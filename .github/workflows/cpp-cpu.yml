@@ -36,16 +36,16 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Configure
+      - name: Configure (CPP)
         run: ./scripts/build.sh --configure --cudf_ROOT=/opt/conda
 
-      - name: Build
+      - name: Build (CPP)
         run: ./scripts/build.sh --build
 
-      - name: Install
+      - name: Install (CPP)
         run: ./scripts/build.sh --install
 
-      - name: Run CPU tests
+      - name: Run CPU tests (CPP)
         run: ctest --test-dir cpp/build -L cpu --output-on-failure
 
       - name: Run Rust tests
