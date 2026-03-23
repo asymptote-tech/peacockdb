@@ -1,6 +1,6 @@
-GpuAggregateExec
+GpuAggregateExec: group_by=[], aggr=[count(*)]
   CoalescePartitionsExec
-    GpuAggregateExec
+    GpuAggregateExec: group_by=[], aggr=[count(*)]
       GpuProjectExec
         CoalesceBatchesExec: target_batch_size=67108864
           GpuFilterExec

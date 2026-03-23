@@ -1,10 +1,10 @@
 SortPreservingMergeExec: [nation_count@1 DESC, r_name@0 ASC NULLS LAST]
   GpuSortExec
     GpuProjectExec
-      GpuAggregateExec
+      GpuAggregateExec: group_by=[r_name], aggr=[count(*)]
         CoalesceBatchesExec: target_batch_size=26843545
           RepartitionExec: partitioning=Hash([r_name@0], 8), input_partitions=8
-            GpuAggregateExec
+            GpuAggregateExec: group_by=[r_name], aggr=[count(*)]
               RepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                 CoalesceBatchesExec: target_batch_size=26843545
                   GpuHashJoinExec

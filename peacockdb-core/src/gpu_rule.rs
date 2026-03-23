@@ -23,6 +23,14 @@ use datafusion::physical_plan::{
 // GPU exec node stubs (delegate to inner CPU node)
 // ---------------------------------------------------------------------------
 
+/// Optional extra display info appended after the node name in plan output.
+/// Implement with a non-empty string to annotate a specific GPU node type.
+trait GpuExtraDisplay {
+    fn extra_display_info(&self) -> String {
+        String::new()
+    }
+}
+
 macro_rules! gpu_exec_node {
     ($name:ident) => {
         #[derive(Debug)]
@@ -38,7 +46,12 @@ macro_rules! gpu_exec_node {
 
         impl DisplayAs for $name {
             fn fmt_as(&self, _t: DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
-                write!(f, "{}", stringify!($name))
+                let extra = self.extra_display_info();
+                if extra.is_empty() {
+                    write!(f, "{}", stringify!($name))
+                } else {
+                    write!(f, "{}: {}", stringify!($name), extra)
+                }
             }
         }
 
@@ -77,10 +90,30 @@ macro_rules! gpu_exec_node {
 }
 
 gpu_exec_node!(GpuFilterExec);
+impl GpuExtraDisplay for GpuFilterExec {}
+
 gpu_exec_node!(GpuProjectExec);
+impl GpuExtraDisplay for GpuProjectExec {}
+
 gpu_exec_node!(GpuAggregateExec);
+impl GpuExtraDisplay for GpuAggregateExec {
+    fn extra_display_info(&self) -> String {
+        let agg = self.inner.as_any().downcast_ref::<AggregateExec>().unwrap();
+        let groups: Vec<&str> = agg.group_expr().expr().iter()
+            .map(|(_, name): &(_, String)| name.as_str())
+            .collect();
+        let aggrs: Vec<&str> = agg.aggr_expr().iter()
+            .map(|e| e.name())
+            .collect();
+        format!("group_by=[{}], aggr=[{}]", groups.join(", "), aggrs.join(", "))
+    }
+}
+
 gpu_exec_node!(GpuHashJoinExec);
+impl GpuExtraDisplay for GpuHashJoinExec {}
+
 gpu_exec_node!(GpuSortExec);
+impl GpuExtraDisplay for GpuSortExec {}
 
 // ---------------------------------------------------------------------------
 // GpuScanExec — wraps ParquetExec to override batch_size at execution time
