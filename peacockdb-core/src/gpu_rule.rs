@@ -10,11 +10,14 @@ use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::execution::TaskContext;
 use datafusion::physical_optimizer::PhysicalOptimizerRule;
 use datafusion::physical_plan::coalesce_batches::CoalesceBatchesExec;
+use datafusion::physical_plan::coalesce_partitions::CoalescePartitionsExec;
 use datafusion::physical_plan::aggregates::AggregateExec;
 use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::joins::HashJoinExec;
 use datafusion::physical_plan::projection::ProjectionExec;
+use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
+use datafusion::physical_plan::sorts::sort_preserving_merge::SortPreservingMergeExec;
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
 };
@@ -41,6 +44,9 @@ macro_rules! gpu_exec_node {
         impl $name {
             pub fn new(inner: Arc<dyn ExecutionPlan>) -> Self {
                 Self { inner }
+            }
+            pub fn inner(&self) -> &Arc<dyn ExecutionPlan> {
+                &self.inner
             }
         }
 
@@ -115,6 +121,35 @@ impl GpuExtraDisplay for GpuHashJoinExec {}
 gpu_exec_node!(GpuSortExec);
 impl GpuExtraDisplay for GpuSortExec {}
 
+gpu_exec_node!(GpuCoalesceBatchesExec);
+impl GpuExtraDisplay for GpuCoalesceBatchesExec {
+    fn extra_display_info(&self) -> String {
+        let cb = self.inner.as_any().downcast_ref::<CoalesceBatchesExec>().unwrap();
+        format!("target_batch_size={}", cb.target_batch_size())
+    }
+}
+
+gpu_exec_node!(GpuCoalescePartitionsExec);
+impl GpuExtraDisplay for GpuCoalescePartitionsExec {}
+
+gpu_exec_node!(GpuRepartitionExec);
+impl GpuExtraDisplay for GpuRepartitionExec {
+    fn extra_display_info(&self) -> String {
+        let rp = self.inner.as_any().downcast_ref::<RepartitionExec>().unwrap();
+        let partitioning = rp.partitioning();
+        let input_partitions = rp.input().properties().output_partitioning().partition_count();
+        format!("partitioning={partitioning}, input_partitions={input_partitions}")
+    }
+}
+
+gpu_exec_node!(GpuSortPreservingMergeExec);
+impl GpuExtraDisplay for GpuSortPreservingMergeExec {
+    fn extra_display_info(&self) -> String {
+        let spm = self.inner.as_any().downcast_ref::<SortPreservingMergeExec>().unwrap();
+        format!("[{}]", spm.expr())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GpuScanExec — wraps ParquetExec to override batch_size at execution time
 // ---------------------------------------------------------------------------
@@ -131,6 +166,9 @@ impl GpuScanExec {
             inner,
             gpu_batch_size,
         }
+    }
+    pub fn inner(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.inner
     }
 }
 
@@ -209,6 +247,14 @@ impl PhysicalOptimizerRule for GpuExecutionRule {
                 Arc::new(GpuHashJoinExec::new(node))
             } else if node.as_any().is::<SortExec>() {
                 Arc::new(GpuSortExec::new(node))
+            } else if node.as_any().is::<CoalesceBatchesExec>() {
+                Arc::new(GpuCoalesceBatchesExec::new(node))
+            } else if node.as_any().is::<CoalescePartitionsExec>() {
+                Arc::new(GpuCoalescePartitionsExec::new(node))
+            } else if node.as_any().is::<RepartitionExec>() {
+                Arc::new(GpuRepartitionExec::new(node))
+            } else if node.as_any().is::<SortPreservingMergeExec>() {
+                Arc::new(GpuSortPreservingMergeExec::new(node))
             } else {
                 return Ok(Transformed::no(node));
             };
@@ -449,11 +495,13 @@ impl PhysicalOptimizerRule for GpuMemoryBudgetRule {
                 Ok(Transformed::yes(
                     Arc::new(GpuScanExec::new(node, batch_size)) as Arc<dyn ExecutionPlan>,
                 ))
-            } else if let Some(coalesce) = node.as_any().downcast_ref::<CoalesceBatchesExec>() {
+            } else if node.as_any().is::<GpuCoalesceBatchesExec>() {
+                let gpu_cb = node.as_any().downcast_ref::<GpuCoalesceBatchesExec>().unwrap();
+                let coalesce = gpu_cb.inner().as_any().downcast_ref::<CoalesceBatchesExec>().unwrap();
                 let input = coalesce.input().clone();
+                let new_inner: Arc<dyn ExecutionPlan> = Arc::new(CoalesceBatchesExec::new(input, batch_size));
                 Ok(Transformed::yes(
-                    Arc::new(CoalesceBatchesExec::new(input, batch_size))
-                        as Arc<dyn ExecutionPlan>,
+                    Arc::new(GpuCoalesceBatchesExec::new(new_inner)) as Arc<dyn ExecutionPlan>,
                 ))
             } else {
                 Ok(Transformed::no(node))

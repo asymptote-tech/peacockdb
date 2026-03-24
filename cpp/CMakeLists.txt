@@ -49,14 +49,48 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# FlatBuffers (header-only runtime + flatc compiler for codegen)
+# ---------------------------------------------------------------------------
+include(FetchContent)
+FetchContent_Declare(
+  flatbuffers
+  GIT_REPOSITORY https://github.com/google/flatbuffers.git
+  GIT_TAG        v25.12.19
+  GIT_SHALLOW    TRUE
+)
+set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(FLATBUFFERS_BUILD_FLATC ON CACHE BOOL "" FORCE)
+set(FLATBUFFERS_BUILD_FLATHASH OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(flatbuffers)
+
+# ---------------------------------------------------------------------------
+# Generate C++ header from the FlatBuffers schema
+# ---------------------------------------------------------------------------
+set(FBS_SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/../flatbuffers/gpu_plan.fbs")
+set(FBS_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(FBS_GENERATED_HEADER "${FBS_GENERATED_DIR}/gpu_plan_generated.h")
+
+file(MAKE_DIRECTORY ${FBS_GENERATED_DIR})
+
+add_custom_command(
+  OUTPUT  ${FBS_GENERATED_HEADER}
+  COMMAND flatc --cpp -o ${FBS_GENERATED_DIR} ${FBS_SCHEMA}
+  DEPENDS ${FBS_SCHEMA} flatc
+  COMMENT "Generating gpu_plan_generated.h from FlatBuffers schema"
+)
+add_custom_target(gpu_plan_fbs DEPENDS ${FBS_GENERATED_HEADER})
+
+# ---------------------------------------------------------------------------
 # libpeacock_gpu
 # ---------------------------------------------------------------------------
 add_library(peacock_gpu SHARED src/gpu_executor.cpp)
+add_dependencies(peacock_gpu gpu_plan_fbs)
 target_include_directories(peacock_gpu PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${FBS_GENERATED_DIR}/..>
   $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(peacock_gpu PRIVATE cudf::cudf)
+target_link_libraries(peacock_gpu PRIVATE cudf::cudf flatbuffers)
 
 # ---------------------------------------------------------------------------
 # Tests

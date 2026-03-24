@@ -1,0 +1,325 @@
+// GPU physical plan IR — serialized on the Rust side, deserialized on C++.
+//
+// Describes the plan tree that crosses the Rust→C++ FFI boundary via
+// peacock_execute(). The C++ GPU executor walks this tree bottom-up,
+// executing cuDF operations at each node.
+
+namespace peacock.plan;
+
+// =========================================================================
+// Data types
+// =========================================================================
+
+/// Subset of Arrow data types that the GPU executor supports.
+enum DataType : byte {
+  Null = 0,
+  Boolean,
+  Int8,
+  Int16,
+  Int32,
+  Int64,
+  UInt8,
+  UInt16,
+  UInt32,
+  UInt64,
+  Float16,
+  Float32,
+  Float64,
+  Utf8,
+  LargeUtf8,
+  Binary,
+  LargeBinary,
+  Date32,
+  Date64,
+  Decimal128,
+  Utf8View,
+  BinaryView,
+}
+
+// =========================================================================
+// Scalar values (for literal expressions)
+// =========================================================================
+
+/// A typed scalar value. Exactly one of the value fields is meaningful,
+/// determined by `type`. For Null type, no value field is set.
+table ScalarValue {
+  type: DataType;
+  bool_val: bool;
+  int_val: int64;
+  uint_val: uint64;
+  float_val: double;
+  string_val: string;
+  bytes_val: [ubyte];
+  // Decimal128: stored as (hi, lo) forming a 128-bit signed integer.
+  decimal_hi: int64;
+  decimal_lo: uint64;
+  decimal_precision: uint8;
+  decimal_scale: int8;
+}
+
+// =========================================================================
+// Expressions
+// =========================================================================
+
+enum BinaryOp : byte {
+  Eq = 0,
+  NotEq,
+  Lt,
+  LtEq,
+  Gt,
+  GtEq,
+  Plus,
+  Minus,
+  Multiply,
+  Divide,
+  Modulo,
+  And,
+  Or,
+  BitwiseAnd,
+  BitwiseOr,
+  BitwiseXor,
+  BitwiseShiftLeft,
+  BitwiseShiftRight,
+  StringConcat,
+  IsDistinctFrom,
+  IsNotDistinctFrom,
+}
+
+enum UnaryOp : byte {
+  Not = 0,
+  IsNull,
+  IsNotNull,
+  Negative,
+}
+
+/// Reference to a column by index within the input table.
+table ColumnRef {
+  index: uint32;
+  name: string;
+}
+
+/// A constant literal value.
+table LiteralExpr {
+  value: ScalarValue;
+}
+
+/// left <op> right
+table BinaryExprNode {
+  left: Expr;
+  op: BinaryOp;
+  right: Expr;
+}
+
+/// <op>(arg)
+table UnaryExprNode {
+  op: UnaryOp;
+  arg: Expr;
+}
+
+/// CAST(expr AS target_type)
+table CastExprNode {
+  expr: Expr;
+  target_type: DataType;
+}
+
+/// An aggregate function invocation (used inside GpuAggregate).
+table AggregateFuncNode {
+  /// Function name: "count", "sum", "min", "max", "avg", etc.
+  name: string;
+  args: [Expr];
+  distinct: bool;
+  /// Output column alias (e.g. "count(*)"). If absent, defaults to name.
+  alias: string;
+}
+
+union ExprNode {
+  ColumnRef,
+  LiteralExpr,
+  BinaryExprNode,
+  UnaryExprNode,
+  CastExprNode,
+  AggregateFuncNode,
+}
+
+table Expr {
+  node: ExprNode;
+}
+
+// =========================================================================
+// Schema
+// =========================================================================
+
+table Field {
+  name: string;
+  data_type: DataType;
+  nullable: bool;
+}
+
+table Schema {
+  fields: [Field];
+}
+
+// =========================================================================
+// Plan nodes
+// =========================================================================
+
+enum JoinType : byte {
+  Inner = 0,
+  Left,
+  Right,
+  Full,
+  LeftSemi,
+  RightSemi,
+  LeftAnti,
+  RightAnti,
+}
+
+enum AggregateMode : byte {
+  Partial = 0,
+  Final,
+  FinalPartitioned,
+  Single,
+  SinglePartitioned,
+}
+
+/// Sort specification for a single column.
+table SortExprNode {
+  expr: Expr;
+  asc: bool;
+  nulls_first: bool;
+}
+
+/// A pair of equi-join keys: left_key = right_key.
+table JoinKey {
+  left: Expr;
+  right: Expr;
+}
+
+// --- Concrete plan node tables ---
+
+/// Read Parquet files from disk.
+table GpuScan {
+  /// Paths to Parquet files to read.
+  file_paths: [string];
+  /// Schema of the files (before projection).
+  file_schema: Schema;
+  /// Column indices to project (empty = all columns).
+  projection: [uint32];
+  /// Number of rows per batch.
+  batch_size: uint32;
+  /// Maximum rows to read (0 = unlimited).
+  limit: uint64;
+}
+
+/// Apply a boolean predicate, discarding non-matching rows.
+table GpuFilter {
+  predicate: Expr;
+  input: PlanNode;
+}
+
+/// Compute new columns / select a subset of columns.
+table GpuProject {
+  /// Expressions to evaluate for each output column.
+  exprs: [Expr];
+  /// Output column names (parallel to exprs).
+  aliases: [string];
+  input: PlanNode;
+}
+
+/// Group-by aggregation.
+table GpuAggregate {
+  mode: AggregateMode;
+  /// GROUP BY expressions.
+  group_exprs: [Expr];
+  /// Output names for the group columns (parallel to group_exprs).
+  group_names: [string];
+  /// Aggregate function invocations.
+  aggr_funcs: [AggregateFuncNode];
+  input: PlanNode;
+}
+
+/// Hash join (equi-join on key pairs, with optional residual filter).
+table GpuHashJoin {
+  join_type: JoinType;
+  /// Equi-join key pairs: keys[i].left = keys[i].right.
+  keys: [JoinKey];
+  /// Optional post-join filter (null if none).
+  filter: Expr;
+  left: PlanNode;
+  right: PlanNode;
+  /// Optional output projection (column indices to keep from the full join output).
+  projection: [uint32];
+}
+
+/// Sort by one or more columns.
+table GpuSort {
+  /// Sort specifications (first = primary key, etc.).
+  exprs: [SortExprNode];
+  /// Maximum rows to emit (-1 = unlimited). Corresponds to LIMIT / FETCH.
+  fetch: int64;
+  input: PlanNode;
+}
+
+/// Coalesce small batches into larger ones of up to target_batch_size rows.
+table GpuCoalesceBatches {
+  target_batch_size: uint32;
+  input: PlanNode;
+}
+
+/// Merge all input partitions into a single output partition.
+table GpuCoalescePartitions {
+  input: PlanNode;
+}
+
+enum PartitioningKind : byte {
+  RoundRobinBatch = 0,
+  Hash,
+  Unknown,
+}
+
+/// Repartition the input across a given number of output partitions.
+table GpuRepartition {
+  kind: PartitioningKind;
+  num_partitions: uint32;
+  /// Hash expressions (only for Hash partitioning).
+  hash_exprs: [Expr];
+  input: PlanNode;
+}
+
+/// Merge pre-sorted partitions, preserving sort order.
+table GpuSortPreservingMerge {
+  /// Sort specifications.
+  exprs: [SortExprNode];
+  /// Maximum rows to emit (-1 = unlimited).
+  fetch: int64;
+  input: PlanNode;
+}
+
+// --- Plan node union ---
+
+union PlanNodeKind {
+  GpuScan,
+  GpuFilter,
+  GpuProject,
+  GpuAggregate,
+  GpuHashJoin,
+  GpuSort,
+  GpuCoalesceBatches,
+  GpuCoalescePartitions,
+  GpuRepartition,
+  GpuSortPreservingMerge,
+}
+
+/// A single node in the physical plan tree.
+table PlanNode {
+  node: PlanNodeKind;
+  /// Output schema of this node.
+  output_schema: Schema;
+}
+
+/// Top-level message: the entire GPU execution plan.
+table GpuPlan {
+  root: PlanNode;
+}
+
+root_type GpuPlan;

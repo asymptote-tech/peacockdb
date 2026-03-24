@@ -604,7 +604,7 @@ Each `GpuXxxExec` node implements the `ExecutionPlan` trait. In `execute()`, it 
 
 ### 3.1 GPU Physical Plan IR
 Define a serializable intermediate representation that crosses the Rust→C++ FFI boundary. This can be either:
-- **Option A (recommended):** A Flatbuffers/Protobuf schema describing the plan tree, serialized on the Rust side, deserialized on the C++ side
+- **Option A (recommended):** A FlatBuffers schema describing the plan tree, serialized on the Rust side, deserialized on the C++ side (FlatBuffers aligns with the Arrow ecosystem which already uses it, offers zero-copy deserialization in C++, and requires no runtime library)
 - **Option B:** A C-compatible struct tree passed via FFI (more fragile but simpler for initial prototype)
 
 The IR plan node types:

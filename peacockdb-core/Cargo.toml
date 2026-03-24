@@ -3,6 +3,10 @@ name = "peacockdb-core"
 version = "0.1.0"
 edition = "2024"
 
+[build-dependencies]
+flatc-fork = "0.6"
+
 [dependencies]
 datafusion = "44"
+flatbuffers = "25"
 tokio = { version = "1", features = ["rt-multi-thread"] }

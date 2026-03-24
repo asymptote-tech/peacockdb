@@ -1,4 +1,11 @@
 mod gpu_rule;
+#[allow(unused_imports, dead_code, clippy::all)]
+mod generated {
+    pub mod gpu_plan_generated {
+        include!(concat!(env!("OUT_DIR"), "/gpu_plan_generated.rs"));
+    }
+}
+pub mod plan_serializer;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -157,6 +164,25 @@ mod tests {
             canonical.trim_end(),
             "plan for '{name}' does not match {}",
             canonical_path.display()
+        );
+
+        // Flatbuffer roundtrip: serialize → deserialize → re-serialize,
+        // verify the plan survives the round trip.
+        assert_flatbuffer_roundtrip(plan, name);
+    }
+
+    fn assert_flatbuffer_roundtrip(plan: &Arc<dyn ExecutionPlan>, name: &str) {
+        let bytes = plan_serializer::serialize_plan(plan)
+            .unwrap_or_else(|e| panic!("flatbuffer serialization failed for '{name}': {e}"));
+
+        let reconstructed = plan_serializer::deserialize_plan(&bytes)
+            .unwrap_or_else(|e| panic!("flatbuffer deserialization failed for '{name}': {e}"));
+
+        let original = plan_str(plan);
+        let roundtripped = plan_str(&reconstructed);
+        assert_eq!(
+            roundtripped, original,
+            "flatbuffer roundtrip mismatch for '{name}'"
         );
     }
 

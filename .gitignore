@@ -14,5 +14,9 @@ compile_commands.json
 *.swo
 *~
 
+# Generated FlatBuffers code (built from flatbuffers/gpu_plan.fbs)
+cpp/include/generated/
+peacockdb-core/src/generated/
+
 # OS
 .DS_Store

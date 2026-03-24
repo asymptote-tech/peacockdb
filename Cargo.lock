@@ -271,7 +271,7 @@ dependencies = [
  "arrow-cast",
  "arrow-data",
  "arrow-schema",
- "flatbuffers",
+ "flatbuffers 24.12.23",
  "lz4_flex",
 ]
 
@@ -1235,6 +1235,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "flatbuffers"
+version = "25.12.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35f6839d7b3b98adde531effaf34f0c2badc6f4735d26fe74709d8e513a96ef3"
+dependencies = [
+ "bitflags 2.11.0",
+ "rustc_version",
+]
+
+[[package]]
+name = "flatc-fork"
+version = "0.6.0+25.12.19-2026-02-06-03fffb2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f995c44278ee64981366ec17e6847f0756184a92ad0d3a1b6f7170f91e1eb129"
+dependencies = [
+ "cmake",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2023,6 +2042,8 @@ name = "peacockdb-core"
 version = "0.1.0"
 dependencies = [
  "datafusion",
+ "flatbuffers 25.12.19",
+ "flatc-fork",
  "tokio",
 ]
 
