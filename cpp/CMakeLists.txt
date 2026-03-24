@@ -83,14 +83,19 @@ add_custom_target(gpu_plan_fbs DEPENDS ${FBS_GENERATED_HEADER})
 # ---------------------------------------------------------------------------
 # libpeacock_gpu
 # ---------------------------------------------------------------------------
-add_library(peacock_gpu SHARED src/gpu_executor.cpp)
+add_library(peacock_gpu SHARED src/gpu_executor.cpp src/plan_executor.cpp)
 add_dependencies(peacock_gpu gpu_plan_fbs)
 target_include_directories(peacock_gpu PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
   $<BUILD_INTERFACE:${FBS_GENERATED_DIR}/..>
   $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(peacock_gpu PRIVATE cudf::cudf flatbuffers)
+
+# Make TESTDATA_DIR available to test sources.
+set(PEACOCK_TESTDATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../testdata")
+get_filename_component(PEACOCK_TESTDATA_DIR "${PEACOCK_TESTDATA_DIR}" ABSOLUTE)
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -114,15 +119,31 @@ set_target_properties(peacock_gpu_tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_
 add_test(NAME peacock_gpu_tests COMMAND peacock_gpu_tests)
 set_tests_properties(peacock_gpu_tests PROPERTIES LABELS "gpu")
 
+# Plan executor GPU tests — executes FlatBuffer plans against testdata Parquet files
+add_executable(peacock_plan_tests tests/gpu/test_plan_executor.cpp)
+target_include_directories(peacock_plan_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${FBS_GENERATED_DIR}/..
+)
+target_compile_definitions(peacock_plan_tests PRIVATE
+  PEACOCK_TESTDATA_DIR="${PEACOCK_TESTDATA_DIR}"
+)
+target_link_libraries(peacock_plan_tests PRIVATE peacock_gpu cudf::cudf flatbuffers GTest::gtest)
+set_target_properties(peacock_plan_tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+add_dependencies(peacock_plan_tests gpu_plan_fbs)
+add_test(NAME peacock_plan_tests COMMAND peacock_plan_tests)
+set_tests_properties(peacock_plan_tests PROPERTIES LABELS "gpu")
+
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
 install(TARGETS peacock_gpu LIBRARY DESTINATION lib)
-install(TARGETS peacock_gpu_tests peacock_cpu_tests RUNTIME DESTINATION bin)
+install(TARGETS peacock_gpu_tests peacock_cpu_tests peacock_plan_tests RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)
 
 # Ensure installed test binaries can find libpeacock_gpu.so in ../lib.
-set_target_properties(peacock_cpu_tests peacock_gpu_tests PROPERTIES
+set_target_properties(peacock_cpu_tests peacock_gpu_tests peacock_plan_tests PROPERTIES
   INSTALL_RPATH "$ORIGIN/../lib"
 )
 

@@ -25,6 +25,6 @@ su - "$TARGET_USER" -c '
     cudf=26.02 \
     libcudf=26.02 \
     python=3.12 \
-    "cuda-version>=12.1,<=12.9"
+    "cuda-version=12.2.*"
   echo "source \$HOME/miniforge3/etc/profile.d/conda.sh" >> "$HOME/.bashrc"
 '

@@ -1,0 +1,242 @@
+#!/bin/bash
+#
+# Download and build glibc 2.35 into a local prefix (no sudo required).
+# Then patchelf the test binaries to use it.
+#
+# Usage:
+#   ./scripts/setup-glibc.sh --repo-dir=/path/to/peacockdb
+#   ./scripts/setup-glibc.sh --repo-dir=/path/to/peacockdb --cuda-dir=/usr/local/cuda-12.2
+#   ./scripts/setup-glibc.sh --repo-dir=/path/to/peacockdb --patch-only
+#
+# After patching, run tests with:
+#   ./cpp/build/peacock_plan_tests
+
+set -euo pipefail
+
+GLIBC_VERSION="2.35"
+PREFIX="$HOME/glibc-${GLIBC_VERSION}"
+BUILD_DIR="/tmp/glibc-build-${GLIBC_VERSION}"
+SRC_DIR="/tmp/glibc-${GLIBC_VERSION}"
+TARBALL="/tmp/glibc-${GLIBC_VERSION}.tar.xz"
+PATCH_ONLY=0
+REPO_DIR=""
+CUDA_DIR=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --patch-only)    PATCH_ONLY=1 ;;
+    --repo-dir=*)    REPO_DIR="${arg#--repo-dir=}" ;;
+    --cuda-dir=*)    CUDA_DIR="${arg#--cuda-dir=}" ;;
+    *) echo "Unknown flag: $arg"; exit 1 ;;
+  esac
+done
+
+if [ -z "$REPO_DIR" ]; then
+  echo "ERROR: --repo-dir=<path> is required"
+  exit 1
+fi
+
+# Resolve CUDA lib directory.
+CUDA_LIB_DIR=""
+if [ -n "$CUDA_DIR" ]; then
+  for candidate in \
+    "${CUDA_DIR}/targets/x86_64-linux/lib" \
+    "${CUDA_DIR}/lib64" \
+    "${CUDA_DIR}/lib"; do
+    if [ -d "$candidate" ]; then
+      CUDA_LIB_DIR="$candidate"
+      break
+    fi
+  done
+  if [ -z "$CUDA_LIB_DIR" ]; then
+    echo "WARNING: --cuda-dir=${CUDA_DIR} specified but no lib directory found"
+  else
+    echo "--- Using CUDA libs from ${CUDA_LIB_DIR}"
+  fi
+fi
+
+REPO_DIR="$(cd "$REPO_DIR" && pwd)"
+CPP_BUILD_DIR="${REPO_DIR}/cpp/build"
+
+# -----------------------------------------------------------------------
+# Step 1: Build glibc
+# -----------------------------------------------------------------------
+
+if [ "$PATCH_ONLY" -eq 0 ]; then
+
+  # Ensure bison is available (glibc configure requires it).
+  if ! command -v bison &>/dev/null || ! bison --version | head -1 | grep -qE '3\.[0-9]'; then
+    BISON_VERSION="3.8.2"
+    BISON_PREFIX="$HOME/.local"
+    BISON_TAR="/tmp/bison-${BISON_VERSION}.tar.xz"
+    BISON_SRC="/tmp/bison-${BISON_VERSION}"
+
+    if [ ! -x "${BISON_PREFIX}/bin/bison" ]; then
+      echo "==> Building bison ${BISON_VERSION} (required by glibc)..."
+      if [ ! -f "$BISON_TAR" ]; then
+        curl -fSL "https://ftp.gnu.org/gnu/bison/bison-${BISON_VERSION}.tar.xz" -o "$BISON_TAR"
+      fi
+      if [ ! -d "$BISON_SRC" ]; then
+        tar -xf "$BISON_TAR" -C /tmp
+      fi
+      cd "$BISON_SRC"
+      ./configure --prefix="$BISON_PREFIX" 2>&1 | tail -3
+      make -j"$(nproc)" 2>&1 | tail -3
+      make install 2>&1 | tail -3
+      rm -rf "$BISON_SRC" "$BISON_TAR"
+    fi
+
+    export PATH="${BISON_PREFIX}/bin:$PATH"
+    echo "--- Using bison: $(bison --version | head -1)"
+  fi
+
+  echo "==> Building glibc ${GLIBC_VERSION} into ${PREFIX}"
+
+  # Download source.
+  if [ ! -f "$TARBALL" ]; then
+    echo "--- Downloading glibc ${GLIBC_VERSION} source..."
+    curl -fSL "https://ftp.gnu.org/gnu/glibc/glibc-${GLIBC_VERSION}.tar.xz" -o "$TARBALL"
+  fi
+
+  # Extract.
+  if [ ! -d "$SRC_DIR" ]; then
+    echo "--- Extracting..."
+    tar -xf "$TARBALL" -C /tmp
+  fi
+
+  # Build out-of-tree.
+  rm -rf "$BUILD_DIR"
+  mkdir -p "$BUILD_DIR"
+  cd "$BUILD_DIR"
+
+  echo "--- Configuring..."
+  "${SRC_DIR}/configure" \
+    --prefix="$PREFIX" \
+    --disable-werror \
+    --disable-profile \
+    --enable-shared \
+    --without-selinux \
+    CFLAGS="-O2 -g0" 2>&1 | tail -5
+
+  echo "--- Building (this takes a few minutes)..."
+  make -j"$(nproc)" 2>&1 | tail -3
+
+  echo "--- Installing to ${PREFIX}..."
+  make install 2>&1 | tail -3
+
+  # Clean up build artifacts (keep the prefix).
+  rm -rf "$BUILD_DIR" "$SRC_DIR" "$TARBALL"
+
+  echo "==> glibc ${GLIBC_VERSION} installed to ${PREFIX}"
+fi
+
+# -----------------------------------------------------------------------
+# Step 2: Ensure patchelf is available
+# -----------------------------------------------------------------------
+
+if ! command -v patchelf &>/dev/null; then
+  echo "--- patchelf not found, installing locally..."
+  PATCHELF_VERSION="0.18.0"
+  PATCHELF_DIR="/tmp/patchelf-${PATCHELF_VERSION}"
+  PATCHELF_TAR="/tmp/patchelf-${PATCHELF_VERSION}.tar.gz"
+
+  if [ ! -f "$HOME/.local/bin/patchelf" ]; then
+    curl -fSL "https://github.com/NixOS/patchelf/releases/download/${PATCHELF_VERSION}/patchelf-${PATCHELF_VERSION}-x86_64.tar.gz" \
+      -o "$PATCHELF_TAR"
+    mkdir -p "$PATCHELF_DIR"
+    tar -xzf "$PATCHELF_TAR" -C "$PATCHELF_DIR"
+    mkdir -p "$HOME/.local/bin"
+    cp "$PATCHELF_DIR/bin/patchelf" "$HOME/.local/bin/"
+    rm -rf "$PATCHELF_DIR" "$PATCHELF_TAR"
+  fi
+
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# -----------------------------------------------------------------------
+# Step 3: Patch binaries to use the local glibc
+# -----------------------------------------------------------------------
+
+INTERP="${PREFIX}/lib/ld-linux-x86-64.so.2"
+
+if [ ! -f "$INTERP" ]; then
+  echo "ERROR: interpreter not found at ${INTERP}"
+  echo "Run without --patch-only first to build glibc."
+  exit 1
+fi
+
+CPP_INSTALL_DIR="${REPO_DIR}/cpp/install"
+
+BINARIES=(
+  peacock_plan_tests
+  peacock_gpu_tests
+  peacock_cpu_tests
+)
+
+LIBS=(
+  libpeacock_gpu.so
+)
+
+patch_rpath() {
+  local target="$1"
+  local current
+  current="$(patchelf --print-rpath "$target" 2>/dev/null || true)"
+
+  # Strip previous glibc and cuda entries to make this idempotent.
+  local cleaned
+  cleaned="$(echo "$current" | tr ':' '\n' \
+    | grep -v "^${PREFIX}/lib\$" \
+    | { if [ -n "$CUDA_LIB_DIR" ]; then grep -v "^${CUDA_LIB_DIR}\$"; else cat; fi; } \
+    | paste -sd ':')"
+
+  # Build new rpath: glibc first, then cuda, then original entries.
+  local new_rpath="${PREFIX}/lib"
+  if [ -n "$CUDA_LIB_DIR" ]; then
+    new_rpath="${new_rpath}:${CUDA_LIB_DIR}"
+  fi
+  if [ -n "$cleaned" ]; then
+    new_rpath="${new_rpath}:${cleaned}"
+  fi
+
+  patchelf --set-rpath "$new_rpath" "$target"
+}
+
+patch_dir() {
+  local dir="$1"
+  local label="$2"
+
+  if [ ! -d "$dir" ]; then
+    echo "--- Skipping ${label} (directory not found)"
+    return
+  fi
+
+  echo "==> Patching binaries in ${dir} (${label})"
+
+  for bin in "${BINARIES[@]}"; do
+    target="${dir}/${bin}"
+    [ -d "${dir}/bin" ] && target="${dir}/bin/${bin}"
+    if [ -f "$target" ]; then
+      echo "--- Patching ${bin}"
+      patchelf --set-interpreter "$INTERP" "$target"
+      patch_rpath "$target"
+    else
+      echo "--- Skipping ${bin} (not found)"
+    fi
+  done
+
+  for lib in "${LIBS[@]}"; do
+    target="${dir}/${lib}"
+    [ -d "${dir}/lib" ] && target="${dir}/lib/${lib}"
+    if [ -f "$target" ]; then
+      echo "--- Patching ${lib} rpath"
+      patch_rpath "$target"
+    fi
+  done
+}
+
+patch_dir "$CPP_BUILD_DIR" "build"
+patch_dir "$CPP_INSTALL_DIR" "install"
+
+echo ""
+echo "==> Done. Run tests with:"
+echo "    LD_LIBRARY_PATH=${PREFIX}/lib:\$LD_LIBRARY_PATH ${CPP_BUILD_DIR}/peacock_plan_tests"
