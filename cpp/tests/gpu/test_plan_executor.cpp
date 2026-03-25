@@ -25,6 +25,8 @@ namespace fb = peacock::plan;
 // ---------------------------------------------------------------------------
 
 static std::string testdata_dir() {
+  const char* env = std::getenv("PEACOCK_TESTDATA_DIR");
+  if (env) return std::string(env);
   return std::string(PEACOCK_TESTDATA_DIR);
 }
 

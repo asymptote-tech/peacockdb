@@ -1,13 +1,16 @@
 #include "plan_executor.h"
 #include "generated/gpu_plan_generated.h"
 
-#include <cudf/ast/ast_operator.hpp>
 #include <cudf/ast/expressions.hpp>
 #include <cudf/column/column_view.hpp>
 #include <cudf/copying.hpp>
 #include <cudf/groupby.hpp>
 #include <cudf/io/parquet.hpp>
+#if __has_include(<cudf/join/join.hpp>)
 #include <cudf/join/join.hpp>
+#else
+#include <cudf/join.hpp>
+#endif
 #include <cudf/scalar/scalar.hpp>
 #include <cudf/scalar/scalar_factories.hpp>
 #include <cudf/sorting.hpp>
