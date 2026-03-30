@@ -41,6 +41,22 @@ export CUDF_ROOT=$HOME/miniforge3/envs/rapids
 cargo build 
 ```
 
+GPU TO CPU TESTS
+
+```
+ # all 5 tests in cpu_executor                                                                                              
+  cargo test -p peacockdb-core --lib cpu_executor                                                                            
+   
+  # one specific test                                                                                                        
+  cargo test -p peacockdb-core --lib cpu_executor::tests::test_execution_strips_gpu_nodes
+                                                                                                                             
+  # with output printed (useful for seeing node names etc.)                                                                  
+  cargo test -p peacockdb-core --lib cpu_executor -- --nocapture                                                             
+                                                                                                                             
+  # everything in the crate                                 
+  cargo test -p peacockdb-core                                                                                               
+```
+
 ## Run GPU tests
 
 Set up environment on the GPU machine in the same way, by installing all packages using init.sh.
