@@ -1,9 +1,0 @@
- 26-03-2026 15:00:22:723 [pid=72925 tid=72925] NOTICE  cufio-drv:855 running in compatible mode
- 26-03-2026 15:00:23:650 [pid=72925 tid=72925] ERROR  cufio-fs:328 error creating udev_device for block device dev_no: 0:42
- 26-03-2026 15:00:23:650 [pid=72925 tid=72925] ERROR  cufio-fs:767 error getting volume attributes error for device: dev_no: 0:42
- 26-03-2026 15:00:23:650 [pid=72925 tid=72925] NOTICE  cufio:294 cuFileHandleRegister GDS not supported or disabled by config, using cuFile posix read/write with compat mode enabled
- 26-03-2026 15:00:23:650 [pid=72925 tid=72925] ERROR  cufio-fs:328 error creating udev_device for block device dev_no: 0:42
- 26-03-2026 15:00:23:650 [pid=72925 tid=72925] ERROR  cufio-fs:767 error getting volume attributes error for device: dev_no: 0:42
- 26-03-2026 15:00:23:650 [pid=72925 tid=72925] ERROR  cufio-obj:242 unable to get volume attributes for fd 16
- 26-03-2026 15:00:23:650 [pid=72925 tid=72925] ERROR  cufio:312 cuFileHandleRegister error, failed to allocate file object
- 26-03-2026 15:00:23:650 [pid=72925 tid=72925] ERROR  cufio:340 cuFileHandleRegister error: internal error
