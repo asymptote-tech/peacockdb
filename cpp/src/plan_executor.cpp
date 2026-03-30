@@ -4,6 +4,8 @@
 #include <cudf/ast/expressions.hpp>
 #include <cudf/column/column_view.hpp>
 #include <cudf/copying.hpp>
+#include <cudf/column/column_factories.hpp>
+#include <cudf/filling.hpp>
 #include <cudf/groupby.hpp>
 #include <cudf/io/parquet.hpp>
 #if __has_include(<cudf/join/join.hpp>)
@@ -11,7 +13,9 @@
 #else
 #include <cudf/join.hpp>
 #endif
+#include <cudf/reduction.hpp>
 #include <cudf/scalar/scalar.hpp>
+#include <cudf/unary.hpp>
 #include <cudf/scalar/scalar_factories.hpp>
 #include <cudf/sorting.hpp>
 #include <cudf/stream_compaction.hpp>
@@ -364,6 +368,19 @@ static std::unique_ptr<cudf::groupby_aggregation> make_agg(
   throw std::runtime_error("unsupported aggregate function: " + func_name);
 }
 
+static std::unique_ptr<cudf::reduce_aggregation> make_reduce_agg(
+    const std::string& func_name) {
+  if (func_name == "count" || func_name == "COUNT")
+    throw std::runtime_error("count handled inline — make_reduce_agg should not be called for count");
+  if (func_name == "sum" || func_name == "SUM")
+    return cudf::make_sum_aggregation<cudf::reduce_aggregation>();
+  if (func_name == "min" || func_name == "MIN")
+    return cudf::make_min_aggregation<cudf::reduce_aggregation>();
+  if (func_name == "max" || func_name == "MAX")
+    return cudf::make_max_aggregation<cudf::reduce_aggregation>();
+  throw std::runtime_error("unsupported aggregate function: " + func_name);
+}
+
 static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
   auto input = execute_node(agg->input());
   auto tv = input.table->view();
@@ -391,35 +408,67 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
   // Build key table.
   std::vector<cudf::column_view> key_cols;
   for (auto idx : key_indices) key_cols.push_back(tv.column(idx));
-  cudf::table_view keys_view{key_cols};
 
+  // Helper to determine the values column for a function node.
+  auto get_values_col = [&](const fb::AggregateFuncNode* func) -> cudf::column_view {
+    if (func->args() && func->args()->size() > 0) {
+      auto* arg = func->args()->Get(0);
+      if (arg->node_type() == fb::ExprNode_ColumnRef)
+        return tv.column(static_cast<cudf::size_type>(arg->node_as_ColumnRef()->index()));
+    }
+    return tv.column(0);  // count(*) or no args: dummy first column
+  };
+
+  std::vector<std::unique_ptr<cudf::column>> out_cols;
+  std::vector<std::string> out_names;
+
+  if (key_cols.empty()) {
+    // Global aggregation (no group-by): use cudf::reduce to produce one row.
+    if (agg->aggr_funcs()) {
+      for (flatbuffers::uoffset_t i = 0; i < agg->aggr_funcs()->size(); ++i) {
+        auto* func = agg->aggr_funcs()->Get(i);
+        std::string name = func->name() ? func->name()->str() : "count";
+
+        cudf::column_view values_col = get_values_col(func);
+        bool is_count = (name == "count" || name == "COUNT");
+
+        std::unique_ptr<cudf::scalar> scalar_result;
+        if (is_count) {
+          // Avoid make_count_aggregation<reduce_aggregation> which is not
+          // exported in all cudf versions. Count = size - null_count.
+          int64_t cnt = static_cast<int64_t>(values_col.size()) -
+                        static_cast<int64_t>(values_col.null_count());
+          auto s = std::make_unique<cudf::numeric_scalar<int64_t>>(cnt, true);
+          scalar_result = std::move(s);
+        } else {
+          scalar_result = cudf::reduce(values_col, *make_reduce_agg(name),
+                                       values_col.type());
+        }
+        out_cols.push_back(cudf::make_column_from_scalar(*scalar_result, 1));
+
+        if (func->alias())
+          out_names.push_back(func->alias()->str());
+        else
+          out_names.push_back(name);
+      }
+    }
+    return {std::make_unique<cudf::table>(std::move(out_cols)), std::move(out_names)};
+  }
+
+  cudf::table_view keys_view{key_cols};
   cudf::groupby::groupby gb{keys_view};
 
   // Build aggregation requests — one per aggregate function.
   std::vector<cudf::groupby::aggregation_request> requests;
   std::vector<std::string> agg_names;
+  std::vector<bool> agg_is_count;
   if (agg->aggr_funcs()) {
     for (flatbuffers::uoffset_t i = 0; i < agg->aggr_funcs()->size(); ++i) {
       auto* func = agg->aggr_funcs()->Get(i);
       std::string name = func->name() ? func->name()->str() : "count";
 
-      // Determine the values column.
-      cudf::column_view values_col;
-      if (func->args() && func->args()->size() > 0) {
-        auto* arg = func->args()->Get(0);
-        if (arg->node_type() == fb::ExprNode_ColumnRef) {
-          auto idx = arg->node_as_ColumnRef()->index();
-          values_col = tv.column(static_cast<cudf::size_type>(idx));
-        } else {
-          // For count(*), use the first column as a dummy.
-          values_col = tv.column(0);
-        }
-      } else {
-        values_col = tv.column(0);
-      }
-
       cudf::groupby::aggregation_request req;
-      req.values = values_col;
+      req.values = get_values_col(func);
       req.aggregations.push_back(make_agg(name, is_final));
       requests.push_back(std::move(req));
 
@@ -427,22 +476,24 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
         agg_names.push_back(func->alias()->str());
       else
         agg_names.push_back(name);
+      agg_is_count.push_back(name == "count" || name == "COUNT");
     }
   }
 
   auto [group_keys, agg_results] = gb.aggregate(requests);
 
   // Assemble output: key columns + aggregation result columns.
-  std::vector<std::unique_ptr<cudf::column>> out_cols;
-  std::vector<std::string> out_names;
-
   for (cudf::size_type i = 0; i < group_keys->num_columns(); ++i) {
     out_cols.push_back(std::make_unique<cudf::column>(group_keys->view().column(i)));
     out_names.push_back(key_names[i]);
   }
   for (size_t i = 0; i < agg_results.size(); ++i) {
     // Each aggregation_result has one column per aggregation; we have one each.
-    out_cols.push_back(std::move(agg_results[i].results[0]));
+    auto col = std::move(agg_results[i].results[0]);
+    // cuDF count returns INT32; cast to INT64 for SQL BIGINT compatibility.
+    if (agg_is_count[i] && col->type().id() == cudf::type_id::INT32)
+      col = cudf::cast(*col, cudf::data_type{cudf::type_id::INT64});
+    out_cols.push_back(std::move(col));
     out_names.push_back(agg_names[i]);
   }
 
