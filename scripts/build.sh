@@ -28,6 +28,10 @@ done
 BUILD_DIR="${TARGET}/build"
 INSTALL_DIR="${TARGET}/install"
 
+export CC=/usr/bin/gcc-14
+export CXX=/usr/bin/g++-14
+export CUDACXX=/usr/local/cuda/bin/nvcc
+
 if [ $DO_CONFIGURE -eq 1 ]; then
   mkdir -p "${BUILD_DIR}" "${INSTALL_DIR}"
 

@@ -15,9 +15,9 @@ Make sure `auto_activate_base` is set to false in conda config, such that builds
 To build just the C++ part of peacockdb, run:
 
 ```
-scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids-26.02 --configure
-scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids-26.02 --build
-scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids-26.02 --install
+scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids --configure
+scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids --build
+scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids --install
 ```
 
 When the build is done, resulting binaries will link with cudf dynamically.
@@ -25,7 +25,7 @@ When the build is done, resulting binaries will link with cudf dynamically.
 To invoke C++ tests, run
 
 ```
-export LD_LIBRARY_PATH=$HOME/miniforge3/envs/rapids-26.02/lib
+export LD_LIBRARY_PATH=$HOME/miniforge3/envs/rapids/lib
 cpp/install/build/peacock_gpu_tests
 ```
 
@@ -37,7 +37,7 @@ cargo test --features rust-only
 
 cargo can also be used to build the system end-to-end (
 ```
-export CUDF_ROOT=$HOME/miniforge3/envs/rapids-26.02
+export CUDF_ROOT=$HOME/miniforge3/envs/rapids
 cargo build 
 ```
 
