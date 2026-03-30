@@ -7,9 +7,17 @@ on:
 
 jobs:
   cpp-cpu:
+    strategy:
+      matrix:
+        include:
+          - cudf: "26.02"
+            image: rapidsai/base:25.10a-cuda12-py3.12
+          - cudf: "25.02"
+            image: rapidsai/base:25.02a-cuda12.2-py3.12
+    name: C++ CPU Tests (cudf ${{ matrix.cudf }})
     runs-on: ubuntu-latest
     container:
-      image: rapidsai/base:25.10a-cuda12-py3.12
+      image: ${{ matrix.image }}
 
     steps:
       - uses: actions/checkout@v4
