@@ -1,5 +1,5 @@
 /// GPU tests for plan_executor: builds FlatBuffer plans programmatically and
-/// executes them against testdata/tpchsf1/ Parquet files.
+/// executes them against testdata/tpch.minimal/ Parquet files.
 
 #include "plan_executor.h"
 #include "generated/gpu_plan_generated.h"
@@ -31,7 +31,7 @@ static std::string testdata_dir() {
 }
 
 static std::string parquet_path(const std::string& table) {
-  return testdata_dir() + "/tpchsf1/" + table + ".parquet";
+  return testdata_dir() + "/tpch.minimal/" + table + ".parquet";
 }
 
 // ---------------------------------------------------------------------------

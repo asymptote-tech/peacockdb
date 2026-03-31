@@ -4,9 +4,9 @@
 # Then patchelf the test binaries to use it.
 #
 # Usage:
-#   ./scripts/setup-glibc.sh --repo-dir=/path/to/peacockdb
-#   ./scripts/setup-glibc.sh --repo-dir=/path/to/peacockdb --cuda-dir=/usr/local/cuda-12.2
-#   ./scripts/setup-glibc.sh --repo-dir=/path/to/peacockdb --patch-only
+#   ./scripts/setup-glibc.sh --repo-dir /path/to/peacockdb --install --patch
+#   ./scripts/setup-glibc.sh --repo-dir /path/to/peacockdb --install
+#   ./scripts/setup-glibc.sh --repo-dir /path/to/peacockdb --patch --cuda-dir /usr/local/cuda-12.2
 #
 # After patching, run tests with:
 #   ./cpp/build/peacock_plan_tests
@@ -18,21 +18,29 @@ PREFIX="$HOME/glibc-${GLIBC_VERSION}"
 BUILD_DIR="/tmp/glibc-build-${GLIBC_VERSION}"
 SRC_DIR="/tmp/glibc-${GLIBC_VERSION}"
 TARBALL="/tmp/glibc-${GLIBC_VERSION}.tar.xz"
-PATCH_ONLY=0
+DO_INSTALL=0
+DO_PATCH=0
 REPO_DIR=""
 CUDA_DIR=""
 
-for arg in "$@"; do
-  case "$arg" in
-    --patch-only)    PATCH_ONLY=1 ;;
-    --repo-dir=*)    REPO_DIR="${arg#--repo-dir=}" ;;
-    --cuda-dir=*)    CUDA_DIR="${arg#--cuda-dir=}" ;;
-    *) echo "Unknown flag: $arg"; exit 1 ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --install)       DO_INSTALL=1 ;;
+    --patch)         DO_PATCH=1 ;;
+    --repo-dir)      REPO_DIR="$2"; shift ;;
+    --cuda-dir)      CUDA_DIR="$2"; shift ;;
+    *) echo "Unknown flag: $1"; exit 1 ;;
   esac
+  shift
 done
 
+if [ "$DO_INSTALL" -eq 0 ] && [ "$DO_PATCH" -eq 0 ]; then
+  echo "ERROR: specify at least one of --install or --patch"
+  exit 1
+fi
+
 if [ -z "$REPO_DIR" ]; then
-  echo "ERROR: --repo-dir=<path> is required"
+  echo "ERROR: --repo-dir <path> is required"
   exit 1
 fi
 
@@ -62,7 +70,7 @@ CPP_BUILD_DIR="${REPO_DIR}/cpp/build"
 # Step 1: Build glibc
 # -----------------------------------------------------------------------
 
-if [ "$PATCH_ONLY" -eq 0 ]; then
+if [ "$DO_INSTALL" -eq 1 ]; then
 
   # Ensure bison is available (glibc configure requires it).
   if ! command -v bison &>/dev/null || ! bison --version | head -1 | grep -qE '3\.[0-9]'; then
@@ -130,6 +138,11 @@ if [ "$PATCH_ONLY" -eq 0 ]; then
   echo "==> glibc ${GLIBC_VERSION} installed to ${PREFIX}"
 fi
 
+if [ "$DO_PATCH" -eq 0 ]; then
+  echo "==> Done (install only, skipping patch)."
+  exit 0
+fi
+
 # -----------------------------------------------------------------------
 # Step 2: Ensure patchelf is available
 # -----------------------------------------------------------------------
@@ -161,7 +174,7 @@ INTERP="${PREFIX}/lib/ld-linux-x86-64.so.2"
 
 if [ ! -f "$INTERP" ]; then
   echo "ERROR: interpreter not found at ${INTERP}"
-  echo "Run without --patch-only first to build glibc."
+  echo "Run with --install first to build glibc."
   exit 1
 fi
 

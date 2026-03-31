@@ -20,6 +20,10 @@ jobs:
       image: ${{ matrix.image }}
 
     steps:
+      - name: Install git
+        if: matrix.cudf == '25.02'
+        run: conda install -y -n base -c conda-forge git
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -45,7 +49,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Configure (CPP)
-        run: ./scripts/build.sh --configure --cudf_ROOT=/opt/conda
+        run: ./scripts/build.sh --configure --cudf_ROOT /opt/conda
 
       - name: Build (CPP)
         run: ./scripts/build.sh --build

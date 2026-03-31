@@ -12,17 +12,18 @@ CUDF_ROOT=""
 CUDF_BUILD_FROM_SOURCE=0
 TARGET="cpp"
 
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --configure)              DO_CONFIGURE=1 ;;
     --build)                  DO_BUILD=1 ;;
     --install)                DO_INSTALL=1 ;;
     --all)                    DO_CONFIGURE=1; DO_BUILD=1; DO_INSTALL=1 ;;
-    --cudf_ROOT=*)            CUDF_ROOT="${arg#--cudf_ROOT=}" ;;
+    --cudf_ROOT)              CUDF_ROOT="$2"; shift ;;
     --cudf-build-from-source) CUDF_BUILD_FROM_SOURCE=1 ;;
-    --target=*)               TARGET="${arg#--target=}" ;;
-    *) echo "Unknown flag: $arg"; exit 1 ;;
+    --target)                 TARGET="$2"; shift ;;
+    *) echo "Unknown flag: $1"; exit 1 ;;
   esac
+  shift
 done
 
 BUILD_DIR="${TARGET}/build"
@@ -38,7 +39,7 @@ if [ $DO_CONFIGURE -eq 1 ]; then
     CUDF_CMAKE_FLAGS="-Dcudf_ROOT=${CUDF_ROOT}"
   else
     echo "error: cudf not configured. Either:" >&2
-    echo "  --cudf_ROOT=<path>        use a host cudf installation" >&2
+    echo "  --cudf_ROOT <path>        use a host cudf installation" >&2
     echo "  --cudf-build-from-source  build cudf from the vendored submodule" >&2
     exit 1
   fi

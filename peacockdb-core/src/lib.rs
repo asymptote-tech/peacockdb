@@ -83,7 +83,7 @@ mod tests {
 
     fn testdata_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../testdata/tpchsf1")
+            .join("../testdata/tpch.minimal")
     }
 
     async fn count(ctx: &SessionContext, query: &str) -> i64 {

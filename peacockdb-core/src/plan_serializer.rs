@@ -1400,7 +1400,7 @@ mod tests {
     /// Helper: build a plan from SQL and serialize it.
     async fn serialize_query(sql: &str) -> Vec<u8> {
         let data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../testdata/tpchsf1");
+            .join("../testdata/tpch.minimal");
         let ctx = crate::create_context_with_tables(&data_dir, 1, 2 * 1024 * 1024 * 1024)
             .await
             .unwrap();
