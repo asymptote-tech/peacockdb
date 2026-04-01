@@ -1,0 +1,3 @@
+CrossJoinExec
+  GpuScanExec: batch_size=29826161
+  GpuScanExec: batch_size=29826161

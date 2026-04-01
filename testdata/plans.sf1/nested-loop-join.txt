@@ -1,0 +1,3 @@
+NestedLoopJoinExec: join_type=Inner, filter=n_regionkey@1 > r_regionkey@0
+  GpuScanExec: batch_size=29826161
+  GpuScanExec: batch_size=29826161
