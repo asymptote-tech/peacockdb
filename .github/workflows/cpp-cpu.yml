@@ -22,7 +22,7 @@ jobs:
     steps:
       - name: Install git
         if: matrix.cudf == '25.02'
-        run: conda install -y -n base -c conda-forge git
+        run: conda install -y -n base -c conda-forge git curl
 
       - uses: actions/checkout@v4
         with:
