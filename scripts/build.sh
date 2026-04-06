@@ -28,6 +28,10 @@ done
 BUILD_DIR="${TARGET}/build"
 INSTALL_DIR="${TARGET}/install"
 
+export CC=$(which gcc-14)
+export CXX=$(which g++-14)
+export CUDACXX=$(which nvcc)
+
 if [ $DO_CONFIGURE -eq 1 ]; then
   mkdir -p "${BUILD_DIR}" "${INSTALL_DIR}"
 
@@ -48,9 +52,6 @@ if [ $DO_CONFIGURE -eq 1 ]; then
     -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
     -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
-    -DCMAKE_C_COMPILER=$(which gcc-14) \
-    -DCMAKE_CXX_COMPILER=$(which g++-14) \
-    -DCMAKE_CUDA_COMPILER=$(which nvcc) \
     ${CUDF_CMAKE_FLAGS}
 fi
 
