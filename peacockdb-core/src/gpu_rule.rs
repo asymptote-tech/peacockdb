@@ -279,7 +279,7 @@ impl PhysicalOptimizerRule for GpuExecutionRule {
 /// Estimated byte width of a single row for the given schema.
 /// Uses `DataType::primitive_width()` for fixed-size types,
 /// falls back to 32 bytes for variable-length types (Utf8, Binary, etc.).
-pub(crate) fn row_width(schema: &SchemaRef) -> usize {
+pub fn row_width(schema: &SchemaRef) -> usize {
     schema
         .fields()
         .iter()
@@ -339,22 +339,22 @@ impl CardinalityEstimator for TrivialCardinalityEstimator {
 /// Memory is modeled as a linear function of the scan batch size N.
 /// `output_row_ratio` tracks the cumulative row multiplier: if a filter has
 /// 50% selectivity, downstream operators see 0.5 × N rows instead of N.
-pub(crate) struct SubtreeMemory {
+pub struct SubtreeMemory {
     /// Peak GPU memory as bytes per scan-batch-row N:
     /// `peak_bytes = subtree_max_row_bytes * N`.
-    pub(crate) subtree_max_row_bytes: usize,
+    pub subtree_max_row_bytes: usize,
     /// Output row width in bytes (per output row).
-    pub(crate) output_width: usize,
+    pub output_width: usize,
     /// Ratio of output rows to original batch size N.
     /// 1.0 means row count is preserved; <1.0 after filters; >1.0 after fan-out joins.
-    pub(crate) output_row_ratio: f64,
+    pub output_row_ratio: f64,
 }
 
 /// Walk the plan tree and compute peak memory as a linear function of batch size N.
 ///
 /// Per-operator memory = input batch + output batch, where the row counts are
 /// adjusted by selectivity (filters) and cardinality (joins) estimators.
-pub(crate) fn analyze_memory(plan: &Arc<dyn ExecutionPlan>) -> SubtreeMemory {
+pub fn analyze_memory(plan: &Arc<dyn ExecutionPlan>) -> SubtreeMemory {
     analyze_memory_with(
         plan,
         &TrivialSelectivityEstimator,

@@ -1,0 +1,15 @@
+GpuProjectExec
+  GpuAggregateExec: group_by=[], aggr=[sum(lineitem.l_extendedprice * lineitem.l_discount)]
+    GpuCoalescePartitionsExec
+      GpuAggregateExec: group_by=[], aggr=[sum(lineitem.l_extendedprice * lineitem.l_discount)]
+        GpuCoalesceBatchesExec: target_batch_size=25565281
+          GpuFilterExec
+            GpuScanExec: batch_size=25565281
+--- memory ---
+GpuProjectExec: row_width=16, subtree_max_row_bytes=84
+  GpuAggregateExec: row_width=16, subtree_max_row_bytes=84
+    GpuCoalescePartitionsExec: row_width=16, subtree_max_row_bytes=84
+      GpuAggregateExec: row_width=16, subtree_max_row_bytes=84
+        GpuCoalesceBatchesExec: row_width=32, subtree_max_row_bytes=84
+          GpuFilterExec: row_width=32, subtree_max_row_bytes=84
+            GpuScanExec: row_width=52, subtree_max_row_bytes=52

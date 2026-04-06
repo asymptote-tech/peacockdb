@@ -1,3 +1,7 @@
 GpuCoalesceBatchesExec: target_batch_size=44739242
   GpuFilterExec
     GpuScanExec: batch_size=44739242
+--- memory ---
+GpuCoalesceBatchesExec: row_width=24, subtree_max_row_bytes=48
+  GpuFilterExec: row_width=24, subtree_max_row_bytes=48
+    GpuScanExec: row_width=24, subtree_max_row_bytes=24

@@ -1,0 +1,23 @@
+GpuSortPreservingMergeExec: [l_returnflag@0 ASC NULLS LAST, l_linestatus@1 ASC NULLS LAST]
+  GpuSortExec
+    GpuProjectExec
+      GpuAggregateExec: group_by=[l_returnflag, l_linestatus], aggr=[sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount * Int64(1) + lineitem.l_tax), avg(lineitem.l_quantity), avg(lineitem.l_extendedprice), avg(lineitem.l_discount), count(*)]
+        GpuCoalesceBatchesExec: target_batch_size=5478274
+          GpuRepartitionExec: partitioning=Hash([l_returnflag@0, l_linestatus@1], 8), input_partitions=8
+            GpuAggregateExec: group_by=[l_returnflag, l_linestatus], aggr=[sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount * Int64(1) + lineitem.l_tax), avg(lineitem.l_quantity), avg(lineitem.l_extendedprice), avg(lineitem.l_discount), count(*)]
+              GpuProjectExec
+                GpuCoalesceBatchesExec: target_batch_size=5478274
+                  GpuFilterExec
+                    GpuScanExec: batch_size=5478274
+--- memory ---
+GpuSortPreservingMergeExec: row_width=184, subtree_max_row_bytes=392
+  GpuSortExec: row_width=184, subtree_max_row_bytes=392
+    GpuProjectExec: row_width=184, subtree_max_row_bytes=392
+      GpuAggregateExec: row_width=184, subtree_max_row_bytes=392
+        GpuCoalesceBatchesExec: row_width=208, subtree_max_row_bytes=352
+          GpuRepartitionExec: row_width=208, subtree_max_row_bytes=352
+            GpuAggregateExec: row_width=208, subtree_max_row_bytes=352
+              GpuProjectExec: row_width=144, subtree_max_row_bytes=272
+                GpuCoalesceBatchesExec: row_width=128, subtree_max_row_bytes=260
+                  GpuFilterExec: row_width=128, subtree_max_row_bytes=260
+                    GpuScanExec: row_width=132, subtree_max_row_bytes=132
