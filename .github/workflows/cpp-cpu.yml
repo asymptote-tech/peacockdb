@@ -58,15 +58,15 @@ jobs:
       - name: Run CPU tests (CPP)
         run: ctest --test-dir cpp/build -L cpu --output-on-failure
 
-      - name: Run Rust unit tests
-        run: cargo test -p peacockdb-core --lib
-        env:
-          CMAKE_GENERATOR: Ninja
-
       - name: Generate SF-1 test data
         run: |
           conda install -y -n base -c conda-forge duckdb-cli
           testdata/generate_testdata.sh
+
+      - name: Run Rust unit tests
+        run: cargo test -p peacockdb-core --lib
+        env:
+          CMAKE_GENERATOR: Ninja
 
       - name: Run query plan tests
         run: cargo test -p peacockdb-core --test test_queries
