@@ -15,9 +15,9 @@ Make sure `auto_activate_base` is set to false in conda config, such that builds
 To build just the C++ part of peacockdb, run:
 
 ```
-scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids-26.02 --configure
-scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids-26.02 --build
-scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids-26.02 --install
+scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids --configure
+scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids --build
+scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids --install
 ```
 
 When the build is done, resulting binaries will link with cudf dynamically.
@@ -25,7 +25,7 @@ When the build is done, resulting binaries will link with cudf dynamically.
 To invoke C++ tests, run
 
 ```
-export LD_LIBRARY_PATH=$HOME/miniforge3/envs/rapids-26.02/lib
+export LD_LIBRARY_PATH=$HOME/miniforge3/envs/rapids/lib
 cpp/install/build/peacock_gpu_tests
 ```
 
@@ -37,8 +37,24 @@ cargo test --features rust-only
 
 cargo can also be used to build the system end-to-end (
 ```
-export CUDF_ROOT=$HOME/miniforge3/envs/rapids-26.02
+export CUDF_ROOT=$HOME/miniforge3/envs/rapids
 cargo build 
+```
+
+GPU TO CPU TESTS
+
+```
+ # all 5 tests in cpu_executor                                                                                              
+  cargo test -p peacockdb-core --lib cpu_executor                                                                            
+   
+  # one specific test                                                                                                        
+  cargo test -p peacockdb-core --lib cpu_executor::tests::test_execution_strips_gpu_nodes
+                                                                                                                             
+  # with output printed (useful for seeing node names etc.)                                                                  
+  cargo test -p peacockdb-core --lib cpu_executor -- --nocapture                                                             
+                                                                                                                             
+  # everything in the crate                                 
+  cargo test -p peacockdb-core                                                                                               
 ```
 
 ## Run GPU tests

@@ -1,4 +1,5 @@
 mod gpu_rule;
+pub mod cpu_executor;
 #[allow(unused_imports, dead_code, clippy::all)]
 mod generated {
     pub mod gpu_plan_generated {
@@ -10,12 +11,14 @@ pub mod plan_serializer;
 use std::path::Path;
 use std::sync::Arc;
 
+use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::datasource::file_format::parquet::ParquetFormat;
 use datafusion::datasource::listing::{ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl};
 use datafusion::execution::context::SessionContext;
 use datafusion::execution::SessionStateBuilder;
 use datafusion::error::Result;
 
+use cpu_executor::{execute_node_by_node, NodeMemoryStats};
 use gpu_rule::{GpuExecutionRule, GpuMemoryBudgetRule};
 
 /// Scans `data_dir` for `.parquet` files and registers each as a table in a new
@@ -72,6 +75,71 @@ pub async fn create_context_with_tables(
     Ok(ctx)
 }
 
+// ---------------------------------------------------------------------------
+// CpuExecutor
+// ---------------------------------------------------------------------------
+
+/// Executes SQL queries on CPU by building a GPU-annotated physical plan
+/// and running it through [`execute_node_by_node`].
+///
+/// This is the idiomatic entry point: callers only see SQL in and
+/// `Vec<RecordBatch>` out — the GPU plan construction, node stripping, and
+/// `TaskContext` wiring are all hidden inside.
+///
+/// ```
+/// # use std::path::Path;
+/// # use peacockdb_core::CpuExecutor;
+/// # async fn example() -> datafusion::error::Result<()> {
+/// let exec = CpuExecutor::new(Path::new("./data"), 8, 2 * 1024 * 1024 * 1024).await?;
+/// let batches = exec.execute("SELECT count(*) FROM orders WHERE o_totalprice > 100").await?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct CpuExecutor {
+    ctx: SessionContext,
+}
+
+impl CpuExecutor {
+    /// Build a `CpuExecutor` from a directory of `.parquet` files.
+    ///
+    /// Internally calls [`create_context_with_tables`] so the `SessionContext`
+    /// already has `GpuExecutionRule` and `GpuMemoryBudgetRule` registered.
+    /// The resulting physical plans are GPU-annotated but executed on CPU.
+    pub async fn new(
+        data_dir: &Path,
+        target_partitions: usize,
+        gpu_memory_budget: usize,
+    ) -> Result<Self> {
+        let ctx = create_context_with_tables(data_dir, target_partitions, gpu_memory_budget).await?;
+        Ok(Self { ctx })
+    }
+
+    /// Execute a SQL query and return all result batches.
+    ///
+    /// Steps (all hidden from the caller):
+    /// 1. `ctx.sql(sql)` → DataFusion `DataFrame` (SQL parse + logical plan)
+    /// 2. `.create_physical_plan()` → GPU-annotated `ExecutionPlan` tree
+    /// 3. `execute_node_by_node` → strip GPU wrappers, run each CPU node bottom-up
+    pub async fn execute(&self, sql: &str) -> Result<Vec<RecordBatch>> {
+        let plan = self.ctx.sql(sql).await?.create_physical_plan().await?;
+        execute_node_by_node(plan, self.ctx.task_ctx(), &mut |_, _| {}).await
+    }
+
+    /// Like [`execute`] but also returns per-node memory stats in post-order.
+    pub async fn execute_instrumented(
+        &self,
+        sql: &str,
+    ) -> Result<(Vec<RecordBatch>, Vec<NodeMemoryStats>)> {
+        let plan = self.ctx.sql(sql).await?.create_physical_plan().await?;
+        let mut stats = Vec::new();
+        let batches = execute_node_by_node(plan, self.ctx.task_ctx(), &mut |name, batches| {
+            stats.push(NodeMemoryStats::collect(name, batches));
+        })
+        .await?;
+        Ok((batches, stats))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,6 +152,63 @@ mod tests {
     fn testdata_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../testdata/tpch.minimal")
+    }
+
+    // ── CpuExecutor integration tests ────────────────────────────────────────
+
+    /// Full end-to-end example showing the idiomatic usage:
+    ///   1. CpuExecutor::new  — builds a SessionContext with GPU rules
+    ///   2. exec.execute(sql) — SQL → GPU plan → CPU execution → RecordBatches
+    #[tokio::test]
+    async fn test_cpu_executor_simple_query() {
+        let exec = CpuExecutor::new(&testdata_dir(), 1, 2 * 1024 * 1024 * 1024)
+            .await
+            .unwrap();
+
+        let batches = exec
+            .execute("SELECT count(*) FROM nation WHERE n_regionkey >= 0")
+            .await
+            .unwrap();
+
+        let count = batches[0]
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(0);
+
+        assert_eq!(count, 25);
+    }
+
+    /// execute_instrumented returns both results and per-node stats in one call.
+    #[tokio::test]
+    async fn test_cpu_executor_instrumented() {
+        let exec = CpuExecutor::new(&testdata_dir(), 1, 2 * 1024 * 1024 * 1024)
+            .await
+            .unwrap();
+
+        let (batches, stats) = exec
+            .execute_instrumented("SELECT count(*) FROM nation WHERE n_regionkey >= 0")
+            .await
+            .unwrap();
+
+        let count = batches[0]
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(0);
+        assert_eq!(count, 25);
+
+        // Every stat entry must name a CPU node, never a GPU wrapper.
+        for s in &stats {
+            assert!(
+                !s.node_name.starts_with("Gpu"),
+                "GPU node '{}' leaked into stats",
+                s.node_name
+            );
+        }
+        assert!(!stats.is_empty());
     }
 
     async fn count(ctx: &SessionContext, query: &str) -> i64 {
@@ -289,7 +414,7 @@ mod tests {
             SELECT n.n_name, r.r_name
             FROM nation n JOIN region r ON n.n_regionkey = r.r_regionkey
             ORDER BY n.n_name";
-
+        
         let plan = ctx.sql(query).await.unwrap().create_physical_plan().await.unwrap();
         let sizes = scan_batch_sizes(&plan);
         assert!(!sizes.is_empty(), "expected GpuScanExec nodes in plan");
