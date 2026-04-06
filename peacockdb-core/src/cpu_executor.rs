@@ -292,12 +292,10 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpchsf1")
     }
 
-    /// Walk the plan tree; return true if any node name starts with "Gpu".
     fn has_gpu_node(plan: &Arc<dyn ExecutionPlan>) -> bool {
         plan.name().starts_with("Gpu") || plan.children().iter().any(|c| has_gpu_node(c))
     }
 
-    /// Collect every node name in the plan tree (pre-order).
     fn all_node_names(plan: &Arc<dyn ExecutionPlan>) -> Vec<String> {
         let mut names = vec![plan.name().to_string()];
         for child in plan.children() {
@@ -306,7 +304,6 @@ mod tests {
         names
     }
 
-    /// Walk the plan and collect the `gpu_batch_size` from every `GpuScanExec`.
     fn scan_batch_sizes(plan: &Arc<dyn ExecutionPlan>) -> Vec<usize> {
         use crate::gpu_rule::GpuScanExec;
         let mut sizes = vec![];
@@ -319,7 +316,6 @@ mod tests {
         sizes
     }
 
-    /// Render a plan to an indented string using DataFusion's built-in display.
     fn fmt_plan(plan: &Arc<dyn ExecutionPlan>) -> String {
         use datafusion::physical_plan::display::DisplayableExecutionPlan;
         DisplayableExecutionPlan::new(plan.as_ref())
@@ -328,40 +324,14 @@ mod tests {
     }
 
     async fn make_ctx(budget: usize) -> datafusion::execution::context::SessionContext {
-        create_context_with_tables(&testdata_dir(), /*partitions=*/ 1, budget)
+        create_context_with_tables(&testdata_dir(), 1, budget)
             .await
             .unwrap()
     }
 
-    const FULL_BUDGET: usize = 2 * 1024 * 1024 * 1024; // 2 GiB — no constraint in practice
-    const TIGHT_BUDGET: usize = 10 * 1024; // 10 KiB — forces tiny batches
+    const FULL_BUDGET: usize = 2 * 1024 * 1024 * 1024;
+    const TIGHT_BUDGET: usize = 10 * 1024;
 
-    // ── Test 1 ───────────────────────────────────────────────────────────────
-    // Precondition: the SessionContext with our optimizer rules produces a plan
-    // that actually contains GPU wrapper nodes.  Without this the other tests
-    // would not prove anything about GPU→CPU conversion.
-    #[tokio::test]
-    async fn test_physical_plan_contains_gpu_nodes() {
-        let ctx = make_ctx(FULL_BUDGET).await;
-        let plan = ctx
-            .sql("SELECT count(*) FROM nation WHERE n_regionkey >= 0")
-            .await
-            .unwrap()
-            .create_physical_plan()
-            .await
-            .unwrap();
-
-        assert!(
-            has_gpu_node(&plan),
-            "expected GPU nodes in plan, got node names: {:?}",
-            all_node_names(&plan)
-        );
-    }
-
-    // ── Test 2 ───────────────────────────────────────────────────────────────
-    // Core behaviour: execute_node_by_node_instrumented reports only CPU node
-    // names.  Because strip_gpu() unwraps every Gpu* wrapper before execution,
-    // no "Gpu…" string should appear in the collected stats.
     #[tokio::test]
     async fn test_execution_strips_gpu_nodes() {
         let ctx = make_ctx(FULL_BUDGET).await;
@@ -373,44 +343,31 @@ mod tests {
             .await
             .unwrap();
 
-        // Precondition — verify the plan really does have GPU nodes.
-        assert!(has_gpu_node(&plan), "precondition failed: plan has no GPU nodes");
+        assert!(
+            has_gpu_node(&plan),
+            "expected GPU nodes in plan, got: {:?}",
+            all_node_names(&plan)
+        );
 
-        let task_ctx = ctx.task_ctx();
         let mut stats: Vec<NodeMemoryStats> = vec![];
-        execute_node_by_node_instrumented(plan, task_ctx, &mut stats)
+        execute_node_by_node_instrumented(plan, ctx.task_ctx(), &mut stats)
             .await
             .unwrap();
 
         assert!(!stats.is_empty(), "no nodes were executed");
-
         let gpu_names: Vec<&str> = stats
             .iter()
             .filter(|s| s.node_name.starts_with("Gpu"))
             .map(|s| s.node_name.as_str())
             .collect();
-
-        assert!(
-            gpu_names.is_empty(),
-            "GPU nodes were NOT stripped; still present in execution stats: {gpu_names:?}"
-        );
+        assert!(gpu_names.is_empty(), "GPU nodes not stripped: {gpu_names:?}");
     }
 
-    // ── Test 3 ───────────────────────────────────────────────────────────────
-    // Correctness: results produced by our CPU executor match DataFusion's own
-    // direct collect() on the same query.
-    //
-    // The WHERE clause forces a real Parquet scan (DataFusion cannot answer the
-    // query from statistics alone, so the plan includes ParquetExec → GpuScanExec).
-    // n_name comes back as Utf8View in this DataFusion version, so we downcast
-    // to StringViewArray.
     #[tokio::test]
     async fn test_cpu_results_match_direct_execution() {
         let ctx = make_ctx(FULL_BUDGET).await;
-        // WHERE n_regionkey >= 0 forces a full scan; ORDER BY makes output deterministic.
         let query = "SELECT n_name FROM nation WHERE n_regionkey >= 0 ORDER BY n_name";
 
-        // Reference: DataFusion's own streaming pipeline.
         let reference: Vec<RecordBatch> =
             ctx.sql(query).await.unwrap().collect().await.unwrap();
         let ref_names: Vec<String> = reference
@@ -425,7 +382,6 @@ mod tests {
             })
             .collect();
 
-        // Our executor: GPU plan → strip wrappers → CPU node-by-node.
         let plan = ctx
             .sql(query)
             .await
@@ -454,37 +410,10 @@ mod tests {
         assert_eq!(cpu_names.len(), 25, "nation table must have 25 rows");
     }
 
-    // ── Test 4 ───────────────────────────────────────────────────────────────
-    // Memory boundary preservation — the real test.
-    //
-    // Problem with testing on `nation` (25 rows): the table is so small that
-    // every batch is ≤ 25 rows regardless of the batch_size limit, so the test
-    // passes even if with_batch_size() is deleted.  We need a table large enough
-    // that the default 8192-row batch size is actually reached without the limit.
-    //
-    // `lineitem` at SF1 has ~6 million rows.  With a 10 KiB budget,
-    // GpuMemoryBudgetRule computes a very small batch_size (tens of rows).
-    // Without the TaskContext override the Parquet reader emits 8192-row batches,
-    // clearly violating the limit.
-    //
-    // How we track it:
-    //   1. Read `gpu_batch_size` from every GpuScanExec in the GPU plan — this is
-    //      the ceiling the memory budget rule decided on.
-    //   2. Run execute_node_by_node_instrumented — it now records max_batch_rows
-    //      (largest single batch) per node.
-    //   3. The ParquetExec stat's max_batch_rows must be ≤ gpu_batch_size.
-    //      If with_batch_size() were removed, max_batch_rows would be 8192.
-    //
-    // We also print both plans (tight vs full budget) so the batch_size
-    // difference in the GpuScanExec line is visible in test output.
     #[tokio::test]
     async fn test_memory_boundary_preserved_tight_budget() {
-        // `customer` at SF1 has 150 000 rows — large enough that the default
-        // 8192-row Parquet batch size is actually reached without the limit.
-        // The WHERE clause forces a real scan (no statistics short-circuit).
         let query = "SELECT count(*) FROM customer WHERE c_custkey > 0";
 
-        // ── Build both plans and print the diff ──────────────────────────────
         let ctx_full = make_ctx(FULL_BUDGET).await;
         let plan_full = ctx_full.sql(query).await.unwrap()
             .create_physical_plan().await.unwrap();
@@ -493,7 +422,6 @@ mod tests {
         let plan_tight = ctx_tight.sql(query).await.unwrap()
             .create_physical_plan().await.unwrap();
 
-        // These lines appear in test output when run with --nocapture.
         eprintln!("\n=== FULL BUDGET ({} GiB) plan ===\n{}", FULL_BUDGET / (1024*1024*1024), fmt_plan(&plan_full));
         eprintln!("=== TIGHT BUDGET ({} KiB) plan ===\n{}", TIGHT_BUDGET / 1024, fmt_plan(&plan_tight));
 
@@ -517,26 +445,15 @@ mod tests {
             "tight budget batch_size ({gpu_batch_size}) should be smaller than full budget ({full_batch_size})"
         );
 
-        // ── Execute and collect per-node stats ───────────────────────────────
-        let task_ctx = ctx_tight.task_ctx();
         let mut stats: Vec<NodeMemoryStats> = vec![];
         let batches =
-            execute_node_by_node_instrumented(plan_tight, task_ctx, &mut stats)
+            execute_node_by_node_instrumented(plan_tight, ctx_tight.task_ctx(), &mut stats)
                 .await
                 .unwrap();
 
-        // Correctness: customer at SF1 has 150 000 rows, all c_custkey > 0.
-        let count = batches[0]
-            .column(0)
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .unwrap()
-            .value(0);
+        let count = batches[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap().value(0);
         assert_eq!(count, 150_000, "customer table must have 150 000 rows");
 
-        // ── Key assertion: scan batches respect the memory limit ─────────────
-        // ParquetExec is the only leaf; after stripping GpuScanExec its name is
-        // "ParquetExec".  Its max_batch_rows must be ≤ gpu_batch_size.
         let scan_stats: Vec<&NodeMemoryStats> = stats
             .iter()
             .filter(|s| s.node_name == "ParquetExec")
@@ -554,14 +471,11 @@ mod tests {
         for s in &scan_stats {
             assert!(
                 s.max_batch_rows <= gpu_batch_size,
-                "ParquetExec emitted a batch of {} rows, exceeding gpu_batch_size={} — \
-                 the TaskContext batch_size override was not applied",
-                s.max_batch_rows,
-                gpu_batch_size
+                "ParquetExec batch {} rows exceeds gpu_batch_size={}",
+                s.max_batch_rows, gpu_batch_size
             );
         }
 
-        // No GPU node names in stats.
         let gpu_names: Vec<&str> = stats
             .iter()
             .filter(|s| s.node_name.starts_with("Gpu"))
@@ -570,9 +484,6 @@ mod tests {
         assert!(gpu_names.is_empty(), "GPU nodes in stats: {gpu_names:?}");
     }
 
-    // ── Test 5 ───────────────────────────────────────────────────────────────
-    // Instrumented stats sanity check: every executed node reports non-zero
-    // allocated bytes and the total row count is consistent with the query result.
     #[tokio::test]
     async fn test_instrumented_stats_are_populated() {
         let ctx = make_ctx(FULL_BUDGET).await;
@@ -584,14 +495,11 @@ mod tests {
             .await
             .unwrap();
 
-        let task_ctx = ctx.task_ctx();
         let mut stats: Vec<NodeMemoryStats> = vec![];
         let batches =
-            execute_node_by_node_instrumented(plan, task_ctx, &mut stats).await.unwrap();
+            execute_node_by_node_instrumented(plan, ctx.task_ctx(), &mut stats).await.unwrap();
 
         let final_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
-
-        // The root node's stats are the last entry (post-order).
         let root_stat = stats.last().unwrap();
         assert_eq!(
             root_stat.row_count, final_rows,

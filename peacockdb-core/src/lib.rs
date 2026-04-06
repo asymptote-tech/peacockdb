@@ -414,7 +414,7 @@ mod tests {
             SELECT n.n_name, r.r_name
             FROM nation n JOIN region r ON n.n_regionkey = r.r_regionkey
             ORDER BY n.n_name";
-
+        
         let plan = ctx.sql(query).await.unwrap().create_physical_plan().await.unwrap();
         let sizes = scan_batch_sizes(&plan);
         assert!(!sizes.is_empty(), "expected GpuScanExec nodes in plan");

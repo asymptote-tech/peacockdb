@@ -44,4 +44,4 @@ unzip -o /tmp/ninja-linux.zip -d /usr/local/bin
 rm /tmp/ninja-linux.zip
 chmod +x /usr/local/bin/ninja
 
-"sudo $SCRIPT_DIR/conda-install-cudf.sh" --user "$USER"
+"$SCRIPT_DIR/conda-install-cudf.sh" --user "$USER"
