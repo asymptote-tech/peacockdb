@@ -87,3 +87,12 @@ Run it on the GPU machine with the cudf library path set:
 export LD_LIBRARY_PATH=$HOME/miniforge3/envs/rapids-26.02/lib
 ~/peacockdb/peacockdb
 ```
+
+## RUN TPCH benchmark
+
+# Run all 22 individually (parallel by default)
+cargo test -p peacockdb-core --test tpch                                                                                   
+
+# Run the summary table (sequential, with timing output)                                                                   
+cargo test -p peacockdb-core --test tpch tpch_all_queries_smoke -- --nocapture                                           
+                                                                                
