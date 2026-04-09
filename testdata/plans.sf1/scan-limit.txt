@@ -1,3 +1,0 @@
-GlobalLimitExec: skip=0, fetch=10
-  GpuCoalescePartitionsExec
-    GpuScanExec: batch_size=8012998

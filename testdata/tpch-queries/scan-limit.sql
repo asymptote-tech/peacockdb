@@ -1,1 +1,0 @@
-SELECT * FROM lineitem LIMIT 10;

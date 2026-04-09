@@ -1,11 +1,8 @@
 //! Parameterized tests that canonize GPU execution plans for TPC-H queries.
 //!
-//! Each test reads a SQL file from `testdata/tpch-queries/<name>.sql`, plans it
-//! against the SF-1 dataset, and asserts the plan matches the canonical file in
-//! `testdata/plans.sf1/<name>.txt`.
+//! Each test reads a SQL file from `testdata/tpch-queries-full/<name>.sql`, plans it
+//! against the SF-1 dataset, and compares with DataFusion physical plan
 //!
-//! To generate or update canonical plans, run with:
-//!   UPDATE_CANONICAL=1 cargo test -p peacockdb-core --test test_queries
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,16 +18,7 @@ const TARGET_PARTITIONS: usize = 8;
 // const GPU_MEMORY_BUDGET: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
 
 fn testdata_dir() -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.sf1");
-    if !dir.exists() {
-        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/generate_testdata.sh");
-        let status = std::process::Command::new("bash")
-            .arg(&script)
-            .status()
-            .expect("failed to run generate_testdata.sh");
-        assert!(status.success(), "generate_testdata.sh exited with {}", status);
-    }
-    dir
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.sf1")
 }
 
 fn queries_full_dir() -> PathBuf {

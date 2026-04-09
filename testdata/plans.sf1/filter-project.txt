@@ -1,3 +1,0 @@
-GpuCoalesceBatchesExec: target_batch_size=44739242
-  GpuFilterExec
-    GpuScanExec: batch_size=44739242
