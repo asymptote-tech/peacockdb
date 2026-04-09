@@ -2,7 +2,7 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [master]
+    branches: [master, tpch_bench]
   pull_request:
 
 jobs:
