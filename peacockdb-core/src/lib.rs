@@ -1,4 +1,4 @@
-mod gpu_rule;
+pub mod gpu_rule;
 pub mod cpu_executor;
 #[allow(unused_imports, dead_code, clippy::all)]
 mod generated {
