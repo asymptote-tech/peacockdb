@@ -1,4 +1,5 @@
 # Rust
+Cargo.lock
 target/
 
 # CMake / C++ build artifacts
