@@ -33,10 +33,6 @@ fn testdata_dir() -> PathBuf {
     dir
 }
 
-fn queries_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch-queries")
-}
-
 fn queries_full_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch-queries-full")
 }
@@ -94,18 +90,10 @@ async fn run_query_test(name: &str) {
         );
     }
 
-    let sql_path = queries_dir().join(format!("{name}.sql"));
-    let sql = std::fs::read_to_string(&sql_path)
-        .unwrap_or_else(|_| panic!("query file not found: {}", sql_path.display()));
-
-    compare_plans_with_query(name, &sql).await;
-}
-
-async fn run_tpch_full_test(name: &str) {
-    let data_dir = testdata_dir();
     let sql_path = queries_full_dir().join(format!("{name}.sql"));
     let sql = std::fs::read_to_string(&sql_path)
         .unwrap_or_else(|_| panic!("query file not found: {}", sql_path.display()));
+
     compare_plans_with_query(name, &sql).await;
 }
 
@@ -118,45 +106,25 @@ macro_rules! query_test {
     };
 }
 
-macro_rules! tpch_full_test {
-    ($func_name:ident, $query_name:literal) => {
-        #[tokio::test]
-        async fn $func_name() {
-            run_tpch_full_test($query_name).await;
-        }
-    };
-}
-
-query_test!(test_scan_limit, "scan-limit");
-query_test!(test_filter_project, "filter-project");
-query_test!(test_aggregate_groupby, "aggregate-groupby");
-query_test!(test_hash_join, "hash-join");
-query_test!(test_left_join, "left-join");
-query_test!(test_semi_join, "semi-join");
-query_test!(test_anti_join, "anti-join");
-query_test!(test_nested_loop_join, "nested-loop-join");
-query_test!(test_mixed_join, "mixed-join");
-query_test!(test_cross_join, "cross-join");
-
-tpch_full_test!(tpch_q1,  "q1");
-tpch_full_test!(tpch_q2,  "q2");
-tpch_full_test!(tpch_q3,  "q3");
-tpch_full_test!(tpch_q4,  "q4");
-tpch_full_test!(tpch_q5,  "q5");
-tpch_full_test!(tpch_q6,  "q6");
-tpch_full_test!(tpch_q7,  "q7");
-tpch_full_test!(tpch_q8,  "q8");
-tpch_full_test!(tpch_q9,  "q9");
-tpch_full_test!(tpch_q10, "q10");
-tpch_full_test!(tpch_q11, "q11");
-tpch_full_test!(tpch_q12, "q12");
-tpch_full_test!(tpch_q13, "q13");
-tpch_full_test!(tpch_q14, "q14");
-tpch_full_test!(tpch_q15, "q15");
-tpch_full_test!(tpch_q16, "q16");
-tpch_full_test!(tpch_q17, "q17");
-tpch_full_test!(tpch_q18, "q18");
-tpch_full_test!(tpch_q19, "q19");
-tpch_full_test!(tpch_q20, "q20");
-tpch_full_test!(tpch_q21, "q21");
-tpch_full_test!(tpch_q22, "q22");
+query_test!(tpch_q1,  "q1");
+query_test!(tpch_q2,  "q2");
+query_test!(tpch_q3,  "q3");
+query_test!(tpch_q4,  "q4");
+query_test!(tpch_q5,  "q5");
+query_test!(tpch_q6,  "q6");
+query_test!(tpch_q7,  "q7");
+query_test!(tpch_q8,  "q8");
+query_test!(tpch_q9,  "q9");
+query_test!(tpch_q10, "q10");
+query_test!(tpch_q11, "q11");
+query_test!(tpch_q12, "q12");
+query_test!(tpch_q13, "q13");
+query_test!(tpch_q14, "q14");
+query_test!(tpch_q15, "q15");
+query_test!(tpch_q16, "q16");
+query_test!(tpch_q17, "q17");
+query_test!(tpch_q18, "q18");
+query_test!(tpch_q19, "q19");
+query_test!(tpch_q20, "q20");
+query_test!(tpch_q21, "q21");
+query_test!(tpch_q22, "q22");
