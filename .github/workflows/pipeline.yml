@@ -1,4 +1,4 @@
-name: C++ CPU Tests
+name: CI Pipeline
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  cpp-cpu:
+  pipeline:
     strategy:
       matrix:
         include:
@@ -57,34 +57,40 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Configure (CPP)
+      # ── Compile ──────────────────────────────────────────────────────────────
+
+      - name: Configure (C++)
         run: ./scripts/build.sh --configure --cudf_ROOT /opt/conda
         env:
           LDFLAGS: -Wl,-rpath-link,/opt/conda/lib
 
-      - name: Build (CPP)
+      - name: Build (C++)
         run: ./scripts/build.sh --build
         env:
           LDFLAGS: -Wl,-rpath-link,/opt/conda/lib
 
-      - name: Install (CPP)
+      - name: Install (C++)
         run: ./scripts/build.sh --install
 
-      - name: Run CPU tests (CPP)
-        run: ctest --test-dir cpp/build -L cpu --output-on-failure
+      - name: Build (Rust)
+        run: cargo build -p peacockdb-core
+        env:
+          CMAKE_GENERATOR: Ninja
+
+      # ── Test data ─────────────────────────────────────────────────────────────
 
       - name: Generate SF-1 test data
         run: |
           conda install -y -n base -c conda-forge duckdb-cli
           testdata/generate_testdata.sh
 
-      - name: Run Rust unit tests
-        run: cargo test -p peacockdb-core --lib
-        env:
-          CMAKE_GENERATOR: Ninja
+      # ── Tests ─────────────────────────────────────────────────────────────────
 
-      - name: Run query plan tests
-        run: cargo test -p peacockdb-core --test test_queries
+      - name: Run C++ tests
+        run: ctest --test-dir cpp/build -L cpu --output-on-failure
+
+      - name: Run Rust tests
+        run: cargo test -p peacockdb-core
         env:
           CMAKE_GENERATOR: Ninja
 
