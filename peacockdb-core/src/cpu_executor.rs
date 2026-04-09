@@ -103,6 +103,18 @@ impl NodeMemoryStats {
     }
 }
 
+/// Recursively strip all GPU wrapper nodes from a plan tree, returning a
+/// structurally identical tree composed of plain DataFusion CPU nodes.
+pub fn strip_gpu_tree(plan: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionPlan>> {
+    let (cpu_node, _) = strip_gpu(plan);
+    let stripped_children = cpu_node
+        .children()
+        .into_iter()
+        .map(|c| strip_gpu_tree(c.clone()))
+        .collect::<Result<Vec<_>>>()?;
+    cpu_node.with_new_children(stripped_children)
+}
+
 /// Execute a physical plan one node at a time, bottom-up, on CPU.
 ///
 /// GPU wrapper nodes (`GpuFilterExec`, `GpuScanExec`, …) are stripped to their

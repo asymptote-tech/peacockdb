@@ -7,10 +7,13 @@ edition = "2024"
 flatc-fork = "0.6"
 
 [dependencies]
-datafusion = "44"
+arrow = "54.2.0"               
+datafusion = "45"               
 flatbuffers = "25"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
-datafusion = "44"
+datafusion = "45"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# No [patch] section needed

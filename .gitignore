@@ -17,6 +17,7 @@ compile_commands.json
 # Generated FlatBuffers code (built from flatbuffers/gpu_plan.fbs)
 cpp/include/generated/
 peacockdb-core/src/generated/
+testdata/compare
 
 # OS
 .DS_Store

@@ -8,7 +8,7 @@ mod generated {
 }
 pub mod plan_serializer;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use datafusion::arrow::record_batch::RecordBatch;
@@ -21,13 +21,10 @@ use datafusion::error::Result;
 use cpu_executor::{execute_node_by_node, NodeMemoryStats};
 use gpu_rule::{GpuExecutionRule, GpuMemoryBudgetRule};
 
-/// Scans `data_dir` for `.parquet` files and registers each as a table in a new
-/// `SessionContext`. The table name is the file stem (e.g. `orders.parquet` → `orders`).
-pub async fn create_context_with_tables(
-    data_dir: &Path,
+pub fn build_session_state_with_gpu_budget_rule(
     target_partitions: usize,
-    gpu_memory_budget: usize,
-) -> Result<SessionContext> {
+    gpu_memory_budget: usize
+) -> SessionContext {
     let base = SessionContext::new();
     let mut config = base.state().config().clone();
     config.options_mut().execution.target_partitions = target_partitions;
@@ -36,43 +33,93 @@ pub async fn create_context_with_tables(
         .with_physical_optimizer_rule(Arc::new(GpuExecutionRule))
         .with_physical_optimizer_rule(Arc::new(GpuMemoryBudgetRule::new(gpu_memory_budget)))
         .build();
-    let ctx = SessionContext::new_with_state(state);
+    
+    SessionContext::new_with_state(state)
+}
 
-    let entries = std::fs::read_dir(data_dir).map_err(|e| {
-        datafusion::error::DataFusionError::IoError(e)
-    })?;
+pub fn build_session_state_with_gpu_rule(
+    target_partitions: usize,
+) -> SessionContext {
+    let base = SessionContext::new();
+    let mut config = base.state().config().clone();
+    config.options_mut().execution.target_partitions = target_partitions;
+    let state = SessionStateBuilder::new_from_existing(base.state())
+        .with_config(config)
+        .with_physical_optimizer_rule(Arc::new(GpuExecutionRule))
+        .build();
+    
+    SessionContext::new_with_state(state)
+}
 
-    for entry in entries {
-        let entry = entry.map_err(|e| datafusion::error::DataFusionError::IoError(e))?;
-        let path = entry.path();
+pub fn build_session_state(
+    target_partitions: usize
+) -> SessionContext {
+    let base = SessionContext::new();
+    let mut config = base.state().config().clone();
+    config.options_mut().execution.target_partitions = target_partitions;
+    let state = SessionStateBuilder::new_from_existing(base.state())
+        .with_config(config)
+        .build();
+    
+    SessionContext::new_with_state(state)
+}
 
-        if path.extension().and_then(|e| e.to_str()) != Some("parquet") {
-            continue;
-        }
+async fn read_table(path: PathBuf, ctx: &SessionContext) -> Result<(String, Arc<ListingTable>), ()> {
+    if path.extension().and_then(|e| e.to_str()) != Some("parquet") {
+        ()
+    }
 
-        let table_name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| datafusion::error::DataFusionError::Plan(
-                format!("could not derive table name from path: {}", path.display()),
-            ))?
-            .to_string();
+    let table_name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| datafusion::error::DataFusionError::Plan(
+            format!("could not derive table name from path: {}", path.display()),
+        )).unwrap()
+        .to_string();
 
-        let table_url = ListingTableUrl::parse(path.to_str().unwrap())?;
-        let format = Arc::new(ParquetFormat::default().with_enable_pruning(true));
-        let listing_options = ListingOptions::new(format).with_file_extension(".parquet");
+    let table_url = ListingTableUrl::parse(path.to_str().unwrap()).unwrap();
+    let format = Arc::new(ParquetFormat::default().with_enable_pruning(true));
+    let listing_options = ListingOptions::new(format).with_file_extension(".parquet");
 
-        let resolved_schema = listing_options.infer_schema(&ctx.state(), &table_url).await?;
+    let resolved_schema = listing_options.infer_schema(&ctx.state(), &table_url).await.unwrap();
 
-        let config = ListingTableConfig::new(table_url)
-            .with_listing_options(listing_options)
-            .with_schema(resolved_schema);
+    let config = ListingTableConfig::new(table_url)
+        .with_listing_options(listing_options)
+        .with_schema(resolved_schema);
 
-        let table = Arc::new(ListingTable::try_new(config)?);
+    let table = Arc::new(ListingTable::try_new(config).unwrap());
+
+    Ok((table_name, table))
+}
+
+pub async fn register_tables_for(
+    ctx: SessionContext,
+    data_dir: &Path
+) -> Result<SessionContext> {
+    for entry in std::fs::read_dir(data_dir)? {
+        let path = entry?.path();
+        let Ok((table_name, table)) = read_table(path, &ctx).await else { continue; }; 
         ctx.register_table(&table_name, table)?;
     }
 
     Ok(ctx)
+}
+
+pub async fn create_context_with_tables(
+    data_dir: &Path,
+    target_partitions: usize,
+    gpu_memory_budget: usize,
+) -> Result<SessionContext> {
+    let ctx = build_session_state_with_gpu_budget_rule(target_partitions, gpu_memory_budget);
+    register_tables_for(ctx, data_dir).await
+}
+
+pub async fn create_context_with_tables_datafusion(
+    data_dir: &Path,
+    target_partitions: usize,
+) -> Result<SessionContext> {
+    let ctx = build_session_state(target_partitions);
+    register_tables_for(ctx, data_dir).await
 }
 
 // ---------------------------------------------------------------------------

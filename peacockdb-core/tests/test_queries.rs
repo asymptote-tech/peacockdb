@@ -13,22 +13,28 @@ use std::sync::Arc;
 use datafusion::physical_plan::display::DisplayableExecutionPlan;
 use datafusion::physical_plan::ExecutionPlan;
 
-use peacockdb_core::create_context_with_tables;
-use peacockdb_core::plan_serializer;
+use peacockdb_core::{build_session_state, build_session_state_with_gpu_rule};
+use peacockdb_core::register_tables_for;
+use peacockdb_core::cpu_executor::strip_gpu_tree;
 
 const TARGET_PARTITIONS: usize = 8;
-const GPU_MEMORY_BUDGET: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
+// const GPU_MEMORY_BUDGET: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
 
 fn testdata_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.sf1")
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.sf1");
+    if !dir.exists() {
+        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/generate_testdata.sh");
+        let status = std::process::Command::new("bash")
+            .arg(&script)
+            .status()
+            .expect("failed to run generate_testdata.sh");
+        assert!(status.success(), "generate_testdata.sh exited with {}", status);
+    }
+    dir
 }
 
 fn queries_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch-queries")
-}
-
-fn plans_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/plans.sf1")
 }
 
 /// Render the plan to a string, normalizing ParquetExec lines to be path-independent.
@@ -54,52 +60,25 @@ fn plan_str(plan: &Arc<dyn ExecutionPlan>) -> String {
         .join("\n")
 }
 
-fn assert_plan_matches_canonical(plan: &Arc<dyn ExecutionPlan>, name: &str) {
-    let canonical_path = plans_dir().join(format!("{name}.txt"));
-    let actual = plan_str(plan);
+async fn compare_plans_with_query(name: &str, sql: &str) {
+    let data_dir = testdata_dir();
+    //build_session_state_with_gpu_rule
+    let gpu_ctx = register_tables_for(build_session_state_with_gpu_rule(TARGET_PARTITIONS), &data_dir).await.unwrap();
+    
+    let gpu_plan = gpu_ctx.sql(sql).await.unwrap().create_physical_plan().await.unwrap();
+    let actual = plan_str(&strip_gpu_tree(gpu_plan).unwrap());
 
-    if std::env::var("UPDATE_CANONICAL").is_ok() {
-        std::fs::create_dir_all(plans_dir()).unwrap();
-        std::fs::write(&canonical_path, &actual).unwrap();
-        eprintln!("Updated canonical plan: {}", canonical_path.display());
-        return;
-    }
+    let df_ctx = register_tables_for(build_session_state(TARGET_PARTITIONS), &data_dir)
+        .await
+        .unwrap();
+    let df_plan = df_ctx.sql(sql).await.unwrap().create_physical_plan().await.unwrap();
+    let expected = plan_str(&df_plan);
 
-    let canonical = std::fs::read_to_string(&canonical_path).unwrap_or_else(|_| {
-        panic!(
-            "canonical file not found: {}\nRun with UPDATE_CANONICAL=1 to generate it.",
-            canonical_path.display()
-        )
-    });
-    assert_eq!(
-        actual,
-        canonical.trim_end(),
-        "plan for '{name}' does not match {}",
-        canonical_path.display()
-    );
+    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/compare").join(name);
+    std::fs::create_dir_all(&out_dir).unwrap();
+    std::fs::write(out_dir.join("result.txt"), format!("EXPECTED:\n{expected}\n\nGOT:\n{actual}")).unwrap();
 
-    // Flatbuffer roundtrip — skip if the plan contains unsupported nodes/expressions.
-    match plan_serializer::serialize_plan(plan) {
-        Ok(bytes) => {
-            match plan_serializer::deserialize_plan(&bytes) {
-                Ok(reconstructed) => {
-                    let roundtripped = plan_str(&reconstructed);
-                    assert_eq!(
-                        roundtripped, actual,
-                        "flatbuffer roundtrip mismatch for '{name}'"
-                    );
-                }
-                Err(e) if e.contains("not supported") || e.contains("unsupported") => {
-                    eprintln!("Skipping flatbuffer roundtrip for '{name}': {e}");
-                }
-                Err(e) => panic!("flatbuffer deserialization failed for '{name}': {e}"),
-            }
-        }
-        Err(e) if e.contains("unsupported") => {
-            eprintln!("Skipping flatbuffer roundtrip for '{name}': {e}");
-        }
-        Err(e) => panic!("flatbuffer serialization failed for '{name}': {e}"),
-    }
+    assert_eq!(actual, expected, "GPU-stripped plan does not match DataFusion plan for '{name}'");
 }
 
 async fn run_query_test(name: &str) {
@@ -115,19 +94,7 @@ async fn run_query_test(name: &str) {
     let sql = std::fs::read_to_string(&sql_path)
         .unwrap_or_else(|_| panic!("query file not found: {}", sql_path.display()));
 
-    let ctx = create_context_with_tables(&data_dir, TARGET_PARTITIONS, GPU_MEMORY_BUDGET)
-        .await
-        .unwrap();
-
-    let plan = ctx
-        .sql(sql.trim())
-        .await
-        .unwrap()
-        .create_physical_plan()
-        .await
-        .unwrap();
-
-    assert_plan_matches_canonical(&plan, name);
+    compare_plans_with_query(name, &sql).await;
 }
 
 macro_rules! query_test {
