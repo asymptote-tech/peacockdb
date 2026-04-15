@@ -289,7 +289,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn testdata_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpchsf1")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.sf1")
     }
 
     fn has_gpu_node(plan: &Arc<dyn ExecutionPlan>) -> bool {
