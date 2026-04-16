@@ -20,6 +20,15 @@ jobs:
       image: ${{ matrix.image }}
 
     steps:
+      - name: Locate cudf
+        run: |
+          echo "--- /opt/conda/lib ---"
+          ls /opt/conda/lib/libcudf.so* /opt/conda/lib/libcudart.so* 2>&1 || true
+          echo "--- /opt/conda/lib64 ---"
+          ls /opt/conda/lib64/libcudart.so* 2>&1 || true
+          echo "--- cudart search ---"
+          find /opt/conda -maxdepth 5 -name 'libcudart.so*' 2>/dev/null | head -20
+
       - name: Install git
         if: matrix.cudf == '25.02'
         run: conda install -y -n base -c conda-forge git curl
@@ -50,11 +59,13 @@ jobs:
 
       - name: Configure (CPP)
         run: ./scripts/build.sh --configure --cudf_ROOT /opt/conda
+        env:
+          LDFLAGS: -Wl,-rpath-link,/opt/conda/lib
 
       - name: Build (CPP)
         run: ./scripts/build.sh --build
         env:
-          LIBRARY_PATH: /opt/conda/lib
+          LDFLAGS: -Wl,-rpath-link,/opt/conda/lib
 
       - name: Install (CPP)
         run: ./scripts/build.sh --install
