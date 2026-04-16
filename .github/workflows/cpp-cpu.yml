@@ -12,6 +12,8 @@ jobs:
         include:
           - cudf: "26.02"
             image: rapidsai/base:25.10a-cuda12-py3.12
+          - cudf: "25.02"
+            image: rapidsai/base:25.02-cuda12.0-py3.12
     name: C++ CPU Tests (cudf ${{ matrix.cudf }})
     runs-on: ubuntu-latest
     container:
@@ -51,6 +53,8 @@ jobs:
 
       - name: Build (CPP)
         run: ./scripts/build.sh --build
+        env:
+          LIBRARY_PATH: /opt/conda/lib
 
       - name: Install (CPP)
         run: ./scripts/build.sh --install
@@ -72,3 +76,29 @@ jobs:
         run: cargo test -p peacockdb-core --test test_queries
         env:
           CMAKE_GENERATOR: Ninja
+
+  gpu-tests:
+    name: GPU Tests (shad-gpu)
+    needs: cpp-cpu
+    runs-on: [self-hosted, linux, gpu]
+    env:
+      CUDF_ROOT: /home/info/miniforge3/envs/rapids-cuda-12.2
+      LD_LIBRARY_PATH: /usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:/home/info/miniforge3/envs/rapids-cuda-12.2/lib
+      PEACOCK_TESTDATA_DIR: ${{ github.workspace }}/testdata
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure (CPP)
+        run: ./scripts/build.sh --configure --cudf_ROOT "$CUDF_ROOT"
+
+      - name: Build (CPP)
+        run: ./scripts/build.sh --build
+
+      - name: Install (CPP)
+        run: ./scripts/build.sh --install
+
+      - name: Run GPU tests (CPP)
+        run: ctest --test-dir cpp/build -L gpu --output-on-failure
