@@ -1,3 +1,4 @@
+-- TODO: remove view from this query
 -- Q15 requires a view: revenue0
 -- create view revenue0 as
 --     select l_suppkey as supplier_no, sum(l_extendedprice * (1 - l_discount)) as total_revenue

@@ -38,14 +38,14 @@ INSTALL tpch;
 LOAD tpch;
 CALL dbgen(sf=${SF});
 
-COPY nation     TO '${OUTDIR}/nation.parquet'    (FORMAT parquet);
-COPY region     TO '${OUTDIR}/region.parquet'    (FORMAT parquet);
-COPY supplier   TO '${OUTDIR}/supplier.parquet'  (FORMAT parquet);
-COPY customer   TO '${OUTDIR}/customer.parquet'  (FORMAT parquet);
-COPY part       TO '${OUTDIR}/part.parquet'      (FORMAT parquet);
-COPY partsupp   TO '${OUTDIR}/partsupp.parquet'  (FORMAT parquet);
-COPY orders     TO '${OUTDIR}/orders.parquet'    (FORMAT parquet);
-COPY lineitem   TO '${OUTDIR}/lineitem.parquet'  (FORMAT parquet);
+COPY nation    TO '${OUTDIR}/nation.parquet'    (FORMAT parquet);
+COPY region    TO '${OUTDIR}/region.parquet'    (FORMAT parquet);
+COPY supplier  TO '${OUTDIR}/supplier.parquet'  (FORMAT parquet);
+COPY customer  TO '${OUTDIR}/customer.parquet'  (FORMAT parquet);
+COPY part      TO '${OUTDIR}/part.parquet'      (FORMAT parquet);
+COPY partsupp  TO '${OUTDIR}/partsupp.parquet'  (FORMAT parquet);
+COPY orders    TO '${OUTDIR}/orders.parquet'    (FORMAT parquet);
+COPY lineitem  TO '${OUTDIR}/lineitem.parquet'  (FORMAT parquet);
 SQL
 
 echo "Done. Files in ${OUTDIR}:"
