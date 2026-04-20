@@ -32,7 +32,7 @@ use crate::gpu_rule::{
 /// Serialize an entire GPU execution plan tree into a FlatBuffer byte vector.
 ///
 /// Returns `Err` if the plan contains nodes that cannot be serialized (e.g.
-/// unsupported expression types or plan nodes).
+/// unsupported expression types or plan nodes)
 pub fn serialize_plan(plan: &Arc<dyn ExecutionPlan>) -> Result<Vec<u8>, String> {
     let mut builder = FlatBufferBuilder::with_capacity(4096);
     let root = serialize_plan_node(&mut builder, plan)?;
