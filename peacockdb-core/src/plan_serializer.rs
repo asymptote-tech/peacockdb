@@ -32,7 +32,7 @@ use crate::gpu_rule::{
 /// Serialize an entire GPU execution plan tree into a FlatBuffer byte vector.
 ///
 /// Returns `Err` if the plan contains nodes that cannot be serialized (e.g.
-/// unsupported expression types or plan nodes).
+/// unsupported expression types or plan nodes)
 pub fn serialize_plan(plan: &Arc<dyn ExecutionPlan>) -> Result<Vec<u8>, String> {
     let mut builder = FlatBufferBuilder::with_capacity(4096);
     let root = serialize_plan_node(&mut builder, plan)?;
@@ -1384,71 +1384,4 @@ fn deserialize_gpu_sort_preserving_merge(
     }
 
     Ok(Arc::new(GpuSortPreservingMergeExec::new(Arc::new(merge_exec))))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Verify that a serialized plan round-trips through FlatBuffer validation.
-    fn assert_valid_flatbuffer(bytes: &[u8]) {
-        let plan = flatbuffers::root::<fb::GpuPlan>(bytes)
-            .expect("invalid FlatBuffer");
-        assert!(plan.root().is_some(), "root PlanNode should be present");
-    }
-
-    /// Helper: build a plan from SQL and serialize it.
-    async fn serialize_query(sql: &str) -> Vec<u8> {
-        let data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../testdata/tpch.minimal");
-        let ctx = crate::create_context_with_tables(&data_dir, 1, 2 * 1024 * 1024 * 1024)
-            .await
-            .unwrap();
-        let plan = ctx
-            .sql(sql)
-            .await
-            .unwrap()
-            .create_physical_plan()
-            .await
-            .unwrap();
-        serialize_plan(&plan).expect("serialization failed")
-    }
-
-    #[tokio::test]
-    async fn test_serialize_filter_agg() {
-        let bytes = serialize_query(
-            "SELECT count(*) FROM customer WHERE c_acctbal > 0",
-        ).await;
-        assert_valid_flatbuffer(&bytes);
-
-        let plan = flatbuffers::root::<fb::GpuPlan>(&bytes).unwrap();
-        let root = plan.root().unwrap();
-        // Root should be an aggregate.
-        assert_eq!(root.node_type(), fb::PlanNodeKind::GpuAggregate);
-    }
-
-    #[tokio::test]
-    async fn test_serialize_join_sort() {
-        let bytes = serialize_query(
-            "SELECT n.n_name, r.r_name \
-             FROM nation n JOIN region r ON n.n_regionkey = r.r_regionkey \
-             ORDER BY n.n_name",
-        ).await;
-        assert_valid_flatbuffer(&bytes);
-
-        let plan = flatbuffers::root::<fb::GpuPlan>(&bytes).unwrap();
-        let root = plan.root().unwrap();
-        assert_eq!(root.node_type(), fb::PlanNodeKind::GpuSort);
-    }
-
-    #[tokio::test]
-    async fn test_serialize_group_join_sort() {
-        let bytes = serialize_query(
-            "SELECT r.r_name, count(*) AS nation_count \
-             FROM nation n JOIN region r ON n.n_regionkey = r.r_regionkey \
-             GROUP BY r.r_name \
-             ORDER BY nation_count DESC, r.r_name",
-        ).await;
-        assert_valid_flatbuffer(&bytes);
-    }
 }

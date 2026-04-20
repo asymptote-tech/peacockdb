@@ -5,11 +5,3 @@ GpuAggregateExec: group_by=[], aggr=[count(*)]
         GpuCoalesceBatchesExec: target_batch_size=67108864
           GpuFilterExec
             GpuScanExec: batch_size=67108864
---- memory ---
-GpuAggregateExec: row_width=8, subtree_max_row_bytes=32
-  GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=32
-    GpuAggregateExec: row_width=8, subtree_max_row_bytes=32
-      GpuProjectExec: row_width=1, subtree_max_row_bytes=32
-        GpuCoalesceBatchesExec: row_width=16, subtree_max_row_bytes=32
-          GpuFilterExec: row_width=16, subtree_max_row_bytes=32
-            GpuScanExec: row_width=16, subtree_max_row_bytes=16

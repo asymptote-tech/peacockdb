@@ -1,8 +1,8 @@
-name: C++ CPU Tests
+name: CI Pipeline
 
 on:
   push:
-    branches: [master]
+    branches: [master, tpch_bench]
   pull_request:
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
             image: rapidsai/base:25.10a-cuda12-py3.12
           - cudf: "25.02"
             image: rapidsai/base:25.02-cuda12.0-py3.12
-    name: C++ CPU Tests (cudf ${{ matrix.cudf }})
+    name: CI Pipeline (cudf ${{ matrix.cudf }})
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.image }}

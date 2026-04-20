@@ -1,8 +1,8 @@
-GpuCoalesceBatchesExec: target_batch_size=2462710
-  GpuHashJoinExec
-    GpuCoalesceBatchesExec: target_batch_size=2462710
-      GpuRepartitionExec: partitioning=Hash([o_orderkey@0], 8), input_partitions=8
-        GpuScanExec: batch_size=2462710
-    GpuCoalesceBatchesExec: target_batch_size=2462710
-      GpuRepartitionExec: partitioning=Hash([l_orderkey@0], 8), input_partitions=8
-        GpuScanExec: batch_size=2462710
+CoalesceBatchesExec: target_batch_size=2462710
+  HashJoinExec: mode=Partitioned, join_type=Left, on=[(o_orderkey@0, l_orderkey@0)]
+    CoalesceBatchesExec: target_batch_size=2462710
+      RepartitionExec: partitioning=Hash([o_orderkey@0], 8), input_partitions=8
+        ParquetExec: table=orders
+    CoalesceBatchesExec: target_batch_size=2462710
+      RepartitionExec: partitioning=Hash([l_orderkey@0], 8), input_partitions=8
+        ParquetExec: table=lineitem

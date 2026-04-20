@@ -1,0 +1,17 @@
+ProjectionExec: expr=[sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)@0 as revenue]
+  AggregateExec: mode=Final, gby=[], aggr=[sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)]
+    CoalescePartitionsExec
+      AggregateExec: mode=Partial, gby=[], aggr=[sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)]
+        CoalesceBatchesExec: target_batch_size=12201611
+          HashJoinExec: mode=Partitioned, join_type=Inner, on=[(p_partkey@0, l_partkey@0)], filter=p_brand@1 = Brand#12 AND p_container@3 IN ([Literal { value: Utf8View("SM CASE") }, Literal { value: Utf8View("SM BOX") }, Literal { value: Utf8View("SM PACK") }, Literal { value: Utf8View("SM PKG") }]) AND l_quantity@0 >= Some(100),15,2 AND l_quantity@0 <= Some(1100),15,2 AND p_size@2 <= 5 OR p_brand@1 = Brand#23 AND p_container@3 IN ([Literal { value: Utf8View("MED BAG") }, Literal { value: Utf8View("MED BOX") }, Literal { value: Utf8View("MED PKG") }, Literal { value: Utf8View("MED PACK") }]) AND l_quantity@0 >= Some(1000),15,2 AND l_quantity@0 <= Some(2000),15,2 AND p_size@2 <= 10 OR p_brand@1 = Brand#34 AND p_container@3 IN ([Literal { value: Utf8View("LG CASE") }, Literal { value: Utf8View("LG BOX") }, Literal { value: Utf8View("LG PACK") }, Literal { value: Utf8View("LG PKG") }]) AND l_quantity@0 >= Some(2000),15,2 AND l_quantity@0 <= Some(3000),15,2 AND p_size@2 <= 15, projection=[l_extendedprice@6, l_discount@7]
+            CoalesceBatchesExec: target_batch_size=12201611
+              RepartitionExec: partitioning=Hash([p_partkey@0], 8), input_partitions=8
+                CoalesceBatchesExec: target_batch_size=12201611
+                  FilterExec: (p_brand@1 = Brand#12 AND p_container@3 IN ([Literal { value: Utf8View("SM CASE") }, Literal { value: Utf8View("SM BOX") }, Literal { value: Utf8View("SM PACK") }, Literal { value: Utf8View("SM PKG") }]) AND p_size@2 <= 5 OR p_brand@1 = Brand#23 AND p_container@3 IN ([Literal { value: Utf8View("MED BAG") }, Literal { value: Utf8View("MED BOX") }, Literal { value: Utf8View("MED PKG") }, Literal { value: Utf8View("MED PACK") }]) AND p_size@2 <= 10 OR p_brand@1 = Brand#34 AND p_container@3 IN ([Literal { value: Utf8View("LG CASE") }, Literal { value: Utf8View("LG BOX") }, Literal { value: Utf8View("LG PACK") }, Literal { value: Utf8View("LG PKG") }]) AND p_size@2 <= 15) AND p_size@2 >= 1
+                    RepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                      ParquetExec: table=part
+            CoalesceBatchesExec: target_batch_size=12201611
+              RepartitionExec: partitioning=Hash([l_partkey@0], 8), input_partitions=8
+                CoalesceBatchesExec: target_batch_size=12201611
+                  FilterExec: (l_quantity@1 >= Some(100),15,2 AND l_quantity@1 <= Some(1100),15,2 OR l_quantity@1 >= Some(1000),15,2 AND l_quantity@1 <= Some(2000),15,2 OR l_quantity@1 >= Some(2000),15,2 AND l_quantity@1 <= Some(3000),15,2) AND (l_shipmode@5 = AIR OR l_shipmode@5 = AIR REG) AND l_shipinstruct@4 = DELIVER IN PERSON, projection=[l_partkey@0, l_quantity@1, l_extendedprice@2, l_discount@3]
+                    ParquetExec: table=lineitem

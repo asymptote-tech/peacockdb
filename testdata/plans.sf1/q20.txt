@@ -1,0 +1,43 @@
+SortPreservingMergeExec: [s_name@0 ASC NULLS LAST]
+  SortExec: expr=[s_name@0 ASC NULLS LAST], preserve_partitioning=[true]
+    CoalesceBatchesExec: target_batch_size=14128181
+      HashJoinExec: mode=Partitioned, join_type=LeftSemi, on=[(s_suppkey@0, ps_suppkey@0)], projection=[s_name@1, s_address@2]
+        CoalesceBatchesExec: target_batch_size=14128181
+          RepartitionExec: partitioning=Hash([s_suppkey@0], 8), input_partitions=8
+            CoalesceBatchesExec: target_batch_size=14128181
+              HashJoinExec: mode=Partitioned, join_type=Inner, on=[(n_nationkey@0, s_nationkey@3)], projection=[s_suppkey@1, s_name@2, s_address@3]
+                CoalesceBatchesExec: target_batch_size=14128181
+                  RepartitionExec: partitioning=Hash([n_nationkey@0], 8), input_partitions=8
+                    CoalesceBatchesExec: target_batch_size=14128181
+                      FilterExec: n_name@1 = CANADA, projection=[n_nationkey@0]
+                        RepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                          ParquetExec: table=nation
+                CoalesceBatchesExec: target_batch_size=14128181
+                  RepartitionExec: partitioning=Hash([s_nationkey@3], 8), input_partitions=8
+                    RepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                      ParquetExec: table=supplier
+        CoalesceBatchesExec: target_batch_size=14128181
+          RepartitionExec: partitioning=Hash([ps_suppkey@0], 8), input_partitions=8
+            CoalesceBatchesExec: target_batch_size=14128181
+              HashJoinExec: mode=Partitioned, join_type=Inner, on=[(ps_partkey@0, l_partkey@1), (ps_suppkey@1, l_suppkey@2)], filter=CAST(ps_availqty@0 AS Float64) > Float64(0.5) * sum(lineitem.l_quantity)@1, projection=[ps_suppkey@1]
+                CoalesceBatchesExec: target_batch_size=14128181
+                  RepartitionExec: partitioning=Hash([ps_partkey@0, ps_suppkey@1], 8), input_partitions=8
+                    CoalesceBatchesExec: target_batch_size=14128181
+                      HashJoinExec: mode=Partitioned, join_type=RightSemi, on=[(p_partkey@0, ps_partkey@0)]
+                        CoalesceBatchesExec: target_batch_size=14128181
+                          RepartitionExec: partitioning=Hash([p_partkey@0], 8), input_partitions=8
+                            CoalesceBatchesExec: target_batch_size=14128181
+                              FilterExec: p_name@1 LIKE forest%, projection=[p_partkey@0]
+                                RepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                                  ParquetExec: table=part
+                        CoalesceBatchesExec: target_batch_size=14128181
+                          RepartitionExec: partitioning=Hash([ps_partkey@0], 8), input_partitions=8
+                            ParquetExec: table=partsupp
+                ProjectionExec: expr=[0.5 * CAST(sum(lineitem.l_quantity)@2 AS Float64) as Float64(0.5) * sum(lineitem.l_quantity), l_partkey@0 as l_partkey, l_suppkey@1 as l_suppkey]
+                  AggregateExec: mode=FinalPartitioned, gby=[l_partkey@0 as l_partkey, l_suppkey@1 as l_suppkey], aggr=[sum(lineitem.l_quantity)]
+                    CoalesceBatchesExec: target_batch_size=14128181
+                      RepartitionExec: partitioning=Hash([l_partkey@0, l_suppkey@1], 8), input_partitions=8
+                        AggregateExec: mode=Partial, gby=[l_partkey@0 as l_partkey, l_suppkey@1 as l_suppkey], aggr=[sum(lineitem.l_quantity)]
+                          CoalesceBatchesExec: target_batch_size=14128181
+                            FilterExec: l_shipdate@3 >= 1994-01-01 AND l_shipdate@3 < 1995-01-01, projection=[l_partkey@0, l_suppkey@1, l_quantity@2]
+                              ParquetExec: table=lineitem
