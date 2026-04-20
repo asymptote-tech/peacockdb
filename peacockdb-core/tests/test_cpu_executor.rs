@@ -1,16 +1,22 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Int64Array, StringViewArray};
+use datafusion::arrow::array::Int64Array;
+use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::arrow::util::pretty::pretty_format_batches;
 use datafusion::physical_plan::ExecutionPlan;
 
 use peacockdb_core::cpu_executor::{
     execute_node_by_node, execute_node_by_node_instrumented, NodeMemoryStats,
 };
-use peacockdb_core::create_context_with_tables;
+use peacockdb_core::{create_context_with_tables, build_session_state, register_tables_for};
 
 fn testdata_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.minimal")
+}
+
+fn queries_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch-queries")
 }
 
 fn has_gpu_node(plan: &Arc<dyn ExecutionPlan>) -> bool {
@@ -53,6 +59,7 @@ async fn make_ctx(budget: usize) -> datafusion::execution::context::SessionConte
 const FULL_BUDGET: usize = 2 * 1024 * 1024 * 1024;
 const TIGHT_BUDGET: usize = 10 * 1024;
 
+// 
 #[tokio::test]
 async fn test_execution_strips_gpu_nodes() {
     let ctx = make_ctx(FULL_BUDGET).await;
@@ -84,52 +91,93 @@ async fn test_execution_strips_gpu_nodes() {
     assert!(gpu_names.is_empty(), "GPU nodes not stripped: {gpu_names:?}");
 }
 
-#[tokio::test]
-async fn test_cpu_results_match_direct_execution() {
-    let ctx = make_ctx(FULL_BUDGET).await;
-    let query = "SELECT n_name FROM nation WHERE n_regionkey >= 0 ORDER BY n_name";
+/// Render RecordBatches as a pretty table and sort the data rows so that
+/// result comparison is order-independent (queries without ORDER BY may
+/// return rows in any order depending on the executor path).
+fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
+    let formatted = pretty_format_batches(batches).unwrap().to_string();
+    let lines: Vec<&str> = formatted.lines().collect();
+    // Layout: border / header / border / ...data rows... / border
+    if lines.len() > 4 {
+        let mut data = lines[3..lines.len() - 1].to_vec();
+        data.sort_unstable();
+        let mut out = lines[..3].to_vec();
+        out.extend(data);
+        out.push(lines[lines.len() - 1]);
+        out.join("\n")
+    } else {
+        formatted
+    }
+}
 
-    let reference: Vec<datafusion::arrow::record_batch::RecordBatch> =
-        ctx.sql(query).await.unwrap().collect().await.unwrap();
-    let ref_names: Vec<String> = reference
-        .iter()
-        .flat_map(|b| {
-            b.column(0)
-                .as_any()
-                .downcast_ref::<StringViewArray>()
-                .unwrap()
-                .iter()
-                .map(|v| v.unwrap().to_string())
-        })
-        .collect();
+/// Run `name.sql` through both plain DataFusion and the CPU executor, then
+/// assert that the result sets are equal (order-independent).
+async fn assert_cpu_results_match_datafusion(name: &str) {
+    let data_dir = testdata_dir();
 
-    let plan = ctx
-        .sql(query)
-        .await
-        .unwrap()
-        .create_physical_plan()
+    let sql_path = queries_dir().join(format!("{name}.sql"));
+    let sql = std::fs::read_to_string(&sql_path)
+        .unwrap_or_else(|_| panic!("query file not found: {}", sql_path.display()));
+    let mut df_ctx = build_session_state(1);
+    df_ctx = register_tables_for(df_ctx, &data_dir).await.unwrap();
+    // Ground truth: plain DataFusion without GPU rules.
+    let expected = df_ctx.sql(&sql).await.unwrap().collect().await.unwrap();
+
+    // CPU executor: GPU-annotated plan executed node-by-node on CPU.
+    let cpu_ctx = make_ctx(FULL_BUDGET).await;
+    let plan = cpu_ctx.sql(&sql).await.unwrap().create_physical_plan().await.unwrap();
+    let actual = execute_node_by_node(plan, cpu_ctx.task_ctx(), &mut |_, _| {})
         .await
         .unwrap();
-    let task_ctx = ctx.task_ctx();
-    let cpu_batches = execute_node_by_node(plan, task_ctx, &mut |_, _| {}).await.unwrap();
-    let cpu_names: Vec<String> = cpu_batches
-        .iter()
-        .flat_map(|b| {
-            b.column(0)
-                .as_any()
-                .downcast_ref::<StringViewArray>()
-                .unwrap()
-                .iter()
-                .map(|v| v.unwrap().to_string())
-        })
-        .collect();
 
     assert_eq!(
-        cpu_names, ref_names,
-        "CPU executor result differs from direct execution"
+        batches_to_sorted_str(&actual),
+        batches_to_sorted_str(&expected),
+        "CPU executor result for '{name}' differs from plain DataFusion"
     );
-    assert_eq!(cpu_names.len(), 25, "nation table must have 25 rows");
 }
+
+macro_rules! cpu_result_test {
+    ($func_name:ident, $query_name:literal) => {
+        #[tokio::test]
+        async fn $func_name() {
+            assert_cpu_results_match_datafusion($query_name).await;
+        }
+    };
+}
+
+cpu_result_test!(test_cpu_scan_limit, "scan-limit");
+cpu_result_test!(test_cpu_filter_project, "filter-project");
+cpu_result_test!(test_cpu_aggregate_groupby, "aggregate-groupby");
+cpu_result_test!(test_cpu_hash_join, "hash-join");
+cpu_result_test!(test_cpu_left_join, "left-join");
+cpu_result_test!(test_cpu_semi_join, "semi-join");
+cpu_result_test!(test_cpu_anti_join, "anti-join");
+cpu_result_test!(test_cpu_nested_loop_join, "nested-loop-join");
+cpu_result_test!(test_cpu_mixed_join, "mixed-join");
+cpu_result_test!(test_cpu_cross_join, "cross-join");
+cpu_result_test!(test_cpu_q1, "q1");
+cpu_result_test!(test_cpu_q2, "q2");
+cpu_result_test!(test_cpu_q3, "q3");
+cpu_result_test!(test_cpu_q4, "q4");
+cpu_result_test!(test_cpu_q5, "q5");
+cpu_result_test!(test_cpu_q6, "q6");
+cpu_result_test!(test_cpu_q7, "q7");
+cpu_result_test!(test_cpu_q8, "q8");
+cpu_result_test!(test_cpu_q9, "q9");
+cpu_result_test!(test_cpu_q10, "q10");
+cpu_result_test!(test_cpu_q11, "q11");
+cpu_result_test!(test_cpu_q12, "q12");
+cpu_result_test!(test_cpu_q13, "q13");
+cpu_result_test!(test_cpu_q14, "q14");
+// cpu_result_test!(test_cpu_q15, "q15");  // q15 uses a view; skip like test_queries.rs
+cpu_result_test!(test_cpu_q16, "q16");
+cpu_result_test!(test_cpu_q17, "q17");
+cpu_result_test!(test_cpu_q18, "q18");
+cpu_result_test!(test_cpu_q19, "q19");
+cpu_result_test!(test_cpu_q20, "q20");
+cpu_result_test!(test_cpu_q21, "q21");
+cpu_result_test!(test_cpu_q22, "q22");
 
 #[tokio::test]
 async fn test_memory_boundary_preserved_tight_budget() {

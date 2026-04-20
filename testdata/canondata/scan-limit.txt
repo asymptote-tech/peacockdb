@@ -1,0 +1,3 @@
+GlobalLimitExec: skip=0, fetch=10
+  CoalescePartitionsExec
+    ParquetExec: table=lineitem

@@ -272,3 +272,5 @@ pub fn batch_logical_size(batch: &RecordBatch) -> usize {
         })
         .sum()
 }
+
+// Tests live in tests/test_cpu_executor.rs

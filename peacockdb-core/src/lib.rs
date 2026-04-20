@@ -1,7 +1,7 @@
 pub mod gpu_rule;
 pub mod cpu_executor;
 #[allow(unused_imports, dead_code, clippy::all)]
-mod generated {
+pub mod generated {
     pub mod gpu_plan_generated {
         include!(concat!(env!("OUT_DIR"), "/gpu_plan_generated.rs"));
     }
@@ -21,7 +21,7 @@ use datafusion::error::Result;
 use cpu_executor::{execute_node_by_node, NodeMemoryStats};
 use gpu_rule::{GpuExecutionRule, GpuMemoryBudgetRule};
 
-pub fn build_session_state_with_gpu_budget_rule(
+pub fn build_session_state_with_gpu_rules(
     target_partitions: usize,
     gpu_memory_budget: usize
 ) -> SessionContext {
@@ -32,20 +32,6 @@ pub fn build_session_state_with_gpu_budget_rule(
         .with_config(config)
         .with_physical_optimizer_rule(Arc::new(GpuExecutionRule))
         .with_physical_optimizer_rule(Arc::new(GpuMemoryBudgetRule::new(gpu_memory_budget)))
-        .build();
-    
-    SessionContext::new_with_state(state)
-}
-
-pub fn build_session_state_with_gpu_rule(
-    target_partitions: usize,
-) -> SessionContext {
-    let base = SessionContext::new();
-    let mut config = base.state().config().clone();
-    config.options_mut().execution.target_partitions = target_partitions;
-    let state = SessionStateBuilder::new_from_existing(base.state())
-        .with_config(config)
-        .with_physical_optimizer_rule(Arc::new(GpuExecutionRule))
         .build();
     
     SessionContext::new_with_state(state)
@@ -110,15 +96,7 @@ pub async fn create_context_with_tables(
     target_partitions: usize,
     gpu_memory_budget: usize,
 ) -> Result<SessionContext> {
-    let ctx = build_session_state_with_gpu_budget_rule(target_partitions, gpu_memory_budget);
-    register_tables_for(ctx, data_dir).await
-}
-
-pub async fn create_context_with_tables_datafusion(
-    data_dir: &Path,
-    target_partitions: usize,
-) -> Result<SessionContext> {
-    let ctx = build_session_state(target_partitions);
+    let ctx = build_session_state_with_gpu_rules(target_partitions, gpu_memory_budget);
     register_tables_for(ctx, data_dir).await
 }
 
