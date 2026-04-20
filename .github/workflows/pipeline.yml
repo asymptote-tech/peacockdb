@@ -54,7 +54,7 @@ jobs:
           rm /tmp/ninja-linux.zip
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-            - name: Install Rust toolchain
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Configure (CPP)
