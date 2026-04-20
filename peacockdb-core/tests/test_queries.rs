@@ -48,7 +48,7 @@ fn queries_dir() -> PathBuf {
 }
 
 fn canondata_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/canondata")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/plans.sf1")
 }
 
 fn plans_dir() -> PathBuf {

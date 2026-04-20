@@ -1,3 +1,0 @@
-CrossJoinExec
-  ParquetExec: table=region
-  ParquetExec: table=nation

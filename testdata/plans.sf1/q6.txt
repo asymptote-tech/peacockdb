@@ -2,6 +2,6 @@ ProjectionExec: expr=[sum(lineitem.l_extendedprice * lineitem.l_discount)@0 as r
   AggregateExec: mode=Final, gby=[], aggr=[sum(lineitem.l_extendedprice * lineitem.l_discount)]
     CoalescePartitionsExec
       AggregateExec: mode=Partial, gby=[], aggr=[sum(lineitem.l_extendedprice * lineitem.l_discount)]
-        CoalesceBatchesExec: target_batch_size=8192
+        CoalesceBatchesExec: target_batch_size=25565281
           FilterExec: l_shipdate@3 >= 1994-01-01 AND l_shipdate@3 < 1995-01-01 AND l_discount@2 >= Some(5),15,2 AND l_discount@2 <= Some(7),15,2 AND l_quantity@0 < Some(2400),15,2, projection=[l_extendedprice@1, l_discount@2]
             ParquetExec: table=lineitem

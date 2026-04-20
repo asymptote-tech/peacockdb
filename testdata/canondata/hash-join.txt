@@ -1,8 +1,0 @@
-CoalesceBatchesExec: target_batch_size=8192
-  HashJoinExec: mode=Partitioned, join_type=Inner, on=[(o_orderkey@0, l_orderkey@0)]
-    CoalesceBatchesExec: target_batch_size=8192
-      RepartitionExec: partitioning=Hash([o_orderkey@0], 8), input_partitions=8
-        ParquetExec: table=orders
-    CoalesceBatchesExec: target_batch_size=8192
-      RepartitionExec: partitioning=Hash([l_orderkey@0], 8), input_partitions=8
-        ParquetExec: table=lineitem

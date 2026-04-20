@@ -1,10 +1,10 @@
-GpuCoalesceBatchesExec: target_batch_size=6242685
-  GpuHashJoinExec
-    GpuCoalesceBatchesExec: target_batch_size=6242685
-      GpuRepartitionExec: partitioning=Hash([c_custkey@0], 8), input_partitions=8
-        GpuCoalesceBatchesExec: target_batch_size=6242685
-          GpuFilterExec
-            GpuScanExec: batch_size=6242685
-    GpuCoalesceBatchesExec: target_batch_size=6242685
-      GpuRepartitionExec: partitioning=Hash([o_custkey@1], 8), input_partitions=8
-        GpuScanExec: batch_size=6242685
+CoalesceBatchesExec: target_batch_size=6242685
+  HashJoinExec: mode=Partitioned, join_type=RightSemi, on=[(c_custkey@0, o_custkey@1)]
+    CoalesceBatchesExec: target_batch_size=6242685
+      RepartitionExec: partitioning=Hash([c_custkey@0], 8), input_partitions=8
+        CoalesceBatchesExec: target_batch_size=6242685
+          FilterExec: c_mktsegment@1 = BUILDING, projection=[c_custkey@0]
+            ParquetExec: table=customer
+    CoalesceBatchesExec: target_batch_size=6242685
+      RepartitionExec: partitioning=Hash([o_custkey@1], 8), input_partitions=8
+        ParquetExec: table=orders
