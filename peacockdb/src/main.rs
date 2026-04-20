@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     let ctx = create_context_with_tables(&cli.data_dir, target_partitions, cli.gpu_memory_budget).await?;
     let df = ctx.sql(&cli.query).await?;
     let batches = df.collect().await?;
-    print_batches(&batches)?;
+    //print_batches(&batches)?;
 
     Ok(())
 }

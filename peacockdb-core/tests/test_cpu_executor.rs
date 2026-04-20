@@ -12,7 +12,7 @@ use peacockdb_core::cpu_executor::{
 use peacockdb_core::{create_context_with_tables, build_session_state, register_tables_for};
 
 fn testdata_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.minimal")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.sf1")
 }
 
 fn queries_dir() -> PathBuf {
