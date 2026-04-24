@@ -1,8 +1,8 @@
-name: C++ CPU Tests
+name: CI Pipeline
 
 on:
   push:
-    branches: [master]
+    branches: [master, tpch_bench]
   pull_request:
 
 jobs:
@@ -14,21 +14,12 @@ jobs:
             image: rapidsai/base:25.10a-cuda12-py3.12
           - cudf: "25.02"
             image: rapidsai/base:25.02-cuda12.0-py3.12
-    name: C++ CPU Tests (cudf ${{ matrix.cudf }})
+    name: CI Pipeline (cudf ${{ matrix.cudf }})
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.image }}
 
     steps:
-      - name: Locate cudf
-        run: |
-          echo "--- /opt/conda/lib ---"
-          ls /opt/conda/lib/libcudf.so* /opt/conda/lib/libcudart.so* 2>&1 || true
-          echo "--- /opt/conda/lib64 ---"
-          ls /opt/conda/lib64/libcudart.so* 2>&1 || true
-          echo "--- cudart search ---"
-          find /opt/conda -maxdepth 5 -name 'libcudart.so*' 2>/dev/null | head -20
-
       - name: Install git
         if: matrix.cudf == '25.02'
         run: conda install -y -n base -c conda-forge git curl
@@ -78,15 +69,15 @@ jobs:
           conda install -y -n base -c conda-forge duckdb-cli
           testdata/generate_testdata.sh
 
-      - name: Run Rust unit tests
-        run: cargo test -p peacockdb-core --lib
+      - name: Run Rust tests
+        run: |
+          cargo test -p peacockdb-core --test test_plan_serialiser
+          cargo test -p peacockdb-core --test test_query_plan
+          cargo test -p peacockdb-core --test test_cpu_executor
+          cargo test -p peacockdb-ffi --test test_ffi
         env:
           CMAKE_GENERATOR: Ninja
-
-      - name: Run query plan tests
-        run: cargo test -p peacockdb-core --test test_queries
-        env:
-          CMAKE_GENERATOR: Ninja
+          LD_LIBRARY_PATH: /opt/conda/lib
 
   gpu-tests:
     name: GPU Tests (shad-gpu)
