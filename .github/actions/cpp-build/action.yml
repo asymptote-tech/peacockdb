@@ -1,0 +1,40 @@
+name: Build peacockdb C++
+description: Install build dependencies and build the peacockdb C++ library against cuDF at /opt/conda.
+
+runs:
+  using: composite
+  steps:
+    - name: Install compiler
+      shell: bash
+      run: conda install -y -c conda-forge gcc gxx binutils
+
+    - name: Install cmake and ninja
+      shell: bash
+      run: |
+        CMAKE_VERSION=4.2.3
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+          | tar -xz -C "$HOME/.local" --strip-components=1
+        NINJA_VERSION=1.12.1
+        curl -fsSL "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-linux.zip" \
+          -o /tmp/ninja-linux.zip
+        python3 -c "import zipfile; zipfile.ZipFile('/tmp/ninja-linux.zip').extractall('$HOME/.local/bin')"
+        chmod +x "$HOME/.local/bin/ninja"
+        rm /tmp/ninja-linux.zip
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Configure (CPP)
+      shell: bash
+      run: ./scripts/build.sh --configure --cudf_ROOT /opt/conda
+      env:
+        LDFLAGS: -Wl,-rpath-link,/opt/conda/lib
+
+    - name: Build (CPP)
+      shell: bash
+      run: ./scripts/build.sh --build
+      env:
+        LDFLAGS: -Wl,-rpath-link,/opt/conda/lib
+
+    - name: Install (CPP)
+      shell: bash
+      run: ./scripts/build.sh --install
