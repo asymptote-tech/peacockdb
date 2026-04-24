@@ -2,12 +2,13 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [master, tpch_bench]
+    branches: [master]
   pull_request:
 
 jobs:
   cpp-cpu:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - cudf: "26.02"
@@ -28,38 +29,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install compiler
-        run: conda install -y -c conda-forge gcc gxx binutils
-
-      - name: Install cmake and ninja
-        run: |
-          CMAKE_VERSION=4.2.3
-          mkdir -p "$HOME/.local/bin"
-          curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
-            | tar -xz -C "$HOME/.local" --strip-components=1
-          NINJA_VERSION=1.12.1
-          curl -fsSL "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-linux.zip" \
-            -o /tmp/ninja-linux.zip
-          python3 -c "import zipfile; zipfile.ZipFile('/tmp/ninja-linux.zip').extractall('$HOME/.local/bin')"
-          chmod +x "$HOME/.local/bin/ninja"
-          rm /tmp/ninja-linux.zip
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/cpp-build
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Configure (CPP)
-        run: ./scripts/build.sh --configure --cudf_ROOT /opt/conda
-        env:
-          LDFLAGS: -Wl,-rpath-link,/opt/conda/lib
-
-      - name: Build (CPP)
-        run: ./scripts/build.sh --build
-        env:
-          LDFLAGS: -Wl,-rpath-link,/opt/conda/lib
-
-      - name: Install (CPP)
-        run: ./scripts/build.sh --install
 
       - name: Run CPU tests (CPP)
         run: ctest --test-dir cpp/build -L cpu --output-on-failure
@@ -78,29 +51,94 @@ jobs:
         env:
           CMAKE_GENERATOR: Ninja
           LD_LIBRARY_PATH: /opt/conda/lib
+          CUDF_ROOT: /opt/conda
 
-  gpu-tests:
-    name: GPU Tests (shad-gpu)
-    needs: cpp-cpu
-    runs-on: [self-hosted, linux, gpu]
-    env:
-      CUDF_ROOT: /home/info/miniforge3/envs/rapids-cuda-12.2
-      LD_LIBRARY_PATH: /usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:/home/info/miniforge3/envs/rapids-cuda-12.2/lib
-      PEACOCK_TESTDATA_DIR: ${{ github.workspace }}/testdata
+  # Standalone build job for the shad-gpu artifact — runs in parallel with cpp-cpu
+  # so gpu-tests can start as soon as the build is done, without waiting for the
+  # CPU tests + Rust tests to finish.
+  cpp-build-2502:
+    name: CI Pipeline (build 25.02 for GPU)
+    runs-on: ubuntu-latest
+    container:
+      image: rapidsai/base:25.02-cuda12.0-py3.12
 
     steps:
+      - name: Install git
+        run: conda install -y -n base -c conda-forge git curl
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Configure (CPP)
-        run: ./scripts/build.sh --configure --cudf_ROOT "$CUDF_ROOT"
+      - uses: ./.github/actions/cpp-build
 
-      - name: Build (CPP)
-        run: ./scripts/build.sh --build
+      - name: Upload GPU test binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpp-install-25.02
+          path: cpp/install/
+          retention-days: 1
 
-      - name: Install (CPP)
-        run: ./scripts/build.sh --install
+  gpu-tests:
+    name: GPU Tests (remote)
+    needs: cpp-build-2502
+    runs-on: ubuntu-latest
+    # Secrets aren't passed to fork PRs, so this job just fails-fast there.
+    env:
+      GPU_HOST: info@llm-gpu0h200.velkerr.ru
+      REMOTE_DIR: /home/info/peacockdb-ci/run-${{ github.run_id }}-${{ github.run_attempt }}
+      REMOTE_LD_LIBRARY_PATH: /usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:/home/info/miniforge3/envs/rapids-cuda-12.2/lib
 
-      - name: Run GPU tests (CPP)
-        run: ctest --test-dir cpp/build -L gpu --output-on-failure
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download GPU test binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: cpp-install-25.02
+          path: cpp/install/
+
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.SHAD_GPU_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Trust-on-first-use: acceptable for CI since runners are ephemeral.
+          cat > ~/.ssh/config <<EOF
+          Host gpu
+              HostName llm-gpu0h200.velkerr.ru
+              User info
+              IdentityFile ~/.ssh/id_ed25519
+              StrictHostKeyChecking accept-new
+              UserKnownHostsFile ~/.ssh/known_hosts_ci
+          EOF
+
+      - name: Rsync artifacts and testdata to remote
+        run: |
+          ssh gpu "mkdir -p $REMOTE_DIR/cpp/install $REMOTE_DIR/testdata"
+          # Fresh binaries — --delete keeps cpp/install/ clean across runs.
+          rsync -a --delete cpp/install/ gpu:$REMOTE_DIR/cpp/install/
+          # Query SQL + minimal dataset + testdata generator.
+          rsync -a testdata/tpch-queries testdata/tpch.minimal testdata/generate_testdata.sh \
+            gpu:$REMOTE_DIR/testdata/
+          chmod +x cpp/install/bin/* 2>/dev/null || true
+          ssh gpu "chmod +x $REMOTE_DIR/cpp/install/bin/* $REMOTE_DIR/testdata/generate_testdata.sh"
+
+      - name: Patch binaries for glibc 2.35
+        run: ssh gpu "/home/info/setup-glibc.sh --repo-dir=$REMOTE_DIR --patch-only"
+
+      - name: Generate SF-1 testdata (skips if present)
+        run: ssh gpu "cd $REMOTE_DIR && DUCKDB=/home/info/.local/bin/duckdb testdata/generate_testdata.sh"
+
+      - name: Run GPU tests
+        run: |
+          ssh gpu "\
+            PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata \
+            LD_LIBRARY_PATH=$REMOTE_LD_LIBRARY_PATH \
+            $REMOTE_DIR/cpp/install/bin/peacock_plan_tests"
+
+      - name: Cleanup remote run directory
+        if: always()
+        run: ssh -o ConnectTimeout=10 gpu "rm -rf $REMOTE_DIR" || true
