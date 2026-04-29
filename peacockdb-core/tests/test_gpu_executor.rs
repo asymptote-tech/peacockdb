@@ -4,8 +4,12 @@ mod gpu_executor_tests {
 
     use peacockdb_core::gpu_executor::GpuExecutor;
 
-    fn testdata_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.minimal")
+        fn testdata_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.sf1")
+    }
+
+    fn queries_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch-queries")
     }
 
     const GPU_BUDGET: usize = 2 * 1024 * 1024 * 1024;

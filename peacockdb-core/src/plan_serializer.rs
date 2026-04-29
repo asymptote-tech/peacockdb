@@ -698,8 +698,7 @@ fn serialize_scalar_value<'a>(
             args.float_val = *v;
         }
         DfScalarValue::Utf8(Some(s))
-        | DfScalarValue::LargeUtf8(Some(s))
-        | DfScalarValue::Utf8View(Some(s)) => {
+        | DfScalarValue::LargeUtf8(Some(s)) => {
             args.type_ = fb::DataType::Utf8;
             args.string_val = Some(b.create_string(s));
         }
