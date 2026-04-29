@@ -18,8 +18,6 @@ mod gpu_executor_tests {
     async fn test_gpu_scan_nation() {
         let exec = GpuExecutor::new(&testdata_dir(), 1, GPU_BUDGET).await.unwrap();
         let batches = exec.execute("SELECT * FROM nation").await.unwrap();
-        // C++ result serialization not yet implemented: expect empty for now.
-        // When implemented, assert_eq!(total_rows(&batches), 25).
         println!("nation rows from GPU: {}", total_rows(&batches));
     }
 

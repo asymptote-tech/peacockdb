@@ -697,9 +697,15 @@ fn serialize_scalar_value<'a>(
             args.type_ = fb::DataType::Float64;
             args.float_val = *v;
         }
-        DfScalarValue::Utf8(Some(s)) | DfScalarValue::LargeUtf8(Some(s)) => {
+        DfScalarValue::Utf8(Some(s))
+        | DfScalarValue::LargeUtf8(Some(s))
+        | DfScalarValue::Utf8View(Some(s)) => {
             args.type_ = fb::DataType::Utf8;
             args.string_val = Some(b.create_string(s));
+        }
+        DfScalarValue::Date32(Some(v)) => {
+            args.type_ = fb::DataType::Date32;
+            args.int_val = *v as i64;
         }
         DfScalarValue::Decimal128(Some(v), prec, scale) => {
             args.type_ = fb::DataType::Decimal128;
@@ -991,6 +997,7 @@ fn deserialize_scalar(sv: &fb::ScalarValue) -> Result<DfScalarValue, String> {
         fb::DataType::LargeUtf8 => {
             DfScalarValue::LargeUtf8(Some(sv.string_val().unwrap_or("").to_string()))
         }
+        fb::DataType::Date32 => DfScalarValue::Date32(Some(sv.int_val() as i32)),
         fb::DataType::Decimal128 => {
             let hi = sv.decimal_hi() as i128;
             let lo = sv.decimal_lo() as i128;

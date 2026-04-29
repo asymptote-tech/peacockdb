@@ -49,6 +49,12 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# Arrow (IPC serialization of query results)
+# ---------------------------------------------------------------------------
+find_package(Arrow REQUIRED CONFIG)
+message(STATUS "Using Arrow: ${Arrow_VERSION}")
+
+# ---------------------------------------------------------------------------
 # FlatBuffers (header-only runtime + flatc compiler for codegen)
 # ---------------------------------------------------------------------------
 include(FetchContent)
@@ -91,7 +97,7 @@ target_include_directories(peacock_gpu PUBLIC
   $<BUILD_INTERFACE:${FBS_GENERATED_DIR}/..>
   $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(peacock_gpu PRIVATE cudf::cudf flatbuffers)
+target_link_libraries(peacock_gpu PRIVATE cudf::cudf flatbuffers Arrow::arrow_shared)
 
 # Make TESTDATA_DIR available to test sources.
 set(PEACOCK_TESTDATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../testdata")

@@ -93,6 +93,8 @@ export LD_LIBRARY_PATH=$HOME/miniforge3/envs/rapids-26.02/lib
 cargo test -p peacockdb-core --test test_query_plan
 cargo test -p peacockdb-core --test test_cpu_executor
 
+LD_LIBRARY_PATH=/home/babanov1403/miniforge3/envs/rapids/lib CUDF_ROOT=/home/babanov1403/miniforge3/envs/rapids cargo test -p peacockdb-core --test test_gpu_executor -- --nocapture
+
 ## RUN All rust non-gpu tests
 
 cargo test --features rust-only
