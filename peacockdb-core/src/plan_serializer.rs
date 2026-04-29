@@ -101,14 +101,24 @@ fn serialize_gpu_scan<'a>(
 
     let config = parquet.base_config();
 
-    // Collect file paths.
+    // Reconstruct absolute filesystem paths from object store URL + location.
+    // DataFusion's object_meta.location is relative to the store root (e.g.
+    // "home/user/data/nation.parquet" for a file:/// store), so we prepend the
+    // filesystem root extracted from the store URL.
+    let base_fs = config
+        .object_store_url
+        .as_str()
+        .strip_prefix("file://")
+        .unwrap_or("/")
+        .trim_end_matches('/');
+
     let path_strings: Vec<String> = config
         .file_groups
         .iter()
         .flat_map(|group| {
             group
                 .iter()
-                .map(|pf| pf.object_meta.location.to_string())
+                .map(|pf| format!("{}/{}", base_fs, pf.object_meta.location))
         })
         .collect();
     let paths: Vec<_> = path_strings.iter().map(|s| b.create_string(s)).collect();

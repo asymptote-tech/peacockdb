@@ -1,5 +1,7 @@
 pub mod gpu_rule;
 pub mod cpu_executor;
+#[cfg(not(feature = "rust-only"))]
+pub mod gpu_executor;
 #[allow(unused_imports, dead_code, clippy::all)]
 pub mod generated {
     pub mod gpu_plan_generated {

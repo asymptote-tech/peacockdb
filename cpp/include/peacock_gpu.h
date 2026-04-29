@@ -56,6 +56,10 @@ int peacock_execute(peacock_executor_t* executor,
 /// Free a result buffer returned by peacock_execute().
 void peacock_result_free(uint8_t* result_bytes);
 
+/// Return the last error message set by peacock_execute(), or an empty string.
+/// The returned pointer is valid until the next call on this executor.
+const char* peacock_last_error(peacock_executor_t* executor);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

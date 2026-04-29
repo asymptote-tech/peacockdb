@@ -7,6 +7,7 @@
 #include <cstring>
 #include <new>
 #include <string>
+#include <cstdio>
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -60,18 +61,26 @@ int peacock_execute(peacock_executor_t* executor,
 
   try {
     auto result = peacock::execute_plan(plan_bytes, plan_len);
-    // For now, return an empty buffer — Arrow IPC serialization
-    // of the result will be implemented when the C API needs it.
-    // The internal C++ API (execute_plan) is the primary interface.
+    // Arrow IPC serialization of the result will be implemented later.
     *out_result_bytes = static_cast<uint8_t*>(std::malloc(0));
     *out_result_len = 0;
     return 0;
   } catch (const std::exception& e) {
     executor->last_error = e.what();
+    std::fprintf(stderr, "[peacock_execute] error: %s\n", e.what());
+    return 1;
+  } catch (...) {
+    executor->last_error = "unknown exception";
+    std::fprintf(stderr, "[peacock_execute] unknown exception\n");
     return 1;
   }
 }
 
 void peacock_result_free(uint8_t* result_bytes) {
   std::free(result_bytes);
+}
+
+const char* peacock_last_error(peacock_executor_t* executor) {
+  if (!executor) return "";
+  return executor->last_error.c_str();
 }
