@@ -247,8 +247,55 @@ patch_dir() {
   done
 }
 
+# Rust integration test binaries (cargo test --no-run output, staged by
+# build-test-shadgpu.sh / CI under cpp/install/rust-tests/). They live one
+# directory deep next to cpp/install/lib, so $ORIGIN/../lib resolves
+# libpeacock_gpu.so. Filenames vary, so we ELF-detect by trying patchelf.
+patch_rust_dir() {
+  local dir="$1"
+
+  if [ ! -d "$dir" ]; then
+    echo "--- Skipping rust tests (directory not found: ${dir})"
+    return
+  fi
+
+  echo "==> Patching rust test binaries in ${dir}"
+
+  local f current cleaned new_rpath
+  for f in "$dir"/*; do
+    [ -f "$f" ] && [ -x "$f" ] || continue
+    if ! patchelf --print-interpreter "$f" >/dev/null 2>&1; then
+      continue
+    fi
+
+    echo "--- Patching $(basename "$f")"
+    patchelf --set-interpreter "$INTERP" "$f"
+
+    # Same approach as patch_rpath, plus a $ORIGIN/../lib entry so libpeacock_gpu.so
+    # resolves from the sibling lib/ dir without depending on LD_LIBRARY_PATH.
+    current="$(patchelf --print-rpath "$f" 2>/dev/null || true)"
+    cleaned="$(echo "$current" | tr ':' '\n' \
+      | grep -v "^${PREFIX}/lib\$" \
+      | { if [ -n "$CUDA_LIB_DIR" ]; then grep -v "^${CUDA_LIB_DIR}\$"; else cat; fi; } \
+      | grep -vF '$ORIGIN/../lib' \
+      | paste -sd ':')"
+
+    new_rpath="${PREFIX}/lib"
+    if [ -n "$CUDA_LIB_DIR" ]; then
+      new_rpath="${new_rpath}:${CUDA_LIB_DIR}"
+    fi
+    new_rpath="${new_rpath}:\$ORIGIN/../lib"
+    if [ -n "$cleaned" ]; then
+      new_rpath="${new_rpath}:${cleaned}"
+    fi
+
+    patchelf --set-rpath "$new_rpath" "$f"
+  done
+}
+
 patch_dir "$CPP_BUILD_DIR" "build"
 patch_dir "$CPP_INSTALL_DIR" "install"
+patch_rust_dir "${CPP_INSTALL_DIR}/rust-tests"
 
 echo ""
 echo "==> Done. Run tests with:"
