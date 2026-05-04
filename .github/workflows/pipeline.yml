@@ -72,6 +72,14 @@ jobs:
 
       - uses: ./.github/actions/cpp-build
 
+      - name: Bundle Arrow/Parquet runtime libraries
+        run: |
+          mkdir -p cpp/install/lib
+          cp -P /opt/conda/lib/libarrow.so* cpp/install/lib/
+          cp -P /opt/conda/lib/libparquet.so* cpp/install/lib/
+          cp -P /opt/conda/lib/libarrow_acero.so* cpp/install/lib/ 2>/dev/null || true
+          cp -P /opt/conda/lib/libarrow_dataset.so* cpp/install/lib/ 2>/dev/null || true
+
       - name: Upload GPU test binaries
         uses: actions/upload-artifact@v4
         with:
@@ -136,8 +144,8 @@ jobs:
         run: |
           ssh gpu "\
             PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata \
-            LD_LIBRARY_PATH=$REMOTE_LD_LIBRARY_PATH \
-            $REMOTE_DIR/cpp/install/bin/peacock_plan_tests"
+            LD_LIBRARY_PATH=$REMOTE_DIR/cpp/install/lib:$REMOTE_LD_LIBRARY_PATH \
+              $REMOTE_DIR/cpp/install/bin/peacock_plan_tests"
 
       - name: Cleanup remote run directory
         if: always()
