@@ -51,8 +51,20 @@ endif()
 # ---------------------------------------------------------------------------
 # Arrow (IPC serialization of query results)
 # ---------------------------------------------------------------------------
+# Arrow must come from the same prefix as cuDF. Otherwise CMake can pick up
+# the system arrow (e.g. Ubuntu's libarrow-dev at /lib/x86_64-linux-gnu),
+# which has a different version and links against an incompatible
+# curl/openssl — surfaces as a link-time undefined reference to
+# curl_easy_getinfo@CURL_OPENSSL_4 or as ABI mismatches with cuDF.
+if(NOT DEFINED Arrow_ROOT AND NOT DEFINED ENV{Arrow_ROOT})
+  if(DEFINED cudf_ROOT)
+    set(Arrow_ROOT "${cudf_ROOT}" CACHE PATH "Match Arrow with cuDF prefix")
+  elseif(DEFINED ENV{cudf_ROOT})
+    set(Arrow_ROOT "$ENV{cudf_ROOT}" CACHE PATH "Match Arrow with cuDF prefix")
+  endif()
+endif()
 find_package(Arrow REQUIRED CONFIG)
-message(STATUS "Using Arrow: ${Arrow_VERSION}")
+message(STATUS "Using Arrow: ${Arrow_VERSION} from ${Arrow_DIR}")
 
 # ---------------------------------------------------------------------------
 # FlatBuffers (header-only runtime + flatc compiler for codegen)
