@@ -17,6 +17,19 @@ include(rapids-find)
 rapids_cpm_init()
 rapids_cuda_init_architectures(peacock_gpu)
 
+# nvcc finds its host compiler via PATH (`gcc`/`g++`) by default, ignoring
+# CMAKE_CXX_COMPILER. When the system default gcc is newer than what
+# nvcc supports (e.g. gcc-14 with CUDA 12.2), nvcc fails host_config.h's
+# version check even though CMAKE_CXX_COMPILER points at a supported gcc.
+# Force nvcc's -ccbin to match the configured CXX.
+if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
+  if(DEFINED CMAKE_CXX_COMPILER)
+    set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}" CACHE FILEPATH "")
+  elseif(DEFINED ENV{CXX})
+    set(CMAKE_CUDA_HOST_COMPILER "$ENV{CXX}" CACHE FILEPATH "")
+  endif()
+endif()
+
 project(peacock_gpu LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 20)

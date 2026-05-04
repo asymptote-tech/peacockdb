@@ -80,6 +80,35 @@ jobs:
           cp -P /opt/conda/lib/libarrow_acero.so* cpp/install/lib/ 2>/dev/null || true
           cp -P /opt/conda/lib/libarrow_dataset.so* cpp/install/lib/ 2>/dev/null || true
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build and stage rust GPU test binaries
+        run: |
+          mkdir -p cpp/install/rust-tests
+          for t in test_gpu_executor; do
+            exec_path=$(cargo test --no-run -p peacockdb-core --test "$t" \
+                --message-format=json \
+              | python3 -c '
+          import json, sys
+          name = sys.argv[1]
+          for line in sys.stdin:
+              try: m = json.loads(line)
+              except ValueError: continue
+              if m.get("executable") and (m.get("target") or {}).get("name") == name:
+                  print(m["executable"]); break
+          ' "$t")
+            if [ -z "$exec_path" ] || [ ! -f "$exec_path" ]; then
+              echo "ERROR: failed to locate built binary for $t"; exit 1
+            fi
+            cp -f "$exec_path" "cpp/install/rust-tests/$t"
+            echo "--- Staged: $(ls -lh cpp/install/rust-tests/$t)"
+          done
+        env:
+          CMAKE_GENERATOR: Ninja
+          LD_LIBRARY_PATH: /opt/conda/lib
+          CUDF_ROOT: /opt/conda
+
       - name: Upload GPU test binaries
         uses: actions/upload-artifact@v4
         with:
@@ -125,27 +154,46 @@ jobs:
 
       - name: Rsync artifacts and testdata to remote
         run: |
-          ssh gpu "mkdir -p $REMOTE_DIR/cpp/install $REMOTE_DIR/testdata"
+          ssh gpu "mkdir -p $REMOTE_DIR/cpp/install $REMOTE_DIR/testdata $REMOTE_DIR/scripts"
           # Fresh binaries — --delete keeps cpp/install/ clean across runs.
           rsync -a --delete cpp/install/ gpu:$REMOTE_DIR/cpp/install/
           # Query SQL + minimal dataset + testdata generator.
           rsync -a testdata/tpch-queries testdata/tpch.minimal testdata/generate_testdata.sh \
             gpu:$REMOTE_DIR/testdata/
-          chmod +x cpp/install/bin/* 2>/dev/null || true
-          ssh gpu "chmod +x $REMOTE_DIR/cpp/install/bin/* $REMOTE_DIR/testdata/generate_testdata.sh"
+          # Ship the updated setup-glibc.sh so its patch_rust_dir step is
+          # present on the host (not just the older /home/info/ copy).
+          rsync -a scripts/setup-glibc.sh gpu:$REMOTE_DIR/scripts/
+          chmod +x cpp/install/bin/* cpp/install/rust-tests/* 2>/dev/null || true
+          ssh gpu "chmod +x \
+            $REMOTE_DIR/cpp/install/bin/* \
+            $REMOTE_DIR/cpp/install/rust-tests/* \
+            $REMOTE_DIR/testdata/generate_testdata.sh \
+            $REMOTE_DIR/scripts/setup-glibc.sh 2>/dev/null || true"
 
       - name: Patch binaries for glibc 2.35
-        run: ssh gpu "/home/info/setup-glibc.sh --repo-dir=$REMOTE_DIR --patch-only"
+        run: ssh gpu "$REMOTE_DIR/scripts/setup-glibc.sh --repo-dir=$REMOTE_DIR --patch"
 
       - name: Generate SF-1 testdata (skips if present)
         run: ssh gpu "cd $REMOTE_DIR && DUCKDB=/home/info/.local/bin/duckdb testdata/generate_testdata.sh"
 
       - name: Run GPU tests
         run: |
-          ssh gpu "\
-            PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata \
-            LD_LIBRARY_PATH=$REMOTE_DIR/cpp/install/lib:$REMOTE_LD_LIBRARY_PATH \
-              $REMOTE_DIR/cpp/install/bin/peacock_plan_tests"
+          ssh gpu bash <<EOF
+            set -e
+
+            export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata
+            export LD_LIBRARY_PATH=$REMOTE_DIR/cpp/install/lib:$REMOTE_LD_LIBRARY_PATH
+
+            echo "==> peacock_plan_tests (C++)"
+            $REMOTE_DIR/cpp/install/bin/peacock_plan_tests
+
+            echo "==> rust GPU integration tests"
+            for t in $REMOTE_DIR/cpp/install/rust-tests/*; do
+              [ -x "\$t" ] || continue
+              echo "--- \$(basename \$t)"
+              "\$t" --nocapture
+            done
+          EOF
 
       - name: Cleanup remote run directory
         if: always()

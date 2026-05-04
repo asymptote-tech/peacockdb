@@ -4,12 +4,23 @@ mod gpu_executor_tests {
 
     use peacockdb_core::gpu_executor::GpuExecutor;
 
-        fn testdata_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.sf1")
+    // Root of the testdata tree. PEACOCK_TESTDATA_DIR overrides the
+    // compile-time path so the binary can be built on one machine and run
+    // on another (e.g. shad-gpu), where CARGO_MANIFEST_DIR doesn't exist.
+    fn testdata_root() -> PathBuf {
+        if let Some(d) = std::env::var_os("PEACOCK_TESTDATA_DIR") {
+            return PathBuf::from(d);
+        }
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata")
     }
 
+    fn testdata_dir() -> PathBuf {
+        testdata_root().join("tpch.sf1")
+    }
+
+    #[allow(dead_code)]
     fn queries_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch-queries")
+        testdata_root().join("tpch-queries")
     }
 
     const GPU_BUDGET: usize = 2 * 1024 * 1024 * 1024;
