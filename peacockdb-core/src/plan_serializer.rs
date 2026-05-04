@@ -108,7 +108,10 @@ fn serialize_gpu_scan<'a>(
         .flat_map(|group| {
             group
                 .iter()
-                .map(|pf| pf.object_meta.location.to_string())
+                .map(|pf| {
+                    let loc = pf.object_meta.location.to_string();
+                    if loc.starts_with('/') { loc } else { format!("/{loc}") }
+                })
         })
         .collect();
     let paths: Vec<_> = path_strings.iter().map(|s| b.create_string(s)).collect();
