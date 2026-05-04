@@ -5,6 +5,15 @@ set -e
 CUDF_ROOT=/home/dmitry/data/miniforge3/envs/rapids-cuda-12.2
 export CUDF_ROOT
 
+# nvcc 12.2 (the conda env's CUDA toolkit) hard-rejects gcc>12 in
+# host_config.h. Ubuntu's default cc/c++ is gcc-14, so pin gcc-12 for
+# both the C++ build (via --gcc-version below) and the cargo cmake
+# invocation (via CC/CXX, which the `cmake` crate honors).
+#   sudo apt install gcc-12 g++-12
+GCC_VERSION=12
+export CC=/usr/bin/gcc-${GCC_VERSION}
+export CXX=/usr/bin/g++-${GCC_VERSION}
+
 # Rust integration tests that link libpeacock_gpu.so and need to run on the GPU host.
 # After build, each binary is staged under cpp/install/rust-tests/<name> so the
 # existing rsync step picks them up alongside the C++ binaries.
@@ -34,22 +43,25 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "$BUILD" -eq 1 ]; then
-  ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --configure
-  ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --build
-  ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --install
+  ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --gcc-version "$GCC_VERSION" --configure
+  ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --gcc-version "$GCC_VERSION" --build
+  ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --gcc-version "$GCC_VERSION" --install
 
-  if ! command -v jq >/dev/null; then
-    echo "ERROR: jq is required to locate cargo test binaries"; exit 1
-  fi
   mkdir -p "$RUST_TESTS_STAGING"
   for t in "${RUST_TESTS[@]}"; do
     # cargo test --no-run prints a json artifact line per built target; the
     # integration test we want has .target.name == $t and a non-null .executable.
     exec_path=$(cargo test --no-run -p peacockdb-core --test "$t" \
         --message-format=json \
-      | jq -r --arg name "$t" \
-          'select(.executable != null) | select(.target.name == $name) | .executable' \
-      | head -1)
+      | python3 -c '
+import json, sys
+name = sys.argv[1]
+for line in sys.stdin:
+    try: m = json.loads(line)
+    except ValueError: continue
+    if m.get("executable") and (m.get("target") or {}).get("name") == name:
+        print(m["executable"]); break
+' "$t")
     if [ -z "$exec_path" ] || [ ! -f "$exec_path" ]; then
       echo "ERROR: failed to locate built binary for $t"; exit 1
     fi
@@ -60,12 +72,36 @@ fi
 
 if [ "$RSYNC" -eq 1 ]; then
   rsync -r -P cpp/install/* shad-gpu:/home/info/peacockdb/cpp/install/
+  # Ship our setup-glibc.sh (with patch_rust_dir) so --patch uses the
+  # version that knows about cpp/install/rust-tests/.
+  ssh shad-gpu "mkdir -p /home/info/peacockdb/scripts"
+  rsync -a scripts/setup-glibc.sh shad-gpu:/home/info/peacockdb/scripts/
 fi
 
 if [ "$PATCH" -eq 1 ]; then
-  ssh shad-gpu "/home/info/setup-glibc.sh --repo-dir=/home/info/peacockdb --patch-only"
+  ssh shad-gpu "/home/info/peacockdb/scripts/setup-glibc.sh --repo-dir /home/info/peacockdb --patch"
 fi
 
 if [ "$RUN" -eq 1 ]; then
-  ssh shad-gpu 'PEACOCK_TESTDATA_DIR=/home/info/peacockdb/testdata LD_LIBRARY_PATH=/usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:$HOME/miniforge3/envs/rapids-cuda-12.2/lib:$LD_LIBRARY_PATH /home/info/peacockdb/cpp/install/bin/peacock_plan_tests'
+  # Note the heredoc uses no quoting on the EOF marker, so $VARS expand
+  # *locally* before being sent to the remote shell. Escape with \$ for
+  # any var that should be expanded remotely (e.g. \$LD_LIBRARY_PATH).
+  ssh shad-gpu bash <<EOF
+    set -e
+
+    export PEACOCK_TESTDATA_DIR=/home/info/peacockdb/testdata
+    # cpp/install/lib first so libpeacock_gpu.so resolves for the rust test
+    # binary (its baked-in rpath points at the build host's cargo target).
+    export LD_LIBRARY_PATH=/home/info/peacockdb/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\$LD_LIBRARY_PATH
+
+    echo "==> peacock_plan_tests (C++)"
+    /home/info/peacockdb/cpp/install/bin/peacock_plan_tests
+
+    echo "==> rust GPU integration tests"
+    for t in /home/info/peacockdb/cpp/install/rust-tests/*; do
+      [ -x "\$t" ] || continue
+      echo "--- \$(basename "\$t")"
+      "\$t" --nocapture
+    done
+EOF
 fi

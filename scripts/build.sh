@@ -11,6 +11,7 @@ DO_INSTALL=0
 CUDF_ROOT=""
 CUDF_BUILD_FROM_SOURCE=0
 TARGET="cpp"
+GCC_VERSION=""  # empty = use default below
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -21,6 +22,7 @@ while [ $# -gt 0 ]; do
     --cudf_ROOT)              CUDF_ROOT="$2"; shift ;;
     --cudf-build-from-source) CUDF_BUILD_FROM_SOURCE=1 ;;
     --target)                 TARGET="$2"; shift ;;
+    --gcc-version)            GCC_VERSION="$2"; shift ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
   esac
   shift
@@ -29,9 +31,19 @@ done
 BUILD_DIR="${TARGET}/build"
 INSTALL_DIR="${TARGET}/install"
 
-export CC=$(which gcc-14)
-export CXX=$(which g++-14)
+# Default to gcc-14 (matches Ubuntu's current default). For nvcc toolkits
+# that don't yet support gcc-14 (e.g. CUDA <= 12.2, which caps at gcc-12),
+# pass --gcc-version 12 to pick gcc-12/g++-12.
+if [ -z "$GCC_VERSION" ]; then
+  GCC_VERSION=14
+fi
+export CC=$(which "gcc-${GCC_VERSION}")
+export CXX=$(which "g++-${GCC_VERSION}")
 export CUDACXX=$(which nvcc)
+if [ -z "$CC" ] || [ -z "$CXX" ]; then
+  echo "error: gcc-${GCC_VERSION} / g++-${GCC_VERSION} not found on PATH" >&2
+  exit 1
+fi
 
 if [ $DO_CONFIGURE -eq 1 ]; then
   mkdir -p "${BUILD_DIR}" "${INSTALL_DIR}"
