@@ -153,24 +153,10 @@ set_target_properties(peacock_cpu_tests peacock_gpu_tests peacock_plan_tests PRO
   INSTALL_RPATH "$ORIGIN/../lib"
 )
 
-# Collect and install all transitive shared library dependencies of
-# libpeacock_gpu.so, excluding system libs and the host GPU driver.
-# Skipped when using host cudf — the run host is expected to provide it.
-if(CUDF_BUILD_FROM_SOURCE)
-install(CODE "
-  file(GET_RUNTIME_DEPENDENCIES
-    LIBRARIES
-      \"\$<TARGET_FILE:peacock_gpu>\"
-      \"\$<TARGET_FILE:cudf::cudf>\"
-      \"\$<TARGET_FILE:nvcomp::nvcomp>\"
-    RESOLVED_DEPENDENCIES_VAR   resolved
-    UNRESOLVED_DEPENDENCIES_VAR unresolved
-    DIRECTORIES
-      \"\$<TARGET_FILE_DIR:cudf::cudf>\"
-      \"\$<TARGET_FILE_DIR:nvcomp::nvcomp>\"
-    PRE_EXCLUDE_REGEXES  \"libcuda\\\\.so\" \"libcudart\\\\.so\" \"libnvidia\"
-    POST_EXCLUDE_REGEXES \"^/lib/\" \"^/usr/lib/\" \"^/lib64/\"
-  )
+# Helper macro used by both install(CODE) blocks below.
+# Copies each resolved dep to install/lib, patches its rpath to $ORIGIN,
+# and creates a soname symlink if needed.
+set(_install_dep_code "
   foreach(dep IN LISTS resolved)
     file(INSTALL \"\${dep}\" DESTINATION \"\${CMAKE_INSTALL_PREFIX}/lib\" FOLLOW_SYMLINK_CHAIN)
     get_filename_component(dep_name \"\${dep}\" NAME)
@@ -186,5 +172,39 @@ install(CODE "
   if(unresolved)
     message(WARNING \"Unresolved runtime dependencies: \${unresolved}\")
   endif()
+")
+
+# Always bundle Arrow and its own dependencies so the installed test binaries
+# can find them via $ORIGIN/../lib regardless of how cudf was provided.
+# Collecting from Arrow::arrow_shared directly avoids accidentally dragging in
+# libcudf.so (which is large and host-provided) via peacock_gpu's dep tree.
+install(CODE "
+  file(GET_RUNTIME_DEPENDENCIES
+    LIBRARIES      \"\$<TARGET_FILE:Arrow::arrow_shared>\"
+    RESOLVED_DEPENDENCIES_VAR   resolved
+    UNRESOLVED_DEPENDENCIES_VAR unresolved
+    DIRECTORIES    \"\$<TARGET_FILE_DIR:Arrow::arrow_shared>\"
+    PRE_EXCLUDE_REGEXES  \"libcuda\\\\.so\" \"libcudart\\\\.so\" \"libnvidia\"
+    POST_EXCLUDE_REGEXES \"^/lib/\" \"^/usr/lib/\" \"^/lib64/\"
+  )
+  ${_install_dep_code}
+")
+
+# When cudf is built from source also bundle cudf and nvcomp themselves.
+if(CUDF_BUILD_FROM_SOURCE)
+install(CODE "
+  file(GET_RUNTIME_DEPENDENCIES
+    LIBRARIES
+      \"\$<TARGET_FILE:cudf::cudf>\"
+      \"\$<TARGET_FILE:nvcomp::nvcomp>\"
+    RESOLVED_DEPENDENCIES_VAR   resolved
+    UNRESOLVED_DEPENDENCIES_VAR unresolved
+    DIRECTORIES
+      \"\$<TARGET_FILE_DIR:cudf::cudf>\"
+      \"\$<TARGET_FILE_DIR:nvcomp::nvcomp>\"
+    PRE_EXCLUDE_REGEXES  \"libcuda\\\\.so\" \"libcudart\\\\.so\" \"libnvidia\"
+    POST_EXCLUDE_REGEXES \"^/lib/\" \"^/usr/lib/\" \"^/lib64/\"
+  )
+  ${_install_dep_code}
 ")
 endif()
