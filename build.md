@@ -20,6 +20,20 @@ scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids --build
 scripts/build.sh --cudf_ROOT=$HOME/miniforge3/envs/rapids --install
 ```
 
+`scripts/build.sh` defaults to `gcc-14`. If your conda env's nvcc is older
+than CUDA 12.4 it will reject `gcc-14` (nvcc 12.2 caps at gcc-12, nvcc 12.3
+caps at gcc-13). In that case install the matching gcc and pass
+`--gcc-version`:
+
+```
+sudo apt install gcc-12 g++-12
+scripts/build.sh --cudf_ROOT=... --gcc-version 12 --configure
+```
+
+`build.sh` also forces nvcc's `-ccbin` to match the configured CXX
+(`CMAKE_CUDA_HOST_COMPILER`), so the host compiler nvcc invokes for `.cu`
+files won't drift back to the system `gcc`.
+
 When the build is done, resulting binaries will link with cudf dynamically.
 
 To invoke C++ tests, run
@@ -40,6 +54,19 @@ cargo can also be used to build the system end-to-end (
 export CUDF_ROOT=$HOME/miniforge3/envs/rapids
 cargo build 
 ```
+
+`peacockdb-ffi/build.rs` runs its own cmake invocation (separate from
+`scripts/build.sh`), so the `--gcc-version` flag does not reach it. If you
+need a non-default gcc, export `CC`/`CXX` before invoking cargo:
+
+```
+export CC=/usr/bin/gcc-12 CXX=/usr/bin/g++-12
+cargo build
+```
+
+After changing the host compiler, wipe the stale cmake cache so the
+compiler-ID test reruns: `cargo clean -p peacockdb-ffi` and (for the
+C++ tree) `rm -rf cpp/build`.
 
 GPU TO CPU TESTS
 
@@ -92,6 +119,8 @@ export LD_LIBRARY_PATH=$HOME/miniforge3/envs/rapids-26.02/lib
 
 cargo test -p peacockdb-core --test test_query_plan
 cargo test -p peacockdb-core --test test_cpu_executor
+
+LD_LIBRARY_PATH=/home/babanov1403/miniforge3/envs/rapids/lib CUDF_ROOT=/home/babanov1403/miniforge3/envs/rapids cargo test -p peacockdb-core --test test_gpu_executor -- --nocapture
 
 ## RUN All rust non-gpu tests
 

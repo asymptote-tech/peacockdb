@@ -32,6 +32,7 @@ pub mod raw {
         ) -> i32;
 
         pub fn peacock_result_free(result_bytes: *mut u8);
+        pub fn peacock_last_error(executor: *mut PeacockExecutor) -> *const c_char;
     }
 }
 

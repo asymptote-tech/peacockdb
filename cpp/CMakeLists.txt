@@ -17,6 +17,19 @@ include(rapids-find)
 rapids_cpm_init()
 rapids_cuda_init_architectures(peacock_gpu)
 
+# nvcc finds its host compiler via PATH (`gcc`/`g++`) by default, ignoring
+# CMAKE_CXX_COMPILER. When the system default gcc is newer than what
+# nvcc supports (e.g. gcc-14 with CUDA 12.2), nvcc fails host_config.h's
+# version check even though CMAKE_CXX_COMPILER points at a supported gcc.
+# Force nvcc's -ccbin to match the configured CXX.
+if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
+  if(DEFINED CMAKE_CXX_COMPILER)
+    set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}" CACHE FILEPATH "")
+  elseif(DEFINED ENV{CXX})
+    set(CMAKE_CUDA_HOST_COMPILER "$ENV{CXX}" CACHE FILEPATH "")
+  endif()
+endif()
+
 project(peacock_gpu LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -47,6 +60,24 @@ else()
   find_package(cudf REQUIRED CONFIG)
   message(STATUS "Using host cudf: ${cudf_VERSION}")
 endif()
+
+# ---------------------------------------------------------------------------
+# Arrow (IPC serialization of query results)
+# ---------------------------------------------------------------------------
+# Arrow must come from the same prefix as cuDF. Otherwise CMake can pick up
+# the system arrow (e.g. Ubuntu's libarrow-dev at /lib/x86_64-linux-gnu),
+# which has a different version and links against an incompatible
+# curl/openssl — surfaces as a link-time undefined reference to
+# curl_easy_getinfo@CURL_OPENSSL_4 or as ABI mismatches with cuDF.
+if(NOT DEFINED Arrow_ROOT AND NOT DEFINED ENV{Arrow_ROOT})
+  if(DEFINED cudf_ROOT)
+    set(Arrow_ROOT "${cudf_ROOT}" CACHE PATH "Match Arrow with cuDF prefix")
+  elseif(DEFINED ENV{cudf_ROOT})
+    set(Arrow_ROOT "$ENV{cudf_ROOT}" CACHE PATH "Match Arrow with cuDF prefix")
+  endif()
+endif()
+find_package(Arrow REQUIRED CONFIG)
+message(STATUS "Using Arrow: ${Arrow_VERSION} from ${Arrow_DIR}")
 
 # ---------------------------------------------------------------------------
 # FlatBuffers (header-only runtime + flatc compiler for codegen)
@@ -91,7 +122,7 @@ target_include_directories(peacock_gpu PUBLIC
   $<BUILD_INTERFACE:${FBS_GENERATED_DIR}/..>
   $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(peacock_gpu PRIVATE cudf::cudf flatbuffers)
+target_link_libraries(peacock_gpu PRIVATE cudf::cudf flatbuffers Arrow::arrow_shared)
 
 # Make TESTDATA_DIR available to test sources.
 set(PEACOCK_TESTDATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../testdata")
@@ -147,24 +178,10 @@ set_target_properties(peacock_cpu_tests peacock_gpu_tests peacock_plan_tests PRO
   INSTALL_RPATH "$ORIGIN/../lib"
 )
 
-# Collect and install all transitive shared library dependencies of
-# libpeacock_gpu.so, excluding system libs and the host GPU driver.
-# Skipped when using host cudf — the run host is expected to provide it.
-if(CUDF_BUILD_FROM_SOURCE)
-install(CODE "
-  file(GET_RUNTIME_DEPENDENCIES
-    LIBRARIES
-      \"\$<TARGET_FILE:peacock_gpu>\"
-      \"\$<TARGET_FILE:cudf::cudf>\"
-      \"\$<TARGET_FILE:nvcomp::nvcomp>\"
-    RESOLVED_DEPENDENCIES_VAR   resolved
-    UNRESOLVED_DEPENDENCIES_VAR unresolved
-    DIRECTORIES
-      \"\$<TARGET_FILE_DIR:cudf::cudf>\"
-      \"\$<TARGET_FILE_DIR:nvcomp::nvcomp>\"
-    PRE_EXCLUDE_REGEXES  \"libcuda\\\\.so\" \"libcudart\\\\.so\" \"libnvidia\"
-    POST_EXCLUDE_REGEXES \"^/lib/\" \"^/usr/lib/\" \"^/lib64/\"
-  )
+# Helper macro used by both install(CODE) blocks below.
+# Copies each resolved dep to install/lib, patches its rpath to $ORIGIN,
+# and creates a soname symlink if needed.
+set(_install_dep_code "
   foreach(dep IN LISTS resolved)
     file(INSTALL \"\${dep}\" DESTINATION \"\${CMAKE_INSTALL_PREFIX}/lib\" FOLLOW_SYMLINK_CHAIN)
     get_filename_component(dep_name \"\${dep}\" NAME)
@@ -180,5 +197,39 @@ install(CODE "
   if(unresolved)
     message(WARNING \"Unresolved runtime dependencies: \${unresolved}\")
   endif()
+")
+
+# Always bundle Arrow and its own dependencies so the installed test binaries
+# can find them via $ORIGIN/../lib regardless of how cudf was provided.
+# Collecting from Arrow::arrow_shared directly avoids accidentally dragging in
+# libcudf.so (which is large and host-provided) via peacock_gpu's dep tree.
+install(CODE "
+  file(GET_RUNTIME_DEPENDENCIES
+    LIBRARIES      \"\$<TARGET_FILE:Arrow::arrow_shared>\"
+    RESOLVED_DEPENDENCIES_VAR   resolved
+    UNRESOLVED_DEPENDENCIES_VAR unresolved
+    DIRECTORIES    \"\$<TARGET_FILE_DIR:Arrow::arrow_shared>\"
+    PRE_EXCLUDE_REGEXES  \"libcuda\\\\.so\" \"libcudart\\\\.so\" \"libnvidia\"
+    POST_EXCLUDE_REGEXES \"^/lib/\" \"^/usr/lib/\" \"^/lib64/\"
+  )
+  ${_install_dep_code}
+")
+
+# When cudf is built from source also bundle cudf and nvcomp themselves.
+if(CUDF_BUILD_FROM_SOURCE)
+install(CODE "
+  file(GET_RUNTIME_DEPENDENCIES
+    LIBRARIES
+      \"\$<TARGET_FILE:cudf::cudf>\"
+      \"\$<TARGET_FILE:nvcomp::nvcomp>\"
+    RESOLVED_DEPENDENCIES_VAR   resolved
+    UNRESOLVED_DEPENDENCIES_VAR unresolved
+    DIRECTORIES
+      \"\$<TARGET_FILE_DIR:cudf::cudf>\"
+      \"\$<TARGET_FILE_DIR:nvcomp::nvcomp>\"
+    PRE_EXCLUDE_REGEXES  \"libcuda\\\\.so\" \"libcudart\\\\.so\" \"libnvidia\"
+    POST_EXCLUDE_REGEXES \"^/lib/\" \"^/usr/lib/\" \"^/lib64/\"
+  )
+  ${_install_dep_code}
 ")
 endif()

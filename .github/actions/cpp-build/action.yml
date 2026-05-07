@@ -6,7 +6,19 @@ runs:
   steps:
     - name: Install compiler
       shell: bash
-      run: conda install -y -c conda-forge gcc gxx binutils
+      run: |
+        conda install -y -c conda-forge gcc gxx binutils
+        # scripts/build.sh resolves the host compiler via `which gcc-${VERSION}`,
+        # but conda-forge's gcc package only installs unversioned `gcc`/`g++`
+        # symlinks. Add the versioned aliases so build.sh can find them, and
+        # surface the version for later steps to pass via --gcc-version.
+        GCC_VER=$(gcc -dumpversion | cut -d. -f1)
+        GCC_PATH=$(command -v gcc)
+        GXX_PATH=$(command -v g++)
+        BIN_DIR=$(dirname "$GCC_PATH")
+        ln -sf "$GCC_PATH" "$BIN_DIR/gcc-${GCC_VER}"
+        ln -sf "$GXX_PATH" "$BIN_DIR/g++-${GCC_VER}"
+        echo "PEACOCK_GCC_VERSION=${GCC_VER}" >> "$GITHUB_ENV"
 
     - name: Install cmake and ninja
       shell: bash
@@ -25,16 +37,16 @@ runs:
 
     - name: Configure (CPP)
       shell: bash
-      run: ./scripts/build.sh --configure --cudf_ROOT /opt/conda
+      run: ./scripts/build.sh --configure --cudf_ROOT /opt/conda --gcc-version "${PEACOCK_GCC_VERSION}"
       env:
         LDFLAGS: -Wl,-rpath-link,/opt/conda/lib
 
     - name: Build (CPP)
       shell: bash
-      run: ./scripts/build.sh --build
+      run: ./scripts/build.sh --build --gcc-version "${PEACOCK_GCC_VERSION}"
       env:
         LDFLAGS: -Wl,-rpath-link,/opt/conda/lib
 
     - name: Install (CPP)
       shell: bash
-      run: ./scripts/build.sh --install
+      run: ./scripts/build.sh --install --gcc-version "${PEACOCK_GCC_VERSION}"

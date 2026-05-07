@@ -20,3 +20,4 @@ peacockdb-core/src/generated/
 
 # OS
 .DS_Store
+cufile.log
