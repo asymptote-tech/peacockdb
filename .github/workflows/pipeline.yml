@@ -171,7 +171,7 @@ jobs:
             $REMOTE_DIR/scripts/setup-glibc.sh 2>/dev/null || true"
 
       - name: Patch binaries for glibc 2.35
-        run: ssh gpu "$REMOTE_DIR/scripts/setup-glibc.sh --repo-dir=$REMOTE_DIR --patch"
+        run: ssh gpu "$REMOTE_DIR/scripts/setup-glibc.sh --repo-dir $REMOTE_DIR --patch"
 
       - name: Generate SF-1 testdata (skips if present)
         run: ssh gpu "cd $REMOTE_DIR && DUCKDB=/home/info/.local/bin/duckdb testdata/generate_testdata.sh"
