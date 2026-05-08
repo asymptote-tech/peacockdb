@@ -132,6 +132,45 @@ table AggregateFuncNode {
   alias: string;
 }
 
+/// SQL LIKE / NOT LIKE / ILIKE / NOT ILIKE.
+/// `expr` is the string column or expression being tested; `pattern` is the
+/// SQL LIKE pattern (`%` matches any run, `_` matches one char). cuDF AST has
+/// no LIKE operator, so the executor evaluates this via a column-producing
+/// path (`cudf::strings::like`).
+table LikeExprNode {
+  expr: Expr;
+  pattern: Expr;
+  negated: bool;
+  case_insensitive: bool;
+}
+
+/// One WHEN/THEN pair inside a CaseExprNode.
+table CaseWhenThen {
+  when: Expr;
+  then: Expr;
+}
+
+/// SQL CASE expression. Search form (`CASE WHEN cond THEN ... END`) leaves
+/// `expr` null; value form (`CASE x WHEN val THEN ... END`) sets it.
+/// Evaluated via a chain of `cudf::copy_if_else` on the C++ side.
+table CaseExprNode {
+  expr: Expr;
+  when_thens: [CaseWhenThen];
+  else_expr: Expr;
+}
+
+/// A scalar (row-wise) function call. Covers date/time extraction,
+/// string slicing, and other DataFusion built-in functions that don't map
+/// to cuDF AST operators.
+table ScalarFunctionExprNode {
+  /// Function name as DataFusion exposes it (e.g. "date_part", "substr").
+  name: string;
+  args: [Expr];
+  /// Output type, used by the column-producing executor to allocate the
+  /// result column.
+  return_type: DataType;
+}
+
 union ExprNode {
   ColumnRef,
   LiteralExpr,
@@ -139,6 +178,9 @@ union ExprNode {
   UnaryExprNode,
   CastExprNode,
   AggregateFuncNode,
+  LikeExprNode,
+  CaseExprNode,
+  ScalarFunctionExprNode,
 }
 
 table Expr {

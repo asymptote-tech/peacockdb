@@ -10,8 +10,10 @@ use datafusion::arrow::datatypes::{DataType as ArrowDataType, SchemaRef};
 use datafusion::common::ScalarValue as DfScalarValue;
 use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::physical_expr::expressions::{
-    BinaryExpr, CastExpr, Column, IsNotNullExpr, IsNullExpr, Literal, NegativeExpr, NotExpr,
+    BinaryExpr, CaseExpr, CastExpr, Column, IsNotNullExpr, IsNullExpr, LikeExpr, Literal,
+    NegativeExpr, NotExpr,
 };
+use datafusion::physical_expr::ScalarFunctionExpr;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode as DfAggMode};
 use datafusion::physical_plan::filter::FilterExec;
 use datafusion::common::JoinType as DfJoinType;
@@ -648,6 +650,67 @@ fn serialize_expr<'a>(
             },
         );
         (fb::ExprNode::CastExprNode, ce.as_union_value())
+    } else if let Some(like) = any.downcast_ref::<LikeExpr>() {
+        let inner = serialize_expr(b, like.expr())?;
+        let pattern = serialize_expr(b, like.pattern())?;
+        let le = fb::LikeExprNode::create(
+            b,
+            &fb::LikeExprNodeArgs {
+                expr: Some(inner),
+                pattern: Some(pattern),
+                negated: like.negated(),
+                case_insensitive: like.case_insensitive(),
+            },
+        );
+        (fb::ExprNode::LikeExprNode, le.as_union_value())
+    } else if let Some(case) = any.downcast_ref::<CaseExpr>() {
+        let comparand = match case.expr() {
+            Some(e) => Some(serialize_expr(b, e)?),
+            None => None,
+        };
+        let mut whens = Vec::new();
+        for (when, then) in case.when_then_expr() {
+            let w = serialize_expr(b, when)?;
+            let t = serialize_expr(b, then)?;
+            whens.push(fb::CaseWhenThen::create(
+                b,
+                &fb::CaseWhenThenArgs {
+                    when: Some(w),
+                    then: Some(t),
+                },
+            ));
+        }
+        let whens_vec = b.create_vector(&whens);
+        let else_ = match case.else_expr() {
+            Some(e) => Some(serialize_expr(b, e)?),
+            None => None,
+        };
+        let ce = fb::CaseExprNode::create(
+            b,
+            &fb::CaseExprNodeArgs {
+                expr: comparand,
+                when_thens: Some(whens_vec),
+                else_expr: else_,
+            },
+        );
+        (fb::ExprNode::CaseExprNode, ce.as_union_value())
+    } else if let Some(sf) = any.downcast_ref::<ScalarFunctionExpr>() {
+        let name = b.create_string(sf.name());
+        let mut args = Vec::new();
+        for arg in sf.args() {
+            args.push(serialize_expr(b, arg)?);
+        }
+        let args_vec = b.create_vector(&args);
+        let ret = convert_data_type(sf.return_type())?;
+        let sfn = fb::ScalarFunctionExprNode::create(
+            b,
+            &fb::ScalarFunctionExprNodeArgs {
+                name: Some(name),
+                args: Some(args_vec),
+                return_type: ret,
+            },
+        );
+        (fb::ExprNode::ScalarFunctionExprNode, sfn.as_union_value())
     } else {
         return Err(format!(
             "unsupported physical expression: {}",
@@ -725,6 +788,17 @@ fn serialize_scalar_value<'a>(
         DfScalarValue::Utf8(Some(s)) | DfScalarValue::LargeUtf8(Some(s)) => {
             args.type_ = fb::DataType::Utf8;
             args.string_val = Some(b.create_string(s));
+        }
+        DfScalarValue::Utf8View(Some(s)) => {
+            // Utf8View is a DataFusion 45+ optimizer rewrite of string literals;
+            // cuDF doesn't distinguish view vs. owned strings. Preserve the type
+            // tag for faithful roundtrip, but the wire payload is identical.
+            args.type_ = fb::DataType::Utf8View;
+            args.string_val = Some(b.create_string(s));
+        }
+        DfScalarValue::Date32(Some(d)) => {
+            args.type_ = fb::DataType::Date32;
+            args.int_val = *d as i64;
         }
         DfScalarValue::Decimal128(Some(v), prec, scale) => {
             args.type_ = fb::DataType::Decimal128;
@@ -847,7 +921,16 @@ fn serialize_schema<'a>(
 /// (CoalesceBatches, Repartition, etc.) are not present in the flatbuffer
 /// and are therefore not reconstructed.
 pub fn deserialize_plan(bytes: &[u8]) -> Result<Arc<dyn ExecutionPlan>, String> {
-    let gpu_plan = flatbuffers::root::<fb::GpuPlan>(bytes)
+    // Real query plans nest deeper than the flatbuffers verifier default of
+    // 64. Each Filter / Project / Repartition / CoalesceBatches / HashJoin
+    // wrapper adds a couple of levels, and TPC-DS easily reaches 100+. Cap at
+    // 256 to give comfortable headroom while still bounding adversarial
+    // payloads (the input is trusted Rust-side serialization in practice).
+    let opts = flatbuffers::VerifierOptions {
+        max_depth: 256,
+        ..Default::default()
+    };
+    let gpu_plan = flatbuffers::root_with_opts::<fb::GpuPlan>(&opts, bytes)
         .map_err(|e| format!("invalid FlatBuffer: {e}"))?;
     let root = gpu_plan
         .root()
@@ -992,6 +1075,64 @@ fn deserialize_expr(expr: &fb::Expr) -> Result<Arc<dyn PhysicalExpr>, String> {
             let target = fb_to_arrow_type(cast.target_type());
             Ok(Arc::new(CastExpr::new(inner, target, None)))
         }
+        fb::ExprNode::LikeExprNode => {
+            let l = expr.node_as_like_expr_node().ok_or("expected LikeExprNode")?;
+            let inner = deserialize_expr(&l.expr().ok_or("LikeExpr missing expr")?)?;
+            let pat = deserialize_expr(&l.pattern().ok_or("LikeExpr missing pattern")?)?;
+            Ok(Arc::new(LikeExpr::new(
+                l.negated(),
+                l.case_insensitive(),
+                inner,
+                pat,
+            )))
+        }
+        fb::ExprNode::CaseExprNode => {
+            let c = expr.node_as_case_expr_node().ok_or("expected CaseExprNode")?;
+            let comparand = match c.expr() {
+                Some(e) => Some(deserialize_expr(&e)?),
+                None => None,
+            };
+            let mut whens = Vec::new();
+            if let Some(wts) = c.when_thens() {
+                for i in 0..wts.len() {
+                    let wt = wts.get(i);
+                    let when = deserialize_expr(&wt.when().ok_or("CaseWhenThen missing when")?)?;
+                    let then = deserialize_expr(&wt.then().ok_or("CaseWhenThen missing then")?)?;
+                    whens.push((when, then));
+                }
+            }
+            let else_ = match c.else_expr() {
+                Some(e) => Some(deserialize_expr(&e)?),
+                None => None,
+            };
+            Ok(Arc::new(
+                CaseExpr::try_new(comparand, whens, else_)
+                    .map_err(|e| format!("CaseExpr::try_new: {e}"))?,
+            ))
+        }
+        fb::ExprNode::ScalarFunctionExprNode => {
+            let s = expr
+                .node_as_scalar_function_expr_node()
+                .ok_or("expected ScalarFunctionExprNode")?;
+            let name = s.name().ok_or("ScalarFunctionExpr missing name")?;
+            let mut args = Vec::new();
+            if let Some(a) = s.args() {
+                for i in 0..a.len() {
+                    args.push(deserialize_expr(&a.get(i))?);
+                }
+            }
+            let udf = datafusion::functions::all_default_functions()
+                .into_iter()
+                .find(|u| u.name() == name)
+                .ok_or_else(|| format!("unknown scalar function: {name}"))?;
+            let return_type = fb_to_arrow_type(s.return_type());
+            Ok(Arc::new(ScalarFunctionExpr::new(
+                name,
+                udf,
+                args,
+                return_type,
+            )))
+        }
         other => Err(format!("unsupported ExprNode type: {:?}", other)),
     }
 }
@@ -1016,6 +1157,10 @@ fn deserialize_scalar(sv: &fb::ScalarValue) -> Result<DfScalarValue, String> {
         fb::DataType::LargeUtf8 => {
             DfScalarValue::LargeUtf8(Some(sv.string_val().unwrap_or("").to_string()))
         }
+        fb::DataType::Utf8View => {
+            DfScalarValue::Utf8View(Some(sv.string_val().unwrap_or("").to_string()))
+        }
+        fb::DataType::Date32 => DfScalarValue::Date32(Some(sv.int_val() as i32)),
         fb::DataType::Decimal128 => {
             let hi = sv.decimal_hi() as i128;
             let lo = sv.decimal_lo() as i128;
