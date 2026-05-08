@@ -246,10 +246,18 @@ static TableResult execute_scan(const fb::GpuScan* scan) {
   if (!scan->file_paths() || scan->file_paths()->size() == 0)
     throw std::runtime_error("GpuScan: no file paths");
 
-  // Collect file paths.
+  // Wire-format contract (see gpu_plan.fbs::GpuScan): every path must be
+  // absolute. We reject anything else with a clear error rather than
+  // resolving against an implicit root.
   std::vector<std::string> paths;
+  paths.reserve(scan->file_paths()->size());
   for (auto* p : *scan->file_paths()) {
-    paths.push_back(p->str());
+    auto s = p->str();
+    if (s.empty() || s.front() != '/') {
+      throw std::runtime_error(
+          "GpuScan: file path must be absolute (got \"" + s + "\")");
+    }
+    paths.push_back(std::move(s));
   }
 
   // Build column name list from file_schema + projection.
