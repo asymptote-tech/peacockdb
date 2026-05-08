@@ -45,8 +45,15 @@ void peacock_executor_destroy(peacock_executor_t* executor);
 /// @param out_result_bytes  On success, set to a newly allocated buffer
 ///                          containing the result (Arrow IPC stream).
 ///                          Caller must free with peacock_result_free().
+///                          An empty result (no rows) is signalled by
+///                          *out_result_len == 0; *out_result_bytes is
+///                          unspecified in that case and must not be freed.
 /// @param out_result_len    Set to the length of out_result_bytes.
-/// @return                  0 on success, non-zero on failure.
+/// @return                  0 on success, non-zero on failure. On failure
+///                          *out_result_bytes and *out_result_len are
+///                          unspecified — the caller must not read or free
+///                          them, and should retrieve the error via
+///                          peacock_last_error().
 int peacock_execute(peacock_executor_t* executor,
                     const uint8_t* plan_bytes,
                     uint64_t plan_len,

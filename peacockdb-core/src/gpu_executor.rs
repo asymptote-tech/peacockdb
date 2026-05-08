@@ -54,8 +54,10 @@ impl GpuExecutor {
     /// 3. Call `peacock_execute` — the C++ engine runs the plan on the GPU.
     /// 4. Deserialize the Arrow IPC stream result back to `Vec<RecordBatch>`.
     ///
-    /// Returns an empty vec while the C++ result serialization is not yet
-    /// implemented (out_result_len == 0).
+    /// The empty-buffer branch (`out_result_len == 0`) is defensive: today the
+    /// C side always emits a full Arrow IPC stream (schema + zero or more
+    /// batches) on success, so a zero-row query still produces a non-empty
+    /// buffer that decodes to an empty `Vec<RecordBatch>`.
     pub async fn execute(&self, sql: &str) -> DfResult<Vec<RecordBatch>> {
         let plan = self.ctx.sql(sql).await?.create_physical_plan().await?;
         let plan_bytes = serialize_plan(&plan)

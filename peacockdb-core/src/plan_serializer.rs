@@ -101,17 +101,18 @@ fn serialize_gpu_scan<'a>(
 
     let config = parquet.base_config();
 
-    // Collect file paths.
+    // The wire format requires absolute filesystem paths. `object_meta.location`
+    // is an `object_store::path::Path`, which strips the leading `/` during
+    // normalization, so we re-add it here. ListingTableUrl canonicalizes to
+    // absolute at registration time, so the original input was always absolute
+    // by the time we get here.
     let path_strings: Vec<String> = config
         .file_groups
         .iter()
         .flat_map(|group| {
             group
                 .iter()
-                .map(|pf| {
-                    let loc = pf.object_meta.location.to_string();
-                    if loc.starts_with('/') { loc } else { format!("/{loc}") }
-                })
+                .map(|pf| format!("/{}", pf.object_meta.location))
         })
         .collect();
     let paths: Vec<_> = path_strings.iter().map(|s| b.create_string(s)).collect();

@@ -199,7 +199,9 @@ table JoinKey {
 
 /// Read Parquet files from disk.
 table GpuScan {
-  /// Paths to Parquet files to read.
+  /// Absolute filesystem paths to the Parquet files to read. Each path must
+  /// be non-empty and begin with `/`; the consumer rejects relative paths
+  /// rather than resolving them against an implicit root.
   file_paths: [string];
   /// Schema of the files (before projection).
   file_schema: Schema;
