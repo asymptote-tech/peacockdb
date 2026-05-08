@@ -15,6 +15,10 @@
 #else
 #include <cudf/join.hpp>
 #endif
+#if __has_include(<cudf/join/filtered_join.hpp>)
+#include <cudf/join/filtered_join.hpp>
+#define PEACOCK_HAVE_FILTERED_JOIN 1
+#endif
 #include <cudf/reduction.hpp>
 #include <cudf/scalar/scalar.hpp>
 #include <cudf/strings/contains.hpp>
@@ -278,6 +282,25 @@ static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx)
 // column-path is a recursive fallback that calls into the AST evaluator
 // whenever it encounters a fully AST-able subexpression.
 
+// String/binary literal types whose AST evaluation isn't supported by cuDF
+// (compute_column allocates fixed-width output, so a string compare aborts).
+static bool is_string_like_literal(const fb::Expr* expr) {
+  if (expr->node_type() != fb::ExprNode_LiteralExpr) return false;
+  auto* sv = expr->node_as_LiteralExpr()->value();
+  if (!sv) return false;
+  switch (sv->type()) {
+    case fb::DataType_Utf8:
+    case fb::DataType_LargeUtf8:
+    case fb::DataType_Utf8View:
+    case fb::DataType_Binary:
+    case fb::DataType_LargeBinary:
+    case fb::DataType_BinaryView:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static bool is_ast_able(const fb::Expr* expr) {
   switch (expr->node_type()) {
     case fb::ExprNode_LikeExprNode:
@@ -286,6 +309,10 @@ static bool is_ast_able(const fb::Expr* expr) {
       return false;
     case fb::ExprNode_BinaryExprNode: {
       auto* b = expr->node_as_BinaryExprNode();
+      // cuDF AST has no string ops; string literal on either side forces the
+      // column path (cudf::binary_operation, which does support strings).
+      if (is_string_like_literal(b->left()) || is_string_like_literal(b->right()))
+        return false;
       return is_ast_able(b->left()) && is_ast_able(b->right());
     }
     case fb::ExprNode_UnaryExprNode:
@@ -530,6 +557,14 @@ static std::unique_ptr<cudf::column> build_column(
   if (expr->node_type() == fb::ExprNode_LiteralExpr) {
     auto sc = build_scalar(expr->node_as_LiteralExpr()->value());
     return cudf::make_column_from_scalar(*sc, table.num_rows());
+  }
+
+  // Bare column reference: copy the column view directly. compute_column
+  // would allocate fixed-width output and reject strings/lists/structs.
+  if (expr->node_type() == fb::ExprNode_ColumnRef) {
+    auto* c = expr->node_as_ColumnRef();
+    auto idx = static_cast<cudf::size_type>(c->index());
+    return std::make_unique<cudf::column>(table.column(idx));
   }
 
   // AST-able expressions go through cudf::compute_column for fusion.
@@ -928,27 +963,58 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
   bool is_semi_or_anti = false;
   bool emit_left = true;  // false → emit right side instead
   std::unique_ptr<rmm::device_uvector<cudf::size_type>> single_indices;
+  // cuDF replaced free `left_{semi,anti}_join` with `filtered_join` (build the
+  // hash table from one side, then probe). For Left{Semi,Anti} the right side
+  // is the filter; for Right{Semi,Anti} we swap.
   switch (join->join_type()) {
-    case fb::JoinType_LeftSemi:
+    case fb::JoinType_LeftSemi: {
+#ifdef PEACOCK_HAVE_FILTERED_JOIN
+      cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
+                             cudf::set_as_build_table::RIGHT, 0.5);
+      single_indices = fj.semi_join(left_keys);
+#else
       single_indices = cudf::left_semi_join(left_keys, right_keys);
+#endif
       is_semi_or_anti = true;
       emit_left = true;
       break;
-    case fb::JoinType_LeftAnti:
+    }
+    case fb::JoinType_LeftAnti: {
+#ifdef PEACOCK_HAVE_FILTERED_JOIN
+      cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
+                             cudf::set_as_build_table::RIGHT, 0.5);
+      single_indices = fj.anti_join(left_keys);
+#else
       single_indices = cudf::left_anti_join(left_keys, right_keys);
+#endif
       is_semi_or_anti = true;
       emit_left = true;
       break;
-    case fb::JoinType_RightSemi:
+    }
+    case fb::JoinType_RightSemi: {
+#ifdef PEACOCK_HAVE_FILTERED_JOIN
+      cudf::filtered_join fj(left_keys, cudf::null_equality::EQUAL,
+                             cudf::set_as_build_table::RIGHT, 0.5);
+      single_indices = fj.semi_join(right_keys);
+#else
       single_indices = cudf::left_semi_join(right_keys, left_keys);
+#endif
       is_semi_or_anti = true;
       emit_left = false;
       break;
-    case fb::JoinType_RightAnti:
+    }
+    case fb::JoinType_RightAnti: {
+#ifdef PEACOCK_HAVE_FILTERED_JOIN
+      cudf::filtered_join fj(left_keys, cudf::null_equality::EQUAL,
+                             cudf::set_as_build_table::RIGHT, 0.5);
+      single_indices = fj.anti_join(right_keys);
+#else
       single_indices = cudf::left_anti_join(right_keys, left_keys);
+#endif
       is_semi_or_anti = true;
       emit_left = false;
       break;
+    }
     default:
       break;
   }

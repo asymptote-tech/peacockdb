@@ -10,8 +10,8 @@ use datafusion::arrow::datatypes::{DataType as ArrowDataType, SchemaRef};
 use datafusion::common::ScalarValue as DfScalarValue;
 use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::physical_expr::expressions::{
-    BinaryExpr, CaseExpr, CastExpr, Column, IsNotNullExpr, IsNullExpr, LikeExpr, Literal,
-    NegativeExpr, NotExpr,
+    BinaryExpr, CaseExpr, CastExpr, Column, InListExpr, IsNotNullExpr, IsNullExpr, LikeExpr,
+    Literal, NegativeExpr, NotExpr,
 };
 use datafusion::physical_expr::ScalarFunctionExpr;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode as DfAggMode};
@@ -694,6 +694,81 @@ fn serialize_expr<'a>(
             },
         );
         (fb::ExprNode::CaseExprNode, ce.as_union_value())
+    } else if let Some(in_list) = any.downcast_ref::<InListExpr>() {
+        // C++ executor has no IN-list opcode. Expand `expr IN (a, b, c)` into
+        // `(expr = a) OR (expr = b) OR (expr = c)` (or NOT(...) when negated)
+        // so it lowers to ordinary cuDF AST binary ops.
+        let list = in_list.list();
+        if list.is_empty() {
+            return Err("IN with empty list not supported".to_string());
+        }
+        let target = in_list.expr();
+
+        let lhs0 = serialize_expr(b, target)?;
+        let rhs0 = serialize_expr(b, &list[0])?;
+        let mut acc_be = fb::BinaryExprNode::create(
+            b,
+            &fb::BinaryExprNodeArgs {
+                left: Some(lhs0),
+                op: fb::BinaryOp::Eq,
+                right: Some(rhs0),
+            },
+        );
+
+        for item in &list[1..] {
+            let prev = fb::Expr::create(
+                b,
+                &fb::ExprArgs {
+                    node_type: fb::ExprNode::BinaryExprNode,
+                    node: Some(acc_be.as_union_value()),
+                },
+            );
+            let lhs_i = serialize_expr(b, target)?;
+            let rhs_i = serialize_expr(b, item)?;
+            let eq_be = fb::BinaryExprNode::create(
+                b,
+                &fb::BinaryExprNodeArgs {
+                    left: Some(lhs_i),
+                    op: fb::BinaryOp::Eq,
+                    right: Some(rhs_i),
+                },
+            );
+            let eq_expr = fb::Expr::create(
+                b,
+                &fb::ExprArgs {
+                    node_type: fb::ExprNode::BinaryExprNode,
+                    node: Some(eq_be.as_union_value()),
+                },
+            );
+            acc_be = fb::BinaryExprNode::create(
+                b,
+                &fb::BinaryExprNodeArgs {
+                    left: Some(prev),
+                    op: fb::BinaryOp::Or,
+                    right: Some(eq_expr),
+                },
+            );
+        }
+
+        if in_list.negated() {
+            let combined = fb::Expr::create(
+                b,
+                &fb::ExprArgs {
+                    node_type: fb::ExprNode::BinaryExprNode,
+                    node: Some(acc_be.as_union_value()),
+                },
+            );
+            let ue = fb::UnaryExprNode::create(
+                b,
+                &fb::UnaryExprNodeArgs {
+                    op: fb::UnaryOp::Not,
+                    arg: Some(combined),
+                },
+            );
+            (fb::ExprNode::UnaryExprNode, ue.as_union_value())
+        } else {
+            (fb::ExprNode::BinaryExprNode, acc_be.as_union_value())
+        }
     } else if let Some(sf) = any.downcast_ref::<ScalarFunctionExpr>() {
         let name = b.create_string(sf.name());
         let mut args = Vec::new();
