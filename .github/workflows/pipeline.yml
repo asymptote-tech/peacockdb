@@ -196,7 +196,11 @@ jobs:
             for t in $REMOTE_DIR/cpp/install/rust-tests/*; do
               [ -x "\$t" ] || continue
               echo "--- \$(basename \$t)"
-              "\$t" --nocapture
+              # --test-threads=1: cuDF/RMM share one process-wide pool; running
+              # several GPU tests concurrently OOMs the device and poisons the
+              # CUDA context, cascading into bad_alloc/cudaErrorIllegalAddress
+              # for every later test. Sequential is mandatory.
+              "\$t" --nocapture --test-threads=1
             done
           EOF
 

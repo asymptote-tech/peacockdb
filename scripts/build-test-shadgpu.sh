@@ -101,7 +101,8 @@ if [ "$RUN" -eq 1 ]; then
     for t in /home/info/peacockdb/cpp/install/rust-tests/*; do
       [ -x "\$t" ] || continue
       echo "--- \$(basename "\$t")"
-      "\$t" --nocapture
+      # --test-threads=1: GPU/RMM context is process-wide, parallel tests OOM.
+      "\$t" --nocapture --test-threads=1
     done
 EOF
 fi
