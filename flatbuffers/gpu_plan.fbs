@@ -217,6 +217,12 @@ table GpuScan {
 table GpuFilter {
   predicate: Expr;
   input: PlanNode;
+  /// Optional post-filter column projection. When present, the filter emits
+  /// only these column indices (in this order) from its input. Set by the
+  /// DataFusion physical optimizer when it fuses a downstream ProjectionExec
+  /// into the filter; dropping it changes the output schema and breaks
+  /// downstream column references.
+  projection: [uint32];
 }
 
 /// Compute new columns / select a subset of columns.
@@ -226,6 +232,14 @@ table GpuProject {
   /// Output column names (parallel to exprs).
   aliases: [string];
   input: PlanNode;
+}
+
+/// Per-grouping-set null mask. `values[i] = true` means the i-th group_expr is
+/// replaced with null_exprs[i] for that grouping set. Used for ROLLUP/CUBE/
+/// GROUPING SETS, which DataFusion expands into multiple grouping sets at
+/// physical-plan time and appends a `__grouping_id` column to the output.
+table GroupingSetMask {
+  values: [bool];
 }
 
 /// Group-by aggregation.
@@ -238,6 +252,15 @@ table GpuAggregate {
   /// Aggregate function invocations.
   aggr_funcs: [AggregateFuncNode];
   input: PlanNode;
+  /// NULL-fill expressions (NULL literal of the matching type) parallel to
+  /// group_exprs. Populated only for ROLLUP/CUBE/GROUPING SETS. Empty/missing
+  /// => regular GROUP BY (single grouping set).
+  null_exprs: [Expr];
+  /// Names parallel to null_exprs.
+  null_names: [string];
+  /// Per-grouping-set null masks. Empty/missing => regular GROUP BY. Each
+  /// mask must have length == group_exprs.length.
+  grouping_sets: [GroupingSetMask];
 }
 
 /// Hash join (equi-join on key pairs, with optional residual filter).

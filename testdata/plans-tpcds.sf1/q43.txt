@@ -1,0 +1,59 @@
+GpuSortPreservingMergeExec: [s_store_name@0 ASC NULLS LAST, s_store_id@1 ASC NULLS LAST, sun_sales@2 ASC NULLS LAST, mon_sales@3 ASC NULLS LAST, tue_sales@4 ASC NULLS LAST, wed_sales@5 ASC NULLS LAST, thu_sales@6 ASC NULLS LAST, fri_sales@7 ASC NULLS LAST, sat_sales@8 ASC NULLS LAST]
+  GpuSortExec
+    GpuProjectExec
+      GpuAggregateExec: group_by=[s_store_name, s_store_id], aggr=[sum(CASE WHEN date_dim.d_day_name = Utf8("Sunday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Monday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Tuesday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Wednesday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Thursday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Friday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Saturday") THEN store_sales.ss_sales_price ELSE NULL END)]
+        GpuCoalesceBatchesExec: target_batch_size=6100805
+          GpuRepartitionExec: partitioning=Hash([s_store_name@0, s_store_id@1], 8), input_partitions=8
+            GpuAggregateExec: group_by=[s_store_name, s_store_id], aggr=[sum(CASE WHEN date_dim.d_day_name = Utf8("Sunday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Monday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Tuesday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Wednesday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Thursday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Friday") THEN store_sales.ss_sales_price ELSE NULL END), sum(CASE WHEN date_dim.d_day_name = Utf8("Saturday") THEN store_sales.ss_sales_price ELSE NULL END)]
+              GpuProjectExec
+                GpuCoalesceBatchesExec: target_batch_size=6100805
+                  GpuHashJoinExec
+                    GpuCoalesceBatchesExec: target_batch_size=6100805
+                      GpuRepartitionExec: partitioning=Hash([s_store_sk@0], 8), input_partitions=8
+                        GpuCoalesceBatchesExec: target_batch_size=6100805
+                          GpuFilterExec
+                            GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                              GpuScanExec: batch_size=6100805
+                    GpuCoalesceBatchesExec: target_batch_size=6100805
+                      GpuRepartitionExec: partitioning=Hash([ss_store_sk@1], 8), input_partitions=8
+                        GpuCoalesceBatchesExec: target_batch_size=6100805
+                          GpuHashJoinExec
+                            GpuCoalesceBatchesExec: target_batch_size=6100805
+                              GpuRepartitionExec: partitioning=Hash([d_date_sk@0], 8), input_partitions=8
+                                GpuCoalesceBatchesExec: target_batch_size=6100805
+                                  GpuFilterExec
+                                    GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                                      GpuScanExec: batch_size=6100805
+                            GpuCoalesceBatchesExec: target_batch_size=6100805
+                              GpuRepartitionExec: partitioning=Hash([ss_sold_date_sk@0], 8), input_partitions=8
+                                GpuScanExec: batch_size=6100805
+--- memory ---
+GpuSortPreservingMergeExec: row_width=176, subtree_max_row_bytes=352
+  GpuSortExec: row_width=176, subtree_max_row_bytes=352
+    GpuProjectExec: row_width=176, subtree_max_row_bytes=352
+      GpuAggregateExec: row_width=176, subtree_max_row_bytes=352
+        GpuCoalesceBatchesExec: row_width=176, subtree_max_row_bytes=288
+          GpuRepartitionExec: row_width=176, subtree_max_row_bytes=288
+            GpuAggregateExec: row_width=176, subtree_max_row_bytes=288
+              GpuProjectExec: row_width=112, subtree_max_row_bytes=232
+                GpuCoalesceBatchesExec: row_width=112, subtree_max_row_bytes=232
+                  GpuHashJoinExec: row_width=112, subtree_max_row_bytes=232
+                    GpuCoalesceBatchesExec: row_width=68, subtree_max_row_bytes=152
+                      GpuRepartitionExec: row_width=68, subtree_max_row_bytes=152
+                        GpuCoalesceBatchesExec: row_width=68, subtree_max_row_bytes=152
+                          GpuFilterExec: row_width=68, subtree_max_row_bytes=152
+                            GpuRepartitionExec: row_width=84, subtree_max_row_bytes=84
+                              GpuScanExec: row_width=84, subtree_max_row_bytes=84
+                    GpuCoalesceBatchesExec: row_width=52, subtree_max_row_bytes=112
+                      GpuRepartitionExec: row_width=52, subtree_max_row_bytes=112
+                        GpuCoalesceBatchesExec: row_width=52, subtree_max_row_bytes=112
+                          GpuHashJoinExec: row_width=52, subtree_max_row_bytes=112
+                            GpuCoalesceBatchesExec: row_width=36, subtree_max_row_bytes=76
+                              GpuRepartitionExec: row_width=36, subtree_max_row_bytes=76
+                                GpuCoalesceBatchesExec: row_width=36, subtree_max_row_bytes=76
+                                  GpuFilterExec: row_width=36, subtree_max_row_bytes=76
+                                    GpuRepartitionExec: row_width=40, subtree_max_row_bytes=40
+                                      GpuScanExec: row_width=40, subtree_max_row_bytes=40
+                            GpuCoalesceBatchesExec: row_width=24, subtree_max_row_bytes=24
+                              GpuRepartitionExec: row_width=24, subtree_max_row_bytes=24
+                                GpuScanExec: row_width=24, subtree_max_row_bytes=24

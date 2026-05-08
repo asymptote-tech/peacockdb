@@ -161,11 +161,17 @@ fn serialize_gpu_filter<'a>(
     let input_plan = filter.input();
     let input = serialize_plan_node(b, input_plan)?;
 
+    let projection = filter.projection().map(|p| {
+        let indices: Vec<u32> = p.iter().map(|&i| i as u32).collect();
+        b.create_vector(&indices)
+    });
+
     let node = fb::GpuFilter::create(
         b,
         &fb::GpuFilterArgs {
             predicate: Some(predicate),
             input: Some(input),
+            projection,
         },
     );
     Ok((fb::PlanNodeKind::GpuFilter, node.as_union_value()))
@@ -243,6 +249,28 @@ fn serialize_gpu_aggregate<'a>(
     let group_exprs_vec = b.create_vector(&group_exprs);
     let group_names_vec = b.create_vector(&group_names);
 
+    // ROLLUP/CUBE/GROUPING SETS state. Empty for regular GROUP BY.
+    let mut null_exprs = Vec::new();
+    let mut null_names = Vec::new();
+    for (expr, name) in group_by.null_expr() {
+        null_exprs.push(serialize_expr(b, expr)?);
+        null_names.push(b.create_string(name));
+    }
+    let null_exprs_vec = b.create_vector(&null_exprs);
+    let null_names_vec = b.create_vector(&null_names);
+
+    let mut grouping_set_offsets = Vec::new();
+    for set in group_by.groups() {
+        let values = b.create_vector(set.as_slice());
+        grouping_set_offsets.push(fb::GroupingSetMask::create(
+            b,
+            &fb::GroupingSetMaskArgs {
+                values: Some(values),
+            },
+        ));
+    }
+    let grouping_sets_vec = b.create_vector(&grouping_set_offsets);
+
     let mut aggr_funcs = Vec::new();
     for aggr in agg.aggr_expr() {
         let func_name = b.create_string(aggr.fun().name());
@@ -275,6 +303,9 @@ fn serialize_gpu_aggregate<'a>(
             group_names: Some(group_names_vec),
             aggr_funcs: Some(aggr_funcs_vec),
             input: Some(input),
+            null_exprs: Some(null_exprs_vec),
+            null_names: Some(null_names_vec),
+            grouping_sets: Some(grouping_sets_vec),
         },
     );
     Ok((fb::PlanNodeKind::GpuAggregate, node.as_union_value()))
@@ -1091,8 +1122,14 @@ fn deserialize_gpu_filter(
 ) -> Result<Arc<dyn ExecutionPlan>, String> {
     let input = deserialize_plan_node(&filter.input().ok_or("GpuFilter missing input")?)?;
     let predicate = deserialize_expr(&filter.predicate().ok_or("GpuFilter missing predicate")?)?;
-    let filter_exec =
+    let mut filter_exec =
         FilterExec::try_new(predicate, input).map_err(|e| format!("FilterExec: {e}"))?;
+    if let Some(proj) = filter.projection() {
+        let indices: Vec<usize> = (0..proj.len()).map(|i| proj.get(i) as usize).collect();
+        filter_exec = filter_exec
+            .with_projection(Some(indices))
+            .map_err(|e| format!("FilterExec::with_projection: {e}"))?;
+    }
     Ok(Arc::new(GpuFilterExec::new(Arc::new(filter_exec))))
 }
 
@@ -1148,7 +1185,39 @@ fn deserialize_gpu_aggregate(
         .transpose()?
         .unwrap_or_default();
 
-    let group_by = PhysicalGroupBy::new_single(group_exprs);
+    // ROLLUP/CUBE/GROUPING SETS: reconstruct null exprs and per-set masks.
+    let null_exprs: Vec<(Arc<dyn PhysicalExpr>, String)> = match (agg.null_exprs(), agg.null_names()) {
+        (Some(exprs), Some(names)) => (0..exprs.len())
+            .map(|i| {
+                let expr = deserialize_expr(&exprs.get(i))?;
+                let name = names.get(i).to_string();
+                Ok::<_, String>((expr, name))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => Vec::new(),
+    };
+    let groups: Vec<Vec<bool>> = agg
+        .grouping_sets()
+        .map(|sets| {
+            (0..sets.len())
+                .map(|i| {
+                    sets.get(i)
+                        .values()
+                        .map(|v| (0..v.len()).map(|j| v.get(j)).collect::<Vec<bool>>())
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    // `is_single` is equivalent to "null_expr is empty" in DataFusion. Keep the
+    // same convention here: anything with a non-empty null_expr came from
+    // ROLLUP/CUBE/GROUPING SETS and must be reconstructed via `new`.
+    let group_by = if null_exprs.is_empty() {
+        PhysicalGroupBy::new_single(group_exprs)
+    } else {
+        PhysicalGroupBy::new(group_exprs, null_exprs, groups)
+    };
 
     // Reconstruct aggregate function expressions.
     let input_schema = input.schema();
