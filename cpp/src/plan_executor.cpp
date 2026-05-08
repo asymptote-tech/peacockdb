@@ -672,6 +672,24 @@ static TableResult execute_filter(const fb::GpuFilter* filter) {
   }
   auto filtered = cudf::apply_boolean_mask(input.table->view(), mask->view());
 
+  // Optional projection (set when the planner fused a downstream
+  // ProjectionExec into the filter). Without this, all input columns survive
+  // and downstream column indices are wrong by exactly the number of dropped
+  // columns.
+  if (filter->projection() && filter->projection()->size() > 0) {
+    auto fv = filtered->view();
+    std::vector<std::unique_ptr<cudf::column>> proj_cols;
+    std::vector<std::string> proj_names;
+    proj_cols.reserve(filter->projection()->size());
+    proj_names.reserve(filter->projection()->size());
+    for (auto idx : *filter->projection()) {
+      proj_cols.push_back(std::make_unique<cudf::column>(fv.column(idx)));
+      proj_names.push_back(input.column_names[idx]);
+    }
+    return {std::make_unique<cudf::table>(std::move(proj_cols)),
+            std::move(proj_names)};
+  }
+
   return {std::move(filtered), std::move(input.column_names)};
 }
 
@@ -902,6 +920,67 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
 
   cudf::table_view left_keys{left_key_cols};
   cudf::table_view right_keys{right_key_cols};
+
+  // Semi/anti joins emit only one side's columns and use a different cuDF API
+  // (single index vector instead of a pair). Right{Semi,Anti} = Left{Semi,Anti}
+  // with sides swapped, so we normalise to Left{Semi,Anti} and remember which
+  // side to gather from.
+  bool is_semi_or_anti = false;
+  bool emit_left = true;  // false → emit right side instead
+  std::unique_ptr<rmm::device_uvector<cudf::size_type>> single_indices;
+  switch (join->join_type()) {
+    case fb::JoinType_LeftSemi:
+      single_indices = cudf::left_semi_join(left_keys, right_keys);
+      is_semi_or_anti = true;
+      emit_left = true;
+      break;
+    case fb::JoinType_LeftAnti:
+      single_indices = cudf::left_anti_join(left_keys, right_keys);
+      is_semi_or_anti = true;
+      emit_left = true;
+      break;
+    case fb::JoinType_RightSemi:
+      single_indices = cudf::left_semi_join(right_keys, left_keys);
+      is_semi_or_anti = true;
+      emit_left = false;
+      break;
+    case fb::JoinType_RightAnti:
+      single_indices = cudf::left_anti_join(right_keys, left_keys);
+      is_semi_or_anti = true;
+      emit_left = false;
+      break;
+    default:
+      break;
+  }
+
+  if (is_semi_or_anti) {
+    auto& side_tv = emit_left ? ltv : rtv;
+    auto& side_names = emit_left ? left.column_names : right.column_names;
+    auto m = static_cast<cudf::size_type>(single_indices->size());
+    cudf::column_view idx_col{cudf::data_type{cudf::type_id::INT32}, m,
+                              single_indices->data(), nullptr, 0, 0, {}};
+    auto gathered = cudf::gather(side_tv, idx_col);
+    auto gtv = gathered->view();
+    std::vector<std::unique_ptr<cudf::column>> cols;
+    std::vector<std::string> names;
+    for (cudf::size_type i = 0; i < gtv.num_columns(); ++i) {
+      cols.push_back(std::make_unique<cudf::column>(gtv.column(i)));
+      names.push_back(side_names[i]);
+    }
+    auto t = std::make_unique<cudf::table>(std::move(cols));
+    if (join->projection() && join->projection()->size() > 0) {
+      auto tv = t->view();
+      std::vector<std::unique_ptr<cudf::column>> p_cols;
+      std::vector<std::string> p_names;
+      for (auto idx : *join->projection()) {
+        p_cols.push_back(std::make_unique<cudf::column>(tv.column(idx)));
+        p_names.push_back(names[idx]);
+      }
+      return {std::make_unique<cudf::table>(std::move(p_cols)),
+              std::move(p_names)};
+    }
+    return {std::move(t), std::move(names)};
+  }
 
   // Execute join — returns index pairs.
   auto [left_indices, right_indices] = [&]() {
