@@ -34,14 +34,20 @@ DUCKDB=${DUCKDB:-$(which duckdb 2>/dev/null)} || { echo "error: duckdb not found
 # across DuckDB releases (e.g. INT32 vs INT64 surrogate keys), which would
 # shift `row_width` and `target_batch_size` across every plan canonical file
 # — silently invalidating the goldens. Bump here + regenerate goldens.
+#
+# We compare only the `vX.Y.Z` token — `duckdb --version` also prints a build
+# short-SHA (e.g. `v1.2.2 7c039464e4` from upstream, `v1.2.2 8e52ec4` from
+# conda-forge's rebuild). The SHA isn't part of dsdgen's semantics; pinning
+# on it would falsely reject the same upstream release packaged differently.
 # Set EXPECTED_DUCKDB= (empty) to skip the check.
-EXPECTED_DUCKDB=${EXPECTED_DUCKDB-"v1.2.2 7c039464e4"}
+EXPECTED_DUCKDB=${EXPECTED_DUCKDB-"v1.2.2"}
 if [ -n "$EXPECTED_DUCKDB" ]; then
-  ACTUAL_DUCKDB=$("$DUCKDB" --version)
+  ACTUAL_DUCKDB_FULL=$("$DUCKDB" --version)
+  ACTUAL_DUCKDB=$(echo "$ACTUAL_DUCKDB_FULL" | awk '{print $1}')
   if [ "$ACTUAL_DUCKDB" != "$EXPECTED_DUCKDB" ]; then
     echo "error: duckdb version mismatch" >&2
     echo "  expected: $EXPECTED_DUCKDB" >&2
-    echo "  actual:   $ACTUAL_DUCKDB" >&2
+    echo "  actual:   $ACTUAL_DUCKDB  (full: $ACTUAL_DUCKDB_FULL)" >&2
     echo "  duckdb:   $DUCKDB" >&2
     echo "Plan-canonical row_width / target_batch_size depend on the exact" >&2
     echo "schema dsdgen emits. Install duckdb-cli=1.2.2 (e.g. \`conda install" >&2

@@ -192,7 +192,7 @@ query_plan_test!(tpcds_q5, "q5");
 query_plan_test!(tpcds_q7, "q7");
 // q8: flatbuffer verifier rejects on deserialize with "Nested table depth
 // limit reached". q8 is the deepest TPC-DS plan and exceeds the current
-// max_depth bump. See issue #12 ("Plan-serializer bugs").
+// max_depth bump. See issue #14 ("Plan-serializer bugs").
 // query_plan_test!(tpcds_q8, "q8");
 query_plan_test!(tpcds_q9, "q9");
 query_plan_test!(tpcds_q10, "q10");
@@ -208,7 +208,7 @@ query_plan_test!(tpcds_q19, "q19");
 query_plan_test!(tpcds_q20, "q20");
 query_plan_test!(tpcds_q21, "q21");
 // q22: AggregateExec roundtrip doesn't preserve __grouping_id virtual column
-// for ROLLUP/GROUPING SETS in the Final stage. See issue #12.
+// for ROLLUP/GROUPING SETS in the Final stage. See issue #14.
 // query_plan_test!(tpcds_q22, "q22");
 query_plan_test!(tpcds_q23, "q23");
 query_plan_test!(tpcds_q24, "q24");
@@ -257,7 +257,7 @@ query_plan_test!(tpcds_q62, "q62");
 query_plan_test!(tpcds_q63, "q63");
 // TODO(plan_serializer): same Final-aggregate-input-schema bug as q4/q6/q40
 // (PhysicalExpr Column 'cr_reversed_charge'@3 doesn't exist in partial-output
-// schema passed to AggregateExprBuilder). See issue #12.
+// schema passed to AggregateExprBuilder). See issue #14.
 // query_plan_test!(tpcds_q64, "q64");
 query_plan_test!(tpcds_q65, "q65");
 query_plan_test!(tpcds_q66, "q66");
