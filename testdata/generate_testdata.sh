@@ -29,6 +29,27 @@ case "$BENCH" in
 esac
 
 DUCKDB=${DUCKDB:-$(which duckdb 2>/dev/null)} || { echo "error: duckdb not found in PATH"; exit 1; }
+
+# Pinned DuckDB version. The TPC-DS `dsdgen` extension's column types drift
+# across DuckDB releases (e.g. INT32 vs INT64 surrogate keys), which would
+# shift `row_width` and `target_batch_size` across every plan canonical file
+# — silently invalidating the goldens. Bump here + regenerate goldens.
+# Set EXPECTED_DUCKDB= (empty) to skip the check.
+EXPECTED_DUCKDB=${EXPECTED_DUCKDB-"v1.2.2 7c039464e4"}
+if [ -n "$EXPECTED_DUCKDB" ]; then
+  ACTUAL_DUCKDB=$("$DUCKDB" --version)
+  if [ "$ACTUAL_DUCKDB" != "$EXPECTED_DUCKDB" ]; then
+    echo "error: duckdb version mismatch" >&2
+    echo "  expected: $EXPECTED_DUCKDB" >&2
+    echo "  actual:   $ACTUAL_DUCKDB" >&2
+    echo "  duckdb:   $DUCKDB" >&2
+    echo "Plan-canonical row_width / target_batch_size depend on the exact" >&2
+    echo "schema dsdgen emits. Install duckdb-cli=1.2.2 (e.g. \`conda install" >&2
+    echo "-c conda-forge duckdb-cli=1.2.2\`), or set EXPECTED_DUCKDB= to skip." >&2
+    exit 1
+  fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="${SCRIPT_DIR}/${BENCH}.sf${SF}"
 
