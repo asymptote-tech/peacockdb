@@ -35,10 +35,50 @@
 #include <cudf/wrappers/timestamps.hpp>
 
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
+
+#include <cuda_runtime.h>
+#include <rmm/cuda_stream_view.hpp>
 
 namespace peacock {
 namespace fb = peacock::plan;
+
+// ---------------------------------------------------------------------------
+// Debug instrumentation (PEACOCK_GPU_DEBUG=1 to enable)
+// ---------------------------------------------------------------------------
+// Prints each plan node + expression as it executes and synchronizes the
+// default cuDF stream after each step so async CUDA errors surface at the
+// call site instead of cascading several ops later.
+
+static bool debug_enabled() {
+  static const bool e = []() {
+    const char* v = std::getenv("PEACOCK_GPU_DEBUG");
+    return v && v[0] && v[0] != '0';
+  }();
+  return e;
+}
+
+#define PCK_TRACE(...) do {                                  \
+    if (debug_enabled()) {                                   \
+      std::fprintf(stderr, "[peacock] " __VA_ARGS__);        \
+      std::fprintf(stderr, "\n");                            \
+    }                                                        \
+  } while (0)
+
+// Synchronize the default stream and check for errors. When debug is on,
+// we always sync (to localize errors); when off, this is a no-op.
+static void debug_sync(const char* tag) {
+  if (!debug_enabled()) return;
+  auto err = cudaStreamSynchronize(cudf::get_default_stream().value());
+  if (err != cudaSuccess) {
+    std::fprintf(stderr, "[peacock] CUDA sync after %s: %s\n",
+                 tag, cudaGetErrorString(err));
+    throw std::runtime_error(std::string("CUDA error after ") + tag +
+                             ": " + cudaGetErrorString(err));
+  }
+}
 
 // ============================================================================
 // Expression evaluation context
@@ -549,14 +589,35 @@ static std::unique_ptr<cudf::column> build_column_case(
   return result;
 }
 
+static const char* expr_kind_name(fb::ExprNode k) {
+  switch (k) {
+    case fb::ExprNode_ColumnRef:               return "ColumnRef";
+    case fb::ExprNode_LiteralExpr:             return "Literal";
+    case fb::ExprNode_BinaryExprNode:          return "Binary";
+    case fb::ExprNode_UnaryExprNode:           return "Unary";
+    case fb::ExprNode_CastExprNode:            return "Cast";
+    case fb::ExprNode_LikeExprNode:            return "Like";
+    case fb::ExprNode_CaseExprNode:            return "Case";
+    case fb::ExprNode_ScalarFunctionExprNode:  return "ScalarFn";
+    default:                                    return "?";
+  }
+}
+
 static std::unique_ptr<cudf::column> build_column(
     const fb::Expr* expr, cudf::table_view const& table) {
+  if (debug_enabled()) {
+    PCK_TRACE("  build_column kind=%s rows=%d cols=%d",
+              expr_kind_name(expr->node_type()),
+              table.num_rows(), table.num_columns());
+  }
   // Plain literal: broadcast scalar to the table's row count. cudf::ast
   // doesn't have a defined behaviour for literal-only expressions in
   // compute_column, so handle this case before the AST fast path.
   if (expr->node_type() == fb::ExprNode_LiteralExpr) {
     auto sc = build_scalar(expr->node_as_LiteralExpr()->value());
-    return cudf::make_column_from_scalar(*sc, table.num_rows());
+    auto out = cudf::make_column_from_scalar(*sc, table.num_rows());
+    debug_sync("Literal->make_column_from_scalar");
+    return out;
   }
 
   // Bare column reference: copy the column view directly. compute_column
@@ -564,11 +625,30 @@ static std::unique_ptr<cudf::column> build_column(
   if (expr->node_type() == fb::ExprNode_ColumnRef) {
     auto* c = expr->node_as_ColumnRef();
     auto idx = static_cast<cudf::size_type>(c->index());
-    return std::make_unique<cudf::column>(table.column(idx));
+    if (idx < 0 || idx >= table.num_columns()) {
+      throw std::runtime_error(
+          "ColumnRef index " + std::to_string(idx) +
+          " out of range (cols=" + std::to_string(table.num_columns()) + ")");
+    }
+    auto cv = table.column(idx);
+    if (debug_enabled()) {
+      PCK_TRACE("  ColumnRef idx=%d type_id=%d size=%d null_count=%d",
+                static_cast<int>(idx),
+                static_cast<int>(cv.type().id()),
+                static_cast<int>(cv.size()),
+                static_cast<int>(cv.null_count()));
+    }
+    auto out = std::make_unique<cudf::column>(cv);
+    debug_sync("ColumnRef->copy");
+    return out;
   }
 
   // AST-able expressions go through cudf::compute_column for fusion.
-  if (is_ast_able(expr)) return eval_ast_subtree(expr, table);
+  if (is_ast_able(expr)) {
+    auto out = eval_ast_subtree(expr, table);
+    debug_sync("AST->compute_column");
+    return out;
+  }
 
   switch (expr->node_type()) {
     case fb::ExprNode_BinaryExprNode:
@@ -1064,6 +1144,20 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
   }();
 
   // Gather rows from both sides.
+  //
+  // For LEFT/FULL outer joins, cuDF signals unmatched rows with
+  // JoinNoneValue (INT32_MIN) in the corresponding index vector — gathering
+  // those with the default DONT_CHECK policy reads out of bounds and faults
+  // with cudaErrorIllegalAddress. NULLIFY converts sentinel indices to nulls.
+  using cudf::out_of_bounds_policy;
+  auto kind = join->join_type();
+  auto right_policy = (kind == fb::JoinType_Left || kind == fb::JoinType_Full)
+                          ? out_of_bounds_policy::NULLIFY
+                          : out_of_bounds_policy::DONT_CHECK;
+  auto left_policy = (kind == fb::JoinType_Full)
+                         ? out_of_bounds_policy::NULLIFY
+                         : out_of_bounds_policy::DONT_CHECK;
+
   auto n = static_cast<cudf::size_type>(left_indices->size());
   cudf::column_view left_idx_col{cudf::data_type{cudf::type_id::INT32},
                                   n, left_indices->data(),
@@ -1071,8 +1165,8 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
   cudf::column_view right_idx_col{cudf::data_type{cudf::type_id::INT32},
                                    n, right_indices->data(),
                                    nullptr, 0, 0, {}};
-  auto left_gathered = cudf::gather(ltv, left_idx_col);
-  auto right_gathered = cudf::gather(rtv, right_idx_col);
+  auto left_gathered = cudf::gather(ltv, left_idx_col, left_policy);
+  auto right_gathered = cudf::gather(rtv, right_idx_col, right_policy);
 
   // Concatenate columns: [left_cols..., right_cols...].
   std::vector<std::unique_ptr<cudf::column>> all_cols;
@@ -1163,47 +1257,69 @@ static TableResult execute_passthrough(const fb::PlanNode* input_node) {
 // Plan node dispatcher
 // ============================================================================
 
+static const char* plan_node_kind_name(fb::PlanNodeKind k) {
+  switch (k) {
+    case fb::PlanNodeKind_GpuScan:                return "GpuScan";
+    case fb::PlanNodeKind_GpuFilter:              return "GpuFilter";
+    case fb::PlanNodeKind_GpuProject:             return "GpuProject";
+    case fb::PlanNodeKind_GpuAggregate:           return "GpuAggregate";
+    case fb::PlanNodeKind_GpuHashJoin:            return "GpuHashJoin";
+    case fb::PlanNodeKind_GpuSort:                return "GpuSort";
+    case fb::PlanNodeKind_GpuCoalesceBatches:     return "GpuCoalesceBatches";
+    case fb::PlanNodeKind_GpuCoalescePartitions:  return "GpuCoalescePartitions";
+    case fb::PlanNodeKind_GpuRepartition:         return "GpuRepartition";
+    case fb::PlanNodeKind_GpuSortPreservingMerge: return "GpuSortPreservingMerge";
+    default:                                       return "Unknown";
+  }
+}
+
 static TableResult execute_node(const fb::PlanNode* node) {
   if (!node) throw std::runtime_error("null PlanNode");
 
-  switch (node->node_type()) {
-    case fb::PlanNodeKind_GpuScan:
-      return execute_scan(node->node_as_GpuScan());
+  const char* kind = plan_node_kind_name(node->node_type());
+  PCK_TRACE("enter %s", kind);
 
-    case fb::PlanNodeKind_GpuFilter:
-      return execute_filter(node->node_as_GpuFilter());
-
-    case fb::PlanNodeKind_GpuProject:
-      return execute_project(node->node_as_GpuProject());
-
-    case fb::PlanNodeKind_GpuAggregate:
-      return execute_aggregate(node->node_as_GpuAggregate());
-
-    case fb::PlanNodeKind_GpuHashJoin:
-      return execute_hash_join(node->node_as_GpuHashJoin());
-
-    case fb::PlanNodeKind_GpuSort:
-      return execute_sort(node->node_as_GpuSort());
-
-    // Pass-through nodes — on a single GPU, just forward to input.
-    case fb::PlanNodeKind_GpuCoalesceBatches:
-      return execute_passthrough(node->node_as_GpuCoalesceBatches()->input());
-
-    case fb::PlanNodeKind_GpuCoalescePartitions:
-      return execute_passthrough(node->node_as_GpuCoalescePartitions()->input());
-
-    case fb::PlanNodeKind_GpuRepartition:
-      return execute_passthrough(node->node_as_GpuRepartition()->input());
-
-    case fb::PlanNodeKind_GpuSortPreservingMerge:
-      // On single GPU with single partition, just forward to input.
-      // Sort order is already established by the child GpuSort.
-      return execute_passthrough(node->node_as_GpuSortPreservingMerge()->input());
-
-    default:
-      throw std::runtime_error(
-          "unsupported PlanNodeKind: " + std::to_string(node->node_type()));
+  TableResult result;
+  try {
+    switch (node->node_type()) {
+      case fb::PlanNodeKind_GpuScan:
+        result = execute_scan(node->node_as_GpuScan()); break;
+      case fb::PlanNodeKind_GpuFilter:
+        result = execute_filter(node->node_as_GpuFilter()); break;
+      case fb::PlanNodeKind_GpuProject:
+        result = execute_project(node->node_as_GpuProject()); break;
+      case fb::PlanNodeKind_GpuAggregate:
+        result = execute_aggregate(node->node_as_GpuAggregate()); break;
+      case fb::PlanNodeKind_GpuHashJoin:
+        result = execute_hash_join(node->node_as_GpuHashJoin()); break;
+      case fb::PlanNodeKind_GpuSort:
+        result = execute_sort(node->node_as_GpuSort()); break;
+      case fb::PlanNodeKind_GpuCoalesceBatches:
+        result = execute_passthrough(node->node_as_GpuCoalesceBatches()->input()); break;
+      case fb::PlanNodeKind_GpuCoalescePartitions:
+        result = execute_passthrough(node->node_as_GpuCoalescePartitions()->input()); break;
+      case fb::PlanNodeKind_GpuRepartition:
+        result = execute_passthrough(node->node_as_GpuRepartition()->input()); break;
+      case fb::PlanNodeKind_GpuSortPreservingMerge:
+        result = execute_passthrough(node->node_as_GpuSortPreservingMerge()->input()); break;
+      default:
+        throw std::runtime_error(
+            "unsupported PlanNodeKind: " + std::to_string(node->node_type()));
+    }
+  } catch (const std::exception& e) {
+    std::string msg = e.what();
+    if (msg.find("[in ") == std::string::npos) {
+      throw std::runtime_error(std::string("[in ") + kind + "] " + msg);
+    }
+    throw;
   }
+
+  debug_sync(kind);
+  if (debug_enabled()) {
+    auto tv = result.table->view();
+    PCK_TRACE("leave %s rows=%d cols=%d", kind, tv.num_rows(), tv.num_columns());
+  }
+  return result;
 }
 
 // ============================================================================
