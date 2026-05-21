@@ -353,6 +353,10 @@ pub struct SubtreeMemory {
     pub input_row_bytes: usize,
     /// Estimated output bytes produced by this node per scan-batch-row N.
     pub output_row_bytes: usize,
+    /// Estimated input bytes flowing into this node per scan-batch-row N.
+    pub input_row_bytes: usize,
+    /// Estimated output bytes produced by this node per scan-batch-row N.
+    pub output_row_bytes: usize,
 }
 
 /// Walk the plan tree and compute peak memory as a linear function of batch size N.
@@ -384,6 +388,8 @@ pub(crate) fn node_memory_with(
             output_row_ratio: 1.0,
             input_row_bytes: 0,
             output_row_bytes: output_width,
+            input_row_bytes: 0,
+            output_row_bytes: output_width,
         };
     }
 
@@ -393,12 +399,15 @@ pub(crate) fn node_memory_with(
             let sel = selectivity.estimate(plan);
             let input_rows_bytes = (child.output_row_ratio * child.output_width as f64) as usize;
             let output_rows_bytes = (sel * output_width as f64) as usize;
+            let output_rows_bytes = (sel * output_width as f64) as usize;
             SubtreeMemory {
                 subtree_max_row_bytes: child
                     .subtree_max_row_bytes
                     .max(input_rows_bytes + output_rows_bytes),
                 output_width,
                 output_row_ratio: child.output_row_ratio * sel,
+                input_row_bytes: input_rows_bytes,
+                output_row_bytes: output_rows_bytes,
                 input_row_bytes: input_rows_bytes,
                 output_row_bytes: output_rows_bytes,
             }
@@ -413,6 +422,8 @@ pub(crate) fn node_memory_with(
                     .max(input_rows_bytes + output_rows_bytes),
                 output_width,
                 output_row_ratio: child.output_row_ratio,
+                input_row_bytes: input_rows_bytes,
+                output_row_bytes: output_rows_bytes,
                 input_row_bytes: input_rows_bytes,
                 output_row_bytes: output_rows_bytes,
             }
@@ -432,6 +443,8 @@ pub(crate) fn node_memory_with(
                     .max(own),
                 output_width,
                 output_row_ratio: output_ratio,
+                input_row_bytes: build_bytes + probe_bytes,
+                output_row_bytes: output_bytes,
                 input_row_bytes: build_bytes + probe_bytes,
                 output_row_bytes: output_bytes,
             }
@@ -466,6 +479,18 @@ pub(crate) fn node_memory_with(
                 output_row_bytes: input_bytes,
             }
         }
+        // Everything else (CoalescePartitions, Repartition, CoalesceBatches, etc.):
+        // pass-through — peak is the max of children, ratio is max of children.
+        _ => {
+            let child_results: Vec<_> = children
+                .iter()
+                .map(|c| analyze_memory_with(c, selectivity, cardinality))
+                .collect();
+            let max_peak = child_results
+                input_row_bytes: input_bytes,
+                output_row_bytes: input_bytes,
+            }
+        }
         _ => {
             let max_peak = child_mems
                 .iter()
@@ -476,6 +501,11 @@ pub(crate) fn node_memory_with(
                 .iter()
                 .map(|c| c.output_row_ratio)
                 .fold(1.0_f64, f64::max);
+            let max_child_output = child_results
+                .iter()
+                .map(|c| c.output_row_bytes)
+                .max()
+                .unwrap_or(output_width);
             let max_child_output = child_mems
                 .iter()
                 .map(|c| c.output_row_bytes)
@@ -485,6 +515,8 @@ pub(crate) fn node_memory_with(
                 subtree_max_row_bytes: max_peak,
                 output_width,
                 output_row_ratio: max_ratio,
+                input_row_bytes: max_child_output,
+                output_row_bytes: max_child_output,
                 input_row_bytes: max_child_output,
                 output_row_bytes: max_child_output,
             }
