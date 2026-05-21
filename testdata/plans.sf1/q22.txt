@@ -24,7 +24,7 @@ GpuSortPreservingMergeExec: [cntrycode@0 ASC NULLS LAST]
                         GpuRepartitionExec: partitioning=Hash([o_custkey@0], 8), input_partitions=8
                           GpuScanExec: batch_size=19173961
 --- memory ---
-total_cost=2008
+total_cost=1992
 GpuSortPreservingMergeExec: row_width=56, subtree_max_row_bytes=112, input_bytes=56, output_bytes=56, cost=112
   GpuSortExec: row_width=56, subtree_max_row_bytes=112, input_bytes=56, output_bytes=56, cost=112
     GpuProjectExec: row_width=56, subtree_max_row_bytes=112, input_bytes=56, output_bytes=56, cost=112
@@ -33,7 +33,7 @@ GpuSortPreservingMergeExec: row_width=56, subtree_max_row_bytes=112, input_bytes
           GpuRepartitionExec: row_width=56, subtree_max_row_bytes=112, input_bytes=56, output_bytes=56, cost=112
             GpuAggregateExec: row_width=56, subtree_max_row_bytes=112, input_bytes=48, output_bytes=56, cost=104
               GpuProjectExec: row_width=48, subtree_max_row_bytes=112, input_bytes=48, output_bytes=48, cost=96
-                NestedLoopJoinExec: row_width=48, subtree_max_row_bytes=112, input_bytes=64, output_bytes=48, cost=112
+                NestedLoopJoinExec: row_width=48, subtree_max_row_bytes=112, input_bytes=48, output_bytes=48, cost=96
                   GpuAggregateExec: row_width=16, subtree_max_row_bytes=64, input_bytes=24, output_bytes=16, cost=40
                     GpuCoalescePartitionsExec: row_width=24, subtree_max_row_bytes=64, input_bytes=24, output_bytes=24, cost=48
                       GpuAggregateExec: row_width=24, subtree_max_row_bytes=64, input_bytes=16, output_bytes=24, cost=40

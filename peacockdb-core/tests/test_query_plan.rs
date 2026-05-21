@@ -26,7 +26,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use peacockdb_core::build_session_state_with_gpu_rules;
 use peacockdb_core::register_tables_for;
 use peacockdb_core::create_context_with_tables;
-use peacockdb_core::gpu_rule::{analyze_memory, analyze_memory_nodes, row_width, GpuScanExec};
+use peacockdb_core::gpu_rule::{analyze_memory, row_width, GpuScanExec};
 use peacockdb_core::plan_serializer;
 use peacockdb_core::CpuExecutor;
 
@@ -92,25 +92,33 @@ fn plan_str(plan: &Arc<dyn ExecutionPlan>) -> String {
 }
 
 fn memory_str(plan: &Arc<dyn ExecutionPlan>) -> String {
-    let mut total_cost = 0usize;
-    let lines: Vec<String> = analyze_memory_nodes(plan)
-        .into_iter()
-        .map(|(name, depth, mem)| {
-            let cost = mem.input_row_bytes + mem.output_row_bytes;
-            total_cost += cost;
-            format!(
-                "{}{}: row_width={}, subtree_max_row_bytes={}, input_bytes={}, output_bytes={}, cost={}",
-                " ".repeat(depth * 2),
-                name,
-                mem.output_width,
-                mem.subtree_max_row_bytes,
-                mem.input_row_bytes,
-                mem.output_row_bytes,
-                cost,
-            )
-        })
-        .collect();
-    format!("total_cost={}\n{}", total_cost, lines.join("\n"))
+    fn total_cost(plan: &Arc<dyn ExecutionPlan>) -> usize {
+        let mem = analyze_memory(plan);
+        let node_cost = mem.input_row_bytes + mem.output_row_bytes;
+        node_cost + plan.children().iter().map(|c| total_cost(c)).sum::<usize>()
+    }
+
+    fn walk(plan: &Arc<dyn ExecutionPlan>, indent: usize, lines: &mut Vec<String>) {
+        let mem = analyze_memory(plan);
+        let rw = row_width(&plan.schema());
+        let cost = mem.input_row_bytes + mem.output_row_bytes;
+        lines.push(format!(
+            "{}{}: row_width={}, subtree_max_row_bytes={}, input_bytes={}, output_bytes={}, cost={}",
+            " ".repeat(indent),
+            plan.name(),
+            rw,
+            mem.subtree_max_row_bytes,
+            mem.input_row_bytes,
+            mem.output_row_bytes,
+            cost,
+        ));
+        for child in plan.children() {
+            walk(child, indent + 2, lines);
+        }
+    }
+    let mut lines = Vec::new();
+    walk(plan, 0, &mut lines);
+    format!("total_cost={}\n{}", total_cost(plan), lines.join("\n"))
 }
 
 fn assert_plan_matches_canonical_at(plan: &Arc<dyn ExecutionPlan>, name: &str, dir: &std::path::Path) {

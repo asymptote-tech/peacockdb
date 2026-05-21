@@ -572,6 +572,54 @@ pub fn analyze_memory_nodes(plan: &Arc<dyn ExecutionPlan>) -> Vec<(String, usize
     result
 }
 
+pub(crate) fn analyze_memory_with(
+    plan: &Arc<dyn ExecutionPlan>,
+    selectivity: &dyn SelectivityEstimator,
+    cardinality: &dyn CardinalityEstimator,
+) -> SubtreeMemory {
+    let child_mems: Vec<SubtreeMemory> = plan
+        .children()
+        .iter()
+        .map(|c| analyze_memory_with(c, selectivity, cardinality))
+        .collect();
+    node_memory_with(plan, &child_mems, selectivity, cardinality)
+}
+
+/// Walk the plan tree once and return per-node memory info in pre-order.
+/// Each entry is `(name, depth, SubtreeMemory)`. O(n) — each node is visited once.
+pub fn analyze_memory_nodes(plan: &Arc<dyn ExecutionPlan>) -> Vec<(String, usize, SubtreeMemory)> {
+    fn walk(
+        plan: &Arc<dyn ExecutionPlan>,
+        depth: usize,
+        result: &mut Vec<(String, usize, SubtreeMemory)>,
+    ) -> SubtreeMemory {
+        let my_idx = result.len();
+        result.push((plan.name().to_string(), depth, SubtreeMemory {
+            subtree_max_row_bytes: 0,
+            output_width: 0,
+            output_row_ratio: 0.0,
+            input_row_bytes: 0,
+            output_row_bytes: 0,
+        }));
+        let child_mems: Vec<SubtreeMemory> = plan
+            .children()
+            .iter()
+            .map(|c| walk(c, depth + 1, result))
+            .collect();
+        let mem = node_memory_with(
+            plan,
+            &child_mems,
+            &TrivialSelectivityEstimator,
+            &TrivialCardinalityEstimator,
+        );
+        result[my_idx].2 = mem;
+        mem
+    }
+    let mut result = Vec::new();
+    walk(plan, 0, &mut result);
+    result
+}
+
 // ---------------------------------------------------------------------------
 // GpuMemoryBudgetRule — compute batch size from memory budget, wrap scans
 // ---------------------------------------------------------------------------
