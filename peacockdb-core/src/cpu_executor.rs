@@ -70,8 +70,12 @@ pub struct NodeMemoryStats {
     pub node_name: String,
     /// Sum of `get_array_memory_size()` across all output batches (allocated upper bound).
     pub allocated_bytes: usize,
-    /// Sum of logical (exact) sizes across all output batches.
-    pub logical_bytes: usize,
+    /// Logical byte size of all batches fed into this node (sum across all children).
+    pub input_bytes: usize,
+    /// Logical byte size of all batches produced by this node.
+    pub output_bytes: usize,
+    /// `input_bytes + output_bytes`.
+    pub cost: usize,
     /// Total number of output rows across all batches.
     pub row_count: usize,
     /// Largest single batch (in rows) produced by this node.
@@ -80,13 +84,17 @@ pub struct NodeMemoryStats {
 }
 
 impl NodeMemoryStats {
-    pub(crate) fn collect(node_name: &str, batches: &[RecordBatch]) -> Self {
+    pub(crate) fn collect(node_name: &str, input: &[RecordBatch], output: &[RecordBatch]) -> Self {
+        let input_bytes: usize = input.iter().map(|b| batch_logical_size(b)).sum();
+        let output_bytes: usize = output.iter().map(|b| batch_logical_size(b)).sum();
         Self {
             node_name: node_name.to_string(),
-            allocated_bytes: batches.iter().map(|b| batch_allocated_size(b)).sum(),
-            logical_bytes: batches.iter().map(|b| batch_logical_size(b)).sum(),
-            row_count: batches.iter().map(|b| b.num_rows()).sum(),
-            max_batch_rows: batches.iter().map(|b| b.num_rows()).max().unwrap_or(0),
+            allocated_bytes: output.iter().map(|b| batch_allocated_size(b)).sum(),
+            input_bytes,
+            output_bytes,
+            cost: input_bytes + output_bytes,
+            row_count: output.iter().map(|b| b.num_rows()).sum(),
+            max_batch_rows: output.iter().map(|b| b.num_rows()).max().unwrap_or(0),
         }
     }
 }
@@ -117,7 +125,7 @@ pub fn strip_gpu_tree(plan: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionP
 /// 3. Recurses into the CPU node's children.
 /// 4. Wraps each child's results in `MemoryExec` (DataFusion's in-memory source).
 /// 5. Calls `collect()` on the isolated CPU node with its `MemoryExec` stubs.
-/// 6. Calls `on_node(cpu_node_name, &batches)`.
+/// 6. Calls `on_node(cpu_node_name, &input_batches, &output_batches)`.
 ///
 /// TODO: this implementation OOMs on wide joins (e.g. hash-join.sql at SF=1) because
 /// it calls `collect()` on every child before the parent runs, holding both full inputs
@@ -140,7 +148,7 @@ pub fn strip_gpu_tree(plan: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionP
 /// 4. Update `execute_node_by_node_instrumented` to `collect()` only the root stream;
 ///    all intermediate stats are populated by `InstrumentedStream` as the root is consumed.
 ///
-/// 5. Change `on_node` signature from `FnMut(&str, &[RecordBatch])` to
+/// 5. Change `on_node` signature from `FnMut(&str, &[RecordBatch], &[RecordBatch])` to
 ///    `FnMut(&str, &NodeMemoryStats)` since intermediate batches are no longer available
 ///    all at once.
 ///
@@ -150,7 +158,7 @@ pub fn strip_gpu_tree(plan: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionP
 pub async fn execute_node_by_node(
     root: Arc<dyn ExecutionPlan>,
     task_ctx: Arc<TaskContext>,
-    on_node: &mut dyn FnMut(&str, &[RecordBatch]),
+    on_node: &mut dyn FnMut(&str, &[RecordBatch], &[RecordBatch]),
 ) -> Result<Vec<RecordBatch>> {
     let (cpu_node, batch_size_override) = strip_gpu(root);
 
@@ -160,9 +168,11 @@ pub async fn execute_node_by_node(
     };
 
     let mut stub_children: Vec<Arc<dyn ExecutionPlan>> = vec![];
+    let mut input_batches: Vec<RecordBatch> = vec![];
     for child in cpu_node.children() {
         let child_batches =
             Box::pin(execute_node_by_node(child.clone(), task_ctx.clone(), on_node)).await?;
+        input_batches.extend(child_batches.iter().cloned());
         let mem_exec = MemoryExec::try_new(&[child_batches], child.schema(), None)?;
         stub_children.push(Arc::new(mem_exec));
     }
@@ -170,7 +180,7 @@ pub async fn execute_node_by_node(
     let node_name = cpu_node.name().to_string();
     let node = cpu_node.with_new_children(stub_children)?;
     let batches = collect(node, task_ctx).await?;
-    on_node(&node_name, &batches);
+    on_node(&node_name, &input_batches, &batches);
     Ok(batches)
 }
 
@@ -181,8 +191,8 @@ pub async fn execute_node_by_node_instrumented(
     task_ctx: Arc<TaskContext>,
     stats: &mut Vec<NodeMemoryStats>,
 ) -> Result<Vec<RecordBatch>> {
-    execute_node_by_node(root, task_ctx, &mut |name, batches| {
-        stats.push(NodeMemoryStats::collect(name, batches));
+    execute_node_by_node(root, task_ctx, &mut |name, input, output| {
+        stats.push(NodeMemoryStats::collect(name, input, output));
     })
     .await
 }

@@ -2,6 +2,7 @@ NestedLoopJoinExec: join_type=Inner, filter=n_regionkey@1 > r_regionkey@0
   GpuScanExec: batch_size=29826161
   GpuScanExec: batch_size=29826161
 --- memory ---
-NestedLoopJoinExec: row_width=140, subtree_max_row_bytes=72
-  GpuScanExec: row_width=68, subtree_max_row_bytes=68
-  GpuScanExec: row_width=72, subtree_max_row_bytes=72
+total_cost=284
+NestedLoopJoinExec: row_width=140, subtree_max_row_bytes=72, input_bytes=72, output_bytes=72, cost=144
+  GpuScanExec: row_width=68, subtree_max_row_bytes=68, input_bytes=0, output_bytes=68, cost=68
+  GpuScanExec: row_width=72, subtree_max_row_bytes=72, input_bytes=0, output_bytes=72, cost=72

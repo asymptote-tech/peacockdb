@@ -2,6 +2,7 @@ GlobalLimitExec: skip=0, fetch=10
   GpuCoalescePartitionsExec
     GpuScanExec: batch_size=8012998
 --- memory ---
-GlobalLimitExec: row_width=268, subtree_max_row_bytes=268
-  GpuCoalescePartitionsExec: row_width=268, subtree_max_row_bytes=268
-    GpuScanExec: row_width=268, subtree_max_row_bytes=268
+total_cost=1340
+GlobalLimitExec: row_width=268, subtree_max_row_bytes=268, input_bytes=268, output_bytes=268, cost=536
+  GpuCoalescePartitionsExec: row_width=268, subtree_max_row_bytes=268, input_bytes=268, output_bytes=268, cost=536
+    GpuScanExec: row_width=268, subtree_max_row_bytes=268, input_bytes=0, output_bytes=268, cost=268

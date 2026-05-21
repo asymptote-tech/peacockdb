@@ -348,6 +348,10 @@ pub struct SubtreeMemory {
     /// Ratio of output rows to original batch size N.
     /// 1.0 means row count is preserved; <1.0 after filters; >1.0 after fan-out joins.
     pub output_row_ratio: f64,
+    /// Estimated input bytes flowing into this node per scan-batch-row N.
+    pub input_row_bytes: usize,
+    /// Estimated output bytes produced by this node per scan-batch-row N.
+    pub output_row_bytes: usize,
 }
 
 /// Walk the plan tree and compute peak memory as a linear function of batch size N.
@@ -376,6 +380,8 @@ pub(crate) fn analyze_memory_with(
             subtree_max_row_bytes: output_width,
             output_width,
             output_row_ratio: 1.0,
+            input_row_bytes: 0,
+            output_row_bytes: output_width,
         };
     }
 
@@ -384,14 +390,16 @@ pub(crate) fn analyze_memory_with(
         "GpuFilterExec" => {
             let child = analyze_memory_with(children[0], selectivity, cardinality);
             let sel = selectivity.estimate(plan);
-            let output_rows_bytes = (sel * output_width as f64) as usize;
             let input_rows_bytes = (child.output_row_ratio * child.output_width as f64) as usize;
+            let output_rows_bytes = (sel * output_width as f64) as usize;
             SubtreeMemory {
                 subtree_max_row_bytes: child
                     .subtree_max_row_bytes
                     .max(input_rows_bytes + output_rows_bytes),
                 output_width,
                 output_row_ratio: child.output_row_ratio * sel,
+                input_row_bytes: input_rows_bytes,
+                output_row_bytes: output_rows_bytes,
             }
         }
         // Projection / aggregation: input batch + output batch, row count preserved.
@@ -405,6 +413,8 @@ pub(crate) fn analyze_memory_with(
                     .max(input_rows_bytes + output_rows_bytes),
                 output_width,
                 output_row_ratio: child.output_row_ratio,
+                input_row_bytes: input_rows_bytes,
+                output_row_bytes: output_rows_bytes,
             }
         }
         // Hash join: build side + probe batch + output batch.
@@ -424,6 +434,8 @@ pub(crate) fn analyze_memory_with(
                     .max(own),
                 output_width,
                 output_row_ratio: output_ratio,
+                input_row_bytes: build_bytes + probe_bytes,
+                output_row_bytes: output_bytes,
             }
         }
         // Sort: input + workspace (index array, ~2× input).
@@ -434,6 +446,8 @@ pub(crate) fn analyze_memory_with(
                 subtree_max_row_bytes: child.subtree_max_row_bytes.max(2 * input_bytes),
                 output_width,
                 output_row_ratio: child.output_row_ratio,
+                input_row_bytes: input_bytes,
+                output_row_bytes: input_bytes,
             }
         }
         // Everything else (CoalescePartitions, Repartition, CoalesceBatches, etc.):
@@ -452,10 +466,17 @@ pub(crate) fn analyze_memory_with(
                 .iter()
                 .map(|c| c.output_row_ratio)
                 .fold(1.0_f64, f64::max);
+            let max_child_output = child_results
+                .iter()
+                .map(|c| c.output_row_bytes)
+                .max()
+                .unwrap_or(output_width);
             SubtreeMemory {
                 subtree_max_row_bytes: max_peak,
                 output_width,
                 output_row_ratio: max_ratio,
+                input_row_bytes: max_child_output,
+                output_row_bytes: max_child_output,
             }
         }
     }
