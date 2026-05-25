@@ -1055,6 +1055,88 @@ The pipelining directly helps memory management:
 
 ## Phase 5: GPU Memory Management, Chunking & OOM Recovery
 
+### Single-Tenant GPU Execution (Server-Side Lock)
+
+PeacockDB executes **at most one query on a given GPU at a time**. This is
+not a performance optimization — it's a correctness and isolation
+requirement of the cuDF/RMM stack:
+
+- **Process-wide memory pool.** RMM's pool resource is a singleton inside
+  one process. Two queries running in parallel allocate from the same
+  pool, and a transient OOM in either path produces `std::bad_alloc` in
+  *both* — even though one of the queries individually fits.
+- **Process-wide CUDA context.** The first illegal-memory-access or
+  invalid-device error from any kernel poisons the context. Every
+  subsequent kernel — possibly from a different unrelated query — fails
+  with `cudaErrorIllegalAddress`. There's no way to "recover" the context
+  short of tearing down the process.
+- **Memory budget accounting (5.1).** The budget tracker reasons about
+  one query's intermediates at a time; concurrent queries would have to
+  partition the budget statically, which defeats the chunking and OOM
+  recovery machinery in 5.4–5.5.
+
+**Implementation: a per-GPU exclusive lock.** The execution layer holds a
+`std::shared_mutex` (used in exclusive mode) guarding each GPU device.
+Query dispatch acquires the lock, runs the plan to completion, releases.
+
+```cpp
+class GpuDevice {
+  int device_id_;
+  std::shared_mutex exec_mu_;  // exclusive on every query
+
+ public:
+  // RAII guard. Switches the calling thread to this device on construction
+  // and holds the lock for the lifetime of the guard.
+  class Lease {
+    std::unique_lock<std::shared_mutex> lock_;
+    int prev_device_;
+   public:
+    Lease(GpuDevice& d) : lock_(d.exec_mu_) {
+      cudaGetDevice(&prev_device_);
+      cudaSetDevice(d.device_id_);
+    }
+    ~Lease() { cudaSetDevice(prev_device_); }
+  };
+
+  Lease acquire() { return Lease(*this); }
+};
+```
+
+The query dispatcher takes a lease before invoking the executor:
+
+```cpp
+auto lease = gpu_pool.device_for(query).acquire();
+auto result = executor.run(plan);
+// lease released here; next queued query is admitted
+```
+
+**Why exclusive (not reader/writer) on a single query path.** Even
+"read-only" queries on the GPU mutate the RMM pool's free list, allocate
+intermediates, and launch kernels on the default stream. There's nothing
+read-only about them at the device level. `unique_lock` is the only
+meaningful mode.
+
+**Server admission control.** With one in-flight query per GPU, the
+front-end queues incoming queries and admits them in order. Capacity
+scaling beyond a single concurrent query requires multiple GPUs and a
+`GpuDevice` per device (next bullet), not parallelism on one device.
+
+**Multi-GPU host.** One `GpuDevice` per physical GPU; each holds its own
+lock. The dispatcher routes a query to whichever device's lock is free,
+or to a specific device if the plan was pre-bound (e.g. data already
+resident there).
+
+**Multi-process safety.** The in-process mutex doesn't protect against a
+second OS process attaching to the same device. Production deployments
+should restrict the device to one process via `CUDA_VISIBLE_DEVICES` or
+MIG partitioning; if multiple processes must share, take a
+`flock`-based file lock under `/var/run/peacockdb/gpu-<id>.lock` around
+the lease scope.
+
+**Relation to testing.** The same single-tenant invariant is what forces
+`--test-threads=1` on the GPU integration suite (§9.7); the test runner
+hits the requirement from a different angle.
+
 ### 5.1 Memory Budget Tracker
 - Query available GPU memory via `cudaMemGetInfo()`
 - Maintain a running estimate of memory usage across all live `cudf::table` objects
@@ -2048,6 +2130,60 @@ For each function category, test GPU vs CPU equivalence:
 - Run queries on datasets larger than GPU memory
 - Verify chunking produces correct results
 - Monitor GPU memory usage stays within budget
+
+### 9.7 GPU Test Serialization (Exclusive-Lock Requirement)
+
+GPU integration tests must run **one at a time**. cuDF and RMM share a single
+process-wide CUDA context and memory pool, so concurrent test threads aren't
+isolated:
+
+- The first OOM, illegal-address, or invalid-device error inside any kernel
+  poisons the context for the *entire* process. Every later test in the
+  same binary then fails with `std::bad_alloc` from
+  `cuda_memory_resource.hpp`, `cudaErrorIllegalAddress` from
+  `rmm/cuda_stream_view.hpp`, or `cudaErrorInvalidDevice` — none of which
+  reflect a real bug in the test that "fails second."
+- Even without errors, two tests racing for the same RMM pool routinely
+  exceed the device's free memory and OOM each other; failures look
+  non-deterministic and bisect-resistant.
+
+The default Rust test harness picks a thread count from
+`std::thread::available_parallelism()`, so absent an explicit flag it will
+run as many GPU tests in parallel as the host has cores.
+
+**Enforcement** — every invocation of a GPU test binary must pass
+`--test-threads=1`:
+
+- CI workflow (`.github/workflows/pipeline.yml`) loops over
+  `cpp/install/rust-tests/*` and invokes each as
+  `"$t" --nocapture --test-threads=1`.
+- Local helper (`scripts/build-test-shadgpu.sh`, `--run`) does the same
+  over SSH on the GPU host.
+- Ad-hoc invocations (`cargo test -p peacockdb-core --test test_gpu_executor`)
+  must also be run with `--test-threads=1` or `RUST_TEST_THREADS=1`.
+
+**Why not a per-test `serial_test` mutex?** A Rust-level mutex serializes
+test threads within one process, but that's already what
+`--test-threads=1` does — and the latter is one flag instead of an
+attribute on every `#[test]`. A mutex also wouldn't address concurrent
+test *processes* (e.g. two `cargo test` invocations on the same host).
+
+**Why not a separate process per test?** Cargo launches one binary per
+integration-test file and reuses it for every `#[test]` inside; spawning a
+fresh process per test would require either rewriting tests as separate
+binaries or using a wrapper like `cargo nextest`. `--test-threads=1` is
+the same isolation at one flag.
+
+**Cross-process exclusion (multi-tenant GPU host).** If multiple PRs or
+developers can hit the same GPU host, take a host-level filesystem lock
+around the GPU-test loop:
+
+```bash
+flock -n /var/lock/peacockdb-gpu.lock -c '<run tests>'
+```
+
+`flock -n` returns non-zero immediately if another runner holds the lock,
+preventing two CI jobs from corrupting each other's RMM pool.
 
 ---
 

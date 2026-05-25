@@ -1,0 +1,151 @@
+GpuSortExec
+  GpuProjectExec
+    CrossJoinExec
+      GpuProjectExec
+        GpuAggregateExec: group_by=[], aggr=[count(*)]
+          GpuCoalescePartitionsExec
+            GpuAggregateExec: group_by=[], aggr=[count(*)]
+              GpuProjectExec
+                GpuCoalesceBatchesExec: target_batch_size=67108864
+                  GpuHashJoinExec
+                    GpuCoalesceBatchesExec: target_batch_size=67108864
+                      GpuRepartitionExec: partitioning=Hash([wp_web_page_sk@0], 8), input_partitions=8
+                        GpuCoalesceBatchesExec: target_batch_size=67108864
+                          GpuFilterExec
+                            GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                              GpuScanExec: batch_size=67108864
+                    GpuCoalesceBatchesExec: target_batch_size=67108864
+                      GpuRepartitionExec: partitioning=Hash([ws_web_page_sk@0], 8), input_partitions=8
+                        GpuCoalesceBatchesExec: target_batch_size=67108864
+                          GpuHashJoinExec
+                            GpuCoalesceBatchesExec: target_batch_size=67108864
+                              GpuRepartitionExec: partitioning=Hash([t_time_sk@0], 8), input_partitions=8
+                                GpuCoalesceBatchesExec: target_batch_size=67108864
+                                  GpuFilterExec
+                                    GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                                      GpuScanExec: batch_size=67108864
+                            GpuCoalesceBatchesExec: target_batch_size=67108864
+                              GpuRepartitionExec: partitioning=Hash([ws_sold_time_sk@0], 8), input_partitions=8
+                                GpuCoalesceBatchesExec: target_batch_size=67108864
+                                  GpuHashJoinExec
+                                    GpuCoalesceBatchesExec: target_batch_size=67108864
+                                      GpuRepartitionExec: partitioning=Hash([hd_demo_sk@0], 8), input_partitions=8
+                                        GpuCoalesceBatchesExec: target_batch_size=67108864
+                                          GpuFilterExec
+                                            GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                                              GpuScanExec: batch_size=67108864
+                                    GpuCoalesceBatchesExec: target_batch_size=67108864
+                                      GpuRepartitionExec: partitioning=Hash([ws_ship_hdemo_sk@1], 8), input_partitions=8
+                                        GpuScanExec: batch_size=67108864
+      GpuProjectExec
+        GpuAggregateExec: group_by=[], aggr=[count(*)]
+          GpuCoalescePartitionsExec
+            GpuAggregateExec: group_by=[], aggr=[count(*)]
+              GpuProjectExec
+                GpuCoalesceBatchesExec: target_batch_size=67108864
+                  GpuHashJoinExec
+                    GpuCoalesceBatchesExec: target_batch_size=67108864
+                      GpuRepartitionExec: partitioning=Hash([wp_web_page_sk@0], 8), input_partitions=8
+                        GpuCoalesceBatchesExec: target_batch_size=67108864
+                          GpuFilterExec
+                            GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                              GpuScanExec: batch_size=67108864
+                    GpuCoalesceBatchesExec: target_batch_size=67108864
+                      GpuRepartitionExec: partitioning=Hash([ws_web_page_sk@0], 8), input_partitions=8
+                        GpuCoalesceBatchesExec: target_batch_size=67108864
+                          GpuHashJoinExec
+                            GpuCoalesceBatchesExec: target_batch_size=67108864
+                              GpuRepartitionExec: partitioning=Hash([t_time_sk@0], 8), input_partitions=8
+                                GpuCoalesceBatchesExec: target_batch_size=67108864
+                                  GpuFilterExec
+                                    GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                                      GpuScanExec: batch_size=67108864
+                            GpuCoalesceBatchesExec: target_batch_size=67108864
+                              GpuRepartitionExec: partitioning=Hash([ws_sold_time_sk@0], 8), input_partitions=8
+                                GpuCoalesceBatchesExec: target_batch_size=67108864
+                                  GpuHashJoinExec
+                                    GpuCoalesceBatchesExec: target_batch_size=67108864
+                                      GpuRepartitionExec: partitioning=Hash([hd_demo_sk@0], 8), input_partitions=8
+                                        GpuCoalesceBatchesExec: target_batch_size=67108864
+                                          GpuFilterExec
+                                            GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
+                                              GpuScanExec: batch_size=67108864
+                                    GpuCoalesceBatchesExec: target_batch_size=67108864
+                                      GpuRepartitionExec: partitioning=Hash([ws_ship_hdemo_sk@1], 8), input_partitions=8
+                                        GpuScanExec: batch_size=67108864
+--- memory ---
+GpuSortExec: row_width=16, subtree_max_row_bytes=32
+  GpuProjectExec: row_width=16, subtree_max_row_bytes=32
+    CrossJoinExec: row_width=16, subtree_max_row_bytes=24
+      GpuProjectExec: row_width=8, subtree_max_row_bytes=24
+        GpuAggregateExec: row_width=8, subtree_max_row_bytes=24
+          GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=24
+            GpuAggregateExec: row_width=8, subtree_max_row_bytes=24
+              GpuProjectExec: row_width=1, subtree_max_row_bytes=24
+                GpuCoalesceBatchesExec: row_width=8, subtree_max_row_bytes=24
+                  GpuHashJoinExec: row_width=8, subtree_max_row_bytes=24
+                    GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                      GpuRepartitionExec: row_width=4, subtree_max_row_bytes=12
+                        GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                          GpuFilterExec: row_width=4, subtree_max_row_bytes=12
+                            GpuRepartitionExec: row_width=8, subtree_max_row_bytes=8
+                              GpuScanExec: row_width=8, subtree_max_row_bytes=8
+                    GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=24
+                      GpuRepartitionExec: row_width=4, subtree_max_row_bytes=24
+                        GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=24
+                          GpuHashJoinExec: row_width=4, subtree_max_row_bytes=24
+                            GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                              GpuRepartitionExec: row_width=4, subtree_max_row_bytes=12
+                                GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                                  GpuFilterExec: row_width=4, subtree_max_row_bytes=12
+                                    GpuRepartitionExec: row_width=8, subtree_max_row_bytes=8
+                                      GpuScanExec: row_width=8, subtree_max_row_bytes=8
+                            GpuCoalesceBatchesExec: row_width=8, subtree_max_row_bytes=24
+                              GpuRepartitionExec: row_width=8, subtree_max_row_bytes=24
+                                GpuCoalesceBatchesExec: row_width=8, subtree_max_row_bytes=24
+                                  GpuHashJoinExec: row_width=8, subtree_max_row_bytes=24
+                                    GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                                      GpuRepartitionExec: row_width=4, subtree_max_row_bytes=12
+                                        GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                                          GpuFilterExec: row_width=4, subtree_max_row_bytes=12
+                                            GpuRepartitionExec: row_width=8, subtree_max_row_bytes=8
+                                              GpuScanExec: row_width=8, subtree_max_row_bytes=8
+                                    GpuCoalesceBatchesExec: row_width=12, subtree_max_row_bytes=12
+                                      GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
+                                        GpuScanExec: row_width=12, subtree_max_row_bytes=12
+      GpuProjectExec: row_width=8, subtree_max_row_bytes=24
+        GpuAggregateExec: row_width=8, subtree_max_row_bytes=24
+          GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=24
+            GpuAggregateExec: row_width=8, subtree_max_row_bytes=24
+              GpuProjectExec: row_width=1, subtree_max_row_bytes=24
+                GpuCoalesceBatchesExec: row_width=8, subtree_max_row_bytes=24
+                  GpuHashJoinExec: row_width=8, subtree_max_row_bytes=24
+                    GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                      GpuRepartitionExec: row_width=4, subtree_max_row_bytes=12
+                        GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                          GpuFilterExec: row_width=4, subtree_max_row_bytes=12
+                            GpuRepartitionExec: row_width=8, subtree_max_row_bytes=8
+                              GpuScanExec: row_width=8, subtree_max_row_bytes=8
+                    GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=24
+                      GpuRepartitionExec: row_width=4, subtree_max_row_bytes=24
+                        GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=24
+                          GpuHashJoinExec: row_width=4, subtree_max_row_bytes=24
+                            GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                              GpuRepartitionExec: row_width=4, subtree_max_row_bytes=12
+                                GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                                  GpuFilterExec: row_width=4, subtree_max_row_bytes=12
+                                    GpuRepartitionExec: row_width=8, subtree_max_row_bytes=8
+                                      GpuScanExec: row_width=8, subtree_max_row_bytes=8
+                            GpuCoalesceBatchesExec: row_width=8, subtree_max_row_bytes=24
+                              GpuRepartitionExec: row_width=8, subtree_max_row_bytes=24
+                                GpuCoalesceBatchesExec: row_width=8, subtree_max_row_bytes=24
+                                  GpuHashJoinExec: row_width=8, subtree_max_row_bytes=24
+                                    GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                                      GpuRepartitionExec: row_width=4, subtree_max_row_bytes=12
+                                        GpuCoalesceBatchesExec: row_width=4, subtree_max_row_bytes=12
+                                          GpuFilterExec: row_width=4, subtree_max_row_bytes=12
+                                            GpuRepartitionExec: row_width=8, subtree_max_row_bytes=8
+                                              GpuScanExec: row_width=8, subtree_max_row_bytes=8
+                                    GpuCoalesceBatchesExec: row_width=12, subtree_max_row_bytes=12
+                                      GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
+                                        GpuScanExec: row_width=12, subtree_max_row_bytes=12

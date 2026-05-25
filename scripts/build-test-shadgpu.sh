@@ -83,6 +83,16 @@ if [ "$PATCH" -eq 1 ]; then
 fi
 
 if [ "$RUN" -eq 1 ]; then
+  # Optional knobs (set in the caller's env, not via flags):
+  #   PEACOCK_GPU_DEBUG=1    enable PCK_TRACE + per-node cudaStreamSynchronize
+  #                          in plan_executor.cpp (localizes async errors).
+  #   PCK_TEST_FILTER=<sub>  cargo-test name filter forwarded to the rust
+  #                          binary (e.g. test_gpu_q13). Empty = run all.
+  #   PCK_RUN_CPP=0          skip peacock_plan_tests (default: run them).
+  : "${PEACOCK_GPU_DEBUG:=}"
+  : "${PCK_TEST_FILTER:=}"
+  : "${PCK_RUN_CPP:=1}"
+
   # Note the heredoc uses no quoting on the EOF marker, so $VARS expand
   # *locally* before being sent to the remote shell. Escape with \$ for
   # any var that should be expanded remotely (e.g. \$LD_LIBRARY_PATH).
@@ -90,18 +100,22 @@ if [ "$RUN" -eq 1 ]; then
     set -e
 
     export PEACOCK_TESTDATA_DIR=/home/info/peacockdb/testdata
+    export PEACOCK_GPU_DEBUG='$PEACOCK_GPU_DEBUG'
     # cpp/install/lib first so libpeacock_gpu.so resolves for the rust test
     # binary (its baked-in rpath points at the build host's cargo target).
     export LD_LIBRARY_PATH=/home/info/peacockdb/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\$LD_LIBRARY_PATH
 
-    echo "==> peacock_plan_tests (C++)"
-    /home/info/peacockdb/cpp/install/bin/peacock_plan_tests
+    if [ '$PCK_RUN_CPP' = '1' ]; then
+      echo "==> peacock_plan_tests (C++)"
+      /home/info/peacockdb/cpp/install/bin/peacock_plan_tests
+    fi
 
-    echo "==> rust GPU integration tests"
+    echo "==> rust GPU integration tests (filter='$PCK_TEST_FILTER')"
     for t in /home/info/peacockdb/cpp/install/rust-tests/*; do
       [ -x "\$t" ] || continue
       echo "--- \$(basename "\$t")"
-      "\$t" --nocapture
+      # --test-threads=1: GPU/RMM context is process-wide, parallel tests OOM.
+      "\$t" --nocapture --test-threads=1 '$PCK_TEST_FILTER'
     done
 EOF
 fi
