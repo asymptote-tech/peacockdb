@@ -1,0 +1,12 @@
+The SQL queries in this directory are derived from the TPC-DS benchmark specification.
+
+TPC-DS is a decision support benchmark developed and maintained by the Transaction
+Processing Performance Council (TPC). The benchmark specification and queries are
+Copyright (C) 2001-2022 Transaction Processing Performance Council. All rights reserved.
+
+These queries are used here solely for non-commercial benchmarking and research purposes
+in accordance with the TPC Fair Use Policy (https://www.tpc.org/tpc_documents_current_versions/pdf/tpc_fair_use_policy.pdf).
+
+The source of the benchmark specification is: https://www.tpc.org/tpcds/
+
+Queries were extracted from the duckdb tpcds extension (`tpcds_queries()`).

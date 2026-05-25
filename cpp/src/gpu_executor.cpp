@@ -3,6 +3,7 @@
 
 #include <cudf/interop.hpp>
 #include <cudf/null_mask.hpp>
+#include <cudf/unary.hpp>
 
 #include <arrow/buffer.h>
 #include <arrow/c/bridge.h>
@@ -76,12 +77,33 @@ int peacock_execute(peacock_executor_t* executor,
     }
     auto tview = result.table->view();
 
+    // arrow-ipc on the Rust side rejects DECIMAL32/DECIMAL64 ("Unexpected
+    // decimal bit width 64"). Widen to DECIMAL128 (same scale) before export
+    // so the wire format only carries types the consumer can decode.
+    std::vector<std::unique_ptr<cudf::column>> widened;
+    std::vector<cudf::column_view> widened_views;
+    widened_views.reserve(tview.num_columns());
+    for (cudf::size_type i = 0; i < tview.num_columns(); ++i) {
+      auto col = tview.column(i);
+      auto t = col.type();
+      if (t.id() == cudf::type_id::DECIMAL32 ||
+          t.id() == cudf::type_id::DECIMAL64) {
+        auto w = cudf::cast(col, cudf::data_type{cudf::type_id::DECIMAL128,
+                                                  t.scale()});
+        widened_views.push_back(w->view());
+        widened.push_back(std::move(w));
+      } else {
+        widened_views.push_back(col);
+      }
+    }
+    cudf::table_view export_view{widened_views};
+
     // Export schema via the Arrow C Data Interface.
-    auto c_schema = cudf::to_arrow_schema(tview, col_meta);
+    auto c_schema = cudf::to_arrow_schema(export_view, col_meta);
     auto schema   = arrow::ImportSchema(c_schema.get()).ValueOrDie();
 
     // Copy table data to host and export as an Arrow record batch.
-    auto c_array = cudf::to_arrow_host(tview);
+    auto c_array = cudf::to_arrow_host(export_view);
     auto batch   = arrow::ImportRecordBatch(&c_array->array, schema).ValueOrDie();
 
     // Serialize as an Arrow IPC stream into a memory buffer.
