@@ -479,8 +479,7 @@ pub(crate) fn node_memory_with(
                 output_row_bytes: input_bytes,
             }
         }
-        // Everything else (CoalescePartitions, Repartition, CoalesceBatches, etc.):
-        // pass-through — peak is the max of children, ratio is max of children.
+        // Everything else (CoalescePartitions, Repartition, CoalesceBatches, et        // pass-through — peak is the max of children, ratio is max of children.
         _ => {
             let child_results: Vec<_> = children
                 .iter()
