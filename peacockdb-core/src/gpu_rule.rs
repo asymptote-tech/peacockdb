@@ -353,10 +353,6 @@ pub struct SubtreeMemory {
     pub input_row_bytes: usize,
     /// Estimated output bytes produced by this node per scan-batch-row N.
     pub output_row_bytes: usize,
-    /// Estimated input bytes flowing into this node per scan-batch-row N.
-    pub input_row_bytes: usize,
-    /// Estimated output bytes produced by this node per scan-batch-row N.
-    pub output_row_bytes: usize,
 }
 
 /// Walk the plan tree and compute peak memory as a linear function of batch size N.
@@ -388,8 +384,6 @@ pub(crate) fn node_memory_with(
             output_row_ratio: 1.0,
             input_row_bytes: 0,
             output_row_bytes: output_width,
-            input_row_bytes: 0,
-            output_row_bytes: output_width,
         };
     }
 
@@ -398,16 +392,13 @@ pub(crate) fn node_memory_with(
             let child = child_mems[0];
             let sel = selectivity.estimate(plan);
             let input_rows_bytes = (child.output_row_ratio * child.output_width as f64) as usize;
-            let output_rows_bytes = (sel * output_width as f64) as usize;
-            let output_rows_bytes = (sel * output_width as f64) as usize;
+            let output_rows_bytes = (child.output_row_ratio * sel * output_width as f64) as usize;
             SubtreeMemory {
                 subtree_max_row_bytes: child
                     .subtree_max_row_bytes
                     .max(input_rows_bytes + output_rows_bytes),
                 output_width,
                 output_row_ratio: child.output_row_ratio * sel,
-                input_row_bytes: input_rows_bytes,
-                output_row_bytes: output_rows_bytes,
                 input_row_bytes: input_rows_bytes,
                 output_row_bytes: output_rows_bytes,
             }
@@ -422,8 +413,6 @@ pub(crate) fn node_memory_with(
                     .max(input_rows_bytes + output_rows_bytes),
                 output_width,
                 output_row_ratio: child.output_row_ratio,
-                input_row_bytes: input_rows_bytes,
-                output_row_bytes: output_rows_bytes,
                 input_row_bytes: input_rows_bytes,
                 output_row_bytes: output_rows_bytes,
             }
@@ -443,8 +432,6 @@ pub(crate) fn node_memory_with(
                     .max(own),
                 output_width,
                 output_row_ratio: output_ratio,
-                input_row_bytes: build_bytes + probe_bytes,
-                output_row_bytes: output_bytes,
                 input_row_bytes: build_bytes + probe_bytes,
                 output_row_bytes: output_bytes,
             }
@@ -479,17 +466,8 @@ pub(crate) fn node_memory_with(
                 output_row_bytes: input_bytes,
             }
         }
-        // Everything else (CoalescePartitions, Repartition, CoalesceBatches, et        // pass-through — peak is the max of children, ratio is max of children.
-        _ => {
-            let child_results: Vec<_> = children
-                .iter()
-                .map(|c| analyze_memory_with(c, selectivity, cardinality))
-                .collect();
-            let max_peak = child_results
-                input_row_bytes: input_bytes,
-                output_row_bytes: input_bytes,
-            }
-        }
+        // Everything else (CoalescePartitions, Repartition, CoalesceBatches, etc.):
+        // pass-through — peak is the max of children, ratio is max of children.
         _ => {
             let max_peak = child_mems
                 .iter()
@@ -500,75 +478,20 @@ pub(crate) fn node_memory_with(
                 .iter()
                 .map(|c| c.output_row_ratio)
                 .fold(1.0_f64, f64::max);
-            let max_child_output = child_results
+            let input_bytes: usize = child_mems
                 .iter()
-                .map(|c| c.output_row_bytes)
-                .max()
-                .unwrap_or(output_width);
-            let max_child_output = child_mems
-                .iter()
-                .map(|c| c.output_row_bytes)
-                .max()
-                .unwrap_or(output_width);
+                .map(|c| (c.output_row_ratio * c.output_width as f64) as usize)
+                .sum();
+            let output_bytes = (max_ratio * output_width as f64) as usize;
             SubtreeMemory {
                 subtree_max_row_bytes: max_peak,
                 output_width,
                 output_row_ratio: max_ratio,
-                input_row_bytes: max_child_output,
-                output_row_bytes: max_child_output,
-                input_row_bytes: max_child_output,
-                output_row_bytes: max_child_output,
+                input_row_bytes: input_bytes,
+                output_row_bytes: output_bytes,
             }
         }
     }
-}
-
-pub(crate) fn analyze_memory_with(
-    plan: &Arc<dyn ExecutionPlan>,
-    selectivity: &dyn SelectivityEstimator,
-    cardinality: &dyn CardinalityEstimator,
-) -> SubtreeMemory {
-    let child_mems: Vec<SubtreeMemory> = plan
-        .children()
-        .iter()
-        .map(|c| analyze_memory_with(c, selectivity, cardinality))
-        .collect();
-    node_memory_with(plan, &child_mems, selectivity, cardinality)
-}
-
-/// Walk the plan tree once and return per-node memory info in pre-order.
-/// Each entry is `(name, depth, SubtreeMemory)`. O(n) — each node is visited once.
-pub fn analyze_memory_nodes(plan: &Arc<dyn ExecutionPlan>) -> Vec<(String, usize, SubtreeMemory)> {
-    fn walk(
-        plan: &Arc<dyn ExecutionPlan>,
-        depth: usize,
-        result: &mut Vec<(String, usize, SubtreeMemory)>,
-    ) -> SubtreeMemory {
-        let my_idx = result.len();
-        result.push((plan.name().to_string(), depth, SubtreeMemory {
-            subtree_max_row_bytes: 0,
-            output_width: 0,
-            output_row_ratio: 0.0,
-            input_row_bytes: 0,
-            output_row_bytes: 0,
-        }));
-        let child_mems: Vec<SubtreeMemory> = plan
-            .children()
-            .iter()
-            .map(|c| walk(c, depth + 1, result))
-            .collect();
-        let mem = node_memory_with(
-            plan,
-            &child_mems,
-            &TrivialSelectivityEstimator,
-            &TrivialCardinalityEstimator,
-        );
-        result[my_idx].2 = mem;
-        mem
-    }
-    let mut result = Vec::new();
-    walk(plan, 0, &mut result);
-    result
 }
 
 pub(crate) fn analyze_memory_with(
