@@ -92,11 +92,6 @@ fn assert_plan_matches_canonical_at(
     let canonical_path = dir.join(format!("{name}.txt"));
     let actual = format!("{}\n--- memory ---\n{}", plan_str(plan), memory_str(plan));
 
-    // Write the actual result to a sibling file for debugging/inspection
-    let actual_path = dir.join(format!("{name}_actual.txt"));
-    std::fs::create_dir_all(dir).unwrap(); // ensure the directory exists
-    std::fs::write(&actual_path, &actual).unwrap();
-
     if std::env::var("UPDATE_CANONICAL").is_ok() {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(&canonical_path, &actual).unwrap();
