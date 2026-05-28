@@ -1,8 +1,8 @@
 CrossJoinExec
-  GpuScanExec: batch_size=29826161
-  GpuScanExec: batch_size=29826161
+  GpuScanExec: batch_size=7669584
+  GpuScanExec: batch_size=7669584
 --- memory ---
-total_cost=284
-CrossJoinExec: row_width=140, subtree_max_row_bytes=72, input_bytes=72, output_bytes=72, cost=144
+total_cost=420
+CrossJoinExec: row_width=140, subtree_max_row_bytes=280, input_bytes=140, output_bytes=140, cost=280
   GpuScanExec: row_width=68, subtree_max_row_bytes=68, input_bytes=0, output_bytes=68, cost=68
   GpuScanExec: row_width=72, subtree_max_row_bytes=72, input_bytes=0, output_bytes=72, cost=72

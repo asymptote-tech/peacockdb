@@ -339,6 +339,7 @@ impl CardinalityEstimator for TrivialCardinalityEstimator {
 /// Memory is modeled as a linear function of the scan batch size N.
 /// `output_row_ratio` tracks the cumulative row multiplier: if a filter has
 /// 50% selectivity, downstream operators see 0.5 × N rows instead of N.
+#[derive(Clone, Copy)]
 pub struct SubtreeMemory {
     /// Peak GPU memory as bytes per scan-batch-row N:
     /// `peak_bytes = subtree_max_row_bytes * N`.
@@ -366,16 +367,17 @@ pub fn analyze_memory(plan: &Arc<dyn ExecutionPlan>) -> SubtreeMemory {
     )
 }
 
-pub(crate) fn analyze_memory_with(
+/// Compute a node's `SubtreeMemory` given already-computed child results.
+/// Does not recurse — callers are responsible for walking children first.
+pub(crate) fn node_memory_with(
     plan: &Arc<dyn ExecutionPlan>,
+    child_mems: &[SubtreeMemory],
     selectivity: &dyn SelectivityEstimator,
     cardinality: &dyn CardinalityEstimator,
 ) -> SubtreeMemory {
     let output_width = row_width(&plan.schema());
-    let children = plan.children();
 
-    // Leaf node (ParquetExec, etc.): just the output batch.
-    if children.is_empty() {
+    if child_mems.is_empty() {
         return SubtreeMemory {
             subtree_max_row_bytes: output_width,
             output_width,
@@ -386,9 +388,8 @@ pub(crate) fn analyze_memory_with(
     }
 
     match plan.name() {
-        // Filter: input batch (child rows) + output batch (filtered rows).
         "GpuFilterExec" => {
-            let child = analyze_memory_with(children[0], selectivity, cardinality);
+            let child = child_mems[0];
             let sel = selectivity.estimate(plan);
             let input_rows_bytes = (child.output_row_ratio * child.output_width as f64) as usize;
             let output_rows_bytes = (sel * output_width as f64) as usize;
@@ -402,9 +403,8 @@ pub(crate) fn analyze_memory_with(
                 output_row_bytes: output_rows_bytes,
             }
         }
-        // Projection / aggregation: input batch + output batch, row count preserved.
         "GpuProjectExec" | "GpuAggregateExec" => {
-            let child = analyze_memory_with(children[0], selectivity, cardinality);
+            let child = child_mems[0];
             let input_rows_bytes = (child.output_row_ratio * child.output_width as f64) as usize;
             let output_rows_bytes = (child.output_row_ratio * output_width as f64) as usize;
             SubtreeMemory {
@@ -417,10 +417,8 @@ pub(crate) fn analyze_memory_with(
                 output_row_bytes: output_rows_bytes,
             }
         }
-        // Hash join: build side + probe batch + output batch.
         "GpuHashJoinExec" => {
-            let build = analyze_memory_with(children[0], selectivity, cardinality);
-            let probe = analyze_memory_with(children[1], selectivity, cardinality);
+            let (build, probe) = (child_mems[0], child_mems[1]);
             let card = cardinality.estimate(plan);
             let build_bytes = (build.output_row_ratio * build.output_width as f64) as usize;
             let probe_bytes = (probe.output_row_ratio * probe.output_width as f64) as usize;
@@ -438,9 +436,27 @@ pub(crate) fn analyze_memory_with(
                 output_row_bytes: output_bytes,
             }
         }
-        // Sort: input + workspace (index array, ~2× input).
+        "CrossJoinExec" | "NestedLoopJoinExec" => {
+            let (left, right) = (child_mems[0], child_mems[1]);
+            let card = cardinality.estimate(plan);
+            let left_bytes = (left.output_row_ratio * left.output_width as f64) as usize;
+            let right_bytes = (right.output_row_ratio * right.output_width as f64) as usize;
+            let output_ratio = left.output_row_ratio * right.output_row_ratio * card;
+            let output_bytes = (output_ratio * output_width as f64) as usize;
+            let own = left_bytes + right_bytes + output_bytes;
+            SubtreeMemory {
+                subtree_max_row_bytes: left
+                    .subtree_max_row_bytes
+                    .max(right.subtree_max_row_bytes)
+                    .max(own),
+                output_width,
+                output_row_ratio: output_ratio,
+                input_row_bytes: left_bytes + right_bytes,
+                output_row_bytes: output_bytes,
+            }
+        }
         "GpuSortExec" => {
-            let child = analyze_memory_with(children[0], selectivity, cardinality);
+            let child = child_mems[0];
             let input_bytes = (child.output_row_ratio * child.output_width as f64) as usize;
             SubtreeMemory {
                 subtree_max_row_bytes: child.subtree_max_row_bytes.max(2 * input_bytes),
@@ -450,23 +466,17 @@ pub(crate) fn analyze_memory_with(
                 output_row_bytes: input_bytes,
             }
         }
-        // Everything else (CoalescePartitions, Repartition, CoalesceBatches, etc.):
-        // pass-through — peak is the max of children, ratio is max of children.
         _ => {
-            let child_results: Vec<_> = children
-                .iter()
-                .map(|c| analyze_memory_with(c, selectivity, cardinality))
-                .collect();
-            let max_peak = child_results
+            let max_peak = child_mems
                 .iter()
                 .map(|c| c.subtree_max_row_bytes)
                 .max()
                 .unwrap_or(output_width);
-            let max_ratio = child_results
+            let max_ratio = child_mems
                 .iter()
                 .map(|c| c.output_row_ratio)
                 .fold(1.0_f64, f64::max);
-            let max_child_output = child_results
+            let max_child_output = child_mems
                 .iter()
                 .map(|c| c.output_row_bytes)
                 .max()
@@ -480,6 +490,54 @@ pub(crate) fn analyze_memory_with(
             }
         }
     }
+}
+
+pub(crate) fn analyze_memory_with(
+    plan: &Arc<dyn ExecutionPlan>,
+    selectivity: &dyn SelectivityEstimator,
+    cardinality: &dyn CardinalityEstimator,
+) -> SubtreeMemory {
+    let child_mems: Vec<SubtreeMemory> = plan
+        .children()
+        .iter()
+        .map(|c| analyze_memory_with(c, selectivity, cardinality))
+        .collect();
+    node_memory_with(plan, &child_mems, selectivity, cardinality)
+}
+
+/// Walk the plan tree once and return per-node memory info in pre-order.
+/// Each entry is `(name, depth, SubtreeMemory)`. O(n) — each node is visited once.
+pub fn analyze_memory_nodes(plan: &Arc<dyn ExecutionPlan>) -> Vec<(String, usize, SubtreeMemory)> {
+    fn walk(
+        plan: &Arc<dyn ExecutionPlan>,
+        depth: usize,
+        result: &mut Vec<(String, usize, SubtreeMemory)>,
+    ) -> SubtreeMemory {
+        let my_idx = result.len();
+        result.push((plan.name().to_string(), depth, SubtreeMemory {
+            subtree_max_row_bytes: 0,
+            output_width: 0,
+            output_row_ratio: 0.0,
+            input_row_bytes: 0,
+            output_row_bytes: 0,
+        }));
+        let child_mems: Vec<SubtreeMemory> = plan
+            .children()
+            .iter()
+            .map(|c| walk(c, depth + 1, result))
+            .collect();
+        let mem = node_memory_with(
+            plan,
+            &child_mems,
+            &TrivialSelectivityEstimator,
+            &TrivialCardinalityEstimator,
+        );
+        result[my_idx].2 = mem;
+        mem
+    }
+    let mut result = Vec::new();
+    walk(plan, 0, &mut result);
+    result
 }
 
 // ---------------------------------------------------------------------------
