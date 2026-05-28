@@ -301,7 +301,7 @@ GpuProjectExec
                                                             GpuScanExec: batch_size=16777216
 --- memory ---
 GpuProjectExec: row_width=64, subtree_max_row_bytes=128
-  CrossJoinExec: row_width=64, subtree_max_row_bytes=112
+  CrossJoinExec: row_width=64, subtree_max_row_bytes=128
     GpuProjectExec: row_width=8, subtree_max_row_bytes=40
       GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
         GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
@@ -339,7 +339,7 @@ GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                                     GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
                                       GpuScanExec: row_width=12, subtree_max_row_bytes=12
     GpuProjectExec: row_width=56, subtree_max_row_bytes=112
-      CrossJoinExec: row_width=56, subtree_max_row_bytes=96
+      CrossJoinExec: row_width=56, subtree_max_row_bytes=112
         GpuProjectExec: row_width=8, subtree_max_row_bytes=40
           GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
             GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
@@ -377,7 +377,7 @@ GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                                         GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
                                           GpuScanExec: row_width=12, subtree_max_row_bytes=12
         GpuProjectExec: row_width=48, subtree_max_row_bytes=96
-          CrossJoinExec: row_width=48, subtree_max_row_bytes=80
+          CrossJoinExec: row_width=48, subtree_max_row_bytes=96
             GpuProjectExec: row_width=8, subtree_max_row_bytes=40
               GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
                 GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
@@ -415,7 +415,7 @@ GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                                             GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
                                               GpuScanExec: row_width=12, subtree_max_row_bytes=12
             GpuProjectExec: row_width=40, subtree_max_row_bytes=80
-              CrossJoinExec: row_width=40, subtree_max_row_bytes=64
+              CrossJoinExec: row_width=40, subtree_max_row_bytes=80
                 GpuProjectExec: row_width=8, subtree_max_row_bytes=40
                   GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
                     GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
@@ -453,7 +453,7 @@ GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                                                 GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
                                                   GpuScanExec: row_width=12, subtree_max_row_bytes=12
                 GpuProjectExec: row_width=32, subtree_max_row_bytes=64
-                  CrossJoinExec: row_width=32, subtree_max_row_bytes=48
+                  CrossJoinExec: row_width=32, subtree_max_row_bytes=64
                     GpuProjectExec: row_width=8, subtree_max_row_bytes=40
                       GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
                         GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
@@ -491,7 +491,7 @@ GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                                                     GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
                                                       GpuScanExec: row_width=12, subtree_max_row_bytes=12
                     GpuProjectExec: row_width=24, subtree_max_row_bytes=48
-                      CrossJoinExec: row_width=24, subtree_max_row_bytes=40
+                      CrossJoinExec: row_width=24, subtree_max_row_bytes=48
                         GpuProjectExec: row_width=8, subtree_max_row_bytes=40
                           GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
                             GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40

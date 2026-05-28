@@ -292,7 +292,7 @@ GpuSortPreservingMergeExec: row_width=80, subtree_max_row_bytes=196
                       GpuFilterExec: row_width=4, subtree_max_row_bytes=80
                         GpuAggregateExec: row_width=36, subtree_max_row_bytes=80
                           GpuProjectExec: row_width=40, subtree_max_row_bytes=80
-                            CrossJoinExec: row_width=40, subtree_max_row_bytes=60
+                            CrossJoinExec: row_width=40, subtree_max_row_bytes=80
                               GpuProjectExec: row_width=16, subtree_max_row_bytes=60
                                 GpuAggregateExec: row_width=16, subtree_max_row_bytes=60
                                   GpuCoalescePartitionsExec: row_width=16, subtree_max_row_bytes=60
@@ -401,7 +401,7 @@ GpuSortPreservingMergeExec: row_width=80, subtree_max_row_bytes=196
                       GpuFilterExec: row_width=4, subtree_max_row_bytes=80
                         GpuAggregateExec: row_width=36, subtree_max_row_bytes=80
                           GpuProjectExec: row_width=40, subtree_max_row_bytes=80
-                            CrossJoinExec: row_width=40, subtree_max_row_bytes=60
+                            CrossJoinExec: row_width=40, subtree_max_row_bytes=80
                               GpuProjectExec: row_width=16, subtree_max_row_bytes=60
                                 GpuAggregateExec: row_width=16, subtree_max_row_bytes=60
                                   GpuCoalescePartitionsExec: row_width=16, subtree_max_row_bytes=60

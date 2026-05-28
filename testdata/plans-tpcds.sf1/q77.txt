@@ -192,7 +192,7 @@ GpuSortPreservingMergeExec: row_width=84, subtree_max_row_bytes=170
                                               GpuScanExec: row_width=40, subtree_max_row_bytes=40
                 GpuProjectExec: row_width=84, subtree_max_row_bytes=152
                   GpuProjectExec: row_width=68, subtree_max_row_bytes=136
-                    CrossJoinExec: row_width=68, subtree_max_row_bytes=80
+                    CrossJoinExec: row_width=68, subtree_max_row_bytes=136
                       GpuCoalescePartitionsExec: row_width=32, subtree_max_row_bytes=80
                         GpuProjectExec: row_width=32, subtree_max_row_bytes=80
                           GpuAggregateExec: row_width=36, subtree_max_row_bytes=80

@@ -76,7 +76,7 @@ GpuSortExec
 --- memory ---
 GpuSortExec: row_width=16, subtree_max_row_bytes=32
   GpuProjectExec: row_width=16, subtree_max_row_bytes=32
-    CrossJoinExec: row_width=16, subtree_max_row_bytes=24
+    CrossJoinExec: row_width=16, subtree_max_row_bytes=32
       GpuProjectExec: row_width=8, subtree_max_row_bytes=24
         GpuAggregateExec: row_width=8, subtree_max_row_bytes=24
           GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=24
