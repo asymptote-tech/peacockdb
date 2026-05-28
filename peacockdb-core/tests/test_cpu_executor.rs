@@ -19,6 +19,14 @@ fn queries_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch-queries")
 }
 
+fn tpcds_testdata_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpcds.sf1")
+}
+
+fn tpcds_queries_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpcds-queries")
+}
+
 fn has_gpu_node(plan: &Arc<dyn ExecutionPlan>) -> bool {
     plan.name().starts_with("Gpu") || plan.children().iter().any(|c| has_gpu_node(c))
 }
@@ -180,6 +188,170 @@ cpu_result_test!(test_cpu_q19, "q19");
 cpu_result_test!(test_cpu_q20, "q20");
 cpu_result_test!(test_cpu_q21, "q21");
 cpu_result_test!(test_cpu_q22, "q22");
+
+async fn assert_cpu_results_match_datafusion_tpcds(name: &str) {
+    let data_dir = tpcds_testdata_dir();
+
+    let sql_path = tpcds_queries_dir().join(format!("{name}.sql"));
+    let sql = std::fs::read_to_string(&sql_path)
+        .unwrap_or_else(|_| panic!("query file not found: {}", sql_path.display()));
+    let mut df_ctx = build_session_state(1);
+    df_ctx = register_tables_for(df_ctx, &data_dir).await.unwrap();
+    let expected = df_ctx.sql(&sql).await.unwrap().collect().await.unwrap();
+
+    let cpu_ctx = create_context_with_tables(&data_dir, 1, FULL_BUDGET)
+        .await
+        .unwrap();
+    let plan = cpu_ctx.sql(&sql).await.unwrap().create_physical_plan().await.unwrap();
+    let actual = execute_node_by_node(plan, cpu_ctx.task_ctx(), &mut |_, _| {})
+        .await
+        .unwrap();
+
+    assert_eq!(
+        batches_to_sorted_str(&actual),
+        batches_to_sorted_str(&expected),
+        "CPU executor result for TPC-DS '{name}' differs from plain DataFusion"
+    );
+}
+
+macro_rules! tpcds_cpu_result_test {
+    ($func_name:ident, $query_name:literal) => {
+        #[tokio::test]
+        async fn $func_name() {
+            assert_cpu_results_match_datafusion_tpcds($query_name).await;
+        }
+    };
+}
+
+tpcds_cpu_result_test!(test_cpu_tpcds_q1,  "q1");
+tpcds_cpu_result_test!(test_cpu_tpcds_q2,  "q2");
+tpcds_cpu_result_test!(test_cpu_tpcds_q3,  "q3");
+tpcds_cpu_result_test!(test_cpu_tpcds_q4,  "q4");
+tpcds_cpu_result_test!(test_cpu_tpcds_q5,  "q5");
+tpcds_cpu_result_test!(test_cpu_tpcds_q6,  "q6");
+tpcds_cpu_result_test!(test_cpu_tpcds_q7,  "q7");
+tpcds_cpu_result_test!(test_cpu_tpcds_q8,  "q8");
+tpcds_cpu_result_test!(test_cpu_tpcds_q9,  "q9");
+tpcds_cpu_result_test!(test_cpu_tpcds_q10, "q10");
+tpcds_cpu_result_test!(test_cpu_tpcds_q11, "q11");
+// Skipped (issue #17, DataFusion 45 limitation — window PARTITION BY
+// ordering check fails: "All partition by columns should have an ordering"):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q12, "q12");
+tpcds_cpu_result_test!(test_cpu_tpcds_q13, "q13");
+tpcds_cpu_result_test!(test_cpu_tpcds_q14, "q14");
+tpcds_cpu_result_test!(test_cpu_tpcds_q15, "q15");
+tpcds_cpu_result_test!(test_cpu_tpcds_q16, "q16");
+tpcds_cpu_result_test!(test_cpu_tpcds_q17, "q17");
+tpcds_cpu_result_test!(test_cpu_tpcds_q18, "q18");
+tpcds_cpu_result_test!(test_cpu_tpcds_q19, "q19");
+// Skipped (issue #17, DataFusion 45 limitation — window PARTITION BY
+// ordering check fails: "All partition by columns should have an ordering"):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q20, "q20");
+tpcds_cpu_result_test!(test_cpu_tpcds_q21, "q21");
+tpcds_cpu_result_test!(test_cpu_tpcds_q22, "q22");
+tpcds_cpu_result_test!(test_cpu_tpcds_q23, "q23");
+tpcds_cpu_result_test!(test_cpu_tpcds_q24, "q24");
+tpcds_cpu_result_test!(test_cpu_tpcds_q25, "q25");
+tpcds_cpu_result_test!(test_cpu_tpcds_q26, "q26");
+// Skipped (issue #14, DataFusion 45 limitation — SanityCheckPlan rejects
+// SortPreservingMergeExec ordering for ROLLUP):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q27, "q27");
+tpcds_cpu_result_test!(test_cpu_tpcds_q28, "q28");
+tpcds_cpu_result_test!(test_cpu_tpcds_q29, "q29");
+tpcds_cpu_result_test!(test_cpu_tpcds_q30, "q30");
+tpcds_cpu_result_test!(test_cpu_tpcds_q31, "q31");
+tpcds_cpu_result_test!(test_cpu_tpcds_q32, "q32");
+tpcds_cpu_result_test!(test_cpu_tpcds_q33, "q33");
+tpcds_cpu_result_test!(test_cpu_tpcds_q34, "q34");
+tpcds_cpu_result_test!(test_cpu_tpcds_q35, "q35");
+// Skipped (issue #17, DataFusion 45 limitation — window PARTITION BY
+// ordering check fails: "Expects PARTITION BY expression to be ordered"):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q36, "q36");
+tpcds_cpu_result_test!(test_cpu_tpcds_q37, "q37");
+tpcds_cpu_result_test!(test_cpu_tpcds_q38, "q38");
+tpcds_cpu_result_test!(test_cpu_tpcds_q39, "q39");
+tpcds_cpu_result_test!(test_cpu_tpcds_q40, "q40");
+tpcds_cpu_result_test!(test_cpu_tpcds_q41, "q41");
+tpcds_cpu_result_test!(test_cpu_tpcds_q42, "q42");
+tpcds_cpu_result_test!(test_cpu_tpcds_q43, "q43");
+tpcds_cpu_result_test!(test_cpu_tpcds_q44, "q44");
+tpcds_cpu_result_test!(test_cpu_tpcds_q45, "q45");
+tpcds_cpu_result_test!(test_cpu_tpcds_q46, "q46");
+// Skipped (issue #17, DataFusion 45 limitation — window PARTITION BY
+// ordering check fails: "Expects PARTITION BY expression to be ordered"):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q47, "q47");
+tpcds_cpu_result_test!(test_cpu_tpcds_q48, "q48");
+tpcds_cpu_result_test!(test_cpu_tpcds_q49, "q49");
+tpcds_cpu_result_test!(test_cpu_tpcds_q50, "q50");
+// Skipped (issue #17, DataFusion 45 limitation — window PARTITION BY
+// ordering check fails: "Expects PARTITION BY expression to be ordered"):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q51, "q51");
+tpcds_cpu_result_test!(test_cpu_tpcds_q52, "q52");
+// Skipped (issue #17, DataFusion 45 limitation — window PARTITION BY
+// ordering check fails: "All partition by columns should have an ordering"):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q53, "q53");
+tpcds_cpu_result_test!(test_cpu_tpcds_q54, "q54");
+tpcds_cpu_result_test!(test_cpu_tpcds_q55, "q55");
+tpcds_cpu_result_test!(test_cpu_tpcds_q56, "q56");
+// Skipped (issue #17, DataFusion 45 limitation — window PARTITION BY
+// ordering check fails: "Expects PARTITION BY expression to be ordered"):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q57, "q57");
+tpcds_cpu_result_test!(test_cpu_tpcds_q58, "q58");
+tpcds_cpu_result_test!(test_cpu_tpcds_q59, "q59");
+tpcds_cpu_result_test!(test_cpu_tpcds_q60, "q60");
+tpcds_cpu_result_test!(test_cpu_tpcds_q61, "q61");
+tpcds_cpu_result_test!(test_cpu_tpcds_q62, "q62");
+// Skipped (issue #17, DataFusion 45 limitation — window PARTITION BY
+// ordering check fails: "All partition by columns should have an ordering"):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q63, "q63");
+tpcds_cpu_result_test!(test_cpu_tpcds_q64, "q64");
+tpcds_cpu_result_test!(test_cpu_tpcds_q65, "q65");
+tpcds_cpu_result_test!(test_cpu_tpcds_q66, "q66");
+// Skipped (issue #17, DataFusion 45 limitation — window PARTITION BY
+// ordering check fails: "Expects PARTITION BY expression to be ordered"):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q67, "q67");
+tpcds_cpu_result_test!(test_cpu_tpcds_q68, "q68");
+tpcds_cpu_result_test!(test_cpu_tpcds_q69, "q69");
+// Skipped (issue #14, DataFusion 45 limitation — GROUPING() aggregate has no
+// physical-plan support):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q70, "q70");
+tpcds_cpu_result_test!(test_cpu_tpcds_q71, "q71");
+// Skipped (issue #14, DataFusion 45 limitation — Date32 + Int64 type-coercion
+// not supported):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q72, "q72");
+tpcds_cpu_result_test!(test_cpu_tpcds_q73, "q73");
+tpcds_cpu_result_test!(test_cpu_tpcds_q74, "q74");
+tpcds_cpu_result_test!(test_cpu_tpcds_q75, "q75");
+tpcds_cpu_result_test!(test_cpu_tpcds_q76, "q76");
+tpcds_cpu_result_test!(test_cpu_tpcds_q77, "q77");
+tpcds_cpu_result_test!(test_cpu_tpcds_q78, "q78");
+tpcds_cpu_result_test!(test_cpu_tpcds_q79, "q79");
+tpcds_cpu_result_test!(test_cpu_tpcds_q80, "q80");
+tpcds_cpu_result_test!(test_cpu_tpcds_q81, "q81");
+tpcds_cpu_result_test!(test_cpu_tpcds_q82, "q82");
+tpcds_cpu_result_test!(test_cpu_tpcds_q83, "q83");
+tpcds_cpu_result_test!(test_cpu_tpcds_q84, "q84");
+tpcds_cpu_result_test!(test_cpu_tpcds_q85, "q85");
+// Skipped (issue #14, DataFusion 45 limitation — GROUPING() aggregate has no
+// physical-plan support):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q86, "q86");
+tpcds_cpu_result_test!(test_cpu_tpcds_q87, "q87");
+tpcds_cpu_result_test!(test_cpu_tpcds_q88, "q88");
+// Skipped (issue #17, DataFusion 45 limitation — window PARTITION BY
+// ordering check fails: "All partition by columns should have an ordering"):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q89, "q89");
+tpcds_cpu_result_test!(test_cpu_tpcds_q90, "q90");
+tpcds_cpu_result_test!(test_cpu_tpcds_q91, "q91");
+tpcds_cpu_result_test!(test_cpu_tpcds_q92, "q92");
+tpcds_cpu_result_test!(test_cpu_tpcds_q93, "q93");
+tpcds_cpu_result_test!(test_cpu_tpcds_q94, "q94");
+tpcds_cpu_result_test!(test_cpu_tpcds_q95, "q95");
+tpcds_cpu_result_test!(test_cpu_tpcds_q96, "q96");
+tpcds_cpu_result_test!(test_cpu_tpcds_q97, "q97");
+// Skipped (issue #17, DataFusion 45 limitation — window PARTITION BY
+// ordering check fails: "All partition by columns should have an ordering"):
+// tpcds_cpu_result_test!(test_cpu_tpcds_q98, "q98");
+tpcds_cpu_result_test!(test_cpu_tpcds_q99, "q99");
 
 #[tokio::test]
 async fn test_memory_boundary_preserved_tight_budget() {
