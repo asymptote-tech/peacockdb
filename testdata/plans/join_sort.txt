@@ -5,9 +5,10 @@ GpuSortExec
         GpuScanExec: batch_size=15790320
         GpuScanExec: batch_size=15790320
 --- memory ---
-GpuSortExec: row_width=64, subtree_max_row_bytes=136
-  GpuProjectExec: row_width=64, subtree_max_row_bytes=136
-    GpuCoalesceBatchesExec: row_width=64, subtree_max_row_bytes=136
-      GpuHashJoinExec: row_width=64, subtree_max_row_bytes=136
-        GpuScanExec: row_width=36, subtree_max_row_bytes=36
-        GpuScanExec: row_width=36, subtree_max_row_bytes=36
+total_cost=592
+GpuSortExec: row_width=64, subtree_max_row_bytes=136, input_bytes=64, output_bytes=64, cost=128
+  GpuProjectExec: row_width=64, subtree_max_row_bytes=136, input_bytes=64, output_bytes=64, cost=128
+    GpuCoalesceBatchesExec: row_width=64, subtree_max_row_bytes=136, input_bytes=64, output_bytes=64, cost=128
+      GpuHashJoinExec: row_width=64, subtree_max_row_bytes=136, input_bytes=72, output_bytes=64, cost=136
+        GpuScanExec: row_width=36, subtree_max_row_bytes=36, input_bytes=0, output_bytes=36, cost=36
+        GpuScanExec: row_width=36, subtree_max_row_bytes=36, input_bytes=0, output_bytes=36, cost=36

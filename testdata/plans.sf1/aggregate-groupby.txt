@@ -4,8 +4,9 @@ GpuAggregateExec: group_by=[l_returnflag], aggr=[sum(lineitem.l_quantity)]
       GpuAggregateExec: group_by=[l_returnflag], aggr=[sum(lineitem.l_quantity)]
         GpuScanExec: batch_size=22369621
 --- memory ---
-GpuAggregateExec: row_width=48, subtree_max_row_bytes=96
-  GpuCoalesceBatchesExec: row_width=48, subtree_max_row_bytes=96
-    GpuRepartitionExec: row_width=48, subtree_max_row_bytes=96
-      GpuAggregateExec: row_width=48, subtree_max_row_bytes=96
-        GpuScanExec: row_width=48, subtree_max_row_bytes=48
+total_cost=432
+GpuAggregateExec: row_width=48, subtree_max_row_bytes=96, input_bytes=48, output_bytes=48, cost=96
+  GpuCoalesceBatchesExec: row_width=48, subtree_max_row_bytes=96, input_bytes=48, output_bytes=48, cost=96
+    GpuRepartitionExec: row_width=48, subtree_max_row_bytes=96, input_bytes=48, output_bytes=48, cost=96
+      GpuAggregateExec: row_width=48, subtree_max_row_bytes=96, input_bytes=48, output_bytes=48, cost=96
+        GpuScanExec: row_width=48, subtree_max_row_bytes=48, input_bytes=0, output_bytes=48, cost=48

@@ -6,10 +6,11 @@ GpuAggregateExec: group_by=[], aggr=[count(*)]
           GpuFilterExec
             GpuScanExec: batch_size=67108864
 --- memory ---
-GpuAggregateExec: row_width=8, subtree_max_row_bytes=32
-  GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=32
-    GpuAggregateExec: row_width=8, subtree_max_row_bytes=32
-      GpuProjectExec: row_width=1, subtree_max_row_bytes=32
-        GpuCoalesceBatchesExec: row_width=16, subtree_max_row_bytes=32
-          GpuFilterExec: row_width=16, subtree_max_row_bytes=32
-            GpuScanExec: row_width=16, subtree_max_row_bytes=16
+total_cost=138
+GpuAggregateExec: row_width=8, subtree_max_row_bytes=32, input_bytes=8, output_bytes=8, cost=16
+  GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=32, input_bytes=8, output_bytes=8, cost=16
+    GpuAggregateExec: row_width=8, subtree_max_row_bytes=32, input_bytes=1, output_bytes=8, cost=9
+      GpuProjectExec: row_width=1, subtree_max_row_bytes=32, input_bytes=16, output_bytes=1, cost=17
+        GpuCoalesceBatchesExec: row_width=16, subtree_max_row_bytes=32, input_bytes=16, output_bytes=16, cost=32
+          GpuFilterExec: row_width=16, subtree_max_row_bytes=32, input_bytes=16, output_bytes=16, cost=32
+            GpuScanExec: row_width=16, subtree_max_row_bytes=16, input_bytes=0, output_bytes=16, cost=16
