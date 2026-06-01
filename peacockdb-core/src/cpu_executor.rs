@@ -12,7 +12,7 @@ use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream, TaskCo
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::{
-    DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
+    execute_stream, DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
 };
 use futures::Stream;
 
@@ -177,7 +177,10 @@ fn build_stream(
     let node_name = cpu_node.name().to_string();
     let node_schema = cpu_node.schema();
     let node = cpu_node.with_new_children(stream_children)?;
-    let inner = node.execute(0, task_ctx)?;
+    // Use execute_stream (not execute(0)) so multi-partition nodes (UnionExec,
+    // RepartitionExec, …) are coalesced into a single stream instead of
+    // silently dropping all partitions but one.
+    let inner = execute_stream(node, task_ctx)?;
     Ok(Box::pin(InstrumentedStream::new(
         node_name,
         node_schema,
