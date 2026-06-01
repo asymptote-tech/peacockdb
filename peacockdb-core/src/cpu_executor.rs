@@ -1,12 +1,20 @@
-use std::sync::Arc;
+use std::any::Any;
+use std::fmt;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 
 use datafusion::arrow::array::{BinaryArray, LargeBinaryArray, LargeStringArray, StringArray};
-use datafusion::arrow::datatypes::DataType;
+use datafusion::arrow::datatypes::{DataType, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::error::Result;
-use datafusion::execution::TaskContext;
-use datafusion::physical_plan::memory::MemoryExec;
-use datafusion::physical_plan::{collect, ExecutionPlan};
+use datafusion::error::{DataFusionError, Result};
+use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream, TaskContext};
+use datafusion::physical_expr::EquivalenceProperties;
+use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
+use datafusion::physical_plan::{
+    DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
+};
+use futures::Stream;
 
 use crate::gpu_rule::{
     GpuAggregateExec, GpuCoalesceBatchesExec, GpuCoalescePartitionsExec, GpuFilterExec,
@@ -79,18 +87,6 @@ pub struct NodeMemoryStats {
     pub max_batch_rows: usize,
 }
 
-impl NodeMemoryStats {
-    pub(crate) fn collect(node_name: &str, batches: &[RecordBatch]) -> Self {
-        Self {
-            node_name: node_name.to_string(),
-            allocated_bytes: batches.iter().map(|b| batch_allocated_size(b)).sum(),
-            logical_bytes: batches.iter().map(|b| batch_logical_size(b)).sum(),
-            row_count: batches.iter().map(|b| b.num_rows()).sum(),
-            max_batch_rows: batches.iter().map(|b| b.num_rows()).max().unwrap_or(0),
-        }
-    }
-}
-
 /// Recursively strip all GPU wrapper nodes from a plan tree, returning a
 /// structurally identical tree composed of plain DataFusion CPU nodes.
 pub fn strip_gpu_tree(plan: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionPlan>> {
@@ -111,47 +107,59 @@ pub fn strip_gpu_tree(plan: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionP
 /// overridden to that value so the Parquet reader produces the same batch sizes
 /// the GPU planner computed.
 ///
+/// Execution is streaming: each node's input is a live `SendableRecordBatchStream`
+/// wrapped in a `StreamSourceExec` rather than a fully-materialized `MemoryExec`.
+/// This keeps peak memory bounded by what the underlying operators themselves
+/// hold (e.g. a hash join still buffers its build side internally) plus a few
+/// in-flight batches, not the full output of every intermediate node.
+///
 /// For each node the function:
 /// 1. Strips the GPU wrapper (if any) → CPU node + optional batch_size.
 /// 2. Applies the batch_size override to `TaskContext` if present.
-/// 3. Recurses into the CPU node's children.
-/// 4. Wraps each child's results in `MemoryExec` (DataFusion's in-memory source).
-/// 5. Calls `collect()` on the isolated CPU node with its `MemoryExec` stubs.
-/// 6. Calls `on_node(cpu_node_name, &batches)`.
-///
-/// TODO: this implementation OOMs on wide joins (e.g. hash-join.sql at SF=1) because
-/// it calls `collect()` on every child before the parent runs, holding both full inputs
-/// of a join in memory simultaneously. Fix by making execution streaming:
-///
-/// 1. `StreamSourceExec` — a custom `ExecutionPlan` wrapping a `SendableRecordBatchStream`
-///    that returns it from `execute(0, ctx)`. Lets a live stream be passed as a child to
-///    any DataFusion operator without materializing it first.
-///
-/// 2. `InstrumentedStream` — a stream adaptor that accumulates `NodeMemoryStats` as
-///    batches flow through (row counts, allocated/logical bytes, max batch size) and
-///    fires the `on_node` callback when the stream is exhausted.
-///
-/// 3. Refactor `execute_node_by_node` to return `SendableRecordBatchStream`:
-///    - For each child, recurse to get a child stream.
-///    - Wrap each child stream in `InstrumentedStream` → `StreamSourceExec`.
-///    - Call `cpu_node.with_new_children(stream_sources)?.execute(0, task_ctx)`.
-///    - Return the resulting stream wrapped in its own `InstrumentedStream`.
-///
-/// 4. Update `execute_node_by_node_instrumented` to `collect()` only the root stream;
-///    all intermediate stats are populated by `InstrumentedStream` as the root is consumed.
-///
-/// 5. Change `on_node` signature from `FnMut(&str, &[RecordBatch])` to
-///    `FnMut(&str, &NodeMemoryStats)` since intermediate batches are no longer available
-///    all at once.
-///
-/// After the fix: hash join build side is still materialized by DataFusion internally
-/// (unavoidable), but the probe side streams through `batch_size` rows at a time.
-/// Peak memory ≈ build side size + 2 × batch_size × row_width.
+/// 3. Recurses into the CPU node's children to obtain child streams.
+/// 4. Wraps each child stream in `StreamSourceExec`.
+/// 5. Calls `execute(0, ctx)` on the isolated CPU node with its stream stubs.
+/// 6. Wraps the resulting stream in `InstrumentedStream`, which fires `on_node`
+///    with the accumulated `NodeMemoryStats` once the stream is fully drained.
 pub async fn execute_node_by_node(
     root: Arc<dyn ExecutionPlan>,
     task_ctx: Arc<TaskContext>,
-    on_node: &mut dyn FnMut(&str, &[RecordBatch]),
+    on_node: &mut dyn FnMut(&str, &NodeMemoryStats),
 ) -> Result<Vec<RecordBatch>> {
+    let collector: Arc<Mutex<Vec<NodeMemoryStats>>> = Arc::new(Mutex::new(Vec::new()));
+    let stream = build_stream(root, task_ctx, collector.clone())?;
+    let batches = drain_stream(stream).await?;
+    let stats = std::mem::take(&mut *collector.lock().unwrap());
+    for s in &stats {
+        on_node(&s.node_name, s);
+    }
+    Ok(batches)
+}
+
+/// Convenience wrapper: runs [`execute_node_by_node`] and collects
+/// [`NodeMemoryStats`] per node in post-order (stream-completion order).
+pub async fn execute_node_by_node_instrumented(
+    root: Arc<dyn ExecutionPlan>,
+    task_ctx: Arc<TaskContext>,
+    stats: &mut Vec<NodeMemoryStats>,
+) -> Result<Vec<RecordBatch>> {
+    execute_node_by_node(root, task_ctx, &mut |_, s| {
+        stats.push(NodeMemoryStats {
+            node_name: s.node_name.clone(),
+            allocated_bytes: s.allocated_bytes,
+            logical_bytes: s.logical_bytes,
+            row_count: s.row_count,
+            max_batch_rows: s.max_batch_rows,
+        });
+    })
+    .await
+}
+
+fn build_stream(
+    root: Arc<dyn ExecutionPlan>,
+    task_ctx: Arc<TaskContext>,
+    collector: Arc<Mutex<Vec<NodeMemoryStats>>>,
+) -> Result<SendableRecordBatchStream> {
     let (cpu_node, batch_size_override) = strip_gpu(root);
 
     let task_ctx = match batch_size_override {
@@ -159,32 +167,186 @@ pub async fn execute_node_by_node(
         None => task_ctx,
     };
 
-    let mut stub_children: Vec<Arc<dyn ExecutionPlan>> = vec![];
+    let mut stream_children: Vec<Arc<dyn ExecutionPlan>> = Vec::new();
     for child in cpu_node.children() {
-        let child_batches =
-            Box::pin(execute_node_by_node(child.clone(), task_ctx.clone(), on_node)).await?;
-        let mem_exec = MemoryExec::try_new(&[child_batches], child.schema(), None)?;
-        stub_children.push(Arc::new(mem_exec));
+        let child_schema = child.schema();
+        let child_stream = build_stream(child.clone(), task_ctx.clone(), collector.clone())?;
+        stream_children.push(Arc::new(StreamSourceExec::new(child_schema, child_stream)));
     }
 
     let node_name = cpu_node.name().to_string();
-    let node = cpu_node.with_new_children(stub_children)?;
-    let batches = collect(node, task_ctx).await?;
-    on_node(&node_name, &batches);
-    Ok(batches)
+    let node_schema = cpu_node.schema();
+    let node = cpu_node.with_new_children(stream_children)?;
+    let inner = node.execute(0, task_ctx)?;
+    Ok(Box::pin(InstrumentedStream::new(
+        node_name,
+        node_schema,
+        inner,
+        collector,
+    )))
 }
 
-/// Convenience wrapper: runs [`execute_node_by_node`] and collects
-/// [`NodeMemoryStats`] per node in post-order.
-pub async fn execute_node_by_node_instrumented(
-    root: Arc<dyn ExecutionPlan>,
-    task_ctx: Arc<TaskContext>,
-    stats: &mut Vec<NodeMemoryStats>,
-) -> Result<Vec<RecordBatch>> {
-    execute_node_by_node(root, task_ctx, &mut |name, batches| {
-        stats.push(NodeMemoryStats::collect(name, batches));
-    })
-    .await
+async fn drain_stream(mut stream: SendableRecordBatchStream) -> Result<Vec<RecordBatch>> {
+    use futures::StreamExt;
+    let mut out = Vec::new();
+    while let Some(batch) = stream.next().await {
+        out.push(batch?);
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// StreamSourceExec — adapt a live SendableRecordBatchStream as a child node
+// ---------------------------------------------------------------------------
+
+/// `ExecutionPlan` that returns a pre-built `SendableRecordBatchStream` from
+/// `execute(0, _)`. Single-partition, single-use: the stream is taken on first
+/// `execute()` call; subsequent calls error.
+struct StreamSourceExec {
+    schema: SchemaRef,
+    stream: Mutex<Option<SendableRecordBatchStream>>,
+    cache: PlanProperties,
+}
+
+impl fmt::Debug for StreamSourceExec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StreamSourceExec")
+            .field("schema", &self.schema)
+            .finish()
+    }
+}
+
+impl StreamSourceExec {
+    fn new(schema: SchemaRef, stream: SendableRecordBatchStream) -> Self {
+        let cache = PlanProperties::new(
+            EquivalenceProperties::new(Arc::clone(&schema)),
+            Partitioning::UnknownPartitioning(1),
+            EmissionType::Incremental,
+            Boundedness::Bounded,
+        );
+        Self {
+            schema,
+            stream: Mutex::new(Some(stream)),
+            cache,
+        }
+    }
+}
+
+impl DisplayAs for StreamSourceExec {
+    fn fmt_as(&self, _t: DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "StreamSourceExec")
+    }
+}
+
+impl ExecutionPlan for StreamSourceExec {
+    fn name(&self) -> &str {
+        "StreamSourceExec"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
+    fn properties(&self) -> &PlanProperties {
+        &self.cache
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![]
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        _children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(self)
+    }
+    fn execute(
+        &self,
+        _partition: usize,
+        _context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
+        self.stream
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or_else(|| DataFusionError::Internal("StreamSourceExec executed twice".into()))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// InstrumentedStream — accumulate NodeMemoryStats as batches flow through
+// ---------------------------------------------------------------------------
+
+struct InstrumentedStream {
+    node_name: String,
+    schema: SchemaRef,
+    inner: SendableRecordBatchStream,
+    allocated_bytes: usize,
+    logical_bytes: usize,
+    row_count: usize,
+    max_batch_rows: usize,
+    collector: Arc<Mutex<Vec<NodeMemoryStats>>>,
+    done: bool,
+}
+
+impl InstrumentedStream {
+    fn new(
+        node_name: String,
+        schema: SchemaRef,
+        inner: SendableRecordBatchStream,
+        collector: Arc<Mutex<Vec<NodeMemoryStats>>>,
+    ) -> Self {
+        Self {
+            node_name,
+            schema,
+            inner,
+            allocated_bytes: 0,
+            logical_bytes: 0,
+            row_count: 0,
+            max_batch_rows: 0,
+            collector,
+            done: false,
+        }
+    }
+}
+
+impl Stream for InstrumentedStream {
+    type Item = Result<RecordBatch>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let me = &mut *self;
+        let poll = Pin::new(&mut me.inner).poll_next(cx);
+        if let Poll::Ready(item) = &poll {
+            match item {
+                Some(Ok(batch)) => {
+                    me.allocated_bytes += batch_allocated_size(batch);
+                    me.logical_bytes += batch_logical_size(batch);
+                    me.row_count += batch.num_rows();
+                    if batch.num_rows() > me.max_batch_rows {
+                        me.max_batch_rows = batch.num_rows();
+                    }
+                }
+                None if !me.done => {
+                    me.done = true;
+                    me.collector.lock().unwrap().push(NodeMemoryStats {
+                        node_name: me.node_name.clone(),
+                        allocated_bytes: me.allocated_bytes,
+                        logical_bytes: me.logical_bytes,
+                        row_count: me.row_count,
+                        max_batch_rows: me.max_batch_rows,
+                    });
+                }
+                _ => {}
+            }
+        }
+        poll
+    }
+}
+
+impl RecordBatchStream for InstrumentedStream {
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
 }
 
 // ---------------------------------------------------------------------------

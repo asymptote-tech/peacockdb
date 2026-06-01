@@ -13,6 +13,7 @@ flatc-fork = "0.6"
 arrow = "54.2.0"
 datafusion = "45"
 flatbuffers = "25"
+futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 peacockdb-ffi = { path = "../peacockdb-ffi" }
 
