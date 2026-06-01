@@ -999,18 +999,21 @@ fn serialize_schema<'a>(
 /// (CoalesceBatches, Repartition, etc.) are not present in the flatbuffer
 /// and are therefore not reconstructed.
 pub fn deserialize_plan(bytes: &[u8]) -> Result<Arc<dyn ExecutionPlan>, String> {
-    // Plans nest arbitrarily deep (TPC-DS q8 exceeds 256 levels). The recursive
-    // descent below overflows the default 2 MiB thread stack on the deepest
-    // plans, so run it on a thread with a generous stack instead.
+    // Plans nest arbitrarily deep (TPC-DS q8 exceeds the verifier's default
+    // depth limit, and the verifier + recursive descent below overflow the
+    // default 2 MiB thread stack on the deepest plans). Run both on a thread
+    // with a generous stack and a raised `max_depth`, which keeps the verifier's
+    // malformed-buffer guard intact.
     std::thread::scope(|s| {
         std::thread::Builder::new()
             .stack_size(64 * 1024 * 1024)
             .spawn_scoped(s, || {
-                // Skip the flatbuffers verifier: its own per-level recursion
-                // blows the stack before a workable `max_depth` is reached, and
-                // these buffers are always produced by our own `serialize_plan`
-                // in-process, so there is no untrusted input to guard against.
-                let gpu_plan = unsafe { flatbuffers::root_unchecked::<fb::GpuPlan>(bytes) };
+                let opts = flatbuffers::VerifierOptions {
+                    max_depth: 1024,
+                    ..Default::default()
+                };
+                let gpu_plan = flatbuffers::root_with_opts::<fb::GpuPlan>(&opts, bytes)
+                    .map_err(|e| format!("invalid FlatBuffer: {e}"))?;
                 let root = gpu_plan.root().ok_or("GpuPlan has no root node")?;
                 deserialize_plan_node(&root)
             })
