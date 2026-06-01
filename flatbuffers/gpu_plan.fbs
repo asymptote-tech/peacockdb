@@ -303,6 +303,12 @@ table GpuAggregate {
   /// Per-grouping-set null masks. Empty/missing => regular GROUP BY. Each
   /// mask must have length == group_exprs.length.
   grouping_sets: [GroupingSetMask];
+  /// Schema of the input *before any aggregation* (AggregateExec::input_schema).
+  /// Aggregate-function argument exprs resolve against this schema, NOT against
+  /// `input.schema()`. They differ for Final/FinalPartitioned stages, whose
+  /// `input` is the Partial-stage output (group cols + partial accumulator
+  /// columns) rather than the original ungrouped columns the args reference.
+  aggr_input_schema: Schema;
 }
 
 /// Hash join (equi-join on key pairs, with optional residual filter).
