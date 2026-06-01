@@ -159,8 +159,14 @@ impl CpuExecutor {
     ) -> Result<(Vec<RecordBatch>, Vec<NodeMemoryStats>)> {
         let plan = self.ctx.sql(sql).await?.create_physical_plan().await?;
         let mut stats = Vec::new();
-        let batches = execute_node_by_node(plan, self.ctx.task_ctx(), &mut |name, batches| {
-            stats.push(NodeMemoryStats::collect(name, batches));
+        let batches = execute_node_by_node(plan, self.ctx.task_ctx(), &mut |_, s| {
+            stats.push(NodeMemoryStats {
+                node_name: s.node_name.clone(),
+                allocated_bytes: s.allocated_bytes,
+                logical_bytes: s.logical_bytes,
+                row_count: s.row_count,
+                max_batch_rows: s.max_batch_rows,
+            });
         })
         .await?;
         Ok((batches, stats))

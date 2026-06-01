@@ -2759,6 +2759,7 @@ dependencies = [
  "datafusion 45.0.0",
  "flatbuffers 25.12.19",
  "flatc-fork",
+ "futures",
  "peacockdb-ffi",
  "tokio",
 ]

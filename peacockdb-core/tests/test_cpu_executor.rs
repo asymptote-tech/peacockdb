@@ -154,10 +154,9 @@ macro_rules! cpu_result_test {
     };
 }
 
-// These tests OOM at sf=1, see TODO in cpu_executor.rs
-//cpu_result_test!(test_cpu_hash_join, "hash-join");
-//cpu_result_test!(test_cpu_left_join, "left-join");
-//cpu_result_test!(test_cpu_mixed_join, "mixed-join");
+cpu_result_test!(test_cpu_hash_join, "hash-join");
+cpu_result_test!(test_cpu_left_join, "left-join");
+cpu_result_test!(test_cpu_mixed_join, "mixed-join");
 
 cpu_result_test!(test_cpu_scan_limit, "scan-limit");
 cpu_result_test!(test_cpu_filter_project, "filter-project");
