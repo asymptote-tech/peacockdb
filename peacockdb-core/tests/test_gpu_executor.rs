@@ -86,51 +86,35 @@ macro_rules! gpu_result_test {
 }
 
 gpu_result_test!(test_gpu_scan_limit, "scan-limit");
-// Skipped (issue #12, bucket 6 — cuDF AST mixed int32/int64 coercion):
-// gpu_result_test!(test_gpu_filter_project, "filter-project");
+gpu_result_test!(test_gpu_filter_project, "filter-project");
 gpu_result_test!(test_gpu_aggregate_groupby, "aggregate-groupby");
 gpu_result_test!(test_gpu_semi_join, "semi-join");
 gpu_result_test!(test_gpu_anti_join, "anti-join");
 // Skipped (issue #12, bucket 4 — needs GpuCrossJoinExec / GpuNestedLoopJoinExec):
 // gpu_result_test!(test_gpu_nested_loop_join, "nested-loop-join");
 // gpu_result_test!(test_gpu_cross_join, "cross-join");
-// Skipped (issue #12, bucket 6 — cuDF AST type mismatch: Decimal × (Int − Decimal) coercion):
-// gpu_result_test!(test_gpu_q1, "q1");
+gpu_result_test!(test_gpu_q1, "q1");
 gpu_result_test!(test_gpu_q2, "q2");
-// Skipped (issue #12, bucket 8 — cuDF groupby: Invalid type/aggregation combination
-// on Decimal × Decimal sum):
-// gpu_result_test!(test_gpu_q3, "q3");
+gpu_result_test!(test_gpu_q3, "q3");
 gpu_result_test!(test_gpu_q4, "q4");
-// Skipped (issue #12, bucket 7 — result divergence: revenue values differ):
-// gpu_result_test!(test_gpu_q5, "q5");
-// Skipped (issue #12, bucket 6 — cuDF AST type mismatch: Decimal column vs Float/Int literal):
-// gpu_result_test!(test_gpu_q6, "q6");
-// Skipped (issue #12, bucket 6 — cuDF AST type mismatch: Decimal × (Int − Decimal) coercion):
-// gpu_result_test!(test_gpu_q7, "q7");
-// Skipped (issue #12, bucket 6 — cuDF AST type mismatch: Decimal × (Int − Decimal) coercion):
-// gpu_result_test!(test_gpu_q8, "q8");
-// Skipped (issue #12, bucket 6 — cuDF AST type mismatch in GpuProject expr):
-// gpu_result_test!(test_gpu_q9, "q9");
-// Skipped (issue #12, bucket 7 — result divergence: revenue values differ):
-// gpu_result_test!(test_gpu_q10, "q10");
+gpu_result_test!(test_gpu_q5, "q5");
+gpu_result_test!(test_gpu_q6, "q6");
+gpu_result_test!(test_gpu_q7, "q7");
+gpu_result_test!(test_gpu_q8, "q8");
+gpu_result_test!(test_gpu_q9, "q9");
+gpu_result_test!(test_gpu_q10, "q10");
 // Skipped (issue #12, bucket 4 — TPC-H q11 has correlated HAVING subquery → NestedLoopJoinExec):
 // gpu_result_test!(test_gpu_q11, "q11");
-// Skipped (issue #12, bucket 8 — cuDF groupby: Invalid type/aggregation combination
-// on sum of CASE WHEN ... THEN 1 ELSE 0 END):
-// gpu_result_test!(test_gpu_q12, "q12");
+gpu_result_test!(test_gpu_q12, "q12");
 gpu_result_test!(test_gpu_q13, "q13");
-// Skipped (issue #12, bucket 6 — cuDF AST type mismatch: Decimal × (Int − Decimal) coercion):
-// gpu_result_test!(test_gpu_q14, "q14");
+gpu_result_test!(test_gpu_q14, "q14");
 // q15 uses a view; skip like test_cpu_executor.rs / test_queries.rs
 gpu_result_test!(test_gpu_q16, "q16");
 gpu_result_test!(test_gpu_q17, "q17");
-// Skipped (issue #12, bucket 6 — cuDF AST type mismatch in join filter):
-// gpu_result_test!(test_gpu_q18, "q18");
-// Skipped (issue #12, bucket 6 — cuDF AST type mismatch in GpuFilter expr):
-// gpu_result_test!(test_gpu_q19, "q19");
+gpu_result_test!(test_gpu_q18, "q18");
+gpu_result_test!(test_gpu_q19, "q19");
 gpu_result_test!(test_gpu_q20, "q20");
-// Skipped (issue #12, bucket 7 — result divergence: empty vs ~99 rows):
-// gpu_result_test!(test_gpu_q21, "q21");
+gpu_result_test!(test_gpu_q21, "q21");
 // Skipped (issue #12, bucket 4 — TPC-H q22 has correlated subquery → NestedLoopJoinExec):
 // gpu_result_test!(test_gpu_q22, "q22");
 

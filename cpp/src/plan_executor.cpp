@@ -1,4 +1,5 @@
 #include "plan_executor.h"
+#include "plan_executor_internal.h"
 #include "generated/gpu_plan_generated.h"
 
 #include <cudf/ast/expressions.hpp>
@@ -20,6 +21,12 @@
 #include <cudf/join/filtered_join.hpp>
 #define PEACOCK_HAVE_FILTERED_JOIN 1
 #endif
+// cuDF 26.02 moved the mixed (equality + AST-conditional) join functions out of
+// the monolithic <cudf/join.hpp> into their own header; older versions declare
+// them in <cudf/join.hpp> (included above). Pull in the split header when present.
+#if __has_include(<cudf/join/mixed_join.hpp>)
+#include <cudf/join/mixed_join.hpp>
+#endif
 #include <cudf/reduction.hpp>
 #include <cudf/scalar/scalar.hpp>
 #include <cudf/strings/contains.hpp>
@@ -35,6 +42,7 @@
 #include <cudf/wrappers/durations.hpp>
 #include <cudf/wrappers/timestamps.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -96,9 +104,18 @@ struct ExprContext {
   }
 };
 
+// When non-null (join-filter context), a ColumnRef(i) in the expression is
+// remapped to column_reference(col_map[i].index, LEFT|RIGHT) so a mixed
+// semi/anti join's AST predicate can address its two conditional tables.
+using JoinFilterColMap = flatbuffers::Vector<const fb::JoinFilterColumn*>;
+
 // Forward declarations
 static TableResult execute_node(const fb::PlanNode* node);
-static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx);
+static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
+                                         const JoinFilterColMap* col_map = nullptr);
+static bool is_predicate_op(fb::BinaryOp op);
+static cudf::type_id infer_expr_type(const fb::Expr* expr,
+                                     cudf::table_view const& table);
 
 // ============================================================================
 // FlatBuffer DataType → cuDF type_id
@@ -158,13 +175,27 @@ static cudf::ast::ast_operator fb_to_ast_op(fb::BinaryOp op) {
 // AST expression builder
 // ============================================================================
 
-static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx) {
+static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
+                                         const JoinFilterColMap* col_map) {
   if (!expr || !expr->node())
     throw std::runtime_error("null expression");
 
   switch (expr->node_type()) {
     case fb::ExprNode_ColumnRef: {
       auto* col = expr->node_as_ColumnRef();
+      if (col_map) {
+        // Join-filter predicate: ColumnRef(i) indexes the filter's intermediate
+        // schema; remap to (side, index) so the AST addresses the mixed join's
+        // left/right conditional tables directly.
+        if (col->index() >= col_map->size())
+          throw std::runtime_error("join filter ColumnRef out of range of filter_columns");
+        auto* fc = col_map->Get(col->index());
+        auto side = fc->side() == fb::JoinSide_Right
+                        ? cudf::ast::table_reference::RIGHT
+                        : cudf::ast::table_reference::LEFT;
+        return ctx.keep(std::make_unique<cudf::ast::column_reference>(
+            static_cast<cudf::size_type>(fc->index()), side));
+      }
       return ctx.keep(std::make_unique<cudf::ast::column_reference>(
           static_cast<cudf::size_type>(col->index())));
     }
@@ -259,15 +290,15 @@ static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx)
 
     case fb::ExprNode_BinaryExprNode: {
       auto* bin = expr->node_as_BinaryExprNode();
-      auto& left = build_expr(bin->left(), ctx);
-      auto& right = build_expr(bin->right(), ctx);
+      auto& left = build_expr(bin->left(), ctx, col_map);
+      auto& right = build_expr(bin->right(), ctx, col_map);
       auto op = fb_to_ast_op(bin->op());
       return ctx.keep(std::make_unique<cudf::ast::operation>(op, left, right));
     }
 
     case fb::ExprNode_UnaryExprNode: {
       auto* un = expr->node_as_UnaryExprNode();
-      auto& arg = build_expr(un->arg(), ctx);
+      auto& arg = build_expr(un->arg(), ctx, col_map);
       switch (un->op()) {
         case fb::UnaryOp_Not:
           return ctx.keep(std::make_unique<cudf::ast::operation>(
@@ -292,7 +323,7 @@ static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx)
 
     case fb::ExprNode_CastExprNode: {
       auto* cast = expr->node_as_CastExprNode();
-      auto& inner = build_expr(cast->expr(), ctx);
+      auto& inner = build_expr(cast->expr(), ctx, col_map);
       auto target = fb_to_type_id(cast->target_type());
       cudf::ast::ast_operator cast_op;
       switch (target) {
@@ -342,7 +373,65 @@ static bool is_string_like_literal(const fb::Expr* expr) {
   }
 }
 
-static bool is_ast_able(const fb::Expr* expr) {
+// Best-effort static type of an expression, resolved against the input table
+// (column refs need the schema). Used only to decide AST-ability; returns
+// EMPTY for shapes we can't infer, which callers treat conservatively.
+static cudf::type_id infer_expr_type(const fb::Expr* expr,
+                                     cudf::table_view const& table) {
+  switch (expr->node_type()) {
+    case fb::ExprNode_ColumnRef: {
+      auto idx = static_cast<cudf::size_type>(
+          expr->node_as_ColumnRef()->index());
+      if (idx < 0 || idx >= table.num_columns()) return cudf::type_id::EMPTY;
+      return table.column(idx).type().id();
+    }
+    case fb::ExprNode_LiteralExpr: {
+      auto* sv = expr->node_as_LiteralExpr()->value();
+      return sv ? fb_to_type_id(sv->type()) : cudf::type_id::EMPTY;
+    }
+    case fb::ExprNode_BinaryExprNode: {
+      auto* b = expr->node_as_BinaryExprNode();
+      if (is_predicate_op(b->op())) return cudf::type_id::BOOL8;
+      auto lt = infer_expr_type(b->left(), table);
+      auto rt = infer_expr_type(b->right(), table);
+      auto is_float = [](cudf::type_id t) {
+        return t == cudf::type_id::FLOAT32 || t == cudf::type_id::FLOAT64;
+      };
+      if (is_float(lt) || is_float(rt)) return cudf::type_id::FLOAT64;
+      if (lt == cudf::type_id::DECIMAL128 || rt == cudf::type_id::DECIMAL128)
+        return cudf::type_id::DECIMAL128;
+      return lt;
+    }
+    case fb::ExprNode_UnaryExprNode: {
+      auto* u = expr->node_as_UnaryExprNode();
+      switch (u->op()) {
+        case fb::UnaryOp_Not:
+        case fb::UnaryOp_IsNull:
+        case fb::UnaryOp_IsNotNull:
+          return cudf::type_id::BOOL8;
+        default:  // Negative
+          return infer_expr_type(u->arg(), table);
+      }
+    }
+    case fb::ExprNode_CastExprNode:
+      return fb_to_type_id(expr->node_as_CastExprNode()->target_type());
+    case fb::ExprNode_LikeExprNode:
+      return cudf::type_id::BOOL8;
+    case fb::ExprNode_CaseExprNode: {
+      auto* c = expr->node_as_CaseExprNode();
+      if (c->when_thens() && c->when_thens()->size() > 0)
+        return infer_expr_type(c->when_thens()->Get(0)->then(), table);
+      return cudf::type_id::EMPTY;
+    }
+    case fb::ExprNode_ScalarFunctionExprNode:
+      return fb_to_type_id(
+          expr->node_as_ScalarFunctionExprNode()->return_type());
+    default:
+      return cudf::type_id::EMPTY;
+  }
+}
+
+bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table) {
   switch (expr->node_type()) {
     case fb::ExprNode_LikeExprNode:
     case fb::ExprNode_CaseExprNode:
@@ -354,10 +443,28 @@ static bool is_ast_able(const fb::Expr* expr) {
       // column path (cudf::binary_operation, which does support strings).
       if (is_string_like_literal(b->left()) || is_string_like_literal(b->right()))
         return false;
-      return is_ast_able(b->left()) && is_ast_able(b->right());
+      // cuDF AST requires both operands to be the identical type and has no
+      // decimal support at all (it only auto-promotes nothing — unlike the
+      // binaryop API). DataFusion emits matched decimal operands and same-type
+      // comparisons, but our AST literal path promotes decimal literals to
+      // float64, and int widths can differ. Any decimal operand, or a type
+      // mismatch between the two sides, routes to the column path, where
+      // cudf::binary_operation coerces (and handles fixed_point) natively.
+      auto lt = infer_expr_type(b->left(), table);
+      auto rt = infer_expr_type(b->right(), table);
+      // Un-inferrable operand → route to the column path conservatively. (Two
+      // EMPTYs would otherwise compare equal below and be treated as AST-able,
+      // the opposite of the intended fallback.)
+      if (lt == cudf::type_id::EMPTY || rt == cudf::type_id::EMPTY)
+        return false;
+      if (lt == cudf::type_id::DECIMAL128 || rt == cudf::type_id::DECIMAL128)
+        return false;
+      if (lt != rt)
+        return false;
+      return is_ast_able(b->left(), table) && is_ast_able(b->right(), table);
     }
     case fb::ExprNode_UnaryExprNode:
-      return is_ast_able(expr->node_as_UnaryExprNode()->arg());
+      return is_ast_able(expr->node_as_UnaryExprNode()->arg(), table);
     case fb::ExprNode_CastExprNode: {
       // cuDF AST only has CAST_TO_INT64 / CAST_TO_FLOAT64. Any other target
       // (notably Decimal128) must go through the column path, which uses
@@ -365,7 +472,7 @@ static bool is_ast_able(const fb::Expr* expr) {
       auto target = fb_to_type_id(expr->node_as_CastExprNode()->target_type());
       if (target != cudf::type_id::INT64 && target != cudf::type_id::FLOAT64)
         return false;
-      return is_ast_able(expr->node_as_CastExprNode()->expr());
+      return is_ast_able(expr->node_as_CastExprNode()->expr(), table);
     }
     default:
       return true;
@@ -473,9 +580,25 @@ static bool is_predicate_op(fb::BinaryOp op) {
 // Pick an output type for binary_operation. Boolean for predicates; otherwise
 // promote to the wider of the two input types (cuDF's binary_operation does
 // the actual coercion under the hood, but it needs us to declare an output).
-static cudf::data_type binop_output_type(
+cudf::data_type binop_output_type(
     fb::BinaryOp op, cudf::data_type lhs, cudf::data_type rhs) {
   if (is_predicate_op(op)) return cudf::data_type{cudf::type_id::BOOL8};
+  // Fixed-point arithmetic: cuDF requires the output type's scale to equal the
+  // scale it computes for the operation, so we can't just echo lhs. The rules
+  // (scales are base-10 exponents, negative for fractional digits): ADD/SUB/MOD
+  // take min(s_l, s_r); MUL adds; DIV subtracts. Matches SQL decimal semantics.
+  if (lhs.id() == cudf::type_id::DECIMAL128 ||
+      rhs.id() == cudf::type_id::DECIMAL128) {
+    int32_t ls = lhs.scale();
+    int32_t rs = rhs.scale();
+    int32_t out_scale;
+    switch (op) {
+      case fb::BinaryOp_Multiply: out_scale = ls + rs; break;
+      case fb::BinaryOp_Divide:   out_scale = ls - rs; break;
+      default:                    out_scale = std::min(ls, rs); break;
+    }
+    return cudf::data_type{cudf::type_id::DECIMAL128, out_scale};
+  }
   // Fall back to lhs type — adequate for the queries we care about
   // (arithmetic in projections is rare in this code path; the heavy
   // arithmetic still goes through AST).
@@ -488,6 +611,32 @@ static std::unique_ptr<cudf::column> build_column_binary(
   auto* lhs = bin->left();
   auto* rhs = bin->right();
   auto op = fb_to_binop(bin->op());
+
+  // Decimal division: cuDF's fixed_point DIV yields scale s_l-s_r (e.g. 0 for
+  // two scale-4 sums → truncates to 0), but DataFusion boosts the scale (its
+  // declared value rides on out_decimal_precision/scale). Reproduce it by
+  // pre-scaling the numerator so DIV lands on DataFusion's scale: with output
+  // exponent e_o = −out_scale and denominator exponent e_r, set numerator
+  // exponent e_l = e_o + e_r (since DIV gives e_l − e_r = e_o).
+  if (bin->op() == fb::BinaryOp_Divide && bin->out_decimal_precision() != 0) {
+    auto lcol = build_column(lhs, table);
+    auto rcol = build_column(rhs, table);
+    if (lcol->type().id() == cudf::type_id::DECIMAL128 &&
+        rcol->type().id() == cudf::type_id::DECIMAL128) {
+      int32_t e_o = -static_cast<int32_t>(bin->out_decimal_scale());
+      int32_t e_r = rcol->type().scale();
+      auto num = cudf::cast(
+          lcol->view(), cudf::data_type{cudf::type_id::DECIMAL128, e_o + e_r});
+      return cudf::binary_operation(
+          num->view(), rcol->view(), op,
+          cudf::data_type{cudf::type_id::DECIMAL128, e_o});
+    }
+    // out_decimal_precision != 0 means DataFusion declared a Decimal128 result,
+    // which after scan-widening implies both operands materialise as DECIMAL128.
+    throw std::runtime_error(
+        "decimal division declared Decimal128 output but operand columns are "
+        "not both DECIMAL128");
+  }
 
   // Column-scalar fast path when one side is a literal.
   if (rhs->node_type() == fb::ExprNode_LiteralExpr &&
@@ -663,7 +812,7 @@ static std::unique_ptr<cudf::column> build_column(
   }
 
   // AST-able expressions go through cudf::compute_column for fusion.
-  if (is_ast_able(expr)) {
+  if (is_ast_able(expr, table)) {
     auto out = eval_ast_subtree(expr, table);
     debug_sync("AST->compute_column");
     return out;
@@ -791,7 +940,24 @@ static TableResult execute_scan(const fb::GpuScan* scan) {
     col_names.push_back(ci.name);
   }
 
-  return {std::move(result.tbl), std::move(col_names)};
+  // Widen narrow decimals to DECIMAL128. The cuDF parquet reader picks the
+  // smallest fixed_point width that fits (decimal32/64 for small precision),
+  // but DataFusion — and therefore our serialized literals and the CPU
+  // ground-truth executor — represent every decimal as Decimal128. cuDF's
+  // binary_operation rejects mixed fixed_point widths ("Unsupported operator
+  // for these types"), so normalize the scan output to a uniform DECIMAL128
+  // representation (scale preserved). This also subsumes the decimal64→128
+  // widening the result-export path does for Arrow IPC.
+  auto cols = result.tbl->release();
+  for (auto& c : cols) {
+    auto id = c->type().id();
+    if (id == cudf::type_id::DECIMAL32 || id == cudf::type_id::DECIMAL64) {
+      c = cudf::cast(c->view(),
+                     cudf::data_type{cudf::type_id::DECIMAL128, c->type().scale()});
+    }
+  }
+
+  return {std::make_unique<cudf::table>(std::move(cols)), std::move(col_names)};
 }
 
 // ============================================================================
@@ -804,7 +970,7 @@ static TableResult execute_filter(const fb::GpuFilter* filter) {
   // AST fast path when the predicate has no LIKE / CASE / ScalarFunction nodes;
   // otherwise produce the bool mask via the column-producing evaluator.
   std::unique_ptr<cudf::column> mask;
-  if (is_ast_able(filter->predicate())) {
+  if (is_ast_able(filter->predicate(), input.table->view())) {
     ExprContext ctx;
     auto& predicate = build_expr(filter->predicate(), ctx);
     mask = cudf::compute_column(input.table->view(), predicate);
@@ -856,7 +1022,7 @@ static TableResult execute_project(const fb::GpuProject* proj) {
       auto* col = expr->node_as_ColumnRef();
       auto idx = static_cast<cudf::size_type>(col->index());
       columns.push_back(std::make_unique<cudf::column>(tv.column(idx)));
-    } else if (is_ast_able(expr)) {
+    } else if (is_ast_able(expr, tv)) {
       // Pure AST expression: fuse via cudf::compute_column.
       ExprContext ctx;
       auto& ast = build_expr(expr, ctx);
@@ -956,14 +1122,45 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
   std::vector<cudf::column_view> key_cols;
   for (auto idx : key_indices) key_cols.push_back(tv.column(idx));
 
+  // Owns columns materialised for aggregate arguments that aren't plain column
+  // references (e.g. sum(a*b), sum(CASE ...)). Must outlive the aggregate call
+  // below, since the column_views handed to cuDF point into these.
+  std::vector<std::unique_ptr<cudf::column>> computed_args;
+
   // Helper to determine the values column for a function node.
   auto get_values_col = [&](const fb::AggregateFuncNode* func) -> cudf::column_view {
+    cudf::column_view base;
     if (func->args() && func->args()->size() > 0) {
       auto* arg = func->args()->Get(0);
-      if (arg->node_type() == fb::ExprNode_ColumnRef)
-        return tv.column(static_cast<cudf::size_type>(arg->node_as_ColumnRef()->index()));
+      if (arg->node_type() == fb::ExprNode_ColumnRef) {
+        base = tv.column(static_cast<cudf::size_type>(arg->node_as_ColumnRef()->index()));
+      } else {
+        // Aggregate over a computed expression: DataFusion inlines the argument
+        // (no preceding ProjectionExec). Materialise it against the input table
+        // rather than silently aggregating the wrong column.
+        computed_args.push_back(build_column(arg, tv));
+        base = computed_args.back()->view();
+      }
+    } else {
+      base = tv.column(0);  // count(*) or no args: dummy first column
     }
-    return tv.column(0);  // count(*) or no args: dummy first column
+    // avg over a decimal: DataFusion's result scale is s+4, but cuDF's mean
+    // keeps the input scale s (truncating precision). Cast the input up to the
+    // declared output scale first so the mean carries the right value, not just
+    // a zero-padded display (out_decimal_scale rides on the func node).
+    std::string fname = func->name() ? func->name()->str() : "";
+    bool is_avg = (fname == "avg" || fname == "AVG" ||
+                   fname == "mean" || fname == "MEAN");
+    if (is_avg && func->out_decimal_precision() != 0 &&
+        base.type().id() == cudf::type_id::DECIMAL128) {
+      int32_t want_exp = -static_cast<int32_t>(func->out_decimal_scale());
+      if (base.type().scale() != want_exp) {
+        computed_args.push_back(cudf::cast(
+            base, cudf::data_type{cudf::type_id::DECIMAL128, want_exp}));
+        base = computed_args.back()->view();
+      }
+    }
+    return base;
   };
 
   std::vector<std::unique_ptr<cudf::column>> out_cols;
@@ -1122,35 +1319,73 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
   bool is_semi_or_anti = false;
   bool emit_left = true;  // false → emit right side instead
   std::unique_ptr<rmm::device_uvector<cudf::size_type>> single_indices;
+
+  // A residual filter on a semi/anti join (e.g. EXISTS / NOT EXISTS with a `<>`
+  // correlation, as in TPC-H q21) is NOT optional: the key-only cuDF semi/anti
+  // joins ignore it, which silently changes the result — a LeftAnti on the key
+  // alone excludes every left row whose key trivially exists in the right side,
+  // collapsing the output to zero rows. Route those to the mixed_* variants,
+  // whose AST predicate is evaluated during the join. Build the predicate only
+  // for semi/anti types so inner-join (non-AST) filters aren't forced through
+  // the AST path.
+  auto jt = join->join_type();
+  bool semi_anti_type =
+      jt == fb::JoinType_LeftSemi || jt == fb::JoinType_LeftAnti ||
+      jt == fb::JoinType_RightSemi || jt == fb::JoinType_RightAnti;
+  ExprContext semi_ctx;
+  const cudf::ast::expression* semi_pred = nullptr;
+  if (semi_anti_type && join->filter()) {
+    if (!join->filter_columns())
+      throw std::runtime_error(
+          "semi/anti join has a filter but no filter_columns map");
+    semi_pred = &build_expr(join->filter(), semi_ctx, join->filter_columns());
+  }
+
   // cuDF replaced free `left_{semi,anti}_join` with `filtered_join` (build the
   // hash table from one side, then probe). For Left{Semi,Anti} the right side
   // is the filter; for Right{Semi,Anti} we swap.
-  switch (join->join_type()) {
+  switch (jt) {
     case fb::JoinType_LeftSemi: {
+      if (semi_pred) {
+        single_indices = cudf::mixed_left_semi_join(
+            left_keys, right_keys, ltv, rtv, *semi_pred,
+            cudf::null_equality::EQUAL);
+      } else {
 #ifdef PEACOCK_HAVE_FILTERED_JOIN
-      cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
-                             cudf::set_as_build_table::RIGHT, 0.5);
-      single_indices = fj.semi_join(left_keys);
+        cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
+                               cudf::set_as_build_table::RIGHT, 0.5);
+        single_indices = fj.semi_join(left_keys);
 #else
-      single_indices = cudf::left_semi_join(left_keys, right_keys);
+        single_indices = cudf::left_semi_join(left_keys, right_keys);
 #endif
+      }
       is_semi_or_anti = true;
       emit_left = true;
       break;
     }
     case fb::JoinType_LeftAnti: {
+      if (semi_pred) {
+        single_indices = cudf::mixed_left_anti_join(
+            left_keys, right_keys, ltv, rtv, *semi_pred,
+            cudf::null_equality::EQUAL);
+      } else {
 #ifdef PEACOCK_HAVE_FILTERED_JOIN
-      cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
-                             cudf::set_as_build_table::RIGHT, 0.5);
-      single_indices = fj.anti_join(left_keys);
+        cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
+                               cudf::set_as_build_table::RIGHT, 0.5);
+        single_indices = fj.anti_join(left_keys);
 #else
-      single_indices = cudf::left_anti_join(left_keys, right_keys);
+        single_indices = cudf::left_anti_join(left_keys, right_keys);
 #endif
+      }
       is_semi_or_anti = true;
       emit_left = true;
       break;
     }
     case fb::JoinType_RightSemi: {
+      if (semi_pred)
+        throw std::runtime_error(
+            "residual filter on RightSemi join not supported (no swapped "
+            "mixed-join path); should not arise from DataFusion decorrelation");
 #ifdef PEACOCK_HAVE_FILTERED_JOIN
       cudf::filtered_join fj(left_keys, cudf::null_equality::EQUAL,
                              cudf::set_as_build_table::RIGHT, 0.5);
@@ -1163,6 +1398,10 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
       break;
     }
     case fb::JoinType_RightAnti: {
+      if (semi_pred)
+        throw std::runtime_error(
+            "residual filter on RightAnti join not supported (no swapped "
+            "mixed-join path); should not arise from DataFusion decorrelation");
 #ifdef PEACOCK_HAVE_FILTERED_JOIN
       cudf::filtered_join fj(left_keys, cudf::null_equality::EQUAL,
                              cudf::set_as_build_table::RIGHT, 0.5);
