@@ -580,6 +580,30 @@ static std::unique_ptr<cudf::column> build_column_binary(
   auto* rhs = bin->right();
   auto op = fb_to_binop(bin->op());
 
+  // Decimal division: cuDF's fixed_point DIV yields scale s_l-s_r (e.g. 0 for
+  // two scale-4 sums → truncates to 0), but DataFusion boosts the scale (its
+  // declared value rides on out_decimal_precision/scale). Reproduce it by
+  // pre-scaling the numerator so DIV lands on DataFusion's scale: with output
+  // exponent e_o = −out_scale and denominator exponent e_r, set numerator
+  // exponent e_l = e_o + e_r (since DIV gives e_l − e_r = e_o).
+  if (bin->op() == fb::BinaryOp_Divide && bin->out_decimal_precision() != 0) {
+    auto lcol = build_column(lhs, table);
+    auto rcol = build_column(rhs, table);
+    if (lcol->type().id() == cudf::type_id::DECIMAL128 &&
+        rcol->type().id() == cudf::type_id::DECIMAL128) {
+      int32_t e_o = -static_cast<int32_t>(bin->out_decimal_scale());
+      int32_t e_r = rcol->type().scale();
+      auto num = cudf::cast(
+          lcol->view(), cudf::data_type{cudf::type_id::DECIMAL128, e_o + e_r});
+      return cudf::binary_operation(
+          num->view(), rcol->view(), op,
+          cudf::data_type{cudf::type_id::DECIMAL128, e_o});
+    }
+    // Fall through for non-decimal (shouldn't happen given the guard).
+    auto out = binop_output_type(bin->op(), lcol->type(), rcol->type());
+    return cudf::binary_operation(lcol->view(), rcol->view(), op, out);
+  }
+
   // Column-scalar fast path when one side is a literal.
   if (rhs->node_type() == fb::ExprNode_LiteralExpr &&
       lhs->node_type() != fb::ExprNode_LiteralExpr) {
@@ -1071,17 +1095,38 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
 
   // Helper to determine the values column for a function node.
   auto get_values_col = [&](const fb::AggregateFuncNode* func) -> cudf::column_view {
+    cudf::column_view base;
     if (func->args() && func->args()->size() > 0) {
       auto* arg = func->args()->Get(0);
-      if (arg->node_type() == fb::ExprNode_ColumnRef)
-        return tv.column(static_cast<cudf::size_type>(arg->node_as_ColumnRef()->index()));
-      // Aggregate over a computed expression: DataFusion inlines the argument
-      // (no preceding ProjectionExec). Materialise it against the input table
-      // rather than silently aggregating the wrong column.
-      computed_args.push_back(build_column(arg, tv));
-      return computed_args.back()->view();
+      if (arg->node_type() == fb::ExprNode_ColumnRef) {
+        base = tv.column(static_cast<cudf::size_type>(arg->node_as_ColumnRef()->index()));
+      } else {
+        // Aggregate over a computed expression: DataFusion inlines the argument
+        // (no preceding ProjectionExec). Materialise it against the input table
+        // rather than silently aggregating the wrong column.
+        computed_args.push_back(build_column(arg, tv));
+        base = computed_args.back()->view();
+      }
+    } else {
+      base = tv.column(0);  // count(*) or no args: dummy first column
     }
-    return tv.column(0);  // count(*) or no args: dummy first column
+    // avg over a decimal: DataFusion's result scale is s+4, but cuDF's mean
+    // keeps the input scale s (truncating precision). Cast the input up to the
+    // declared output scale first so the mean carries the right value, not just
+    // a zero-padded display (out_decimal_scale rides on the func node).
+    std::string fname = func->name() ? func->name()->str() : "";
+    bool is_avg = (fname == "avg" || fname == "AVG" ||
+                   fname == "mean" || fname == "MEAN");
+    if (is_avg && func->out_decimal_precision() != 0 &&
+        base.type().id() == cudf::type_id::DECIMAL128) {
+      int32_t want_exp = -static_cast<int32_t>(func->out_decimal_scale());
+      if (base.type().scale() != want_exp) {
+        computed_args.push_back(cudf::cast(
+            base, cudf::data_type{cudf::type_id::DECIMAL128, want_exp}));
+        base = computed_args.back()->view();
+      }
+    }
+    return base;
   };
 
   std::vector<std::unique_ptr<cudf::column>> out_cols;

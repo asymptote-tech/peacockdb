@@ -93,29 +93,21 @@ gpu_result_test!(test_gpu_anti_join, "anti-join");
 // Skipped (issue #12, bucket 4 — needs GpuCrossJoinExec / GpuNestedLoopJoinExec):
 // gpu_result_test!(test_gpu_nested_loop_join, "nested-loop-join");
 // gpu_result_test!(test_gpu_cross_join, "cross-join");
-// Skipped (issue #12, bucket 6b — decimal result-scale: avg(decimal) returns scale
-// s+4 in DataFusion but s in cuDF (sums/products match exactly; only avg cols differ)):
-// gpu_result_test!(test_gpu_q1, "q1");
+gpu_result_test!(test_gpu_q1, "q1");
 gpu_result_test!(test_gpu_q2, "q2");
-// Skipped (issue #12, bucket 8 — cuDF groupby: Invalid type/aggregation combination
-// on Decimal × Decimal sum):
-// gpu_result_test!(test_gpu_q3, "q3");
+gpu_result_test!(test_gpu_q3, "q3");
 gpu_result_test!(test_gpu_q4, "q4");
 // Skipped (issue #12, bucket 7 — result divergence: revenue values differ):
 // gpu_result_test!(test_gpu_q5, "q5");
 gpu_result_test!(test_gpu_q6, "q6");
 gpu_result_test!(test_gpu_q7, "q7");
-// Skipped (issue #12, bucket 6b — decimal result-scale: decimal division boosts scale
-// in DataFusion (mkt_share scale 8) but cuDF DIV gives scale 0 → truncates to 0):
-// gpu_result_test!(test_gpu_q8, "q8");
+gpu_result_test!(test_gpu_q8, "q8");
 gpu_result_test!(test_gpu_q9, "q9");
 // Skipped (issue #12, bucket 7 — result divergence: revenue values differ):
 // gpu_result_test!(test_gpu_q10, "q10");
 // Skipped (issue #12, bucket 4 — TPC-H q11 has correlated HAVING subquery → NestedLoopJoinExec):
 // gpu_result_test!(test_gpu_q11, "q11");
-// Skipped (issue #12, bucket 8 — cuDF groupby: Invalid type/aggregation combination
-// on sum of CASE WHEN ... THEN 1 ELSE 0 END):
-// gpu_result_test!(test_gpu_q12, "q12");
+gpu_result_test!(test_gpu_q12, "q12");
 gpu_result_test!(test_gpu_q13, "q13");
 gpu_result_test!(test_gpu_q14, "q14");
 // q15 uses a view; skip like test_cpu_executor.rs / test_queries.rs

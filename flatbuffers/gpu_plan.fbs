@@ -112,6 +112,15 @@ table BinaryExprNode {
   left: Expr;
   op: BinaryOp;
   right: Expr;
+  /// DataFusion's declared decimal output type for this op, when the result is
+  /// a Decimal128. cuDF and DataFusion compute fixed_point result scales by
+  /// different rules (notably division: cuDF gives scale s_l-s_r, DataFusion
+  /// boosts it). The executor uses this to reproduce DataFusion's scale exactly
+  /// rather than re-deriving the coercion. precision == 0 means "not declared"
+  /// (non-decimal result, or the type couldn't be inferred); the executor then
+  /// falls back to cuDF's natural scale.
+  out_decimal_precision: uint8;
+  out_decimal_scale: int8;
 }
 
 /// <op>(arg)
@@ -141,6 +150,14 @@ table AggregateFuncNode {
   distinct: bool;
   /// Output column alias (e.g. "count(*)"). If absent, defaults to name.
   alias: string;
+  /// DataFusion's declared decimal output type for this aggregate (the *final*
+  /// result type, even in Partial mode), when it is a Decimal128. Needed for
+  /// avg, whose result scale is s+4 in DataFusion but cuDF's mean keeps the
+  /// input scale s. The executor casts the input to this scale before the mean
+  /// so the value (not just the displayed scale) matches. precision == 0 means
+  /// "not declared"; the executor then uses cuDF's natural scale.
+  out_decimal_precision: uint8;
+  out_decimal_scale: int8;
 }
 
 /// SQL LIKE / NOT LIKE / ILIKE / NOT ILIKE.

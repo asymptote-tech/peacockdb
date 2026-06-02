@@ -161,7 +161,7 @@ fn serialize_gpu_filter<'a>(
         .downcast_ref::<FilterExec>()
         .ok_or("GpuFilterExec inner is not FilterExec")?;
 
-    let predicate = serialize_expr(b, filter.predicate())?;
+    let predicate = serialize_expr(b, filter.predicate(), &filter.input().schema())?;
     let input_plan = filter.input();
     let input = serialize_plan_node(b, input_plan)?;
 
@@ -200,7 +200,7 @@ fn serialize_gpu_project<'a>(
     let mut exprs = Vec::new();
     let mut alias_offsets = Vec::new();
     for (expr, alias) in proj.expr() {
-        exprs.push(serialize_expr(b, expr)?);
+        exprs.push(serialize_expr(b, expr, &proj.input().schema())?);
         alias_offsets.push(b.create_string(alias));
     }
     let exprs_vec = b.create_vector(&exprs);
@@ -247,7 +247,7 @@ fn serialize_gpu_aggregate<'a>(
     let mut group_exprs = Vec::new();
     let mut group_names = Vec::new();
     for (expr, name) in group_by.expr() {
-        group_exprs.push(serialize_expr(b, expr)?);
+        group_exprs.push(serialize_expr(b, expr, &agg.input().schema())?);
         group_names.push(b.create_string(name));
     }
     let group_exprs_vec = b.create_vector(&group_exprs);
@@ -257,7 +257,7 @@ fn serialize_gpu_aggregate<'a>(
     let mut null_exprs = Vec::new();
     let mut null_names = Vec::new();
     for (expr, name) in group_by.null_expr() {
-        null_exprs.push(serialize_expr(b, expr)?);
+        null_exprs.push(serialize_expr(b, expr, &agg.input().schema())?);
         null_names.push(b.create_string(name));
     }
     let null_exprs_vec = b.create_vector(&null_exprs);
@@ -281,9 +281,16 @@ fn serialize_gpu_aggregate<'a>(
         let alias = b.create_string(aggr.name());
         let mut arg_offsets = Vec::new();
         for arg in aggr.expressions() {
-            arg_offsets.push(serialize_expr(b, &arg)?);
+            arg_offsets.push(serialize_expr(b, &arg, &agg.input_schema())?);
         }
         let args = b.create_vector(&arg_offsets);
+        // DataFusion's declared final output type (e.g. avg(Decimal(p,s)) →
+        // Decimal(p+4, s+4)); cuDF's mean keeps the input scale, so the executor
+        // casts the input to this scale before averaging.
+        let (out_decimal_precision, out_decimal_scale) = match aggr.field().data_type() {
+            ArrowDataType::Decimal128(p, s) => (*p, *s),
+            _ => (0, 0),
+        };
         let func = fb::AggregateFuncNode::create(
             b,
             &fb::AggregateFuncNodeArgs {
@@ -291,6 +298,8 @@ fn serialize_gpu_aggregate<'a>(
                 args: Some(args),
                 distinct: aggr.is_distinct(),
                 alias: Some(alias),
+                out_decimal_precision,
+                out_decimal_scale,
             },
         );
         aggr_funcs.push(func);
@@ -348,8 +357,8 @@ fn serialize_gpu_hash_join<'a>(
 
     let mut keys = Vec::new();
     for (left_key, right_key) in join.on() {
-        let left = serialize_expr(b, left_key)?;
-        let right = serialize_expr(b, right_key)?;
+        let left = serialize_expr(b, left_key, &join.left().schema())?;
+        let right = serialize_expr(b, right_key, &join.right().schema())?;
         keys.push(fb::JoinKey::create(
             b,
             &fb::JoinKeyArgs {
@@ -364,7 +373,7 @@ fn serialize_gpu_hash_join<'a>(
     // The expression's ColumnRefs index the filter's intermediate schema; the
     // C++ executor remaps them to its post-join table via `filter_columns`.
     let (filter, filter_columns) = if let Some(jf) = join.filter() {
-        let expr = serialize_expr(b, jf.expression())?;
+        let expr = serialize_expr(b, jf.expression(), jf.schema())?;
         let cols: Vec<fb::JoinFilterColumn> = jf
             .column_indices()
             .iter()
@@ -425,7 +434,7 @@ fn serialize_gpu_sort<'a>(
 
     let mut sort_exprs = Vec::new();
     for se in sort.expr().iter() {
-        let expr = serialize_expr(b, &se.expr)?;
+        let expr = serialize_expr(b, &se.expr, &sort.input().schema())?;
         sort_exprs.push(fb::SortExprNode::create(
             b,
             &fb::SortExprNodeArgs {
@@ -522,7 +531,7 @@ fn serialize_gpu_repartition<'a>(
         Partitioning::Hash(exprs, n) => {
             let mut expr_offsets = Vec::new();
             for expr in exprs {
-                expr_offsets.push(serialize_expr(b, expr)?);
+                expr_offsets.push(serialize_expr(b, expr, &rp.input().schema())?);
             }
             let exprs_vec = b.create_vector(&expr_offsets);
             (fb::PartitioningKind::Hash, *n, Some(exprs_vec))
@@ -561,7 +570,7 @@ fn serialize_gpu_sort_preserving_merge<'a>(
 
     let mut sort_exprs = Vec::new();
     for se in spm.expr().iter() {
-        let expr = serialize_expr(b, &se.expr)?;
+        let expr = serialize_expr(b, &se.expr, &spm.input().schema())?;
         sort_exprs.push(fb::SortExprNode::create(
             b,
             &fb::SortExprNodeArgs {
@@ -593,6 +602,7 @@ fn serialize_gpu_sort_preserving_merge<'a>(
 fn serialize_expr<'a>(
     b: &mut FlatBufferBuilder<'a>,
     expr: &Arc<dyn PhysicalExpr>,
+    schema: &Schema,
 ) -> Result<WIPOffset<fb::Expr<'a>>, String> {
     let any = expr.as_any();
 
@@ -611,20 +621,28 @@ fn serialize_expr<'a>(
         let le = fb::LiteralExpr::create(b, &fb::LiteralExprArgs { value: Some(sv) });
         (fb::ExprNode::LiteralExpr, le.as_union_value())
     } else if let Some(bin) = any.downcast_ref::<BinaryExpr>() {
-        let left = serialize_expr(b, bin.left())?;
-        let right = serialize_expr(b, bin.right())?;
+        let left = serialize_expr(b, bin.left(), schema)?;
+        let right = serialize_expr(b, bin.right(), schema)?;
         let op = convert_operator(bin.op())?;
+        // DataFusion's declared decimal output scale, so the executor can match
+        // its fixed_point result scale (esp. division, where cuDF differs).
+        let (out_decimal_precision, out_decimal_scale) = match bin.data_type(schema) {
+            Ok(ArrowDataType::Decimal128(p, s)) => (p, s),
+            _ => (0, 0),
+        };
         let be = fb::BinaryExprNode::create(
             b,
             &fb::BinaryExprNodeArgs {
                 left: Some(left),
                 op,
                 right: Some(right),
+                out_decimal_precision,
+                out_decimal_scale,
             },
         );
         (fb::ExprNode::BinaryExprNode, be.as_union_value())
     } else if let Some(not) = any.downcast_ref::<NotExpr>() {
-        let arg = serialize_expr(b, not.arg())?;
+        let arg = serialize_expr(b, not.arg(), schema)?;
         let ue = fb::UnaryExprNode::create(
             b,
             &fb::UnaryExprNodeArgs {
@@ -634,7 +652,7 @@ fn serialize_expr<'a>(
         );
         (fb::ExprNode::UnaryExprNode, ue.as_union_value())
     } else if let Some(is_null) = any.downcast_ref::<IsNullExpr>() {
-        let arg = serialize_expr(b, is_null.arg())?;
+        let arg = serialize_expr(b, is_null.arg(), schema)?;
         let ue = fb::UnaryExprNode::create(
             b,
             &fb::UnaryExprNodeArgs {
@@ -644,7 +662,7 @@ fn serialize_expr<'a>(
         );
         (fb::ExprNode::UnaryExprNode, ue.as_union_value())
     } else if let Some(is_not_null) = any.downcast_ref::<IsNotNullExpr>() {
-        let arg = serialize_expr(b, is_not_null.arg())?;
+        let arg = serialize_expr(b, is_not_null.arg(), schema)?;
         let ue = fb::UnaryExprNode::create(
             b,
             &fb::UnaryExprNodeArgs {
@@ -654,7 +672,7 @@ fn serialize_expr<'a>(
         );
         (fb::ExprNode::UnaryExprNode, ue.as_union_value())
     } else if let Some(neg) = any.downcast_ref::<NegativeExpr>() {
-        let arg = serialize_expr(b, neg.arg())?;
+        let arg = serialize_expr(b, neg.arg(), schema)?;
         let ue = fb::UnaryExprNode::create(
             b,
             &fb::UnaryExprNodeArgs {
@@ -664,7 +682,7 @@ fn serialize_expr<'a>(
         );
         (fb::ExprNode::UnaryExprNode, ue.as_union_value())
     } else if let Some(cast) = any.downcast_ref::<CastExpr>() {
-        let inner = serialize_expr(b, cast.expr())?;
+        let inner = serialize_expr(b, cast.expr(), schema)?;
         let target = convert_data_type(cast.cast_type())?;
         // The DataType enum can't carry decimal precision/scale, but the
         // executor needs the scale to reconstruct the cuDF fixed_point type.
@@ -683,8 +701,8 @@ fn serialize_expr<'a>(
         );
         (fb::ExprNode::CastExprNode, ce.as_union_value())
     } else if let Some(like) = any.downcast_ref::<LikeExpr>() {
-        let inner = serialize_expr(b, like.expr())?;
-        let pattern = serialize_expr(b, like.pattern())?;
+        let inner = serialize_expr(b, like.expr(), schema)?;
+        let pattern = serialize_expr(b, like.pattern(), schema)?;
         let le = fb::LikeExprNode::create(
             b,
             &fb::LikeExprNodeArgs {
@@ -697,13 +715,13 @@ fn serialize_expr<'a>(
         (fb::ExprNode::LikeExprNode, le.as_union_value())
     } else if let Some(case) = any.downcast_ref::<CaseExpr>() {
         let comparand = match case.expr() {
-            Some(e) => Some(serialize_expr(b, e)?),
+            Some(e) => Some(serialize_expr(b, e, schema)?),
             None => None,
         };
         let mut whens = Vec::new();
         for (when, then) in case.when_then_expr() {
-            let w = serialize_expr(b, when)?;
-            let t = serialize_expr(b, then)?;
+            let w = serialize_expr(b, when, schema)?;
+            let t = serialize_expr(b, then, schema)?;
             whens.push(fb::CaseWhenThen::create(
                 b,
                 &fb::CaseWhenThenArgs {
@@ -714,7 +732,7 @@ fn serialize_expr<'a>(
         }
         let whens_vec = b.create_vector(&whens);
         let else_ = match case.else_expr() {
-            Some(e) => Some(serialize_expr(b, e)?),
+            Some(e) => Some(serialize_expr(b, e, schema)?),
             None => None,
         };
         let ce = fb::CaseExprNode::create(
@@ -738,7 +756,7 @@ fn serialize_expr<'a>(
         let name = b.create_string(sf.name());
         let mut args = Vec::new();
         for arg in sf.args() {
-            args.push(serialize_expr(b, arg)?);
+            args.push(serialize_expr(b, arg, schema)?);
         }
         let args_vec = b.create_vector(&args);
         let ret = convert_data_type(sf.return_type())?;
