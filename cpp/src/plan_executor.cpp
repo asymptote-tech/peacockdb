@@ -20,6 +20,12 @@
 #include <cudf/join/filtered_join.hpp>
 #define PEACOCK_HAVE_FILTERED_JOIN 1
 #endif
+// cuDF 26.02 moved the mixed (equality + AST-conditional) join functions out of
+// the monolithic <cudf/join.hpp> into their own header; older versions declare
+// them in <cudf/join.hpp> (included above). Pull in the split header when present.
+#if __has_include(<cudf/join/mixed_join.hpp>)
+#include <cudf/join/mixed_join.hpp>
+#endif
 #include <cudf/reduction.hpp>
 #include <cudf/scalar/scalar.hpp>
 #include <cudf/strings/contains.hpp>
@@ -445,6 +451,11 @@ static bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table) {
       // cudf::binary_operation coerces (and handles fixed_point) natively.
       auto lt = infer_expr_type(b->left(), table);
       auto rt = infer_expr_type(b->right(), table);
+      // Un-inferrable operand → route to the column path conservatively. (Two
+      // EMPTYs would otherwise compare equal below and be treated as AST-able,
+      // the opposite of the intended fallback.)
+      if (lt == cudf::type_id::EMPTY || rt == cudf::type_id::EMPTY)
+        return false;
       if (lt == cudf::type_id::DECIMAL128 || rt == cudf::type_id::DECIMAL128)
         return false;
       if (lt != rt)
