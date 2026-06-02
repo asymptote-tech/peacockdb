@@ -1,4 +1,5 @@
 #include "plan_executor.h"
+#include "plan_executor_internal.h"
 #include "generated/gpu_plan_generated.h"
 
 #include <cudf/ast/expressions.hpp>
@@ -430,7 +431,7 @@ static cudf::type_id infer_expr_type(const fb::Expr* expr,
   }
 }
 
-static bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table) {
+bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table) {
   switch (expr->node_type()) {
     case fb::ExprNode_LikeExprNode:
     case fb::ExprNode_CaseExprNode:
@@ -579,7 +580,7 @@ static bool is_predicate_op(fb::BinaryOp op) {
 // Pick an output type for binary_operation. Boolean for predicates; otherwise
 // promote to the wider of the two input types (cuDF's binary_operation does
 // the actual coercion under the hood, but it needs us to declare an output).
-static cudf::data_type binop_output_type(
+cudf::data_type binop_output_type(
     fb::BinaryOp op, cudf::data_type lhs, cudf::data_type rhs) {
   if (is_predicate_op(op)) return cudf::data_type{cudf::type_id::BOOL8};
   // Fixed-point arithmetic: cuDF requires the output type's scale to equal the
@@ -630,9 +631,11 @@ static std::unique_ptr<cudf::column> build_column_binary(
           num->view(), rcol->view(), op,
           cudf::data_type{cudf::type_id::DECIMAL128, e_o});
     }
-    // Fall through for non-decimal (shouldn't happen given the guard).
-    auto out = binop_output_type(bin->op(), lcol->type(), rcol->type());
-    return cudf::binary_operation(lcol->view(), rcol->view(), op, out);
+    // out_decimal_precision != 0 means DataFusion declared a Decimal128 result,
+    // which after scan-widening implies both operands materialise as DECIMAL128.
+    throw std::runtime_error(
+        "decimal division declared Decimal128 output but operand columns are "
+        "not both DECIMAL128");
   }
 
   // Column-scalar fast path when one side is a literal.
