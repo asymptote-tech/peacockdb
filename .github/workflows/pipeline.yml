@@ -58,6 +58,12 @@ jobs:
           CMAKE_GENERATOR: Ninja
           LD_LIBRARY_PATH: /opt/conda/lib
           CUDF_ROOT: /opt/conda
+          # Strip debug info from all Rust artifacts. The test binaries link the
+          # full DataFusion/Arrow stack plus libpeacock_gpu; with debuginfo the
+          # largest one (test_query_plan_tpcds) overflows the container's tmpfs
+          # while lld writes its mmap'd output, crashing with SIGBUS. Debug info
+          # is dead weight for pass/fail CI anyway.
+          RUSTFLAGS: "-C debuginfo=0"
 
   # Standalone build job for the shad-gpu artifact — runs in parallel with cpp-cpu
   # so gpu-tests can start as soon as the build is done, without waiting for the

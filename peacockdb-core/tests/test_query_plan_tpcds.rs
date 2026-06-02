@@ -183,17 +183,11 @@ macro_rules! query_plan_test {
 query_plan_test!(tpcds_q1, "q1");
 query_plan_test!(tpcds_q2, "q2");
 query_plan_test!(tpcds_q3, "q3");
-// TODO(plan_serializer): same Final-aggregate-input-schema bug as TPC-H q3/q5.
-// query_plan_test!(tpcds_q4, "q4");
+query_plan_test!(tpcds_q4, "q4");
 query_plan_test!(tpcds_q5, "q5");
-// TODO(plan_serializer): same Final-aggregate-input-schema bug as TPC-H q3/q5
-// (avg() validates against the wrong schema and rejects Utf8View columns).
-// query_plan_test!(tpcds_q6, "q6");
+query_plan_test!(tpcds_q6, "q6");
 query_plan_test!(tpcds_q7, "q7");
-// q8: flatbuffer verifier rejects on deserialize with "Nested table depth
-// limit reached". q8 is the deepest TPC-DS plan and exceeds the current
-// max_depth bump. See issue #14 ("Plan-serializer bugs").
-// query_plan_test!(tpcds_q8, "q8");
+query_plan_test!(tpcds_q8, "q8");
 query_plan_test!(tpcds_q9, "q9");
 query_plan_test!(tpcds_q10, "q10");
 query_plan_test!(tpcds_q11, "q11");
@@ -207,9 +201,7 @@ query_plan_test!(tpcds_q18, "q18");
 query_plan_test!(tpcds_q19, "q19");
 query_plan_test!(tpcds_q20, "q20");
 query_plan_test!(tpcds_q21, "q21");
-// q22: AggregateExec roundtrip doesn't preserve __grouping_id virtual column
-// for ROLLUP/GROUPING SETS in the Final stage. See issue #14.
-// query_plan_test!(tpcds_q22, "q22");
+query_plan_test!(tpcds_q22, "q22");
 query_plan_test!(tpcds_q23, "q23");
 query_plan_test!(tpcds_q24, "q24");
 query_plan_test!(tpcds_q25, "q25");
@@ -229,9 +221,7 @@ query_plan_test!(tpcds_q36, "q36");
 query_plan_test!(tpcds_q37, "q37");
 query_plan_test!(tpcds_q38, "q38");
 query_plan_test!(tpcds_q39, "q39");
-// TODO(plan_serializer): same Final-aggregate-input-schema bug; aggregate args
-// validate against the wrong schema and reject Utf8View - Decimal128.
-// query_plan_test!(tpcds_q40, "q40");
+query_plan_test!(tpcds_q40, "q40");
 query_plan_test!(tpcds_q41, "q41");
 query_plan_test!(tpcds_q42, "q42");
 query_plan_test!(tpcds_q43, "q43");
@@ -255,10 +245,7 @@ query_plan_test!(tpcds_q60, "q60");
 query_plan_test!(tpcds_q61, "q61");
 query_plan_test!(tpcds_q62, "q62");
 query_plan_test!(tpcds_q63, "q63");
-// TODO(plan_serializer): same Final-aggregate-input-schema bug as q4/q6/q40
-// (PhysicalExpr Column 'cr_reversed_charge'@3 doesn't exist in partial-output
-// schema passed to AggregateExprBuilder). See issue #14.
-// query_plan_test!(tpcds_q64, "q64");
+query_plan_test!(tpcds_q64, "q64");
 query_plan_test!(tpcds_q65, "q65");
 query_plan_test!(tpcds_q66, "q66");
 query_plan_test!(tpcds_q67, "q67");
@@ -284,8 +271,7 @@ query_plan_test!(tpcds_q84, "q84");
 query_plan_test!(tpcds_q85, "q85");
 // q86: DataFusion 45 doesn't physical-plan the GROUPING() aggregate.
 // query_plan_test!(tpcds_q86, "q86");
-// TODO(plan_serializer): ProjectionExec field-name mismatch on roundtrip.
-// query_plan_test!(tpcds_q87, "q87");
+query_plan_test!(tpcds_q87, "q87");
 query_plan_test!(tpcds_q88, "q88");
 query_plan_test!(tpcds_q89, "q89");
 query_plan_test!(tpcds_q90, "q90");

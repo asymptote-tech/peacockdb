@@ -295,6 +295,8 @@ fn serialize_gpu_aggregate<'a>(
     }
     let aggr_funcs_vec = b.create_vector(&aggr_funcs);
 
+    let aggr_input_schema = serialize_schema(b, &agg.input_schema());
+
     let input = serialize_plan_node(b, agg.input())?;
 
     let node = fb::GpuAggregate::create(
@@ -308,6 +310,7 @@ fn serialize_gpu_aggregate<'a>(
             null_exprs: Some(null_exprs_vec),
             null_names: Some(null_names_vec),
             grouping_sets: Some(grouping_sets_vec),
+            aggr_input_schema: Some(aggr_input_schema),
         },
     );
     Ok((fb::PlanNodeKind::GpuAggregate, node.as_union_value()))
@@ -996,21 +999,28 @@ fn serialize_schema<'a>(
 /// (CoalesceBatches, Repartition, etc.) are not present in the flatbuffer
 /// and are therefore not reconstructed.
 pub fn deserialize_plan(bytes: &[u8]) -> Result<Arc<dyn ExecutionPlan>, String> {
-    // Real query plans nest deeper than the flatbuffers verifier default of
-    // 64. Each Filter / Project / Repartition / CoalesceBatches / HashJoin
-    // wrapper adds a couple of levels, and TPC-DS easily reaches 100+. Cap at
-    // 256 to give comfortable headroom while still bounding adversarial
-    // payloads (the input is trusted Rust-side serialization in practice).
-    let opts = flatbuffers::VerifierOptions {
-        max_depth: 256,
-        ..Default::default()
-    };
-    let gpu_plan = flatbuffers::root_with_opts::<fb::GpuPlan>(&opts, bytes)
-        .map_err(|e| format!("invalid FlatBuffer: {e}"))?;
-    let root = gpu_plan
-        .root()
-        .ok_or("GpuPlan has no root node")?;
-    deserialize_plan_node(&root)
+    // Plans nest arbitrarily deep (TPC-DS q8 exceeds the verifier's default
+    // depth limit, and the verifier + recursive descent below overflow the
+    // default 2 MiB thread stack on the deepest plans). Run both on a thread
+    // with a generous stack and a raised `max_depth`, which keeps the verifier's
+    // malformed-buffer guard intact.
+    std::thread::scope(|s| {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn_scoped(s, || {
+                let opts = flatbuffers::VerifierOptions {
+                    max_depth: 1024,
+                    ..Default::default()
+                };
+                let gpu_plan = flatbuffers::root_with_opts::<fb::GpuPlan>(&opts, bytes)
+                    .map_err(|e| format!("invalid FlatBuffer: {e}"))?;
+                let root = gpu_plan.root().ok_or("GpuPlan has no root node")?;
+                deserialize_plan_node(&root)
+            })
+            .expect("spawn deserialization thread")
+            .join()
+            .map_err(|_| "deserialization thread panicked".to_string())?
+    })
 }
 
 fn deserialize_plan_node(node: &fb::PlanNode) -> Result<Arc<dyn ExecutionPlan>, String> {
@@ -1439,8 +1449,13 @@ fn deserialize_gpu_aggregate(
         PhysicalGroupBy::new(group_exprs, null_exprs, groups)
     };
 
-    // Reconstruct aggregate function expressions.
-    let input_schema = input.schema();
+    // Reconstruct aggregate function expressions. Aggregate args resolve against
+    // the pre-aggregation input schema, which differs from `input.schema()` for
+    // Final/FinalPartitioned stages (whose input is the Partial output and lacks
+    // the original columns the args reference).
+    let input_schema = deserialize_schema(
+        &agg.aggr_input_schema().ok_or("GpuAggregate missing aggr_input_schema")?,
+    );
     let aggr_exprs: Vec<Arc<datafusion::physical_expr::aggregate::AggregateFunctionExpr>> = agg
         .aggr_funcs()
         .map(|funcs| {
