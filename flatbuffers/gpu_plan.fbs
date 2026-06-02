@@ -120,6 +120,13 @@ table UnaryExprNode {
 table CastExprNode {
   expr: Expr;
   target_type: DataType;
+  /// For target_type == Decimal128 only: the precision/scale of the target
+  /// decimal. The DataType enum can't carry these, but the executor needs the
+  /// scale to build the right cuDF fixed_point type (cuDF AST has no decimal
+  /// cast, so decimal casts run through the column path, which calls
+  /// cudf::cast with this scale). Ignored for non-decimal targets.
+  decimal_precision: uint8;
+  decimal_scale: int8;
 }
 
 /// An aggregate function invocation (used inside GpuAggregate).

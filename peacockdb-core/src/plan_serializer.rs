@@ -16,7 +16,10 @@ use datafusion::physical_expr::expressions::{
 use datafusion::physical_expr::ScalarFunctionExpr;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode as DfAggMode};
 use datafusion::physical_plan::filter::FilterExec;
+use datafusion::common::tree_node::{Transformed, TreeNode};
+use datafusion::common::JoinSide;
 use datafusion::common::JoinType as DfJoinType;
+use datafusion::physical_plan::joins::utils::ColumnIndex;
 use datafusion::physical_plan::joins::HashJoinExec;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
@@ -318,6 +321,39 @@ fn serialize_gpu_aggregate<'a>(
 
 // --- GpuHashJoinExec ---
 
+/// Rewrite a join filter expression's column indices from DataFusion's private
+/// intermediate schema to the executor's combined post-join layout
+/// (`[left_cols..., right_cols...]`). `column_indices[i]` says which side and
+/// which original column the intermediate column `i` comes from.
+fn remap_join_filter_columns(
+    expr: &Arc<dyn PhysicalExpr>,
+    column_indices: &[ColumnIndex],
+    left_width: usize,
+) -> Result<Arc<dyn PhysicalExpr>, String> {
+    expr.clone()
+        .transform(|e| {
+            if let Some(col) = e.as_any().downcast_ref::<Column>() {
+                let ci = &column_indices[col.index()];
+                let new_index = match ci.side {
+                    JoinSide::Left => ci.index,
+                    JoinSide::Right => left_width + ci.index,
+                    // `None` is used for mark-join marker columns, which never
+                    // appear in a residual filter.
+                    JoinSide::None => return Err(datafusion::error::DataFusionError::Internal(
+                        "join filter references a mark-join column".into(),
+                    )),
+                };
+                Ok(Transformed::yes(
+                    Arc::new(Column::new(col.name(), new_index)) as Arc<dyn PhysicalExpr>,
+                ))
+            } else {
+                Ok(Transformed::no(e))
+            }
+        })
+        .map(|t| t.data)
+        .map_err(|e| format!("remap join filter columns: {e}"))
+}
+
 fn serialize_gpu_hash_join<'a>(
     b: &mut FlatBufferBuilder<'a>,
     plan: &Arc<dyn ExecutionPlan>,
@@ -358,8 +394,15 @@ fn serialize_gpu_hash_join<'a>(
     }
     let keys_vec = b.create_vector(&keys);
 
+    // The join filter's column refs index a private "intermediate" schema
+    // (described by `column_indices`), not the executor's post-join table. The
+    // executor evaluates the filter against the gathered `[left_cols..., right
+    // _cols...]` table, so rewrite each Column to that combined index here.
     let filter = if let Some(jf) = join.filter() {
-        Some(serialize_expr(b, jf.expression())?)
+        let left_width = join.left().schema().fields().len();
+        let remapped =
+            remap_join_filter_columns(jf.expression(), jf.column_indices(), left_width)?;
+        Some(serialize_expr(b, &remapped)?)
     } else {
         None
     };
@@ -645,11 +688,19 @@ fn serialize_expr<'a>(
     } else if let Some(cast) = any.downcast_ref::<CastExpr>() {
         let inner = serialize_expr(b, cast.expr())?;
         let target = convert_data_type(cast.cast_type())?;
+        // The DataType enum can't carry decimal precision/scale, but the
+        // executor needs the scale to reconstruct the cuDF fixed_point type.
+        let (decimal_precision, decimal_scale) = match cast.cast_type() {
+            ArrowDataType::Decimal128(p, s) => (*p, *s),
+            _ => (0, 0),
+        };
         let ce = fb::CastExprNode::create(
             b,
             &fb::CastExprNodeArgs {
                 expr: Some(inner),
                 target_type: target,
+                decimal_precision,
+                decimal_scale,
             },
         );
         (fb::ExprNode::CastExprNode, ce.as_union_value())
@@ -1157,7 +1208,15 @@ fn deserialize_expr(expr: &fb::Expr) -> Result<Arc<dyn PhysicalExpr>, String> {
                 .node_as_cast_expr_node()
                 .ok_or("expected CastExprNode")?;
             let inner = deserialize_expr(&cast.expr().ok_or("CastExpr missing expr")?)?;
-            let target = fb_to_arrow_type(cast.target_type());
+            // Decimal128 carries its precision/scale in dedicated fields (the
+            // DataType enum can't), so reconstruct the exact type rather than
+            // the placeholder fb_to_arrow_type returns.
+            let target = match cast.target_type() {
+                fb::DataType::Decimal128 => {
+                    ArrowDataType::Decimal128(cast.decimal_precision(), cast.decimal_scale())
+                }
+                other => fb_to_arrow_type(other),
+            };
             Ok(Arc::new(CastExpr::new(inner, target, None)))
         }
         fb::ExprNode::LikeExprNode => {

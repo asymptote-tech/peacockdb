@@ -123,9 +123,7 @@ gpu_result_test!(test_gpu_q13, "q13");
 // gpu_result_test!(test_gpu_q14, "q14");
 // q15 uses a view; skip like test_cpu_executor.rs / test_queries.rs
 gpu_result_test!(test_gpu_q16, "q16");
-// Skipped (issue #12, bucket 9 — unsupported aggregate function: avg
-// (execute_aggregate has no AVG case)):
-// gpu_result_test!(test_gpu_q17, "q17");
+gpu_result_test!(test_gpu_q17, "q17");
 // Skipped (issue #12, bucket 6 — cuDF AST type mismatch in join filter):
 // gpu_result_test!(test_gpu_q18, "q18");
 // Skipped (issue #12, bucket 6 — cuDF AST type mismatch in GpuFilter expr):
