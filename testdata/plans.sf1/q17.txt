@@ -1,22 +1,22 @@
-GpuProjectExec
+GpuProjectExec: expr=[CAST(sum(lineitem.l_extendedprice)@0 AS Float64) / 7 as avg_yearly]
   GpuAggregateExec: group_by=[], aggr=[sum(lineitem.l_extendedprice)]
     GpuCoalescePartitionsExec
       GpuAggregateExec: group_by=[], aggr=[sum(lineitem.l_extendedprice)]
         GpuCoalesceBatchesExec: target_batch_size=24403223
-          GpuHashJoinExec
-            GpuProjectExec
+          GpuHashJoinExec: join_type=Inner, on=[(p_partkey@2, l_partkey@1)], filter=CAST(l_quantity@0 AS Decimal128(30, 15)) < Float64(0.2) * avg(lineitem.l_quantity)@1, projection=[1]
+            GpuProjectExec: expr=[l_quantity@1 as l_quantity, l_extendedprice@2 as l_extendedprice, p_partkey@0 as p_partkey]
               GpuCoalesceBatchesExec: target_batch_size=24403223
-                GpuHashJoinExec
+                GpuHashJoinExec: join_type=Inner, on=[(p_partkey@0, l_partkey@0)], projection=[0, 2, 3]
                   GpuCoalesceBatchesExec: target_batch_size=24403223
                     GpuRepartitionExec: partitioning=Hash([p_partkey@0], 8), input_partitions=8
                       GpuCoalesceBatchesExec: target_batch_size=24403223
-                        GpuFilterExec
+                        GpuFilterExec: predicate=p_brand@1 = Brand#23 AND p_container@2 = MED BOX, projection=[0]
                           GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                             GpuScanExec: batch_size=24403223
                   GpuCoalesceBatchesExec: target_batch_size=24403223
                     GpuRepartitionExec: partitioning=Hash([l_partkey@0], 8), input_partitions=8
                       GpuScanExec: batch_size=24403223
-            GpuProjectExec
+            GpuProjectExec: expr=[CAST(0.2 * CAST(avg(lineitem.l_quantity)@1 AS Float64) AS Decimal128(30, 15)) as Float64(0.2) * avg(lineitem.l_quantity), l_partkey@0 as l_partkey]
               GpuAggregateExec: group_by=[l_partkey], aggr=[avg(lineitem.l_quantity)]
                 GpuCoalesceBatchesExec: target_batch_size=24403223
                   GpuRepartitionExec: partitioning=Hash([l_partkey@0], 8), input_partitions=8

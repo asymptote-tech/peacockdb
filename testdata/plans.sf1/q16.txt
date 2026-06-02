@@ -1,6 +1,6 @@
 GpuSortPreservingMergeExec: [supplier_cnt@3 DESC, p_brand@0 ASC NULLS LAST, p_type@1 ASC NULLS LAST, p_size@2 ASC NULLS LAST]
-  GpuSortExec
-    GpuProjectExec
+  GpuSortExec: expr=[supplier_cnt@3 DESC, p_brand@0 ASC NULLS LAST, p_type@1 ASC NULLS LAST, p_size@2 ASC NULLS LAST]
+    GpuProjectExec: expr=[p_brand@0 as p_brand, p_type@1 as p_type, p_size@2 as p_size, count(alias1)@3 as supplier_cnt]
       GpuAggregateExec: group_by=[p_brand, p_type, p_size], aggr=[count(alias1)]
         GpuCoalesceBatchesExec: target_batch_size=12782640
           GpuRepartitionExec: partitioning=Hash([p_brand@0, p_type@1, p_size@2], 8), input_partitions=8
@@ -10,22 +10,22 @@ GpuSortPreservingMergeExec: [supplier_cnt@3 DESC, p_brand@0 ASC NULLS LAST, p_ty
                   GpuRepartitionExec: partitioning=Hash([p_brand@0, p_type@1, p_size@2, alias1@3], 8), input_partitions=8
                     GpuAggregateExec: group_by=[p_brand, p_type, p_size, alias1], aggr=[]
                       GpuCoalesceBatchesExec: target_batch_size=12782640
-                        GpuHashJoinExec
+                        GpuHashJoinExec: join_type=RightAnti, on=[(s_suppkey@0, ps_suppkey@0)]
                           GpuCoalesceBatchesExec: target_batch_size=12782640
                             GpuRepartitionExec: partitioning=Hash([s_suppkey@0], 8), input_partitions=8
                               GpuCoalesceBatchesExec: target_batch_size=12782640
-                                GpuFilterExec
+                                GpuFilterExec: predicate=s_comment@1 LIKE %Customer%Complaints%, projection=[0]
                                   GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                                     GpuScanExec: batch_size=12782640
                           GpuCoalesceBatchesExec: target_batch_size=12782640
                             GpuRepartitionExec: partitioning=Hash([ps_suppkey@0], 8), input_partitions=8
-                              GpuProjectExec
+                              GpuProjectExec: expr=[ps_suppkey@3 as ps_suppkey, p_brand@0 as p_brand, p_type@1 as p_type, p_size@2 as p_size]
                                 GpuCoalesceBatchesExec: target_batch_size=12782640
-                                  GpuHashJoinExec
+                                  GpuHashJoinExec: join_type=Inner, on=[(p_partkey@0, ps_partkey@0)], projection=[1, 2, 3, 5]
                                     GpuCoalesceBatchesExec: target_batch_size=12782640
                                       GpuRepartitionExec: partitioning=Hash([p_partkey@0], 8), input_partitions=8
                                         GpuCoalesceBatchesExec: target_batch_size=12782640
-                                          GpuFilterExec
+                                          GpuFilterExec: predicate=p_brand@1 != Brand#45 AND p_type@2 NOT LIKE MEDIUM POLISHED% AND (p_size@3 = 49 OR p_size@3 = 14 OR p_size@3 = 23 OR p_size@3 = 45 OR p_size@3 = 19 OR p_size@3 = 3 OR p_size@3 = 36 OR p_size@3 = 9)
                                             GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                                               GpuScanExec: batch_size=12782640
                                     GpuCoalesceBatchesExec: target_batch_size=12782640

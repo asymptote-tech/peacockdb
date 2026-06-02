@@ -373,40 +373,43 @@ static bool is_ast_able(const fb::Expr* expr) {
 }
 
 static std::unique_ptr<cudf::scalar> build_scalar(const fb::ScalarValue* sv) {
+  // A typed NULL literal is encoded with is_null set; the value fields are
+  // unused. Each scalar is built invalid so cuDF treats it as null of `type`.
+  bool valid = !sv->is_null();
   switch (sv->type()) {
     case fb::DataType_Boolean:
-      return std::make_unique<cudf::numeric_scalar<bool>>(sv->bool_val(), true);
+      return std::make_unique<cudf::numeric_scalar<bool>>(sv->bool_val(), valid);
     case fb::DataType_Int8:
       return std::make_unique<cudf::numeric_scalar<int8_t>>(
-          static_cast<int8_t>(sv->int_val()), true);
+          static_cast<int8_t>(sv->int_val()), valid);
     case fb::DataType_Int16:
       return std::make_unique<cudf::numeric_scalar<int16_t>>(
-          static_cast<int16_t>(sv->int_val()), true);
+          static_cast<int16_t>(sv->int_val()), valid);
     case fb::DataType_Int32:
       return std::make_unique<cudf::numeric_scalar<int32_t>>(
-          static_cast<int32_t>(sv->int_val()), true);
+          static_cast<int32_t>(sv->int_val()), valid);
     case fb::DataType_Int64:
-      return std::make_unique<cudf::numeric_scalar<int64_t>>(sv->int_val(), true);
+      return std::make_unique<cudf::numeric_scalar<int64_t>>(sv->int_val(), valid);
     case fb::DataType_Float32:
       return std::make_unique<cudf::numeric_scalar<float>>(
-          static_cast<float>(sv->float_val()), true);
+          static_cast<float>(sv->float_val()), valid);
     case fb::DataType_Float64:
-      return std::make_unique<cudf::numeric_scalar<double>>(sv->float_val(), true);
+      return std::make_unique<cudf::numeric_scalar<double>>(sv->float_val(), valid);
     case fb::DataType_Utf8:
     case fb::DataType_LargeUtf8:
     case fb::DataType_Utf8View:
       return std::make_unique<cudf::string_scalar>(
-          std::string(sv->string_val() ? sv->string_val()->str() : ""), true);
+          std::string(sv->string_val() ? sv->string_val()->str() : ""), valid);
     case fb::DataType_Date32:
       return std::make_unique<cudf::timestamp_scalar<cudf::timestamp_D>>(
-          cudf::duration_D{static_cast<int32_t>(sv->int_val())}, true);
+          cudf::duration_D{static_cast<int32_t>(sv->int_val())}, valid);
     case fb::DataType_Decimal128: {
       // Reassemble the 128-bit value; Arrow scale (fractional digits, positive)
       // negates to cuDF's base-10 exponent.
       __int128 val = (static_cast<__int128>(sv->decimal_hi()) << 64) |
                      static_cast<unsigned __int128>(sv->decimal_lo());
       return std::make_unique<cudf::fixed_point_scalar<numeric::decimal128>>(
-          val, numeric::scale_type{-static_cast<int32_t>(sv->decimal_scale())}, true);
+          val, numeric::scale_type{-static_cast<int32_t>(sv->decimal_scale())}, valid);
     }
     default:
       throw std::runtime_error(
@@ -1220,12 +1223,26 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
   auto full_table = std::make_unique<cudf::table>(std::move(all_cols));
 
   // Residual (non-equi) join filter: DataFusion attaches a predicate the
-  // equijoin can't express (e.g. q17's `l_quantity < 0.2 * avg`). Its column
-  // refs were rewritten by the serializer to index this gathered
-  // [left_cols..., right_cols...] table. Evaluate it and drop failing rows
-  // before applying the output projection.
+  // equijoin can't express (e.g. q17's `l_quantity < 0.2 * avg`). It's
+  // serialized verbatim, with its ColumnRefs indexing the filter's intermediate
+  // schema; `filter_columns` maps intermediate column i to the (side, index) in
+  // the join inputs. Build that intermediate view over the gathered
+  // [left_cols..., right_cols...] table, evaluate the filter, and drop failing
+  // rows before applying the output projection.
   if (join->filter()) {
-    auto mask = build_column(join->filter(), full_table->view());
+    auto left_width = static_cast<cudf::size_type>(left.table->num_columns());
+    std::vector<cudf::column_view> inter_cols;
+    if (join->filter_columns()) {
+      for (const auto* fc : *join->filter_columns()) {
+        cudf::size_type combined =
+            fc->side() == fb::JoinSide_Right
+                ? left_width + static_cast<cudf::size_type>(fc->index())
+                : static_cast<cudf::size_type>(fc->index());
+        inter_cols.push_back(full_table->view().column(combined));
+      }
+    }
+    cudf::table_view inter{inter_cols};
+    auto mask = build_column(join->filter(), inter);
     full_table = cudf::apply_boolean_mask(full_table->view(), mask->view());
   }
 

@@ -1,5 +1,5 @@
 GpuCoalesceBatchesExec: target_batch_size=44739242
-  GpuFilterExec
+  GpuFilterExec: predicate=l_quantity@1 > Some(3000),15,2
     GpuScanExec: batch_size=44739242
 --- memory ---
 GpuCoalesceBatchesExec: row_width=24, subtree_max_row_bytes=48

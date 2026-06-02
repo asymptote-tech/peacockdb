@@ -1,4 +1,4 @@
-GpuProjectExec
+GpuProjectExec: expr=[CASE WHEN count(*)@0 > 74129 THEN avg(store_sales.ss_ext_discount_amt)@1 ELSE avg(store_sales.ss_net_paid)@2 END as bucket1, CASE WHEN count(*)@3 > 122840 THEN avg(store_sales.ss_ext_discount_amt)@4 ELSE avg(store_sales.ss_net_paid)@5 END as bucket2, CASE WHEN count(*)@6 > 56580 THEN avg(store_sales.ss_ext_discount_amt)@7 ELSE avg(store_sales.ss_net_paid)@8 END as bucket3, CASE WHEN count(*)@9 > 10097 THEN avg(store_sales.ss_ext_discount_amt)@10 ELSE avg(store_sales.ss_net_paid)@11 END as bucket4, CASE WHEN count(*)@12 > 165306 THEN avg(store_sales.ss_ext_discount_amt)@13 ELSE avg(store_sales.ss_net_paid)@14 END as bucket5]
   GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
     NestedLoopJoinExec: join_type=Left
       NestedLoopJoinExec: join_type=Left
@@ -16,105 +16,105 @@ GpuProjectExec
                               NestedLoopJoinExec: join_type=Left
                                 NestedLoopJoinExec: join_type=Left
                                   GpuCoalescePartitionsExec
-                                    GpuProjectExec
+                                    GpuProjectExec: expr=[]
                                       GpuCoalesceBatchesExec: target_batch_size=7669584
-                                        GpuFilterExec
+                                        GpuFilterExec: predicate=r_reason_sk@0 = 1
                                           GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                                             GpuScanExec: batch_size=7669584
                                   GpuAggregateExec: group_by=[], aggr=[count(*)]
                                     GpuCoalescePartitionsExec
                                       GpuAggregateExec: group_by=[], aggr=[count(*)]
-                                        GpuProjectExec
+                                        GpuProjectExec: expr=[]
                                           GpuCoalesceBatchesExec: target_batch_size=7669584
-                                            GpuFilterExec
+                                            GpuFilterExec: predicate=ss_quantity@0 >= 1 AND ss_quantity@0 <= 20
                                               GpuScanExec: batch_size=7669584
                                 GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_ext_discount_amt)]
                                   GpuCoalescePartitionsExec
                                     GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_ext_discount_amt)]
                                       GpuCoalesceBatchesExec: target_batch_size=7669584
-                                        GpuFilterExec
+                                        GpuFilterExec: predicate=ss_quantity@0 >= 1 AND ss_quantity@0 <= 20, projection=[1]
                                           GpuScanExec: batch_size=7669584
                               GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_net_paid)]
                                 GpuCoalescePartitionsExec
                                   GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_net_paid)]
                                     GpuCoalesceBatchesExec: target_batch_size=7669584
-                                      GpuFilterExec
+                                      GpuFilterExec: predicate=ss_quantity@0 >= 1 AND ss_quantity@0 <= 20, projection=[1]
                                         GpuScanExec: batch_size=7669584
                             GpuAggregateExec: group_by=[], aggr=[count(*)]
                               GpuCoalescePartitionsExec
                                 GpuAggregateExec: group_by=[], aggr=[count(*)]
-                                  GpuProjectExec
+                                  GpuProjectExec: expr=[]
                                     GpuCoalesceBatchesExec: target_batch_size=7669584
-                                      GpuFilterExec
+                                      GpuFilterExec: predicate=ss_quantity@0 >= 21 AND ss_quantity@0 <= 40
                                         GpuScanExec: batch_size=7669584
                           GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_ext_discount_amt)]
                             GpuCoalescePartitionsExec
                               GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_ext_discount_amt)]
                                 GpuCoalesceBatchesExec: target_batch_size=7669584
-                                  GpuFilterExec
+                                  GpuFilterExec: predicate=ss_quantity@0 >= 21 AND ss_quantity@0 <= 40, projection=[1]
                                     GpuScanExec: batch_size=7669584
                         GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_net_paid)]
                           GpuCoalescePartitionsExec
                             GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_net_paid)]
                               GpuCoalesceBatchesExec: target_batch_size=7669584
-                                GpuFilterExec
+                                GpuFilterExec: predicate=ss_quantity@0 >= 21 AND ss_quantity@0 <= 40, projection=[1]
                                   GpuScanExec: batch_size=7669584
                       GpuAggregateExec: group_by=[], aggr=[count(*)]
                         GpuCoalescePartitionsExec
                           GpuAggregateExec: group_by=[], aggr=[count(*)]
-                            GpuProjectExec
+                            GpuProjectExec: expr=[]
                               GpuCoalesceBatchesExec: target_batch_size=7669584
-                                GpuFilterExec
+                                GpuFilterExec: predicate=ss_quantity@0 >= 41 AND ss_quantity@0 <= 60
                                   GpuScanExec: batch_size=7669584
                     GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_ext_discount_amt)]
                       GpuCoalescePartitionsExec
                         GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_ext_discount_amt)]
                           GpuCoalesceBatchesExec: target_batch_size=7669584
-                            GpuFilterExec
+                            GpuFilterExec: predicate=ss_quantity@0 >= 41 AND ss_quantity@0 <= 60, projection=[1]
                               GpuScanExec: batch_size=7669584
                   GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_net_paid)]
                     GpuCoalescePartitionsExec
                       GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_net_paid)]
                         GpuCoalesceBatchesExec: target_batch_size=7669584
-                          GpuFilterExec
+                          GpuFilterExec: predicate=ss_quantity@0 >= 41 AND ss_quantity@0 <= 60, projection=[1]
                             GpuScanExec: batch_size=7669584
                 GpuAggregateExec: group_by=[], aggr=[count(*)]
                   GpuCoalescePartitionsExec
                     GpuAggregateExec: group_by=[], aggr=[count(*)]
-                      GpuProjectExec
+                      GpuProjectExec: expr=[]
                         GpuCoalesceBatchesExec: target_batch_size=7669584
-                          GpuFilterExec
+                          GpuFilterExec: predicate=ss_quantity@0 >= 61 AND ss_quantity@0 <= 80
                             GpuScanExec: batch_size=7669584
               GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_ext_discount_amt)]
                 GpuCoalescePartitionsExec
                   GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_ext_discount_amt)]
                     GpuCoalesceBatchesExec: target_batch_size=7669584
-                      GpuFilterExec
+                      GpuFilterExec: predicate=ss_quantity@0 >= 61 AND ss_quantity@0 <= 80, projection=[1]
                         GpuScanExec: batch_size=7669584
             GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_net_paid)]
               GpuCoalescePartitionsExec
                 GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_net_paid)]
                   GpuCoalesceBatchesExec: target_batch_size=7669584
-                    GpuFilterExec
+                    GpuFilterExec: predicate=ss_quantity@0 >= 61 AND ss_quantity@0 <= 80, projection=[1]
                       GpuScanExec: batch_size=7669584
           GpuAggregateExec: group_by=[], aggr=[count(*)]
             GpuCoalescePartitionsExec
               GpuAggregateExec: group_by=[], aggr=[count(*)]
-                GpuProjectExec
+                GpuProjectExec: expr=[]
                   GpuCoalesceBatchesExec: target_batch_size=7669584
-                    GpuFilterExec
+                    GpuFilterExec: predicate=ss_quantity@0 >= 81 AND ss_quantity@0 <= 100
                       GpuScanExec: batch_size=7669584
         GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_ext_discount_amt)]
           GpuCoalescePartitionsExec
             GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_ext_discount_amt)]
               GpuCoalesceBatchesExec: target_batch_size=7669584
-                GpuFilterExec
+                GpuFilterExec: predicate=ss_quantity@0 >= 81 AND ss_quantity@0 <= 100, projection=[1]
                   GpuScanExec: batch_size=7669584
       GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_net_paid)]
         GpuCoalescePartitionsExec
           GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_net_paid)]
             GpuCoalesceBatchesExec: target_batch_size=7669584
-              GpuFilterExec
+              GpuFilterExec: predicate=ss_quantity@0 >= 81 AND ss_quantity@0 <= 100, projection=[1]
                 GpuScanExec: batch_size=7669584
 --- memory ---
 GpuProjectExec: row_width=80, subtree_max_row_bytes=280

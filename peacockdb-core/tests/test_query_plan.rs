@@ -140,6 +140,9 @@ fn assert_plan_matches_canonical_at(plan: &Arc<dyn ExecutionPlan>, name: &str, d
         Ok(bytes) => {
             match plan_serializer::deserialize_plan(&bytes) {
                 Ok(reconstructed) => {
+                    // Serialization is a verbatim encoding of the plan (all GPU
+                    // lowering happens earlier, in GpuExecutionRule), so the
+                    // roundtrip must reproduce the plan_str exactly.
                     let roundtripped = plan_str(&reconstructed);
                     assert_eq!(
                         roundtripped, plan_str(plan),

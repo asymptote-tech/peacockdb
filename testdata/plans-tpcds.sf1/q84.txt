@@ -1,39 +1,39 @@
-GpuProjectExec
+GpuProjectExec: expr=[customer_id@0 as customer_id, customername@1 as customername]
   GpuSortPreservingMergeExec: [c_customer_id@2 ASC]
-    GpuSortExec
-      GpuProjectExec
+    GpuSortExec: expr=[c_customer_id@2 ASC], fetch=100
+      GpuProjectExec: expr=[c_customer_id@0 as customer_id, concat(concat(coalesce(c_last_name@2, ), , ), coalesce(c_first_name@1, )) as customername, c_customer_id@0 as c_customer_id]
         GpuCoalesceBatchesExec: target_batch_size=9942053
-          GpuHashJoinExec
+          GpuHashJoinExec: join_type=Inner, on=[(cd_demo_sk@3, sr_cdemo_sk@0)], projection=[0, 1, 2]
             GpuCoalesceBatchesExec: target_batch_size=9942053
               GpuRepartitionExec: partitioning=Hash([cd_demo_sk@3], 8), input_partitions=8
                 GpuCoalesceBatchesExec: target_batch_size=9942053
-                  GpuHashJoinExec
+                  GpuHashJoinExec: join_type=Inner, on=[(ib_income_band_sk@0, hd_income_band_sk@4)], projection=[1, 2, 3, 4]
                     GpuCoalesceBatchesExec: target_batch_size=9942053
                       GpuRepartitionExec: partitioning=Hash([ib_income_band_sk@0], 8), input_partitions=8
                         GpuCoalesceBatchesExec: target_batch_size=9942053
-                          GpuFilterExec
+                          GpuFilterExec: predicate=ib_lower_bound@1 >= 38128 AND ib_upper_bound@2 <= 88128, projection=[0]
                             GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                               GpuScanExec: batch_size=9942053
                     GpuCoalesceBatchesExec: target_batch_size=9942053
                       GpuRepartitionExec: partitioning=Hash([hd_income_band_sk@4], 8), input_partitions=8
-                        GpuProjectExec
+                        GpuProjectExec: expr=[c_customer_id@1 as c_customer_id, c_first_name@2 as c_first_name, c_last_name@3 as c_last_name, cd_demo_sk@4 as cd_demo_sk, hd_income_band_sk@0 as hd_income_band_sk]
                           GpuCoalesceBatchesExec: target_batch_size=9942053
-                            GpuHashJoinExec
+                            GpuHashJoinExec: join_type=Inner, on=[(hd_demo_sk@0, c_current_hdemo_sk@1)], projection=[1, 2, 4, 5, 6]
                               GpuCoalesceBatchesExec: target_batch_size=9942053
                                 GpuRepartitionExec: partitioning=Hash([hd_demo_sk@0], 8), input_partitions=1
                                   GpuScanExec: batch_size=9942053
                               GpuCoalesceBatchesExec: target_batch_size=9942053
                                 GpuRepartitionExec: partitioning=Hash([c_current_hdemo_sk@1], 8), input_partitions=8
                                   GpuCoalesceBatchesExec: target_batch_size=9942053
-                                    GpuHashJoinExec
+                                    GpuHashJoinExec: join_type=Inner, on=[(c_current_cdemo_sk@1, cd_demo_sk@0)], projection=[0, 2, 3, 4, 5]
                                       GpuCoalesceBatchesExec: target_batch_size=9942053
                                         GpuRepartitionExec: partitioning=Hash([c_current_cdemo_sk@1], 8), input_partitions=8
                                           GpuCoalesceBatchesExec: target_batch_size=9942053
-                                            GpuHashJoinExec
+                                            GpuHashJoinExec: join_type=Inner, on=[(ca_address_sk@0, c_current_addr_sk@3)], projection=[1, 2, 3, 5, 6]
                                               GpuCoalesceBatchesExec: target_batch_size=9942053
                                                 GpuRepartitionExec: partitioning=Hash([ca_address_sk@0], 8), input_partitions=8
                                                   GpuCoalesceBatchesExec: target_batch_size=9942053
-                                                    GpuFilterExec
+                                                    GpuFilterExec: predicate=ca_city@1 = Edgewood, projection=[0]
                                                       GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                                                         GpuScanExec: batch_size=9942053
                                               GpuCoalesceBatchesExec: target_batch_size=9942053
