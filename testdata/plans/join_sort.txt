@@ -1,7 +1,7 @@
-GpuSortExec
-  GpuProjectExec
+GpuSortExec: expr=[n_name@0 ASC NULLS LAST]
+  GpuProjectExec: expr=[n_name@1 as n_name, r_name@0 as r_name]
     GpuCoalesceBatchesExec: target_batch_size=15790320
-      GpuHashJoinExec
+      GpuHashJoinExec: join_type=Inner, on=[(r_regionkey@0, n_regionkey@1)], projection=[1, 2]
         GpuScanExec: batch_size=15790320
         GpuScanExec: batch_size=15790320
 --- memory ---

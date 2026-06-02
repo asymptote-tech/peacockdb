@@ -8,6 +8,7 @@
 #include <cudf/column/column_factories.hpp>
 #include <cudf/datetime.hpp>
 #include <cudf/filling.hpp>
+#include <cudf/fixed_point/fixed_point.hpp>
 #include <cudf/groupby.hpp>
 #include <cudf/io/parquet.hpp>
 #if __has_include(<cudf/join/join.hpp>)
@@ -357,41 +358,59 @@ static bool is_ast_able(const fb::Expr* expr) {
     }
     case fb::ExprNode_UnaryExprNode:
       return is_ast_able(expr->node_as_UnaryExprNode()->arg());
-    case fb::ExprNode_CastExprNode:
+    case fb::ExprNode_CastExprNode: {
+      // cuDF AST only has CAST_TO_INT64 / CAST_TO_FLOAT64. Any other target
+      // (notably Decimal128) must go through the column path, which uses
+      // cudf::cast.
+      auto target = fb_to_type_id(expr->node_as_CastExprNode()->target_type());
+      if (target != cudf::type_id::INT64 && target != cudf::type_id::FLOAT64)
+        return false;
       return is_ast_able(expr->node_as_CastExprNode()->expr());
+    }
     default:
       return true;
   }
 }
 
 static std::unique_ptr<cudf::scalar> build_scalar(const fb::ScalarValue* sv) {
+  // A typed NULL literal is encoded with is_null set; the value fields are
+  // unused. Each scalar is built invalid so cuDF treats it as null of `type`.
+  bool valid = !sv->is_null();
   switch (sv->type()) {
     case fb::DataType_Boolean:
-      return std::make_unique<cudf::numeric_scalar<bool>>(sv->bool_val(), true);
+      return std::make_unique<cudf::numeric_scalar<bool>>(sv->bool_val(), valid);
     case fb::DataType_Int8:
       return std::make_unique<cudf::numeric_scalar<int8_t>>(
-          static_cast<int8_t>(sv->int_val()), true);
+          static_cast<int8_t>(sv->int_val()), valid);
     case fb::DataType_Int16:
       return std::make_unique<cudf::numeric_scalar<int16_t>>(
-          static_cast<int16_t>(sv->int_val()), true);
+          static_cast<int16_t>(sv->int_val()), valid);
     case fb::DataType_Int32:
       return std::make_unique<cudf::numeric_scalar<int32_t>>(
-          static_cast<int32_t>(sv->int_val()), true);
+          static_cast<int32_t>(sv->int_val()), valid);
     case fb::DataType_Int64:
-      return std::make_unique<cudf::numeric_scalar<int64_t>>(sv->int_val(), true);
+      return std::make_unique<cudf::numeric_scalar<int64_t>>(sv->int_val(), valid);
     case fb::DataType_Float32:
       return std::make_unique<cudf::numeric_scalar<float>>(
-          static_cast<float>(sv->float_val()), true);
+          static_cast<float>(sv->float_val()), valid);
     case fb::DataType_Float64:
-      return std::make_unique<cudf::numeric_scalar<double>>(sv->float_val(), true);
+      return std::make_unique<cudf::numeric_scalar<double>>(sv->float_val(), valid);
     case fb::DataType_Utf8:
     case fb::DataType_LargeUtf8:
     case fb::DataType_Utf8View:
       return std::make_unique<cudf::string_scalar>(
-          std::string(sv->string_val() ? sv->string_val()->str() : ""), true);
+          std::string(sv->string_val() ? sv->string_val()->str() : ""), valid);
     case fb::DataType_Date32:
       return std::make_unique<cudf::timestamp_scalar<cudf::timestamp_D>>(
-          cudf::duration_D{static_cast<int32_t>(sv->int_val())}, true);
+          cudf::duration_D{static_cast<int32_t>(sv->int_val())}, valid);
+    case fb::DataType_Decimal128: {
+      // Reassemble the 128-bit value; Arrow scale (fractional digits, positive)
+      // negates to cuDF's base-10 exponent.
+      __int128 val = (static_cast<__int128>(sv->decimal_hi()) << 64) |
+                     static_cast<unsigned __int128>(sv->decimal_lo());
+      return std::make_unique<cudf::fixed_point_scalar<numeric::decimal128>>(
+          val, numeric::scale_type{-static_cast<int32_t>(sv->decimal_scale())}, valid);
+    }
     default:
       throw std::runtime_error(
           "unsupported scalar type in column path: " + std::to_string(sv->type()));
@@ -696,7 +715,14 @@ static std::unique_ptr<cudf::column> build_column(
     case fb::ExprNode_CastExprNode: {
       auto* cast = expr->node_as_CastExprNode();
       auto inner = build_column(cast->expr(), table);
-      cudf::data_type target{fb_to_type_id(cast->target_type())};
+      auto target_id = fb_to_type_id(cast->target_type());
+      // Decimal types need a scale. Arrow/DataFusion scale counts fractional
+      // digits (positive); cuDF's fixed_point scale is the base-10 exponent
+      // (negated). Other types use the default (scale 0).
+      cudf::data_type target =
+          target_id == cudf::type_id::DECIMAL128
+              ? cudf::data_type{target_id, -static_cast<int32_t>(cast->decimal_scale())}
+              : cudf::data_type{target_id};
       return cudf::cast(inner->view(), target);
     }
 
@@ -870,6 +896,19 @@ static std::unique_ptr<cudf::groupby_aggregation> make_agg(
     return cudf::make_min_aggregation<cudf::groupby_aggregation>();
   if (func_name == "max" || func_name == "MAX")
     return cudf::make_max_aggregation<cudf::groupby_aggregation>();
+  if (func_name == "avg" || func_name == "AVG" ||
+      func_name == "mean" || func_name == "MEAN") {
+    // GpuRepartition executes as passthrough, so the Partial stage already
+    // groups the full input (one row per key); the Final stage then regroups
+    // those unique keys, making MEAN-of-singleton an identity. So a plain
+    // groupby MEAN is correct in both Partial and Final modes here.
+    // NOTE: correct only while Partial output is one-row-per-key. Multi-
+    // partition repartition breaks this (mean-of-means); execute_aggregate
+    // guards against it at runtime — see the has_avg_final check there.
+    // Decompose AVG into SUM+COUNT to lift this restriction:
+    // https://github.com/asymptote-tech/peacockdb/issues/25
+    return cudf::make_mean_aggregation<cudf::groupby_aggregation>();
+  }
   throw std::runtime_error("unsupported aggregate function: " + func_name);
 }
 
@@ -883,6 +922,9 @@ static std::unique_ptr<cudf::reduce_aggregation> make_reduce_agg(
     return cudf::make_min_aggregation<cudf::reduce_aggregation>();
   if (func_name == "max" || func_name == "MAX")
     return cudf::make_max_aggregation<cudf::reduce_aggregation>();
+  if (func_name == "avg" || func_name == "AVG" ||
+      func_name == "mean" || func_name == "MEAN")
+    return cudf::make_mean_aggregation<cudf::reduce_aggregation>();
   throw std::runtime_error("unsupported aggregate function: " + func_name);
 }
 
@@ -937,6 +979,21 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
         cudf::column_view values_col = get_values_col(func);
         bool is_count = (name == "count" || name == "COUNT");
 
+        bool is_avg = (name == "avg" || name == "AVG" ||
+                       name == "mean" || name == "MEAN");
+        // Same shortcut/guard as the grouped path: a Final-stage global AVG
+        // reduces over the Partial outputs. With passthrough repartition there
+        // is exactly one partial row, so MEAN-of-one is an identity. More than
+        // one row means a multi-partition merge → silently-wrong mean-of-means
+        // (decompose AVG into SUM+COUNT to lift this:
+        // https://github.com/asymptote-tech/peacockdb/issues/25).
+        if (is_final && is_avg && values_col.size() > 1) {
+          throw std::runtime_error(
+              "Final-stage AVG merged multiple partial rows "
+              "(mean-of-means is wrong); AVG must be decomposed into "
+              "SUM+COUNT before multi-partition GPU repartition is enabled");
+        }
+
         std::unique_ptr<cudf::scalar> scalar_result;
         if (is_count) {
           // Avoid make_count_aggregation<reduce_aggregation> which is not
@@ -967,6 +1024,7 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
   std::vector<cudf::groupby::aggregation_request> requests;
   std::vector<std::string> agg_names;
   std::vector<bool> agg_is_count;
+  bool has_avg_final = false;
   if (agg->aggr_funcs()) {
     for (flatbuffers::uoffset_t i = 0; i < agg->aggr_funcs()->size(); ++i) {
       auto* func = agg->aggr_funcs()->Get(i);
@@ -982,10 +1040,31 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
       else
         agg_names.push_back(name);
       agg_is_count.push_back(name == "count" || name == "COUNT");
+      if (is_final && (name == "avg" || name == "AVG" ||
+                       name == "mean" || name == "MEAN"))
+        has_avg_final = true;
     }
   }
 
   auto [group_keys, agg_results] = gb.aggregate(requests);
+
+  // Guard the AVG-as-plain-MEAN shortcut (see make_agg). It is correct only
+  // when the Partial stage already produced one row per key, so the Final
+  // regroup is an identity (MEAN-of-singleton). Today that holds because
+  // GpuRepartition runs as passthrough (single partition). If real multi-
+  // partition repartition is ever enabled, the same key arrives from several
+  // Partial outputs and this Final groupby actually merges rows — turning AVG
+  // into a silently-wrong mean-of-means. Detect that here (fewer output groups
+  // than input rows) and fail loudly instead. The fix at that point is to
+  // decompose AVG into SUM+COUNT across the Partial/Final boundary:
+  // https://github.com/asymptote-tech/peacockdb/issues/25
+  if (has_avg_final &&
+      group_keys->num_rows() < static_cast<cudf::size_type>(tv.num_rows())) {
+    throw std::runtime_error(
+        "Final-stage AVG merged multiple partial rows per key "
+        "(mean-of-means is wrong); AVG must be decomposed into SUM+COUNT "
+        "before multi-partition GPU repartition is enabled");
+  }
 
   // Assemble output: key columns + aggregation result columns.
   for (cudf::size_type i = 0; i < group_keys->num_columns(); ++i) {
@@ -1184,6 +1263,30 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
   }
 
   auto full_table = std::make_unique<cudf::table>(std::move(all_cols));
+
+  // Residual (non-equi) join filter: DataFusion attaches a predicate the
+  // equijoin can't express (e.g. q17's `l_quantity < 0.2 * avg`). It's
+  // serialized verbatim, with its ColumnRefs indexing the filter's intermediate
+  // schema; `filter_columns` maps intermediate column i to the (side, index) in
+  // the join inputs. Build that intermediate view over the gathered
+  // [left_cols..., right_cols...] table, evaluate the filter, and drop failing
+  // rows before applying the output projection.
+  if (join->filter()) {
+    auto left_width = static_cast<cudf::size_type>(left.table->num_columns());
+    std::vector<cudf::column_view> inter_cols;
+    if (join->filter_columns()) {
+      for (const auto* fc : *join->filter_columns()) {
+        cudf::size_type combined =
+            fc->side() == fb::JoinSide_Right
+                ? left_width + static_cast<cudf::size_type>(fc->index())
+                : static_cast<cudf::size_type>(fc->index());
+        inter_cols.push_back(full_table->view().column(combined));
+      }
+    }
+    cudf::table_view inter{inter_cols};
+    auto mask = build_column(join->filter(), inter);
+    full_table = cudf::apply_boolean_mask(full_table->view(), mask->view());
+  }
 
   // Apply output projection if present.
   if (join->projection() && join->projection()->size() > 0) {

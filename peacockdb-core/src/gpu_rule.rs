@@ -13,11 +13,15 @@ use datafusion::physical_plan::coalesce_batches::CoalesceBatchesExec;
 use datafusion::physical_plan::coalesce_partitions::CoalescePartitionsExec;
 use datafusion::physical_plan::aggregates::AggregateExec;
 use datafusion::physical_plan::filter::FilterExec;
+use datafusion::physical_plan::joins::utils::JoinFilter;
 use datafusion::physical_plan::joins::HashJoinExec;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
 use datafusion::physical_plan::sorts::sort_preserving_merge::SortPreservingMergeExec;
+use datafusion::physical_plan::PhysicalExpr;
+use datafusion::physical_expr::expressions::{BinaryExpr, InListExpr, NotExpr};
+use datafusion::logical_expr::Operator;
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
 };
@@ -96,10 +100,30 @@ macro_rules! gpu_exec_node {
 }
 
 gpu_exec_node!(GpuFilterExec);
-impl GpuExtraDisplay for GpuFilterExec {}
+impl GpuExtraDisplay for GpuFilterExec {
+    fn extra_display_info(&self) -> String {
+        let fe = self.inner.as_any().downcast_ref::<FilterExec>().unwrap();
+        let mut s = format!("predicate={}", fe.predicate());
+        if let Some(proj) = fe.projection() {
+            let cols: Vec<String> = proj.iter().map(|i| i.to_string()).collect();
+            s.push_str(&format!(", projection=[{}]", cols.join(", ")));
+        }
+        s
+    }
+}
 
 gpu_exec_node!(GpuProjectExec);
-impl GpuExtraDisplay for GpuProjectExec {}
+impl GpuExtraDisplay for GpuProjectExec {
+    fn extra_display_info(&self) -> String {
+        let pe = self.inner.as_any().downcast_ref::<ProjectionExec>().unwrap();
+        let exprs: Vec<String> = pe
+            .expr()
+            .iter()
+            .map(|(e, alias)| format!("{e} as {alias}"))
+            .collect();
+        format!("expr=[{}]", exprs.join(", "))
+    }
+}
 
 gpu_exec_node!(GpuAggregateExec);
 impl GpuExtraDisplay for GpuAggregateExec {
@@ -116,10 +140,37 @@ impl GpuExtraDisplay for GpuAggregateExec {
 }
 
 gpu_exec_node!(GpuHashJoinExec);
-impl GpuExtraDisplay for GpuHashJoinExec {}
+impl GpuExtraDisplay for GpuHashJoinExec {
+    fn extra_display_info(&self) -> String {
+        let hj = self.inner.as_any().downcast_ref::<HashJoinExec>().unwrap();
+        let on: Vec<String> = hj
+            .on()
+            .iter()
+            .map(|(l, r)| format!("({l}, {r})"))
+            .collect();
+        let mut s = format!("join_type={:?}, on=[{}]", hj.join_type(), on.join(", "));
+        if let Some(jf) = hj.filter() {
+            s.push_str(&format!(", filter={}", jf.expression()));
+        }
+        if let Some(proj) = hj.projection.as_ref() {
+            let cols: Vec<String> = proj.iter().map(|i| i.to_string()).collect();
+            s.push_str(&format!(", projection=[{}]", cols.join(", ")));
+        }
+        s
+    }
+}
 
 gpu_exec_node!(GpuSortExec);
-impl GpuExtraDisplay for GpuSortExec {}
+impl GpuExtraDisplay for GpuSortExec {
+    fn extra_display_info(&self) -> String {
+        let se = self.inner.as_any().downcast_ref::<SortExec>().unwrap();
+        let mut s = format!("expr=[{}]", se.expr());
+        if let Some(f) = se.fetch() {
+            s.push_str(&format!(", fetch={f}"));
+        }
+        s
+    }
+}
 
 gpu_exec_node!(GpuCoalesceBatchesExec);
 impl GpuExtraDisplay for GpuCoalesceBatchesExec {
@@ -230,6 +281,42 @@ impl ExecutionPlan for GpuScanExec {
 #[derive(Debug)]
 pub struct GpuExecutionRule;
 
+/// Expand `x IN (a, b, c)` into `((x = a) OR (x = b)) OR (x = c)` — or its
+/// `NOT(...)` form for `NOT IN`. cuDF's AST has no IN opcode, so this lowering
+/// must happen before execution; doing it here (in the plan) rather than inside
+/// the serializer keeps serialization a verbatim encoding of the plan.
+fn expand_in_list(in_list: &InListExpr) -> Result<Arc<dyn PhysicalExpr>> {
+    let list = in_list.list();
+    if list.is_empty() {
+        return Err(datafusion::error::DataFusionError::NotImplemented(
+            "IN with empty list".into(),
+        ));
+    }
+    let target = in_list.expr();
+    let eq = |item: &Arc<dyn PhysicalExpr>| -> Arc<dyn PhysicalExpr> {
+        Arc::new(BinaryExpr::new(target.clone(), Operator::Eq, item.clone()))
+    };
+    let mut acc = eq(&list[0]);
+    for item in &list[1..] {
+        acc = Arc::new(BinaryExpr::new(acc, Operator::Or, eq(item)));
+    }
+    if in_list.negated() {
+        acc = Arc::new(NotExpr::new(acc));
+    }
+    Ok(acc)
+}
+
+/// Recursively replace every `InListExpr` in `expr` with its OR-chain form.
+fn lower_in_lists(expr: Arc<dyn PhysicalExpr>) -> Result<Transformed<Arc<dyn PhysicalExpr>>> {
+    expr.transform_up(|e| {
+        if let Some(in_list) = e.as_any().downcast_ref::<InListExpr>() {
+            Ok(Transformed::yes(expand_in_list(in_list)?))
+        } else {
+            Ok(Transformed::no(e))
+        }
+    })
+}
+
 impl PhysicalOptimizerRule for GpuExecutionRule {
     fn optimize(
         &self,
@@ -238,13 +325,74 @@ impl PhysicalOptimizerRule for GpuExecutionRule {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let result = plan.transform_up(|node: Arc<dyn ExecutionPlan>| {
             let new_node: Arc<dyn ExecutionPlan> = if node.as_any().is::<FilterExec>() {
-                Arc::new(GpuFilterExec::new(node))
+                // Lower any IN-lists in the predicate before wrapping.
+                let rebuilt: Option<Arc<dyn ExecutionPlan>> = {
+                    let fe = node.as_any().downcast_ref::<FilterExec>().unwrap();
+                    let lowered = lower_in_lists(fe.predicate().clone())?;
+                    if lowered.transformed {
+                        let mut f = FilterExec::try_new(lowered.data, fe.input().clone())?;
+                        if let Some(proj) = fe.projection() {
+                            f = f.with_projection(Some(proj.clone()))?;
+                        }
+                        Some(Arc::new(f) as Arc<dyn ExecutionPlan>)
+                    } else {
+                        None
+                    }
+                };
+                Arc::new(GpuFilterExec::new(rebuilt.unwrap_or(node)))
             } else if node.as_any().is::<ProjectionExec>() {
-                Arc::new(GpuProjectExec::new(node))
+                let rebuilt: Option<Arc<dyn ExecutionPlan>> = {
+                    let pe = node.as_any().downcast_ref::<ProjectionExec>().unwrap();
+                    let mut changed = false;
+                    let mut new_exprs: Vec<(Arc<dyn PhysicalExpr>, String)> =
+                        Vec::with_capacity(pe.expr().len());
+                    for (e, alias) in pe.expr() {
+                        let lowered = lower_in_lists(e.clone())?;
+                        changed |= lowered.transformed;
+                        new_exprs.push((lowered.data, alias.clone()));
+                    }
+                    if changed {
+                        Some(Arc::new(ProjectionExec::try_new(new_exprs, pe.input().clone())?)
+                            as Arc<dyn ExecutionPlan>)
+                    } else {
+                        None
+                    }
+                };
+                Arc::new(GpuProjectExec::new(rebuilt.unwrap_or(node)))
             } else if node.as_any().is::<AggregateExec>() {
                 Arc::new(GpuAggregateExec::new(node))
             } else if node.as_any().is::<HashJoinExec>() {
-                Arc::new(GpuHashJoinExec::new(node))
+                // Lower any IN-lists in the residual join filter before wrapping.
+                let rebuilt: Option<Arc<dyn ExecutionPlan>> = {
+                    let hj = node.as_any().downcast_ref::<HashJoinExec>().unwrap();
+                    match hj.filter() {
+                        Some(jf) => {
+                            let lowered = lower_in_lists(jf.expression().clone())?;
+                            if lowered.transformed {
+                                let new_filter = JoinFilter::new(
+                                    lowered.data,
+                                    jf.column_indices().to_vec(),
+                                    jf.schema().clone(),
+                                );
+                                let h = HashJoinExec::try_new(
+                                    hj.left().clone(),
+                                    hj.right().clone(),
+                                    hj.on().to_vec(),
+                                    Some(new_filter),
+                                    hj.join_type(),
+                                    hj.projection.clone(),
+                                    *hj.partition_mode(),
+                                    hj.null_equals_null(),
+                                )?;
+                                Some(Arc::new(h) as Arc<dyn ExecutionPlan>)
+                            } else {
+                                None
+                            }
+                        }
+                        None => None,
+                    }
+                };
+                Arc::new(GpuHashJoinExec::new(rebuilt.unwrap_or(node)))
             } else if node.as_any().is::<SortExec>() {
                 Arc::new(GpuSortExec::new(node))
             } else if node.as_any().is::<CoalesceBatchesExec>() {

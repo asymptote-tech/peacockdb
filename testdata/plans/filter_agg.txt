@@ -1,9 +1,9 @@
 GpuAggregateExec: group_by=[], aggr=[count(*)]
   GpuCoalescePartitionsExec
     GpuAggregateExec: group_by=[], aggr=[count(*)]
-      GpuProjectExec
+      GpuProjectExec: expr=[]
         GpuCoalesceBatchesExec: target_batch_size=67108864
-          GpuFilterExec
+          GpuFilterExec: predicate=c_acctbal@0 > Some(0),15,2
             GpuScanExec: batch_size=67108864
 --- memory ---
 GpuAggregateExec: row_width=8, subtree_max_row_bytes=32

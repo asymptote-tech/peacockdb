@@ -1,13 +1,13 @@
 GpuSortPreservingMergeExec: [nation_count@1 DESC, r_name@0 ASC NULLS LAST]
-  GpuSortExec
-    GpuProjectExec
+  GpuSortExec: expr=[nation_count@1 DESC, r_name@0 ASC NULLS LAST]
+    GpuProjectExec: expr=[r_name@0 as r_name, count(*)@1 as nation_count]
       GpuAggregateExec: group_by=[r_name], aggr=[count(*)]
         GpuCoalesceBatchesExec: target_batch_size=26843545
           GpuRepartitionExec: partitioning=Hash([r_name@0], 8), input_partitions=8
             GpuAggregateExec: group_by=[r_name], aggr=[count(*)]
               GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                 GpuCoalesceBatchesExec: target_batch_size=26843545
-                  GpuHashJoinExec
+                  GpuHashJoinExec: join_type=Inner, on=[(r_regionkey@0, n_regionkey@0)], projection=[1]
                     GpuScanExec: batch_size=26843545
                     GpuScanExec: batch_size=26843545
 --- memory ---

@@ -2,44 +2,44 @@ GpuAggregateExec: group_by=[], aggr=[sum(store_sales.ss_quantity)]
   GpuCoalescePartitionsExec
     GpuAggregateExec: group_by=[], aggr=[sum(store_sales.ss_quantity)]
       GpuCoalesceBatchesExec: target_batch_size=14913080
-        GpuHashJoinExec
+        GpuHashJoinExec: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@0)], projection=[2]
           GpuCoalesceBatchesExec: target_batch_size=14913080
             GpuRepartitionExec: partitioning=Hash([d_date_sk@0], 8), input_partitions=8
               GpuCoalesceBatchesExec: target_batch_size=14913080
-                GpuFilterExec
+                GpuFilterExec: predicate=d_year@1 = 2000, projection=[0]
                   GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                     GpuScanExec: batch_size=14913080
           GpuCoalesceBatchesExec: target_batch_size=14913080
             GpuRepartitionExec: partitioning=Hash([ss_sold_date_sk@0], 8), input_partitions=8
               GpuCoalesceBatchesExec: target_batch_size=14913080
-                GpuHashJoinExec
+                GpuHashJoinExec: join_type=Inner, on=[(ca_address_sk@0, ss_addr_sk@1)], filter=(ca_state@1 = CO OR ca_state@1 = OH OR ca_state@1 = TX) AND ss_net_profit@0 >= Some(0),7,2 AND ss_net_profit@0 <= Some(200000),7,2 OR (ca_state@1 = OR OR ca_state@1 = MN OR ca_state@1 = KY) AND ss_net_profit@0 >= Some(15000),7,2 AND ss_net_profit@0 <= Some(300000),7,2 OR (ca_state@1 = VA OR ca_state@1 = CA OR ca_state@1 = MS) AND ss_net_profit@0 >= Some(5000),7,2 AND ss_net_profit@0 <= Some(2500000),7,2, projection=[2, 4]
                   GpuCoalesceBatchesExec: target_batch_size=14913080
                     GpuRepartitionExec: partitioning=Hash([ca_address_sk@0], 8), input_partitions=8
                       GpuCoalesceBatchesExec: target_batch_size=14913080
-                        GpuFilterExec
+                        GpuFilterExec: predicate=(ca_state@1 = CO OR ca_state@1 = OH OR ca_state@1 = TX OR ca_state@1 = OR OR ca_state@1 = MN OR ca_state@1 = KY OR ca_state@1 = VA OR ca_state@1 = CA OR ca_state@1 = MS) AND ca_country@2 = United States, projection=[0, 1]
                           GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                             GpuScanExec: batch_size=14913080
                   GpuCoalesceBatchesExec: target_batch_size=14913080
                     GpuRepartitionExec: partitioning=Hash([ss_addr_sk@1], 8), input_partitions=8
                       GpuCoalesceBatchesExec: target_batch_size=14913080
-                        GpuHashJoinExec
+                        GpuHashJoinExec: join_type=Inner, on=[(cd_demo_sk@0, ss_cdemo_sk@1)], filter=cd_marital_status@1 = M AND cd_education_status@2 = 4 yr Degree AND ss_sales_price@0 >= Some(10000),7,2 AND ss_sales_price@0 <= Some(15000),7,2 OR cd_marital_status@1 = D AND cd_education_status@2 = 2 yr Degree AND ss_sales_price@0 >= Some(5000),7,2 AND ss_sales_price@0 <= Some(10000),7,2 OR cd_marital_status@1 = S AND cd_education_status@2 = College AND ss_sales_price@0 >= Some(15000),7,2 AND ss_sales_price@0 <= Some(20000),7,2, projection=[3, 5, 6, 8]
                           GpuCoalesceBatchesExec: target_batch_size=14913080
                             GpuRepartitionExec: partitioning=Hash([cd_demo_sk@0], 8), input_partitions=8
                               GpuCoalesceBatchesExec: target_batch_size=14913080
-                                GpuFilterExec
+                                GpuFilterExec: predicate=cd_marital_status@1 = M AND cd_education_status@2 = 4 yr Degree OR cd_marital_status@1 = D AND cd_education_status@2 = 2 yr Degree OR cd_marital_status@1 = S AND cd_education_status@2 = College
                                   GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                                     GpuScanExec: batch_size=14913080
                           GpuCoalesceBatchesExec: target_batch_size=14913080
                             GpuRepartitionExec: partitioning=Hash([ss_cdemo_sk@1], 8), input_partitions=8
                               GpuCoalesceBatchesExec: target_batch_size=14913080
-                                GpuHashJoinExec
+                                GpuHashJoinExec: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@3)], projection=[1, 2, 3, 5, 6, 7]
                                   GpuCoalesceBatchesExec: target_batch_size=14913080
                                     GpuRepartitionExec: partitioning=Hash([s_store_sk@0], 8), input_partitions=1
                                       GpuScanExec: batch_size=14913080
                                   GpuCoalesceBatchesExec: target_batch_size=14913080
                                     GpuRepartitionExec: partitioning=Hash([ss_store_sk@3], 8), input_partitions=8
                                       GpuCoalesceBatchesExec: target_batch_size=14913080
-                                        GpuFilterExec
+                                        GpuFilterExec: predicate=(ss_net_profit@6 >= Some(0),7,2 AND ss_net_profit@6 <= Some(200000),7,2 OR ss_net_profit@6 >= Some(15000),7,2 AND ss_net_profit@6 <= Some(300000),7,2 OR ss_net_profit@6 >= Some(5000),7,2 AND ss_net_profit@6 <= Some(2500000),7,2) AND (ss_sales_price@5 >= Some(10000),7,2 AND ss_sales_price@5 <= Some(15000),7,2 OR ss_sales_price@5 >= Some(5000),7,2 AND ss_sales_price@5 <= Some(10000),7,2 OR ss_sales_price@5 >= Some(15000),7,2 AND ss_sales_price@5 <= Some(20000),7,2)
                                           GpuScanExec: batch_size=14913080
 --- memory ---
 GpuAggregateExec: row_width=8, subtree_max_row_bytes=144

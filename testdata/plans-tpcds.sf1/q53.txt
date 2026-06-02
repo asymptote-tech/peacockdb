@@ -1,41 +1,41 @@
 GpuSortPreservingMergeExec: [avg_quarterly_sales@2 ASC NULLS LAST, sum_sales@1 ASC NULLS LAST, i_manufact_id@0 ASC NULLS LAST]
-  GpuSortExec
-    GpuProjectExec
+  GpuSortExec: expr=[avg_quarterly_sales@2 ASC NULLS LAST, sum_sales@1 ASC NULLS LAST, i_manufact_id@0 ASC NULLS LAST], fetch=100
+    GpuProjectExec: expr=[i_manufact_id@0 as i_manufact_id, sum(store_sales.ss_sales_price)@1 as sum_sales, avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manufact_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@2 as avg_quarterly_sales]
       GpuCoalesceBatchesExec: target_batch_size=19173961
-        GpuFilterExec
+        GpuFilterExec: predicate=CASE WHEN avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manufact_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@2 > Some(0),21,6 THEN abs(sum(store_sales.ss_sales_price)@1 - avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manufact_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@2) / avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manufact_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@2 END > Some(1000000000),32,10
           WindowAggExec: wdw=[avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manufact_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING: Ok(Field { name: "avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manufact_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING", data_type: Decimal128(21, 6), nullable: true, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Rows, start_bound: Preceding(UInt64(NULL)), end_bound: Following(UInt64(NULL)), is_causal: false }]
-            GpuSortExec
+            GpuSortExec: expr=[i_manufact_id@0 ASC NULLS LAST]
               GpuCoalesceBatchesExec: target_batch_size=19173961
                 GpuRepartitionExec: partitioning=Hash([i_manufact_id@0], 8), input_partitions=8
-                  GpuProjectExec
+                  GpuProjectExec: expr=[i_manufact_id@0 as i_manufact_id, sum(store_sales.ss_sales_price)@2 as sum(store_sales.ss_sales_price)]
                     GpuAggregateExec: group_by=[i_manufact_id, d_qoy], aggr=[sum(store_sales.ss_sales_price)]
                       GpuCoalesceBatchesExec: target_batch_size=19173961
                         GpuRepartitionExec: partitioning=Hash([i_manufact_id@0, d_qoy@1], 8), input_partitions=8
                           GpuAggregateExec: group_by=[i_manufact_id, d_qoy], aggr=[sum(store_sales.ss_sales_price)]
                             GpuCoalesceBatchesExec: target_batch_size=19173961
-                              GpuHashJoinExec
+                              GpuHashJoinExec: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@1)], projection=[1, 3, 4]
                                 GpuCoalesceBatchesExec: target_batch_size=19173961
                                   GpuRepartitionExec: partitioning=Hash([s_store_sk@0], 8), input_partitions=1
                                     GpuScanExec: batch_size=19173961
                                 GpuCoalesceBatchesExec: target_batch_size=19173961
                                   GpuRepartitionExec: partitioning=Hash([ss_store_sk@1], 8), input_partitions=8
-                                    GpuProjectExec
+                                    GpuProjectExec: expr=[i_manufact_id@1 as i_manufact_id, ss_store_sk@2 as ss_store_sk, ss_sales_price@3 as ss_sales_price, d_qoy@0 as d_qoy]
                                       GpuCoalesceBatchesExec: target_batch_size=19173961
-                                        GpuHashJoinExec
+                                        GpuHashJoinExec: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@1)], projection=[1, 2, 4, 5]
                                           GpuCoalesceBatchesExec: target_batch_size=19173961
                                             GpuRepartitionExec: partitioning=Hash([d_date_sk@0], 8), input_partitions=8
                                               GpuCoalesceBatchesExec: target_batch_size=19173961
-                                                GpuFilterExec
+                                                GpuFilterExec: predicate=d_month_seq@1 = 1200 OR d_month_seq@1 = 1201 OR d_month_seq@1 = 1202 OR d_month_seq@1 = 1203 OR d_month_seq@1 = 1204 OR d_month_seq@1 = 1205 OR d_month_seq@1 = 1206 OR d_month_seq@1 = 1207 OR d_month_seq@1 = 1208 OR d_month_seq@1 = 1209 OR d_month_seq@1 = 1210 OR d_month_seq@1 = 1211, projection=[0, 2]
                                                   GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                                                     GpuScanExec: batch_size=19173961
                                           GpuCoalesceBatchesExec: target_batch_size=19173961
                                             GpuRepartitionExec: partitioning=Hash([ss_sold_date_sk@1], 8), input_partitions=8
                                               GpuCoalesceBatchesExec: target_batch_size=19173961
-                                                GpuHashJoinExec
+                                                GpuHashJoinExec: join_type=Inner, on=[(i_item_sk@0, ss_item_sk@1)], projection=[1, 2, 4, 5]
                                                   GpuCoalesceBatchesExec: target_batch_size=19173961
                                                     GpuRepartitionExec: partitioning=Hash([i_item_sk@0], 8), input_partitions=8
                                                       GpuCoalesceBatchesExec: target_batch_size=19173961
-                                                        GpuFilterExec
+                                                        GpuFilterExec: predicate=(i_category@3 = Books OR i_category@3 = Children OR i_category@3 = Electronics) AND (i_class@2 = personal OR i_class@2 = portable OR i_class@2 = reference OR i_class@2 = self-help) AND (i_brand@1 = scholaramalgamalg #14 OR i_brand@1 = scholaramalgamalg #7 OR i_brand@1 = exportiunivamalg #9 OR i_brand@1 = scholaramalgamalg #9) OR (i_category@3 = Women OR i_category@3 = Music OR i_category@3 = Men) AND (i_class@2 = accessories OR i_class@2 = classical OR i_class@2 = fragrances OR i_class@2 = pants) AND (i_brand@1 = amalgimporto #1 OR i_brand@1 = edu packscholar #1 OR i_brand@1 = exportiimporto #1 OR i_brand@1 = importoamalg #1), projection=[0, 4]
                                                           GpuRepartitionExec: partitioning=RoundRobinBatch(8), input_partitions=1
                                                             GpuScanExec: batch_size=19173961
                                                   GpuCoalesceBatchesExec: target_batch_size=19173961

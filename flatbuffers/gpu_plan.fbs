@@ -44,6 +44,10 @@ enum DataType : byte {
 /// determined by `type`. For Null type, no value field is set.
 table ScalarValue {
   type: DataType;
+  /// True for a typed NULL literal (e.g. `CASE WHEN ... THEN NULL`). When set,
+  /// the value fields are unused and the consumer produces a null of `type`.
+  /// Without this flag a null is indistinguishable from a zero/empty value.
+  is_null: bool;
   bool_val: bool;
   int_val: int64;
   uint_val: uint64;
@@ -120,6 +124,13 @@ table UnaryExprNode {
 table CastExprNode {
   expr: Expr;
   target_type: DataType;
+  /// For target_type == Decimal128 only: the precision/scale of the target
+  /// decimal. The DataType enum can't carry these, but the executor needs the
+  /// scale to build the right cuDF fixed_point type (cuDF AST has no decimal
+  /// cast, so decimal casts run through the column path, which calls
+  /// cudf::cast with this scale). Ignored for non-decimal targets.
+  decimal_precision: uint8;
+  decimal_scale: int8;
 }
 
 /// An aggregate function invocation (used inside GpuAggregate).
@@ -237,6 +248,18 @@ table JoinKey {
   right: Expr;
 }
 
+enum JoinSide : byte { Left = 0, Right = 1 }
+
+/// Maps one column of a join filter's private "intermediate" schema back to its
+/// origin in the join inputs. The filter expression's `ColumnRef(i)` refers to
+/// `filter_columns[i]`: column `index` of the `side` input. The executor uses
+/// this to evaluate the filter against its combined [left||right] table; the
+/// Rust deserializer uses it to rebuild DataFusion's `JoinFilter`.
+struct JoinFilterColumn {
+  index: uint32;
+  side: JoinSide;
+}
+
 // --- Concrete plan node tables ---
 
 /// Read Parquet files from disk.
@@ -316,8 +339,12 @@ table GpuHashJoin {
   join_type: JoinType;
   /// Equi-join key pairs: keys[i].left = keys[i].right.
   keys: [JoinKey];
-  /// Optional post-join filter (null if none).
+  /// Optional residual (non-equi) post-join filter (null if none). Serialized
+  /// verbatim — its ColumnRefs index the intermediate schema described by
+  /// `filter_columns`, NOT the post-join table. The C++ executor remaps them.
   filter: Expr;
+  /// Column origin map for `filter` (parallel to its intermediate schema).
+  filter_columns: [JoinFilterColumn];
   left: PlanNode;
   right: PlanNode;
   /// Optional output projection (column indices to keep from the full join output).

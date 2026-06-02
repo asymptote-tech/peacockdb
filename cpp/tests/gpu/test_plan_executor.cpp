@@ -329,7 +329,7 @@ TEST(PlanExecutor, HashJoinNationRegion) {
 
   auto join = fb::CreateGpuHashJoin(
       fbb, fb::JoinType_Inner, keys_vec,
-      /*filter=*/0, nation_node, region_node);
+      /*filter=*/0, /*filter_columns=*/0, nation_node, region_node);
   auto join_node =
       make_plan_node(fbb, fb::PlanNodeKind_GpuHashJoin, join.Union());
   auto buf = finish_plan(fbb, join_node);
@@ -390,7 +390,7 @@ TEST(PlanExecutor, HashJoinWithProjection) {
 
   auto join = fb::CreateGpuHashJoin(
       fbb, fb::JoinType_Inner, keys_vec,
-      /*filter=*/0, nation_node, region_node, proj_vec);
+      /*filter=*/0, /*filter_columns=*/0, nation_node, region_node, proj_vec);
   auto join_node =
       make_plan_node(fbb, fb::PlanNodeKind_GpuHashJoin, join.Union());
   auto buf = finish_plan(fbb, join_node);
@@ -581,7 +581,7 @@ TEST(PlanExecutor, AggregateGroupBy) {
 
   auto join = fb::CreateGpuHashJoin(
       fbb, fb::JoinType_Inner, keys_vec,
-      /*filter=*/0, nation_node, region_node, join_proj_vec);
+      /*filter=*/0, /*filter_columns=*/0, nation_node, region_node, join_proj_vec);
   auto join_node =
       make_plan_node(fbb, fb::PlanNodeKind_GpuHashJoin, join.Union());
 
@@ -747,7 +747,7 @@ TEST(PlanExecutor, JoinProjectSort) {
 
   auto join = fb::CreateGpuHashJoin(
       fbb, fb::JoinType_Inner, keys_vec,
-      /*filter=*/0, nation_node, region_node, join_proj_vec);
+      /*filter=*/0, /*filter_columns=*/0, nation_node, region_node, join_proj_vec);
   auto join_node =
       make_plan_node(fbb, fb::PlanNodeKind_GpuHashJoin, join.Union());
 

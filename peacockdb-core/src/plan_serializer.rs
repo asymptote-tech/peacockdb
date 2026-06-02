@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::{DataType as ArrowDataType, SchemaRef};
+use datafusion::arrow::datatypes::{DataType as ArrowDataType, Field, Schema, SchemaRef};
 use datafusion::common::ScalarValue as DfScalarValue;
 use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::physical_expr::expressions::{
@@ -16,7 +16,9 @@ use datafusion::physical_expr::expressions::{
 use datafusion::physical_expr::ScalarFunctionExpr;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode as DfAggMode};
 use datafusion::physical_plan::filter::FilterExec;
+use datafusion::common::JoinSide;
 use datafusion::common::JoinType as DfJoinType;
+use datafusion::physical_plan::joins::utils::{ColumnIndex, JoinFilter};
 use datafusion::physical_plan::joins::HashJoinExec;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
@@ -358,10 +360,28 @@ fn serialize_gpu_hash_join<'a>(
     }
     let keys_vec = b.create_vector(&keys);
 
-    let filter = if let Some(jf) = join.filter() {
-        Some(serialize_expr(b, jf.expression())?)
+    // Serialize the residual filter verbatim, along with its column-origin map.
+    // The expression's ColumnRefs index the filter's intermediate schema; the
+    // C++ executor remaps them to its post-join table via `filter_columns`.
+    let (filter, filter_columns) = if let Some(jf) = join.filter() {
+        let expr = serialize_expr(b, jf.expression())?;
+        let cols: Vec<fb::JoinFilterColumn> = jf
+            .column_indices()
+            .iter()
+            .map(|ci| {
+                let side = match ci.side {
+                    JoinSide::Left => fb::JoinSide::Left,
+                    JoinSide::Right => fb::JoinSide::Right,
+                    JoinSide::None => {
+                        return Err("join filter references a mark-join column".to_string())
+                    }
+                };
+                Ok(fb::JoinFilterColumn::new(ci.index as u32, side))
+            })
+            .collect::<Result<_, String>>()?;
+        (Some(expr), Some(b.create_vector(&cols)))
     } else {
-        None
+        (None, None)
     };
 
     let left = serialize_plan_node(b, join.left())?;
@@ -378,6 +398,7 @@ fn serialize_gpu_hash_join<'a>(
             join_type,
             keys: Some(keys_vec),
             filter,
+            filter_columns,
             left: Some(left),
             right: Some(right),
             projection,
@@ -645,11 +666,19 @@ fn serialize_expr<'a>(
     } else if let Some(cast) = any.downcast_ref::<CastExpr>() {
         let inner = serialize_expr(b, cast.expr())?;
         let target = convert_data_type(cast.cast_type())?;
+        // The DataType enum can't carry decimal precision/scale, but the
+        // executor needs the scale to reconstruct the cuDF fixed_point type.
+        let (decimal_precision, decimal_scale) = match cast.cast_type() {
+            ArrowDataType::Decimal128(p, s) => (*p, *s),
+            _ => (0, 0),
+        };
         let ce = fb::CastExprNode::create(
             b,
             &fb::CastExprNodeArgs {
                 expr: Some(inner),
                 target_type: target,
+                decimal_precision,
+                decimal_scale,
             },
         );
         (fb::ExprNode::CastExprNode, ce.as_union_value())
@@ -697,81 +726,14 @@ fn serialize_expr<'a>(
             },
         );
         (fb::ExprNode::CaseExprNode, ce.as_union_value())
-    } else if let Some(in_list) = any.downcast_ref::<InListExpr>() {
-        // C++ executor has no IN-list opcode. Expand `expr IN (a, b, c)` into
-        // `(expr = a) OR (expr = b) OR (expr = c)` (or NOT(...) when negated)
-        // so it lowers to ordinary cuDF AST binary ops.
-        let list = in_list.list();
-        if list.is_empty() {
-            return Err("IN with empty list not supported".to_string());
-        }
-        let target = in_list.expr();
-
-        let lhs0 = serialize_expr(b, target)?;
-        let rhs0 = serialize_expr(b, &list[0])?;
-        let mut acc_be = fb::BinaryExprNode::create(
-            b,
-            &fb::BinaryExprNodeArgs {
-                left: Some(lhs0),
-                op: fb::BinaryOp::Eq,
-                right: Some(rhs0),
-            },
-        );
-
-        for item in &list[1..] {
-            let prev = fb::Expr::create(
-                b,
-                &fb::ExprArgs {
-                    node_type: fb::ExprNode::BinaryExprNode,
-                    node: Some(acc_be.as_union_value()),
-                },
-            );
-            let lhs_i = serialize_expr(b, target)?;
-            let rhs_i = serialize_expr(b, item)?;
-            let eq_be = fb::BinaryExprNode::create(
-                b,
-                &fb::BinaryExprNodeArgs {
-                    left: Some(lhs_i),
-                    op: fb::BinaryOp::Eq,
-                    right: Some(rhs_i),
-                },
-            );
-            let eq_expr = fb::Expr::create(
-                b,
-                &fb::ExprArgs {
-                    node_type: fb::ExprNode::BinaryExprNode,
-                    node: Some(eq_be.as_union_value()),
-                },
-            );
-            acc_be = fb::BinaryExprNode::create(
-                b,
-                &fb::BinaryExprNodeArgs {
-                    left: Some(prev),
-                    op: fb::BinaryOp::Or,
-                    right: Some(eq_expr),
-                },
-            );
-        }
-
-        if in_list.negated() {
-            let combined = fb::Expr::create(
-                b,
-                &fb::ExprArgs {
-                    node_type: fb::ExprNode::BinaryExprNode,
-                    node: Some(acc_be.as_union_value()),
-                },
-            );
-            let ue = fb::UnaryExprNode::create(
-                b,
-                &fb::UnaryExprNodeArgs {
-                    op: fb::UnaryOp::Not,
-                    arg: Some(combined),
-                },
-            );
-            (fb::ExprNode::UnaryExprNode, ue.as_union_value())
-        } else {
-            (fb::ExprNode::BinaryExprNode, acc_be.as_union_value())
-        }
+    } else if any.downcast_ref::<InListExpr>().is_some() {
+        // IN-lists are lowered to OR-chains by GpuExecutionRule before the plan
+        // reaches the serializer (cuDF AST has no IN opcode). Hitting one here
+        // means a plan node carrying an IN-list wasn't covered by that pass.
+        return Err(format!(
+            "InListExpr reached the serializer un-lowered (GpuExecutionRule should \
+             have expanded it to an OR-chain): {expr}"
+        ));
     } else if let Some(sf) = any.downcast_ref::<ScalarFunctionExpr>() {
         let name = b.create_string(sf.name());
         let mut args = Vec::new();
@@ -885,9 +847,15 @@ fn serialize_scalar_value<'a>(
             args.decimal_precision = *prec;
             args.decimal_scale = *scale as i8;
         }
-        // Treat any None variant as typed null.
+        // Treat any None variant as typed null. The `is_null` flag is what
+        // distinguishes it from a zero value on the wire.
         other if other.is_null() => {
             args.type_ = convert_data_type(&other.data_type())?;
+            args.is_null = true;
+            if let DfScalarValue::Decimal128(_, prec, scale) = other {
+                args.decimal_precision = *prec;
+                args.decimal_scale = *scale as i8;
+            }
         }
         other => {
             return Err(format!("unsupported scalar value: {other:?}"));
@@ -1157,7 +1125,15 @@ fn deserialize_expr(expr: &fb::Expr) -> Result<Arc<dyn PhysicalExpr>, String> {
                 .node_as_cast_expr_node()
                 .ok_or("expected CastExprNode")?;
             let inner = deserialize_expr(&cast.expr().ok_or("CastExpr missing expr")?)?;
-            let target = fb_to_arrow_type(cast.target_type());
+            // Decimal128 carries its precision/scale in dedicated fields (the
+            // DataType enum can't), so reconstruct the exact type rather than
+            // the placeholder fb_to_arrow_type returns.
+            let target = match cast.target_type() {
+                fb::DataType::Decimal128 => {
+                    ArrowDataType::Decimal128(cast.decimal_precision(), cast.decimal_scale())
+                }
+                other => fb_to_arrow_type(other),
+            };
             Ok(Arc::new(CastExpr::new(inner, target, None)))
         }
         fb::ExprNode::LikeExprNode => {
@@ -1223,6 +1199,19 @@ fn deserialize_expr(expr: &fb::Expr) -> Result<Arc<dyn PhysicalExpr>, String> {
 }
 
 fn deserialize_scalar(sv: &fb::ScalarValue) -> Result<DfScalarValue, String> {
+    // A typed NULL literal: reconstruct the `None` variant of the right type.
+    if sv.is_null() {
+        return Ok(match sv.type_() {
+            fb::DataType::Decimal128 => {
+                DfScalarValue::Decimal128(None, sv.decimal_precision(), sv.decimal_scale() as i8)
+            }
+            other => {
+                let dt = fb_to_arrow_type(other);
+                DfScalarValue::try_from(&dt)
+                    .map_err(|e| format!("null scalar of type {dt:?}: {e}"))?
+            }
+        });
+    }
     Ok(match sv.type_() {
         fb::DataType::Null => DfScalarValue::Null,
         fb::DataType::Boolean => DfScalarValue::Boolean(Some(sv.bool_val())),
@@ -1550,11 +1539,37 @@ fn deserialize_gpu_hash_join(
         (0..v.len()).map(|i| v.get(i) as usize).collect()
     });
 
+    // Rebuild the residual JoinFilter from the verbatim expression + its
+    // column-origin map. The intermediate schema is reconstructed by pulling
+    // each referenced field from the left/right input schemas.
+    let filter = match (join.filter(), join.filter_columns()) {
+        (Some(expr), Some(cols)) => {
+            let expression = deserialize_expr(&expr)?;
+            let left_schema = left.schema();
+            let right_schema = right.schema();
+            let mut column_indices = Vec::with_capacity(cols.len());
+            let mut fields: Vec<Field> = Vec::with_capacity(cols.len());
+            for i in 0..cols.len() {
+                let c = cols.get(i);
+                let idx = c.index() as usize;
+                let (side, schema) = match c.side() {
+                    fb::JoinSide::Left => (JoinSide::Left, &left_schema),
+                    fb::JoinSide::Right => (JoinSide::Right, &right_schema),
+                    other => return Err(format!("invalid JoinSide: {other:?}")),
+                };
+                fields.push(schema.field(idx).clone());
+                column_indices.push(ColumnIndex { index: idx, side });
+            }
+            Some(JoinFilter::new(expression, column_indices, Schema::new(fields).into()))
+        }
+        _ => None,
+    };
+
     let join_exec = HashJoinExec::try_new(
         left,
         right,
         on,
-        None, // join filter (we serialized it but HashJoinExec::try_new takes JoinFilter, not PhysicalExpr)
+        filter,
         &join_type,
         projection,
         datafusion::physical_plan::joins::PartitionMode::CollectLeft,
