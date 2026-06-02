@@ -902,6 +902,11 @@ static std::unique_ptr<cudf::groupby_aggregation> make_agg(
     // groups the full input (one row per key); the Final stage then regroups
     // those unique keys, making MEAN-of-singleton an identity. So a plain
     // groupby MEAN is correct in both Partial and Final modes here.
+    // NOTE: correct only while Partial output is one-row-per-key. Multi-
+    // partition repartition breaks this (mean-of-means); execute_aggregate
+    // guards against it at runtime — see the has_avg_final check there.
+    // Decompose AVG into SUM+COUNT to lift this restriction:
+    // https://github.com/asymptote-tech/peacockdb/issues/25
     return cudf::make_mean_aggregation<cudf::groupby_aggregation>();
   }
   throw std::runtime_error("unsupported aggregate function: " + func_name);
@@ -974,6 +979,21 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
         cudf::column_view values_col = get_values_col(func);
         bool is_count = (name == "count" || name == "COUNT");
 
+        bool is_avg = (name == "avg" || name == "AVG" ||
+                       name == "mean" || name == "MEAN");
+        // Same shortcut/guard as the grouped path: a Final-stage global AVG
+        // reduces over the Partial outputs. With passthrough repartition there
+        // is exactly one partial row, so MEAN-of-one is an identity. More than
+        // one row means a multi-partition merge → silently-wrong mean-of-means
+        // (decompose AVG into SUM+COUNT to lift this:
+        // https://github.com/asymptote-tech/peacockdb/issues/25).
+        if (is_final && is_avg && values_col.size() > 1) {
+          throw std::runtime_error(
+              "Final-stage AVG merged multiple partial rows "
+              "(mean-of-means is wrong); AVG must be decomposed into "
+              "SUM+COUNT before multi-partition GPU repartition is enabled");
+        }
+
         std::unique_ptr<cudf::scalar> scalar_result;
         if (is_count) {
           // Avoid make_count_aggregation<reduce_aggregation> which is not
@@ -1004,6 +1024,7 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
   std::vector<cudf::groupby::aggregation_request> requests;
   std::vector<std::string> agg_names;
   std::vector<bool> agg_is_count;
+  bool has_avg_final = false;
   if (agg->aggr_funcs()) {
     for (flatbuffers::uoffset_t i = 0; i < agg->aggr_funcs()->size(); ++i) {
       auto* func = agg->aggr_funcs()->Get(i);
@@ -1019,10 +1040,31 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
       else
         agg_names.push_back(name);
       agg_is_count.push_back(name == "count" || name == "COUNT");
+      if (is_final && (name == "avg" || name == "AVG" ||
+                       name == "mean" || name == "MEAN"))
+        has_avg_final = true;
     }
   }
 
   auto [group_keys, agg_results] = gb.aggregate(requests);
+
+  // Guard the AVG-as-plain-MEAN shortcut (see make_agg). It is correct only
+  // when the Partial stage already produced one row per key, so the Final
+  // regroup is an identity (MEAN-of-singleton). Today that holds because
+  // GpuRepartition runs as passthrough (single partition). If real multi-
+  // partition repartition is ever enabled, the same key arrives from several
+  // Partial outputs and this Final groupby actually merges rows — turning AVG
+  // into a silently-wrong mean-of-means. Detect that here (fewer output groups
+  // than input rows) and fail loudly instead. The fix at that point is to
+  // decompose AVG into SUM+COUNT across the Partial/Final boundary:
+  // https://github.com/asymptote-tech/peacockdb/issues/25
+  if (has_avg_final &&
+      group_keys->num_rows() < static_cast<cudf::size_type>(tv.num_rows())) {
+    throw std::runtime_error(
+        "Final-stage AVG merged multiple partial rows per key "
+        "(mean-of-means is wrong); AVG must be decomposed into SUM+COUNT "
+        "before multi-partition GPU repartition is enabled");
+  }
 
   // Assemble output: key columns + aggregation result columns.
   for (cudf::size_type i = 0; i < group_keys->num_columns(); ++i) {
