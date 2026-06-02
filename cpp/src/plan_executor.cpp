@@ -97,9 +97,15 @@ struct ExprContext {
   }
 };
 
+// When non-null (join-filter context), a ColumnRef(i) in the expression is
+// remapped to column_reference(col_map[i].index, LEFT|RIGHT) so a mixed
+// semi/anti join's AST predicate can address its two conditional tables.
+using JoinFilterColMap = flatbuffers::Vector<const fb::JoinFilterColumn*>;
+
 // Forward declarations
 static TableResult execute_node(const fb::PlanNode* node);
-static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx);
+static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
+                                         const JoinFilterColMap* col_map = nullptr);
 static bool is_predicate_op(fb::BinaryOp op);
 static cudf::type_id infer_expr_type(const fb::Expr* expr,
                                      cudf::table_view const& table);
@@ -162,13 +168,27 @@ static cudf::ast::ast_operator fb_to_ast_op(fb::BinaryOp op) {
 // AST expression builder
 // ============================================================================
 
-static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx) {
+static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
+                                         const JoinFilterColMap* col_map) {
   if (!expr || !expr->node())
     throw std::runtime_error("null expression");
 
   switch (expr->node_type()) {
     case fb::ExprNode_ColumnRef: {
       auto* col = expr->node_as_ColumnRef();
+      if (col_map) {
+        // Join-filter predicate: ColumnRef(i) indexes the filter's intermediate
+        // schema; remap to (side, index) so the AST addresses the mixed join's
+        // left/right conditional tables directly.
+        if (col->index() >= col_map->size())
+          throw std::runtime_error("join filter ColumnRef out of range of filter_columns");
+        auto* fc = col_map->Get(col->index());
+        auto side = fc->side() == fb::JoinSide_Right
+                        ? cudf::ast::table_reference::RIGHT
+                        : cudf::ast::table_reference::LEFT;
+        return ctx.keep(std::make_unique<cudf::ast::column_reference>(
+            static_cast<cudf::size_type>(fc->index()), side));
+      }
       return ctx.keep(std::make_unique<cudf::ast::column_reference>(
           static_cast<cudf::size_type>(col->index())));
     }
@@ -263,15 +283,15 @@ static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx)
 
     case fb::ExprNode_BinaryExprNode: {
       auto* bin = expr->node_as_BinaryExprNode();
-      auto& left = build_expr(bin->left(), ctx);
-      auto& right = build_expr(bin->right(), ctx);
+      auto& left = build_expr(bin->left(), ctx, col_map);
+      auto& right = build_expr(bin->right(), ctx, col_map);
       auto op = fb_to_ast_op(bin->op());
       return ctx.keep(std::make_unique<cudf::ast::operation>(op, left, right));
     }
 
     case fb::ExprNode_UnaryExprNode: {
       auto* un = expr->node_as_UnaryExprNode();
-      auto& arg = build_expr(un->arg(), ctx);
+      auto& arg = build_expr(un->arg(), ctx, col_map);
       switch (un->op()) {
         case fb::UnaryOp_Not:
           return ctx.keep(std::make_unique<cudf::ast::operation>(
@@ -296,7 +316,7 @@ static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx)
 
     case fb::ExprNode_CastExprNode: {
       auto* cast = expr->node_as_CastExprNode();
-      auto& inner = build_expr(cast->expr(), ctx);
+      auto& inner = build_expr(cast->expr(), ctx, col_map);
       auto target = fb_to_type_id(cast->target_type());
       cudf::ast::ast_operator cast_op;
       switch (target) {
@@ -1285,35 +1305,73 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
   bool is_semi_or_anti = false;
   bool emit_left = true;  // false → emit right side instead
   std::unique_ptr<rmm::device_uvector<cudf::size_type>> single_indices;
+
+  // A residual filter on a semi/anti join (e.g. EXISTS / NOT EXISTS with a `<>`
+  // correlation, as in TPC-H q21) is NOT optional: the key-only cuDF semi/anti
+  // joins ignore it, which silently changes the result — a LeftAnti on the key
+  // alone excludes every left row whose key trivially exists in the right side,
+  // collapsing the output to zero rows. Route those to the mixed_* variants,
+  // whose AST predicate is evaluated during the join. Build the predicate only
+  // for semi/anti types so inner-join (non-AST) filters aren't forced through
+  // the AST path.
+  auto jt = join->join_type();
+  bool semi_anti_type =
+      jt == fb::JoinType_LeftSemi || jt == fb::JoinType_LeftAnti ||
+      jt == fb::JoinType_RightSemi || jt == fb::JoinType_RightAnti;
+  ExprContext semi_ctx;
+  const cudf::ast::expression* semi_pred = nullptr;
+  if (semi_anti_type && join->filter()) {
+    if (!join->filter_columns())
+      throw std::runtime_error(
+          "semi/anti join has a filter but no filter_columns map");
+    semi_pred = &build_expr(join->filter(), semi_ctx, join->filter_columns());
+  }
+
   // cuDF replaced free `left_{semi,anti}_join` with `filtered_join` (build the
   // hash table from one side, then probe). For Left{Semi,Anti} the right side
   // is the filter; for Right{Semi,Anti} we swap.
-  switch (join->join_type()) {
+  switch (jt) {
     case fb::JoinType_LeftSemi: {
+      if (semi_pred) {
+        single_indices = cudf::mixed_left_semi_join(
+            left_keys, right_keys, ltv, rtv, *semi_pred,
+            cudf::null_equality::EQUAL);
+      } else {
 #ifdef PEACOCK_HAVE_FILTERED_JOIN
-      cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
-                             cudf::set_as_build_table::RIGHT, 0.5);
-      single_indices = fj.semi_join(left_keys);
+        cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
+                               cudf::set_as_build_table::RIGHT, 0.5);
+        single_indices = fj.semi_join(left_keys);
 #else
-      single_indices = cudf::left_semi_join(left_keys, right_keys);
+        single_indices = cudf::left_semi_join(left_keys, right_keys);
 #endif
+      }
       is_semi_or_anti = true;
       emit_left = true;
       break;
     }
     case fb::JoinType_LeftAnti: {
+      if (semi_pred) {
+        single_indices = cudf::mixed_left_anti_join(
+            left_keys, right_keys, ltv, rtv, *semi_pred,
+            cudf::null_equality::EQUAL);
+      } else {
 #ifdef PEACOCK_HAVE_FILTERED_JOIN
-      cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
-                             cudf::set_as_build_table::RIGHT, 0.5);
-      single_indices = fj.anti_join(left_keys);
+        cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
+                               cudf::set_as_build_table::RIGHT, 0.5);
+        single_indices = fj.anti_join(left_keys);
 #else
-      single_indices = cudf::left_anti_join(left_keys, right_keys);
+        single_indices = cudf::left_anti_join(left_keys, right_keys);
 #endif
+      }
       is_semi_or_anti = true;
       emit_left = true;
       break;
     }
     case fb::JoinType_RightSemi: {
+      if (semi_pred)
+        throw std::runtime_error(
+            "residual filter on RightSemi join not supported (no swapped "
+            "mixed-join path); should not arise from DataFusion decorrelation");
 #ifdef PEACOCK_HAVE_FILTERED_JOIN
       cudf::filtered_join fj(left_keys, cudf::null_equality::EQUAL,
                              cudf::set_as_build_table::RIGHT, 0.5);
@@ -1326,6 +1384,10 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
       break;
     }
     case fb::JoinType_RightAnti: {
+      if (semi_pred)
+        throw std::runtime_error(
+            "residual filter on RightAnti join not supported (no swapped "
+            "mixed-join path); should not arise from DataFusion decorrelation");
 #ifdef PEACOCK_HAVE_FILTERED_JOIN
       cudf::filtered_join fj(left_keys, cudf::null_equality::EQUAL,
                              cudf::set_as_build_table::RIGHT, 0.5);

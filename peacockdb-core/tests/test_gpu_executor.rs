@@ -97,14 +97,12 @@ gpu_result_test!(test_gpu_q1, "q1");
 gpu_result_test!(test_gpu_q2, "q2");
 gpu_result_test!(test_gpu_q3, "q3");
 gpu_result_test!(test_gpu_q4, "q4");
-// Skipped (issue #12, bucket 7 — result divergence: revenue values differ):
-// gpu_result_test!(test_gpu_q5, "q5");
+gpu_result_test!(test_gpu_q5, "q5");
 gpu_result_test!(test_gpu_q6, "q6");
 gpu_result_test!(test_gpu_q7, "q7");
 gpu_result_test!(test_gpu_q8, "q8");
 gpu_result_test!(test_gpu_q9, "q9");
-// Skipped (issue #12, bucket 7 — result divergence: revenue values differ):
-// gpu_result_test!(test_gpu_q10, "q10");
+gpu_result_test!(test_gpu_q10, "q10");
 // Skipped (issue #12, bucket 4 — TPC-H q11 has correlated HAVING subquery → NestedLoopJoinExec):
 // gpu_result_test!(test_gpu_q11, "q11");
 gpu_result_test!(test_gpu_q12, "q12");
@@ -116,8 +114,7 @@ gpu_result_test!(test_gpu_q17, "q17");
 gpu_result_test!(test_gpu_q18, "q18");
 gpu_result_test!(test_gpu_q19, "q19");
 gpu_result_test!(test_gpu_q20, "q20");
-// Skipped (issue #12, bucket 7 — result divergence: empty vs ~99 rows):
-// gpu_result_test!(test_gpu_q21, "q21");
+gpu_result_test!(test_gpu_q21, "q21");
 // Skipped (issue #12, bucket 4 — TPC-H q22 has correlated subquery → NestedLoopJoinExec):
 // gpu_result_test!(test_gpu_q22, "q22");
 
