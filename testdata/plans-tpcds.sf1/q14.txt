@@ -5,7 +5,7 @@ GpuSortPreservingMergeExec: [channel@0 ASC, i_brand_id@1 ASC, i_class_id@2 ASC, 
         GpuCoalesceBatchesExec: target_batch_size=15561475
           GpuRepartitionExec: partitioning=Hash([channel@0, i_brand_id@1, i_class_id@2, i_category_id@3, __grouping_id@4], 8), input_partitions=8
             GpuAggregateExec: group_by=[channel, i_brand_id, i_class_id, i_category_id], aggr=[sum(y.sales), sum(y.number_sales)]
-              InterleaveExec
+              GpuInterleaveExec
                 GpuProjectExec: expr=[store as channel, i_brand_id@0 as i_brand_id, i_class_id@1 as i_class_id, i_category_id@2 as i_category_id, sum(store_sales.ss_quantity * store_sales.ss_list_price)@3 as sales, count(*)@4 as number_sales]
                   GpuProjectExec: expr=[i_brand_id@1 as i_brand_id, i_class_id@2 as i_class_id, i_category_id@3 as i_category_id, sum(store_sales.ss_quantity * store_sales.ss_list_price)@4 as sum(store_sales.ss_quantity * store_sales.ss_list_price), count(*)@5 as count(*), avg_sales.average_sales@0 as avg_sales.average_sales]
                     NestedLoopJoinExec: join_type=Inner, filter=CAST(sum(store_sales.ss_quantity * store_sales.ss_list_price)@0 AS Decimal128(32, 6)) > avg_sales.average_sales@1
@@ -13,7 +13,7 @@ GpuSortPreservingMergeExec: [channel@0 ASC, i_brand_id@1 ASC, i_class_id@2 ASC, 
                         GpuAggregateExec: group_by=[], aggr=[avg(sq2.quantity * sq2.list_price)]
                           GpuCoalescePartitionsExec
                             GpuAggregateExec: group_by=[], aggr=[avg(sq2.quantity * sq2.list_price)]
-                              UnionExec
+                              GpuUnionExec
                                 GpuProjectExec: expr=[ss_quantity@0 as quantity, ss_list_price@1 as list_price]
                                   GpuCoalesceBatchesExec: target_batch_size=15561475
                                     GpuHashJoinExec: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@0)], projection=[2, 3]
@@ -168,7 +168,7 @@ GpuSortPreservingMergeExec: [channel@0 ASC, i_brand_id@1 ASC, i_class_id@2 ASC, 
                         GpuAggregateExec: group_by=[], aggr=[avg(sq2.quantity * sq2.list_price)]
                           GpuCoalescePartitionsExec
                             GpuAggregateExec: group_by=[], aggr=[avg(sq2.quantity * sq2.list_price)]
-                              UnionExec
+                              GpuUnionExec
                                 GpuProjectExec: expr=[ss_quantity@0 as quantity, ss_list_price@1 as list_price]
                                   GpuCoalesceBatchesExec: target_batch_size=15561475
                                     GpuHashJoinExec: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@0)], projection=[2, 3]
@@ -323,7 +323,7 @@ GpuSortPreservingMergeExec: [channel@0 ASC, i_brand_id@1 ASC, i_class_id@2 ASC, 
                         GpuAggregateExec: group_by=[], aggr=[avg(sq2.quantity * sq2.list_price)]
                           GpuCoalescePartitionsExec
                             GpuAggregateExec: group_by=[], aggr=[avg(sq2.quantity * sq2.list_price)]
-                              UnionExec
+                              GpuUnionExec
                                 GpuProjectExec: expr=[ss_quantity@0 as quantity, ss_list_price@1 as list_price]
                                   GpuCoalesceBatchesExec: target_batch_size=15561475
                                     GpuHashJoinExec: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@0)], projection=[2, 3]
@@ -479,7 +479,7 @@ GpuSortPreservingMergeExec: row_width=68, subtree_max_row_bytes=138
         GpuCoalesceBatchesExec: row_width=69, subtree_max_row_bytes=137
           GpuRepartitionExec: row_width=69, subtree_max_row_bytes=137
             GpuAggregateExec: row_width=69, subtree_max_row_bytes=137
-              InterleaveExec: row_width=68, subtree_max_row_bytes=120
+              GpuInterleaveExec: row_width=68, subtree_max_row_bytes=120
                 GpuProjectExec: row_width=68, subtree_max_row_bytes=120
                   GpuProjectExec: row_width=52, subtree_max_row_bytes=104
                     NestedLoopJoinExec: row_width=52, subtree_max_row_bytes=84
@@ -487,7 +487,7 @@ GpuSortPreservingMergeExec: row_width=68, subtree_max_row_bytes=138
                         GpuAggregateExec: row_width=16, subtree_max_row_bytes=48
                           GpuCoalescePartitionsExec: row_width=24, subtree_max_row_bytes=48
                             GpuAggregateExec: row_width=24, subtree_max_row_bytes=48
-                              UnionExec: row_width=20, subtree_max_row_bytes=48
+                              GpuUnionExec: row_width=20, subtree_max_row_bytes=48
                                 GpuProjectExec: row_width=20, subtree_max_row_bytes=48
                                   GpuCoalesceBatchesExec: row_width=20, subtree_max_row_bytes=48
                                     GpuHashJoinExec: row_width=20, subtree_max_row_bytes=48
@@ -642,7 +642,7 @@ GpuSortPreservingMergeExec: row_width=68, subtree_max_row_bytes=138
                         GpuAggregateExec: row_width=16, subtree_max_row_bytes=48
                           GpuCoalescePartitionsExec: row_width=24, subtree_max_row_bytes=48
                             GpuAggregateExec: row_width=24, subtree_max_row_bytes=48
-                              UnionExec: row_width=20, subtree_max_row_bytes=48
+                              GpuUnionExec: row_width=20, subtree_max_row_bytes=48
                                 GpuProjectExec: row_width=20, subtree_max_row_bytes=48
                                   GpuCoalesceBatchesExec: row_width=20, subtree_max_row_bytes=48
                                     GpuHashJoinExec: row_width=20, subtree_max_row_bytes=48
@@ -797,7 +797,7 @@ GpuSortPreservingMergeExec: row_width=68, subtree_max_row_bytes=138
                         GpuAggregateExec: row_width=16, subtree_max_row_bytes=48
                           GpuCoalescePartitionsExec: row_width=24, subtree_max_row_bytes=48
                             GpuAggregateExec: row_width=24, subtree_max_row_bytes=48
-                              UnionExec: row_width=20, subtree_max_row_bytes=48
+                              GpuUnionExec: row_width=20, subtree_max_row_bytes=48
                                 GpuProjectExec: row_width=20, subtree_max_row_bytes=48
                                   GpuCoalesceBatchesExec: row_width=20, subtree_max_row_bytes=48
                                     GpuHashJoinExec: row_width=20, subtree_max_row_bytes=48

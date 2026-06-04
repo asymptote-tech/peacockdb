@@ -121,6 +121,17 @@ gpu_result_test!(test_gpu_tpcds_q82, "q82");
 gpu_result_test!(test_gpu_tpcds_q83, "q83");
 gpu_result_test!(test_gpu_tpcds_q85, "q85");
 gpu_result_test!(test_gpu_tpcds_q91, "q91");
+// Bucket A (UnionExec / InterleaveExec → GpuUnion):
+gpu_result_test!(test_gpu_tpcds_q33, "q33");
+gpu_result_test!(test_gpu_tpcds_q56, "q56");
+gpu_result_test!(test_gpu_tpcds_q60, "q60");
+gpu_result_test!(test_gpu_tpcds_q71, "q71");
+// Bucket B (GlobalLimitExec → GpuLimit):
+gpu_result_test!(test_gpu_tpcds_q16, "q16");
+gpu_result_test!(test_gpu_tpcds_q32, "q32");
+gpu_result_test!(test_gpu_tpcds_q92, "q92");
+gpu_result_test!(test_gpu_tpcds_q94, "q94");
+gpu_result_test!(test_gpu_tpcds_q95, "q95");
 
 // =====================================================================
 // Skipped — failing on the GPU. Buckets per issue #29 (surface analysis;
@@ -128,30 +139,42 @@ gpu_result_test!(test_gpu_tpcds_q91, "q91");
 // line as its bucket is addressed.
 // =====================================================================
 
-// --- Bucket A: unsupported plan node: UnionExec (no GpuUnionExec) ---
-// gpu_result_test!(test_gpu_tpcds_q2, "q2");
+// Buckets A (UnionExec/InterleaveExec → GpuUnion) and B (GlobalLimitExec →
+// GpuLimit) are implemented; the passing queries moved up to the active list.
+// The queries below carried a Union/Limit node but hit a *second* blocker once
+// it was lowered — re-bucketed by that blocker below.
+
+// --- Bucket A residual: GpuUnion concatenate type mismatch ---
+// q5: union branches produce DECIMAL128 columns with drifting scales (each
+// channel's SUM lands a different cuDF scale), so cudf::concatenate rejects
+// them. Needs per-branch cast to the union's declared output scale.
 // gpu_result_test!(test_gpu_tpcds_q5, "q5");
-// gpu_result_test!(test_gpu_tpcds_q14, "q14");
-// gpu_result_test!(test_gpu_tpcds_q23, "q23");
-// gpu_result_test!(test_gpu_tpcds_q33, "q33");
+
+// --- Bucket C: window functions (BoundedWindowAggExec) ---
 // gpu_result_test!(test_gpu_tpcds_q49, "q49");
-// gpu_result_test!(test_gpu_tpcds_q56, "q56");
-// gpu_result_test!(test_gpu_tpcds_q60, "q60");
-// gpu_result_test!(test_gpu_tpcds_q66, "q66");
-// gpu_result_test!(test_gpu_tpcds_q71, "q71");
-// gpu_result_test!(test_gpu_tpcds_q75, "q75");
-// gpu_result_test!(test_gpu_tpcds_q76, "q76");
+
+// --- Bucket D: joins not yet supported ---
+// CrossJoinExec (see #28):
+// gpu_result_test!(test_gpu_tpcds_q23, "q23");
+// gpu_result_test!(test_gpu_tpcds_q28, "q28");
 // gpu_result_test!(test_gpu_tpcds_q77, "q77");
+// NestedLoopJoinExec (see #28):
+// gpu_result_test!(test_gpu_tpcds_q14, "q14");
+// unsupported join type: 2 (Right join):
 // gpu_result_test!(test_gpu_tpcds_q80, "q80");
 
-// --- Bucket B: unsupported plan node: GlobalLimitExec ---
-// gpu_result_test!(test_gpu_tpcds_q16, "q16");
-// gpu_result_test!(test_gpu_tpcds_q28, "q28");
-// gpu_result_test!(test_gpu_tpcds_q32, "q32");
+// --- Bucket E: aggregate gaps ---
+// q2: GpuAggregate binaryop "Unsupported operator for these types".
+// gpu_result_test!(test_gpu_tpcds_q2, "q2");
+
+// --- Bucket F: projection / scalar-expr gaps ---
+// q38, q96: GpuProject: no expressions.
+// q66, q76: GpuProject non-fixed-width type (column_factories).
+// q75: scalar fn: coalesce. q97: unsupported UnaryOp: 2.
 // gpu_result_test!(test_gpu_tpcds_q38, "q38");
-// gpu_result_test!(test_gpu_tpcds_q92, "q92");
-// gpu_result_test!(test_gpu_tpcds_q94, "q94");
-// gpu_result_test!(test_gpu_tpcds_q95, "q95");
+// gpu_result_test!(test_gpu_tpcds_q66, "q66");
+// gpu_result_test!(test_gpu_tpcds_q75, "q75");
+// gpu_result_test!(test_gpu_tpcds_q76, "q76");
 // gpu_result_test!(test_gpu_tpcds_q96, "q96");
 // gpu_result_test!(test_gpu_tpcds_q97, "q97");
 

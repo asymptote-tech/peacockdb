@@ -1,6 +1,6 @@
 GpuProjectExec: expr=[Excess Discount Amount@0 as Excess Discount Amount]
   GpuProjectExec: expr=[sum(web_sales.ws_ext_discount_amt)@0 as Excess Discount Amount, sum(web_sales.ws_ext_discount_amt)@0 as sum(web_sales.ws_ext_discount_amt)]
-    GlobalLimitExec: skip=0, fetch=100
+    GpuGlobalLimitExec: skip=0, fetch=100
       GpuAggregateExec: group_by=[], aggr=[sum(web_sales.ws_ext_discount_amt)]
         GpuCoalescePartitionsExec
           GpuAggregateExec: group_by=[], aggr=[sum(web_sales.ws_ext_discount_amt)]
@@ -49,7 +49,7 @@ GpuProjectExec: expr=[Excess Discount Amount@0 as Excess Discount Amount]
 --- memory ---
 GpuProjectExec: row_width=16, subtree_max_row_bytes=56
   GpuProjectExec: row_width=32, subtree_max_row_bytes=56
-    GlobalLimitExec: row_width=16, subtree_max_row_bytes=56
+    GpuGlobalLimitExec: row_width=16, subtree_max_row_bytes=56
       GpuAggregateExec: row_width=16, subtree_max_row_bytes=56
         GpuCoalescePartitionsExec: row_width=16, subtree_max_row_bytes=56
           GpuAggregateExec: row_width=16, subtree_max_row_bytes=56

@@ -5,7 +5,7 @@ GpuSortPreservingMergeExec: [channel@0 ASC, col_name@1 ASC, d_year@2 ASC, d_qoy@
         GpuCoalesceBatchesExec: target_batch_size=8388608
           GpuRepartitionExec: partitioning=Hash([channel@0, col_name@1, d_year@2, d_qoy@3, i_category@4], 8), input_partitions=24
             GpuAggregateExec: group_by=[channel, col_name, d_year, d_qoy, i_category], aggr=[count(*), sum(foo.ext_sales_price)]
-              UnionExec
+              GpuUnionExec
                 GpuProjectExec: expr=[store as channel, ss_store_sk as col_name, d_year@4 as d_year, d_qoy@5 as d_qoy, i_category@2 as i_category, ss_ext_sales_price@1 as ext_sales_price]
                   GpuProjectExec: expr=[ss_sold_date_sk@3 as ss_sold_date_sk, ss_ext_sales_price@4 as ss_ext_sales_price, i_category@5 as i_category, d_date_sk@0 as d_date_sk, d_year@1 as d_year, d_qoy@2 as d_qoy]
                     GpuCoalesceBatchesExec: target_batch_size=8388608
@@ -80,7 +80,7 @@ GpuSortPreservingMergeExec: row_width=128, subtree_max_row_bytes=256
         GpuCoalesceBatchesExec: row_width=128, subtree_max_row_bytes=248
           GpuRepartitionExec: row_width=128, subtree_max_row_bytes=248
             GpuAggregateExec: row_width=128, subtree_max_row_bytes=248
-              UnionExec: row_width=120, subtree_max_row_bytes=184
+              GpuUnionExec: row_width=120, subtree_max_row_bytes=184
                 GpuProjectExec: row_width=120, subtree_max_row_bytes=184
                   GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                     GpuCoalesceBatchesExec: row_width=64, subtree_max_row_bytes=128

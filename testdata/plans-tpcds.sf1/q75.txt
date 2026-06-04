@@ -14,7 +14,7 @@ GpuSortPreservingMergeExec: [sales_cnt_diff@8 ASC NULLS LAST, sales_amt_diff@9 A
                           GpuCoalesceBatchesExec: target_batch_size=13421772
                             GpuRepartitionExec: partitioning=Hash([d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], 8), input_partitions=24
                               GpuAggregateExec: group_by=[d_year, i_brand_id, i_class_id, i_category_id, i_manufact_id, sales_cnt, sales_amt], aggr=[]
-                                UnionExec
+                                GpuUnionExec
                                   GpuProjectExec: expr=[d_year@6 as d_year, i_brand_id@2 as i_brand_id, i_class_id@3 as i_class_id, i_category_id@4 as i_category_id, i_manufact_id@5 as i_manufact_id, CAST(cs_quantity@0 AS Int64) - coalesce(CAST(cr_return_quantity@7 AS Int64), 0) as sales_cnt, cs_ext_sales_price@1 - coalesce(CAST(cr_return_amount@8 AS Decimal128(30, 15)), Some(0),30,15) as sales_amt]
                                     GpuCoalesceBatchesExec: target_batch_size=13421772
                                       GpuHashJoinExec: join_type=Left, on=[(cs_order_number@1, cr_order_number@1), (cs_item_sk@0, cr_item_sk@0)], projection=[2, 3, 4, 5, 6, 7, 8, 11, 12]
@@ -120,7 +120,7 @@ GpuSortPreservingMergeExec: [sales_cnt_diff@8 ASC NULLS LAST, sales_amt_diff@9 A
                           GpuCoalesceBatchesExec: target_batch_size=13421772
                             GpuRepartitionExec: partitioning=Hash([d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], 8), input_partitions=24
                               GpuAggregateExec: group_by=[d_year, i_brand_id, i_class_id, i_category_id, i_manufact_id, sales_cnt, sales_amt], aggr=[]
-                                UnionExec
+                                GpuUnionExec
                                   GpuProjectExec: expr=[d_year@6 as d_year, i_brand_id@2 as i_brand_id, i_class_id@3 as i_class_id, i_category_id@4 as i_category_id, i_manufact_id@5 as i_manufact_id, CAST(cs_quantity@0 AS Int64) - coalesce(CAST(cr_return_quantity@7 AS Int64), 0) as sales_cnt, cs_ext_sales_price@1 - coalesce(CAST(cr_return_amount@8 AS Decimal128(30, 15)), Some(0),30,15) as sales_amt]
                                     GpuCoalesceBatchesExec: target_batch_size=13421772
                                       GpuHashJoinExec: join_type=Left, on=[(cs_order_number@1, cr_order_number@1), (cs_item_sk@0, cr_item_sk@0)], projection=[2, 3, 4, 5, 6, 7, 8, 11, 12]
@@ -232,7 +232,7 @@ GpuSortPreservingMergeExec: row_width=64, subtree_max_row_bytes=160
                           GpuCoalesceBatchesExec: row_width=44, subtree_max_row_bytes=136
                             GpuRepartitionExec: row_width=44, subtree_max_row_bytes=136
                               GpuAggregateExec: row_width=44, subtree_max_row_bytes=136
-                                UnionExec: row_width=44, subtree_max_row_bytes=136
+                                GpuUnionExec: row_width=44, subtree_max_row_bytes=136
                                   GpuProjectExec: row_width=44, subtree_max_row_bytes=136
                                     GpuCoalesceBatchesExec: row_width=60, subtree_max_row_bytes=136
                                       GpuHashJoinExec: row_width=60, subtree_max_row_bytes=136
@@ -338,7 +338,7 @@ GpuSortPreservingMergeExec: row_width=64, subtree_max_row_bytes=160
                           GpuCoalesceBatchesExec: row_width=44, subtree_max_row_bytes=136
                             GpuRepartitionExec: row_width=44, subtree_max_row_bytes=136
                               GpuAggregateExec: row_width=44, subtree_max_row_bytes=136
-                                UnionExec: row_width=44, subtree_max_row_bytes=136
+                                GpuUnionExec: row_width=44, subtree_max_row_bytes=136
                                   GpuProjectExec: row_width=44, subtree_max_row_bytes=136
                                     GpuCoalesceBatchesExec: row_width=60, subtree_max_row_bytes=136
                                       GpuHashJoinExec: row_width=60, subtree_max_row_bytes=136

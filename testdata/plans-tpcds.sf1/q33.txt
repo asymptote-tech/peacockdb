@@ -2,7 +2,7 @@ GpuSortPreservingMergeExec: [total_sales@1 ASC NULLS LAST]
   GpuSortExec: expr=[total_sales@1 ASC NULLS LAST], fetch=100
     GpuProjectExec: expr=[i_manufact_id@0 as i_manufact_id, sum(tmp1.total_sales)@1 as total_sales]
       GpuAggregateExec: group_by=[i_manufact_id], aggr=[sum(tmp1.total_sales)]
-        InterleaveExec
+        GpuInterleaveExec
           GpuProjectExec: expr=[i_manufact_id@0 as i_manufact_id, sum(store_sales.ss_ext_sales_price)@1 as total_sales]
             GpuAggregateExec: group_by=[i_manufact_id], aggr=[sum(store_sales.ss_ext_sales_price)]
               GpuCoalesceBatchesExec: target_batch_size=38347922
@@ -132,7 +132,7 @@ GpuSortPreservingMergeExec: row_width=20, subtree_max_row_bytes=56
   GpuSortExec: row_width=20, subtree_max_row_bytes=56
     GpuProjectExec: row_width=20, subtree_max_row_bytes=56
       GpuAggregateExec: row_width=20, subtree_max_row_bytes=56
-        InterleaveExec: row_width=20, subtree_max_row_bytes=56
+        GpuInterleaveExec: row_width=20, subtree_max_row_bytes=56
           GpuProjectExec: row_width=20, subtree_max_row_bytes=56
             GpuAggregateExec: row_width=20, subtree_max_row_bytes=56
               GpuCoalesceBatchesExec: row_width=20, subtree_max_row_bytes=56

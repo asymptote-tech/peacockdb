@@ -16,9 +16,11 @@ use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::joins::utils::JoinFilter;
 use datafusion::physical_plan::joins::HashJoinExec;
 use datafusion::physical_plan::projection::ProjectionExec;
+use datafusion::physical_plan::limit::GlobalLimitExec;
 use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
 use datafusion::physical_plan::sorts::sort_preserving_merge::SortPreservingMergeExec;
+use datafusion::physical_plan::union::{InterleaveExec, UnionExec};
 use datafusion::physical_plan::PhysicalExpr;
 use datafusion::physical_expr::expressions::{BinaryExpr, InListExpr, NotExpr};
 use datafusion::logical_expr::Operator;
@@ -198,6 +200,23 @@ impl GpuExtraDisplay for GpuSortPreservingMergeExec {
     fn extra_display_info(&self) -> String {
         let spm = self.inner.as_any().downcast_ref::<SortPreservingMergeExec>().unwrap();
         format!("[{}]", spm.expr())
+    }
+}
+
+gpu_exec_node!(GpuUnionExec);
+impl GpuExtraDisplay for GpuUnionExec {}
+
+gpu_exec_node!(GpuInterleaveExec);
+impl GpuExtraDisplay for GpuInterleaveExec {}
+
+gpu_exec_node!(GpuGlobalLimitExec);
+impl GpuExtraDisplay for GpuGlobalLimitExec {
+    fn extra_display_info(&self) -> String {
+        let gl = self.inner.as_any().downcast_ref::<GlobalLimitExec>().unwrap();
+        match gl.fetch() {
+            Some(f) => format!("skip={}, fetch={}", gl.skip(), f),
+            None => format!("skip={}, fetch=None", gl.skip()),
+        }
     }
 }
 
@@ -403,6 +422,12 @@ impl PhysicalOptimizerRule for GpuExecutionRule {
                 Arc::new(GpuRepartitionExec::new(node))
             } else if node.as_any().is::<SortPreservingMergeExec>() {
                 Arc::new(GpuSortPreservingMergeExec::new(node))
+            } else if node.as_any().is::<UnionExec>() {
+                Arc::new(GpuUnionExec::new(node))
+            } else if node.as_any().is::<InterleaveExec>() {
+                Arc::new(GpuInterleaveExec::new(node))
+            } else if node.as_any().is::<GlobalLimitExec>() {
+                Arc::new(GpuGlobalLimitExec::new(node))
             } else {
                 return Ok(Transformed::no(node));
             };

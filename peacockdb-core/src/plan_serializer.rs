@@ -29,8 +29,8 @@ use flatbuffers::{FlatBufferBuilder, WIPOffset};
 use crate::generated::gpu_plan_generated::peacock::plan as fb;
 use crate::gpu_rule::{
     GpuAggregateExec, GpuCoalesceBatchesExec, GpuCoalescePartitionsExec, GpuFilterExec,
-    GpuHashJoinExec, GpuProjectExec, GpuRepartitionExec, GpuScanExec, GpuSortExec,
-    GpuSortPreservingMergeExec,
+    GpuGlobalLimitExec, GpuHashJoinExec, GpuInterleaveExec, GpuProjectExec, GpuRepartitionExec,
+    GpuScanExec, GpuSortExec, GpuSortPreservingMergeExec, GpuUnionExec,
 };
 
 /// Serialize an entire GPU execution plan tree into a FlatBuffer byte vector.
@@ -76,6 +76,12 @@ fn serialize_plan_node<'a>(
         serialize_gpu_repartition(b, plan)?
     } else if plan.as_any().is::<GpuSortPreservingMergeExec>() {
         serialize_gpu_sort_preserving_merge(b, plan)?
+    } else if plan.as_any().is::<GpuUnionExec>() {
+        serialize_gpu_union(b, plan, false)?
+    } else if plan.as_any().is::<GpuInterleaveExec>() {
+        serialize_gpu_union(b, plan, true)?
+    } else if plan.as_any().is::<GpuGlobalLimitExec>() {
+        serialize_gpu_limit(b, plan)?
     } else {
         return Err(format!("unsupported plan node: {}", plan.name()));
     };
@@ -595,6 +601,60 @@ fn serialize_gpu_sort_preserving_merge<'a>(
     Ok((fb::PlanNodeKind::GpuSortPreservingMerge, node.as_union_value()))
 }
 
+// --- GpuUnionExec / GpuInterleaveExec ---
+
+fn serialize_gpu_union<'a>(
+    b: &mut FlatBufferBuilder<'a>,
+    plan: &Arc<dyn ExecutionPlan>,
+    interleave: bool,
+) -> Result<(fb::PlanNodeKind, WIPOffset<flatbuffers::UnionWIPOffset>), String> {
+    // UnionExec and InterleaveExec carry no extra state beyond their children,
+    // so serialize the inputs directly off the wrapper (no inner downcast).
+    let mut inputs = Vec::with_capacity(plan.children().len());
+    for child in plan.children() {
+        inputs.push(serialize_plan_node(b, child)?);
+    }
+    let inputs_vec = b.create_vector(&inputs);
+
+    let node = fb::GpuUnion::create(
+        b,
+        &fb::GpuUnionArgs {
+            inputs: Some(inputs_vec),
+            interleave,
+        },
+    );
+    Ok((fb::PlanNodeKind::GpuUnion, node.as_union_value()))
+}
+
+// --- GpuGlobalLimitExec ---
+
+fn serialize_gpu_limit<'a>(
+    b: &mut FlatBufferBuilder<'a>,
+    plan: &Arc<dyn ExecutionPlan>,
+) -> Result<(fb::PlanNodeKind, WIPOffset<flatbuffers::UnionWIPOffset>), String> {
+    use datafusion::physical_plan::limit::GlobalLimitExec;
+
+    let gpu_limit = plan.as_any().downcast_ref::<GpuGlobalLimitExec>().unwrap();
+    let limit = gpu_limit
+        .inner()
+        .as_any()
+        .downcast_ref::<GlobalLimitExec>()
+        .ok_or("GpuGlobalLimitExec inner is not GlobalLimitExec")?;
+
+    let input = serialize_plan_node(b, limit.input())?;
+    let fetch = limit.fetch().map(|f| f as i64).unwrap_or(-1);
+
+    let node = fb::GpuLimit::create(
+        b,
+        &fb::GpuLimitArgs {
+            skip: limit.skip() as u64,
+            fetch,
+            input: Some(input),
+        },
+    );
+    Ok((fb::PlanNodeKind::GpuLimit, node.as_union_value()))
+}
+
 // ---------------------------------------------------------------------------
 // Expressions
 // ---------------------------------------------------------------------------
@@ -1063,6 +1123,14 @@ fn deserialize_plan_node(node: &fb::PlanNode) -> Result<Arc<dyn ExecutionPlan>, 
         fb::PlanNodeKind::GpuSortPreservingMerge => {
             let spm = node.node_as_gpu_sort_preserving_merge().ok_or("expected GpuSortPreservingMerge")?;
             deserialize_gpu_sort_preserving_merge(&spm)
+        }
+        fb::PlanNodeKind::GpuUnion => {
+            let u = node.node_as_gpu_union().ok_or("expected GpuUnion")?;
+            deserialize_gpu_union(&u)
+        }
+        fb::PlanNodeKind::GpuLimit => {
+            let l = node.node_as_gpu_limit().ok_or("expected GpuLimit")?;
+            deserialize_gpu_limit(&l)
         }
         other => Err(format!("unknown PlanNodeKind: {:?}", other)),
     }
@@ -1754,4 +1822,42 @@ fn deserialize_gpu_sort_preserving_merge(
     }
 
     Ok(Arc::new(GpuSortPreservingMergeExec::new(Arc::new(merge_exec))))
+}
+
+fn deserialize_gpu_union(u: &fb::GpuUnion) -> Result<Arc<dyn ExecutionPlan>, String> {
+    use datafusion::physical_plan::union::{InterleaveExec, UnionExec};
+
+    let inputs: Vec<Arc<dyn ExecutionPlan>> = u
+        .inputs()
+        .map(|v| {
+            (0..v.len())
+                .map(|i| deserialize_plan_node(&v.get(i)))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    if inputs.is_empty() {
+        return Err("GpuUnion has no inputs".into());
+    }
+
+    if u.interleave() {
+        let inner = InterleaveExec::try_new(inputs).map_err(|e| format!("InterleaveExec: {e}"))?;
+        Ok(Arc::new(GpuInterleaveExec::new(Arc::new(inner))))
+    } else {
+        let inner = UnionExec::new(inputs);
+        Ok(Arc::new(GpuUnionExec::new(Arc::new(inner))))
+    }
+}
+
+fn deserialize_gpu_limit(l: &fb::GpuLimit) -> Result<Arc<dyn ExecutionPlan>, String> {
+    use datafusion::physical_plan::limit::GlobalLimitExec;
+
+    let input = deserialize_plan_node(&l.input().ok_or("GpuLimit missing input")?)?;
+    let fetch = if l.fetch() >= 0 {
+        Some(l.fetch() as usize)
+    } else {
+        None
+    };
+    let inner = GlobalLimitExec::new(input, l.skip() as usize, fetch);
+    Ok(Arc::new(GpuGlobalLimitExec::new(Arc::new(inner))))
 }

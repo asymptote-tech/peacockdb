@@ -1,6 +1,6 @@
 GpuProjectExec: expr=[order count@0 as order count, total shipping cost@1 as total shipping cost, total net profit@2 as total net profit]
   GpuProjectExec: expr=[count(alias1)@0 as order count, sum(alias2)@1 as total shipping cost, sum(alias3)@2 as total net profit, count(alias1)@0 as count(DISTINCT ws1.ws_order_number)]
-    GlobalLimitExec: skip=0, fetch=100
+    GpuGlobalLimitExec: skip=0, fetch=100
       GpuAggregateExec: group_by=[], aggr=[count(alias1), sum(alias2), sum(alias3)]
         GpuCoalescePartitionsExec
           GpuAggregateExec: group_by=[], aggr=[count(alias1), sum(alias2), sum(alias3)]
@@ -67,7 +67,7 @@ GpuProjectExec: expr=[order count@0 as order count, total shipping cost@1 as tot
 --- memory ---
 GpuProjectExec: row_width=40, subtree_max_row_bytes=96
   GpuProjectExec: row_width=48, subtree_max_row_bytes=96
-    GlobalLimitExec: row_width=40, subtree_max_row_bytes=96
+    GpuGlobalLimitExec: row_width=40, subtree_max_row_bytes=96
       GpuAggregateExec: row_width=40, subtree_max_row_bytes=96
         GpuCoalescePartitionsExec: row_width=40, subtree_max_row_bytes=96
           GpuAggregateExec: row_width=40, subtree_max_row_bytes=96

@@ -58,7 +58,7 @@ GpuSortPreservingMergeExec: [segment@0 ASC, num_customers@1 ASC, segment_base@2 
                                                                                                       GpuScanExec: batch_size=11671106
                                                                                             GpuCoalesceBatchesExec: target_batch_size=11671106
                                                                                               GpuRepartitionExec: partitioning=Hash([item_sk@2], 8), input_partitions=16
-                                                                                                UnionExec
+                                                                                                GpuUnionExec
                                                                                                   GpuProjectExec: expr=[cs_sold_date_sk@0 as sold_date_sk, cs_bill_customer_sk@1 as customer_sk, cs_item_sk@2 as item_sk]
                                                                                                     GpuScanExec: batch_size=11671106
                                                                                                   GpuProjectExec: expr=[ws_sold_date_sk@0 as sold_date_sk, ws_bill_customer_sk@2 as customer_sk, ws_item_sk@1 as item_sk]
@@ -160,7 +160,7 @@ GpuSortPreservingMergeExec: row_width=20, subtree_max_row_bytes=184
                                                                                                       GpuScanExec: row_width=68, subtree_max_row_bytes=68
                                                                                             GpuCoalesceBatchesExec: row_width=12, subtree_max_row_bytes=24
                                                                                               GpuRepartitionExec: row_width=12, subtree_max_row_bytes=24
-                                                                                                UnionExec: row_width=12, subtree_max_row_bytes=24
+                                                                                                GpuUnionExec: row_width=12, subtree_max_row_bytes=24
                                                                                                   GpuProjectExec: row_width=12, subtree_max_row_bytes=24
                                                                                                     GpuScanExec: row_width=12, subtree_max_row_bytes=12
                                                                                                   GpuProjectExec: row_width=12, subtree_max_row_bytes=24

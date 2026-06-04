@@ -5,7 +5,7 @@ GpuSortPreservingMergeExec: [channel@0 ASC, id@1 ASC, returns_@3 DESC]
         GpuCoalesceBatchesExec: target_batch_size=12632256
           GpuRepartitionExec: partitioning=Hash([channel@0, id@1, __grouping_id@2], 8), input_partitions=8
             GpuAggregateExec: group_by=[channel, id], aggr=[sum(x.sales), sum(x.returns_), sum(x.profit)]
-              InterleaveExec
+              GpuInterleaveExec
                 GpuProjectExec: expr=[store channel as channel, s_store_sk@0 as id, sales@1 as sales, coalesce(CAST(returns_@4 AS Decimal128(22, 2)), Some(0),22,2) as returns_, profit@2 - coalesce(CAST(profit_loss@5 AS Decimal128(22, 2)), Some(0),22,2) as profit]
                   GpuProjectExec: expr=[s_store_sk@3 as s_store_sk, sales@4 as sales, profit@5 as profit, s_store_sk@0 as s_store_sk, returns_@1 as returns_, profit_loss@2 as profit_loss]
                     GpuCoalesceBatchesExec: target_batch_size=12632256
@@ -143,7 +143,7 @@ GpuSortPreservingMergeExec: row_width=84, subtree_max_row_bytes=170
         GpuCoalesceBatchesExec: row_width=85, subtree_max_row_bytes=169
           GpuRepartitionExec: row_width=85, subtree_max_row_bytes=169
             GpuAggregateExec: row_width=85, subtree_max_row_bytes=169
-              InterleaveExec: row_width=84, subtree_max_row_bytes=156
+              GpuInterleaveExec: row_width=84, subtree_max_row_bytes=156
                 GpuProjectExec: row_width=84, subtree_max_row_bytes=156
                   GpuProjectExec: row_width=72, subtree_max_row_bytes=144
                     GpuCoalesceBatchesExec: row_width=72, subtree_max_row_bytes=144

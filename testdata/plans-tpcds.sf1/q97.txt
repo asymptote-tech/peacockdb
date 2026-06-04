@@ -1,5 +1,5 @@
 GpuProjectExec: expr=[sum(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NULL THEN Int64(1) ELSE Int64(0) END)@0 as store_only, sum(CASE WHEN ssci.customer_sk IS NULL AND csci.customer_sk IS NOT NULL THEN Int64(1) ELSE Int64(0) END)@1 as catalog_only, sum(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NOT NULL THEN Int64(1) ELSE Int64(0) END)@2 as store_and_catalog]
-  GlobalLimitExec: skip=0, fetch=100
+  GpuGlobalLimitExec: skip=0, fetch=100
     GpuAggregateExec: group_by=[], aggr=[sum(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NULL THEN Int64(1) ELSE Int64(0) END), sum(CASE WHEN ssci.customer_sk IS NULL AND csci.customer_sk IS NOT NULL THEN Int64(1) ELSE Int64(0) END), sum(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NOT NULL THEN Int64(1) ELSE Int64(0) END)]
       GpuCoalescePartitionsExec
         GpuAggregateExec: group_by=[], aggr=[sum(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NULL THEN Int64(1) ELSE Int64(0) END), sum(CASE WHEN ssci.customer_sk IS NULL AND csci.customer_sk IS NOT NULL THEN Int64(1) ELSE Int64(0) END), sum(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NOT NULL THEN Int64(1) ELSE Int64(0) END)]
@@ -40,7 +40,7 @@ GpuProjectExec: expr=[sum(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.custom
                                   GpuScanExec: batch_size=33554432
 --- memory ---
 GpuProjectExec: row_width=24, subtree_max_row_bytes=64
-  GlobalLimitExec: row_width=24, subtree_max_row_bytes=64
+  GpuGlobalLimitExec: row_width=24, subtree_max_row_bytes=64
     GpuAggregateExec: row_width=24, subtree_max_row_bytes=64
       GpuCoalescePartitionsExec: row_width=24, subtree_max_row_bytes=64
         GpuAggregateExec: row_width=24, subtree_max_row_bytes=64
