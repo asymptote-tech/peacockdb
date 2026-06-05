@@ -14,13 +14,13 @@ GpuSortPreservingMergeExec: [sum_sales@7 - avg_monthly_sales@6 ASC NULLS LAST, i
                           GpuCoalesceBatchesExec: target_batch_size=3728270
                             GpuFilterExec: predicate=__common_expr_3@0 AND CASE WHEN __common_expr_3@0 THEN abs(sum(store_sales.ss_sales_price)@7 - avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name, date_dim.d_year] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@9) / avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name, date_dim.d_year] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@9 END > Some(1000000000),32,10, projection=[1, 2, 3, 4, 5, 6, 7, 8, 9]
                               GpuProjectExec: expr=[avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name, date_dim.d_year] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@8 > Some(0),21,6 as __common_expr_3, i_category@0 as i_category, i_brand@1 as i_brand, s_store_name@2 as s_store_name, s_company_name@3 as s_company_name, d_year@4 as d_year, d_moy@5 as d_moy, sum(store_sales.ss_sales_price)@6 as sum(store_sales.ss_sales_price), rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@7 as rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW, avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name, date_dim.d_year] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@8 as avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name, date_dim.d_year] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING]
-                                WindowAggExec: wdw=[avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name, date_dim.d_year] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING: Ok(Field { name: "avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name, date_dim.d_year] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING", data_type: Decimal128(21, 6), nullable: true, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Rows, start_bound: Preceding(UInt64(NULL)), end_bound: Following(UInt64(NULL)), is_causal: false }]
+                                GpuWindowExec: wdw=[avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name, date_dim.d_year] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING]
                                   GpuSortExec: expr=[i_category@0 ASC NULLS LAST, i_brand@1 ASC NULLS LAST, s_store_name@2 ASC NULLS LAST, s_company_name@3 ASC NULLS LAST]
                                     GpuCoalesceBatchesExec: target_batch_size=3728270
                                       GpuRepartitionExec: partitioning=Hash([i_category@0, i_brand@1, s_store_name@2, s_company_name@3, d_year@4], 8), input_partitions=8
                                         GpuCoalesceBatchesExec: target_batch_size=3728270
                                           GpuFilterExec: predicate=d_year@4 = 1999
-                                            BoundedWindowAggExec: wdw=[rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW: Ok(Field { name: "rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW", data_type: UInt64, nullable: false, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Range, start_bound: Preceding(Int32(NULL)), end_bound: CurrentRow, is_causal: false }], mode=[Sorted]
+                                            GpuWindowExec: wdw=[rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW]
                                               GpuSortExec: expr=[i_category@0 ASC NULLS LAST, i_brand@1 ASC NULLS LAST, s_store_name@2 ASC NULLS LAST, s_company_name@3 ASC NULLS LAST, d_year@4 ASC NULLS LAST, d_moy@5 ASC NULLS LAST]
                                                 GpuCoalesceBatchesExec: target_batch_size=3728270
                                                   GpuRepartitionExec: partitioning=Hash([i_category@0, i_brand@1, s_store_name@2, s_company_name@3], 8), input_partitions=8
@@ -59,7 +59,7 @@ GpuSortPreservingMergeExec: [sum_sales@7 - avg_monthly_sales@6 ASC NULLS LAST, i
                     GpuCoalesceBatchesExec: target_batch_size=3728270
                       GpuRepartitionExec: partitioning=Hash([i_category@0, i_brand@1, s_store_name@2, s_company_name@3, CAST(CAST(v1_lag.rn AS Int64) + Int64(1) AS Decimal128(20, 0))@6], 8), input_partitions=8
                         GpuProjectExec: expr=[i_category@0 as i_category, i_brand@1 as i_brand, s_store_name@2 as s_store_name, s_company_name@3 as s_company_name, sum(store_sales.ss_sales_price)@6 as sum_sales, rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@7 as rn, CAST(CAST(rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@7 AS Int64) + 1 AS Decimal128(20, 0)) as CAST(CAST(v1_lag.rn AS Int64) + Int64(1) AS Decimal128(20, 0))]
-                          BoundedWindowAggExec: wdw=[rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW: Ok(Field { name: "rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW", data_type: UInt64, nullable: false, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Range, start_bound: Preceding(Int32(NULL)), end_bound: CurrentRow, is_causal: false }], mode=[Sorted]
+                          GpuWindowExec: wdw=[rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW]
                             GpuSortExec: expr=[i_category@0 ASC NULLS LAST, i_brand@1 ASC NULLS LAST, s_store_name@2 ASC NULLS LAST, s_company_name@3 ASC NULLS LAST, d_year@4 ASC NULLS LAST, d_moy@5 ASC NULLS LAST]
                               GpuCoalesceBatchesExec: target_batch_size=3728270
                                 GpuRepartitionExec: partitioning=Hash([i_category@0, i_brand@1, s_store_name@2, s_company_name@3], 8), input_partitions=8
@@ -98,7 +98,7 @@ GpuSortPreservingMergeExec: [sum_sales@7 - avg_monthly_sales@6 ASC NULLS LAST, i
           GpuCoalesceBatchesExec: target_batch_size=3728270
             GpuRepartitionExec: partitioning=Hash([i_category@0, i_brand@1, s_store_name@2, s_company_name@3, CAST(CAST(v1_lead.rn AS Int64) - Int64(1) AS Decimal128(20, 0))@6], 8), input_partitions=8
               GpuProjectExec: expr=[i_category@0 as i_category, i_brand@1 as i_brand, s_store_name@2 as s_store_name, s_company_name@3 as s_company_name, sum(store_sales.ss_sales_price)@6 as sum_sales, rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@7 as rn, CAST(CAST(rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@7 AS Int64) - 1 AS Decimal128(20, 0)) as CAST(CAST(v1_lead.rn AS Int64) - Int64(1) AS Decimal128(20, 0))]
-                BoundedWindowAggExec: wdw=[rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW: Ok(Field { name: "rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW", data_type: UInt64, nullable: false, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Range, start_bound: Preceding(Int32(NULL)), end_bound: CurrentRow, is_causal: false }], mode=[Sorted]
+                GpuWindowExec: wdw=[rank() PARTITION BY [item.i_category, item.i_brand, store.s_store_name, store.s_company_name] ORDER BY [date_dim.d_year ASC NULLS LAST, date_dim.d_moy ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW]
                   GpuSortExec: expr=[i_category@0 ASC NULLS LAST, i_brand@1 ASC NULLS LAST, s_store_name@2 ASC NULLS LAST, s_company_name@3 ASC NULLS LAST, d_year@4 ASC NULLS LAST, d_moy@5 ASC NULLS LAST]
                     GpuCoalesceBatchesExec: target_batch_size=3728270
                       GpuRepartitionExec: partitioning=Hash([i_category@0, i_brand@1, s_store_name@2, s_company_name@3], 8), input_partitions=8
@@ -151,13 +151,13 @@ GpuSortPreservingMergeExec: row_width=200, subtree_max_row_bytes=576
                           GpuCoalesceBatchesExec: row_width=176, subtree_max_row_bytes=384
                             GpuFilterExec: row_width=176, subtree_max_row_bytes=384
                               GpuProjectExec: row_width=208, subtree_max_row_bytes=384
-                                WindowAggExec: row_width=176, subtree_max_row_bytes=320
+                                GpuWindowExec: row_width=176, subtree_max_row_bytes=320
                                   GpuSortExec: row_width=160, subtree_max_row_bytes=320
                                     GpuCoalesceBatchesExec: row_width=160, subtree_max_row_bytes=320
                                       GpuRepartitionExec: row_width=160, subtree_max_row_bytes=320
                                         GpuCoalesceBatchesExec: row_width=160, subtree_max_row_bytes=320
                                           GpuFilterExec: row_width=160, subtree_max_row_bytes=320
-                                            BoundedWindowAggExec: row_width=160, subtree_max_row_bytes=312
+                                            GpuWindowExec: row_width=160, subtree_max_row_bytes=312
                                               GpuSortExec: row_width=152, subtree_max_row_bytes=312
                                                 GpuCoalesceBatchesExec: row_width=152, subtree_max_row_bytes=312
                                                   GpuRepartitionExec: row_width=152, subtree_max_row_bytes=312
@@ -196,7 +196,7 @@ GpuSortPreservingMergeExec: row_width=200, subtree_max_row_bytes=576
                     GpuCoalesceBatchesExec: row_width=168, subtree_max_row_bytes=328
                       GpuRepartitionExec: row_width=168, subtree_max_row_bytes=328
                         GpuProjectExec: row_width=168, subtree_max_row_bytes=328
-                          BoundedWindowAggExec: row_width=160, subtree_max_row_bytes=312
+                          GpuWindowExec: row_width=160, subtree_max_row_bytes=312
                             GpuSortExec: row_width=152, subtree_max_row_bytes=312
                               GpuCoalesceBatchesExec: row_width=152, subtree_max_row_bytes=312
                                 GpuRepartitionExec: row_width=152, subtree_max_row_bytes=312
@@ -235,7 +235,7 @@ GpuSortPreservingMergeExec: row_width=200, subtree_max_row_bytes=576
           GpuCoalesceBatchesExec: row_width=168, subtree_max_row_bytes=328
             GpuRepartitionExec: row_width=168, subtree_max_row_bytes=328
               GpuProjectExec: row_width=168, subtree_max_row_bytes=328
-                BoundedWindowAggExec: row_width=160, subtree_max_row_bytes=312
+                GpuWindowExec: row_width=160, subtree_max_row_bytes=312
                   GpuSortExec: row_width=152, subtree_max_row_bytes=312
                     GpuCoalesceBatchesExec: row_width=152, subtree_max_row_bytes=312
                       GpuRepartitionExec: row_width=152, subtree_max_row_bytes=312

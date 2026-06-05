@@ -3,7 +3,7 @@ GpuSortPreservingMergeExec: [i_manager_id@0 ASC NULLS LAST, avg_monthly_sales@2 
     GpuProjectExec: expr=[i_manager_id@0 as i_manager_id, sum(store_sales.ss_sales_price)@1 as sum_sales, avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manager_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@2 as avg_monthly_sales]
       GpuCoalesceBatchesExec: target_batch_size=19173961
         GpuFilterExec: predicate=CASE WHEN avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manager_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@2 > Some(0),21,6 THEN abs(sum(store_sales.ss_sales_price)@1 - avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manager_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@2) / avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manager_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING@2 END > Some(1000000000),32,10
-          WindowAggExec: wdw=[avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manager_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING: Ok(Field { name: "avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manager_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING", data_type: Decimal128(21, 6), nullable: true, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Rows, start_bound: Preceding(UInt64(NULL)), end_bound: Following(UInt64(NULL)), is_causal: false }]
+          GpuWindowExec: wdw=[avg(sum(store_sales.ss_sales_price)) PARTITION BY [item.i_manager_id] ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING]
             GpuSortExec: expr=[i_manager_id@0 ASC NULLS LAST]
               GpuCoalesceBatchesExec: target_batch_size=19173961
                 GpuRepartitionExec: partitioning=Hash([i_manager_id@0], 8), input_partitions=8
@@ -47,7 +47,7 @@ GpuSortPreservingMergeExec: row_width=36, subtree_max_row_bytes=112
     GpuProjectExec: row_width=36, subtree_max_row_bytes=112
       GpuCoalesceBatchesExec: row_width=36, subtree_max_row_bytes=112
         GpuFilterExec: row_width=36, subtree_max_row_bytes=112
-          WindowAggExec: row_width=36, subtree_max_row_bytes=112
+          GpuWindowExec: row_width=36, subtree_max_row_bytes=112
             GpuSortExec: row_width=20, subtree_max_row_bytes=112
               GpuCoalesceBatchesExec: row_width=20, subtree_max_row_bytes=112
                 GpuRepartitionExec: row_width=20, subtree_max_row_bytes=112
