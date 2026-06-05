@@ -98,7 +98,7 @@ jobs:
       - name: Build and stage rust GPU test binaries
         run: |
           mkdir -p cpp/install/rust-tests
-          for t in test_gpu_executor; do
+          for t in test_gpu_executor test_gpu_executor_tpcds; do
             exec_path=$(cargo test --no-run -p peacockdb-core --test "$t" \
                 --message-format=json \
               | python3 -c '

@@ -1,5 +1,5 @@
 GpuProjectExec: expr=[sum(catalog_sales.cs_ext_discount_amt)@0 as excess discount amount]
-  GlobalLimitExec: skip=0, fetch=100
+  GpuGlobalLimitExec: skip=0, fetch=100
     GpuAggregateExec: group_by=[], aggr=[sum(catalog_sales.cs_ext_discount_amt)]
       GpuCoalescePartitionsExec
         GpuAggregateExec: group_by=[], aggr=[sum(catalog_sales.cs_ext_discount_amt)]
@@ -47,7 +47,7 @@ GpuProjectExec: expr=[sum(catalog_sales.cs_ext_discount_amt)@0 as excess discoun
                                 GpuScanExec: batch_size=38347922
 --- memory ---
 GpuProjectExec: row_width=16, subtree_max_row_bytes=56
-  GlobalLimitExec: row_width=16, subtree_max_row_bytes=56
+  GpuGlobalLimitExec: row_width=16, subtree_max_row_bytes=56
     GpuAggregateExec: row_width=16, subtree_max_row_bytes=56
       GpuCoalescePartitionsExec: row_width=16, subtree_max_row_bytes=56
         GpuAggregateExec: row_width=16, subtree_max_row_bytes=56

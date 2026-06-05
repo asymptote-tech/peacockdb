@@ -1,4 +1,4 @@
-GlobalLimitExec: skip=0, fetch=100
+GpuGlobalLimitExec: skip=0, fetch=100
   GpuAggregateExec: group_by=[], aggr=[count(*)]
     GpuCoalescePartitionsExec
       GpuAggregateExec: group_by=[], aggr=[count(*)]
@@ -35,7 +35,7 @@ GlobalLimitExec: skip=0, fetch=100
                                 GpuRepartitionExec: partitioning=Hash([ss_hdemo_sk@1], 8), input_partitions=8
                                   GpuScanExec: batch_size=53687091
 --- memory ---
-GlobalLimitExec: row_width=8, subtree_max_row_bytes=40
+GpuGlobalLimitExec: row_width=8, subtree_max_row_bytes=40
   GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
     GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
       GpuAggregateExec: row_width=8, subtree_max_row_bytes=40

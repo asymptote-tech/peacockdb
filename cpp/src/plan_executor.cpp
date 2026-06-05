@@ -5,6 +5,7 @@
 #include <cudf/ast/expressions.hpp>
 #include <cudf/binaryop.hpp>
 #include <cudf/column/column_view.hpp>
+#include <cudf/concatenate.hpp>
 #include <cudf/copying.hpp>
 #include <cudf/column/column_factories.hpp>
 #include <cudf/datetime.hpp>
@@ -1588,6 +1589,57 @@ static TableResult execute_sort(const fb::GpuSort* sort) {
 }
 
 // ============================================================================
+// Union (UNION ALL / interleave): concatenate the rows of all inputs
+// ============================================================================
+
+static TableResult execute_union(const fb::GpuUnion* u) {
+  if (!u->inputs() || u->inputs()->size() == 0)
+    throw std::runtime_error("GpuUnion has no inputs");
+
+  // Execute each input fully, then concatenate the materialized tables. All
+  // inputs share one schema, so cudf::concatenate stacks them row-wise.
+  std::vector<TableResult> inputs;
+  inputs.reserve(u->inputs()->size());
+  std::vector<cudf::table_view> views;
+  views.reserve(u->inputs()->size());
+  for (flatbuffers::uoffset_t i = 0; i < u->inputs()->size(); ++i) {
+    inputs.push_back(execute_node(u->inputs()->Get(i)));
+    views.push_back(inputs.back().table->view());
+  }
+
+  // A single input needs no copy.
+  if (inputs.size() == 1) return std::move(inputs[0]);
+
+  auto out = cudf::concatenate(views);
+  return {std::move(out), std::move(inputs[0].column_names)};
+}
+
+// ============================================================================
+// Limit (LIMIT / OFFSET): slice rows [skip, skip + fetch)
+// ============================================================================
+
+static TableResult execute_limit(const fb::GpuLimit* limit) {
+  auto input = execute_node(limit->input());
+  auto tv = input.table->view();
+  auto num_rows = tv.num_rows();
+
+  auto skip = std::min(static_cast<cudf::size_type>(limit->skip()), num_rows);
+  auto end = num_rows;
+  if (limit->fetch() >= 0) {
+    // skip + fetch, clamped to num_rows (skip is already <= num_rows).
+    auto want = static_cast<int64_t>(skip) + limit->fetch();
+    end = static_cast<cudf::size_type>(std::min<int64_t>(want, num_rows));
+  }
+
+  if (skip == 0 && end == num_rows) return std::move(input);
+
+  std::vector<cudf::size_type> slice_indices{skip, end};
+  auto sliced = cudf::slice(tv, slice_indices);
+  auto result = std::make_unique<cudf::table>(sliced[0]);
+  return {std::move(result), std::move(input.column_names)};
+}
+
+// ============================================================================
 // Pass-through nodes (single-GPU: just execute input)
 // ============================================================================
 
@@ -1611,6 +1663,8 @@ static const char* plan_node_kind_name(fb::PlanNodeKind k) {
     case fb::PlanNodeKind_GpuCoalescePartitions:  return "GpuCoalescePartitions";
     case fb::PlanNodeKind_GpuRepartition:         return "GpuRepartition";
     case fb::PlanNodeKind_GpuSortPreservingMerge: return "GpuSortPreservingMerge";
+    case fb::PlanNodeKind_GpuUnion:               return "GpuUnion";
+    case fb::PlanNodeKind_GpuLimit:               return "GpuLimit";
     default:                                       return "Unknown";
   }
 }
@@ -1644,6 +1698,10 @@ static TableResult execute_node(const fb::PlanNode* node) {
         result = execute_passthrough(node->node_as_GpuRepartition()->input()); break;
       case fb::PlanNodeKind_GpuSortPreservingMerge:
         result = execute_passthrough(node->node_as_GpuSortPreservingMerge()->input()); break;
+      case fb::PlanNodeKind_GpuUnion:
+        result = execute_union(node->node_as_GpuUnion()); break;
+      case fb::PlanNodeKind_GpuLimit:
+        result = execute_limit(node->node_as_GpuLimit()); break;
       default:
         throw std::runtime_error(
             "unsupported PlanNodeKind: " + std::to_string(node->node_type()));

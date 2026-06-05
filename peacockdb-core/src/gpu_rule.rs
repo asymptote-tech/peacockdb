@@ -16,9 +16,11 @@ use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::joins::utils::JoinFilter;
 use datafusion::physical_plan::joins::HashJoinExec;
 use datafusion::physical_plan::projection::ProjectionExec;
+use datafusion::physical_plan::limit::GlobalLimitExec;
 use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
 use datafusion::physical_plan::sorts::sort_preserving_merge::SortPreservingMergeExec;
+use datafusion::physical_plan::union::{InterleaveExec, UnionExec};
 use datafusion::physical_plan::PhysicalExpr;
 use datafusion::physical_expr::expressions::{BinaryExpr, InListExpr, NotExpr};
 use datafusion::logical_expr::Operator;
@@ -198,6 +200,23 @@ impl GpuExtraDisplay for GpuSortPreservingMergeExec {
     fn extra_display_info(&self) -> String {
         let spm = self.inner.as_any().downcast_ref::<SortPreservingMergeExec>().unwrap();
         format!("[{}]", spm.expr())
+    }
+}
+
+gpu_exec_node!(GpuUnionExec);
+impl GpuExtraDisplay for GpuUnionExec {}
+
+gpu_exec_node!(GpuInterleaveExec);
+impl GpuExtraDisplay for GpuInterleaveExec {}
+
+gpu_exec_node!(GpuGlobalLimitExec);
+impl GpuExtraDisplay for GpuGlobalLimitExec {
+    fn extra_display_info(&self) -> String {
+        let gl = self.inner.as_any().downcast_ref::<GlobalLimitExec>().unwrap();
+        match gl.fetch() {
+            Some(f) => format!("skip={}, fetch={}", gl.skip(), f),
+            None => format!("skip={}, fetch=None", gl.skip()),
+        }
     }
 }
 
@@ -403,6 +422,12 @@ impl PhysicalOptimizerRule for GpuExecutionRule {
                 Arc::new(GpuRepartitionExec::new(node))
             } else if node.as_any().is::<SortPreservingMergeExec>() {
                 Arc::new(GpuSortPreservingMergeExec::new(node))
+            } else if node.as_any().is::<UnionExec>() {
+                Arc::new(GpuUnionExec::new(node))
+            } else if node.as_any().is::<InterleaveExec>() {
+                Arc::new(GpuInterleaveExec::new(node))
+            } else if node.as_any().is::<GlobalLimitExec>() {
+                Arc::new(GpuGlobalLimitExec::new(node))
             } else {
                 return Ok(Transformed::no(node));
             };
@@ -582,6 +607,51 @@ pub(crate) fn analyze_memory_with(
                 subtree_max_row_bytes: child.subtree_max_row_bytes.max(2 * input_bytes),
                 output_width,
                 output_row_ratio: child.output_row_ratio,
+            }
+        }
+        // UNION ALL (concatenate the rows of all inputs). Must mirror what
+        // execute_union actually does today, branching on input count:
+        //   - single input  → std::move (true pass-through): peak = child peak.
+        //   - multiple inputs → all input tables are held live, then the
+        //     cudf::concatenate output is allocated → peak ≈ Σ(inputs) + output,
+        //     and the output row count is the *sum* of child cardinalities.
+        // Undercounting here would feed GpuMemoryBudgetRule too small a
+        // subtree_max_row_bytes → too large a batch size → OOM.
+        // (Once the multi-partition / true-pass-through model lands in #34, the
+        // concat moves up into GpuCoalescePartitionsExec and this can revert to a
+        // plain pass-through.)
+        "GpuUnionExec" | "GpuInterleaveExec" => {
+            let child_results: Vec<_> = children
+                .iter()
+                .map(|c| analyze_memory_with(c, selectivity, cardinality))
+                .collect();
+            let max_child_peak = child_results
+                .iter()
+                .map(|c| c.subtree_max_row_bytes)
+                .max()
+                .unwrap_or(output_width);
+            if child_results.len() <= 1 {
+                let output_row_ratio =
+                    child_results.first().map(|c| c.output_row_ratio).unwrap_or(1.0);
+                SubtreeMemory {
+                    subtree_max_row_bytes: max_child_peak,
+                    output_width,
+                    output_row_ratio,
+                }
+            } else {
+                let inputs_bytes: usize = child_results
+                    .iter()
+                    .map(|c| (c.output_row_ratio * c.output_width as f64) as usize)
+                    .sum();
+                let output_row_ratio: f64 =
+                    child_results.iter().map(|c| c.output_row_ratio).sum();
+                let output_bytes = (output_row_ratio * output_width as f64) as usize;
+                let own = inputs_bytes + output_bytes;
+                SubtreeMemory {
+                    subtree_max_row_bytes: max_child_peak.max(own),
+                    output_width,
+                    output_row_ratio,
+                }
             }
         }
         // Everything else (CoalescePartitions, Repartition, CoalesceBatches, etc.):

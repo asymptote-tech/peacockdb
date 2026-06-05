@@ -429,6 +429,29 @@ table GpuSortPreservingMerge {
   input: PlanNode;
 }
 
+/// Concatenate the rows of all inputs (UNION ALL). Covers DataFusion's
+/// `UnionExec` (append partition streams) and `InterleaveExec` (combine
+/// same-hash-partitioned inputs); both produce the same row multiset, which on
+/// the single-table GPU path is just `cudf::concatenate` of the input tables.
+/// All inputs share one schema.
+table GpuUnion {
+  inputs: [PlanNode];
+  /// True if this came from an `InterleaveExec` rather than a `UnionExec`.
+  /// Only affects the Rust roundtrip (which DataFusion node to rebuild); the
+  /// C++ executor concatenates regardless.
+  interleave: bool;
+}
+
+/// Skip the first `skip` rows, then emit at most `fetch` (LIMIT/OFFSET).
+/// Corresponds to DataFusion's `GlobalLimitExec`. The GPU path runs as a single
+/// materialized table, so this is a row slice `[skip, skip + fetch)`.
+table GpuLimit {
+  skip: uint64;
+  /// Maximum rows to emit after the skip (-1 = unlimited, i.e. skip only).
+  fetch: int64;
+  input: PlanNode;
+}
+
 // --- Plan node union ---
 
 union PlanNodeKind {
@@ -442,6 +465,8 @@ union PlanNodeKind {
   GpuCoalescePartitions,
   GpuRepartition,
   GpuSortPreservingMerge,
+  GpuUnion,
+  GpuLimit,
 }
 
 /// A single node in the physical plan tree.
