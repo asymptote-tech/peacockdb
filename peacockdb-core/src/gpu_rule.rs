@@ -609,6 +609,51 @@ pub(crate) fn analyze_memory_with(
                 output_row_ratio: child.output_row_ratio,
             }
         }
+        // UNION ALL (concatenate the rows of all inputs). Must mirror what
+        // execute_union actually does today, branching on input count:
+        //   - single input  → std::move (true pass-through): peak = child peak.
+        //   - multiple inputs → all input tables are held live, then the
+        //     cudf::concatenate output is allocated → peak ≈ Σ(inputs) + output,
+        //     and the output row count is the *sum* of child cardinalities.
+        // Undercounting here would feed GpuMemoryBudgetRule too small a
+        // subtree_max_row_bytes → too large a batch size → OOM.
+        // (Once the multi-partition / true-pass-through model lands in #34, the
+        // concat moves up into GpuCoalescePartitionsExec and this can revert to a
+        // plain pass-through.)
+        "GpuUnionExec" | "GpuInterleaveExec" => {
+            let child_results: Vec<_> = children
+                .iter()
+                .map(|c| analyze_memory_with(c, selectivity, cardinality))
+                .collect();
+            let max_child_peak = child_results
+                .iter()
+                .map(|c| c.subtree_max_row_bytes)
+                .max()
+                .unwrap_or(output_width);
+            if child_results.len() <= 1 {
+                let output_row_ratio =
+                    child_results.first().map(|c| c.output_row_ratio).unwrap_or(1.0);
+                SubtreeMemory {
+                    subtree_max_row_bytes: max_child_peak,
+                    output_width,
+                    output_row_ratio,
+                }
+            } else {
+                let inputs_bytes: usize = child_results
+                    .iter()
+                    .map(|c| (c.output_row_ratio * c.output_width as f64) as usize)
+                    .sum();
+                let output_row_ratio: f64 =
+                    child_results.iter().map(|c| c.output_row_ratio).sum();
+                let output_bytes = (output_row_ratio * output_width as f64) as usize;
+                let own = inputs_bytes + output_bytes;
+                SubtreeMemory {
+                    subtree_max_row_bytes: max_child_peak.max(own),
+                    output_width,
+                    output_row_ratio,
+                }
+            }
+        }
         // Everything else (CoalescePartitions, Repartition, CoalesceBatches, etc.):
         // pass-through — peak is the max of children, ratio is max of children.
         _ => {
