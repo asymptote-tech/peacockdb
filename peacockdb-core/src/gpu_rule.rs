@@ -21,6 +21,7 @@ use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
 use datafusion::physical_plan::sorts::sort_preserving_merge::SortPreservingMergeExec;
 use datafusion::physical_plan::union::{InterleaveExec, UnionExec};
+use datafusion::physical_plan::windows::{BoundedWindowAggExec, WindowAggExec};
 use datafusion::physical_plan::PhysicalExpr;
 use datafusion::physical_expr::expressions::{BinaryExpr, InListExpr, NotExpr};
 use datafusion::logical_expr::Operator;
@@ -217,6 +218,23 @@ impl GpuExtraDisplay for GpuGlobalLimitExec {
             Some(f) => format!("skip={}, fetch={}", gl.skip(), f),
             None => format!("skip={}, fetch=None", gl.skip()),
         }
+    }
+}
+
+gpu_exec_node!(GpuWindowExec);
+impl GpuExtraDisplay for GpuWindowExec {
+    fn extra_display_info(&self) -> String {
+        // Window exprs live on either WindowAggExec or BoundedWindowAggExec.
+        let names: Vec<String> = if let Some(w) =
+            self.inner.as_any().downcast_ref::<WindowAggExec>()
+        {
+            w.window_expr().iter().map(|e| e.name().to_string()).collect()
+        } else if let Some(w) = self.inner.as_any().downcast_ref::<BoundedWindowAggExec>() {
+            w.window_expr().iter().map(|e| e.name().to_string()).collect()
+        } else {
+            vec![]
+        };
+        format!("wdw=[{}]", names.join(", "))
     }
 }
 
@@ -428,6 +446,10 @@ impl PhysicalOptimizerRule for GpuExecutionRule {
                 Arc::new(GpuInterleaveExec::new(node))
             } else if node.as_any().is::<GlobalLimitExec>() {
                 Arc::new(GpuGlobalLimitExec::new(node))
+            } else if node.as_any().is::<WindowAggExec>()
+                || node.as_any().is::<BoundedWindowAggExec>()
+            {
+                Arc::new(GpuWindowExec::new(node))
             } else {
                 return Ok(Transformed::no(node));
             };

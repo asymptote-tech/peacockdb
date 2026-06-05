@@ -1,7 +1,7 @@
 GpuSortPreservingMergeExec: [lochierarchy@3 DESC, CASE WHEN lochierarchy@3 = 0 THEN i_category@1 END ASC, rank_within_parent@4 ASC]
   GpuSortExec: expr=[lochierarchy@3 DESC, CASE WHEN lochierarchy@3 = 0 THEN i_category@1 END ASC, rank_within_parent@4 ASC], fetch=100
     GpuProjectExec: expr=[gross_margin@0 as gross_margin, i_category@1 as i_category, i_class@2 as i_class, lochierarchy@4 as lochierarchy, rank() PARTITION BY [results_rollup.lochierarchy, CASE WHEN results_rollup.t_class = Int64(0) THEN results_rollup.i_category END] ORDER BY [results_rollup.gross_margin ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@5 as rank_within_parent]
-      BoundedWindowAggExec: wdw=[rank() PARTITION BY [results_rollup.lochierarchy, CASE WHEN results_rollup.t_class = Int64(0) THEN results_rollup.i_category END] ORDER BY [results_rollup.gross_margin ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW: Ok(Field { name: "rank() PARTITION BY [results_rollup.lochierarchy, CASE WHEN results_rollup.t_class = Int64(0) THEN results_rollup.i_category END] ORDER BY [results_rollup.gross_margin ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW", data_type: UInt64, nullable: false, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Range, start_bound: Preceding(Float64(NULL)), end_bound: CurrentRow, is_causal: false }], mode=[Sorted]
+      GpuWindowExec: wdw=[rank() PARTITION BY [results_rollup.lochierarchy, CASE WHEN results_rollup.t_class = Int64(0) THEN results_rollup.i_category END] ORDER BY [results_rollup.gross_margin ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW]
         GpuSortExec: expr=[lochierarchy@4 ASC NULLS LAST, CASE WHEN t_class@3 = 0 THEN i_category@1 END ASC NULLS LAST, gross_margin@0 ASC NULLS LAST]
           GpuCoalesceBatchesExec: target_batch_size=3728270
             GpuRepartitionExec: partitioning=Hash([lochierarchy@4, CASE WHEN t_class@3 = 0 THEN i_category@1 END], 8), input_partitions=8
@@ -130,7 +130,7 @@ GpuSortPreservingMergeExec: [lochierarchy@3 DESC, CASE WHEN lochierarchy@3 = 0 T
 GpuSortPreservingMergeExec: row_width=88, subtree_max_row_bytes=576
   GpuSortExec: row_width=88, subtree_max_row_bytes=576
     GpuProjectExec: row_width=88, subtree_max_row_bytes=576
-      BoundedWindowAggExec: row_width=96, subtree_max_row_bytes=576
+      GpuWindowExec: row_width=96, subtree_max_row_bytes=576
         GpuSortExec: row_width=88, subtree_max_row_bytes=576
           GpuCoalesceBatchesExec: row_width=88, subtree_max_row_bytes=576
             GpuRepartitionExec: row_width=88, subtree_max_row_bytes=576

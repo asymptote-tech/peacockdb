@@ -452,6 +452,51 @@ table GpuLimit {
   input: PlanNode;
 }
 
+/// A single window-frame boundary. The executor supports only the frames
+/// DataFusion emits for TPC-DS: start is always UnboundedPreceding; end is
+/// either CurrentRow (running aggregate) or UnboundedFollowing (whole partition).
+enum WindowFrameBound : byte {
+  UnboundedPreceding = 0,
+  CurrentRow,
+  UnboundedFollowing,
+}
+
+/// One window-function invocation inside a GpuWindow node, appending one output
+/// column. Covers DataFusion's WindowAggExec / BoundedWindowAggExec.
+table WindowExprNode {
+  /// Function name: "sum", "avg", "max", "min", "count", "rank", "row_number".
+  func_name: string;
+  /// Argument expression(s) for aggregate windows (e.g. sum's input). Empty for
+  /// ranking functions (rank / row_number).
+  args: [Expr];
+  /// PARTITION BY expressions (the group keys). The input arrives pre-sorted by
+  /// [partition_by, order_by] (DataFusion inserts the SortExec), so the executor
+  /// treats consecutive equal keys as one partition.
+  partition_by: [Expr];
+  /// ORDER BY within the partition (needed for ranking and running frames).
+  order_by: [SortExprNode];
+  /// Frame bounds (see WindowFrameBound). start is UnboundedPreceding.
+  frame_start: WindowFrameBound;
+  frame_end: WindowFrameBound;
+  /// Output column alias.
+  alias: string;
+  /// Output column type.
+  return_type: DataType;
+  /// DataFusion's declared decimal output type, when it is a Decimal128 (e.g.
+  /// avg, whose scale differs from cuDF's mean). precision == 0 means "not
+  /// declared"; the executor then uses cuDF's natural scale. See AggregateFuncNode.
+  out_decimal_precision: uint8;
+  out_decimal_scale: int8;
+}
+
+/// Window functions: append one column per window expr to the input rows,
+/// preserving input row order. Maps DataFusion's WindowAggExec (whole-partition
+/// frames) and BoundedWindowAggExec (running / ranking frames).
+table GpuWindow {
+  window_exprs: [WindowExprNode];
+  input: PlanNode;
+}
+
 // --- Plan node union ---
 
 union PlanNodeKind {
@@ -467,6 +512,7 @@ union PlanNodeKind {
   GpuSortPreservingMerge,
   GpuUnion,
   GpuLimit,
+  GpuWindow,
 }
 
 /// A single node in the physical plan tree.

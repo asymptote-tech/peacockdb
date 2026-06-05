@@ -179,18 +179,18 @@ gpu_result_test!(test_gpu_tpcds_q95, "q95");
 // gpu_result_test!(test_gpu_tpcds_q97, "q97");
 
 // --- Bucket C: window functions (BoundedWindowAggExec / PARTITION BY ordering) ---
-// gpu_result_test!(test_gpu_tpcds_q12, "q12");
-// gpu_result_test!(test_gpu_tpcds_q20, "q20");
+gpu_result_test!(test_gpu_tpcds_q12, "q12");
+gpu_result_test!(test_gpu_tpcds_q20, "q20");
 // gpu_result_test!(test_gpu_tpcds_q36, "q36");
 // gpu_result_test!(test_gpu_tpcds_q44, "q44");
 // gpu_result_test!(test_gpu_tpcds_q47, "q47");
-// gpu_result_test!(test_gpu_tpcds_q51, "q51");
-// gpu_result_test!(test_gpu_tpcds_q53, "q53");
+gpu_result_test!(test_gpu_tpcds_q51, "q51");
+gpu_result_test!(test_gpu_tpcds_q53, "q53");
 // gpu_result_test!(test_gpu_tpcds_q57, "q57");
-// gpu_result_test!(test_gpu_tpcds_q63, "q63");
+gpu_result_test!(test_gpu_tpcds_q63, "q63");
 // gpu_result_test!(test_gpu_tpcds_q67, "q67");
-// gpu_result_test!(test_gpu_tpcds_q89, "q89");
-// gpu_result_test!(test_gpu_tpcds_q98, "q98");
+gpu_result_test!(test_gpu_tpcds_q89, "q89");
+gpu_result_test!(test_gpu_tpcds_q98, "q98");
 
 // --- Bucket D: joins not yet supported ---
 // LeftMark join:

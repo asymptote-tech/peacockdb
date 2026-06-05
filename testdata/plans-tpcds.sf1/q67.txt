@@ -3,7 +3,7 @@ GpuSortPreservingMergeExec: [i_category@0 ASC, i_class@1 ASC, i_brand@2 ASC, i_p
     GpuProjectExec: expr=[i_category@0 as i_category, i_class@1 as i_class, i_brand@2 as i_brand, i_product_name@3 as i_product_name, d_year@4 as d_year, d_qoy@5 as d_qoy, d_moy@6 as d_moy, s_store_id@7 as s_store_id, sumsales@8 as sumsales, rank() PARTITION BY [dw1.i_category] ORDER BY [dw1.sumsales DESC NULLS FIRST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@9 as rk]
       GpuCoalesceBatchesExec: target_batch_size=5478274
         GpuFilterExec: predicate=rank() PARTITION BY [dw1.i_category] ORDER BY [dw1.sumsales DESC NULLS FIRST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@9 <= 100
-          BoundedWindowAggExec: wdw=[rank() PARTITION BY [dw1.i_category] ORDER BY [dw1.sumsales DESC NULLS FIRST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW: Ok(Field { name: "rank() PARTITION BY [dw1.i_category] ORDER BY [dw1.sumsales DESC NULLS FIRST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW", data_type: UInt64, nullable: false, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Range, start_bound: Preceding(Decimal128(None,32,2)), end_bound: CurrentRow, is_causal: false }], mode=[Sorted]
+          GpuWindowExec: wdw=[rank() PARTITION BY [dw1.i_category] ORDER BY [dw1.sumsales DESC NULLS FIRST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW]
             GpuSortExec: expr=[i_category@0 ASC NULLS LAST, sumsales@8 DESC]
               GpuCoalesceBatchesExec: target_batch_size=5478274
                 GpuRepartitionExec: partitioning=Hash([i_category@0], 8), input_partitions=8
@@ -47,7 +47,7 @@ GpuSortPreservingMergeExec: row_width=196, subtree_max_row_bytes=392
     GpuProjectExec: row_width=196, subtree_max_row_bytes=392
       GpuCoalesceBatchesExec: row_width=196, subtree_max_row_bytes=392
         GpuFilterExec: row_width=196, subtree_max_row_bytes=392
-          BoundedWindowAggExec: row_width=196, subtree_max_row_bytes=392
+          GpuWindowExec: row_width=196, subtree_max_row_bytes=392
             GpuSortExec: row_width=188, subtree_max_row_bytes=392
               GpuCoalesceBatchesExec: row_width=188, subtree_max_row_bytes=392
                 GpuRepartitionExec: row_width=188, subtree_max_row_bytes=392

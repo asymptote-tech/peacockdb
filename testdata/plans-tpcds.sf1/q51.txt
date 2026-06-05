@@ -3,7 +3,7 @@ GpuSortPreservingMergeExec: [item_sk@0 ASC, d_date@1 ASC]
     GpuProjectExec: expr=[item_sk@0 as item_sk, d_date@1 as d_date, web_sales@2 as web_sales, store_sales@3 as store_sales, max(x.web_sales) PARTITION BY [x.item_sk] ORDER BY [x.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@4 as web_cumulative, max(x.store_sales) PARTITION BY [x.item_sk] ORDER BY [x.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@5 as store_cumulative]
       GpuCoalesceBatchesExec: target_batch_size=14913080
         GpuFilterExec: predicate=max(x.web_sales) PARTITION BY [x.item_sk] ORDER BY [x.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@4 > max(x.store_sales) PARTITION BY [x.item_sk] ORDER BY [x.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@5
-          BoundedWindowAggExec: wdw=[max(x.web_sales) PARTITION BY [x.item_sk] ORDER BY [x.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW: Ok(Field { name: "max(x.web_sales) PARTITION BY [x.item_sk] ORDER BY [x.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW", data_type: Decimal128(27, 2), nullable: true, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Rows, start_bound: Preceding(UInt64(NULL)), end_bound: CurrentRow, is_causal: true }, max(x.store_sales) PARTITION BY [x.item_sk] ORDER BY [x.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW: Ok(Field { name: "max(x.store_sales) PARTITION BY [x.item_sk] ORDER BY [x.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW", data_type: Decimal128(27, 2), nullable: true, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Rows, start_bound: Preceding(UInt64(NULL)), end_bound: CurrentRow, is_causal: true }], mode=[Sorted]
+          GpuWindowExec: wdw=[max(x.web_sales) PARTITION BY [x.item_sk] ORDER BY [x.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW, max(x.store_sales) PARTITION BY [x.item_sk] ORDER BY [x.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW]
             GpuSortExec: expr=[item_sk@0 ASC NULLS LAST, d_date@1 ASC NULLS LAST]
               GpuCoalesceBatchesExec: target_batch_size=14913080
                 GpuRepartitionExec: partitioning=Hash([item_sk@0], 8), input_partitions=8
@@ -13,7 +13,7 @@ GpuSortPreservingMergeExec: [item_sk@0 ASC, d_date@1 ASC]
                         GpuCoalesceBatchesExec: target_batch_size=14913080
                           GpuRepartitionExec: partitioning=Hash([item_sk@0, d_date@1], 8), input_partitions=8
                             GpuProjectExec: expr=[ws_item_sk@0 as item_sk, d_date@1 as d_date, sum(sum(web_sales.ws_sales_price)) PARTITION BY [web_sales.ws_item_sk] ORDER BY [date_dim.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@3 as cume_sales]
-                              BoundedWindowAggExec: wdw=[sum(sum(web_sales.ws_sales_price)) PARTITION BY [web_sales.ws_item_sk] ORDER BY [date_dim.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW: Ok(Field { name: "sum(sum(web_sales.ws_sales_price)) PARTITION BY [web_sales.ws_item_sk] ORDER BY [date_dim.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW", data_type: Decimal128(27, 2), nullable: true, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Rows, start_bound: Preceding(UInt64(NULL)), end_bound: CurrentRow, is_causal: true }], mode=[Sorted]
+                              GpuWindowExec: wdw=[sum(sum(web_sales.ws_sales_price)) PARTITION BY [web_sales.ws_item_sk] ORDER BY [date_dim.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW]
                                 GpuSortExec: expr=[ws_item_sk@0 ASC NULLS LAST, d_date@1 ASC NULLS LAST]
                                   GpuCoalesceBatchesExec: target_batch_size=14913080
                                     GpuRepartitionExec: partitioning=Hash([ws_item_sk@0], 8), input_partitions=8
@@ -38,7 +38,7 @@ GpuSortPreservingMergeExec: [item_sk@0 ASC, d_date@1 ASC]
                         GpuCoalesceBatchesExec: target_batch_size=14913080
                           GpuRepartitionExec: partitioning=Hash([item_sk@0, d_date@1], 8), input_partitions=8
                             GpuProjectExec: expr=[ss_item_sk@0 as item_sk, d_date@1 as d_date, sum(sum(store_sales.ss_sales_price)) PARTITION BY [store_sales.ss_item_sk] ORDER BY [date_dim.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW@3 as cume_sales]
-                              BoundedWindowAggExec: wdw=[sum(sum(store_sales.ss_sales_price)) PARTITION BY [store_sales.ss_item_sk] ORDER BY [date_dim.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW: Ok(Field { name: "sum(sum(store_sales.ss_sales_price)) PARTITION BY [store_sales.ss_item_sk] ORDER BY [date_dim.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW", data_type: Decimal128(27, 2), nullable: true, dict_id: 0, dict_is_ordered: false, metadata: {} }), frame: WindowFrame { units: Rows, start_bound: Preceding(UInt64(NULL)), end_bound: CurrentRow, is_causal: true }], mode=[Sorted]
+                              GpuWindowExec: wdw=[sum(sum(store_sales.ss_sales_price)) PARTITION BY [store_sales.ss_item_sk] ORDER BY [date_dim.d_date ASC NULLS LAST] ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW]
                                 GpuSortExec: expr=[ss_item_sk@0 ASC NULLS LAST, d_date@1 ASC NULLS LAST]
                                   GpuCoalesceBatchesExec: target_batch_size=14913080
                                     GpuRepartitionExec: partitioning=Hash([ss_item_sk@0], 8), input_partitions=8
@@ -66,7 +66,7 @@ GpuSortPreservingMergeExec: row_width=72, subtree_max_row_bytes=144
     GpuProjectExec: row_width=72, subtree_max_row_bytes=144
       GpuCoalesceBatchesExec: row_width=72, subtree_max_row_bytes=144
         GpuFilterExec: row_width=72, subtree_max_row_bytes=144
-          BoundedWindowAggExec: row_width=72, subtree_max_row_bytes=96
+          GpuWindowExec: row_width=72, subtree_max_row_bytes=96
             GpuSortExec: row_width=40, subtree_max_row_bytes=96
               GpuCoalesceBatchesExec: row_width=40, subtree_max_row_bytes=96
                 GpuRepartitionExec: row_width=40, subtree_max_row_bytes=96
@@ -76,7 +76,7 @@ GpuSortPreservingMergeExec: row_width=72, subtree_max_row_bytes=144
                         GpuCoalesceBatchesExec: row_width=24, subtree_max_row_bytes=64
                           GpuRepartitionExec: row_width=24, subtree_max_row_bytes=64
                             GpuProjectExec: row_width=24, subtree_max_row_bytes=64
-                              BoundedWindowAggExec: row_width=40, subtree_max_row_bytes=56
+                              GpuWindowExec: row_width=40, subtree_max_row_bytes=56
                                 GpuSortExec: row_width=24, subtree_max_row_bytes=56
                                   GpuCoalesceBatchesExec: row_width=24, subtree_max_row_bytes=56
                                     GpuRepartitionExec: row_width=24, subtree_max_row_bytes=56
@@ -101,7 +101,7 @@ GpuSortPreservingMergeExec: row_width=72, subtree_max_row_bytes=144
                         GpuCoalesceBatchesExec: row_width=24, subtree_max_row_bytes=64
                           GpuRepartitionExec: row_width=24, subtree_max_row_bytes=64
                             GpuProjectExec: row_width=24, subtree_max_row_bytes=64
-                              BoundedWindowAggExec: row_width=40, subtree_max_row_bytes=56
+                              GpuWindowExec: row_width=40, subtree_max_row_bytes=56
                                 GpuSortExec: row_width=24, subtree_max_row_bytes=56
                                   GpuCoalesceBatchesExec: row_width=24, subtree_max_row_bytes=56
                                     GpuRepartitionExec: row_width=24, subtree_max_row_bytes=56
