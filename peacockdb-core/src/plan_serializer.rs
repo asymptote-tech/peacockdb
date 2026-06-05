@@ -463,6 +463,7 @@ fn serialize_gpu_sort<'a>(
         &fb::GpuSortArgs {
             exprs: Some(exprs_vec),
             fetch,
+            preserve_partitioning: sort.preserve_partitioning(),
             input: Some(input),
         },
     );
@@ -1265,12 +1266,8 @@ fn deserialize_plan_node(node: &fb::PlanNode) -> Result<Arc<dyn ExecutionPlan>, 
             deserialize_gpu_limit(&l)
         }
         fb::PlanNodeKind::GpuWindow => {
-            // Faithfully rebuilding a WindowAggExec/BoundedWindowAggExec (window
-            // exprs, frames, partition-search mode) from the wire is involved and
-            // unnecessary for execution: the GPU path is Rust serialize → C++, and
-            // this Rust deserialize only backs the plan-roundtrip fidelity test.
-            // Report "unsupported" so that test skips the roundtrip for now.
-            Err("unsupported: GpuWindow roundtrip reconstruction not implemented".to_string())
+            let w = node.node_as_gpu_window().ok_or("expected GpuWindow")?;
+            deserialize_gpu_window(&w)
         }
         other => Err(format!("unknown PlanNodeKind: {:?}", other)),
     }
@@ -1861,7 +1858,8 @@ fn deserialize_gpu_sort(
         .transpose()?
         .unwrap_or_default();
 
-    let mut sort_exec = SortExec::new(sort_exprs.into(), input);
+    let mut sort_exec = SortExec::new(sort_exprs.into(), input)
+        .with_preserve_partitioning(sort.preserve_partitioning());
     if sort.fetch() >= 0 {
         sort_exec = sort_exec.with_fetch(Some(sort.fetch() as usize));
     }
@@ -2000,4 +1998,133 @@ fn deserialize_gpu_limit(l: &fb::GpuLimit) -> Result<Arc<dyn ExecutionPlan>, Str
     };
     let inner = GlobalLimitExec::new(input, l.skip() as usize, fetch);
     Ok(Arc::new(GpuGlobalLimitExec::new(Arc::new(inner))))
+}
+
+fn deserialize_gpu_window(win: &fb::GpuWindow) -> Result<Arc<dyn ExecutionPlan>, String> {
+    use datafusion::logical_expr::{
+        WindowFrame, WindowFrameBound as DfBound, WindowFrameUnits, WindowFunctionDefinition,
+    };
+    use datafusion::physical_expr::LexOrdering;
+    use datafusion::physical_plan::windows::{
+        create_window_expr, BoundedWindowAggExec, WindowAggExec,
+    };
+    use datafusion::physical_plan::InputOrderMode;
+
+    let input = deserialize_plan_node(&win.input().ok_or("GpuWindow missing input")?)?;
+    let input_schema = input.schema();
+
+    // DataFusion plans a running frame (… AND CURRENT ROW) as a streaming
+    // BoundedWindowAggExec, which preserves the input's partitioning, but a
+    // whole-partition frame (… AND UNBOUNDED FOLLOWING) as a WindowAggExec, which
+    // collapses to a single partition. The exec type isn't on the wire (it doesn't
+    // affect the GPU executor), but it changes the output partitioning that parent
+    // nodes display, so pick it from the frame to keep the round-trip faithful.
+    let mut running_frame = false;
+    let mut window_exprs = Vec::new();
+    if let Some(exprs) = win.window_exprs() {
+        for i in 0..exprs.len() {
+            let we = exprs.get(i);
+            let func_name = we.func_name().ok_or("WindowExpr missing func_name")?;
+
+            // Only aggregate windows are serialized (serialize_gpu_window rejects
+            // ranking functions), so look the function up among aggregate UDFs.
+            let udf = datafusion::functions_aggregate::all_default_aggregate_functions()
+                .into_iter()
+                .find(|u| u.name() == func_name)
+                .ok_or_else(|| format!("unknown window aggregate function: {func_name}"))?;
+
+            let args: Vec<Arc<dyn PhysicalExpr>> = we
+                .args()
+                .map(|a| {
+                    (0..a.len())
+                        .map(|j| deserialize_expr(&a.get(j)))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+
+            let partition_by: Vec<Arc<dyn PhysicalExpr>> = we
+                .partition_by()
+                .map(|p| {
+                    (0..p.len())
+                        .map(|j| deserialize_expr(&p.get(j)))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+
+            let order_by_exprs: Vec<PhysicalSortExpr> = we
+                .order_by()
+                .map(|ob| {
+                    (0..ob.len())
+                        .map(|j| {
+                            let se = ob.get(j);
+                            let expr =
+                                deserialize_expr(&se.expr().ok_or("SortExpr missing expr")?)?;
+                            Ok::<_, String>(PhysicalSortExpr::new(
+                                expr,
+                                SortOptions {
+                                    descending: !se.asc(),
+                                    nulls_first: se.nulls_first(),
+                                },
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, String>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+            let order_by: LexOrdering = order_by_exprs.into();
+
+            // Supported frames: start = UNBOUNDED PRECEDING; end = CURRENT ROW or
+            // UNBOUNDED FOLLOWING. The wire omits the frame units (irrelevant to the
+            // GPU executor, which keys off the bounds), so reconstruct as RANGE —
+            // the units affect neither re-serialization nor the round-trip oracle.
+            let start_bound = DfBound::Preceding(DfScalarValue::Null);
+            let end_bound = match we.frame_end() {
+                fb::WindowFrameBound::CurrentRow => {
+                    running_frame = true;
+                    DfBound::CurrentRow
+                }
+                fb::WindowFrameBound::UnboundedFollowing => {
+                    DfBound::Following(DfScalarValue::Null)
+                }
+                other => return Err(format!("unsupported window frame end: {other:?}")),
+            };
+            let frame = Arc::new(WindowFrame::new_bounds(
+                WindowFrameUnits::Range,
+                start_bound,
+                end_bound,
+            ));
+
+            let alias = we.alias().unwrap_or(func_name).to_string();
+            let fun = WindowFunctionDefinition::AggregateUDF(udf);
+            let wexpr = create_window_expr(
+                &fun,
+                alias,
+                &args,
+                &partition_by,
+                &order_by,
+                frame,
+                input_schema.as_ref(),
+                false,
+            )
+            .map_err(|e| format!("create_window_expr: {e}"))?;
+            window_exprs.push(wexpr);
+        }
+    }
+
+    // partition_keys (repartition keys) aren't serialized and aren't read back on
+    // re-serialization, so an empty set is faithful for the round-trip.
+    let exec: Arc<dyn ExecutionPlan> = if running_frame {
+        Arc::new(
+            BoundedWindowAggExec::try_new(window_exprs, input, vec![], InputOrderMode::Sorted)
+                .map_err(|e| format!("BoundedWindowAggExec: {e}"))?,
+        )
+    } else {
+        Arc::new(
+            WindowAggExec::try_new(window_exprs, input, vec![])
+                .map_err(|e| format!("WindowAggExec: {e}"))?,
+        )
+    };
+    Ok(Arc::new(GpuWindowExec::new(exec)))
 }

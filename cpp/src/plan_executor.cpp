@@ -1645,7 +1645,7 @@ static TableResult execute_limit(const fb::GpuLimit* limit) {
 // ============================================================================
 
 static std::unique_ptr<cudf::rolling_aggregation> make_rolling_agg(
-    const std::string& func_name) {
+    const std::string& func_name, cudf::null_policy count_nulls) {
   if (func_name == "sum" || func_name == "SUM")
     return cudf::make_sum_aggregation<cudf::rolling_aggregation>();
   if (func_name == "min" || func_name == "MIN")
@@ -1656,7 +1656,7 @@ static std::unique_ptr<cudf::rolling_aggregation> make_rolling_agg(
       func_name == "MEAN")
     return cudf::make_mean_aggregation<cudf::rolling_aggregation>();
   if (func_name == "count" || func_name == "COUNT")
-    return cudf::make_count_aggregation<cudf::rolling_aggregation>();
+    return cudf::make_count_aggregation<cudf::rolling_aggregation>(count_nulls);
   throw std::runtime_error("unsupported window function: " + func_name);
 }
 
@@ -1692,11 +1692,12 @@ static TableResult execute_window(const fb::GpuWindow* win) {
       }
       cudf::table_view keys{key_views};
 
-      // Argument column. count() may have no args; use the first column as a
-      // non-null placeholder (COUNT counts rows in the window).
+      // Argument column. count() may have no args (COUNT(*)); use the first
+      // column as a placeholder since COUNT(*) counts every row.
       std::unique_ptr<cudf::column> arg_owned;
       cudf::column_view arg_view;
-      if (we->args() && we->args()->size() > 0) {
+      bool has_arg = we->args() && we->args()->size() > 0;
+      if (has_arg) {
         arg_owned = build_column(we->args()->Get(0), tv);
         arg_view = arg_owned->view();
       } else {
@@ -1725,7 +1726,11 @@ static TableResult execute_window(const fb::GpuWindow* win) {
                            ? cudf::window_bounds::unbounded()
                            : cudf::window_bounds::get(0);
 
-      auto agg = make_rolling_agg(fname);
+      // COUNT(*) counts every row, so the placeholder column's nulls must be
+      // included; COUNT(col) counts non-null values (cuDF's EXCLUDE default).
+      auto count_nulls = has_arg ? cudf::null_policy::EXCLUDE
+                                 : cudf::null_policy::INCLUDE;
+      auto agg = make_rolling_agg(fname, count_nulls);
       auto col = cudf::grouped_rolling_window(keys, arg_view, preceding, following,
                                               /*min_periods=*/1, *agg);
 

@@ -392,6 +392,11 @@ table GpuSort {
   /// Maximum rows to emit (-1 = unlimited). Corresponds to LIMIT / FETCH.
   fetch: int64;
   input: PlanNode;
+  /// True = sort each input partition independently (output keeps the input's
+  /// partition count); false = global sort that collapses to one partition.
+  /// Affects the output partitioning that parent nodes observe. Appended last to
+  /// keep the generated CreateGpuSort positional args stable for C++ callers.
+  preserve_partitioning: bool;
 }
 
 /// Coalesce small batches into larger ones of up to target_batch_size rows.
