@@ -760,12 +760,19 @@ fn serialize_expr<'a>(
         }
         let args_vec = b.create_vector(&args);
         let ret = convert_data_type(sf.return_type())?;
+        let (return_decimal_precision, return_decimal_scale) = match sf.return_type() {
+            ArrowDataType::Decimal128(p, s) => (*p, *s),
+            _ => (0, 0),
+        };
         let sfn = fb::ScalarFunctionExprNode::create(
             b,
             &fb::ScalarFunctionExprNodeArgs {
                 name: Some(name),
                 args: Some(args_vec),
                 return_type: ret,
+                return_decimal_precision,
+                return_decimal_scale,
+                nullable: sf.nullable(),
             },
         );
         (fb::ExprNode::ScalarFunctionExprNode, sfn.as_union_value())
@@ -959,12 +966,18 @@ fn serialize_schema<'a>(
         .map(|f| {
             let name = b.create_string(f.name());
             let dt = convert_data_type(f.data_type()).unwrap_or(fb::DataType::Null);
+            let (decimal_precision, decimal_scale) = match f.data_type() {
+                ArrowDataType::Decimal128(p, s) => (*p, *s),
+                _ => (0, 0),
+            };
             fb::Field::create(
                 b,
                 &fb::FieldArgs {
                     name: Some(name),
                     data_type: dt,
                     nullable: f.is_nullable(),
+                    decimal_precision,
+                    decimal_scale,
                 },
             )
         })
@@ -1062,9 +1075,19 @@ fn deserialize_schema(schema: &fb::Schema) -> SchemaRef {
             (0..v.len())
                 .map(|i| {
                     let f = v.get(i);
+                    // Decimal128 carries its precision/scale in dedicated fields
+                    // (the DataType enum can't); reconstruct the exact type so the
+                    // schema — and every downstream expression result scale derived
+                    // from it — round-trips faithfully.
+                    let dt = match f.data_type() {
+                        fb::DataType::Decimal128 => {
+                            ArrowDataType::Decimal128(f.decimal_precision(), f.decimal_scale())
+                        }
+                        other => fb_to_arrow_type(other),
+                    };
                     datafusion::arrow::datatypes::Field::new(
                         f.name().unwrap_or(""),
-                        fb_to_arrow_type(f.data_type()),
+                        dt,
                         f.nullable(),
                     )
                 })
@@ -1204,13 +1227,19 @@ fn deserialize_expr(expr: &fb::Expr) -> Result<Arc<dyn PhysicalExpr>, String> {
                 .into_iter()
                 .find(|u| u.name() == name)
                 .ok_or_else(|| format!("unknown scalar function: {name}"))?;
-            let return_type = fb_to_arrow_type(s.return_type());
-            Ok(Arc::new(ScalarFunctionExpr::new(
-                name,
-                udf,
-                args,
-                return_type,
-            )))
+            let return_type = match s.return_type() {
+                fb::DataType::Decimal128 => ArrowDataType::Decimal128(
+                    s.return_decimal_precision(),
+                    s.return_decimal_scale(),
+                ),
+                other => fb_to_arrow_type(other),
+            };
+            // ScalarFunctionExpr::new defaults nullable=true; restore the
+            // serialized nullability so the result field round-trips.
+            Ok(Arc::new(
+                ScalarFunctionExpr::new(name, udf, args, return_type)
+                    .with_nullable(s.nullable()),
+            ))
         }
         other => Err(format!("unsupported ExprNode type: {:?}", other)),
     }

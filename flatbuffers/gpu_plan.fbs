@@ -197,6 +197,15 @@ table ScalarFunctionExprNode {
   /// Output type, used by the column-producing executor to allocate the
   /// result column.
   return_type: DataType;
+  /// For return_type == Decimal128 only: precision/scale (the DataType enum
+  /// can't carry them). Needed so the type round-trips and downstream result
+  /// scales (e.g. a sum over coalesce(decimal,...)) recompute correctly.
+  return_decimal_precision: uint8;
+  return_decimal_scale: int8;
+  /// Result nullability. DataFusion derives this per function (e.g. coalesce
+  /// with a non-null arg is non-nullable), but ScalarFunctionExpr::new defaults
+  /// to nullable=true; carry it so the result field round-trips.
+  nullable: bool;
 }
 
 union ExprNode {
@@ -223,6 +232,14 @@ table Field {
   name: string;
   data_type: DataType;
   nullable: bool;
+  /// For data_type == Decimal128 only: the precision/scale (the DataType enum
+  /// can't carry them). Without these, a roundtripped decimal field defaults to
+  /// an arbitrary scale, which (a) breaks nodes that validate cross-input schema
+  /// equality (e.g. UnionExec) and (b) makes downstream expression result scales
+  /// (BinaryExpr/Aggregate out_decimal) recompute wrong, so the IR no longer
+  /// round-trips. Ignored for non-decimal types.
+  decimal_precision: uint8;
+  decimal_scale: int8;
 }
 
 table Schema {

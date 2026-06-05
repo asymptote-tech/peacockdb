@@ -116,12 +116,28 @@ fn assert_plan_matches_canonical_at(
     match plan_serializer::serialize_plan(plan) {
         Ok(bytes) => match plan_serializer::deserialize_plan(&bytes) {
             Ok(reconstructed) => {
-                let roundtripped = plan_str(&reconstructed);
+                // Two complementary oracles (serialization is a verbatim encoding
+                // of the plan): text-equal on `plan_str` gives a legible diff and
+                // checks the node tree + the fields DisplayAs prints; bytes-equal
+                // on the re-serialized IR is the complete, Display-independent
+                // oracle — it surfaces every serialized field (decimal
+                // precision/scale, schema field types, join-filter inner exprs)
+                // and FlatBuffers offset ordering, none of which DisplayAs is
+                // guaranteed to print.
                 assert_eq!(
-                    roundtripped,
+                    plan_str(&reconstructed),
                     plan_str(plan),
-                    "flatbuffer roundtrip mismatch for '{name}'"
+                    "flatbuffer roundtrip (plan_str) mismatch for '{name}'"
                 );
+                match plan_serializer::serialize_plan(&reconstructed) {
+                    Ok(reserialized) => assert_eq!(
+                        reserialized, bytes,
+                        "flatbuffer roundtrip (bytes) mismatch for '{name}'"
+                    ),
+                    Err(e) => {
+                        panic!("re-serialize of reconstructed plan failed for '{name}': {e}")
+                    }
+                }
             }
             Err(e) if e.contains("not supported") || e.contains("unsupported") => {
                 eprintln!("Skipping flatbuffer roundtrip for '{name}': {e}");

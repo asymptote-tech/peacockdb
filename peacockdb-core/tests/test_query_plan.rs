@@ -140,14 +140,32 @@ fn assert_plan_matches_canonical_at(plan: &Arc<dyn ExecutionPlan>, name: &str, d
         Ok(bytes) => {
             match plan_serializer::deserialize_plan(&bytes) {
                 Ok(reconstructed) => {
-                    // Serialization is a verbatim encoding of the plan (all GPU
-                    // lowering happens earlier, in GpuExecutionRule), so the
-                    // roundtrip must reproduce the plan_str exactly.
-                    let roundtripped = plan_str(&reconstructed);
+                    // Two complementary oracles. Serialization is a verbatim
+                    // encoding of the plan (all GPU lowering happens earlier, in
+                    // GpuExecutionRule), so the reconstructed plan must match the
+                    // original on both:
+                    //  - text-equal on `plan_str` — a readable check that the node
+                    //    tree and the fields DisplayAs prints are reproduced; gives
+                    //    a legible diff when it breaks.
+                    //  - bytes-equal on the re-serialized IR — the complete,
+                    //    Display-independent oracle: it surfaces every serialized
+                    //    field (decimal precision/scale, schema field types,
+                    //    join-filter inner exprs) and FlatBuffers offset ordering,
+                    //    none of which DisplayAs is guaranteed to print.
                     assert_eq!(
-                        roundtripped, plan_str(plan),
-                        "flatbuffer roundtrip mismatch for '{name}'"
+                        plan_str(&reconstructed),
+                        plan_str(plan),
+                        "flatbuffer roundtrip (plan_str) mismatch for '{name}'"
                     );
+                    match plan_serializer::serialize_plan(&reconstructed) {
+                        Ok(reserialized) => assert_eq!(
+                            reserialized, bytes,
+                            "flatbuffer roundtrip (bytes) mismatch for '{name}'"
+                        ),
+                        Err(e) => panic!(
+                            "re-serialize of reconstructed plan failed for '{name}': {e}"
+                        ),
+                    }
                 }
                 Err(e) if e.contains("not supported") || e.contains("unsupported") => {
                     eprintln!("Skipping flatbuffer roundtrip for '{name}': {e}");
