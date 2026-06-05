@@ -170,8 +170,18 @@ fn build_stream(
     let mut stream_children: Vec<Arc<dyn ExecutionPlan>> = Vec::new();
     for child in cpu_node.children() {
         let child_schema = child.schema();
+        // Carry the child's equivalence properties (notably its output ordering)
+        // into the stub. The data really is ordered — a SortExec produced it —
+        // but a stub that reports no ordering makes order-sensitive parents like
+        // BoundedWindowAggExec (mode=Sorted) reject their input
+        // ("PARTITION BY expression to be ordered").
+        let child_eq = child.properties().equivalence_properties().clone();
         let child_stream = build_stream(child.clone(), task_ctx.clone(), collector.clone())?;
-        stream_children.push(Arc::new(StreamSourceExec::new(child_schema, child_stream)));
+        stream_children.push(Arc::new(StreamSourceExec::new(
+            child_schema,
+            child_eq,
+            child_stream,
+        )));
     }
 
     let node_name = cpu_node.name().to_string();
@@ -220,9 +230,13 @@ impl fmt::Debug for StreamSourceExec {
 }
 
 impl StreamSourceExec {
-    fn new(schema: SchemaRef, stream: SendableRecordBatchStream) -> Self {
+    fn new(
+        schema: SchemaRef,
+        eq_properties: EquivalenceProperties,
+        stream: SendableRecordBatchStream,
+    ) -> Self {
         let cache = PlanProperties::new(
-            EquivalenceProperties::new(Arc::clone(&schema)),
+            eq_properties,
             Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
             Boundedness::Bounded,
