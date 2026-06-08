@@ -134,7 +134,7 @@ async fn assert_cpu_results_match_datafusion(name: &str) {
     // CPU executor: GPU-annotated plan executed node-by-node on CPU.
     let cpu_ctx = make_ctx(FULL_BUDGET).await;
     let plan = cpu_ctx.sql(&sql).await.unwrap().create_physical_plan().await.unwrap();
-    let actual = execute_node_by_node(plan, cpu_ctx.task_ctx(), &mut |_, _| {})
+    let actual = execute_node_by_node(plan, cpu_ctx.task_ctx(), &mut |_, _, _| {})
         .await
         .unwrap();
 
@@ -382,8 +382,8 @@ async fn test_memory_boundary_preserved_tight_budget() {
     eprintln!("Per-node stats (post-order):");
     for s in &stats {
         eprintln!(
-            "  {}: rows={}, max_batch={}, alloc={}B, logical={}B",
-            s.node_name, s.row_count, s.max_batch_rows, s.allocated_bytes, s.logical_bytes
+            "  {}: rows={}, max_batch={}, alloc={}B, in={}B, out={}B, cost={}B",
+            s.node_name, s.row_count, s.max_batch_rows, s.allocated_bytes, s.input_bytes, s.output_bytes, s.cost
         );
     }
 
@@ -429,13 +429,13 @@ async fn test_instrumented_stats_are_populated() {
         "root node allocated_bytes should be > 0"
     );
     assert!(
-        root_stat.logical_bytes > 0,
-        "root node logical_bytes should be > 0"
+        root_stat.output_bytes > 0,
+        "root node output_bytes should be > 0"
     );
     assert!(
-        root_stat.allocated_bytes >= root_stat.logical_bytes,
-        "allocated_bytes ({}) must be >= logical_bytes ({})",
+        root_stat.allocated_bytes >= root_stat.output_bytes,
+        "allocated_bytes ({}) must be >= output_bytes ({})",
         root_stat.allocated_bytes,
-        root_stat.logical_bytes
+        root_stat.output_bytes
     );
 }

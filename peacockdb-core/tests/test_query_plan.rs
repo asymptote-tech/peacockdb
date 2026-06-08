@@ -104,15 +104,25 @@ fn plan_str(plan: &Arc<dyn ExecutionPlan>) -> String {
 }
 
 fn memory_str(plan: &Arc<dyn ExecutionPlan>) -> String {
+    fn total_cost(plan: &Arc<dyn ExecutionPlan>) -> usize {
+        let mem = analyze_memory(plan);
+        let node_cost = mem.input_row_bytes + mem.output_row_bytes;
+        node_cost + plan.children().iter().map(|c| total_cost(c)).sum::<usize>()
+    }
+
     fn walk(plan: &Arc<dyn ExecutionPlan>, indent: usize, lines: &mut Vec<String>) {
         let mem = analyze_memory(plan);
         let rw = row_width(&plan.schema());
+        let cost = mem.input_row_bytes + mem.output_row_bytes;
         lines.push(format!(
-            "{}{}: row_width={}, subtree_max_row_bytes={}",
+            "{}{}: row_width={}, subtree_max_row_bytes={}, input_bytes={}, output_bytes={}, cost={}",
             " ".repeat(indent),
             plan.name(),
             rw,
-            mem.subtree_max_row_bytes
+            mem.subtree_max_row_bytes,
+            mem.input_row_bytes,
+            mem.output_row_bytes,
+            cost,
         ));
         for child in plan.children() {
             walk(child, indent + 2, lines);
@@ -120,7 +130,7 @@ fn memory_str(plan: &Arc<dyn ExecutionPlan>) -> String {
     }
     let mut lines = Vec::new();
     walk(plan, 0, &mut lines);
-    lines.join("\n")
+    format!("total_cost={}\n{}", total_cost(plan), lines.join("\n"))
 }
 
 fn assert_plan_matches_canonical_at(plan: &Arc<dyn ExecutionPlan>, name: &str, dir: &std::path::Path) {
@@ -274,34 +284,34 @@ query_plan_test!(test_mixed_join, "mixed-join");
 query_plan_test!(test_cross_join, "cross-join");
 
 
-query_plan_test!(plan_tpch_q1,  "q1");
-query_plan_test!(plan_tpch_q2,  "q2");
+query_plan_test!(tpch_q1,  "q1");
+query_plan_test!(tpch_q2,  "q2");
 // TODO(plan_serializer): Final/FinalPartitioned AggregateExec roundtrip uses
 // input.schema() (partial output) to resolve aggr args, but those args
 // reference the partial's *input* schema. Need to also serialize
 // AggregateExec::input_schema() and pass it to AggregateExprBuilder.
-// query_plan_test!(plan_tpch_q3,  "q3");
-query_plan_test!(plan_tpch_q4,  "q4");
-// query_plan_test!(plan_tpch_q5,  "q5");  // Same Final-aggregate-input-schema bug.
-// query_plan_test!(plan_tpch_q6,  "q6");  // Same Final-aggregate-input-schema bug.
-query_plan_test!(plan_tpch_q7,  "q7");
-query_plan_test!(plan_tpch_q8,  "q8");
-query_plan_test!(plan_tpch_q9,  "q9");
-// query_plan_test!(plan_tpch_q10, "q10"); // Same Final-aggregate-input-schema bug.
-query_plan_test!(plan_tpch_q11, "q11");
-query_plan_test!(plan_tpch_q12, "q12");
-query_plan_test!(plan_tpch_q13, "q13");
-query_plan_test!(plan_tpch_q14, "q14");
-// query_plan_test!(plan_tpch_q15, "q15");
-query_plan_test!(plan_tpch_q16, "q16");
-query_plan_test!(plan_tpch_q17, "q17");
-query_plan_test!(plan_tpch_q18, "q18");
-// query_plan_test!(plan_tpch_q19, "q19"); // Same Final-aggregate-input-schema bug.
+// query_plan_test!(tpch_q3,  "q3");
+query_plan_test!(tpch_q4,  "q4");
+// query_plan_test!(tpch_q5,  "q5");  // Same Final-aggregate-input-schema bug.
+// query_plan_test!(tpch_q6,  "q6");  // Same Final-aggregate-input-schema bug.
+query_plan_test!(tpch_q7,  "q7");
+query_plan_test!(tpch_q8,  "q8");
+query_plan_test!(tpch_q9,  "q9");
+// query_plan_test!(tpch_q10, "q10"); // Same Final-aggregate-input-schema bug.
+query_plan_test!(tpch_q11, "q11");
+query_plan_test!(tpch_q12, "q12");
+query_plan_test!(tpch_q13, "q13");
+query_plan_test!(tpch_q14, "q14");
+// query_plan_test!(tpch_q15, "q15");
+query_plan_test!(tpch_q16, "q16");
+query_plan_test!(tpch_q17, "q17");
+query_plan_test!(tpch_q18, "q18");
+// query_plan_test!(tpch_q19, "q19"); // Same Final-aggregate-input-schema bug.
                                        // Was previously masked by InListExpr
                                        // serializer error; now exposed.
-query_plan_test!(plan_tpch_q20, "q20");
-query_plan_test!(plan_tpch_q21, "q21");
-query_plan_test!(plan_tpch_q22, "q22");
+query_plan_test!(tpch_q20, "q20");
+query_plan_test!(tpch_q21, "q21");
+query_plan_test!(tpch_q22, "q22");
 
 // ── CpuExecutor integration tests ────────────────────────────────────────
 
@@ -436,6 +446,57 @@ async fn test_gpu_nodes_group_join_sort() {
     for i in 0..counts.len() {
         assert_eq!(counts.value(i), 5, "region {} has {} nations, expected 5", i, counts.value(i));
     }
+}
+
+// ── Memory cost tests ────────────────────────────────────────────────────
+
+fn find_node(plan: &Arc<dyn ExecutionPlan>, name: &str) -> Option<Arc<dyn ExecutionPlan>> {
+    if plan.name() == name {
+        return Some(plan.clone());
+    }
+    plan.children().iter().find_map(|c| find_node(c, name))
+}
+
+#[tokio::test]
+async fn test_memory_cost_leaf_and_filter() {
+    let ctx = test_ctx(&testdata_minimal_dir()).await.unwrap();
+
+    // Leaf (GpuScanExec): no input, output = row_width, peak = row_width.
+    let scan_plan = ctx
+        .sql("SELECT n_nationkey FROM nation")
+        .await.unwrap()
+        .create_physical_plan().await.unwrap();
+
+    let scan_node = find_node(&scan_plan, "GpuScanExec").expect("expected GpuScanExec");
+    let scan_rw = row_width(&scan_node.schema());
+    let scan_mem = analyze_memory(&scan_node);
+
+    assert_eq!(scan_mem.input_row_bytes, 0, "leaf has no input");
+    assert_eq!(scan_mem.output_row_bytes, scan_rw, "leaf output = row_width");
+    assert_eq!(scan_mem.subtree_max_row_bytes, scan_rw, "leaf peak = row_width");
+
+    // Filter (GpuFilterExec) with trivial selectivity (1.0):
+    //   input  = child output width  (ratio 1.0 × child_row_width)
+    //   output = filter_row_width    (ratio 1.0 × sel 1.0 × output_width)
+    //   peak   = max(child_peak, input + output)
+    let filter_plan = ctx
+        .sql("SELECT n_nationkey FROM nation WHERE n_nationkey > 0")
+        .await.unwrap()
+        .create_physical_plan().await.unwrap();
+
+    let filter_node = find_node(&filter_plan, "GpuFilterExec").expect("expected GpuFilterExec");
+    let filter_rw = row_width(&filter_node.schema());
+    let child_rw = row_width(&filter_node.children()[0].schema());
+    let filter_mem = analyze_memory(&filter_node);
+
+    assert_eq!(filter_mem.input_row_bytes, child_rw, "filter input = child row_width");
+    assert_eq!(filter_mem.output_row_bytes, filter_rw, "filter output = row_width (sel=1.0)");
+    assert!(
+        filter_mem.subtree_max_row_bytes >= filter_mem.input_row_bytes + filter_mem.output_row_bytes,
+        "peak ({}) must be >= input + output ({})",
+        filter_mem.subtree_max_row_bytes,
+        filter_mem.input_row_bytes + filter_mem.output_row_bytes,
+    );
 }
 
 // ── Memory budget tests ──────────────────────────────────────────────────

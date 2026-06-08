@@ -78,13 +78,33 @@ pub struct NodeMemoryStats {
     pub node_name: String,
     /// Sum of `get_array_memory_size()` across all output batches (allocated upper bound).
     pub allocated_bytes: usize,
-    /// Sum of logical (exact) sizes across all output batches.
-    pub logical_bytes: usize,
+    /// Logical byte size of all batches fed into this node (sum across all children).
+    pub input_bytes: usize,
+    /// Logical byte size of all batches produced by this node.
+    pub output_bytes: usize,
+    /// `input_bytes + output_bytes`.
+    pub cost: usize,
     /// Total number of output rows across all batches.
     pub row_count: usize,
     /// Largest single batch (in rows) produced by this node.
     /// Compare against `GpuScanExec.gpu_batch_size` to verify the memory contract.
     pub max_batch_rows: usize,
+}
+
+impl NodeMemoryStats {
+    pub(crate) fn collect(node_name: &str, input: &[RecordBatch], output: &[RecordBatch]) -> Self {
+        let input_bytes: usize = input.iter().map(|b| batch_logical_size(b)).sum();
+        let output_bytes: usize = output.iter().map(|b| batch_logical_size(b)).sum();
+        Self {
+            node_name: node_name.to_string(),
+            allocated_bytes: output.iter().map(|b| batch_allocated_size(b)).sum(),
+            input_bytes,
+            output_bytes,
+            cost: input_bytes + output_bytes,
+            row_count: output.iter().map(|b| b.num_rows()).sum(),
+            max_batch_rows: output.iter().map(|b| b.num_rows()).max().unwrap_or(0),
+        }
+    }
 }
 
 /// Recursively strip all GPU wrapper nodes from a plan tree, returning a
@@ -116,15 +136,43 @@ pub fn strip_gpu_tree(plan: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionP
 /// For each node the function:
 /// 1. Strips the GPU wrapper (if any) → CPU node + optional batch_size.
 /// 2. Applies the batch_size override to `TaskContext` if present.
-/// 3. Recurses into the CPU node's children to obtain child streams.
-/// 4. Wraps each child stream in `StreamSourceExec`.
-/// 5. Calls `execute(0, ctx)` on the isolated CPU node with its stream stubs.
-/// 6. Wraps the resulting stream in `InstrumentedStream`, which fires `on_node`
-///    with the accumulated `NodeMemoryStats` once the stream is fully drained.
+/// 3. Recurses into the CPU node's children.
+/// 4. Wraps each child's results in `MemoryExec` (DataFusion's in-memory source).
+/// 5. Calls `collect()` on the isolated CPU node with its `MemoryExec` stubs.
+/// 6. Calls `on_node(cpu_node_name, &input_batches, &output_batches)`.
+///
+/// TODO: this implementation OOMs on wide joins (e.g. hash-join.sql at SF=1) because
+/// it calls `collect()` on every child before the parent runs, holding both full inputs
+/// of a join in memory simultaneously. Fix by making execution streaming:
+///
+/// 1. `StreamSourceExec` — a custom `ExecutionPlan` wrapping a `SendableRecordBatchStream`
+///    that returns it from `execute(0, ctx)`. Lets a live stream be passed as a child to
+///    any DataFusion operator without materializing it first.
+///
+/// 2. `InstrumentedStream` — a stream adaptor that accumulates `NodeMemoryStats` as
+///    batches flow through (row counts, allocated/logical bytes, max batch size) and
+///    fires the `on_node` callback when the stream is exhausted.
+///
+/// 3. Refactor `execute_node_by_node` to return `SendableRecordBatchStream`:
+///    - For each child, recurse to get a child stream.
+///    - Wrap each child stream in `InstrumentedStream` → `StreamSourceExec`.
+///    - Call `cpu_node.with_new_children(stream_sources)?.execute(0, task_ctx)`.
+///    - Return the resulting stream wrapped in its own `InstrumentedStream`.
+///
+/// 4. Update `execute_node_by_node_instrumented` to `collect()` only the root stream;
+///    all intermediate stats are populated by `InstrumentedStream` as the root is consumed.
+///
+/// 5. Change `on_node` signature from `FnMut(&str, &[RecordBatch], &[RecordBatch])` to
+///    `FnMut(&str, &NodeMemoryStats)` since intermediate batches are no longer available
+///    all at once.
+///
+/// After the fix: hash join build side is still materialized by DataFusion internally
+/// (unavoidable), but the probe side streams through `batch_size` rows at a time.
+/// Peak memory ≈ build side size + 2 × batch_size × row_width.
 pub async fn execute_node_by_node(
     root: Arc<dyn ExecutionPlan>,
     task_ctx: Arc<TaskContext>,
-    on_node: &mut dyn FnMut(&str, &NodeMemoryStats),
+    on_node: &mut dyn FnMut(&str, &[RecordBatch], &[RecordBatch]),
 ) -> Result<Vec<RecordBatch>> {
     let collector: Arc<Mutex<Vec<NodeMemoryStats>>> = Arc::new(Mutex::new(Vec::new()));
     let stream = build_stream(root, task_ctx, collector.clone())?;
