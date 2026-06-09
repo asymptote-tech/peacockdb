@@ -168,15 +168,25 @@ gpu_result_test!(test_gpu_tpcds_q95, "q95");
 // gpu_result_test!(test_gpu_tpcds_q2, "q2");
 
 // --- Bucket F: projection / scalar-expr gaps ---
-// q38, q96: GpuProject: no expressions.
-// q66, q76: GpuProject non-fixed-width type (column_factories).
-// q75: scalar fn: coalesce. q97: unsupported UnaryOp: 2.
-// gpu_result_test!(test_gpu_tpcds_q38, "q38");
+// q96: empty GpuProject feeding count(*) (row-count placeholder).
+// q97: IsNotNull in AST.
+gpu_result_test!(test_gpu_tpcds_q96, "q96");
+gpu_result_test!(test_gpu_tpcds_q97, "q97");
+// --- Bucket E: aggregate gaps ---
+// q66: sum(decimal/int) is a two-phase decimal aggregate. DataFusion casts the
+// divisor to Decimal128 (__common_expr_1) and evaluates the division only in the
+// partial aggregate; our GpuAggregate re-evaluates it against the final-phase
+// input (int group key + partial-sum state), so the division operand types don't
+// line up (CUDF cast failure). Needs partial/final aggregate handling.
 // gpu_result_test!(test_gpu_tpcds_q66, "q66");
+// --- Bucket I: set operations / multi-input dedup (result divergence) ---
+// Execute on GPU but diverge from CPU; root cause beyond projection scope.
+// q38: INTERSECT (×3) of DISTINCT sets feeding count(*).
+// gpu_result_test!(test_gpu_tpcds_q38, "q38");
+// q75: UNION (distinct) + COALESCE + decimal-cast self-join.
 // gpu_result_test!(test_gpu_tpcds_q75, "q75");
+// q76: UNION ALL + IS NULL filters + grouped count(*).
 // gpu_result_test!(test_gpu_tpcds_q76, "q76");
-// gpu_result_test!(test_gpu_tpcds_q96, "q96");
-// gpu_result_test!(test_gpu_tpcds_q97, "q97");
 
 // --- Bucket C: window functions (GpuWindow node) ---
 // Whole-partition aggregate windows now execute on GPU via cudf::grouped_rolling_window.
@@ -196,12 +206,13 @@ gpu_result_test!(test_gpu_tpcds_q12, "q12");
 // gpu_result_test!(test_gpu_tpcds_q47, "q47");
 // gpu_result_test!(test_gpu_tpcds_q57, "q57");
 // gpu_result_test!(test_gpu_tpcds_q67, "q67");
-// Window works, but blocked by an unrelated filter gap (Bucket F):
-// q51 → unsupported UnaryOp IsNotNull; q53/q63/q89 → scalar fn `abs`.
-// gpu_result_test!(test_gpu_tpcds_q51, "q51");
-// gpu_result_test!(test_gpu_tpcds_q53, "q53");
-// gpu_result_test!(test_gpu_tpcds_q63, "q63");
-// gpu_result_test!(test_gpu_tpcds_q89, "q89");
+// Window + Bucket F filter gaps now resolved (q51 → IsNotNull; q53/q63/q89 → abs).
+// q89 additionally needs expression sort keys (sum_sales - avg_monthly_sales),
+// now materialised via build_column in execute_sort.
+gpu_result_test!(test_gpu_tpcds_q51, "q51");
+gpu_result_test!(test_gpu_tpcds_q53, "q53");
+gpu_result_test!(test_gpu_tpcds_q63, "q63");
+gpu_result_test!(test_gpu_tpcds_q89, "q89");
 
 // --- Bucket D: joins not yet supported ---
 // LeftMark join:
@@ -231,13 +242,18 @@ gpu_result_test!(test_gpu_tpcds_q12, "q12");
 // gpu_result_test!(test_gpu_tpcds_q22, "q22");
 
 // --- Bucket F: projection / scalar-expr gaps ---
-// gpu_result_test!(test_gpu_tpcds_q41, "q41"); // unsupported literal type: 1
-// gpu_result_test!(test_gpu_tpcds_q84, "q84"); // scalar fn: concat
-// gpu_result_test!(test_gpu_tpcds_q99, "q99"); // scalar fn: lower
-// gpu_result_test!(test_gpu_tpcds_q87, "q87"); // GpuProject: no expressions
+gpu_result_test!(test_gpu_tpcds_q41, "q41"); // Boolean AST literal
+gpu_result_test!(test_gpu_tpcds_q84, "q84"); // scalar fn: concat
+// q99: scalar fn lower executes but result diverges from CPU (see Bucket I/H).
+// gpu_result_test!(test_gpu_tpcds_q99, "q99");
 
-// --- Bucket G: FlatBuffer verification failed (large plans) ---
-// gpu_result_test!(test_gpu_tpcds_q8, "q8");
+// --- Bucket I: set operations (result divergence) ---
+// q87: EXCEPT (×2) of DISTINCT sets feeding count(*) — diverges.
+// gpu_result_test!(test_gpu_tpcds_q87, "q87");
+
+// --- Bucket G: FlatBuffer verification failed (large plans → raised verifier max_depth) ---
+gpu_result_test!(test_gpu_tpcds_q8, "q8");
+// q64: large plan verifies/executes but result diverges from CPU (Bucket H).
 // gpu_result_test!(test_gpu_tpcds_q64, "q64");
 
 // --- Bucket H: result divergence (executes, wrong result) ---

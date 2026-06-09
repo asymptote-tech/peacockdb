@@ -31,6 +31,8 @@
 #include <cudf/reduction.hpp>
 #include <cudf/rolling.hpp>
 #include <cudf/scalar/scalar.hpp>
+#include <cudf/strings/case.hpp>
+#include <cudf/strings/combine.hpp>
 #include <cudf/strings/contains.hpp>
 #include <cudf/strings/slice.hpp>
 #include <cudf/unary.hpp>
@@ -208,6 +210,13 @@ static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
       if (!sv) throw std::runtime_error("LiteralExpr has no value");
 
       switch (sv->type()) {
+        case fb::DataType_Boolean: {
+          auto s = std::make_unique<cudf::numeric_scalar<bool>>(
+              sv->bool_val(), true);
+          auto& ref = *s;
+          ctx.scalars.push_back(std::move(s));
+          return ctx.keep(std::make_unique<cudf::ast::literal>(ref));
+        }
         case fb::DataType_Int8: {
           auto s = std::make_unique<cudf::numeric_scalar<int8_t>>(
               static_cast<int8_t>(sv->int_val()), true);
@@ -308,6 +317,13 @@ static cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
         case fb::UnaryOp_IsNull:
           return ctx.keep(std::make_unique<cudf::ast::operation>(
               cudf::ast::ast_operator::IS_NULL, arg));
+        case fb::UnaryOp_IsNotNull: {
+          // cuDF AST has no IS_NOT_NULL; compose as NOT(IS_NULL(arg)).
+          auto& is_null = ctx.keep(std::make_unique<cudf::ast::operation>(
+              cudf::ast::ast_operator::IS_NULL, arg));
+          return ctx.keep(std::make_unique<cudf::ast::operation>(
+              cudf::ast::ast_operator::NOT, is_null));
+        }
         case fb::UnaryOp_Negative: {
           // -x = 0 - x
           auto zero = std::make_unique<cudf::numeric_scalar<int64_t>>(0, true);
@@ -439,6 +455,12 @@ bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table) {
     case fb::ExprNode_CaseExprNode:
     case fb::ExprNode_ScalarFunctionExprNode:
       return false;
+    case fb::ExprNode_LiteralExpr:
+      // A standalone string/binary literal can't go through compute_column
+      // (it allocates fixed-width output); route it to build_column, which
+      // broadcasts the scalar. Numeric literals stay AST-able. Literals inside
+      // binary ops are classified by the BinaryExprNode arm below, not here.
+      return !is_string_like_literal(expr);
     case fb::ExprNode_BinaryExprNode: {
       auto* b = expr->node_as_BinaryExprNode();
       // cuDF AST has no string ops; string literal on either side forces the
@@ -726,6 +748,59 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
         cudf::strings_column_view{strcol->view()}, start_s, stop_s, step_s);
   }
 
+  // abs(x) — numeric/decimal absolute value.
+  if (name == "abs") {
+    if (args->size() != 1)
+      throw std::runtime_error("abs expects 1 arg");
+    auto col = build_column(args->Get(0), table);
+    return cudf::unary_operation(col->view(), cudf::unary_operator::ABS);
+  }
+
+  // lower(s) — lowercase a string column.
+  if (name == "lower") {
+    if (args->size() != 1)
+      throw std::runtime_error("lower expects 1 arg");
+    auto col = build_column(args->Get(0), table);
+    return cudf::strings::to_lower(cudf::strings_column_view{col->view()});
+  }
+
+  // upper(s) — uppercase a string column.
+  if (name == "upper") {
+    if (args->size() != 1)
+      throw std::runtime_error("upper expects 1 arg");
+    auto col = build_column(args->Get(0), table);
+    return cudf::strings::to_upper(cudf::strings_column_view{col->view()});
+  }
+
+  // concat(a, b, …) — string concatenation. DataFusion's `concat` treats NULL
+  // as the empty string, so map nulls to "" (narep) rather than nulling the row.
+  if (name == "concat") {
+    std::vector<std::unique_ptr<cudf::column>> owned;
+    std::vector<cudf::column_view> views;
+    owned.reserve(args->size());
+    views.reserve(args->size());
+    for (flatbuffers::uoffset_t k = 0; k < args->size(); ++k) {
+      owned.push_back(build_column(args->Get(k), table));
+      views.push_back(owned.back()->view());
+    }
+    cudf::string_scalar separator("", true);
+    cudf::string_scalar narep("", true);
+    return cudf::strings::concatenate(cudf::table_view{views}, separator, narep);
+  }
+
+  // coalesce(a, b, …) — first non-null per row. Fold from the last arg back,
+  // selecting arg_k where it is valid, otherwise the accumulated result.
+  if (name == "coalesce") {
+    auto n = args->size();
+    auto result = build_column(args->Get(n - 1), table);
+    for (int k = static_cast<int>(n) - 2; k >= 0; --k) {
+      auto col = build_column(args->Get(k), table);
+      auto mask = cudf::is_valid(col->view());
+      result = cudf::copy_if_else(col->view(), result->view(), mask->view());
+    }
+    return result;
+  }
+
   throw std::runtime_error("unsupported scalar function in column path: " + name);
 }
 
@@ -1009,8 +1084,18 @@ static TableResult execute_filter(const fb::GpuFilter* filter) {
 static TableResult execute_project(const fb::GpuProject* proj) {
   auto input = execute_node(proj->input());
 
-  if (!proj->exprs() || proj->exprs()->size() == 0)
-    throw std::runtime_error("GpuProject: no expressions");
+  if (!proj->exprs() || proj->exprs()->size() == 0) {
+    // Empty projection (DataFusion emits one feeding count(*) — it needs no
+    // input columns, only the row count). A 0-column table would lose that
+    // count, so emit a single non-null placeholder column of the input length;
+    // count(*) reads column 0 as size − null_count and gets the right answer.
+    auto n_rows = input.table->num_rows();
+    cudf::numeric_scalar<int8_t> zero(0, true);
+    std::vector<std::unique_ptr<cudf::column>> columns;
+    columns.push_back(cudf::make_column_from_scalar(zero, n_rows));
+    std::vector<std::string> names{"__rowcount__"};
+    return {std::make_unique<cudf::table>(std::move(columns)), std::move(names)};
+  }
 
   auto tv = input.table->view();
   std::vector<std::unique_ptr<cudf::column>> columns;
@@ -1560,14 +1645,22 @@ static TableResult execute_sort(const fb::GpuSort* sort) {
   std::vector<cudf::column_view> key_cols;
   std::vector<cudf::order> orders;
   std::vector<cudf::null_order> null_orders;
+  // Owns columns materialised from expression sort keys (e.g. q89 sorts by
+  // sum_sales - avg_monthly_sales); kept alive until after the gather.
+  std::vector<std::unique_ptr<cudf::column>> owned_keys;
 
   for (flatbuffers::uoffset_t i = 0; i < sort->exprs()->size(); ++i) {
     auto* se = sort->exprs()->Get(i);
     auto* expr = se->expr();
-    if (!expr || expr->node_type() != fb::ExprNode_ColumnRef)
-      throw std::runtime_error("GpuSort: only ColumnRef sort keys supported");
-    auto idx = static_cast<cudf::size_type>(expr->node_as_ColumnRef()->index());
-    key_cols.push_back(tv.column(idx));
+    if (!expr)
+      throw std::runtime_error("GpuSort: missing sort key expression");
+    if (expr->node_type() == fb::ExprNode_ColumnRef) {
+      auto idx = static_cast<cudf::size_type>(expr->node_as_ColumnRef()->index());
+      key_cols.push_back(tv.column(idx));
+    } else {
+      owned_keys.push_back(build_column(expr, tv));
+      key_cols.push_back(owned_keys.back()->view());
+    }
     orders.push_back(se->asc() ? cudf::order::ASCENDING : cudf::order::DESCENDING);
     null_orders.push_back(se->nulls_first() ? cudf::null_order::BEFORE
                                             : cudf::null_order::AFTER);
@@ -1839,7 +1932,9 @@ TableResult execute_plan(const uint8_t* plan_bytes, uint64_t plan_len) {
   if (!gpu_plan)
     throw std::runtime_error("failed to parse FlatBuffer GpuPlan");
 
-  flatbuffers::Verifier verifier(plan_bytes, plan_len);
+  // Deeply nested plans (e.g. TPC-DS q8/q64) exceed the verifier's default
+  // max_depth of 64; raise it to match the Rust serializer's VerifierOptions.
+  flatbuffers::Verifier verifier(plan_bytes, plan_len, /*max_depth=*/1024);
   if (!gpu_plan->Verify(verifier))
     throw std::runtime_error("FlatBuffer verification failed");
 
