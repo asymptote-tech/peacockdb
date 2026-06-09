@@ -29,7 +29,15 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Disk usage (start)
+        if: always()
+        run: df -h
+
       - uses: ./.github/actions/cpp-build
+
+      - name: Disk usage (after cpp build)
+        if: always()
+        run: df -h
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -46,6 +54,10 @@ jobs:
           conda install -y -n base -c conda-forge 'duckdb-cli=1.2.2'
           testdata/generate_testdata.sh
           testdata/generate_testdata.sh --bench tpcds
+
+      - name: Disk usage (after testdata)
+        if: always()
+        run: df -h
 
       - name: Run Rust tests
         run: |
