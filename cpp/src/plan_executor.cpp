@@ -645,21 +645,22 @@ static std::unique_ptr<cudf::column> build_column_binary(
   if (bin->op() == fb::BinaryOp_Divide && bin->out_decimal_precision() != 0) {
     auto lcol = build_column(lhs, table);
     auto rcol = build_column(rhs, table);
-    if (lcol->type().id() == cudf::type_id::DECIMAL128 &&
-        rcol->type().id() == cudf::type_id::DECIMAL128) {
-      int32_t e_o = -static_cast<int32_t>(bin->out_decimal_scale());
-      int32_t e_r = rcol->type().scale();
-      auto num = cudf::cast(
-          lcol->view(), cudf::data_type{cudf::type_id::DECIMAL128, e_o + e_r});
-      return cudf::binary_operation(
-          num->view(), rcol->view(), op,
-          cudf::data_type{cudf::type_id::DECIMAL128, e_o});
-    }
-    // out_decimal_precision != 0 means DataFusion declared a Decimal128 result,
-    // which after scan-widening implies both operands materialise as DECIMAL128.
-    throw std::runtime_error(
-        "decimal division declared Decimal128 output but operand columns are "
-        "not both DECIMAL128");
+    // DataFusion declared a Decimal128 result, but an operand may be an integer
+    // column (e.g. q66 sum(decimal)/int_warehouse_sq_ft). cuDF's fixed_point DIV
+    // needs both operands DECIMAL128, so cast any integral operand to scale 0.
+    if (lcol->type().id() != cudf::type_id::DECIMAL128)
+      lcol = cudf::cast(lcol->view(),
+                        cudf::data_type{cudf::type_id::DECIMAL128, 0});
+    if (rcol->type().id() != cudf::type_id::DECIMAL128)
+      rcol = cudf::cast(rcol->view(),
+                        cudf::data_type{cudf::type_id::DECIMAL128, 0});
+    int32_t e_o = -static_cast<int32_t>(bin->out_decimal_scale());
+    int32_t e_r = rcol->type().scale();
+    auto num = cudf::cast(
+        lcol->view(), cudf::data_type{cudf::type_id::DECIMAL128, e_o + e_r});
+    return cudf::binary_operation(
+        num->view(), rcol->view(), op,
+        cudf::data_type{cudf::type_id::DECIMAL128, e_o});
   }
 
   // Column-scalar fast path when one side is a literal.
@@ -1645,14 +1646,22 @@ static TableResult execute_sort(const fb::GpuSort* sort) {
   std::vector<cudf::column_view> key_cols;
   std::vector<cudf::order> orders;
   std::vector<cudf::null_order> null_orders;
+  // Owns columns materialised from expression sort keys (e.g. q89 sorts by
+  // sum_sales - avg_monthly_sales); kept alive until after the gather.
+  std::vector<std::unique_ptr<cudf::column>> owned_keys;
 
   for (flatbuffers::uoffset_t i = 0; i < sort->exprs()->size(); ++i) {
     auto* se = sort->exprs()->Get(i);
     auto* expr = se->expr();
-    if (!expr || expr->node_type() != fb::ExprNode_ColumnRef)
-      throw std::runtime_error("GpuSort: only ColumnRef sort keys supported");
-    auto idx = static_cast<cudf::size_type>(expr->node_as_ColumnRef()->index());
-    key_cols.push_back(tv.column(idx));
+    if (!expr)
+      throw std::runtime_error("GpuSort: missing sort key expression");
+    if (expr->node_type() == fb::ExprNode_ColumnRef) {
+      auto idx = static_cast<cudf::size_type>(expr->node_as_ColumnRef()->index());
+      key_cols.push_back(tv.column(idx));
+    } else {
+      owned_keys.push_back(build_column(expr, tv));
+      key_cols.push_back(owned_keys.back()->view());
+    }
     orders.push_back(se->asc() ? cudf::order::ASCENDING : cudf::order::DESCENDING);
     null_orders.push_back(se->nulls_first() ? cudf::null_order::BEFORE
                                             : cudf::null_order::AFTER);
