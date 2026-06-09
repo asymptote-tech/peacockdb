@@ -144,11 +144,11 @@ gpu_result_test!(test_gpu_tpcds_q95, "q95");
 // The queries below carried a Union/Limit node but hit a *second* blocker once
 // it was lowered — re-bucketed by that blocker below.
 
-// --- Bucket A residual: GpuUnion concatenate type mismatch ---
 // q5: union branches produce DECIMAL128 columns with drifting scales (each
-// channel's SUM lands a different cuDF scale), so cudf::concatenate rejects
-// them. Needs per-branch cast to the union's declared output scale.
-// gpu_result_test!(test_gpu_tpcds_q5, "q5");
+// channel's SUM lands a different cuDF scale); the executor now casts each
+// branch to the union's declared output scale (GpuUnion.output_schema) before
+// concatenate.
+gpu_result_test!(test_gpu_tpcds_q5, "q5");
 
 // --- Bucket C: window functions (BoundedWindowAggExec) ---
 // gpu_result_test!(test_gpu_tpcds_q49, "q49");

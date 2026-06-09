@@ -445,6 +445,13 @@ table GpuUnion {
   /// Only affects the Rust roundtrip (which DataFusion node to rebuild); the
   /// C++ executor concatenates regardless.
   interleave: bool;
+  /// DataFusion's declared output schema. Each branch computes its decimal
+  /// columns independently, so cuDF's SUM/etc. can land a different fixed_point
+  /// scale per branch, which cudf::concatenate rejects (it requires identical
+  /// types). The executor casts every branch's decimal columns to the scale
+  /// declared here before concatenating. Ignored by the Rust roundtrip, which
+  /// rebuilds the schema from the children.
+  output_schema: Schema;
 }
 
 /// Skip the first `skip` rows, then emit at most `fetch` (LIMIT/OFFSET).

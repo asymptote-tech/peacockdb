@@ -1690,19 +1690,43 @@ static TableResult execute_union(const fb::GpuUnion* u) {
   if (!u->inputs() || u->inputs()->size() == 0)
     throw std::runtime_error("GpuUnion has no inputs");
 
-  // Execute each input fully, then concatenate the materialized tables. All
-  // inputs share one schema, so cudf::concatenate stacks them row-wise.
+  // Execute each input fully, then concatenate the materialized tables.
   std::vector<TableResult> inputs;
   inputs.reserve(u->inputs()->size());
-  std::vector<cudf::table_view> views;
-  views.reserve(u->inputs()->size());
   for (flatbuffers::uoffset_t i = 0; i < u->inputs()->size(); ++i) {
     inputs.push_back(execute_node(u->inputs()->Get(i)));
-    views.push_back(inputs.back().table->view());
   }
 
   // A single input needs no copy.
   if (inputs.size() == 1) return std::move(inputs[0]);
+
+  // Each branch computes its decimal columns independently, so cuDF's SUM/etc.
+  // can land a different fixed_point scale per branch; cudf::concatenate then
+  // rejects them (it requires identical types). Cast every branch's decimal
+  // columns to the union's declared output scale before stacking.
+  if (u->output_schema() && u->output_schema()->fields()) {
+    auto* fields = u->output_schema()->fields();
+    for (auto& in : inputs) {
+      auto cols = in.table->release();
+      auto n = std::min<std::size_t>(cols.size(), fields->size());
+      for (std::size_t c = 0; c < n; ++c) {
+        auto* f = fields->Get(static_cast<flatbuffers::uoffset_t>(c));
+        if (f->data_type() != fb::DataType_Decimal128) continue;
+        int32_t want_exp = -static_cast<int32_t>(f->decimal_scale());
+        if (cols[c]->type().id() == cudf::type_id::DECIMAL128 &&
+            cols[c]->type().scale() != want_exp) {
+          cols[c] = cudf::cast(
+              cols[c]->view(),
+              cudf::data_type{cudf::type_id::DECIMAL128, want_exp});
+        }
+      }
+      in.table = std::make_unique<cudf::table>(std::move(cols));
+    }
+  }
+
+  std::vector<cudf::table_view> views;
+  views.reserve(inputs.size());
+  for (auto& in : inputs) views.push_back(in.table->view());
 
   auto out = cudf::concatenate(views);
   return {std::move(out), std::move(inputs[0].column_names)};
