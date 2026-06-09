@@ -645,22 +645,21 @@ static std::unique_ptr<cudf::column> build_column_binary(
   if (bin->op() == fb::BinaryOp_Divide && bin->out_decimal_precision() != 0) {
     auto lcol = build_column(lhs, table);
     auto rcol = build_column(rhs, table);
-    // DataFusion declared a Decimal128 result, but an operand may be an integer
-    // column (e.g. q66 sum(decimal)/int_warehouse_sq_ft). cuDF's fixed_point DIV
-    // needs both operands DECIMAL128, so cast any integral operand to scale 0.
-    if (lcol->type().id() != cudf::type_id::DECIMAL128)
-      lcol = cudf::cast(lcol->view(),
-                        cudf::data_type{cudf::type_id::DECIMAL128, 0});
-    if (rcol->type().id() != cudf::type_id::DECIMAL128)
-      rcol = cudf::cast(rcol->view(),
-                        cudf::data_type{cudf::type_id::DECIMAL128, 0});
-    int32_t e_o = -static_cast<int32_t>(bin->out_decimal_scale());
-    int32_t e_r = rcol->type().scale();
-    auto num = cudf::cast(
-        lcol->view(), cudf::data_type{cudf::type_id::DECIMAL128, e_o + e_r});
-    return cudf::binary_operation(
-        num->view(), rcol->view(), op,
-        cudf::data_type{cudf::type_id::DECIMAL128, e_o});
+    if (lcol->type().id() == cudf::type_id::DECIMAL128 &&
+        rcol->type().id() == cudf::type_id::DECIMAL128) {
+      int32_t e_o = -static_cast<int32_t>(bin->out_decimal_scale());
+      int32_t e_r = rcol->type().scale();
+      auto num = cudf::cast(
+          lcol->view(), cudf::data_type{cudf::type_id::DECIMAL128, e_o + e_r});
+      return cudf::binary_operation(
+          num->view(), rcol->view(), op,
+          cudf::data_type{cudf::type_id::DECIMAL128, e_o});
+    }
+    // out_decimal_precision != 0 means DataFusion declared a Decimal128 result,
+    // which after scan-widening implies both operands materialise as DECIMAL128.
+    throw std::runtime_error(
+        "decimal division declared Decimal128 output but operand columns are "
+        "not both DECIMAL128");
   }
 
   // Column-scalar fast path when one side is a literal.
