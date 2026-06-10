@@ -194,13 +194,17 @@ jobs:
       - name: Run GPU tests
         run: |
           ssh gpu bash <<EOF
-            set -e
-
+            # Deliberately no 'set -e': run every test binary even when an
+            # earlier one fails (e.g. TPC-H failing must not skip TPC-DS), then
+            # fail the step at the end if anything failed. Each binary's pass/fail
+            # is OR'd into rc.
             export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata
             export LD_LIBRARY_PATH=$REMOTE_DIR/cpp/install/lib:$REMOTE_LD_LIBRARY_PATH
 
+            rc=0
+
             echo "==> peacock_plan_tests (C++)"
-            $REMOTE_DIR/cpp/install/bin/peacock_plan_tests
+            $REMOTE_DIR/cpp/install/bin/peacock_plan_tests || rc=1
 
             echo "==> rust GPU integration tests"
             for t in $REMOTE_DIR/cpp/install/rust-tests/*; do
@@ -210,8 +214,10 @@ jobs:
               # several GPU tests concurrently OOMs the device and poisons the
               # CUDA context, cascading into bad_alloc/cudaErrorIllegalAddress
               # for every later test. Sequential is mandatory.
-              "\$t" --nocapture --test-threads=1
+              "\$t" --nocapture --test-threads=1 || rc=1
             done
+
+            exit \$rc
           EOF
 
       - name: Cleanup remote run directory
