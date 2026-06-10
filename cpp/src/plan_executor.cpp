@@ -28,6 +28,12 @@
 #if __has_include(<cudf/join/mixed_join.hpp>)
 #include <cudf/join/mixed_join.hpp>
 #endif
+// Likewise, 26.02 split the conditional (pure-AST) join functions
+// (conditional_inner_join / conditional_left_join, used by GpuNestedLoopJoin)
+// into their own header; older versions declare them in <cudf/join.hpp>.
+#if __has_include(<cudf/join/conditional_join.hpp>)
+#include <cudf/join/conditional_join.hpp>
+#endif
 #include <cudf/reduction.hpp>
 #include <cudf/rolling.hpp>
 #include <cudf/scalar/scalar.hpp>
@@ -1549,7 +1555,13 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
       matched = cudf::mixed_left_semi_join(left_keys, right_keys, ltv, rtv, pred,
                                            cudf::null_equality::EQUAL);
     } else {
+#ifdef PEACOCK_HAVE_FILTERED_JOIN
+      cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
+                             cudf::set_as_build_table::RIGHT, 0.5);
+      matched = fj.semi_join(left_keys);
+#else
       matched = cudf::left_semi_join(left_keys, right_keys);
+#endif
     }
     auto nrows = ltv.num_rows();
     auto m = static_cast<cudf::size_type>(matched->size());
@@ -1726,10 +1738,18 @@ static TableResult execute_nested_loop_join(const fb::GpuNestedLoopJoin* join) {
 
   std::unique_ptr<cudf::table> full_table;
   if (!join->filter()) {
-    // Unconditional NestedLoopJoin = cartesian product. (For a LEFT join with an
-    // empty right side this should still emit left rows with nulls; in practice
-    // the right side is a scalar aggregate with exactly one row, so the cross
-    // product matches the left-join result.)
+    // Unconditional NestedLoopJoin = cartesian product: every left row pairs
+    // with every right row. For a LEFT join this equals the cross product only
+    // when the right side is non-empty — an empty right would have to emit each
+    // left row once with null right columns, but cross_join yields zero rows.
+    // The only source of an unconditional LEFT NLJ is a decorrelated scalar
+    // subquery whose (group-by-less) aggregate always returns exactly one row,
+    // so we assert that invariant rather than special-casing empty-right.
+    if (jt == fb::JoinType_Left && rtv.num_rows() == 0)
+      throw std::runtime_error(
+          "unconditional LEFT NestedLoopJoin with an empty right side is "
+          "unsupported (cross_join would drop all left rows); expected a "
+          "single-row scalar aggregate on the right");
     full_table = cudf::cross_join(ltv, rtv);
   } else {
     // Build the predicate as a cuDF AST over the two tables — build_expr maps

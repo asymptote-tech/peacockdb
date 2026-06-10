@@ -468,16 +468,17 @@ fn serialize_gpu_nested_loop_join<'a>(
         .downcast_ref::<NestedLoopJoinExec>()
         .ok_or("GpuNestedLoopJoinExec inner is not NestedLoopJoinExec")?;
 
+    // The C++ executor only implements Inner and Left nested-loop joins, so keep
+    // the serializable surface equal to the executable one: reject the rest here
+    // rather than failing at GPU runtime.
     let join_type = match nlj.join_type() {
         DfJoinType::Inner => fb::JoinType::Inner,
         DfJoinType::Left => fb::JoinType::Left,
-        DfJoinType::Right => fb::JoinType::Right,
-        DfJoinType::Full => fb::JoinType::Full,
-        DfJoinType::LeftSemi => fb::JoinType::LeftSemi,
-        DfJoinType::RightSemi => fb::JoinType::RightSemi,
-        DfJoinType::LeftAnti => fb::JoinType::LeftAnti,
-        DfJoinType::RightAnti => fb::JoinType::RightAnti,
-        DfJoinType::LeftMark => fb::JoinType::LeftMark,
+        other => {
+            return Err(format!(
+                "NestedLoopJoin join type {other:?} is not supported on GPU (only Inner/Left)"
+            ))
+        }
     };
 
     // Same convention as GpuHashJoin: serialize the predicate verbatim with its
