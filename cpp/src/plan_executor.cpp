@@ -1284,19 +1284,43 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
               "SUM+COUNT before multi-partition GPU repartition is enabled");
         }
 
-        std::unique_ptr<cudf::scalar> scalar_result;
+        bool is_sum = (name == "sum" || name == "SUM");
+        std::unique_ptr<cudf::column> result_col;
         if (is_count) {
           // Avoid make_count_aggregation<reduce_aggregation> which is not
           // exported in all cudf versions. Count = size - null_count.
           int64_t cnt = static_cast<int64_t>(values_col.size()) -
                         static_cast<int64_t>(values_col.null_count());
-          auto s = std::make_unique<cudf::numeric_scalar<int64_t>>(cnt, true);
-          scalar_result = std::move(s);
+          cudf::numeric_scalar<int64_t> s(cnt, true);
+          result_col = cudf::make_column_from_scalar(s, 1);
+        } else if (values_col.type().id() == cudf::type_id::DECIMAL128 &&
+                   (is_sum || is_avg)) {
+          // cudf::reduce supports only min/max on fixed_point types; sum/mean
+          // throw "non-arithmetic types" (TPC-H q22's global avg of a decimal).
+          // The groupby path *does* support decimal sum/mean, so tag every row
+          // with one constant key and run a single-group aggregation.
+          if (values_col.size() == 0) {
+            // SQL sum/avg over zero rows is NULL; groupby would emit no groups,
+            // so build the one-row null result of the input type directly.
+            result_col = cudf::make_column_from_scalar(
+                *cudf::make_default_constructed_scalar(values_col.type()), 1);
+          } else {
+            cudf::numeric_scalar<int32_t> zero(0, true);
+            auto key = cudf::make_column_from_scalar(zero, values_col.size());
+            cudf::table_view kview{{key->view()}};
+            cudf::groupby::groupby gb1{kview};
+            std::vector<cudf::groupby::aggregation_request> reqs(1);
+            reqs[0].values = values_col;
+            reqs[0].aggregations.push_back(make_agg(name, is_final));
+            auto [gk, res] = gb1.aggregate(reqs);
+            result_col = std::move(res[0].results[0]);
+          }
         } else {
-          scalar_result = cudf::reduce(values_col, *make_reduce_agg(name),
-                                       values_col.type());
+          auto scalar_result = cudf::reduce(values_col, *make_reduce_agg(name),
+                                            values_col.type());
+          result_col = cudf::make_column_from_scalar(*scalar_result, 1);
         }
-        out_cols.push_back(cudf::make_column_from_scalar(*scalar_result, 1));
+        out_cols.push_back(std::move(result_col));
 
         if (func->alias())
           out_names.push_back(func->alias()->str());
@@ -1751,6 +1775,50 @@ static TableResult execute_nested_loop_join(const fb::GpuNestedLoopJoin* join) {
           "unsupported (cross_join would drop all left rows); expected a "
           "single-row scalar aggregate on the right");
     full_table = cudf::cross_join(ltv, rtv);
+  } else if (!is_ast_able(
+                 join->filter(),
+                 // Type-only view of the referenced columns in filter_columns
+                 // order: ColumnRef(i) -> filter_columns[i] -> a left/right
+                 // column. is_ast_able only inspects types, so views suffice.
+                 [&] {
+                   std::vector<cudf::column_view> cols;
+                   for (flatbuffers::uoffset_t i = 0;
+                        i < join->filter_columns()->size(); ++i) {
+                     auto* fc = join->filter_columns()->Get(i);
+                     cols.push_back(fc->side() == fb::JoinSide_Right
+                                        ? rtv.column(fc->index())
+                                        : ltv.column(fc->index()));
+                   }
+                   return cudf::table_view{cols};
+                 }())) {
+    // Filter isn't expressible in the cuDF AST (e.g. a CAST to Decimal128, as in
+    // TPC-H q11/q22) so conditional_*_join can't evaluate it. Fall back to the
+    // column path: materialise the full cross product, evaluate the predicate as
+    // a boolean column, and apply it as a mask. Only Inner is handled — a LEFT
+    // join would additionally have to re-emit unmatched left rows with null
+    // right columns, which the mask can't express.
+    if (jt != fb::JoinType_Inner)
+      throw std::runtime_error(
+          "non-AST-able NestedLoopJoin filter is only supported for Inner joins");
+    if (!join->filter_columns())
+      throw std::runtime_error(
+          "GpuNestedLoopJoin has a filter but no filter_columns map");
+    auto crossed = cudf::cross_join(ltv, rtv);
+    auto cv = crossed->view();
+    // build_column resolves ColumnRef(i) directly against column i of the table
+    // it is given, so arrange the cross-product columns in filter_columns order:
+    // left columns occupy [0, L), right columns [L, L+R).
+    auto left_ncols = ltv.num_columns();
+    std::vector<cudf::column_view> mask_cols;
+    for (flatbuffers::uoffset_t i = 0; i < join->filter_columns()->size(); ++i) {
+      auto* fc = join->filter_columns()->Get(i);
+      mask_cols.push_back(fc->side() == fb::JoinSide_Right
+                              ? cv.column(left_ncols + fc->index())
+                              : cv.column(fc->index()));
+    }
+    cudf::table_view mask_src{mask_cols};
+    auto mask = build_column(join->filter(), mask_src);
+    full_table = cudf::apply_boolean_mask(cv, mask->view());
   } else {
     // Build the predicate as a cuDF AST over the two tables — build_expr maps
     // each ColumnRef to table_reference::LEFT/RIGHT via filter_columns — and run
