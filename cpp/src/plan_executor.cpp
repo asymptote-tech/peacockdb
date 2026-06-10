@@ -1700,10 +1700,13 @@ static TableResult execute_union(const fb::GpuUnion* u) {
   // A single input needs no copy.
   if (inputs.size() == 1) return std::move(inputs[0]);
 
-  // Each branch computes its decimal columns independently, so cuDF's SUM/etc.
-  // can land a different fixed_point scale per branch; cudf::concatenate then
-  // rejects them (it requires identical types). Cast every branch's decimal
-  // columns to the union's declared output scale before stacking.
+  // Each branch is planned independently, so a column can land a different cuDF
+  // type per branch even though DataFusion declares one union output type: q5's
+  // inner UNION pairs a real decimal measure in one branch against a `0` literal
+  // (materialized as FLOAT64) at the same position in the other, and cuDF's SUM
+  // also drifts the fixed_point scale per branch. cudf::concatenate requires
+  // identical column types, so cast every branch column to the union's declared
+  // output type (id + decimal scale) before stacking.
   if (u->output_schema() && u->output_schema()->fields()) {
     auto* fields = u->output_schema()->fields();
     for (auto& in : inputs) {
@@ -1711,13 +1714,16 @@ static TableResult execute_union(const fb::GpuUnion* u) {
       auto n = std::min<std::size_t>(cols.size(), fields->size());
       for (std::size_t c = 0; c < n; ++c) {
         auto* f = fields->Get(static_cast<flatbuffers::uoffset_t>(c));
-        if (f->data_type() != fb::DataType_Decimal128) continue;
-        int32_t want_exp = -static_cast<int32_t>(f->decimal_scale());
-        if (cols[c]->type().id() == cudf::type_id::DECIMAL128 &&
-            cols[c]->type().scale() != want_exp) {
-          cols[c] = cudf::cast(
-              cols[c]->view(),
-              cudf::data_type{cudf::type_id::DECIMAL128, want_exp});
+        auto want_id = fb_to_type_id(f->data_type());
+        cudf::data_type want =
+            (f->data_type() == fb::DataType_Decimal128)
+                ? cudf::data_type{want_id, -static_cast<int32_t>(f->decimal_scale())}
+                : cudf::data_type{want_id};
+        // STRING/EMPTY aren't producible by cudf::cast and already agree across
+        // branches; only retype numeric/decimal columns that actually differ.
+        if (want_id != cudf::type_id::STRING && want_id != cudf::type_id::EMPTY &&
+            cols[c]->type() != want) {
+          cols[c] = cudf::cast(cols[c]->view(), want);
         }
       }
       in.table = std::make_unique<cudf::table>(std::move(cols));
