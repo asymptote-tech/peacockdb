@@ -144,10 +144,12 @@ gpu_result_test!(test_gpu_tpcds_q95, "q95");
 // The queries below carried a Union/Limit node but hit a *second* blocker once
 // it was lowered — re-bucketed by that blocker below.
 
-// --- Bucket A residual: GpuUnion concatenate type mismatch ---
-// q5: union branches produce DECIMAL128 columns with drifting scales (each
-// channel's SUM lands a different cuDF scale), so cudf::concatenate rejects
-// them. Needs per-branch cast to the union's declared output scale.
+// q5: the Bucket A union-concatenate blocker is now fixed (the executor casts
+// each branch to the union's declared output type via GpuUnion.output_schema).
+// But q5 then hits a SECOND, separate blocker — its final GROUP BY ROLLUP
+// (channel, id) needs grouping-sets aggregation, which the GPU path does not
+// implement yet (same gap that parks q14/q18/q22/q36/q67/q70/q80/q86). Re-enable
+// once grouping-sets lands.
 // gpu_result_test!(test_gpu_tpcds_q5, "q5");
 
 // --- Bucket C: window functions (BoundedWindowAggExec) ---

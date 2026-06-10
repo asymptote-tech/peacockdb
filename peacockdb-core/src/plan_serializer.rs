@@ -619,11 +619,16 @@ fn serialize_gpu_union<'a>(
     }
     let inputs_vec = b.create_vector(&inputs);
 
+    // Carry the declared output schema so the executor can normalize each
+    // branch's decimal scale before concatenate (see GpuUnion.output_schema).
+    let output_schema = serialize_schema(b, &plan.schema());
+
     let node = fb::GpuUnion::create(
         b,
         &fb::GpuUnionArgs {
             inputs: Some(inputs_vec),
             interleave,
+            output_schema: Some(output_schema),
         },
     );
     Ok((fb::PlanNodeKind::GpuUnion, node.as_union_value()))
