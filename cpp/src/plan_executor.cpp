@@ -1779,15 +1779,18 @@ static TableResult execute_nested_loop_join(const fb::GpuNestedLoopJoin* join) {
                  join->filter(),
                  // Type-only view of the referenced columns in filter_columns
                  // order: ColumnRef(i) -> filter_columns[i] -> a left/right
-                 // column. is_ast_able only inspects types, so views suffice.
+                 // column. is_ast_able only inspects types, but a table_view
+                 // requires equal column sizes — and left/right differ — so use
+                 // zero-row slices (which preserve type) to make them uniform.
                  [&] {
                    std::vector<cudf::column_view> cols;
                    for (flatbuffers::uoffset_t i = 0;
                         i < join->filter_columns()->size(); ++i) {
                      auto* fc = join->filter_columns()->Get(i);
-                     cols.push_back(fc->side() == fb::JoinSide_Right
-                                        ? rtv.column(fc->index())
-                                        : ltv.column(fc->index()));
+                     auto src = fc->side() == fb::JoinSide_Right
+                                    ? rtv.column(fc->index())
+                                    : ltv.column(fc->index());
+                     cols.push_back(cudf::slice(src, {0, 0}).front());
                    }
                    return cudf::table_view{cols};
                  }())) {
