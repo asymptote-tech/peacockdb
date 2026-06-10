@@ -71,6 +71,13 @@ for line in sys.stdin:
 fi
 
 if [ "$RSYNC" -eq 1 ]; then
+  # Always strip the rust test binaries before shipping. Unstripped debug builds
+  # are ~565MB each and choke the (sometimes very slow / bursty) link to
+  # shad-gpu; stripped they are ~155MB. --strip-debug drops only the debug
+  # sections, keeping the dynamic symbol table the glibc patchelf step needs.
+  for t in "${RUST_TESTS[@]}"; do
+    [ -f "$RUST_TESTS_STAGING/$t" ] && strip --strip-debug "$RUST_TESTS_STAGING/$t"
+  done
   rsync -r -P cpp/install/* shad-gpu:/home/info/peacockdb/cpp/install/
   # Ship our setup-glibc.sh (with patch_rust_dir) so --patch uses the
   # version that knows about cpp/install/rust-tests/.

@@ -6,7 +6,7 @@ GpuSortPreservingMergeExec: [cntrycode@0 ASC NULLS LAST]
           GpuRepartitionExec: partitioning=Hash([cntrycode@0], 8), input_partitions=8
             GpuAggregateExec: group_by=[cntrycode], aggr=[count(*), sum(custsale.c_acctbal)]
               GpuProjectExec: expr=[substr(c_phone@0, 1, 2) as cntrycode, c_acctbal@1 as c_acctbal]
-                NestedLoopJoinExec: join_type=Inner, filter=CAST(c_acctbal@0 AS Decimal128(19, 6)) > avg(customer.c_acctbal)@1, projection=[c_phone@1, c_acctbal@2]
+                GpuNestedLoopJoinExec: join_type=Inner, filter=CAST(c_acctbal@0 AS Decimal128(19, 6)) > avg(customer.c_acctbal)@1, projection=[1, 2]
                   GpuAggregateExec: group_by=[], aggr=[avg(customer.c_acctbal)]
                     GpuCoalescePartitionsExec
                       GpuAggregateExec: group_by=[], aggr=[avg(customer.c_acctbal)]
@@ -32,7 +32,7 @@ GpuSortPreservingMergeExec: row_width=56, subtree_max_row_bytes=112
           GpuRepartitionExec: row_width=56, subtree_max_row_bytes=112
             GpuAggregateExec: row_width=56, subtree_max_row_bytes=112
               GpuProjectExec: row_width=48, subtree_max_row_bytes=112
-                NestedLoopJoinExec: row_width=48, subtree_max_row_bytes=112
+                GpuNestedLoopJoinExec: row_width=48, subtree_max_row_bytes=112
                   GpuAggregateExec: row_width=16, subtree_max_row_bytes=64
                     GpuCoalescePartitionsExec: row_width=24, subtree_max_row_bytes=64
                       GpuAggregateExec: row_width=24, subtree_max_row_bytes=64

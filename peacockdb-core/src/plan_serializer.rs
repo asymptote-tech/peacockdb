@@ -19,7 +19,7 @@ use datafusion::physical_plan::filter::FilterExec;
 use datafusion::common::JoinSide;
 use datafusion::common::JoinType as DfJoinType;
 use datafusion::physical_plan::joins::utils::{ColumnIndex, JoinFilter};
-use datafusion::physical_plan::joins::HashJoinExec;
+use datafusion::physical_plan::joins::{CrossJoinExec, HashJoinExec, NestedLoopJoinExec};
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
 use datafusion::physical_plan::ExecutionPlan;
@@ -28,9 +28,10 @@ use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
 use crate::generated::gpu_plan_generated::peacock::plan as fb;
 use crate::gpu_rule::{
-    GpuAggregateExec, GpuCoalesceBatchesExec, GpuCoalescePartitionsExec, GpuFilterExec,
-    GpuGlobalLimitExec, GpuHashJoinExec, GpuInterleaveExec, GpuProjectExec, GpuRepartitionExec,
-    GpuScanExec, GpuSortExec, GpuSortPreservingMergeExec, GpuUnionExec, GpuWindowExec,
+    GpuAggregateExec, GpuCoalesceBatchesExec, GpuCoalescePartitionsExec, GpuCrossJoinExec,
+    GpuFilterExec, GpuGlobalLimitExec, GpuHashJoinExec, GpuInterleaveExec, GpuNestedLoopJoinExec,
+    GpuProjectExec, GpuRepartitionExec, GpuScanExec, GpuSortExec, GpuSortPreservingMergeExec,
+    GpuUnionExec, GpuWindowExec,
 };
 
 /// Serialize an entire GPU execution plan tree into a FlatBuffer byte vector.
@@ -66,6 +67,10 @@ fn serialize_plan_node<'a>(
         serialize_gpu_aggregate(b, plan)?
     } else if plan.as_any().is::<GpuHashJoinExec>() {
         serialize_gpu_hash_join(b, plan)?
+    } else if plan.as_any().is::<GpuCrossJoinExec>() {
+        serialize_gpu_cross_join(b, plan)?
+    } else if plan.as_any().is::<GpuNestedLoopJoinExec>() {
+        serialize_gpu_nested_loop_join(b, plan)?
     } else if plan.as_any().is::<GpuSortExec>() {
         serialize_gpu_sort(b, plan)?
     } else if plan.as_any().is::<GpuCoalesceBatchesExec>() {
@@ -360,7 +365,7 @@ fn serialize_gpu_hash_join<'a>(
         DfJoinType::RightSemi => fb::JoinType::RightSemi,
         DfJoinType::LeftAnti => fb::JoinType::LeftAnti,
         DfJoinType::RightAnti => fb::JoinType::RightAnti,
-        other => return Err(format!("unsupported join type: {other:?}")),
+        DfJoinType::LeftMark => fb::JoinType::LeftMark,
     };
 
     let mut keys = Vec::new();
@@ -422,6 +427,105 @@ fn serialize_gpu_hash_join<'a>(
         },
     );
     Ok((fb::PlanNodeKind::GpuHashJoin, node.as_union_value()))
+}
+
+// --- GpuCrossJoinExec ---
+
+fn serialize_gpu_cross_join<'a>(
+    b: &mut FlatBufferBuilder<'a>,
+    plan: &Arc<dyn ExecutionPlan>,
+) -> Result<(fb::PlanNodeKind, WIPOffset<flatbuffers::UnionWIPOffset>), String> {
+    let gpu = plan.as_any().downcast_ref::<GpuCrossJoinExec>().unwrap();
+    let cross = gpu
+        .inner()
+        .as_any()
+        .downcast_ref::<CrossJoinExec>()
+        .ok_or("GpuCrossJoinExec inner is not CrossJoinExec")?;
+
+    let left = serialize_plan_node(b, cross.left())?;
+    let right = serialize_plan_node(b, cross.right())?;
+
+    let node = fb::GpuCrossJoin::create(
+        b,
+        &fb::GpuCrossJoinArgs {
+            left: Some(left),
+            right: Some(right),
+        },
+    );
+    Ok((fb::PlanNodeKind::GpuCrossJoin, node.as_union_value()))
+}
+
+// --- GpuNestedLoopJoinExec ---
+
+fn serialize_gpu_nested_loop_join<'a>(
+    b: &mut FlatBufferBuilder<'a>,
+    plan: &Arc<dyn ExecutionPlan>,
+) -> Result<(fb::PlanNodeKind, WIPOffset<flatbuffers::UnionWIPOffset>), String> {
+    let gpu = plan.as_any().downcast_ref::<GpuNestedLoopJoinExec>().unwrap();
+    let nlj = gpu
+        .inner()
+        .as_any()
+        .downcast_ref::<NestedLoopJoinExec>()
+        .ok_or("GpuNestedLoopJoinExec inner is not NestedLoopJoinExec")?;
+
+    // The C++ executor only implements Inner and Left nested-loop joins, so keep
+    // the serializable surface equal to the executable one: reject the rest here
+    // rather than failing at GPU runtime.
+    let join_type = match nlj.join_type() {
+        DfJoinType::Inner => fb::JoinType::Inner,
+        DfJoinType::Left => fb::JoinType::Left,
+        other => {
+            return Err(format!(
+                "NestedLoopJoin join type {other:?} is not supported on GPU (only Inner/Left)"
+            ))
+        }
+    };
+
+    // Same convention as GpuHashJoin: serialize the predicate verbatim with its
+    // column-origin map; the C++ executor remaps the ColumnRefs.
+    let (filter, filter_columns) = if let Some(jf) = nlj.filter() {
+        let expr = serialize_expr(b, jf.expression(), jf.schema())?;
+        let cols: Vec<fb::JoinFilterColumn> = jf
+            .column_indices()
+            .iter()
+            .map(|ci| {
+                let side = match ci.side {
+                    JoinSide::Left => fb::JoinSide::Left,
+                    JoinSide::Right => fb::JoinSide::Right,
+                    JoinSide::None => {
+                        return Err(
+                            "nested-loop join filter references a mark-join column".to_string()
+                        )
+                    }
+                };
+                Ok(fb::JoinFilterColumn::new(ci.index as u32, side))
+            })
+            .collect::<Result<_, String>>()?;
+        (Some(expr), Some(b.create_vector(&cols)))
+    } else {
+        (None, None)
+    };
+
+    let left = serialize_plan_node(b, nlj.left())?;
+    let right = serialize_plan_node(b, nlj.right())?;
+
+    let projection = nlj.projection().map(|proj| {
+        let indices: Vec<u32> = proj.iter().map(|&i| i as u32).collect();
+        b.create_vector(&indices)
+    });
+
+    let node = fb::GpuNestedLoopJoin::create(
+        b,
+        &fb::GpuNestedLoopJoinArgs {
+            join_type,
+            filter,
+            filter_columns,
+            left: Some(left),
+            right: Some(right),
+            projection,
+        },
+    );
+    Ok((fb::PlanNodeKind::GpuNestedLoopJoin, node.as_union_value()))
 }
 
 // --- GpuSortExec ---
@@ -1242,6 +1346,16 @@ fn deserialize_plan_node(node: &fb::PlanNode) -> Result<Arc<dyn ExecutionPlan>, 
             let join = node.node_as_gpu_hash_join().ok_or("expected GpuHashJoin")?;
             deserialize_gpu_hash_join(&join, node)
         }
+        fb::PlanNodeKind::GpuCrossJoin => {
+            let join = node.node_as_gpu_cross_join().ok_or("expected GpuCrossJoin")?;
+            deserialize_gpu_cross_join(&join)
+        }
+        fb::PlanNodeKind::GpuNestedLoopJoin => {
+            let join = node
+                .node_as_gpu_nested_loop_join()
+                .ok_or("expected GpuNestedLoopJoin")?;
+            deserialize_gpu_nested_loop_join(&join, node)
+        }
         fb::PlanNodeKind::GpuSort => {
             let sort = node.node_as_gpu_sort().ok_or("expected GpuSort")?;
             deserialize_gpu_sort(&sort, node)
@@ -1774,6 +1888,7 @@ fn deserialize_gpu_hash_join(
         fb::JoinType::RightSemi => DfJoinType::RightSemi,
         fb::JoinType::LeftAnti => DfJoinType::LeftAnti,
         fb::JoinType::RightAnti => DfJoinType::RightAnti,
+        fb::JoinType::LeftMark => DfJoinType::LeftMark,
         other => return Err(format!("unsupported JoinType: {:?}", other)),
     };
 
@@ -1835,6 +1950,68 @@ fn deserialize_gpu_hash_join(
     .map_err(|e| format!("HashJoinExec: {e}"))?;
 
     Ok(Arc::new(GpuHashJoinExec::new(Arc::new(join_exec))))
+}
+
+fn deserialize_gpu_cross_join(join: &fb::GpuCrossJoin) -> Result<Arc<dyn ExecutionPlan>, String> {
+    let left = deserialize_plan_node(&join.left().ok_or("GpuCrossJoin missing left")?)?;
+    let right = deserialize_plan_node(&join.right().ok_or("GpuCrossJoin missing right")?)?;
+    let join_exec = CrossJoinExec::new(left, right);
+    Ok(Arc::new(GpuCrossJoinExec::new(Arc::new(join_exec))))
+}
+
+fn deserialize_gpu_nested_loop_join(
+    join: &fb::GpuNestedLoopJoin,
+    _node: &fb::PlanNode,
+) -> Result<Arc<dyn ExecutionPlan>, String> {
+    let left = deserialize_plan_node(&join.left().ok_or("GpuNestedLoopJoin missing left")?)?;
+    let right = deserialize_plan_node(&join.right().ok_or("GpuNestedLoopJoin missing right")?)?;
+
+    let join_type = match join.join_type() {
+        fb::JoinType::Inner => DfJoinType::Inner,
+        fb::JoinType::Left => DfJoinType::Left,
+        fb::JoinType::Right => DfJoinType::Right,
+        fb::JoinType::Full => DfJoinType::Full,
+        fb::JoinType::LeftSemi => DfJoinType::LeftSemi,
+        fb::JoinType::RightSemi => DfJoinType::RightSemi,
+        fb::JoinType::LeftAnti => DfJoinType::LeftAnti,
+        fb::JoinType::RightAnti => DfJoinType::RightAnti,
+        fb::JoinType::LeftMark => DfJoinType::LeftMark,
+        other => return Err(format!("unsupported JoinType: {:?}", other)),
+    };
+
+    let projection: Option<Vec<usize>> = join
+        .projection()
+        .map(|v| (0..v.len()).map(|i| v.get(i) as usize).collect());
+
+    // Rebuild the join predicate from the verbatim expression + column-origin
+    // map (same convention as the hash-join residual filter).
+    let filter = match (join.filter(), join.filter_columns()) {
+        (Some(expr), Some(cols)) => {
+            let expression = deserialize_expr(&expr)?;
+            let left_schema = left.schema();
+            let right_schema = right.schema();
+            let mut column_indices = Vec::with_capacity(cols.len());
+            let mut fields: Vec<Field> = Vec::with_capacity(cols.len());
+            for i in 0..cols.len() {
+                let c = cols.get(i);
+                let idx = c.index() as usize;
+                let (side, schema) = match c.side() {
+                    fb::JoinSide::Left => (JoinSide::Left, &left_schema),
+                    fb::JoinSide::Right => (JoinSide::Right, &right_schema),
+                    other => return Err(format!("invalid JoinSide: {other:?}")),
+                };
+                fields.push(schema.field(idx).clone());
+                column_indices.push(ColumnIndex { index: idx, side });
+            }
+            Some(JoinFilter::new(expression, column_indices, Schema::new(fields).into()))
+        }
+        _ => None,
+    };
+
+    let join_exec = NestedLoopJoinExec::try_new(left, right, filter, &join_type, projection)
+        .map_err(|e| format!("NestedLoopJoinExec: {e}"))?;
+
+    Ok(Arc::new(GpuNestedLoopJoinExec::new(Arc::new(join_exec))))
 }
 
 fn deserialize_gpu_sort(

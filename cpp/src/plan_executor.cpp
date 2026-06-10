@@ -28,6 +28,12 @@
 #if __has_include(<cudf/join/mixed_join.hpp>)
 #include <cudf/join/mixed_join.hpp>
 #endif
+// Likewise, 26.02 split the conditional (pure-AST) join functions
+// (conditional_inner_join / conditional_left_join, used by GpuNestedLoopJoin)
+// into their own header; older versions declare them in <cudf/join.hpp>.
+#if __has_include(<cudf/join/conditional_join.hpp>)
+#include <cudf/join/conditional_join.hpp>
+#endif
 #include <cudf/reduction.hpp>
 #include <cudf/rolling.hpp>
 #include <cudf/scalar/scalar.hpp>
@@ -1278,19 +1284,43 @@ static TableResult execute_aggregate(const fb::GpuAggregate* agg) {
               "SUM+COUNT before multi-partition GPU repartition is enabled");
         }
 
-        std::unique_ptr<cudf::scalar> scalar_result;
+        bool is_sum = (name == "sum" || name == "SUM");
+        std::unique_ptr<cudf::column> result_col;
         if (is_count) {
           // Avoid make_count_aggregation<reduce_aggregation> which is not
           // exported in all cudf versions. Count = size - null_count.
           int64_t cnt = static_cast<int64_t>(values_col.size()) -
                         static_cast<int64_t>(values_col.null_count());
-          auto s = std::make_unique<cudf::numeric_scalar<int64_t>>(cnt, true);
-          scalar_result = std::move(s);
+          cudf::numeric_scalar<int64_t> s(cnt, true);
+          result_col = cudf::make_column_from_scalar(s, 1);
+        } else if (values_col.type().id() == cudf::type_id::DECIMAL128 &&
+                   (is_sum || is_avg)) {
+          // cudf::reduce supports only min/max on fixed_point types; sum/mean
+          // throw "non-arithmetic types" (TPC-H q22's global avg of a decimal).
+          // The groupby path *does* support decimal sum/mean, so tag every row
+          // with one constant key and run a single-group aggregation.
+          if (values_col.size() == 0) {
+            // SQL sum/avg over zero rows is NULL; groupby would emit no groups,
+            // so build the one-row null result of the input type directly.
+            result_col = cudf::make_column_from_scalar(
+                *cudf::make_default_constructed_scalar(values_col.type()), 1);
+          } else {
+            cudf::numeric_scalar<int32_t> zero(0, true);
+            auto key = cudf::make_column_from_scalar(zero, values_col.size());
+            cudf::table_view kview{{key->view()}};
+            cudf::groupby::groupby gb1{kview};
+            std::vector<cudf::groupby::aggregation_request> reqs(1);
+            reqs[0].values = values_col;
+            reqs[0].aggregations.push_back(make_agg(name, is_final));
+            auto [gk, res] = gb1.aggregate(reqs);
+            result_col = std::move(res[0].results[0]);
+          }
         } else {
-          scalar_result = cudf::reduce(values_col, *make_reduce_agg(name),
-                                       values_col.type());
+          auto scalar_result = cudf::reduce(values_col, *make_reduce_agg(name),
+                                            values_col.type());
+          result_col = cudf::make_column_from_scalar(*scalar_result, 1);
         }
-        out_cols.push_back(cudf::make_column_from_scalar(*scalar_result, 1));
+        out_cols.push_back(std::move(result_col));
 
         if (func->alias())
           out_names.push_back(func->alias()->str());
@@ -1533,6 +1563,64 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
     return {std::move(t), std::move(names)};
   }
 
+  // LeftMark: one row per left row, plus a trailing boolean "mark" column that
+  // is true iff the left row has >=1 match in the right input (DataFusion's
+  // EXISTS-in-disjunction decorrelation). cuDF has no mark join, so compute the
+  // matched left-row indices with a (mixed) left semi-join and scatter `true`
+  // into an all-false boolean column.
+  if (jt == fb::JoinType_LeftMark) {
+    std::unique_ptr<rmm::device_uvector<cudf::size_type>> matched;
+    if (join->filter()) {
+      if (!join->filter_columns())
+        throw std::runtime_error(
+            "LeftMark join has a filter but no filter_columns map");
+      ExprContext mctx;
+      const auto& pred = build_expr(join->filter(), mctx, join->filter_columns());
+      matched = cudf::mixed_left_semi_join(left_keys, right_keys, ltv, rtv, pred,
+                                           cudf::null_equality::EQUAL);
+    } else {
+#ifdef PEACOCK_HAVE_FILTERED_JOIN
+      cudf::filtered_join fj(right_keys, cudf::null_equality::EQUAL,
+                             cudf::set_as_build_table::RIGHT, 0.5);
+      matched = fj.semi_join(left_keys);
+#else
+      matched = cudf::left_semi_join(left_keys, right_keys);
+#endif
+    }
+    auto nrows = ltv.num_rows();
+    auto m = static_cast<cudf::size_type>(matched->size());
+    cudf::numeric_scalar<bool> true_s(true), false_s(false);
+    auto target = cudf::make_column_from_scalar(false_s, nrows);
+    auto src = cudf::make_column_from_scalar(true_s, m);
+    cudf::column_view map_col{cudf::data_type{cudf::type_id::INT32}, m,
+                              matched->data(), nullptr, 0, 0, {}};
+    auto scattered = cudf::scatter(cudf::table_view{{src->view()}}, map_col,
+                                   cudf::table_view{{target->view()}});
+    auto scattered_cols = scattered->release();
+
+    std::vector<std::unique_ptr<cudf::column>> cols;
+    std::vector<std::string> names;
+    for (cudf::size_type i = 0; i < ltv.num_columns(); ++i) {
+      cols.push_back(std::make_unique<cudf::column>(ltv.column(i)));
+      names.push_back(left.column_names[i]);
+    }
+    cols.push_back(std::move(scattered_cols.front()));
+    names.push_back("mark");
+    auto t = std::make_unique<cudf::table>(std::move(cols));
+    if (join->projection() && join->projection()->size() > 0) {
+      auto tv = t->view();
+      std::vector<std::unique_ptr<cudf::column>> p_cols;
+      std::vector<std::string> p_names;
+      for (auto idx : *join->projection()) {
+        p_cols.push_back(std::make_unique<cudf::column>(tv.column(idx)));
+        p_names.push_back(names[idx]);
+      }
+      return {std::make_unique<cudf::table>(std::move(p_cols)),
+              std::move(p_names)};
+    }
+    return {std::move(t), std::move(names)};
+  }
+
   // Execute join — returns index pairs.
   auto [left_indices, right_indices] = [&]() {
     switch (join->join_type()) {
@@ -1542,6 +1630,14 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
         return cudf::left_join(left_keys, right_keys);
       case fb::JoinType_Full:
         return cudf::full_join(left_keys, right_keys);
+      case fb::JoinType_Right: {
+        // cuDF has no right_join; right_join(L,R) == left_join(R,L) with the
+        // returned (right_idx, left_idx) pair swapped back to (left_idx,
+        // right_idx). Unmatched left rows then carry JoinNoneValue and are
+        // NULLIFY-gathered below (see left_policy).
+        auto p = cudf::left_join(right_keys, left_keys);
+        return std::make_pair(std::move(p.second), std::move(p.first));
+      }
       default:
         throw std::runtime_error(
             "unsupported join type: " + std::to_string(join->join_type()));
@@ -1559,7 +1655,7 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
   auto right_policy = (kind == fb::JoinType_Left || kind == fb::JoinType_Full)
                           ? out_of_bounds_policy::NULLIFY
                           : out_of_bounds_policy::DONT_CHECK;
-  auto left_policy = (kind == fb::JoinType_Full)
+  auto left_policy = (kind == fb::JoinType_Full || kind == fb::JoinType_Right)
                          ? out_of_bounds_policy::NULLIFY
                          : out_of_bounds_policy::DONT_CHECK;
 
@@ -1612,6 +1708,158 @@ static TableResult execute_hash_join(const fb::GpuHashJoin* join) {
     cudf::table_view inter{inter_cols};
     auto mask = build_column(join->filter(), inter);
     full_table = cudf::apply_boolean_mask(full_table->view(), mask->view());
+  }
+
+  // Apply output projection if present.
+  if (join->projection() && join->projection()->size() > 0) {
+    auto ftv = full_table->view();
+    std::vector<std::unique_ptr<cudf::column>> proj_cols;
+    std::vector<std::string> proj_names;
+    for (auto idx : *join->projection()) {
+      proj_cols.push_back(std::make_unique<cudf::column>(ftv.column(idx)));
+      proj_names.push_back(all_names[idx]);
+    }
+    return {std::make_unique<cudf::table>(std::move(proj_cols)),
+            std::move(proj_names)};
+  }
+
+  return {std::move(full_table), std::move(all_names)};
+}
+
+// ============================================================================
+// GpuCrossJoin — cartesian product
+// ============================================================================
+
+static TableResult execute_cross_join(const fb::GpuCrossJoin* join) {
+  auto left = execute_node(join->left());
+  auto right = execute_node(join->right());
+
+  auto out = cudf::cross_join(left.table->view(), right.table->view());
+  std::vector<std::string> names = std::move(left.column_names);
+  names.insert(names.end(), right.column_names.begin(), right.column_names.end());
+  return {std::move(out), std::move(names)};
+}
+
+// ============================================================================
+// GpuNestedLoopJoin — cross product filtered by a non-equi predicate
+// ============================================================================
+
+static TableResult execute_nested_loop_join(const fb::GpuNestedLoopJoin* join) {
+  auto jt = join->join_type();
+  if (jt != fb::JoinType_Inner && jt != fb::JoinType_Left)
+    throw std::runtime_error(
+        "GpuNestedLoopJoin: only Inner/Left join types supported (got " +
+        std::to_string(jt) + ")");
+
+  auto left = execute_node(join->left());
+  auto right = execute_node(join->right());
+  auto ltv = left.table->view();
+  auto rtv = right.table->view();
+
+  std::vector<std::string> all_names = left.column_names;
+  all_names.insert(all_names.end(), right.column_names.begin(),
+                   right.column_names.end());
+
+  std::unique_ptr<cudf::table> full_table;
+  if (!join->filter()) {
+    // Unconditional NestedLoopJoin = cartesian product: every left row pairs
+    // with every right row. For a LEFT join this equals the cross product only
+    // when the right side is non-empty — an empty right would have to emit each
+    // left row once with null right columns, but cross_join yields zero rows.
+    // The only source of an unconditional LEFT NLJ is a decorrelated scalar
+    // subquery whose (group-by-less) aggregate always returns exactly one row,
+    // so we assert that invariant rather than special-casing empty-right.
+    if (jt == fb::JoinType_Left && rtv.num_rows() == 0)
+      throw std::runtime_error(
+          "unconditional LEFT NestedLoopJoin with an empty right side is "
+          "unsupported (cross_join would drop all left rows); expected a "
+          "single-row scalar aggregate on the right");
+    full_table = cudf::cross_join(ltv, rtv);
+  } else if (!is_ast_able(
+                 join->filter(),
+                 // Type-only view of the referenced columns in filter_columns
+                 // order: ColumnRef(i) -> filter_columns[i] -> a left/right
+                 // column. is_ast_able only inspects types, but a table_view
+                 // requires equal column sizes — and left/right differ — so use
+                 // zero-row slices (which preserve type) to make them uniform.
+                 [&] {
+                   std::vector<cudf::column_view> cols;
+                   for (flatbuffers::uoffset_t i = 0;
+                        i < join->filter_columns()->size(); ++i) {
+                     auto* fc = join->filter_columns()->Get(i);
+                     auto src = fc->side() == fb::JoinSide_Right
+                                    ? rtv.column(fc->index())
+                                    : ltv.column(fc->index());
+                     cols.push_back(cudf::slice(src, {0, 0}).front());
+                   }
+                   return cudf::table_view{cols};
+                 }())) {
+    // Filter isn't expressible in the cuDF AST (e.g. a CAST to Decimal128, as in
+    // TPC-H q11/q22) so conditional_*_join can't evaluate it. Fall back to the
+    // column path: materialise the full cross product, evaluate the predicate as
+    // a boolean column, and apply it as a mask. Only Inner is handled — a LEFT
+    // join would additionally have to re-emit unmatched left rows with null
+    // right columns, which the mask can't express.
+    if (jt != fb::JoinType_Inner)
+      throw std::runtime_error(
+          "non-AST-able NestedLoopJoin filter is only supported for Inner joins");
+    if (!join->filter_columns())
+      throw std::runtime_error(
+          "GpuNestedLoopJoin has a filter but no filter_columns map");
+    auto crossed = cudf::cross_join(ltv, rtv);
+    auto cv = crossed->view();
+    // build_column resolves ColumnRef(i) directly against column i of the table
+    // it is given, so arrange the cross-product columns in filter_columns order:
+    // left columns occupy [0, L), right columns [L, L+R).
+    auto left_ncols = ltv.num_columns();
+    std::vector<cudf::column_view> mask_cols;
+    for (flatbuffers::uoffset_t i = 0; i < join->filter_columns()->size(); ++i) {
+      auto* fc = join->filter_columns()->Get(i);
+      mask_cols.push_back(fc->side() == fb::JoinSide_Right
+                              ? cv.column(left_ncols + fc->index())
+                              : cv.column(fc->index()));
+    }
+    cudf::table_view mask_src{mask_cols};
+    auto mask = build_column(join->filter(), mask_src);
+    full_table = cudf::apply_boolean_mask(cv, mask->view());
+  } else {
+    // Build the predicate as a cuDF AST over the two tables — build_expr maps
+    // each ColumnRef to table_reference::LEFT/RIGHT via filter_columns — and run
+    // a conditional join, which evaluates the predicate per (left,right) pair.
+    if (!join->filter_columns())
+      throw std::runtime_error(
+          "GpuNestedLoopJoin has a filter but no filter_columns map");
+    ExprContext ctx;
+    const auto& pred = build_expr(join->filter(), ctx, join->filter_columns());
+
+    auto [left_indices, right_indices] =
+        jt == fb::JoinType_Left ? cudf::conditional_left_join(ltv, rtv, pred)
+                                : cudf::conditional_inner_join(ltv, rtv, pred);
+
+    // For a LEFT join, unmatched left rows carry an out-of-bounds right index;
+    // NULLIFY turns those into nulls. All left indices are in-bounds.
+    using cudf::out_of_bounds_policy;
+    auto right_policy = (jt == fb::JoinType_Left)
+                            ? out_of_bounds_policy::NULLIFY
+                            : out_of_bounds_policy::DONT_CHECK;
+    auto n = static_cast<cudf::size_type>(left_indices->size());
+    cudf::column_view left_idx_col{cudf::data_type{cudf::type_id::INT32}, n,
+                                   left_indices->data(), nullptr, 0, 0, {}};
+    cudf::column_view right_idx_col{cudf::data_type{cudf::type_id::INT32}, n,
+                                    right_indices->data(), nullptr, 0, 0, {}};
+    auto left_gathered =
+        cudf::gather(ltv, left_idx_col, out_of_bounds_policy::DONT_CHECK);
+    auto right_gathered = cudf::gather(rtv, right_idx_col, right_policy);
+
+    // Concatenate columns: [left_cols..., right_cols...].
+    std::vector<std::unique_ptr<cudf::column>> all_cols;
+    auto lgv = left_gathered->view();
+    for (cudf::size_type i = 0; i < lgv.num_columns(); ++i)
+      all_cols.push_back(std::make_unique<cudf::column>(lgv.column(i)));
+    auto rgv = right_gathered->view();
+    for (cudf::size_type i = 0; i < rgv.num_columns(); ++i)
+      all_cols.push_back(std::make_unique<cudf::column>(rgv.column(i)));
+    full_table = std::make_unique<cudf::table>(std::move(all_cols));
   }
 
   // Apply output projection if present.
@@ -1886,6 +2134,8 @@ static const char* plan_node_kind_name(fb::PlanNodeKind k) {
     case fb::PlanNodeKind_GpuProject:             return "GpuProject";
     case fb::PlanNodeKind_GpuAggregate:           return "GpuAggregate";
     case fb::PlanNodeKind_GpuHashJoin:            return "GpuHashJoin";
+    case fb::PlanNodeKind_GpuCrossJoin:           return "GpuCrossJoin";
+    case fb::PlanNodeKind_GpuNestedLoopJoin:      return "GpuNestedLoopJoin";
     case fb::PlanNodeKind_GpuSort:                return "GpuSort";
     case fb::PlanNodeKind_GpuCoalesceBatches:     return "GpuCoalesceBatches";
     case fb::PlanNodeKind_GpuCoalescePartitions:  return "GpuCoalescePartitions";
@@ -1917,6 +2167,10 @@ static TableResult execute_node(const fb::PlanNode* node) {
         result = execute_aggregate(node->node_as_GpuAggregate()); break;
       case fb::PlanNodeKind_GpuHashJoin:
         result = execute_hash_join(node->node_as_GpuHashJoin()); break;
+      case fb::PlanNodeKind_GpuCrossJoin:
+        result = execute_cross_join(node->node_as_GpuCrossJoin()); break;
+      case fb::PlanNodeKind_GpuNestedLoopJoin:
+        result = execute_nested_loop_join(node->node_as_GpuNestedLoopJoin()); break;
       case fb::PlanNodeKind_GpuSort:
         result = execute_sort(node->node_as_GpuSort()); break;
       case fb::PlanNodeKind_GpuCoalesceBatches:

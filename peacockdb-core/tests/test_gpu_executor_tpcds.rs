@@ -155,14 +155,22 @@ gpu_result_test!(test_gpu_tpcds_q95, "q95");
 // --- Bucket C: window functions (BoundedWindowAggExec) ---
 // gpu_result_test!(test_gpu_tpcds_q49, "q49");
 
-// --- Bucket D: joins not yet supported ---
-// CrossJoinExec (see #28):
-// gpu_result_test!(test_gpu_tpcds_q23, "q23");
-// gpu_result_test!(test_gpu_tpcds_q28, "q28");
+// --- Bucket D: joins ---
+// CrossJoinExec (now supported):
+gpu_result_test!(test_gpu_tpcds_q23, "q23");
+// q77: CrossJoin works, but GPU returns 40 rows vs 45 (an upstream join/aggregate
+// drops rows; cross join cannot drop rows) — distinct correctness blocker, not
+// the join (issue #47).
 // gpu_result_test!(test_gpu_tpcds_q77, "q77");
-// NestedLoopJoinExec (see #28):
+// q28: CrossJoin works, but blocked by a downstream GpuAggregate cuDF failure
+// ("Reduction operators other than min/max are not supported for non-arithmetic
+// types") — distinct blocker, not a join issue (issue #44).
+// gpu_result_test!(test_gpu_tpcds_q28, "q28");
+// q14: NestedLoopJoin now supported, but q14 also uses GROUP BY ROLLUP — blocked
+// by the grouping-sets gap (issue #40).
 // gpu_result_test!(test_gpu_tpcds_q14, "q14");
-// unsupported join type: 2 (Right join):
+// q80: Right join now supported, but q80 also uses GROUP BY ROLLUP — blocked by
+// the grouping-sets gap (issue #40).
 // gpu_result_test!(test_gpu_tpcds_q80, "q80");
 
 // --- Bucket E: aggregate gaps ---
@@ -217,22 +225,39 @@ gpu_result_test!(test_gpu_tpcds_q63, "q63");
 gpu_result_test!(test_gpu_tpcds_q89, "q89");
 
 // --- Bucket D: joins not yet supported ---
-// LeftMark join:
-// gpu_result_test!(test_gpu_tpcds_q10, "q10");
+// LeftMark join (now supported):
+gpu_result_test!(test_gpu_tpcds_q10, "q10");
+gpu_result_test!(test_gpu_tpcds_q45, "q45");
+// q35: LeftMark join works, but the final ORDER BY ca_state NULLS FIRST is not
+// honored on GPU (nulls sort last instead of first) — GpuSort null-ordering
+// blocker, not a join issue (issue #42).
 // gpu_result_test!(test_gpu_tpcds_q35, "q35");
-// gpu_result_test!(test_gpu_tpcds_q45, "q45");
-// NestedLoopJoinExec (see #28):
+// NestedLoopJoinExec (now supported, incl. Inner + Left):
+// q9: NestedLoopJoin works (executes past the join), but blocked by a downstream
+// GpuAggregate cuDF failure ("Reduction operators other than min/max are not
+// supported for non-arithmetic types") — same blocker as q28, not a join issue
+// (issue #44).
 // gpu_result_test!(test_gpu_tpcds_q9, "q9");
+// q24: NestedLoopJoin works, but blocked by a GpuHashJoin cuDF failure ("Unary
+// cast type must be fixed-width" — a cast to a non-fixed-width/string type) —
+// distinct blocker, not a join issue (issue #45).
 // gpu_result_test!(test_gpu_tpcds_q24, "q24");
+// q54: NestedLoopJoin works, but blocked by the unsupported scalar function
+// `round` in GpuProject (issue #43).
 // gpu_result_test!(test_gpu_tpcds_q54, "q54");
-// CrossJoinExec (see #28):
+// CrossJoinExec (now supported):
+gpu_result_test!(test_gpu_tpcds_q88, "q88");
+gpu_result_test!(test_gpu_tpcds_q90, "q90");
+// q61: CrossJoin works (the cross-joined `total` matches CPU), but the
+// `promotions` sum subtree produces a wrong value on GPU — distinct upstream
+// correctness blocker, not the join (issue #46).
 // gpu_result_test!(test_gpu_tpcds_q61, "q61");
-// gpu_result_test!(test_gpu_tpcds_q88, "q88");
-// gpu_result_test!(test_gpu_tpcds_q90, "q90");
-// unsupported join type: 2 (Right join):
-// gpu_result_test!(test_gpu_tpcds_q40, "q40");
+// Right join (now supported):
+gpu_result_test!(test_gpu_tpcds_q40, "q40");
+gpu_result_test!(test_gpu_tpcds_q93, "q93");
+// q78: Right join works, but blocked by an unsupported scalar function in the
+// column path (round) in GpuProject — not a join issue (issue #43).
 // gpu_result_test!(test_gpu_tpcds_q78, "q78");
-// gpu_result_test!(test_gpu_tpcds_q93, "q93");
 
 // --- Bucket E: aggregate gaps ---
 // stddev unmapped:

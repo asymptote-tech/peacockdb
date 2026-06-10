@@ -1,6 +1,6 @@
 GpuSortExec: expr=[am_pm_ratio@0 ASC NULLS LAST], fetch=100
   GpuProjectExec: expr=[CASE WHEN pmc@1 = 0 THEN None,23,8 ELSE CAST(amc@0 AS Decimal128(15, 4)) / CAST(pmc@1 AS Decimal128(15, 4)) END as am_pm_ratio]
-    CrossJoinExec
+    GpuCrossJoinExec
       GpuProjectExec: expr=[count(*)@0 as amc]
         GpuAggregateExec: group_by=[], aggr=[count(*)]
           GpuCoalescePartitionsExec
@@ -76,7 +76,7 @@ GpuSortExec: expr=[am_pm_ratio@0 ASC NULLS LAST], fetch=100
 --- memory ---
 GpuSortExec: row_width=16, subtree_max_row_bytes=32
   GpuProjectExec: row_width=16, subtree_max_row_bytes=32
-    CrossJoinExec: row_width=16, subtree_max_row_bytes=24
+    GpuCrossJoinExec: row_width=16, subtree_max_row_bytes=24
       GpuProjectExec: row_width=8, subtree_max_row_bytes=24
         GpuAggregateExec: row_width=8, subtree_max_row_bytes=24
           GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=24

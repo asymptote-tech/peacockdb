@@ -1,6 +1,6 @@
 GpuProjectExec: expr=[b1_lp@3 as b1_lp, b1_cnt@4 as b1_cnt, b1_cntd@5 as b1_cntd, b2_lp@6 as b2_lp, b2_cnt@7 as b2_cnt, b2_cntd@8 as b2_cntd, b3_lp@9 as b3_lp, b3_cnt@10 as b3_cnt, b3_cntd@11 as b3_cntd, b4_lp@12 as b4_lp, b4_cnt@13 as b4_cnt, b4_cntd@14 as b4_cntd, b5_lp@15 as b5_lp, b5_cnt@16 as b5_cnt, b5_cntd@17 as b5_cntd, b6_lp@0 as b6_lp, b6_cnt@1 as b6_cnt, b6_cntd@2 as b6_cntd]
   GpuGlobalLimitExec: skip=0, fetch=100
-    CrossJoinExec
+    GpuCrossJoinExec
       GpuProjectExec: expr=[avg(store_sales.ss_list_price)@0 as b6_lp, count(store_sales.ss_list_price)@1 as b6_cnt, count(DISTINCT store_sales.ss_list_price)@2 as b6_cntd]
         GpuGlobalLimitExec: skip=0, fetch=100
           GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_list_price), count(store_sales.ss_list_price), count(DISTINCT store_sales.ss_list_price)]
@@ -11,7 +11,7 @@ GpuProjectExec: expr=[b1_lp@3 as b1_lp, b1_cnt@4 as b1_cnt, b1_cntd@5 as b1_cntd
                     GpuScanExec: batch_size=5592405
       GpuProjectExec: expr=[b1_lp@3 as b1_lp, b1_cnt@4 as b1_cnt, b1_cntd@5 as b1_cntd, b2_lp@6 as b2_lp, b2_cnt@7 as b2_cnt, b2_cntd@8 as b2_cntd, b3_lp@9 as b3_lp, b3_cnt@10 as b3_cnt, b3_cntd@11 as b3_cntd, b4_lp@12 as b4_lp, b4_cnt@13 as b4_cnt, b4_cntd@14 as b4_cntd, b5_lp@0 as b5_lp, b5_cnt@1 as b5_cnt, b5_cntd@2 as b5_cntd]
         GpuGlobalLimitExec: skip=0, fetch=100
-          CrossJoinExec
+          GpuCrossJoinExec
             GpuProjectExec: expr=[avg(store_sales.ss_list_price)@0 as b5_lp, count(store_sales.ss_list_price)@1 as b5_cnt, count(DISTINCT store_sales.ss_list_price)@2 as b5_cntd]
               GpuGlobalLimitExec: skip=0, fetch=100
                 GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_list_price), count(store_sales.ss_list_price), count(DISTINCT store_sales.ss_list_price)]
@@ -22,7 +22,7 @@ GpuProjectExec: expr=[b1_lp@3 as b1_lp, b1_cnt@4 as b1_cnt, b1_cntd@5 as b1_cntd
                           GpuScanExec: batch_size=5592405
             GpuProjectExec: expr=[b1_lp@3 as b1_lp, b1_cnt@4 as b1_cnt, b1_cntd@5 as b1_cntd, b2_lp@6 as b2_lp, b2_cnt@7 as b2_cnt, b2_cntd@8 as b2_cntd, b3_lp@9 as b3_lp, b3_cnt@10 as b3_cnt, b3_cntd@11 as b3_cntd, b4_lp@0 as b4_lp, b4_cnt@1 as b4_cnt, b4_cntd@2 as b4_cntd]
               GpuGlobalLimitExec: skip=0, fetch=100
-                CrossJoinExec
+                GpuCrossJoinExec
                   GpuProjectExec: expr=[avg(store_sales.ss_list_price)@0 as b4_lp, count(store_sales.ss_list_price)@1 as b4_cnt, count(DISTINCT store_sales.ss_list_price)@2 as b4_cntd]
                     GpuGlobalLimitExec: skip=0, fetch=100
                       GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_list_price), count(store_sales.ss_list_price), count(DISTINCT store_sales.ss_list_price)]
@@ -33,7 +33,7 @@ GpuProjectExec: expr=[b1_lp@3 as b1_lp, b1_cnt@4 as b1_cnt, b1_cntd@5 as b1_cntd
                                 GpuScanExec: batch_size=5592405
                   GpuProjectExec: expr=[b1_lp@3 as b1_lp, b1_cnt@4 as b1_cnt, b1_cntd@5 as b1_cntd, b2_lp@6 as b2_lp, b2_cnt@7 as b2_cnt, b2_cntd@8 as b2_cntd, b3_lp@0 as b3_lp, b3_cnt@1 as b3_cnt, b3_cntd@2 as b3_cntd]
                     GpuGlobalLimitExec: skip=0, fetch=100
-                      CrossJoinExec
+                      GpuCrossJoinExec
                         GpuProjectExec: expr=[avg(store_sales.ss_list_price)@0 as b3_lp, count(store_sales.ss_list_price)@1 as b3_cnt, count(DISTINCT store_sales.ss_list_price)@2 as b3_cntd]
                           GpuGlobalLimitExec: skip=0, fetch=100
                             GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_list_price), count(store_sales.ss_list_price), count(DISTINCT store_sales.ss_list_price)]
@@ -43,7 +43,7 @@ GpuProjectExec: expr=[b1_lp@3 as b1_lp, b1_cnt@4 as b1_cnt, b1_cntd@5 as b1_cntd
                                     GpuFilterExec: predicate=ss_quantity@0 >= 11 AND ss_quantity@0 <= 15 AND (ss_list_price@2 >= Some(14200),7,2 AND ss_list_price@2 <= Some(15200),7,2 OR ss_coupon_amt@3 >= Some(1221400),7,2 AND ss_coupon_amt@3 <= Some(1321400),7,2 OR ss_wholesale_cost@1 >= Some(7900),7,2 AND ss_wholesale_cost@1 <= Some(9900),7,2), projection=[2]
                                       GpuScanExec: batch_size=5592405
                         GpuGlobalLimitExec: skip=0, fetch=100
-                          CrossJoinExec
+                          GpuCrossJoinExec
                             GpuProjectExec: expr=[avg(store_sales.ss_list_price)@0 as b1_lp, count(store_sales.ss_list_price)@1 as b1_cnt, count(DISTINCT store_sales.ss_list_price)@2 as b1_cntd]
                               GpuAggregateExec: group_by=[], aggr=[avg(store_sales.ss_list_price), count(store_sales.ss_list_price), count(DISTINCT store_sales.ss_list_price)]
                                 GpuCoalescePartitionsExec
@@ -61,7 +61,7 @@ GpuProjectExec: expr=[b1_lp@3 as b1_lp, b1_cnt@4 as b1_cnt, b1_cntd@5 as b1_cntd
 --- memory ---
 GpuProjectExec: row_width=192, subtree_max_row_bytes=384
   GpuGlobalLimitExec: row_width=192, subtree_max_row_bytes=320
-    CrossJoinExec: row_width=192, subtree_max_row_bytes=320
+    GpuCrossJoinExec: row_width=192, subtree_max_row_bytes=320
       GpuProjectExec: row_width=32, subtree_max_row_bytes=96
         GpuGlobalLimitExec: row_width=32, subtree_max_row_bytes=96
           GpuAggregateExec: row_width=32, subtree_max_row_bytes=96
@@ -72,7 +72,7 @@ GpuProjectExec: row_width=192, subtree_max_row_bytes=384
                     GpuScanExec: row_width=52, subtree_max_row_bytes=52
       GpuProjectExec: row_width=160, subtree_max_row_bytes=320
         GpuGlobalLimitExec: row_width=160, subtree_max_row_bytes=256
-          CrossJoinExec: row_width=160, subtree_max_row_bytes=256
+          GpuCrossJoinExec: row_width=160, subtree_max_row_bytes=256
             GpuProjectExec: row_width=32, subtree_max_row_bytes=96
               GpuGlobalLimitExec: row_width=32, subtree_max_row_bytes=96
                 GpuAggregateExec: row_width=32, subtree_max_row_bytes=96
@@ -83,7 +83,7 @@ GpuProjectExec: row_width=192, subtree_max_row_bytes=384
                           GpuScanExec: row_width=52, subtree_max_row_bytes=52
             GpuProjectExec: row_width=128, subtree_max_row_bytes=256
               GpuGlobalLimitExec: row_width=128, subtree_max_row_bytes=192
-                CrossJoinExec: row_width=128, subtree_max_row_bytes=192
+                GpuCrossJoinExec: row_width=128, subtree_max_row_bytes=192
                   GpuProjectExec: row_width=32, subtree_max_row_bytes=96
                     GpuGlobalLimitExec: row_width=32, subtree_max_row_bytes=96
                       GpuAggregateExec: row_width=32, subtree_max_row_bytes=96
@@ -94,7 +94,7 @@ GpuProjectExec: row_width=192, subtree_max_row_bytes=384
                                 GpuScanExec: row_width=52, subtree_max_row_bytes=52
                   GpuProjectExec: row_width=96, subtree_max_row_bytes=192
                     GpuGlobalLimitExec: row_width=96, subtree_max_row_bytes=96
-                      CrossJoinExec: row_width=96, subtree_max_row_bytes=96
+                      GpuCrossJoinExec: row_width=96, subtree_max_row_bytes=96
                         GpuProjectExec: row_width=32, subtree_max_row_bytes=96
                           GpuGlobalLimitExec: row_width=32, subtree_max_row_bytes=96
                             GpuAggregateExec: row_width=32, subtree_max_row_bytes=96
@@ -104,7 +104,7 @@ GpuProjectExec: row_width=192, subtree_max_row_bytes=384
                                     GpuFilterExec: row_width=16, subtree_max_row_bytes=68
                                       GpuScanExec: row_width=52, subtree_max_row_bytes=52
                         GpuGlobalLimitExec: row_width=64, subtree_max_row_bytes=96
-                          CrossJoinExec: row_width=64, subtree_max_row_bytes=96
+                          GpuCrossJoinExec: row_width=64, subtree_max_row_bytes=96
                             GpuProjectExec: row_width=32, subtree_max_row_bytes=96
                               GpuAggregateExec: row_width=32, subtree_max_row_bytes=96
                                 GpuCoalescePartitionsExec: row_width=64, subtree_max_row_bytes=80

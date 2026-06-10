@@ -259,6 +259,9 @@ enum JoinType : byte {
   RightSemi,
   LeftAnti,
   RightAnti,
+  /// DataFusion's mark join: one row per left row plus a trailing boolean
+  /// "mark" column = true iff the row has >=1 match in the right input.
+  LeftMark,
 }
 
 enum AggregateMode : byte {
@@ -376,6 +379,27 @@ table GpuHashJoin {
   /// Optional residual (non-equi) post-join filter (null if none). Serialized
   /// verbatim — its ColumnRefs index the intermediate schema described by
   /// `filter_columns`, NOT the post-join table. The C++ executor remaps them.
+  filter: Expr;
+  /// Column origin map for `filter` (parallel to its intermediate schema).
+  filter_columns: [JoinFilterColumn];
+  left: PlanNode;
+  right: PlanNode;
+  /// Optional output projection (column indices to keep from the full join output).
+  projection: [uint32];
+}
+
+/// Cross join (cartesian product). Output is [left_cols..., right_cols...].
+table GpuCrossJoin {
+  left: PlanNode;
+  right: PlanNode;
+}
+
+/// Nested-loop join: a cross product filtered by a non-equi predicate. The
+/// `filter` ColumnRefs index the filter's intermediate schema described by
+/// `filter_columns` (same convention as GpuHashJoin), NOT the post-join table.
+table GpuNestedLoopJoin {
+  join_type: JoinType;
+  /// Join predicate (null = pure cross product).
   filter: Expr;
   /// Column origin map for `filter` (parallel to its intermediate schema).
   filter_columns: [JoinFilterColumn];
@@ -517,6 +541,8 @@ union PlanNodeKind {
   GpuProject,
   GpuAggregate,
   GpuHashJoin,
+  GpuCrossJoin,
+  GpuNestedLoopJoin,
   GpuSort,
   GpuCoalesceBatches,
   GpuCoalescePartitions,

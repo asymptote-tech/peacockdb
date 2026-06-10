@@ -90,9 +90,9 @@ gpu_result_test!(test_gpu_filter_project, "filter-project");
 gpu_result_test!(test_gpu_aggregate_groupby, "aggregate-groupby");
 gpu_result_test!(test_gpu_semi_join, "semi-join");
 gpu_result_test!(test_gpu_anti_join, "anti-join");
-// Skipped (issue #12, bucket 4 — needs GpuCrossJoinExec / GpuNestedLoopJoinExec):
-// gpu_result_test!(test_gpu_nested_loop_join, "nested-loop-join");
-// gpu_result_test!(test_gpu_cross_join, "cross-join");
+// CrossJoinExec / NestedLoopJoinExec now supported (issue #12):
+gpu_result_test!(test_gpu_nested_loop_join, "nested-loop-join");
+gpu_result_test!(test_gpu_cross_join, "cross-join");
 gpu_result_test!(test_gpu_tpch_q1, "q1");
 gpu_result_test!(test_gpu_tpch_q2, "q2");
 gpu_result_test!(test_gpu_tpch_q3, "q3");
@@ -103,8 +103,8 @@ gpu_result_test!(test_gpu_tpch_q7, "q7");
 gpu_result_test!(test_gpu_tpch_q8, "q8");
 gpu_result_test!(test_gpu_tpch_q9, "q9");
 gpu_result_test!(test_gpu_tpch_q10, "q10");
-// Skipped (issue #12, bucket 4 — TPC-H q11 has correlated HAVING subquery → NestedLoopJoinExec):
-// gpu_result_test!(test_gpu_tpch_q11, "q11");
+// TPC-H q11: correlated HAVING subquery → NestedLoopJoinExec (now supported).
+gpu_result_test!(test_gpu_tpch_q11, "q11");
 gpu_result_test!(test_gpu_tpch_q12, "q12");
 gpu_result_test!(test_gpu_tpch_q13, "q13");
 gpu_result_test!(test_gpu_tpch_q14, "q14");
@@ -115,8 +115,8 @@ gpu_result_test!(test_gpu_tpch_q18, "q18");
 gpu_result_test!(test_gpu_tpch_q19, "q19");
 gpu_result_test!(test_gpu_tpch_q20, "q20");
 gpu_result_test!(test_gpu_tpch_q21, "q21");
-// Skipped (issue #12, bucket 4 — TPC-H q22 has correlated subquery → NestedLoopJoinExec):
-// gpu_result_test!(test_gpu_tpch_q22, "q22");
+// TPC-H q22: correlated subquery → NestedLoopJoinExec (now supported).
+gpu_result_test!(test_gpu_tpch_q22, "q22");
 
 #[tokio::test]
 async fn test_gpu_scan_nation() {
