@@ -1,7 +1,7 @@
-NestedLoopJoinExec: join_type=Inner, filter=n_regionkey@1 > r_regionkey@0
+GpuNestedLoopJoinExec: join_type=Inner, filter=n_regionkey@1 > r_regionkey@0
   GpuScanExec: batch_size=29826161
   GpuScanExec: batch_size=29826161
 --- memory ---
-NestedLoopJoinExec: row_width=140, subtree_max_row_bytes=72
+GpuNestedLoopJoinExec: row_width=140, subtree_max_row_bytes=72
   GpuScanExec: row_width=68, subtree_max_row_bytes=68
   GpuScanExec: row_width=72, subtree_max_row_bytes=72

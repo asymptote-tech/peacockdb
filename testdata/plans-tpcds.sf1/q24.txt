@@ -1,7 +1,7 @@
 GpuSortPreservingMergeExec: [c_last_name@0 ASC NULLS LAST, c_first_name@1 ASC NULLS LAST, s_store_name@2 ASC NULLS LAST]
   GpuSortExec: expr=[c_last_name@0 ASC NULLS LAST, c_first_name@1 ASC NULLS LAST, s_store_name@2 ASC NULLS LAST]
     GpuProjectExec: expr=[c_last_name@0 as c_last_name, c_first_name@1 as c_first_name, s_store_name@2 as s_store_name, sum(ssales.netpaid)@3 as paid]
-      NestedLoopJoinExec: join_type=Inner, filter=CAST(sum(ssales.netpaid)@0 AS Decimal128(38, 15)) > Float64(0.05) * avg(ssales.netpaid)@1, projection=[c_last_name@1, c_first_name@2, s_store_name@3, sum(ssales.netpaid)@4]
+      GpuNestedLoopJoinExec: join_type=Inner, filter=CAST(sum(ssales.netpaid)@0 AS Decimal128(38, 15)) > Float64(0.05) * avg(ssales.netpaid)@1, projection=[1, 2, 3, 4]
         GpuProjectExec: expr=[CAST(0.05 * CAST(avg(ssales.netpaid)@0 AS Float64) AS Decimal128(38, 15)) as Float64(0.05) * avg(ssales.netpaid)]
           GpuAggregateExec: group_by=[], aggr=[avg(ssales.netpaid)]
             GpuCoalescePartitionsExec
@@ -118,7 +118,7 @@ GpuSortPreservingMergeExec: [c_last_name@0 ASC NULLS LAST, c_first_name@1 ASC NU
 GpuSortPreservingMergeExec: row_width=112, subtree_max_row_bytes=720
   GpuSortExec: row_width=112, subtree_max_row_bytes=720
     GpuProjectExec: row_width=112, subtree_max_row_bytes=720
-      NestedLoopJoinExec: row_width=112, subtree_max_row_bytes=720
+      GpuNestedLoopJoinExec: row_width=112, subtree_max_row_bytes=720
         GpuProjectExec: row_width=16, subtree_max_row_bytes=720
           GpuAggregateExec: row_width=16, subtree_max_row_bytes=720
             GpuCoalescePartitionsExec: row_width=24, subtree_max_row_bytes=720

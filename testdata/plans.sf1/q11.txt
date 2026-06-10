@@ -1,7 +1,7 @@
 GpuSortPreservingMergeExec: [value@1 DESC]
   GpuSortExec: expr=[value@1 DESC]
     GpuProjectExec: expr=[ps_partkey@0 as ps_partkey, sum(partsupp.ps_supplycost * partsupp.ps_availqty)@1 as value]
-      NestedLoopJoinExec: join_type=Inner, filter=CAST(sum(partsupp.ps_supplycost * partsupp.ps_availqty)@0 AS Decimal128(38, 15)) > sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.000002)@1, projection=[ps_partkey@1, sum(partsupp.ps_supplycost * partsupp.ps_availqty)@2]
+      GpuNestedLoopJoinExec: join_type=Inner, filter=CAST(sum(partsupp.ps_supplycost * partsupp.ps_availqty)@0 AS Decimal128(38, 15)) > sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.000002)@1, projection=[1, 2]
         GpuProjectExec: expr=[CAST(CAST(sum(partsupp.ps_supplycost * partsupp.ps_availqty)@0 AS Float64) * 0.000002 AS Decimal128(38, 15)) as sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.000002)]
           GpuAggregateExec: group_by=[], aggr=[sum(partsupp.ps_supplycost * partsupp.ps_availqty)]
             GpuCoalescePartitionsExec
@@ -54,7 +54,7 @@ GpuSortPreservingMergeExec: [value@1 DESC]
 GpuSortPreservingMergeExec: row_width=24, subtree_max_row_bytes=88
   GpuSortExec: row_width=24, subtree_max_row_bytes=88
     GpuProjectExec: row_width=24, subtree_max_row_bytes=88
-      NestedLoopJoinExec: row_width=24, subtree_max_row_bytes=88
+      GpuNestedLoopJoinExec: row_width=24, subtree_max_row_bytes=88
         GpuProjectExec: row_width=16, subtree_max_row_bytes=72
           GpuAggregateExec: row_width=16, subtree_max_row_bytes=72
             GpuCoalescePartitionsExec: row_width=16, subtree_max_row_bytes=72

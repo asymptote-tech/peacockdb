@@ -24,7 +24,7 @@ GpuSortPreservingMergeExec: [rnk@0 ASC NULLS LAST]
                                               GpuProjectExec: expr=[ss_item_sk@0 as item_sk, avg(ss1.ss_net_profit)@1 as rank_col]
                                                 GpuCoalesceBatchesExec: target_batch_size=14128181
                                                   GpuFilterExec: predicate=CAST(avg(ss1.ss_net_profit)@1 AS Decimal128(30, 15)) > CAST(0.9 * rank_col@2 AS Decimal128(30, 15)), projection=[0, 1]
-                                                    NestedLoopJoinExec: join_type=Left
+                                                    GpuNestedLoopJoinExec: join_type=Left
                                                       GpuCoalescePartitionsExec
                                                         GpuAggregateExec: group_by=[ss_item_sk], aggr=[avg(ss1.ss_net_profit)]
                                                           GpuCoalesceBatchesExec: target_batch_size=14128181
@@ -54,7 +54,7 @@ GpuSortPreservingMergeExec: [rnk@0 ASC NULLS LAST]
                                               GpuProjectExec: expr=[ss_item_sk@0 as item_sk, avg(ss1.ss_net_profit)@1 as rank_col]
                                                 GpuCoalesceBatchesExec: target_batch_size=14128181
                                                   GpuFilterExec: predicate=CAST(avg(ss1.ss_net_profit)@1 AS Decimal128(30, 15)) > CAST(0.9 * rank_col@2 AS Decimal128(30, 15)), projection=[0, 1]
-                                                    NestedLoopJoinExec: join_type=Left
+                                                    GpuNestedLoopJoinExec: join_type=Left
                                                       GpuCoalescePartitionsExec
                                                         GpuAggregateExec: group_by=[ss_item_sk], aggr=[avg(ss1.ss_net_profit)]
                                                           GpuCoalesceBatchesExec: target_batch_size=14128181
@@ -106,7 +106,7 @@ GpuSortPreservingMergeExec: row_width=72, subtree_max_row_bytes=152
                                               GpuProjectExec: row_width=20, subtree_max_row_bytes=48
                                                 GpuCoalesceBatchesExec: row_width=20, subtree_max_row_bytes=48
                                                   GpuFilterExec: row_width=20, subtree_max_row_bytes=48
-                                                    NestedLoopJoinExec: row_width=28, subtree_max_row_bytes=48
+                                                    GpuNestedLoopJoinExec: row_width=28, subtree_max_row_bytes=48
                                                       GpuCoalescePartitionsExec: row_width=20, subtree_max_row_bytes=48
                                                         GpuAggregateExec: row_width=20, subtree_max_row_bytes=48
                                                           GpuCoalesceBatchesExec: row_width=28, subtree_max_row_bytes=48
@@ -136,7 +136,7 @@ GpuSortPreservingMergeExec: row_width=72, subtree_max_row_bytes=152
                                               GpuProjectExec: row_width=20, subtree_max_row_bytes=48
                                                 GpuCoalesceBatchesExec: row_width=20, subtree_max_row_bytes=48
                                                   GpuFilterExec: row_width=20, subtree_max_row_bytes=48
-                                                    NestedLoopJoinExec: row_width=28, subtree_max_row_bytes=48
+                                                    GpuNestedLoopJoinExec: row_width=28, subtree_max_row_bytes=48
                                                       GpuCoalescePartitionsExec: row_width=20, subtree_max_row_bytes=48
                                                         GpuAggregateExec: row_width=20, subtree_max_row_bytes=48
                                                           GpuCoalesceBatchesExec: row_width=28, subtree_max_row_bytes=48

@@ -1,5 +1,5 @@
 GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9_30_to_10@3 as h9_30_to_10, h10_to_10_30@4 as h10_to_10_30, h10_30_to_11@5 as h10_30_to_11, h11_to_11_30@6 as h11_to_11_30, h11_30_to_12@7 as h11_30_to_12, h12_to_12_30@0 as h12_to_12_30]
-  CrossJoinExec
+  GpuCrossJoinExec
     GpuProjectExec: expr=[count(*)@0 as h12_to_12_30]
       GpuAggregateExec: group_by=[], aggr=[count(*)]
         GpuCoalescePartitionsExec
@@ -37,7 +37,7 @@ GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9
                                     GpuRepartitionExec: partitioning=Hash([ss_hdemo_sk@1], 8), input_partitions=8
                                       GpuScanExec: batch_size=16777216
     GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9_30_to_10@3 as h9_30_to_10, h10_to_10_30@4 as h10_to_10_30, h10_30_to_11@5 as h10_30_to_11, h11_to_11_30@6 as h11_to_11_30, h11_30_to_12@0 as h11_30_to_12]
-      CrossJoinExec
+      GpuCrossJoinExec
         GpuProjectExec: expr=[count(*)@0 as h11_30_to_12]
           GpuAggregateExec: group_by=[], aggr=[count(*)]
             GpuCoalescePartitionsExec
@@ -75,7 +75,7 @@ GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9
                                         GpuRepartitionExec: partitioning=Hash([ss_hdemo_sk@1], 8), input_partitions=8
                                           GpuScanExec: batch_size=16777216
         GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9_30_to_10@3 as h9_30_to_10, h10_to_10_30@4 as h10_to_10_30, h10_30_to_11@5 as h10_30_to_11, h11_to_11_30@0 as h11_to_11_30]
-          CrossJoinExec
+          GpuCrossJoinExec
             GpuProjectExec: expr=[count(*)@0 as h11_to_11_30]
               GpuAggregateExec: group_by=[], aggr=[count(*)]
                 GpuCoalescePartitionsExec
@@ -113,7 +113,7 @@ GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9
                                             GpuRepartitionExec: partitioning=Hash([ss_hdemo_sk@1], 8), input_partitions=8
                                               GpuScanExec: batch_size=16777216
             GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9_30_to_10@3 as h9_30_to_10, h10_to_10_30@4 as h10_to_10_30, h10_30_to_11@0 as h10_30_to_11]
-              CrossJoinExec
+              GpuCrossJoinExec
                 GpuProjectExec: expr=[count(*)@0 as h10_30_to_11]
                   GpuAggregateExec: group_by=[], aggr=[count(*)]
                     GpuCoalescePartitionsExec
@@ -151,7 +151,7 @@ GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9
                                                 GpuRepartitionExec: partitioning=Hash([ss_hdemo_sk@1], 8), input_partitions=8
                                                   GpuScanExec: batch_size=16777216
                 GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9_30_to_10@3 as h9_30_to_10, h10_to_10_30@0 as h10_to_10_30]
-                  CrossJoinExec
+                  GpuCrossJoinExec
                     GpuProjectExec: expr=[count(*)@0 as h10_to_10_30]
                       GpuAggregateExec: group_by=[], aggr=[count(*)]
                         GpuCoalescePartitionsExec
@@ -189,7 +189,7 @@ GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9
                                                     GpuRepartitionExec: partitioning=Hash([ss_hdemo_sk@1], 8), input_partitions=8
                                                       GpuScanExec: batch_size=16777216
                     GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9_30_to_10@0 as h9_30_to_10]
-                      CrossJoinExec
+                      GpuCrossJoinExec
                         GpuProjectExec: expr=[count(*)@0 as h9_30_to_10]
                           GpuAggregateExec: group_by=[], aggr=[count(*)]
                             GpuCoalescePartitionsExec
@@ -226,7 +226,7 @@ GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9
                                                       GpuCoalesceBatchesExec: target_batch_size=16777216
                                                         GpuRepartitionExec: partitioning=Hash([ss_hdemo_sk@1], 8), input_partitions=8
                                                           GpuScanExec: batch_size=16777216
-                        CrossJoinExec
+                        GpuCrossJoinExec
                           GpuProjectExec: expr=[count(*)@0 as h8_30_to_9]
                             GpuAggregateExec: group_by=[], aggr=[count(*)]
                               GpuCoalescePartitionsExec
@@ -301,7 +301,7 @@ GpuProjectExec: expr=[h8_30_to_9@1 as h8_30_to_9, h9_to_9_30@2 as h9_to_9_30, h9
                                                             GpuScanExec: batch_size=16777216
 --- memory ---
 GpuProjectExec: row_width=64, subtree_max_row_bytes=128
-  CrossJoinExec: row_width=64, subtree_max_row_bytes=112
+  GpuCrossJoinExec: row_width=64, subtree_max_row_bytes=112
     GpuProjectExec: row_width=8, subtree_max_row_bytes=40
       GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
         GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
@@ -339,7 +339,7 @@ GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                                     GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
                                       GpuScanExec: row_width=12, subtree_max_row_bytes=12
     GpuProjectExec: row_width=56, subtree_max_row_bytes=112
-      CrossJoinExec: row_width=56, subtree_max_row_bytes=96
+      GpuCrossJoinExec: row_width=56, subtree_max_row_bytes=96
         GpuProjectExec: row_width=8, subtree_max_row_bytes=40
           GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
             GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
@@ -377,7 +377,7 @@ GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                                         GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
                                           GpuScanExec: row_width=12, subtree_max_row_bytes=12
         GpuProjectExec: row_width=48, subtree_max_row_bytes=96
-          CrossJoinExec: row_width=48, subtree_max_row_bytes=80
+          GpuCrossJoinExec: row_width=48, subtree_max_row_bytes=80
             GpuProjectExec: row_width=8, subtree_max_row_bytes=40
               GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
                 GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
@@ -415,7 +415,7 @@ GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                                             GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
                                               GpuScanExec: row_width=12, subtree_max_row_bytes=12
             GpuProjectExec: row_width=40, subtree_max_row_bytes=80
-              CrossJoinExec: row_width=40, subtree_max_row_bytes=64
+              GpuCrossJoinExec: row_width=40, subtree_max_row_bytes=64
                 GpuProjectExec: row_width=8, subtree_max_row_bytes=40
                   GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
                     GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
@@ -453,7 +453,7 @@ GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                                                 GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
                                                   GpuScanExec: row_width=12, subtree_max_row_bytes=12
                 GpuProjectExec: row_width=32, subtree_max_row_bytes=64
-                  CrossJoinExec: row_width=32, subtree_max_row_bytes=48
+                  GpuCrossJoinExec: row_width=32, subtree_max_row_bytes=48
                     GpuProjectExec: row_width=8, subtree_max_row_bytes=40
                       GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
                         GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
@@ -491,7 +491,7 @@ GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                                                     GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
                                                       GpuScanExec: row_width=12, subtree_max_row_bytes=12
                     GpuProjectExec: row_width=24, subtree_max_row_bytes=48
-                      CrossJoinExec: row_width=24, subtree_max_row_bytes=40
+                      GpuCrossJoinExec: row_width=24, subtree_max_row_bytes=40
                         GpuProjectExec: row_width=8, subtree_max_row_bytes=40
                           GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
                             GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40
@@ -528,7 +528,7 @@ GpuProjectExec: row_width=64, subtree_max_row_bytes=128
                                                       GpuCoalesceBatchesExec: row_width=12, subtree_max_row_bytes=12
                                                         GpuRepartitionExec: row_width=12, subtree_max_row_bytes=12
                                                           GpuScanExec: row_width=12, subtree_max_row_bytes=12
-                        CrossJoinExec: row_width=16, subtree_max_row_bytes=40
+                        GpuCrossJoinExec: row_width=16, subtree_max_row_bytes=40
                           GpuProjectExec: row_width=8, subtree_max_row_bytes=40
                             GpuAggregateExec: row_width=8, subtree_max_row_bytes=40
                               GpuCoalescePartitionsExec: row_width=8, subtree_max_row_bytes=40

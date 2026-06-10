@@ -8,7 +8,7 @@ GpuSortPreservingMergeExec: [channel@0 ASC, i_brand_id@1 ASC, i_class_id@2 ASC, 
               GpuInterleaveExec
                 GpuProjectExec: expr=[store as channel, i_brand_id@0 as i_brand_id, i_class_id@1 as i_class_id, i_category_id@2 as i_category_id, sum(store_sales.ss_quantity * store_sales.ss_list_price)@3 as sales, count(*)@4 as number_sales]
                   GpuProjectExec: expr=[i_brand_id@1 as i_brand_id, i_class_id@2 as i_class_id, i_category_id@3 as i_category_id, sum(store_sales.ss_quantity * store_sales.ss_list_price)@4 as sum(store_sales.ss_quantity * store_sales.ss_list_price), count(*)@5 as count(*), avg_sales.average_sales@0 as avg_sales.average_sales]
-                    NestedLoopJoinExec: join_type=Inner, filter=CAST(sum(store_sales.ss_quantity * store_sales.ss_list_price)@0 AS Decimal128(32, 6)) > avg_sales.average_sales@1
+                    GpuNestedLoopJoinExec: join_type=Inner, filter=CAST(sum(store_sales.ss_quantity * store_sales.ss_list_price)@0 AS Decimal128(32, 6)) > avg_sales.average_sales@1
                       GpuProjectExec: expr=[CAST(avg(sq2.quantity * sq2.list_price)@0 AS Decimal128(32, 6)) as avg_sales.average_sales]
                         GpuAggregateExec: group_by=[], aggr=[avg(sq2.quantity * sq2.list_price)]
                           GpuCoalescePartitionsExec
@@ -163,7 +163,7 @@ GpuSortPreservingMergeExec: [channel@0 ASC, i_brand_id@1 ASC, i_class_id@2 ASC, 
                                                                                   GpuScanExec: batch_size=1729052
                 GpuProjectExec: expr=[catalog as channel, i_brand_id@0 as i_brand_id, i_class_id@1 as i_class_id, i_category_id@2 as i_category_id, sum(catalog_sales.cs_quantity * catalog_sales.cs_list_price)@3 as sales, count(*)@4 as number_sales]
                   GpuProjectExec: expr=[i_brand_id@1 as i_brand_id, i_class_id@2 as i_class_id, i_category_id@3 as i_category_id, sum(catalog_sales.cs_quantity * catalog_sales.cs_list_price)@4 as sum(catalog_sales.cs_quantity * catalog_sales.cs_list_price), count(*)@5 as count(*), avg_sales.average_sales@0 as avg_sales.average_sales]
-                    NestedLoopJoinExec: join_type=Inner, filter=CAST(sum(catalog_sales.cs_quantity * catalog_sales.cs_list_price)@0 AS Decimal128(32, 6)) > avg_sales.average_sales@1
+                    GpuNestedLoopJoinExec: join_type=Inner, filter=CAST(sum(catalog_sales.cs_quantity * catalog_sales.cs_list_price)@0 AS Decimal128(32, 6)) > avg_sales.average_sales@1
                       GpuProjectExec: expr=[CAST(avg(sq2.quantity * sq2.list_price)@0 AS Decimal128(32, 6)) as avg_sales.average_sales]
                         GpuAggregateExec: group_by=[], aggr=[avg(sq2.quantity * sq2.list_price)]
                           GpuCoalescePartitionsExec
@@ -318,7 +318,7 @@ GpuSortPreservingMergeExec: [channel@0 ASC, i_brand_id@1 ASC, i_class_id@2 ASC, 
                                                                                   GpuScanExec: batch_size=1729052
                 GpuProjectExec: expr=[web as channel, i_brand_id@0 as i_brand_id, i_class_id@1 as i_class_id, i_category_id@2 as i_category_id, sum(web_sales.ws_quantity * web_sales.ws_list_price)@3 as sales, count(*)@4 as number_sales]
                   GpuProjectExec: expr=[i_brand_id@1 as i_brand_id, i_class_id@2 as i_class_id, i_category_id@3 as i_category_id, sum(web_sales.ws_quantity * web_sales.ws_list_price)@4 as sum(web_sales.ws_quantity * web_sales.ws_list_price), count(*)@5 as count(*), avg_sales.average_sales@0 as avg_sales.average_sales]
-                    NestedLoopJoinExec: join_type=Inner, filter=CAST(sum(web_sales.ws_quantity * web_sales.ws_list_price)@0 AS Decimal128(32, 6)) > avg_sales.average_sales@1
+                    GpuNestedLoopJoinExec: join_type=Inner, filter=CAST(sum(web_sales.ws_quantity * web_sales.ws_list_price)@0 AS Decimal128(32, 6)) > avg_sales.average_sales@1
                       GpuProjectExec: expr=[CAST(avg(sq2.quantity * sq2.list_price)@0 AS Decimal128(32, 6)) as avg_sales.average_sales]
                         GpuAggregateExec: group_by=[], aggr=[avg(sq2.quantity * sq2.list_price)]
                           GpuCoalescePartitionsExec
@@ -482,7 +482,7 @@ GpuSortPreservingMergeExec: row_width=68, subtree_max_row_bytes=1242
               GpuInterleaveExec: row_width=68, subtree_max_row_bytes=1224
                 GpuProjectExec: row_width=68, subtree_max_row_bytes=360
                   GpuProjectExec: row_width=52, subtree_max_row_bytes=312
-                    NestedLoopJoinExec: row_width=52, subtree_max_row_bytes=132
+                    GpuNestedLoopJoinExec: row_width=52, subtree_max_row_bytes=132
                       GpuProjectExec: row_width=16, subtree_max_row_bytes=132
                         GpuAggregateExec: row_width=16, subtree_max_row_bytes=132
                           GpuCoalescePartitionsExec: row_width=24, subtree_max_row_bytes=132
@@ -637,7 +637,7 @@ GpuSortPreservingMergeExec: row_width=68, subtree_max_row_bytes=1242
                                                                                   GpuScanExec: row_width=8, subtree_max_row_bytes=8
                 GpuProjectExec: row_width=68, subtree_max_row_bytes=360
                   GpuProjectExec: row_width=52, subtree_max_row_bytes=312
-                    NestedLoopJoinExec: row_width=52, subtree_max_row_bytes=132
+                    GpuNestedLoopJoinExec: row_width=52, subtree_max_row_bytes=132
                       GpuProjectExec: row_width=16, subtree_max_row_bytes=132
                         GpuAggregateExec: row_width=16, subtree_max_row_bytes=132
                           GpuCoalescePartitionsExec: row_width=24, subtree_max_row_bytes=132
@@ -792,7 +792,7 @@ GpuSortPreservingMergeExec: row_width=68, subtree_max_row_bytes=1242
                                                                                   GpuScanExec: row_width=8, subtree_max_row_bytes=8
                 GpuProjectExec: row_width=68, subtree_max_row_bytes=360
                   GpuProjectExec: row_width=52, subtree_max_row_bytes=312
-                    NestedLoopJoinExec: row_width=52, subtree_max_row_bytes=132
+                    GpuNestedLoopJoinExec: row_width=52, subtree_max_row_bytes=132
                       GpuProjectExec: row_width=16, subtree_max_row_bytes=132
                         GpuAggregateExec: row_width=16, subtree_max_row_bytes=132
                           GpuCoalescePartitionsExec: row_width=24, subtree_max_row_bytes=132

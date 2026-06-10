@@ -14,7 +14,7 @@ use datafusion::physical_plan::coalesce_partitions::CoalescePartitionsExec;
 use datafusion::physical_plan::aggregates::AggregateExec;
 use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::joins::utils::JoinFilter;
-use datafusion::physical_plan::joins::HashJoinExec;
+use datafusion::physical_plan::joins::{CrossJoinExec, HashJoinExec, NestedLoopJoinExec};
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::limit::GlobalLimitExec;
 use datafusion::physical_plan::repartition::RepartitionExec;
@@ -156,6 +156,29 @@ impl GpuExtraDisplay for GpuHashJoinExec {
             s.push_str(&format!(", filter={}", jf.expression()));
         }
         if let Some(proj) = hj.projection.as_ref() {
+            let cols: Vec<String> = proj.iter().map(|i| i.to_string()).collect();
+            s.push_str(&format!(", projection=[{}]", cols.join(", ")));
+        }
+        s
+    }
+}
+
+gpu_exec_node!(GpuCrossJoinExec);
+impl GpuExtraDisplay for GpuCrossJoinExec {}
+
+gpu_exec_node!(GpuNestedLoopJoinExec);
+impl GpuExtraDisplay for GpuNestedLoopJoinExec {
+    fn extra_display_info(&self) -> String {
+        let nlj = self
+            .inner
+            .as_any()
+            .downcast_ref::<NestedLoopJoinExec>()
+            .unwrap();
+        let mut s = format!("join_type={:?}", nlj.join_type());
+        if let Some(jf) = nlj.filter() {
+            s.push_str(&format!(", filter={}", jf.expression()));
+        }
+        if let Some(proj) = nlj.projection() {
             let cols: Vec<String> = proj.iter().map(|i| i.to_string()).collect();
             s.push_str(&format!(", projection=[{}]", cols.join(", ")));
         }
@@ -430,6 +453,10 @@ impl PhysicalOptimizerRule for GpuExecutionRule {
                     }
                 };
                 Arc::new(GpuHashJoinExec::new(rebuilt.unwrap_or(node)))
+            } else if node.as_any().is::<CrossJoinExec>() {
+                Arc::new(GpuCrossJoinExec::new(node))
+            } else if node.as_any().is::<NestedLoopJoinExec>() {
+                Arc::new(GpuNestedLoopJoinExec::new(node))
             } else if node.as_any().is::<SortExec>() {
                 Arc::new(GpuSortExec::new(node))
             } else if node.as_any().is::<CoalesceBatchesExec>() {

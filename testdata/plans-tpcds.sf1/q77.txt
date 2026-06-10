@@ -54,7 +54,7 @@ GpuSortPreservingMergeExec: [channel@0 ASC, id@1 ASC, returns_@3 DESC]
                                               GpuScanExec: batch_size=4210752
                 GpuProjectExec: expr=[catalog channel as channel, cs_call_center_sk@0 as id, sales@1 as sales, CAST(returns_@3 AS Decimal128(22, 2)) as returns_, CAST(profit@2 - profit_loss@4 AS Decimal128(23, 2)) as profit]
                   GpuProjectExec: expr=[cs_call_center_sk@2 as cs_call_center_sk, sales@3 as sales, profit@4 as profit, returns_@0 as returns_, profit_loss@1 as profit_loss]
-                    CrossJoinExec
+                    GpuCrossJoinExec
                       GpuCoalescePartitionsExec
                         GpuProjectExec: expr=[sum(catalog_returns.cr_return_amount)@1 as returns_, sum(catalog_returns.cr_net_loss)@2 as profit_loss]
                           GpuAggregateExec: group_by=[cr_call_center_sk], aggr=[sum(catalog_returns.cr_return_amount), sum(catalog_returns.cr_net_loss)]
@@ -192,7 +192,7 @@ GpuSortPreservingMergeExec: row_width=84, subtree_max_row_bytes=510
                                               GpuScanExec: row_width=40, subtree_max_row_bytes=40
                 GpuProjectExec: row_width=84, subtree_max_row_bytes=152
                   GpuProjectExec: row_width=68, subtree_max_row_bytes=136
-                    CrossJoinExec: row_width=68, subtree_max_row_bytes=80
+                    GpuCrossJoinExec: row_width=68, subtree_max_row_bytes=80
                       GpuCoalescePartitionsExec: row_width=32, subtree_max_row_bytes=80
                         GpuProjectExec: row_width=32, subtree_max_row_bytes=80
                           GpuAggregateExec: row_width=36, subtree_max_row_bytes=80
