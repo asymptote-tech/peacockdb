@@ -104,15 +104,25 @@ fn plan_str(plan: &Arc<dyn ExecutionPlan>) -> String {
 }
 
 fn memory_str(plan: &Arc<dyn ExecutionPlan>) -> String {
+    fn total_estimate_cost(plan: &Arc<dyn ExecutionPlan>) -> usize {
+        let mem = analyze_memory(plan);
+        let node_cost = mem.input_row_bytes + mem.output_row_bytes;
+        node_cost + plan.children().iter().map(|c| total_estimate_cost(c)).sum::<usize>()
+    }
+
     fn walk(plan: &Arc<dyn ExecutionPlan>, indent: usize, lines: &mut Vec<String>) {
         let mem = analyze_memory(plan);
         let rw = row_width(&plan.schema());
+        let estimate_cost = mem.input_row_bytes + mem.output_row_bytes;
         lines.push(format!(
-            "{}{}: row_width={}, subtree_max_row_bytes={}",
+            "{}{}: row_width={}, subtree_max_row_bytes={}, estimate_input_bytes={}, estimate_output_bytes={}, estimate_cost={}",
             " ".repeat(indent),
             plan.name(),
             rw,
-            mem.subtree_max_row_bytes
+            mem.subtree_max_row_bytes,
+            mem.input_row_bytes,
+            mem.output_row_bytes,
+            estimate_cost,
         ));
         for child in plan.children() {
             walk(child, indent + 2, lines);
@@ -120,7 +130,7 @@ fn memory_str(plan: &Arc<dyn ExecutionPlan>) -> String {
     }
     let mut lines = Vec::new();
     walk(plan, 0, &mut lines);
-    lines.join("\n")
+    format!("total_estimate_cost={}\n{}", total_estimate_cost(plan), lines.join("\n"))
 }
 
 fn assert_plan_matches_canonical_at(plan: &Arc<dyn ExecutionPlan>, name: &str, dir: &std::path::Path) {
@@ -336,7 +346,7 @@ async fn test_cpu_executor_instrumented() {
         .await
         .unwrap();
 
-    let (batches, stats) = exec
+    let (batches, _plan, stats) = exec
         .execute_instrumented("SELECT count(*) FROM nation WHERE n_regionkey >= 0")
         .await
         .unwrap();
@@ -436,6 +446,57 @@ async fn test_gpu_nodes_group_join_sort() {
     for i in 0..counts.len() {
         assert_eq!(counts.value(i), 5, "region {} has {} nations, expected 5", i, counts.value(i));
     }
+}
+
+// ── Memory cost tests ────────────────────────────────────────────────────
+
+fn find_node(plan: &Arc<dyn ExecutionPlan>, name: &str) -> Option<Arc<dyn ExecutionPlan>> {
+    if plan.name() == name {
+        return Some(plan.clone());
+    }
+    plan.children().iter().find_map(|c| find_node(c, name))
+}
+
+#[tokio::test]
+async fn test_memory_cost_leaf_and_filter() {
+    let ctx = test_ctx(&testdata_minimal_dir()).await.unwrap();
+
+    // Leaf (GpuScanExec): no input, output = row_width, peak = row_width.
+    let scan_plan = ctx
+        .sql("SELECT n_nationkey FROM nation")
+        .await.unwrap()
+        .create_physical_plan().await.unwrap();
+
+    let scan_node = find_node(&scan_plan, "GpuScanExec").expect("expected GpuScanExec");
+    let scan_rw = row_width(&scan_node.schema());
+    let scan_mem = analyze_memory(&scan_node);
+
+    assert_eq!(scan_mem.input_row_bytes, 0, "leaf has no input");
+    assert_eq!(scan_mem.output_row_bytes, scan_rw, "leaf output = row_width");
+    assert_eq!(scan_mem.subtree_max_row_bytes, scan_rw, "leaf peak = row_width");
+
+    // Filter (GpuFilterExec) with trivial selectivity (1.0):
+    //   input  = child output width  (ratio 1.0 × child_row_width)
+    //   output = filter_row_width    (ratio 1.0 × sel 1.0 × output_width)
+    //   peak   = max(child_peak, input + output)
+    let filter_plan = ctx
+        .sql("SELECT n_nationkey FROM nation WHERE n_nationkey > 0")
+        .await.unwrap()
+        .create_physical_plan().await.unwrap();
+
+    let filter_node = find_node(&filter_plan, "GpuFilterExec").expect("expected GpuFilterExec");
+    let filter_rw = row_width(&filter_node.schema());
+    let child_rw = row_width(&filter_node.children()[0].schema());
+    let filter_mem = analyze_memory(&filter_node);
+
+    assert_eq!(filter_mem.input_row_bytes, child_rw, "filter input = child row_width");
+    assert_eq!(filter_mem.output_row_bytes, filter_rw, "filter output = row_width (sel=1.0)");
+    assert!(
+        filter_mem.subtree_max_row_bytes >= filter_mem.input_row_bytes + filter_mem.output_row_bytes,
+        "peak ({}) must be >= input + output ({})",
+        filter_mem.subtree_max_row_bytes,
+        filter_mem.input_row_bytes + filter_mem.output_row_bytes,
+    );
 }
 
 // ── Memory budget tests ──────────────────────────────────────────────────

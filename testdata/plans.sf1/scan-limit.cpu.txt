@@ -1,0 +1,1 @@
+ParquetExec: output_bytes=472

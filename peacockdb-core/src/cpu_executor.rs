@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::fmt;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
@@ -14,6 +15,7 @@ use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::{
     execute_stream, DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
 };
+use datafusion::physical_plan::union::{InterleaveExec, UnionExec};
 use futures::Stream;
 
 use crate::gpu_rule::{
@@ -73,13 +75,14 @@ fn with_batch_size(ctx: Arc<TaskContext>, batch_size: usize) -> Arc<TaskContext>
 // ---------------------------------------------------------------------------
 
 /// Per-node memory stats collected via the `on_node` callback.
+#[derive(Clone)]
 pub struct NodeMemoryStats {
     /// Name of the CPU node that was executed (GPU wrapper already stripped).
     pub node_name: String,
     /// Sum of `get_array_memory_size()` across all output batches (allocated upper bound).
     pub allocated_bytes: usize,
-    /// Sum of logical (exact) sizes across all output batches.
-    pub logical_bytes: usize,
+    /// Logical byte size of all batches produced by this node.
+    pub output_bytes: usize,
     /// Total number of output rows across all batches.
     pub row_count: usize,
     /// Largest single batch (in rows) produced by this node.
@@ -126,11 +129,18 @@ pub async fn execute_node_by_node(
     task_ctx: Arc<TaskContext>,
     on_node: &mut dyn FnMut(&str, &NodeMemoryStats),
 ) -> Result<Vec<RecordBatch>> {
-    let collector: Arc<Mutex<Vec<NodeMemoryStats>>> = Arc::new(Mutex::new(Vec::new()));
-    let stream = build_stream(root, task_ctx, collector.clone())?;
+    let collector: Arc<Mutex<Vec<(usize, NodeMemoryStats)>>> = Arc::new(Mutex::new(Vec::new()));
+    let seq_counter = Arc::new(AtomicUsize::new(0));
+    let stream = build_stream(root.clone(), task_ctx, collector.clone(), seq_counter)?;
     let batches = drain_stream(stream).await?;
-    let stats = std::mem::take(&mut *collector.lock().unwrap());
-    for s in &stats {
+    let mut stats = std::mem::take(&mut *collector.lock().unwrap());
+    // Stats are pushed in stream-completion/Drop order. That is normally
+    // post-order, but a LIMIT parent finalizes (returns None) before its
+    // abandoned child stream is dropped, which inverts the two. Sort by the
+    // post-order `seq` assigned at build time so consumers (e.g. cpu_stats_str)
+    // can rely on strict children-before-parent ordering.
+    stats.sort_by_key(|(seq, _)| *seq);
+    for (_, s) in &stats {
         on_node(&s.node_name, s);
     }
     Ok(batches)
@@ -143,22 +153,14 @@ pub async fn execute_node_by_node_instrumented(
     task_ctx: Arc<TaskContext>,
     stats: &mut Vec<NodeMemoryStats>,
 ) -> Result<Vec<RecordBatch>> {
-    execute_node_by_node(root, task_ctx, &mut |_, s| {
-        stats.push(NodeMemoryStats {
-            node_name: s.node_name.clone(),
-            allocated_bytes: s.allocated_bytes,
-            logical_bytes: s.logical_bytes,
-            row_count: s.row_count,
-            max_batch_rows: s.max_batch_rows,
-        });
-    })
-    .await
+    execute_node_by_node(root, task_ctx, &mut |_, s| stats.push(s.clone())).await
 }
 
 fn build_stream(
     root: Arc<dyn ExecutionPlan>,
     task_ctx: Arc<TaskContext>,
-    collector: Arc<Mutex<Vec<NodeMemoryStats>>>,
+    collector: Arc<Mutex<Vec<(usize, NodeMemoryStats)>>>,
+    seq_counter: Arc<AtomicUsize>,
 ) -> Result<SendableRecordBatchStream> {
     let (cpu_node, batch_size_override) = strip_gpu(root);
 
@@ -176,7 +178,8 @@ fn build_stream(
         // BoundedWindowAggExec (mode=Sorted) reject their input
         // ("PARTITION BY expression to be ordered").
         let child_eq = child.properties().equivalence_properties().clone();
-        let child_stream = build_stream(child.clone(), task_ctx.clone(), collector.clone())?;
+        let child_stream =
+            build_stream(child.clone(), task_ctx.clone(), collector.clone(), seq_counter.clone())?;
         stream_children.push(Arc::new(StreamSourceExec::new(
             child_schema,
             child_eq,
@@ -186,12 +189,28 @@ fn build_stream(
 
     let node_name = cpu_node.name().to_string();
     let node_schema = cpu_node.schema();
-    let node = cpu_node.with_new_children(stream_children)?;
+    // InterleaveExec requires Hash-partitioned children and rejects the
+    // StreamSourceExec stubs (UnknownPartitioning(1)); for that one node UnionExec
+    // is a semantically-equivalent single-stream substitute. Any *other*
+    // with_new_children failure is a real error and must propagate (master used
+    // `?` here — don't blanket-swallow it).
+    let node = match cpu_node.clone().with_new_children(stream_children.clone()) {
+        Ok(n) => n,
+        Err(_) if cpu_node.as_any().is::<InterleaveExec>() => {
+            Arc::new(UnionExec::new(stream_children))
+        }
+        Err(e) => return Err(e),
+    };
+    // Assign this node's post-order sequence *after* its children were built
+    // (they incremented the counter first), so children always sort before their
+    // parent regardless of stream-completion/Drop timing (see I2 / LIMIT case).
+    let seq = seq_counter.fetch_add(1, Ordering::Relaxed);
     // Use execute_stream (not execute(0)) so multi-partition nodes (UnionExec,
     // RepartitionExec, …) are coalesced into a single stream instead of
     // silently dropping all partitions but one.
     let inner = execute_stream(node, task_ctx)?;
     Ok(Box::pin(InstrumentedStream::new(
+        seq,
         node_name,
         node_schema,
         inner,
@@ -295,35 +314,64 @@ impl ExecutionPlan for StreamSourceExec {
 // ---------------------------------------------------------------------------
 
 struct InstrumentedStream {
+    seq: usize,
     node_name: String,
     schema: SchemaRef,
     inner: SendableRecordBatchStream,
     allocated_bytes: usize,
-    logical_bytes: usize,
+    output_bytes: usize,
     row_count: usize,
     max_batch_rows: usize,
-    collector: Arc<Mutex<Vec<NodeMemoryStats>>>,
+    collector: Arc<Mutex<Vec<(usize, NodeMemoryStats)>>>,
     done: bool,
 }
 
 impl InstrumentedStream {
     fn new(
+        seq: usize,
         node_name: String,
         schema: SchemaRef,
         inner: SendableRecordBatchStream,
-        collector: Arc<Mutex<Vec<NodeMemoryStats>>>,
+        collector: Arc<Mutex<Vec<(usize, NodeMemoryStats)>>>,
     ) -> Self {
         Self {
+            seq,
             node_name,
             schema,
             inner,
             allocated_bytes: 0,
-            logical_bytes: 0,
+            output_bytes: 0,
             row_count: 0,
             max_batch_rows: 0,
             collector,
             done: false,
         }
+    }
+}
+
+impl InstrumentedStream {
+    fn push_stat(&mut self) {
+        if !self.done {
+            self.done = true;
+            self.collector.lock().unwrap().push((
+                self.seq,
+                NodeMemoryStats {
+                    node_name: self.node_name.clone(),
+                    allocated_bytes: self.allocated_bytes,
+                    output_bytes: self.output_bytes,
+                    row_count: self.row_count,
+                    max_batch_rows: self.max_batch_rows,
+                },
+            ));
+        }
+    }
+}
+
+// Fires even when the stream is dropped before being fully exhausted
+// (e.g. the child of a GlobalLimitExec is abandoned after LIMIT rows).
+impl Drop for InstrumentedStream {
+    fn drop(&mut self) {
+        self.push_stat();
     }
 }
 
@@ -337,22 +385,13 @@ impl Stream for InstrumentedStream {
             match item {
                 Some(Ok(batch)) => {
                     me.allocated_bytes += batch_allocated_size(batch);
-                    me.logical_bytes += batch_logical_size(batch);
+                    me.output_bytes += batch_logical_size(batch);
                     me.row_count += batch.num_rows();
                     if batch.num_rows() > me.max_batch_rows {
                         me.max_batch_rows = batch.num_rows();
                     }
                 }
-                None if !me.done => {
-                    me.done = true;
-                    me.collector.lock().unwrap().push(NodeMemoryStats {
-                        node_name: me.node_name.clone(),
-                        allocated_bytes: me.allocated_bytes,
-                        logical_bytes: me.logical_bytes,
-                        row_count: me.row_count,
-                        max_batch_rows: me.max_batch_rows,
-                    });
-                }
+                None => me.push_stat(),
                 _ => {}
             }
         }

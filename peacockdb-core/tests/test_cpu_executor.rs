@@ -7,7 +7,7 @@ use datafusion::arrow::util::pretty::pretty_format_batches;
 use datafusion::physical_plan::ExecutionPlan;
 
 use peacockdb_core::cpu_executor::{
-    execute_node_by_node, execute_node_by_node_instrumented, NodeMemoryStats,
+    execute_node_by_node_instrumented, NodeMemoryStats,
 };
 use peacockdb_core::{create_context_with_tables, build_session_state, register_tables_for};
 
@@ -25,6 +25,14 @@ fn tpcds_testdata_dir() -> PathBuf {
 
 fn tpcds_queries_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpcds-queries")
+}
+
+fn canondata_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/plans.sf1")
+}
+
+fn tpcds_canondata_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/plans-tpcds.sf1")
 }
 
 fn has_gpu_node(plan: &Arc<dyn ExecutionPlan>) -> bool {
@@ -59,6 +67,9 @@ fn fmt_plan(plan: &Arc<dyn ExecutionPlan>) -> String {
 }
 
 async fn make_ctx(budget: usize) -> datafusion::execution::context::SessionContext {
+    // 1 partition on purpose: the per-node cost canon (`.cpu.txt`) records
+    // output_bytes, which is batch-boundary sensitive and only reproducible
+    // single-stream. Multi-partition determinism is tracked in #53.
     create_context_with_tables(&testdata_dir(), 1, budget)
         .await
         .unwrap()
@@ -118,8 +129,76 @@ fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
     }
 }
 
+/// Format per-node CPU execution stats as a pre-order tree. Stats are collected
+/// post-order during execution; the plan tree supplies the indentation.
+fn cpu_stats_str(plan: &Arc<dyn ExecutionPlan>, stats: &[NodeMemoryStats]) -> String {
+    struct Node<'a> {
+        stat: &'a NodeMemoryStats,
+        children: Vec<Node<'a>>,
+    }
+
+    fn collect<'a>(plan: &Arc<dyn ExecutionPlan>, stats: &'a [NodeMemoryStats], idx: &mut usize) -> Node<'a> {
+        let children: Vec<Node<'a>> = plan.children().iter()
+            .map(|c| collect(c, stats, idx))
+            .collect();
+        let stat = &stats[*idx];
+        *idx += 1;
+        Node { stat, children }
+    }
+
+    fn walk(node: &Node, indent: usize, lines: &mut Vec<String>) {
+        lines.push(format!(
+            "{}{}: output_bytes={}",
+            " ".repeat(indent),
+            node.stat.node_name,
+            node.stat.output_bytes,
+        ));
+        for child in &node.children {
+            walk(child, indent + 2, lines);
+        }
+    }
+
+    let root = collect(plan, stats, &mut 0);
+    let mut lines = Vec::new();
+    walk(&root, 0, &mut lines);
+    lines.join("\n")
+}
+
+/// Compare the per-node CPU cost tree to the `.cpu.txt` canonical in `dir`, or
+/// regenerate it when `UPDATE_CANONICAL` is set.
+fn assert_cpu_cost_canonical(
+    plan: &Arc<dyn ExecutionPlan>,
+    stats: &[NodeMemoryStats],
+    name: &str,
+    dir: &std::path::Path,
+) {
+    let canonical_path = dir.join(format!("{name}.cpu.txt"));
+    let actual = cpu_stats_str(plan, stats);
+
+    if std::env::var("UPDATE_CANONICAL").is_ok() {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(&canonical_path, &actual).unwrap();
+        eprintln!("Updated CPU canonical: {}", canonical_path.display());
+        return;
+    }
+
+    let canonical = std::fs::read_to_string(&canonical_path).unwrap_or_else(|_| {
+        panic!(
+            "CPU canonical file not found: {}\nRun with UPDATE_CANONICAL=1 to generate it.",
+            canonical_path.display()
+        )
+    });
+    assert_eq!(
+        actual,
+        canonical.trim_end(),
+        "CPU cost tree for '{name}' does not match {}",
+        canonical_path.display()
+    );
+}
+
 /// Run `name.sql` through both plain DataFusion and the CPU executor, then
-/// assert that the result sets are equal (order-independent).
+/// assert that the result sets are equal (order-independent) and that the
+/// per-node CPU cost tree matches the `.cpu.txt` canonical.
 async fn assert_cpu_results_match_datafusion(name: &str) {
     let data_dir = testdata_dir();
 
@@ -131,10 +210,12 @@ async fn assert_cpu_results_match_datafusion(name: &str) {
     // Ground truth: plain DataFusion without GPU rules.
     let expected = df_ctx.sql(&sql).await.unwrap().collect().await.unwrap();
 
-    // CPU executor: GPU-annotated plan executed node-by-node on CPU.
+    // CPU executor: GPU-annotated plan executed node-by-node on CPU, capturing
+    // per-node memory stats for cost canonization.
     let cpu_ctx = make_ctx(FULL_BUDGET).await;
     let plan = cpu_ctx.sql(&sql).await.unwrap().create_physical_plan().await.unwrap();
-    let actual = execute_node_by_node(plan, cpu_ctx.task_ctx(), &mut |_, _| {})
+    let mut stats: Vec<NodeMemoryStats> = vec![];
+    let actual = execute_node_by_node_instrumented(plan.clone(), cpu_ctx.task_ctx(), &mut stats)
         .await
         .unwrap();
 
@@ -143,6 +224,8 @@ async fn assert_cpu_results_match_datafusion(name: &str) {
         batches_to_sorted_str(&expected),
         "CPU executor result for '{name}' differs from plain DataFusion"
     );
+
+    assert_cpu_cost_canonical(&plan, &stats, name, &canondata_dir());
 }
 
 macro_rules! cpu_result_test {
@@ -198,11 +281,14 @@ async fn assert_cpu_results_match_datafusion_tpcds(name: &str) {
     df_ctx = register_tables_for(df_ctx, &data_dir).await.unwrap();
     let expected = df_ctx.sql(&sql).await.unwrap().collect().await.unwrap();
 
+    // 1 partition on purpose — see make_ctx / #53 (cost canon needs single-stream
+    // execution for reproducible per-node output_bytes).
     let cpu_ctx = create_context_with_tables(&data_dir, 1, FULL_BUDGET)
         .await
         .unwrap();
     let plan = cpu_ctx.sql(&sql).await.unwrap().create_physical_plan().await.unwrap();
-    let actual = execute_node_by_node(plan, cpu_ctx.task_ctx(), &mut |_, _| {})
+    let mut stats: Vec<NodeMemoryStats> = vec![];
+    let actual = execute_node_by_node_instrumented(plan.clone(), cpu_ctx.task_ctx(), &mut stats)
         .await
         .unwrap();
 
@@ -211,6 +297,8 @@ async fn assert_cpu_results_match_datafusion_tpcds(name: &str) {
         batches_to_sorted_str(&expected),
         "CPU executor result for TPC-DS '{name}' differs from plain DataFusion"
     );
+
+    assert_cpu_cost_canonical(&plan, &stats, name, &tpcds_canondata_dir());
 }
 
 macro_rules! tpcds_cpu_result_test {
@@ -382,8 +470,8 @@ async fn test_memory_boundary_preserved_tight_budget() {
     eprintln!("Per-node stats (post-order):");
     for s in &stats {
         eprintln!(
-            "  {}: rows={}, max_batch={}, alloc={}B, logical={}B",
-            s.node_name, s.row_count, s.max_batch_rows, s.allocated_bytes, s.logical_bytes
+            "  {}: rows={}, max_batch={}, alloc={}B, out={}B",
+            s.node_name, s.row_count, s.max_batch_rows, s.allocated_bytes, s.output_bytes
         );
     }
 
@@ -429,13 +517,13 @@ async fn test_instrumented_stats_are_populated() {
         "root node allocated_bytes should be > 0"
     );
     assert!(
-        root_stat.logical_bytes > 0,
-        "root node logical_bytes should be > 0"
+        root_stat.output_bytes > 0,
+        "root node output_bytes should be > 0"
     );
     assert!(
-        root_stat.allocated_bytes >= root_stat.logical_bytes,
-        "allocated_bytes ({}) must be >= logical_bytes ({})",
+        root_stat.allocated_bytes >= root_stat.output_bytes,
+        "allocated_bytes ({}) must be >= output_bytes ({})",
         root_stat.allocated_bytes,
-        root_stat.logical_bytes
+        root_stat.output_bytes
     );
 }

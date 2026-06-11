@@ -1,0 +1,3 @@
+GpuNestedLoopJoinExec: output_bytes=649
+  ParquetExec: output_bytes=23
+  ParquetExec: output_bytes=216

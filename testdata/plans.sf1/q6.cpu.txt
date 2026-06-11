@@ -1,0 +1,5 @@
+ProjectionExec: output_bytes=1
+  AggregateExec: output_bytes=1
+    CoalesceBatchesExec: output_bytes=28540
+      FilterExec: output_bytes=28584
+        ParquetExec: output_bytes=27005468
