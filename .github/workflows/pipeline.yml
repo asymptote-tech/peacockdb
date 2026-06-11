@@ -119,6 +119,12 @@ jobs:
           CMAKE_GENERATOR: Ninja
           LD_LIBRARY_PATH: /opt/conda/lib
           CUDF_ROOT: /opt/conda
+          # Same as the cpp-cpu job: without this, linking test_gpu_executor
+          # (full DataFusion/Arrow + libpeacock_gpu, now larger with the TPC-DS
+          # suite merged in) overflows the container tmpfs while lld writes its
+          # mmap'd output and crashes with SIGBUS. The failure is at *link* time,
+          # so a post-build strip can't help — debug info must not be emitted.
+          RUSTFLAGS: "-C debuginfo=0"
 
       - name: Upload GPU test binaries
         uses: actions/upload-artifact@v4
