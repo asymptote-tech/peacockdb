@@ -1,0 +1,17 @@
+SortExec: output_bytes=891
+  ProjectionExec: output_bytes=12488
+    GpuWindowExec: output_bytes=1232
+      SortExec: output_bytes=1056
+        AggregateExec: output_bytes=1056
+          CoalesceBatchesExec: output_bytes=1506
+            HashJoinExec: output_bytes=1506
+              CoalesceBatchesExec: output_bytes=128
+                FilterExec: output_bytes=128
+                  ParquetExec: output_bytes=602656
+              ProjectionExec: output_bytes=1041912
+                CoalesceBatchesExec: output_bytes=1041912
+                  HashJoinExec: output_bytes=1041926
+                    CoalesceBatchesExec: output_bytes=25288
+                      FilterExec: output_bytes=25288
+                        ParquetExec: output_bytes=85500
+                    ParquetExec: output_bytes=6024841

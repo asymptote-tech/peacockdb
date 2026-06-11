@@ -1,0 +1,5 @@
+AggregateExec: output_bytes=11
+  CoalesceBatchesExec: output_bytes=1116018
+    HashJoinExec: output_bytes=1116668
+      ParquetExec: output_bytes=18562500
+      ParquetExec: output_bytes=74265036

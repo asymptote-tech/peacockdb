@@ -1,0 +1,16 @@
+ProjectionExec: output_bytes=439
+  SortExec: output_bytes=852
+    ProjectionExec: output_bytes=884
+      AggregateExec: output_bytes=455
+        ProjectionExec: output_bytes=7497
+          CoalesceBatchesExec: output_bytes=7497
+            HashJoinExec: output_bytes=7497
+              CoalesceBatchesExec: output_bytes=2841
+                FilterExec: output_bytes=2841
+                  ParquetExec: output_bytes=225000
+              CoalesceBatchesExec: output_bytes=366832
+                HashJoinExec: output_bytes=366856
+                  CoalesceBatchesExec: output_bytes=124
+                    FilterExec: output_bytes=124
+                      ParquetExec: output_bytes=903984
+                  ParquetExec: output_bytes=24123385

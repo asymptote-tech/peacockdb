@@ -1,0 +1,3 @@
+CoalesceBatchesExec: output_bytes=19818044
+  FilterExec: output_bytes=19818086
+    ParquetExec: output_bytes=49510024

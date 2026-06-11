@@ -1,0 +1,3 @@
+GpuCrossJoinExec: output_bytes=1640
+  ParquetExec: output_bytes=23
+  ParquetExec: output_bytes=216

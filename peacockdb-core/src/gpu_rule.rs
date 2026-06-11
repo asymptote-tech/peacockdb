@@ -872,3 +872,69 @@ impl PhysicalOptimizerRule for GpuMemoryBudgetRule {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::physical_plan::empty::EmptyExec;
+
+    fn empty(fields: Vec<Field>) -> Arc<dyn ExecutionPlan> {
+        Arc::new(EmptyExec::new(Arc::new(Schema::new(fields))))
+    }
+
+    fn child(subtree_max_row_bytes: usize, output_width: usize, output_row_ratio: f64) -> SubtreeMemory {
+        SubtreeMemory {
+            subtree_max_row_bytes,
+            output_width,
+            output_row_ratio,
+            input_row_bytes: 0,
+            output_row_bytes: 0,
+        }
+    }
+
+    // Focused coverage of the CrossJoin/NestedLoopJoin cost arm in
+    // node_memory_with (CrossJoinExec and NestedLoopJoinExec share the arm).
+    // Both estimators are trivial (selectivity = cardinality = 1.0).
+    #[test]
+    fn cross_nlj_cost_arm() {
+        let plan: Arc<dyn ExecutionPlan> = Arc::new(CrossJoinExec::new(
+            empty(vec![Field::new("a", DataType::Int64, false)]),
+            empty(vec![Field::new("b", DataType::Int64, false)]),
+        ));
+        assert_eq!(plan.name(), "CrossJoinExec");
+
+        // Distinct ratios/widths so each term is individually checkable; small
+        // child peaks so the join's own footprint dominates subtree_max.
+        let left = child(10, 8, 2.0);
+        let right = child(20, 16, 3.0);
+
+        let mem = node_memory_with(
+            &plan,
+            &[left, right],
+            &TrivialSelectivityEstimator,
+            &TrivialCardinalityEstimator,
+        );
+
+        let card = 1.0; // TrivialCardinalityEstimator
+        let output_width = row_width(&plan.schema());
+        let left_bytes = (left.output_row_ratio * left.output_width as f64) as usize; // 16
+        let right_bytes = (right.output_row_ratio * right.output_width as f64) as usize; // 48
+        let output_ratio = left.output_row_ratio * right.output_row_ratio * card; // 6.0
+        let output_bytes = (output_ratio * output_width as f64) as usize;
+        let own = left_bytes + right_bytes + output_bytes;
+
+        assert_eq!(mem.output_width, output_width);
+        assert_eq!(mem.output_row_ratio, output_ratio);
+        assert_eq!(mem.input_row_bytes, left_bytes + right_bytes);
+        assert_eq!(mem.output_row_bytes, output_bytes);
+        assert_eq!(
+            mem.subtree_max_row_bytes,
+            left.subtree_max_row_bytes
+                .max(right.subtree_max_row_bytes)
+                .max(own)
+        );
+        // own (>= 64) dominates the deliberately tiny child peaks (10, 20).
+        assert_eq!(mem.subtree_max_row_bytes, own);
+    }
+}

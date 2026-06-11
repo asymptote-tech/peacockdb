@@ -1,0 +1,2 @@
+AggregateExec: output_bytes=2
+  ParquetExec: output_bytes=1500304

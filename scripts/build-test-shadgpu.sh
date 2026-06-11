@@ -42,10 +42,42 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# rsync over the flaky/bursty shad-gpu link. The connection stalls often, so
+# make each transfer self-healing instead of an all-or-nothing shot:
+#   --partial --inplace  keep partially-sent files and update them in place, so
+#                        a retry resumes the same file (no temp-rename restart).
+#   --timeout=90         abort a stalled connection instead of hanging forever,
+#                        so the loop can reconnect and resume.
+# Retries until rsync reports success (each attempt is bounded by --timeout),
+# capped so a genuinely-down host eventually fails instead of looping forever.
+# Caller passes mode flags (e.g. -r / -a) and the src/dst; -P/--partial/--inplace
+# /--timeout are added here.
+resilient_rsync() {
+  local attempt=1 max_attempts=100 rc=0
+  while :; do
+    rsync -P --partial --inplace --timeout=90 "$@" && return 0
+    rc=$?
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      echo "rsync: giving up after $attempt attempts (last rc=$rc)" >&2
+      return "$rc"
+    fi
+    echo "rsync: attempt $attempt stalled/failed (rc=$rc); resuming in 5s..." >&2
+    attempt=$((attempt + 1))
+    sleep 5
+  done
+}
+
 if [ "$BUILD" -eq 1 ]; then
   ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --gcc-version "$GCC_VERSION" --configure
   ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --gcc-version "$GCC_VERSION" --build
   ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --gcc-version "$GCC_VERSION" --install
+
+  # The FFI crate builds its own libpeacock_gpu.so via the `cmake` crate in
+  # cargo's OUT_DIR, and cmake caches the resolved cudf_DIR/Arrow there. If the
+  # previous build used a different cuDF root (e.g. the CPU build-test.sh path's
+  # rapids-26.02), that stale cache makes the link pick the wrong Arrow and fail
+  # (`ld returned 1`). Clean it so it reconfigures against this build's CUDF_ROOT.
+  cargo clean -p peacockdb-ffi
 
   mkdir -p "$RUST_TESTS_STAGING"
   for t in "${RUST_TESTS[@]}"; do
@@ -78,11 +110,11 @@ if [ "$RSYNC" -eq 1 ]; then
   for t in "${RUST_TESTS[@]}"; do
     [ -f "$RUST_TESTS_STAGING/$t" ] && strip --strip-debug "$RUST_TESTS_STAGING/$t"
   done
-  rsync -r -P cpp/install/* shad-gpu:/home/info/peacockdb/cpp/install/
+  resilient_rsync -r cpp/install/* shad-gpu:/home/info/peacockdb/cpp/install/
   # Ship our setup-glibc.sh (with patch_rust_dir) so --patch uses the
   # version that knows about cpp/install/rust-tests/.
   ssh shad-gpu "mkdir -p /home/info/peacockdb/scripts"
-  rsync -a scripts/setup-glibc.sh shad-gpu:/home/info/peacockdb/scripts/
+  resilient_rsync -a scripts/setup-glibc.sh shad-gpu:/home/info/peacockdb/scripts/
 fi
 
 if [ "$PATCH" -eq 1 ]; then

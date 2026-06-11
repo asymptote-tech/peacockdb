@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::fmt;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
@@ -14,7 +15,7 @@ use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::{
     execute_stream, DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
 };
-use datafusion::physical_plan::union::UnionExec;
+use datafusion::physical_plan::union::{InterleaveExec, UnionExec};
 use futures::Stream;
 
 use crate::gpu_rule::{
@@ -118,48 +119,28 @@ pub fn strip_gpu_tree(plan: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionP
 /// For each node the function:
 /// 1. Strips the GPU wrapper (if any) → CPU node + optional batch_size.
 /// 2. Applies the batch_size override to `TaskContext` if present.
-/// 3. Recurses into the CPU node's children.
-/// 4. Wraps each child's results in `MemoryExec` (DataFusion's in-memory source).
-/// 5. Calls `collect()` on the isolated CPU node with its `MemoryExec` stubs.
-/// 6. Calls `on_node(cpu_node_name, &input_batches, &output_batches)`.
-///
-/// TODO: this implementation OOMs on wide joins (e.g. hash-join.sql at SF=1) because
-/// it calls `collect()` on every child before the parent runs, holding both full inputs
-/// of a join in memory simultaneously. Fix by making execution streaming:
-///
-/// 1. `StreamSourceExec` — a custom `ExecutionPlan` wrapping a `SendableRecordBatchStream`
-///    that returns it from `execute(0, ctx)`. Lets a live stream be passed as a child to
-///    any DataFusion operator without materializing it first.
-///
-/// 2. `InstrumentedStream` — a stream adaptor that accumulates `NodeMemoryStats` as
-///    batches flow through (row counts, allocated/logical bytes, max batch size) and
-///    fires the `on_node` callback when the stream is exhausted.
-///
-/// 3. Refactor `execute_node_by_node` to return `SendableRecordBatchStream`:
-///    - For each child, recurse to get a child stream.
-///    - Wrap each child stream in `InstrumentedStream` → `StreamSourceExec`.
-///    - Call `cpu_node.with_new_children(stream_sources)?.execute(0, task_ctx)`.
-///    - Return the resulting stream wrapped in its own `InstrumentedStream`.
-///
-/// 4. Update `execute_node_by_node_instrumented` to `collect()` only the root stream;
-///    all intermediate stats are populated by `InstrumentedStream` as the root is consumed.
-///
-/// 5. The `on_node` callback receives `(&str, &NodeMemoryStats)` — intermediate batches
-///    are not available all at once in streaming mode.
-///
-/// After the fix: hash join build side is still materialized by DataFusion internally
-/// (unavoidable), but the probe side streams through `batch_size` rows at a time.
-/// Peak memory ≈ build side size + 2 × batch_size × row_width.
+/// 3. Recurses into the CPU node's children to obtain child streams.
+/// 4. Wraps each child stream in `StreamSourceExec`.
+/// 5. Calls `execute(0, ctx)` on the isolated CPU node with its stream stubs.
+/// 6. Wraps the resulting stream in `InstrumentedStream`, which fires `on_node`
+///    with the accumulated `NodeMemoryStats` once the stream is fully drained.
 pub async fn execute_node_by_node(
     root: Arc<dyn ExecutionPlan>,
     task_ctx: Arc<TaskContext>,
     on_node: &mut dyn FnMut(&str, &NodeMemoryStats),
 ) -> Result<Vec<RecordBatch>> {
-    let collector: Arc<Mutex<Vec<NodeMemoryStats>>> = Arc::new(Mutex::new(Vec::new()));
-    let stream = build_stream(root.clone(), task_ctx, collector.clone())?;
+    let collector: Arc<Mutex<Vec<(usize, NodeMemoryStats)>>> = Arc::new(Mutex::new(Vec::new()));
+    let seq_counter = Arc::new(AtomicUsize::new(0));
+    let stream = build_stream(root.clone(), task_ctx, collector.clone(), seq_counter)?;
     let batches = drain_stream(stream).await?;
-    let stats = std::mem::take(&mut *collector.lock().unwrap());
-    for s in &stats {
+    let mut stats = std::mem::take(&mut *collector.lock().unwrap());
+    // Stats are pushed in stream-completion/Drop order. That is normally
+    // post-order, but a LIMIT parent finalizes (returns None) before its
+    // abandoned child stream is dropped, which inverts the two. Sort by the
+    // post-order `seq` assigned at build time so consumers (e.g. cpu_stats_str)
+    // can rely on strict children-before-parent ordering.
+    stats.sort_by_key(|(seq, _)| *seq);
+    for (_, s) in &stats {
         on_node(&s.node_name, s);
     }
     Ok(batches)
@@ -178,7 +159,8 @@ pub async fn execute_node_by_node_instrumented(
 fn build_stream(
     root: Arc<dyn ExecutionPlan>,
     task_ctx: Arc<TaskContext>,
-    collector: Arc<Mutex<Vec<NodeMemoryStats>>>,
+    collector: Arc<Mutex<Vec<(usize, NodeMemoryStats)>>>,
+    seq_counter: Arc<AtomicUsize>,
 ) -> Result<SendableRecordBatchStream> {
     let (cpu_node, batch_size_override) = strip_gpu(root);
 
@@ -196,7 +178,8 @@ fn build_stream(
         // BoundedWindowAggExec (mode=Sorted) reject their input
         // ("PARTITION BY expression to be ordered").
         let child_eq = child.properties().equivalence_properties().clone();
-        let child_stream = build_stream(child.clone(), task_ctx.clone(), collector.clone())?;
+        let child_stream =
+            build_stream(child.clone(), task_ctx.clone(), collector.clone(), seq_counter.clone())?;
         stream_children.push(Arc::new(StreamSourceExec::new(
             child_schema,
             child_eq,
@@ -206,17 +189,28 @@ fn build_stream(
 
     let node_name = cpu_node.name().to_string();
     let node_schema = cpu_node.schema();
-    // Some nodes (e.g. InterleaveExec) require Hash-partitioned children and reject
-    // StreamSourceExec (UnknownPartitioning(1)).  Fall back to UnionExec, which
-    // concatenates streams without partition requirements — semantically equivalent
-    // for our single-stream instrumentation path.
-    let node = cpu_node.clone().with_new_children(stream_children.clone())
-        .unwrap_or_else(|_| Arc::new(UnionExec::new(stream_children)));
+    // InterleaveExec requires Hash-partitioned children and rejects the
+    // StreamSourceExec stubs (UnknownPartitioning(1)); for that one node UnionExec
+    // is a semantically-equivalent single-stream substitute. Any *other*
+    // with_new_children failure is a real error and must propagate (master used
+    // `?` here — don't blanket-swallow it).
+    let node = match cpu_node.clone().with_new_children(stream_children.clone()) {
+        Ok(n) => n,
+        Err(_) if cpu_node.as_any().is::<InterleaveExec>() => {
+            Arc::new(UnionExec::new(stream_children))
+        }
+        Err(e) => return Err(e),
+    };
+    // Assign this node's post-order sequence *after* its children were built
+    // (they incremented the counter first), so children always sort before their
+    // parent regardless of stream-completion/Drop timing (see I2 / LIMIT case).
+    let seq = seq_counter.fetch_add(1, Ordering::Relaxed);
     // Use execute_stream (not execute(0)) so multi-partition nodes (UnionExec,
     // RepartitionExec, …) are coalesced into a single stream instead of
     // silently dropping all partitions but one.
     let inner = execute_stream(node, task_ctx)?;
     Ok(Box::pin(InstrumentedStream::new(
+        seq,
         node_name,
         node_schema,
         inner,
@@ -320,6 +314,7 @@ impl ExecutionPlan for StreamSourceExec {
 // ---------------------------------------------------------------------------
 
 struct InstrumentedStream {
+    seq: usize,
     node_name: String,
     schema: SchemaRef,
     inner: SendableRecordBatchStream,
@@ -327,18 +322,20 @@ struct InstrumentedStream {
     output_bytes: usize,
     row_count: usize,
     max_batch_rows: usize,
-    collector: Arc<Mutex<Vec<NodeMemoryStats>>>,
+    collector: Arc<Mutex<Vec<(usize, NodeMemoryStats)>>>,
     done: bool,
 }
 
 impl InstrumentedStream {
     fn new(
+        seq: usize,
         node_name: String,
         schema: SchemaRef,
         inner: SendableRecordBatchStream,
-        collector: Arc<Mutex<Vec<NodeMemoryStats>>>,
+        collector: Arc<Mutex<Vec<(usize, NodeMemoryStats)>>>,
     ) -> Self {
         Self {
+            seq,
             node_name,
             schema,
             inner,
@@ -356,13 +353,16 @@ impl InstrumentedStream {
     fn push_stat(&mut self) {
         if !self.done {
             self.done = true;
-            self.collector.lock().unwrap().push(NodeMemoryStats {
-                node_name: self.node_name.clone(),
-                allocated_bytes: self.allocated_bytes,
-                output_bytes: self.output_bytes,
-                row_count: self.row_count,
-                max_batch_rows: self.max_batch_rows,
-            });
+            self.collector.lock().unwrap().push((
+                self.seq,
+                NodeMemoryStats {
+                    node_name: self.node_name.clone(),
+                    allocated_bytes: self.allocated_bytes,
+                    output_bytes: self.output_bytes,
+                    row_count: self.row_count,
+                    max_batch_rows: self.max_batch_rows,
+                },
+            ));
         }
     }
 }
