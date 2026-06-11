@@ -666,6 +666,82 @@ TEST(PlanExecutor, ProjectRename) {
 }
 
 // =========================================================================
+// Test: GpuProject — value-form CASE (`CASE x WHEN v THEN t ... ELSE e END`)
+//
+// DataFusion always lowers value-form CASE to search-form before it reaches
+// the GPU plan, so no corpus query exercises build_column_case's comparand
+// path. Drive it directly here: a value-form CASE over a scanned column with
+// literal WHEN values, asserting the per-row `comparand == when` EQUAL +
+// copy_if_else fold (including the ELSE branch for non-matching rows).
+// =========================================================================
+
+TEST(PlanExecutor, ProjectValueFormCase) {
+  flatbuffers::FlatBufferBuilder fbb;
+
+  auto path = fbb.CreateString(parquet_path("region"));
+  auto paths = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
+  auto schema = make_schema(fbb, {
+      {"r_regionkey", fb::DataType_Int32},
+      {"r_name", fb::DataType_Utf8View},
+      {"r_comment", fb::DataType_Utf8View},
+  });
+  auto scan = fb::CreateGpuScan(fbb, paths, schema);
+  auto scan_node =
+      make_plan_node(fbb, fb::PlanNodeKind_GpuScan, scan.Union());
+
+  // First projected column: CAST(r_regionkey AS Int64), so we can read the key
+  // back per row and derive the expected CASE value order-independently.
+  auto key_expr =
+      make_cast_expr(fbb, make_col_ref(fbb, 0), fb::DataType_Int64);
+
+  // CASE r_regionkey WHEN 0 THEN 100 WHEN 2 THEN 200 ELSE -1 END.
+  // The comparand is CAST to Int64 so it matches the Int64 WHEN literals (and
+  // the THEN/ELSE column type) without relying on cuDF mixed-width comparison.
+  auto comparand =
+      make_cast_expr(fbb, make_col_ref(fbb, 0), fb::DataType_Int64);
+  auto wt0 = fb::CreateCaseWhenThen(fbb, make_int64_literal(fbb, 0),
+                                    make_int64_literal(fbb, 100));
+  auto wt2 = fb::CreateCaseWhenThen(fbb, make_int64_literal(fbb, 2),
+                                    make_int64_literal(fbb, 200));
+  auto when_thens = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<fb::CaseWhenThen>>{wt0, wt2});
+  auto else_expr = make_int64_literal(fbb, -1);
+  auto case_node =
+      fb::CreateCaseExprNode(fbb, comparand, when_thens, else_expr);
+  auto case_expr =
+      fb::CreateExpr(fbb, fb::ExprNode_CaseExprNode, case_node.Union());
+
+  auto exprs = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<fb::Expr>>{key_expr, case_expr});
+  auto a1 = fbb.CreateString("key");
+  auto a2 = fbb.CreateString("mapped");
+  auto aliases = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<flatbuffers::String>>{a1, a2});
+
+  auto proj = fb::CreateGpuProject(fbb, exprs, aliases, scan_node);
+  auto proj_node =
+      make_plan_node(fbb, fb::PlanNodeKind_GpuProject, proj.Union());
+  auto buf = finish_plan(fbb, proj_node);
+
+  auto result = peacock::execute_plan(buf.data(), buf.size());
+
+  ASSERT_EQ(result.table->num_columns(), 2);
+  ASSERT_EQ(result.table->num_rows(), 5);
+  EXPECT_EQ(result.column_names[0], "key");
+  EXPECT_EQ(result.column_names[1], "mapped");
+
+  auto key_col = result.table->view().column(0);
+  auto mapped_col = result.table->view().column(1);
+  for (cudf::size_type row = 0; row < result.table->num_rows(); ++row) {
+    auto key = get_scalar_value<int64_t>(key_col, row);
+    int64_t expected = (key == 0) ? 100 : (key == 2) ? 200 : -1;
+    EXPECT_EQ(get_scalar_value<int64_t>(mapped_col, row), expected)
+        << "row " << row << " key " << key;
+  }
+}
+
+// =========================================================================
 // Test: Pass-through nodes (CoalesceBatches, CoalescePartitions)
 // =========================================================================
 

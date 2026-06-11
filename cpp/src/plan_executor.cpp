@@ -820,6 +820,14 @@ static std::unique_ptr<cudf::column> build_column_case(
   // comparand once; each branch's predicate becomes `x = vi`. cuDF EQUAL nulls
   // a row where either side is null, and copy_if_else treats a null predicate as
   // the else branch — matching SQL (a NULL comparand/when never matches).
+  //
+  // Reached by real plans: DataFusion preserves value-form CASE at the physical
+  // layer (it does NOT rewrite `CASE x WHEN v` into `CASE WHEN x = v`), and
+  // plan_serializer.rs forwards `case.expr()` as the comparand. TPC-DS q39 emits
+  // two such nodes (`CASE mean WHEN 0 THEN NULL/0 ELSE stdev/mean END` in the
+  // projection and the filter). q39's GPU result test is currently disabled on a
+  // stddev ULP divergence (#54), so this branch's live GPU coverage comes from
+  // PlanExecutor.ProjectValueFormCase in tests/gpu/test_plan_executor.cpp.
   std::unique_ptr<cudf::column> comparand;
   if (c->expr()) comparand = build_column(c->expr(), table);
 

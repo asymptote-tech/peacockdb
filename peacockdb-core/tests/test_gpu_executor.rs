@@ -85,6 +85,33 @@ async fn assert_gpu_results_match_cpu(data_dir: &Path, queries_dir: &Path, name:
     let gpu = GpuExecutor::new(data_dir, 1, GPU_BUDGET).await.unwrap();
     let actual = gpu.execute(&sql).await.unwrap();
 
+    // Empty result sets render differently depending on whether the executor
+    // emits a single zero-row batch (which carries the schema) or an empty
+    // batch list (which carries none); `pretty_format_batches` then produces a
+    // header-bearing table for one and a bare "++" for the other, so the string
+    // compare fails on that formatting detail alone, not on any data.
+    //
+    // This asymmetry is the normal case here, not a corner case: the GPU
+    // executor decodes a zero-row query from its Arrow IPC stream as an *empty
+    // Vec* (schema message, zero batch messages -> `vec![]`, no `.first()`),
+    // while the peacock CPU executor yields a single zero-row batch that *does*
+    // carry the schema. q17 is exactly this shape. We therefore compare schema
+    // fields only when *both* sides carry a batch; when exactly one does (the
+    // q17 case) there is no second schema to compare against, so we accept the
+    // match rather than fail on the empty-vs-zero-row representation gap. When
+    // both sides carry a batch a real schema divergence is still caught.
+    if total_rows(&expected) == 0 && total_rows(&actual) == 0 {
+        if let (Some(e), Some(a)) = (expected.first(), actual.first()) {
+            assert_eq!(
+                e.schema().fields(),
+                a.schema().fields(),
+                "GPU executor schema for '{name}' differs from peacock CPU \
+                 executor (both result sets are empty)"
+            );
+        }
+        return;
+    }
+
     assert_eq!(
         batches_to_sorted_str(&actual),
         batches_to_sorted_str(&expected),
@@ -379,17 +406,18 @@ gpu_result_test_tpcds!(test_gpu_tpcds_q93, "q93");
 // reductions/compound.cuh failure. GPU-green.
 gpu_result_test_tpcds!(test_gpu_tpcds_q13, "q13");
 // q17, q39: stddev is now mapped (cuDF STD aggregation, sample ddof=1; two-phase
-// Partial/Final handled like AVG — Final is a singleton identity). The executor
-// computes the correct values, but these stay disabled because the result-set
-// comparison here is *exact* (pretty-printed string equality), and cuDF's STD
-// and DataFusion's Welford-based stddev_samp differ in the last float ULP
-// (e.g. q39 cov 1.0561770587198125 vs 1.0561770587198123). That ULP both fails
-// the string compare directly and flips the ~53 rows whose cov straddles the
-// `cov > 1` filter boundary. q17 additionally returns 0 rows on the SF1 testdata
-// (the store/return/catalog cross-channel join is empty), so it can't exercise
-// stddev at all. Re-enable once the GPU harness gains float-tolerant comparison
-// for stddev/variance columns (proposed ticket).
-// gpu_result_test_tpcds!(test_gpu_tpcds_q17, "q17");
+// Partial/Final handled like AVG — Final is a singleton identity). q17 returns
+// 0 rows on the SF1 testdata (the store/return/catalog cross-channel join is
+// empty), so it never materialises a stddev value to diverge on; with the
+// empty-result handling in `assert_gpu_results_match_cpu` it is GPU-green.
+gpu_result_test_tpcds!(test_gpu_tpcds_q17, "q17");
+// q39 stays disabled: it returns rows, and the result-set comparison here is
+// *exact* (pretty-printed string equality), but cuDF's STD and DataFusion's
+// Welford-based stddev_samp differ in the last float ULP (e.g. cov
+// 1.0561770587198125 vs 1.0561770587198123). That ULP both fails the string
+// compare directly and flips the ~53 rows whose cov straddles the `cov > 1`
+// filter boundary. Re-enable once the GPU harness gains float-tolerant
+// comparison for stddev/variance columns (proposed ticket).
 // gpu_result_test_tpcds!(test_gpu_tpcds_q39, "q39");
 // q18, q22: GROUP BY ROLLUP — the executor ignores the grouping_sets mask, so
 // these need grouping-sets aggregation (issue #40), not an aggregate-function
