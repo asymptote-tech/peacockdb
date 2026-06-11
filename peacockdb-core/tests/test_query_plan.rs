@@ -54,6 +54,18 @@ fn plans_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/plans")
 }
 
+fn tpcds_testdata_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpcds.sf1")
+}
+
+fn tpcds_queries_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpcds-queries")
+}
+
+fn tpcds_canondata_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/plans-tpcds.sf1")
+}
+
 fn test_ctx(data_dir: &std::path::Path) -> impl std::future::Future<Output = datafusion::error::Result<SessionContext>> + '_ {
     create_context_with_tables(data_dir, TEST_TARGET_PARTITIONS, TEST_GPU_MEMORY_BUDGET)
 }
@@ -184,40 +196,68 @@ fn assert_plan_matches_canonical(plan: &Arc<dyn ExecutionPlan>, name: &str) {
     assert_plan_matches_canonical_at(plan, name, &plans_dir());
 }
 
-async fn compare_plans_with_query(name: &str, sql: &str) {
-    let data_dir = testdata_dir();
-    let gpu_ctx = register_tables_for(
-        build_session_state_with_gpu_rules(TARGET_PARTITIONS, TEST_GPU_MEMORY_BUDGET),
-        &data_dir,
-    )
-    .await
-    .unwrap();
-
-    let plan = gpu_ctx.sql(sql).await.unwrap().create_physical_plan().await.unwrap();
-    assert_plan_matches_canonical_at(&plan, name, &canondata_dir());
-}
-
-async fn run_query_test(name: &str) {
-    let data_dir = testdata_dir();
+/// Plan `name` against `data_dir`/`queries_dir` and compare it to the canonical
+/// plan in `canon_dir`. `gen_hint` is the generate_testdata.sh invocation shown
+/// if the dataset is missing. Shared by the TPC-H and TPC-DS test macros.
+async fn run_query_test_at(
+    name: &str,
+    data_dir: &std::path::Path,
+    queries_dir: &std::path::Path,
+    canon_dir: &std::path::Path,
+    gen_hint: &str,
+) {
     if !data_dir.exists() {
         panic!(
-            "SF-1 dataset not found at {}. Run testdata/generate_testdata.sh first.",
+            "SF-1 dataset not found at {}. Run {gen_hint} first.",
             data_dir.display()
         );
     }
 
-    let sql_path = queries_dir().join(format!("{name}.sql"));
+    let sql_path = queries_dir.join(format!("{name}.sql"));
     let sql = std::fs::read_to_string(&sql_path)
         .unwrap_or_else(|_| panic!("query file not found: {}", sql_path.display()));
 
-    compare_plans_with_query(name, &sql).await;
+    let gpu_ctx = register_tables_for(
+        build_session_state_with_gpu_rules(TARGET_PARTITIONS, TEST_GPU_MEMORY_BUDGET),
+        data_dir,
+    )
+    .await
+    .unwrap();
+
+    let plan = gpu_ctx.sql(&sql).await.unwrap().create_physical_plan().await.unwrap();
+    assert_plan_matches_canonical_at(&plan, name, canon_dir);
 }
 
+/// Define a TPC-H plan-canonical test (testdata/tpch-queries → testdata/plans.sf1).
 macro_rules! query_plan_test {
     ($func_name:ident, $query_name:literal) => {
         #[tokio::test]
         async fn $func_name() {
-            run_query_test($query_name).await;
+            run_query_test_at(
+                $query_name,
+                &testdata_dir(),
+                &queries_dir(),
+                &canondata_dir(),
+                "testdata/generate_testdata.sh",
+            )
+            .await;
+        }
+    };
+}
+
+/// Define a TPC-DS plan-canonical test (testdata/tpcds-queries → testdata/plans-tpcds.sf1).
+macro_rules! query_plan_test_tpcds {
+    ($func_name:ident, $query_name:literal) => {
+        #[tokio::test]
+        async fn $func_name() {
+            run_query_test_at(
+                $query_name,
+                &tpcds_testdata_dir(),
+                &tpcds_queries_dir(),
+                &tpcds_canondata_dir(),
+                "testdata/generate_testdata.sh --bench tpcds",
+            )
+            .await;
         }
     };
 }
@@ -437,3 +477,111 @@ async fn test_memory_budget_reduces_batch_size() {
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(total_rows, 25);
 }
+
+// ── TPC-DS plan-canonical tests ──────────────────────────────────────────
+// Reads testdata/tpcds-queries/q<N>.sql, compares against testdata/plans-tpcds.sf1.
+
+query_plan_test_tpcds!(plan_tpcds_q1, "q1");
+query_plan_test_tpcds!(plan_tpcds_q2, "q2");
+query_plan_test_tpcds!(plan_tpcds_q3, "q3");
+query_plan_test_tpcds!(plan_tpcds_q4, "q4");
+query_plan_test_tpcds!(plan_tpcds_q5, "q5");
+query_plan_test_tpcds!(plan_tpcds_q6, "q6");
+query_plan_test_tpcds!(plan_tpcds_q7, "q7");
+query_plan_test_tpcds!(plan_tpcds_q8, "q8");
+query_plan_test_tpcds!(plan_tpcds_q9, "q9");
+query_plan_test_tpcds!(plan_tpcds_q10, "q10");
+query_plan_test_tpcds!(plan_tpcds_q11, "q11");
+query_plan_test_tpcds!(plan_tpcds_q12, "q12");
+query_plan_test_tpcds!(plan_tpcds_q13, "q13");
+query_plan_test_tpcds!(plan_tpcds_q14, "q14");
+query_plan_test_tpcds!(plan_tpcds_q15, "q15");
+query_plan_test_tpcds!(plan_tpcds_q16, "q16");
+query_plan_test_tpcds!(plan_tpcds_q17, "q17");
+query_plan_test_tpcds!(plan_tpcds_q18, "q18");
+query_plan_test_tpcds!(plan_tpcds_q19, "q19");
+query_plan_test_tpcds!(plan_tpcds_q20, "q20");
+query_plan_test_tpcds!(plan_tpcds_q21, "q21");
+query_plan_test_tpcds!(plan_tpcds_q22, "q22");
+query_plan_test_tpcds!(plan_tpcds_q23, "q23");
+query_plan_test_tpcds!(plan_tpcds_q24, "q24");
+query_plan_test_tpcds!(plan_tpcds_q25, "q25");
+query_plan_test_tpcds!(plan_tpcds_q26, "q26");
+// q27: DataFusion 45 SanityCheckPlan rejects the SortPreservingMergeExec ordering
+// emitted for ROLLUP. Re-enable once upstream is fixed.
+// query_plan_test_tpcds!(plan_tpcds_q27, "q27");
+query_plan_test_tpcds!(plan_tpcds_q28, "q28");
+query_plan_test_tpcds!(plan_tpcds_q29, "q29");
+query_plan_test_tpcds!(plan_tpcds_q30, "q30");
+query_plan_test_tpcds!(plan_tpcds_q31, "q31");
+query_plan_test_tpcds!(plan_tpcds_q32, "q32");
+query_plan_test_tpcds!(plan_tpcds_q33, "q33");
+query_plan_test_tpcds!(plan_tpcds_q34, "q34");
+query_plan_test_tpcds!(plan_tpcds_q35, "q35");
+query_plan_test_tpcds!(plan_tpcds_q36, "q36");
+query_plan_test_tpcds!(plan_tpcds_q37, "q37");
+query_plan_test_tpcds!(plan_tpcds_q38, "q38");
+query_plan_test_tpcds!(plan_tpcds_q39, "q39");
+query_plan_test_tpcds!(plan_tpcds_q40, "q40");
+query_plan_test_tpcds!(plan_tpcds_q41, "q41");
+query_plan_test_tpcds!(plan_tpcds_q42, "q42");
+query_plan_test_tpcds!(plan_tpcds_q43, "q43");
+query_plan_test_tpcds!(plan_tpcds_q44, "q44");
+query_plan_test_tpcds!(plan_tpcds_q45, "q45");
+query_plan_test_tpcds!(plan_tpcds_q46, "q46");
+query_plan_test_tpcds!(plan_tpcds_q47, "q47");
+query_plan_test_tpcds!(plan_tpcds_q48, "q48");
+query_plan_test_tpcds!(plan_tpcds_q49, "q49");
+query_plan_test_tpcds!(plan_tpcds_q50, "q50");
+query_plan_test_tpcds!(plan_tpcds_q51, "q51");
+query_plan_test_tpcds!(plan_tpcds_q52, "q52");
+query_plan_test_tpcds!(plan_tpcds_q53, "q53");
+query_plan_test_tpcds!(plan_tpcds_q54, "q54");
+query_plan_test_tpcds!(plan_tpcds_q55, "q55");
+query_plan_test_tpcds!(plan_tpcds_q56, "q56");
+query_plan_test_tpcds!(plan_tpcds_q57, "q57");
+query_plan_test_tpcds!(plan_tpcds_q58, "q58");
+query_plan_test_tpcds!(plan_tpcds_q59, "q59");
+query_plan_test_tpcds!(plan_tpcds_q60, "q60");
+query_plan_test_tpcds!(plan_tpcds_q61, "q61");
+query_plan_test_tpcds!(plan_tpcds_q62, "q62");
+query_plan_test_tpcds!(plan_tpcds_q63, "q63");
+query_plan_test_tpcds!(plan_tpcds_q64, "q64");
+query_plan_test_tpcds!(plan_tpcds_q65, "q65");
+query_plan_test_tpcds!(plan_tpcds_q66, "q66");
+query_plan_test_tpcds!(plan_tpcds_q67, "q67");
+query_plan_test_tpcds!(plan_tpcds_q68, "q68");
+query_plan_test_tpcds!(plan_tpcds_q69, "q69");
+// q70: DataFusion 45 doesn't physical-plan the GROUPING() aggregate.
+// query_plan_test_tpcds!(plan_tpcds_q70, "q70");
+query_plan_test_tpcds!(plan_tpcds_q71, "q71");
+// q72: DataFusion 45 type-coercion can't handle Date32 + Int64 arithmetic.
+// query_plan_test_tpcds!(plan_tpcds_q72, "q72");
+query_plan_test_tpcds!(plan_tpcds_q73, "q73");
+query_plan_test_tpcds!(plan_tpcds_q74, "q74");
+query_plan_test_tpcds!(plan_tpcds_q75, "q75");
+query_plan_test_tpcds!(plan_tpcds_q76, "q76");
+query_plan_test_tpcds!(plan_tpcds_q77, "q77");
+query_plan_test_tpcds!(plan_tpcds_q78, "q78");
+query_plan_test_tpcds!(plan_tpcds_q79, "q79");
+query_plan_test_tpcds!(plan_tpcds_q80, "q80");
+query_plan_test_tpcds!(plan_tpcds_q81, "q81");
+query_plan_test_tpcds!(plan_tpcds_q82, "q82");
+query_plan_test_tpcds!(plan_tpcds_q83, "q83");
+query_plan_test_tpcds!(plan_tpcds_q84, "q84");
+query_plan_test_tpcds!(plan_tpcds_q85, "q85");
+// q86: DataFusion 45 doesn't physical-plan the GROUPING() aggregate.
+// query_plan_test_tpcds!(plan_tpcds_q86, "q86");
+query_plan_test_tpcds!(plan_tpcds_q87, "q87");
+query_plan_test_tpcds!(plan_tpcds_q88, "q88");
+query_plan_test_tpcds!(plan_tpcds_q89, "q89");
+query_plan_test_tpcds!(plan_tpcds_q90, "q90");
+query_plan_test_tpcds!(plan_tpcds_q91, "q91");
+query_plan_test_tpcds!(plan_tpcds_q92, "q92");
+query_plan_test_tpcds!(plan_tpcds_q93, "q93");
+query_plan_test_tpcds!(plan_tpcds_q94, "q94");
+query_plan_test_tpcds!(plan_tpcds_q95, "q95");
+query_plan_test_tpcds!(plan_tpcds_q96, "q96");
+query_plan_test_tpcds!(plan_tpcds_q97, "q97");
+query_plan_test_tpcds!(plan_tpcds_q98, "q98");
+query_plan_test_tpcds!(plan_tpcds_q99, "q99");
