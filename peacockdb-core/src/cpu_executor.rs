@@ -14,6 +14,7 @@ use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::{
     execute_stream, DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
 };
+use datafusion::physical_plan::union::UnionExec;
 use futures::Stream;
 
 use crate::gpu_rule::{
@@ -73,38 +74,19 @@ fn with_batch_size(ctx: Arc<TaskContext>, batch_size: usize) -> Arc<TaskContext>
 // ---------------------------------------------------------------------------
 
 /// Per-node memory stats collected via the `on_node` callback.
+#[derive(Clone)]
 pub struct NodeMemoryStats {
     /// Name of the CPU node that was executed (GPU wrapper already stripped).
     pub node_name: String,
     /// Sum of `get_array_memory_size()` across all output batches (allocated upper bound).
     pub allocated_bytes: usize,
-    /// Logical byte size of all batches fed into this node (sum across all children).
-    pub input_bytes: usize,
     /// Logical byte size of all batches produced by this node.
     pub output_bytes: usize,
-    /// `input_bytes + output_bytes`.
-    pub cost: usize,
     /// Total number of output rows across all batches.
     pub row_count: usize,
     /// Largest single batch (in rows) produced by this node.
     /// Compare against `GpuScanExec.gpu_batch_size` to verify the memory contract.
     pub max_batch_rows: usize,
-}
-
-impl NodeMemoryStats {
-    pub(crate) fn collect(node_name: &str, input: &[RecordBatch], output: &[RecordBatch]) -> Self {
-        let input_bytes: usize = input.iter().map(|b| batch_logical_size(b)).sum();
-        let output_bytes: usize = output.iter().map(|b| batch_logical_size(b)).sum();
-        Self {
-            node_name: node_name.to_string(),
-            allocated_bytes: output.iter().map(|b| batch_allocated_size(b)).sum(),
-            input_bytes,
-            output_bytes,
-            cost: input_bytes + output_bytes,
-            row_count: output.iter().map(|b| b.num_rows()).sum(),
-            max_batch_rows: output.iter().map(|b| b.num_rows()).max().unwrap_or(0),
-        }
-    }
 }
 
 /// Recursively strip all GPU wrapper nodes from a plan tree, returning a
@@ -162,9 +144,8 @@ pub fn strip_gpu_tree(plan: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionP
 /// 4. Update `execute_node_by_node_instrumented` to `collect()` only the root stream;
 ///    all intermediate stats are populated by `InstrumentedStream` as the root is consumed.
 ///
-/// 5. Change `on_node` signature from `FnMut(&str, &[RecordBatch], &[RecordBatch])` to
-///    `FnMut(&str, &NodeMemoryStats)` since intermediate batches are no longer available
-///    all at once.
+/// 5. The `on_node` callback receives `(&str, &NodeMemoryStats)` — intermediate batches
+///    are not available all at once in streaming mode.
 ///
 /// After the fix: hash join build side is still materialized by DataFusion internally
 /// (unavoidable), but the probe side streams through `batch_size` rows at a time.
@@ -172,10 +153,10 @@ pub fn strip_gpu_tree(plan: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionP
 pub async fn execute_node_by_node(
     root: Arc<dyn ExecutionPlan>,
     task_ctx: Arc<TaskContext>,
-    on_node: &mut dyn FnMut(&str, &[RecordBatch], &[RecordBatch]),
+    on_node: &mut dyn FnMut(&str, &NodeMemoryStats),
 ) -> Result<Vec<RecordBatch>> {
     let collector: Arc<Mutex<Vec<NodeMemoryStats>>> = Arc::new(Mutex::new(Vec::new()));
-    let stream = build_stream(root, task_ctx, collector.clone())?;
+    let stream = build_stream(root.clone(), task_ctx, collector.clone())?;
     let batches = drain_stream(stream).await?;
     let stats = std::mem::take(&mut *collector.lock().unwrap());
     for s in &stats {
@@ -191,16 +172,7 @@ pub async fn execute_node_by_node_instrumented(
     task_ctx: Arc<TaskContext>,
     stats: &mut Vec<NodeMemoryStats>,
 ) -> Result<Vec<RecordBatch>> {
-    execute_node_by_node(root, task_ctx, &mut |_, s| {
-        stats.push(NodeMemoryStats {
-            node_name: s.node_name.clone(),
-            allocated_bytes: s.allocated_bytes,
-            logical_bytes: s.logical_bytes,
-            row_count: s.row_count,
-            max_batch_rows: s.max_batch_rows,
-        });
-    })
-    .await
+    execute_node_by_node(root, task_ctx, &mut |_, s| stats.push(s.clone())).await
 }
 
 fn build_stream(
@@ -234,7 +206,12 @@ fn build_stream(
 
     let node_name = cpu_node.name().to_string();
     let node_schema = cpu_node.schema();
-    let node = cpu_node.with_new_children(stream_children)?;
+    // Some nodes (e.g. InterleaveExec) require Hash-partitioned children and reject
+    // StreamSourceExec (UnknownPartitioning(1)).  Fall back to UnionExec, which
+    // concatenates streams without partition requirements — semantically equivalent
+    // for our single-stream instrumentation path.
+    let node = cpu_node.clone().with_new_children(stream_children.clone())
+        .unwrap_or_else(|_| Arc::new(UnionExec::new(stream_children)));
     // Use execute_stream (not execute(0)) so multi-partition nodes (UnionExec,
     // RepartitionExec, …) are coalesced into a single stream instead of
     // silently dropping all partitions but one.
@@ -347,7 +324,7 @@ struct InstrumentedStream {
     schema: SchemaRef,
     inner: SendableRecordBatchStream,
     allocated_bytes: usize,
-    logical_bytes: usize,
+    output_bytes: usize,
     row_count: usize,
     max_batch_rows: usize,
     collector: Arc<Mutex<Vec<NodeMemoryStats>>>,
@@ -366,12 +343,35 @@ impl InstrumentedStream {
             schema,
             inner,
             allocated_bytes: 0,
-            logical_bytes: 0,
+            output_bytes: 0,
             row_count: 0,
             max_batch_rows: 0,
             collector,
             done: false,
         }
+    }
+}
+
+impl InstrumentedStream {
+    fn push_stat(&mut self) {
+        if !self.done {
+            self.done = true;
+            self.collector.lock().unwrap().push(NodeMemoryStats {
+                node_name: self.node_name.clone(),
+                allocated_bytes: self.allocated_bytes,
+                output_bytes: self.output_bytes,
+                row_count: self.row_count,
+                max_batch_rows: self.max_batch_rows,
+            });
+        }
+    }
+}
+
+// Fires even when the stream is dropped before being fully exhausted
+// (e.g. the child of a GlobalLimitExec is abandoned after LIMIT rows).
+impl Drop for InstrumentedStream {
+    fn drop(&mut self) {
+        self.push_stat();
     }
 }
 
@@ -385,22 +385,13 @@ impl Stream for InstrumentedStream {
             match item {
                 Some(Ok(batch)) => {
                     me.allocated_bytes += batch_allocated_size(batch);
-                    me.logical_bytes += batch_logical_size(batch);
+                    me.output_bytes += batch_logical_size(batch);
                     me.row_count += batch.num_rows();
                     if batch.num_rows() > me.max_batch_rows {
                         me.max_batch_rows = batch.num_rows();
                     }
                 }
-                None if !me.done => {
-                    me.done = true;
-                    me.collector.lock().unwrap().push(NodeMemoryStats {
-                        node_name: me.node_name.clone(),
-                        allocated_bytes: me.allocated_bytes,
-                        logical_bytes: me.logical_bytes,
-                        row_count: me.row_count,
-                        max_batch_rows: me.max_batch_rows,
-                    });
-                }
+                None => me.push_stat(),
                 _ => {}
             }
         }

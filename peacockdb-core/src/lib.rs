@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::physical_plan::ExecutionPlan;
 use datafusion::datasource::file_format::parquet::ParquetFormat;
 use datafusion::datasource::listing::{ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl};
 use datafusion::execution::context::SessionContext;
@@ -149,26 +150,22 @@ impl CpuExecutor {
     /// 3. `execute_node_by_node` → strip GPU wrappers, run each CPU node bottom-up
     pub async fn execute(&self, sql: &str) -> Result<Vec<RecordBatch>> {
         let plan = self.ctx.sql(sql).await?.create_physical_plan().await?;
-        execute_node_by_node(plan, self.ctx.task_ctx(), &mut |_, _, _| {}).await
+        execute_node_by_node(plan, self.ctx.task_ctx(), &mut |_, _| {}).await
     }
 
-    /// Like [`execute`] but also returns per-node memory stats in post-order.
+    /// Like [`execute`] but also returns the physical plan and per-node memory stats
+    /// in post-order. The plan is the GPU-annotated plan (before CPU stripping) and
+    /// its tree structure matches the stat ordering, enabling tree-shaped formatting.
     pub async fn execute_instrumented(
         &self,
         sql: &str,
-    ) -> Result<(Vec<RecordBatch>, Vec<NodeMemoryStats>)> {
+    ) -> Result<(Vec<RecordBatch>, Arc<dyn ExecutionPlan>, Vec<NodeMemoryStats>)> {
         let plan = self.ctx.sql(sql).await?.create_physical_plan().await?;
         let mut stats = Vec::new();
-        let batches = execute_node_by_node(plan, self.ctx.task_ctx(), &mut |_, s| {
-            stats.push(NodeMemoryStats {
-                node_name: s.node_name.clone(),
-                allocated_bytes: s.allocated_bytes,
-                logical_bytes: s.logical_bytes,
-                row_count: s.row_count,
-                max_batch_rows: s.max_batch_rows,
-            });
+        let batches = execute_node_by_node(plan.clone(), self.ctx.task_ctx(), &mut |_, s| {
+            stats.push(s.clone());
         })
         .await?;
-        Ok((batches, stats))
+        Ok((batches, plan, stats))
     }
 }

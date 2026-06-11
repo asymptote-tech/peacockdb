@@ -700,36 +700,42 @@ pub(crate) fn node_memory_with(
         // concat moves up into GpuCoalescePartitionsExec and this can revert to a
         // plain pass-through.)
         "GpuUnionExec" | "GpuInterleaveExec" => {
-            let child_results: Vec<_> = children
-                .iter()
-                .map(|c| analyze_memory_with(c, selectivity, cardinality))
-                .collect();
-            let max_child_peak = child_results
+            let max_child_peak = child_mems
                 .iter()
                 .map(|c| c.subtree_max_row_bytes)
                 .max()
                 .unwrap_or(output_width);
-            if child_results.len() <= 1 {
-                let output_row_ratio =
-                    child_results.first().map(|c| c.output_row_ratio).unwrap_or(1.0);
+            if child_mems.len() <= 1 {
+                let child = child_mems.first().copied().unwrap_or(SubtreeMemory {
+                    subtree_max_row_bytes: output_width,
+                    output_width,
+                    output_row_ratio: 1.0,
+                    input_row_bytes: 0,
+                    output_row_bytes: output_width,
+                });
+                let input_bytes = (child.output_row_ratio * child.output_width as f64) as usize;
+                let output_bytes = (child.output_row_ratio * output_width as f64) as usize;
                 SubtreeMemory {
                     subtree_max_row_bytes: max_child_peak,
                     output_width,
-                    output_row_ratio,
+                    output_row_ratio: child.output_row_ratio,
+                    input_row_bytes: input_bytes,
+                    output_row_bytes: output_bytes,
                 }
             } else {
-                let inputs_bytes: usize = child_results
+                let inputs_bytes: usize = child_mems
                     .iter()
                     .map(|c| (c.output_row_ratio * c.output_width as f64) as usize)
                     .sum();
-                let output_row_ratio: f64 =
-                    child_results.iter().map(|c| c.output_row_ratio).sum();
+                let output_row_ratio: f64 = child_mems.iter().map(|c| c.output_row_ratio).sum();
                 let output_bytes = (output_row_ratio * output_width as f64) as usize;
                 let own = inputs_bytes + output_bytes;
                 SubtreeMemory {
                     subtree_max_row_bytes: max_child_peak.max(own),
                     output_width,
                     output_row_ratio,
+                    input_row_bytes: inputs_bytes,
+                    output_row_bytes: output_bytes,
                 }
             }
         }
