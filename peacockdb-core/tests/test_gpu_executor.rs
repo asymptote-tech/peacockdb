@@ -284,7 +284,11 @@ gpu_result_test_tpcds!(test_gpu_tpcds_q23, "q23");
 // gpu_result_test_tpcds!(test_gpu_tpcds_q80, "q80");
 
 // --- Bucket E: aggregate gaps ---
-// q2: GpuAggregate binaryop "Unsupported operator for these types".
+// q2: two blockers. (1) The Partial GpuAggregate sums a CASE over a string
+// equality (sum(CASE WHEN d_day_name='Sunday' THEN sales_price END)) — a
+// GpuAggregate binaryop "Unsupported operator for these types". (2) Even past
+// that, the final projection uses round() (round(.../...,2)), an unsupported
+// scalar function (issue #43, same as q54/q78). Not a pure aggregate gap.
 // gpu_result_test_tpcds!(test_gpu_tpcds_q2, "q2");
 
 // --- Bucket F: projection / scalar-expr gaps ---
@@ -370,11 +374,26 @@ gpu_result_test_tpcds!(test_gpu_tpcds_q93, "q93");
 // gpu_result_test_tpcds!(test_gpu_tpcds_q78, "q78");
 
 // --- Bucket E: aggregate gaps ---
-// stddev unmapped:
+// q13: global avg of an integer column. The compound (mean) reduce now outputs
+// FLOAT64 instead of echoing the integer input type, fixing the cuDF
+// reductions/compound.cuh failure. GPU-green.
+gpu_result_test_tpcds!(test_gpu_tpcds_q13, "q13");
+// q17, q39: stddev is now mapped (cuDF STD aggregation, sample ddof=1; two-phase
+// Partial/Final handled like AVG — Final is a singleton identity). The executor
+// computes the correct values, but these stay disabled because the result-set
+// comparison here is *exact* (pretty-printed string equality), and cuDF's STD
+// and DataFusion's Welford-based stddev_samp differ in the last float ULP
+// (e.g. q39 cov 1.0561770587198125 vs 1.0561770587198123). That ULP both fails
+// the string compare directly and flips the ~53 rows whose cov straddles the
+// `cov > 1` filter boundary. q17 additionally returns 0 rows on the SF1 testdata
+// (the store/return/catalog cross-channel join is empty), so it can't exercise
+// stddev at all. Re-enable once the GPU harness gains float-tolerant comparison
+// for stddev/variance columns (proposed ticket).
 // gpu_result_test_tpcds!(test_gpu_tpcds_q17, "q17");
 // gpu_result_test_tpcds!(test_gpu_tpcds_q39, "q39");
-// GpuAggregate CUDF failure (compound reduction / cast / AST operator):
-// gpu_result_test_tpcds!(test_gpu_tpcds_q13, "q13");
+// q18, q22: GROUP BY ROLLUP — the executor ignores the grouping_sets mask, so
+// these need grouping-sets aggregation (issue #40), not an aggregate-function
+// gap. Keep disabled until grouping sets land.
 // gpu_result_test_tpcds!(test_gpu_tpcds_q18, "q18");
 // gpu_result_test_tpcds!(test_gpu_tpcds_q22, "q22");
 
