@@ -812,24 +812,22 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
 
 static std::unique_ptr<cudf::column> build_column_case(
     const fb::CaseExprNode* c, cudf::table_view const& table) {
+  // Search-form CASE only. Value-form (`CASE x WHEN v THEN t ... END`) is NOT
+  // rewritten away by DataFusion — it survives to the physical plan and
+  // plan_serializer.rs forwards `case.expr()` as the comparand — so it does
+  // reach here for e.g. TPC-DS q39 (`CASE mean WHEN 0 THEN NULL/0 ELSE
+  // stdev/mean END`). A column-path implementation (comparand + per-branch
+  // `comparand == when` + copy_if_else fold) was attempted but produced
+  // incorrect results on the GPU (every output row came back 0/null — #57), so
+  // it is withheld rather than shipped unverified. q39 is the only value-form
+  // user and is already disabled (stddev ULP, #54); this throw is therefore
+  // unreachable from the enabled suite. Re-implement, with a direct GPU test,
+  // when q39 is enabled (#57).
+  if (c->expr())
+    throw std::runtime_error("value-form CASE not supported in column path");
   auto* whens = c->when_thens();
   if (!whens || whens->size() == 0)
     throw std::runtime_error("CASE has no WHEN/THEN pairs");
-
-  // Value-form CASE (`CASE x WHEN v1 THEN t1 ... ELSE e END`): materialise the
-  // comparand once; each branch's predicate becomes `x = vi`. cuDF EQUAL nulls
-  // a row where either side is null, and copy_if_else treats a null predicate as
-  // the else branch — matching SQL (a NULL comparand/when never matches).
-  //
-  // Reached by real plans: DataFusion preserves value-form CASE at the physical
-  // layer (it does NOT rewrite `CASE x WHEN v` into `CASE WHEN x = v`), and
-  // plan_serializer.rs forwards `case.expr()` as the comparand. TPC-DS q39 emits
-  // two such nodes (`CASE mean WHEN 0 THEN NULL/0 ELSE stdev/mean END` in the
-  // projection and the filter). q39's GPU result test is currently disabled on a
-  // stddev ULP divergence (#54), so this branch's live GPU coverage comes from
-  // PlanExecutor.ProjectValueFormCase in tests/gpu/test_plan_executor.cpp.
-  std::unique_ptr<cudf::column> comparand;
-  if (c->expr()) comparand = build_column(c->expr(), table);
 
   // Build the ELSE column first (or null if none); fold from the last WHEN
   // backward so each step produces `if cond_i then then_i else accumulated`.
@@ -845,24 +843,7 @@ static std::unique_ptr<cudf::column> build_column_case(
 
   for (cudf::size_type i = static_cast<cudf::size_type>(whens->size()) - 1; i >= 0; --i) {
     auto* wt = whens->Get(static_cast<flatbuffers::uoffset_t>(i));
-    std::unique_ptr<cudf::column> cond;
-    if (comparand) {
-      // value-form: cond = (comparand == when_value)
-      auto* when_expr = wt->when();
-      auto bool_t = cudf::data_type{cudf::type_id::BOOL8};
-      if (when_expr->node_type() == fb::ExprNode_LiteralExpr) {
-        auto wscalar = build_scalar(when_expr->node_as_LiteralExpr()->value());
-        cond = cudf::binary_operation(comparand->view(), *wscalar,
-                                      cudf::binary_operator::EQUAL, bool_t);
-      } else {
-        auto when_col = build_column(when_expr, table);
-        cond = cudf::binary_operation(comparand->view(), when_col->view(),
-                                      cudf::binary_operator::EQUAL, bool_t);
-      }
-    } else {
-      // search-form: the WHEN is already a boolean predicate.
-      cond = build_column(wt->when(), table);
-    }
+    auto cond = build_column(wt->when(), table);
     auto then = build_column(wt->then(), table);
     result = cudf::copy_if_else(then->view(), result->view(), cond->view());
   }
