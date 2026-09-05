@@ -513,23 +513,16 @@ the next push.
 
 One file per (dataset, mode), at
 `testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt`, holding a section
-per query timed at that mode. The tree is
-the plan with `setup_us`/`submit_us`/`device_us` per node (and `p<k>:` sub-lines where
-N>1), then a trailer:
-
-Three terms rather than one because the cost model is fitted across two datasets,
-and peacockdb pays a per-node host prologue — flatbuffer decode, handle lookups,
-AST build — that bare cuDF has no analogue for. Folding it into the work makes
-every coefficient wrong by a plan-shape-dependent amount, so it is measured separately
-and fitted as its own constant. `test_node_timing` is what checks the split is real:
-that the CUDA events bracket device work rather than that prologue.
+per query timed at that mode. The tree is the plan with
+`setup_us`/`submit_us`/`device_us` per node (and `p<k>:` sub-lines where N>1), then a
+trailer:
 
 | Field | Reading |
 |---|---|
 | `build_profile` | which release profile the harness was compiled under. `total_us − nodes_total_us` is that Rust. Always a release build — the run asserts it |
 | `allocator` | the rmm pool the node times were taken under, with the sizes it was built with. Always a pool — the run asserts it, because with rmm's default every cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip billed to whichever node allocated it, which inflates the largest-output nodes hardest and so moves the **profile**, not just the scale. The sizes vary with free memory at install time |
 | `shared_work_charged_to` | which `p<k>` sub-line carries work a node does once for all its partitions — the hash scatter concatenates and scatters in one operation and bills p0, so a p0 far above its siblings is the accounting, not skew. Written whether or not the plan has a repartition, so absence means only "written before the field" |
-| `setup_us` | host time before the node's first device touch — the peacockdb-only prologue, fitted as its own constant |
+| `setup_us` | host time before the node's first device touch — the peacockdb-only prologue, which bare cuDF has no analogue for |
 | `submit_us` / `device_us` | host time from the first device touch to the end of the region, and the device work CUDA events bracketed inside it. `submit_us` is **not** launch cost — cuDF and rmm synchronize internally, so the host waits for most of what it submits (tpch q3: Σ`submit_us` within 0.01% of Σ`device_us`) |
 | `nodes_total_us` | Σ `setup_us` + Σ `submit_us` — the **host** side of the walk. `nodes_device_us` is deliberately not added: the host ran while the device did, so the two are concurrent spans of one clock |
 | `nodes_device_us` | Σ `device_us`. Regions are on cuDF's single default stream in program order, so they are disjoint and this is ≤ `total_us`; the gap is stream idle — the device waiting through host prologue |
@@ -555,21 +548,17 @@ measured.
 
 Setting `PEACOCK_RECORD_PATH` makes the same run also append calibration rows to that
 file — **every** measured run, not the one the tree above reports: the tree answers "what
-did this query cost", the record is a fit's samples and a spread of ten is what tells a
-coefficient from an accident. Unset by default: the record is for a fit, not for the
-committed tree, and the two must not start depending on each other. Its column meanings
+did this query cost", the record answers what each cuDF call cost, and ten executions of
+a call are what separate a number from an accident. Unset by default: the record and the
+committed tree must not start depending on each other. Its column meanings
 are in the `#` preamble the first append writes, and in
-[`tests/common/record.rs`](../peacockdb-core/tests/common/record.rs). Two properties of
+[`tests/common/record.rs`](../peacockdb-core/tests/common/record.rs). One property of
 the format that a reader will otherwise assume wrong:
 
 - A row is one **cuDF call** — one (plan node, recipe step, call index) — not one node
   and not one output partition. One plan node publishes several recipe steps and a
   batched run drives each of them once per batch per lane; a call answering with several
   output partitions is still one row, its cost summed over its regions.
-- There is a second, unrelated writer. `cpp/tests/gpu/calibration_record.hpp` records the
-  bare-cuDF TPC-H suite in an OLDER format — per-cuDF-call rows with `source`, `label`,
-  `cuda_bytes`, `wall_us` — for the two-source model this record no longer uses. It reads
-  its own `PEACOCK_CUDF_RECORD_PATH`, so the two cannot append to one file.
 
 ### Wall-time C++ suites (currently unscripted)
 
