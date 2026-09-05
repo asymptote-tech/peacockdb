@@ -27,7 +27,7 @@
 <p class="note">read_parquet: decompression, page decode, PCIe. Kept apart from compute on purpose: one axis holding both draws a picture about two different machines.</p>
 <figure><img src="load/CudfScan.png" alt="load/CudfScan.png"><figcaption>load/CudfScan.png</figcaption></figure>
 <h2>Compute — everything else</h2>
-<p class="note">Arithmetic over resident columns. Log-log, because the model&#x27;s claim is t = a·bytes, a straight line of slope 1 whatever a is — so the eye checks the shape without knowing the coefficient.</p>
+<p class="note">Arithmetic over resident columns. Log-log, because a cost proportional to bytes is a straight line of slope 1 whatever the constant is — so the eye checks the shape without knowing it.</p>
 <figure><img src="compute/CudfAggregate_Merge_.png" alt="compute/CudfAggregate_Merge_.png"><figcaption>compute/CudfAggregate_Merge_.png</figcaption></figure>
 <figure><img src="compute/CudfAggregate_Partial_.png" alt="compute/CudfAggregate_Partial_.png"><figcaption>compute/CudfAggregate_Partial_.png</figcaption></figure>
 <figure><img src="compute/CudfCoalescePartitions.png" alt="compute/CudfCoalescePartitions.png"><figcaption>compute/CudfCoalescePartitions.png</figcaption></figure>
@@ -36,7 +36,7 @@
 <figure><img src="compute/CudfProject.png" alt="compute/CudfProject.png"><figcaption>compute/CudfProject.png</figcaption></figure>
 <figure><img src="compute/CudfProject_finalize_.png" alt="compute/CudfProject_finalize_.png"><figcaption>compute/CudfProject_finalize_.png</figcaption></figure>
 <h2>What a median discards</h2>
-<p class="note">Each execution&#x27;s device_us as a ratio to its own call&#x27;s median. A kind with a long tail is one whose coefficient would be fitted to scheduling noise.</p>
+<p class="note">Each execution&#x27;s device_us as a ratio to its own call&#x27;s median. A kind with a long tail is one whose median stands for scheduling noise.</p>
 <figure><img src="spread/by-kind.png" alt="spread/by-kind.png"><figcaption>spread/by-kind.png</figcaption></figure>
 <h2>HBM traffic</h2>
 <p class="note">Times from a clean run, traffic from a capture under GPU memory counters, joined on the tuple. The counters cost the query ~7%, which is why they are two runs.</p>

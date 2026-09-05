@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draw the calibration record, before anything is fitted to it.
+"""Draw the calibration record, before anything is derived from it.
 
     /usr/bin/python3 scripts/calibration/plot.py \
         --record testdata/calibration/records.tsv \
@@ -11,10 +11,10 @@ page, comes from this call and from nothing else. That is the point rather than 
 preference: a second generator is a second reading of the format, and two readings of one
 file disagree the first time a column moves.
 
-A fit answers "what are the coefficients"; it cannot answer "is a line the right shape",
-because it returns coefficients either way. These are the pictures that decide whether
-fitting is meaningful at all, so nothing here reduces a call to one number before it is
-drawn -- every measured execution is a point.
+A number per call answers "how much"; it cannot answer "is this the right shape", because
+it comes out the same either way. These are the pictures that say whether a call's cost is
+describable at all, so nothing here reduces a call to one number before it is drawn --
+every measured execution is a point.
 
 Not matplotlib's default python: this repo's `python3` is a linuxbrew build with neither
 numpy nor matplotlib. `/usr/bin/python3` has both.
@@ -29,8 +29,8 @@ WHAT IS DRAWN
             through the origin; a per-kind panel is where it either looks like one or
             does not.
   spread/   per step kind: every execution's device_us as a ratio to that call's median
-            across executions. A fit collapses those executions to one number, and this
-            is the plot that says what that discards.
+            across executions. Any single figure for a call collapses them, and this is
+            the plot that says what that discards.
   query/    per (query, mode): where the time went, by node and by term.
   hbm/      hbm_bytes against out_bytes, where an HBM capture was joined in.
   icicle/   per (query, mode): plan node -> recipe step -> cuDF call, width in device
@@ -46,10 +46,8 @@ and every panel says which of the two it is.
 
 READING THE RECORD
 
-The parser is this file's own, deliberately NOT imported from `fit.py`. That module reads
-the pre-batch-partitioned format -- `wall_us`, `label`, `partition` -- and is the fit's,
-which is a separate piece of work; importing it would tie this script to the columns it
-was written to leave behind.
+The parser is this file's own. The record's columns are read here and nowhere else, so a
+column that moves breaks one reader loudly rather than two readers differently.
 
 Everything is read BY COLUMN NAME. The record's columns have already changed twice, and a
 reader that counts fields survives such a change quietly, drawing whatever slid into the
@@ -135,9 +133,8 @@ def case_label(row):
 def executions(rows):
     """Rows grouped by call, each group being that call's executions in run order.
 
-    `run_index` is a column now, so this is a group-by rather than the recovery from row
-    ORDER the format used to promise. That change is why this file no longer imports
-    `fit.py`'s `region_groups`: what it recovered is now written down.
+    `run_index` is a column, so this is a group-by rather than a recovery from row ORDER:
+    which execution a row belongs to is written down rather than inferred.
     """
     by_call = collections.defaultdict(list)
     for row in rows:
@@ -157,10 +154,10 @@ def executions(rows):
 def scatter(ax, points, title, xlabel, ylabel):
     """One log-log panel, one point per EXECUTION.
 
-    Log-log because the model's claim is `t = a * bytes`, which is a straight line of
-    slope 1 here whatever `a` is -- so the eye checks the SHAPE without knowing the
-    coefficient. A panel whose points bend, or sit at two heights for one x, is a panel
-    the model cannot describe, and that is visible before any fitting.
+    Log-log because a cost proportional to bytes is a straight line of slope 1 here
+    whatever the constant is -- so the eye checks the SHAPE without knowing it. A panel
+    whose points bend, or sit at two heights for one x, is a panel no such cost
+    describes, and that is visible without computing anything.
     """
     if not points:
         ax.set_axis_off()
@@ -240,10 +237,10 @@ def safe(name):
 def plot_spread(by_call, out_dir):
     """Per step kind: each execution's device_us as a ratio to its own call's median.
 
-    The question is not "how fast is this call" but "how repeatable is it". A fit takes
-    one number per call; this says how much of a number there was to take. A kind whose
-    ratios sit inside a few percent is one where a median means something, and a kind
-    with a long tail is one where the coefficient is being fitted to scheduling noise.
+    The question is not "how fast is this call" but "how repeatable is it". Any summary
+    takes one number per call; this says how much of a number there was to take. A kind
+    whose ratios sit inside a few percent is one where a median means something, and a
+    kind with a long tail is one where a median stands for scheduling noise.
 
     Ratio to the CALL's own median, not to the kind's: calls of one kind differ by orders
     of magnitude in size, and a ratio across them would measure the query, not the noise.
@@ -634,12 +631,12 @@ SECTIONS = [
      "read_parquet: decompression, page decode, PCIe. Kept apart from compute on "
      "purpose: one axis holding both draws a picture about two different machines."),
     ("compute", "Compute — everything else",
-     "Arithmetic over resident columns. Log-log, because the model's claim is "
-     "t = a·bytes, a straight line of slope 1 whatever a is — so the eye checks the "
-     "shape without knowing the coefficient."),
+     "Arithmetic over resident columns. Log-log, because a cost proportional to bytes "
+     "is a straight line of slope 1 whatever the constant is — so the eye checks the "
+     "shape without knowing it."),
     ("spread", "What a median discards",
      "Each execution's device_us as a ratio to its own call's median. A kind with a long "
-     "tail is one whose coefficient would be fitted to scheduling noise."),
+     "tail is one whose median stands for scheduling noise."),
     ("hbm", "HBM traffic",
      "Times from a clean run, traffic from a capture under GPU memory counters, joined "
      "on the tuple. The counters cost the query ~7%, which is why they are two runs."),
