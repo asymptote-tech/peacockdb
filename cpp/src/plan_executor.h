@@ -165,9 +165,8 @@ std::pair<cudf::size_type, cudf::size_type> clamp_row_range(uint64_t offset, uin
 /// measured var-length content total.
 ///
 /// A second implementation of a rule the codebase otherwise keeps in one place, so the
-/// reason has to be stated: the bare-cuDF sf40 tests never enter Rust, and a calibration
-/// fitting sf1 and sf40 on one line is wrong by an unknown factor if the two ends count
-/// bytes differently. On the peacockdb path it exists only to be compared.
+/// reason has to be stated: a call in the middle of a node's chain hands its raw handle
+/// on, so nothing in Rust ever prices its output. This is the only figure for it.
 ///
 /// Models the RUST formula, not cuDF's physical layout, and the two differ: BOOL8 is a
 /// byte per row on the device and a bit per row here, and the validity bitmap is charged
