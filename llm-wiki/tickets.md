@@ -177,11 +177,8 @@ produced types. The >32-group case is the one that is not merely cosmetic, but n
 reaches it.
 
 Not fixed: unlike #195 the correct width is not a constant, so the fix has to read the
-declared `output_schema` (or count grouping expressions) rather than pick a type. Excluded
-from the byte cross-check meanwhile — `NodeStats::schema_faithful`
-(`cpp/src/execute_plan.cpp`, `types_match_declared`) reports 0 for these nodes and the
-assertion skips them. Grouping sets cannot arise on the bare-cuDF sf40 path, so the
-calibration is unaffected.
+declared `output_schema` (or count grouping expressions) rather than pick a type. No
+measured query reaches a plan with grouping sets, so nothing timed depends on it.
 
 ## Blockers for disabled coverage
 
