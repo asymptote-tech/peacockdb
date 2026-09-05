@@ -224,8 +224,8 @@ async fn test_instrumented_stats_are_populated() {
 ///
 /// **Its execution.** `CpuBackend` is a working backend: a case that drove it would not
 /// fail at all. It would produce a whole tree of plausible microseconds measured on the
-/// wrong machine, and nothing downstream — not the record, not the fit, not a plot —
-/// carries a field that says which backend ran. That is worse than a missing file, and
+/// wrong machine, and nothing downstream — not the record, not a plot — carries a field
+/// that says which backend ran. That is worse than a missing file, and
 /// it is why the two names sit in one list.
 ///
 /// Deliberately NOT `CpuBatch`: it lives on the GPU path legitimately, because an unload

@@ -42,7 +42,7 @@
 # rather than behind a flag: the rows are derived from the run that wrote the tree
 # above, and a flag someone has to remember is a way for the two to silently
 # disagree about which measurement they describe. Truncated at the start of every
-# run -- one file per run is what a fit reads, and appending across runs would mix
+# run -- one file per run is what a reader gets, and appending across runs would mix
 # build profiles and allocators under one header. One file for every mode: `mode`
 # is a column, and what must not mix is the CONDITIONS, which the `# run:` heading
 # holds and record.rs refuses to merge across.
@@ -887,8 +887,7 @@ EOF
 
   # The trace capture read down to what a call splits into inside libcudf, which is a
   # level `records.tsv` cannot hold: one ABI call is several libcudf calls, and a hash
-  # join's build, probe and gather cost differently — a coefficient fitted against their
-  # sum is wrong for all three.
+  # join's build, probe and gather cost differently — their sum describes none of them.
   #
   # Derived here rather than on the host and rerun on every pull: it reads a capture that
   # is already home and goldens that are already local, costs seconds, and a derived file

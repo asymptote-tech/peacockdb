@@ -355,7 +355,7 @@ def main():
             "#   host prologue, and it says whether a thin sample count is a short call or\n"
             "#   a stalled one.\n"
             "# samples = GPU metric samples inside the call. Under ~10 the integral is an\n"
-            "#   estimate from too few points; the fit should weight or drop those rows.\n"
+            "#   estimate from too few points; a reader should weight or drop those rows.\n"
         )
         fh.write(
             "\t".join(TUPLE)
@@ -376,7 +376,7 @@ def main():
             f"{len(thin)} calls under 10 samples, carrying "
             f"{sum(r[at + 2] for r in thin) / 1e9:.3f} GB "
             f"({100 * sum(r[at + 2] for r in thin) / total:.2f}%) "
-            "-- too few to integrate, and the fit should weight or drop them"
+            "-- too few to integrate, and a reader should weight or drop them"
         )
     print(f"wrote {args.out}")
 

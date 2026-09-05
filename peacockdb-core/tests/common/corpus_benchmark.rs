@@ -271,9 +271,9 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
     }
 
     let times: Vec<u64> = runs.iter().map(|run| run.total_us).collect();
-    // Before the pick, and every run rather than the chosen one: the record's rows are the
-    // fit's samples, and a spread of ten is what tells a coefficient from an accident. The
-    // file beside it reports one run instead — the two answer different questions.
+    // Before the pick, and every run rather than the chosen one: a spread of ten is what
+    // separates a call's cost from an accident of scheduling. The file beside it reports
+    // one run instead — the two answer different questions.
     //
     // In the order they ran, which `second_smallest` is about to destroy: a repeat of
     // `call_index` 0 is where one execution's rows end, and sorting first would interleave

@@ -29,7 +29,7 @@
 // ── TPC-H, sf40 ─────────────────────────────────────────────────────────────
 // sf40 AND NOT sf1, which is the task's own instruction and not a preference: at sf1 a
 // query is mostly the host prologue — measured, 0..4us per call, below the resolution of
-// the clock — so a fit over sf1 rows would fit the instrument. The correctness corpus
+// the clock — so sf1 rows would describe the instrument. The correctness corpus
 // stays at sf1 for the mirror-image reason: a wrong answer is legible in six million rows
 // and not in six hundred million.
 //

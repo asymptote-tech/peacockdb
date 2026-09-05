@@ -184,7 +184,7 @@ async fn events_are_free_and_land_where_they_claim() {
         ev_setup > 0,
         "Σ host_setup_us is zero: no region reported any pre-device host time, so the \
          `mark_device_start` calls are at region entry rather than at the first device \
-         touch, and const_peacock cannot be fitted from records taken this way",
+         touch, and every record taken this way bills the prologue as device work",
     );
 
     // 3d. Nothing went unmeasured. The sums above are over whatever regions came back,

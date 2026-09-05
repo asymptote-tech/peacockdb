@@ -328,9 +328,9 @@ const HEADER_NOTES: &str = "\
 
 /// Append this run's rows to `$PEACOCK_RECORD_PATH`, or do nothing if it is unset.
 ///
-/// Appends rather than writes: a collection run is many queries in one process, and
-/// one file per run is what the fit reads. The header goes in only when the file is
-/// created, so concatenating runs stays a valid file.
+/// Appends rather than writes: a collection run is many queries in one process, and one
+/// file per run is what a reader gets. The header goes in only when the file is created,
+/// so concatenating runs stays a valid file.
 pub fn append_records(rows: &[String], meta: &RunMeta<'_>) {
     let Ok(path) = std::env::var(RECORD_PATH_ENV) else { return };
     let path = PathBuf::from(path);

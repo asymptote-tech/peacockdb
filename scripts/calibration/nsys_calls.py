@@ -14,8 +14,8 @@ cases it can check.
 
 The calibration record has one number per region and one input size for it. For a hash
 join that input size is the SUM over both children -- `input_for` adds every child's
-bytes together -- and a join's cost does not depend on its two sides the same way, so no
-coefficient fitted against that sum can be right. This reads the split back out of a
+bytes together -- and a join's cost does not depend on its two sides the same way, so
+that sum cannot explain it. This reads the split back out of a
 capture instead of adding columns to the record: libcudf pushes an NVTX range around
 every public call it makes, so the build side (`hash_join`), the probe (`inner_join`) and
 the materialisation (`gather`) are already three separate spans inside our region. The
@@ -379,9 +379,9 @@ def main():
         rest[1] += (r_end - r_start) - host_covered
         rest[2] += region_dev - dev_covered
 
-    # Median over executions, per (region, call, depth). Median rather than the mean for
-    # the same reason the fit takes one: the warm-up execution is in here, and on a first
-    # touch of a column the parquet reader does work no later execution repeats.
+    # Median over executions, per (region, call, depth). Median rather than the mean: the
+    # warm-up execution is in here, and on a first touch of a column the parquet reader
+    # does work no later execution repeats.
     rows = []
     keys = {(ident, cd) for (ident, _), b in per_exec.items() for cd in b}
     for ident, (call, depth) in sorted(keys, key=lambda k: (k[0], k[1][1], k[1][0])):
