@@ -175,11 +175,11 @@ std::pair<cudf::size_type, cudf::size_type> clamp_row_range(uint64_t offset, uin
 /// Unhandled type ids throw rather than contributing zero, matching the Rust-side panic,
 /// so a newly supported type breaks both ends loudly instead of silently disagreeing.
 ///
-/// One ambiguity is irreducible and left to the comparison: `fb_to_type_id` (expr.cpp)
-/// collapses `Utf8`, `LargeUtf8` and `Utf8View` onto one cuDF STRING, which Rust widths
-/// at 4-byte offsets for the first and third and 8 for the second, and nothing on the
-/// device recovers which it was. This assumes 4, what the corpus produces; a `LargeUtf8`
-/// column surfaces as a mismatch against Rust, which is the intended outcome.
+/// One ambiguity is irreducible: `fb_to_type_id` (expr.cpp) collapses `Utf8`,
+/// `LargeUtf8` and `Utf8View` onto one cuDF STRING, which Rust widths at 4-byte offsets
+/// for the first and third and 8 for the second, and nothing on the device recovers
+/// which it was. This assumes 4, what the corpus produces; a `LargeUtf8` column is
+/// under-counted here, silently, and nothing on this side can notice.
 uint64_t logical_size_from_table(const cudf::table_view& table, uint64_t varlen_content);
 
 /// Everything a finished output partition is worth reporting, before the split between

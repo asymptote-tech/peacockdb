@@ -771,7 +771,7 @@ std::vector<NodeRegion> NodeSession::collect_node_regions() {
   for (auto& slot : impl_->sink->slots) {
     // Every region is reported; only its DEVICE half needs a complete pair. A region
     // that never touched the device, or whose events failed to create, still carries
-    // host times and a byte cross-check worth having.
+    // host times and its byte total, both worth having.
     if (slot.start_recorded && slot.stop_recorded) {
       // Synchronize on the stop event, not the stream: the stream may have moved on
       // to work that belongs to nobody's region (the root materialize), and draining

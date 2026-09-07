@@ -172,9 +172,9 @@ with more than 32.
 
 Same shape as #195 (archived, fixed) and unnoticed for the same reasons — the ids are tiny,
 the goldens compare printed text, and `materialize` accepts whatever schema the IPC stream
-declares. Visible on tpcds q18/q22/q80, and only because the byte cross-check asks about
-produced types. The >32-group case is the one that is not merely cosmetic, but no corpus query
-reaches it.
+declares. Visible on tpcds q18/q22/q80, and only to something that asks about produced types
+rather than printed values. The >32-group case is the one that is not merely cosmetic, but no
+corpus query reaches it.
 
 Not fixed: unlike #195 the correct width is not a constant, so the fix has to read the
 declared `output_schema` (or count grouping expressions) rather than pick a type. No

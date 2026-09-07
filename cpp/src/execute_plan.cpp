@@ -69,11 +69,10 @@ uint64_t logical_size_from_table(const cudf::table_view& table, uint64_t varlen_
             std::to_string(static_cast<int>(id)) +
             " — add a deterministic arm here AND in type_structural_size (Rust)");
     }
-    // Diagnostic, off unless asked for. When the Rust cross-check in
-    // `gpu_node_executor` disagrees, it can name the Arrow schema but not the types
-    // cuDF actually materialized — and that gap is the whole finding (#195, #41).
-    // Printing the device side turns "the totals differ by N" into "column i came back
-    // as type T". Correlate with the assertion by (rows, varlen, total).
+    // Diagnostic, off unless asked for. What this function returns is a total, and a
+    // suspected schema divergence is a question about one column: printing the device
+    // side turns "the bytes look wrong" into "column i came back as type T". The tool
+    // the open divergences are chased with (#196, #41).
     static const bool log_cols = std::getenv("PEACOCK_LOG_LOGICAL_BYTES") != nullptr;
     if (log_cols) {
       std::fprintf(stderr,
