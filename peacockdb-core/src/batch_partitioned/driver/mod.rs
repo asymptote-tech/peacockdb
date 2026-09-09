@@ -4,8 +4,7 @@
 //! categories; [`single_partition`] is one lane of one lane-scoped node, deciding which
 //! call that lane's input state calls for and making exactly one. Both are generic over
 //! [`Backend`](super::backend::Backend), so each backend monomorphizes and nothing on the
-//! per-batch path is boxed. The design is `llm-wiki/tasks/batch_partitioned_executor.md`,
-//! sections Drivers and Memory accounting.
+//! per-batch path is boxed. The reasons are `llm-wiki/architecture.md`, under Execution.
 
 mod accounting;
 pub(crate) mod index;

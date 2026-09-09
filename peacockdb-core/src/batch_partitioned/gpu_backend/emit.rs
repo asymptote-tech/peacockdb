@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
 
-use crate::executors::node_timing_on;
+use crate::batch_partitioned::instrument::node_timing_on;
 
 use super::super::error::PlanError;
 use super::super::executor::{AbiCalls, BackendError, CallResult, CallStats};

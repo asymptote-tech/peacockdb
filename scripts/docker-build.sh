@@ -33,7 +33,7 @@
 #   scripts/docker-build.sh --image-only          # (re)build the builder image, stop
 #   scripts/docker-build.sh --shell               # interactive shell in the container
 #   scripts/docker-build.sh -- cargo test -p peacockdb-core --no-run   # any command
-#   scripts/docker-build.sh --no-image -- ./scripts/build-test-shadgpu.sh --build-benchmarks
+#   scripts/docker-build.sh --no-image -- ./scripts/build-test-shadgpu.sh --build
 #
 # After it succeeds, deploy and run with the committed script, unchanged:
 #   ./scripts/build-test-shadgpu.sh --push-binaries --patch --run

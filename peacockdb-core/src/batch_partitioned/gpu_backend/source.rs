@@ -11,7 +11,7 @@ use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
 
 use peacockdb_ffi::raw::{PeacockNodeStats, peacock_executor_execute_scan_rowgroups};
 
-use crate::executors::node_timing_on;
+use crate::batch_partitioned::instrument::node_timing_on;
 
 use super::super::error::PlanError;
 use super::super::executor::{AbiCalls, BackendError, CallStats};

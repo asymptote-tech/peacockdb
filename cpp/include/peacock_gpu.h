@@ -34,36 +34,13 @@ int peacock_executor_create(uint64_t gpu_memory_limit,
 void peacock_executor_destroy(peacock_executor_t* executor);
 
 // ---------------------------------------------------------------------------
-// Query execution
+// Results and errors
 // ---------------------------------------------------------------------------
 
-/// Execute a serialised physical plan.
-///
-/// @param executor          Executor handle.
-/// @param plan_bytes        Flatbuffer-encoded physical plan.
-/// @param plan_len          Length of plan_bytes in bytes.
-/// @param out_result_bytes  On success, set to a newly allocated buffer
-///                          containing the result (Arrow IPC stream).
-///                          Caller must free with peacock_result_free().
-///                          An empty result (no rows) is signalled by
-///                          *out_result_len == 0; *out_result_bytes is
-///                          unspecified in that case and must not be freed.
-/// @param out_result_len    Set to the length of out_result_bytes.
-/// @return                  0 on success, non-zero on failure. On failure
-///                          *out_result_bytes and *out_result_len are
-///                          unspecified — the caller must not read or free
-///                          them, and should retrieve the error via
-///                          peacock_last_error().
-int peacock_execute(peacock_executor_t* executor,
-                    const uint8_t* plan_bytes,
-                    uint64_t plan_len,
-                    uint8_t** out_result_bytes,
-                    uint64_t* out_result_len);
-
-/// Free a result buffer returned by peacock_execute().
+/// Free a result buffer returned by peacock_result_from_handle().
 void peacock_result_free(uint8_t* result_bytes);
 
-/// Return the last error message set by peacock_execute(), or an empty string.
+/// Return the last error message set by a call on this executor, or an empty string.
 /// The returned pointer is valid until the next call on this executor.
 const char* peacock_last_error(peacock_executor_t* executor);
 
@@ -112,11 +89,11 @@ typedef struct PeacockRmmPoolInfo {
 /// Install rmm's pooled device resource for the current device (process-global,
 /// idempotent, NOT installed by default). Call before any GPU work.
 ///
-/// Without it every cuDF intermediate is a cudaMalloc/cudaFree round trip. The gtest
-/// binaries install the same pool from their main(); this entry point exists so
-/// `peacock_gpu_benchmarks` — a Rust target, which cannot include
-/// cpp/include/peacock/rmm_pool.hpp — measures under the same allocator rather than
-/// producing numbers quietly compared with theirs.
+/// Without it every cuDF intermediate is a cudaMalloc/cudaFree round trip. The
+/// C++ gtest binaries install the same pool from their main(); this entry point
+/// exists so a Rust caller — which cannot include cpp/include/peacock/rmm_pool.hpp —
+/// measures the engine under the same allocator instead of producing numbers that are
+/// quietly compared with theirs.
 ///
 /// The engine does not call this for itself, so a shipping query is unaffected; making
 /// it self-installing is #148.

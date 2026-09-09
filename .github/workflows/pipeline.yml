@@ -273,26 +273,26 @@ jobs:
         run: |
           # EVERY target the run step invokes must be listed here, or its compile
           # failure surfaces as a run-step failure and the split stops meaning
-          # anything. The five after test_cpu_full_table were run-only for exactly
-          # that reason -- they compiled inside the "pure run" step.
-          cargo test --no-run -p peacockdb-core --test test_plan_serialiser --test test_query_plan --test test_cpu_full_table \
-            --test test_cpu_executor_misc --test test_cpu_oom --test test_node_executor \
-            --test test_query_plan_misc --test test_cpu_partitioned \
-            --test test_batch_partitioned_plans --test test_gpu_batch
+          # anything.
+          cargo test --no-run -p peacockdb-core --test test_batch_partitioned_plans --test test_gpu_batch
           cargo test --no-run -p peacockdb-ffi --test test_ffi
           # Separate line because of --features rust-only: cargo's fingerprint
           # includes the feature set, so this cannot share the invocation above.
           # The feature only reaches peacockdb-ffi/peacockdb-core, not the
           # DataFusion/Arrow graph, so the extra compile is small.
           #
-          # --lib rides HERE rather than on the default-feature line: the lib unit
-          # tests touch no FFI — config, gpu_rule, resident, and the batch_partitioned
-          # planner, which is most of them now — so under rust-only their
-          # binary does not link libpeacock_gpu — a smaller link in the tier that has
-          # already hit tmpfs/SIGBUS at link time. It shares this line's already-built
-          # rust-only fingerprint, so it costs no extra dependency compile.
-          cargo test --no-run --features rust-only -p peacockdb-core --lib --test test_plan_bytes \
+          # --lib rides HERE rather than on the default-feature line: the lib unit tests
+          # touch no FFI — config and the batch-partitioned planner, which is nearly all of
+          # them — so under rust-only their binary does not link libpeacock_gpu, a smaller
+          # link in the tier that has already hit tmpfs/SIGBUS at link time. It shares this
+          # line's already-built rust-only fingerprint, so it costs no extra compile.
+          cargo test --no-run --features rust-only -p peacockdb-core --lib \
             --test test_cpu_executors --test test_cpu_batch_partitioned
+          # The CLI, which has no test target of its own and so is named by nothing above.
+          # It is the only caller of the planner and the driver from outside the crate, so a
+          # signature change that the tests absorb still breaks it — and unbuilt, it breaks
+          # at the merge gate of whoever notices next. test_ci_coverage asserts this line.
+          cargo build --features rust-only -p peacockdb
         env:
           # The pair's own two only; CMAKE_GENERATOR and RUSTFLAGS come from the job.
           LD_LIBRARY_PATH: /opt/conda/lib
@@ -305,44 +305,21 @@ jobs:
       # job's and identical by construction.
       - name: Run Rust tests
         run: |
-          # Batch-partitioned first: it is the mode under development, so its failures are
-          # the ones worth seeing soonest, and it plans rather than executes so it finishes
-          # in seconds where the legacy tiers take minutes. It plans real sf1 tables,
-          # reading row-group metadata off the parquet, so it needs this tier's dataset.
+          # The plan tier first: it plans rather than executes, so its failures are the
+          # ones worth seeing soonest. It plans real sf1 tables, reading row-group metadata
+          # off the parquet, so it needs this tier's dataset.
           cargo test -p peacockdb-core --test test_batch_partitioned_plans
-          cargo test -p peacockdb-core --test test_plan_serialiser
-          cargo test -p peacockdb-core --test test_query_plan
-          cargo test -p peacockdb-core --test test_cpu_full_table
-          # Named-not-globbed, so these four were invisible to CI until the
-          # test_ci_coverage meta-test surfaced them. They need the dataset + the
-          # linked executor, so they belong in this tier rather than the golden one.
-          cargo test -p peacockdb-core --test test_cpu_executor_misc
-          cargo test -p peacockdb-core --test test_cpu_oom
-          cargo test -p peacockdb-core --test test_node_executor
-          cargo test -p peacockdb-core --test test_query_plan_misc
-          cargo test -p peacockdb-core --test test_cpu_partitioned
           # GpuBatch's own surface, and it belongs in a CPU tier deliberately: the batch
           # is a handle plus a Drop, and the release it calls is null-guarded on the
           # executor, so nothing here needs a device. The GPU half of the ABI is
           # test_gpu_abi, staged for the gpu-tests job.
           cargo test -p peacockdb-core --test test_gpu_batch
           cargo test -p peacockdb-ffi --test test_ffi
-          # The FlatBuffer wire-format guard lives HERE, not in the golden-only
-          # cost-report tier where it was first wired. It NEEDS the sf1 parquet,
-          # because it builds real physical plans before serializing them — the
-          # old rationale ("pure text/bytes over committed artifacts, no executor,
-          # no dataset, no GPU") was wrong on "no dataset" and would invite someone
-          # to move it straight back. It does NOT need a GPU or the linked C++
-          # executor (it runs under rust-only), so the parquet CPU tier is its home.
-          # It MUST run in CI: the C++ side consumes these bytes, so a write-order
-          # shift that only went red locally would reach master green.
-          # See tests/test_plan_bytes.rs and goldens/plan_bytes.sha256.
-          cargo test --features rust-only -p peacockdb-core --test test_plan_bytes
-          # The inline #[cfg(test)] modules: config, gpu_rule, resident, and the
-          # batch_partitioned planner, which is 101 of the 110. Every other cargo
-          # invocation in this file passes --test, which selects integration targets
-          # ONLY — so before this line the lib unit tests ran locally and
-          # never in CI. test_ci_coverage asserts this line exists.
+          # The inline #[cfg(test)] modules: config and the batch-partitioned planner,
+          # which is nearly all of them. Every other cargo invocation in this file passes
+          # --test, which selects integration targets ONLY — so before this line the lib
+          # unit tests ran locally and never in CI. test_ci_coverage asserts this line
+          # exists.
           cargo test --features rust-only -p peacockdb-core --lib
           # The executor contract both engines owe, from one table: this runs its rows on
           # the CPU backend and the gpu-tests job runs the same rows on a device. Neither
@@ -414,11 +391,14 @@ jobs:
       - name: Build and stage rust GPU test binaries
         run: |
           mkdir -p cpp/install/rust-tests
-          # The GPU targets, one line each; build-test.md's test table is the detail.
-          # test_gpu_full_table / test_gpu_partitioned = the per-query GPU verify, split by
-          #   execution mode: each asserts the per-node cost tree against the matching
-          #   .cpu.txt golden AND the final result, which catches an intermediate divergence
-          #   a whole-result check misses. Staging one alone retires an execution mode.
+          # The six GPU targets, one line each; build-test.md's test table is the detail.
+          # test_gpu_bp_corpus = the corpus on a device, read against the sections the cpu
+          #   tier authored — plan shape, per-batch lists and bytes, and the result where
+          #   the query's line names a golden.
+          # test_node_timing = the timing method itself: that the events mode does not slow
+          #   the query it measures, and that its CUDA events bracket device work rather
+          #   than the host prologue. Every number under testdata/benchmark-results/ rests
+          #   on both, and nothing else checks either.
           # test_inc2_conformance = GPU vs comet Spark-murmur3 partition ids, bit-exact.
           # test_gpu_abi = the batch-partitioned ABI's three per-call symbols on a device;
           #   its companion test_gpu_batch needs no device and runs in dataset-matrix instead.
@@ -430,7 +410,7 @@ jobs:
           #   assumes both; nothing else checks either.
           # One line on purpose: the coverage guard reads the array below with a single
           # `lines().find`, so a continuation hides every target after the backslash.
-          for t in test_gpu_full_table test_gpu_partitioned test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_bp_corpus test_node_timing; do
+          for t in test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_bp_corpus test_node_timing; do
             exec_path=$(cargo test --no-run -p peacockdb-core --test "$t" \
                 --message-format=json \
               | python3 -c '
@@ -470,6 +450,13 @@ jobs:
     name: GPU Tests (remote)
     needs: cpp-build-2502
     runs-on: ubuntu-latest
+    # One physical device, so one of these at a time across every ref. Two jobs on the same
+    # GPU contend for its memory, and --test-threads=1 keeps one test at a time inside a
+    # process but cannot reach across two. Queued rather than cancel-in-progress: a
+    # cancelled run can leave both its REMOTE_DIR and the device's state behind.
+    concurrency:
+      group: shad-gpu
+      cancel-in-progress: false
     # Secrets aren't passed to fork PRs, so this job just fails-fast there.
     env:
       GPU_HOST: info@llm-gpu0h200.velkerr.ru
@@ -516,10 +503,9 @@ jobs:
           # Fresh binaries — --delete keeps cpp/install/ clean across runs.
           rsync -a --delete cpp/install/ gpu:$REMOTE_DIR/cpp/install/
           # Query SQL + minimal dataset + testdata generator + committed goldens.
-          # testdata/goldens carries the *.full_table-tp1-standard.cpu.txt tp1
-          # node-by-node goldens (29 tpch + 78 tpcds) that test_gpu_full_table asserts
-          # against, plus the *.partitioned-tp8-standard.cpu.txt set for
-          # test_gpu_partitioned; without them the node-by-node verify cannot run.
+          # testdata/goldens carries the per-mode `.cpu.txt` files the device tier reads
+          # read-only — the sections the cpu tier authored are what a device run is checked
+          # against, so without them test_gpu_bp_corpus has nothing to compare to.
           # cost-registry.csv is a committed fixture the registry test READS (it
           # asserts the CSV against the suite's link-time inventory); without it the
           # test dies on a missing file, which reads as a broken check rather than an
@@ -560,13 +546,25 @@ jobs:
 
       - name: Run GPU tests
         run: |
-          ssh gpu bash <<EOF
+          # The block below deliberately runs without 'set -e', so only what it explicitly
+          # OR's into rc can fail it — a command that dies of a signal contributes nothing.
+          # The one place such a death is visible is the text, so the text is kept and read
+          # here, on the runner, where coreutils are not the thing under suspicion.
+          set -o pipefail
+          rc=0
+          ssh gpu bash <<EOF 2>&1 | tee "$RUNNER_TEMP/gpu-tests.log" || rc=$?
             # Deliberately no 'set -e': run every test binary even when an
             # earlier one fails (e.g. TPC-H failing must not skip TPC-DS), then
             # fail the step at the end if anything failed. Each binary's pass/fail
             # is OR'd into rc.
             export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata
-            export LD_LIBRARY_PATH=$REMOTE_DIR/cpp/install/lib:$REMOTE_LD_LIBRARY_PATH
+
+            # The patched glibc-2.35 goes to the test binaries PER COMMAND and is never
+            # exported, which is what setup-glibc.sh's own output tells you to do: exported,
+            # the host's coreutils load it too and segfault — and since this block has no
+            # 'set -e', a crashing `grep -q` just answers no and its guard goes quietly
+            # green. That shipped, for the five rust targets, until it was read in a log.
+            PATCHED_LD=$REMOTE_DIR/cpp/install/lib:$REMOTE_LD_LIBRARY_PATH
 
             rc=0
 
@@ -614,16 +612,14 @@ jobs:
             ran_any=0
             for t in $REMOTE_DIR/cpp/install/bin/peacock_*_tests; do
               [ -x "\$t" ] || continue
-              # \${t##*/} not basename: basename is coreutils and segfaults under the
-              # glibc-2.35 LD_LIBRARY_PATH exported above.
               tname=\${t##*/}
               echo "==> \$tname"
               tlog=$REMOTE_DIR/\$tname.log
-              "\$t" > "\$tlog" 2>&1
+              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" > "\$tlog" 2>&1
               trc=\$?
               [ "\$trc" -eq 0 ] || rc=1
-              # echo + scan in one builtin pass (no cat, no grep — see the warning on
-              # REMOTE_LD_LIBRARY_PATH above)
+              # echo + scan in one builtin pass: one read of the log answers both what to
+              # print and whether anything ran.
               tzero=0
               while IFS= read -r line; do
                 printf '%s\n' "\$line"
@@ -647,6 +643,7 @@ jobs:
             # Same zero-test guard the C++ loop above carries, in libtest's wording: a
             # rust binary whose cases all vanished exits 0 and says nothing, so the staging
             # array would go on excusing a target that verifies nothing.
+            rust_ran=0
             for t in $REMOTE_DIR/cpp/install/rust-tests/*; do
               [ -x "\$t" ] || continue
               tname=\${t##*/}
@@ -656,16 +653,33 @@ jobs:
               # CUDA context, cascading into bad_alloc/cudaErrorIllegalAddress
               # for every later test. Sequential is mandatory.
               tlog=$REMOTE_DIR/\$tname.rust.log
-              "\$t" --nocapture --test-threads=1 > "\$tlog" 2>&1 || rc=1
-              cat "\$tlog"
-              if grep -q "^running 0 tests" "\$tlog"; then
+              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 > "\$tlog" 2>&1 || rc=1
+              rzero=0
+              while IFS= read -r line; do
+                printf '%s\n' "\$line"
+                case "\$line" in "running 0 tests"*) rzero=1 ;; esac
+              done < "\$tlog"
+              if [ "\$rzero" -eq 1 ]; then
                 echo "::error::\$tname ran 0 tests — nothing was verified"
                 rc=1
               fi
+              rust_ran=\$((rust_ran + 1))
             done
+            # The C++ loop's ran_any, for the rust half: an empty staging directory would
+            # otherwise run nothing and say nothing.
+            if [ "\$rust_ran" -eq 0 ]; then
+              echo "::error::no rust test binaries in $REMOTE_DIR/cpp/install/rust-tests"
+              rc=1
+            fi
+            echo "==> ran \$rust_ran rust test binaries"
 
             exit \$rc
           EOF
+          if grep -qE "Segmentation fault|core dumped" "$RUNNER_TEMP/gpu-tests.log"; then
+            echo "::error::something segfaulted on the GPU host — see the log above"
+            rc=1
+          fi
+          exit $rc
 
       - name: Cleanup remote run directory
         if: always()
@@ -757,10 +771,10 @@ jobs:
       # target is unwired, which it cannot do from behind a container and a dataset build.
       # Every peacockdb-core integration test target must be NAMED by some workflow
       # step above. CI does not sweep them as a set, so a new tests/test_*.rs is
-      # invisible here until someone remembers to add it — which is exactly how
-      # test_plan_bytes shipped as a guard that could not go red at the merge gate,
-      # and how peacock_tpchv_tests was built+shipped+patched but never run (see the
-      # C++ glob note in the gpu-tests job). This asserts the coverage instead.
+      # invisible here until someone remembers to add it — which is exactly how a wire-format
+      # guard once shipped unable to go red at the merge gate, and how peacock_tpchv_tests was
+      # built+shipped+patched but never run (see the C++ glob note in the gpu-tests job).
+      # This asserts the coverage instead.
       - name: Every rust test target is wired into CI
         run: cargo test --features rust-only -p peacockdb-core --test test_ci_coverage
 
@@ -789,15 +803,13 @@ jobs:
             fi
             cargo run -p cost-report -- --published \
               --sha "$REPORT_SHA" --generated-at "$GENERATED_AT" \
-              --site report --md-legacy "$RUNNER_TEMP/pr_comment.md" \
-              --md-bp "$RUNNER_TEMP/pr_comment_bp.md"
+              --site report --md "$RUNNER_TEMP/pr_comment.md"
           else
             # PR: single standalone report for the artifact-less comment; the page
             # isn't published for this change yet, so no --site / no nav links.
             cargo run -p cost-report -- \
               --sha "$REPORT_SHA" --generated-at "$GENERATED_AT" \
-              --html report/index.html --md-legacy "$RUNNER_TEMP/pr_comment.md" \
-              --md-bp "$RUNNER_TEMP/pr_comment_bp.md"
+              --html report/index.html --md "$RUNNER_TEMP/pr_comment.md"
           fi
 
       # PR: upsert exactly one comment, keyed on the hidden sentinel. Restricted
@@ -817,9 +829,8 @@ jobs:
               owner, repo, issue_number, per_page: 100,
             });
             // The sentinel is the file's FIRST LINE rather than a copy of the constant:
-            // the tables exceed one comment's 65,536-byte body, so there are two files, and
             // a sentinel spelled in both Rust and YAML is a constant that drifts.
-            for (const name of ['pr_comment.md', 'pr_comment_bp.md']) {
+            for (const name of ['pr_comment.md']) {
               const path = process.env.RUNNER_TEMP + '/' + name;
               // always() runs this after a failed generate step too, where the file is absent.
               if (!fs.existsSync(path)) { core.info(`no ${name}; skipping`); continue; }

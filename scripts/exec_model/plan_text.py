@@ -1,7 +1,7 @@
 """Rendering a plan as text, for the corpus plan goldens.
 
-The spec's [Node display](../../llm-wiki/tasks/batch_partitioned_executor.md#node-display)
-section defines what the real mode's `.plans.txt` will carry: the node, its declared
+[Node display](../../llm-wiki/architecture.md#node-display)
+defines what the real mode's `.plans.txt` carries: the node, its declared
 `PartitionLayout` — lane count, batch layout, key distribution, sort order — and the
 parameters that decide what it computes. This is that, at the prototype's level of detail,
 so a corpus query's lowering is reviewable as a tree rather than as forty lines of builder

@@ -17,9 +17,8 @@ use peacockdb_core::batch_partitioned::plan::{PlanKnobs, plan_batch_partitioned}
 use peacockdb_core::batch_partitioned::plan_text::{
     Payloads, render_plan, render_plan_memory, render_plan_recipes,
 };
-use peacockdb_core::batch_partitioned::recipe::{attach_recipes, check_seq_kinds, depth, node_at};
+use peacockdb_core::batch_partitioned::recipe::{attach_recipes, check_seq_kinds, depth};
 use peacockdb_core::batch_partitioned::{ExecutorCategory, category_of};
-use peacockdb_core::generated::gpu_plan_generated::peacock::plan as fb;
 
 use common::bp_mode::{BP_MODES, BpMode, mode_named};
 use common::golden_text::{ordered_sections, section_differences};
@@ -220,8 +219,7 @@ const PAYLOAD_QUERIES: [(&str, &str); 20] = [
 ];
 
 /// A digest of the bytes beside the text, because the two can disagree: a field the
-/// renderer does not print, an ordering that moves. `plan_bytes.sha256` pins the legacy
-/// wire form the same way and for the same reason.
+/// renderer does not print, an ordering that moves.
 fn digest_of(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
@@ -243,8 +241,7 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
             continue;
         }
         // Through the canonical root, so the paths the buffer embeds — and the digest
-        // over them — are the same on every machine. `test_plan_bytes` holds the legacy
-        // wire form still the same way, and for the same reason.
+        // over them — are the same on every machine.
         let ctx = peacockdb_core::register_tables_for(
             peacockdb_core::build_session_state(mode.knobs().target_partitions),
             &common::canonical_data_dir(dataset, "1"),
@@ -277,11 +274,10 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
     let path = common::testdata_root()
         .join("goldens")
         .join("bp-recipe-payloads.txt");
-    // Three states, as `plan_bytes.sha256` has for the legacy wire form and for the same
-    // reason: the digests here are this branch's only byte-level pin on the newer
-    // serializer, and the documented way to refresh goldens is a bulk --update-canonical on
+    // Three states, because the digests here are the only byte-level pin on what the C++ is
+    // handed, and the documented way to refresh goldens is a bulk --update-canonical on
     // verda. Without the second variable that run would rewrite the evidence and the diff
-    // would come home among hundreds. With it, a moved payload goes red DURING the regen.
+    // would come home among the others. With it, a moved payload goes red DURING the regen.
     let update = std::env::var("UPDATE_CANONICAL").is_ok();
     let rewrite = std::env::var("PEACOCK_REWRITE_RECIPE_BYTES").is_ok();
     if update && !rewrite {
@@ -861,261 +857,6 @@ fn sections_of(path: &Path) -> std::collections::BTreeMap<String, String> {
         sections.insert(previous, body);
     }
     sections
-}
-
-/// Which fields each writer sets, per fb table, unioned over the whole corpus.
-///
-/// `expr_writer`'s tests compare the two writers byte for byte, which is right for
-/// expressions and wrong for node payloads: the two legitimately differ there. What a
-/// difference must not be is unexamined — a field the legacy writer sets and this one
-/// leaves at its default is either a decision with a reason beside it or the grouping-set
-/// omission again, and from outside the two look identical.
-///
-/// Names come from the fbs rather than from a list here, so a field added to a table is
-/// covered the moment it exists.
-fn fbs_offset_fields() -> std::collections::BTreeMap<String, Vec<String>> {
-    let text = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../flatbuffers/gpu_plan.fbs"),
-    )
-    .expect("the schema");
-    // A scalar equal to its default is written by nobody, so presence says nothing about
-    // it: `interleave: false` and an unset `interleave` are the same bytes. Enums are
-    // scalars too, which is why the enum names are collected rather than assumed.
-    let mut scalars: BTreeSet<String> = [
-        "bool", "byte", "ubyte", "short", "ushort", "int", "uint", "long", "ulong", "float",
-        "double", "int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64",
-        "float32", "float64",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect();
-    let mut unions: BTreeSet<String> = BTreeSet::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("enum ") {
-            scalars.insert(rest.split([':', ' ']).next().unwrap().to_string());
-        } else if let Some(rest) = line.strip_prefix("union ") {
-            unions.insert(rest.split([' ', '{']).next().unwrap().to_string());
-        }
-    }
-
-    let mut tables = std::collections::BTreeMap::new();
-    let mut open: Option<(String, Vec<String>)> = None;
-    for line in text.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("table ") {
-            open = Some((rest.trim_end_matches(" {").trim().to_string(), Vec::new()));
-        } else if line == "}" {
-            if let Some((name, fields)) = open.take() {
-                tables.insert(name, fields);
-            }
-        } else if let Some((_, fields)) = open.as_mut() {
-            if line.starts_with("//") || line.is_empty() {
-                continue;
-            }
-            let Some((name, declared)) = line.split_once(':') else {
-                continue;
-            };
-            // Every field takes a vtable slot, so the position is the declaration order
-            // whatever the type; only the ones worth comparing carry a name.
-            let declared = declared
-                .split(|c: char| c == '=' || c == ';' || c == '(')
-                .next()
-                .unwrap_or("")
-                .trim();
-            // A union takes two slots — the type byte, then the offset — so a table
-            // holding one numbers every field after it two higher than it is declared.
-            if unions.contains(declared) {
-                fields.push(String::new());
-            }
-            fields.push(if scalars.contains(declared) {
-                String::new()
-            } else {
-                name.trim().to_string()
-            });
-        }
-    }
-    tables
-}
-
-/// The field indices a table actually set, read off its vtable so a field nobody wrote an
-/// accessor call for is still counted.
-fn fields_set(table: &flatbuffers::Table<'_>) -> BTreeSet<usize> {
-    let vtable = table.vtable();
-    (0..vtable.num_fields())
-        .filter(|index| {
-            vtable.get(flatbuffers::field_index_to_field_offset(
-                *index as flatbuffers::VOffsetT,
-            )) != 0
-        })
-        .collect()
-}
-
-/// Per node kind, the union of the field indices set across every node of that kind.
-///
-/// `PlanNode` and each node's top-level payload, and nothing below them: a field of a
-/// nested table is outside this comparison, as `AggregateFuncNode`'s decimal pair is.
-/// Those two are answered at `recipe::aggregate_writer::named_func` instead.
-fn written_fields(bytes: &[u8]) -> std::collections::BTreeMap<String, BTreeSet<usize>> {
-    let options = flatbuffers::VerifierOptions {
-        max_depth: 1024,
-        ..Default::default()
-    };
-    let plan = flatbuffers::root_with_opts::<fb::GpuPlan>(&options, bytes).expect("it verifies");
-    let mut per_kind: std::collections::BTreeMap<String, BTreeSet<usize>> =
-        std::collections::BTreeMap::new();
-    let mut seq = 0;
-    while let Some(node) = node_at(&plan, seq) {
-        per_kind
-            .entry("PlanNode".to_string())
-            .or_default()
-            .extend(fields_set(&node._tab));
-        if let Some(payload) = node.node() {
-            per_kind
-                .entry(format!("{:?}", node.node_type()))
-                .or_default()
-                .extend(fields_set(&payload));
-        }
-        seq += 1;
-    }
-    per_kind
-}
-/// The differences between the two writers, each with the reason it is one. Everything not
-/// listed has to match: a field the legacy writer sets and this one does not is how the
-/// grouping-set omission shipped, and the payload golden pinned it faithfully.
-const WRITER_DIFFERENCES: [(&str, &str, &str); 5] = [
-    (
-        "CudfScan",
-        "projection",
-        "the file schema written here is already the projected fields, so an empty \
-         projection reads as every column of it",
-    ),
-    (
-        "CudfScan",
-        "row_groups",
-        "the node's own list is overridden per call by execute_scan_rowgroups, so a list \
-         on the node would be a second answer to the same question",
-    ),
-    (
-        "CudfScan",
-        "batches",
-        "the RG map is this mode's own and is executed one batch per call, not read off \
-         the node",
-    ),
-    (
-        "CudfUnion",
-        "output_schema",
-        "the only unions here are structural, gathering a node's unconsumed branches so \
-         nothing is left unreachable; no recipe publishes a seq for one, so execute_union \
-         never runs on it and never reads this",
-    ),
-    (
-        "PlanNode",
-        "output_schema",
-        "nothing on the C++ side reads it — the executors take their types from each \
-         node's own payload. The one arm that would have is the collapse of no input \
-         handles, which needed a schema to answer with and is a refusal instead (#173), \
-         so this stays absent rather than becoming a field written for one caller",
-    ),
-];
-
-/// The two writers run over different query sets — this one only where planning and
-/// `attach_recipes` both succeed, the legacy one over everything — so a field the legacy
-/// writer sets only on a query this mode refuses arrives here as a difference, and the
-/// entry explaining it would be describing the refusal rather than the writer.
-#[tokio::test]
-async fn every_field_the_legacy_writer_sets_is_set_here_or_declared_a_difference() {
-    let names = fbs_offset_fields();
-    let mut legacy: std::collections::BTreeMap<String, BTreeSet<usize>> = Default::default();
-    let mut recipe: std::collections::BTreeMap<String, BTreeSet<usize>> = Default::default();
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
-        let mode = mode_named(PAYLOAD_MODE);
-        let ctx = peacockdb_core::register_tables_for(
-            peacockdb_core::build_session_state(mode.knobs().target_partitions),
-            &data_dir_for(dataset, sf),
-        )
-        .await
-        .expect("register the tables");
-        for (query, path) in queries(dataset) {
-            let sql = std::fs::read_to_string(&path).expect("the query text");
-            let Ok(frame) = ctx.sql(&sql).await else {
-                continue;
-            };
-            let Ok(plan) = frame.create_physical_plan().await else {
-                continue;
-            };
-            if let Ok((tree, _)) = plan_batch_partitioned(&plan, mode.knobs())
-                && let Ok(recipes) = attach_recipes(tree.as_ref())
-            {
-                merge(&mut recipe, written_fields(recipes.bytes()));
-            }
-            let legacy_plan = common::plan_for(dataset, sf, &query, "tp8-standard").await;
-            if let Ok(bytes) = peacockdb_core::plan_serializer::serialize_plan_mode(
-                &legacy_plan,
-                common::plan_partition_mode("tp8-standard"),
-            ) {
-                merge(&mut legacy, written_fields(&bytes));
-            }
-        }
-    }
-
-    let mut unexplained: Vec<String> = Vec::new();
-    for (kind, set) in &legacy {
-        let Some(here) = recipe.get(kind) else {
-            continue;
-        };
-        for index in set.difference(here) {
-            let field = names
-                .get(kind)
-                .and_then(|fields| fields.get(*index))
-                .map(String::as_str)
-                .unwrap_or("?");
-            if field.is_empty() {
-                continue;
-            }
-            if !WRITER_DIFFERENCES
-                .iter()
-                .any(|(table, name, _)| *table == kind && *name == field)
-            {
-                unexplained.push(format!("{kind}.{field}"));
-            }
-        }
-    }
-    assert!(
-        unexplained.is_empty(),
-        "the legacy writer sets these and the recipe writer leaves them at their default, \
-         with no entry in WRITER_DIFFERENCES saying why: {unexplained:?}"
-    );
-
-    let stale: Vec<String> = WRITER_DIFFERENCES
-        .iter()
-        .filter(|(table, name, _)| {
-            let index = names
-                .get(*table)
-                .and_then(|fields| fields.iter().position(|field| field == name));
-            match (index, legacy.get(*table), recipe.get(*table)) {
-                (Some(index), Some(set), Some(here)) => {
-                    !set.contains(&index) || here.contains(&index)
-                }
-                _ => true,
-            }
-        })
-        .map(|(table, name, _)| format!("{table}.{name}"))
-        .collect();
-    assert!(
-        stale.is_empty(),
-        "WRITER_DIFFERENCES explains differences that are not there — either the field \
-         moved or this writer now sets it: {stale:?}"
-    );
-}
-
-fn merge(
-    into: &mut std::collections::BTreeMap<String, BTreeSet<usize>>,
-    from: std::collections::BTreeMap<String, BTreeSet<usize>>,
-) {
-    for (kind, set) in from {
-        into.entry(kind).or_default().extend(set);
-    }
 }
 
 /// The driver's numbering and the recipe list's are the same numbering.

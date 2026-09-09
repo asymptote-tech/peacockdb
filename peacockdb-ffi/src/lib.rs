@@ -88,14 +88,6 @@ pub mod raw {
 
         pub fn peacock_executor_destroy(executor: *mut PeacockExecutor);
 
-        pub fn peacock_execute(
-            executor: *mut PeacockExecutor,
-            plan_bytes: *const u8,
-            plan_len: u64,
-            out_result_bytes: *mut *mut u8,
-            out_result_len: *mut u64,
-        ) -> i32;
-
         pub fn peacock_result_free(result_bytes: *mut u8);
         pub fn peacock_last_error(executor: *mut PeacockExecutor) -> *const c_char;
 
@@ -105,15 +97,14 @@ pub mod raw {
         ///
         /// Without it every cuDF intermediate the engine allocates is a
         /// `cudaMalloc`/`cudaFree` round trip. The C++ gtest binaries install the same
-        /// pool from their `main()`; this exists so `peacock_gpu_benchmarks` — which is
-        /// Rust and cannot include the C++ header that owns the sizing rule — measures
-        /// the engine under the same allocator rather than producing node times that get
-        /// compared with theirs anyway.
+        /// pool from their `main()`; this exists so a Rust caller — which cannot include
+        /// the C++ header that owns the sizing rule — measures the engine under the same
+        /// allocator rather than producing numbers that get compared with theirs anyway.
         ///
         /// Returns 0 unless `out_info` is null; NOT non-zero on
         /// [`PEACOCK_RMM_POOL_UNAVAILABLE`], which still leaves a runnable default
-        /// resource. The caller decides whether that is fatal — for the benchmark
-        /// harness it is.
+        /// resource. The caller decides whether that is fatal, and for anything being
+        /// timed it is.
         pub fn peacock_install_rmm_pool(out_info: *mut PeacockRmmPoolInfo) -> i32;
 
         /// Select the per-node timing mode (process-global; `PEACOCK_NODE_TIMING_OFF`

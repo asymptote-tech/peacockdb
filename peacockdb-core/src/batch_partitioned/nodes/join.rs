@@ -504,7 +504,7 @@ impl JoinCapability {
     ///
     /// True where nothing needs a finish, and also where the probe cannot stream — the
     /// planner makes that probe a single batch, and one call over the whole of it is the
-    /// same legacy node the other modes emit. Asked by the recipe writer for what to
+    /// plain join node the wire has always carried. Asked by the recipe writer for what to
     /// publish and by an executor for what to build, because answering it twice is how a
     /// filtered semi join ended up on the finish path with its residual dropped.
     pub fn answers_in_one_call(&self) -> bool {

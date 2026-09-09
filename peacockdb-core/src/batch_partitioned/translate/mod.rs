@@ -39,10 +39,9 @@ use super::nodes::{
     GpuInterleave, GpuJoin, GpuLimit, GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions,
     GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion, GpuUnload,
 };
-use super::parquet_meta::survivor_metadata;
+use super::parquet_meta::{parquet_table_name, survivor_metadata};
 use super::partitioner::{Batching, RowGroupMeta, partition};
 use super::schema::Schema;
-use crate::operators::scan::parquet_table_name;
 
 mod aggregate;
 #[cfg(test)]

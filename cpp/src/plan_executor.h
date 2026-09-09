@@ -143,12 +143,6 @@ struct NodeRegion {
   uint64_t logical_bytes = 0;
 };
 
-/// Execute a FlatBuffer-encoded GPU plan and return the result table.
-/// Thin recursive wrapper over the single-node executor — the production fast path.
-///
-/// @throws std::runtime_error on parse or execution errors.
-TableResult execute_plan(const uint8_t* plan_bytes, uint64_t plan_len);
-
 /// Σ var-length content bytes over a table's columns (see `NodeStats`).
 uint64_t varlen_content_bytes(const cudf::table_view& table);
 
@@ -200,8 +194,7 @@ CallOutcome call_outcome(const TableResult& result);
 
 /// Node-by-node execution session: parses a plan once and drives ONE node at a
 /// time given already-resident child inputs, keeping intermediates resident in a
-/// handle registry. Used by the unified CPU/GPU node-executor interface; the
-/// all-at-once `execute_plan` remains the production fast path.
+/// handle registry. The only way a plan is executed.
 ///
 /// Nodes are addressed by canonical POST-ORDER sequence (children left-to-right,
 /// then the node) — the SAME order the Rust walk uses, so the caller's child

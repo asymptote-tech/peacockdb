@@ -1,7 +1,7 @@
 //! Row-group metadata for the partitioner, read at plan time.
 //!
-//! Pruning is legacy's — the same survivors the existing scan reads — and what is added
-//! here is the per-group rows and bytes the mapping needs. Bytes are the parquet
+//! What it adds to the pruning pass is the per-group rows and bytes the mapping needs.
+//! Bytes are the parquet
 //! column-chunk totals over the projected columns: a varchar's width is a property of
 //! the data, and the file already knows it.
 
@@ -13,6 +13,20 @@ use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 use super::error::PlanError;
 use super::partitioner::RowGroupMeta;
 use crate::gpu_rowgroup_prune::surviving_row_groups;
+
+/// The table a scan reads, named after the parquet file rather than declared anywhere:
+/// DataFusion's `ParquetExec` carries paths, and the plan text and every node above it
+/// name the table.
+pub fn parquet_table_name(parquet: &ParquetExec) -> Option<String> {
+    let file = parquet.base_config().file_groups.first()?.first()?;
+    file.object_meta
+        .location
+        .to_string()
+        .rsplit('/')
+        .next()?
+        .strip_suffix(".parquet")
+        .map(String::from)
+}
 
 /// What one read of a scan's metadata tells the planner: the row groups it will read, and
 /// whether each projected column has a NULL in any of them.

@@ -4,6 +4,10 @@ Tickets that are finished or that the tree outgrew. Numbers stay permanent and a
 reused, so a commit message or comment naming an old ticket still resolves — here.
 `llm-wiki/tickets.md` holds only open work.
 
+Three closing markers, and they say different things: **Done** is fixed, **Stale** is
+overtaken by the tree, and **Obsolete** is a capability or a question deliberately dropped —
+which a later reader needs to tell from an oversight. Stale and obsolete share a section.
+
 **Numbers spent without a ticket.** A number withdrawn before it described anything real is
 recorded here and nowhere else, so the counter never walks back over it:
 
@@ -23,6 +27,43 @@ the report rather than emitting one that goes nowhere.
 
 ## Done
 
+<a id="t194"></a>
+### #194 — the cost gate's git baseline ignores which section it was asked for
+
+`base_total` (`cost-report/src/main.rs:1623`) reads a base-side total two ways. The directory arm
+passes `section` to `entry_total`; the git-ref arm — the one every PR uses — calls
+`read_total_str` on the whole file and drops it. `read_total_str` returns the FIRST
+`peacockdb_cost=` in the text, so every section of a per-mode `.cost.txt` is compared against
+whichever query sorts first in that file.
+
+Legacy goldens are one file per query, so `section` is `None` and the two arms agree. The
+batch-partitioned per-mode files hold ~60 sections each, and there the gate is comparing unrelated
+queries. On `tpcds.sf1/bp-tp1-single-mini.cost.txt` the reported deltas run -99.6% to +341.3%
+against `q2`'s 737,382,823 — three below -90%, three above +200%, none of them a cost change.
+
+Every bp row on PR #135's cost widget is this. The new-side totals are correct; only the baseline
+is wrong, so nothing is mis-measured in the goldens themselves.
+
+Fix: the git arm takes the same `entry_total(text, section)` path as the directory arm. A test that
+the two arms agree on a multi-section file is what would have caught it.
+
+**Done 2026-09-08, by commit ca5c34d2.** Both arms take `entry_total(text, section)`, and
+`both_base_arms_read_the_same_section_of_a_multi_section_file` builds a two-section golden and
+asserts the directory arm and the git arm return the same number for the section that is not
+first. Archived here when the ticket was found open with the fix already in the tree.
+
+<a id="t110"></a>
+### #110 — Retire the all-at-once GPU executor
+Remove `executors/all_at_once_gpu_executor.rs` → `peacock_execute` FFI (whole-plan, no
+per-node stats), migrate or drop its 5 smoke tests plus the lifecycle test, and drop the
+FFI symbols from `cpp/include/peacock_gpu.h` / `cpp/src/gpu_executor.cpp` (and
+`execute_plan.cpp`). Its stated blocker — a common `Executor` trait — has landed, so this
+is unblocked pending full_table/partitioned covering all needs.
+
+**Done 2026-09-08.** The all-at-once executor, `peacock_execute`, `execute_plan.cpp` and
+the recursive arm of `execute_node` are gone with the other five legacy modes; `execute_node`
+is now only the resolver that hands an operator its next already-resident input.
+
 <a id="t103"></a>
 ### #103 — GPU SIGSEGV: shuffle_stddev tp8-standard (Welford N-way merge)
 `gpu_partitioned_tpch_sf1_shuffle_stddev_partitioned_tp8_standard` segfaults (139) or fails as a contained
@@ -40,8 +81,8 @@ the latent read into a segfault on its first call.
 `gpu_case!(tpch, 1, shuffle_stddev, partitioned_tp8_standard, golden_approx_std)` is enabled
 again after 20 consecutive green runs on shad-gpu, and `common/gpu_cases.inc` names this ticket
 beside it: if it flakes again, reopen this rather than filing a new number.
-<a id="t195"></a>
-### #195 — date_part materializes INT16 where DataFusion declares Int32
+<a id="t197"></a>
+### #197 — date_part materializes INT16 where DataFusion declares Int32
 `cudf::datetime::extract_datetime_component` returns an `int16_t` column — cuDF's own header
 says so (`cudf/datetime.hpp` L66) — and `execute_scalar_function` returned it unchanged.
 DataFusion types `date_part` as `Int32`. Every `EXTRACT(YEAR …)` column was therefore 2
@@ -61,7 +102,7 @@ It stops being harmless as soon as a GPU node's output reaches a CPU operator: t
 the whole plan and materializes at the root.
 
 **Done.** `cudf::cast` to INT32 at the call site (`cpp/src/expr.cpp`) — one pass over a narrow
-column, and only where an EXTRACT exists. #196 is the same shape and stays open, because there
+column, and only where an EXTRACT exists. #198 is the same shape and stays open, because there
 the correct width is not a constant.
 
 <a id="t151"></a>
@@ -169,8 +210,7 @@ hardcodes.
 **The three stay disabled in the legacy modes deliberately**, which is why this is closed
 rather than acted on: they are `full_table_gpu=na` by choice now, not by defect, and the
 registry keeps `115` in their `tickets` column so the widget still says which decision the
-cells rest on. The batch-partitioned mode plans all three; q87 is recorded in
-`llm-wiki/tasks/batch_partitioned_executor.md` as a query whose corpus is larger than legacy's.
+cells rest on. The batch-partitioned mode plans all three.
 
 <a id="t77"></a>
 ### #77 — Cost report: publish per-SHA history on master
@@ -233,7 +273,220 @@ prebuilt binaries to shad-gpu rather than building there, and the golden/meta ti
 under `rust-only` with no C++ at all. Re-file with concrete time targets if CI length
 becomes a problem again.
 
-## Stale
+## Stale or obsolete
+
+<a id="t41"></a>
+### #41 — Standing test for GpuUnion branch-type normalization cast
+Nothing is unimplemented — the title says *test*. `execute_union` retypes every branch column to
+the declared output type before `cudf::concatenate` (`union.cpp` ~L49), or it throws.
+
+What is open is that nothing covers it. The implementation comment names the case it was
+written for — tpcds q5, pairing a decimal measure against a `cast(0 AS decimal(7,2))` literal
+that materializes as FLOAT64, plus cuDF's SUM drifting fixed_point scale per branch. That case
+used to go red by luck, through a device tier that ran q5 and no longer exists; today no test
+reaches the cast at all. Fix: a focused gtest building a two-branch union with FLOAT64 against
+DECIMAL128, asserting the concatenate succeeds with the declared type. Cheap, and independent
+of any corpus query.
+
+**Obsolete 2026-09-08.** The kernel it asks to pin is unreachable. No recipe addresses a
+union — `FbKind` has no variant for one, and the only `CudfUnion` the writer emits is
+structural, holding branches together with no seq published for it — so `execute_union` and
+the `cudf::cast` inside it are never called by this pipeline. What normalizes branch types now
+is a per-branch `GpuProject` the planner inserts, and twelve corpus queries carry a union at
+`bp-tp1-single` with tpcds q5 among them, answered against DataFusion on the cpu backend. A
+gtest here would pin a path nothing takes; the device side of those twelve is the rollout's
+gap, not this ticket's.
+
+<a id="t32"></a>
+### #32 — GPU window functions / PARTITION BY
+The kernel gaps, which #143 sits on top of: this mode refuses a window query at plan time, so
+nothing reaches them today. Whole-partition aggregate windows worked
+(`cpp/src/operators/window.cpp`; q12/q51/q53/q63/q89 were green on a device before the modes
+that ran them went). Remaining: `rank()`/`dense_rank()` (`StandardWindowExpr`) for
+q36/q44/q47/q57/q67; q49 secondary blocker; q20 LIMIT-boundary NULL-ordering tiebreak; q98 OOM
+on a shared GPU.
+
+**Obsolete 2026-09-08.** Window functions are not a capability this engine is carrying: the
+planner refuses a window query before any of these kernels is reached ([#143](#t143), obsolete
+beside this), and the mode that once ran them on a device is deleted. The gaps are recorded
+here for whoever revives the feature rather than tracked as work.
+
+<a id="t143"></a>
+### #143 — window functions in batch-partitioned mode
+The planner refuses window queries at plan time, so a window query does not run at all —
+the one capability that went with the retired modes rather than moving to this one, and
+12 registry rows. Direction: a window is a per-partition op once the input is
+hash-partitioned on the PARTITION BY keys;
+whole-partition aggregate windows need a single batch (coalesce-all first), while
+`BoundedWindowAggExec`-class frames could stream as a `BatchAccumulator`. The
+rank/dense_rank gaps of #32 carry over unchanged.
+
+**Obsolete 2026-09-08.** Window support is not planned. A window query is refused at plan
+time, so thirteen TPC-DS queries do not run and their registry cells stay `na` — a decision
+with a consequence, not an oversight, and the kernel-side gaps are in [#32](#t32) beside this.
+
+<a id="t114"></a>
+### #114 — plan_status is shape-validated but never truth-verified
+`plan_status` (ok/fail) is shape-checked only; no test attempts to plan the `fail` rows.
+When #23 lands and q27/q70/q72/q86 start planning, the widget keeps rendering `plan ✗`
+with nothing going red. Fix: a permanent plan-attempt probe in `test_batch_partitioned_plans`
+asserting each `fail` row still fails to physically plan (and `ok` rows plan) — that tier
+already provisions parquet and already reads the registry. Accepted risk until then: stale ✗
+cells after an upgrade.
+
+**Obsolete 2026-09-08.** The probe it asked for exists, as a golden line rather than a test
+of its own: each `<mode>.plans.txt` holds `refused by datafusion: …` per query,
+`the_registry_matches_the_goldens_in_both_directions` maps that line to `na` in both
+directions, and `load_csv` refuses an enabled cell on a `plan_status=fail` row. So when #23
+lands and q27/q70/q72/q86 start planning, the golden moves first and the cells and the status
+cannot stay as they are.
+
+<a id="t132"></a>
+### #132 — Two batch-size fields cross the IR and nobody writes or reads them
+`CudfScan.batch_size` and `CudfCoalesceBatches.target_batch_size` are in the fbs, and
+`grep -rn 'batch_size' cpp/src cpp/include` returns nothing. Neither is read: the scan reads
+by row group (`set_row_groups`), so there is no batch to size, and `CudfCoalesceBatches` is
+`execute_passthrough` in `dispatch.cpp`. Since the legacy planner went, neither is written
+either — the recipe writer emits no coalesce-batches node at all and leaves `batch_size` at
+its default — so they are two fields of wire-format surface with nobody on either end. The
+wire format is deliberately frozen, so the decision is whether a batch bound should ever
+cross it (a device would then have a memory lever it does not have) or the fields should go
+in a commit that regenerates the payload digest deliberately. Until then, do not read them as
+evidence that device execution is batch-bounded.
+
+**Obsolete 2026-09-08.** With the legacy planner gone nothing writes these two either — the
+recipe writer emits no coalesce-batches node at all and leaves `CudfScan.batch_size` at its
+default — so they are inert fields of a frozen schema rather than a knob that misleads.
+Dropping them would move every payload byte and the digest that pins them, for no reader's
+benefit; a real batch bound, if a device ever takes one, is a new field designed for the mode
+that wants it.
+
+<a id="t96"></a>
+### #96 — GPU real-8-way per-partition JOIN execution
+Largely landed: the CPU oracle and the GPU map arm both run partitioned joins
+per-partition (child0[p] ⋈ child1[p]); q17 green at tp8-standard plus
+q3/q5/q7/q8/q9/q12/q13/q19. Before closing, confirm nothing remains beyond the
+broadcast/CollectLeft and non-inner surfaces now tracked in #97.
+
+**Stale 2026-09-08.** The real-8-way mode whose join arm this tracked is deleted, and #97,
+which held what remained of it, is stale beside this. What a device does with a join now is the
+batch-partitioned capability matrix, whose gaps carry their own tickets.
+
+<a id="t131"></a>
+### #131 — resident model never accounts for cross / nested-loop join build sides
+`resident.rs::peak()` stacks a build side by matching `stat.node_name` against `"HashJoinExec" |
+"CrossJoinExec" | "NestedLoopJoinExec"`, and two of the three never match.
+
+`GpuCrossJoinExec` and `GpuNestedLoopJoinExec` are two of the five operators that do not strip,
+so the name reaching the classifier keeps its `Gpu` prefix, matches nothing and falls into the
+streaming arm: the build side contributes zero and never stacks with the probe. `HashJoinExec`
+works only because its wrapper strips. So the resident-OOM enforcer under-estimates every plan
+containing a cross or nested-loop join, in the direction that lets a query through that should
+have tripped. Latent — the tight-budget set (`test_cpu_oom`: tpcds q78, tpch q7/q18) has no such
+join — and unreachable by the existing unit tests, which construct names by hand
+(`node("HashJoinExec", …)`) and so cannot see the mismatch: a guard that cannot go red. Fix:
+classify on a type rather than a rendered name (`as_operator` plus the wrapped node's identity),
+or normalize the prefix where the name is recorded, then add a case built from a real wrapped
+plan.
+
+**Stale 2026-09-08.** `resident.rs` and the streaming driver it hung off are deleted with
+the legacy modes. The batch-partitioned mode accounts memory from its own model
+(`batch_partitioned/estimator.rs` and the driver's accountant), which knows a join's build
+side by node kind rather than by a rendered name.
+
+<a id="t130"></a>
+### #130 — `partition_topology()` is implemented 16 times and read by nobody
+`Operator::partition_topology()` (`peacockdb-core/src/operators/operator.rs`) returns each
+operator's partition behaviour — ScanEmit / Map / Collapse / KWayMerge / RepartitionHash /
+Join — and has *no* callers: not in `src`, not in `tests`. The CPU backend and the C++ side
+each re-derive the same
+classification independently: the CPU partitioned backend by ad-hoc predicates
+(`collapses_partitions`, `hash_repartition_of`, `partitioned_join_arity` in
+`backend/cpu_node_executor.rs`) and the C++ side by `node_type()` switches in
+`node_session.cpp`. That is the duplicated-rule antipattern coding-style.md names: three
+copies of one fact, and the trait copy — the one a reader would trust, since it is the
+declared interface — is the copy nothing can prove right, because no test can make it go
+red. Either drive both off it (the CPU predicates become one match on the topology)
+or delete it and stop implying an abstraction the code does not use. Found auditing the
+operator tables for architecture.md.
+
+**Stale 2026-09-08.** `Operator` and its `partition_topology` are deleted with the legacy
+modes. The batch-partitioned nodes declare their lane behaviour in the layout the planner
+fills and the validator checks, so the declaration has readers.
+
+<a id="t133"></a>
+### #133 — No tp1 plan golden: tp1 cost annotation is unpinned
+Every `.plan.txt` in the tree is tp8 — 130 at `tp8-mini` plus `shuffle_additive` at
+`tp8-standard` — so the plan tier never renders a tp1 plan. The tp1 node TREE is still pinned,
+by the 110 `tp1-standard` `.cpu.txt` goldens, which carry each node's exprs, predicates and
+projections. What is pinned nowhere is the plan-only annotation at tp1: `row_width`,
+`subtree_max_row_bytes`, `estimate_input_bytes`, `estimate_output_bytes`, `estimate_cost`
+appear only in `.plan.txt`. A change to the memory/cost model that moved those numbers at tp1
+while leaving tp8 unchanged would go green — and tp1 is the shape the GPU full-table tier
+runs, so it is not a corner. Fix: canonize a handful of tp1 `.plan.txt` goldens (the same
+queries the tp1-standard cpu tier already uses), or teach the cpu golden to carry the
+annotation. Same class as #114 — a cell nothing verifies. Found auditing tp1/tp8 planning
+impact.
+
+**Stale 2026-09-08.** There is no `.plan.txt` tier: the plan goldens are the five
+batch-partitioned modes, and each renders the tree, the recipes and the memory model for
+every query at that mode. The annotation this ticket wanted pinned at tp1 is pinned at each
+of the five.
+
+<a id="t126"></a>
+### #126 — maybe_write_result_golden discards its removal result
+`peacockdb-core/tests/common/mod.rs` (~L566): when a result exceeds
+`RESULT_GOLDEN_MAX_BYTES` the golden is deleted so the GPU test falls back to the live
+oracle, but `let _ = std::fs::remove_file(...)` discards the outcome and the message
+prints unconditionally. A failed removal is therefore reported as "no golden" while the
+stale golden is still on disk, and the message cannot distinguish "deleted a stale one"
+from "there was nothing here". Narrow, but it is a regen path: the operator's next move
+is to trust the log and commit. Same shape as #119. Check the result, and say which of
+the two things happened.
+
+**Stale 2026-09-08.** `maybe_write_result_golden` went with the legacy harness. The corpus
+result golden is one file of sections written by the tier that authors it, with no size cap
+and no removal path.
+
+<a id="t97"></a>
+### #97 — Semi/anti/outer joins at real-8-way
+The widest tp8 blocker (~25 registry rows). Per-partition semi/anti/outer landed
+(semi_join / anti_join / left_join green at tp8-standard). Remaining: (a) broadcast /
+CollectLeft semi-anti-outer need a cross-probe-partition build-match bitmap reduction;
+(b) the NOT-IN global "any build partition holds a NULL key" check (#80). Carriers:
+tpch q4/q16/q18/q20/q21/q22 plus the tpcds outer/semi set.
+
+**Stale 2026-09-08.** The real-8-way mode this described is deleted. The
+batch-partitioned join capability matrix is what says which join shapes run on a device now,
+and what it refuses it refuses by name with its own ticket.
+
+<a id="t91"></a>
+### #91 — Memory-aware GPU hash-repartition + resident-OOM in the partitioned executor
+Real 8-way is only validated at generous budgets. (1) Repartition is concat-first
+(`GpuCoalescePartitions` full concatenate, then scatter), spiking peak memory and
+defeating the point of partitioning. (2) The resident-OOM enforcer
+(`executors/stream.rs`) hangs off the streaming driver only, not ported to the CPU backend.
+Payoff: a genuine tp8-mini (2 GiB real-8-way) device, inexpressible today.
+
+**Stale 2026-09-08.** Both halves were about the legacy partitioned executor: the
+concat-first repartition it emitted, and porting the streaming driver's enforcer to it. The
+batch-partitioned mode scatters a batch at a time and carries its own accounting, and the
+legacy executor is deleted.
+
+<a id="t116"></a>
+### #116 — Registry rows with no GPU coverage and no blocker
+`hash_join` and `mixed_join` (full_table_gpu=na, no `gpu_full_table_test!` entry, no known blocker —
+plain inner joins plus an aggregate; mixed_join adds a residual range filter) and
+`join_int` (tp8-only oracle test, no tp1 row). Either add the missing GPU test rows or
+mark the cells intentionally-na with a reason.
+
+`nested_loop_left_join` is the fourth row and the one with a reason already: it was added for
+T17's end-to-end tests, which run no device, and its GPU columns belong to T19's enablement
+sweep.
+
+**Stale 2026-09-08.** The columns it names — `full_table_gpu` and its neighbours — are
+gone from the registry with the modes they described. What a query runs on a device now is a
+`corpus_query!` line, and an unbacked cell fails the registry check in both directions.
 
 <a id="t157"></a>
 ### #157 — legacy: the budget rule drops a CoalesceBatchesExec's fetch, and the wire cannot carry one

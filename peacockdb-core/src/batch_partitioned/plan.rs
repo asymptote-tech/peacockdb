@@ -19,6 +19,17 @@ use super::partitioner::Batching;
 use super::translate::Translator;
 use super::validate::{check_output_schema, validate};
 
+/// A source reading less than this stops being worth splitting: it has nothing to gain
+/// from lanes and would pay a shuffle for them.
+///
+/// From the sf1 measurement at full projection: the largest table that must stay on one
+/// lane is tpcds date_dim at 4,006,445 bytes, the smallest that must not is tpcds
+/// web_returns at 8,041,397, and tpch supplier at 1,532,237 sets the floor. 5 MiB sits in
+/// that gap nearer the lower end, so date_dim would have to grow 31% to cross it and
+/// web_returns shrink 35%. It reads the projected bytes of the surviving row groups, so a
+/// narrow scan of a big table falls below it — the rule working, not a value to retune.
+pub const SMALL_TABLE_BYTES: u64 = 5 * 1024 * 1024;
+
 /// The planner inputs a mode fixes: how many lanes to aim for, whether a lane holds more
 /// than one batch, the budget the estimator divides, and the byte count below which a
 /// source stops being worth splitting.

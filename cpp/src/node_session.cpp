@@ -1,15 +1,18 @@
 // NodeSession: node-by-node execution over a parsed plan, keeping intermediates
-// resident in a handle registry. `node_children` stays static here -- it is the
-// session's own notion of child order and nothing else needs it.
+// resident in a handle registry, plus the two free functions only its stats and its
+// row ranges need. `node_children` is the session's own notion of child order, and the
+// one thing a caller needs to address the same nodes it does.
 
 #include "peacock/operators.h"
 #include "peacock/expr.h"
 #include "peacock/partitioning.hpp"
+#include "plan_executor_internal.h"
 
 #include <cudf/concatenate.hpp>
 #include <cudf/copying.hpp>
 #include <cudf/merge.hpp>
 #include <cudf/sorting.hpp>
+#include <cudf/strings/strings_column_view.hpp>
 #include <cudf/table/table.hpp>
 #include <cudf/utilities/default_stream.hpp>
 
@@ -29,8 +32,90 @@
 
 namespace peacock {
 
+// What a call produced, priced. Here because this is the only caller: the
+// node-at-a-time entry point these lived beside is gone.
+uint64_t logical_size_from_table(const cudf::table_view& table, uint64_t varlen_content) {
+  const uint64_t rows = static_cast<uint64_t>(table.num_rows());
+  // Charged per column, nullable or not — mirroring the Rust formula, which adds it
+  // from the row count alone and never looks at the null mask.
+  const uint64_t bitmap = (rows + 7) / 8;
+  uint64_t total = varlen_content;
+  for (cudf::size_type i = 0; i < table.num_columns(); ++i) {
+    const auto id = table.column(i).type().id();
+    uint64_t data = 0;
+    switch (id) {
+      // A bit per row, NOT cuDF's byte per row: this models the Rust number.
+      case cudf::type_id::BOOL8: data = (rows + 7) / 8; break;
+      case cudf::type_id::INT8:
+      case cudf::type_id::UINT8: data = rows; break;
+      case cudf::type_id::INT16:
+      case cudf::type_id::UINT16: data = rows * 2; break;
+      // TIMESTAMP_DAYS is Arrow Date32. Arrow Timestamp, which Rust widths at 8,
+      // cannot reach the GPU at all — `convert_data_type` has no arm for it — so
+      // the 4-byte reading is the only one available here.
+      case cudf::type_id::INT32:
+      case cudf::type_id::UINT32:
+      case cudf::type_id::FLOAT32:
+      case cudf::type_id::TIMESTAMP_DAYS: data = rows * 4; break;
+      case cudf::type_id::INT64:
+      case cudf::type_id::UINT64:
+      case cudf::type_id::FLOAT64:
+      case cudf::type_id::TIMESTAMP_MILLISECONDS: data = rows * 8; break;
+      // Only the offset buffer is structural; the content arrived as varlen_content.
+      // See the header on why 4-byte offsets are assumed.
+      case cudf::type_id::STRING: data = (rows + 1) * 4; break;
+      case cudf::type_id::DECIMAL128: data = rows * 16; break;
+      default:
+        throw std::runtime_error(
+            "logical_size_from_table: unhandled cudf type id " +
+            std::to_string(static_cast<int>(id)) +
+            " — add a deterministic arm here AND in type_structural_size (Rust)");
+    }
+    // Diagnostic, off unless asked for. What this function returns is a total, and a
+    // suspected schema divergence is a question about one column: printing the device
+    // side turns "the bytes look wrong" into "column i came back as type T". The tool
+    // the open divergences are chased with (#198, #41).
+    static const bool log_cols = std::getenv("PEACOCK_LOG_LOGICAL_BYTES") != nullptr;
+    if (log_cols) {
+      std::fprintf(stderr,
+                   "[logical_bytes] col=%d type_id=%d scale=%d rows=%llu bytes=%llu\n", i,
+                   static_cast<int>(id), table.column(i).type().scale(),
+                   static_cast<unsigned long long>(rows),
+                   static_cast<unsigned long long>(bitmap + data));
+    }
+    total += bitmap + data;
+  }
+  return total;
+}
+
+CallOutcome call_outcome(const TableResult& result) {
+  const auto full = result.table->view();
+
+  // Drop `__rowcount__` before costing. `execute_project` synthesizes that column
+  // when the projection is empty (see project.cpp): cuDF cannot represent a
+  // 0-column table with rows, but DataFusion's `output_schema` for such a node
+  // genuinely has no fields. It is an artifact of the device representation, not a
+  // logical column, and charging it puts this end of the byte axis above Rust's by
+  // a whole column (tpcds q88/q90/q96).
+  std::vector<cudf::column_view> logical_cols;
+  logical_cols.reserve(full.num_columns());
+  for (cudf::size_type i = 0; i < full.num_columns(); ++i) {
+    if (i < static_cast<cudf::size_type>(result.column_names.size()) &&
+        result.column_names[i] == "__rowcount__")
+      continue;
+    logical_cols.push_back(full.column(i));
+  }
+  const cudf::table_view logical{logical_cols};
+
+  // Rows come from `full`: dropping the placeholder must not change the row count,
+  // and an all-placeholder table's `logical` view reports 0 rows.
+  const uint64_t varlen = varlen_content_bytes(logical);
+  return CallOutcome{static_cast<uint64_t>(full.num_rows()), varlen,
+                     logical_size_from_table(logical, varlen)};
+}
+
 // ============================================================================
-// Per-node timing (benchmark mode)
+// Per-node timing (measurement mode)
 // ============================================================================
 // Off by default. The contract on `set_node_timing` in plan_executor.h says why
 // measuring costs the normal path anything at all.
@@ -286,9 +371,24 @@ void mark_device_start() {
     pair->start_recorded = true;
 }
 
+uint64_t varlen_content_bytes(const cudf::table_view& table) {
+  uint64_t total = 0;
+  for (cudf::size_type i = 0; i < table.num_columns(); ++i) {
+    auto col = table.column(i);
+    // Flat string columns only — no nested List types reach here. Matches the Rust
+    // ColAccum content term (Σ value byte lengths = offsets[n]-offsets[0]).
+    if (col.type().id() == cudf::type_id::STRING) {
+      total += static_cast<uint64_t>(
+          cudf::strings_column_view(col).chars_size(cudf::get_default_stream()));
+    }
+  }
+  return total;
+}
+
 // Children of a plan node in canonical order — MUST match the Rust walk's child
-// order so the caller's input handles line up with each node's inputs.
-static std::vector<const fb::PlanNode*> node_children(const fb::PlanNode* node) {
+// order so the caller's input handles line up with each node's inputs. Declared in
+// plan_executor_internal.h for the tests that drive a plan node by node.
+std::vector<const fb::PlanNode*> node_children(const fb::PlanNode* node) {
   switch (node->node_type()) {
     case fb::PlanNodeKind_CudfScan:
       return {};
@@ -597,7 +697,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
       for (flatbuffers::uoffset_t i = 0; i < exprs->size(); ++i) {
         const fb::Expr* e = exprs->Get(i);
         if (e->node_type() != fb::ExprNode_ColumnRef)
-          throw std::runtime_error("CudfRepartition: only ColumnRef hash keys supported (Inc2)");
+          throw std::runtime_error("CudfRepartition: only ColumnRef hash keys supported");
         key_cols.push_back(static_cast<cudf::size_type>(e->node_as_ColumnRef()->index()));
       }
     }

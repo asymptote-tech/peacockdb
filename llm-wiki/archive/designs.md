@@ -73,6 +73,6 @@ mis-pricing above passed the diagnostic in silence — what caught it was the en
 tripping on a query that fits. On the GPU path joins are the first nodes that must be
 instrumented through the RMM hooks, not the last.
 
-The rules this left binding on the Rust implementation are in the Memory accounting section of
-[`tasks/batch_partitioned_executor.md`](../tasks/batch_partitioned_executor.md); what is kept
-here is the measurement, the case and the numbers.
+The rules this left binding on the implementation are in the Memory accounting section of
+[`architecture.md`](../architecture.md#memory-accounting); what is kept here is the
+measurement, the case and the numbers.

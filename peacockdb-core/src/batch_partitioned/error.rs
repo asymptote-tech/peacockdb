@@ -83,7 +83,7 @@ impl std::error::Error for RunError {}
 impl From<RunError> for DataFusionError {
     fn from(error: RunError) -> Self {
         match error {
-            // The same class the legacy enforcer raises, so a caller distinguishing an
+            // The class an exhausted budget has always raised, so a caller distinguishing an
             // over-budget query from a broken one keeps doing it by the same match.
             RunError::BudgetExceeded { message, .. } => {
                 DataFusionError::ResourcesExhausted(message)

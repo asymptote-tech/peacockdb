@@ -1,10 +1,10 @@
 //! The GPU backend's executors: a node's recipe is the instruction set, and running it is
 //! all these do.
 //!
-//! No legacy operator code is reached from here, deliberately: the recipe already says
-//! which seqs to address and in what order, so an executor that also built cuDF calls
-//! would be a second path to the same kernels, and the two would drift where the plan
-//! golden pins only the recipe.
+//! Nothing here builds a cuDF call of its own, deliberately: the recipe already says which
+//! seqs to address and in what order, so an executor that also built calls would be a
+//! second path to the same kernels, and the two would drift where the plan golden pins
+//! only the recipe.
 //!
 //! So an executor holds a borrowed session pointer, its recipe's calls, and the schema its
 //! output is priced by. Handles thread from one call to the next.
@@ -28,7 +28,7 @@ use peacockdb_ffi::raw::{
     peacock_result_from_handle,
 };
 
-use crate::executors::node_timing_on;
+use crate::batch_partitioned::instrument::node_timing_on;
 use crate::memory::logical_size_from_schema;
 
 use super::batch::Batch;

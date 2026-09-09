@@ -37,10 +37,9 @@ interface: the alternative — passing views so the registry can retain its entr
 files with an interface change instead of a type change, and every operator has to be re-read
 rather than re-typed.
 
-Erase-on-read also does **not** change. The legacy driver depends on it: `Backend::release` has one
-caller, `node_by_node.rs:87`, releasing only the root handles, so every intermediate on that path is
-reclaimed by being read. What changes is what erasing costs — dropping a reference, not destroying a
-table.
+Erase-on-read also does **not** change: an intermediate is reclaimed by being read, and the driver
+releases only what it still holds. What changes is what erasing costs — dropping a reference, not
+destroying a table.
 
 ## 2. `peacock_handle_retain` — the one new ABI symbol
 

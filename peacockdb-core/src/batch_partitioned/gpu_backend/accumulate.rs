@@ -13,7 +13,7 @@ use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
 
 use peacockdb_ffi::raw::peacock_executor_slice_handle;
 
-use crate::executors::node_timing_on;
+use crate::batch_partitioned::instrument::node_timing_on;
 use crate::memory::logical_size_from_schema;
 
 use super::super::batch::Batch;

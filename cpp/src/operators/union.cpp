@@ -21,7 +21,7 @@ TableResult execute_union(const fb::CudfUnion* u, NodeInputs* in) {
   std::vector<TableResult> inputs;
   inputs.reserve(u->inputs()->size());
   for (flatbuffers::uoffset_t i = 0; i < u->inputs()->size(); ++i) {
-    inputs.push_back(execute_node(u->inputs()->Get(i), in));
+    inputs.push_back(take_input(in));
   }
 
   // A single input needs no copy.

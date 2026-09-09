@@ -3,6 +3,7 @@
 
 #include "peacock_gpu.h"
 #include "plan_executor.h"
+#include "plan_executor_internal.h"
 #include "generated/gpu_plan_generated.h"
 
 #include <cudf/column/column_view.hpp>
@@ -171,6 +172,46 @@ static std::string get_string_value(const cudf::column_view& col,
   }
 }
 
+/// A hand-built plan driven node by node, children first, each node handed its
+/// children's handles — the same walk the batch-partitioned driver makes over a real
+/// plan, and the only way a plan is executed since the whole-plan entry point retired.
+///
+/// The seq a node takes is its post-order position, counted here as the walk reaches it.
+/// `NodeSession` indexes with the same `node_children` in the same order, so the two
+/// numberings are the same numbering rather than two that happen to agree.
+class WholePlan {
+ public:
+  explicit WholePlan(const std::vector<uint8_t>& plan) : session_(plan.data(), plan.size()) {
+    uint64_t seq = 0;
+    root_ = run(fb::GetGpuPlan(plan.data())->root(), seq);
+  }
+
+  const peacock::TableResult& result() const { return session_.table_for(root_); }
+
+ private:
+  /// Execute one node's subtree and return its single output handle. Every plan in this
+  /// file is single-partition, so a node emitting more than one is a test that has
+  /// outgrown the walker rather than a result to pick from.
+  uint64_t run(const fb::PlanNode* node, uint64_t& seq) {
+    std::vector<uint64_t> handles;
+    std::vector<uint64_t> counts;
+    for (auto* child : peacock::node_children(node)) {
+      handles.push_back(run(child, seq));
+      counts.push_back(1);
+    }
+    uint64_t out = 0;
+    size_t count = 0;
+    peacock::NodeStats stats{};
+    session_.execute_node(seq++, handles.data(), counts.data(), counts.size(), &out,
+                          /*out_cap=*/1, &count, &stats);
+    EXPECT_EQ(count, 1u) << "a node emitted " << count << " partitions";
+    return out;
+  }
+
+  peacock::NodeSession session_;
+  uint64_t root_ = 0;
+};
+
 TEST(PlanExecutor, ScanNation) {
   flatbuffers::FlatBufferBuilder fbb;
 
@@ -191,7 +232,8 @@ TEST(PlanExecutor, ScanNation) {
   auto node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
   auto buf = finish_plan(fbb, node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 4);
   EXPECT_EQ(result.table->num_rows(), 25);
@@ -223,7 +265,8 @@ TEST(PlanExecutor, ScanNationProjected) {
   auto node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
   auto buf = finish_plan(fbb, node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 2);
   EXPECT_EQ(result.table->num_rows(), 25);
@@ -258,7 +301,8 @@ TEST(PlanExecutor, FilterNation) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfFilter, filter.Union());
   auto buf = finish_plan(fbb, filter_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 4);
   // Regions 3 and 4 (0-indexed) have nations. Exact count depends on data.
@@ -310,7 +354,8 @@ TEST(PlanExecutor, HashJoinNationRegion) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfHashJoin, join.Union());
   auto buf = finish_plan(fbb, join_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   // Every nation has exactly one region → 25 rows, 7 columns (4 + 3).
   ASSERT_EQ(result.table->num_columns(), 7);
@@ -367,7 +412,8 @@ TEST(PlanExecutor, HashJoinWithProjection) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfHashJoin, join.Union());
   auto buf = finish_plan(fbb, join_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 3);
   EXPECT_EQ(result.table->num_rows(), 25);
@@ -407,7 +453,8 @@ TEST(PlanExecutor, SortNationByName) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfSort, sort.Union());
   auto buf = finish_plan(fbb, sort_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 1);
   EXPECT_EQ(result.table->num_rows(), 25);
@@ -450,7 +497,8 @@ TEST(PlanExecutor, SortWithFetch) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfSort, sort.Union());
   auto buf = finish_plan(fbb, sort_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   EXPECT_EQ(result.table->num_rows(), 5);
 }
@@ -485,7 +533,8 @@ TEST(PlanExecutor, AggregateCount) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfAggregate, agg.Union());
   auto buf = finish_plan(fbb, agg_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 1);
   ASSERT_EQ(result.table->num_rows(), 1);
@@ -562,7 +611,8 @@ TEST(PlanExecutor, AggregateGroupBy) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfAggregate, agg.Union());
   auto buf = finish_plan(fbb, agg_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   // 5 regions, each with 5 nations.
   ASSERT_EQ(result.table->num_columns(), 2);
@@ -607,7 +657,8 @@ TEST(PlanExecutor, ProjectRename) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfProject, proj.Union());
   auto buf = finish_plan(fbb, proj_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 2);
   EXPECT_EQ(result.table->num_rows(), 5);
@@ -650,7 +701,8 @@ TEST(PlanExecutor, ProjectSqrtThroughTheAst) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfProject, proj.Union());
   auto buf = finish_plan(fbb, proj_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 1);
   ASSERT_EQ(result.table->num_rows(), 5);
@@ -704,7 +756,8 @@ TEST(PlanExecutor, ProjectSqrtThroughTheColumnPath) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfProject, proj.Union());
   auto buf = finish_plan(fbb, proj_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 1);
   ASSERT_EQ(result.table->num_rows(), 5);
@@ -819,7 +872,7 @@ partial_and_merged(const char* func, bool mergeable) {
     auto partial = nation_aggregate(fbb, nation_scan_node(fbb),
                                     fb::AggregateMode_Partial, func, mergeable);
     auto buf = finish_plan(fbb, partial);
-    partial_rows = by_group(peacock::execute_plan(buf.data(), buf.size()));
+    partial_rows = by_group(WholePlan(buf).result());
   }
   std::map<int32_t, std::vector<double>> merged_rows;
   {
@@ -835,7 +888,7 @@ partial_and_merged(const char* func, bool mergeable) {
     auto merged = nation_aggregate(fbb, both_node, fb::AggregateMode_Merge, func,
                                    mergeable);
     auto buf = finish_plan(fbb, merged);
-    merged_rows = by_group(peacock::execute_plan(buf.data(), buf.size()));
+    merged_rows = by_group(WholePlan(buf).result());
   }
   return {partial_rows, merged_rows};
 }
@@ -870,7 +923,8 @@ TEST(AggregateMerge, TheMergedCountIsWidenedSoASecondMergeReadsTheSameLayout) {
   auto twice = nation_aggregate(fbb, once, fb::AggregateMode_Merge, "stddev", true);
   auto buf = finish_plan(fbb, twice);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
   auto view = result.table->view();
   ASSERT_EQ(view.num_columns(), 4) << "the key and the three state columns";
   EXPECT_EQ(view.column(1).type().id(), cudf::type_id::INT64);
@@ -928,7 +982,8 @@ TEST(PlanExecutor, PassthroughNodes) {
       fbb, fb::PlanNodeKind_CudfCoalescePartitions, cp.Union());
   auto buf = finish_plan(fbb, cp_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 3);
   EXPECT_EQ(result.table->num_rows(), 5);
@@ -1009,7 +1064,8 @@ TEST(PlanExecutor, JoinProjectSort) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfSort, sort.Union());
   auto buf = finish_plan(fbb, sort_node);
 
-  auto result = peacock::execute_plan(buf.data(), buf.size());
+  WholePlan plan(buf);
+  const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 2);
   EXPECT_EQ(result.table->num_rows(), 25);
@@ -1086,7 +1142,7 @@ class CApiPlan {
 TEST(ScanRowGroups, SubsetsUnionToTheWholeScan) {
   flatbuffers::FlatBufferBuilder fbb;
   auto buf = customer_scan_plan(fbb, {0});
-  auto whole = keys_of(peacock::execute_plan(buf.data(), buf.size()));
+  auto whole = keys_of(WholePlan(buf).result());
 
   peacock::NodeSession session(buf.data(), buf.size());
   peacock::NodeStats first_stats{}, second_stats{};

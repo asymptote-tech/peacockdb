@@ -78,9 +78,9 @@ Twelve of T18's device cases over eleven queries — tpcds q3 q15 q37 q42 q43 q5
 q12 q15 — with `#183` on their gpu columns.
 
 The same divergence bit the digest comparator one layer up, where hashing the column type reddened
-eight legacy gpu cases whose rendered comparison had never looked at types. That one was a
-comparison artefact and was fixed by hashing names; this one is the export genuinely disagreeing
-with the schema the plan declared, and no comparison choice makes it go away.
+eight device cases whose rendered comparison had never looked at types. That one was a comparison
+artefact and was fixed by hashing names; this one is the export genuinely disagreeing with the
+schema the plan declared, and no comparison choice makes it go away.
 
 <a id="t184"></a>
 ### #184 — a hash repartition of one lane into four fails in cuDF
@@ -89,9 +89,9 @@ with the schema the plan declared, and no comparison choice makes it go away.
 cpp/src/spark_hash_partition.cu:179`. Four of T18's device cases, `tpch/q15` at every mode, and
 no other query reaches it.
 
-One lane in and four out is the shape, which the batched mode produces far more often than legacy
-does — a shuffle above a single-lane source. Whether the kernel refuses the 1-to-N case or the
-input carries something it will not take is the first thing to establish.
+One lane in and four out is the shape — a shuffle above a single-lane source. Whether the kernel
+refuses the 1-to-N case or the input carries something it will not take is the first thing to
+establish.
 
 <a id="t185"></a>
 ### #185 — `GpuAggregateBatches` reports its own output as `in_rows`
@@ -187,9 +187,9 @@ device *widening* a decimal, to 38 whatever the declaration says. This is the de
 integer, to the natural width for a year rather than to a maximum. Opposite direction, different
 type family, and a fix for either says nothing about the other.
 
-Not new behaviour either, only newly reached: `diag_flip_audit`'s header already records
-`extract_year -> INT16` as a place where the DataFusion type is an imperfect proxy for the cuDF one.
-What is new is a corpus query whose unload sees it.
+Not new behaviour either, only newly reached: `extract_year -> INT16` was already on record as a
+place where the DataFusion type is an imperfect proxy for the cuDF one. What is new is a corpus
+query whose unload sees it.
 
 One cell, `tpch/q8` at `bp-tp1-single` — which is the only mode that gets far enough to reach the
 unload, the other four stopping at [#152](../tickets.md#t152).

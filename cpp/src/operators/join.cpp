@@ -40,8 +40,8 @@ namespace peacock {
 // ============================================================================
 
 TableResult execute_hash_join(const fb::CudfHashJoin* join, NodeInputs* in) {
-  auto left = execute_node(join->left(), in);
-  auto right = execute_node(join->right(), in);
+  auto left = take_input(in);
+  auto right = take_input(in);
 
   auto ltv = left.table->view();
   auto rtv = right.table->view();
@@ -392,8 +392,8 @@ TableResult execute_hash_join(const fb::CudfHashJoin* join, NodeInputs* in) {
 // ============================================================================
 
 TableResult execute_cross_join(const fb::CudfCrossJoin* join, NodeInputs* in) {
-  auto left = execute_node(join->left(), in);
-  auto right = execute_node(join->right(), in);
+  auto left = take_input(in);
+  auto right = take_input(in);
 
   mark_device_start();
   auto out = cudf::cross_join(left.table->view(), right.table->view());
@@ -413,8 +413,8 @@ TableResult execute_nested_loop_join(const fb::CudfNestedLoopJoin* join, NodeInp
         "CudfNestedLoopJoin: only Inner/Left join types supported (got " +
         std::to_string(jt) + ")");
 
-  auto left = execute_node(join->left(), in);
-  auto right = execute_node(join->right(), in);
+  auto left = take_input(in);
+  auto right = take_input(in);
   auto ltv = left.table->view();
   auto rtv = right.table->view();
 

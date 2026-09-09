@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use peacockdb_core::batch_partitioned::GpuNode;
-use peacockdb_core::gpu_executor::{
+use peacockdb_core::batch_partitioned::instrument::{
     NodeTiming, RmmPool, install_rmm_pool, nvtx_range, set_node_timing, set_nvtx_ranges,
 };
 use peacockdb_core::batch_partitioned::driver::{

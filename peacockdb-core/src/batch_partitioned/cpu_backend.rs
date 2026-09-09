@@ -1,9 +1,7 @@
 //! The CPU backend's executors: one DataFusion operator per node, run one batch at a time.
 //!
-//! Reuse with the legacy modes is the point rather than something to avoid — both ask
-//! DataFusion for the same operator — so this relays through [`execute_single_node`],
-//! which `node_by_node` already uses. The operator is built at construction, and the
-//! batch is what changes per call.
+//! The operator is built at construction and the batch is what changes per call, so what
+//! a call does is hand [`execute_single_node`] one node and the rows it runs over.
 //!
 //! The traits are synchronous and DataFusion's operator API is not, so each call blocks a
 //! thread on one node's stream. A sort past its in-place threshold spawns onto the runtime
@@ -15,6 +13,7 @@ pub mod emit;
 pub mod join;
 mod merge_m2;
 pub mod source;
+mod single_node;
 
 use std::sync::Arc;
 
@@ -34,7 +33,7 @@ use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
 
-use crate::executors::single_node::execute_single_node;
+use single_node::execute_single_node;
 
 use super::aggregates::{AggCall, PlanAgg};
 use super::cpu_batch::CpuBatch;
@@ -284,7 +283,6 @@ fn run_node(
     ctx: &Arc<TaskContext>,
 ) -> Result<Vec<RecordBatch>, BackendError> {
     futures::executor::block_on(execute_single_node(node, inputs, ctx.clone()))
-        .map(|(batches, _)| batches)
         .map_err(|error| BackendError::new(error.to_string()))
 }
 

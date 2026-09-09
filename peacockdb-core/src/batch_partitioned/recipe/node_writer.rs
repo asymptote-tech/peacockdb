@@ -8,7 +8,7 @@ use datafusion::arrow::datatypes::Field;
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
 use crate::generated::gpu_plan_generated::peacock::plan as fb;
-use crate::plan_serializer::serialize_schema;
+use super::wire::serialize_schema;
 
 use super::super::error::PlanError;
 use super::super::expr::Expr;

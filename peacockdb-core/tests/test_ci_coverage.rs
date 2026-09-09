@@ -36,33 +36,18 @@ enum Exemption {
 
 /// Targets deliberately absent from the CI tiers this guard sweeps.
 const INTENTIONALLY_NOT_IN_CI: &[(&str, Exemption)] = &[
-    ("test_gpu_full_table", Exemption::GpuJob),
-    ("test_gpu_partitioned", Exemption::GpuJob),
     ("test_inc2_conformance", Exemption::GpuJob),
     ("test_gpu_abi", Exemption::GpuJob),
     ("test_gpu_recipe_walk", Exemption::GpuJob),
     ("test_gpu_executors", Exemption::GpuJob),
     ("test_node_timing", Exemption::GpuJob),
-    ("test_gpu_executor_misc", Exemption::NotRun(
-        "needs the linked C++/CUDA executor; not built in the CPU tiers and not staged \
-         for the GPU job",
-    )),
     ("peacock_gpu_benchmarks", Exemption::NotRun(
         "GPU host only, tens of minutes, and it MEASURES rather than asserts — there is \
-         nothing for a merge gate to go red on. Correctness is owned by test_gpu_bp_corpus \
-         and the two legacy gpu tiers; the timing list is its own, since the sf worth \
-         timing and the sf worth checking differ. \
+         nothing for a merge gate to go red on. Correctness for the queries it times is \
+         test_gpu_bp_corpus's, which runs them at the sf a wrong answer is legible at. \
          NOT Exemption::GpuJob: that variant claims membership in the gpu-tests staging \
          array and is verified against it — this target is deliberately not in it",
     )),
-    ("diag_flip_audit", Exemption::NotRun(
-        "diagnostic printer, no assertions — run by hand while #97/#95 gate the tp8 \
-         rollout; wiring it to CI would add a step that cannot fail",
-    )),
-    // test_cpu_partitioned is NOT exempt: it needs no GPU (its tp8-standard goldens
-    // are CPU-emulated) and it owns the cost-registry check for the partitioned_cpu
-    // column — leaving it out of CI would let a CSV row claim coverage no test
-    // provides.
     ("test_gpu_bp_corpus", Exemption::GpuJob),
     ("test_ci_coverage", Exemption::NotRun("this test")),
 ];
@@ -109,7 +94,7 @@ fn fold_continuations(text: &str) -> Vec<String> {
 ///
 /// The inline `#[cfg(test)]` modules are a target class this guard was blind to: every
 /// other invocation in the workflows passes `--test`, which selects integration
-/// targets ONLY, so `config`/`gpu_rule`/`resident`'s unit tests ran locally and never
+/// targets ONLY, so the crate's own unit tests ran locally and never
 /// at the merge gate. Being invisible to the guard AND to CI is the same hole one
 /// level down — a target class nothing enumerates.
 fn line_runs_lib_tests(line: &str) -> bool {
@@ -121,6 +106,19 @@ fn line_runs_lib_tests(line: &str) -> bool {
     let Some(i) = line.find("--lib") else { return false };
     let after_ok = line[i + "--lib".len()..].chars().next().is_none_or(char::is_whitespace);
     after_ok && line.contains("cargo test") && line.contains("-p peacockdb-core")
+}
+
+/// Does this workflow line BUILD the `peacockdb` CLI?
+///
+/// The bin target is the same hole one level down again: it has no test target, so the
+/// `--test` sweep cannot see it, and it is the only caller of the planner and the driver
+/// from outside the crate. `cargo build` rather than `cargo test --no-run`, since the
+/// crate has no tests for the latter to name.
+fn line_builds_the_cli(line: &str) -> bool {
+    let Some(i) = line.find("-p peacockdb") else { return false };
+    let after_ok =
+        line[i + "-p peacockdb".len()..].chars().next().is_none_or(char::is_whitespace);
+    after_ok && line.contains("cargo build")
 }
 
 /// The test targets pipeline.yml's gpu-tests job stages and runs, read out of the
@@ -187,11 +185,12 @@ fn gpu_runtime_targets() -> BTreeSet<(String, String)> {
 /// reports FALSE coverage is worse than no guard at all. Two ways a naive
 /// `workflows.contains("--test {name}")` lies:
 ///
-///   - PREFIX COLLISION. `--test test_query_plan` is a substring of
-///     `--test test_query_plan_misc`. This repo HAS that prefix pair, so deleting
-///     the standalone `test_query_plan` step would still report it covered — one
-///     edit away from a live hole. Fixed by requiring a word boundary (whitespace
-///     or end-of-line) after the name.
+///   - PREFIX COLLISION. `--test test_corpus` is a substring of
+///     `--test test_corpus_goldens`, so the shorter name reads as covered by the
+///     longer one's step. No two targets are a prefix pair today — the pair that made
+///     this concrete went with the legacy tiers — so this is the guard holding a
+///     property rather than fixing a live hole, and the next such pair inherits it.
+///     Fixed by requiring a word boundary (whitespace or end-of-line) after the name.
 ///   - `--no-run` BLINDNESS. `cargo test --no-run ... --test X` BUILDS X without
 ///     running it. A target named only in such a step is "wired" while never
 ///     executing — precisely the built-but-never-run hole (peacock_tpchv_tests) that
@@ -228,27 +227,27 @@ fn line_runs_target(line: &str, name: &str) -> bool {
 #[test]
 fn line_matcher_rejects_both_false_coverage_modes() {
     // (1) prefix collision — a longer target name must not cover a shorter one.
-    let only_misc = "          cargo test -p peacockdb-core --test test_query_plan_misc";
+    let only_misc = "          cargo test -p peacockdb-core --test test_corpus_goldens";
     assert!(
-        !line_runs_target(only_misc, "test_query_plan"),
-        "prefix collision: `--test test_query_plan_misc` must NOT count as running \
-         test_query_plan"
+        !line_runs_target(only_misc, "test_corpus"),
+        "prefix collision: `--test test_corpus_goldens` must NOT count as running \
+         test_corpus"
     );
-    assert!(line_runs_target(only_misc, "test_query_plan_misc"));
+    assert!(line_runs_target(only_misc, "test_corpus_goldens"));
 
     // (2) --no-run blindness — building a target is not running it.
     let build_only =
-        "          cargo test --no-run -p peacockdb-core --test test_query_plan --test test_ffi";
+        "          cargo test --no-run -p peacockdb-core --test test_corpus --test test_ffi";
     assert!(
-        !line_runs_target(build_only, "test_query_plan"),
+        !line_runs_target(build_only, "test_corpus"),
         "--no-run builds without running; it must not count as CI coverage"
     );
 
     // A genuine run step still counts, including at end-of-line and mid-line.
-    assert!(line_runs_target("cargo test -p x --test test_query_plan", "test_query_plan"));
+    assert!(line_runs_target("cargo test -p x --test test_corpus", "test_corpus"));
     assert!(line_runs_target(
-        "cargo test -p x --test test_query_plan --test test_ffi",
-        "test_query_plan"
+        "cargo test -p x --test test_corpus --test test_ffi",
+        "test_corpus"
     ));
 
     // (3) LINE CONTINUATION — the mode that actually shipped. A --no-run build split
@@ -266,12 +265,40 @@ fn line_matcher_rejects_both_false_coverage_modes() {
             "{t} is BUILT, not run — a continuation must not count as coverage"
         );
     }
+    // CLI detection: the package name needs a word boundary, and a test invocation
+    // naming the core crate is not a build of the bin.
+    assert!(line_builds_the_cli("          cargo build --features rust-only -p peacockdb"));
+    assert!(
+        !line_builds_the_cli("          cargo build --features rust-only -p peacockdb-core"),
+        "`-p peacockdb-core` must not read as a build of the `peacockdb` bin"
+    );
+    assert!(
+        !line_builds_the_cli("          cargo test --no-run -p peacockdb"),
+        "a test invocation is not the bin build; the crate has no test target"
+    );
+
+    // The rust GPU runner reader: it must find the line that runs the binary however that
+    // line is prefixed, and must not mistake the loop's executable test for it — that line
+    // carries no flags, so matching it would fail the assertion on a correct runner.
+    assert!(is_rust_gpu_runner_invocation(
+        r#"    env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 > "\$tlog" 2>&1"#
+    ));
+    assert!(is_rust_gpu_runner_invocation(r#"    "\$t" --nocapture --test-threads=1 > "\$rlog" 2>&1"#));
+    assert!(
+        !is_rust_gpu_runner_invocation(r#"    [ -x "\$t" ] || continue"#),
+        "the loop's executable test is not the invocation"
+    );
+    assert!(
+        !is_rust_gpu_runner_invocation(r#"    # "\$t" --test-threads=1 > "\$tlog""#),
+        "a commented-out invocation is not one"
+    );
+
     // --lib detection: a build is not a run, and the flag needs a word boundary.
     assert!(line_runs_lib_tests("          cargo test --features rust-only -p peacockdb-core --lib"));
     assert!(!line_runs_lib_tests(
-        "          cargo test --no-run --features rust-only -p peacockdb-core --lib --test test_plan_bytes"
+        "          cargo test --no-run --features rust-only -p peacockdb-core --lib --test test_cpu_executors"
     ), "--no-run builds the lib target without running it");
-    assert!(!line_runs_lib_tests("          cargo test -p peacockdb-core --test test_query_plan"),
+    assert!(!line_runs_lib_tests("          cargo test -p peacockdb-core --test test_corpus"),
             "an integration-only invocation does not run the lib tests");
 
     // ...while a continued RUN step still counts, on any of its physical lines.
@@ -409,9 +436,19 @@ fn every_rust_test_target_is_named_by_ci() {
         workflow_lines.iter().any(|l| line_runs_lib_tests(l)),
         "no workflow line runs the peacockdb-core LIB unit tests. Every other cargo \
          invocation passes --test, which selects integration targets only, so the \
-         inline #[cfg(test)] modules (batch_partitioned, config, gpu_rule, resident) would run locally \
+         inline #[cfg(test)] modules (batch_partitioned, config) would run locally \
          and never at the merge gate. Add `cargo test --features rust-only \
          -p peacockdb-core --lib` to the CPU tier."
+    );
+
+    // The CLI has no test target at all, so neither the sweep above nor the --lib check
+    // reaches it. Asserted the same way and for the same reason.
+    assert!(
+        workflow_lines.iter().any(|l| line_builds_the_cli(l)),
+        "no workflow line builds the peacockdb CLI. It is the only caller of \
+         plan_batch_partitioned and the driver from outside the crate, and it has no test \
+         target, so nothing else compiles it. Add `cargo build --features rust-only \
+         -p peacockdb` to the CPU tier."
     );
 
     // F5: a GpuJob exemption CLAIMS the gpu-tests job runs the target. Verify that
@@ -515,6 +552,71 @@ fn the_three_gpu_target_lists_agree() {
     );
 }
 
+/// The body of the `Run GPU tests` step, out of the committed workflow.
+fn gpu_test_step() -> String {
+    let text = std::fs::read_to_string(repo_root().join(".github/workflows/pipeline.yml"))
+        .expect("read pipeline.yml");
+    let mut lines = text.lines().skip_while(|l| !l.contains("- name: Run GPU tests"));
+    lines.next().unwrap_or_else(|| {
+        panic!(
+            "pipeline.yml has no `Run GPU tests` step — the GPU job was reshaped and the \
+             guards below now read nothing"
+        )
+    });
+    lines
+        .take_while(|l| !l.trim_start().starts_with("- name:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The GPU step reports a failure, and has no way to report success over one.
+///
+/// It runs without `set -e` deliberately — one binary failing must not skip the rest — so the
+/// only thing that can fail it is what it folds into `rc` itself. Three ways that goes wrong:
+/// a binary's status never folded in, the block not exiting `rc`, and a command dying of a
+/// signal, which leaves no status to fold at all. The third shipped: the rust loop's `cat` and
+/// `grep` segfaulted under an exported glibc-2.35 once per target, so five binaries ran with
+/// their output discarded and their zero-tests guard answering from a crash, job green.
+#[test]
+fn the_gpu_step_cannot_report_success_over_a_failure() {
+    let step = gpu_test_step();
+
+    assert!(
+        step.contains("exit \\$rc"),
+        "the GPU step does not end by exiting the status it accumulated, so everything it \
+         recorded in rc is discarded and the step is green whatever ran"
+    );
+    for line in rust_gpu_runner_invocations(".github/workflows/pipeline.yml") {
+        assert!(
+            line.ends_with("|| rc=1"),
+            "a staged rust GPU binary runs without folding its status into rc, so it cannot \
+             fail the job: {line}"
+        );
+    }
+    assert!(
+        step.contains("[ \"\\$trc\" -eq 0 ] || rc=1"),
+        "the C++ loop no longer folds each binary's status into rc"
+    );
+    assert!(
+        step.contains("|| rc=$?"),
+        "the ssh pipeline's own status is not captured into rc. Written `rc=\\$?`, the escape \
+         a heredoc-shaped edit reaches for, it assigns the literal two characters and the \
+         status of the whole remote run is lost"
+    );
+    assert!(
+        step.contains("Segmentation fault") && step.contains("::error::"),
+        "nothing in the GPU step notices a command dying of a signal. Without 'set -e' such a \
+         death folds no status into rc, so the step is green having crashed — which is how the \
+         rust loop printed nothing for five targets and said so nowhere"
+    );
+    assert!(
+        !step.contains("export LD_LIBRARY_PATH"),
+        "the GPU step exports the patched glibc into its shell. setup-glibc.sh prints the trap \
+         in this same job's log: the host's own coreutils then load it and segfault. Apply it \
+         per command (env LD_LIBRARY_PATH=… \"$t\" …) instead"
+    );
+}
+
 /// The `<crate>:<target>` form build-test.sh matches on, for failure messages.
 fn qualified((krate, target): &(String, String)) -> String {
     format!("{krate}:{target}")
@@ -554,9 +656,15 @@ fn is_rust_gpu_runner_loop_header(line: &str) -> bool {
     line.contains("for t in") && line.contains("rust-tests/")
 }
 
-/// Is this the line that executes the binary, rather than a comment about it?
+/// Is this the line that executes the binary, rather than a comment or the `[ -x … ]` test?
+///
+/// Keyed on running `"$t"` AND redirecting to a log, not on the line starting with `"$t"`:
+/// the patched glibc is applied per command (`env LD_LIBRARY_PATH=… "$t" …`) rather than
+/// exported, and a reader anchored at the start of the line stops seeing the invocation the
+/// moment anything precedes it — a guard silently reading nothing, not a red one.
 fn is_rust_gpu_runner_invocation(line: &str) -> bool {
-    line.trim_start().starts_with("\"\\$t\"")
+    let line = line.trim_start();
+    !line.starts_with('#') && line.contains("\"\\$t\"") && line.contains("> \"\\$")
 }
 
 /// Single-tenant GPU is one flag on two committed runner lines and nothing else. cuDF and

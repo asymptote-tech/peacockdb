@@ -28,6 +28,7 @@ debug = true
 [profile.dev.package."*"]
 opt-level = 3
 
+
 # For `peacock_gpu_benchmarks` ONLY (scripts/build-test-shadgpu.sh --build-benchmarks).
 #
 # The opt-level-1 plateau measured above is right for the test suite and wrong here.

@@ -50,3 +50,12 @@ cpp/build26/
 # mostly the host prologue and is not benchmarked at all — and the tree is one file per
 # (dataset, mode) rather than one per query, so a collection rewrites two files instead
 # of thirty-two. The measurement is the deliverable, and it is committed.)
+
+# Scratch at the repo root — papers, one-off scripts, rendered reports. Nothing tracked
+# sits loose here but README.md and the build files, and `git add -A .` once swept
+# thirteen of these into a commit, 25 MB of PDFs among them.
+/*.pdf
+/*.tsv
+/*.txt
+/*.html
+/*.sh

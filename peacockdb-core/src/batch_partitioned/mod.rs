@@ -2,9 +2,8 @@
 //! resident table.
 //!
 //! This module is the vocabulary — plan nodes, the layout and schema they declare, and
-//! the executor contracts the drivers call. The design and the reasons behind each
-//! shape are in `llm-wiki/tasks/batch_partitioned_executor.md`; the legacy modes under
-//! `executors/` are untouched by any of it.
+//! the executor contracts the drivers call. The reasons behind each shape are in
+//! `llm-wiki/architecture.md`.
 
 pub mod aggregates;
 pub mod backend;
@@ -19,6 +18,8 @@ pub mod expr;
 pub mod expr_physical;
 pub mod expr_translate;
 pub mod forwarder;
+#[cfg(not(feature = "rust-only"))]
+pub mod instrument;
 pub mod layout;
 pub mod node;
 pub mod nodes;

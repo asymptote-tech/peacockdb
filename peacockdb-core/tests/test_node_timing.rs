@@ -16,7 +16,9 @@ use std::time::Instant;
 use peacockdb_core::batch_partitioned::GpuNode;
 use peacockdb_core::batch_partitioned::driver::{Region, batch_partitioned_driver};
 use peacockdb_core::batch_partitioned::gpu_backend::backend::GpuBackend;
-use peacockdb_core::gpu_executor::{NodeTiming, install_rmm_pool, set_node_timing};
+use peacockdb_core::batch_partitioned::instrument::{
+    NodeTiming, install_rmm_pool, set_node_timing,
+};
 
 use common::bp_mode::mode_named;
 use common::corpus::plan_at;
