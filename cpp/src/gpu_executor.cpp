@@ -46,8 +46,7 @@ static_assert(offsetof(PeacockNodeStats, varlen_content_bytes) ==
 static_assert(offsetof(PeacockNodeStats, time_us) == offsetof(peacock::NodeStats, time_us));
 
 // Export a cuDF table to an Arrow IPC stream buffer (malloc'd; free with
-// peacock_result_free). Shared by peacock_execute (fast path) and
-// peacock_result_from_handle (node-by-node root). Widens DECIMAL32/64→128 since
+// peacock_result_free), for peacock_result_from_handle. Widens DECIMAL32/64→128 since
 // the Rust arrow-ipc reader rejects narrow decimals.
 static void export_table_to_ipc(const cudf::table_view& tview,
                                 const std::vector<std::string>& column_names,
@@ -174,32 +173,8 @@ void peacock_executor_destroy(peacock_executor_t* executor) {
 }
 
 // ---------------------------------------------------------------------------
-// Query execution
+// Results and errors
 // ---------------------------------------------------------------------------
-
-int peacock_execute(peacock_executor_t* executor,
-                    const uint8_t* plan_bytes,
-                    uint64_t plan_len,
-                    uint8_t** out_result_bytes,
-                    uint64_t* out_result_len) {
-  if (!executor || !plan_bytes || !out_result_bytes || !out_result_len)
-    return 1;
-
-  try {
-    auto result = peacock::execute_plan(plan_bytes, plan_len);
-    export_table_to_ipc(result.table->view(), result.column_names, out_result_bytes,
-                        out_result_len);
-    return 0;
-  } catch (const std::exception& e) {
-    executor->last_error = e.what();
-    std::fprintf(stderr, "[peacock_execute] error: %s\n", e.what());
-    return 1;
-  } catch (...) {
-    executor->last_error = "unknown exception";
-    std::fprintf(stderr, "[peacock_execute] unknown exception\n");
-    return 1;
-  }
-}
 
 void peacock_result_free(uint8_t* result_bytes) {
   std::free(result_bytes);

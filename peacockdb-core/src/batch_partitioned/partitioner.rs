@@ -48,7 +48,7 @@ pub fn partition(
     if survivors.is_empty() {
         return Err(PlanError::Invalid(
             "no surviving row groups: what an empty scan means is the caller's decision, \
-             not an empty map — the wire format reads that as legacy single-partition"
+             not an empty map — the wire format reads that as one unmapped partition"
                 .to_string(),
         ));
     }

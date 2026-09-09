@@ -101,10 +101,11 @@ before they are written, legacy paths untouched, `plan_bytes.sha256` proving the
 did not move, and each new arm exercised by a gtest in the plan-executor suite on shad-gpu — an
 arm nothing runs is a claim nobody has checked.
 
-**Coexistence.** All six legacy modes and their tests stay functional throughout.
-Retiring them is a separate, later decision (blocked at minimum by #143). Code reuse with
-legacy is moderate and always by extracting shared helpers, never by entangling the new
-planner with the wrapper/strip machinery.
+**Coexistence.** The six legacy modes stayed functional throughout the rollout and were
+deleted on 2026-09-08, once this mode ran the corpus: nothing plans or executes a query but
+this one. Sentences below that compare against them are the record of a design decision, not
+a description of code — the wire vocabulary they left behind is what "the legacy call" still
+names.
 
 ## Planning
 
@@ -2785,8 +2786,6 @@ carries, that a dump too large to read is a dump nobody reads, and a 240 MB `ass
 that failure three orders of magnitude over. The tolerance arm keeps its map, because a digest
 cannot express "within 1e-12"; it stops formatting the columns it does not key on.
 
-This is legacy's comparator and the legacy tiers get it too, which is the point rather than a side
-effect — `anti-join` at `full_table-tp1-standard` renders 240 MB twice on every green run today.
 No verdict changes, so no green test moves.
 
 **A `live_cpu` comparison runs once per mode, beside the device run it checks.** It cannot reuse
@@ -3331,12 +3330,12 @@ The eighteen that stay out, every one against a ticket that already exists:
 
 | held back | why | ticket |
 |---|---|---|
-| tpcds `q12` `q20` `q36` `q44` `q47` `q49` `q51` `q53` `q57` `q63` `q67` `q89` `q98` | the planner refuses `WindowAggExec` and `BoundedWindowAggExec` — the one feature regression against legacy, which plans all thirteen | [#143](../tickets.md#t143) |
-| tpcds `q27` `q70` `q72` `q86` | DataFusion 45 does not physical-plan them at all, so they are dead in legacy too (`plan_status=fail`) | [#23](../tickets.md#t23) |
+| tpcds `q12` `q20` `q36` `q44` `q47` `q49` `q51` `q53` `q57` `q63` `q67` `q89` `q98` | the planner refuses `WindowAggExec` and `BoundedWindowAggExec` — the one capability the retired modes had and this one does not | [#143](../tickets.md#t143) |
+| tpcds `q27` `q70` `q72` `q86` | DataFusion 45 does not physical-plan them at all (`plan_status=fail`) | [#23](../tickets.md#t23) |
 | tpcds `q28` | a `DISTINCT` inside `count(DISTINCT …)`, refused by name | [#62](../tickets.md#t62) |
 
-Window functions stay disabled and are not this task's to fix — [#143](../tickets.md#t143) calls
-it the blocker for ever retiring the legacy modes, which is a decision above a rollout.
+Window functions stay disabled and are not this task's to fix — [#143](../tickets.md#t143)
+carries them.
 
 **Seventeen of these hundred are already run by T17's tier, and the overlap is deliberate.**
 `test_cpu_batch_partitioned` runs six queries at the five modes and eleven more at the modes plus

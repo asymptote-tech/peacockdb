@@ -36,32 +36,10 @@ enum Exemption {
 
 /// Targets deliberately absent from the CI tiers this guard sweeps.
 const INTENTIONALLY_NOT_IN_CI: &[(&str, Exemption)] = &[
-    ("test_gpu_full_table", Exemption::GpuJob),
-    ("test_gpu_partitioned", Exemption::GpuJob),
     ("test_inc2_conformance", Exemption::GpuJob),
     ("test_gpu_abi", Exemption::GpuJob),
     ("test_gpu_recipe_walk", Exemption::GpuJob),
     ("test_gpu_executors", Exemption::GpuJob),
-    ("test_gpu_executor_misc", Exemption::NotRun(
-        "needs the linked C++/CUDA executor; not built in the CPU tiers and not staged \
-         for the GPU job",
-    )),
-    ("peacock_gpu_benchmarks", Exemption::NotRun(
-        "GPU host only, tens of minutes, and it MEASURES rather than asserts — there is \
-         nothing for a merge gate to go red on. Correctness for the very same case list \
-         (all three targets include! common/gpu_cases.inc) is owned by \
-         test_gpu_full_table / test_gpu_partitioned, which is where a regression shows up. \
-         NOT Exemption::GpuJob: that variant claims membership in the gpu-tests staging \
-         array and is verified against it — this target is deliberately not in it",
-    )),
-    ("diag_flip_audit", Exemption::NotRun(
-        "diagnostic printer, no assertions — run by hand while #97/#95 gate the tp8 \
-         rollout; wiring it to CI would add a step that cannot fail",
-    )),
-    // test_cpu_partitioned is NOT exempt: it needs no GPU (its tp8-standard goldens
-    // are CPU-emulated) and it owns the cost-registry check for the partitioned_cpu
-    // column — leaving it out of CI would let a CSV row claim coverage no test
-    // provides.
     ("test_gpu_bp_corpus", Exemption::GpuJob),
     ("test_ci_coverage", Exemption::NotRun("this test")),
 ];
@@ -108,7 +86,7 @@ fn fold_continuations(text: &str) -> Vec<String> {
 ///
 /// The inline `#[cfg(test)]` modules are a target class this guard was blind to: every
 /// other invocation in the workflows passes `--test`, which selects integration
-/// targets ONLY, so `config`/`gpu_rule`/`resident`'s unit tests ran locally and never
+/// targets ONLY, so the crate's own unit tests ran locally and never
 /// at the merge gate. Being invisible to the guard AND to CI is the same hole one
 /// level down — a target class nothing enumerates.
 fn line_runs_lib_tests(line: &str) -> bool {
@@ -186,11 +164,12 @@ fn gpu_runtime_targets() -> BTreeSet<(String, String)> {
 /// reports FALSE coverage is worse than no guard at all. Two ways a naive
 /// `workflows.contains("--test {name}")` lies:
 ///
-///   - PREFIX COLLISION. `--test test_query_plan` is a substring of
-///     `--test test_query_plan_misc`. This repo HAS that prefix pair, so deleting
-///     the standalone `test_query_plan` step would still report it covered — one
-///     edit away from a live hole. Fixed by requiring a word boundary (whitespace
-///     or end-of-line) after the name.
+///   - PREFIX COLLISION. `--test test_corpus` is a substring of
+///     `--test test_corpus_goldens`, so the shorter name reads as covered by the
+///     longer one's step. No two targets are a prefix pair today — the pair that made
+///     this concrete went with the legacy tiers — so this is the guard holding a
+///     property rather than fixing a live hole, and the next such pair inherits it.
+///     Fixed by requiring a word boundary (whitespace or end-of-line) after the name.
 ///   - `--no-run` BLINDNESS. `cargo test --no-run ... --test X` BUILDS X without
 ///     running it. A target named only in such a step is "wired" while never
 ///     executing — precisely the built-but-never-run hole (peacock_tpchv_tests) that
@@ -227,27 +206,27 @@ fn line_runs_target(line: &str, name: &str) -> bool {
 #[test]
 fn line_matcher_rejects_both_false_coverage_modes() {
     // (1) prefix collision — a longer target name must not cover a shorter one.
-    let only_misc = "          cargo test -p peacockdb-core --test test_query_plan_misc";
+    let only_misc = "          cargo test -p peacockdb-core --test test_corpus_goldens";
     assert!(
-        !line_runs_target(only_misc, "test_query_plan"),
-        "prefix collision: `--test test_query_plan_misc` must NOT count as running \
-         test_query_plan"
+        !line_runs_target(only_misc, "test_corpus"),
+        "prefix collision: `--test test_corpus_goldens` must NOT count as running \
+         test_corpus"
     );
-    assert!(line_runs_target(only_misc, "test_query_plan_misc"));
+    assert!(line_runs_target(only_misc, "test_corpus_goldens"));
 
     // (2) --no-run blindness — building a target is not running it.
     let build_only =
-        "          cargo test --no-run -p peacockdb-core --test test_query_plan --test test_ffi";
+        "          cargo test --no-run -p peacockdb-core --test test_corpus --test test_ffi";
     assert!(
-        !line_runs_target(build_only, "test_query_plan"),
+        !line_runs_target(build_only, "test_corpus"),
         "--no-run builds without running; it must not count as CI coverage"
     );
 
     // A genuine run step still counts, including at end-of-line and mid-line.
-    assert!(line_runs_target("cargo test -p x --test test_query_plan", "test_query_plan"));
+    assert!(line_runs_target("cargo test -p x --test test_corpus", "test_corpus"));
     assert!(line_runs_target(
-        "cargo test -p x --test test_query_plan --test test_ffi",
-        "test_query_plan"
+        "cargo test -p x --test test_corpus --test test_ffi",
+        "test_corpus"
     ));
 
     // (3) LINE CONTINUATION — the mode that actually shipped. A --no-run build split
@@ -268,9 +247,9 @@ fn line_matcher_rejects_both_false_coverage_modes() {
     // --lib detection: a build is not a run, and the flag needs a word boundary.
     assert!(line_runs_lib_tests("          cargo test --features rust-only -p peacockdb-core --lib"));
     assert!(!line_runs_lib_tests(
-        "          cargo test --no-run --features rust-only -p peacockdb-core --lib --test test_plan_bytes"
+        "          cargo test --no-run --features rust-only -p peacockdb-core --lib --test test_cpu_executors"
     ), "--no-run builds the lib target without running it");
-    assert!(!line_runs_lib_tests("          cargo test -p peacockdb-core --test test_query_plan"),
+    assert!(!line_runs_lib_tests("          cargo test -p peacockdb-core --test test_corpus"),
             "an integration-only invocation does not run the lib tests");
 
     // ...while a continued RUN step still counts, on any of its physical lines.
@@ -408,7 +387,7 @@ fn every_rust_test_target_is_named_by_ci() {
         workflow_lines.iter().any(|l| line_runs_lib_tests(l)),
         "no workflow line runs the peacockdb-core LIB unit tests. Every other cargo \
          invocation passes --test, which selects integration targets only, so the \
-         inline #[cfg(test)] modules (batch_partitioned, config, gpu_rule, resident) would run locally \
+         inline #[cfg(test)] modules (batch_partitioned, config) would run locally \
          and never at the merge gate. Add `cargo test --features rust-only \
          -p peacockdb-core --lib` to the CPU tier."
     );

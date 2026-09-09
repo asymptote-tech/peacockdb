@@ -260,15 +260,11 @@ rust_only_targets() {
       base=$(basename "$f" .rs)
       # File-level gate => needs cmake; excluded from the rust-only set.
       grep -qF '#![cfg(not(feature = "rust-only"))]' "$f" && continue
-      # EXCLUSIONS, each for a measured reason rather than taste:
-      #   test_ffi  compiles under rust-only but yields ZERO tests (measured) — the
-      #             whole file is behind one cfg. Staging it ships a binary that runs
-      #             nothing, which reads as coverage.
-      #   diag_flip_audit  a manual diagnostic with no assertions (see its module doc
-      #             and its test_ci_coverage exemption). It cannot fail, so it cannot
-      #             contribute to a verify run, and a regen run must not depend on it.
+      # EXCLUSION, for a measured reason rather than taste: test_ffi compiles under
+      # rust-only but yields ZERO tests — the whole file is behind one cfg. Staging it
+      # ships a binary that runs nothing, which reads as coverage.
       case "$base" in
-        test_ffi|diag_flip_audit) continue ;;
+        test_ffi) continue ;;
       esac
       # Needs a GPU at RUNTIME even where it compiles fine — subtracted as a SET, not
       # by name. See gpu_runtime_targets.
@@ -307,13 +303,10 @@ rust_only_targets() {
 # remain, which is harmless but still not this suite's job.
 gpu_runtime_targets() {
   cat <<'GPUSET'
-peacockdb-core:test_gpu_full_table
-peacockdb-core:test_gpu_partitioned
 peacockdb-core:test_gpu_abi
 peacockdb-core:test_gpu_recipe_walk
 peacockdb-core:test_gpu_executors
 peacockdb-core:test_inc2_conformance
-peacockdb-core:test_gpu_executor_misc
 peacockdb-core:test_gpu_bp_corpus
 GPUSET
 }
@@ -339,10 +332,7 @@ if [ "$MODE" = "gpu" ]; then
   # GPU-runtime set. Kept in step with build-test-shadgpu.sh:RUST_TESTS and
   # pipeline.yml's gpu-tests staging array — three runners had three lists and this
   # one was short by test_inc2_conformance, the GPU<->comet bit-exact murmur3 gate.
-  # test_gpu_executor_misc is in the GPU-runtime set but is NOT staged: it needs the
-  # linked C++/CUDA executor and is not built for the GPU job (see test_ci_coverage's
-  # exemption table, which records the same fact).
-  mapfile -t RUST_TESTS < <(gpu_runtime_targets | grep -v ':test_gpu_executor_misc$')
+  mapfile -t RUST_TESTS < <(gpu_runtime_targets)
   CPP_TEST_BIN=peacock_plan_tests
 elif [ "$RUST_ONLY" -eq 1 ]; then
   # Golden regen / cpu+plan verify: no C++, no FFI.
@@ -601,7 +591,7 @@ if [ "$RUN" -eq 1 ]; then
 
   # Run only this mode's binaries by explicit name — globbing rust-tests/* would
   # also pick up stale binaries left by a previous run of the other mode (the
-  # rsync doesn't --delete), e.g. test_cpu_full_table lingering during a --gpu run.
+  # rsync doesn't --delete), e.g. a renamed target lingering during a --gpu run.
   RUST_TEST_NAMES=""
   for spec in "${RUST_TESTS[@]}"; do RUST_TEST_NAMES="$RUST_TEST_NAMES ${spec##*:}"; done
 
@@ -645,11 +635,11 @@ if [ ${#PULL_KINDS[@]} -gt 0 ]; then
   for kind in "${PULL_KINDS[@]}"; do
     for d in $(testdata_dirs_for_kind "$kind"); do
       if [ "$kind" = "goldens" ]; then
-        # No *.txt filter any more. Its real job was keeping plan_bytes.sha256 out of
-        # the round trip, and that is now the TEST's job (test_plan_bytes refuses to
-        # regenerate without PEACOCK_REWRITE_PLAN_BYTES). Two mechanisms for one
-        # invariant, with the weaker one in the wrong layer, is how they drift. The
-        # filter also silently dropped the 16 sf40 CSVs.
+        # No *.txt filter. Its real job was keeping a byte-level golden out of the round
+        # trip, and that is the TEST's job — the payload digest refuses to regenerate
+        # without PEACOCK_REWRITE_RECIPE_BYTES. Two mechanisms for one invariant, with the
+        # weaker one in the wrong layer, is how they drift; the filter also silently
+        # dropped the 16 sf40 CSVs.
         sync_goldens pull
       else
         echo "==> pull $HOST:$REMOTE_DIR/testdata/$d -> testdata/$d (additive)"

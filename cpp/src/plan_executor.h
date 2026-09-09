@@ -38,13 +38,10 @@ struct NodeStats {
 /// boundary, which serializes what cuDF would otherwise pipeline. That is the right
 /// trade for a benchmark and the wrong one for everything else.
 ///
-/// Without the sync a host-side timer around a cuDF call measures kernel
-/// SUBMISSION, not execution — and the node-by-node path (`NodeSession::execute_node`)
-/// has no sync of its own: `debug_sync` is only reached from `run_op`, i.e. the
-/// recursive all-at-once path. The one incidental sync here is
-/// `varlen_content_bytes`, which reads `chars_size` back to the host, and only for
-/// STRING columns — so timings taken without this flag would be skewed by whether a
-/// node happens to output strings.
+/// Without the sync a host-side timer around a cuDF call measures kernel SUBMISSION,
+/// not execution. The one incidental sync on the node path is `varlen_content_bytes`,
+/// which reads `chars_size` back to the host, and only for STRING columns — so timings
+/// taken without this flag would be skewed by whether a node happens to output strings.
 void set_node_timing(bool enabled);
 
 /// Current state of the timing switch (see `set_node_timing`).
@@ -69,12 +66,6 @@ bool node_timing_enabled();
 /// and it flips the global timing switch for the duration).
 uint64_t measure_timing_floor_us(unsigned samples);
 
-/// Execute a FlatBuffer-encoded GPU plan and return the result table.
-/// Thin recursive wrapper over the single-node executor — the production fast path.
-///
-/// @throws std::runtime_error on parse or execution errors.
-TableResult execute_plan(const uint8_t* plan_bytes, uint64_t plan_len);
-
 /// Σ var-length content bytes over a table's columns (see `NodeStats`).
 uint64_t varlen_content_bytes(const cudf::table_view& table);
 
@@ -89,8 +80,7 @@ std::pair<cudf::size_type, cudf::size_type> clamp_row_range(uint64_t offset, uin
 
 /// Node-by-node execution session: parses a plan once and drives ONE node at a
 /// time given already-resident child inputs, keeping intermediates resident in a
-/// handle registry. Used by the unified CPU/GPU node-executor interface; the
-/// all-at-once `execute_plan` remains the production fast path.
+/// handle registry. The only way a plan is executed.
 ///
 /// Nodes are addressed by canonical POST-ORDER sequence (children left-to-right,
 /// then the node) — the SAME order the Rust walk uses, so the caller's child

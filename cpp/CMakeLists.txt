@@ -138,7 +138,6 @@ add_custom_target(gpu_plan_fbs DEPENDS ${FBS_GENERATED_HEADER})
 add_library(peacock_gpu SHARED
   src/gpu_executor.cpp
   src/expr.cpp
-  src/execute_plan.cpp
   src/node_session.cpp
   src/operators/dispatch.cpp
   src/operators/scan.cpp

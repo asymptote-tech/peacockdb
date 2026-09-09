@@ -16,9 +16,9 @@ reference still resolves there.
 | Section | Open | Tickets |
 |---|--:|---|
 | [Critical correctness](#critical-correctness) | 15 | #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 #41 |
-| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 19 | #169 #168 #158 #175 #173 #97 #23 #32 #65 #62 #91 #95 #57 #45 #63 #56 #55 #96 #143 |
-| [Performance / architecture](#performance--architecture) | 28 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #110 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 27 | #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #114 #116 #126 #134 #133 #132 #131 #130 #129 #128 #127 #125 #13 #94 #69 #49 |
+| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #169 #168 #158 #175 #173 #23 #32 #65 #62 #95 #57 #45 #63 #56 #55 #143 |
+| [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
+| [Infrastructure / process](#infrastructure--process) | 22 | #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #114 #134 #132 #129 #128 #127 #125 #13 #94 #69 #49 |
 
 ## Critical correctness
 
@@ -75,12 +75,12 @@ change. Anti remainder overlaps #80.
 ### #46 — q61 GPU: 'promotions' sum subtree returns the wrong value
 Cross join is correct; `promotions` sum returns 2855378.83 vs CPU 2894907.87 — an
 upstream filtered-sum / projection / aggregate bug. Bisect that subtree node-by-node,
-CPU vs GPU. q61 full_table_gpu stays off.
+CPU vs GPU. q61 stays off on a device.
 
 <a id="t47"></a>
 ### #47 — q77 GPU returns 40 rows vs CPU 45
 Cross join correct; an upstream outer-join/aggregate branch drops 5 rows. Bisect
-per-node row counts. q77 full_table_gpu stays off.
+per-node row counts. q77 stays off on a device.
 
 <a id="t60"></a>
 ### #60 — q78 GPU diverges in anti-join + top-N; possibly memory-borderline
@@ -149,15 +149,13 @@ a data dir panics instead of being skipped. Found during the comment audit.
 Nothing is unimplemented — the title says *test*. `execute_union` retypes every branch column to
 the declared output type before `cudf::concatenate` (`union.cpp` ~L49), or it throws.
 
-What is open is that the coverage is incidental. The implementation comment names the case it
-was written for — tpcds q5, pairing a decimal measure against a `cast(0 AS decimal(7,2))`
-literal that materializes as FLOAT64, plus cuDF's SUM drifting fixed_point scale per branch —
-and tpcds q5 does run `full_table_tp1_standard` GPU at `golden_exact`, so breaking the cast goes
-red today. But it is red by luck: nothing pins that q5 keeps a union with mismatched branch
-types, and if that shape changes the cast becomes untested silently, which is the situation this
-ticket was filed to end. (tpch q5 is irrelevant — its plan has no `GpuUnionExec`.) Fix: a
-focused gtest building a two-branch union with FLOAT64 against DECIMAL128, asserting the
-concatenate succeeds with the declared type. Cheap, and independent of any corpus query.
+What is open is that nothing covers it. The implementation comment names the case it was
+written for — tpcds q5, pairing a decimal measure against a `cast(0 AS decimal(7,2))` literal
+that materializes as FLOAT64, plus cuDF's SUM drifting fixed_point scale per branch. That case
+used to go red by luck, through a device tier that ran q5 and no longer exists; today no test
+reaches the cast at all. Fix: a focused gtest building a two-branch union with FLOAT64 against
+DECIMAL128, asserting the concatenate succeeds with the declared type. Cheap, and independent
+of any corpus query.
 
 ## Blockers for disabled coverage
 
@@ -245,14 +243,6 @@ row whatever arrived.
 Unfreezing buys a make-empty-of-schema call and the refusals go. Until then the refusal is the
 contract, and the shapes that reach it are the ones a lane can be empty in.
 
-<a id="t97"></a>
-### #97 — Semi/anti/outer joins at real-8-way
-The widest tp8 blocker (~25 registry rows). Per-partition semi/anti/outer landed
-(semi_join / anti_join / left_join green at tp8-standard). Remaining: (a) broadcast /
-CollectLeft semi-anti-outer need a cross-probe-partition build-match bitmap reduction;
-(b) the NOT-IN global "any build partition holds a NULL key" check (#80). Carriers:
-tpch q4/q16/q18/q20/q21/q22 plus the tpcds outer/semi set.
-
 <a id="t23"></a>
 ### #23 — Upgrade DataFusion 45→46+ to unblock q27/q70/q72/q86
 Four TPC-DS queries fail to physical-plan on DataFusion 45 (`plan_status=fail`): q27
@@ -261,11 +251,12 @@ not planned; q72 `Date32 + Int64` coercion. Whole rows dead until the upgrade. S
 
 <a id="t32"></a>
 ### #32 — GPU window functions / PARTITION BY
-12 registry rows. Whole-partition aggregate windows work
-(`cpp/src/operators/window.cpp`; q12/q51/q53/q63/q89 green at tp1). Remaining:
-`rank()`/`dense_rank()` (`StandardWindowExpr`) for q36/q44/q47/q57/q67; q49 secondary
-blocker; q20 LIMIT-boundary NULL-ordering tiebreak; q98 OOM on a shared GPU (now
-`oracle` mode at tp1). Windows also gate the tp8 rollout for those rows.
+The kernel gaps, which #143 sits on top of: this mode refuses a window query at plan time, so
+nothing reaches them today. Whole-partition aggregate windows worked
+(`cpp/src/operators/window.cpp`; q12/q51/q53/q63/q89 were green on a device before the modes
+that ran them went). Remaining: `rank()`/`dense_rank()` (`StandardWindowExpr`) for
+q36/q44/q47/q57/q67; q49 secondary blocker; q20 LIMIT-boundary NULL-ordering tiebreak; q98 OOM
+on a shared GPU.
 
 <a id="t65"></a>
 ### #65 — __grouping_id encoding doesn't match DataFusion's GROUPING()
@@ -283,21 +274,13 @@ only for mixed distinct + non-distinct, blocking q28. Fix: map count+distinct �
 `nunique` (`null_policy::EXCLUDE`) in the grouped and global paths without regressing
 the rewrite queries.
 
-<a id="t91"></a>
-### #91 — Memory-aware GPU hash-repartition + resident-OOM in the partitioned executor
-Real 8-way is only validated at generous budgets. (1) Repartition is concat-first
-(`GpuCoalescePartitions` full concatenate, then scatter), spiking peak memory and
-defeating the point of partitioning. (2) The resident-OOM enforcer
-(`executors/stream.rs`) hangs off the streaming driver only, not ported to the CPU backend.
-Payoff: a genuine tp8-mini (2 GiB real-8-way) device, inexpressible today.
-
 <a id="t95"></a>
 ### #95 — Decimal partition keys for real-8-way murmur3
 murmur3 covers int/date/timestamp/composite/null; decimal deferred (float indefinitely).
-Needed once the tp8 rollout reaches decimal-keyed repartitions (tpch q18 `o_totalprice`,
-q22 `c_acctbal`, tpcds `i_current_price`). Dispatch by *logical* precision (≤18 → low 8 LE
-bytes of int128; >18 → raw 16B LE) and thread precision through the partition FFI. Until
-then `spark_hash_partition.cu` throws a loud "decimal partition key unsupported".
+Needed by the first shuffle on a decimal key (tpch q18 `o_totalprice`, q22 `c_acctbal`,
+tpcds `i_current_price`). Dispatch by *logical* precision (≤18 → low 8 LE bytes of int128;
+>18 → raw 16B LE) and thread precision through the partition FFI. Until then
+`spark_hash_partition.cu` throws a loud "decimal partition key unsupported".
 
 <a id="t57"></a>
 ### #57 — Value-form CASE produces wrong results on the GPU column path
@@ -330,19 +313,12 @@ DataFusion evaluates `sum(decimal/int)`'s division (divisor cast to Decimal128) 
 the Partial phase; GpuAggregate re-evaluates against Final-phase inputs → cast failure.
 Honor the partial-phase operand cast / state schema.
 
-<a id="t96"></a>
-### #96 — GPU real-8-way per-partition JOIN execution
-Largely landed: the CPU oracle and the GPU map arm both run partitioned joins
-per-partition (child0[p] ⋈ child1[p]); q17 green at tp8-standard plus
-q3/q5/q7/q8/q9/q12/q13/q19. Before closing, confirm nothing remains beyond the
-broadcast/CollectLeft and non-inner surfaces now tracked in #97.
-
 <a id="t143"></a>
 ### #143 — window functions in batch-partitioned mode
-The batch-partitioned planner refuses window queries at plan time (rendered as plan ✗ in
-the new widget tables) — the one feature regression against legacy full_table coverage,
-and a blocker for ever retiring the legacy modes. Direction: a window is a per-partition
-op once the input is hash-partitioned on the PARTITION BY keys (the legacy invariant);
+The planner refuses window queries at plan time, so a window query does not run at all —
+the one capability that went with the retired modes rather than moving to this one, and
+12 registry rows. Direction: a window is a per-partition op once the input is
+hash-partitioned on the PARTITION BY keys;
 whole-partition aggregate windows need a single batch (coalesce-all first), while
 `BoundedWindowAggExec`-class frames could stream as a `BatchAccumulator`. The
 rank/dense_rank gaps of #32 carry over unchanged.
@@ -509,10 +485,12 @@ byte-identical, plus a case asserting a small limit is honoured.
 
 <a id="t19"></a>
 ### #19 — Stats propagation: 55 TPC-DS hash joins blind to cardinality
-`num_rows` doesn't survive descent through the `Gpu*`-wrapped tree (`statistics()` impls
-in `gpu_rule.rs`; GpuScanExec not forwarding ParquetExec row counts), so JoinSelection
-can't flip build/probe on 55 of 103 joins across 38 queries. One confirmed mis-order: q45
-build 9.95× larger than probe. Foundation for all CBO work (#73, #20).
+Measured when a wrapper tree sat between DataFusion's nodes and its optimizer: `num_rows`
+did not survive the descent, so JoinSelection could not flip build/probe on 55 of 103 joins
+across 38 queries, one confirmed mis-order being q45 with the build 9.95× larger than the
+probe. The wrappers are gone, so that half of the cause is gone with them and the number
+wants re-measuring against the plans DataFusion produces today. Foundation for all CBO work
+(#73, #20).
 
 <a id="t16"></a>
 ### #16 — Dynamic / runtime filters: build-side keys → probe-side scan
@@ -563,14 +541,6 @@ that way round.
 Move physical planning from static heuristics to cost-based, validated against the DuckDB
 cost oracle and goldens. In scope: adaptive filter placement, join enumeration (#20),
 stats (#19, the load-bearing prereq), runtime filters (#16).
-
-<a id="t110"></a>
-### #110 — Retire the all-at-once GPU executor
-Remove `executors/all_at_once_gpu_executor.rs` → `peacock_execute` FFI (whole-plan, no
-per-node stats), migrate or drop its 5 smoke tests plus the lifecycle test, and drop the
-FFI symbols from `cpp/include/peacock_gpu.h` / `cpp/src/gpu_executor.cpp` (and
-`execute_plan.cpp`). Its stated blocker — a common `Executor` trait — has landed, so this
-is unblocked pending full_table/partitioned covering all needs.
 
 <a id="t75"></a>
 ### #75 — Refactor duckdb_cost.py: separate cost formula from extraction
@@ -749,26 +719,6 @@ trip log, and `Underestimate` is the precedent for what one would look like. Rel
 
 ## Infrastructure / process
 
-<a id="t194"></a>
-### #194 — the cost gate's git baseline ignores which section it was asked for
-
-`base_total` (`cost-report/src/main.rs:1623`) reads a base-side total two ways. The directory arm
-passes `section` to `entry_total`; the git-ref arm — the one every PR uses — calls
-`read_total_str` on the whole file and drops it. `read_total_str` returns the FIRST
-`peacockdb_cost=` in the text, so every section of a per-mode `.cost.txt` is compared against
-whichever query sorts first in that file.
-
-Legacy goldens are one file per query, so `section` is `None` and the two arms agree. The
-batch-partitioned per-mode files hold ~60 sections each, and there the gate is comparing unrelated
-queries. On `tpcds.sf1/bp-tp1-single-mini.cost.txt` the reported deltas run -99.6% to +341.3%
-against `q2`'s 737,382,823 — three below -90%, three above +200%, none of them a cost change.
-
-Every bp row on PR #135's cost widget is this. The new-side totals are correct; only the baseline
-is wrong, so nothing is mis-measured in the goldens themselves.
-
-Fix: the git arm takes the same `entry_total(text, section)` path as the directory arm. A test that
-the two arms agree on a multi-section file is what would have caught it.
-
 <a id="t178"></a>
 ### #178 — two CI runs share the GPU host, and the pool is sized for one
 `gpu-tests` uses a per-run `REMOTE_DIR` so two runs do not overwrite each other's files, and
@@ -928,107 +878,35 @@ cells describing a query the repo does not contain, with nothing red.
 ### #114 — plan_status is shape-validated but never truth-verified
 `plan_status` (ok/fail) is shape-checked only; no test attempts to plan the `fail` rows.
 When #23 lands and q27/q70/q72/q86 start planning, the widget keeps rendering `plan ✗`
-with nothing going red. Fix: a permanent plan-attempt probe in `test_query_plan.rs`
+with nothing going red. Fix: a permanent plan-attempt probe in `test_batch_partitioned_plans`
 asserting each `fail` row still fails to physically plan (and `ok` rows plan) — that tier
-already provisions parquet. Accepted risk until then: stale ✗ cells after an upgrade.
-
-<a id="t116"></a>
-### #116 — Registry rows with no GPU coverage and no blocker
-`hash_join` and `mixed_join` (full_table_gpu=na, no `gpu_full_table_test!` entry, no known blocker —
-plain inner joins plus an aggregate; mixed_join adds a residual range filter) and
-`join_int` (tp8-only oracle test, no tp1 row). Either add the missing GPU test rows or
-mark the cells intentionally-na with a reason.
-
-`nested_loop_left_join` is the fourth row and the one with a reason already: it was added for
-T17's end-to-end tests, which run no device, and its GPU columns belong to T19's enablement
-sweep.
-
-<a id="t126"></a>
-### #126 — maybe_write_result_golden discards its removal result
-`peacockdb-core/tests/common/mod.rs` (~L566): when a result exceeds
-`RESULT_GOLDEN_MAX_BYTES` the golden is deleted so the GPU test falls back to the live
-oracle, but `let _ = std::fs::remove_file(...)` discards the outcome and the message
-prints unconditionally. A failed removal is therefore reported as "no golden" while the
-stale golden is still on disk, and the message cannot distinguish "deleted a stale one"
-from "there was nothing here". Narrow, but it is a regen path: the operator's next move
-is to trust the log and commit. Same shape as #119. Check the result, and say which of
-the two things happened.
+already provisions parquet and already reads the registry. Accepted risk until then: stale ✗
+cells after an upgrade.
 
 <a id="t134"></a>
-### #134 — begin_plan's node count is returned and discarded
-`peacock_executor_begin_plan` fills `out_node_count`, and
-`GpuNodeExecutor::new` (`backend/gpu_node_executor.rs`) reads it into a local and drops it. That
-number is the one free cross-check on the invariant the whole node-by-node FFI rests on: Rust's
-`post_order` and C++'s `index_post_order` are separate implementations of the same rule, and
-every handle is addressed by the resulting sequence number. Today a divergence surfaces
-indirectly — per-node stats that stop matching the `.cpu.txt` golden, or an unknown-handle throw
-— i.e. as wrong-looking results rather than as the structural mismatch it is. Fix: compare it
-with the Rust walk's node count in `GpuNodeExecutor::new` and error naming both numbers. Two
-lines, and it converts a confusing failure into an obvious one. Found while diagramming the
-node-by-node driver's collaborators.
-
-<a id="t133"></a>
-### #133 — No tp1 plan golden: tp1 cost annotation is unpinned
-Every `.plan.txt` in the tree is tp8 — 130 at `tp8-mini` plus `shuffle_additive` at
-`tp8-standard` — so the plan tier never renders a tp1 plan. The tp1 node TREE is still pinned,
-by the 110 `tp1-standard` `.cpu.txt` goldens, which carry each node's exprs, predicates and
-projections. What is pinned nowhere is the plan-only annotation at tp1: `row_width`,
-`subtree_max_row_bytes`, `estimate_input_bytes`, `estimate_output_bytes`, `estimate_cost`
-appear only in `.plan.txt`. A change to the memory/cost model that moved those numbers at tp1
-while leaving tp8 unchanged would go green — and tp1 is the shape the GPU full-table tier
-runs, so it is not a corner. Fix: canonize a handful of tp1 `.plan.txt` goldens (the same
-queries the tp1-standard cpu tier already uses), or teach the cpu golden to carry the
-annotation. Same class as #114 — a cell nothing verifies. Found auditing tp1/tp8 planning
-impact.
+### #134 — begin_plan's node count is returned and discarded on the production path
+`peacock_executor_begin_plan` fills `out_node_count`, and the session the GPU backend opens
+reads it into a local and drops it. That number is the one free cross-check on the invariant
+the whole node-by-node FFI rests on: the recipe writer's numbering and C++'s
+`index_post_order` are separate implementations of one rule, and every handle is addressed by
+the resulting sequence number. `test_gpu_recipe_walk` compares it against
+`RecipePlan::wire_nodes()` and is the only place both numbers exist at once; a production run
+meets a divergence indirectly instead — a section that stops matching, or an unknown-handle
+throw. Fix: make the same comparison where the session is opened, and error naming both
+numbers.
 
 <a id="t132"></a>
-### #132 — Two batch-size fields cross the IR and nothing on the C++ side reads them
-`CudfScan.batch_size` and `CudfCoalesceBatches.target_batch_size` are both computed by
-`GpuMemoryBudgetRule`, serialized by the plan serializer, and pinned byte-for-byte by
-`goldens/plan_bytes.sha256` — and `grep -rn 'batch_size' cpp/src cpp/include` returns
-nothing. Neither is read: the GPU scan reads by row group (`set_row_groups`), so there is no
-batch to size, and `GpuCoalesceBatches` is `execute_passthrough` in `dispatch.cpp`, so the
-target it carries is never consulted. Harmless today, and the wire format is deliberately
-frozen, but it reads as a memory bound the GPU respects when the GPU's only memory lever is
-the row-group→partition map. Decide which it is: either the GPU should honour a batch/chunk
-bound (overlaps #91's memory-aware repartition and #34's single-table constraint) or the two
-fields should be dropped from the IR in a commit that regenerates the digest deliberately.
-Until then, do not read these fields as evidence that GPU execution is batch-bounded. Found
-testing the assumption that batch_size is respected only in full-table CPU execution — it is
-respected in BOTH CPU modes and in neither GPU mode.
-
-<a id="t131"></a>
-### #131 — resident model never accounts for cross / nested-loop join build sides
-`resident.rs::peak()` stacks a build side by matching `stat.node_name` against `"HashJoinExec" |
-"CrossJoinExec" | "NestedLoopJoinExec"`, and two of the three never match.
-
-`GpuCrossJoinExec` and `GpuNestedLoopJoinExec` are two of the five operators that do not strip,
-so the name reaching the classifier keeps its `Gpu` prefix, matches nothing and falls into the
-streaming arm: the build side contributes zero and never stacks with the probe. `HashJoinExec`
-works only because its wrapper strips. So the resident-OOM enforcer under-estimates every plan
-containing a cross or nested-loop join, in the direction that lets a query through that should
-have tripped. Latent — the tight-budget set (`test_cpu_oom`: tpcds q78, tpch q7/q18) has no such
-join — and unreachable by the existing unit tests, which construct names by hand
-(`node("HashJoinExec", …)`) and so cannot see the mismatch: a guard that cannot go red. Fix:
-classify on a type rather than a rendered name (`as_operator` plus the wrapped node's identity),
-or normalize the prefix where the name is recorded, then add a case built from a real wrapped
-plan.
-
-<a id="t130"></a>
-### #130 — `partition_topology()` is implemented 16 times and read by nobody
-`Operator::partition_topology()` (`peacockdb-core/src/operators/operator.rs`) returns each
-operator's partition behaviour — ScanEmit / Map / Collapse / KWayMerge / RepartitionHash /
-Join — and has *no* callers: not in `src`, not in `tests`. The CPU backend and the C++ side
-each re-derive the same
-classification independently: the CPU partitioned backend by ad-hoc predicates
-(`collapses_partitions`, `hash_repartition_of`, `partitioned_join_arity` in
-`backend/cpu_node_executor.rs`) and the C++ side by `node_type()` switches in
-`node_session.cpp`. That is the duplicated-rule antipattern coding-style.md names: three
-copies of one fact, and the trait copy — the one a reader would trust, since it is the
-declared interface — is the copy nothing can prove right, because no test can make it go
-red. Either drive both off it (the CPU predicates become one match on the topology)
-or delete it and stop implying an abstraction the code does not use. Found auditing the
-operator tables for architecture.md.
+### #132 — Two batch-size fields cross the IR and nobody writes or reads them
+`CudfScan.batch_size` and `CudfCoalesceBatches.target_batch_size` are in the fbs, and
+`grep -rn 'batch_size' cpp/src cpp/include` returns nothing. Neither is read: the scan reads
+by row group (`set_row_groups`), so there is no batch to size, and `CudfCoalesceBatches` is
+`execute_passthrough` in `dispatch.cpp`. Since the legacy planner went, neither is written
+either — the recipe writer emits no coalesce-batches node at all and leaves `batch_size` at
+its default — so they are two fields of wire-format surface with nobody on either end. The
+wire format is deliberately frozen, so the decision is whether a batch bound should ever
+cross it (a device would then have a memory lever it does not have) or the fields should go
+in a commit that regenerates the payload digest deliberately. Until then, do not read them as
+evidence that device execution is batch-bounded.
 
 <a id="t129"></a>
 ### #129 — The "26.02" CI leg builds against a 25.10a image; the GPU job has no fork guard
@@ -1044,15 +922,13 @@ while the repo has no forks, which is exactly why it will bite later.
 
 <a id="t128"></a>
 ### #128 — Doctests run nowhere, and the meta guard cannot see them
-`peacockdb-core` has one doctest (`CpuExecutor`, `src/lib.rs` ~L166). No step in
-`pipeline.yml` passes `--doc`, so it executes only in a local `cargo test`. Worse than a
-missing step: `test_ci_coverage.rs` enumerates `--test` targets plus `--lib`, so a
-doctest is invisible to the guard whose whole job is finding targets CI does not run —
-this one is unlisted, not exempted, and adding a second doctest would go equally
-unnoticed. Fix: run `cargo test --features rust-only -p peacockdb-core --doc` in the
-dataset-matrix tier and teach the guard that `--doc` is a target class it must see named
-(the `--lib` check at `line_runs_lib_tests` is the pattern). Found during the
-test-category census (2026-08-04).
+No step in `pipeline.yml` passes `--doc`, and `test_ci_coverage.rs` enumerates `--test`
+targets plus `--lib`, so a doctest is invisible to the guard whose whole job is finding
+targets CI does not run. The crate has no doctest today — the one it had went with
+`CpuExecutor` — so nothing is unrun right now, and the first one written would be, silently.
+Fix: run `cargo test --features rust-only -p peacockdb-core --doc` in the dataset-matrix tier
+and teach the guard that `--doc` is a target class it must see named (the `--lib` check at
+`line_runs_lib_tests` is the pattern).
 
 <a id="t127"></a>
 ### #127 — Unowned testdata dirs on shad-gpu
@@ -1097,15 +973,15 @@ drop/normalize the thread-sensitive field.
 ### #49 — Test crates bake CARGO_MANIFEST_DIR for testdata
 **Priority: low**
 
-Three test files read testdata through `env!("CARGO_MANIFEST_DIR")` instead of
-`testdata_root()`, so they only find their data where the build tree stood.
+Some tests read testdata through `env!("CARGO_MANIFEST_DIR")` instead of `testdata_root()`,
+so they only find their data where the build tree stood.
 
 It matters because a test binary is built on one host and run on another: remote CPU runs ship
 binaries, goldens and data but never source, so a compile-time path is a path the remote does
 not have. `tests/common/mod.rs testdata_root()` solves that by honouring `PEACOCK_TESTDATA_DIR`
-first, which `build-test.sh` sets for remote runs. The residual is `test_node_executor.rs`,
-`test_plan_serialiser.rs` (both `tpch.minimal`) and `diag_flip_audit.rs` — which is exactly why
-a remote CPU host needs a `/media/data/peacockdb` symlink and why `--gpu` runs, which set the
-env var, do not. `test_ci_coverage.rs` is on the old list but should come off rather than be
-swept: its `CARGO_MANIFEST_DIR` resolves the repo root to read `pipeline.yml`, not testdata, and
-no env var should redirect that. Sweep the three, drop the fourth, close it.
+first, which `build-test.sh` sets for remote runs. The residual is the crate's own unit tests
+— six sites under `src/batch_partitioned/` reaching `tpch.minimal` — which is exactly why a
+remote CPU host needs a `/media/data/peacockdb` symlink and why `--gpu` runs, which set the
+env var, do not. `test_ci_coverage.rs` and the fbs reader in `test_batch_partitioned_plans`
+are not this: their `CARGO_MANIFEST_DIR` resolves the repo root to read committed source, not
+testdata, and no env var should redirect that. Sweep the six, close it.

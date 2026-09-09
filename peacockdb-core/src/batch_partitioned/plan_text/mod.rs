@@ -499,7 +499,7 @@ mod tests {
         )
         .await;
         // Lane count and batch layout on every node; a hash or an order only where one is
-        // declared. Three of these four are invisible in a legacy line.
+        // declared. Three of these four are properties a plan line has nowhere else to say.
         assert!(
             line_with(&text, "GpuLoadParquet").contains("lanes=4, batches=multiple"),
             "{text}"
@@ -522,8 +522,9 @@ mod tests {
             4,
         )
         .await;
-        // A merge that turns 40 rows into 7 says so on its own line; in legacy only the
-        // sort beneath it does, and the merge is silent.
+        // A merge that turns 40 rows into 7 says so on its own line: the fetch rides the
+        // merge, and a reader who found it only on the sort beneath would misread which
+        // node truncates.
         assert!(line_with(&text, "GpuSort").contains("fetch=7"), "{text}");
         assert!(
             line_with(&text, "GpuMergeSortedPartitions").contains("fetch=7"),

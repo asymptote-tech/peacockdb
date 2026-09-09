@@ -1,6 +1,6 @@
-// The plan-node dispatch switch (run_op) and its two drivers, execute_node
-// (recursive) and execute_one (single-node). Co-located deliberately: they are one
-// dispatch mechanism.
+// The plan-node dispatch switch (run_op), the input resolver every operator calls for
+// its children (execute_node) and the single-node driver (execute_one). Co-located
+// deliberately: they are one dispatch mechanism.
 
 #include "peacock/operators.h"
 #include "peacock/expr.h"
@@ -35,8 +35,8 @@ static const char* plan_node_kind_name(fb::PlanNodeKind k) {
 }
 
 
-// Run one node's op (the dispatch switch). In recursive mode each op's
-// `execute_node(child)` recurses here; in single-node mode it returns inputs.
+// Run one node's op (the dispatch switch). Each op resolves its children through
+// `execute_node`, which hands back an input the caller already made resident.
 static TableResult run_op(const fb::PlanNode* node, NodeInputs* in) {
   if (!node) throw std::runtime_error("null PlanNode");
 
@@ -96,15 +96,19 @@ static TableResult run_op(const fb::PlanNode* node, NodeInputs* in) {
   return result;
 }
 
-// Recursive driver (production fast path) OR single-node child resolver.
+// One operator's next input. `node` is unread: it names the child in the plan, and what
+// comes back is the table the caller already put there — which is the whole of what a
+// node-by-node driver means. It stays a parameter because the passthrough arms have
+// nothing else to name the child they forward.
 TableResult execute_node(const fb::PlanNode* node, NodeInputs* in) {
-  if (in && in->items) {
-    if (in->idx >= in->items->size()) {
-      throw std::runtime_error("execute_one: not enough input handles for node");
-    }
-    return std::move((*in->items)[in->idx++]);
+  (void)node;
+  if (!in || !in->items) {
+    throw std::runtime_error("execute_node: no inputs were provided for this node");
   }
-  return run_op(node, in);
+  if (in->idx >= in->items->size()) {
+    throw std::runtime_error("execute_one: not enough input handles for node");
+  }
+  return std::move((*in->items)[in->idx++]);
 }
 
 TableResult execute_one(const fb::PlanNode* node, std::vector<TableResult> inputs) {
@@ -114,24 +118,22 @@ TableResult execute_one(const fb::PlanNode* node, std::vector<TableResult> input
 
   // INVARIANT: a node handed inputs must consume ALL of them.
   //
-  // Under-consumption means execute_node did not see the caller's inputs, fell
-  // through to run_op, and re-executed that child subtree from parquet — CORRECT
-  // ANSWERS at exponential cost, so goldens, byte digests and result comparison
-  // all still pass. This check is the only detector.
+  // Under-consumption means an operator did not resolve one of its children, so the
+  // table the caller made resident for it is dropped and the node ran against
+  // whatever it did read — an answer computed from the wrong inputs.
   //
   // Safe for every dispatch case: scans are leaves (provided == 0) and every other
   // op resolves its children unconditionally.
   //
   // Deliberately `!= provided`, NOT `> 0 && idx == 0`: the weaker form covers only
   // single-child ops. A hash join threading `in` to its left child but nullptr to
-  // its right consumes 1 of 2, passes the weak check, and re-executes the whole
-  // right subtree — the costliest form of exactly this bug.
+  // its right consumes 1 of 2 and passes the weak check.
   if (in.idx != provided) {
     throw std::runtime_error(
         "execute_one: node was given " + std::to_string(provided) +
         " input(s) but consumed " + std::to_string(in.idx) +
-        " — the unconsumed children were re-executed instead of reused. This is the "
-        "silent re-execution bug: correct results, exponential cost.");
+        " — an operator did not resolve one of its children, so it ran against inputs "
+        "the caller did not give it.");
   }
   return result;
 }

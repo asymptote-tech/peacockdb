@@ -1,9 +1,8 @@
 # shellcheck shell=bash
 #
-# Shared build/deploy environment for the shad-gpu workflows: toolchain pinning,
-# cargo target dir, the remote, and the two helpers both phases use. The
-# correctness gate and the benchmark run need all of it identically, and two
-# copies of it drifted before this file existed.
+# Shared build/deploy environment for the shad-gpu workflow: toolchain pinning, cargo
+# target dir, the remote, and the helpers the phases use. Sourced by the driver script
+# and by anything else that has to reach the host with the same settings.
 #
 # Sourced, never executed: no `set -e` here, and nothing below has a side effect
 # beyond exporting variables and defining functions.
@@ -28,10 +27,6 @@ export CXX=/usr/bin/g++-${GCC_VERSION}
 # (it re-enables arrow's `ffi`), and a different cudf_ROOT (it changes the FFI
 # build's resolved Arrow/cudf). Sharing ./target across either recompiles that
 # stack on every flip. Override with CARGO_TARGET_DIR.
-#
-# The benchmark profile does not get a root of its own: `[profile.benchmarks]`
-# already separates its artifacts into `<target-dir>/benchmarks/`, and a second
-# root would fork the `.peacock-ffi-cudf-root` stamp without saving a rebuild.
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target-cudf-$(basename "$CUDF_ROOT")}"
 
 # The first build in a fresh target-cudf recompiles the DataFusion stack at opt-3

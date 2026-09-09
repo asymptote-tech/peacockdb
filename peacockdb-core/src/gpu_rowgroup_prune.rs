@@ -1,4 +1,4 @@
-//! Compute surviving parquet row-group indices for a `GpuScanExec`, so the GPU
+//! Compute surviving parquet row-group indices for a source, so the GPU
 //! scan (cuDF `read_parquet` `set_row_groups`) decodes ONLY the groups that can
 //! match the scan's static predicate — matching the CPU oracle, which DataFusion's
 //! `ParquetExec` already prunes the same way.

@@ -16,16 +16,8 @@ use peacockdb_core::config::MemoryLimit;
 pub const TIER: MemoryLimit = MemoryLimit::Mini;
 pub const BUDGET: u64 = TIER.bytes() as u64;
 
-/// A scan reading less than this stops being worth splitting: it has nothing to gain from
-/// lanes and would pay a shuffle for them.
-///
-/// From the sf1 measurement at full projection: the largest table that must stay on one lane
-/// is tpcds date_dim at 4,006,445 bytes, the smallest that must not is tpcds web_returns at
-/// 8,041,397, and tpch supplier at 1,532,237 sets the floor. 5 MiB sits in that gap nearer
-/// the lower end, so date_dim would have to grow 31% to cross it and web_returns shrink 35%.
-/// It reads the projected bytes of the surviving row groups, so a narrow scan of a big table
-/// falls below it — the rule working, not a value to retune.
-pub const SMALL_TABLE_BYTES: u64 = 5 * 1024 * 1024;
+pub use peacockdb_core::batch_partitioned::plan::SMALL_TABLE_BYTES;
+
 
 /// One planning mode: what the goldens call it, and the two knobs that make it distinct.
 pub struct BpMode {

@@ -12,7 +12,7 @@ use datafusion::arrow::datatypes::DataType;
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
 use crate::generated::gpu_plan_generated::peacock::plan as fb;
-use crate::plan_serializer::{convert_data_type, serialize_scalar_value};
+use super::wire::{convert_data_type, serialize_scalar_value};
 
 use super::super::error::PlanError;
 use super::super::expr::{BinaryOp, Expr, UnaryOp};

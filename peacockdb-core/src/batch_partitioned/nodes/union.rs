@@ -1,5 +1,5 @@
 //! Union and interleave: lane relabeling, and nothing else. Neither touches a row — the
-//! branch type normalization legacy does inside the executor is a per-branch `GpuProject`
+//! branch type normalization the union kernel does inside the executor is a per-branch `GpuProject`
 //! the planner inserts, which is what leaves these two as pure routing.
 
 use std::any::Any;

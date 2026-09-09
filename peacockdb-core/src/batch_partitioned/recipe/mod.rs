@@ -15,6 +15,7 @@ mod join;
 mod node_writer;
 mod read;
 mod types;
+mod wire;
 mod writer;
 
 use super::error::PlanError;

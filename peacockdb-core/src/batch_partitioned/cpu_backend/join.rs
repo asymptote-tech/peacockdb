@@ -431,7 +431,7 @@ fn pad_project(
 }
 
 /// The residual, rebuilt against the intermediate schema its column map names — the same
-/// reconstruction the legacy deserializer makes, since the map is the same map.
+/// reconstruction the wire's own reader makes, since the map is the same map.
 fn join_filter(
     filter: &super::super::expr::Expr,
     columns: &[super::super::nodes::join::JoinFilterColumn],

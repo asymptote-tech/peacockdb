@@ -1,8 +1,8 @@
 == q6
-storage_read_bytes=51119616 # GpuScanExec, GpuLoadParquet
-cuda_filter_bytes=3653312 # GpuFilterExec, GpuFilter
+storage_read_bytes=51119616 # GpuLoadParquet
+cuda_filter_bytes=3653312 # GpuFilter
 peacockdb_cost=54772928
 == q14
-storage_read_bytes=27000000 # GpuScanExec, GpuLoadParquet
-cuda_filter_bytes=1000000 # GpuFilterExec, GpuFilter
+storage_read_bytes=27000000 # GpuLoadParquet
+cuda_filter_bytes=1000000 # GpuFilter
 peacockdb_cost=28000000

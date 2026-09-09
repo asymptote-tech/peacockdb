@@ -12,7 +12,7 @@
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
 use crate::generated::gpu_plan_generated::peacock::plan as fb;
-use crate::plan_serializer::serialize_schema;
+use super::wire::serialize_schema;
 
 use super::super::aggregates::AggCall;
 use super::super::error::PlanError;
@@ -148,8 +148,8 @@ fn state_funcs<'a>(
 }
 
 /// `out_decimal_precision`/`out_decimal_scale` stay at zero, and that is a decision. They
-/// are the legacy writer's channel for `avg`'s declared decimal type (`operators/aggregate.rs`,
-/// read by `aggregate.cpp` at :216 and :711), but this mode never sends an `avg` to a device:
+/// are the wire's channel for `avg`'s declared decimal type (read by `aggregate.cpp` at
+/// :216 and :711), but this mode never sends an `avg` to a device:
 /// decomposition splits it into sum and count, so the scale rides on the finalize divide's own
 /// `out_decimal_precision`, which `expr_writer` sets and
 /// `an_average_finalizes_to_the_digits_the_oracle_computes` proves against the oracle's digits.

@@ -1,15 +1,18 @@
 // NodeSession: node-by-node execution over a parsed plan, keeping intermediates
-// resident in a handle registry. `node_children` stays static here -- it is the
-// session's own notion of child order and nothing else needs it.
+// resident in a handle registry, plus the two free functions only its stats and its
+// row ranges need. `node_children` is the session's own notion of child order, and the
+// one thing a caller needs to address the same nodes it does.
 
 #include "peacock/operators.h"
 #include "peacock/expr.h"
 #include "peacock/partitioning.hpp"
+#include "plan_executor_internal.h"
 
 #include <cudf/concatenate.hpp>
 #include <cudf/copying.hpp>
 #include <cudf/merge.hpp>
 #include <cudf/sorting.hpp>
+#include <cudf/strings/strings_column_view.hpp>
 #include <cudf/table/table.hpp>
 #include <cudf/utilities/default_stream.hpp>
 
@@ -27,7 +30,7 @@
 namespace peacock {
 
 // ============================================================================
-// Per-node timing (benchmark mode)
+// Per-node timing (measurement mode)
 // ============================================================================
 // OFF by default; see the contract on `set_node_timing` in plan_executor.h for
 // why measuring at all requires a stream sync, and why that sync must not be
@@ -105,9 +108,24 @@ uint64_t measure_timing_floor_us(unsigned samples) {
   return samples_us[1];
 }
 
+uint64_t varlen_content_bytes(const cudf::table_view& table) {
+  uint64_t total = 0;
+  for (cudf::size_type i = 0; i < table.num_columns(); ++i) {
+    auto col = table.column(i);
+    // Flat string columns only — no nested List types reach here. Matches the Rust
+    // ColAccum content term (Σ value byte lengths = offsets[n]-offsets[0]).
+    if (col.type().id() == cudf::type_id::STRING) {
+      total += static_cast<uint64_t>(
+          cudf::strings_column_view(col).chars_size(cudf::get_default_stream()));
+    }
+  }
+  return total;
+}
+
 // Children of a plan node in canonical order — MUST match the Rust walk's child
-// order so the caller's input handles line up with each node's inputs.
-static std::vector<const fb::PlanNode*> node_children(const fb::PlanNode* node) {
+// order so the caller's input handles line up with each node's inputs. Declared in
+// plan_executor_internal.h for the tests that drive a plan node by node.
+std::vector<const fb::PlanNode*> node_children(const fb::PlanNode* node) {
   switch (node->node_type()) {
     case fb::PlanNodeKind_CudfScan:
       return {};
