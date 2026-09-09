@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 196), which is also the counter for
+New tickets take the next free number (currently 197), which is also the counter for
 `tasks/bp-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -18,7 +18,7 @@ reference still resolves there.
 | [Critical correctness](#critical-correctness) | 14 | #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 21 | #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
+| [Infrastructure / process](#infrastructure--process) | 22 | #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
 
 ## Critical correctness
 
@@ -171,9 +171,8 @@ designing: nothing yet says a thousand-node plan is a shape this mode should pro
 column, so folding cannot reach it and that join's recipe has no writable payload.
 
 It is the only query in either bench with the shape — every other corpus interval folds away
-before serialization — and nothing regressed: the legacy path refuses the same literal at
-`serialize_scalar_value`, `mixed_join` was never staged in `gpu_cases.inc`, and no GPU path here
-has carried one. What changed is that the golden says so, not an `Err` nobody reads.
+before serialization — and no GPU path here has ever carried one. What changed is that the
+golden says so, not an `Err` nobody reads.
 
 That node's payload reads `unavailable:` with the reason, and the placeholder adopts the children
 already taken for the node it replaces: a leaf would orphan those subtrees and shift every seq
@@ -189,19 +188,14 @@ proposed: one query is a thin case for a surface change, and T21 does not need i
 `AggregateStatistics` rule answers it from parquet metadata and emits `PlaceholderRowExec`
 holding the result.
 
-No engine here runs it. Legacy fails at serialization ("unsupported plan node"), so the GPU
-path dies before any device work while the CPU path passes it to DataFusion and answers
-correctly; the batch-partitioned mode refuses it at plan time. A standing GPU gap, then,
-not a new-mode regression — and no corpus query reaches it, since all 31 using `count(*)`
-carry a WHERE, GROUP BY or JOIN and the rule cannot fire.
+The mode refuses it at plan time, so nothing here runs it. No corpus query reaches it either,
+since all 31 using `count(*)` carry a WHERE, GROUP BY or JOIN and the rule cannot fire.
 
 The fix is small on the CPU and unavailable on a device: the node is a source of constant rows,
 and a table of literals made from no input is what the frozen surface has no call for — the same
 wall as [#173](#t173) and [#175](#t175). T17 was to have discharged it and did not: writing the
 CPU half alone makes the oracle answer a query the device refuses, and the oracle is what the
 device is checked against. Waits on the make-a-table-of-literals call all three want.
-Legacy would need the same node in the fbs to close its half,
-not worth doing for a shape neither benchmark has.
 
 <a id="t175"></a>
 ### #175 — an empty build side leaves three join types owing rows they cannot make
@@ -686,8 +680,7 @@ planner refuses the shape at plan time.
 Nothing downstream of the loader can split a batch: minimum load granularity is one row
 group, `GpuCoalesceAllBatches` before a join build side can exceed any budget, and the
 planner deliberately still produces a plan — `driver/accounting.rs` then trips at run time and
-the query dies cleanly, which T13 made real for this mode rather than borrowed from the legacy
-enforcer. Recourse options, deferred until better estimators and adaptive execution: a split
+the query dies cleanly. Recourse options, deferred until better estimators and adaptive execution: a split
 operator (needs a C++ slice-to-handles entry point), or adaptive replanning on trip (re-plan
 with more partitions or smaller batches) — the second being the only one that would make a trip
 anything other than the end of the query.
@@ -699,6 +692,18 @@ tripped, so something can branch on it, but there is nowhere to record into — 
 trip log, and `Underestimate` is the precedent for what one would look like. Related: #91.
 
 ## Infrastructure / process
+
+<a id="t196"></a>
+### #196 — the table registrar's non-parquet guard does nothing, so a stray file panics
+`read_table` in `lib.rs` opens with `if path.extension() != Some("parquet") { () }` — the
+condition is computed and discarded, so a non-parquet entry falls through to
+`ListingTableUrl::parse` and four `unwrap`s. The caller's `let Ok(..) else { continue }` says
+the intent was an `Err` there.
+
+Nothing in the tree provokes it: every dataset dir holds parquet and nothing else, and
+`.duckdb_cache/` is a sibling rather than a child. The CLI is what makes it reachable by a
+user, since it registers whatever directory it is pointed at. The fix is the `return Err(())`
+the shape already asks for, with a case putting a non-parquet file in the dir.
 
 <a id="t195"></a>
 ### #195 — the corpus is numeric-aggregate heavy, and six shapes have no query at all
@@ -768,9 +773,8 @@ What is unverified is the whole lifecycle after a failure rather than any one ca
 `peacock_executor_end_plan` on an already-reset session is safe, that the same executor can
 `begin_plan` again and answer a second query, and that device memory is actually back rather
 than merely unreferenced — which today means cuDF's default resource, since the engine installs
-no RMM pool ([#148](tickets.md#t148)). The batch-partitioned drivers make this reachable far
-more often than the legacy modes do: a node runs once per batch per lane, so a query has
-thousands of chances to throw where a legacy one had tens. Their own error path is covered by a
+no RMM pool ([#148](tickets.md#t148)). The drivers reach it often: a node runs once per batch
+per lane, so one query has thousands of chances to throw. Their own error path is covered by a
 mock, and a mock frees nothing. Wants a gtest that fails a node mid-walk and asserts the
 executor is reusable, plus one Rust FFI case on shad-gpu. Retry with a smaller batch is
 [#142](tickets.md#t142) and is not this.
@@ -787,8 +791,7 @@ behaviour rather than an exception — `filter.cpp` ~L42 reads `fv.column(idx)` 
 `input.column_names[idx]` in one iteration and only the first is checked. Assert
 `num_columns() == column_names.size()` where `TableResult` is built. Separately `expr.cpp` ~L349
 returns `type_id::EMPTY` for an out-of-range `ColumnRef` instead of throwing, turning a bad
-ordinal into a confusing type error further along. Legacy has no plan-time check of either, so
-for those modes this is still the whole guard. The third closure #135 named is unstarted and
+ordinal into a confusing type error further along. The third closure #135 named is unstarted and
 belongs here too: a per-node type check in the GPU tiers, the only thing that would surface a
 wrong-order subtree before the root.
 

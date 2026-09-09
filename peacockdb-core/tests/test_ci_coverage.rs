@@ -100,6 +100,19 @@ fn line_runs_lib_tests(line: &str) -> bool {
     after_ok && line.contains("cargo test") && line.contains("-p peacockdb-core")
 }
 
+/// Does this workflow line BUILD the `peacockdb` CLI?
+///
+/// The bin target is the same hole one level down again: it has no test target, so the
+/// `--test` sweep cannot see it, and it is the only caller of the planner and the driver
+/// from outside the crate. `cargo build` rather than `cargo test --no-run`, since the
+/// crate has no tests for the latter to name.
+fn line_builds_the_cli(line: &str) -> bool {
+    let Some(i) = line.find("-p peacockdb") else { return false };
+    let after_ok =
+        line[i + "-p peacockdb".len()..].chars().next().is_none_or(char::is_whitespace);
+    after_ok && line.contains("cargo build")
+}
+
 /// The test targets pipeline.yml's gpu-tests job stages and runs, read out of the
 /// committed workflow (`for t in <names>; do`).
 ///
@@ -244,6 +257,18 @@ fn line_matcher_rejects_both_false_coverage_modes() {
             "{t} is BUILT, not run — a continuation must not count as coverage"
         );
     }
+    // CLI detection: the package name needs a word boundary, and a test invocation
+    // naming the core crate is not a build of the bin.
+    assert!(line_builds_the_cli("          cargo build --features rust-only -p peacockdb"));
+    assert!(
+        !line_builds_the_cli("          cargo build --features rust-only -p peacockdb-core"),
+        "`-p peacockdb-core` must not read as a build of the `peacockdb` bin"
+    );
+    assert!(
+        !line_builds_the_cli("          cargo test --no-run -p peacockdb"),
+        "a test invocation is not the bin build; the crate has no test target"
+    );
+
     // --lib detection: a build is not a run, and the flag needs a word boundary.
     assert!(line_runs_lib_tests("          cargo test --features rust-only -p peacockdb-core --lib"));
     assert!(!line_runs_lib_tests(
@@ -390,6 +415,16 @@ fn every_rust_test_target_is_named_by_ci() {
          inline #[cfg(test)] modules (batch_partitioned, config) would run locally \
          and never at the merge gate. Add `cargo test --features rust-only \
          -p peacockdb-core --lib` to the CPU tier."
+    );
+
+    // The CLI has no test target at all, so neither the sweep above nor the --lib check
+    // reaches it. Asserted the same way and for the same reason.
+    assert!(
+        workflow_lines.iter().any(|l| line_builds_the_cli(l)),
+        "no workflow line builds the peacockdb CLI. It is the only caller of \
+         plan_batch_partitioned and the driver from outside the crate, and it has no test \
+         target, so nothing else compiles it. Add `cargo build --features rust-only \
+         -p peacockdb` to the CPU tier."
     );
 
     // F5: a GpuJob exemption CLAIMS the gpu-tests job runs the target. Verify that

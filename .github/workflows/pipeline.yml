@@ -288,6 +288,11 @@ jobs:
           # line's already-built rust-only fingerprint, so it costs no extra compile.
           cargo test --no-run --features rust-only -p peacockdb-core --lib \
             --test test_cpu_executors --test test_cpu_batch_partitioned
+          # The CLI, which has no test target of its own and so is named by nothing above.
+          # It is the only caller of the planner and the driver from outside the crate, so a
+          # signature change that the tests absorb still breaks it — and unbuilt, it breaks
+          # at the merge gate of whoever notices next. test_ci_coverage asserts this line.
+          cargo build --features rust-only -p peacockdb
         env:
           # The pair's own two only; CMAKE_GENERATOR and RUSTFLAGS come from the job.
           LD_LIBRARY_PATH: /opt/conda/lib

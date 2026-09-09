@@ -1,3 +1,10 @@
+//! The CLI: plan a query in the batch-partitioned mode and run it on the CPU backend.
+//!
+//! CPU only, and not because the GPU path is unreachable from here — it is the same tree,
+//! a turbofish away. It is that most queries the corpus covers are still refused on a
+//! device (llm-wiki/tasks/bp-tickets.md), so a `--gpu` flag would fail on nearly every
+//! input it was given. It becomes worth adding when that stops being true.
+
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -10,7 +17,7 @@ use peacockdb_core::batch_partitioned::plan::{
 use peacockdb_core::{build_session_state, register_tables_for};
 
 #[derive(Parser)]
-#[command(name = "peacockdb", about = "GPU-accelerated analytical database")]
+#[command(name = "peacockdb", about = "Run one SQL query over a directory of Parquet")]
 struct Cli {
     /// Directory of Parquet files; each file becomes a table named after its stem.
     #[arg(long)]

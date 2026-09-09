@@ -3,10 +3,11 @@
 - **Create useful abstractions.** New code should introduce (or reuse) abstractions that
   make later reuse easy — a shared driver, a trait, a helper — rather than copies of
   similar logic.
-- **Small files:** under 1000 lines. Split by responsibility (the operator family files
-  and executor modules are the pattern).
-- **Interfaces/traits in separate files** from their implementations (`executors/executor.rs`,
-  `executors/node_by_node.rs`, `operators/operator.rs` are the models).
+- **Small files:** under 1000 lines. Split by responsibility (`batch_partitioned/nodes/`,
+  one file per node family, and `batch_partitioned/cpu_backend/` are the pattern).
+- **Interfaces/traits in separate files** from their implementations
+  (`batch_partitioned/executor.rs`, `batch_partitioned/node.rs` and
+  `batch_partitioned/backend.rs` are the models).
 - **Short functions:** under 150 lines in most cases.
 - **Comments say *why*, briefly.** Only non-obvious constraints, invariants, and gotchas —
   never what the next line does, never process history. If a comment documents an
@@ -141,9 +142,9 @@ The case that revealed it, in the test harness: `partition_mode("tp8-standard")`
 which executor a test ran was a side effect of how its golden file happened to be named.
 Adding a device — a memory-constrained genuine-8-way tier (#91) — would have routed it to
 the wrong executor with nothing failing. The mode is now a parameter stated at the call
-site. One lookup survives, for the plan tier, whose `.plan.txt` names are frozen and whose
-corpus is built by parsing them off disk: it is exhaustive, so a new label fails loudly
-instead of planning single-partition by default.
+site. One lookup survives, `mode_named` in `tests/common/bp_mode.rs`, which resolves the
+mode ident a `corpus_query!` line writes: it is exhaustive, so an unknown one panics naming
+the five rather than planning some default nobody chose.
 
 The same shape appears as a bool that means two unrelated things, a trailing `Option`
 whose `None` selects a different algorithm, and an argument order that is not type-checked

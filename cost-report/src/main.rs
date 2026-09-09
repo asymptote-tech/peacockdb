@@ -1566,16 +1566,13 @@ mod tests {
         );
     }
 
-    /// The gate's red case, and the reason the reader had to change: read per file, a
-    /// two-section golden whose SECOND section moved reports no change at all — the
-    /// The two arms of `base_total` return the same total for the same file.
+    /// The two arms of `base_total` return the same total for the same section.
     ///
     /// The git arm dropped `section` and read the whole file, so every section of a per-mode
     /// `.cost.txt` was baselined against whichever query sorts first — a swing in both
     /// directions that was never a cost change. `the_per_file_reader_misses_a_second_section
     /// _that_moved` below already proves that reader blind; this asserts the caller stopped
-    /// using it. Legacy goldens are one file per query, so both arms agreed there and always
-    /// have.
+    /// using it.
     #[test]
     fn both_base_arms_read_the_same_section_of_a_multi_section_file() {
         let repo_rel = "testdata/goldens/tpch.sf1/bp-tp4-sized-mini.cost.txt";
@@ -1771,7 +1768,7 @@ mod tests {
     #[test]
     fn read_total_reads_footer_and_none_when_absent() {
         // cost-report reads the explicit footer total, not the per-node breakdown.
-        let cpu = "GpuScanExec: ..., output_bytes=58, output_rows=6\npeacockdb_cost=12345\n";
+        let cpu = "GpuLoadParquet: ..., output_bytes=58, output_rows=6\npeacockdb_cost=12345\n";
         assert_eq!(read_total_str(cpu, "peacockdb_cost="), Some(12345));
         let duck = "TABLE_SCAN: output_bytes=240, materialized=2640, bytes_read_est=2400\nduckdb_cost=98765\n";
         assert_eq!(read_total_str(duck, "duckdb_cost="), Some(98765));
@@ -1783,7 +1780,7 @@ mod tests {
     #[test]
     fn cost_cells_link_only_when_value_and_url_present() {
         let v = Some(43_308_088u64);
-        let url = Some("https://x/blob/abc/testdata/goldens/tpch.sf1/q1.full_table-tp1-mini.cpu.txt".to_string());
+        let url = Some("https://x/blob/abc/testdata/goldens/tpch.sf1/bp-tp4-sized-mini.cpu.txt".to_string());
         assert!(cost_cell_html(v, url.clone()).starts_with("<a href="));
         assert!(cost_cell_md(v, url).starts_with("<a href="));
         // value but no sha/url → plain text, no link.
@@ -1829,15 +1826,15 @@ mod tests {
 
     #[test]
     fn peacock_cell_renders_plan_and_cost_links() {
-        let plan = Some("https://x/q1.full_table-tp8-mini.cpu.txt".to_string());
-        let cost = Some("https://x/q1.full_table-tp8-mini.cost.txt".to_string());
+        let plan = Some("https://x/bp-tp4-sized-mini.cpu.txt".to_string());
+        let cost = Some("https://x/bp-tp4-sized-mini.cost.txt".to_string());
         let html = peacock_cell_html(Some(43_308_088), plan.clone(), cost.clone());
         assert!(html.contains(">plan</a>") && html.contains(">cost</a>") && html.starts_with("41.30 MB ("));
         let md = peacock_cell_md(Some(43_308_088), plan, cost);
         // HTML anchors: the comment's table is raw HTML, where markdown link
         // syntax would render literally as brackets.
-        assert!(md.contains("<a href=\"https://x/q1.full_table-tp8-mini.cpu.txt\">plan</a>"), "{md}");
-        assert!(md.contains("<a href=\"https://x/q1.full_table-tp8-mini.cost.txt\">cost</a>"), "{md}");
+        assert!(md.contains("<a href=\"https://x/bp-tp4-sized-mini.cpu.txt\">plan</a>"), "{md}");
+        assert!(md.contains("<a href=\"https://x/bp-tp4-sized-mini.cost.txt\">cost</a>"), "{md}");
         assert!(md.starts_with("41.30 MB ("));
         // value but no urls (dry run) → plain bytes, no links.
         assert_eq!(peacock_cell_html(Some(43_308_088), None, None), "41.30 MB");
@@ -2115,13 +2112,14 @@ mod tests {
         assert_eq!(doc, known, "the usage doc and FLAGS name different sets");
     }
 
-    /// Both comments fit, measured over the registry this repo actually has.
+    /// The comment fits, measured over the registry this repo actually has.
     ///
     /// A fixture cannot fail this: the body grows by a row per query the rollout enables, and
-    /// the four tables were 127 KB against a 65,536-byte cap before they were split. What is
-    /// asserted is the thing GitHub checks — bytes of the rendered body.
+    /// the four tables were 127 KB against the 65,536-byte cap before the legacy pair went.
+    /// The run prints the margin as well as the verdict, since the number that matters is how
+    /// many more queries fit. What is asserted is the thing GitHub checks — rendered bytes.
     #[test]
-    fn both_pr_comments_fit_under_the_body_cap() {
+    fn the_pr_comment_fits_under_the_body_cap() {
         let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
         let registry = Registry::load(&testdata.join("cost-registry.csv"));
         let links = Links {

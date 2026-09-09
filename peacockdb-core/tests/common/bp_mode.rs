@@ -18,7 +18,6 @@ pub const BUDGET: u64 = TIER.bytes() as u64;
 
 pub use peacockdb_core::batch_partitioned::plan::SMALL_TABLE_BYTES;
 
-
 /// One planning mode: what the goldens call it, and the two knobs that make it distinct.
 pub struct BpMode {
     /// The golden's spelling, `bp-tp4-sized`.

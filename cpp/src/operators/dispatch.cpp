@@ -1,5 +1,5 @@
 // The plan-node dispatch switch (run_op), the input resolver every operator calls for
-// its children (execute_node) and the single-node driver (execute_one). Co-located
+// its children (take_input) and the single-node driver (execute_one). Co-located
 // deliberately: they are one dispatch mechanism.
 
 #include "peacock/operators.h"
@@ -36,7 +36,7 @@ static const char* plan_node_kind_name(fb::PlanNodeKind k) {
 
 
 // Run one node's op (the dispatch switch). Each op resolves its children through
-// `execute_node`, which hands back an input the caller already made resident.
+// `take_input`, which hands back an input the caller already made resident.
 static TableResult run_op(const fb::PlanNode* node, NodeInputs* in) {
   if (!node) throw std::runtime_error("null PlanNode");
 
@@ -63,13 +63,13 @@ static TableResult run_op(const fb::PlanNode* node, NodeInputs* in) {
       case fb::PlanNodeKind_CudfSort:
         result = execute_sort(node->node_as_CudfSort(), in); break;
       case fb::PlanNodeKind_CudfCoalesceBatches:
-        result = execute_passthrough(node->node_as_CudfCoalesceBatches()->input(), in); break;
+        result = execute_passthrough(in); break;
       case fb::PlanNodeKind_CudfCoalescePartitions:
-        result = execute_passthrough(node->node_as_CudfCoalescePartitions()->input(), in); break;
+        result = execute_passthrough(in); break;
       case fb::PlanNodeKind_CudfRepartition:
-        result = execute_passthrough(node->node_as_CudfRepartition()->input(), in); break;
+        result = execute_passthrough(in); break;
       case fb::PlanNodeKind_CudfSortPreservingMerge:
-        result = execute_passthrough(node->node_as_CudfSortPreservingMerge()->input(), in); break;
+        result = execute_passthrough(in); break;
       case fb::PlanNodeKind_CudfUnion:
         result = execute_union(node->node_as_CudfUnion(), in); break;
       case fb::PlanNodeKind_CudfLimit:
@@ -96,17 +96,15 @@ static TableResult run_op(const fb::PlanNode* node, NodeInputs* in) {
   return result;
 }
 
-// One operator's next input. `node` is unread: it names the child in the plan, and what
-// comes back is the table the caller already put there — which is the whole of what a
-// node-by-node driver means. It stays a parameter because the passthrough arms have
-// nothing else to name the child they forward.
-TableResult execute_node(const fb::PlanNode* node, NodeInputs* in) {
-  (void)node;
+// One operator's next input, in the post-order the caller pushed them. Which child it is
+// comes from the call's position rather than from a node argument — the table is already
+// resident, so there is nothing to look up.
+TableResult take_input(NodeInputs* in) {
   if (!in || !in->items) {
-    throw std::runtime_error("execute_node: no inputs were provided for this node");
+    throw std::runtime_error("take_input: no inputs were provided for this node");
   }
   if (in->idx >= in->items->size()) {
-    throw std::runtime_error("execute_one: not enough input handles for node");
+    throw std::runtime_error("take_input: not enough input handles for node");
   }
   return std::move((*in->items)[in->idx++]);
 }

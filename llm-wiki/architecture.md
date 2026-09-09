@@ -1,7 +1,7 @@
 # peacockdb architecture
 
-The code is authoritative. Where this page and the code disagree, the code is right and
-this page is stale — fix the page (and say so) rather than the reading.
+The code is authoritative: where this page and the code disagree, fix the page rather than the
+reading, and say so.
 
 Pipeline: SQL → DataFusion logical/physical plan → the batch-partitioned node tree
 (`peacockdb-core/src/batch_partitioned/`) → a recipe plan in the FlatBuffers vocabulary
@@ -9,59 +9,37 @@ Pipeline: SQL → DataFusion logical/physical plan → the batch-partitioned nod
 either backend: `CpuBackend` relays a call to DataFusion, `GpuBackend` makes it through the
 C ABI.
 
-A **lane** holds a *stream of batches* rather than one resident table, and that is the whole
-of why the mode exists. Load → filter at 1% selectivity → aggregate into few groups
-materializes the whole scan before the filter runs if a partition is one table; with batches
-only the aggregate's state stays resident, so the query fits a budget the table does not.
+A **lane** holds a *stream of batches* rather than one resident table, and that is the whole of
+why the mode exists. Load → filter at 1% selectivity → aggregate into few groups materializes
+the whole scan before the filter runs if a lane is one table; with batches only the aggregate's
+state stays resident, so the query fits a budget the table does not.
 
 ## Contents
 
-- [Planning](#planning)
-  - [Modes and knobs](#modes-and-knobs)
-  - [The row-group mapping](#the-row-group-mapping)
-  - [Batch sizing](#batch-sizing)
-- [The node set](#the-node-set)
-  - [The sort decomposition](#the-sort-decomposition)
-  - [The aggregate sequence](#the-aggregate-sequence)
-  - [Grouping sets](#grouping-sets)
-  - [DISTINCT lowers to grouping](#distinct-lowers-to-grouping)
-  - [Compaction runs on a doubling threshold](#compaction-runs-on-a-doubling-threshold)
-  - [Every cast is explicit](#every-cast-is-explicit)
-  - [The limit lowering rule](#the-limit-lowering-rule)
-- [Joins](#joins)
-  - [Capability matrix](#capability-matrix)
-  - [What a streamed probe costs](#what-a-streamed-probe-costs)
-  - [Cross join vs nested-loop join](#cross-join-vs-nested-loop-join)
-- [Execution](#execution)
-  - [Traits](#traits)
-  - [The scheduling rule](#the-scheduling-rule)
-  - [Early exit at a limit](#early-exit-at-a-limit)
-  - [Memory accounting](#memory-accounting)
-  - [Determinism rules](#determinism-rules)
-- [The wire format](#the-wire-format)
-  - [From node to seqs](#from-node-to-seqs)
-  - [From flat buffer to cuDF call](#from-flat-buffer-to-cudf-call)
-  - [What the frozen surface costs](#what-the-frozen-surface-costs)
-- [Interfaces](#interfaces)
-  - [The handle registry has no type](#the-handle-registry-has-no-type)
-- [Rehash and the comet hash](#rehash-and-the-comet-hash)
-- [C++ executor layout](#c-executor-layout)
-- [Column indexing](#column-indexing)
-  - [What actually guards it](#what-actually-guards-it)
-  - [What nothing guards](#what-nothing-guards)
-- [cuDF options](#cudf-options)
-  - [What the Rust side puts in the flat buffers](#what-the-rust-side-puts-in-the-flat-buffers)
-  - [Join types and NULL key equality](#join-types-and-null-key-equality)
-- [Node display](#node-display)
-- [Multi-GPU notes (cuDF ≥26.02)](#multi-gpu-notes-cudf-2602)
-- [Cost model and the DuckDB oracle](#cost-model-and-the-duckdb-oracle)
+[Planning](#planning) · [The node set](#the-node-set) · [Joins](#joins) ·
+[Execution](#execution) · [The wire format](#the-wire-format) ·
+[Interfaces](#interfaces) · [Rehash and the comet hash](#rehash-and-the-comet-hash) ·
+[C++ executor layout](#c-executor-layout) · [Column indexing](#column-indexing) ·
+[cuDF options](#cudf-options) · [Node display](#node-display) ·
+[Multi-GPU notes](#multi-gpu-notes-cudf-2602) ·
+[Cost model and the DuckDB oracle](#cost-model-and-the-duckdb-oracle)
 
 ## Planning
 
-`plan_batch_partitioned()` asks DataFusion for a physical plan at the target lane count,
-then **translates** it into this mode's node vocabulary (`batch_partitioned/translate/`).
-Translation, not annotation: a 1:1 wrapper carries DataFusion's execution semantics along
-with it, and this model's semantics are different at every node.
+`plan_batch_partitioned()` takes DataFusion's physical plan, built at the target lane count
+by the caller, and **translates** it into this mode's node vocabulary
+(`batch_partitioned/translate/`). Translation, not annotation: a 1:1 wrapper carries
+DataFusion's execution semantics along with it, and this model's semantics are different at
+every node.
+
+**It translates twice**, because the two halves define each other: a batch size needs the
+tree it flows through, and the mapping needs a batch size. The first pass seeds every source
+with the smallest batch the mapping can express and exists only to be priced; the second
+plans at the sizes the estimator solved for. The tree's shape does not move between them —
+lane counts come from row counts and pushed-down limits, never from the batch size — and the
+two passes address sources by the order translation reaches them, so a second pass reaching a
+different number of sources is a plan-time error rather than a tail planned at the seed size.
+Only the budgeted mode pays for the second pass; the other two are the plan already.
 
 What DataFusion is reused for is its planning, never its execution:
 
@@ -94,8 +72,10 @@ rather than a rule.
 ### Modes and knobs
 
 Two knobs, and five modes over them. **Lane count** is `target_partitions`. **Batching** is an
-enum rather than a magic target value: `Off` gives one batch per chunk, `PerRowGroup` one per
-row group, `Sized { target_batch_bytes }` the estimator's number.
+enum rather than a magic target value, and it is two enums because a mode asks for a shape
+before there is a number: `BatchSizing` is what a mode names, `Batching` what the partitioner
+gets — `Off` one batch per chunk, `PerRowGroup` one per row group, `Sized { target_batch_bytes }`
+the estimator's number.
 
 | Mode | Lanes | Batching | Budget |
 |---|---|---|---|
@@ -217,10 +197,10 @@ Four limits on the number it produces.
 ### The sort decomposition
 
 A `SortExec` becomes a per-batch `GpuSort` plus an accumulator above it, because sorting each
-batch leaves the batches individually ordered and collectively not. Which accumulator depends
-on what the parent needs: one lane's stream sorted is `GpuAccumulateBatchesAndSort`, and a
-`SortPreservingMergeExec`'s N-into-1 is `GpuMergeSortedPartitions`. Both merge at done, so both
-are pipeline breakers.
+batch leaves the batches individually ordered and collectively not. Which accumulator depends on
+what the parent needs: one lane's stream sorted is `GpuAccumulateBatchesAndSort`, a
+`SortPreservingMergeExec`'s N-into-1 is `GpuMergeSortedPartitions`, and both merge at done, so
+both are pipeline breakers.
 
 **The `fetch` comes from DataFusion alone**, which pushes a `LIMIT` into the sort, so a top-N
 usually reaches us with no limit node in the plan at all. It is replicated onto every stage of
@@ -357,17 +337,14 @@ re-scan work is linear in the rows that pass through. Residency then grows, whic
 answer for that shape, and the enforcer is the backstop ([#142](tickets.md#t142)).
 
 **The shuffle beneath a final aggregate is coalesced first.** `GpuMergePartitions` forwards its
-L lanes' batches without concatenating, so without help the emit would scatter once per arriving
-batch and produce L×N batches. A `GpuCoalesceAllBatches` between the two makes it one scatter
-call and N outputs.
-
-The reason is batch *shape*, not residency: all L pre-shuffle batches are resident either way.
-What it buys is N batches at about G/N rows instead of L×N at G/(L·N), and one allocation per
-output lane instead of L ([#145](tickets.md#t145) removes those copies altogether). The concat
-it costs is bounded by the smallest data in the plan, this point being post-partial-aggregate.
-
-A join's probe-side shuffle is **not** coalesced: its input is unbounded, and streaming past
-the build side is the whole point.
+L lanes' batches without concatenating, so without a `GpuCoalesceAllBatches` between the two the
+emit would scatter once per arriving batch and produce L×N of them. The reason is batch *shape*
+rather than residency — all L pre-shuffle batches are resident either way. What it buys is N
+batches at about G/N rows instead of L×N at G/(L·N), and one allocation per output lane instead
+of L ([#145](tickets.md#t145) removes those copies altogether); what it costs is a concat over
+the smallest data in the plan, this point being post-partial-aggregate. A join's probe-side
+shuffle is **not** coalesced: its input is unbounded, and streaming past the build side is the
+whole point.
 
 ### Every cast is explicit
 
@@ -376,11 +353,11 @@ that its input and its expressions do not account for is a defect whichever side
 invented it, and the plan golden prints the declared schema per node, so it is one a reader can
 see.
 
-Seven coercions the C++ used to insert on its own are plan nodes here: `avg`'s decimal input and
-its finalize divide, `count`'s widening to INT64, the stddev/var operands, union branch types, a
-decimal divide's numerator, and `round`'s operand. Each is a `CastExprNode` the planner emits —
-the aggregate ones inside the finalize expressions, the union ones as per-branch projects, the
-expression ones at the point of use.
+Seven coercions are plan nodes rather than something an executor infers: `avg`'s decimal input
+and its finalize divide, `count`'s widening to INT64, the stddev/var operands, union branch
+types, a decimal divide's numerator, and `round`'s operand. Each is a `CastExprNode` the planner
+emits — the aggregate ones inside the finalize expressions, the union ones as per-branch
+projects, the expression ones at the point of use.
 
 Two stay in C++ with a reason. The loader's decimal width is the source honouring the output
 schema it already declares, since cuDF's parquet reader picks the narrowest fixed_point width
@@ -471,16 +448,13 @@ which the C++ rejects outright.
 ### What a streamed probe costs
 
 `execute_node` erases every handle it reads, and no node duplicates one. So a build side probed
-by B batches is needed B times and exists once, which is [#152](tickets.md#t152). Per family,
-per probe batch: the probe-local types (Inner, Right, RightSemi, RightAnti) need **one
-build-side copy**; Left and Full that plus a copy of the probe batch, since the join consumes
-the batch and the key accumulation needs it too; the build-side semi family **none at all**,
-because its probe calls never touch the build side.
-
-None of those copies can be taken — the surface has no symbol for one, and `slice_handle` moves
-rather than copies — so what the count predicts is where a device refuses: the probe-local types
-after one batch, Left and Full outright. [#145](tickets.md#t145) turns each refusal into a copy,
-and then into no copy at all.
+by B batches is needed B times and exists once, which is [#152](tickets.md#t152). Per probe
+batch: the probe-local types (Inner, Right, RightSemi, RightAnti) need **one build-side copy**;
+Left and Full that plus a copy of the probe batch, since the join consumes the batch and the
+key accumulation needs it too; the build-side semi family **none at all**, its probe calls
+never touching the build side. None of those copies can be taken — the surface has no symbol
+for one, and `slice_handle` moves rather than copies — so the count predicts where a device
+refuses: the probe-local types after one batch, Left and Full outright.
 
 **What the finish pass computes.** "Which build rows matched at least once" is the one fact a
 streamed probe loses, and it cannot cross the ABI, which returns a table and row counts. So the
@@ -510,21 +484,17 @@ Both are a join with no equality to hash, and which one DataFusion plans — and
 the translator meets — is decided by whether there is a predicate at all.
 
 - **No join predicate ⇒ `CrossJoinExec`.** `SELECT * FROM region, nation` — a full cartesian
-  product, every left row against every right row. In the corpus: the `cross-join` fixture plus
-  tpcds q23, q28, q61, q77, q88, q90 — all of them pairing one-row aggregate results with no
-  condition, e.g. q61 puts `sum(ss_ext_sales_price) as promotions` beside `total` so it can
-  divide them.
+  product. In the corpus every case pairs a one-row aggregate result with another under no
+  condition, e.g. tpcds q61 putting `sum(ss_ext_sales_price) as promotions` beside `total` so
+  it can divide them.
 - **A predicate that is not an equijoin ⇒ `NestedLoopJoinExec`**, carrying that predicate as
-  its `filter`. `SELECT * FROM region a, nation b WHERE a.r_regionkey < b.n_regionkey` becomes
-  a `GpuNestedLoopJoin` with `filter=n_regionkey@1 > r_regionkey@0`. In the corpus:
-  the `nested-loop-join` fixture plus tpch q11 and q22 and tpcds q9, q14, q24, q44, q54.
+  its `filter`: `… WHERE a.r_regionkey < b.n_regionkey` becomes a `GpuNestedLoopJoin` with
+  `filter=n_regionkey@1 > r_regionkey@0`.
 
-The tpch pair is worth recognizing, because it is a shape rather than an accident: q11's
-`having sum(ps_supplycost * ps_availqty) > (select sum(…) * 0.000002 …)` plans as a
-nested-loop join whose filter is the comparison against the one-row subquery —
-`filter=CAST(sum(partsupp.ps_supplycost * partsupp.ps_availqty)@0 AS Decimal128(38, 15)) > …`.
-A scalar threshold is a 1×N join with an inequality, so the planner has nowhere to put it but
-here. (Rewriting that into a broadcast filter is the optimization #27 was archived for.)
+The second is worth recognizing as a shape rather than an accident, because a `HAVING` against
+a scalar subquery lands there: tpch q11's `having sum(…) > (select sum(…) * 0.000002 …)` is a
+1×N join with an inequality, and the planner has nowhere else to put it. (Rewriting that into a
+broadcast filter is the optimization #27 was archived for.)
 
 ## Execution
 
@@ -578,25 +548,22 @@ driver adds the node and the lane and fails the query — no retry with a smalle
 [#142](tickets.md#t142)'s adaptive future.
 
 The C ABI is what that rests on. `execute_node` resets the session on any exception, dropping
-the plan and every resident intermediate, so after a failure no handle is usable;
-`result_from_handle` does not reset; and `handle_release` is null-guarded, so releasing into a
-reset session is a no-op rather than a fault.
+the plan and every resident intermediate, so after a failure no handle is usable, while
+`handle_release` is null-guarded and releasing into a reset session is a no-op. The driver
+therefore needs no teardown: it stops scheduling, and the failure site releases the batch it
+was handed, exactly where the successful path would have.
 
-The driver therefore needs no teardown: it stops scheduling and releases what it holds. The
-batch handed to the failing call is not in a queue, so **the failure site releases it**, where
-the successful path releases the same batch — and no handle is touched afterwards.
-
-`resident_bytes` and `scratch_bytes` stay infallible, and the line is between a method that does
+`resident_bytes` and `scratch_bytes` stay infallible, the line being between a method that does
 work and one that reports a number the executor already holds. An accountant handed a failure
 instead of a figure has nothing to do with it: zero stops the enforcer enforcing, unbounded
 kills a query over a reporting hiccup, and skipping the check disables the guard silently.
 
 **Executor construction is the backend's**, as `Backend::executors_for(ctx, node, post_order,
-lane)`. It cannot be a generic method on `GpuNode`, which is a trait object; and it is the
+lane)`. It cannot be a generic method on `GpuNode`, which is a trait object, and it is the
 better placement anyway, since a node describes what it computes and stops knowing backends
-exist. It returns a `Result` because this match is where "does this backend implement this node"
-is answered, and that question has a no. `post_order` is how a GPU executor finds its node's
-recipe, keyed that way because the FFI addresses nodes that way.
+exist. It returns a `Result` because this match is where "does this backend implement this
+node" is answered, and that question has a no. `post_order` is how a GPU executor finds its
+node's recipe, keyed that way because the FFI addresses nodes that way.
 
 Lane-scoped categories get one instance per (node, lane); `PartitionAccumulator` and
 `PartitionEmitter` get one per node, since they are the cross-lane points. A `BatchForwarder` is
@@ -606,9 +573,9 @@ order, forwarding one batch per visit, skipping empty sources and retiring finis
 
 ### The scheduling rule
 
-Two drivers, both single-threaded, push-based and deterministic. `driver/partitioned.rs` owns
-the tree, the queues and the three cross-lane categories; `driver/single_partition.rs` owns one
-lane of one lane-scoped node as a state machine; `scheduler.rs` decides what runs next from
+Two drivers, both single-threaded, push-based and deterministic. In `driver/`, `partitioned.rs`
+owns the tree, the queues and the three cross-lane categories; `single_partition.rs` owns one
+lane of one lane-scoped node as a state machine; and `scheduler.rs` decides what runs next from
 plain numbers, with no backend, batch or executor in sight.
 
 Every node carries a **height** (distance to the root) and an **order** (pre-order index). A
@@ -651,27 +618,6 @@ output lane and becomes ready one *input* lane at a time, and an emitter reads a
 lane whatever it emits. Counting output lanes there gives a driver that never schedules a
 merge's later lanes.
 
-```
-                        batch_partitioned_driver
-    ────────────────────────────────────────────────────────────────────
-    heights (distance to root)          the choice each step:
-                                          runnable nodes → min height,
-      0            unload                 ties leftmost → run every lane
-                     ▲
-      1        agg_final                every edge holds ≤ 1 batch per lane,
-                     ▲                   because the parent is strictly
-      2          emit ─┬▶ q0 ─┐          lower and drains first
-                       ├▶ q1  │
-      3         merge  ├▶ q2  │  (empty scatter outputs dropped here)
-                       └▶ q3 ─┘
-      4      agg_batches
-                     ▲
-      5         filter                  join in build phase
-                     ▲                    └▶ holds its whole probe subtree
-      6          scan                   satisfied limit
-                                          └▶ holds its whole subtree, for good
-```
-
 ### Early exit at a limit
 
 A `GpuUnload` carrying a root-adjacent interval is the one node the driver special-cases. Its
@@ -699,12 +645,8 @@ section. Because `GpuMergePartitions` polls round-robin, all N lanes are live at
 estimator charges the full multi-lane section — N × (per-lane executor state + one in-flight
 batch) between the loader and the merge point.
 
-**Run time** the driver keeps a running total incrementally:
-
-```
-resident = Σ byte_size of driver-held in-flight batches
-         + Σ cached resident_bytes() over live executors
-```
+**Run time** the driver keeps a running total incrementally — `resident` is Σ `byte_size` over
+the driver-held in-flight batches plus Σ cached `resident_bytes()` over live executors.
 
 Per call: pre-check `resident + scratch_bytes(rows, bytes)` against the budget; execute; remove
 consumed inputs, add outputs at actual `byte_size()`, refresh that one executor's figure, and
@@ -745,14 +687,12 @@ Four rules were measured rather than designed, over the whole corpus under a 2 G
 the cases are in [`archive/designs.md`](archive/designs.md).
 
 - **`resident_bytes()` is a total for the enforcer to check, never a numerator for a per-row
-  cost.** Anything dividing it wants the part that scales with build rows, and only the executor
-  knows which part that is. This mispriced one call at 2.0 TB and declined a query whose whole
-  run peaked at 11.5 MB.
-- **A build-preserving join's residency grows with the probe side**, not the build side, since
-  it holds key columns for every probe row it has seen — charged per lane, for all lanes live at
-  once. The CPU backend never pays it, so it cannot be used to price it.
-- **A memory bound asserted at one partitioning asserts about one shape of arrival.** Only a
-  streamed probe accumulates. Two corpus queries passed at one layout and failed at two others.
+  cost** — only the executor knows which part scales with build rows. Dividing it mispriced one
+  call at 2.0 TB and declined a query whose whole run peaked at 11.5 MB.
+- **A build-preserving join's residency grows with the probe side**, since it holds key columns
+  for every probe row seen, per lane. The CPU backend never pays it, so it cannot price it.
+- **A memory bound asserted at one partitioning asserts about one shape of arrival**: only a
+  streamed probe accumulates, and two corpus queries passed at one layout and failed at two.
 - **Zero rows is not zero bytes, and a zero peak is a defect.** A batch of no rows still costs
   its schema; an empty lane emits no batch at all, which is a different thing.
 
@@ -777,14 +717,13 @@ pinned.
   sums in stream order, so an unpinned order changes low bits.
 - **A root-adjacent limit counts across lanes**, so which rows an unordered `LIMIT` returns
   depends on the order batches reach the sink. Inserting a merge would not change that — it is
-  round-robin, so it interleaves lanes too — and every ordered limit is unaffected, because a
-  sort delivers one lane and one batch before the sink sees anything.
+  round-robin, so it interleaves lanes too — and an ordered limit is unaffected, since a sort
+  delivers one lane and one batch before the sink sees anything.
 
-**These rules pin execution for a given plan, not across plans.** Two plans for the same query
-may legitimately return different rows where the SQL does not determine them, which is what an
-unordered `LIMIT` is. Each mode has its own result golden and they are compared row-sorted, so
-emission order is not part of the contract. What must hold is that one plan run twice gives one
-answer, byte for byte.
+**These rules pin execution for a given plan, not across plans.** Two plans for one query may
+legitimately return different rows where the SQL does not determine them, which is what an
+unordered `LIMIT` is. Results are compared row-sorted, so emission order is not part of the
+contract; what must hold is that one plan run twice gives one answer, byte for byte.
 
 ## The wire format
 
@@ -803,16 +742,14 @@ Two spellings, and the prefix is the tell: `Cudf*` is a flat-buffer node table, 
 the C++ dispatches on, with `GpuPlan` as the root table wrapping them. A `Gpu` name with no
 `Cudf` is one of this mode's own plan nodes and never crosses.
 
-Three of the fifteen wire kinds have no writer today: `CudfCoalesceBatches` (batching is
-this mode's own and needs no node), `CudfLimit` (a limit is a row range on the export, not
-a node) and `CudfWindow` (no window function in this mode yet, #143). They stay because the
-kernels behind them do.
+Three of the fifteen wire kinds have no writer: `CudfCoalesceBatches` (batching is this mode's
+own and needs no node), `CudfLimit` (a limit is a row range on the export) and `CudfWindow` (no
+window function here yet, #143). They stay because the kernels behind them do.
 
 **Statement order is the wire format**: FlatBufferBuilder is a no-interning bump arena, so
-reordering writes changes bytes even with identical values.
+reordering writes changes bytes even with identical values, and
 [`goldens/bp-recipe-payloads.txt`](../testdata/goldens/bp-recipe-payloads.txt) pins each
-payload's bytes with a digest beside it; regenerating it to silence a red defeats its
-purpose.
+payload's bytes with a digest beside it. Regenerating it to silence a red defeats its purpose.
 
 ### From node to seqs
 
@@ -867,43 +804,35 @@ One row per wire node kind: what the plan hands the C++ side, and the cuDF it tu
 
 The middle column is the fields that change what the call does — `input` / `left` / `right`
 are the tree and are not repeated, and a field nothing reads is called out, because a wire
-field with no consumer reads as a knob (#132). Line links are to the deciding call, not to
-the whole function.
+field with no consumer reads as a knob (#132).
 
 | Node | What steers it | The cuDF it becomes |
 |---|---|---|
-| [`CudfScan`](../flatbuffers/gpu_plan.fbs#L317) | `file_paths`, `projection`, `row_groups` (pruning survivors) or `batches[p]` (this partition's slice of them), or a list the call supplies instead of either (`execute_scan_rowgroups`, which is how one node loads a batch at a time), `limit`; `batch_size` **is read by nobody** (#132) | [`scan.cpp#L83`](../cpp/src/operators/scan.cpp#L83) — `cudf::io::read_parquet(opts)`, with `.columns(projected)`, `set_row_groups(...)` and `set_num_rows(limit)` set on `opts` first |
-| [`CudfFilter`](../flatbuffers/gpu_plan.fbs#L346) | `predicate`, `projection` | [`filter.cpp#L25`](../cpp/src/operators/filter.cpp#L25) — `cudf::compute_column(tv, predicate)` for the mask, then `cudf::apply_boolean_mask(tv, mask->view())` |
-| [`CudfProject`](../flatbuffers/gpu_plan.fbs#L358) | `exprs`, `aliases` | [`project.cpp#L49`](../cpp/src/operators/project.cpp#L49) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is a column copy, and LIKE/CASE/scalar functions take `build_column` instead |
-| [`CudfAggregate`](../flatbuffers/gpu_plan.fbs#L375) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale and `distinct`), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp#L666`](../cpp/src/operators/aggregate.cpp#L666) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp#L435); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp#L258) to one row |
-| [`CudfHashJoin`](../flatbuffers/gpu_plan.fbs#L412) | `join_type`, `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `projection` | [`join.cpp#L290`](../cpp/src/operators/join.cpp#L290) — `cudf::inner_join` / `left_join` / `full_join(left_keys, right_keys, kJoinNulls)`; semi/anti take [`left_semi_join` / `left_anti_join`](../cpp/src/operators/join.cpp#L126), or their `mixed_*` forms when a residual filter must be evaluated during the join |
-| [`CudfCrossJoin`](../flatbuffers/gpu_plan.fbs#L434) | nothing — the node is its two inputs | [`join.cpp#L394`](../cpp/src/operators/join.cpp#L394) — `cudf::cross_join(ltv, rtv)` |
-| [`CudfNestedLoopJoin`](../flatbuffers/gpu_plan.fbs#L442) | `join_type`, `filter` + `filter_columns`, `projection` | [`join.cpp#L432`](../cpp/src/operators/join.cpp#L432) — `cudf::cross_join`, then [`apply_boolean_mask`](../cpp/src/operators/join.cpp#L478) over the filter evaluated on the crossed table |
-| [`CudfSort`](../flatbuffers/gpu_plan.fbs#L455) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp#L50`](../cpp/src/operators/sort.cpp#L50) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp#L58) when `fetch` makes it a top-N |
-| [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs#L469) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp#L66`](../cpp/src/operators/dispatch.cpp#L66) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
-| [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs#L475) | nothing | [`node_session.cpp#L298`](../cpp/src/node_session.cpp#L298) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |
-| [`CudfRepartition`](../flatbuffers/gpu_plan.fbs#L486) | `kind`, `num_partitions`, `hash_exprs` (key ordinals) | [`node_session.cpp#L371`](../cpp/src/node_session.cpp#L371) — `spark_hash_partition(tv, key_cols, n)`, ours rather than cuDF's murmur3, then [`cudf::slice`](../cpp/src/node_session.cpp#L384) per partition into an owning table |
-| [`CudfSortPreservingMerge`](../flatbuffers/gpu_plan.fbs#L495) | `exprs`, `fetch` | [`node_session.cpp#L286`](../cpp/src/node_session.cpp#L286) — `cudf::merge(views, key_cols, orders, null_orders)`, k-way and order-preserving; a concat fallback with no keys or one input (#118) |
-| [`CudfUnion`](../flatbuffers/gpu_plan.fbs#L508) | `inputs`, `interleave`, `output_schema` | [`union.cpp#L62`](../cpp/src/operators/union.cpp#L62) — `cudf::concatenate(views)`, after [`cudf::cast`](../cpp/src/operators/union.cpp#L51) retypes each branch column to the declared output type (#41) |
-| [`CudfLimit`](../flatbuffers/gpu_plan.fbs#L526) | `skip`, `fetch` | [`limit.cpp#L31`](../cpp/src/operators/limit.cpp#L31) — `cudf::slice(tv, {skip, end})`, and the whole table returned untouched when the range covers it |
-| [`CudfWindow`](../flatbuffers/gpu_plan.fbs#L573) | `window_exprs` (partition keys, order keys, frame bounds, out decimal scale) | [`window.cpp#L106`](../cpp/src/operators/window.cpp#L106) — `cudf::grouped_rolling_window(keys, arg, preceding, following, min_periods, agg)`, which preserves input row order |
+| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `limit`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `.columns(projected)`, `set_row_groups(...)` and `set_num_rows(limit)` set on `opts` first |
+| [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — `cudf::compute_column(tv, predicate)` for the mask, then `cudf::apply_boolean_mask(tv, mask->view())` |
+| [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is a column copy, and LIKE/CASE/scalar functions take `build_column` instead |
+| [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale and `distinct`), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row |
+| [`CudfHashJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::inner_join` / `left_join` / `full_join(left_keys, right_keys, kJoinNulls)`; semi/anti take [`left_semi_join` / `left_anti_join`](../cpp/src/operators/join.cpp), or their `mixed_*` forms when a residual filter must be evaluated during the join |
+| [`CudfCrossJoin`](../flatbuffers/gpu_plan.fbs) | nothing — the node is its two inputs | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::cross_join(ltv, rtv)` |
+| [`CudfNestedLoopJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `filter` + `filter_columns`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::cross_join`, then [`apply_boolean_mask`](../cpp/src/operators/join.cpp) over the filter evaluated on the crossed table |
+| [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N |
+| [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
+| [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs) | nothing | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |
+| [`CudfRepartition`](../flatbuffers/gpu_plan.fbs) | `kind`, `num_partitions`, `hash_exprs` (key ordinals) | [`node_session.cpp`](../cpp/src/node_session.cpp) — `spark_hash_partition(tv, key_cols, n)`, ours rather than cuDF's murmur3, then [`cudf::slice`](../cpp/src/node_session.cpp) per partition into an owning table |
+| [`CudfSortPreservingMerge`](../flatbuffers/gpu_plan.fbs) | `exprs`, `fetch` | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::merge(views, key_cols, orders, null_orders)`, k-way and order-preserving; a concat fallback with no keys or one input (#118) |
+| [`CudfUnion`](../flatbuffers/gpu_plan.fbs) | `inputs`, `interleave`, `output_schema` | [`union.cpp`](../cpp/src/operators/union.cpp) — `cudf::concatenate(views)`, after [`cudf::cast`](../cpp/src/operators/union.cpp) retypes each branch column to the declared output type (#41) |
+| [`CudfLimit`](../flatbuffers/gpu_plan.fbs) | `skip`, `fetch` | [`limit.cpp`](../cpp/src/operators/limit.cpp) — `cudf::slice(tv, {skip, end})`, and the whole table returned untouched when the range covers it |
+| [`CudfWindow`](../flatbuffers/gpu_plan.fbs) | `window_exprs` (partition keys, order keys, frame bounds, out decimal scale) | [`window.cpp`](../cpp/src/operators/window.cpp) — `cudf::grouped_rolling_window(keys, arg, preceding, following, min_periods, agg)`, which preserves input row order |
 
 Two things recur. **A node handed one input reaches no kernel** where all it does is change
-the layout rows sit in: coalesce-partitions, repartition and sort-preserving-merge pass the
-table through, since one table has no layout to change. Coalesce-batches is passthrough
-whatever it is handed.
-
-And **three nodes need more than one call**, because cuDF has no fused form: filter
-computes a mask and then applies it; sort takes `sorted_order` then `gather`, and a third
-call to `slice` when a `fetch` makes it a top-N; union casts each branch column whose type
-differs from the declared output, then concatenates once. Each intermediate in those
-sequences exists because the pair could not be one call.
+the layout rows sit in — one table has no layout to change — and **three nodes need more than
+one call**, because cuDF has no fused form for filter's mask-then-apply, sort's
+order-gather-slice, or union's cast-then-concatenate.
 
 The nested-loop join is the one to read separately rather than filing beside filter. It
-materialises the **full cartesian product** first and only then evaluates its predicate
-over it — cross join, build the mask on the crossed table, apply it. That is three calls
-whose first is the expensive one, and it is why broadcast joins (#140) would change the
-shape rather than the constant.
+materialises the **full cartesian product** first and only then evaluates its predicate over
+it, so it is three calls whose first is the expensive one — which is why broadcast joins
+([#140](tickets.md#t140)) would change the shape rather than the constant.
 
 ### What the frozen surface costs
 
@@ -937,226 +866,84 @@ semantics change with no ABI change at all.
 
 **One cost is not about the surface.** Every operator exit path deep-copies its columns into a
 fresh table where a move would do ([#154](tickets.md#t154)) — for a join with a projection,
-twice over. A whole-table mode pays that once per node per query; this one pays it once per node
-per *batch*.
+twice over. An engine running a node once per query would pay that once per node; this one pays
+it once per node per *batch*, which is what makes it worth a ticket.
 
 ## Interfaces
 
-Declarations are quoted with doc comments elided. Items marked *de facto* have no trait or
-abstract base behind them, yet other code is written against them, so changing one breaks a
-caller that never named it. The Rust side's own traits — `Backend`, the executor families,
-`GpuNode` — are in [Execution](#traits) above, beside the reasons for their shape.
+The **public C++ surface is two headers**: [`peacock_gpu.h`](../cpp/include/peacock_gpu.h)
+and [`partitioning.hpp`](../cpp/include/peacock/partitioning.hpp). Everything under
+`cpp/src/peacock/` is private to the library, with `plan_executor_internal.h` alongside for
+what the tests reach into. Items called *de facto* below have no trait or abstract base, yet
+other code is written against them, so changing one breaks a caller that never named it. The
+Rust side's own traits — `Backend`, the executor families, `GpuNode` — are in
+[Execution](#traits) above, beside the reasons for their shape.
 
-**[The C ABI](../cpp/include/peacock_gpu.h)** — the entire public surface of the C++ side,
-plus `partitioning.hpp`. Everything else under `cpp/src/peacock/` is private to the library.
+The ABI is sixteen symbols in five groups: lifecycle (`peacock_gpu_version`,
+`peacock_executor_create` / `_destroy`, `peacock_last_error`, `peacock_result_free`); the
+node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `end_plan`); the three
+per-call entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`);
+instrumentation (`install_rmm_pool`, `set_node_timing`, `measure_timing_floor_us`); and the
+conformance hook `peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow
+C-data batch so the Rust side can compare it against comet's.
 
-```c
-const char* peacock_gpu_version(void);
-typedef struct peacock_executor peacock_executor_t;
+Three conventions the signatures do not carry:
 
-int  peacock_executor_create(uint64_t gpu_memory_limit, peacock_executor_t** out_executor);
-void peacock_executor_destroy(peacock_executor_t* executor);
-const char* peacock_last_error(peacock_executor_t* executor);
+- **A row range is `[offset, offset+length)`**, `UINT64_MAX` meaning to the end, an offset
+  past the end empty, an overrun clamped. It is the same convention on `slice_handle` and
+  `result_from_handle`, which are otherwise the two halves of the limit rule — one produces
+  a handle, the other a result.
+- **Instrumentation is process-global, off by default, and nothing in this workspace turns
+  any of it on.** Without the pool every cuDF intermediate is a `cudaMalloc`/`cudaFree` round
+  trip ([#148](tickets.md#t148)); the gtest binaries install it from their own `main()`, and
+  this symbol exists for a Rust caller that cannot include the C++ header. Node timing makes
+  `execute_node` synchronize the default stream at every measurement boundary, which is what
+  makes `time_us` execution rather than kernel submission and also what serializes what cuDF
+  would otherwise pipeline. The floor is what an empty timed region costs, and it is never
+  subtracted: a node at or below it is unresolved, not cheap.
+- **`peacock_executor_create` takes a byte limit it does not enforce.** Residency is the
+  Rust driver's accounting; see [Memory accounting](#memory-accounting).
 
-void peacock_result_free(uint8_t* result_bytes);
+**[`NodeSession`](../cpp/src/plan_executor.h)** — *de facto*, and what the node-by-node FFI
+entry points are thin wrappers over. Nodes are addressed by canonical post-order sequence,
+the same order the recipe writer numbers in, so child handles align across the boundary;
+input handles are consumed and `out_stats` is filled per output partition. PIMPL, so the
+header exposes no cuDF internals; the handle registry lives in that `Impl` and is not a type
+of its own (below).
 
-/* node-by-node: one session, one node at a time, intermediates stay resident */
-typedef struct PeacockNodeStats {
-  uint64_t rows; uint64_t varlen_content_bytes; uint64_t time_us;
-} PeacockNodeStats;
+**[`TableResult` / `NodeStats`](../cpp/src/plan_executor.h)** — the two value types every C++
+path returns. `NodeStats` carries only what C++ alone can measure — rows, var-length content
+bytes, and a time that is zero unless timing is on. The byte formula itself lives in Rust
+(`memory.rs`) so the two engines cannot drift.
 
-int  peacock_executor_begin_plan(peacock_executor_t* executor, const uint8_t* plan_bytes,
-                                 uint64_t plan_len, uint64_t* out_node_count);
-int  peacock_executor_execute_node(peacock_executor_t* executor, uint64_t seq,
-                                   const uint64_t* input_handles,
-                                   const uint64_t* input_child_counts, uint64_t n_children,
-                                   uint64_t* out_handles, uint64_t out_cap,
-                                   uint64_t* out_count, PeacockNodeStats* out_stats);
-void peacock_handle_release(peacock_executor_t* executor, uint64_t handle);
-void peacock_executor_end_plan(peacock_executor_t* executor);
-
-/* per-call entry points: what a driver decides per call — a batch's row groups, a
-   limit's bounds — cannot ride a plan node, whose fields are constants.
-   A row range is [offset, offset+length), UINT64_MAX meaning to the end, an offset
-   past the end empty and an overrun clamped. */
-int  peacock_executor_execute_scan_rowgroups(peacock_executor_t* executor, uint64_t seq,
-                                             const uint32_t* row_groups, uint64_t n,
-                                             uint64_t* out_handle,
-                                             PeacockNodeStats* out_stats);
-int  peacock_executor_slice_handle(peacock_executor_t* executor, uint64_t handle,
-                                   uint64_t offset, uint64_t length, uint64_t* out_handle);
-int  peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle,
-                                uint64_t offset, uint64_t length,
-                                uint8_t** out_ipc, uint64_t* out_ipc_len);
-
-/* instrumentation: process-global, off by default, and nothing in this workspace
-   turns any of it on. The pool is what the gtest binaries install from their own
-   main(), offered here for a Rust caller that cannot include the C++ header; without
-   it every cuDF intermediate is a cudaMalloc/cudaFree round trip (#148). Node timing
-   makes execute_node synchronize the default stream at every measurement boundary, so
-   time_us measures execution rather than kernel submission — and serializes what cuDF
-   would otherwise pipeline, which is why the correctness path never sets it. The floor
-   is what an empty timed region costs; a node at or below it is unresolved, not cheap,
-   and it is never subtracted. */
-int      peacock_install_rmm_pool(PeacockRmmPoolInfo* out_info);
-void     peacock_set_node_timing(int enable);
-uint64_t peacock_measure_timing_floor_us(unsigned samples);
-
-/* the conformance hook: Spark-murmur3 partition ids over one Arrow C-data batch */
-int  peacock_spark_partition_ids(const void* schema, const void* array,
-                                 const uint32_t* key_cols, uint64_t num_keys,
-                                 uint32_t num_partitions, uint32_t seed,
-                                 int32_t* out_pids, uint64_t out_cap, uint64_t* out_n);
-```
-
-**[`NodeSession`](../cpp/src/plan_executor.h#L46)** — *de facto*. No abstract base, but an
-interface in every practical sense: it is what the node-by-node FFI entry points are thin
-wrappers over, and the recipes the Rust side writes are addressed against its shape. Nodes
-take a canonical post-order sequence, the same order the recipe writer numbers in, so child
-handles align across the boundary. PIMPL, so the header exposes no cuDF internals.
-
-```cpp
-class NodeSession {
- public:
-  NodeSession(const uint8_t* plan_bytes, uint64_t plan_len);
-  ~NodeSession();
-  NodeSession(const NodeSession&) = delete;
-  NodeSession& operator=(const NodeSession&) = delete;
-
-  size_t node_count() const;
-
-  // Input handles are CONSUMED. out_stats is filled PER PARTITION.
-  void execute_node(uint64_t seq, const uint64_t* input_handles,
-                    const uint64_t* input_child_counts, size_t n_children,
-                    uint64_t* out_handles, size_t out_cap, size_t* out_count,
-                    NodeStats* out_stats);
-
-  // The scan's row groups and the slice's bounds are per-call values, so they are
-  // arguments here rather than fields of the node addressed by seq.
-  uint64_t execute_scan_rowgroups(uint64_t seq, cudf::host_span<const uint32_t> row_groups,
-                                  NodeStats* out_stats);
-  uint64_t slice_handle(uint64_t handle, uint64_t offset, uint64_t length);
-
-  const TableResult& table_for(uint64_t handle) const;
-  void release(uint64_t handle);
-
- private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
-};
-```
-
-**[`TableResult` / `NodeStats`](../cpp/src/plan_executor.h#L13)** — the two value types every
-C++ path returns. `NodeStats` carries only what C++ alone can measure: the byte formula
-lives in Rust so the two engines cannot drift.
-
-```cpp
-struct TableResult {
-  std::unique_ptr<cudf::table> table;
-  std::vector<std::string> column_names;
-};
-
-struct NodeStats {
-  uint64_t rows = 0;
-  uint64_t varlen_content_bytes = 0;   // Σ over varlen columns of offsets[n]-offsets[0]
-  uint64_t time_us = 0;                // per output partition; 0 unless timing is on
-};
-```
-
-**[`NodeInputs` and the operator dispatch](../cpp/src/peacock/operators.h#L22)** — the
-contract every operator translation unit shares. `NodeInputs` is passed explicitly rather
-than through a thread-local, and that is deliberate: a per-translation-unit thread-local
-would silently fork when the file was split and re-execute whole subtrees
-(coding-style.md).
-
-```cpp
-struct NodeInputs {
-  std::vector<TableResult>* items = nullptr;   // the caller's already-resident inputs
-  size_t idx = 0;
-};
-
-TableResult execute_scan(const fb::CudfScan* scan,
-                         cudf::host_span<const uint32_t> row_groups_override = {});
-TableResult execute_filter(const fb::CudfFilter* filter, NodeInputs* in);
-TableResult execute_project(const fb::CudfProject* proj, NodeInputs* in);
-TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in);
-TableResult execute_hash_join(const fb::CudfHashJoin* join, NodeInputs* in);
-TableResult execute_cross_join(const fb::CudfCrossJoin* join, NodeInputs* in);
-TableResult execute_nested_loop_join(const fb::CudfNestedLoopJoin* join, NodeInputs* in);
-TableResult execute_sort(const fb::CudfSort* sort, NodeInputs* in);
-TableResult execute_union(const fb::CudfUnion* u, NodeInputs* in);
-TableResult execute_limit(const fb::CudfLimit* limit, NodeInputs* in);
-TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in);
-
-TableResult execute_node(const fb::PlanNode* node, NodeInputs* in);
-TableResult execute_one(const fb::PlanNode* node, std::vector<TableResult> inputs);
-inline TableResult execute_passthrough(const fb::PlanNode* input_node, NodeInputs* in);
-```
+**[`NodeInputs` and the operator dispatch](../cpp/src/peacock/operators.h)** — the contract
+every operator translation unit shares: one `execute_*` per wire node kind, plus `take_input`
+to resolve a child and `execute_one` to run a node over inputs given by value. `NodeInputs`
+is a parameter rather than a thread-local, and that is deliberate: an anonymous-namespace
+thread-local forks when the file is split, so one half would read the other's inputs
+(coding-style.md carries the case).
 
 **[`peacock::partitioning`](../cpp/include/peacock/partitioning.hpp)** — the second public
-header: our own bit-exact Spark-murmur3, because cuDF ships only standard murmur3.
+header: `spark_partition_ids` and `spark_hash_partition`, our own bit-exact Spark-murmur3 at
+seed 42, because cuDF ships only standard murmur3. Both take the stream and memory resource
+as trailing defaults, which is what makes them usable off device 0.
 
-```cpp
-std::unique_ptr<cudf::column> spark_partition_ids(
-    cudf::table_view const& input,
-    std::vector<cudf::size_type> const& key_cols,
-    cudf::size_type num_partitions,
-    uint32_t seed                     = 42,
-    rmm::cuda_stream_view stream      = cudf::get_default_stream(),
-    rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
+**[`ExprContext`](../cpp/src/peacock/expr.h)** — *de facto*. cuDF AST nodes hold references,
+so something must own every sub-expression for the lifetime of the call; that ownership IS
+the interface. `build_expr` takes an optional column map, which is how a mixed join's filter
+ordinals are remapped onto its LEFT and RIGHT tables.
 
-std::pair<std::unique_ptr<cudf::table>, std::vector<cudf::size_type>> spark_hash_partition(
-    cudf::table_view const& input,
-    std::vector<cudf::size_type> const& key_cols, /* … same trailing defaults … */);
-```
-
-**[`ExprContext`](../cpp/src/peacock/expr.h#L25)** — *de facto*. Expression building. cuDF AST nodes hold
-references, so something must own every sub-expression for the lifetime of the call; that
-ownership IS the interface.
-
-```cpp
-struct ExprContext {
-  std::vector<std::unique_ptr<cudf::ast::expression>> owned;
-  std::vector<std::unique_ptr<cudf::scalar>> scalars;
-  cudf::ast::expression& keep(std::unique_ptr<cudf::ast::expression> e);
-};
-
-using JoinFilterColMap = flatbuffers::Vector<const fb::JoinFilterColumn*>;
-cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
-                                  const JoinFilterColMap* col_map = nullptr);
-```
-
-**[`GpuWorker` / `WorkerPool`](../cpp/tests/gpu/multi_gpu.hpp#L79)** — *de facto*, test-only
-(`cpp/tests/gpu/`), and the one place the multi-GPU rules are encoded as a type: a cuDF or
-cuVS object must be destroyed on its owning device's thread, so every device gets a worker
-thread and a persistent stream, and work reaches a device only by `submit`.
-
-```cpp
-class GpuWorker {
- public:
-  explicit GpuWorker(int device);
-  ~GpuWorker();
-  template <typename F> auto submit(F f) -> std::future<decltype(f())>;
-};
-
-class WorkerPool {
- public:
-  explicit WorkerPool(int num_gpus);
-  ~WorkerPool();
-  int size() const;
-  GpuWorker& operator[](int g);
-  rmm::cuda_stream_view stream(int g) const;
-};
-```
+**[`GpuWorker` / `WorkerPool`](../cpp/tests/gpu/multi_gpu.hpp)** — *de facto*, test-only, and
+the one place the multi-GPU rules are encoded as a type: a cuDF or cuVS object must be
+destroyed on its owning device's thread, so every device gets a worker thread and a
+persistent stream, and work reaches a device only by `submit`.
 
 ### The handle registry has no type
 
-The C++ side keeps intermediates alive behind opaque `u64` handles, and that is not a
-class. It is two fields inside the private
-[`NodeSession::Impl`](../cpp/src/node_session.cpp#L70) —
-`std::unordered_map<uint64_t, TableResult> registry` and `uint64_t next_handle = 1` — with
-allocation, lookup, consume-on-read and erase written inline at each of the twenty-two sites
-that touch them.
+The C++ side keeps intermediates alive behind opaque `u64` handles, and that is not a class.
+It is two fields inside the private [`NodeSession::Impl`](../cpp/src/node_session.cpp) — an
+`unordered_map<uint64_t, TableResult>` and a monotonic `next_handle` — with allocation,
+lookup, consume-on-read and erase written inline at every site that touches them.
 
 So the consume-once rule the FFI documents ("input handles are CONSUMED") holds by convention
 at each site rather than by construction, and only at run time: reading an already-consumed
@@ -1169,32 +956,30 @@ type is holding this together.
 
 ## Rehash and the comet hash
 
-A shuffle is `GpuEmitPartitions`: one lane's batch in, one batch per lane out, scattered by
-hash. Both backends run it, so which lane a row lands in has to be the same number on each.
-
-The hash is **Spark's murmur3 as implemented by comet** (seed 42) on both engines. Neither
-available implementation would do: DataFusion's default repartition uses ahash, and cuDF
-exposes standard murmur3, which differs from Spark's spec in multi-column combine and null
+A shuffle is `GpuEmitPartitions`, and both backends run it, so which lane a row lands in has to
+be the same number on each. The hash is **Spark's murmur3 as implemented by comet**, seed 42,
+on both. Neither available implementation would do: DataFusion's repartition uses ahash, and
+cuDF exposes standard murmur3, which differs from Spark's spec in multi-column combine and null
 handling.
 
 So placement is identical by construction rather than by agreement. The CPU side calls comet's
-`create_murmur3_hashes` (`peacockdb-core/src/spark_partitioning.rs`), the GPU side owns a
-bit-exact kernel (`cpp/src/spark_hash_partition.cu`) and reuses cuDF only for the scatter, and
-a live gate (`peacock_spark_partition_ids`, `test_inc2_conformance.rs`) proves the two agree
-over the same bytes.
+`create_murmur3_hashes` (`spark_partitioning.rs`), the GPU side owns a bit-exact kernel
+(`spark_hash_partition.cu`) and reuses cuDF only for the scatter, and a live gate
+(`peacock_spark_partition_ids`, `test_inc2_conformance.rs`) proves the two agree over the same
+bytes.
 
 ## C++ executor layout
 
 `cpp/src/`: `gpu_executor.cpp` (the C FFI), `node_session.cpp` (the post-order index, the
 handle registry, and the multi-partition dispatch — scan-map emission, collapse, k-way merge,
-hash repartition, 1:1 map), `expr.cpp` (expression and AST building), `operators/` (per-op
-`execute_*` plus `dispatch.cpp` with the `run_op` switch).
+hash repartition, 1:1 map), `expr.cpp` (expression and AST building),
+`spark_hash_partition.cu` (the murmur3 kernel), and `operators/` (one `execute_*` per wire
+node kind plus `dispatch.cpp` with the `run_op` switch).
 
-Node inputs are threaded explicitly (`NodeInputs{items, idx}` — never a thread-local; see
-coding-style.md), and `execute_one` enforces **consumed == provided**: a node handed inputs
-must consume all of them, or it ran against inputs the caller did not give it. Private headers
-live in `cpp/src/peacock/`; the public surface is the C FFI plus `partitioning.hpp`, with
-`plan_executor_internal.h` alongside for what the tests reach into.
+`execute_one` enforces **consumed == provided**: a node handed inputs must consume all of
+them, or it ran against inputs the caller did not give it. That check is what makes the
+positional `NodeInputs` contract safe, since nothing else names which child a `take_input`
+resolves.
 
 ## Column indexing
 
@@ -1206,59 +991,42 @@ Where the ordinals come from and where they land:
 
 | Reference | Written by | Read by |
 |---|---|---|
-| `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/expr_writer.rs), off the ordinal `expr_translate` read from DataFusion's `Column::index()` | [`build_expr`](../cpp/src/expr.cpp#L140) for the AST path, [`build_column`](../cpp/src/expr.cpp#L833) for the column path |
-| `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/node_writer.rs), [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp#L40), [`join.cpp`](../cpp/src/operators/join.cpp#L206) — gather by ordinal, and the name list is indexed with the same ordinal |
-| join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`join.cpp`](../cpp/src/operators/join.cpp#L58) — ColumnRef only, anything else throws |
-| `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp#L145) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
-| sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp#L38), [`node_session.cpp`](../cpp/src/node_session.cpp#L255), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp#L157) |
+| `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/expr_writer.rs), off the ordinal `expr_translate` read from DataFusion's `Column::index()` | [`build_expr`](../cpp/src/expr.cpp) for the AST path, [`build_column`](../cpp/src/expr.cpp) for the column path |
+| `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/node_writer.rs), [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join.cpp`](../cpp/src/operators/join.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
+| join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`join.cpp`](../cpp/src/operators/join.cpp) — ColumnRef only, anything else throws |
+| `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
+| sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) |
 
-`cpp/src/` holds 22 `->index()` reads and 46 `.column(…)` calls, so this is the engine's most
+`cpp/src/` holds 22 `->index()` reads and 48 `.column(…)` calls, so this is the engine's most
 common operation and the one with the least ceremony around it.
 
-### What actually guards it
+### What guards it, and what does not
 
-Your presumption is nearly right — there is one real backstop, and it is not ours.
+One real backstop, and it is not ours: **cuDF bounds-checks column access**.
+`table_view::column(i)` is `_columns.at(i)`, so an out-of-range ordinal throws rather than
+reading garbage, and the FFI surfaces the message. What it is not is *informative* — the
+message is `vector::at` boilerplate with no node, operator or ordinal, because the check sits
+three layers below the code that had the context. Two explicit checks in `expr.cpp` do better
+and worse: the column path throws with the ordinal and the column count, while the
+type-inference helper returns `type_id::EMPTY` and turns a bad ordinal into an unhelpful type
+error further along. One arity check, on the Final-stage aggregate, catches a state width that
+disagrees with the arity expected — width, not order. The FlatBuffers verifier checks that
+offsets and vectors are well formed and has no idea what an ordinal means.
 
-- **cuDF bounds-checks column access.** `table_view::column(i)` is `_columns.at(i)`, so an
-  out-of-range ordinal throws `std::out_of_range` rather than reading garbage. The FFI catches
-  `std::exception` and surfaces the message, so the failure is loud. What it is not is
-  *informative*: the message is `vector::at` boilerplate with no node, no operator and no
-  ordinal, because the check is three layers below the code that had the context.
-- **Two explicit checks, in `expr.cpp` only.** The column path
-  ([#L837](../cpp/src/expr.cpp#L837)) throws with the ordinal and the column count, which is the
-  message you actually want. The type-inference helper ([#L349](../cpp/src/expr.cpp#L349))
-  checks the same thing and **returns `type_id::EMPTY`** — a silent fallback that turns a bad
-  ordinal into an unhelpful type error further along.
-- **One arity check.** The Final-stage aggregate compares its input width against the state
-  arity it expects and throws when they disagree
-  ([`aggregate.cpp#L505`](../cpp/src/operators/aggregate.cpp#L505)). It is the only place a
-  schema-shape mismatch is deliberately caught, and it catches width, not order.
-- **The FlatBuffers verifier** checks structure — that offsets and vectors are well formed. It
-  has no idea what an ordinal means.
+Two things nothing guards, and [#164](tickets.md#t164) carries the fixes.
 
-### What nothing guards
+**Column names are a parallel array with no invariant.** `TableResult` is a `cudf::table` plus
+a `std::vector<std::string>` with no assertion that the two are the same length, and the six
+sites indexing names use `operator[]` — so a short names vector is undefined behaviour rather
+than an exception. `filter.cpp` reads the checked `column(idx)` and the unchecked
+`column_names[idx]` in one loop iteration, and the checked read happening first is luck.
 
-**Column names are a parallel array with no invariant.** `TableResult` is a `cudf::table` plus a
-`std::vector<std::string>`, and nothing asserts the two have the same length. The six sites that
-index the names do it with `operator[]`, so a names vector shorter than the table is undefined
-behaviour rather than an exception — for example
-[`filter.cpp#L42`](../cpp/src/operators/filter.cpp#L42), where the same loop iteration reads
-`fv.column(idx)` (checked) and `input.column_names[idx]` (unchecked). Today the checked read
-happens first and throws, which is luck, not design.
-
-**Nothing checks that a child's column *order* matches what the plan assumed.** The per-node
-golden records the node line, its lane and batch lists, rows and bytes — not the column list
-and not the types. The bytes cannot help either: both engines compute them from the *plan's*
-schema, deliberately, so that they cannot drift.
-
-So a node emitting the right number of columns in the wrong order produces identical per-node
-numbers on both engines, and the divergence surfaces only at the root — for a query whose
-corpus line names a result golden or an oracle, and nowhere else in the tree.
-
-That is the honest state: the ordinal contract is enforced by cuDF's `at()` for gross
-violations and by the result comparison for subtle ones, with nothing in between. Adding
-`num_columns() == column_names.size()` to `TableResult`'s construction, and a per-node type
-check in the device tier, are the two obvious closures (#164).
+**Nothing checks that a child's column *order* is what the plan assumed.** The per-node golden
+records the node line, its lane and batch lists, rows and bytes — not the column list and not
+the types, and the bytes cannot help because both engines compute them from the plan's schema
+precisely so they cannot drift. So a node emitting the right columns in the wrong order gives
+identical per-node numbers on both engines, and the divergence surfaces only at the root, for
+a query whose corpus line names a result golden or an oracle.
 
 ## cuDF options
 
@@ -1269,16 +1037,16 @@ precisely so cuDF cannot infer something the CPU side did not.
 
 | Option | Set at | Value | What the default would do |
 |---|---|---|---|
-| `parquet_reader_options` | [`scan.cpp`](../cpp/src/operators/scan.cpp#L57) | `.columns(projected)`, `set_row_groups(map ∥ pruned)`, `set_num_rows(limit)` | read every column and every row group; the row-group list is also how a partition reads only its own slice |
-| `cudf::order`, `cudf::null_order` | [`sort.cpp`](../cpp/src/operators/sort.cpp#L44), [`node_session.cpp`](../cpp/src/node_session.cpp#L192) | per key from the flat buffers's `asc` / `nulls_first` | cuDF has no notion of the query's ORDER BY; the two sites must agree or a k-way merge would order differently from a sort |
-| `cudf::null_equality` | [`join.cpp`](../cpp/src/operators/join.cpp#L90) ×9 | see the table below | `EQUAL` — NULL keys match, inventing rows SQL excludes |
-| `cudf::out_of_bounds_policy` | [`join.cpp`](../cpp/src/operators/join.cpp#L315) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
-| `cudf::null_policy` (groupby) | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp#L435), [grouping sets](../cpp/src/operators/aggregate.cpp#L392) | `INCLUDE` | `EXCLUDE` silently drops the NULL group — tpcds q15's NULL `ca_zip` row disappears |
-| `cudf::null_policy` (rolling count) | [`window.cpp`](../cpp/src/operators/window.cpp#L103) | `EXCLUDE` for `COUNT(col)`, `INCLUDE` for `COUNT(*)` | one of the two is always wrong: `COUNT(*)` counts rows, `COUNT(col)` counts non-nulls |
-| decimal scale | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp#L212), [`union.cpp`](../cpp/src/operators/union.cpp#L45), [`window.cpp`](../cpp/src/operators/window.cpp#L86) | `data_type{id, -out_decimal_scale}` from the flat buffers | cuDF would re-derive a scale per operation and drift from DataFusion's |
-| binary-op output type | [`expr.cpp`](../cpp/src/expr.cpp#L547) | boolean for predicates, else the wider input; division pre-scales the numerator to hit the flat buffers's `out_decimal_precision/scale` | cuDF promotes by its own rule, which is not SQL's decimal arithmetic |
-| hash seed / algorithm | [`spark_hash_partition.cu`](../cpp/src/spark_hash_partition.cu#L198) | our own Spark-murmur3, seed 42, cuDF only for the scatter | cuDF ships standard murmur3, whose partition numbers differ from comet's — see [Rehash and the comet hash](#rehash-and-the-comet-hash) |
-| IPC export | [`gpu_executor.cpp`](../cpp/src/gpu_executor.cpp#L39) | column names as `column_metadata`; DECIMAL32/64 cast up to DECIMAL128 | unnamed columns, and narrow decimals that the Rust arrow-ipc reader rejects outright |
+| `parquet_reader_options` | [`scan.cpp`](../cpp/src/operators/scan.cpp) | `.columns(projected)`, `set_row_groups(map ∥ pruned)`, `set_num_rows(limit)` | read every column and every row group; the row-group list is also how a partition reads only its own slice |
+| `cudf::order`, `cudf::null_order` | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp) | per key from the flat buffers's `asc` / `nulls_first` | cuDF has no notion of the query's ORDER BY; the two sites must agree or a k-way merge would order differently from a sort |
+| `cudf::null_equality` | [`join.cpp`](../cpp/src/operators/join.cpp) ×9 | see the table below | `EQUAL` — NULL keys match, inventing rows SQL excludes |
+| `cudf::out_of_bounds_policy` | [`join.cpp`](../cpp/src/operators/join.cpp) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
+| `cudf::null_policy` (groupby) | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [grouping sets](../cpp/src/operators/aggregate.cpp) | `INCLUDE` | `EXCLUDE` silently drops the NULL group — tpcds q15's NULL `ca_zip` row disappears |
+| `cudf::null_policy` (rolling count) | [`window.cpp`](../cpp/src/operators/window.cpp) | `EXCLUDE` for `COUNT(col)`, `INCLUDE` for `COUNT(*)` | one of the two is always wrong: `COUNT(*)` counts rows, `COUNT(col)` counts non-nulls |
+| decimal scale | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [`union.cpp`](../cpp/src/operators/union.cpp), [`window.cpp`](../cpp/src/operators/window.cpp) | `data_type{id, -out_decimal_scale}` from the flat buffers | cuDF would re-derive a scale per operation and drift from DataFusion's |
+| binary-op output type | [`expr.cpp`](../cpp/src/expr.cpp) | boolean for predicates, else the wider input; division pre-scales the numerator to hit the flat buffers's `out_decimal_precision/scale` | cuDF promotes by its own rule, which is not SQL's decimal arithmetic |
+| hash seed / algorithm | [`spark_hash_partition.cu`](../cpp/src/spark_hash_partition.cu) | our own Spark-murmur3, seed 42, cuDF only for the scatter | cuDF ships standard murmur3, whose partition numbers differ from comet's — see [Rehash and the comet hash](#rehash-and-the-comet-hash) |
+| IPC export | [`gpu_executor.cpp`](../cpp/src/gpu_executor.cpp) | column names as `column_metadata`; DECIMAL32/64 cast up to DECIMAL128 | unnamed columns, and narrow decimals that the Rust arrow-ipc reader rejects outright |
 | stream + memory resource | everywhere in the single-GPU path | `cudf::get_default_stream()`, current device resource | fine on device 0 and wrong anywhere else — the multi-GPU rules are in [Multi-GPU notes](#multi-gpu-notes-cudf-2602) |
 
 ### What the Rust side puts in the flat buffers
@@ -1300,15 +1068,17 @@ below are relative to it.
 | `BinaryExpr`<br>`.out_decimal_precision/scale` | `expr_writer.rs` | the expression's declared output type | the binop output type, and division pre-scales to hit it |
 | `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from values, `Merge` merges state into state. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which cuDF aggregation runs, whether state columns are merged, and whether the result is state or a value |
 | `CudfRepartition.hash_exprs`,<br>`num_partitions` | `node_writer.rs` | the emit node's keys and lane count | key ordinals and N for<br>`spark_hash_partition` |
-| `CudfScan.row_groups`,<br>`limit` | `node_writer.rs` | the source's surviving row groups and its pushed-down limit | `parquet_reader_options::`<br>`set_row_groups` / `set_num_rows` — though every load overrides the list per call |
+| `CudfScan.limit` | `node_writer.rs` | the source's pushed-down limit | `parquet_reader_options::set_num_rows` |
 | `AggregateFuncNode`<br>`.out_decimal_precision/scale` | `aggregate_writer.rs`, at zero | nothing: decomposition means no `avg` reaches a device, so the scale rides the finalize divide's own pair | **nothing** here, deliberately, and the writer says why |
 | `CudfScan.batch_size`,<br>`CudfCoalesceBatches`<br>`.target_batch_size` | nobody | — | **nothing** — no C++ code reads either (#132) |
+| `CudfScan.row_groups`,<br>`.batches` | nobody | — | `set_row_groups`, but no plan reaches it: every load names its own groups per call |
 
-Two shapes are worth separating here. Most rows carry a value the GPU must not recompute —
+Three shapes are worth separating here. Most rows carry a value the GPU must not recompute —
 decimal scales above all, since cuDF derives its own per operation and DataFusion's is what
-the result is compared against. The last two rows are different: one is a field left at its
-default on purpose, and the other is a pair of fields no writer sets and no reader reads,
-which is the wire-format surface #132 is about.
+the result is compared against. The last three rows are different: a field left at its
+default on purpose; a pair no writer sets and no reader reads, which is the wire-format
+surface #132 is about; and a pair the C++ still reads that no plan fills, because the row
+groups a batch loads are a per-call value and ride the call instead.
 
 ### Join types and NULL key equality
 
@@ -1316,18 +1086,18 @@ which is the wire-format surface #132 is about.
 means a NULL key matches nothing, `true` means NULL = NULL, which is what a set operation
 lowered to a join needs. Whether a join type actually honours it is the interesting part.
 
-| Join type | cuDF call | `null_equality` | Code |
-|---|---|---|---|
-| Inner | `inner_join` | from the flat buffers | [join.cpp#L289](../cpp/src/operators/join.cpp#L289) |
-| Left | `left_join` | from the flat buffers | [#L291](../cpp/src/operators/join.cpp#L291) |
-| Full | `full_join` | from the flat buffers | [#L293](../cpp/src/operators/join.cpp#L293) |
-| Right | `left_join` with sides swapped, indices swapped back | from the flat buffers | [#L295](../cpp/src/operators/join.cpp#L295) |
-| LeftSemi | `left_semi_join`, `filtered_join::semi_join`, or `mixed_left_semi_join` with a residual filter | from the flat buffers | [#L116](../cpp/src/operators/join.cpp#L116) |
-| RightSemi | the same, sides swapped; a residual filter is rejected | from the flat buffers | [#L153](../cpp/src/operators/join.cpp#L153) |
-| LeftAnti | `left_anti_join`, `filtered_join::anti_join`, or `mixed_left_anti_join` | **hardcoded `EQUAL`** | [#L134](../cpp/src/operators/join.cpp#L134) |
-| RightAnti | the same, sides swapped | **hardcoded `EQUAL`** | [#L170](../cpp/src/operators/join.cpp#L170) |
-| LeftMark | `left_semi_join`-shaped, emitting one row per left row plus a boolean mark | **hardcoded `EQUAL`** | [#L224](../cpp/src/operators/join.cpp#L224) |
-| Inner / Left, non-equi | `conditional_inner_join` / `conditional_left_join`, or an AST boolean mask | n/a — the predicate decides | [#L405](../cpp/src/operators/join.cpp#L405) |
+| Join type | cuDF call | `null_equality` |
+|---|---|---|
+| Inner | `inner_join` | from the flat buffers |
+| Left | `left_join` | from the flat buffers |
+| Full | `full_join` | from the flat buffers |
+| Right | `left_join` with sides swapped, indices swapped back | from the flat buffers |
+| LeftSemi | `left_semi_join`, `filtered_join::semi_join`, or `mixed_left_semi_join` with a residual filter | from the flat buffers |
+| RightSemi | the same, sides swapped; a residual filter is rejected | from the flat buffers |
+| LeftAnti | `left_anti_join`, `filtered_join::anti_join`, or `mixed_left_anti_join` | **hardcoded `EQUAL`** |
+| RightAnti | the same, sides swapped | **hardcoded `EQUAL`** |
+| LeftMark | `left_semi_join`-shaped, emitting one row per left row plus a boolean mark | **hardcoded `EQUAL`** |
+| Inner / Left, non-equi | `conditional_inner_join` / `conditional_left_join`, or an AST boolean mask | n/a — the predicate decides |
 
 Three things that table is worth reading for.
 
@@ -1349,9 +1119,13 @@ a filter outright, because no swapped `mixed_*` variant exists.
 
 ## Node display
 
-A per-node line is `<Name>: <node fields>, lanes=N, batches=single|multiple, output_rows=R,
-output_bytes=B`, indentation drawing the tree. Four rules decide what is inside it; the golden
-files themselves are in [build-test.md](build-test.md).
+**There are two node lines, and the difference is which golden it is in.** A plan line is
+`<Name>: <node fields>, lanes=N, batches=single|multiple[, hashed_on=…][, sorted_on=…],
+schema=[name:type, …]`. An execution line drops the schema, adds `output_rows` and
+`output_bytes`, and carries a second line beneath it — `in_rows` nested by child then by that
+child's lane, `batch_rows` and `batch_bytes` by this node's lane then by batch, plus
+`abandoned` where a run left something behind. Indentation draws the tree in both. The files
+themselves are in [build-test.md](build-test.md).
 
 **Every column reference renders `name@ordinal`.** The ordinal is authoritative and the name
 comes from the declared schema at that position, so a reader can follow a reference without
@@ -1365,21 +1139,17 @@ absence reads as the fact it is. What a parent may assume is exactly this, so th
 **Every node carrying a `fetch` prints it.** A merge that turns 80 rows into 10 says so on its
 own line rather than leaving the number to be inferred from the sort beneath it. Same for the
 aggregate's `aggs` and `final` lists, the loader's `partition_groups`, and a limit's interval
-wherever it lives.
-
-**Types are a plan fact.** The declared output schema per node — `name:type` per column — sits
-beside the layout in the plan golden and is not repeated in the execution golden. It is what
-makes the explicit casts legible: a `Decimal128(38, 6)` in a finalize means nothing without the
-state column's declared scale beside it. It checks nothing — a golden records what the planner
-declared, and the declaration is exactly what a wrong type would move. Comparing a declared type
-against the expression that produces it is [#163](tickets.md#t163), and the C++ half is
-[#164](tickets.md#t164).
-
-A source renders its whole mapping as one nested structure —
+wherever it lives. A source renders its whole mapping as one nested structure —
 `partition_groups=[[[0,1],[2,3]],[[4],[5,6,7]]]`, lanes outermost, batches within them, row
-groups innermost — verbatim what the partitioner returned. Not a lane count beside a batch
-count: the two are not independent, and every property worth reading off the line is about which
-batch sits in which lane.
+groups innermost — verbatim what the partitioner returned, because which batch sits in which
+lane is the property worth reading and a lane count beside a batch count does not carry it.
+
+**Types are a plan fact.** The declared schema per node is what makes the explicit casts
+legible: a `Decimal128(38, 6)` in a finalize means nothing without the state column's declared
+scale beside it. It checks nothing — a golden records what the planner declared, and the
+declaration is exactly what a wrong type would move. Comparing a declared type against the
+expression that produces it is [#163](tickets.md#t163), and the C++ half is
+[#164](tickets.md#t164).
 
 **Estimates go in a `--- memory ---` section per query, not on the node line.** They churn where
 plan shapes do not — an estimator change, then #19's statistics, then #147's refinement — so on
@@ -1389,41 +1159,38 @@ it was.
 
 ## Multi-GPU notes (cuDF ≥26.02)
 
-Hard-won constraints for the multi-GPU C++ path (`cpp/tests/gpu/test_multi_gpu_*`,
-WorkerPool, `hash_shuffle`, `gather_here`):
+Hard-won constraints for the multi-GPU C++ path, which lives entirely in
+`cpp/tests/gpu/test_multi_gpu_*` — no engine path reaches a second device today.
 
-- Every cudf op on a worker pinned to GPU≠0 needs a **device-local stream** —
+- Every cudf op on a worker pinned to GPU≠0 needs a **device-local stream**;
   `cudf::get_default_stream()` is device-0-bound ("invalid device ordinal" otherwise).
-- A cudf/cuVS device object must be **destroyed on its owning device's worker thread** —
-  hence the worker-per-GPU pool; release partitions/results on-worker before teardown.
-- Per-device **RMM pools** (with persistent per-worker streams) are what make cheap
-  queries scale; pool dealloc is stream-ordered, so an object outliving a transient
-  stream frees on a dead stream and crashes.
-- RMM `set_per_device_resource(g, nullptr)` resets the pointer map but NOT the ref map —
-  teardown must also call `reset_per_device_resource_ref(g)`.
-- Benchmarking multiple queries in one process is flaky at G≥2 (process-global cudf
-  stream state across WorkerPool teardowns) — one query per process (see build-test.md).
+- A cudf/cuVS device object must be **destroyed on its owning device's worker thread** — hence
+  the worker-per-GPU pool; release partitions and results on-worker before teardown.
+- Per-device **RMM pools** with persistent per-worker streams are what make cheap queries
+  scale. Pool dealloc is stream-ordered, so an object outliving a transient stream frees on a
+  dead stream and crashes; and `set_per_device_resource(g, nullptr)` resets the pointer map but
+  not the ref map, so teardown must also call `reset_per_device_resource_ref(g)`.
+- Benchmarking several queries in one process is flaky at G≥2 (process-global cudf stream state
+  across WorkerPool teardowns) — one query per process (see build-test.md).
 
 ## Cost model and the DuckDB oracle
 
-- **Peacock cost:** `.cost.txt` goldens are derived purely from the `.cpu.txt` per-node
-  tree text, section by section (`tests/common/cost_model.rs`): each node's `output_bytes`
-  is binned into a category and multiplied by that category's weight from
-  **`testdata/cost_model.conf`** (runtime-editable; format `<category> <multiplier>
-  [nodes…]`). Today every real category has multiplier 1.0 (total == Σ output_bytes);
-  three placeholder phases (ram_to_vram, cuda_decompress, cuda_rle_decode) sit at 0.0, and
-  `cuda_window_bytes` names no node at all, since window functions are not planned (#143,
-  obsolete) — it stays because dropping a category rewrites the line list of every committed
-  cost golden.
-- **DuckDB oracle:** `testdata/duckdb_cost.py` runs each query through DuckDB in two
-  passes (deterministic profile with join-filter-pushdown off; a second pass extracting
-  only dynamic-filter min/max bounds), combines them with parquet row-group stats, and
-  emits `<q>.duckdb_cost.txt` = `materialization_total` (Σ pipeline-breaker materialized
-  bytes) + `storage_read_total` (decoded Arrow bytes of surviving row-groups' referenced
-  columns after static ∩ dynamic pruning — deliberately the same units as the source
-  node's output_bytes so the ratio is apples-to-apples).
-- **Widget:** the cost report compares peacock Σout — the query's section of the last mode
-  its cpu run is enabled at — against duckdb Σout; ratio ≤ 1.4 renders green. Directional
-  signal only, not a benchmark. Per-query mode enablement comes from
-  `testdata/cost-registry.csv` (the registry the inventory tests verify), tickets from
-  `llm-wiki/tickets.md`.
+Both numbers the widget compares are bytes, and the point of the pairing is that they are the
+same bytes: how much data the query had to move. build-test.md has how each file is produced.
+
+**Peacock cost** is a re-reading of the execution golden rather than a second measurement:
+each node's `output_bytes` is binned into a category and multiplied by that category's weight
+from `testdata/cost_model.conf`. Every real category is 1.0 today, so the total is Σ
+`output_bytes`; the weights exist so a phase can be priced without moving the goldens that
+record it. Three placeholder phases sit at 0.0 and one category names no node at all — kept
+because dropping a category rewrites the line list of every committed cost golden.
+
+**The DuckDB oracle** runs each query twice — a deterministic profile with join-filter
+pushdown off, then a pass reading only the dynamic-filter bounds — and combines them with
+parquet row-group statistics. `storage_read_total` is deliberately in the same units as a
+source node's `output_bytes`, decoded Arrow bytes of the surviving row groups' referenced
+columns, which is what makes the ratio apples-to-apples rather than a scan count against a
+byte count.
+
+**The widget** takes the query's section at the last mode its cpu run is enabled at, and
+renders green at a ratio ≤ 1.4. Directional signal, not a benchmark: nothing here is timed.

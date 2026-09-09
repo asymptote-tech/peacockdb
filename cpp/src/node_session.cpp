@@ -393,7 +393,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
       for (flatbuffers::uoffset_t i = 0; i < exprs->size(); ++i) {
         const fb::Expr* e = exprs->Get(i);
         if (e->node_type() != fb::ExprNode_ColumnRef)
-          throw std::runtime_error("CudfRepartition: only ColumnRef hash keys supported (Inc2)");
+          throw std::runtime_error("CudfRepartition: only ColumnRef hash keys supported");
         key_cols.push_back(static_cast<cudf::size_type>(e->node_as_ColumnRef()->index()));
       }
     }

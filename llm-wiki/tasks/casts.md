@@ -57,8 +57,8 @@ the plan is refused at planning time, which is what happens to them today only b
 
 ### 2. Derive `exports` inside `attach_recipes`
 
-Not a separate pass and not in `plan_serializer.rs`, which is the wire codec rather than a planning
-phase. The recipe walk already delivers the input:
+Not a separate pass and not in the recipe writers, which are the wire codec rather than a
+planning phase. The recipe walk already delivers the input:
 
 ```rust
 fn unload(
@@ -113,7 +113,7 @@ next addition to that file forces the split rather than this one.
 
 **Code and test changes are limited to what is written above.** No refactor of the surrounding
 writer, no generalizing `export_type_for` beyond the table, no second cast site, no cleanup of
-`plan_serializer.rs` while passing through it. Anything else found on the way is a ticket.
+the recipe writers while passing through them. Anything else found on the way is a ticket.
 
 ## Goldens, and how each moves
 

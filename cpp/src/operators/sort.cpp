@@ -15,7 +15,7 @@
 namespace peacock {
 
 TableResult execute_sort(const fb::CudfSort* sort, NodeInputs* in) {
-  auto input = execute_node(sort->input(), in);
+  auto input = take_input(in);
   auto tv = input.table->view();
 
   if (!sort->exprs() || sort->exprs()->size() == 0)

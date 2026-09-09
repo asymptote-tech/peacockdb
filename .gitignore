@@ -43,3 +43,12 @@ testdata/embeddings-cache/
 # The 26.02 build tree; cpp/build (25.02) is covered above and this one was not,
 # so a `git add cpp` swept 1069 build artifacts into a commit once.
 cpp/build26/
+
+# Scratch at the repo root — papers, one-off scripts, rendered reports. Nothing tracked
+# sits loose here but README.md and the build files, and `git add -A .` once swept
+# thirteen of these into a commit, 25 MB of PDFs among them.
+/*.pdf
+/*.tsv
+/*.txt
+/*.html
+/*.sh

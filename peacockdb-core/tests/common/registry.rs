@@ -65,8 +65,9 @@ inventory::collect!(CorpusDeclaration);
 /// The CSV's per-mode columns, in file order.
 ///
 /// Three groups, one per thing that can be enabled independently. The five `bp_` columns
-/// are plan enablement, and they are the one group no test macro registers: that mode's plan goldens are one file per mode rather than one
-/// file per query, so what declares a cell is the golden's section for that query, and
+/// are plan enablement, and they are the one group no test macro registers: the plan goldens
+/// are one file per mode rather than one file per query, so what declares a cell is the
+/// golden's section for that query, and
 /// `test_batch_partitioned_plans` is what holds the two to each other in both directions.
 /// The `bp_cpu_` and `bp_gpu_` columns are execution, declared by `corpus_query!` through
 /// this inventory — one per engine because a query can be correct at five modes on the cpu

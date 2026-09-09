@@ -1,10 +1,5 @@
 //! This mode's [`Expr`] into the wire's `fb::Expr`.
 //!
-//! Separate from `plan_serializer.rs`'s writer, which takes an `Arc<dyn PhysicalExpr>`
-//! and downcasts: that file's job is a DataFusion plan, and a second input shape is how
-//! it would stop having one. The scalar and type helpers are shared, so a literal or a
-//! decimal is written by exactly one piece of code whichever plan asked for it.
-//!
 //! Every variant writes, `Sqrt` included: the schema gained it so that a finalizing
 //! aggregate carries its own finalize rather than leaving the arithmetic to the C++.
 
@@ -191,8 +186,7 @@ pub(crate) fn write_expr<'a>(
     ))
 }
 
-/// Precision and scale, or `(0, 0)` — which the wire reads as "not a decimal", the same
-/// convention `plan_serializer` writes.
+/// Precision and scale, or `(0, 0)`, which the wire reads as "not a decimal".
 fn decimal_parts(data_type: &DataType) -> (u8, i8) {
     match data_type {
         DataType::Decimal128(precision, scale) => (*precision, *scale),
