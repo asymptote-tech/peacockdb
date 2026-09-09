@@ -132,8 +132,8 @@ async fn events_are_free_and_land_where_they_claim() {
     let (off_us, events_us) = (off.total_us, events.total_us);
     let (off_regions, ev_regions) = (&off.regions, &events.regions);
 
-    let ev_setup = sum(ev_regions, |r| r.host_setup_us);
-    let ev_device = sum(ev_regions, |r| r.device_us);
+    let ev_setup = sum(ev_regions, |r| r.measured.host_setup_us);
+    let ev_device = sum(ev_regions, |r| r.measured.device_us);
     let over = |us: u64| 100.0 * (us as f64 / off_us as f64 - 1.0);
     eprintln!(
         "node-timing {DATASET}/{QUERY} [{}] alloc=[{allocator}] regions={}\n  \
@@ -142,7 +142,7 @@ async fn events_are_free_and_land_where_they_claim() {
         mode.name,
         ev_regions.len(),
         over(events_us),
-        sum(ev_regions, |r| r.host_submit_us),
+        sum(ev_regions, |r| r.measured.host_submit_us),
     );
 
     // 1. Off is off. A region is opened only in a measured mode, so a leak shows up as

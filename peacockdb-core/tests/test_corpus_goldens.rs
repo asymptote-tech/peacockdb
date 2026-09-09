@@ -713,15 +713,10 @@ fn a_regeneration_does_not_make_the_read_only_path_write() {
 /// above make — a golden with no external oracle is still checkable against its own
 /// redundancy.
 ///
-/// `-` is NOT "measured and unknown" — it is "no region opened", which is what a call
-/// that made no ABI call of its own leaves behind: an accumulator below its compaction
-/// threshold, an unload exporting through a door that opens none. No device time is
-/// attributable to it, so the total sums the numeric entries and skips those. A node
-/// whose entries are ALL `-` has nothing to sum and carries `-` itself.
-///
-/// Which is why this is worth pinning rather than obvious: the other reading — any `-`
-/// poisons the total — is equally plausible from the file alone, and the two differ on
-/// every node that has both.
+/// Every entry is a number, so the total is a plain sum with nothing to skip. A `0` is a
+/// call that opened no region — an accumulator below its compaction threshold, an unload
+/// exporting through a door that opens none — and a `1` is a region the clock rounded
+/// down, which is why the two are not the same digit.
 ///
 /// Absent files are skipped rather than failed: this tree is written by a run on a GPU
 /// host and a fresh checkout has none. What is NOT skipped is finding no file at all with
@@ -751,17 +746,19 @@ fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .collect();
-            let numbers: Vec<u64> = entries.iter().filter_map(|e| e.parse().ok()).collect();
-            let unknown = entries.len() - numbers.len();
-            let want = match numbers.is_empty() {
-                false => numbers.iter().sum::<u64>().to_string(),
-                true => "-".to_string(),
-            };
+            let numbers: Vec<u64> = entries
+                .iter()
+                .map(|e| {
+                    e.parse().unwrap_or_else(|_| {
+                        panic!("{}:{}: {e:?} is not a number — {line:?}", path.display(), n + 1)
+                    })
+                })
+                .collect();
+            let want = numbers.iter().sum::<u64>().to_string();
             assert_eq!(
                 total,
                 want,
-                "{}:{}: total_us disagrees with the {} measured entries beside it \
-                 ({unknown} opened no region) — {line:?}",
+                "{}:{}: total_us disagrees with the {} entries beside it — {line:?}",
                 path.display(),
                 n + 1,
                 numbers.len()

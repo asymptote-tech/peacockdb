@@ -18,15 +18,23 @@ use std::fmt::Write as _;
 
 use super::{join_parts, node_line_parts};
 use crate::batch_partitioned::driver::index::{PlanIndex, ROOT};
-use crate::batch_partitioned::driver::{Measurements, node_measured};
+use crate::batch_partitioned::driver::{Measured, Measurements};
 use crate::batch_partitioned::node::GpuNode;
 
-/// What a call reports when the device recorded no region for it — a call that opened
-/// none, or a run nobody measured.
+/// One call's device microseconds, as this file reports them.
 ///
-/// Not `0`: the call took time, and a zero would say it did not. The distinction is the
-/// same one `AbiCalls` carries from the backend up, and this is where it reaches a reader.
-const UNMEASURED: &str = "-";
+/// `0` where the device recorded no region: a call that opened none did no device work,
+/// and that is its time. `1` where a region exists but its microseconds truncated to zero
+/// — something ran on the device, and writing 0 would claim more than the clock can say.
+///
+/// The one place the rule lives, so a node's total is the sum of the entries beside it by
+/// construction rather than by two functions agreeing.
+fn call_us(call: &Option<Measured>) -> u64 {
+    match call {
+        Some(time) if time.regions > 0 => time.device_us.max(1),
+        _ => 0,
+    }
+}
 
 /// `root` as it was timed: one node per line with the microseconds its calls spent on the
 /// device beneath it.
@@ -64,7 +72,7 @@ fn render_node(
     }
 }
 
-/// `[[22,37,40],[55,-,30]]` — one list per driving lane, one entry per call that lane made.
+/// `[[22,37,40],[55,1,30]]` — one list per driving lane, one entry per call that lane made.
 ///
 /// A lane the node was never driven on renders `[]` rather than being left out: a routing
 /// node the driver answers itself has as many empty lanes as it has, and dropping them
@@ -74,24 +82,20 @@ fn lanes_of(times: &Measurements, node: usize) -> String {
         .lanes(node)
         .iter()
         .map(|lane| {
-            let calls: Vec<String> = lane
-                .iter()
-                .map(|call| match call {
-                    Some(time) if time.regions > 0 => time.device_us.to_string(),
-                    _ => UNMEASURED.to_string(),
-                })
-                .collect();
+            let calls: Vec<String> = lane.iter().map(|call| call_us(call).to_string()).collect();
             format!("[{}]", calls.join(","))
         })
         .collect();
     format!("[{}]", rendered.join(","))
 }
 
-/// The node's whole device time, over every lane and call. `-` where nothing was measured,
-/// which is not the same statement as a node that cost nothing.
-fn total_of(times: &Measurements, node: usize) -> String {
-    match node_measured(times, node) {
-        Some(time) if time.regions > 0 => time.device_us.to_string(),
-        _ => UNMEASURED.to_string(),
-    }
+/// The node's whole device time: the entries above, added. A node that made no call at all
+/// sums nothing and reports 0.
+fn total_of(times: &Measurements, node: usize) -> u64 {
+    times
+        .lanes(node)
+        .iter()
+        .flat_map(|lane| lane.iter())
+        .map(call_us)
+        .sum()
 }
