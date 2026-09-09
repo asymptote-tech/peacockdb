@@ -1,5 +1,7 @@
 # Answering with nothing: the table no call can build
 
+Kind: production
+
 Two refusals, one wall. A node owes rows it did not receive, and every entry point on the surface
 loads a table by reading one — so there is no call to make.
 

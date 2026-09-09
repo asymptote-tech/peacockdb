@@ -1,5 +1,7 @@
 # Refcounted tables: one allocation, several handles
 
+Kind: production
+
 A handle owns its table exclusively — `TableResult` (`cpp/src/plan_executor.h:15`) holds a
 `std::unique_ptr<cudf::table>` — and `execute_one` takes its inputs **by value**
 (`cpp/src/operators/dispatch.cpp:110`), so the session moves a table out of its registry to run a

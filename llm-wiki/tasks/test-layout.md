@@ -1,5 +1,7 @@
 # 3 — tests down the source tree
 
+Kind: production
+
 Third of four, after [`module-layout.md`](module-layout.md) and before
 [`test-support.md`](test-support.md).
 
