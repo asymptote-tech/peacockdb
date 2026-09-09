@@ -25,13 +25,12 @@ jobs:
   # evaluates it against the WHOLE PR diff, not the commits just pushed, so a PR that
   # touches any code runs the full pipeline on every later docs-only push — measured,
   # not assumed: a docs-only push to #118 started run 31644108948 with the filter live.
-  # This job closes that case by classifying the push range itself.
   #
   # Fail-open by construction. It answers `code=true` — run everything — for any event
   # that is not a synchronize, a force push or rebase, an unreadable compare, a range at
   # the API's page limit, and any file it cannot place. Only a clean append of
-  # documentation skips. A wrong skip is not a hole into master where the PR targets master
-  # — but the trigger above is `branches: [master]`, so a merge into a parent runs nothing.
+  # documentation skips. A wrong skip is not a hole into master: merging there re-runs from
+  # scratch, and `branches: [master]` means a chain PR reaches that run when its root does.
   changes:
     name: Changed paths
     runs-on: ubuntu-latest
