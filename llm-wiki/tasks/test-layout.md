@@ -371,9 +371,14 @@ moved the wrong thing.
 
 ### Test code is separated
 
-- `git grep -n '#\[cfg(test)\]' -- peacockdb-core/src` returns only `mod tests` declarations.
+- **Every grep here takes `--untracked`**, for the reason task 1 found the hard way: `git grep`
+  cannot see untracked files, so a sweep run before staging is blind to exactly the 8,450 lines
+  this task moves. A gate that reports clean over unstaged moves is the failure that looks like
+  success.
+- `git grep -n --untracked '#\[cfg(test)\]' -- peacockdb-core/src` returns only `mod tests`
+  declarations.
   Anything else is test code in a production file, which is what this task exists to end.
-- `git grep -n '#\[test\]' -- peacockdb-core/src` returns only paths containing `test`.
+- `git grep -n --untracked '#\[test\]' -- peacockdb-core/src` returns only paths containing `test`.
 - The transitive gate is checked by construction: add a line in `src/tests/` referencing a private
   item, confirm `cargo build --release` still succeeds; add a line in `plan/` referencing
   `crate::tests::`, confirm it fails with `E0433`. Revert both.

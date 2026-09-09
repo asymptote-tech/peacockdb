@@ -341,7 +341,10 @@ Nothing here may change what the engine computes, so the bar is the opposite of 
 
 It goes first, alone, and it is the only commit in the task whose diff touches `testdata/goldens/`.
 Sed the 13,246 lines, then regenerate and require an empty diff — the regeneration confirms the sed
-rather than authoring it. **Every later commit must show zero golden changes in `git diff --stat`,**
+rather than authoring it. **Plain `UPDATE_CANONICAL=1`, never with `PEACOCK_REWRITE_RECIPE_BYTES`:**
+without the second variable `test_plan_goldens` compares the committed payload digests against the
+bytes it just built and fails naming the file; with it, it rewrites them, and the digest agrees
+with itself having proved nothing. **Every later commit must show zero golden changes in `git diff --stat`,**
 and that is the single most valuable check in the task: a golden that moves after this point means
 the layout changed behaviour.
 
@@ -367,6 +370,11 @@ component that caused it rather than found at the end across a 138-file diff.
   no `pub use`; no `pub(super)`; subcomponents declared `mod`, not `pub mod`; and the item set
   unchanged from the baseline, since this task moves declarations and does not remove any. Run it
   at every component commit.
+- **Every grep in this task takes `--untracked`.** `git grep` does not see untracked files, so a
+  sweep run before staging is blind to exactly the files being moved — in task 1 a gate reported
+  clean while residue sat in four renamed files. This task moves every file in the crate, so the
+  blindness is total until each slice is staged. Run the sweeps after `git add`, or with
+  `--untracked`, and never before a move.
 - **`git diff -M --summary` reports renames**, not delete-plus-add. A file reported as both changed
   more than half its content, which a path rewrite and an import fix should not do.
 
