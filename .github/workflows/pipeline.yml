@@ -537,7 +537,7 @@ jobs:
           # here, on the runner, where coreutils are not the thing under suspicion.
           set -o pipefail
           rc=0
-          ssh gpu bash <<EOF 2>&1 | tee "$RUNNER_TEMP/gpu-tests.log" || rc=\$?
+          ssh gpu bash <<EOF 2>&1 | tee "$RUNNER_TEMP/gpu-tests.log" || rc=$?
             # Deliberately no 'set -e': run every test binary even when an
             # earlier one fails (e.g. TPC-H failing must not skip TPC-DS), then
             # fail the step at the end if anything failed. Each binary's pass/fail

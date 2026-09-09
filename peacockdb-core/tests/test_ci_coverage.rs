@@ -590,6 +590,12 @@ fn the_gpu_step_cannot_report_success_over_a_failure() {
         "the C++ loop no longer folds each binary's status into rc"
     );
     assert!(
+        step.contains("|| rc=$?"),
+        "the ssh pipeline's own status is not captured into rc. Written `rc=\\$?`, the escape \
+         a heredoc-shaped edit reaches for, it assigns the literal two characters and the \
+         status of the whole remote run is lost"
+    );
+    assert!(
         step.contains("Segmentation fault") && step.contains("::error::"),
         "nothing in the GPU step notices a command dying of a signal. Without 'set -e' such a \
          death folds no status into rc, so the step is green having crashed — which is how the \
