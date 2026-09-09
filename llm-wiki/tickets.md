@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 195), which is also the counter for
+New tickets take the next free number (currently 196), which is also the counter for
 `tasks/bp-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,10 +15,10 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 15 | #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 #41 |
-| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #169 #168 #158 #175 #173 #23 #32 #65 #62 #95 #57 #45 #63 #56 #55 #143 |
+| [Critical correctness](#critical-correctness) | 14 | #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 22 | #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #114 #134 #132 #129 #128 #127 #125 #13 #94 #69 #49 |
+| [Infrastructure / process](#infrastructure--process) | 21 | #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
 
 ## Critical correctness
 
@@ -144,18 +144,6 @@ is a no-op, so non-parquet dir entries are not skipped; and `read_table` never r
 `Err` (failures panic), making the `else { continue }` dead. A stray non-parquet file in
 a data dir panics instead of being skipped. Found during the comment audit.
 
-<a id="t41"></a>
-### #41 — Standing test for GpuUnion branch-type normalization cast
-Nothing is unimplemented — the title says *test*. `execute_union` retypes every branch column to
-the declared output type before `cudf::concatenate` (`union.cpp` ~L49), or it throws.
-
-What is open is that nothing covers it. The implementation comment names the case it was
-written for — tpcds q5, pairing a decimal measure against a `cast(0 AS decimal(7,2))` literal
-that materializes as FLOAT64, plus cuDF's SUM drifting fixed_point scale per branch. That case
-used to go red by luck, through a device tier that ran q5 and no longer exists; today no test
-reaches the cast at all. Fix: a focused gtest building a two-branch union with FLOAT64 against
-DECIMAL128, asserting the concatenate succeeds with the declared type. Cheap, and independent
-of any corpus query.
 
 ## Blockers for disabled coverage
 
@@ -192,7 +180,7 @@ already taken for the node it replaces: a leaf would orphan those subtrees and s
 above the failure while the rendering said nothing.
 
 Closing it is a third appended `ScalarValue` variant plus the C++ arm, on the terms the other two
-took ([the spec's constraints](tasks/batch_partitioned_executor.md#scope-and-constraints)). Not
+took, both appended so no ordinal moves. Not
 proposed: one query is a thin case for a surface change, and T21 does not need it.
 
 <a id="t158"></a>
@@ -249,15 +237,6 @@ Four TPC-DS queries fail to physical-plan on DataFusion 45 (`plan_status=fail`):
 SanityCheckPlan vs ROLLUP SortPreservingMerge ordering; q70/q86 `GROUPING()` aggregate
 not planned; q72 `Date32 + Int64` coercion. Whole rows dead until the upgrade. See #114.
 
-<a id="t32"></a>
-### #32 — GPU window functions / PARTITION BY
-The kernel gaps, which #143 sits on top of: this mode refuses a window query at plan time, so
-nothing reaches them today. Whole-partition aggregate windows worked
-(`cpp/src/operators/window.cpp`; q12/q51/q53/q63/q89 were green on a device before the modes
-that ran them went). Remaining: `rank()`/`dense_rank()` (`StandardWindowExpr`) for
-q36/q44/q47/q57/q67; q49 secondary blocker; q20 LIMIT-boundary NULL-ordering tiebreak; q98 OOM
-on a shared GPU.
-
 <a id="t65"></a>
 ### #65 — __grouping_id encoding doesn't match DataFusion's GROUPING()
 Grouping-set expansion (`cpp/src/operators/aggregate.cpp`) emits a gid that is
@@ -313,15 +292,6 @@ DataFusion evaluates `sum(decimal/int)`'s division (divisor cast to Decimal128) 
 the Partial phase; GpuAggregate re-evaluates against Final-phase inputs → cast failure.
 Honor the partial-phase operand cast / state schema.
 
-<a id="t143"></a>
-### #143 — window functions in batch-partitioned mode
-The planner refuses window queries at plan time, so a window query does not run at all —
-the one capability that went with the retired modes rather than moving to this one, and
-12 registry rows. Direction: a window is a per-partition op once the input is
-hash-partitioned on the PARTITION BY keys;
-whole-partition aggregate windows need a single batch (coalesce-all first), while
-`BoundedWindowAggExec`-class frames could stream as a `BatchAccumulator`. The
-rank/dense_rank gaps of #32 carry over unchanged.
 
 ## Performance / architecture
 
@@ -362,7 +332,7 @@ run is a second guess on top of the first.
 ### #170 — a source whose lanes each hold one batch could say so, and three shortcuts would fire
 
 The loader declares `MultipleBatches` unconditionally
-([the spec](tasks/batch_partitioned_executor.md#knobs)), so no downstream node may assume one
+([architecture.md](architecture.md#modes-and-knobs)), so no downstream node may assume one
 batch per partition. That was incremental simplicity rather than a missing fact: `partitioner.rs`
 computes the row-group → (partition, batch) mapping once at plan time and everything downstream
 consumes it verbatim, so the batch count per lane is `partition_groups[lane].len()` — known in all
@@ -381,7 +351,7 @@ and the plans get smaller by themselves. Every bp golden moves, which is its rea
 <a id="t155"></a>
 ### #155 — umbrella: join execution through a wider C and FlatBuffers API
 Every join mode already runs on the frozen surface (`scripts/exec_model`, and the capability
-matrix in `tasks/batch_partitioned_executor.md`); open is what running it there costs.
+matrix in `architecture.md`); open is what running it there costs.
 
 | Cost | Ticket | What removes it | Surface change |
 |---|--:|---|---|
@@ -418,7 +388,7 @@ needs the assert and not the observation. Land before [#155](#t155).
 ~L427), but a streamed probe calls the join seq once per batch and needs it B times.
 
 [#136](#t136) assumes the table is there and so does the recipe mapping in
-`tasks/batch_partitioned_executor.md`; neither says how. [#140](#t140) is the same constraint one
+`architecture.md`; neither says how. [#140](#t140) is the same constraint one
 axis over and [#145](#t145) is the mechanism both want.
 
 T16 confirmed both halves on a device. A build-side shape refuses its second probe batch, so only
@@ -484,13 +454,24 @@ integrated part's reservation sharing the page cache's pool. Tests: the GPU tier
 byte-identical, plus a case asserting a small limit is honoured.
 
 <a id="t19"></a>
-### #19 — Stats propagation: 55 TPC-DS hash joins blind to cardinality
-Measured when a wrapper tree sat between DataFusion's nodes and its optimizer: `num_rows`
-did not survive the descent, so JoinSelection could not flip build/probe on 55 of 103 joins
-across 38 queries, one confirmed mis-order being q45 with the build 9.95× larger than the
-probe. The wrappers are gone, so that half of the cause is gone with them and the number
-wants re-measuring against the plans DataFusion produces today. Foundation for all CBO work
-(#73, #20).
+### #19 — the planner has no cardinality estimate, and the memory model pays for it
+Widths are facts and source rows are facts — the schema, and the `rows`/`bytes` a scan reads
+off its surviving row groups at plan time (`batch_partitioned/parquet_meta.rs`). What a query
+does to them is guessed: `estimator.rs::rows` has a filter pass every row, an aggregate emit
+one group per input row, and a join emit its larger side.
+
+It shows twice, both in `estimate`. An accumulator is charged what it holds whatever the batch
+size, so an aggregate's state is priced at its whole input — tpch q1 groups six million rows
+into four and is billed six million — and that total comes off the budget before anything is
+divided, so `share_per_source` and every batch size derived from it come out smaller than the
+plan needs. `rows_are_certain` is what keeps the error one-directional: only the part of the
+accumulator total that rests on facts can refuse a plan, so a guess shrinks batches and never
+rejects a query.
+
+Not part of this any more: build/probe order is DataFusion's own JoinSelection over its own
+nodes, which nothing of ours now sits between — the 55-of-103 measurement this ticket opened
+with was of a wrapper tree that is deleted. #147 is the mechanism a real estimate would arrive
+through; #73 and #20 are what it unlocks.
 
 <a id="t16"></a>
 ### #16 — Dynamic / runtime filters: build-side keys → probe-side scan
@@ -719,6 +700,23 @@ trip log, and `Underestimate` is the precedent for what one would look like. Rel
 
 ## Infrastructure / process
 
+<a id="t195"></a>
+### #195 — the corpus is numeric-aggregate heavy, and six shapes have no query at all
+Measured off `bp-tp1-single.plans.txt` over the 61 enabled queries and the four largest held
+back: node counts run 33 to 267 while distinct node kinds run 6 to 12, median 9. More corpus
+tests scale, not surface, so each shape below wants a hand-written query over the existing
+tables, no new dataset, plus the engine work it needs.
+
+- `ORDER BY … LIMIT n OFFSET m`: every corpus limit has `skip=0`, so both lowerings' offset
+  half is synthetic-only; shape it away from [#166](#t166)'s two droppers.
+- `min`/`max` over a string or date column: zero uses, and the merge is a string reduce.
+- a join on a nullable key: [#59](#t59), [#80](#t80) and [#137](#t137) rest on there being none.
+- a shuffle keyed on a decimal: not a query but [#95](#t95)'s kernel work, and the murmur3
+  conformance gate extended to cover it.
+- two `DISTINCT` args over different expressions: [#144](#t144) has no refusal of its own, and
+  `count_distinct` marks queries this mode handles, so a grep for one finds the wrong two.
+- a wide `SELECT DISTINCT`: dedup whose state is the whole row, the compaction worst case.
+
 <a id="t178"></a>
 ### #178 — two CI runs share the GPU host, and the pool is sized for one
 `gpu-tests` uses a per-run `REMOTE_DIR` so two runs do not overwrite each other's files, and
@@ -874,39 +872,14 @@ Bit a fifth time in T19: the script pushed no query directory where `pipeline.ym
 so a T17 query was absent on the host. An absent file is loud; a stale one runs old text and writes
 cells describing a query the repo does not contain, with nothing red.
 
-<a id="t114"></a>
-### #114 — plan_status is shape-validated but never truth-verified
-`plan_status` (ok/fail) is shape-checked only; no test attempts to plan the `fail` rows.
-When #23 lands and q27/q70/q72/q86 start planning, the widget keeps rendering `plan ✗`
-with nothing going red. Fix: a permanent plan-attempt probe in `test_batch_partitioned_plans`
-asserting each `fail` row still fails to physically plan (and `ok` rows plan) — that tier
-already provisions parquet and already reads the registry. Accepted risk until then: stale ✗
-cells after an upgrade.
-
 <a id="t134"></a>
-### #134 — begin_plan's node count is returned and discarded on the production path
-`peacock_executor_begin_plan` fills `out_node_count`, and the session the GPU backend opens
-reads it into a local and drops it. That number is the one free cross-check on the invariant
-the whole node-by-node FFI rests on: the recipe writer's numbering and C++'s
-`index_post_order` are separate implementations of one rule, and every handle is addressed by
-the resulting sequence number. `test_gpu_recipe_walk` compares it against
-`RecipePlan::wire_nodes()` and is the only place both numbers exist at once; a production run
-meets a divergence indirectly instead — a section that stops matching, or an unknown-handle
-throw. Fix: make the same comparison where the session is opened, and error naming both
-numbers.
-
-<a id="t132"></a>
-### #132 — Two batch-size fields cross the IR and nobody writes or reads them
-`CudfScan.batch_size` and `CudfCoalesceBatches.target_batch_size` are in the fbs, and
-`grep -rn 'batch_size' cpp/src cpp/include` returns nothing. Neither is read: the scan reads
-by row group (`set_row_groups`), so there is no batch to size, and `CudfCoalesceBatches` is
-`execute_passthrough` in `dispatch.cpp`. Since the legacy planner went, neither is written
-either — the recipe writer emits no coalesce-batches node at all and leaves `batch_size` at
-its default — so they are two fields of wire-format surface with nobody on either end. The
-wire format is deliberately frozen, so the decision is whether a batch bound should ever
-cross it (a device would then have a memory lever it does not have) or the fields should go
-in a commit that regenerates the payload digest deliberately. Until then, do not read them as
-evidence that device execution is batch-bounded.
+### #134 — begin_plan's out_node_count is unused on the prod path
+The C++ reports how many fb nodes it indexed; `RecipePlan::wire_nodes()` is what the writer
+created. Comparing them is the one free check that both sides number one tree, which every
+handle's seq rests on — and no library code reads it: `src/` never calls `begin_plan`, so
+outside the tests the number is returned and dropped. Three of the four test openers compare
+(`corpus_gpu.rs`, `test_gpu_recipe_walk`, `test_gpu_executors`); `test_gpu_abi` does not. Fix:
+a helper beside `RecipePlan` that opens a plan and errors naming both numbers, used by all.
 
 <a id="t129"></a>
 ### #129 — The "26.02" CI leg builds against a 25.10a image; the GPU job has no fork guard
@@ -924,11 +897,17 @@ while the repo has no forks, which is exactly why it will bite later.
 ### #128 — Doctests run nowhere, and the meta guard cannot see them
 No step in `pipeline.yml` passes `--doc`, and `test_ci_coverage.rs` enumerates `--test`
 targets plus `--lib`, so a doctest is invisible to the guard whose whole job is finding
-targets CI does not run. The crate has no doctest today — the one it had went with
-`CpuExecutor` — so nothing is unrun right now, and the first one written would be, silently.
-Fix: run `cargo test --features rust-only -p peacockdb-core --doc` in the dataset-matrix tier
-and teach the guard that `--doc` is a target class it must see named (the `--lib` check at
-`line_runs_lib_tests` is the pattern).
+targets CI does not run. The crate has none today: the one it had documented an entry point
+that no longer exists.
+
+There is now one pipeline to document, and it is three calls in a fixed order —
+`plan_batch_partitioned` for the tree, `attach_recipes` where a device is involved, and
+`batch_partitioned_driver` over a backend. `peacockdb/src/main.rs` is the only place that
+sequence is written down, and a reader of the crate meets the three functions separately. A
+doctest on the entry it documents is the natural fix and the reason to close both halves at
+once: write it, run `cargo test --features rust-only -p peacockdb-core --doc` in the
+dataset-matrix tier, and teach the guard that `--doc` is a target class it must see named
+(the `--lib` check at `line_runs_lib_tests` is the pattern).
 
 <a id="t127"></a>
 ### #127 — Unowned testdata dirs on shad-gpu
@@ -980,8 +959,15 @@ It matters because a test binary is built on one host and run on another: remote
 binaries, goldens and data but never source, so a compile-time path is a path the remote does
 not have. `tests/common/mod.rs testdata_root()` solves that by honouring `PEACOCK_TESTDATA_DIR`
 first, which `build-test.sh` sets for remote runs. The residual is the crate's own unit tests
-— six sites under `src/batch_partitioned/` reaching `tpch.minimal` — which is exactly why a
-remote CPU host needs a `/media/data/peacockdb` symlink and why `--gpu` runs, which set the
-env var, do not. `test_ci_coverage.rs` and the fbs reader in `test_batch_partitioned_plans`
-are not this: their `CARGO_MANIFEST_DIR` resolves the repo root to read committed source, not
-testdata, and no env var should redirect that. Sweep the six, close it.
+— six sites under `src/batch_partitioned/` reaching `tpch.minimal`, in `estimator.rs`,
+`parquet_meta.rs`, `plan_text/mod.rs` and `translate/{tests,schema_tests}.rs` — which is
+exactly why a remote CPU host needs a `/media/data/peacockdb` symlink and why `--gpu` runs,
+which set the env var, do not.
+
+The sweep is not the one the integration tests got: a unit test cannot reach
+`tests/common/mod.rs`, so the fix is a `#[cfg(test)]` helper in `src` honouring
+`PEACOCK_TESTDATA_DIR` with the same fallback, and the two spellings then have to be held to
+each other or they are the drift this ticket is about one layer down.
+`test_ci_coverage.rs` and the fbs reader in `test_batch_partitioned_plans` are not this: their
+`CARGO_MANIFEST_DIR` resolves the repo root to read committed source, not testdata, and no env
+var should redirect that.

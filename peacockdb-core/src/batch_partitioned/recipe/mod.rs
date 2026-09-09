@@ -4,7 +4,7 @@
 //! whose nodes exist to be addressed — a menu of parameterized kernels — and the driver
 //! then calls the ABI as often as its own schedule wants. One walk builds that buffer and
 //! records, per plan node, the calls it makes and the seqs they address;
-//! `llm-wiki/tasks/batch_partitioned_executor.md` has the table it implements.
+//! `llm-wiki/architecture.md` has the table it implements.
 //!
 //! A node that makes no ABI call gets no recipe, and the absence is a statement about the
 //! node rather than a gap: a forwarder routes batches and touches no device.

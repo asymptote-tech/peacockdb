@@ -1,8 +1,8 @@
 # batch-partitioned execution model — Python prototype
 
 An emulation of the execution model in
-[`llm-wiki/tasks/batch_partitioned_executor.md`](../../llm-wiki/tasks/batch_partitioned_executor.md),
-built to settle the scheduling rule and the trait set before any Rust exists (task T0).
+[`llm-wiki/architecture.md`](../../llm-wiki/architecture.md), built to settle the scheduling
+rule and the trait set before any Rust existed.
 Not production code. The tests run in CI, in the `cost-report` job's cheap python tier.
 
 **The coordinator owns this prototype.** Changes here are made by the coordinator directly

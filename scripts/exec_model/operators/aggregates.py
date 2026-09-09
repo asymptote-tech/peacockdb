@@ -1,8 +1,7 @@
 """Aggregate specs and the three-part decomposition.
 
 An aggregate is declared as three things, and every node runs the parts it needs — there
-is no phase flag anywhere (`llm-wiki/tasks/batch_partitioned_executor.md`, "The aggregate
-sequence"):
+is no phase flag anywhere (`llm-wiki/architecture.md`, "The aggregate sequence"):
 
 - **init** (`partial`) — aggregators over raw rows, emitting *state* columns. One aggregate
   may emit several: `avg` emits sum and count, `stddev` emits Welford's count, mean and m2.

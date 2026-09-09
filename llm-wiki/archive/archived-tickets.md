@@ -4,6 +4,10 @@ Tickets that are finished or that the tree outgrew. Numbers stay permanent and a
 reused, so a commit message or comment naming an old ticket still resolves — here.
 `llm-wiki/tickets.md` holds only open work.
 
+Three closing markers, and they say different things: **Done** is fixed, **Stale** is
+overtaken by the tree, and **Obsolete** is a capability or a question deliberately dropped —
+which a later reader needs to tell from an oversight. Stale and obsolete share a section.
+
 **Numbers spent without a ticket.** A number withdrawn before it described anything real is
 recorded here and nowhere else, so the counter never walks back over it:
 
@@ -182,8 +186,7 @@ hardcodes.
 **The three stay disabled in the legacy modes deliberately**, which is why this is closed
 rather than acted on: they are `full_table_gpu=na` by choice now, not by defect, and the
 registry keeps `115` in their `tickets` column so the widget still says which decision the
-cells rest on. The batch-partitioned mode plans all three; q87 is recorded in
-`llm-wiki/tasks/batch_partitioned_executor.md` as a query whose corpus is larger than legacy's.
+cells rest on. The batch-partitioned mode plans all three.
 
 <a id="t77"></a>
 ### #77 — Cost report: publish per-SHA history on master
@@ -246,7 +249,93 @@ prebuilt binaries to shad-gpu rather than building there, and the golden/meta ti
 under `rust-only` with no C++ at all. Re-file with concrete time targets if CI length
 becomes a problem again.
 
-## Stale
+## Stale or obsolete
+
+<a id="t41"></a>
+### #41 — Standing test for GpuUnion branch-type normalization cast
+Nothing is unimplemented — the title says *test*. `execute_union` retypes every branch column to
+the declared output type before `cudf::concatenate` (`union.cpp` ~L49), or it throws.
+
+What is open is that nothing covers it. The implementation comment names the case it was
+written for — tpcds q5, pairing a decimal measure against a `cast(0 AS decimal(7,2))` literal
+that materializes as FLOAT64, plus cuDF's SUM drifting fixed_point scale per branch. That case
+used to go red by luck, through a device tier that ran q5 and no longer exists; today no test
+reaches the cast at all. Fix: a focused gtest building a two-branch union with FLOAT64 against
+DECIMAL128, asserting the concatenate succeeds with the declared type. Cheap, and independent
+of any corpus query.
+
+**Obsolete 2026-09-08.** The kernel it asks to pin is unreachable. No recipe addresses a
+union — `FbKind` has no variant for one, and the only `CudfUnion` the writer emits is
+structural, holding branches together with no seq published for it — so `execute_union` and
+the `cudf::cast` inside it are never called by this pipeline. What normalizes branch types now
+is a per-branch `GpuProject` the planner inserts, and twelve corpus queries carry a union at
+`bp-tp1-single` with tpcds q5 among them, answered against DataFusion on the cpu backend. A
+gtest here would pin a path nothing takes; the device side of those twelve is the rollout's
+gap, not this ticket's.
+
+<a id="t32"></a>
+### #32 — GPU window functions / PARTITION BY
+The kernel gaps, which #143 sits on top of: this mode refuses a window query at plan time, so
+nothing reaches them today. Whole-partition aggregate windows worked
+(`cpp/src/operators/window.cpp`; q12/q51/q53/q63/q89 were green on a device before the modes
+that ran them went). Remaining: `rank()`/`dense_rank()` (`StandardWindowExpr`) for
+q36/q44/q47/q57/q67; q49 secondary blocker; q20 LIMIT-boundary NULL-ordering tiebreak; q98 OOM
+on a shared GPU.
+
+**Obsolete 2026-09-08.** Window functions are not a capability this engine is carrying: the
+planner refuses a window query before any of these kernels is reached ([#143](#t143), obsolete
+beside this), and the mode that once ran them on a device is deleted. The gaps are recorded
+here for whoever revives the feature rather than tracked as work.
+
+<a id="t143"></a>
+### #143 — window functions in batch-partitioned mode
+The planner refuses window queries at plan time, so a window query does not run at all —
+the one capability that went with the retired modes rather than moving to this one, and
+12 registry rows. Direction: a window is a per-partition op once the input is
+hash-partitioned on the PARTITION BY keys;
+whole-partition aggregate windows need a single batch (coalesce-all first), while
+`BoundedWindowAggExec`-class frames could stream as a `BatchAccumulator`. The
+rank/dense_rank gaps of #32 carry over unchanged.
+
+**Obsolete 2026-09-08.** Window support is not planned. A window query is refused at plan
+time, so thirteen TPC-DS queries do not run and their registry cells stay `na` — a decision
+with a consequence, not an oversight, and the kernel-side gaps are in [#32](#t32) beside this.
+
+<a id="t114"></a>
+### #114 — plan_status is shape-validated but never truth-verified
+`plan_status` (ok/fail) is shape-checked only; no test attempts to plan the `fail` rows.
+When #23 lands and q27/q70/q72/q86 start planning, the widget keeps rendering `plan ✗`
+with nothing going red. Fix: a permanent plan-attempt probe in `test_batch_partitioned_plans`
+asserting each `fail` row still fails to physically plan (and `ok` rows plan) — that tier
+already provisions parquet and already reads the registry. Accepted risk until then: stale ✗
+cells after an upgrade.
+
+**Obsolete 2026-09-08.** The probe it asked for exists, as a golden line rather than a test
+of its own: each `<mode>.plans.txt` holds `refused by datafusion: …` per query,
+`the_registry_matches_the_goldens_in_both_directions` maps that line to `na` in both
+directions, and `load_csv` refuses an enabled cell on a `plan_status=fail` row. So when #23
+lands and q27/q70/q72/q86 start planning, the golden moves first and the cells and the status
+cannot stay as they are.
+
+<a id="t132"></a>
+### #132 — Two batch-size fields cross the IR and nobody writes or reads them
+`CudfScan.batch_size` and `CudfCoalesceBatches.target_batch_size` are in the fbs, and
+`grep -rn 'batch_size' cpp/src cpp/include` returns nothing. Neither is read: the scan reads
+by row group (`set_row_groups`), so there is no batch to size, and `CudfCoalesceBatches` is
+`execute_passthrough` in `dispatch.cpp`. Since the legacy planner went, neither is written
+either — the recipe writer emits no coalesce-batches node at all and leaves `batch_size` at
+its default — so they are two fields of wire-format surface with nobody on either end. The
+wire format is deliberately frozen, so the decision is whether a batch bound should ever
+cross it (a device would then have a memory lever it does not have) or the fields should go
+in a commit that regenerates the payload digest deliberately. Until then, do not read them as
+evidence that device execution is batch-bounded.
+
+**Obsolete 2026-09-08.** With the legacy planner gone nothing writes these two either — the
+recipe writer emits no coalesce-batches node at all and leaves `CudfScan.batch_size` at its
+default — so they are inert fields of a frozen schema rather than a knob that misleads.
+Dropping them would move every payload byte and the digest that pins them, for no reader's
+benefit; a real batch bound, if a device ever takes one, is a new field designed for the mode
+that wants it.
 
 <a id="t96"></a>
 ### #96 — GPU real-8-way per-partition JOIN execution
