@@ -58,7 +58,7 @@ class TraceEvent:
     n_out: int
 
 
-class BatchPartitionedDriver:
+class PartitionedDriver:
     def __init__(self, plan: Plan, selector: BackendSelector, budget: int | None = None):
         self.plan = plan
         self.selector = selector
@@ -452,6 +452,6 @@ class BatchPartitionedDriver:
 
 def partitioned_driver(
     plan: Plan, selector: BackendSelector, budget: int | None = None
-) -> BatchPartitionedDriver:
+) -> PartitionedDriver:
     """Constructor spelled as the driver name the spec uses."""
-    return BatchPartitionedDriver(plan, selector, budget)
+    return PartitionedDriver(plan, selector, budget)
