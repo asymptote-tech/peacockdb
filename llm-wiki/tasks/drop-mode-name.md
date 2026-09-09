@@ -20,10 +20,15 @@ four in [`tasks.md`](tasks.md) — rebasing across them is a whole-tree conflict
 
 ## What changes
 
-138 files carry the name in a path; 964 content lines outside the goldens and 169 inside.
+138 files carry the name in a path; 964 content lines outside the goldens and 169 inside. (The
+gate below also lands on 138 — a coincidence, not the same 138.)
 
-**Mode labels lose the prefix**: `bp-tp4-sized` becomes `tp4-sized`. One table owns them, `BP_MODES`
-in `tests/common/bp_mode.rs`, and `ident()` derives the macro spelling by replacing hyphens — so the
+`BpMode`, `BP_MODES` and `bp_mode.rs` become `Mode`, `MODES` and `mode.rs`. The lowercase gate
+catches the filename but not the two identifiers, and a `BpMode` in a tree with no `bp` anywhere
+else is the qualifier-against-nothing this task exists to remove.
+
+**Mode labels lose the prefix**: `bp-tp4-sized` becomes `tp4-sized`. One table owns them, `MODES`
+in `tests/common/mode.rs` (`BP_MODES` in `bp_mode.rs` before the rename above), and `ident()` derives the macro spelling by replacing hyphens — so the
 table plus a sed over `corpus_cases.inc` covers the Rust side. Then `cost-registry.csv`'s fifteen
 `bp_*` column headers, `testdata/fixtures/two-row-registry.csv`'s identical headers, and the
 twenty-one sites in `cost-report/src/main.rs`.
@@ -61,10 +66,14 @@ the failure is an `ImportError` at collection time, so run the prototype suite b
 guard fails on a miss, which is the check. `exec-model-corpus.yml` carries the phrase in a comment;
 `pipeline.yml` is not the only workflow to sweep.
 
-**Two traps.**
+**Three traps.**
 
 - **`batch` alone is a domain word.** `BatchSizing`, `Batching`, `batch_rows`, `AggregateBatches`,
   `CudfCoalesceBatches` all stay. Only the two-word phrase goes.
+- **`batch→partition` is not the mode name.** Four sites — `gpu_plan.fbs:312` and `:346`,
+  `node_session.cpp:220`, `gpu_rowgroup_prune.rs:151` — describe the row-group→batch→partition
+  *mapping*, which is a real three-level structure and stays. A regex with `.` between the words
+  matches the arrow, so a careless sweep mangles them.
 - **In `llm-wiki` the phrase is the mode's name, not a qualifier** — 185 hits, plus roughly ten in
   `cpp/` and `gpu_plan.fbs`. Those sentences want rewriting to say the engine; a mechanical strip
   leaves them ungrammatical and, worse, still wrong.
@@ -92,6 +101,14 @@ quietly changed.
   `test_batch_partitioned_plans` and the corpus cpu tier rewrites every golden from a live run;
   `git diff` after it must be empty. The hash check says the files did not move; this says the
   engine still produces them.
+- **The refusal message is the one exception, and it is quarantined.** `error.rs:20` renders
+  `"unsupported in batch-partitioned mode: {what}"` and `translate/mod.rs:221` says "do not plan in
+  batch-partitioned mode (#143)" — and those strings land in **75 lines across the ten
+  `.plans.txt` goldens**. Reword them in their own commit, last: everything before it must
+  regenerate to an empty diff, and that commit's regeneration must produce a diff of exactly those
+  75 lines and nothing else. Same shape as task 2's `GpuHashJoin` quarantine, and the same reason —
+  it separates the strong check from the one known change. The wording is the developer's, under
+  two constraints: it must not say "mode", and the two sites must agree.
 - **The payload digests are the sharpest instrument.** Regenerate with
   `PEACOCK_REWRITE_RECIPE_BYTES=1` and the fixed `/tmp` testdata symlink; an empty diff means the
   flat-buffer bytes are unchanged down to statement order. A digest that moves during a rename means
@@ -104,10 +121,19 @@ quietly changed.
   there rather than in a later task.
 - **The exec-model suite runs before the commit**, not after. Its 216 cases are the only check on
   the Python module rename, and an `ImportError` there is silent until collection.
-- **Grep gates, all empty**: `git grep -inE 'batch.partition' -- ':!llm-wiki' ':!peacockdb-core/src'`,
-  `git grep -nE '\bbp[-_]' -- ':!peacockdb-core/src'`, and `git grep -n 'bp-tickets'`. The two
-  exclusions are the src tree, whose directory name task 2 removes, and `llm-wiki`, whose prose is
-  rewritten by hand rather than swept.
+- **The prose-and-labels gate.** The naive form cannot be empty, because this task deliberately
+  keeps `src/batch_partitioned/` and deliberately does not rename `plan_batch_partitioned` or
+  `batch_partitioned_driver` — 132 lines outside `peacockdb-core/src` name the module path (128 in
+  `peacockdb-core/tests/**`, 4 in `peacockdb/src/main.rs`) and 42 more name those two functions. All
+  of it is the residue task 2 removes. So the gate excludes the four spellings that survive:
+
+  ```
+  git grep -inE 'batch.partition' -- ':!llm-wiki' ':!peacockdb-core/src' \
+    | grep -vE 'batch_partitioned::|::batch_partitioned|plan_batch_partitioned|batch_partitioned_driver'
+  ```
+
+  That is 138 lines today and is the worklist; empty is the finish line. Plus
+  `git grep -nE '\bbp[-_]' -- ':!peacockdb-core/src'` and `git grep -n 'bp-tickets'`, both empty.
 - **`test_ci_coverage` passes**, so a missed target rename fails there rather than silently
   un-gating a tier.
 

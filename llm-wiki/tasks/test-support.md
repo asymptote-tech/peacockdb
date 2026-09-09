@@ -20,7 +20,7 @@ unrelated to it.
 
 ## The move
 
-`corpus.rs` (508 lines), `corpus_gpu.rs` (184) and `bp_mode.rs` (88) go to `src/test_support/`,
+`corpus.rs` (508 lines), `corpus_gpu.rs` (184) and `mode.rs` (88, `bp_mode.rs` before task 1) go to `src/test_support/`,
 behind a feature. Inside the crate they reach `pub(crate)` items, so the eight stop being `pub`.
 
 The two binaries name **none** of the eight directly. They call three functions whose signatures are
@@ -49,8 +49,8 @@ is the whole reason these eight exist.
 ## test_support is shaped like a component
 
 `src/test_support/mod.rs` declares the whole API the integration tests may reach — `cpu_case`,
-`gpu_case`, `authoritative_mode`, `over_cap`, `BpMode`, `BP_MODES`, `MemoryLimit`, `TIER`, `BUDGET`
-— and `mod corpus; mod corpus_gpu; mod bp_mode;` are private implementation modules with
+`gpu_case`, `authoritative_mode`, `over_cap`, `Mode`, `MODES`, `MemoryLimit`, `TIER`, `BUDGET`
+— and `mod corpus; mod corpus_gpu; mod mode;` are private implementation modules with
 `pub(crate)` items. Same rules as a component, for a reason beyond symmetry: **the check below is a
 scan of one file only if the API lives in one file.**
 
@@ -59,7 +59,7 @@ as `src/tests/`, and the reason it reaches `pub(crate)` items without any of the
 
 ## The rule that makes this encapsulation rather than renaming
 
-**Every `pub` in `test_support` takes and returns strings, `BpMode`, `MemoryLimit` or nothing.** A
+**Every `pub` in `test_support` takes and returns strings, `Mode`, `MemoryLimit` or nothing.** A
 signature mentioning `GpuNode` or `RunReport` puts the item straight back on the surface under
 another name, and it compiles. This goes in `coding-style.md` beside the visibility rules, and the
 layout test enforces it.
