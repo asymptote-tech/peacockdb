@@ -442,6 +442,13 @@ jobs:
     name: GPU Tests (remote)
     needs: cpp-build-2502
     runs-on: ubuntu-latest
+    # One physical device, so one of these at a time across every ref. Two jobs on the same
+    # GPU contend for its memory, and --test-threads=1 keeps one test at a time inside a
+    # process but cannot reach across two. Queued rather than cancel-in-progress: a
+    # cancelled run can leave both its REMOTE_DIR and the device's state behind.
+    concurrency:
+      group: shad-gpu
+      cancel-in-progress: false
     # Secrets aren't passed to fork PRs, so this job just fails-fast there.
     env:
       GPU_HOST: info@llm-gpu0h200.velkerr.ru
