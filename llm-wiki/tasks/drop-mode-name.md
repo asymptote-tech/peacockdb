@@ -147,7 +147,7 @@ quietly changed.
   of it is the residue task 2 removes. So the gate excludes the four spellings that survive:
 
   ```
-  git grep -inE --untracked 'batch.?partition' -- ':!llm-wiki' ':!peacockdb-core/src' ':!testdata/goldens' \
+  git grep -inE --untracked 'batch.?partition' -- ':!llm-wiki' ':!peacockdb-core/src' \
     | grep -vE 'mod batch_partitioned|batch_partitioned/|batch_partitioned::|::batch_partitioned|plan_batch_partitioned|batch_partitioned_driver'
   ```
 
@@ -157,6 +157,17 @@ quietly changed.
   four surviving spellings written out rather than a bare `batch_partitioned`, which would swallow
   every underscore residue including `--test test_batch_partitioned_plans` and
   `mod test_batch_partitioned_injection` — the target-rename miss the gate exists to catch.
+
+  **Run it in a UTF-8 locale.** `→` is three bytes, and under `LC_ALL=C` a `.` matches one byte, so
+  the pattern cannot span the arrow and the three mapping sites drop out — the gate reports three
+  and reads as cleaner rather than as half-blind. The residue half is unaffected either way, since
+  CamelCase needs zero characters and every separator form is one byte, so a C-locale run is safe
+  but its count is not the documented one. `build-test.md` sends people to `LC_ALL=C` for
+  cross-host comparison, so this is a real way to meet it.
+
+  The goldens are deliberately **not** excluded. They carry no hits once the refusal is reworded,
+  so excluding them buys nothing today — and they are exactly where that wording lands, so a gate
+  blind to them could not catch it coming back.
 
   At the finish it lands on **six**, all deliberate: the three `batch→partition` mapping sites,
   `README.md:371` and `source.py:3` naming `ParquetBatchPartitioner` (the same structure, not the
@@ -187,11 +198,12 @@ computed path with `.expect(...)`, and `test_cost_model` sweeps the same directo
 tier is not the first reader of those filenames, and a run that claims to be proving them is
 claiming the wrong thing.
 
-What the device run genuinely adds is that the **sections inside** those files still resolve and
-the plan shapes still match — `test_gpu_corpus` reads what the cpu tier authored, read-only, from
-the far side of the ABI, and that is the part the cpu tier cannot self-check because it wrote what
-it is reading. Worth stating correctly: the same judgement recurs in tasks 2 and 3, and "only the
-device can see this" is an easy claim to make about a filename when it is true only of a section.
+Nor is "the sections resolve" the whole of it: `test_corpus_goldens` already checks committed
+sections it did not write, against their own arithmetic, with no run at all. What the device run
+uniquely adds is those sections checked against **a second engine's actual run** — plan shape,
+`in_rows`, the per-batch lists, the bytes. That is the claim that stays true in tasks 2 and 3, and
+"only the device can see this" is an easy thing to say about a filename when it is true only of a
+comparison between engines.
 
 ### Done when
 
