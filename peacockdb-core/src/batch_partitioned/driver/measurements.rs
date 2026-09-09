@@ -33,19 +33,9 @@ pub struct Region {
     pub seq: Seq,
     pub partition: usize,
     pub call_index: u64,
-    pub host_setup_us: u64,
-    pub host_submit_us: u64,
-    /// Zero where the region recorded no complete event pair — it touched no device, or
-    /// the events could not be created. Absent regions are dropped by C++, not zeroed;
-    /// this zero is the other case.
-    pub device_us: u64,
-    /// Rows and bytes this call answered with, for this output partition. The only place a
-    /// middle call's output exists: a node driving several hands its caller the last one's
-    /// and drops the rest.
-    pub out_rows: u64,
-    /// C++'s own reconstruction of the byte total. The only figure for a call in the
-    /// middle of a node's chain, which hands the raw handle on — nothing here priced it.
-    pub logical_bytes: u64,
+    /// What this one region cost and produced, in the same shape a summed call carries —
+    /// so summing is `+=` and not a field list that a seventh field can be left out of.
+    pub measured: Measured,
 }
 
 /// What the device reported about one call, summed over the regions it produced.
@@ -61,14 +51,34 @@ pub struct Region {
 pub struct Measured {
     pub host_setup_us: u64,
     pub host_submit_us: u64,
+    /// Zero where the region recorded no complete event pair — it touched no device, or
+    /// the events could not be created. Absent regions are dropped by C++, not zeroed;
+    /// this zero is the other case.
     pub device_us: u64,
+    /// Rows this answered with. The only place a middle call's output exists: a node
+    /// driving several hands its caller the last one's and drops the rest.
     pub out_rows: u64,
     /// Priced by C++'s own reconstruction of the byte rule — the only figure that exists
     /// for a chained call, which this side never built a batch from.
     pub out_bytes: u64,
-    /// Regions that answered for this call. Zero means the device recorded none — a call
-    /// the measurement did not see, which is not the same as a call that cost nothing.
+    /// Regions that answered. One on a [`Region`], where it is what makes the count fall
+    /// out of the sum; zero on a call means the device recorded none, which is not the
+    /// same as a call that cost nothing.
     pub regions: usize,
+}
+
+impl std::ops::AddAssign for Measured {
+    /// Field for field, because every field of this is additive over regions — including
+    /// `regions` itself. The one operation the three summations in this module need, so
+    /// that a field added above is summed everywhere without visiting them.
+    fn add_assign(&mut self, other: Self) {
+        self.host_setup_us += other.host_setup_us;
+        self.host_submit_us += other.host_submit_us;
+        self.device_us += other.device_us;
+        self.out_rows += other.out_rows;
+        self.out_bytes += other.out_bytes;
+        self.regions += other.regions;
+    }
 }
 
 impl Measured {
@@ -138,13 +148,7 @@ pub fn join_regions(report: &RunReport, regions: &[Region]) -> (Measurements, Ve
     // partition 0, so any single region is a fraction of the call.
     let mut per_call: HashMap<(Seq, u64), Measured> = HashMap::new();
     for region in regions {
-        let call = per_call.entry((region.seq, region.call_index)).or_default();
-        call.host_setup_us += region.host_setup_us;
-        call.host_submit_us += region.host_submit_us;
-        call.device_us += region.device_us;
-        call.out_rows += region.out_rows;
-        call.out_bytes += region.logical_bytes;
-        call.regions += 1;
+        *per_call.entry((region.seq, region.call_index)).or_default() += region.measured;
     }
     let mut claimed: HashMap<(Seq, u64), ()> = HashMap::new();
     let per_entry = report
@@ -165,12 +169,7 @@ pub fn join_regions(report: &RunReport, regions: &[Region]) -> (Measurements, Ve
                                     continue;
                                 };
                                 claimed.insert((call.seq, call.call_index), ());
-                                total.host_setup_us += found.host_setup_us;
-                                total.host_submit_us += found.host_submit_us;
-                                total.device_us += found.device_us;
-                                total.out_rows += found.out_rows;
-                                total.out_bytes += found.out_bytes;
-                                total.regions += found.regions;
+                                total += *found;
                             }
                             Some(total)
                         })
@@ -198,13 +197,7 @@ pub fn node_measured(times: &Measurements, node: usize) -> Option<Measured> {
     let mut total: Option<Measured> = None;
     for lane in times.lanes(node) {
         for call in lane.iter().flatten() {
-            let sum = total.get_or_insert(Measured::default());
-            sum.host_setup_us += call.host_setup_us;
-            sum.host_submit_us += call.host_submit_us;
-            sum.device_us += call.device_us;
-            sum.out_rows += call.out_rows;
-            sum.out_bytes += call.out_bytes;
-            sum.regions += call.regions;
+            *total.get_or_insert(Measured::default()) += *call;
         }
     }
     total

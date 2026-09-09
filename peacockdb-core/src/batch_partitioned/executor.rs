@@ -56,8 +56,8 @@ pub struct AbiCall {
     pub call_index: u64,
     pub in_rows: u64,
     /// `None` where the input was the call before it rather than a batch this side was
-    /// holding: nobody here priced it, and the C++ region for that call reports its
-    /// `logical_bytes`.
+    /// holding: nobody here priced it, and the region for that call reports its
+    /// `out_bytes`.
     pub in_bytes: Option<u64>,
 }
 
