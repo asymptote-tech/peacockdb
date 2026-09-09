@@ -154,10 +154,12 @@ quietly changed.
   inline test modules) and `test_cost_model.rs:196` (an `include_str!` of a src path). The last two
   are task 2 residue and go when the module does.
 
-  Then `git grep -nE --untracked '\bbp[-_]' -- ':!peacockdb-core/src' ':!llm-wiki/archive'` and
-  `git grep -n --untracked 'bp-tickets'`, both empty. The archive exclusion is this task's own rule
-  about historical prose: 21 mode labels there record what the modes were called at the time, and
-  `llm-wiki/archive` is the one place `bp-` deliberately survives.
+  Then `git grep -nE --untracked '\bbp[-_]' -- ':!peacockdb-core/src' ':!llm-wiki'` and
+  `git grep -n --untracked 'bp-tickets' -- ':!llm-wiki'`, both empty. `llm-wiki` is excluded whole
+  because it is rewritten by hand rather than swept, and two parts of it keep `bp` on purpose: the
+  archive's 21 mode labels, which record what the modes were called at the time and would be
+  falsified by an edit, and these four task specs, which have to quote both spellings to say what
+  becomes what.
 
   **`--untracked` is not optional, and it is the trap that would have shipped residue.** `git grep`
   does not see untracked files, so every gate is blind to exactly the 42 files this task renames —
