@@ -111,7 +111,7 @@ pub mod raw {
 
         /// Execute the `CudfScan` at post-order `seq` reading exactly
         /// `row_groups[0..n)` rather than the list the node carries, storing its one
-        /// output as a new resident handle — the batch-partitioned loader's one call
+        /// output as a new resident handle — the loader's one call
         /// per batch. `n == 0` is refused rather than read as "every group", and a
         /// `seq` naming any other kind of node fails saying which.
         pub fn peacock_executor_execute_scan_rowgroups(

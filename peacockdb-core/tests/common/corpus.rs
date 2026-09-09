@@ -17,7 +17,7 @@ use peacockdb_core::batch_partitioned::plan_text::render_run;
 use peacockdb_core::batch_partitioned::{GpuNode, validate};
 
 use super::result_text::ResultDigest;
-use super::bp_mode::{BP_MODES, BpMode, mode_named};
+use super::mode::{MODES, Mode, mode_named};
 use super::cost_model::CostModel;
 use super::{
     RESULT_GOLDEN_MAX_BYTES, assert_results_match, batches_to_sorted_str, corpus_golden,
@@ -39,7 +39,7 @@ pub async fn plan_at(
     dataset: &str,
     sf: &str,
     query: &str,
-    mode: &BpMode,
+    mode: &Mode,
 ) -> (SessionContext, Box<dyn GpuNode>) {
     let what = format!("{dataset}/{query} at {}", mode.name);
     let ctx = session_for(dataset, sf, mode.target_partitions).await;
@@ -59,7 +59,7 @@ pub async fn plan_at(
 }
 
 /// Plan and run on the CPU backend, with the two accounting assertions every run makes.
-pub async fn run_cpu(dataset: &str, sf: &str, query: &str, mode: &BpMode) -> CpuRun {
+pub async fn run_cpu(dataset: &str, sf: &str, query: &str, mode: &Mode) -> CpuRun {
     let what = format!("{dataset}/{query} at {}", mode.name);
     let (ctx, tree) = plan_at(dataset, sf, query, mode).await;
     let report = batch_partitioned_driver::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
@@ -89,7 +89,7 @@ pub async fn assert_answer(
     dataset: &str,
     sf: &str,
     query: &str,
-    mode: &BpMode,
+    mode: &Mode,
     oracle: &str,
     batches: &[RecordBatch],
 ) {
@@ -382,21 +382,21 @@ pub async fn cpu_case(dataset: &str, sf: &str, query: &str, mode: &str, cpu_orac
     }
 }
 
-/// The `bp_cpu_` column this mode's cells live in.
-fn cpu_column(mode: &BpMode) -> String {
-    format!("bp_cpu_{}", mode.ident().trim_start_matches("bp_"))
+/// The `cpu_` column this mode's cells live in.
+fn cpu_column(mode: &Mode) -> String {
+    format!("cpu_{}", mode.ident())
 }
 
 /// Which mode authors `.result.txt`: the last mode the query DECLARES, in the fixed
 /// sequence of five. Its authority is a property of the declaration and not of what
 /// happened to run, which is what keeps the one golden with no mode in its key well defined
 /// under a filtered regeneration — a run without the authority leaves the section alone.
-pub fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'static BpMode> {
+pub fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'static Mode> {
     let rows = registry::load_csv();
     let row = rows
         .iter()
         .find(|row| row.dataset == dataset && row.sf == sf && registry::stem(&row.query) == query)?;
-    BP_MODES.iter().rev().find(|mode| {
+    MODES.iter().rev().find(|mode| {
         row.states
             .get(&cpu_column(mode))
             .is_some_and(|state| state == "enabled" || state == "skip")
@@ -410,7 +410,7 @@ pub fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'stat
 /// The marker keeps first position and `mode=` follows it: `corpus_gpu` reads a leading
 /// SKIPPED as "this section holds no rows", so a mode line ahead of it would let a
 /// `golden_exact` declaration pass against a section with nothing to compare.
-pub fn over_cap(bytes: Option<usize>, mode: &BpMode) -> String {
+pub fn over_cap(bytes: Option<usize>, mode: &Mode) -> String {
     let size = match bytes {
         Some(bytes) => format!("is {bytes} bytes, at or above"),
         None => "is at or above".to_string(),
@@ -429,7 +429,7 @@ fn assert_result_section(
     dataset: &str,
     sf: &str,
     query: &str,
-    mode: &BpMode,
+    mode: &Mode,
     batches: &[RecordBatch],
 ) {
     // Sized before it is built, and the cells alone are a lower bound on the table: an
@@ -446,7 +446,7 @@ fn assert_result_section(
             }
         }
     };
-    let columns: Vec<String> = BP_MODES.iter().map(cpu_column).collect();
+    let columns: Vec<String> = MODES.iter().map(cpu_column).collect();
     let columns: Vec<&str> = columns.iter().map(String::as_str).collect();
     corpus_golden::assert_or_merge(
         &corpus_golden::result_golden(dataset, sf),

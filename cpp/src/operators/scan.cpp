@@ -64,7 +64,7 @@ TableResult execute_scan(const fb::CudfScan* scan,
 
   // Row-group pruning: decode ONLY the groups the serializer computed (the same
   // DataFusion PruningPredicate the CPU path prunes with) unless this call overrides
-  // them — with the RG→partition map, or one batch of the batch-partitioned loader.
+  // them — with the RG→partition map, or one batch of the loader.
   // An empty override defers to the node's list, and an empty list reads all (#16).
   std::vector<cudf::size_type> rgs;
   if (!row_groups_override.empty()) {

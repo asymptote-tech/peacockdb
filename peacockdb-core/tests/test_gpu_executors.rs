@@ -1,4 +1,4 @@
-//! The batch-partitioned executors on a live GPU: each one handed its node's recipe and
+//! The executors on a live GPU: each one handed its node's recipe and
 //! the batches a lane would give it.
 //!
 //! Every plan here is hand-built over six synthetic rows the test writes itself, so a case

@@ -1,7 +1,7 @@
 """`LayoutInjector` — re-shape a plan's partitioning and batching, keep its answer.
 
 A query's result is a function of its rows, not of how those rows were divided. Everything
-the batch-partitioned model adds — lanes, batches, shuffles, accumulators — is machinery
+the model adds — lanes, batches, shuffles, accumulators — is machinery
 underneath that invariant, and the way to test machinery like that is to vary it as
 violently as the engine permits and demand the same answer every time.
 

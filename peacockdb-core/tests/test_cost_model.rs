@@ -139,8 +139,7 @@ GpuSort: by=[x], output_bytes=10, output_rows=1
     assert_eq!(cost_total(&cost), 60); // 10 + 20 + 30 == Σ output_bytes
 }
 
-/// Every batch-partitioned node kind is in the taxonomy, and every batch-partitioned name
-/// in the taxonomy is a kind — read off the exhaustive match in `nodes::node_name`, which
+/// Every node kind is in the taxonomy, and every name in the taxonomy is a kind — read off the exhaustive match in `nodes::node_name`, which
 /// is the one place a kind is named. A nineteenth kind adds an arm there and reddens this
 /// until it has an entry, which is what makes "all eighteen at once" a property rather
 /// than a moment: T19 enables queries and must never touch this file.

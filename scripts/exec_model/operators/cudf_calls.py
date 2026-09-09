@@ -281,7 +281,7 @@ def left_join(left_keys: Table, right_keys: Table, compare_nulls: NullEquality):
 
     Reached by `Right` (which is this call with the sides swapped) and by a single-batch
     probe — and by a streamed Left join **never**, which is one of this prototype's
-    results: the batch-partitioned lowering decomposes Left into a per-batch `Inner` plus a
+    results: the lowering decomposes Left into a per-batch `Inner` plus a
     `LeftAnti` at finish, so the frozen surface executes a Left outer join without ever
     calling `left_join`. The same holds of `full_join` below, via `Right`.
     """

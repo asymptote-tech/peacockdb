@@ -31,13 +31,13 @@ use std::collections::{BTreeMap, BTreeSet};
 /// lives in exactly one place and can be unit-tested.
 #[derive(Debug)]
 pub struct RegistryEntry {
-    /// "bp_cpu" | "bp_gpu" — which engine ran the case.
+    /// "cpu" | "gpu" — which engine ran the case.
     pub kind: &'static str,
     pub dataset: &'static str,
     pub sf: &'static str,
     /// Underscore form, as written in the macro (`shuffle_stddev`, `q12`).
     pub query: &'static str,
-    /// The mode's ident, as `bp_mode` spells it (`bp_tp4_sized`).
+    /// The mode's ident, as `mode` spells it (`tp4_sized`).
     pub device: &'static str,
     /// "enabled" | "skip"
     pub state: &'static str,
@@ -64,12 +64,12 @@ inventory::collect!(CorpusDeclaration);
 
 /// The CSV's per-mode columns, in file order.
 ///
-/// Three groups, one per thing that can be enabled independently. The five `bp_` columns
+/// Three groups, one per thing that can be enabled independently. The five bare mode columns
 /// are plan enablement, and they are the one group no test macro registers: the plan goldens
 /// are one file per mode rather than one file per query, so what declares a cell is the
 /// golden's section for that query, and
-/// `test_batch_partitioned_plans` is what holds the two to each other in both directions.
-/// The `bp_cpu_` and `bp_gpu_` columns are execution, declared by `corpus_query!` through
+/// `test_plan_goldens` is what holds the two to each other in both directions.
+/// The `cpu_` and `gpu_` columns are execution, declared by `corpus_query!` through
 /// this inventory — one per engine because a query can be correct at five modes on the cpu
 /// and at two on a device.
 ///
@@ -77,28 +77,28 @@ inventory::collect!(CorpusDeclaration);
 /// and `cost-report`, and both parse by header name. A repeated group would need the two to
 /// agree on a decoding convention as well, which is one more place to drift.
 pub const COLUMNS: [&str; 15] = [
-    "bp_tp1_single",
-    "bp_tp1_rowgroup",
-    "bp_tp4_single",
-    "bp_tp4_rowgroup",
-    "bp_tp4_sized",
-    "bp_cpu_tp1_single",
-    "bp_cpu_tp1_rowgroup",
-    "bp_cpu_tp4_single",
-    "bp_cpu_tp4_rowgroup",
-    "bp_cpu_tp4_sized",
-    "bp_gpu_tp1_single",
-    "bp_gpu_tp1_rowgroup",
-    "bp_gpu_tp4_single",
-    "bp_gpu_tp4_rowgroup",
-    "bp_gpu_tp4_sized",
+    "tp1_single",
+    "tp1_rowgroup",
+    "tp4_single",
+    "tp4_rowgroup",
+    "tp4_sized",
+    "cpu_tp1_single",
+    "cpu_tp1_rowgroup",
+    "cpu_tp4_single",
+    "cpu_tp4_rowgroup",
+    "cpu_tp4_sized",
+    "gpu_tp1_single",
+    "gpu_tp1_rowgroup",
+    "gpu_tp4_single",
+    "gpu_tp4_rowgroup",
+    "gpu_tp4_sized",
 ];
 
 /// Map a registration to its CSV column: the engine it ran on and the mode it ran at,
 /// composed rather than parsed off a label.
 pub fn column_for(kind: &str, device: &str) -> Option<&'static str> {
     match kind {
-        "bp_cpu" | "bp_gpu" => bp_column(kind, device),
+        "cpu" | "gpu" => mode_column(kind, device),
         _ => None,
     }
 }
@@ -108,9 +108,9 @@ pub fn column_for(kind: &str, device: &str) -> Option<&'static str> {
 /// this composes rather than looks up, and the mode set is checked exhaustively: an
 /// unlisted one is `None` and the registration is reported unmappable, rather than being
 /// silently binned into whichever column a prefix match reached first.
-fn bp_column(kind: &str, mode: &str) -> Option<&'static str> {
-    let known = super::bp_mode::BP_MODES.iter().any(|m| m.ident() == mode);
-    let suffix = known.then(|| mode.trim_start_matches("bp_"))?;
+fn mode_column(kind: &str, mode: &str) -> Option<&'static str> {
+    let known = super::mode::MODES.iter().any(|m| m.ident() == mode);
+    let suffix = known.then_some(mode)?;
     COLUMNS
         .iter()
         .find(|column| **column == format!("{kind}_{suffix}"))

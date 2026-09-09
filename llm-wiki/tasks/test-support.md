@@ -8,7 +8,7 @@ that **`peacockdb-core` exposes exactly what the CLI needs and nothing else**.
 
 The eight are `GpuNode`, `validate`, `RunReport`, `render_run`, `GpuBackend`, `GpuContext`,
 `RecipePlan` and `attach_recipes`. They exist for two integration targets that deliberately stay
-external — `test_cpu_bp_corpus` and `test_gpu_bp_corpus` — through the harness they share.
+external — `test_cpu_corpus` and `test_gpu_corpus` — through the harness they share.
 
 ## Why those two targets stay
 

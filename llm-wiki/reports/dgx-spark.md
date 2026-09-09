@@ -196,7 +196,7 @@ query that allocates tens of GB unpooled pays this on every intermediate — whi
 mechanism behind [#148](../tickets.md#t148) and behind the 5x that forced pool growth costs.
 
 **Kernel launch is 1.9-2.2 us** (48 SMs, empty kernel, batched). That is the floor on batching
-finer: the batch-partitioned mode issues one call per node per batch, so a 20-node plan at
+finer: the engine issues one call per node per batch, so a 20-node plan at
 1000 batches spends ~40 ms in launches alone before doing any work.
 
 ## 13. Managed memory oversubscribes, and first touch is where it hurts

@@ -1,4 +1,4 @@
-"""Error types for the batch-partitioned execution-model prototype."""
+"""Error types for the execution-model prototype."""
 
 
 class PlanError(Exception):

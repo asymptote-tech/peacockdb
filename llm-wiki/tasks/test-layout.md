@@ -120,18 +120,18 @@ things.
 
 | Lands in | From | | N |
 |---|---|:-:|--:|
-| `plan/tests/` | `test_batch_partitioned_injection` | cpu | 4 |
+| `plan/tests/` | `test_layout_injection` | cpu | 4 |
 | `planner/tests/` | `test_planner_join_capability` | cpu | 13 |
 | `planner/tests/` | `test_planner_join_refusals` | cpu | 10 |
 | `planner/tests/` | `test_null_analysis` | cpu | 8 |
-| `planner/tests/` | `test_batch_partitioned_plans` | cpu | 19 |
+| `planner/tests/` | `test_plan_goldens` | cpu | 19 |
 | `wire/tests/` | `test_gpu_recipe_walk` | **gpu** | 10 |
 | `executor/tests/` | `test_gpu_batch` | cpu | 3 |
 | `executor/cpu_backend/tests/` | `test_cpu_executors` | cpu | 1 |
 | `executor/gpu_backend/tests/` | `test_gpu_executors` | **gpu** | 31 |
 | `executor/gpu_backend/tests/` | `test_gpu_abi` | **gpu** | 4 |
 | `executor/cpu_backend/tests/` | `test_murmur_conformance` | **gpu** | 10 |
-| `src/tests/` | `test_cpu_batch_partitioned` | cpu | 26 |
+| `src/tests/` | `test_cpu_end_to_end` | cpu | 26 |
 | `src/tests/` | `common/{injection,rebuild,join_fixture}.rs` | — | 0 |
 | | | | **139** |
 
@@ -164,8 +164,8 @@ Three layers, and only the first is discipline.
 
 | Target | Why it cannot fold in | | N |
 |---|---|:-:|--:|
-| `test_cpu_bp_corpus` | `inventory` collects per linked binary; the registry needs two | cpu | 448 |
-| `test_gpu_bp_corpus` | the other half of that pair, and it writes env vars | **gpu** | 8 |
+| `test_cpu_corpus` | `inventory` collects per linked binary; the registry needs two | cpu | 448 |
+| `test_gpu_corpus` | the other half of that pair, and it writes env vars | **gpu** | 8 |
 | `test_golden_format` | the format reader, over strings | cpu | 24 |
 | `test_corpus_goldens` | committed sections against their own arithmetic | cpu | 20 |
 | `test_ci_coverage` | reads the workflow yaml | cpu | 6 |
@@ -261,7 +261,7 @@ a bigger change to those scripts than to the lists.
 
 **`build-test-shadgpu.sh`**
 
-- `RUST_TESTS=(test_gpu_bp_corpus)` — one entry.
+- `RUST_TESTS=(test_gpu_corpus)` — one entry.
 - `stage_cargo_test_binary` resolves a built binary by matching `target.name` against a `--test`
   name in cargo's json. It needs a second form for the lib test target, whose json entry has
   `kind: ["lib"]` and `test: true` and whose `target.name` is the crate name. Stage it under an
@@ -273,7 +273,7 @@ a bigger change to those scripts than to the lists.
 
 **`build-test.sh`**
 
-- `gpu_runtime_targets()` shrinks to `test_gpu_bp_corpus` plus the lib entry.
+- `gpu_runtime_targets()` shrinks to `test_gpu_corpus` plus the lib entry.
 - **Ten lines of comment above it become obsolete and should go.** They explain that
   `test_inc2_conformance` is the only file gating per item rather than per file, which is why the
   membership test could not see it and why the list is written out rather than derived. After the

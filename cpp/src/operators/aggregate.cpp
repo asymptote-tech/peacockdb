@@ -52,7 +52,7 @@ static cudf::size_type stddev_ddof(const std::string& f) {
 //   Final   = merges partial STATE across the shuffle -> AVG = Σsum / Σcount
 // SUM/COUNT/MIN/MAX are phase-insensitive except count-Final -> sum.
 //   Merge   = merges partial STATE and emits STATE, not a finished value. The
-//             batch-partitioned mode merges once per lane and again across lanes,
+//             engine merges once per lane and again across lanes,
 //             and finalizes in a project of its own, so the merge and the finalize
 //             Final couples are separate here.
 enum class AggPhase { Single, Partial, Final, Merge };

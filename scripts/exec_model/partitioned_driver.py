@@ -1,4 +1,4 @@
-"""`batch_partitioned_driver` — the scheduler and everything cross-partition.
+"""`partitioned_driver` — the scheduler and everything cross-partition.
 
 **The strategy.** Every node carries a height (distance to the root) and a left-to-right
 order, both computed once in `plan.py`. A node is *runnable* when any of its partitions
@@ -23,7 +23,7 @@ by holding the join's whole probe subtree until the build is set (`_held_by_a_jo
 With the hold in place the bound is unconditional, and the draft's cap-Q mechanism is
 unnecessary — nothing here caps a queue.
 
-Lane-scoped work is delegated to `batch_single_partition_driver`; this driver owns the
+Lane-scoped work is delegated to `single_partition_driver`; this driver owns the
 tree, the queues, the schedule, and the three cross-lane categories.
 """
 
@@ -38,10 +38,10 @@ from .executors import LaneEvent
 from .node import LANE_SCOPED, BackendSelector, ExecutorCategory
 from .plan import Plan, PlanNodeInfo
 from .runtime import LaneInputs, NodeState
-from .batch_single_partition_driver import (
+from .single_partition_driver import (
     PROBE_SLOT,
     JoinPhase,
-    batch_single_partition_driver,
+    single_partition_driver,
 )
 
 #: Safety valve: a step that neither moves a batch nor finalizes a lane cannot happen,
@@ -376,7 +376,7 @@ class BatchPartitionedDriver:
         driver = state.lane_drivers.get(lane)
         if driver is None:
             backends = state.info.executors.backends
-            driver = batch_single_partition_driver(
+            driver = single_partition_driver(
                 state.info,
                 lane,
                 lambda: self.selector.select(state.info.category, backends, lane),
@@ -450,7 +450,7 @@ class BatchPartitionedDriver:
             raise DriverError("nothing runnable but batches remain: " + "; ".join(stranded))
 
 
-def batch_partitioned_driver(
+def partitioned_driver(
     plan: Plan, selector: BackendSelector, budget: int | None = None
 ) -> BatchPartitionedDriver:
     """Constructor spelled as the driver name the spec uses."""

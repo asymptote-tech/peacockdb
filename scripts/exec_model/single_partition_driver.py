@@ -1,4 +1,4 @@
-"""`batch_single_partition_driver` — one lane of one lane-scoped node.
+"""`single_partition_driver` — one lane of one lane-scoped node.
 
 The four lane-scoped categories (Source, Exec, BatchAccumulator, Join) get one executor
 instance per (node, lane), and this driver is that instance's state machine: it decides
@@ -6,7 +6,7 @@ which executor call the lane's current input state calls for, makes exactly one 
 reports the outputs plus whether the lane will ever produce again.
 
 Everything cross-partition — which node runs next, lane remapping, the fan-out at an
-emitter, the rotation at a forwarder — is `batch_partitioned_driver`'s. The split is the
+emitter, the rotation at a forwarder — is `partitioned_driver`'s. The split is the
 one the spec draws; what changed with the height scheduler is the *unit*: a chunk is one
 node's lane rather than a chain of them, because min-height selection walks a batch up
 the chain node by node all on its own.
@@ -44,7 +44,7 @@ class StepResult:
     call: str
 
 
-class BatchSinglePartitionDriver:
+class SinglePartitionDriver:
     """One (node, lane). The executor is constructed on the first step, not before."""
 
     def __init__(
@@ -201,11 +201,11 @@ class BatchSinglePartitionDriver:
         return list(outputs), stats
 
 
-def batch_single_partition_driver(
+def single_partition_driver(
     info: PlanNodeInfo,
     lane: int,
     make_executor: Callable[[], Executor],
     accountant: ResidentAccountant,
-) -> BatchSinglePartitionDriver:
+) -> SinglePartitionDriver:
     """Constructor spelled as the driver name the spec uses."""
-    return BatchSinglePartitionDriver(info, lane, make_executor, accountant)
+    return SinglePartitionDriver(info, lane, make_executor, accountant)

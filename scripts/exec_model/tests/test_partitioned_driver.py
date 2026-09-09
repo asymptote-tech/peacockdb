@@ -1,4 +1,4 @@
-"""End-to-end shapes through `batch_partitioned_driver`, with mock executors only."""
+"""End-to-end shapes through `partitioned_driver`, with mock executors only."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/<file>.p
     __package__ = "scripts.exec_model.tests"
 
 from .harness import main, raises
-from ..batch_partitioned_driver import batch_partitioned_driver
+from ..partitioned_driver import partitioned_driver
 from ..errors import ResidentBudgetExceeded
 from ..plan import Plan
 from .mocks import (
@@ -41,7 +41,7 @@ def run(root, budget=None):
     the producer too since anything under a held node is reached through the same probe
     edge. `test_the_queue_bound_assertion_is_live` is the input that does turn it red.
     """
-    driver = batch_partitioned_driver(Plan.build(root), MockSelector(), budget)
+    driver = partitioned_driver(Plan.build(root), MockSelector(), budget)
     driver.run()
     for info in driver.plan.nodes:
         assert driver.peak_queued[info.id] <= info.n_lanes, f"{info}: queue bound broken"
@@ -115,7 +115,7 @@ def test_probe_side_queues_stay_empty_until_the_build_is_set():
     # ways) into the probe-side emit before the first set_build, because the build-side
     # coalesce makes that subtree one level deeper. Held, the probe subtree has not run
     # at all when the build phase ends.
-    driver = batch_partitioned_driver(Plan.build(two_sided_shuffle_join()), MockSelector())
+    driver = partitioned_driver(Plan.build(two_sided_shuffle_join()), MockSelector())
     while not any(e.call == "set_build" for e in driver.trace):
         assert driver.step(), "the join never reached its build phase"
 
@@ -261,7 +261,7 @@ def test_the_queue_bound_assertion_is_live():
     # queue in a single step, so the bound the helper asserts is genuinely reachable —
     # and #138's ranged merge emission would reach it the same way, from real code.
     plan = Plan.build(sink("unload", eager_merge_partitions("merge_eager", source("load", [[1], [1], [1], [1]]))))
-    driver = batch_partitioned_driver(plan, MockSelector())
+    driver = partitioned_driver(plan, MockSelector())
     driver.run()
 
     merge = next(i for i in plan.nodes if i.node.name() == "merge_eager")

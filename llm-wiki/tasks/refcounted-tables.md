@@ -224,17 +224,17 @@ The file is at 852 lines against the 1000-line cap; `recipe/tests.rs` is at 887.
 
 | golden | moves | why |
 |---|---|---|
-| `bp-*.plans.txt` (10 files) | **yes**, if the inputs are renamed | `Input` renders into the recipe line — `execute_node(#N CudfNestedLoopJoin, build copy, batch)` — via `recipe/types.rs:143`. Mechanical, every join with a streamed probe |
+| `*.plans.txt` (10 files) | **yes**, if the inputs are renamed | `Input` renders into the recipe line — `execute_node(#N CudfNestedLoopJoin, build copy, batch)` — via `recipe/types.rs:143`. Mechanical, every join with a streamed probe |
 | `testdata/cost-registry.csv` | **yes** | device cells move off #152 — see below |
-| `bp-recipe-payloads.txt` | no | no flatbuffer change; the wire is untouched |
+| `recipe-payloads.txt` | no | no flatbuffer change; the wire is untouched |
 | `<mode>-<tier>.cpu.txt`, `.cost.txt` | no | the corpus cpu tier runs `CpuBackend`, which holds no handles |
-| `bp-<tier>.result.txt` | no | no value changes |
+| `<tier>.result.txt` | no | no value changes |
 | benchmark output | **yes** | `nodes_at_or_below_floor`, per the scatter section |
 
 **The registry is the slow part, not the code.** 75 queries carry #152. Each needs a device run and
 then either an enable or a ticket edit, in batches of about five on `shad-gpu` with
 `build-test-shadgpu.sh`, as T19 does. The causes are ordered, so a cell that stops failing on #152
-lands on whatever refuses next rather than going green — expect [#183](bp-tickets.md#t183) at the
+lands on whatever refuses next rather than going green — expect [#183](active-tickets.md#t183) at the
 unload, which is what `casts.md` closes. **Close #152 and #145 when their cells are gone from the
 registry, not when the code lands.**
 

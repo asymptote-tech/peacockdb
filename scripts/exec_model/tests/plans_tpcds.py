@@ -1,4 +1,4 @@
-"""TPC-DS query plans, lowered by hand into the batch-partitioned nodes — the registry.
+"""TPC-DS query plans, lowered by hand into the engine's nodes — the registry.
 
 The corpus is every TPC-DS query the engine already runs in `full_table` mode
 (`testdata/cost-registry.csv`, `ftc_tp1 = enabled`) that does not need a window function:

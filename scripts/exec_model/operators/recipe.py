@@ -1,6 +1,6 @@
 """The recipe plan: FlatBuffers node structs, a handle registry, and the C++ that reads them.
 
-The batch-partitioned mode does not send the C++ side its own node tree. It sends a
+The engine does not send the C++ side its own node tree. It sends a
 **recipe plan** — a structurally valid FlatBuffers plan in the legacy vocabulary whose
 nodes exist to be addressed by seq — and then calls `execute_node(seq, handles)` as many
 times as its own schedule wants (the spec's "GPU execution through the frozen FFI"). This

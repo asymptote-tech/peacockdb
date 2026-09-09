@@ -21,7 +21,7 @@ class NodeState:
     out_queues: list[deque] = field(default_factory=list)
     out_done: list[bool] = field(default_factory=list)
 
-    #: lane-scoped categories: one BatchSinglePartitionDriver per lane, made on demand
+    #: lane-scoped categories: one SinglePartitionDriver per lane, made on demand
     lane_drivers: dict = field(default_factory=dict)
     #: cross-lane categories: one executor for the whole node
     cross_executor: object = None

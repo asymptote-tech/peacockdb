@@ -15,7 +15,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/<file>.p
     __package__ = "scripts.exec_model.tests"
 
 from .harness import main
-from ..batch_partitioned_driver import batch_partitioned_driver
+from ..partitioned_driver import partitioned_driver
 from ..plan import Plan
 from .mocks import (
     MockSelector,
@@ -77,7 +77,7 @@ PLANS = {
 
 
 def run_once(builder):
-    driver = batch_partitioned_driver(Plan.build(builder()), MockSelector())
+    driver = partitioned_driver(Plan.build(builder()), MockSelector())
     driver.run()
     return driver
 
@@ -97,7 +97,7 @@ def test_results_are_identical_across_runs():
 
 def test_a_merge_forwarder_cycles_its_lanes_round_robin():
     plan = Plan.build(sink("unload", merge_partitions("merge", source("load", [[1, 1], [1, 1], [1, 1]]))))
-    driver = batch_partitioned_driver(plan, MockSelector())
+    driver = partitioned_driver(plan, MockSelector())
     driver.run()
 
     forwarded = [b.tag for b in driver.results]
@@ -120,7 +120,7 @@ def test_a_multi_child_forwarder_skips_a_pending_source_instead_of_waiting():
     left = exec_node("l", source("l_scan", [[1, 1], [1, 1]]))
     right = exec_node("r", source("r_scan", [[1, 1], [1, 1]]))
     plan = Plan.build(sink("unload", interleave("interleave", [left, right])))
-    driver = batch_partitioned_driver(plan, MockSelector())
+    driver = partitioned_driver(plan, MockSelector())
     driver.run()
 
     lane0 = [b.tag for b in driver.results if ".p0." in b.tag]

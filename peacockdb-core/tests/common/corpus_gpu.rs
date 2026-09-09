@@ -20,9 +20,9 @@ use peacockdb_ffi::raw::{
     peacock_executor_destroy, peacock_executor_end_plan, peacock_last_error,
 };
 
-use super::bp_mode::{BUDGET, BpMode, mode_named};
 use super::corpus::{plan_at, run_cpu};
 use super::corpus_golden;
+use super::mode::{BUDGET, Mode, mode_named};
 use super::{GpuResultMode, assert_results_match, batches_to_sorted_str, gpu_result_mode};
 
 /// A device session over one plan: the recipes attached and the buffer handed across, which
@@ -140,7 +140,7 @@ async fn assert_result(
     dataset: &str,
     sf: &str,
     query: &str,
-    mode: &BpMode,
+    mode: &Mode,
     gpu_oracle: &str,
     batches: &[RecordBatch],
 ) {

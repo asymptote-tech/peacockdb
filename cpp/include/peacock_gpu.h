@@ -160,7 +160,7 @@ int peacock_executor_execute_node(peacock_executor_t* executor,
 
 /// Execute the CudfScan at post-order `seq` reading exactly `row_groups[0..n)` rather
 /// than the list the plan node carries, and store its one output as a new resident
-/// handle — one call per batch for the batch-partitioned loader. `n == 0` is refused
+/// handle — one call per batch for the loader. `n == 0` is refused
 /// rather than read as "every group"; `out_stats` may be NULL; a failure ends the query.
 ///
 /// Every OTHER field of the node still applies per call, and `limit` is the one that does

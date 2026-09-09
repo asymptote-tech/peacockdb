@@ -1,11 +1,11 @@
 //! Shared test harness: where the fixtures live, how a result is rendered and compared,
-//! and the golden-reading helpers every batch-partitioned tier uses.
+//! and the golden-reading helpers every tier uses.
 //!
 //! Each integration-test crate includes this via `#[macro_use] mod common;`, and every
 //! suite uses a subset, so dead code is fine.
 #![allow(dead_code)]
 
-pub mod bp_mode;
+pub mod mode;
 pub mod corpus;
 pub mod corpus_golden;
 #[cfg(not(feature = "rust-only"))]
@@ -25,7 +25,7 @@ use datafusion::arrow::util::pretty::pretty_format_batches;
 
 use peacockdb_core::config::MemoryLimit;
 
-/// The budget a device run is given, and the one `bp_mode::TIER` plans against: a run
+/// The budget a device run is given, and the one `mode::TIER` plans against: a run
 /// under a budget the plan was not priced for measures a plan nobody wrote down.
 pub const GPU_BUDGET: usize = MemoryLimit::Mini.bytes();
 

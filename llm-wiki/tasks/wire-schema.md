@@ -2,7 +2,7 @@
 
 Kind: production
 
-**This task closes [#187](bp-tickets.md#t187)** — the device widens a decimal the plan declared
+**This task closes [#187](active-tickets.md#t187)** — the device widens a decimal the plan declared
 narrow — by giving the export the precision it currently defaults to 38 for, rather than by casting
 the result back.
 
@@ -71,7 +71,7 @@ way. **No threading from an origin is required, and no signature changes.**
 
 ### 2. `schema_text` renders precision and scale
 
-`fb_text.rs:229` formats fields as `{}:{:?}` over `f.data_type()`, so `bp-recipe-payloads.txt` prints
+`fb_text.rs:229` formats fields as `{}:{:?}` over `f.data_type()`, so `recipe-payloads.txt` prints
 bare `Decimal128` while expressions on the same page print `Decimal128(23, 2)`. Two fields that are
 on the wire are invisible to the golden whose job is to pin the wire — a change to either, including
 one that broke step 1, would not move it. Render them for `Decimal128` fields.
@@ -98,8 +98,8 @@ precision, no cleanup of `TableResult`'s neighbours. Anything else found on the 
 
 | golden | how it moves | why |
 |---|---|---|
-| `bp-recipe-payloads.txt` | **bytes** change on every node; text changes on decimal fields | step 1 adds `output_schema` everywhere, step 2 renders precision |
-| `bp-*.plans.txt` | **no change** | plan text renders the Rust tree, which already knew the precision |
+| `recipe-payloads.txt` | **bytes** change on every node; text changes on decimal fields | step 1 adds `output_schema` everywhere, step 2 renders precision |
+| `*.plans.txt` | **no change** | plan text renders the Rust tree, which already knew the precision |
 | `<mode>-<tier>.cpu.txt`, `.cost.txt`, `.result.txt` | **no change** | values and byte pricing are unaffected; only a declared type moves |
 | `testdata/cost-registry.csv` | device cells move off #187 | see below |
 

@@ -26,7 +26,7 @@ macro_rules! corpus_query {
         $(
             paste::paste! {
                 #[tokio::test]
-                async fn [<bp_cpu_ $dataset _ $query _ $cpu>]() {
+                async fn [<cpu_ $dataset _ $query _ $cpu>]() {
                     common::corpus::cpu_case(
                         stringify!($dataset),
                         stringify!($sf),
@@ -39,7 +39,7 @@ macro_rules! corpus_query {
             }
             inventory::submit! {
                 RegistryEntry {
-                    kind: "bp_cpu",
+                    kind: "cpu",
                     dataset: stringify!($dataset),
                     sf: stringify!($sf),
                     query: stringify!($query),
@@ -94,15 +94,15 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
     let mut wrong: Vec<String> = Vec::new();
     let mut checked = 0;
     for row in common::registry::load_csv() {
-        for mode in &common::bp_mode::BP_MODES {
-            let suffix = mode.ident().trim_start_matches("bp_").to_string();
+        for mode in &common::mode::MODES {
+            let suffix = mode.ident();
             let live = |prefix: &str| {
                 row.states
                     .get(&format!("{prefix}{suffix}"))
                     .is_some_and(|s| s == "enabled" || s == "skip")
             };
             checked += 1;
-            if live("bp_gpu_") && !live("bp_cpu_") {
+            if live("gpu_") && !live("cpu_") {
                 wrong.push(format!("{}/{} at {}", row.dataset, row.query, mode.name));
             }
         }
@@ -112,7 +112,7 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
         "these device cells have no cpu cell at the same mode, so each compares against a \
          marker and passes having checked nothing: {wrong:?}"
     );
-    assert_eq!(checked, common::registry::load_csv().len() * common::bp_mode::BP_MODES.len());
+    assert_eq!(checked, common::registry::load_csv().len() * common::mode::MODES.len());
 }
 
 /// what makes it catch the first `live_cpu` query BEFORE the rollout that needs it, rather
@@ -184,7 +184,7 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
             .unwrap_or_else(|| panic!("{}/{query}: declared and not in the registry", declared.dataset));
         // A query enabled at no mode has no authority to resolve, which is the same None for
         // an entirely different reason — the one this test exists to tell apart.
-        if !row.states.iter().any(|(col, state)| col.starts_with("bp_cpu_") && state == "enabled") {
+        if !row.states.iter().any(|(col, state)| col.starts_with("cpu_") && state == "enabled") {
             continue;
         }
         let authority = common::corpus::authoritative_mode(declared.dataset, declared.sf, &query);
@@ -212,25 +212,25 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
             rows.iter()
                 .find(|r| r.dataset == d.dataset && r.sf == d.sf && r.query == d.query)
                 .is_some_and(|r| {
-                    r.states.iter().any(|(col, state)| col.starts_with("bp_cpu_") && state == "enabled")
+                    r.states.iter().any(|(col, state)| col.starts_with("cpu_") && state == "enabled")
                 })
         })
         .count();
     assert_eq!(checked, expected, "every enabled hyphenated query is checked, and only those");
 }
 
-/// The five `bp_cpu_` columns against what this binary declares, in both directions: a
+/// The five `cpu_` columns against what this binary declares, in both directions: a
 /// registration whose cell says otherwise, and a cell no case backs, both fail. The device
 /// half is checked in the device binary, because `inventory` collects per linked binary.
 #[test]
 fn the_registry_matches_the_cpu_corpus_in_both_directions() {
     common::registry::assert_registry_matches_csv(
         &[
-            "bp_cpu_tp1_single",
-            "bp_cpu_tp1_rowgroup",
-            "bp_cpu_tp4_single",
-            "bp_cpu_tp4_rowgroup",
-            "bp_cpu_tp4_sized",
+            "cpu_tp1_single",
+            "cpu_tp1_rowgroup",
+            "cpu_tp4_single",
+            "cpu_tp4_rowgroup",
+            "cpu_tp4_sized",
         ],
         &[],
     );

@@ -26,7 +26,7 @@ import pandas as pd
 from .harness import main, raises
 from ..accounting import ResidentAccountant
 from ..batch import CallStats
-from ..batch_partitioned_driver import batch_partitioned_driver
+from ..partitioned_driver import partitioned_driver
 from ..errors import ResidentBudgetExceeded
 from ..node import CpuBackendSelector
 from ..operators import aggregates as A
@@ -172,7 +172,7 @@ def join_plan():
 
 
 def run(root, budget=None):
-    driver = batch_partitioned_driver(Plan.build(root), CpuBackendSelector(), budget)
+    driver = partitioned_driver(Plan.build(root), CpuBackendSelector(), budget)
     driver.run()
     return driver
 
@@ -228,7 +228,7 @@ def test_accumulator_residency_is_visible_while_it_holds_rows():
     # An accumulator is where mandatory residency lives, so the accountant must see it
     # rise before the flush rather than only after.
     plan = Plan.build(sink("u", coalesce_all("collect", source("load", [[10, 10, 10]]))))
-    driver = batch_partitioned_driver(plan, MockSelector())
+    driver = partitioned_driver(plan, MockSelector())
     seen = []
     while driver.step():
         seen.append(driver.accountant.executor_bytes)
@@ -254,8 +254,8 @@ def test_a_consumed_input_stays_accounted_through_its_call():
 
     # The batch is 10 bytes and MapExec models 10 bytes of scratch: the pre-check sees 20.
     with raises(ResidentBudgetExceeded):
-        batch_partitioned_driver(Plan.build(plan()), MockSelector(), budget=15).run()
-    batch_partitioned_driver(Plan.build(plan()), MockSelector(), budget=25).run()
+        partitioned_driver(Plan.build(plan()), MockSelector(), budget=15).run()
+    partitioned_driver(Plan.build(plan()), MockSelector(), budget=25).run()
 
 
 def test_an_absent_measurement_is_not_recorded_as_an_underestimate():

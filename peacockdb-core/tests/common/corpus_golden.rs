@@ -9,8 +9,8 @@
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
-use super::bp_mode::TIER;
 use super::golden_text::{line_difference, ordered_sections};
+use super::mode::TIER;
 use super::{golden_dir_for, registry};
 
 /// What a section says when it holds no content. One prefix for every such reason, so a
@@ -27,11 +27,11 @@ pub fn cost_golden(dataset: &str, sf: &str, mode: &str) -> PathBuf {
     golden_dir_for(dataset, sf).join(format!("{mode}-{}.cost.txt", TIER.label()))
 }
 
-/// `bp-<tier>.result.txt` — one entry per query, keyed by the query alone, because the
+/// `<tier>.result.txt` — one entry per query, keyed by the query alone, because the
 /// modes are supposed to agree on results. The tier is in the name for the same reason it
 /// is in the others': a second tier would be a second file rather than a silent overwrite.
 pub fn result_golden(dataset: &str, sf: &str) -> PathBuf {
-    golden_dir_for(dataset, sf).join(format!("bp-{}.result.txt", TIER.label()))
+    golden_dir_for(dataset, sf).join(format!("{}.result.txt", TIER.label()))
 }
 
 /// Whether this run writes goldens, and how much of the file it owns when it does.

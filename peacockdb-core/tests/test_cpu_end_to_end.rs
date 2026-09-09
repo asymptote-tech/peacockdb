@@ -1,7 +1,7 @@
-//! SQL in, rows out: the batch-partitioned mode end to end on the CPU backend, at the five
-//! modes and at the injected shapes.
+//! SQL in, rows out: the engine end to end on the CPU backend, at the five modes and at
+//! the injected shapes.
 //!
-//! Every other test of this mode proves one layer against a fixture of the last one's
+//! Every other test of the engine proves one layer against a fixture of the last one's
 //! shape. This one starts at a query's text and ends at its rows, so what it tests is the
 //! join between the pieces — and the oracle is DataFusion on the same SQL rather than our
 //! own legacy executor, which would agree with us wherever we are consistently wrong.
@@ -25,7 +25,7 @@ use common::injection::{
     CAP, Dimensions, Drain, Empties, Injected, InjectedContext, Injection, PlannedMode, Rebatch,
     SEED, apply, node_count, planned_mode, select,
 };
-use common::bp_mode::{BP_MODES, BpMode};
+use common::mode::{MODES, Mode};
 use common::{assert_results_match, batches_to_sorted_str, data_dir_for, queries_dir_for};
 
 /// Where a Welford merge is the only divergence: this mode decomposes the aggregate into
@@ -81,7 +81,7 @@ async fn sql_answers_match_datafusion(
     // most of the tier. The tolerance path indexes rather than renders and keeps its own.
     let expected_rows = tolerance.is_none().then(|| sorted_rows(&expected)).flatten();
     let mut planned = Vec::new();
-    for mode in &BP_MODES {
+    for mode in &MODES {
         let name = mode.name;
         let ctx = peacockdb_core::register_tables_for(
             peacockdb_core::build_session_state(mode.target_partitions),
@@ -285,7 +285,7 @@ macro_rules! end_to_end {
     ($dataset:ident, $query:ident, $tolerance:expr, $coverage:expr) => {
         paste::paste! {
             #[tokio::test]
-            async fn [<bp_ $dataset _ $query>]() {
+            async fn [<$dataset _ $query>]() {
                 answers_match_datafusion(
                     stringify!($dataset),
                     &stringify!($query).replace('_', "-"),
@@ -430,7 +430,7 @@ async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
     let sql = std::fs::read_to_string(queries_dir_for("tpch").join("nested-limits.sql"))
         .expect("the query text");
     let mut most_offered = 0;
-    for mode in &BP_MODES {
+    for mode in &MODES {
         let name = mode.name;
         let ctx = peacockdb_core::register_tables_for(
             peacockdb_core::build_session_state(mode.target_partitions),
@@ -541,7 +541,7 @@ async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
 //
 // So the claim is that a boundary exists and is one byte wide: the smallest budget that
 // completes, and the byte below it that does not.
-/// Ignored under [#182](../../llm-wiki/tasks/bp-tickets.md) rather than deleted, so it stays
+/// Ignored under [#182](../../llm-wiki/tasks/active-tickets.md) rather than deleted, so it stays
 /// compiled and listed: pricing a `CpuBatch` from the plan's schema moved the accounting under
 /// it and the budget stopped being a boundary. The bar for T18 is results and node stats
 /// consistent between the engines; memory accounting is deferred.
@@ -551,7 +551,7 @@ async fn a_query_has_a_smallest_budget_that_fits_and_trips_a_byte_below_it() {
     let data_dir = data_dir_for("tpch", "1");
     let sql = std::fs::read_to_string(queries_dir_for("tpch").join("nested-loop-join.sql"))
         .expect("the query text");
-    let mode = &BP_MODES[3];
+    let mode = &MODES[3];
     let name = mode.name;
     let ctx = peacockdb_core::register_tables_for(
         peacockdb_core::build_session_state(mode.target_partitions),
@@ -638,7 +638,7 @@ async fn the_model_is_compared_against_what_the_calls_measured() {
     let data_dir = data_dir_for("tpch", "1");
     let sql = std::fs::read_to_string(queries_dir_for("tpch").join("filter-project.sql"))
         .expect("the query text");
-    let mode = &BP_MODES[3];
+    let mode = &MODES[3];
     let name = mode.name;
     let ctx = peacockdb_core::register_tables_for(
         peacockdb_core::build_session_state(mode.target_partitions),
@@ -687,7 +687,7 @@ async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
         .expect("the query text");
     // The one mode with batching off, so the small-table rule leaves every source at four
     // lanes and there is a lane to drain.
-    let mode = &BP_MODES[2];
+    let mode = &MODES[2];
     let name = mode.name;
     let ctx = peacockdb_core::register_tables_for(
         peacockdb_core::build_session_state(mode.target_partitions),
@@ -793,7 +793,7 @@ async fn a_degenerate_hash_under_a_right_outer_is_refused_by_name() {
     let data_dir = data_dir_for("tpcds", "1");
     let sql =
         std::fs::read_to_string(queries_dir_for("tpcds").join("q93.sql")).expect("the query text");
-    let mode = &BP_MODES[2];
+    let mode = &MODES[2];
     let name = mode.name;
     let ctx = peacockdb_core::register_tables_for(
         peacockdb_core::build_session_state(mode.target_partitions),
@@ -875,7 +875,7 @@ fn an_answer_under_the_wrong_column_names_is_not_the_same_answer() {
 /// The injected set is a list, and four of its entries are the only carriers of a shape.
 ///
 /// `end_to_end!` and the injected form differ by one word, so a query leaving the set
-/// leaves it silently: `bp_tpcds_q33` would still pass, the tier's test count would not
+/// leaves it silently: `tpcds_q33` would still pass, the tier's test count would not
 /// move, and the four-lane interleave — the one operator whose correctness IS a lane
 /// correspondence — would stop being injected at all. The list generates the fixtures, so
 /// leaving the set means leaving the list, and this reads the list.
@@ -909,7 +909,7 @@ struct PlannedQuery {
 }
 
 impl PlannedQuery {
-    async fn plan(dataset: &str, query: &str, mode: &BpMode) -> Self {
+    async fn plan(dataset: &str, query: &str, mode: &Mode) -> Self {
         let name = mode.name;
         let sql = std::fs::read_to_string(queries_dir_for(dataset).join(format!("{query}.sql")))
             .expect("the query text");
@@ -1005,11 +1005,11 @@ fn boundaries_under(
 // enforces, and the two rewrites reach it by different halves: a drained lane moves row
 // groups between lanes, a rebatcher moves the batch sizes the accountant prices.
 // `q16` at four lanes peaks at 104.7 MB as planned and 77.9 MB with lane 0 drained, and
-// its budget follows, 131.5 MB against 104.7 MB. `nested-loop-join` at bp-tp4-rowgroup
+// its budget follows, 131.5 MB against 104.7 MB. `nested-loop-join` at tp4-rowgroup
 // peaks at 8,222 bytes and 8,540 under a rebatcher, and its budget does not move: the
 // pre-call check tests the join's own transient, which merging a lane's batches leaves
 // alone.
-/// Ignored under [#182](../../llm-wiki/tasks/bp-tickets.md), the same change: the peak stopped
+/// Ignored under [#182](../../llm-wiki/tasks/active-tickets.md), the same change: the peak stopped
 /// depending on the batch shape, since logical bytes are a function of rows and var-length
 /// content alone, so `rebatch=sources` moves nothing and this case's premise is gone. Whether a
 /// peak that ignores batch shape is right is the ticket's question.
@@ -1018,7 +1018,7 @@ fn boundaries_under(
 async fn an_injected_shape_moves_what_the_query_holds() {
     // Batching off, so the small-table rule leaves the sources at four lanes and there is a
     // lane whose row groups can move.
-    let q16 = PlannedQuery::plan("tpcds", "q16", &BP_MODES[2]).await;
+    let q16 = PlannedQuery::plan("tpcds", "q16", &MODES[2]).await;
     let (as_planned, drained) = boundaries_under(
         &q16,
         Injection {
@@ -1034,11 +1034,11 @@ async fn an_injected_shape_moves_what_the_query_holds() {
 
     // The drain's complement: a query whose residency only a rebatcher reaches, because a
     // lane it could move row groups out of is what this one does not have.
-    let nested_loop = PlannedQuery::plan("tpch", "nested-loop-join", &BP_MODES[3]).await;
+    let nested_loop = PlannedQuery::plan("tpch", "nested-loop-join", &MODES[3]).await;
     assert_eq!(
         nested_loop.lanes, 1,
         "nested-loop-join at {} planned more than one lane, so a drain reaches it too",
-        BP_MODES[3].name
+        MODES[3].name
     );
     let (as_planned, rebatched) = boundaries_under(
         &nested_loop,

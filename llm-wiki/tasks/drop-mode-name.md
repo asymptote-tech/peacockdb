@@ -48,7 +48,7 @@ keep their names; renaming a function whose module is about to move is one edit 
 
 **`llm-wiki/tasks/bp-tickets.md` becomes `active-tickets.md`**, staying in `tasks/`. 34 references
 in eleven files — `archived-tasks.md` (11), `cost-report/src/main.rs` (6), `build-test.md` (3),
-`test_cpu_batch_partitioned.rs` (2), `tasks.md` (2), `casts.md` (2), and one each in
+`test_cpu_end_to_end.rs` (2), `tasks.md` (2), `casts.md` (2), and one each in
 `peacockdb/src/main.rs`, `tickets.md`, `wire-schema.md`, `refcounted-tables.md`. Its fourteen
 `<a id="tNN">` anchors keep their ids, so every `#tNN` link still resolves; only the filename moves.
 `cost-report`'s six are load-bearing — the widget resolves ticket links against that path.
@@ -61,15 +61,32 @@ would falsify the history they exist to hold. Paths must resolve; wording stays.
 `partitioned_driver.py`, and ten files import it by name. Python has no compiler to catch a miss —
 the failure is an `ImportError` at collection time, so run the prototype suite before committing.
 
-**Test targets** rename, which reaches CI twice: `.github/workflows/pipeline.yml` and
+**Test targets** rename, each to what `build-test.md` already calls its tier:
+
+| was | becomes | the tier it is |
+|---|---|---|
+| `test_batch_partitioned_injection` | `test_layout_injection` | Layout injection mechanism |
+| `test_batch_partitioned_plans` | `test_plan_goldens` | Plan goldens — and it sits beside `test_corpus_goldens` |
+| `test_cpu_batch_partitioned` | `test_cpu_end_to_end` | end to end: SQL in, rows out; its macro is already `end_to_end!` |
+| `test_cpu_bp_corpus` | `test_cpu_corpus` | |
+| `test_gpu_bp_corpus` | `test_gpu_corpus` | |
+
+`test_inc2_conformance` is not renamed here — [`test-layout.md`](test-layout.md) makes it
+`test_murmur_conformance` when it moves in-crate, and renaming it twice is one edit made twice.
+
+This reaches CI twice: `.github/workflows/pipeline.yml` and
 `test_ci_coverage.rs`, whose exemption table and three GPU target lists name the binaries. That
 guard fails on a miss, which is the check. `exec-model-corpus.yml` carries the phrase in a comment;
 `pipeline.yml` is not the only workflow to sweep.
 
-**Three traps.**
+**Four traps.**
 
 - **`batch` alone is a domain word.** `BatchSizing`, `Batching`, `batch_rows`, `AggregateBatches`,
   `CudfCoalesceBatches` all stay. Only the two-word phrase goes.
+- **The two words are not always adjacent.** `batch_single_partition_driver.py` carries the same
+  qualifier with `single_` between them, so a `batch.partition` regex misses it; it becomes
+  `single_partition_driver.py`, with its function and class. Left alone it would have been the only
+  `batch` qualifier surviving in `scripts/`.
 - **`batch→partition` is not the mode name.** Four sites — `gpu_plan.fbs:312` and `:346`,
   `node_session.cpp:220`, `gpu_rowgroup_prune.rs:151` — describe the row-group→batch→partition
   *mapping*, which is a real three-level structure and stays. A regex with `.` between the words
@@ -98,7 +115,7 @@ quietly changed.
   list must differ from the baseline only in the two `bp-mini.result.txt` files, and there only on
   `mode=` lines. Any other hash change means the rename touched content it should not have.
 - **Then regenerate anyway, and require an empty diff.** `UPDATE_CANONICAL=1` over
-  `test_batch_partitioned_plans` and the corpus cpu tier rewrites every golden from a live run;
+  `test_plan_goldens` and the corpus cpu tier rewrites every golden from a live run;
   `git diff` after it must be empty. The hash check says the files did not move; this says the
   engine still produces them.
 - **The refusal message is the one exception, and it is quarantined.** `error.rs:20` renders
@@ -128,12 +145,27 @@ quietly changed.
   of it is the residue task 2 removes. So the gate excludes the four spellings that survive:
 
   ```
-  git grep -inE 'batch.partition' -- ':!llm-wiki' ':!peacockdb-core/src' \
-    | grep -vE 'batch_partitioned::|::batch_partitioned|plan_batch_partitioned|batch_partitioned_driver'
+  git grep -inE --untracked 'batch.partition' -- ':!llm-wiki' ':!peacockdb-core/src' \
+    | grep -vE 'batch_partitioned::|::batch_partitioned|plan_batch_partitioned|batch_partitioned_driver|batch_partitioned[^:]|src/batch_partitioned/'
   ```
 
-  That is 138 lines today and is the worklist; empty is the finish line. Plus
-  `git grep -nE '\bbp[-_]' -- ':!peacockdb-core/src'` and `git grep -n 'bp-tickets'`, both empty.
+  138 lines today; at the finish it is **five**, and all five are deliberate — the three
+  `batch→partition` mapping sites, plus `test_ci_coverage.rs:431` (a failure message naming the
+  inline test modules) and `test_cost_model.rs:196` (an `include_str!` of a src path). The last two
+  are task 2 residue and go when the module does.
+
+  Then `git grep -nE --untracked '\bbp[-_]' -- ':!peacockdb-core/src' ':!llm-wiki/archive'` and
+  `git grep -n --untracked 'bp-tickets'`, both empty. The archive exclusion is this task's own rule
+  about historical prose: 21 mode labels there record what the modes were called at the time, and
+  `llm-wiki/archive` is the one place `bp-` deliberately survives.
+
+  **`--untracked` is not optional, and it is the trap that would have shipped residue.** `git grep`
+  does not see untracked files, so every gate is blind to exactly the 42 files this task renames —
+  they are `??` until staged. Run without it and the gate goes **green over the renamed files
+  themselves**: the first pass here left the phrase in `mode.rs`'s module doc and `mode_named`
+  panic, and in two renamed targets' module docs, with gate 1 reporting clean. The same shape bit a
+  `git grep -l` sed list, and that one at least went red in the Python suite. This one would not
+  have.
 - **`test_ci_coverage` passes**, so a missed target rename fails there rather than silently
   un-gating a tier.
 

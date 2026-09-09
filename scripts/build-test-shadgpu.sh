@@ -27,7 +27,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib/shadgpu-env.sh"
 
 # Rust integration tests that link libpeacock_gpu.so and must run on the GPU host.
-RUST_TESTS=(test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_bp_corpus)
+RUST_TESTS=(test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_corpus)
 RUST_TESTS_STAGING=cpp/install/rust-tests
 
 # Runner, log, exit code and run id of a detached run, per phase. Outside

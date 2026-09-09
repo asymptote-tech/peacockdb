@@ -7,7 +7,7 @@ mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
 New tickets take the next free number (currently 197), which is also the counter for
-`tasks/bp-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
+`tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
 
@@ -18,7 +18,7 @@ reference still resolves there.
 | [Critical correctness](#critical-correctness) | 14 | #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 22 | #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
+| [Infrastructure / process](#infrastructure--process) | 23 | #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
 
 ## Critical correctness
 
@@ -154,7 +154,7 @@ fb children are nested, so the recipe plan for a query is one deep chain rather 
 tree: depth equals the number of addressed nodes plus its stubs. The C++ verifier caps depth at
 1024, and the Rust reader had to have the same limit raised to parse what it had just written.
 
-Deepest today is tpcds at `bp-tp4-rowgroup`, seq 382, so nothing is near it. What makes it worth
+Deepest today is tpcds at `tp4-rowgroup`, seq 382, so nothing is near it. What makes it worth
 recording is the failure mode: a plan of roughly a thousand addressed nodes fails at
 `begin_plan` — the whole query refused before a call is made — rather than degrading at the call
 that overruns.
@@ -206,7 +206,7 @@ Owing the probe side means a call over a build table that does not exist, which 
 has no way to express — the same wall as [#173](#t173), reached from the join instead of the
 accumulator. Both backends refuse by name rather than inventing an answer.
 
-The corpus reaches it twice: q21 at bp-tp4-single, and tpcds q77, whose Right outer at four lanes
+The corpus reaches it twice: q21 at tp4-single, and tpcds q77, whose Right outer at four lanes
 gets no build side and owes its probe rows padded with NULLs. q77 is therefore out of the
 end-to-end list, with q2 carrying the union-that-cannot-interleave claim in its place — writing
 the CPU pad alone would make the oracle answer a query the device refuses.
@@ -296,14 +296,14 @@ Whether batch sizes can reach the accountant's binding pre-call check at all is 
 candidates failed structurally rather than by accident, so this is about the model, not a gap.
 
 `GpuCoalesceAllBatches` carries the largest estimate in none of the 120 `--- memory ---`
-sections at `bp-tp4-rowgroup` — `GpuEmitPartitions` in 77, `GpuJoin` in 20, `GpuUnload` in 12 —
+sections at `tp4-rowgroup` — `GpuEmitPartitions` in 77, `GpuJoin` in 20, `GpuUnload` in 12 —
 so a rebatcher grows a node beside the binding one. `nested-loop-join`'s coalescer is 115 bytes
 against a 2,679-byte join. Of the two queries carrying their largest at a loader,
 `tpch/nested-limits` does move its peak under `Rebatch::AboveSources` (4,915,680 to 8,000,480,
 the 1.63x its goldens predict) while its budget is peak+1 both times: `limit=28` means the
 modelled megabytes are never the transient that binds.
 
-A second thing falls out: `boundary()` in `test_cpu_batch_partitioned.rs` searches upward from
+A second thing falls out: `boundary()` in `test_cpu_end_to_end.rs` searches upward from
 the observed peak, so a query whose trip is below it reports an untested floor — the trip assert
 catches that rather than passing. Answering this needs a downward search, a different claim.
 
@@ -377,7 +377,7 @@ ordinal moves one column twice leaving a hole — a wrong answer, not a throw, w
 needs the assert and not the observation. Land before [#155](#t155).
 
 <a id="t152"></a>
-### #152 — batch-partitioned GpuJoin: the build handle does not survive a streamed probe
+### #152 — GpuJoin: the build handle does not survive a streamed probe
 `NodeSession::execute_node` erases every input handle it reads (`node_session.cpp` ~L250, ~L339,
 ~L427), but a streamed probe calls the join seq once per batch and needs it B times.
 
@@ -478,8 +478,8 @@ whose producer has two consumers: the build side feeds the join, and it also fee
 consumer that turns those keys into a predicate on a scan below. That is a diamond, and every
 plan model here is a tree. What serves it — a fork handing one batch stream to N consumers, plus
 a consumer that plans rather than executes — is what a materialized CTE needs ([#101](#t101))
-and what [#147](#t147) calls refinement in flight. Do it after the batch-partitioned mode, which
-suits the shape: with refcounted handles ([#145](#t145)) a tee costs nothing on the device, the
+and what [#147](#t147) calls refinement in flight. Do it after the streamed lanes, which
+suit the shape: with refcounted handles ([#145](#t145)) a tee costs nothing on the device, the
 accountant already models a fork's residency as the slowest consumer's backlog, and a consumer
 blocking its producer is the join hold, one rule already mutation-tested. A diamond in the plan
 is then routing rather than scheduling.
@@ -508,7 +508,7 @@ q2. Direction: CTE materialization or physical CSE; at minimum make the cost mod
 
 The mechanism a materialized CTE needs — one producer, N consumers of the same batch
 stream — is the one [#16](#t16) has to build first for dynamic filters, and it is cheap in
-the batch-partitioned model and expensive in a single-resident-table one. Sequence them
+a streamed-batch model and expensive in a single-resident-table one. Sequence them
 that way round.
 
 <a id="t73"></a>
@@ -528,7 +528,7 @@ and row-group pruning. Shape: preprocessor → flat per-node intermediate
 `.duckdb_cost.txt` numbers must not move.
 
 <a id="t136"></a>
-### #136 — batch-partitioned GpuJoin: build-side match tracking when the probe side streams
+### #136 — GpuJoin: build-side match tracking when the probe side streams
 Left-outer, full, semi, anti and mark need "which build rows matched across all probe batches",
 and that never crosses the ABI — every call rebuilds the join from scratch.
 
@@ -545,7 +545,7 @@ per-call match bitmap out-param or a per-seq join session that also removes the 
 them with the rest of the join surface, [#155](#t155).
 
 <a id="t137"></a>
-### #137 — batch-partitioned planner: drop null join keys before the shuffle
+### #137 — the planner does not drop null join keys before the shuffle
 With `null_equals_null=false` an all-null key matches nothing, and `spark_hash_partition.cu`
 skips null columns, so every such row lands in the one partition `pmod(seed, N)`.
 
@@ -561,7 +561,7 @@ corpus query exercises it. The adaptive form — insert the filter at replan tim
 adaptive replanning existing at all.
 
 <a id="t138"></a>
-### #138 — batch-partitioned sort: ranged merge emission
+### #138 — sort: ranged merge emission
 `GpuAccumulateBatchesAndSort` and `GpuMergeSortedPartitions` run one `cudf::merge` over all
 sorted inputs and materialize the whole output, so the local peak is inputs + output.
 
@@ -578,7 +578,7 @@ breaks that — a stream ordered across several batches — so it must add `Part
 and teach the limit-after-sort validation to accept it alongside the derived form.
 
 <a id="t139"></a>
-### #139 — batch-partitioned GpuCoalesceBatches(target): compact post-filter fragments
+### #139 — GpuCoalesceBatches(target): compact post-filter fragments
 Dropped from v1. After a selective filter, batches shrink to a few rows and every
 downstream kernel pays per-launch overhead on each fragment. A `BatchAccumulator` that
 concatenates to a minimum target size (DataFusion semantics: merge only, never split),
@@ -590,7 +590,7 @@ shown to tolerate one at any tree position; it also splits, which the ticket's n
 not need, because the prototype uses it to make a stream's batches any shape.
 
 <a id="t140"></a>
-### #140 — batch-partitioned broadcast joins (1:N partition broadcast)
+### #140 — broadcast joins (1:N partition broadcast)
 Deferred by the design. Lets one partition (small dimension side) be broadcast to all N
 partitions of the other side without shuffling the big side; also unblocks partitioned
 cross/nested-loop joins. The blocker is consume-once: a GPU handle feeds exactly one
@@ -600,7 +600,7 @@ refcounted handle. Interacts with #136's persistent-build option, which would so
 at once.
 
 <a id="t141"></a>
-### #141 — batch-partitioned planner: skip the shuffle for small group-key sets
+### #141 — the planner cannot skip the shuffle for small group-key sets
 v1 skips `GpuMergePartitions` + `GpuEmitPartitions` around an aggregate only when the
 input is already one partition or the aggregate is keyless. Skipping when the key set is
 merely small (collapse to one partition, run `GpuAggregateBatches[final]` once, avoid the
@@ -628,7 +628,7 @@ why the driver owns no state a caller must survive it.
 ### #146 — aggregate shaping beyond the fixed sequence
 **Priority: low** — each part optimizes an already-correct plan and needs the same estimate.
 
-The batch-partitioned aggregate applies one shape everywhere — per-batch init, merge per lane,
+The aggregate sequence applies one shape everywhere — per-batch init, merge per lane,
 shuffle, finalizing merge — right where group cardinality is far below row count.
 
 Three shapes it cannot express or choose. **(a) A merge accepting raw rows.**
@@ -663,7 +663,7 @@ and T16 refuses a second until this lands ([#152](#t152)).
 **Priority: low** — no query in either benchmark has this shape.
 
 `count(DISTINCT a), count(DISTINCT b)` over different expressions is the one distinct shape the
-batch-partitioned lowering cannot express.
+lowering cannot express.
 
 Single-distinct lowers to grouping on the distinct argument, and non-distinct companions ride
 along because Σ over the inner groups recovers each total. Two distinct arguments break it: one
@@ -676,7 +676,7 @@ ROLLUP/CUBE `__grouping_id` — the two would coexist as separate columns. Until
 planner refuses the shape at plan time.
 
 <a id="t142"></a>
-### #142 — batch-partitioned: no recourse for oversized batches
+### #142 — no recourse for oversized batches
 Nothing downstream of the loader can split a batch: minimum load granularity is one row
 group, `GpuCoalesceAllBatches` before a join build side can exceed any budget, and the
 planner deliberately still produces a plan — `driver/accounting.rs` then trips at run time and
@@ -693,6 +693,16 @@ trip log, and `Underestimate` is the precedent for what one would look like. Rel
 
 ## Infrastructure / process
 
+<a id="t197"></a>
+### #197 — the repartition arm still concatenates a child it can only be handed one of
+`node_session.cpp`'s Hash-repartition arm concatenates `child[0]`'s handles before scattering,
+and the planner puts a `GpuCoalesceAllBatches` above the merge feeding an emit, so it gets one.
+
+The comment there said to retire the branch when the legacy modes retired. They have, so the
+condition is met and nothing left in the tree can hand this arm two handles — the concat is a
+copy of a single table on every call. Removing it needs a device run to prove, which is why it
+is a ticket rather than part of the rename that found it.
+
 <a id="t196"></a>
 ### #196 — the table registrar's non-parquet guard does nothing, so a stray file panics
 `read_table` in `lib.rs` opens with `if path.extension() != Some("parquet") { () }` — the
@@ -707,7 +717,7 @@ the shape already asks for, with a case putting a non-parquet file in the dir.
 
 <a id="t195"></a>
 ### #195 — the corpus is numeric-aggregate heavy, and six shapes have no query at all
-Measured off `bp-tp1-single.plans.txt` over the 61 enabled queries and the four largest held
+Measured off `tp1-single.plans.txt` over the 61 enabled queries and the four largest held
 back: node counts run 33 to 267 while distinct node kinds run 6 to 12, median 9. More corpus
 tests scale, not surface, so each shape below wants a hand-written query over the existing
 tables, no new dataset, plus the engine work it needs.
@@ -744,7 +754,7 @@ fails when a workflow names a target that does not exist.
 
 That way round is not silent, but it is expensive and late: cargo errors inside the cuDF leg after
 the C++ build and the dataset generation, so a typo or a step added ahead of its test file costs a
-full run to discover. The case: a `--test test_cpu_batch_partitioned` step was added three commits
+full run to discover. The case: a `--test test_cpu_end_to_end` step was added three commits
 before the file, and both legs went red on it.
 
 The converse is nearly free — `workspace_test_targets()` and the `--test` line parsing both exist,
@@ -782,7 +792,7 @@ executor is reusable, plus one Rust FFI case on shad-gpu. Retry with a smaller b
 <a id="t164"></a>
 ### #164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws
 
-The C++ half of [#135](archive/archived-tickets.md#t135), which the batch-partitioned planner
+The C++ half of [#135](archive/archived-tickets.md#t135), which the planner
 closed on the Rust side by checking a reference's name against the field at its position.
 
 `TableResult` is a `cudf::table` plus a name vector with no invariant that the two are the same
@@ -971,6 +981,6 @@ The sweep is not the one the integration tests got: a unit test cannot reach
 `tests/common/mod.rs`, so the fix is a `#[cfg(test)]` helper in `src` honouring
 `PEACOCK_TESTDATA_DIR` with the same fallback, and the two spellings then have to be held to
 each other or they are the drift this ticket is about one layer down.
-`test_ci_coverage.rs` and the fbs reader in `test_batch_partitioned_plans` are not this: their
+`test_ci_coverage.rs` and the fbs reader in `test_plan_goldens` are not this: their
 `CARGO_MANIFEST_DIR` resolves the repo root to read committed source, not testdata, and no env
 var should redirect that.

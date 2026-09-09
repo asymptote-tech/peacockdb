@@ -350,7 +350,7 @@ the layout changed behaviour.
 In this order: `plan_text` and `executor/driver` first, because they are already close to the target
 shape and prove the pattern cheaply; then `wire`, which is the largest single move and the one that
 makes `generated` private; then `plan`; then `planner`; then the backends. After each, run the lib
-unit tests plus `test_batch_partitioned_plans` — the cheap tier — so a break is localized to the
+unit tests plus `test_plan_goldens` — the cheap tier — so a break is localized to the
 component that caused it rather than found at the end across a 138-file diff.
 
 ### Per-commit checks

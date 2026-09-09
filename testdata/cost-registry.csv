@@ -1,4 +1,4 @@
-dataset,sf,query,bp_tp1_single,bp_tp1_rowgroup,bp_tp4_single,bp_tp4_rowgroup,bp_tp4_sized,bp_cpu_tp1_single,bp_cpu_tp1_rowgroup,bp_cpu_tp4_single,bp_cpu_tp4_rowgroup,bp_cpu_tp4_sized,bp_gpu_tp1_single,bp_gpu_tp1_rowgroup,bp_gpu_tp4_single,bp_gpu_tp4_rowgroup,bp_gpu_tp4_sized,plan_status,features,tickets
+dataset,sf,query,tp1_single,tp1_rowgroup,tp4_single,tp4_rowgroup,tp4_sized,cpu_tp1_single,cpu_tp1_rowgroup,cpu_tp4_single,cpu_tp4_rowgroup,cpu_tp4_sized,gpu_tp1_single,gpu_tp1_rowgroup,gpu_tp4_single,gpu_tp4_rowgroup,gpu_tp4_sized,plan_status,features,tickets
 tpcds,1,q1,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,corr_subquery avg top_n,163
 tpcds,1,q2,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,corr_subquery,56 152
 tpcds,1,q3,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,corr_subquery top_n,152 183

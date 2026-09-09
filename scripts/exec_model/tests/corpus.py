@@ -53,7 +53,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from ..batch_partitioned_driver import batch_partitioned_driver
+from ..partitioned_driver import partitioned_driver
 from ..node import CpuBackendSelector, RecipeJoinBackendSelector
 from ..operators import aggregates as A
 from ..operators.frame import concatenate
@@ -477,7 +477,7 @@ def backend_selector():
 
 
 def execute(root, budget: int | None = BUDGET):
-    driver = batch_partitioned_driver(Plan.build(root), backend_selector(), budget)
+    driver = partitioned_driver(Plan.build(root), backend_selector(), budget)
     driver.run()
     # The plan's own concatenate, not pandas': it keeps the first batch's schema when every
     # batch is empty, and a query whose answer is the empty set still has to report its

@@ -95,9 +95,9 @@ enum UnaryOp : byte {
   IsNotNull,
   Negative,
   /// Appended, so no ordinal moves and no existing plan's bytes change. A
-  /// stddev's finalize is the one expression that needs it: the batch-partitioned
-  /// mode carries its own finalize rather than letting the executor hardwire one,
-  /// so both engines evaluate the same expression.
+  /// stddev's finalize is the one expression that needs it: the plan carries its own
+  /// finalize rather than letting the executor hardwire one, so both engines evaluate
+  /// the same expression.
   Sqrt,
 }
 
@@ -276,7 +276,7 @@ enum AggregateMode : byte {
   Single,
   SinglePartitioned,
   /// Appended: merge state and emit state, where Final merges and finalizes.
-  /// The batch-partitioned mode needs the two separated — it merges per lane and
+  /// The engine needs the two separated — it merges per lane and
   /// again across lanes, and finalizes in a project of its own — and composite
   /// state (a Welford triple, avg's sum and count) cannot be merged any other way.
   Merge,
