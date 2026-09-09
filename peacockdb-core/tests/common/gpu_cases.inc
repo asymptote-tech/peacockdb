@@ -3,16 +3,14 @@
 // to run. Deliberately NOT a `.rs` file and NOT at `tests/` top level: cargo would
 // auto-discover either as its own test target.
 //
-// `include!`d by THREE targets, which differ only in what `gpu_case!` means there:
+// `include!`d by TWO targets, which differ only in what `gpu_case!` means there:
 //   - `tests/test_gpu_full_table.rs`    — expands the `full_table_tp1_standard` rows
 //     to `gpu_full_table_test!`, and the partitioned rows to NOTHING.
 //   - `tests/test_gpu_partitioned.rs`   — the mirror image.
-//   - `tests/peacock_gpu_benchmarks.rs` — expands BOTH to a benchmark that times the
-//     query and asserts nothing.
 //
 // The label is matched as a LITERAL token, not captured as an `ident`. That is the
 // point of keeping one file rather than two: a row whose label is neither of the two
-// known ones matches no rule and fails to COMPILE, in all three targets at once.
+// known ones matches no rule and fails to COMPILE, in both targets at once.
 // Split across two files the same mistake compiles fine — the row just silently runs
 // in the wrong suite, or in none.
 //
@@ -21,9 +19,6 @@
 // shadowing a `#[macro_export]`ed macro works, but "which definition is in scope here"
 // is then something a reader has to reason about, and getting it wrong silently runs
 // the wrong thing rather than failing to compile.
-//
-// One list, so a query added to the suite is benchmarked without a second edit, and a
-// benchmark record can never describe a query the gate does not run.
 
 // ── TPC-H (the GPU-supported set) ───────────────────────────────────────────
 gpu_case!(tpch, 1, scan_limit, full_table_tp1_standard, golden_exact);
