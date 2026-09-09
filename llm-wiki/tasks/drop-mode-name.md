@@ -126,10 +126,12 @@ quietly changed.
   75 lines and nothing else. Same shape as task 2's `GpuHashJoin` quarantine, and the same reason —
   it separates the strong check from the one known change. The wording is the developer's, under
   two constraints: it must not say "mode", and the two sites must agree.
-- **The payload digests are the sharpest instrument.** Regenerate with
-  `PEACOCK_REWRITE_RECIPE_BYTES=1` and the fixed `/tmp` testdata symlink; an empty diff means the
-  flat-buffer bytes are unchanged down to statement order. A digest that moves during a rename means
-  the run must stop, not that the new digest gets committed.
+- **The payload digests are the sharpest instrument, and the plain regen is what reads them.**
+  Under `UPDATE_CANONICAL=1` alone, `test_plan_goldens` compares the committed digests against the
+  bytes it just built and fails naming the file. Setting `PEACOCK_REWRITE_RECIPE_BYTES=1` makes it
+  rewrite instead of compare, which is the instrument switched off — so never set it here. A
+  digest that moves during a rename means the run stops, not that the new digest gets committed.
+  (`module-layout.md`'s quarantine reads this same paragraph.)
 - **The case inventory maps under one transformation.** Every `--list` name must map to a baseline
   name by removing a `bp_` or `bp-` prefix, and per-target counts must match. A vanished case is a
   `#[test]` lost to a bad sed; a new one is a duplicated module.
@@ -145,14 +147,20 @@ quietly changed.
   of it is the residue task 2 removes. So the gate excludes the four spellings that survive:
 
   ```
-  git grep -inE --untracked 'batch.partition' -- ':!llm-wiki' ':!peacockdb-core/src' \
-    | grep -vE 'batch_partitioned::|::batch_partitioned|plan_batch_partitioned|batch_partitioned_driver|batch_partitioned[^:]|src/batch_partitioned/'
+  git grep -inE --untracked 'batch.?partition' -- ':!llm-wiki' ':!peacockdb-core/src' ':!testdata/goldens' \
+    | grep -vE 'mod batch_partitioned|batch_partitioned/|batch_partitioned::|::batch_partitioned|plan_batch_partitioned|batch_partitioned_driver'
   ```
 
-  138 lines today; at the finish it is **five**, and all five are deliberate — the three
-  `batch→partition` mapping sites, plus `test_ci_coverage.rs:431` (a failure message naming the
-  inline test modules) and `test_cost_model.rs:196` (an `include_str!` of a src path). The last two
-  are task 2 residue and go when the module does.
+  **The pattern is `batch.?partition`, case-insensitive, and both halves of that are load-bearing.**
+  `.?` rather than `.` catches `BatchPartitionedDriver`, which a separator-requiring pattern cannot
+  see at all — that is how a class survived its own module's rename. And the exclusions are the
+  four surviving spellings written out rather than a bare `batch_partitioned`, which would swallow
+  every underscore residue including `--test test_batch_partitioned_plans` and
+  `mod test_batch_partitioned_injection` — the target-rename miss the gate exists to catch.
+
+  At the finish it lands on **six**, all deliberate: the three `batch→partition` mapping sites,
+  `README.md:371` and `source.py:3` naming `ParquetBatchPartitioner` (the same structure, not the
+  mode), and `test_ci_coverage.rs:431`, which is task 2 residue and goes when the module does.
 
   Then `git grep -nE --untracked '\bbp[-_]' -- ':!peacockdb-core/src' ':!llm-wiki'` and
   `git grep -n --untracked 'bp-tickets' -- ':!llm-wiki'`, both empty. `llm-wiki` is excluded whole
@@ -170,6 +178,20 @@ quietly changed.
   have.
 - **`test_ci_coverage` passes**, so a missed target rename fails there rather than silently
   un-gating a tier.
+
+### What a device run does and does not add
+
+A renamed golden that `mode.rs` computes a different path for fails **rust-only, before any
+device**: `test_corpus_goldens` opens `cpu_golden()`, `cost_golden()` and `result_golden()` by
+computed path with `.expect(...)`, and `test_cost_model` sweeps the same directory. So the device
+tier is not the first reader of those filenames, and a run that claims to be proving them is
+claiming the wrong thing.
+
+What the device run genuinely adds is that the **sections inside** those files still resolve and
+the plan shapes still match — `test_gpu_corpus` reads what the cpu tier authored, read-only, from
+the far side of the ABI, and that is the part the cpu tier cannot self-check because it wrote what
+it is reading. Worth stating correctly: the same judgement recurs in tasks 2 and 3, and "only the
+device can see this" is an easy claim to make about a filename when it is true only of a section.
 
 ### Done when
 

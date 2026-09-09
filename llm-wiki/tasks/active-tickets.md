@@ -1,6 +1,6 @@
-# batch-partitioned tickets
+# active tickets
 
-Queries the batch-partitioned rollout disabled, and what has to change before each comes back.
+Queries the rollout disabled, and what has to change before each comes back.
 
 Separate from [`../tickets.md`](../tickets.md) because these are a rollout's worklist rather than
 the engine's: they arrive in bulk when a sweep hits a wall and close in bulk when it is cleared,
@@ -59,7 +59,7 @@ whole lane before emitting one batch — both live at the emit, a rows fact logi
 `nested-loop-join` cannot show it: one batch per lane, so the rebatcher merges one into one, and
 its old 318-byte move was arrow reallocating a single batch.
 
-Fix: repoint the second pair at `tpch/nested-limits` at `tp4-rowgroup` (`BP_MODES[3]`), whose
+Fix: repoint the second pair at `tpch/nested-limits` at `tp4-rowgroup` (`MODES[3]`), whose
 `part` loader is `partition_groups=[[[0],[1]]]` — two batches in one lane — and is the plan's peak
 node at 983,071 estimated against 1,600,062 source bytes. Three milliseconds a run. It is already
 in the corpus and in the injected set, so nothing new is declared.
