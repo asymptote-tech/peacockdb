@@ -38,7 +38,7 @@ shared. 75 queries carry #152. Memory accounting is deliberately out of scope an
 The layout refactor. It may not run beside the ENS-casts chain: both rewrite the same tree, so
 rebasing one across the other is a whole-tree conflict.
 
-### 1. [`drop-mode-name.md`](drop-mode-name.md) — state: done
+### 1. [`drop-mode-name.md`](drop-mode-name.md) — state: needs rebase(done)
 
 Names only. "Batch partitioned" and its `bp` abbreviation qualify against an alternative that no
 longer exists, so every occurrence goes — identifiers, mode labels, golden filenames, one Python
@@ -46,7 +46,7 @@ module, one ticket page. No Rust file moves and no behaviour changes, which make
 every derived artifact reproduces byte for byte. `src/batch_partitioned/` is the one name left
 standing, for task 2 to move once rather than twice.
 
-### 2. [`module-layout.md`](module-layout.md) — state: new
+### 2. [`module-layout.md`](module-layout.md) — state: approved to build
 
 `peacockdb-core/src/batch_partitioned/**` moves up to `src/`, laid out as components whose whole API
 is declared in `mod.rs` with the implementation behind private modules. `plan_batch_partitioned`
