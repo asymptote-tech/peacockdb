@@ -370,6 +370,10 @@ component that caused it rather than found at the end across a 138-file diff.
   no `pub use`; no `pub(super)`; subcomponents declared `mod`, not `pub mod`; and the item set
   unchanged from the baseline, since this task moves declarations and does not remove any. Run it
   at every component commit.
+- **Re-run task 1's strip-and-rematch after each slice.** Its residue gate excludes by line, not
+  by match, so a survivor spelling anywhere on a line hides real residue sharing it. That was
+  latent when task 1 closed; this task moves the files those 170 lines live in, which is exactly
+  the motion that turns it live.
 - **Every grep in this task takes `--untracked`.** `git grep` does not see untracked files, so a
   sweep run before staging is blind to exactly the files being moved — in task 1 a gate reported
   clean while residue sat in four renamed files. This task moves every file in the crate, so the

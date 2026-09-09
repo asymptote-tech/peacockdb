@@ -169,6 +169,14 @@ quietly changed.
   so excluding them buys nothing today — and they are exactly where that wording lands, so a gate
   blind to them could not catch it coming back.
 
+  **The exclusion is line-scoped, which is the one hole left in it.** `grep -vE` drops the whole
+  line, so a deliberate survivor anywhere on a line shields real residue sharing it —
+  `mod batch_partitioned; // renamed from test_batch_partitioned_plans` is invisible to the gate.
+  Latent rather than live today: stripping the six survivor spellings from every excluded line and
+  re-matching returns nothing. But 170 lines carry a survivor spelling, and the later tasks move
+  the tree those lines live in, so re-run that strip-and-rematch after each slice rather than
+  assuming it still holds.
+
   At the finish it lands on **six**, all deliberate: the three `batch→partition` mapping sites,
   `README.md:371` and `source.py:3` naming `ParquetBatchPartitioner` (the same structure, not the
   mode), and `test_ci_coverage.rs:431`, which is task 2 residue and goes when the module does.

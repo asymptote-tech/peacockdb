@@ -30,19 +30,8 @@ jobs:
   # Fail-open by construction. It answers `code=true` — run everything — for any event
   # that is not a synchronize, a force push or rebase, an unreadable compare, a range at
   # the API's page limit, and any file it cannot place. Only a clean append of
-  # documentation skips. A wrong skip is not a hole into master, but only by a route that
-  # holds for one PR shape: the merge lands as a push whose own diff carries the code, and
-  # that run re-evaluates from scratch. The push trigger above is `branches: [master]`, so
-  # that argument covers a PR merging INTO master and nothing else. A PR merged into a
-  # parent `ENS-` branch — the task-chain shape — is a push to a non-master branch and
-  # triggers no run at all; its code reaches a master run only when the chain's root
-  # merges, in aggregate rather than per PR.
-  #
-  # Two consequences for a chain. `gh pr checks` reports the NEWEST run, and a docs-only
-  # push produces a run whose every job is skipped and whose conclusion is therefore
-  # success — so a green PR can sit two runs in front of the one that tested its code.
-  # And there are no required status checks, so nothing mechanical stops a merge on that
-  # green. Verify per-run against the head CODE commit.
+  # documentation skips. A wrong skip is not a hole into master where the PR targets master
+  # — but the trigger above is `branches: [master]`, so a merge into a parent runs nothing.
   changes:
     name: Changed paths
     runs-on: ubuntu-latest
