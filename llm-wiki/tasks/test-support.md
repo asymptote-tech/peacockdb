@@ -1,5 +1,7 @@
 # 4 — the crate's API becomes the CLI's
 
+Kind: production
+
 Last of four, after [`test-layout.md`](test-layout.md). That task moved eleven targets into `src/`
 and took the public surface from 108 test-driven items to eight. This one removes the last eight, so
 that **`peacockdb-core` exposes exactly what the CLI needs and nothing else**.

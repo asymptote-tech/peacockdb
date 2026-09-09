@@ -1,5 +1,7 @@
 # 1 — the mode has no name any more
 
+Kind: production
+
 First of four. The legacy modes are gone, so "batch partitioned" and its `bp` abbreviation
 distinguish nothing; every occurrence is a qualifier against an alternative that no longer exists.
 

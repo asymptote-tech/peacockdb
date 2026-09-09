@@ -1,5 +1,7 @@
 # 2 — a component's API is its mod.rs
 
+Kind: production
+
 Second of four, after [`drop-mode-name.md`](drop-mode-name.md) and before
 [`test-layout.md`](test-layout.md) and [`test-support.md`](test-support.md). None may run beside the
 four in [`tasks.md`](tasks.md) — rebasing across them is a whole-tree conflict.

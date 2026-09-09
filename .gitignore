@@ -36,9 +36,15 @@ __pycache__/
 # Local-only embedding source cache (fetch_embeddings.sh); never committed — data ships as parquet
 testdata/embeddings-cache/
 
-# Agent working directory: this repo is developed by the ensemble in llm-wiki/prompts.md,
-# and .claude/ is per-checkout tooling config, not project state.
-.claude/
+# Agent working directory: this repo is developed by the ensemble in llm-wiki/prompts.md.
+# The agent definitions and the /ensemble command are project state and must be committed —
+# git worktrees do not carry ignored files, so a chain worktree without them cannot spawn a
+# developer. The directory line is a glob because git will not re-include a file inside an
+# excluded directory. Everything else here, .claude/ensemble/ run state included, is
+# per-checkout tooling config.
+.claude/*
+!.claude/agents/
+!.claude/commands/
 
 # The 26.02 build tree; cpp/build (25.02) is covered above and this one was not,
 # so a `git add cpp` swept 1069 build artifacts into a commit once.
