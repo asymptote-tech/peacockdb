@@ -21,7 +21,7 @@ use super::super::executor::{AbiCalls, BackendError, CallResult, CallStats};
 use super::super::gpu_batch::GpuBatch;
 use super::super::nodes::join::empty_build_answers_nothing;
 use super::super::recipe::{CallPattern, FbKind, Input, ProjectRole, Recipe, Seq};
-use super::{Consumed, Device, execute_node, no_abi_calls, produced};
+use super::{Consumed, CallSite, execute_node, no_abi_calls, produced};
 
 /// One call of a join's recipe: the seq, and the inputs it names in order. Each named
 /// input is one child slot — the C++ reads its output count off the first slot, so two
@@ -35,7 +35,7 @@ struct JoinCall {
 
 /// A join before its build side arrives.
 pub struct GpuJoin {
-    dev: Device,
+    site: CallSite,
     /// The node's own type, and `None` for the two joins that have none — cross and
     /// nested-loop. What a finish over no keys owes is decided by this rather than read
     /// back off the call list: two different nodes publish a LeftAnti at done, and one of
@@ -51,7 +51,7 @@ impl GpuJoin {
     /// `keys` is the schema of the probe keys a finishing join accumulates — the key
     /// project's output, which is the node's key columns and nothing else.
     pub fn new(
-        dev: Device,
+        site: CallSite,
         recipe: &Recipe,
         join_type: Option<JoinType>,
         keys: Option<&ArrowSchema>,
@@ -89,7 +89,7 @@ impl GpuJoin {
             ));
         }
         Ok(Self {
-            dev,
+            site,
             join_type,
             per_probe,
             at_done,
@@ -302,10 +302,10 @@ impl GpuProbingJoin {
             taken.bytes += slot.bytes;
             slots.push(handles);
         }
-        let (handle, stats) = execute_node(self.join.dev, call.seq, call.kind, &slots)?;
+        let (handle, stats) = execute_node(self.join.site, call.seq, call.kind, &slots)?;
         calls.record(call.seq, call.kind, taken.rows, Some(taken.bytes));
         let schema = self.schema_of(call.kind);
-        Ok(produced(self.join.dev.executor, handle, stats, schema))
+        Ok(produced(self.join.site.executor, handle, stats, schema))
     }
 
     /// What the call produced is priced by: the key project's output is the keys, and

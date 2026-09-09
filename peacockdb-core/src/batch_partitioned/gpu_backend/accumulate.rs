@@ -22,7 +22,7 @@ use super::super::executor::{AbiCalls, BackendError, CallResult, CallStats, Lane
 use super::super::gpu_batch::GpuBatch;
 use super::super::node::RowInterval;
 use super::super::recipe::{AbiSymbol, Call, CallPattern, FbKind, Input, Recipe, Seq};
-use super::{Consumed, Device, execute_node, last_error, no_abi_calls, produced};
+use super::{Consumed, CallSite, execute_node, last_error, no_abi_calls, produced};
 
 /// A `BatchAccumulator` node's executor, one variant per node.
 pub enum GpuAccumulator {
@@ -34,12 +34,12 @@ pub enum GpuAccumulator {
 
 impl GpuAccumulator {
     /// One call at done, over everything the lane accumulated.
-    pub fn coalesce(dev: Device, recipe: &Recipe, schema: &ArrowSchema) -> Result<Self, PlanError> {
+    pub fn coalesce(site: CallSite, recipe: &Recipe, schema: &ArrowSchema) -> Result<Self, PlanError> {
         let [call] = recipe.calls.as_slice() else {
             return Err(shape("a coalesce makes one call, at done", recipe));
         };
         Ok(Self::Coalesce(Collapse {
-            dev,
+            site,
             collapse: addressed(call, CallPattern::AtDone, Input::LaneBatches)?,
             held: Vec::new(),
             schema: Arc::new(schema.clone()),
@@ -47,7 +47,7 @@ impl GpuAccumulator {
     }
 
     /// A sort per batch, then one merge over the runs at done.
-    pub fn sorted(dev: Device, recipe: &Recipe, schema: &ArrowSchema) -> Result<Self, PlanError> {
+    pub fn sorted(site: CallSite, recipe: &Recipe, schema: &ArrowSchema) -> Result<Self, PlanError> {
         let [per_batch, at_done] = recipe.calls.as_slice() else {
             return Err(shape(
                 "an accumulating sort makes two calls: a sort per batch and a merge at done",
@@ -55,7 +55,7 @@ impl GpuAccumulator {
             ));
         };
         Ok(Self::Sorted(SortedRuns {
-            dev,
+            site,
             sort: addressed(per_batch, CallPattern::PerBatch, Input::Batch)?,
             merge: addressed(at_done, CallPattern::AtDone, Input::LaneBatches)?,
             held: Vec::new(),
@@ -67,7 +67,7 @@ impl GpuAccumulator {
     /// where this node finishes the aggregate. `compact_bytes` is the held size that
     /// triggers a compaction; it comes from the budget rule, which is the driver's.
     pub fn aggregate(
-        dev: Device,
+        site: CallSite,
         recipe: &Recipe,
         state: &ArrowSchema,
         output: &ArrowSchema,
@@ -93,7 +93,7 @@ impl GpuAccumulator {
             }
         };
         Ok(Self::Aggregate(AggregateBatches {
-            dev,
+            site,
             concat: addressed(concat, CallPattern::PerCompaction, Input::LaneBatches)?,
             merge: addressed(merge, CallPattern::PerCompaction, Input::PriorOutput)?,
             finalize,
@@ -109,7 +109,7 @@ impl GpuAccumulator {
     /// No seq at all: a limit's bounds are runtime values, so it addresses the slice
     /// symbol rather than a node.
     pub fn limit(
-        dev: Device,
+        site: CallSite,
         recipe: &Recipe,
         interval: RowInterval,
         schema: &ArrowSchema,
@@ -127,7 +127,7 @@ impl GpuAccumulator {
             ));
         }
         Ok(Self::Limit(LimitStream {
-            dev,
+            site,
             interval,
             seen: 0,
             schema: Arc::new(schema.clone()),
@@ -193,7 +193,7 @@ fn hand_over(batches: Vec<GpuBatch>, measure: bool) -> (Vec<u64>, Consumed) {
 /// this backend emits nothing and the empty batch is the driver's to supply, which is the
 /// one place that knows the schema without asking the device.
 pub struct Collapse {
-    dev: Device,
+    site: CallSite,
     collapse: (Seq, FbKind),
     held: Vec<GpuBatch>,
     schema: SchemaRef,
@@ -216,10 +216,10 @@ impl Collapse {
         let (seq, kind) = self.collapse;
         let mut calls = AbiCalls::armed(node_timing_on());
         let (handles, taken) = hand_over(self.held, calls.is_armed());
-        let (handle, stats) = execute_node(self.dev, seq, kind, &[handles])?;
+        let (handle, stats) = execute_node(self.site, seq, kind, &[handles])?;
         calls.record(seq, kind, taken.rows, Some(taken.bytes));
         Ok((
-            vec![produced(self.dev.executor, handle, stats, &self.schema)],
+            vec![produced(self.site.executor, handle, stats, &self.schema)],
             CallStats {
                 scratch_bytes: None,
                 calls,
@@ -232,7 +232,7 @@ impl Collapse {
 /// where none arrived, since a merge of no runs is the collapse of nothing by another name
 /// and the device refuses that (#173).
 pub struct SortedRuns {
-    dev: Device,
+    site: CallSite,
     sort: (Seq, FbKind),
     merge: (Seq, FbKind),
     held: Vec<GpuBatch>,
@@ -248,10 +248,10 @@ impl SortedRuns {
         let (seq, kind) = self.sort;
         let mut calls = AbiCalls::armed(node_timing_on());
         let (handles, taken) = hand_over(vec![batch], calls.is_armed());
-        let (handle, stats) = execute_node(self.dev, seq, kind, &[handles])?;
+        let (handle, stats) = execute_node(self.site, seq, kind, &[handles])?;
         calls.record(seq, kind, taken.rows, Some(taken.bytes));
         self.held
-            .push(produced(self.dev.executor, handle, stats, &self.schema));
+            .push(produced(self.site.executor, handle, stats, &self.schema));
         Ok((
             Vec::new(),
             CallStats {
@@ -268,10 +268,10 @@ impl SortedRuns {
         let (seq, kind) = self.merge;
         let mut calls = AbiCalls::armed(node_timing_on());
         let (handles, taken) = hand_over(self.held, calls.is_armed());
-        let (handle, stats) = execute_node(self.dev, seq, kind, &[handles])?;
+        let (handle, stats) = execute_node(self.site, seq, kind, &[handles])?;
         calls.record(seq, kind, taken.rows, Some(taken.bytes));
         Ok((
-            vec![produced(self.dev.executor, handle, stats, &self.schema)],
+            vec![produced(self.site.executor, handle, stats, &self.schema)],
             CallStats {
                 scratch_bytes: None,
                 calls,
@@ -285,7 +285,7 @@ impl SortedRuns {
 /// The threshold doubles when a compaction fails to shrink what it folded — see the CPU
 /// backend's copy of this rule, which is the same rule and the same reason.
 pub struct AggregateBatches {
-    dev: Device,
+    site: CallSite,
     concat: (Seq, FbKind),
     merge: (Seq, FbKind),
     finalize: Option<(Seq, FbKind)>,
@@ -331,12 +331,12 @@ impl AggregateBatches {
         folding.append(&mut self.pending);
         let (seq, kind) = self.concat;
         let (handles, taken) = hand_over(folding, calls.is_armed());
-        let (concatenated, concat_stats) = execute_node(self.dev, seq, kind, &[handles])?;
+        let (concatenated, concat_stats) = execute_node(self.site, seq, kind, &[handles])?;
         calls.record(seq, kind, taken.rows, Some(taken.bytes));
         let (seq, kind) = self.merge;
-        let (handle, stats) = execute_node(self.dev, seq, kind, &[vec![concatenated]])?;
+        let (handle, stats) = execute_node(self.site, seq, kind, &[vec![concatenated]])?;
         calls.record(seq, kind, concat_stats.rows, None);
-        let state = produced(self.dev.executor, handle, stats, &self.held);
+        let state = produced(self.site.executor, handle, stats, &self.held);
         self.threshold = self.threshold.max(2 * state.byte_size());
         self.state = Some(state);
         self.compactions += 1;
@@ -359,10 +359,10 @@ impl AggregateBatches {
             return Ok((vec![state], stats_of(calls)));
         };
         let (handles, taken) = hand_over(vec![state], calls.is_armed());
-        let (handle, stats) = execute_node(self.dev, seq, kind, &[handles])?;
+        let (handle, stats) = execute_node(self.site, seq, kind, &[handles])?;
         calls.record(seq, kind, taken.rows, Some(taken.bytes));
         Ok((
-            vec![produced(self.dev.executor, handle, stats, &self.output)],
+            vec![produced(self.site.executor, handle, stats, &self.output)],
             stats_of(calls),
         ))
     }
@@ -376,7 +376,7 @@ impl AggregateBatches {
 /// carrying the last `Done` is the emitting one. The handles go into the merge in lane
 /// order, which is what makes a tie partition-major rather than arrival-ordered.
 pub struct GpuPartitionAccumulator {
-    dev: Device,
+    site: CallSite,
     merge: (Seq, FbKind),
     per_lane: Vec<Vec<GpuBatch>>,
     live: usize,
@@ -390,7 +390,7 @@ impl GpuPartitionAccumulator {
     }
 
     pub fn merge_sorted(
-        dev: Device,
+        site: CallSite,
         recipe: &Recipe,
         lanes: usize,
         schema: &ArrowSchema,
@@ -402,7 +402,7 @@ impl GpuPartitionAccumulator {
             ));
         };
         Ok(Self {
-            dev,
+            site,
             merge: addressed(call, CallPattern::AtDone, Input::AllLanes)?,
             per_lane: (0..lanes).map(|_| Vec::new()).collect(),
             live: lanes,
@@ -435,10 +435,10 @@ impl GpuPartitionAccumulator {
         }
         let mut calls = AbiCalls::armed(node_timing_on());
         let (handles, taken) = hand_over(held, calls.is_armed());
-        let (handle, stats) = execute_node(self.dev, seq, kind, &[handles])?;
+        let (handle, stats) = execute_node(self.site, seq, kind, &[handles])?;
         calls.record(seq, kind, taken.rows, Some(taken.bytes));
         Ok((
-            vec![produced(self.dev.executor, handle, stats, &self.schema)],
+            vec![produced(self.site.executor, handle, stats, &self.schema)],
             CallStats {
                 scratch_bytes: None,
                 calls,
@@ -453,7 +453,7 @@ impl GpuPartitionAccumulator {
 /// is forwarded untouched, and only the two that straddle its ends are sliced. Its input
 /// is one lane — the node checks that — so the count it keeps is the stream's.
 pub struct LimitStream {
-    dev: Device,
+    site: CallSite,
     interval: RowInterval,
     seen: u64,
     schema: SchemaRef,
@@ -482,7 +482,7 @@ impl LimitStream {
         let mut sliced = 0u64;
         let rc = unsafe {
             peacock_executor_slice_handle(
-                self.dev.executor,
+                self.site.executor,
                 handle,
                 rows.offset,
                 rows.length,
@@ -494,13 +494,13 @@ impl LimitStream {
                 "slice_handle({handle}, {}..+{}): {}",
                 rows.offset,
                 rows.length,
-                last_error(self.dev.executor)
+                last_error(self.site.executor)
             )));
         }
         // The slice reports no stats, so the batch is priced from the rows asked for: a
         // range that clamps is one this node computed against the batch it holds.
         let kept = GpuBatch::new(
-            self.dev.executor,
+            self.site.executor,
             sliced,
             rows.length as usize,
             logical_size_from_schema(&self.schema, rows.length as usize, 0),

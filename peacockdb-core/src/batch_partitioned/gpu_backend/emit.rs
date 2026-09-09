@@ -14,10 +14,10 @@ use super::super::error::PlanError;
 use super::super::executor::{AbiCalls, BackendError, CallResult, CallStats};
 use super::super::gpu_batch::GpuBatch;
 use super::super::recipe::{CallPattern, FbKind, Input, Recipe, Seq};
-use super::{Consumed, Device, execute_node_many, produced};
+use super::{Consumed, CallSite, execute_node_many, produced};
 
 pub struct GpuEmitter {
-    dev: Device,
+    site: CallSite,
     seq: Seq,
     kind: FbKind,
     lanes: usize,
@@ -25,7 +25,7 @@ pub struct GpuEmitter {
 }
 
 impl GpuEmitter {
-    pub fn new(dev: Device, recipe: &Recipe, schema: &ArrowSchema) -> Result<Self, PlanError> {
+    pub fn new(site: CallSite, recipe: &Recipe, schema: &ArrowSchema) -> Result<Self, PlanError> {
         let [call] = recipe.calls.as_slice() else {
             return Err(PlanError::Invalid(format!(
                 "a scatter makes one call per batch, and this recipe is `{recipe}`"
@@ -47,7 +47,7 @@ impl GpuEmitter {
             )));
         };
         Ok(Self {
-            dev,
+            site,
             seq,
             kind,
             lanes: lanes as usize,
@@ -63,7 +63,7 @@ impl GpuEmitter {
             .unwrap_or_default();
         let (_, handle) = batch.consume();
         let produced_lanes =
-            execute_node_many(self.dev, self.seq, self.kind, &[vec![handle]], self.lanes)?;
+            execute_node_many(self.site, self.seq, self.kind, &[vec![handle]], self.lanes)?;
         calls.record(self.seq, self.kind, taken.rows, Some(taken.bytes));
         if produced_lanes.len() != self.lanes {
             return Err(BackendError::new(format!(
@@ -77,7 +77,7 @@ impl GpuEmitter {
         Ok((
             produced_lanes
                 .into_iter()
-                .map(|(handle, stats)| produced(self.dev.executor, handle, stats, &self.schema))
+                .map(|(handle, stats)| produced(self.site.executor, handle, stats, &self.schema))
                 .collect(),
             CallStats {
                 scratch_bytes: None,

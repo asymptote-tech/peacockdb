@@ -18,11 +18,11 @@ use super::super::executor::{AbiCalls, BackendError, CallStats};
 use super::super::gpu_batch::GpuBatch;
 use super::super::nodes::GpuLoadParquet;
 use super::super::recipe::{AbiSymbol, CallPattern, FbKind, Input, Recipe, Seq};
-use super::{Device, last_error, produced};
+use super::{CallSite, last_error, produced};
 
 /// A lane's reads, in the order the mapping named them.
 pub struct GpuSource {
-    dev: Device,
+    site: CallSite,
     seq: Seq,
     kind: FbKind,
     /// The row groups per batch this lane still owes, front first.
@@ -32,7 +32,7 @@ pub struct GpuSource {
 
 impl GpuSource {
     pub fn new(
-        dev: Device,
+        site: CallSite,
         recipe: &Recipe,
         node: &GpuLoadParquet,
         schema: &ArrowSchema,
@@ -53,7 +53,7 @@ impl GpuSource {
         let (seq, kind) = call
             .target
             .ok_or_else(|| PlanError::Invalid(format!("{call:?} addresses no seq")))?;
-        let lane = dev.lane;
+        let lane = site.lane;
         let batches = node.partition_groups.get(lane).ok_or_else(|| {
             PlanError::Invalid(format!(
                 "lane {lane} of a scan the partitioner mapped into {} lanes",
@@ -61,7 +61,7 @@ impl GpuSource {
             ))
         })?;
         Ok(Self {
-            dev,
+            site,
             seq,
             kind,
             batches: batches.iter().cloned().collect(),
@@ -78,7 +78,7 @@ impl GpuSource {
         let mut stats = PeacockNodeStats::default();
         let rc = unsafe {
             peacock_executor_execute_scan_rowgroups(
-                self.dev.executor,
+                self.site.executor,
                 self.seq as u64,
                 groups.as_ptr(),
                 groups.len() as u64,
@@ -90,7 +90,7 @@ impl GpuSource {
             return Err(BackendError::new(format!(
                 "execute_scan_rowgroups(#{}, {groups:?}): {}",
                 self.seq,
-                last_error(self.dev.executor)
+                last_error(self.site.executor)
             )));
         }
         // A scan takes no batch, so its input is nothing rather than unknown — the same
@@ -98,7 +98,7 @@ impl GpuSource {
         let mut calls = AbiCalls::armed(node_timing_on());
         calls.record(self.seq, self.kind, 0, Some(0));
         Ok(Some((
-            produced(self.dev.executor, handle, stats, &self.schema),
+            produced(self.site.executor, handle, stats, &self.schema),
             CallStats {
                 scratch_bytes: None,
                 calls,

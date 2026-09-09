@@ -32,7 +32,7 @@ use crate::executors::node_timing_on;
 use crate::memory::logical_size_from_schema;
 
 use super::batch::Batch;
-use super::driver::Region;
+use super::driver::{Measured, Region};
 use super::cpu_batch::CpuBatch;
 use super::error::PlanError;
 use super::executor::{AbiCalls, BackendError, CallResult, CallStats, RowRange};
@@ -44,7 +44,7 @@ use super::recipe::{CallPattern, FbKind, Input, Recipe, Seq};
 /// The session pointer is BORROWED, as everywhere on the GPU path: the session outlives
 /// every executor drawn from it, and the handles it hands back.
 pub struct GpuExec {
-    dev: Device,
+    site: CallSite,
     calls: Vec<(Seq, FbKind)>,
     schema: SchemaRef,
 }
@@ -53,7 +53,7 @@ impl GpuExec {
     /// `schema` is what the node declares it produces, which is what prices the batch —
     /// the ABI reports rows and varlen content, and the fixed width per row is the
     /// schema's.
-    pub fn new(dev: Device, recipe: &Recipe, schema: &ArrowSchema) -> Result<Self, PlanError> {
+    pub fn new(site: CallSite, recipe: &Recipe, schema: &ArrowSchema) -> Result<Self, PlanError> {
         let mut calls = Vec::with_capacity(recipe.calls.len());
         for (position, call) in recipe.calls.iter().enumerate() {
             if call.when != CallPattern::PerBatch {
@@ -84,7 +84,7 @@ impl GpuExec {
             calls.push((seq, kind));
         }
         Ok(Self {
-            dev,
+            site,
             calls,
             schema: Arc::new(schema.clone()),
         })
@@ -108,14 +108,14 @@ impl GpuExec {
         let (_, mut handle) = batch.consume();
         let mut stats = PeacockNodeStats::default();
         for (seq, kind) in &self.calls {
-            let (produced, node_stats) = execute_node(self.dev, *seq, *kind, &[vec![handle]])?;
+            let (produced, node_stats) = execute_node(self.site, *seq, *kind, &[vec![handle]])?;
             calls.record(*seq, *kind, input.0, input.1);
             handle = produced;
             stats = node_stats;
             input = (node_stats.rows, None);
         }
         Ok((
-            produced(self.dev.executor, handle, stats, &self.schema),
+            produced(self.site.executor, handle, stats, &self.schema),
             CallStats {
                 scratch_bytes: None,
                 calls,
@@ -127,16 +127,16 @@ impl GpuExec {
 /// Where the data leaves the device: one export per handle, over the row range the driver
 /// supplies. Named for the call rather than for the node, since `GpuUnload` is the node.
 pub struct GpuExport {
-    dev: Device,
+    site: CallSite,
     schema: SchemaRef,
 }
 
 impl GpuExport {
     /// A sink declares no schema of its own, so this is its input's — the columns that
     /// cross the boundary.
-    pub fn new(dev: Device, schema: &ArrowSchema) -> Self {
+    pub fn new(site: CallSite, schema: &ArrowSchema) -> Self {
         Self {
-            dev,
+            site,
             schema: Arc::new(schema.clone()),
         }
     }
@@ -149,7 +149,7 @@ impl GpuExport {
         let mut len = 0u64;
         let rc = unsafe {
             peacock_result_from_handle(
-                self.dev.executor,
+                self.site.executor,
                 batch.handle(),
                 rows.offset,
                 rows.length,
@@ -163,7 +163,7 @@ impl GpuExport {
                 batch.handle(),
                 rows.offset,
                 rows.length,
-                last_error(self.dev.executor)
+                last_error(self.site.executor)
             )));
         }
         // A range naming no rows exports nothing at all, and there is nothing to free.
@@ -211,7 +211,8 @@ pub(super) fn produced(
     )
 }
 
-/// The session an executor drives, and where in the plan it is driving it.
+/// Where an executor's ABI calls are made from: the session they go through, and the
+/// place in the plan they belong to.
 ///
 /// One value rather than a pointer and two numbers threaded separately: every executor
 /// already carried the pointer, so this costs no argument, and a call that knows only its
@@ -219,7 +220,7 @@ pub(super) fn produced(
 /// where `partition` is the output slot inside one call — at four lanes every one of them
 /// reports 0, so the region alone cannot tell lane 1 batch 0 from lane 0 batch 1.
 #[derive(Clone, Copy)]
-pub struct Device {
+pub struct CallSite {
     pub executor: *mut PeacockExecutor,
     /// Post-order position in the plan tree — the index recipes and the report share.
     pub node: usize,
@@ -254,11 +255,16 @@ pub fn collect_regions(
             seq: region.seq as Seq,
             partition: region.partition as usize,
             call_index: region.call_index,
-            host_setup_us: region.host_setup_us,
-            host_submit_us: region.host_submit_us,
-            device_us: region.device_us,
-            out_rows: region.rows,
-            logical_bytes: region.logical_bytes,
+            measured: Measured {
+                host_setup_us: region.host_setup_us,
+                host_submit_us: region.host_submit_us,
+                device_us: region.device_us,
+                out_rows: region.rows,
+                out_bytes: region.logical_bytes,
+                // This IS one region, and counting it here is what lets a call's region
+                // count fall out of the same sum as its microseconds.
+                regions: 1,
+            },
         })
         .collect())
 }
@@ -306,13 +312,13 @@ impl Consumed {
 /// slot each fills. The call CONSUMES them, so a caller hands over batches it will not
 /// release itself.
 pub(super) fn execute_node(
-    dev: Device,
+    site: CallSite,
     seq: Seq,
     kind: FbKind,
     inputs: &[Vec<u64>],
 ) -> Result<(u64, PeacockNodeStats), BackendError> {
     let [one] = <[(u64, PeacockNodeStats); 1]>::try_from(execute_node_many(
-        dev, seq, kind, inputs, 1,
+        site, seq, kind, inputs, 1,
     )?)
     .map_err(|produced| {
         BackendError::new(format!(
@@ -327,7 +333,7 @@ pub(super) fn execute_node(
 /// The same call where the output count is a plan value: a scatter's N lanes. Every other
 /// node this backend drives takes the one-output form above.
 pub(super) fn execute_node_many(
-    dev: Device,
+    site: CallSite,
     seq: Seq,
     kind: FbKind,
     inputs: &[Vec<u64>],
@@ -343,7 +349,7 @@ pub(super) fn execute_node_many(
     let mut produced = 0u64;
     let rc = unsafe {
         peacock_executor_execute_node(
-            dev.executor,
+            site.executor,
             seq as u64,
             inputs.as_ptr(),
             counts.as_ptr(),
@@ -357,9 +363,9 @@ pub(super) fn execute_node_many(
     if rc != 0 {
         return Err(BackendError::new(format!(
             "execute_node(#{seq} {kind}) for node {} lane {}: {}",
-            dev.node,
-            dev.lane,
-            last_error(dev.executor)
+            site.node,
+            site.lane,
+            last_error(site.executor)
         )));
     }
     handles.truncate(produced as usize);
