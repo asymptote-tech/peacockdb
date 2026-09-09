@@ -531,13 +531,25 @@ jobs:
 
       - name: Run GPU tests
         run: |
-          ssh gpu bash <<EOF
+          # The block below deliberately runs without 'set -e', so only what it explicitly
+          # OR's into rc can fail it — a command that dies of a signal contributes nothing.
+          # The one place such a death is visible is the text, so the text is kept and read
+          # here, on the runner, where coreutils are not the thing under suspicion.
+          set -o pipefail
+          rc=0
+          ssh gpu bash <<EOF 2>&1 | tee "$RUNNER_TEMP/gpu-tests.log" || rc=\$?
             # Deliberately no 'set -e': run every test binary even when an
             # earlier one fails (e.g. TPC-H failing must not skip TPC-DS), then
             # fail the step at the end if anything failed. Each binary's pass/fail
             # is OR'd into rc.
             export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata
-            export LD_LIBRARY_PATH=$REMOTE_DIR/cpp/install/lib:$REMOTE_LD_LIBRARY_PATH
+
+            # The patched glibc-2.35 goes to the test binaries PER COMMAND and is never
+            # exported, which is what setup-glibc.sh's own output tells you to do: exported,
+            # the host's coreutils load it too and segfault — and since this block has no
+            # 'set -e', a crashing `grep -q` just answers no and its guard goes quietly
+            # green. That shipped, for the five rust targets, until it was read in a log.
+            PATCHED_LD=$REMOTE_DIR/cpp/install/lib:$REMOTE_LD_LIBRARY_PATH
 
             rc=0
 
@@ -585,16 +597,14 @@ jobs:
             ran_any=0
             for t in $REMOTE_DIR/cpp/install/bin/peacock_*_tests; do
               [ -x "\$t" ] || continue
-              # \${t##*/} not basename: basename is coreutils and segfaults under the
-              # glibc-2.35 LD_LIBRARY_PATH exported above.
               tname=\${t##*/}
               echo "==> \$tname"
               tlog=$REMOTE_DIR/\$tname.log
-              "\$t" > "\$tlog" 2>&1
+              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" > "\$tlog" 2>&1
               trc=\$?
               [ "\$trc" -eq 0 ] || rc=1
-              # echo + scan in one builtin pass (no cat, no grep — see the warning on
-              # REMOTE_LD_LIBRARY_PATH above)
+              # echo + scan in one builtin pass: one read of the log answers both what to
+              # print and whether anything ran.
               tzero=0
               while IFS= read -r line; do
                 printf '%s\n' "\$line"
@@ -628,11 +638,7 @@ jobs:
               # CUDA context, cascading into bad_alloc/cudaErrorIllegalAddress
               # for every later test. Sequential is mandatory.
               tlog=$REMOTE_DIR/\$tname.rust.log
-              "\$t" --nocapture --test-threads=1 > "\$tlog" 2>&1 || rc=1
-              # echo + scan in one builtin pass, for the reason the C++ loop above gives:
-              # cat and grep are coreutils, they segfault under the exported glibc-2.35
-              # LD_LIBRARY_PATH, and a segfaulting `grep -q` answers no — so this guard
-              # returned "not zero tests" for every target while printing no output at all.
+              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 > "\$tlog" 2>&1 || rc=1
               rzero=0
               while IFS= read -r line; do
                 printf '%s\n' "\$line"
@@ -654,6 +660,11 @@ jobs:
 
             exit \$rc
           EOF
+          if grep -qE "Segmentation fault|core dumped" "$RUNNER_TEMP/gpu-tests.log"; then
+            echo "::error::something segfaulted on the GPU host — see the log above"
+            rc=1
+          fi
+          exit $rc
 
       - name: Cleanup remote run directory
         if: always()

@@ -269,6 +269,22 @@ fn line_matcher_rejects_both_false_coverage_modes() {
         "a test invocation is not the bin build; the crate has no test target"
     );
 
+    // The rust GPU runner reader: it must find the line that runs the binary however that
+    // line is prefixed, and must not mistake the loop's executable test for it — that line
+    // carries no flags, so matching it would fail the assertion on a correct runner.
+    assert!(is_rust_gpu_runner_invocation(
+        r#"    env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 > "\$tlog" 2>&1"#
+    ));
+    assert!(is_rust_gpu_runner_invocation(r#"    "\$t" --nocapture --test-threads=1 > "\$rlog" 2>&1"#));
+    assert!(
+        !is_rust_gpu_runner_invocation(r#"    [ -x "\$t" ] || continue"#),
+        "the loop's executable test is not the invocation"
+    );
+    assert!(
+        !is_rust_gpu_runner_invocation(r#"    # "\$t" --test-threads=1 > "\$tlog""#),
+        "a commented-out invocation is not one"
+    );
+
     // --lib detection: a build is not a run, and the flag needs a word boundary.
     assert!(line_runs_lib_tests("          cargo test --features rust-only -p peacockdb-core --lib"));
     assert!(!line_runs_lib_tests(
@@ -528,6 +544,65 @@ fn the_three_gpu_target_lists_agree() {
     );
 }
 
+/// The body of the `Run GPU tests` step, out of the committed workflow.
+fn gpu_test_step() -> String {
+    let text = std::fs::read_to_string(repo_root().join(".github/workflows/pipeline.yml"))
+        .expect("read pipeline.yml");
+    let mut lines = text.lines().skip_while(|l| !l.contains("- name: Run GPU tests"));
+    lines.next().unwrap_or_else(|| {
+        panic!(
+            "pipeline.yml has no `Run GPU tests` step — the GPU job was reshaped and the \
+             guards below now read nothing"
+        )
+    });
+    lines
+        .take_while(|l| !l.trim_start().starts_with("- name:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The GPU step reports a failure, and has no way to report success over one.
+///
+/// It runs without `set -e` deliberately — one binary failing must not skip the rest — so the
+/// only thing that can fail it is what it folds into `rc` itself. Three ways that goes wrong:
+/// a binary's status never folded in, the block not exiting `rc`, and a command dying of a
+/// signal, which leaves no status to fold at all. The third shipped: the rust loop's `cat` and
+/// `grep` segfaulted under an exported glibc-2.35 once per target, so five binaries ran with
+/// their output discarded and their zero-tests guard answering from a crash, job green.
+#[test]
+fn the_gpu_step_cannot_report_success_over_a_failure() {
+    let step = gpu_test_step();
+
+    assert!(
+        step.contains("exit \\$rc"),
+        "the GPU step does not end by exiting the status it accumulated, so everything it \
+         recorded in rc is discarded and the step is green whatever ran"
+    );
+    for line in rust_gpu_runner_invocations(".github/workflows/pipeline.yml") {
+        assert!(
+            line.ends_with("|| rc=1"),
+            "a staged rust GPU binary runs without folding its status into rc, so it cannot \
+             fail the job: {line}"
+        );
+    }
+    assert!(
+        step.contains("[ \"\\$trc\" -eq 0 ] || rc=1"),
+        "the C++ loop no longer folds each binary's status into rc"
+    );
+    assert!(
+        step.contains("Segmentation fault") && step.contains("::error::"),
+        "nothing in the GPU step notices a command dying of a signal. Without 'set -e' such a \
+         death folds no status into rc, so the step is green having crashed — which is how the \
+         rust loop printed nothing for five targets and said so nowhere"
+    );
+    assert!(
+        !step.contains("export LD_LIBRARY_PATH"),
+        "the GPU step exports the patched glibc into its shell. setup-glibc.sh prints the trap \
+         in this same job's log: the host's own coreutils then load it and segfault. Apply it \
+         per command (env LD_LIBRARY_PATH=… \"$t\" …) instead"
+    );
+}
+
 /// The `<crate>:<target>` form build-test.sh matches on, for failure messages.
 fn qualified((krate, target): &(String, String)) -> String {
     format!("{krate}:{target}")
@@ -567,9 +642,15 @@ fn is_rust_gpu_runner_loop_header(line: &str) -> bool {
     line.contains("for t in") && line.contains("rust-tests/")
 }
 
-/// Is this the line that executes the binary, rather than a comment about it?
+/// Is this the line that executes the binary, rather than a comment or the `[ -x … ]` test?
+///
+/// Keyed on running `"$t"` AND redirecting to a log, not on the line starting with `"$t"`:
+/// the patched glibc is applied per command (`env LD_LIBRARY_PATH=… "$t" …`) rather than
+/// exported, and a reader anchored at the start of the line stops seeing the invocation the
+/// moment anything precedes it — a guard silently reading nothing, not a red one.
 fn is_rust_gpu_runner_invocation(line: &str) -> bool {
-    line.trim_start().starts_with("\"\\$t\"")
+    let line = line.trim_start();
+    !line.starts_with('#') && line.contains("\"\\$t\"") && line.contains("> \"\\$")
 }
 
 /// Single-tenant GPU is one flag on two committed runner lines and nothing else. cuDF and

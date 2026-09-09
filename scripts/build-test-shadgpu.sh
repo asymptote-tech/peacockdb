@@ -309,8 +309,10 @@ remote_gate_script() {
     export PEACOCK_TPCH_VEC_PARAMS=$REMOTE_REPO/testdata/tpch-vec-queries/query_params.jsonl
     export PEACOCK_GPU_DEBUG='$PEACOCK_GPU_DEBUG'
     # cpp/install/lib first, so libpeacock_gpu.so resolves for the rust binaries:
-    # their baked-in rpath points at the build host's cargo target.
-    export LD_LIBRARY_PATH=$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\$LD_LIBRARY_PATH
+    # their baked-in rpath points at the build host's cargo target. Applied per command
+    # and never exported: exported, this host's own coreutils load the patched glibc-2.35
+    # and segfault, which is why both loops below use shell builtins to read a log.
+    PATCHED_LD=$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\$LD_LIBRARY_PATH
 
     rc=0
 
@@ -329,7 +331,7 @@ remote_gate_script() {
         case "\$tname" in peacock_multi_gpu_*) echo "==> \$tname (skipped: multi-GPU is manual-only)"; continue ;; esac
         echo "==> \$tname (C++)"
         tlog=/tmp/\$tname.log
-        "\$t" > "\$tlog" 2>&1
+        env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" > "\$tlog" 2>&1
         trc=\$?
         [ "\$trc" -eq 0 ] || { echo "!!! \$tname FAILED (exit \$trc)"; rc=1; }
         tzero=0
@@ -358,7 +360,7 @@ remote_gate_script() {
       echo "--- \$tname"
       rlog=/tmp/\$tname.rustlog
       # --test-threads=1: the GPU/RMM context is process-wide, parallel tests OOM.
-      "\$t" --nocapture --test-threads=1 $filter_q > "\$rlog" 2>&1
+      env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 $filter_q > "\$rlog" 2>&1
       status=\$?
       # Zero tests is a fault only when nothing was filtered out: with a filter set,
       # every other binary legitimately matches nothing, and a red banner for a run
