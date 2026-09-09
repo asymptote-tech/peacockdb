@@ -618,6 +618,7 @@ jobs:
             # Same zero-test guard the C++ loop above carries, in libtest's wording: a
             # rust binary whose cases all vanished exits 0 and says nothing, so the staging
             # array would go on excusing a target that verifies nothing.
+            rust_ran=0
             for t in $REMOTE_DIR/cpp/install/rust-tests/*; do
               [ -x "\$t" ] || continue
               tname=\${t##*/}
@@ -628,12 +629,28 @@ jobs:
               # for every later test. Sequential is mandatory.
               tlog=$REMOTE_DIR/\$tname.rust.log
               "\$t" --nocapture --test-threads=1 > "\$tlog" 2>&1 || rc=1
-              cat "\$tlog"
-              if grep -q "^running 0 tests" "\$tlog"; then
+              # echo + scan in one builtin pass, for the reason the C++ loop above gives:
+              # cat and grep are coreutils, they segfault under the exported glibc-2.35
+              # LD_LIBRARY_PATH, and a segfaulting `grep -q` answers no — so this guard
+              # returned "not zero tests" for every target while printing no output at all.
+              rzero=0
+              while IFS= read -r line; do
+                printf '%s\n' "\$line"
+                case "\$line" in "running 0 tests"*) rzero=1 ;; esac
+              done < "\$tlog"
+              if [ "\$rzero" -eq 1 ]; then
                 echo "::error::\$tname ran 0 tests — nothing was verified"
                 rc=1
               fi
+              rust_ran=\$((rust_ran + 1))
             done
+            # The C++ loop's ran_any, for the rust half: an empty staging directory would
+            # otherwise run nothing and say nothing.
+            if [ "\$rust_ran" -eq 0 ]; then
+              echo "::error::no rust test binaries in $REMOTE_DIR/cpp/install/rust-tests"
+              rc=1
+            fi
+            echo "==> ran \$rust_ran rust test binaries"
 
             exit \$rc
           EOF
