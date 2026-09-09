@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2269 test cases — Rust 1835, C++ 65, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N column, and the rows below it count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2150 test cases — Rust 1716, C++ 65, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N column, and the rows below it count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the
@@ -36,7 +36,7 @@ and `2gpu` rows also runs locally; large CPU batches go to verda.
 | GpuBatch surface (Rust) | what the batch reports, and that `consume` hands the handle over without releasing it. Needs no device: the release is null-guarded on the executor, so a CPU tier is its home | [test_gpu_batch](../peacockdb-core/tests/test_gpu_batch.rs) | dataset-matrix | 3 |
 | GPU timing method (Rust) | the instrument, not the corpus: the events mode must not slow the query it measures, and its events must bracket device work rather than the host prologue | [events_are_free_and_land_where_they_claim](../peacockdb-core/tests/test_node_timing.rs#L83) | shad-gpu | 1 |
 | GPU all-at-once smoke (Rust) | whole-plan `peacock_execute` FFI; retires with [#110](tickets.md) | [scan_nation](../peacockdb-core/tests/test_gpu_executor_misc.rs#L18) | manual | 6 |
-| GPU per-node timing (Rust) | measures, asserts nothing: one `.benchmark.txt` per case, same list as the two GPU tiers ([`gpu_cases.inc`](../peacockdb-core/tests/common/gpu_cases.inc)), so a case returning to either tier arrives here too | [run_gpu_benchmark](../peacockdb-core/tests/peacock_gpu_benchmarks.rs) | manual | 128 |
+| Corpus benchmarks (Rust) | three timed cases that assert nothing about an answer, plus six that hold the harness to its own format — the section order, one file per (dataset, mode), and the record checked against what the plan declares | [the_record_is_checked_against_what_the_plan_declares](../peacockdb-core/tests/peacock_gpu_benchmarks.rs) | manual | 9 |
 | Cost-model goldens (Rust) | `.cost.txt` derivation from `.cpu.txt` × `cost_model.conf` | [cost_goldens_match_and_total_is_byte_identical](../peacockdb-core/tests/test_cost_model.rs#L36) | dataset-matrix | 3 |
 | Planner join capability (Rust) | every hash join type crossed with a residual filter, the co-partitioning and lane rules, and the null analysis both ways; writes its own parquet, so no dataset | [test_planner_join_capability](../peacockdb-core/tests/test_planner_join_capability.rs) | dataset-matrix | 13 |
 | Null analysis rules (Rust) | every rule in the can-this-column-be-NULL pass, on hand-built nodes — a source declares a not-nullable column here, which no corpus fixture can | [a_scalar_function_can_be_null_even_over_operands_that_cannot](../peacockdb-core/tests/test_null_analysis.rs) | dataset-matrix | 8 |
@@ -104,8 +104,8 @@ Notes
   dropped. `diag_flip_audit` is a diagnostic printer with no assertions, run by hand while
   #97/#95 gate the tp8 rollout; wiring it to CI would add a step that cannot fail.
   `peacock_gpu_benchmarks` measures rather than asserts, so there is nothing for a gate to
-  go red on; correctness for the same case list belongs to the two GPU tiers, which share
-  `gpu_cases.inc` with it.
+  go red on; correctness for the queries it times belongs to `test_gpu_bp_corpus`, which
+  runs them at sf1 where a wrong answer is legible.
 - The doctest is different in kind from those three: they are exempted with a stated reason,
   it is merely unlisted. No CI step passes `--doc` and the meta guard enumerates only
   `--test` targets plus `--lib`, so nothing would go red if it broke (#128).
@@ -236,6 +236,53 @@ Consequences worth knowing before you regenerate:
 - **The `.duckdb_cost.txt` path is re-runnable without DuckDB**: `--extract-only` rebuilds
   the goldens from the committed profiles plus the parquet, so only a genuine oracle change
   needs the 1.5.4 pin.
+
+### Benchmark data flow
+
+A second tree with its own producers. Nothing here is a golden — no run asserts against it
+— so the arrows say which script writes each file rather than which test reads it.
+
+```
+tpch.sf40 (shad-gpu, outside the repo; symlinked in as testdata/tpch.sf40)
+  │
+  ├── build-test-shadgpu.sh --run-benchmarks        (peacock_gpu_benchmarks, events timing)
+  │     ├──► benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt   one run, per node
+  │     └──► calibration/records.tsv                one row per cuDF CALL x execution
+  │           └── --pull-benchmarks brings both home
+  │
+  └── create_nsys_profile.sh                        (the same binary, under Nsight)
+        ├── --trace   nvtx+cuda only, so its times are the run's
+        │     └──► calibration/capture.sqlite
+        │           └── nsys_calls.py x goldens/tpch.sf1
+        │                 └──► calibration/calls.tsv     one ABI call -> libcudf calls
+        │
+        └── --hbm     the same cases under GPU memory counters (~7% slower)
+              ├──► calibration/capture-hbm.sqlite
+              ├──► calibration/records-hbm.tsv    TRAFFIC only; its times are unusable
+              └── nsys_hbm.py (capture x records-hbm)
+                    └──► calibration/hbm.tsv      hbm_bytes on records.tsv's coordinates
+
+calibration/records.tsv + calibration/hbm.tsv
+  └── plot.py ──► calibration/plots/{load,compute,spread,query,icicle,hbm}/*.png
+                  calibration/plots/index.html      one call, every panel
+```
+
+Three things the arrows are there to make checkable:
+
+- **Two runs, and only one of them is timed.** The counters pass measures the same cases
+  ~7% slow, so its record exists to be read for bytes and never for microseconds. They meet
+  on the record's tuple — `(dataset, sf, query, mode, node_seq, recipe_seq, call_index,
+  run_index)` — which is why the record carries one rather than a node number.
+- **Every derived file has exactly one producer.** `hbm.tsv` had none until
+  `create_nsys_profile.sh` existed: it was written by hand once and then rode along, older
+  than the capture beside it, while `plot.py` drew a panel from it.
+- **`plot.py` is the only thing that draws.** A second generator would be a second reading
+  of the record's columns, and two readings disagree the first time a column moves.
+- **The text is committed and the captures are not.** The `.benchmark.txt` tree, the four
+  `.tsv` files and every panel are in git, rewritten in place by each collection, so
+  `git diff` shows how the numbers moved. The two `.sqlite` exports are hundreds of
+  megabytes of undiffable binary that only the scripts above read, and are regenerable by
+  re-running them; `testdata/.gitignore` is deny-by-default over `calibration/` for that.
 
 ## CI structure (`.github/workflows/pipeline.yml`)
 
@@ -486,21 +533,49 @@ Rules that keep this healthy:
 
 ## Benchmarks
 
-### Per-node GPU timing — `peacock_gpu_benchmarks` (scripted)
+### Corpus benchmarks — `peacock_gpu_benchmarks` (scripted)
 
-Same case list as the GPU correctness gate (all three targets `include!`
-`peacockdb-core/tests/common/gpu_cases.inc`, so the measured set cannot drift from
-the verified one), different question: how long did each plan node take. It asserts
-nothing, so it can never gate a merge — `test_ci_coverage.rs` exempts it explicitly.
+Its own case list, `peacockdb-core/tests/common/corpus_benchmark_cases.inc`, and
+deliberately not the correctness gate's: the two disagree about sf on purpose. Correctness
+runs at sf1, where a wrong answer is legible in six million rows; at sf1 a query is mostly
+the host prologue — 0..4us per call — so the rows worth TIMING are at sf40 and the rows
+worth checking are not. A query timed here must still be enabled on a device in
+`corpus_cases.inc`: both binaries plan through the same `plan_at`, so a mode this list
+names for a query that mode refuses fails at plan time rather than measuring nothing.
+
+It asserts nothing about an answer, so it can never gate a merge — `test_ci_coverage.rs`
+exempts it explicitly.
+
+Six steps, three scripts:
 
 ```
+# 1. a profile build — [profile.benchmarks] at opt-3, which the run asserts it got
 scripts/docker-build.sh --no-image -- ./scripts/build-test-shadgpu.sh --build-benchmarks
+# 2. ship and glibc-patch  3. time the corpus  4. bring the tree and the record home
 ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks --pull-benchmarks
 # or, for a run that outlives your ssh session (the suite takes tens of minutes):
 ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks-detached
 ./scripts/build-test-shadgpu.sh --benchmark-status     # going? finished? log tail
 ./scripts/build-test-shadgpu.sh --pull-benchmarks      # once it reports finished
+
+# 5. the derived records: two Nsight passes, their captures, calls.tsv and hbm.tsv
+./scripts/create_nsys_profile.sh
+
+# 6. every panel and index.html, from one call
+/usr/bin/python3 scripts/calibration/plot.py \
+    --record testdata/calibration/records.tsv --hbm testdata/calibration/hbm.tsv \
+    --out-dir testdata/calibration/plots
 ```
+
+Steps 5 and 6 are separate scripts because they are separate measurements: a capture
+serializes what it traces and the counters pass costs ~7%, so neither may write the tree
+step 3 produced. What each writes is the diagram under *Benchmark data flow*.
+
+**The run is measured under CUDA-event timing, and the effect is tiny.** `test_node_timing`
+runs the same query with the switch off and on and compares the wall clock: +0.1%, +0.1%
+and −0.0% on three runs of tpch q19 at sf40, which is inside the spread between two
+identical runs. Events record without draining the stream, which is what makes that
+possible — a mode that synchronized would report a schedule the engine does not run.
 
 The correctness gate has the same pair — `--run-detached` and `--run-status` — through the
 one launcher both phases go through; `--all` stays the attached form. Either status flag
