@@ -23,33 +23,4 @@ fn main() {
         .unwrap_or_else(|e| panic!("failed to run flatc: {e}"));
 
     assert!(status.success(), "flatc failed with {status}");
-
-    emit_build_profile(&out_dir);
-}
-
-/// Bake how this crate was compiled into it, for `peacock_gpu_benchmarks` to write
-/// into every measurement record (`build_profile=`).
-///
-/// The harness refuses to run from a non-release build, so this says WHICH release
-/// profile rather than whether it was one (`[profile.benchmarks]` in the workspace
-/// Cargo.toml says why the distinction is worth keeping). Baked at compile time
-/// because, unlike `sync_floor_us` and `allocator`, it is the one condition of a run
-/// the running process cannot ask about itself.
-///
-/// Cargo hands a build script `OPT_LEVEL` directly, but not the profile NAME:
-/// `PROFILE` collapses every release-inheriting profile to "release". The profile
-/// directory does carry it, and `OUT_DIR` is
-/// `<target>/<profile-dir>/build/<pkg>-<hash>/out` — hence the fourth ancestor.
-/// Unknown rather than a panic if that shape ever changes: a build script is the
-/// wrong place to fail the build over a diagnostic string.
-fn emit_build_profile(out_dir: &std::path::Path) {
-    let profile_dir = out_dir
-        .ancestors()
-        .nth(3)
-        .and_then(|p| p.file_name())
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-    let opt_level = env::var("OPT_LEVEL").unwrap_or_else(|_| "unknown".into());
-    println!("cargo:rustc-env=PEACOCK_BUILD_PROFILE={profile_dir}");
-    println!("cargo:rustc-env=PEACOCK_BUILD_OPT_LEVEL={opt_level}");
 }

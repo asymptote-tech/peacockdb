@@ -33,7 +33,7 @@ static std::unique_ptr<cudf::rolling_aggregation> make_rolling_agg(
 }
 
 TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in) {
-  auto input = execute_node(win->input(), in);
+  auto input = take_input(in);
   auto tv = input.table->view();
 
   // Output = all input columns (in order) followed by one column per window expr.

@@ -9,5 +9,5 @@ two readers share no code — this file is what holds them to one convention, an
 values off it so they diverge red rather than silently.
 
 `two-row-registry.csv` is loaded through `Registry::load` so a widget test starts on the far side of
-the loader. Every other widget test builds its rows by hand, downstream of the seam where `load` read
-only the legacy columns and rendered every batch-partitioned cell as a plausible em-dash.
+the loader. Every other widget test builds its rows by hand, downstream of the seam where a column
+`load` does not read renders as a plausible em-dash rather than as an error.

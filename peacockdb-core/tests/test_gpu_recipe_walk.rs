@@ -32,12 +32,11 @@ use peacockdb_ffi::raw::{
     peacock_result_from_handle,
 };
 
-use common::exec_mode::CpuOracle;
 use common::{GPU_BUDGET, assert_results_match, data_dir_for, total_rows};
 
-/// A scan reading less than this stops being worth splitting. The value the plan goldens
-/// are canonized at, so every shape below is one that tier already renders.
-const SMALL_TABLE_BYTES: u64 = 5 * 1024 * 1024;
+// The value the plan goldens are canonized at, so every shape below is one that tier
+// already renders.
+use peacockdb_core::batch_partitioned::plan::SMALL_TABLE_BYTES;
 
 /// Everything but the aggregates: one lane and one batch, which makes every recipe a
 /// single call per node and the walk a straight line.
@@ -598,7 +597,7 @@ async fn assert_walk_matches_datafusion(sql: &str, knobs: PlanKnobs) -> Vec<(Seq
     assert_results_match(
         &expected,
         &walked.batches,
-        CpuOracle::DataFusionExact.rel_tol(),
+        None,
         &format!(
             "{sql}\n  the walk made: {}\n  and its",
             trail(&walked.calls)

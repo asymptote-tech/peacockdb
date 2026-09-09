@@ -12,8 +12,11 @@ use datafusion::arrow::array::{Array, Int64Array, RecordBatch};
 use datafusion::arrow::ipc::reader::StreamReader;
 
 use peacockdb_core::batch_partitioned::GpuBatch;
-use peacockdb_core::create_context_with_tables;
-use peacockdb_core::plan_serializer::serialize_plan;
+use peacockdb_core::batch_partitioned::plan::{
+    BatchSizing, PlanKnobs, SMALL_TABLE_BYTES, plan_batch_partitioned,
+};
+use peacockdb_core::batch_partitioned::recipe::{AbiSymbol, attach_recipes};
+use peacockdb_core::{build_session_state, register_tables_for};
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,
     peacock_executor_destroy, peacock_executor_end_plan, peacock_executor_execute_scan_rowgroups,
@@ -26,17 +29,29 @@ use common::{GPU_BUDGET, testdata_minimal_dir};
 /// (122880 + 27120), and a narrow column to read back.
 const SQL: &str = "SELECT c_custkey FROM customer";
 const TABLE_ROWS: usize = 150_000;
-/// Post-order seq 0 is the deepest-leftmost leaf, so it is the scan in any plan.
-const SCAN_SEQ: u64 = 0;
+
+/// One lane and one batch, which is the shape these three symbols are exercised at: the
+/// row groups, the range and the slice are all per-call values, so the plan around them
+/// only has to hold a scan.
+const KNOBS: PlanKnobs = PlanKnobs {
+    target_partitions: 1,
+    sizing: BatchSizing::OneBatchPerLane,
+    budget: GPU_BUDGET as u64,
+    small_table_bytes: SMALL_TABLE_BYTES,
+};
 
 /// An executor with the plan loaded, torn down in the order the header requires.
 struct LoadedPlan {
     executor: *mut PeacockExecutor,
+    /// The seq the loader's own recipe publishes, rather than a constant: which node the
+    /// scan is in the recipe plan is the writer's business, and a wrong guess here would
+    /// address some other node's kind and fail as if the ABI were broken.
+    scan_seq: u64,
 }
 
 impl LoadedPlan {
     async fn new() -> Self {
-        let ctx = create_context_with_tables(&testdata_minimal_dir(), 1, GPU_BUDGET)
+        let ctx = register_tables_for(build_session_state(1), &testdata_minimal_dir())
             .await
             .unwrap();
         let plan = ctx
@@ -46,7 +61,20 @@ impl LoadedPlan {
             .create_physical_plan()
             .await
             .unwrap();
-        let bytes = serialize_plan(&plan).unwrap();
+        let (tree, _memory) = plan_batch_partitioned(&plan, KNOBS).expect("this mode plans it");
+        let recipes = attach_recipes(tree.as_ref()).expect("a planned tree has recipes");
+        let scan_seq = recipes
+            .get(0)
+            .and_then(|recipe| {
+                recipe
+                    .calls
+                    .iter()
+                    .find(|call| call.symbol == AbiSymbol::ExecuteScanRowGroups)
+                    .and_then(|call| call.target)
+            })
+            .map(|(seq, _)| seq as u64)
+            .expect("the source's recipe loads a batch");
+        let bytes = recipes.bytes();
 
         let mut executor: *mut PeacockExecutor = std::ptr::null_mut();
         assert_eq!(
@@ -58,7 +86,7 @@ impl LoadedPlan {
             peacock_executor_begin_plan(executor, bytes.as_ptr(), bytes.len() as u64, &mut nodes)
         };
         assert_eq!(rc, 0, "begin_plan failed");
-        Self { executor }
+        Self { executor, scan_seq }
     }
 
     /// One batch's worth of the scan: the row groups named, and nothing else.
@@ -68,7 +96,7 @@ impl LoadedPlan {
         let rc = unsafe {
             peacock_executor_execute_scan_rowgroups(
                 self.executor,
-                SCAN_SEQ,
+                self.scan_seq,
                 row_groups.as_ptr(),
                 row_groups.len() as u64,
                 &mut handle,

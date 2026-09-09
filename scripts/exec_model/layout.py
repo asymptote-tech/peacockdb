@@ -1,7 +1,7 @@
 """Partition layout vocabulary — the properties a node declares about its output.
 
 Declarations only; no execution logic. Mirrors the Rust types in
-`llm-wiki/tasks/batch_partitioned_executor.md` (Traits).
+`llm-wiki/architecture.md` (Execution / Traits).
 """
 
 from __future__ import annotations

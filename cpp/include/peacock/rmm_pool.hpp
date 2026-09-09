@@ -9,16 +9,16 @@
 // This header lives under `cpp/include/` rather than `cpp/tests/` because three different
 // callers install the same pool and must not drift:
 //   - the single-GPU gtest binaries, from their main();
-//   - `peacock_install_rmm_pool` in the FFI, which is how `peacock_gpu_benchmarks` — a Rust
-//     target that cannot include a C++ header — gets the same allocator the gtest binaries
-//     have. Without it the two families of numbers in the tree are taken under different
-//     allocators and quietly compared (llm-wiki/archive/archived-tickets.md #151);
+//   - `peacock_install_rmm_pool` in the FFI, so a Rust caller — which cannot include a
+//     C++ header — gets the same allocator the gtest binaries have. Without it two
+//     families of numbers are taken under different allocators and quietly compared
+//     (llm-wiki/archive/archived-tickets.md #151);
 //   - `multi_gpu.cpp` keeps its own per-device installation, because a pool per worker
 //     thread on the device that worker owns is a different lifecycle, but reads the
 //     percentages from here.
 //
 // The engine still does not install this on its own behalf: no path under `cpp/src/` calls
-// it except the FFI entry point above, which nothing but the benchmark harness invokes. So
+// it except the FFI entry point above, which nothing in this workspace invokes today. So
 // a shipping query still allocates the expensive way, and `gpu_memory_limit` is still
 // accepted and ignored. That is #148, deliberately left open here: making the engine
 // self-install changes where every shipping query's memory comes from and what
@@ -78,7 +78,7 @@ inline constexpr int kIntegratedMaximumPercent = 90;
 //
 // Unavailable is a host problem, not a configuration: nothing asks for it and the sizes
 // below are meaningless when it happens. The gtest binaries carry on regardless, since a
-// correctness result does not depend on the allocator; the benchmark harness asserts,
+// correctness result does not depend on the allocator; a caller taking timings asserts,
 // since a time does.
 struct RmmPoolStatus {
   enum class State {
@@ -109,8 +109,8 @@ inline std::unique_ptr<StatsMr>& stats_mr() {
 // IDEMPOTENT, and that is load-bearing now that this is reachable from the FFI: a second
 // call returns the first call's outcome without building a second pool. Overwriting the
 // statics instead would drop a resource that live allocations still point into, and the
-// benchmark harness — 127 separate #[test] functions in one process — is exactly the shape
-// that would find it.
+// a harness of many #[test] functions in one process is exactly the shape that would
+// find it.
 inline const RmmPoolStatus& install_rmm_pool() {
   static RmmPoolStatus status;
   static bool done = false;
@@ -146,7 +146,7 @@ inline const RmmPoolStatus& install_rmm_pool() {
   // outright — a neighbour holding most of the device leaves an initial size that was
   // computed a moment ago and is no longer there. Report it instead of aborting here: the
   // correctness binaries are still right without a pool, and the one caller for which that
-  // is not true — the benchmark harness — refuses the run on Unavailable itself.
+  // is not true — anything taking a timing — refuses the run on Unavailable itself.
   try {
     pool = std::make_unique<rmm::mr::pool_memory_resource<rmm::mr::cuda_memory_resource>>(
         upstream.get(), initial, maximum);

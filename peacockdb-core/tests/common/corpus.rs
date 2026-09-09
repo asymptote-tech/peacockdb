@@ -19,7 +19,6 @@ use peacockdb_core::batch_partitioned::{GpuNode, validate};
 use super::result_text::ResultDigest;
 use super::bp_mode::{BP_MODES, BpMode, mode_named};
 use super::cost_model::CostModel;
-use super::exec_mode::{CpuOracle, cpu_oracle_mode};
 use super::{
     RESULT_GOLDEN_MAX_BYTES, assert_results_match, batches_to_sorted_str, corpus_golden,
     data_dir_for, queries_dir_for, registry, result_text, total_rows,
@@ -457,4 +456,53 @@ fn assert_result_section(
         query,
         &body,
     );
+}
+
+/// What a corpus case's answer is compared against.
+///
+/// Every variant runs the same oracle — plain DataFusion at `target_partitions = 1` — and
+/// what differs is what is asked of it: the whole answer, the whole answer to a tolerance,
+/// or the count and the containment where the SQL determines no more than those. That is
+/// why it is an argument rather than a second kind of case.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CpuOracle {
+    /// Exact sorted-string equality. The default.
+    DataFusionExact,
+    /// 1e-12 relative tolerance on Float64 columns. Only for queries whose sole
+    /// divergence from the oracle is float summation reassociation: a run at more than one
+    /// lane sums in a different association order than DataFusion's single-lane pass,
+    /// drifting ~1 ULP. The cost golden stays exact either way — a ULP does not change a
+    /// float's byte width — so this loosens the result compare and nothing else.
+    DataFusionApproximate,
+    /// The count and the containment, for a query whose SQL does not determine which
+    /// rows come back — an unordered `LIMIT n OFFSET m`. What it does determine is asked
+    /// of the same session: the count is `max(0, min(n, |unlimited| - m))` and the rows
+    /// are a sub-MULTISET of the unlimited answer, compared as a multiset because set
+    /// membership passes a run that returned one row twice where the oracle has it once.
+    DataFusionSubset,
+}
+
+impl CpuOracle {
+    /// The `rel_tol` handed to the result compare. `None` = exact.
+    pub fn rel_tol(self) -> Option<f64> {
+        match self {
+            CpuOracle::DataFusionExact | CpuOracle::DataFusionSubset => None,
+            CpuOracle::DataFusionApproximate => Some(1e-12),
+        }
+    }
+}
+
+/// Map a `corpus_query!` oracle keyword to its [`CpuOracle`]. An unknown keyword panics
+/// naming the accepted set rather than falling through to the exact compare, which would
+/// make a typo read as the strictest oracle and pass.
+pub fn cpu_oracle_mode(s: &str) -> CpuOracle {
+    match s {
+        "data_fusion_exact" => CpuOracle::DataFusionExact,
+        "data_fusion_approximate" => CpuOracle::DataFusionApproximate,
+        "data_fusion_subset" => CpuOracle::DataFusionSubset,
+        other => panic!(
+            "cpu result test: unknown oracle keyword '{other}' \
+             (expected data_fusion_exact|data_fusion_approximate|data_fusion_subset)"
+        ),
+    }
 }

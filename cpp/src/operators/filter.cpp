@@ -14,7 +14,7 @@
 namespace peacock {
 
 TableResult execute_filter(const fb::CudfFilter* filter, NodeInputs* in) {
-  auto input = execute_node(filter->input(), in);
+  auto input = take_input(in);
 
   // AST fast path when the predicate has no LIKE / CASE / ScalarFunction nodes;
   // otherwise produce the bool mask via the column-producing evaluator.

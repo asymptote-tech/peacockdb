@@ -2,13 +2,12 @@
 //!
 //! Reads only committed goldens, so it runs in the CI CPU tier with no GPU and
 //! no executor build:
-//!   - PeacockDB Σout = Σ `output_bytes` over a query's `<q>.cpu.txt` cost tree
-//!                      (every CPU operator's output size).
+//!   - PeacockDB Σout = Σ `output_bytes` over a query's section of the per-mode
+//!                      `.cost.txt`, at the last mode its cpu run is enabled at.
 //!   - DuckDB Σout    = pipeline-breaker materialized bytes computed from the
-//!                      `<q>.duckdb_cost.txt` profiling tree (see [`duckdb_cost`]).
-//!   - GPU coverage   = whether the query's GPU result test is enabled in
-//!                      `test_gpu_full_table.rs` / `test_gpu_partitioned.rs`
-//!                      (uncommented macro invocation).
+//!                      `<q>.duckdb_cost.txt` profiling tree.
+//!   - coverage       = what `testdata/cost-registry.csv` declares per mode, which
+//!                      the suite's own link-time inventory verifies both ways.
 //!
 //! Both sides are deterministic, measured byte sums — NOT wall-clock cost, and
 //! the two engines emit different plan trees, so the ratio is a provisional,
@@ -19,7 +18,7 @@
 //!
 //! Usage — the flags here are `FLAGS`, and a test holds the two to each other:
 //!   cost-report [--testdata DIR] [--html FILE] [--site DIR]
-//!               [--md-legacy FILE] [--md-bp FILE]
+//!               [--md FILE]
 //!               [--pages-url URL] [--sha SHA] [--repo OWNER/REPO]
 //!               [--generated-at TS] [--published]
 //!               [--cost-diff --base REF|DIR --md-diff FILE]
@@ -35,11 +34,6 @@ const RATIO_GREEN_MAX: f64 = 1.4;
 
 const PAGES_URL_DEFAULT: &str = "https://asymptote-tech.github.io/peacockdb/";
 const DEFAULT_REPO: &str = "asymptote-tech/peacockdb";
-/// Golden label of the CPU-cost goldens (full-table execution, 8 partitions /
-/// 2 GiB), the `<mode>-<tp>-<tier>` component of the `.cpu.txt` filename. MUST
-/// track the mode + device the `cpu_full_table_result_test!` goldens are canonized
-/// at — a stale label here makes every PeacockDB cell render "—" (guarded in `main`).
-const CPU_DEVICE: &str = "full_table-tp8-mini";
 /// Hidden marker so CI can find-and-update its single PR comment in place.
 const SENTINEL: &str = "<!-- peacockdb-cost-report -->";
 /// Separate marker for the cost-regression gate widget, so it upserts as its own
@@ -59,27 +53,8 @@ const COMMENT_MAX_BYTES: usize = 65_536;
 /// checks the workflow's invocations against it, in both directions: a caller passing a
 /// flag that no longer exists, and a flag nothing passes any more.
 const FLAGS: &[&str] = &[
-    "--testdata", "--html", "--site", "--md-legacy", "--md-bp", "--md-diff", "--pages-url",
+    "--testdata", "--html", "--site", "--md", "--md-diff", "--pages-url",
     "--published", "--sha", "--generated-at", "--repo", "--cost-diff", "--base",
-];
-
-/// The batch-partitioned tables go in their own comment: the four tables together exceed
-/// GitHub's 65,536-byte comment body by twice over, and a single dataset's table nearly
-/// fills one on its own, so no arrangement of them fits in one. Each markdown file carries
-/// its sentinel as its FIRST LINE and the workflow reads it from there — the upsert then
-/// works for any number of files and there is no constant to keep in agreement across two
-/// languages.
-const SENTINEL_BP: &str = "<!-- peacockdb-cost-report-bp -->";
-
-/// The execution-mode columns, in display order. `all_at_once` deliberately has no
-/// column: it is a whole-plan-at-once GPU path with no per-node breakdown, so a
-/// per-query enabled/disabled cell would be meaningless.
-const MODE_COLUMNS: [&str; 5] = [
-    "ftc_tp1",
-    "ftc_tp8",
-    "partitioned_cpu",
-    "full_table_gpu",
-    "partitioned_gpu",
 ];
 
 /// The batch-partitioned modes, in the fixed sequence every consumer reads them in: the
@@ -115,21 +90,6 @@ struct RegistryRow {
     tickets: Vec<String>,
 }
 
-/// How a row renders its four execution-mode cells.
-///
-/// The two non-executable categories collapse those four columns into ONE spanning
-/// cell: a query that cannot execute has nothing to say per-mode, and four identical
-/// em-dashes invite the reader to hunt for a distinction that isn't there.
-#[derive(PartialEq, Debug, Clone, Copy)]
-enum RowKind {
-    /// Plans AND has at least one execution mode enabled — four normal mode cells.
-    Executable,
-    /// Plans, but no execution mode is enabled yet.
-    PlanOnly,
-    /// `create_physical_plan` itself fails (see the plan-attempt probe).
-    PlanFailed,
-}
-
 impl Registry {
     fn load(path: &Path) -> Registry {
         let text = std::fs::read_to_string(path)
@@ -144,17 +104,14 @@ impl Registry {
         };
         let (i_ds, i_q, i_feat, i_tick, i_ps) =
             (idx("dataset"), idx("query"), idx("features"), idx("tickets"), idx("plan_status"));
-        // The legacy modes and the batch-partitioned mode's three groups. `MODE_COLUMNS`
-        // alone would leave every bp cell rendering `na`: the columns exist in the file and
-        // nothing would have read them, which is a table of em-dashes rather than an error.
-        let columns: Vec<String> = MODE_COLUMNS
+        // Every column the widget reads: the three groups at each of the five modes.
+        let columns: Vec<String> = BP_MODES
             .iter()
-            .map(|m| m.to_string())
-            .chain(BP_MODES.iter().flat_map(|mode| {
+            .flat_map(|mode| {
                 [BpGroup::Plan, BpGroup::Cpu, BpGroup::Gpu]
                     .into_iter()
                     .map(|group| group.column(mode))
-            }))
+            })
             .collect();
         let mode_idx: Vec<(String, usize)> =
             columns.iter().map(|m| (m.clone(), idx(m))).collect();
@@ -188,29 +145,6 @@ impl Registry {
     }
 }
 
-/// The CPU columns whose `✓` links to a golden, and the single `<mode>-<tp>-<tier>`
-/// label each links at.
-///
-/// ONE label per column, so the link target is predictable from the column alone.
-/// `scan_limit` is the query that makes this worth stating: it is registered at BOTH
-/// tp1_mini and tp1_standard and `column_for` keys on the tp count rather than the
-/// memory tier, so its single `ftc_tp1` cell aggregates two runs and it owns two
-/// goldens. It links at tp1-standard like every other tp1 row; a hyperlink cannot
-/// express "two runs" and inventing a second candidate for it would add config that
-/// nothing else can reach.
-///
-/// The existence check in `build_dataset` plus the gate in `main` is what makes one
-/// label safe: a query registered ONLY at some other tier has no golden here and
-/// fails by name, rather than rendering a dead link.
-///
-/// Deliberately NOT derived from `CPU_DEVICE`: that const is the Σout cells' golden,
-/// and folding the two together would let a Σout retarget silently move these links.
-const CPU_GOLDEN_LABEL: [(&str, &str); 3] = [
-    ("ftc_tp1", "full_table-tp1-standard"),
-    ("ftc_tp8", "full_table-tp8-mini"),
-    ("partitioned_cpu", "partitioned-tp8-standard"),
-];
-
 /// Render a cell state as its glyph. `enabled` means the mode runs AND its result is
 /// validated (golden or live oracle — both count); `skip` means it runs but nothing
 /// checks the result, which is why it gets its own glyph rather than being folded
@@ -235,17 +169,11 @@ struct Row {
     plan_status: String,
     features: Vec<String>,
     tickets: Vec<String>,
-    peacockdb: Option<u64>,
     duckdb: Option<u64>,
-    /// The batch-partitioned cost, and which mode's file it came from. The LAST mode in
-    /// the sequence whose cpu execution is enabled, as the legacy rule uses its own last
-    /// mode: a query enabled at four of five is priced at the fourth rather than at none.
+    /// The cost, and which mode's file it came from: the last mode in the sequence whose
+    /// cpu execution is enabled, so a query enabled at four of five is priced at the
+    /// fourth rather than at none.
     bp_peacockdb: Option<(String, u64)>,
-    /// CPU column -> the `<mode>-<tp>-<tier>` golden label ([`CPU_GOLDEN_LABEL`])
-    /// whose `.cpu.txt` exists on disk for this query, for the ✓ links. Absent for
-    /// non-`enabled` cells, which never link, and for an `enabled` cell whose golden
-    /// is missing — which `main` then reports rather than rendering unlinked.
-    cpu_golden: BTreeMap<String, String>,
 }
 
 impl Row {
@@ -258,30 +186,20 @@ impl Row {
         self.states.get(col).map(String::as_str).unwrap_or("na")
     }
 
-    /// Which of the three row shapes this is. Plan failure dominates: a query that
-    /// cannot be planned cannot have a meaningful execution mode, so it is reported
-    /// as PlanFailed even if the registry somehow also marked a mode enabled (that
-    /// combination would itself be a bug worth seeing as "plan ✗").
-    fn kind(&self) -> RowKind {
-        if self.plan_status == "fail" {
-            return RowKind::PlanFailed;
-        }
-        let any_enabled = MODE_COLUMNS.iter().any(|c| self.state(c) == "enabled");
-        if any_enabled { RowKind::Executable } else { RowKind::PlanOnly }
+    /// Whether `create_physical_plan` fails for this query, in which case no mode can plan
+    /// it and the three cells are one statement rather than fifteen em-dashes.
+    fn plan_failed(&self) -> bool {
+        self.plan_status == "fail"
     }
 
-    /// "Operational" for the summary line = the single-partition GPU mode is
-    /// enabled.
+    /// "Operational" for the summary line: the query runs on a device at some mode.
     fn operational(&self) -> bool {
-        self.state("full_table_gpu") == "enabled"
+        BP_MODES
+            .iter()
+            .any(|mode| self.state(&BpGroup::Gpu.column(mode)) == "enabled")
     }
-}
 
-impl Row {
-    /// PeacockDB Σout / DuckDB Σout (the spec's ratio direction).
-    /// The batch-partitioned ratio and bucket, from that mode's own cost. Separate from the
-    /// legacy pair because the two modes price different work: one number under two headings
-    /// would read as a comparison and be an accident.
+    /// PeacockDB Σout / DuckDB Σout, at the mode the cost came from.
     fn bp_ratio(&self) -> Option<f64> {
         let (_, peacock) = self.bp_peacockdb.as_ref()?;
         let duckdb = self.duckdb?;
@@ -296,54 +214,6 @@ impl Row {
         }
     }
 
-    fn ratio(&self) -> Option<f64> {
-        match (self.peacockdb, self.duckdb) {
-            (Some(p), Some(d)) if d > 0 => Some(p as f64 / d as f64),
-            _ => None,
-        }
-    }
-
-    /// Color bucket: green (within budget), red (over), grey (skip / no cost).
-    fn bucket(&self) -> &'static str {
-        match self.ratio() {
-            _ if !self.operational() => "grey",
-            Some(r) if r <= RATIO_GREEN_MAX => "green",
-            Some(_) => "red",
-            None => "grey",
-        }
-    }
-
-    /// One CPU mode's glyph, hyperlinked to the `.cpu.txt` it was verified against
-    /// when the cell is `enabled` and a URL exists.
-    ///
-    /// ONLY `✓` links: `~`, `✗` and `—` have no golden behind them, so a link would
-    /// promise a file that is not there. Falls back to the bare glyph on a dry run
-    /// (no sha ⇒ `golden_url` is `None`), exactly like the Σout cells.
-    fn cpu_glyph(&self, col: &str, links: &Links, canon_rel: &str) -> String {
-        let glyph = state_glyph(self.state(col));
-        let url = self
-            .cpu_golden
-            .get(col)
-            .and_then(|label| links.golden_url(canon_rel, &self.stem(), &format!("{label}.cpu.txt")));
-        match url {
-            Some(u) => format!("<a href=\"{u}\">{glyph}</a>"),
-            None => glyph.to_string(),
-        }
-    }
-
-    /// full_table_cpu is one logical mode run at two target-partition counts, so it
-    /// renders as a single cell showing the split rather than two columns.
-    ///
-    /// Returns MARKUP, not a label: the two glyphs link to different goldens
-    /// (tp1-standard/tp1-mini vs tp8-mini), so they cannot be one escaped string.
-    /// Both renders emit HTML here — the PR comment's table is raw HTML too.
-    fn ftc_cell(&self, links: &Links, canon_rel: &str) -> String {
-        format!(
-            "tp1{} tp8{}",
-            self.cpu_glyph("ftc_tp1", links, canon_rel),
-            self.cpu_glyph("ftc_tp8", links, canon_rel)
-        )
-    }
 }
 
 /// Where each query's `== <query>` section starts, per batch-partitioned file: the line a
@@ -515,19 +385,10 @@ fn main() {
     // When set, assemble the page-per-sha Pages site here instead of writing a
     // single --html file (master deploy); see `assemble_site`.
     let site = opt("--site", "");
-    // Two files because two comments: see `SENTINEL_BP`. `--md` is gone rather than
-    // repurposed — a flag that used to emit everything and now emits half is worse than one
-    // that no longer exists, so it is rejected by name. The gate renders one table and takes
-    // its own `--md-diff` rather than borrowing a name that means half a report.
     if let Some(bad) = args.iter().find(|a| a.starts_with("--") && !FLAGS.contains(&a.as_str())) {
-        panic!(
-            "unknown flag {bad}: this binary accepts {FLAGS:?}. `--md` in particular is gone — the \
-             report writes two comments and the gate one, so pass --md-legacy and --md-bp, or \
-             --md-diff with --cost-diff."
-        );
+        panic!("unknown flag {bad}: this binary accepts {FLAGS:?}");
     }
-    let md_out = opt("--md-legacy", "");
-    let md_bp_out = opt("--md-bp", "");
+    let md_out = opt("--md", "");
     let md_diff_out = opt("--md-diff", "");
     let pages_url = opt("--pages-url", PAGES_URL_DEFAULT);
     let published = args.iter().any(|a| a == "--published");
@@ -602,62 +463,6 @@ fn main() {
     let tpcds = build_dataset("TPC-DS", "testdata/goldens/tpcds.sf1", "testdata/tpcds-queries", &testdata.join("goldens/tpcds.sf1"), &registry, "tpcds");
     let datasets = [tpch, tpcds];
 
-    // CI gate: a query whose Σout we EXPECT must actually have one. A missing value
-    // silently renders "—" (e.g. a stale CPU_DEVICE or an absent golden) and CI
-    // would stay green — so fail loudly instead.
-    //
-    // "Expect" = the query is GPU-operational AND its full_table_cpu run at the
-    // CPU_DEVICE tier is enabled, because that is the exact golden the Σout is read
-    // from (`<query>.{CPU_DEVICE}.cost.txt`). Requiring it of every operational
-    // query would be wrong now that the registry includes the synthetic
-    // micro-queries: tpch/scan_limit is GPU-operational but runs full_table_cpu at
-    // tp1-mini only, so no full_table-tp8-mini cost golden exists or should. Its Σout
-    // cell is a dash, and the ftc column shows why.
-    let mut missing: Vec<String> = Vec::new();
-    for d in &datasets {
-        for r in &d.rows {
-            if r.operational() && r.state("ftc_tp8") == "enabled" && r.peacockdb.is_none() {
-                missing.push(format!("{} {}", d.label, r.query));
-            }
-        }
-    }
-    if !missing.is_empty() {
-        eprintln!(
-            "cost-report: missing PeacockDB cost for {} operational queries (stale CPU_DEVICE='{CPU_DEVICE}' or absent .cost.txt goldens): {}",
-            missing.len(),
-            missing.join(", ")
-        );
-        std::process::exit(1);
-    }
-
-    // Every `enabled` CPU cell must have a .cpu.txt: assert_cpu_cost_canonical runs on
-    // EVERY CPU macro invocation, independent of the ResultGolden keyword (which gates
-    // only .result.txt). That invariant is the whole premise of these links, so a cell
-    // that resolves to nothing is a real breakage — a new device label, or a golden
-    // renamed without updating CPU_GOLDEN_LABEL — and must be loud rather than a
-    // silently unlinked ✓.
-    let mut unlinked: Vec<String> = Vec::new();
-    for d in &datasets {
-        for r in &d.rows {
-            for (col, label) in CPU_GOLDEN_LABEL {
-                if r.state(col) == "enabled" && !r.cpu_golden.contains_key(col) {
-                    unlinked.push(format!("{} {} [{col}] (expected {label})", d.label, r.query));
-                }
-            }
-        }
-    }
-    if !unlinked.is_empty() {
-        eprintln!(
-            "cost-report: {} enabled CPU cell(s) have no .cpu.txt golden under any known \
-             label. Every enabled CPU cell owns one (assert_cpu_cost_canonical is \
-             unconditional), so this means a query registered at a tier CPU_GOLDEN_LABEL \
-             does not name, or a golden rename it has not caught up with:\n  {}",
-            unlinked.len(),
-            unlinked.join("\n  ")
-        );
-        std::process::exit(1);
-    }
-
     let freshness = freshness_line(links.sha.as_deref(), generated_at.as_deref());
 
     if site.is_empty() {
@@ -669,20 +474,18 @@ fn main() {
         eprintln!("assembled page-per-sha site at {site}/");
     }
 
-    for (out, part) in [(&md_out, MdPart::Legacy), (&md_bp_out, MdPart::BatchPartitioned)] {
-        let md = render_markdown(&datasets, &pages_url, published, &links, freshness.as_deref(), part);
-        assert!(
-            md.len() <= COMMENT_MAX_BYTES,
-            "the {part:?} comment is {} bytes against the {COMMENT_MAX_BYTES}-byte cap — GitHub \
-             refuses the body with a 422 that reads as a permissions error",
-            md.len()
-        );
-        if out.is_empty() {
-            print!("{md}");
-        } else {
-            std::fs::write(out, &md).unwrap_or_else(|e| panic!("write {out}: {e}"));
-            eprintln!("wrote {out}");
-        }
+    let md = render_markdown(&datasets, &pages_url, published, &links, freshness.as_deref());
+    assert!(
+        md.len() <= COMMENT_MAX_BYTES,
+        "the comment is {} bytes against the {COMMENT_MAX_BYTES}-byte cap — GitHub refuses the \
+         body with a 422 that reads as a permissions error",
+        md.len()
+    );
+    if md_out.is_empty() {
+        print!("{md}");
+    } else {
+        std::fs::write(&md_out, &md).unwrap_or_else(|e| panic!("write {md_out}: {e}"));
+        eprintln!("wrote {md_out}");
     }
 }
 
@@ -716,24 +519,8 @@ fn build_dataset(
                 plan_status: r.plan_status.clone(),
                 features: r.features.clone(),
                 tickets: r.tickets.clone(),
-                // PeacockDB total lives in the cheap-to-regenerate .cost.txt (the
-                // .cpu.txt carries no footer); `peacockdb_cost=` key.
-                peacockdb: read_total(
-                    &canon.join(format!("{stem}.{CPU_DEVICE}.cost.txt")),
-                    "peacockdb_cost=",
-                ),
                 duckdb: read_total(&canon.join(format!("{stem}.duckdb_cost.txt")), "duckdb_cost="),
                 bp_peacockdb: bp_cost(canon, &r.states, &r.query),
-                // Check the golden exists rather than assuming it: see
-                // CPU_GOLDEN_LABEL. Only `enabled` cells are resolved — the others
-                // never render a link, and checking them would make the main() gate
-                // below fire on cells that legitimately have no golden.
-                cpu_golden: CPU_GOLDEN_LABEL
-                    .iter()
-                    .filter(|(col, _)| r.states.get(*col).map(String::as_str) == Some("enabled"))
-                    .filter(|(_, label)| canon.join(format!("{stem}.{label}.cpu.txt")).exists())
-                    .map(|(col, label)| (col.to_string(), label.to_string()))
-                    .collect(),
             }
         })
         .collect();
@@ -782,7 +569,7 @@ fn bp_cost(canon: &Path, states: &BTreeMap<String, String>, query: &str) -> Opti
         states.get(&column).map(String::as_str) == Some("enabled")
     })?;
     let text = std::fs::read_to_string(canon.join(format!("{mode}-{BP_TIER}.cost.txt"))).ok()?;
-    let total = entry_total(&text, Some(query))?;
+    let total = entry_total(&text, query)?;
     Some((mode.to_string(), total))
 }
 
@@ -889,33 +676,13 @@ fn peacock_cell_md(value: Option<u64>, plan_url: Option<String>, cost_url: Optio
 /// The four execution-mode `<td>`s for a row — or ONE `colspan=4` cell when the
 /// query has no per-mode story to tell.
 ///
-/// Executable rows get the full cells (full_table_cpu split + 3 glyphs). The other
+/// Executable rows get the three mode cells. The other
 /// two kinds merge, because four repeated em-dashes read as "look for the
 /// difference" when the real statement is a single fact about the whole row: it
 /// plans but nothing runs it yet, or it does not plan at all.
-fn mode_cells_html(r: &Row, links: &Links, canon_rel: &str) -> String {
-    match r.kind() {
-        RowKind::Executable => format!(
-            "<td class=\"mode\">{}</td><td class=\"mode\">{}</td>\
-             <td class=\"mode\">{}</td><td class=\"mode\">{}</td>",
-            r.ftc_cell(links, canon_rel),
-            r.cpu_glyph("partitioned_cpu", links, canon_rel),
-            state_glyph(r.state("full_table_gpu")),
-            state_glyph(r.state("partitioned_gpu")),
-        ),
-        RowKind::PlanOnly => {
-            "<td class=\"mode span\" colspan=\"4\">plan ✓</td>".to_string()
-        }
-        RowKind::PlanFailed => {
-            "<td class=\"mode span\" colspan=\"4\">plan ✗</td>".to_string()
-        }
-    }
-}
-
-/// One batch-partitioned cell: five glyphs, one per mode, in the fixed sequence. Three of
-/// these replace the legacy four mode columns — fifteen columns of one glyph each would set
-/// their own min-content width and push the table into horizontal scroll, which is the
-/// reason the legacy headers are already abbreviated.
+/// One cell: five glyphs, one per mode, in the fixed sequence. Three cells rather than
+/// fifteen columns of one glyph each, which would set their own min-content width and push
+/// the table into horizontal scroll.
 ///
 /// An enabled glyph links to the file its mode's section lives in. A blob view cannot
 /// address a section by name, so the link lands on the file and the reader finds the
@@ -1041,28 +808,6 @@ fn tickets_plain(tickets: &[String]) -> String {
     tickets.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
 }
 
-/// Markdown counterpart of [`mode_cells_html`]. The PR comment's table is raw HTML
-/// (GFM pipe tables support neither `colspan` nor font control), so the same shapes
-/// apply: four `<td>` mode cells for an Executable row, one `colspan=4`
-/// plan-status cell otherwise. `<sub>` shrinks text — GitHub strips class/style.
-fn mode_cells_md(r: &Row, links: &Links, canon_rel: &str) -> String {
-    match r.kind() {
-        RowKind::Executable => format!(
-            "<td><sub>{}</sub></td><td>{}</td><td>{}</td><td>{}</td>",
-            r.ftc_cell(links, canon_rel),
-            r.cpu_glyph("partitioned_cpu", links, canon_rel),
-            state_glyph(r.state("full_table_gpu")),
-            state_glyph(r.state("partitioned_gpu")),
-        ),
-        RowKind::PlanOnly => {
-            "<td colspan=\"4\"><sub>plan ✓</sub></td>".to_string()
-        }
-        RowKind::PlanFailed => {
-            "<td colspan=\"4\"><sub>plan ✗</sub></td>".to_string()
-        }
-    }
-}
-
 /// NOTE: emits an HTML anchor, not markdown `[text](url)`. The comment's table is
 /// raw HTML (needed for colspan + <sub>), and GitHub does NOT process markdown link
 /// syntax inside raw HTML block elements — it would render the brackets literally.
@@ -1160,10 +905,10 @@ fn render_html(
          joins now count both inputs + their own output (aligned with PeacockDB), and a TABLE_SCAN counts \
          bytes_read from storage <em>plus</em> its post-filter output (mirroring PeacockDB's split scan + filter). \
          <strong>Remaining structural skew → red rows on selective queries:</strong> PeacockDB does NOT push \
-         predicates into the scan — its GpuScanExec reads ALL projected rows and a separate GpuFilterExec applies \
-         the predicate (the predicate is dropped at CudfScan serialization, so the GPU path is zero row-group prune), \
-         whereas DuckDB prunes + filters inline in TABLE_SCAN. So peacockdb scan output stays full-size while \
-         DuckDB's is post-filter — a real, explainable efficiency gap (no scan-level pushdown), not noise. \
+         predicates into the read — the source reads every projected row of the surviving row groups and a \
+         separate filter node applies the predicate, whereas DuckDB prunes and filters inline in TABLE_SCAN. \
+         So the peacockdb scan output stays full-size while DuckDB's is post-filter — a real, explainable \
+         efficiency gap (no scan-level pushdown), not noise. \
          (Also: group-by still counts buffered input on DuckDB vs output on PeacockDB.) The ratio is \
          <strong>directional only</strong>, to be replaced by a proper cost model; it asserts nothing and gates nothing.</p>",
     );
@@ -1175,59 +920,21 @@ fn render_html(
          <strong>✓</strong> enabled (result validated, by golden or live oracle) · \
          <strong>~</strong> skip (runs, result NOT validated) · \
          <strong>✗</strong> disabled (deliberately off — see Tickets) · \
-         <strong>—</strong> n/a (mode does not apply to this query). \
-         Mode columns are abbreviated to keep the table within one screen: \
-         <em>ft_cpu</em> = full_table_cpu, <em>p_cpu</em> = partitioned_cpu, \
-         <em>ft_gpu</em> = full_table_gpu, <em>p_gpu</em> = partitioned_gpu. \
-         <em>ft_cpu</em> shows both target-partition counts in one cell. The \
-         <em>all_at_once</em> GPU path has no column: it executes a whole plan in one shot with no \
-         per-node breakdown, so a per-query cell would be meaningless.</p>",
+         <strong>—</strong> n/a (mode does not apply to this query). Each cell is five \
+         glyphs, one per mode: <em>plan</em> is whether that mode plans the query, \
+         <em>cpu</em> and <em>gpu</em> whether it runs and is checked on that engine.</p>",
+    );
+    let _ = write!(
+        s,
+        "<p class=\"legend\">Mode order within a cell: {}.</p>",
+        BP_MODES.join(", ")
     );
 
     for d in datasets {
+        // Three cells of five glyphs rather than fifteen columns of one.
         let _ = write!(
             s,
-            // Short header labels (ft_cpu/p_cpu/ft_gpu/p_gpu) are DISPLAY TEXT ONLY —
-            // CSV column names and all code paths keep the long forms. These four
-            // headers set their columns' min-content width (the cells below are one
-            // glyph), so the long names put the table back into horizontal scroll.
-            "<h2>{}</h2><table><tr><th>Query</th><th class=\"modeh\">ft_cpu</th>\
-             <th class=\"modeh\">p_cpu</th><th class=\"modeh\">ft_gpu</th>\
-             <th class=\"modeh\">p_gpu</th>\
-             <th class=\"sigma\">PeacockDB Σout</th><th class=\"sigma\">DuckDB Σout</th><th>Ratio</th>\
-             <th>Features</th><th>Tickets</th></tr>",
-            d.label
-        );
-        for r in &d.rows {
-            let stem = r.stem();
-            let plan_url = r.peacockdb.and_then(|_| links.golden_url(d.canon_rel, &stem, &format!("{CPU_DEVICE}.cpu.txt")));
-            let cost_url = r.peacockdb.and_then(|_| links.golden_url(d.canon_rel, &stem, &format!("{CPU_DEVICE}.cost.txt")));
-            let dk_url = r.duckdb.and_then(|_| links.golden_url(d.canon_rel, &stem, "duckdb_cost.txt"));
-            let _ = write!(
-                s,
-                "<tr class=\"{}\"><td{}>{}</td>{}<td class=\"num sigma\">{}</td>\
-                 <td class=\"num sigma\">{}</td><td class=\"num\">{}</td><td class=\"feat\">{}</td><td>{}</td></tr>",
-                r.bucket(),
-                // Attribute omitted entirely for q<N> rows — an empty class="" is
-                // noise in the output and is what the plain-cell test asserts against.
-                if r.n.is_none() { " class=\"micro\"" } else { "" },
-                query_cell_html(&r.query, links.query_url(d.query_rel, &stem)),
-                mode_cells_html(r, links, d.canon_rel),
-                peacock_cell_html(r.peacockdb, plan_url, cost_url),
-                cost_cell_html(r.duckdb, dk_url),
-                ratio_or_dash(r.ratio()),
-                features_html(&r.features),
-                tickets_html(&r.tickets, links),
-            );
-        }
-        s.push_str("</table>");
-
-        // The batch-partitioned mode's own table. Three cells of five glyphs rather than
-        // fifteen columns, and its own cost pair: the two modes price different work, so one
-        // Σout column cannot carry both.
-        let _ = write!(
-            s,
-            "<h3>{} — batch-partitioned</h3><table><tr><th>Query</th>\
+            "<h2>{}</h2><table><tr><th>Query</th>\
              <th class=\"modeh\">plan</th><th class=\"modeh\">cpu</th><th class=\"modeh\">gpu</th>\
              <th class=\"sigma\">PeacockDB Σout</th><th class=\"sigma\">DuckDB Σout</th><th>Ratio</th>\
              <th>Features</th><th>Tickets</th></tr>",
@@ -1240,16 +947,24 @@ fn render_html(
                 links.golden_url(d.canon_rel, &format!("{mode}-{BP_TIER}"), "cost.txt")
             });
             let dk_url = r.duckdb.and_then(|_| links.golden_url(d.canon_rel, &stem, "duckdb_cost.txt"));
+            let modes = if r.plan_failed() {
+                "<td class=\"mode span\" colspan=\"3\">plan ✗</td>".to_string()
+            } else {
+                format!(
+                    "{}{}{}",
+                    bp_cell_html(r, links, d, BpGroup::Plan),
+                    bp_cell_html(r, links, d, BpGroup::Cpu),
+                    bp_cell_html(r, links, d, BpGroup::Gpu)
+                )
+            };
             let _ = write!(
                 s,
-                "<tr class=\"{}\"><td{}>{}</td>{}{}{}<td class=\"num sigma\">{}</td>\
+                "<tr class=\"{}\"><td{}>{}</td>{}<td class=\"num sigma\">{}</td>\
                  <td class=\"num sigma\">{}</td><td class=\"num\">{}</td><td class=\"feat\">{}</td><td>{}</td></tr>",
                 r.bp_bucket(),
                 if r.n.is_none() { " class=\"micro\"" } else { "" },
                 query_cell_html(&r.query, links.query_url(d.query_rel, &stem)),
-                bp_cell_html(r, links, d, BpGroup::Plan),
-                bp_cell_html(r, links, d, BpGroup::Cpu),
-                bp_cell_html(r, links, d, BpGroup::Gpu),
+                modes,
                 peacock_cell_html(cost, None, cost_url),
                 cost_cell_html(r.duckdb, dk_url),
                 ratio_or_dash(r.bp_ratio()),
@@ -1281,34 +996,20 @@ fn full_report_ref(published: bool, pages_url: &str) -> String {
     }
 }
 
-/// Which comment this markdown is, and therefore which tables it carries and which
-/// sentinel it opens with. See [`SENTINEL_BP`] for why there are two.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum MdPart {
-    Legacy,
-    BatchPartitioned,
-}
-
 fn render_markdown(
     datasets: &[Dataset],
     pages_url: &str,
     published: bool,
     links: &Links,
     freshness: Option<&str>,
-    part: MdPart,
 ) -> String {
     let mut s = String::new();
-    s.push_str(match part {
-        MdPart::Legacy => SENTINEL,
-        MdPart::BatchPartitioned => SENTINEL_BP,
-    });
+    s.push_str(SENTINEL);
     s.push('\n');
 
-    // Every anchor but the query cell's is dropped from the comment: 612 of them at ~98
-    // bytes of markup each is 60 KB, against a 65,536-byte body. The mode and cost cells
-    // lose their links by being handed a sha-less `Links`, which is what makes their urls
-    // `None` — the artifact keeps all of them.
-    let plain = Links { repo: links.repo.clone(), sha: None, tickets: links.tickets.clone() };
+    // Every anchor but the query cell's is dropped from the comment: hundreds of them at
+    // ~98 bytes of markup each approach the 65,536-byte body cap. The mode and cost cells
+    // are rendered unlinked here; the artifact keeps all of them.
 
     let mut summary = String::new();
     for d in datasets {
@@ -1328,60 +1029,17 @@ fn render_markdown(
     s.push('\n');
 
     for d in datasets {
-        if part == MdPart::Legacy {
+        // The same table as the html's, in what markdown allows: no row background, so the
+        // ratio cell carries the flag, and no hover, so the mode order is above the table.
+        // A table that lands in one rendering and not the other is the failure to expect
+        // here — the html is what a person looks at and this is what the review reads.
         let _ = write!(
             s,
-            // A raw HTML table, NOT a GFM pipe table. Two things the widget's
-            // structure needs are impossible in pipe tables: colspan (for the merged
-            // plan-status cell) and any font control. GitHub renders inline HTML in
-            // comments, and <sub> shrinks text — `class`/`style` are stripped by its
-            // sanitizer, so <sub> is the mechanism, not CSS.
-            "<details><summary>{} — {}/{} operational</summary>\n\n\
-             <table>\n<tr><th>Query</th><th><sub>ft_cpu</sub></th>\
-             <th><sub>p_cpu</sub></th><th><sub>ft_gpu</sub></th>\
-             <th><sub>p_gpu</sub></th><th><sub>PeacockDB Σout</sub></th>\
-             <th><sub>DuckDB Σout</sub></th><th>Ratio</th><th><sub>Features</sub></th>\
-             <th>Tickets</th></tr>\n",
+            "<details><summary>{} — {}/{} GPU-operational</summary>\n\n",
             d.label,
             d.operational(),
             d.total
         );
-        for r in &d.rows {
-            let stem = r.stem();
-            // Markdown can't set a row background, so flag the >threshold rows
-            // with 🔴 — the comment-side equivalent of the HTML light-red row.
-            let ratio_cell = match r.bucket() {
-                "red" => format!("{} 🔴", ratio_or_dash(r.ratio())),
-                _ => ratio_or_dash(r.ratio()),
-            };
-            let _ = write!(
-                s,
-                "<tr><td>{}</td>{}<td><sub>{}</sub></td>\
-                 <td><sub>{}</sub></td><td>{}</td>\
-                 <td><sub>{}</sub></td><td>{}</td></tr>\n",
-                // <sub> only for the non-numeric names; q<N> keeps full size. GitHub
-                // strips class/style, so <sub> is the only lever here.
-                match r.n {
-                    None => format!("<sub>{}</sub>", query_cell_md(&r.query, links.query_url(d.query_rel, &stem))),
-                    Some(_) => query_cell_md(&r.query, links.query_url(d.query_rel, &stem)),
-                },
-                mode_cells_md(r, &plain, d.canon_rel),
-                peacock_cell_md(r.peacockdb, None, None),
-                cost_cell_md(r.duckdb, None),
-                ratio_cell,
-                if r.features.is_empty() { "—".to_string() } else { r.features.join(" ") },
-                tickets_plain(&r.tickets),
-            );
-        }
-        s.push_str("</table>\n</details>\n\n");
-        }
-
-        if part == MdPart::BatchPartitioned {
-        // The same table as the html's, in what markdown allows: no row background, so the
-        // ratio cell carries the flag, and no hover, so the mode order is in the header.
-        // A table that lands in one rendering and not the other is the failure to expect
-        // here — the html is what a person looks at and this is what the review reads.
-        let _ = write!(s, "<details><summary>{} — batch-partitioned</summary>\n\n", d.label);
         let _ = write!(
             s,
             "<sub>Each cell is five glyphs, one per mode, in order: {}.</sub>\n\n",
@@ -1400,16 +1058,24 @@ fn render_markdown(
                 "red" => format!("{} 🔴", ratio_or_dash(r.bp_ratio())),
                 _ => ratio_or_dash(r.bp_ratio()),
             };
+            let modes = if r.plan_failed() {
+                "<td colspan=\"3\"><sub>plan ✗</sub></td>".to_string()
+            } else {
+                format!(
+                    "<td><sub>{}</sub></td><td><sub>{}</sub></td><td><sub>{}</sub></td>",
+                    bp_cell_md(r, BpGroup::Plan),
+                    bp_cell_md(r, BpGroup::Cpu),
+                    bp_cell_md(r, BpGroup::Gpu)
+                )
+            };
             let _ = write!(
                 s,
-                "<tr><td>{}</td><td><sub>{}</sub></td><td><sub>{}</sub></td><td><sub>{}</sub></td><td><sub>{}</sub></td><td><sub>{}</sub></td><td>{}</td><td><sub>{}</sub></td><td>{}</td></tr>\n",
+                "<tr><td>{}</td>{}<td><sub>{}</sub></td><td><sub>{}</sub></td><td>{}</td><td><sub>{}</sub></td><td>{}</td></tr>\n",
                 match r.n {
                     None => format!("<sub>{}</sub>", query_cell_md(&r.query, links.query_url(d.query_rel, &stem))),
                     Some(_) => query_cell_md(&r.query, links.query_url(d.query_rel, &stem)),
                 },
-                bp_cell_md(r, BpGroup::Plan),
-                bp_cell_md(r, BpGroup::Cpu),
-                bp_cell_md(r, BpGroup::Gpu),
+                modes,
                 peacock_cell_md(cost, None, None),
                 cost_cell_md(r.duckdb, None),
                 ratio_cell,
@@ -1418,7 +1084,6 @@ fn render_markdown(
             );
         }
         s.push_str("</table>\n</details>\n\n");
-        }
     }
     let _ = write!(
         s,
@@ -1556,15 +1221,6 @@ fn fmt_delta(pct: Option<f64>) -> String {
     pct.map(|p| format!("{p:+.2}%")).unwrap_or_else(|| "—".to_string())
 }
 
-/// Display label for a per-query `.cost.txt`: `<dataset>/<query>` (device segment and
-/// extension dropped — each query has exactly one such golden, so this stays unique).
-fn diff_label(rel: &Path) -> String {
-    let dataset = rel.parent().and_then(|p| p.file_name()).and_then(|s| s.to_str()).unwrap_or("?");
-    let file = rel.file_name().and_then(|s| s.to_str()).unwrap_or("?");
-    let query = file.split('.').next().unwrap_or(file);
-    format!("{dataset}/{query}")
-}
-
 /// Display label for one section of a per-mode `.cost.txt`: the query and the mode, because
 /// the number belongs to the pair. Taking the filename's first dot-segment here would label
 /// every one of a file's queries with the mode.
@@ -1576,7 +1232,7 @@ fn section_label(rel: &Path, query: &str) -> String {
 }
 
 /// The queries a `.cost.txt` holds in `== <query>` sections, in file order, with each
-/// section's body. Empty for the per-query form, which has no headers.
+/// section's body.
 ///
 /// cost-report reads the convention rather than the test side's parser: its `[dependencies]`
 /// is empty on purpose, so it builds in seconds in the cpu tier, and depending on the
@@ -1631,15 +1287,15 @@ struct CostEntry {
     path: PathBuf,
     /// What `git show <ref>:<repo path>` reads for the base side.
     repo_path: String,
-    /// `None` for a per-query golden, whose whole file is the number.
-    section: Option<String>,
+    /// Which `== <query>` section of that file the number is.
+    section: String,
 }
 
 /// Walk the working tree's `.cost.txt` goldens, one entry per comparable number.
 ///
-/// A per-mode golden holds every query in sections, so it is one FILE and many numbers.
-/// Reading it as one would take whichever query's total came first and label it with the
-/// mode: a real number from an arbitrary query, rendered confidently, gating the build.
+/// A golden holds every query in sections, so it is one FILE and many numbers. Reading it
+/// as one would take whichever query's total came first and label it with the mode: a real
+/// number from an arbitrary query, rendered confidently, gating the build.
 fn collect_cost_goldens(testdata: &Path) -> Vec<CostEntry> {
     let mut out = Vec::new();
     for sub in ["goldens/tpch.sf1", "goldens/tpcds.sf1"] {
@@ -1654,21 +1310,15 @@ fn collect_cost_goldens(testdata: &Path) -> Vec<CostEntry> {
             let repo_path = format!("{}/{}", testdata.display(), rel.display());
             let text = std::fs::read_to_string(&path).unwrap_or_default();
             let sections = cost_sections(&text);
-            if sections.is_empty() {
-                out.push(CostEntry {
-                    label: diff_label(&rel),
-                    path: path.clone(),
-                    repo_path,
-                    section: None,
-                });
-                continue;
-            }
+            // Every golden is sectioned. One that is not would contribute nothing here and
+            // say nothing about it, so it is an error rather than a silent omission.
+            assert!(!sections.is_empty(), "{} has no `== <query>` section", path.display());
             for (query, _) in sections {
                 out.push(CostEntry {
                     label: section_label(&rel, &query),
                     path: path.clone(),
                     repo_path: repo_path.clone(),
-                    section: Some(query),
+                    section: query,
                 });
             }
         }
@@ -1678,20 +1328,17 @@ fn collect_cost_goldens(testdata: &Path) -> Vec<CostEntry> {
 }
 
 /// The total of one entry, from the text of the file it lives in.
-fn entry_total(text: &str, section: Option<&str>) -> Option<u64> {
-    match section {
-        None => read_total_str(text, "peacockdb_cost="),
-        Some(query) => cost_sections(text)
-            .into_iter()
-            .find(|(name, _)| name == query)
-            .and_then(|(_, body)| read_total_str(&body, "peacockdb_cost=")),
-    }
+fn entry_total(text: &str, section: &str) -> Option<u64> {
+    cost_sections(text)
+        .into_iter()
+        .find(|(name, _)| name == section)
+        .and_then(|(_, body)| read_total_str(&body, "peacockdb_cost="))
 }
 
 /// Base-side `.cost.txt` total. `base` is a directory (read `<base>/goldens/…`) or
 /// else a git ref (`git show <base>:<repo path>`). `None` when the file is absent
 /// in the base → that query has no baseline and is omitted by [`cost_diff`].
-fn base_total(base: &str, repo_path: &str, testdata: &Path, section: Option<&str>) -> Option<u64> {
+fn base_total(base: &str, repo_path: &str, testdata: &Path, section: &str) -> Option<u64> {
     let base_dir = Path::new(base);
     if base_dir.is_dir() {
         // repo_path is "<testdata>/goldens/…"; strip the testdata prefix to re-root
@@ -1703,11 +1350,9 @@ fn base_total(base: &str, repo_path: &str, testdata: &Path, section: Option<&str
     if !out.status.success() {
         return None; // not in base → no baseline
     }
-    // The same reader as the directory arm. This arm dropped `section` and read the whole
-    // file, so every section of a per-mode `.cost.txt` was baselined against whichever query
-    // sorts first — the diff then reported swings in both directions and neither was a cost
-    // change. Legacy goldens are one file per query, so `section` is None there and the two
-    // arms agreed; per-mode files are what made the difference reachable.
+    // The same reader as the directory arm. This arm once dropped `section` and read the
+    // whole file, so every section was baselined against whichever query sorts first — the
+    // diff then reported swings in both directions and neither was a cost change.
     entry_total(&String::from_utf8_lossy(&out.stdout), section)
 }
 
@@ -1800,11 +1445,11 @@ fn run_cost_diff(testdata: &Path, base: &str, html_out: &str, md_out: &str, link
     let mut old_map = BTreeMap::new();
     for entry in &goldens {
         let text = std::fs::read_to_string(&entry.path).unwrap_or_default();
-        if let Some(n) = entry_total(&text, entry.section.as_deref()) {
+        if let Some(n) = entry_total(&text, &entry.section) {
             new_map.insert(entry.label.clone(), n);
         }
         if !base.is_empty() {
-            if let Some(o) = base_total(base, &entry.repo_path, testdata, entry.section.as_deref())
+            if let Some(o) = base_total(base, &entry.repo_path, testdata, &entry.section)
             {
                 old_map.insert(entry.label.clone(), o);
             }
@@ -1849,12 +1494,13 @@ mod tests {
     }
 
     /// Build a Row for tests. `modes` maps each mode column to its state; anything
-    /// unlisted defaults to "na". Keeps the tests readable now that a Row carries
-    /// five mode cells plus features and tickets.
-    fn test_row(query: &str, modes: &[(&str, &str)], peacockdb: Option<u64>, duckdb: Option<u64>) -> Row {
+    /// unlisted defaults to "na".
+    fn test_row(query: &str, modes: &[(&str, &str)], duckdb: Option<u64>) -> Row {
         let mut states = BTreeMap::new();
-        for m in MODE_COLUMNS {
-            states.insert(m.to_string(), "na".to_string());
+        for mode in BP_MODES {
+            for group in [BpGroup::Plan, BpGroup::Cpu, BpGroup::Gpu] {
+                states.insert(group.column(mode), "na".to_string());
+            }
         }
         for (k, v) in modes {
             states.insert(k.to_string(), v.to_string());
@@ -1866,10 +1512,8 @@ mod tests {
             plan_status: "ok".to_string(),
             features: vec![],
             tickets: vec![],
-            peacockdb,
             duckdb,
             bp_peacockdb: None,
-            cpu_golden: BTreeMap::new(),
         }
     }
 
@@ -1913,25 +1557,22 @@ mod tests {
             sections.iter().map(|(q, _)| q.as_str()).collect::<Vec<_>>(),
             ["q6", "q14"]
         );
-        assert_eq!(entry_total(SECTIONED, Some("q6")), Some(54_772_928));
-        assert_eq!(entry_total(SECTIONED, Some("q14")), Some(28_000_000));
+        assert_eq!(entry_total(SECTIONED, "q6"), Some(54_772_928));
+        assert_eq!(entry_total(SECTIONED, "q14"), Some(28_000_000));
         assert_eq!(
-            entry_total(SECTIONED, Some("q99")),
+            entry_total(SECTIONED, "q99"),
             None,
             "a query it does not hold"
         );
     }
 
-    /// The gate's red case, and the reason the reader had to change: read per file, a
-    /// two-section golden whose SECOND section moved reports no change at all — the
-    /// The two arms of `base_total` return the same total for the same file.
+    /// The two arms of `base_total` return the same total for the same section.
     ///
     /// The git arm dropped `section` and read the whole file, so every section of a per-mode
     /// `.cost.txt` was baselined against whichever query sorts first — a swing in both
     /// directions that was never a cost change. `the_per_file_reader_misses_a_second_section
     /// _that_moved` below already proves that reader blind; this asserts the caller stopped
-    /// using it. Legacy goldens are one file per query, so both arms agreed there and always
-    /// have.
+    /// using it.
     #[test]
     fn both_base_arms_read_the_same_section_of_a_multi_section_file() {
         let repo_rel = "testdata/goldens/tpch.sf1/bp-tp4-sized-mini.cost.txt";
@@ -1954,8 +1595,8 @@ mod tests {
         std::fs::write(&file, &text).expect("write");
 
         let testdata = Path::new("testdata");
-        let from_dir = base_total(dir.to_str().expect("utf8"), repo_rel, testdata, Some(&query));
-        let from_git = base_total("HEAD", repo_rel, testdata, Some(&query));
+        let from_dir = base_total(dir.to_str().expect("utf8"), repo_rel, testdata, &query);
+        let from_git = base_total("HEAD", repo_rel, testdata, &query);
         assert_eq!(from_dir, from_git, "the two arms disagree on {query}");
         assert!(from_dir.is_some(), "neither arm found {query}");
         assert_ne!(
@@ -1975,18 +1616,10 @@ mod tests {
             "the per-file reader sees the same number before and after"
         );
         assert_ne!(
-            entry_total(SECTIONED, Some("q14")),
-            entry_total(&moved, Some("q14")),
+            entry_total(SECTIONED, "q14"),
+            entry_total(&moved, "q14"),
             "and the section reader sees the move"
         );
-    }
-
-    /// A per-query golden has no headers, so it is one number and its own label.
-    #[test]
-    fn a_per_query_cost_golden_is_one_entry() {
-        let flat = "storage_read_bytes=10 # GpuScanExec\npeacockdb_cost=10";
-        assert!(cost_sections(flat).is_empty());
-        assert_eq!(entry_total(flat, None), Some(10));
     }
 
     /// The label carries the query AND the mode, since the number belongs to the pair —
@@ -1998,10 +1631,6 @@ mod tests {
         assert_eq!(label, "tpch.sf1/q6 bp-tp4-sized-mini");
         let links = links_with_tickets(&[], &[]);
         assert_eq!(diff_query_url(&links, &label), None, "no sha, no link");
-        assert_eq!(
-            diff_label(std::path::Path::new("goldens/tpch.sf1/q6.full_table-tp8-mini.cost.txt")),
-            "tpch.sf1/q6"
-        );
     }
 
     fn links_with_tickets(open: &[&str], archived: &[&str]) -> Links {
@@ -2110,147 +1739,36 @@ mod tests {
         assert_eq!(numbers("each ticket carries an `<a id=\"tNN\">` anchor\n"), Ok(vec![]));
     }
 
-    /// The three row shapes, and the merge. PlanOnly is covered here deliberately:
-    /// no query in the current registry is plan-only (the 4 non-executable TPC-DS
-    /// queries all FAIL to plan), so without this test that branch would ship
-    /// unexercised and could rot silently until the first query lands in it.
+    /// A query DataFusion cannot plan says so once, rather than in fifteen em-dashes.
+    /// No query in the registry is plan-ok-but-nothing-enabled, so the other arm is what
+    /// every other row exercises.
     #[test]
-    fn row_kind_and_merged_mode_cells() {
-        let exec = test_row("q1", &[("full_table_gpu", "enabled")], None, None);
-        assert_eq!(exec.kind(), RowKind::Executable);
-        let h = mode_cells_html(&exec, &dry_links(), "testdata/goldens/tpch.sf1");
-        assert_eq!(h.matches("<td").count(), 4, "executable rows keep 4 cells: {h}");
-        assert!(!h.contains("colspan"), "executable rows must not merge: {h}");
-
-        // plans, but nothing enabled -> one spanning cell
-        let plan_only = test_row("q42", &[], None, None);
-        assert_eq!(plan_only.kind(), RowKind::PlanOnly);
-        let h = mode_cells_html(&plan_only, &dry_links(), "testdata/goldens/tpch.sf1");
-        assert_eq!(h.matches("<td").count(), 1);
-        assert!(h.contains("colspan=\"4\"") && h.contains("plan ✓"), "{h}");
-
-        // does not plan -> one spanning cell, and plan failure DOMINATES an
-        // enabled mode (that combination is itself a bug and must read as ✗).
-        let mut failed = test_row("q27", &[("full_table_gpu", "enabled")], None, None);
+    fn a_query_that_does_not_plan_merges_its_three_mode_cells() {
+        let mut failed = test_row("q27", &[("bp_gpu_tp4_sized", "enabled")], None);
         failed.plan_status = "fail".to_string();
-        assert_eq!(failed.kind(), RowKind::PlanFailed);
-        let h = mode_cells_html(&failed, &dry_links(), "testdata/goldens/tpch.sf1");
-        assert!(h.contains("colspan=\"4\"") && h.contains("plan ✗"), "{h}");
+        let d = bp_dataset();
+        let html = render_html(&[d], "u", &dry_links(), None, None);
+        assert!(!html.contains("plan ✗"), "the fixture row plans: {html}");
 
-        // The markdown comment now mirrors the HTML structure (raw <table>), so the
-        // same invariants hold there: 4 cells when executable, 1 spanning cell
-        // otherwise. <sub> is what shrinks text — GitHub strips class/style.
-        assert_eq!(mode_cells_md(&exec, &dry_links(), "testdata/goldens/tpch.sf1").matches("<td").count(), 4);
-        assert!(mode_cells_md(&exec, &dry_links(), "testdata/goldens/tpch.sf1").contains("<sub>"));
-        assert_eq!(mode_cells_md(&plan_only, &dry_links(), "testdata/goldens/tpch.sf1").matches("<td").count(), 1);
-        assert!(mode_cells_md(&plan_only, &dry_links(), "testdata/goldens/tpch.sf1").contains("colspan=\"4\""));
-        assert!(mode_cells_md(&failed, &dry_links(), "testdata/goldens/tpch.sf1").contains("plan ✗"));
-    }
-
-    /// full_table_cpu is ONE column showing both target-partition counts.
-    #[test]
-    fn ftc_cell_shows_the_tp_split() {
-        let mut states = BTreeMap::new();
-        states.insert("ftc_tp1".to_string(), "enabled".to_string());
-        states.insert("ftc_tp8".to_string(), "disabled".to_string());
-        let r = Row {
-            query: "q1".into(),
-            n: Some(1),
-            states,
-            plan_status: "ok".to_string(),
-            features: vec![],
-            tickets: vec![],
-            peacockdb: None,
-            duckdb: None,
-            bp_peacockdb: None,
-            cpu_golden: BTreeMap::new(),
-        };
-        // Dry run (no sha): no URLs, so both glyphs are bare — the same degradation
-        // the Sigma-out cells have always had.
-        assert_eq!(r.ftc_cell(&dry_links(), "testdata/goldens/tpch.sf1"), "tp1✓ tp8✗");
-    }
-
-    /// The ✓ links, resolved PER COLUMN from [`CPU_GOLDEN_LABEL`].
-    ///
-    /// scan_limit earns a case here because it is the one query where the answer is
-    /// not obvious: it owns TWO tp1 goldens (registered at tp1_mini and tp1_standard,
-    /// both mapping to the single ftc_tp1 cell), yet that cell shows one link, at
-    /// tp1-standard like every other tp1 row. Pinning it stops a future reader from
-    /// "fixing" the link to tp1-mini on the theory that the mini golden is unreachable
-    /// by mistake — it is unreachable by decision (see the task spec).
-    #[test]
-    fn enabled_cpu_glyphs_link_to_their_own_golden() {
-        let canon = "testdata/goldens/tpch.sf1";
-
-        let mut r = test_row("q1", &[("ftc_tp1", "enabled"), ("ftc_tp8", "enabled")], None, None);
-        r.cpu_golden.insert("ftc_tp1".into(), "full_table-tp1-standard".into());
-        r.cpu_golden.insert("ftc_tp8".into(), "full_table-tp8-mini".into());
-        let cell = r.ftc_cell(&sha_links(), canon);
-        assert!(cell.contains(&format!("{canon}/q1.full_table-tp1-standard.cpu.txt")), "{cell}");
-        assert!(cell.contains(&format!("{canon}/q1.full_table-tp8-mini.cpu.txt")), "{cell}");
-        assert_eq!(cell.matches("<a href=").count(), 2, "both glyphs link: {cell}");
-
-        // scan_limit owns BOTH tp1 goldens (registered at tp1_mini and tp1_standard,
-        // one ftc_tp1 cell). It links at tp1-standard like every other tp1 row — the
-        // decision recorded in the task spec — and its stem is hyphenated.
-        let mut sl = test_row("scan_limit", &[("ftc_tp1", "enabled"), ("ftc_tp8", "disabled")], None, None);
-        sl.cpu_golden.insert("ftc_tp1".into(), "full_table-tp1-standard".into());
-        let cell = sl.ftc_cell(&sha_links(), canon);
-        assert!(cell.contains(&format!("{canon}/scan-limit.full_table-tp1-standard.cpu.txt")), "{cell}");
-
-        // Only ✓ links: a disabled cell has no golden behind it, so it stays plain
-        // even when a sha is present.
-        assert_eq!(sl.cpu_glyph("ftc_tp8", &sha_links(), canon), "✗");
-        // ...and a `skip` cell likewise (runs, but nothing verified it).
-        let sk = test_row("q2", &[("partitioned_cpu", "skip")], None, None);
-        assert_eq!(sk.cpu_glyph("partitioned_cpu", &sha_links(), canon), "~");
-    }
-
-    /// Every mode column is accounted for: either CPU_GOLDEN_LABEL probes it, or it is
-    /// a GPU column that owns no golden.
-    ///
-    /// The list that DEFINES the golden check was itself unchecked. Add a seventh mode
-    /// column, or rename one, and CPU_GOLDEN_LABEL simply never probes it: its ✓ renders
-    /// unlinked and the missing-golden gate stays silent, because that gate only
-    /// iterates the labels it already knows. Same shape as an exemption list nothing
-    /// validates, one level up. This forces the new column to be classified —
-    /// linkable-with-a-golden, or GPU/unlinkable — rather than degrading quietly.
-    #[test]
-    fn every_mode_column_is_either_probed_or_declared_goldenless() {
-        use std::collections::BTreeSet;
-        // GPU columns read the CPU golden rather than owning one, so they are
-        // deliberately not linked — see the CPU_GOLDEN_LABEL doc.
-        const GOLDENLESS: [&str; 2] = ["full_table_gpu", "partitioned_gpu"];
-
-        let probed: BTreeSet<&str> = CPU_GOLDEN_LABEL.iter().map(|(c, _)| *c).collect();
-        let declared: BTreeSet<&str> = GOLDENLESS.into_iter().collect();
-        let covered: BTreeSet<&str> = probed.union(&declared).copied().collect();
-        let all: BTreeSet<&str> = MODE_COLUMNS.into_iter().collect();
-
-        assert!(
-            probed.is_disjoint(&declared),
-            "a column cannot be both probed for a golden and declared goldenless: {:?}",
-            probed.intersection(&declared).collect::<Vec<_>>()
-        );
-        assert_eq!(
-            covered, all,
-            "unclassified mode column(s): {:?}. Add it to CPU_GOLDEN_LABEL with the \
-             golden label its ✓ should link to, or to GOLDENLESS if it owns no golden.",
-            all.difference(&covered).collect::<Vec<_>>()
-        );
+        let one = Dataset { rows: vec![failed], ..bp_dataset() };
+        let html = render_html(&[one], "u", &dry_links(), None, None);
+        assert!(html.contains("colspan=\"3\"") && html.contains("plan ✗"), "{html}");
+        // Plan failure dominates an enabled cell: that combination is itself a bug and
+        // must read as ✗ rather than as coverage.
+        assert!(!html.contains("<td class=\"mode\">"), "no per-mode cells: {html}");
     }
 
     /// The Query column shrinks ONLY the non-numeric names, in both renders.
     #[test]
     fn micro_query_names_render_small() {
-        assert!(test_row("shuffle_stddev", &[], None, None).n.is_none());
-        assert!(test_row("q1", &[], None, None).n.is_some());
+        assert!(test_row("shuffle_stddev", &[], None).n.is_none());
+        assert!(test_row("q1", &[], None).n.is_some());
     }
 
     #[test]
     fn read_total_reads_footer_and_none_when_absent() {
         // cost-report reads the explicit footer total, not the per-node breakdown.
-        let cpu = "GpuScanExec: ..., output_bytes=58, output_rows=6\npeacockdb_cost=12345\n";
+        let cpu = "GpuLoadParquet: ..., output_bytes=58, output_rows=6\npeacockdb_cost=12345\n";
         assert_eq!(read_total_str(cpu, "peacockdb_cost="), Some(12345));
         let duck = "TABLE_SCAN: output_bytes=240, materialized=2640, bytes_read_est=2400\nduckdb_cost=98765\n";
         assert_eq!(read_total_str(duck, "duckdb_cost="), Some(98765));
@@ -2262,7 +1780,7 @@ mod tests {
     #[test]
     fn cost_cells_link_only_when_value_and_url_present() {
         let v = Some(43_308_088u64);
-        let url = Some("https://x/blob/abc/testdata/goldens/tpch.sf1/q1.full_table-tp1-mini.cpu.txt".to_string());
+        let url = Some("https://x/blob/abc/testdata/goldens/tpch.sf1/bp-tp4-sized-mini.cpu.txt".to_string());
         assert!(cost_cell_html(v, url.clone()).starts_with("<a href="));
         assert!(cost_cell_md(v, url).starts_with("<a href="));
         // value but no sha/url → plain text, no link.
@@ -2296,28 +1814,27 @@ mod tests {
 
     #[test]
     fn bucket_threshold_is_1_4() {
-        let row = |p: u64, d: u64, op: bool| test_row(
-            "q1",
-            &[("full_table_gpu", if op { "enabled" } else { "na" })],
-            Some(p),
-            Some(d),
-        );
-        assert_eq!(row(14, 10, true).bucket(), "green"); // ratio 1.4 → green (≤)
-        assert_eq!(row(141, 100, true).bucket(), "red"); // ratio 1.41 → red
-        assert_eq!(row(14, 10, false).bucket(), "grey"); // not operational → grey
+        let row = |p: u64, d: Option<u64>| {
+            let mut r = test_row("q1", &[("bp_cpu_tp4_sized", "enabled")], d);
+            r.bp_peacockdb = Some(("bp-tp4-sized".to_string(), p));
+            r
+        };
+        assert_eq!(row(14, Some(10)).bp_bucket(), "green"); // ratio 1.4 → green (≤)
+        assert_eq!(row(141, Some(100)).bp_bucket(), "red"); // ratio 1.41 → red
+        assert_eq!(row(14, None).bp_bucket(), "grey"); // no duckdb number → grey
     }
 
     #[test]
     fn peacock_cell_renders_plan_and_cost_links() {
-        let plan = Some("https://x/q1.full_table-tp8-mini.cpu.txt".to_string());
-        let cost = Some("https://x/q1.full_table-tp8-mini.cost.txt".to_string());
+        let plan = Some("https://x/bp-tp4-sized-mini.cpu.txt".to_string());
+        let cost = Some("https://x/bp-tp4-sized-mini.cost.txt".to_string());
         let html = peacock_cell_html(Some(43_308_088), plan.clone(), cost.clone());
         assert!(html.contains(">plan</a>") && html.contains(">cost</a>") && html.starts_with("41.30 MB ("));
         let md = peacock_cell_md(Some(43_308_088), plan, cost);
         // HTML anchors: the comment's table is raw HTML, where markdown link
         // syntax would render literally as brackets.
-        assert!(md.contains("<a href=\"https://x/q1.full_table-tp8-mini.cpu.txt\">plan</a>"), "{md}");
-        assert!(md.contains("<a href=\"https://x/q1.full_table-tp8-mini.cost.txt\">cost</a>"), "{md}");
+        assert!(md.contains("<a href=\"https://x/bp-tp4-sized-mini.cpu.txt\">plan</a>"), "{md}");
+        assert!(md.contains("<a href=\"https://x/bp-tp4-sized-mini.cost.txt\">cost</a>"), "{md}");
         assert!(md.starts_with("41.30 MB ("));
         // value but no urls (dry run) → plain bytes, no links.
         assert_eq!(peacock_cell_html(Some(43_308_088), None, None), "41.30 MB");
@@ -2436,7 +1953,7 @@ mod tests {
             total: 1,
             canon_rel: "testdata/goldens/tpch.sf1",
             query_rel: "testdata/tpch-queries",
-            rows: vec![test_row("q1", &[("full_table_gpu", "enabled")], Some(100), Some(100))],
+            rows: vec![test_row("q1", &[("bp_gpu_tp4_sized", "enabled")], Some(100))],
             section_lines: SectionLines::new(),
         }
     }
@@ -2507,7 +2024,7 @@ mod tests {
     /// section `== scan-limit`, so a cell looking its anchor up under the registry's spelling
     /// finds none and quietly links at the top of the file — which every `qNN` fixture passes.
     fn bp_row() -> Row {
-        let mut r = test_row("scan_limit", &[("full_table_gpu", "enabled")], Some(100), Some(100));
+        let mut r = test_row("scan_limit", &[], Some(100));
         for (column, state) in [
             ("bp_tp1_single", "enabled"),
             ("bp_tp1_rowgroup", "enabled"),
@@ -2595,13 +2112,14 @@ mod tests {
         assert_eq!(doc, known, "the usage doc and FLAGS name different sets");
     }
 
-    /// Both comments fit, measured over the registry this repo actually has.
+    /// The comment fits, measured over the registry this repo actually has.
     ///
     /// A fixture cannot fail this: the body grows by a row per query the rollout enables, and
-    /// the four tables were 127 KB against a 65,536-byte cap before they were split. What is
-    /// asserted is the thing GitHub checks — bytes of the rendered body.
+    /// the four tables were 127 KB against the 65,536-byte cap before the legacy pair went.
+    /// The run prints the margin as well as the verdict, since the number that matters is how
+    /// many more queries fit. What is asserted is the thing GitHub checks — rendered bytes.
     #[test]
-    fn both_pr_comments_fit_under_the_body_cap() {
+    fn the_pr_comment_fits_under_the_body_cap() {
         let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
         let registry = Registry::load(&testdata.join("cost-registry.csv"));
         let links = Links {
@@ -2613,30 +2131,28 @@ mod tests {
             build_dataset("TPC-H", "testdata/goldens/tpch.sf1", "testdata/tpch-queries", &testdata.join("goldens/tpch.sf1"), &registry, "tpch"),
             build_dataset("TPC-DS", "testdata/goldens/tpcds.sf1", "testdata/tpcds-queries", &testdata.join("goldens/tpcds.sf1"), &registry, "tpcds"),
         ];
-        for part in [MdPart::Legacy, MdPart::BatchPartitioned] {
-            let body = render_markdown(&datasets, "https://p/", false, &links, None, part);
-            // The margin, not just the verdict: the body grows by a row per query enabled and
-            // T20 adds queries by design, so the number a later reader needs is how many more
-            // fit — a guard that only says "green" is one nobody can plan against.
-            let margin = COMMENT_MAX_BYTES.saturating_sub(body.len());
-            let per_row = body.len() / datasets.iter().map(|d| d.rows.len()).sum::<usize>().max(1);
-            println!(
-                "{part:?}: {} bytes of {COMMENT_MAX_BYTES}, {margin} spare — about {} more queries \
-                 at {per_row} bytes a row",
-                body.len(),
-                margin / per_row.max(1)
-            );
-            assert!(
-                body.len() <= COMMENT_MAX_BYTES,
-                "{part:?} is {} bytes against the {COMMENT_MAX_BYTES}-byte cap — GitHub refuses \
-                 this with a 422 that reads as a permissions error",
-                body.len()
-            );
-        }
+        let body = render_markdown(&datasets, "https://p/", false, &links, None);
+        // The margin, not just the verdict: the body grows by a row per query enabled, so
+        // the number a later reader needs is how many more fit — a guard that only says
+        // "green" is one nobody can plan against.
+        let margin = COMMENT_MAX_BYTES.saturating_sub(body.len());
+        let per_row = body.len() / datasets.iter().map(|d| d.rows.len()).sum::<usize>().max(1);
+        println!(
+            "{} bytes of {COMMENT_MAX_BYTES}, {margin} spare — about {} more queries at \
+             {per_row} bytes a row",
+            body.len(),
+            margin / per_row.max(1)
+        );
+        assert!(
+            body.len() <= COMMENT_MAX_BYTES,
+            "the comment is {} bytes against the {COMMENT_MAX_BYTES}-byte cap — GitHub refuses \
+             this with a 422 that reads as a permissions error",
+            body.len()
+        );
     }
 
     #[test]
-    fn each_markdown_part_carries_its_own_tables_and_only_the_query_link() {
+    fn the_comment_carries_the_table_and_only_the_query_link() {
         let linked = Links {
             repo: "o/r".into(),
             sha: Some("deadbeef".into()),
@@ -2644,36 +2160,31 @@ mod tests {
         };
         let mut d = bp_dataset();
         d.rows[0].tickets = vec!["163".to_string()];
-        let legacy = render_markdown(std::slice::from_ref(&d), "https://p/", false, &linked, None, MdPart::Legacy);
-        let bp = render_markdown(std::slice::from_ref(&d), "https://p/", false, &linked, None, MdPart::BatchPartitioned);
+        let text = render_markdown(std::slice::from_ref(&d), "https://p/", false, &linked, None);
 
-        assert!(legacy.starts_with(SENTINEL) && !legacy.contains(SENTINEL_BP));
-        assert!(bp.starts_with(SENTINEL_BP) && !bp.contains("operational</summary>"));
-        assert!(!legacy.contains("batch-partitioned</summary>"), "the legacy comment carries the bp table");
-        assert!(bp.contains("batch-partitioned</summary>"), "the bp comment lost its table");
+        assert!(text.starts_with(SENTINEL), "{text}");
+        assert!(text.contains("GPU-operational</summary>"), "the comment lost its table");
 
-        // Every anchor in either part is the query cell's. A ticket, cost or mode-cell link
-        // returning is what put the comment over the cap.
-        for (part, text) in [("legacy", &legacy), ("bp", &bp)] {
-            for anchor in text.match_indices("<a href=\"") {
-                let tail = &text[anchor.0..];
-                assert!(
-                    tail.contains("tpch-queries/"),
-                    "{part}: an anchor that is not the query cell's: {}",
-                    &tail[..tail.len().min(90)]
-                );
-            }
-            assert!(text.contains("#163"), "{part}: ticket numbers must survive as text");
-            assert!(!text.contains("tickets.md#t163"), "{part}: a ticket link came back");
+        // Every anchor is the query cell's. A ticket, cost or mode-cell link returning is
+        // what would put the comment over the cap.
+        for anchor in text.match_indices("<a href=\"") {
+            let tail = &text[anchor.0..];
+            assert!(
+                tail.contains("tpch-queries/"),
+                "an anchor that is not the query cell's: {}",
+                &tail[..tail.len().min(90)]
+            );
         }
+        assert!(text.contains("#163"), "ticket numbers must survive as text");
+        assert!(!text.contains("tickets.md#t163"), "a ticket link came back");
     }
 
     #[test]
-    fn both_renderings_carry_the_batch_partitioned_table() {
+    fn both_renderings_carry_the_mode_table() {
         let html = render_html(&[bp_dataset()], "https://p/", &no_links(), None, None);
-        assert!(html.contains("batch-partitioned"), "{html}");
-        let md = render_markdown(&[bp_dataset()], "https://p/", false, &no_links(), None, MdPart::BatchPartitioned);
-        assert!(md.contains("batch-partitioned"), "{md}");
+        assert!(html.contains("TPC-H"), "{html}");
+        let md = render_markdown(&[bp_dataset()], "https://p/", false, &no_links(), None);
+        assert!(md.contains("GPU-operational"), "{md}");
         // Four leading spaces is a code block, whatever produced them — and what produced
         // them here was a `\` continuation after a `\n\n`, which carries the source's own
         // indentation into the output. `contains` cannot see it: an indented header still
@@ -2762,13 +2273,13 @@ mod tests {
 
         let html = render_html(&[one_row_dataset()], "https://p/", &linked, None, None);
         assert!(html.contains(&format!("<a href=\"{url}\">q1</a>")));
-        let md = render_markdown(&[one_row_dataset()], "https://p/", false, &linked, None, MdPart::Legacy);
+        let md = render_markdown(&[one_row_dataset()], "https://p/", false, &linked, None);
         assert!(md.contains(&format!("<a href=\"{url}\">q1</a>")));
 
         // No sha → plain q1 cell, no query link.
         let html_plain = render_html(&[one_row_dataset()], "https://p/", &no_links(), None, None);
         assert!(html_plain.contains("<td>q1</td>") && !html_plain.contains("q1.sql"));
-        let md_plain = render_markdown(&[one_row_dataset()], "https://p/", false, &no_links(), None, MdPart::Legacy);
+        let md_plain = render_markdown(&[one_row_dataset()], "https://p/", false, &no_links(), None);
         assert!(md_plain.contains("<td>q1</td>") && !md_plain.contains("q1.sql"));
     }
 

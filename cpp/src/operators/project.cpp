@@ -15,7 +15,7 @@
 namespace peacock {
 
 TableResult execute_project(const fb::CudfProject* proj, NodeInputs* in) {
-  auto input = execute_node(proj->input(), in);
+  auto input = take_input(in);
 
   if (!proj->exprs() || proj->exprs()->size() == 0) {
     // Empty projection (DataFusion emits one feeding count(*) — it needs no

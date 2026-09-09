@@ -4,8 +4,9 @@ A GPU-native SQL engine that runs structured query execution and vector search
 in the **same GPU memory** — so the candidate set produced by a `WHERE` clause
 never has to cross PCIe to a separate vector store.
 
-Rust + DataFusion front end → GPU-annotated physical plan → FlatBuffers → a
-C++/cuDF executor. Status: in development; TPC-H runs end-to-end on GPU.
+Rust + DataFusion front end → a batch-partitioned plan → FlatBuffers → a
+C++/cuDF executor, one node at a time. Status: in development; TPC-H runs end-to-end
+on GPU.
 
 ## One query: structured filter + vector search
 

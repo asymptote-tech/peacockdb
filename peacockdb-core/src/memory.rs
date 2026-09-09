@@ -5,19 +5,11 @@
 //! GPU costs are identical by construction whenever per-node row counts match.
 
 use datafusion::arrow::array::{
-    Array, BinaryArray, BinaryViewArray, LargeBinaryArray, LargeStringArray, ListArray, StringArray,
+    Array, BinaryArray, BinaryViewArray, LargeBinaryArray, LargeStringArray, StringArray,
     StringViewArray,
 };
 use datafusion::arrow::datatypes::{DataType, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
-
-pub fn batch_allocated_size(batch: &RecordBatch) -> usize {
-    batch
-        .columns()
-        .iter()
-        .map(|col| col.get_array_memory_size())
-        .sum()
-}
 
 /// Per-column STRUCTURAL byte size: the part that depends only on the column
 /// type and the row count, NOT on how rows are split into batches — the
@@ -67,14 +59,10 @@ pub(crate) fn type_structural_size(dt: &DataType, rows: usize) -> usize {
     bitmap_bytes + data_bytes
 }
 
-/// Logical `output_bytes` for a node from its output schema, total row count, and
-/// the Σ var-length CONTENT bytes (the data-dependent term). The ColAccum
-/// metric reconstructed from rows+schema+content — the SINGLE source of the
-/// byte-accounting overhead (validity bitmap + fixed-width + var-length offset
-/// buffers). The GPU node-executor calls this with the content bytes measured by
-/// C++, so CPU-emulated and GPU costs are identical whenever rows (and content)
-/// match. (Flat columns only — nested `List` appears at tp>1 two-phase aggregation
-/// and is handled by `ColAccum`.)
+/// Logical `output_bytes` for a node from its output schema, total row count, and the Σ
+/// var-length CONTENT bytes — the data-dependent term, which is what a device measures and
+/// a batch of Arrow arrays is read for. Everything else is a function of the schema, so
+/// the two engines charge a row the same bytes without either reading the other's arrays.
 pub fn logical_size_from_schema(schema: &Schema, rows: usize, varlen_content_bytes: usize) -> usize {
     schema
         .fields()
@@ -84,12 +72,9 @@ pub fn logical_size_from_schema(schema: &Schema, rows: usize, varlen_content_byt
         + varlen_content_bytes
 }
 
-/// Σ var-length CONTENT bytes across all columns of one batch — the data-dependent
-/// term of [`logical_size_from_schema`]. Used by the CPU hash-repartition to
-/// compute each output partition's `output_bytes` identically to the map-op
-/// `ColAccum` path (and to the GPU's per-partition `varlen_content_bytes`). Flat
-/// columns only (the repartition input is post-partial-agg group keys + additive
-/// scalar state — no nested `List`).
+/// Σ var-length CONTENT bytes across all columns of one batch — the data-dependent term
+/// of [`logical_size_from_schema`], and the CPU's spelling of what a device reports as
+/// `varlen_content_bytes`. Flat columns only.
 pub fn batch_varlen_content_bytes(batch: &RecordBatch) -> usize {
     let schema = batch.schema();
     let rows = batch.num_rows();
@@ -98,11 +83,10 @@ pub fn batch_varlen_content_bytes(batch: &RecordBatch) -> usize {
         .sum()
 }
 
-/// Per-column var-length CONTENT bytes for one batch: `offsets[rows]-offsets[0]`
-/// for offset layouts, or Σ value byte lengths for View layouts. Fixed-width
-/// types contribute 0. This term telescopes across batches (the sum over batches
-/// equals the value for the whole node), so it carries NO per-batch overhead and
-/// is safe to accumulate as batches arrive.
+/// Per-column var-length CONTENT bytes for one batch: `offsets[rows]-offsets[0]` for
+/// offset layouts, or Σ value byte lengths for View layouts. Fixed-width types contribute
+/// 0. This term telescopes across batches — the sum over batches equals the value for the
+/// whole node — so it carries no per-batch overhead and is safe to accumulate.
 pub(crate) fn array_content_size(dt: &DataType, col: &dyn Array, rows: usize) -> usize {
     // offsets[rows]-offsets[0]; offsets are i32 (Utf8/Binary) or i64 (Large*).
     macro_rules! offset_content {
@@ -140,99 +124,4 @@ pub(crate) fn array_content_size(dt: &DataType, col: &dyn Array, rows: usize) ->
             .unwrap_or(0),
         _ => 0,
     }
-}
-
-/// Per-column accumulator that makes `output_bytes` deterministic for nested
-/// (`List`) columns too, not just flat ones.
-///
-/// The wobble being removed is per-batch OVERHEAD (validity bitmap rounding +
-/// the offset buffer's `+1`) double-counted across batch boundaries. For flat
-/// columns the level total is just the row count, so the overhead can be
-/// computed once from the schema. For a `List`, the CHILD level's element count
-/// is data-dependent and is NOT a function of the parent row count — so we must
-/// accumulate it. `ColAccum` mirrors the array's nesting, summing each level's
-/// element `count` and the leaf var-length `content` bytes across all batches;
-/// `size` then charges every level's bitmap/offset overhead ONCE from its total.
-/// Counts and content are order-independent sums, so the result is identical
-/// regardless of how the coalesced stream chunks rows into batches.
-#[derive(Clone, Default)]
-pub(crate) struct ColAccum {
-    count: usize,            // total elements at this level across all batches
-    content: usize,          // leaf var-length content bytes (telescopes)
-    children: Vec<ColAccum>, // sub-array accumulators (List child)
-}
-
-impl ColAccum {
-    pub(crate) fn child(&mut self) -> &mut ColAccum {
-        if self.children.is_empty() {
-            self.children.push(ColAccum::default());
-        }
-        &mut self.children[0]
-    }
-
-    /// Fold one batch's array (for this column) into the running totals.
-    pub(crate) fn add(&mut self, array: &dyn Array) {
-        let len = array.len();
-        self.count += len;
-        match array.data_type() {
-            DataType::List(_) => {
-                let la = array.as_any().downcast_ref::<ListArray>().unwrap();
-                let o = la.value_offsets();
-                // Slice the child to just the range these rows reference (the
-                // array may itself be a slice, so start at o[0] not 0).
-                let (start, end) = (o[0] as usize, o[len] as usize);
-                let child = la.values().slice(start, end - start);
-                self.child().add(child.as_ref());
-            }
-            dt => self.content += array_content_size(dt, array, len),
-        }
-    }
-
-    /// Logical size of this whole accumulated level: bitmap + (offset|fixed) +
-    /// content / child, all charged ONCE from the accumulated totals.
-    pub(crate) fn size(&self, dt: &DataType) -> usize {
-        match dt {
-            DataType::List(field) => {
-                let bitmap = (self.count + 7) / 8;
-                let offsets = (self.count + 1) * 4; // i32 offsets
-                bitmap + offsets + self.children.first().map_or(0, |c| c.size(field.data_type()))
-            }
-            // Flat: type_structural_size already counts bitmap + fixed/offset; add
-            // the accumulated var-length content (0 for fixed-width types).
-            flat => type_structural_size(flat, self.count) + self.content,
-        }
-    }
-}
-
-/// Fail at stream CONSTRUCTION (not in `Drop`) if a column type has no
-/// deterministic accounting, recursing into `List` children. Calling the guard
-/// here means an unhandled type unwinds as a normal test failure rather than
-/// aborting the process from inside `InstrumentedStream`'s destructor.
-pub(crate) fn assert_type_accountable(dt: &DataType) {
-    match dt {
-        DataType::List(field) => assert_type_accountable(field.data_type()),
-        other => {
-            let _ = type_structural_size(other, 0); // panics here if unhandled
-        }
-    }
-}
-
-/// Exact logical byte size of a single `RecordBatch` (structural + content).
-///
-/// Note: the per-node `output_bytes` metric is NOT this summed per batch — it is
-/// a [`ColAccum`] over the whole node output, so each level's overhead is charged
-/// once and the value does not depend on batch boundaries. This helper is
-/// retained for callers that genuinely want a single batch's size.
-pub fn batch_logical_size(batch: &RecordBatch) -> usize {
-    batch
-        .schema()
-        .fields()
-        .iter()
-        .zip(batch.columns().iter())
-        .map(|(field, col)| {
-            let mut acc = ColAccum::default();
-            acc.add(col.as_ref());
-            acc.size(field.data_type())
-        })
-        .sum()
 }

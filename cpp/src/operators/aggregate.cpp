@@ -132,7 +132,7 @@ static std::unique_ptr<cudf::reduce_aggregation> make_reduce_agg(
 }
 
 TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
-  auto input = execute_node(agg->input(), in);
+  auto input = take_input(in);
   auto tv = input.table->view();
 
   bool is_final = (agg->mode() == fb::AggregateMode_Final ||
@@ -749,8 +749,9 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
   if (has_stddev_or_var_final &&
       group_keys->num_rows() < static_cast<cudf::size_type>(tv.num_rows())) {
     throw std::runtime_error(
-        "Final-stage STDDEV/VAR merged multiple partial rows per key "
-        "(std-of-stds is wrong); STDDEV/VAR partial-moment merge is Inc5");
+        "Final-stage STDDEV/VAR merged multiple partial rows per key, which is a "
+        "std-of-stds; merge the Welford state with AggregateMode::Merge and finalize "
+        "in a project instead");
   }
 
   // Assemble output: key columns then aggregate columns (per `builds`).

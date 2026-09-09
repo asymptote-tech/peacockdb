@@ -1,7 +1,6 @@
-//! Cost-model goldens: derive each `<query>.<mode>-<tp>-<tier>.cost.txt` from its
-//! sibling `<query>.<mode>-<tp>-<tier>.cpu.txt` text and assert it matches (or
-//! regenerate it under `UPDATE_CANONICAL=1`). Pure text — no executor, no dataset —
-//! so it runs in the
+//! Cost-model goldens: derive each `<mode>-<tier>.cost.txt` from its sibling
+//! `<mode>-<tier>.cpu.txt` text, section by section, and assert it matches (or regenerate
+//! it under `UPDATE_CANONICAL=1`). Pure text — no executor, no dataset — so it runs in the
 //! plain CPU CI tier. The taxonomy + multipliers live in `common/cost_model.rs`.
 //!
 //! Byte-identity invariant: at today's all-1.0 multipliers the `.cost.txt` total
@@ -32,9 +31,8 @@ fn sum_output_bytes(cpu_text: &str) -> u64 {
         .sum()
 }
 
-/// Σ of every `peacockdb_cost=` in the text — one in a legacy cost golden, one per section
-/// in a corpus one, and the sum is what the `.cpu.txt` beside it has to account for either
-/// way.
+/// Σ of every `peacockdb_cost=` in the text — one per section — which is what the
+/// `.cpu.txt` beside it has to account for.
 fn cost_total(cost_text: &str) -> u64 {
     const KEY: &str = "peacockdb_cost=";
     let totals: Vec<u64> = cost_text
@@ -82,15 +80,14 @@ fn cost_goldens_match_and_total_is_byte_identical() {
     for cpu_path in &cpu_files {
         let name = cpu_path.file_name().and_then(|s| s.to_str()).unwrap();
         let cpu_text = std::fs::read_to_string(cpu_path).unwrap();
-        // A corpus golden holds every query in sections and its cost golden mirrors them,
-        // so the derivation is per section there and per file for the legacy one-query
-        // form. Decided by what the file holds rather than by its name: the two forms are
-        // distinguishable, and a name convention is a second thing to keep true.
-        let sectioned = cpu_text.starts_with("== ");
-        let actual = match sectioned {
-            true => model.cost_text_from_sections(&cpu_text, name),
-            false => model.cost_text_from_cpu(&cpu_text, name),
-        };
+        // Every golden holds its whole mode in `== <query>` sections, so the derivation is
+        // per section. A file that does not open with one is malformed rather than an older
+        // form to fall back on.
+        assert!(
+            cpu_text.starts_with("== "),
+            "{name}: a cost golden's source is sectioned by query"
+        );
+        let actual = model.cost_text_from_sections(&cpu_text, name);
 
         // Invariant: total == Σ output_bytes in the .cpu.txt (multipliers all 1.0).
         let total = cost_total(&actual);
@@ -126,18 +123,18 @@ fn cost_goldens_match_and_total_is_byte_identical() {
 
 #[test]
 fn generator_bins_and_totals_synthetic_tree() {
-    // Covers: a node with no args renders bare (`GpuCoalescePartitionsExec,
-    // output_bytes=…`, no colon) and must still bin; nodes sharing a category sum;
-    // an unmapped category lands at 0; total == Σ output_bytes (multipliers 1.0).
+    // Covers: a node with no args renders bare (`GpuMergePartitions, output_bytes=…`, no
+    // colon) and must still bin; nodes sharing a category sum; a category with no node
+    // lands at 0; total == Σ output_bytes (multipliers 1.0).
     let cpu = "\
-GpuSortExec: expr=[x], output_bytes=10, output_rows=1
-  GpuCoalescePartitionsExec, output_bytes=20, output_rows=2
-    GpuScanExec: table=t, output_bytes=30, output_rows=3";
+GpuSort: by=[x], output_bytes=10, output_rows=1
+  GpuMergePartitions, output_bytes=20, output_rows=2
+    GpuLoadParquet: table=t, output_bytes=30, output_rows=3";
     let cost = CostModel::load().cost_text_from_cpu(cpu, "synthetic");
     assert!(cost.contains("storage_read_bytes=30 #"));
     assert!(cost.contains("cuda_sort_bytes=10 #"));
-    assert!(cost.contains("cuda_shuffle_bytes=20 #")); // bare CoalescePartitions binned
-    assert!(cost.contains("cuda_window_bytes=0 #")); // unused category present at 0
+    assert!(cost.contains("cuda_shuffle_bytes=20 #")); // bare MergePartitions binned
+    assert!(cost.contains("cuda_window_bytes=0")); // a category with no node, present at 0
     assert!(cost.contains("ram_to_vram_bytes=0 # (placeholder, no node mapping)"));
     assert_eq!(cost_total(&cost), 60); // 10 + 20 + 30 == Σ output_bytes
 }
@@ -186,9 +183,8 @@ fn every_node_kind_is_in_exactly_one_cost_category() {
     for category in &model.categories {
         for node in &category.nodes {
             assert!(
-                node.ends_with("Exec") || kinds.contains(node.as_str()),
-                "cost_model.conf names '{node}', which is neither a legacy wrapper nor a \
-                 batch-partitioned node kind"
+                kinds.contains(node.as_str()),
+                "cost_model.conf names '{node}', which is not a node kind"
             );
         }
     }
