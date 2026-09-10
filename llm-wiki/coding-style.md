@@ -69,6 +69,13 @@ the exception rather than as the example.
 - **Functions get active names, and an inaccurate name is worse than a vague one**
   (Kernighan and Pike, *The Practice of Programming*). A `check_` that also repairs has
   misled every reader who trusted it.
+- **A function returning `bool` is named as a claim, not an action.** It answers a question, so
+  the call site should read as something that is true or false: `is_`, `has_`, `can_` and
+  `needs_` are the usual forms, and `probe_reads_build`, `rows_are_certain` and `satisfied_by`
+  are equally good without a prefix. `makes_a_finish_pass` is not — "makes" promises the call
+  does something, and a caller who believes it looks for the effect. It becomes
+  `has_finish_pass`. A function that genuinely acts *and* reports is not a predicate and keeps
+  its active name; the bool is its result, not its subject.
 - **The same thing carries the same name everywhere, and one name means one thing** —
   across the FFI most of all, where two names for one value is how the two sides drift
   without either being wrong. The inverse costs as much: `ScanBatch` in the flat buffers

@@ -256,11 +256,21 @@ entries. Task 2 recorded the trade this creates and left it deliberately: if
 `test_gpu_executors.rs` alone stops naming `executor/gpu_backend`, the forward half goes red and
 the three child-naming files cannot re-justify the entry. That is why the target moves whole.
 
-**One piece of the next task comes forward, and only one.** `wire/tests.rs` names
+**The one reach that blocks a wall is answered without a hoist.** `wire/tests.rs` names
 `executor::cpu_backend::join::CpuJoin`, so raising the `cpu_backend` wall is an `E0603` on that
-line unless `CpuJoin` is declared in `executor/mod.rs` first. That is one type and one delegation,
-taken in the slice that raises the wall. The remaining hoist — the other thirteen backend types and
-55 inherent methods — stays [`test-support.md`](test-support.md)'s, because nothing here forces it.
+line. The register concluded that no delegation could carry it — true of the *type*, and it
+stopped there. The test does not want the type: it builds a join per (join type, residual) cell
+and asks one question, whether the executor makes a finish pass, to compare against the recipe's
+`AtDone` call. So `executor/mod.rs` declares the question instead:
+
+    pub(crate) fn has_finish_pass(node: &GpuJoin, build: &Fields, probe: &Fields,
+        ctx: Arc<TaskContext>) -> Result<bool, PlanError>
+
+One line, delegating into `cpu_backend`, obeying the `mod.rs` rule exactly and dragging nothing.
+It is also the honest shape: whether a join has a finish pass is precisely the fact the wire side
+and the executor side must agree on, so it belongs in the component's API rather than being
+reached around. `CpuJoin::makes_a_finish_pass` is renamed to `has_finish_pass` with it, per the
+predicate rule in `coding-style.md`. No hoist is needed here or in the next task.
 
 `CROSS_COMPONENT_REACHES`'s single entry is that same reach and dies with it. The register itself
 is deleted in task 4, not here: this task empties it, and an empty register is still a register.

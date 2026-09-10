@@ -588,12 +588,23 @@ exists to prevent.
 
 Run: `cargo test --features rust-only -p peacockdb-core --lib -- cpu_backend::tests`
 
-- [ ] **Step 3: Hoist `CpuJoin` into `executor/mod.rs`**
+- [ ] **Step 3: Declare `has_finish_pass` in `executor/mod.rs`, and rename the method it calls**
 
 `wire/tests.rs` names `executor::cpu_backend::join::CpuJoin`, so the next step is an `E0603` on
-that line without this. Declare the type in `executor/mod.rs` and update that one reference. This
-is one type and one delegation — the other thirteen backend types and 55 inherent methods are
-`test-support.md`'s hoist, not yours.
+that line without this. Do not hoist the type — the test wants one answer, not the type:
+
+```rust
+pub(crate) fn has_finish_pass(node: &GpuJoin, build: &Fields, probe: &Fields,
+    ctx: Arc<TaskContext>) -> Result<bool, PlanError> {
+    cpu_backend::join::CpuJoin::hash(node, build, probe, ctx).map(|e| e.has_finish_pass())
+}
+```
+
+Rename `CpuJoin::makes_a_finish_pass` to `has_finish_pass` in the same step — `coding-style.md`
+says a bool-returning function reads as a claim, and "makes" promises an effect. Then rewrite
+`wire/tests.rs` to call `crate::executor::has_finish_pass(...)`, keeping both halves of what it
+asserts: a refused cell must give `Err`, and an allowed cell's answer must equal whether the
+recipe carries an `AtDone` call.
 
 - [ ] **Step 4: Close the `cpu_backend` group**
 
