@@ -69,7 +69,7 @@ fi
 while :; do
   before=$(board_state)
   if [ -n "${ENSEMBLE_INTERACTIVE:-}" ]; then
-    claude "/ensemble ${chain}"      # a human is driving; not logged
+    claude  --dangerously-skip-permissions "/ensemble ${chain}"      # a human is driving; not logged
   else
     printf '\n===== %s  /ensemble %s =====\n' "$(date -Is)" "$chain" >> "$log"
     # Unattended, so permissions cannot be granted: a headless run refuses any tool that

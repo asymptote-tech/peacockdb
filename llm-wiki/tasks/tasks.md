@@ -54,7 +54,7 @@ becomes `planner::plan` and `batch_partitioned_driver` becomes `executor::run` a
 acquire those names; `peacockdb/src/main.rs` moves with them. The 170 public items stay public here
 — what changes is where they are declared and what may reach past them.
 
-### 3. [`test-layout.md`](test-layout.md) — state: new
+### 3. [`test-layout.md`](test-layout.md) — state: approved to build
 
 Of 170 public items in `peacockdb-core/src`, 108 are public only because `tests/*.rs` are separate
 crates that see the library the way crates.io would. Moving the eleven targets that force them, plus
@@ -62,7 +62,7 @@ the murmur gate, down into `src/` takes that surface from 108 to eight. The move
 sweep and the separation of test code from production code happen together, because none is worth
 its own pass over the same files.
 
-### 4. [`test-support.md`](test-support.md) — state: new
+### 4. [`test-support.md`](test-support.md) — state: approved to build
 
 The last eight — `GpuNode`, `validate`, `RunReport`, `render_run`, `GpuBackend`, `GpuContext`,
 `RecipePlan`, `attach_recipes` — exist for the two corpus targets that deliberately stay external,
