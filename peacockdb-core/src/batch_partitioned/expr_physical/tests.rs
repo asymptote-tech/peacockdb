@@ -6,7 +6,7 @@
 //! what is asserted is the array each produces.
 
 use super::*;
-use crate::batch_partitioned::expr_translate::translate_expr;
+use crate::planner::translate_expr;
 use datafusion::arrow::array::{
     Array, ArrayRef, Float64Array, Int32Array, RecordBatch, StringArray,
 };

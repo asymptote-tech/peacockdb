@@ -11,10 +11,10 @@ use std::sync::{Mutex, OnceLock};
 use datafusion::arrow::array::RecordBatch;
 use datafusion::execution::context::SessionContext;
 use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
-use peacockdb_core::batch_partitioned::plan::plan_batch_partitioned;
 use peacockdb_core::executor::{RunReport, run};
 use peacockdb_core::plan::{GpuNode, validate};
 use peacockdb_core::plan_text::render_run;
+use peacockdb_core::planner;
 
 use super::cost_model::CostModel;
 use super::mode::{MODES, Mode, mode_named};
@@ -50,7 +50,7 @@ pub async fn plan_at(
         .create_physical_plan()
         .await
         .unwrap_or_else(|e| panic!("{what}: no physical plan: {e}"));
-    let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs())
         .unwrap_or_else(|e| panic!("{what}: this mode refuses it: {e}"));
     // The planner's own check, made again: the driver asks only for canonical form, so a
     // tree that met neither would run and answer.

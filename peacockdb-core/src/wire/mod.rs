@@ -36,6 +36,9 @@ use crate::plan::PlanError;
 
 use generated::peacock::plan as fb;
 
+// What a recipe is made of: the four ABI symbols, the legacy node kinds they address, the
+// handles a call is passed, and when the driver makes it.
+
 /// A node of the recipe plan, addressed by its position in it. The number is the whole
 /// content of an address, which is why a call carries nothing else about the node it runs.
 pub type Seq = u32;

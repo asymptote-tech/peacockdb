@@ -26,9 +26,9 @@ state stays resident, so the query fits a budget the table does not.
 
 ## Planning
 
-`plan_batch_partitioned()` takes DataFusion's physical plan, built at the target lane count
-by the caller, and **translates** it into the engine's node vocabulary
-(`batch_partitioned/translate/`). Translation, not annotation: a 1:1 wrapper carries
+`planner::plan()` takes DataFusion's physical plan, built at the target lane count by the
+caller, and **translates** it into the engine's node vocabulary (`planner/translator/`).
+Translation, not annotation: a 1:1 wrapper carries
 DataFusion's execution semantics along with it, and this model's semantics are different at
 every node.
 
@@ -112,7 +112,7 @@ to look for the difference.
 ### The row-group mapping
 
 The row-group → (lane, batch) mapping is computed once, at plan time, by a pure policy function
-(`batch_partitioned/partitioner.rs`), and everything else consumes its output: the loader
+(`planner/translator/scan_mapping/`), and everything else consumes its output: the loader
 stores it verbatim, the plan golden renders it verbatim as `partition_groups=[…]`, validation
 checks the declared lane count against it. One fact, one owner.
 
@@ -137,7 +137,7 @@ holds it. Type widths are for columns the plan creates rather than reads.
 ### Batch sizing
 
 `target_batch_bytes` is derived, not configured. The budget is what the hardware fixes; batch
-size is how the planner spends it, so an estimator pass (`batch_partitioned/estimator.rs`)
+size is how the planner spends it, so an estimator pass (`planner/memory_estimation/`)
 solves for it per source.
 
 The walk starts at each source and follows its batch upward to the nearest accumulator. Every

@@ -16,11 +16,12 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::ipc::reader::StreamReader;
 use datafusion::common::JoinType;
 
-use peacockdb_core::batch_partitioned::plan::{BatchSizing, PlanKnobs, plan_batch_partitioned};
 use peacockdb_core::executor::{BatchForwarder, forwarder_for};
 use peacockdb_core::plan::GpuNode;
 use peacockdb_core::plan::{ExecutorCategory, category_of};
 use peacockdb_core::plan::{NodeRef, as_node_ref};
+use peacockdb_core::planner;
+use peacockdb_core::planner::{BatchSizing, PlanKnobs};
 use peacockdb_core::wire::{
     AbiSymbol, Call, CallPattern, FbKind, Input, ProjectRole, Recipe, RecipePlan, Seq,
     attach_recipes,
@@ -36,7 +37,7 @@ use common::{GPU_BUDGET, assert_results_match, data_dir_for, total_rows};
 
 // The value the plan goldens are canonized at, so every shape below is one that tier
 // already renders.
-use peacockdb_core::batch_partitioned::plan::SMALL_TABLE_BYTES;
+use peacockdb_core::planner::SMALL_TABLE_BYTES;
 
 /// Everything but the aggregates: one lane and one batch, which makes every recipe a
 /// single call per node and the walk a straight line.
@@ -551,7 +552,7 @@ async fn walk(sql: &str, knobs: PlanKnobs) -> Walked {
         .create_physical_plan()
         .await
         .expect("datafusion lowers it");
-    let (tree, _) = plan_batch_partitioned(&plan, knobs).expect("this mode plans it");
+    let (tree, _) = planner::plan(&plan, knobs).expect("this mode plans it");
     let recipes = attach_recipes(tree.as_ref()).expect("a planned tree has recipes");
     let session = Session::open(&recipes);
     let mut walk = Walk {

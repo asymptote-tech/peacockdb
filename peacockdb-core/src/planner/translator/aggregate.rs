@@ -13,8 +13,10 @@ use datafusion::physical_plan::coalesce_partitions::CoalescePartitionsExec;
 use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::{ExecutionPlan, Partitioning};
 
-use super::super::expr_translate::translate_expr;
-use super::{Translator, batches, hash_key_ordinals, lanes};
+use super::Translator;
+use super::common::{batches, hash_key_ordinals, lanes};
+use super::expr::translate_expr;
+use super::nodes::{merged, node, shuffled};
 use crate::plan::BatchLayout;
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
@@ -22,188 +24,6 @@ use crate::plan::{AggCall, Merge, PlanAgg, decomposition, finalize, resolve};
 use crate::plan::{AggStateColumns, Schema};
 use crate::plan::{AggregateBody, GpuAggregate, GpuAggregateBatches};
 use crate::plan::{Expr, NamedExpr};
-
-impl Translator {
-    pub(super) fn aggregate(
-        &self,
-        aggregate: &AggregateExec,
-    ) -> Result<Box<dyn GpuNode>, PlanError> {
-        match aggregate.mode() {
-            AggregateMode::Partial => self.aggregate_sequence(aggregate, None, Shuffle::None),
-            AggregateMode::Final | AggregateMode::FinalPartitioned => {
-                let (below, shuffle) = shuffle_below(aggregate.input());
-                let partial = below
-                    .as_any()
-                    .downcast_ref::<AggregateExec>()
-                    .filter(|partial| matches!(partial.mode(), AggregateMode::Partial))
-                    .ok_or_else(|| {
-                        PlanError::Unsupported(format!(
-                            "a final aggregate over {} rather than a partial one",
-                            below.name()
-                        ))
-                    })?;
-                self.aggregate_sequence(partial, Some(aggregate), shuffle)
-            }
-            AggregateMode::Single | AggregateMode::SinglePartitioned => {
-                self.aggregate_sequence(aggregate, Some(aggregate), Shuffle::None)
-            }
-        }
-    }
-
-    /// The whole sequence, from the aggregators the partial declares: init per batch, a
-    /// per-lane merge where a lane holds several batches, the shuffle where the lanes must
-    /// be re-landed by group key, and the merge that finishes it. Each part is emitted only
-    /// where this lane count and batch layout need it — a one-lane region never splits, so
-    /// there is nothing to merge back.
-    fn aggregate_sequence(
-        &self,
-        partial: &AggregateExec,
-        finisher: Option<&AggregateExec>,
-        shuffle: Shuffle,
-    ) -> Result<Box<dyn GpuNode>, PlanError> {
-        let input = self.node(partial.input())?;
-        let input_schema = partial.input().schema();
-        let group = partial.group_expr();
-        if partial.filter_expr().iter().any(Option::is_some) {
-            return Err(PlanError::Unsupported(
-                "a filtered aggregate (#161)".to_string(),
-            ));
-        }
-
-        let mut group_by = Vec::with_capacity(group.expr().len());
-        for (expr, _) in group.expr().iter() {
-            group_by.push(translate_expr(expr, &input_schema)?);
-        }
-        // Grouping sets add one output column, `__grouping_id`, which the init emits like
-        // any other and everything above groups on beside the keys. Its name and type are
-        // DataFusion's, off the partial's own schema.
-        let key_columns = group.expr().len() + usize::from(!group.is_single());
-        let key_fields: Vec<Field> = (0..key_columns)
-            .map(|index| partial.schema().field(index).clone())
-            .collect();
-        let mut null_exprs = Vec::new();
-        for (expr, _) in group.null_expr().iter() {
-            null_exprs.push(translate_expr(expr, &input_schema)?);
-        }
-        let grouping_sets: Vec<Vec<bool>> = if group.is_single() {
-            Vec::new()
-        } else {
-            group.groups().to_vec()
-        };
-
-        let decomposed = decompose(partial.aggr_expr(), &input_schema, key_fields.len())?;
-        let intermediate = Schema {
-            fields: Arc::new(ArrowSchema::new(Fields::from(
-                [key_fields.clone(), decomposed.state.clone()].concat(),
-            ))),
-            group_keys: (0..key_fields.len() as u32).collect(),
-            agg_state: decomposed.annotations.clone(),
-        };
-        let keys_through: Vec<Expr> = key_fields
-            .iter()
-            .enumerate()
-            .map(|(index, field)| Expr::column(index as u32, field.name()))
-            .collect();
-
-        // The output names are DataFusion's, so a finalized column lands where the plan
-        // above it expects to read it.
-        let finished = finisher.map(|finisher| {
-            let names = finisher.schema();
-            let finalize: Vec<NamedExpr> = decomposed
-                .finalize
-                .iter()
-                .enumerate()
-                .map(|(index, expr)| {
-                    NamedExpr::new(expr.clone(), names.field(key_fields.len() + index).name())
-                })
-                .collect();
-            // The finalized output holds the keys where the intermediate did and the
-            // finalized columns where the state was, so the keys are still annotated and
-            // the state is gone.
-            let output = Schema {
-                fields: finisher.schema(),
-                group_keys: (0..key_fields.len() as u32).collect(),
-                agg_state: Vec::new(),
-            };
-            (finalize, output)
-        });
-
-        // One batch in one lane is already the whole of every group, so the init node
-        // finishes the aggregate itself.
-        if let Some((finalize, output)) = &finished
-            && batches(input.as_ref()) == BatchLayout::SingleBatch
-            && lanes(input.as_ref()) == 1
-        {
-            return Ok(Box::new(GpuAggregate::new(
-                input,
-                AggregateBody {
-                    group_by,
-                    grouping_sets,
-                    null_exprs,
-                    aggs: decomposed.init,
-                    finalize: Some(finalize.clone()),
-                },
-                intermediate,
-                output.clone(),
-            )));
-        }
-
-        let mut tree: Box<dyn GpuNode> = Box::new(GpuAggregate::new(
-            input,
-            AggregateBody {
-                group_by,
-                grouping_sets,
-                null_exprs,
-                aggs: decomposed.init,
-                finalize: None,
-            },
-            intermediate.clone(),
-            intermediate.clone(),
-        ));
-
-        // A merge groups on what the init emitted — keys and, where there was one, the
-        // grouping id — and expands nothing: the sets were expanded once, below.
-        let merge_body = |aggs: &[AggCall], finalize: Option<Vec<NamedExpr>>| AggregateBody {
-            group_by: keys_through.clone(),
-            grouping_sets: Vec::new(),
-            null_exprs: Vec::new(),
-            aggs: aggs.to_vec(),
-            finalize,
-        };
-
-        // The per-lane half exists to shrink what crosses the shuffle; where the lanes
-        // stay put there is nothing for it to do that the finishing merge does not.
-        let regrouped = !matches!(shuffle, Shuffle::None) && lanes(tree.as_ref()) > 1;
-        if regrouped && batches(tree.as_ref()) != BatchLayout::SingleBatch {
-            tree = Box::new(GpuAggregateBatches::new(
-                tree,
-                merge_body(&decomposed.merge, None),
-                intermediate.clone(),
-                intermediate.clone(),
-            ));
-        }
-
-        tree = match shuffle {
-            Shuffle::ByHash { keys, n } if lanes(tree.as_ref()) > 1 => self.shuffled(tree, keys, n),
-            // One lane holds every group already: v1 skips the shuffle for a one-lane
-            // input exactly as it does for a keyless aggregate.
-            Shuffle::ByHash { .. } => tree,
-            Shuffle::Collapse => self.merged(tree),
-            Shuffle::None => tree,
-        };
-
-        let (finalize, output) = match finished {
-            Some((finalize, output)) => (Some(finalize), output),
-            None => (None, intermediate.clone()),
-        };
-        Ok(Box::new(GpuAggregateBatches::new(
-            tree,
-            merge_body(&decomposed.merge, finalize),
-            intermediate,
-            output,
-        )))
-    }
-}
 
 /// What sits between a partial aggregate and the final one: DataFusion spells a shuffle as
 /// a hash repartition and a lane collapse as a coalesce, and which one it chose is what
@@ -386,4 +206,184 @@ fn decompose(
     }
 
     Ok(decomposed)
+}
+
+pub(crate) fn aggregate(
+    t: &Translator,
+    exec: &AggregateExec,
+) -> Result<Box<dyn GpuNode>, PlanError> {
+    match exec.mode() {
+        AggregateMode::Partial => aggregate_sequence(t, exec, None, Shuffle::None),
+        AggregateMode::Final | AggregateMode::FinalPartitioned => {
+            let (below, shuffle) = shuffle_below(exec.input());
+            let partial = below
+                .as_any()
+                .downcast_ref::<AggregateExec>()
+                .filter(|partial| matches!(partial.mode(), AggregateMode::Partial))
+                .ok_or_else(|| {
+                    PlanError::Unsupported(format!(
+                        "a final aggregate over {} rather than a partial one",
+                        below.name()
+                    ))
+                })?;
+            aggregate_sequence(t, partial, Some(exec), shuffle)
+        }
+        AggregateMode::Single | AggregateMode::SinglePartitioned => {
+            aggregate_sequence(t, exec, Some(exec), Shuffle::None)
+        }
+    }
+}
+
+/// The whole sequence, from the aggregators the partial declares: init per batch, a
+/// per-lane merge where a lane holds several batches, the shuffle where the lanes must
+/// be re-landed by group key, and the merge that finishes it. Each part is emitted only
+/// where this lane count and batch layout need it — a one-lane region never splits, so
+/// there is nothing to merge back.
+fn aggregate_sequence(
+    t: &Translator,
+    partial: &AggregateExec,
+    finisher: Option<&AggregateExec>,
+    shuffle: Shuffle,
+) -> Result<Box<dyn GpuNode>, PlanError> {
+    let input = node(t, partial.input())?;
+    let input_schema = partial.input().schema();
+    let group = partial.group_expr();
+    if partial.filter_expr().iter().any(Option::is_some) {
+        return Err(PlanError::Unsupported(
+            "a filtered aggregate (#161)".to_string(),
+        ));
+    }
+
+    let mut group_by = Vec::with_capacity(group.expr().len());
+    for (expr, _) in group.expr().iter() {
+        group_by.push(translate_expr(expr, &input_schema)?);
+    }
+    // Grouping sets add one output column, `__grouping_id`, which the init emits like
+    // any other and everything above groups on beside the keys. Its name and type are
+    // DataFusion's, off the partial's own schema.
+    let key_columns = group.expr().len() + usize::from(!group.is_single());
+    let key_fields: Vec<Field> = (0..key_columns)
+        .map(|index| partial.schema().field(index).clone())
+        .collect();
+    let mut null_exprs = Vec::new();
+    for (expr, _) in group.null_expr().iter() {
+        null_exprs.push(translate_expr(expr, &input_schema)?);
+    }
+    let grouping_sets: Vec<Vec<bool>> = if group.is_single() {
+        Vec::new()
+    } else {
+        group.groups().to_vec()
+    };
+
+    let decomposed = decompose(partial.aggr_expr(), &input_schema, key_fields.len())?;
+    let intermediate = Schema {
+        fields: Arc::new(ArrowSchema::new(Fields::from(
+            [key_fields.clone(), decomposed.state.clone()].concat(),
+        ))),
+        group_keys: (0..key_fields.len() as u32).collect(),
+        agg_state: decomposed.annotations.clone(),
+    };
+    let keys_through: Vec<Expr> = key_fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| Expr::column(index as u32, field.name()))
+        .collect();
+
+    // The output names are DataFusion's, so a finalized column lands where the plan
+    // above it expects to read it.
+    let finished = finisher.map(|finisher| {
+        let names = finisher.schema();
+        let finalize: Vec<NamedExpr> = decomposed
+            .finalize
+            .iter()
+            .enumerate()
+            .map(|(index, expr)| {
+                NamedExpr::new(expr.clone(), names.field(key_fields.len() + index).name())
+            })
+            .collect();
+        // The finalized output holds the keys where the intermediate did and the
+        // finalized columns where the state was, so the keys are still annotated and
+        // the state is gone.
+        let output = Schema {
+            fields: finisher.schema(),
+            group_keys: (0..key_fields.len() as u32).collect(),
+            agg_state: Vec::new(),
+        };
+        (finalize, output)
+    });
+
+    // One batch in one lane is already the whole of every group, so the init node
+    // finishes the aggregate itself.
+    if let Some((finalize, output)) = &finished
+        && batches(input.as_ref()) == BatchLayout::SingleBatch
+        && lanes(input.as_ref()) == 1
+    {
+        return Ok(Box::new(GpuAggregate::new(
+            input,
+            AggregateBody {
+                group_by,
+                grouping_sets,
+                null_exprs,
+                aggs: decomposed.init,
+                finalize: Some(finalize.clone()),
+            },
+            intermediate,
+            output.clone(),
+        )));
+    }
+
+    let mut tree: Box<dyn GpuNode> = Box::new(GpuAggregate::new(
+        input,
+        AggregateBody {
+            group_by,
+            grouping_sets,
+            null_exprs,
+            aggs: decomposed.init,
+            finalize: None,
+        },
+        intermediate.clone(),
+        intermediate.clone(),
+    ));
+
+    // A merge groups on what the init emitted — keys and, where there was one, the
+    // grouping id — and expands nothing: the sets were expanded once, below.
+    let merge_body = |aggs: &[AggCall], finalize: Option<Vec<NamedExpr>>| AggregateBody {
+        group_by: keys_through.clone(),
+        grouping_sets: Vec::new(),
+        null_exprs: Vec::new(),
+        aggs: aggs.to_vec(),
+        finalize,
+    };
+
+    // The per-lane half exists to shrink what crosses the shuffle; where the lanes
+    // stay put there is nothing for it to do that the finishing merge does not.
+    let regrouped = !matches!(shuffle, Shuffle::None) && lanes(tree.as_ref()) > 1;
+    if regrouped && batches(tree.as_ref()) != BatchLayout::SingleBatch {
+        tree = Box::new(GpuAggregateBatches::new(
+            tree,
+            merge_body(&decomposed.merge, None),
+            intermediate.clone(),
+            intermediate.clone(),
+        ));
+    }
+
+    tree = match shuffle {
+        Shuffle::ByHash { keys, n } if lanes(tree.as_ref()) > 1 => shuffled(tree, keys, n),
+        // One lane holds every group already: v1 skips the shuffle for a one-lane
+        // input exactly as it does for a keyless aggregate.
+        Shuffle::ByHash { .. } => tree,
+        Shuffle::Collapse => merged(tree),
+        Shuffle::None => tree,
+    };
+
+    let (finalize, output) = match finished {
+        Some((finalize, output)) => (Some(finalize), output),
+        None => (None, intermediate.clone()),
+    };
+    Ok(Box::new(GpuAggregateBatches::new(
+        tree,
+        merge_body(&decomposed.merge, finalize),
+        intermediate,
+        output,
+    )))
 }

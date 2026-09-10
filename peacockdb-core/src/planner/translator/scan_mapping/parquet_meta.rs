@@ -11,14 +11,14 @@ use std::collections::BTreeSet;
 use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 
-use crate::gpu_rowgroup_prune::surviving_row_groups;
+use super::rowgroup_prune::surviving_row_groups;
 use crate::plan::PlanError;
 use crate::plan::RowGroupMeta;
 
 /// The table a scan reads, named after the parquet file rather than declared anywhere:
 /// DataFusion's `ParquetExec` carries paths, and the plan text and every node above it
 /// name the table.
-pub fn parquet_table_name(parquet: &ParquetExec) -> Option<String> {
+pub(crate) fn parquet_table_name(parquet: &ParquetExec) -> Option<String> {
     let file = parquet.base_config().file_groups.first()?.first()?;
     file.object_meta
         .location
@@ -29,7 +29,7 @@ pub fn parquet_table_name(parquet: &ParquetExec) -> Option<String> {
         .map(String::from)
 }
 
-pub fn survivor_metadata(parquet: &ParquetExec) -> Result<ScanMetadata, PlanError> {
+pub(crate) fn survivor_metadata(parquet: &ParquetExec) -> Result<ScanMetadata, PlanError> {
     let config = parquet.base_config();
     // At tp>1 DataFusion splits ONE file into several byte-range entries, all with the same
     // path, so entries are not files. Genuinely several files would each have their own row

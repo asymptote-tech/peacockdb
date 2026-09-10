@@ -15,10 +15,10 @@ mod run_text;
 #[cfg(test)]
 mod tests;
 
-use crate::batch_partitioned::estimator::MemoryModel;
 use crate::executor::RunReport;
 use crate::plan::Expr;
 use crate::plan::GpuNode;
+use crate::planner::MemoryModel;
 
 /// The plan under `root`, one line per node. The plan golden carries the declared schema
 /// per node; an execution golden does not, since what it records is what ran.

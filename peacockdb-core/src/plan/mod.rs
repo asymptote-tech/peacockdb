@@ -45,6 +45,8 @@ use partition_ops::{new_emit_partitions, new_merge_partitions, new_merge_sorted_
 use source::{largest_batch_bytes, new_load_parquet};
 use union::{new_interleave, new_union};
 
+/// What planning and validation return. Both are plan-time: a shape the engine cannot run
+/// is refused where the planner can see it, rather than throwing mid-query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanError {
     /// A shape the engine does not implement — window functions (#143), a mixed
@@ -428,6 +430,9 @@ pub struct AggCall {
     pub args: Vec<Expr>,
     pub outputs: Vec<Field>,
 }
+
+// The plan nodes, grouped by family; the downcast registry over them is at the end of this
+// file.
 
 #[derive(Debug)]
 pub struct GpuFilter {
@@ -1041,6 +1046,7 @@ impl RowInterval {
     }
 }
 
+/// What a plan node offers the driver and the validator.
 pub trait GpuNode: std::fmt::Debug {
     /// Layout and schema live inside the kind.
     fn kind(&self) -> &NodeKind;

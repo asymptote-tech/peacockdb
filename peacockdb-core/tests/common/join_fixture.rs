@@ -20,9 +20,10 @@ use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::{ExecutionPlan, Partitioning};
 use datafusion::prelude::ParquetReadOptions;
 
-use peacockdb_core::batch_partitioned::plan::{BatchSizing, PlanKnobs, plan_batch_partitioned};
 use peacockdb_core::plan::GpuNode;
 use peacockdb_core::plan::PlanError;
+use peacockdb_core::planner;
+use peacockdb_core::planner::{BatchSizing, PlanKnobs};
 
 /// Lanes for the co-partitioned cases.
 pub const LANES: usize = 4;
@@ -113,7 +114,7 @@ impl Fixture {
     /// The planner's refusal for a query, which must be a PlanError rather than a panic.
     pub async fn refused(&self, sql: &str) -> PlanError {
         let plan = self.plan(sql).await;
-        plan_batch_partitioned(&plan, knobs(BatchSizing::OneBatchPerRowGroup))
+        planner::plan(&plan, knobs(BatchSizing::OneBatchPerRowGroup))
             .map(|_| ())
             .expect_err(sql)
     }
@@ -179,7 +180,7 @@ fn write(dir: &std::path::Path, name: &str, keys: &[Option<i64>], padding: usize
 }
 
 pub fn planned(plan: &Arc<dyn ExecutionPlan>) -> Result<Box<dyn GpuNode>, PlanError> {
-    plan_batch_partitioned(plan, knobs(BatchSizing::OneBatchPerRowGroup)).map(|(tree, _)| tree)
+    planner::plan(plan, knobs(BatchSizing::OneBatchPerRowGroup)).map(|(tree, _)| tree)
 }
 
 /// Every hash join in a plan, in tree order.

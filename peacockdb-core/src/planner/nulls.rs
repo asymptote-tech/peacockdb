@@ -19,7 +19,7 @@ use crate::plan::{NodeRef, as_node_ref};
 /// Refuses an anti or mark join whose NULLs can meet under SQL semantics. Everything else
 /// plans: semi honours the flag, and `null_equals_null=true` is asking for the equality the
 /// executor hardcodes.
-pub fn refuse_null_unsafe_joins(root: &dyn GpuNode) -> Result<(), PlanError> {
+pub(crate) fn refuse_null_unsafe_joins(root: &dyn GpuNode) -> Result<(), PlanError> {
     for child in root.children() {
         refuse_null_unsafe_joins(child)?;
     }
@@ -58,7 +58,7 @@ fn nullable_at(columns: &[bool], ordinal: u32) -> bool {
 }
 
 /// Per output column of this node, whether it can be NULL.
-pub fn can_be_null(node: &dyn GpuNode) -> Vec<bool> {
+pub(crate) fn can_be_null(node: &dyn GpuNode) -> Vec<bool> {
     let width = node
         .kind()
         .schema()

@@ -13,7 +13,6 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::ScalarValue;
 
-use peacockdb_core::batch_partitioned::nulls::can_be_null;
 use peacockdb_core::plan::RowGroupMeta;
 use peacockdb_core::plan::ScanMetadata;
 use peacockdb_core::plan::Schema;
@@ -23,6 +22,7 @@ use peacockdb_core::plan::{
 };
 use peacockdb_core::plan::{BinaryOp, Expr, NamedExpr};
 use peacockdb_core::plan::{GpuNode, RowInterval};
+use peacockdb_core::planner::can_be_null;
 
 /// A source declaring exactly the nullability asked for. The leaf reads this off parquet
 /// statistics; here it is stated, which is the only way to get a NOT-nullable column at all.

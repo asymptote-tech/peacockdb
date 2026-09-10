@@ -87,7 +87,7 @@ impl PruningStatistics for RowGroupPruningStatistics<'_> {
 /// Surviving row-group indices for `parquet`'s single source under its pushdown
 /// predicate. `None` => no pruning applicable (read all groups): no predicate,
 /// not exactly one file, unreadable metadata, or the predicate prunes nothing.
-pub fn surviving_row_groups(parquet: &ParquetExec) -> Option<Vec<u32>> {
+pub(crate) fn surviving_row_groups(parquet: &ParquetExec) -> Option<Vec<u32>> {
     let predicate = parquet.predicate()?; // None when nothing was pushed down (e.g. #16 dynamic)
     let config = parquet.base_config();
 
@@ -146,18 +146,3 @@ fn single_source_path(config: &datafusion::datasource::physical_plan::FileScanCo
     Some(format!("/{first}"))
 }
 
-/// All row-group indices `0..N` of a single-source ParquetExec (no pruning).
-/// Used by the tp8 partitioning step when there is no static predicate to prune
-/// by, so the scan-batch→partition map still covers every group. `None` for the
-/// multi-file / unreadable cases (the caller then leaves the scan single-partition).
-pub fn all_row_groups(parquet: &ParquetExec) -> Option<Vec<u32>> {
-    let config = parquet.base_config();
-    let path = single_source_path(config)?;
-    let file = std::fs::File::open(&path).ok()?;
-    let reader = SerializedFileReader::new(file).ok()?;
-    let n = reader.metadata().num_row_groups();
-    if n == 0 {
-        return None;
-    }
-    Some((0..n as u32).collect())
-}

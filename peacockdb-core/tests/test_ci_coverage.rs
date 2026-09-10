@@ -438,7 +438,7 @@ fn every_rust_test_target_is_named_by_ci() {
     assert!(
         workflow_lines.iter().any(|l| line_builds_the_cli(l)),
         "no workflow line builds the peacockdb CLI. It is the only caller of \
-         plan_batch_partitioned and the driver from outside the crate, and it has no test \
+         plan and the driver from outside the crate, and it has no test \
          target, so nothing else compiles it. Add `cargo build --features rust-only \
          -p peacockdb` to the CPU tier."
     );

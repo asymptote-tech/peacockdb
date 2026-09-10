@@ -17,7 +17,7 @@ use crate::plan::{Batching, RowGroupMeta};
 /// batch — one row group is the minimum granularity, and the planner always emits a plan
 /// (the accountant owns the runtime consequence, #142). Contiguity is policy, not a cuDF
 /// requirement; changing it regenerates goldens and is treated as that.
-pub fn partition(
+pub(crate) fn partition(
     survivors: &[RowGroupMeta],
     n_partitions: usize,
     batching: Batching,

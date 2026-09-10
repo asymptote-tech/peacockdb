@@ -12,13 +12,13 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::DataType;
 
 use super::Translator;
-use crate::batch_partitioned::plan::{BatchSizing, PlanKnobs, plan_batch_partitioned};
 use crate::plan::AggFunc;
 use crate::plan::Batching;
 use crate::plan::GpuNode;
 use crate::plan::{AggStateColumns, Schema};
 use crate::plan::{BinaryOp, Expr};
 use crate::plan::{NodeRef, as_node_ref};
+use crate::planner::{BatchSizing, PlanKnobs};
 
 /// The committed minimal dataset, whose `p_retailprice` and `c_acctbal` are
 /// `Decimal128(15,2)` — the two columns every decimal assertion below starts from.
@@ -325,12 +325,9 @@ async fn a_pass_through_node_carries_its_inputs_own_schema() {
 /// The planner end to end, through `plan_batch_partitioned` rather than through a rule
 /// called directly: the two tests below are what pins that validation is wired into it at
 /// all — every other test here calls the translator or a node's own check.
-async fn planned(
-    sql: &str,
-    target_partitions: usize,
-) -> Result<(), crate::plan::PlanError> {
+async fn planned(sql: &str, target_partitions: usize) -> Result<(), crate::plan::PlanError> {
     let plan = physical_plan_for(sql, target_partitions).await;
-    plan_batch_partitioned(&plan, knobs(target_partitions)).map(|_| ())
+    crate::planner::plan(&plan, knobs(target_partitions)).map(|_| ())
 }
 
 fn knobs(target_partitions: usize) -> PlanKnobs {
@@ -381,7 +378,7 @@ async fn the_planner_refuses_a_tree_its_validation_rejects() {
             scan,
         ));
 
-    match plan_batch_partitioned(&unsorted_merge, knobs(1)) {
+    match crate::planner::plan(&unsorted_merge, knobs(1)) {
         Err(crate::plan::PlanError::Invalid(said)) => assert!(
             said.contains("GpuMergeSortedPartitions") && said.contains("GpuSort"),
             "the planner's refusal names the wrong fix: {said}"
@@ -417,7 +414,7 @@ async fn the_planner_refuses_a_root_that_does_not_emit_what_the_query_asked_for(
     .await;
     let partial = partial_of(&plan).expect("a partial aggregate to root at");
 
-    match plan_batch_partitioned(&partial, knobs(4)) {
+    match crate::planner::plan(&partial, knobs(4)) {
         Err(crate::plan::PlanError::Invalid(said)) => assert!(
             said.contains("the plan emits") && said.contains("$sum"),
             "the planner's refusal names the wrong columns: {said}"

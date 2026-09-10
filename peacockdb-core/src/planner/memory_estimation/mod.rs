@@ -13,47 +13,14 @@ use std::collections::HashMap;
 
 use datafusion::arrow::datatypes::{Fields, Schema as ArrowSchema};
 
+use super::{MIN_TARGET_BATCH_BYTES, MemoryModel, SourceEstimate};
 use crate::memory::logical_size_from_schema;
 use crate::plan::GpuNode;
 use crate::plan::NodeKind;
 use crate::plan::PlanError;
 use crate::plan::{NodeRef, as_node_ref};
 
-/// What a golden's `--- memory ---` section renders: a figure per node in canonical
-/// post-order, and the batch size each source was given.
-#[derive(Debug, Clone, PartialEq)]
-pub struct MemoryModel {
-    pub budget: u64,
-    /// Σ over the accumulators — held whatever the batch size, so it is spent first.
-    pub accumulator_bytes: u64,
-    /// The part of it that cannot be an overestimate — a build side is its input's rows,
-    /// where an aggregate's state rests on a cardinality estimate. Only this part can
-    /// refuse a plan.
-    pub certain_accumulator_bytes: u64,
-    /// What each source may spend, before its own amplification and size narrow it.
-    pub share_per_source: u64,
-    /// `estimated_max_resident_size` per node, indexed by post-order sequence.
-    pub resident: Vec<u64>,
-    /// One per source, in post-order sequence — which is the order translation reaches
-    /// them, so the second pass consumes them in this order.
-    pub sources: Vec<SourceEstimate>,
-}
-
-/// What the walk from one source found, and what it was given for it.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SourceEstimate {
-    pub seq: usize,
-    /// The largest a batch from this source gets on its way to the accumulator that ends
-    /// the walk, counting the lanes live at that point.
-    pub amplification: f64,
-    pub target_batch_bytes: u64,
-}
-
-/// A batch size below this is not worth deriving: the mapping is quantized to whole row
-/// groups anyway, so the model would be pretending to a precision the plan cannot use.
-pub(crate) const MIN_TARGET_BATCH_BYTES: u64 = 1 << 20;
-
-pub fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, PlanError> {
+pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, PlanError> {
     let tree = Tree::of(root);
     let accumulator_bytes: u64 = (0..tree.nodes.len())
         .filter_map(|seq| tree.held_by_accumulator(seq))
@@ -370,8 +337,7 @@ impl<'a> Tree<'a> {
 mod tests {
     use super::*;
     use crate::plan::Batching;
-    use crate::batch_partitioned::plan::BatchSizing;
-    use crate::batch_partitioned::translate::Translator;
+    use crate::planner::{BatchSizing, PlanKnobs, plan, translate};
     use std::path::PathBuf;
 
     const BUDGET: u64 = 2 * 1024 * 1024 * 1024;
@@ -388,38 +354,34 @@ mod tests {
             .create_physical_plan()
             .await
             .expect("physical plan");
-        let tree = Translator::new(
+        let tree = translate(
             target_partitions,
             Batching::Sized {
                 target_batch_bytes: 1 << 20,
             },
+            &plan,
         )
-        .translate(&plan)
         .expect("translate the plan");
         estimate(tree.as_ref(), budget).expect("estimate the plan")
     }
 
     /// Planned end to end at one of the three batching forms, which is what decides the
     /// mapping the model then prices.
-    async fn modelled_as(
-        sql: &str,
-        target_partitions: usize,
-        sizing: crate::batch_partitioned::plan::BatchSizing,
-    ) -> MemoryModel {
+    async fn modelled_as(sql: &str, target_partitions: usize, sizing: BatchSizing) -> MemoryModel {
         let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.minimal");
         let ctx = crate::register_tables_for(crate::build_session_state(target_partitions), &data)
             .await
             .expect("register the minimal tables");
-        let plan = ctx
+        let physical = ctx
             .sql(sql)
             .await
             .expect("plan the query")
             .create_physical_plan()
             .await
             .expect("physical plan");
-        crate::batch_partitioned::plan::plan_batch_partitioned(
-            &plan,
-            crate::batch_partitioned::plan::PlanKnobs {
+        plan(
+            &physical,
+            PlanKnobs {
                 target_partitions,
                 sizing,
                 budget: BUDGET,
@@ -442,13 +404,13 @@ mod tests {
             .create_physical_plan()
             .await
             .unwrap();
-        let tree = Translator::new(
+        let tree = translate(
             target_partitions,
             Batching::Sized {
                 target_batch_bytes: 1 << 20,
             },
+            &plan,
         )
-        .translate(&plan)
         .expect("translate the plan");
         estimate(tree.as_ref(), budget).expect_err("this plan should not fit")
     }

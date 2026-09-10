@@ -11,48 +11,14 @@ use std::sync::Arc;
 
 use datafusion::physical_plan::ExecutionPlan;
 
-use super::estimator::{MemoryModel, estimate};
-use super::nulls::refuse_null_unsafe_joins;
-use super::translate::Translator;
+use super::translator::Translator;
+use super::{BatchSizing, MemoryModel, PlanKnobs, estimate, refuse_null_unsafe_joins};
 use crate::plan::Batching;
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::{check_output_schema, validate};
 
-/// A source reading less than this stops being worth splitting: it has nothing to gain
-/// from lanes and would pay a shuffle for them.
-///
-/// From the sf1 measurement at full projection: the largest table that must stay on one
-/// lane is tpcds date_dim at 4,006,445 bytes, the smallest that must not is tpcds
-/// web_returns at 8,041,397, and tpch supplier at 1,532,237 sets the floor. 5 MiB sits in
-/// that gap nearer the lower end, so date_dim would have to grow 31% to cross it and
-/// web_returns shrink 35%. It reads the projected bytes of the surviving row groups, so a
-/// narrow scan of a big table falls below it — the rule working, not a value to retune.
-pub const SMALL_TABLE_BYTES: u64 = 5 * 1024 * 1024;
-
-/// The planner inputs a mode fixes: how many lanes to aim for, whether a lane holds more
-/// than one batch, the budget the estimator divides, and the byte count below which a
-/// source stops being worth splitting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PlanKnobs {
-    pub target_partitions: usize,
-    pub sizing: BatchSizing,
-    /// Read only by [`BatchSizing::Budgeted`]; the other two forms reproduce a plan from
-    /// the data alone.
-    pub budget: u64,
-    pub small_table_bytes: u64,
-}
-
-/// What a mode asks of the partitioner. The planner's half of [`Batching`]: `Budgeted` has
-/// no number until the estimator solves for one, which is why it is a separate word.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BatchSizing {
-    OneBatchPerLane,
-    OneBatchPerRowGroup,
-    Budgeted,
-}
-
-pub fn plan_batch_partitioned(
+pub(crate) fn plan(
     root: &Arc<dyn ExecutionPlan>,
     knobs: PlanKnobs,
 ) -> Result<(Box<dyn GpuNode>, MemoryModel), PlanError> {
@@ -119,7 +85,7 @@ fn seed_batching(knobs: PlanKnobs) -> Batching {
         BatchSizing::OneBatchPerLane => Batching::Off,
         BatchSizing::OneBatchPerRowGroup => Batching::PerRowGroup,
         BatchSizing::Budgeted => Batching::Sized {
-            target_batch_bytes: super::estimator::MIN_TARGET_BATCH_BYTES as usize,
+            target_batch_bytes: super::MIN_TARGET_BATCH_BYTES as usize,
         },
     }
 }

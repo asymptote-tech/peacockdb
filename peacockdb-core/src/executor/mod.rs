@@ -32,11 +32,18 @@ use crate::plan::{GpuNode, RowInterval};
 #[cfg(not(feature = "rust-only"))]
 use peacockdb_ffi::raw::PeacockExecutor;
 
+/// One table's worth of rows, and nothing else about it.
+///
+/// Ownership is by move — every executor method takes a batch by value, so reuse after
+/// consumption is a compile error rather than an unknown-handle throw from C++. Neither
+/// implementation is `Clone`: a `GpuBatch` cannot be, and the free `RecordBatch` clone
+/// is not worth the asymmetry (a future dual consumer writes an explicit copy, #140).
 pub trait Batch {
     fn num_rows(&self) -> usize;
     fn byte_size(&self) -> usize;
 }
 
+/// The CPU backend's batch, and what leaves the device at the unload.
 /// Not `Clone`, deliberately — symmetry with `GpuBatch`, whose handle cannot be.
 #[derive(Debug)]
 pub struct CpuBatch {
@@ -57,6 +64,13 @@ impl CpuBatch {
     }
 }
 
+/// A handle to a resident `cudf::table`, plus the session it belongs to.
+///
+/// The handle is the whole value — no box, no vtable — and `Drop` releases it, which is
+/// what keeps a batch the driver abandons from leaking VRAM. A handle an FFI call
+/// consumed must skip that drop: C++ erased it, and releasing it again is a use of a
+/// dead handle. [`GpuBatch::consume`] is that boundary, and the only place the release
+/// is skipped.
 #[cfg(not(feature = "rust-only"))]
 /// The executor pointer is BORROWED, as everywhere else on the GPU path: the session
 /// outlives every batch drawn from it.
@@ -125,6 +139,15 @@ pub type CallResult<T> = Result<(T, CallStats), BackendError>;
 pub struct CallStats {
     pub scratch_bytes: Option<usize>,
 }
+
+// The executor contracts, one per node category.
+//
+// Every state transition emits in the same call, so there is no wrong interleaving to
+// construct and output timing is a pure function of the call sequence. Every method that
+// ends a protocol consumes `self`, which makes four run-time guards the prototype needed
+// into compile errors: probing before `set_build`, a second `set_build`, probing after
+// `finish_and_fetch`, and accumulating after `mark_done_and_fetch`. The source's consuming
+// step removes a fifth — the driver's own exhaustion flag.
 
 pub trait Executor {
     /// State held between calls.
@@ -240,6 +263,9 @@ pub trait UnloadExecutor<B: Backend>: Executor {
     fn unload(&mut self, batch: B::Batch, rows: RowRange) -> CallResult<CpuBatch>;
 }
 
+/// One impl per backend, naming a concrete type for the batch and for every executor
+/// category. Backend choice is a turbofish at the entry point, not a selector consulted
+/// per node.
 pub trait Backend: Sized {
     /// What an executor is built from besides its node: the GPU's open session and the
     /// recipe plan its seqs address, the CPU's `TaskContext`.

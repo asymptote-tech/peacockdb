@@ -450,7 +450,8 @@ byte-identical, plus a case asserting a small limit is honoured.
 <a id="t19"></a>
 ### #19 — the planner has no cardinality estimate, and the memory model pays for it
 Widths are facts and source rows are facts — the schema, and the `rows`/`bytes` a scan reads
-off its surviving row groups at plan time (`batch_partitioned/parquet_meta.rs`). What a query
+off its surviving row groups at plan time (`planner/translator/scan_mapping/parquet_meta.rs`).
+What a query
 does to them is guessed: `estimator.rs::rows` has a filter pass every row, an aggregate emit
 one group per input row, and a join emit its larger side.
 
@@ -493,8 +494,9 @@ cardinality. Blocked by #19. Landing rewrites all plan goldens.
 
 <a id="t71"></a>
 ### #71 — GPU scan: no predicate pushdown into the cuDF read
-Partly addressed: stats-based row-group pruning exists (`gpu_rowgroup_prune.rs` → cuDF
-`set_row_groups`, parity with ParquetExec). Remaining: serialize the predicate itself
+Partly addressed: stats-based row-group pruning exists
+(`planner/translator/scan_mapping/rowgroup_prune.rs` → cuDF `set_row_groups`, parity with
+ParquetExec). Remaining: serialize the predicate itself
 into the cuDF `read_parquet` filter AST (page pruning / pre-filter during decode),
 multi-file scans, dynamic ranges (#16). Cause of red widget ratios on selective queries.
 
@@ -914,8 +916,8 @@ targets CI does not run. The crate has none today: the one it had documented an 
 that no longer exists.
 
 There is now one pipeline to document, and it is three calls in a fixed order —
-`plan_batch_partitioned` for the tree, `attach_recipes` where a device is involved, and
-`batch_partitioned_driver` over a backend. `peacockdb/src/main.rs` is the only place that
+`planner::plan` for the tree, `wire::attach_recipes` where a device is involved, and
+`executor::run` over a backend. `peacockdb/src/main.rs` is the only place that
 sequence is written down, and a reader of the crate meets the three functions separately. A
 doctest on the entry it documents is the natural fix and the reason to close both halves at
 once: write it, run `cargo test --features rust-only -p peacockdb-core --doc` in the
@@ -972,7 +974,7 @@ It matters because a test binary is built on one host and run on another: remote
 binaries, goldens and data but never source, so a compile-time path is a path the remote does
 not have. `tests/common/mod.rs testdata_root()` solves that by honouring `PEACOCK_TESTDATA_DIR`
 first, which `build-test.sh` sets for remote runs. The residual is the crate's own unit tests
-— six sites under `src/batch_partitioned/` reaching `tpch.minimal`, in `estimator.rs`,
+— six sites under `peacockdb-core/src/` reaching `tpch.minimal`, in `memory_estimation/`,
 `parquet_meta.rs`, `plan_text/mod.rs` and `translate/{tests,schema_tests}.rs` — which is
 exactly why a remote CPU host needs a `/media/data/peacockdb` symlink and why `--gpu` runs,
 which set the env var, do not.

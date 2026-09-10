@@ -19,7 +19,7 @@ use datafusion::physical_plan::PhysicalExpr;
 use crate::plan::PlanError;
 use crate::plan::{BinaryOp, ColumnRef, Expr, UnaryOp};
 
-pub fn translate_expr(
+pub(crate) fn translate_expr(
     expr: &Arc<dyn PhysicalExpr>,
     input_schema: &Schema,
 ) -> Result<Expr, PlanError> {

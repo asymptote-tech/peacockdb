@@ -1,7 +1,7 @@
 use super::node_text::quoted;
 use super::*;
-use crate::batch_partitioned::translate::Translator;
 use crate::plan::Batching;
+use crate::planner::translate;
 use std::path::PathBuf;
 
 async fn rendered(sql: &str, target_partitions: usize) -> String {
@@ -16,13 +16,13 @@ async fn rendered(sql: &str, target_partitions: usize) -> String {
         .create_physical_plan()
         .await
         .expect("physical plan");
-    let tree = Translator::new(
+    let tree = translate(
         target_partitions,
         Batching::Sized {
             target_batch_bytes: 1 << 20,
         },
+        &plan,
     )
-    .translate(&plan)
     .expect("translate the plan");
     render_plan(tree.as_ref())
 }

@@ -17,10 +17,10 @@ use datafusion::arrow::datatypes::DataType;
 use datafusion::execution::context::SessionContext;
 
 use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
-use peacockdb_core::batch_partitioned::plan::plan_batch_partitioned;
 use peacockdb_core::executor::{RunError, When};
 use peacockdb_core::executor::{RunReport, run};
 use peacockdb_core::plan::GpuNode;
+use peacockdb_core::planner;
 
 use common::injection::{
     CAP, Dimensions, Drain, Empties, Injected, InjectedContext, Injection, PlannedMode, Rebatch,
@@ -97,7 +97,7 @@ async fn sql_answers_match_datafusion(
             .create_physical_plan()
             .await
             .expect("the query has a physical plan");
-        let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+        let (tree, _memory) = planner::plan(&plan, mode.knobs())
             .unwrap_or_else(|error| panic!("{dataset}/{query} at {name}: {error}"));
         run_and_check(
             tree.as_ref(),
@@ -446,7 +446,7 @@ async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
             .create_physical_plan()
             .await
             .expect("the query has a physical plan");
-        let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+        let (tree, _memory) = planner::plan(&plan, mode.knobs())
             .unwrap_or_else(|error| panic!("nested-limits at {name}: {error}"));
         let offered = batches_offered(tree.as_ref());
         let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
@@ -567,7 +567,7 @@ async fn a_query_has_a_smallest_budget_that_fits_and_trips_a_byte_below_it() {
         .create_physical_plan()
         .await
         .expect("the query has a physical plan");
-    let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs())
         .unwrap_or_else(|error| panic!("nested-loop-join at {name}: {error}"));
 
     let watching = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
@@ -654,7 +654,7 @@ async fn the_model_is_compared_against_what_the_calls_measured() {
         .create_physical_plan()
         .await
         .expect("the query has a physical plan");
-    let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs())
         .unwrap_or_else(|error| panic!("filter-project at {name}: {error}"));
     let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
         .expect("the run finishes");
@@ -703,7 +703,7 @@ async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
         .create_physical_plan()
         .await
         .expect("the query has a physical plan");
-    let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs())
         .unwrap_or_else(|error| panic!("nested-loop-join at {name}: {error}"));
 
     let run = |injection: Injection| {
@@ -809,7 +809,7 @@ async fn a_degenerate_hash_under_a_right_outer_is_refused_by_name() {
         .create_physical_plan()
         .await
         .expect("the query has a physical plan");
-    let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs())
         .unwrap_or_else(|error| panic!("q93 at {name}: {error}"));
     assert!(
         planned_mode(name, tree.as_ref()).owes_probe_when_empty,
@@ -927,7 +927,7 @@ impl PlannedQuery {
             .create_physical_plan()
             .await
             .expect("the query has a physical plan");
-        let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+        let (tree, _memory) = planner::plan(&plan, mode.knobs())
             .unwrap_or_else(|error| panic!("{query} at {name}: {error}"));
         let lanes = planned_mode(name, tree.as_ref()).lanes;
         Self { ctx, tree, lanes }

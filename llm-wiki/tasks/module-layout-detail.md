@@ -473,3 +473,173 @@ component API, rather than reaching into the planner's validation pass.
 points at `plan/mod.rs` and its panic message names that file.
 
 Visibility snapshot: `visibility-after-slice5.txt`, `visibility-items-after-slice5.txt`.
+
+## The defect class: documentation a hoist leaves behind
+
+Recorded as a class, not as an incident, because every check this task runs was green while it
+was happening.
+
+**What it is.** Moving an item into a facade means moving its declaration. A tool that starts
+at the `fn` or `struct` line takes the declaration and leaves the `///` block and any `#[…]`
+above it in the file it came from — which is then deleted. Thirty-five lines went that way in
+the `plan` slice: twelve doc comments and two `#[allow(clippy::too_many_arguments)]`.
+
+**Why nothing went red.** The build was clean, 437 lib tests passed, the goldens were
+byte-identical, the case inventory matched, the visibility sweep was clean, and a body-line
+conservation check reported full conservation — because it filtered comments out, which is what
+a body-line check is for. A dropped doc comment changes no behaviour and no artifact. There is
+nothing in the suite that can see it.
+
+**The check that does see it.** `module-layout-baselines/doc-attr-check.py` emits every
+sentence of documentation and every attribute in `peacockdb-core/src`, for a revision or for
+the working tree, and a slice is compared with `comm -23`. Three things about its shape were
+learned by getting them wrong first:
+
+- **The unit is the sentence, not the line.** Prose that moves into a narrower indent gets
+  rewrapped, so a line-level comparison reports the whole paragraph as deleted. At line level
+  the `plan` slice showed 23 differences, of which the 12 real ones were indistinguishable
+  from the noise.
+- **The marker is stripped.** A module header (`//!`) that becomes an item doc (`///`) or a
+  section comment (`//`) is the same prose in a better place, and a comparison that keeps the
+  marker calls it a loss.
+- **The file list for the working tree is the tree, not the index.** Half of what this task
+  moves is untracked and half of what the index still lists is gone from disk, so
+  `git ls-files --cached` reads neither state.
+
+**Run it on every slice.** It is a per-slice check beside the goldens and the inventory. Its
+output is a list of candidates a person reads, not a pass/fail: a deliberate rewording is
+indistinguishable from a loss to any tool, and this task does a lot of deliberate rewording.
+
+### The retroactive pass over slices 3, 4 and 5
+
+Run against `b14757f9`, the commit before slice 3. **2,616 sentences then, 2,687 now, 30
+absent** — and all thirty are accounted for:
+
+| Count | Kind |
+|---|---|
+| 8 | `enforcer` → `accountant` / `ResidentAccountant`, which the spec asks for |
+| 4 | doc links to paths that no longer exist (`super::nodes::as_node_ref`, two `super::super::nodes::aggregate::…`, `see backend.rs`) |
+| 3 | `this mode's tree` / `the mode's expression IR` / `this mode decides` — task 1's wording, dropped on the way past |
+| 1 | `#[allow(unused_imports, dead_code, clippy::all)]`, now the inner `#![allow(…)]` in `wire/generated.rs` |
+| 14 | module headers that became item docs or section comments, differing only in a `[`Type`]:` prefix or a shortened clause |
+
+Two were genuine drops and are restored: `Backend`'s "Backend choice is a turbofish at the
+entry point, not a selector consulted per node", and `GpuNode`'s "what a plan node offers the
+driver and the validator". Nine more sentences of real prose were restored in the same pass —
+`Batch`'s ownership-by-move rationale, `GpuBatch`'s handle-and-`Drop` rationale, `CpuBatch`'s
+one-liner, the executor contracts' typestate paragraph, `PlanError`'s plan-time rationale, the
+recipe vocabulary's one-liner and the node-family section comment — all of which slices 3, 4
+and 5 had folded away when they replaced seven module headers with one component header.
+
+### Slice 6 — `planner`, and the three-deep nesting
+
+Ready to commit. No golden moved, the case inventory is identical in both shapes, all three
+builds are clean at zero warnings, and the doc-and-attribute check finds exactly one loss,
+which is deliberate (below).
+
+#### The subcomponent walls hold, and the sweep says so
+
+`grep` for each subcomponent from outside its parent returns nothing:
+
+- `scan_mapping` is named only from `planner/translator/**`. It is the three-deep nesting the
+  spec allows, and the spec's reason survives contact: all three entry points have exactly one
+  caller, `Translator::source`, so as a peer of `translator` it would be the design's only
+  subcomponent-to-subcomponent edge.
+- `translator`, `memory_estimation`, `nulls` and `pipeline` are named only from
+  `planner/**`.
+
+Two edges had to be redirected to make that true, both in test code and both one line:
+
+- `plan_text`'s tests built a tree with `Translator::new(…).translate(…)`. A test in another
+  component cannot reach a subcomponent, so `planner/mod.rs` gains `translate()` and the test
+  calls that.
+- `memory_estimation`'s own tests did the same, which would have been a *sibling*-subcomponent
+  edge — the one the spec claims does not exist. Same fix, same entry point.
+- `expr_physical`'s tests named `expr_translate::translate_expr`; `planner/mod.rs` gains
+  `translate_expr()`.
+
+All three facade entry points are `#[cfg(test)]`, and say so in a comment: their only callers
+outside the translator are tests, and without the cfg a plain `cargo build` reports them dead.
+
+#### `Translator`'s methods become free functions
+
+`translator/mod.rs` is a subcomponent facade, so its bodies are one expression. `Translator`
+carried 23 inherent methods, 18 of them the translation itself. Five are the subcomponent's API
+(`new`, `with_source_targets`, `with_small_table_bytes`, `sources_reached`, `translate`) and
+stay; the other 18 became free functions taking `t: &Translator`, in `translator/nodes.rs`
+(the per-kind arms), `translator/common.rs` (the shared ordinal helpers) and
+`translator/aggregate.rs`. `translator/mod.rs` is 118 lines against the spec's "nothing else
+passes 400".
+
+The conversion has one hazard worth writing down: **a parameter or a `let` binding can shadow
+the function it now calls.** `node()` has `if let Some(sort) = …` and then calls `sort(t, sort)`;
+`aggregate()`'s parameter was named `aggregate`. rustc catches every instance as
+`E0618: expected function, found &SortExec`, so none can survive a build — but the error points
+at the *definition* of the shadowed function, not at the call, which makes it read like a
+different bug than it is. Two were fixed by qualifying the call (`self::sort(t, sort)`) and one
+by renaming the parameter to `exec`.
+
+#### `all_row_groups` was dead, and only the wall revealed it
+
+It had no caller at `HEAD` either. It was `pub` in a crate-root module, so `dead_code` could
+not fire; private inside `scan_mapping` it goes red immediately. Deleted rather than given an
+`#[allow]` that would claim it is used. Two consequences the next reader should know:
+
+- It is the one entry in this slice's doc-and-attribute check, and the only prose lost.
+- It carried one of the residue gate's deliberate survivors — `gpu_rowgroup_prune.rs:151`'s
+  `scan-batch→partition` mapping site. **The gate now lands on six rather than seven, and the
+  composition is not the one the spec predicted**: three mapping sites rather than four, plus
+  `README.md`, `source.py` and `test_ci_coverage.rs:431`. The count matching the spec's expected
+  six is a coincidence of two changes, not the finish state.
+
+#### `gpu_rowgroup_prune` loses its `gpu_`
+
+`src/gpu_rowgroup_prune.rs` is `planner/translator/scan_mapping/rowgroup_prune.rs`. It runs on
+the CPU and serves both backends, as the spec says. `partitioner.rs` becomes `partition.rs` in
+the same directory, since `scan_mapping::partitioner::partition` reads worse than
+`scan_mapping::partition::partition`.
+
+#### `plan_batch_partitioned` → `planner::plan`, and what that shadows
+
+The rename collides with the local binding `plan` that eight call sites hold for the DataFusion
+physical plan: `plan(&plan, knobs)` resolves to the binding. Every instance is an `E0618` and
+so cannot ship, but **two of the eight were in files only the cudf build compiles**
+(`test_gpu_recipe_walk.rs`, `test_gpu_abi.rs`) — the third time in this task that a green
+rust-only build hid a cudf-only break. The call sites are now `planner::plan(&plan, …)`.
+
+#### The comparison scripts both went red on something real
+
+- `compare-inventory.sh` reported DRIFTED. The cause was the normalizer, not a test: it dropped
+  the module path down to the last `::tests::`, and `schema_tests` does not match that. Every
+  case name and count was unchanged. Fixed to take any segment ending in `tests`, and the
+  suffix is still unique across all 437.
+- `doc-attr-check.py` found the one deletion and nothing else, which is what it is for.
+
+#### Body-line conservation
+
+Over the eleven old files and the new `planner/`: 3,255 body lines before, 3,302 after, **118**
+absent. All 118 are known rewrites — `&self,` becoming `t: &Translator,` and `self.x(` becoming
+`x(t, ` across the 18 converted methods, `pub fn` narrowing to `pub(crate) fn`, the three test
+helpers moving to `translate()`, the `plan_batch_partitioned` rename, and the eight lines of
+`all_row_groups`.
+
+#### Evidence
+
+| Check | Result |
+|---|---|
+| `--lib` | 437 passed |
+| `test_plan_goldens` | 19 passed |
+| `test_cpu_corpus` | 448 passed |
+| `test_cpu_end_to_end` | 24 passed, 2 ignored |
+| `test_ci_coverage` / `test_corpus_goldens` / `test_cost_model` / `test_golden_format` | 7 / 20 / 3 / 24 passed |
+| `test_layout_injection` / `test_null_analysis` / `test_planner_join_{capability,refusals}` / `test_cpu_executors` | 4 / 8 / 13 / 10 / 1 passed |
+| three builds | 0 warnings each |
+| goldens | byte-identical to `goldens-after-rename.sha256` |
+| case inventory, both shapes | identical |
+| doc and attribute sentences | one absent, the deleted dead function's |
+| residue gate | six lines — see above, the composition changed |
+| `pub use` / `pub(super)` | 0 and 6, the six all in `batch_partitioned/{cpu,gpu}_backend` |
+| bare `pub` outside a `mod.rs` | none in any moved component |
+| subcomponent reach | nothing outside `translator` names `scan_mapping`; nothing outside `planner` names its subcomponents |
+
+Visibility snapshot: `visibility-after-slice6.txt`, `visibility-items-after-slice6.txt`.
