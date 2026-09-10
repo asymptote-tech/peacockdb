@@ -141,38 +141,39 @@ cargo test --features rust-only -p peacockdb-core --lib
 
 ---
 
-### Task 3: The corpus harness moves behind a feature, with the rule that keeps it a facade
+### Task 3: The corpus harness joins the module, with the rule that keeps it a facade
+
+`src/test_support/` and the `test-support` feature already exist — task 4 built them for the
+helpers that had two audiences. This task adds the last two files and the guard.
 
 **Files:**
-- Create: `peacockdb-core/src/test_support/{mod.rs,corpus.rs,corpus_gpu.rs,mode.rs,memory_limit.rs}`
-- Delete: `peacockdb-core/tests/common/{corpus.rs,corpus_gpu.rs,mode.rs,memory_limit.rs}`
-- Modify: `peacockdb-core/Cargo.toml`, `peacockdb-core/src/lib.rs`,
+- Create: `peacockdb-core/src/test_support/{corpus.rs,corpus_gpu.rs}`
+- Delete: `peacockdb-core/tests/common/{corpus.rs,corpus_gpu.rs}`
+- Modify: `peacockdb-core/src/test_support/mod.rs` (declare the two, add their API),
   `peacockdb-core/tests/{test_cpu_corpus.rs,test_gpu_corpus.rs,test_corpus_goldens.rs}`,
   `peacockdb-core/tests/common/mod.rs`, `peacockdb-core/tests/test_module_layout.rs`
-- Modify: `llm-wiki/tasks/module-layout.md` and the moved `memory_limit.rs` doc comment — both say
-  `test-layout.md` creates `src/test_support/`; it does not, this task does.
 
 **Interfaces:**
 - Consumes: nothing.
 - Produces: `test_support::{cpu_case, gpu_case, authoritative_mode, over_cap, Mode, MODES,
   MemoryLimit, TIER, BUDGET}` — the only names the two corpus binaries may use.
 
-- [ ] **Step 1: Declare the feature and the self dev-dependency**
+- [ ] **Step 1: Confirm the module and the feature are already there**
 
-```toml
-[features]
-test-support = []
-[dev-dependencies]
-peacockdb-core = { path = ".", features = ["test-support"] }
+```bash
+grep -n 'test-support' peacockdb-core/Cargo.toml
+ls peacockdb-core/src/test_support/
 ```
 
-In `lib.rs`: `#[cfg(feature = "test-support")] pub mod test_support;`
+Expected: the feature, the self dev-dependency, and `mod.rs` with `testdata.rs`, `mode.rs`,
+`memory_limit.rs`, the golden-text reader and the registry loader. If any is missing, task 4 did
+not finish; say so rather than declaring it here.
 
-- [ ] **Step 2: Move the four files, 837 lines**
+- [ ] **Step 2: Move the two files, 698 lines**
 
-`corpus.rs` (508), `corpus_gpu.rs` (190), `mode.rs` (88), `memory_limit.rs` (51). Inside the crate
-they reach `pub(crate)` items, which is what stops the eight from needing `pub`. `mod.rs` declares
-the API; the four are private `mod` with `pub(crate)` items.
+`corpus.rs` (508) and `corpus_gpu.rs` (190). Inside the crate they reach `pub(crate)` items, which
+is what stops the eight from needing `pub`. Add their API to the existing `mod.rs`; the two are
+private `mod` with `pub(crate)` items like the rest.
 
 - [ ] **Step 3: Rewire the three consumers**
 
@@ -197,18 +198,7 @@ Add `pub fn tree() -> Box<dyn crate::plan::GpuNode> { unimplemented!() }` to `te
 Run: `cargo test --features rust-only -p peacockdb-core --test test_module_layout`
 Expected: FAIL naming `tree`. Revert. This is the guard the whole task rests on.
 
-- [ ] **Step 6: Prove the feature is off in a plain build**
-
-Reference `crate::test_support` from a non-test path in `lib.rs`, run
-`cargo build --features rust-only -p peacockdb-core`, confirm `E0433`, revert. A passing build
-proves nothing — the module simply is not there.
-
-- [ ] **Step 7: Prove no workflow passes the feature**
-
-Run: `grep -rn 'test-support' .github/workflows/`
-Expected: no hits.
-
-- [ ] **Step 8: Run both corpus binaries and check `inventory` still sees two**
+- [ ] **Step 6: Run both corpus binaries and check `inventory` still sees two**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus
@@ -217,7 +207,7 @@ cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus
 Each binary keeps its own registry assertion covering only its own engine's columns. Both must
 pass — that is the property the "keep them external" decision exists to protect.
 
-- [ ] **Step 9: Inventories, goldens, warning count, append, hand back**
+- [ ] **Step 7: Inventories, goldens, warning count, append, hand back**
 
 ---
 

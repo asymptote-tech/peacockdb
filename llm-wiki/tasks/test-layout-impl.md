@@ -175,26 +175,43 @@ Expected: exit 0, no output. A feature nothing uses must move nothing.
 
 ---
 
-### Task 3: `src/tests/` and the one testdata root (closes #49's residual)
+### Task 3: `src/test_support/` — the feature, the shared harness, and the one testdata root
+
+Nine of the eleven moving targets read `tests/common/`, and the seven binaries that stay read the
+same files. A helper with two audiences goes behind the feature; duplicating it guarantees drift.
 
 **Files:**
-- Create: `peacockdb-core/src/tests/mod.rs`, `peacockdb-core/src/tests/testdata.rs`
-- Modify: `peacockdb-core/src/lib.rs` (declare the module)
-- Modify: `peacockdb-core/src/planner/estimator.rs` (3 sites),
-  `parquet_meta.rs`, `plan_text/mod.rs`, `translate/tests.rs`, `translate/schema_tests.rs`
-  — resolve each path against the post-task-2 tree with
+- Modify: `peacockdb-core/Cargo.toml` (`[features]`, `[dev-dependencies]`),
+  `peacockdb-core/src/lib.rs` (declare the module)
+- Create: `peacockdb-core/src/test_support/{mod.rs,testdata.rs}`
+- Move: `peacockdb-core/tests/common/{golden_text.rs,registry.rs,mode.rs,memory_limit.rs}` and the
+  shared helpers out of `tests/common/mod.rs`
+- Modify: `peacockdb-core/tests/common/mod.rs` (delegate, do not reimplement), and the seven
+  `CARGO_MANIFEST_DIR` sites — find them with
   `git grep -ln 'CARGO_MANIFEST_DIR' -- peacockdb-core/src`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `crate::tests::testdata::root() -> std::path::PathBuf`, the only testdata root in the
-  crate. Every moved target uses it in place of `tests/common/mod.rs`'s `testdata_root()`.
+- Produces: `crate::test_support::testdata::root() -> PathBuf`, plus `Mode`, `MODES`,
+  `MemoryLimit`, the golden-text reader and the registry loader. In-crate code says
+  `crate::test_support::…`; the binaries that stay say `peacockdb_core::test_support::…`.
 
-- [ ] **Step 1: Write the helper**
+- [ ] **Step 1: Declare the feature and the self dev-dependency**
+
+```toml
+[features]
+test-support = []
+[dev-dependencies]
+peacockdb-core = { path = ".", features = ["test-support"] }
+```
+
+In `lib.rs`: `#[cfg(feature = "test-support")] pub mod test_support;`
+
+- [ ] **Step 2: Write the testdata root, and make it the only one**
 
 ```rust
-//! The testdata root for in-crate tests. A test binary is built on one host and run on
-//! another, so the compile-time path is a fallback and the environment wins (#49).
+//! The testdata root. A test binary is built on one host and run on another, so the
+//! compile-time path is a fallback and the environment wins (#49).
 use std::path::PathBuf;
 
 pub fn root() -> PathBuf {
@@ -205,49 +222,58 @@ pub fn root() -> PathBuf {
 }
 ```
 
-`tests/common/mod.rs:43` holds the same rule for the integration side; read it and match its
-fallback exactly, including whether it resolves a `canonical_root()` symlink.
+Read `tests/common/mod.rs:43` first and match its fallback exactly, including whether it resolves
+a `canonical_root()` symlink. Then make `testdata_root()` there a one-line call to this, not a
+second implementation — that is the whole of #49.
 
-- [ ] **Step 2: Declare the module**
+- [ ] **Step 3: Move the four helper files and the shared `mod.rs` helpers**
 
-In `lib.rs`: `#[cfg(test)] mod tests;`. In `src/tests/mod.rs`: `pub mod testdata;`. No
-`#[cfg(test)]` inside the subtree — the gate at the root is transitive, which is the guarantee the
-spec rests on.
+`golden_text.rs`, `registry.rs`, `mode.rs`, `memory_limit.rs`, and from `common/mod.rs` the ones
+the moving targets name: `data_dir_for`, `golden_dir_for`, `queries_dir_for`, `GPU_BUDGET`,
+`assert_results_match`, `total_rows`, `testdata_minimal_dir`. `corpus_golden.rs`,
+`result_text.rs` and `cost_model.rs` stay: only binaries that stay read them.
 
-- [ ] **Step 3: Prove the gate is transitive**
+**Bare `pub` only in `test_support/mod.rs`.** Everything below it is `pub(crate)`. The layout test
+already fails on a bare `pub` outside a `mod.rs`, and `test-support.md` turns on
+`unreachable_pub`, which would fire on every one of them.
 
-Add `pub fn scratch() {}` to `src/tests/testdata.rs`, then a line in `src/planner/mod.rs` reading
-`fn _x() { crate::tests::testdata::scratch(); }`.
-Run: `cargo build --release --features rust-only -p peacockdb-core`
-Expected: FAIL with `E0433: failed to resolve`. Revert both lines.
+- [ ] **Step 4: Convert the seven `CARGO_MANIFEST_DIR` sites**
 
-- [ ] **Step 4: Convert the seven sites**
-
-Each becomes `crate::tests::testdata::root().join("tpch.minimal")`. Verify none is left:
+Each becomes `crate::test_support::testdata::root().join("tpch.minimal")`.
 Run: `git grep -n 'CARGO_MANIFEST_DIR' -- peacockdb-core/src`
 Expected: no hits.
 
-- [ ] **Step 5: Run the unit tier and compare**
+- [ ] **Step 5: Prove the feature is off in a plain build**
+
+Reference `crate::test_support` from a non-test path in `lib.rs`, run
+`cargo build --features rust-only -p peacockdb-core`, confirm `E0433`, revert. A passing build
+proves nothing — the module simply is not there.
+
+- [ ] **Step 6: Prove no CI step passes the feature**
+
+Run: `grep -rn 'test-support' .github/workflows/`
+Expected: no hits. If one appears, the self dev-dependency is not doing its job.
+
+- [ ] **Step 7: Everything still compiles, on both sides of the boundary**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib
-scripts/case-inventory.sh rust-only > /tmp/inv.txt
-scripts/compare-inventory.sh rust-only llm-wiki/tasks/test-layout-baselines/inv-rust-only.txt /tmp/inv.txt
+cargo test --features rust-only -p peacockdb-core --no-run
 ```
 
-Expected: green, and no case difference — a path helper changes no case names.
+The second is the one that matters: all eighteen integration targets must still build against the
+helpers in their new home.
 
-- [ ] **Step 6: Prove the override works, which is the point of the exercise**
+- [ ] **Step 8: Prove the override works, which is the point of the exercise**
 
 Run: `PEACOCK_TESTDATA_DIR=/tmp/nonexistent cargo test --features rust-only -p peacockdb-core --lib estimator 2>&1 | tail -5`
-Expected: failures naming `/tmp/nonexistent`. If it passes, the env var is not being read and the
+Expected: failures naming `/tmp/nonexistent`. If it passes, the variable is not being read and the
 device tier will silently read the wrong tree on shad-gpu.
 
-- [ ] **Step 7: Append to the detail file and hand back**
+- [ ] **Step 9: Compare inventories, then hand back**
 
-State that #49's residual is closed and that the ticket can be retired by the completeness pass.
-
----
+No case moves in this task. State in the detail file that #49's residual is closed and the ticket
+can be retired by the completeness pass.
 
 ### Task 4: Teach `test_module_layout` the layout rules, and make the tree obey them
 
@@ -437,7 +463,7 @@ The trio forces 73 of the 108 items. This is the task that moves the number.
 - Modify: `peacockdb-core/tests/common/mod.rs` (drop the three `mod` lines)
 
 **Interfaces:**
-- Consumes: `crate::tests::testdata::root()` (Task 3).
+- Consumes: `crate::test_support::{testdata, …}` (Task 3).
 - Produces: `crate::tests::{injection, rebuild, join_fixture}`, reached by Task 7's targets.
 
 - [ ] **Step 1: Find every consumer before moving anything**
@@ -505,7 +531,7 @@ thing; record both either way.
 
 **Interfaces:**
 - Consumes: `crate::tests::{injection, rebuild, join_fixture}` (Task 6),
-  `crate::tests::testdata::root()` (Task 3).
+  `crate::test_support::{testdata, …}` (Task 3).
 - Produces: nothing later tasks name.
 
 - [ ] **Step 1: Move one target, run it, then the next**
@@ -513,7 +539,8 @@ thing; record both either way.
 `test_null_analysis` has no `mod common` and is the cheapest; take it first as the shape check for
 this destination, then the other three. For each, in order: move the file under
 `src/planner/tests/`, declare it in `src/planner/tests/mod.rs`, rewrite `use peacockdb_core::` to
-`use crate::` and any `mod common;` use to `crate::tests::…`, then:
+`use crate::`, and every `common::…` path to `crate::test_support::…` for a helper Task 3
+moved or `crate::tests::…` for the injector trio, then:
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib -- planner::tests

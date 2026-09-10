@@ -65,9 +65,10 @@ stop being one task's property; `doc-attr-check.py`, `narrow.py` and `external-n
 
 ## The corpus facade
 
-`corpus.rs` (508 lines), `corpus_gpu.rs` (190), `mode.rs` (88) and `memory_limit.rs` (51) — 837
-lines — go to `src/test_support/`, behind a feature. Inside the crate they reach `pub(crate)`
-items, so the eight stop being `pub`.
+`corpus.rs` (508 lines) and `corpus_gpu.rs` (190) — 698 lines — join the helpers already in
+`src/test_support/`. `mode.rs` and `memory_limit.rs` moved with task 4, which needed them; the
+`MemoryLimit` attribution below is corrected there rather than here. Inside the crate these two
+reach `pub(crate)` items, so the eight stop being `pub`.
 
 The eight are `GpuNode`, `validate`, `RunReport`, `render_run`, `GpuBackend`, `GpuContext`,
 `RecipePlan` and `attach_recipes`, and they exist for two integration targets that deliberately
@@ -85,26 +86,22 @@ That is what makes the facade real rather than a rename. `over_cap` travels with
 `test_corpus_goldens` reaches it the same way. `corpus_golden.rs`, `registry.rs`, `golden_text.rs`,
 `result_text.rs` and `cost_model.rs` name zero crate items and stay in `tests/common/` untouched.
 
-## The mechanism
+## The mechanism is already here
 
-```toml
-[features]
-test-support = []
-[dev-dependencies]
-peacockdb-core = { path = ".", features = ["test-support"] }
-```
+`test-layout.md` declared the `test-support` feature and the self dev-dependency, because the
+helpers it moved had two audiences — in-crate tests and the binaries that stayed — and duplicating
+one across the boundary guarantees drift. This task adds no mechanism; it adds the last two files
+to the module that mechanism created, and the eight items stop being `pub` as a result.
 
-The self dev-dependency turns the feature on for `cargo test` and leaves it off for `cargo build`,
-so **no CI step passes a flag** and a plain build cannot see the module. `#[cfg(test)]` cannot do
-this job: the library is compiled without `cfg(test)` when cargo builds an integration test, which
-is the whole reason these eight exist.
+What `#[cfg(test)]` still cannot do is unchanged: the library is compiled without `cfg(test)` when
+cargo builds an integration test, which is the whole reason these eight are `pub` today.
 
 ## test_support is shaped like a component
 
-`src/test_support/mod.rs` declares the whole API the integration tests may reach — `cpu_case`,
-`gpu_case`, `authoritative_mode`, `over_cap`, `Mode`, `MODES`, `MemoryLimit`, `TIER`, `BUDGET` —
-and `mod corpus; mod corpus_gpu; mod mode; mod memory_limit;` are private implementation modules
-with `pub(crate)` items. Same rules as a component, for a reason beyond symmetry: the signature
+`src/test_support/mod.rs` declares the whole API the integration tests may reach. Task 4 put the
+harness half there — `Mode`, `MODES`, `MemoryLimit`, the golden-text reader, the registry loader
+and the testdata root — and this task adds `cpu_case`, `gpu_case`, `authoritative_mode` and
+`over_cap`. Every module below it is private with `pub(crate)` items. Same rules as a component, for a reason beyond symmetry: the signature
 check below is a scan of one file only if the API lives in one file.
 
 Being a child of the crate root it sees component facades and not their internals — the same level
@@ -271,7 +268,7 @@ than checked as outcomes. What moves is visibility, and a visibility regression 
 - **Case counts and leaf-name sets identical to task 3's**, on all three shapes. Nothing moves
   tiers here; a count that shifts means a test followed the harness by accident.
 - **Goldens byte-identical.** Nothing in this task can reach them; a diff means the harness changed
-  behaviour while moving 837 lines of test code.
+  behaviour while moving 698 lines of test code.
 - **`inventory` still sees two binaries.** Both corpus targets keep their own registry assertion and
   both must pass — the property the "keep them external" decision exists to protect.
 - **The residues are gone**: `rustfmt --check` is clean on the four files named above, and no
@@ -285,7 +282,7 @@ each, the lint's count and the dump's bare-`pub` count both fall; a slice that m
 the wrong thing. Each slice ends by appending its state to `test-support-detail.md` and handing
 back.
 
-The corpus move is one slice of its own and does not interleave with the demotions: it is 837
+The corpus move is one slice of its own and does not interleave with the demotions: it is 698
 lines of test code changing compilation unit, and mixing it into a visibility slice makes the diff
 unreadable in exactly the place a reviewer needs to read it.
 

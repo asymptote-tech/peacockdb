@@ -43,10 +43,28 @@ gpu = []                # device tests; not propagated to peacockdb-ffi, which h
 propagate to `peacockdb-ffi`: that crate is a C ABI binding with no device-conditional code, and
 adding a feature there would be a knob nothing reads.
 
-**`test-support` and its self dev-dependency are not declared here.** They arrive in
-[`test-support.md`](test-support.md), with the module that uses them. A feature declared a task
-early is a knob nothing reads, which is the shape this repo files tickets about, and the
-mechanism is worth writing down only where its first consumer is.
+**The `test-support` feature is declared here, because here is where a helper first has two
+audiences.** Nine of the eleven moving targets read `tests/common/` — `golden_text`, `registry`,
+`mode`, `memory_limit` and seven `mod.rs` helpers between them — and the seven binaries that stay
+read the same files from outside the crate. An in-crate `#[cfg(test)]` module cannot see
+`tests/common/`, and duplicating a helper on both sides of the boundary guarantees the drift.
+
+```toml
+[features]
+test-support = []
+[dev-dependencies]
+peacockdb-core = { path = ".", features = ["test-support"] }
+```
+
+The self dev-dependency turns the feature on for `cargo test` and leaves it off for `cargo build`,
+so no CI step passes a flag and a plain build cannot see the module. `src/test_support/` is then
+the one place a helper with two audiences lives: `crate::test_support::…` from inside,
+`peacockdb_core::test_support::…` from the binaries.
+
+**A helper moves when a moving target needs it, and not before.** `golden_text.rs`, `registry.rs`,
+`mode.rs`, `memory_limit.rs` and the shared `mod.rs` helpers move; `corpus_golden.rs`,
+`result_text.rs` and `cost_model.rs` are read only by binaries that stay, so they stay too, and
+`corpus.rs`/`corpus_gpu.rs` are [`test-support.md`](test-support.md)'s whole subject.
 
 **It does not pay for the injector.** `test_gpu_executors` (46 items) constructs `GpuAccumulator`,
 `GpuEmitter` and `GpuJoin` and calls their methods; `test_cpu_executors` (24) does the same on the
@@ -161,6 +179,7 @@ against. The rung column is the ladder above: `rust` needs nothing, `ffi` needs 
 | `executor/cpu_backend/gpu_tests/` | `test_murmur_conformance` | **gpu** | 10 |
 | `src/tests/` | `test_cpu_end_to_end` | rust | 26 |
 | `src/tests/` | `common/{injection,rebuild,join_fixture}.rs` | — | 0 |
+| `src/test_support/` | `common/{golden_text,registry,mode,memory_limit}.rs` and the shared `mod.rs` helpers | — | 0 |
 | | | | **139** |
 
 `test_gpu_executors` is already a directory of five modules — `accumulate`, `backend`, `contract`,
@@ -209,11 +228,13 @@ Moving eleven targets in-crate walks straight into it: they lose `testdata_root(
 the seven that do it the unportable way, and the device ones then run on shad-gpu **from a binary
 built on another host**, which is the case the variable exists for.
 
-So this task closes that residual. `src/tests/testdata.rs` holds one `#[cfg(test)]` helper
-honouring `PEACOCK_TESTDATA_DIR` with the same compile-time fallback, reached as
-`crate::tests::testdata::root()`; the seven existing sites and everything that moves both call it,
-and #49 closes with the sweep. Two spellings of one rule is what that ticket is about, so leaving
-the seven behind would re-file it one layer down.
+So this task closes that residual, and `test_support` is where the root belongs rather than
+`src/tests/` — the moved targets, the crate's own unit tests and the seven binaries that stay all
+need it, which is the same two-audience argument the feature exists for. `test_support/testdata.rs`
+honours `PEACOCK_TESTDATA_DIR` with the same compile-time fallback; `tests/common/mod.rs`'s
+`testdata_root()` becomes a call to it rather than a second implementation, the seven `src` sites
+call it too, and #49 closes with the sweep. Two spellings of one rule is what that ticket is
+about, so any second copy re-files it one layer down.
 
 ### The exemption expires here, one slice at a time
 
@@ -459,7 +480,8 @@ of them back down.
   the rules, this one records what this task settled — the exemption register empty, `pub mod` down
   to six, and eight items still `pub` because a test crate forces them, which
   [`test-support.md`](test-support.md) then removes along with the rest of the raw count. The
-  `test_support` signature rule belongs there too, with the feature it governs.
+  `test_support` signature rule belongs to [`test-support.md`](test-support.md), which is where
+  the corpus facade makes it load-bearing; the feature itself arrives here.
 - **`architecture.md`** needs the Execution section's driver and accountant paths, the wire-format
   section's writer paths (now `wire/`), and the Rehash section's `spark_partitioning.rs` pointer,
   which moves into `executor/cpu_backend/` and whose conformance gate moves beside it.
@@ -580,7 +602,8 @@ raw bare-`pub` count is whatever task 4 inherits and is not this task's claim. N
 production file contains a `#[test]`; no `#[cfg(test)]` sits anywhere but on a test-module
 declaration; every test module declares the lowest rung it needs and is named for it, with name
 and gate implying each other at both rungs above the floor; every test-only path in `src/` carries `test` in its name;
-`crate::tests::testdata::root()` is the only testdata root in the crate and
-[#49](../tickets.md#t49) closes with it; `test_ci_coverage` is near 300 lines and asserts one CI
+`crate::test_support::testdata::root()` is the only testdata root anywhere, called by the crate's
+unit tests, the moved targets and `tests/common/mod.rs` alike, and [#49](../tickets.md#t49) closes
+with it; a plain `cargo build` cannot name `test_support`; `test_ci_coverage` is near 300 lines and asserts one CI
 line per rung plus the CLI build; `build-test.md`'s two tables add to the headline; and the leaf-name
 set is the one the baselines recorded — this task moves tests, it does not delete any.
