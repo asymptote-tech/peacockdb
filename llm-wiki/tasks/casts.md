@@ -1,5 +1,7 @@
 # Export types: predicted at plan time, carried on the wire
 
+Kind: production
+
 Two device cells fail on the same class of thing — the device hands back a column whose Arrow type
 is not the one the plan declared — and each is currently discovered at the boundary rather than
 predicted before it. This task writes the prediction down where it can be checked, and closes both.
