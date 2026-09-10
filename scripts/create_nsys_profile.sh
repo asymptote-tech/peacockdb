@@ -81,16 +81,12 @@ ssh "$REMOTE" test -x "$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET" \
 
 # One pass on the host: capture, export, and say what came of it.
 #
-# `env` between nsys and the binary, not LD_LIBRARY_PATH in front of nsys: the path
-# carries glibc-2.35, and nsys is a host binary that would load it under the host's own
-# loader and die. env inherits an untouched environment and sets it for the child alone.
+# `env` between nsys and the binary, never LD_LIBRARY_PATH in front of it: the path carries
+# glibc-2.35, and nsys is a host binary that would load it under the host's own loader and
+# die. --test-threads=1 is not optional — cuDF/RMM share one pool and one default stream.
 #
-# --test-threads=1 is not optional: cuDF/RMM share one process-wide pool and one default
-# stream, so concurrent cases would measure each other's contention.
-#
-# Exported on the machine that captured: `nsys export` needs the same nsys, and only the
-# export is small enough to want on the wire. Exported even after a failure — a capture of
-# the executions that did happen is the only copy of them.
+# Exported on the machine that captured, since `nsys export` needs the same nsys, and even
+# after a failure: a capture of the executions that did happen is the only copy of them.
 remote_pass() {                   # remote_pass <label> <capture rel> <record rel|""> <nsys flags…>
   local label=$1 capture_rel=$2 record_rel=$3; shift 3
   local flags="$*"

@@ -305,13 +305,10 @@ int peacock_executor_collect_node_regions(peacock_executor_t* executor,
     return 1;
   }
   try {
-    // Copied whole rather than field by field, and the asserts are what make that safe.
-    //
-    // It was field by field, under a size assert. That assert cannot see the failure it
-    // looks like it covers: a field added to BOTH structs keeps the sizes equal, and the
-    // copy that forgot it compiles and reports zeros. That is exactly what `rows` did.
-    // A whole-struct copy has no line to forget; the per-field offsets below are what
-    // hold the two definitions in the same layout, which is the only thing it needs.
+    // Copied whole, because a field-by-field copy has a line to forget and a size assert
+    // cannot see that: a field added to BOTH structs keeps the sizes equal, and the copy
+    // that skipped it reports zeros. The per-field offsets are what make the whole-struct
+    // copy safe — they hold the two definitions in one layout.
     static_assert(sizeof(PeacockNodeRegion) == sizeof(peacock::NodeRegion));
     PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, seq);
     PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, partition);

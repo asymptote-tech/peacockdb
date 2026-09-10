@@ -317,10 +317,9 @@ def main():
     device = DeviceWork(conn)
 
     # One bucket per (region identity, call name, depth), holding a list over the
-    # executions in the capture. A list and not a running total: executions differ by
-    # more than noise — 7% at the median and 36% at the worst, measured — and a mean
-    # hides which of them the number came from. (It used to say the warm-up was in here
-    # too; it is not, since the harness turns ranges on after it.)
+    # capture's executions. A list and not a running total: executions differ by more
+    # than noise — 7% at the median, 36% at the worst — and a mean hides which of them
+    # a number came from.
     per_exec = collections.defaultdict(lambda: collections.defaultdict(
         lambda: [0, 0, 0]))  # exec key -> (call, depth) -> [count, host_ns, device_ns]
     region_span = collections.defaultdict(list)
@@ -330,11 +329,10 @@ def main():
 
     for case, seq, call, kind, part, r_start, r_end, tid in regs:
         ident = (seq, kind, part)
-        # `run` counts occurrences across the capture; `call` is the index within one
-        # execution, which is what a record row carries. They are not the same number and
-        # must not be conflated: a benchmark opens a session per run, so the C++ counter
-        # restarts at every one of them and a seq driven once per run is call 0 ten times
-        # over. What the two together say is how many executions the capture holds.
+        # `run` counts occurrences across the capture; `call` is the index within ONE
+        # execution, which is what a record row carries. A session opens per run, so the
+        # C++ counter restarts each time and a seq driven once per run is call 0 ten
+        # times over. Together they say how many executions the capture holds.
         run = seen[ident]
         seen[ident] += 1
         by_call[ident].add(call)

@@ -434,11 +434,9 @@ def plot_icicle(rows, out_dir):
         for ax, (nodes, note) in zip(axes[:, 0], panels):
             total, legend = draw_icicle(ax, nodes)
             ax.set_title(f"{note} — {total}us", fontsize=8)
-            # Every frame named, including the ones too narrow to hold their own label.
-            # An icicle whose small frames are anonymous coloured slivers tells the reader
-            # that something is there and refuses to say what, which is worse than a plain
-            # table: on q19 only three of nine nodes clear the width a label needs, and
-            # the six that do not are exactly the ones a reader cannot guess.
+            # Every frame named, including ones too narrow for their own label: an
+            # anonymous sliver says something is there and refuses to say what. On q19
+            # only three of nine nodes clear the width a label needs.
             ax.legend(handles=legend, loc="center left", bbox_to_anchor=(1.005, 0.5),
                       fontsize=6.5, frameon=False, handlelength=1.1, borderaxespad=0)
         axes[-1, 0].set_xlabel(
@@ -538,20 +536,10 @@ def plot_hbm(hbm_rows, rows, out_dir):
     if not hbm_rows:
         return []
 
-    # Keyed by the CALL, deliberately WITHOUT `run_index`.
-    #
-    # The two files are different runs, so execution 3 of one and execution 3 of the
-    # other are not the same event and pairing them would be arbitrary. What is joined
-    # here does not depend on which execution it came from: `out_bytes` is a property of
-    # the call -- same plan, same data, same output -- and the check below is what makes
-    # that a fact rather than an assumption. Measured on this record: constant across all
-    # ten executions of all 42 calls, while `device_us` moves 7% at the median and 36% at
-    # the worst.
-    #
-    # So NOTHING here crosses the two runs on a per-execution basis. The bandwidth panel
-    # divides an hbm row's bytes by that same row's `device_busy_us`, both from the
-    # capture; the scatter puts the capture's bytes against a constant of the call. A
-    # microsecond from the clean run never meets a byte from the captured one.
+    # Keyed by the CALL, deliberately WITHOUT `run_index`: the two files are different
+    # runs, so execution 3 of each is not the same event. Only a per-call CONSTANT may
+    # cross — `out_bytes`, which the check below proves constant here while `device_us`
+    # moves 7% at the median. No microsecond of one run ever meets a byte of the other.
     key = lambda r: tuple(r[c] for c in CALL)
     logical = {}
     for r in rows:

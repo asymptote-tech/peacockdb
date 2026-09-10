@@ -1,18 +1,13 @@
 //! The benchmark record's text: the plan tree, and what each node's calls cost.
 //!
-//! A sibling of [`run_text`](super::run_text) rather than a mode of it. The two answer
-//! different questions of the same tree — what it produced, what it took — and they are
-//! written by different runs into different files. What they share is the node line, and
-//! that is shared by calling one function rather than by one renderer growing a flag.
+//! A sibling of [`run_text`](super::run_text), not a mode of it: the two answer different
+//! questions of one tree and are written by different runs into different files. They
+//! share the node line by calling one function, not by a renderer growing a flag.
 //!
-//! Rows and bytes are deliberately absent. They are a correctness fact, asserted in the
-//! `.cpu.txt` golden and carried per call in `records.tsv`; repeating them here would give
-//! one fact two homes and make this file diff on a data change that has nothing to do with
-//! time.
+//! Rows and bytes are deliberately absent — a correctness fact carried elsewhere, and
+//! repeating it here would make this file diff on a data change unrelated to time.
 //!
-//! Its tests are the driver's, in `driver/tests/render.rs`, for the reason `run_text`'s
-//! are: rendering takes a run, and the mock backend that makes a deterministic one is
-//! there.
+//! Its tests are the driver's: rendering takes a run, and the mock backend is there.
 
 use std::fmt::Write as _;
 

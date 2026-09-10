@@ -84,19 +84,16 @@ bool nvtx_ranges();
 void push_harness_range(const char* name);
 void pop_harness_range();
 
-/// Mark where the current timed region begins touching the device — after the decode,
-/// the registry lookups and any `ExprContext`/AST construction, immediately before
-/// issuing device work.
+/// Mark where the current timed region begins touching the device — after the decode and
+/// the registry lookups, immediately before issuing device work.
 ///
-/// First call in a region wins, the rest are a predictable branch: put the call at
-/// every point that could be first and let idempotence sort out which one was.
+/// First call in a region wins: put it at every point that could be first and let
+/// idempotence sort out which one was.
 ///
-/// Placement is the point of the split, not a detail. `cudaEventRecord` on an idle
-/// stream timestamps when the stream REACHES the event, so a mark at the top of a node
-/// bills the host prologue as device work — exactly what `host_setup_us` isolates.
-///
-/// No-op when timing is off or no region is open (the recursive `execute_plan` path),
-/// so operators can call it unconditionally.
+/// Placement is the point of the split. `cudaEventRecord` on an idle stream timestamps
+/// when the stream REACHES it, so a mark at the top of a node bills the host prologue as
+/// device work — exactly what `host_setup_us` isolates. No-op when timing is off or no
+/// region is open, so operators can call it unconditionally.
 void mark_device_start();
 
 /// One collected region: which node output partition it belongs to, and what the
@@ -127,15 +124,9 @@ struct NodeRegion {
   /// The same total Rust derives with `logical_size_from_schema`, recomputed from cuDF
   /// types.
   ///
-  /// COMPARED against Rust's wherever Rust has one — that comparison is what keeps two
-  /// implementations of one formula from drifting, and it is why this is computed at all.
-  /// CONSUMED where Rust has none: a call in the middle of a node's chain hands the raw
-  /// handle on, so no batch is built from it and nothing on that side priced it. The
-  /// calibration record's `out_bytes` is one row per CALL, middle calls included, and this
-  /// is the only figure that exists for them.
-  ///
-  /// The rule is therefore "compare where both have it, consume where only this does" —
-  /// not "never consume", which was the rule while every row was a node rather than a call.
+  /// The only figure for a call in the middle of a node's chain: it hands its raw handle
+  /// on, so no batch is built from it and nothing in Rust ever priced it. The record's
+  /// `out_bytes` is one row per CALL, middle calls included.
   uint64_t logical_bytes = 0;
 };
 
@@ -151,25 +142,15 @@ uint64_t varlen_content_bytes(const cudf::table_view& table);
 std::pair<cudf::size_type, cudf::size_type> clamp_row_range(uint64_t offset, uint64_t length,
                                                             cudf::size_type num_rows);
 /// A table's `output_bytes` under the RUST byte formula
-/// (`peacockdb-core/src/memory.rs::logical_size_from_schema`), given its already
-/// measured var-length content total.
+/// (`peacockdb-core/src/memory.rs::logical_size_from_schema`), given its already measured
+/// var-length content total.
 ///
-/// A second implementation of a rule the codebase otherwise keeps in one place, so the
-/// reason has to be stated: a call in the middle of a node's chain hands its raw handle
-/// on, so nothing in Rust ever prices its output. This is the only figure for it.
-///
-/// Models the RUST formula, not cuDF's physical layout, and the two differ: BOOL8 is a
-/// byte per row on the device and a bit per row here, and the validity bitmap is charged
-/// to every column whether nullable or not.
-///
-/// Unhandled type ids throw rather than contributing zero, matching the Rust-side panic,
-/// so a newly supported type breaks both ends loudly instead of silently disagreeing.
-///
-/// One ambiguity is irreducible: `fb_to_type_id` (expr.cpp) collapses `Utf8`,
-/// `LargeUtf8` and `Utf8View` onto one cuDF STRING, which Rust widths at 4-byte offsets
-/// for the first and third and 8 for the second, and nothing on the device recovers
-/// which it was. This assumes 4, what the corpus produces; a `LargeUtf8` column is
-/// under-counted here, silently, and nothing on this side can notice.
+/// A second implementation of a rule kept in one place elsewhere, so the reason is stated:
+/// a call in the middle of a node's chain hands its handle on, and nothing in Rust prices
+/// its output. Models that formula, not cuDF's layout — BOOL8 is a bit per row here, and
+/// the bitmap is charged to every column. Unhandled types throw rather than contributing
+/// zero. One ambiguity is irreducible: `fb_to_type_id` collapses the three Utf8 kinds onto
+/// one STRING, so a `LargeUtf8` column is under-counted here and nothing can notice.
 uint64_t logical_size_from_table(const cudf::table_view& table, uint64_t varlen_content);
 
 /// Everything a finished output partition is worth reporting, before the split between
@@ -232,19 +213,13 @@ class NodeSession {
   /// Drain every event pair recorded since the last call, one entry per region in
   /// execution order. Empty unless the mode was `NodeTiming::Events`.
   ///
-  /// Separate from `execute_node` because the answer does not exist when a node returns
-  /// — the point of events — and separate from session destruction because that
-  /// destroys the events, so a caller reading only at `end_plan` reads nothing. Call it
-  /// after the root `materialize`.
+  /// Separate from `execute_node` because the answer does not exist when a node returns,
+  /// and from session destruction because that destroys the events. Call it after the root
+  /// `materialize`. Collected regions are released, so a second call does not
+  /// double-report.
   ///
-  /// Collected regions are released, so a second call does not double-report and a long
-  /// session does not accumulate events forever.
-  ///
-  /// Incomplete pairs are dropped, not reported as zero: a node that threw leaves a
-  /// start and no stop, and `cudaEventElapsedTime` on such a pair fails with
-  /// `cudaErrorInvalidResourceHandle`, taking the whole collection down with it. A
-  /// region that never touched the device recorded neither and is equally absent; its
-  /// host halves are still in `NodeStats`.
+  /// Incomplete pairs are dropped, not zeroed: a node that threw leaves a start and no
+  /// stop, and `cudaEventElapsedTime` on such a pair fails and takes the collection down.
   std::vector<NodeRegion> collect_node_regions();
 
   /// Borrow the resident table behind `handle` (for materialization at root).

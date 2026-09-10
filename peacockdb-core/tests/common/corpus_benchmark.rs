@@ -75,9 +75,8 @@ pub fn declared_for(dataset: &str, sf: &str, mode: &str) -> Vec<(String, Option<
 /// `testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt` — one file per
 /// (dataset, mode), holding a section per query it timed.
 ///
-/// One file rather than one per query because a mode's queries are read together: what a
-/// reader compares is this mode against that one, and a directory of one-query files makes
-/// that a directory listing rather than a diff.
+/// One file rather than one per query because a mode's queries are read together, and a
+/// directory of one-query files makes that a listing rather than a diff.
 /// Set ⇒ a case measures and records but leaves the `.benchmark.txt` tree alone.
 ///
 /// For the HBM pass, whose times are distorted by the counters it exists to read. Named
@@ -110,11 +109,9 @@ fn file_stem_of(mode: &str) -> &str {
 /// the critical section and publishes by rename, and those three are the whole of what
 /// makes several cases writing one path safe.
 ///
-/// Always `Sections`, never `Whole`. This file is written rather than asserted — what a
-/// benchmark produces is a measurement, and correctness belongs to `corpus_query!` — and
-/// the binary can be run under a name filter at any moment with nothing in the run to say
-/// so. Pruning what this run did not produce would delete a measurement nobody asked to
-/// lose; clearing a stale section is a deliberate act, not a side effect of a filtered run.
+/// Always `Sections`, never `Whole`: the binary can be run under a name filter at any
+/// moment with nothing in the run to say so, and pruning what this run did not produce
+/// would delete a measurement nobody asked to lose.
 pub fn write_section(dataset: &str, sf: &str, mode: &str, query: &str, body: &str) {
     // The one run whose tree is knowingly wrong: an HBM pass measures under GPU memory
     // counters, which cost the query ~7% and a heavy scan ~11%. It wants the traffic and
@@ -208,11 +205,9 @@ struct Run {
 /// case-list line and a call site read alike; `mode_named` resolves it and panics naming
 /// the five when it is not one of them.
 ///
-/// Planning happens once, outside the runs: `plan_at` registers the dataset's tables,
-/// which reads every file's parquet metadata, and repeating that would time the catalog
-/// rather than the query. So `total_us` here is EXECUTION only — narrower than the legacy
-/// record's, which timed parse and plan too. What the written record carries is decided
-/// with its format, not here.
+/// Planning happens once, outside the runs: `plan_at` reads every file's parquet
+/// metadata, and repeating that would time the catalog rather than the query. So
+/// `total_us` here is EXECUTION only.
 pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
     const _: () = assert!(BENCH_MEASURED_RUNS >= 2, "a second minimum needs >= 2 runs");
 
@@ -228,31 +223,24 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
 
     let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
 
-    // OFF across the warm-up, and set here rather than assumed: the switch is
-    // process-global and this binary runs its cases in one process, so a case that only
-    // ever turned it ON would have every LATER case warm up under the previous one's
-    // setting — ranges emitted with no case range open, which is a call belonging to no
+    // OFF across the warm-up, and SET rather than assumed: the switch is process-global
+    // and this binary runs every case in one process, so a case that only turned it on
+    // would leave later warm-ups ranging with no case range open — calls belonging to no
     // query. The capture's containment check catches exactly that, and did.
     set_nvtx_ranges(false);
     for _ in 0..BENCH_WARMUP_RUNS {
         run_once(tree.as_ref(), &what);
     }
-    // After the warm-up, not before it. Ranges are for a capture and cost device work of
-    // their own, so they stay behind the variable the capture sets — and the warm-up is
-    // not written to the record, so ranging it would leave a capture with one more
-    // execution than the file it is joined against. Deriving that off in the reader
-    // means teaching it a Rust constant.
+    // After the warm-up, not before: the warm-up is not written to the record, so ranging
+    // it would leave the capture one execution longer than the file it joins against —
+    // and the reader would have to know a Rust constant to allow for it.
     if std::env::var_os("PEACOCK_NVTX").is_some() {
         set_nvtx_ranges(true);
     }
-    // Around the measured runs, naming the case: a capture holding several of them cannot
-    // say from a node range's name which query it was in — the name carries `seq`, and seq
-    // numbering restarts with every plan, so q6 and q19 both open with `0.0 CudfScan`.
-    // Containment answers it, and `nsys_hbm.py` reads the case off this rather than being
-    // told it on a command line, which is a thing a human can get wrong in silence.
-    //
-    // Held to the end of the function: dropping it here would close the range before the
-    // runs it is meant to contain.
+    // Around the measured runs, naming the case. A node range carries `seq`, and seq
+    // numbering restarts per plan — q6 and q19 both open with `0.0 CudfScan` — so only
+    // containment says which query a call was in. Held to the end of the function:
+    // dropping it here would close the range before the runs it is meant to contain.
     let _case = nvtx_range(&format!("{dataset}.sf{sf} {query} {}", mode.name));
 
     let mut runs = Vec::with_capacity(BENCH_MEASURED_RUNS);
@@ -271,13 +259,10 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
     }
 
     let times: Vec<u64> = runs.iter().map(|run| run.total_us).collect();
-    // Before the pick, and every run rather than the chosen one: a spread of ten is what
-    // separates a call's cost from an accident of scheduling. The file beside it reports
-    // one run instead — the two answer different questions.
-    //
-    // In the order they ran, which `second_smallest` is about to destroy: a repeat of
-    // `call_index` 0 is where one execution's rows end, and sorting first would interleave
-    // executions with no way back.
+    // Every run, not the chosen one: a spread of ten separates a call's cost from an
+    // accident of scheduling, while the file beside it reports one run. And in the order
+    // they ran, which `second_smallest` is about to destroy — a repeat of `call_index` 0
+    // is where one execution's rows end, and sorting first interleaves them for good.
     let nodes = nodes_as_recorded(tree.as_ref()).unwrap_or_else(|e| panic!("{what}: {e}"));
     let allocator = install_rmm_pool().to_string();
     let meta = RunMeta {
@@ -372,13 +357,10 @@ fn second_smallest(mut runs: Vec<Run>) -> Run {
 ///
 /// The session is per run rather than per case: `attach_recipes` and `begin_plan` are what
 /// a query costs on this side of the FFI, and holding one across runs would time the
-/// second differently from the first. Executor construction rides along and is a plain
-/// `new` of a small struct — the thing the legacy harness kept outside its loop was a
-/// DataFusion `SessionContext`, which here is outside it already.
+/// second differently from the first.
 ///
 /// No budget, so the accountant records without ever tripping — a benchmark that refuses
-/// to finish reports nothing, and the mode's budget has already done its work at plan
-/// time, where it sized the batches.
+/// to finish reports nothing, and the mode's budget already sized the batches at plan time.
 fn run_once(tree: &dyn GpuNode, what: &str) -> (RunReport, Vec<Region>) {
     // In the measured path rather than beside the install, which is the whole point: the
     // install was once lost with the file that held it, and a check standing next to what

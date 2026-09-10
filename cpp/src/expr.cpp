@@ -827,11 +827,9 @@ static const char* expr_kind_name(fb::ExprNode k) {
 
 std::unique_ptr<cudf::column> build_column(
     const fb::Expr* expr, cudf::table_view const& table) {
-  // Every arm below materializes a column on the device, so this is the earliest
-  // honest device mark for expression evaluation — and the one that matters most:
-  // operators that materialize keys inside their decode loop (sort, aggregate)
-  // reach the device here, several frames below their own first cuDF call.
-  // Idempotent, so the recursive descent marks once for the whole tree.
+  // Every arm below materializes on the device, and sort and aggregate reach it HERE —
+  // several frames below their own first cuDF call, inside their decode loop. Idempotent,
+  // so the recursive descent marks once for the tree.
   mark_device_start();
   if (debug_enabled()) {
     PCK_TRACE("  build_column kind=%s rows=%d cols=%d",

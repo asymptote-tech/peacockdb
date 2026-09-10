@@ -56,20 +56,14 @@ impl std::fmt::Display for RmmPool {
 
 /// Install the pooled device allocator and report what happened.
 ///
-/// Idempotent, and the idempotency lives in C++ (`peacock::install_rmm_pool`) rather
-/// than behind a `OnceLock` here, so the process has exactly one guard no matter which
-/// side calls first — the gtest binaries call it from `main()`, this path calls it per
-/// case. A second call rebuilding the pool would drop a resource that live allocations
-/// still point into; the benchmark target, 127 `#[test]` functions sharing one process,
-/// is precisely the shape that would find that.
+/// Idempotent, and the guard lives in C++ rather than behind a `OnceLock` here, so the
+/// process has one no matter which side calls first. A second call rebuilding the pool
+/// would drop a resource live allocations still point into.
 ///
-/// Must run before any GPU work. Cheap to call again afterwards — it returns the first
-/// call's outcome — which is why the caller can just ask for the label at write time.
-///
-/// The engine does not install this for itself: a shipping query still allocates the
-/// expensive way, and `gpu_memory_limit` is still accepted and ignored. Changing that is
-/// `llm-wiki/tickets.md` #148, and it is a decision about the product rather than about
-/// measurement, which is why this entry point exists in the meantime.
+/// Must run before any GPU work; cheap afterwards, since it returns the first call's
+/// outcome. The engine does not install this for itself — a shipping query still allocates
+/// the expensive way, which is #148, a decision about the product and not about
+/// measurement.
 pub fn install_rmm_pool() -> RmmPool {
     let mut info = PeacockRmmPoolInfo::default();
     // Non-zero only for a null pointer, which cannot happen here.
@@ -139,16 +133,12 @@ pub fn set_nvtx_ranges(on: bool) {
 /// A named NVTX range around whatever the caller is about to do, closed when the returned
 /// value drops.
 ///
-/// For a benchmark harness naming the case it runs. Node ranges carry `<seq>.<call_index>`
-/// and seq numbering restarts with every plan, so a capture of several queries cannot say
-/// from those names which query a call was in; this range answers it by containment, and
-/// the reader stops needing to be told the query on its command line.
+/// For a benchmark harness naming the case it runs: node ranges carry `<seq>.<call_index>`
+/// and seq numbering restarts per plan, so only containment says which query a call was in.
 ///
-/// RAII rather than a pop the caller must remember: a case that panics mid-run would
-/// otherwise leave the range open and swallow every case after it into the wrong query.
-///
-/// A no-op while ranges are off, and nothing in the engine calls it — a shipping query
-/// pays nothing here because it never arrives.
+/// RAII rather than a pop the caller must remember — a case that panics mid-run would
+/// leave the range open and swallow every later case into the wrong query. A no-op while
+/// ranges are off, and nothing in the engine calls it.
 #[must_use = "the range closes when this is dropped, so dropping it at once ranges nothing"]
 pub fn nvtx_range(name: &str) -> NvtxRange {
     // Interior NUL is not an error worth a Result: the name is built by the harness from

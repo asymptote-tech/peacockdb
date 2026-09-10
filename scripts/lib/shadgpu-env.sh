@@ -45,20 +45,13 @@ REMOTE_REPO=/home/info/peacockdb
 
 # One TCP connection for the whole invocation, shared by every ssh and rsync below.
 #
-# Not a speed-up. A phase makes a dozen separate connections -- push, patch, launch,
-# state polls, four pulls -- and sshd caps how many may be MID-HANDSHAKE at once
-# (MaxStartups). Past that it resets new ones before authentication, which surfaces as
-#
-#     kex_exchange_identification: read: Connection reset by peer
-#     Connection reset by <host> port 22
-#
-# and takes the whole phase down with rc=255 -- a benchmark run losing its measurement
-# to a limit we walked into ourselves. Observed on shad-gpu at roughly one connection
-# in two. With a master, the first connection pays the handshake and the rest ride it.
-#
-# The socket lives in the run's own directory and dies with it: %C is a hash of
-# host/port/user, so two checkouts against one host do not share a socket, and
-# ControlPersist=60 keeps it just past the gap between phases of one invocation.
+# Not a speed-up. A phase opens a dozen connections and sshd caps how many may be
+# MID-HANDSHAKE at once (MaxStartups); past that it resets them before authentication —
+# "kex_exchange_identification: read: Connection reset by peer" — and the phase dies with
+# rc=255, losing a measurement to a limit we walked into ourselves. Roughly one connection
+# in two here. The socket lives in the run's own directory and dies with it; %C hashes
+# host/port/user, so two checkouts do not share one, and ControlPersist=60 keeps it just
+# past the gap between phases.
 SSH_CONTROL_DIR="${SSH_CONTROL_DIR:-${TMPDIR:-/tmp}/peacock-ssh-$(id -u)}"
 mkdir -p "$SSH_CONTROL_DIR"
 chmod 700 "$SSH_CONTROL_DIR"
@@ -78,11 +71,10 @@ resilient_rsync() {
   while :; do
     rsync -P --partial --inplace --timeout=90 -e "ssh $SSH_OPTS" "$@" && return 0
     rc=$?
-    # 23 is "some files were not transferred", and on this path it is almost always a
-    # source file that is not there — most often a tracked file deleted from the working
-    # tree but not staged, which `git ls-files --cached` still lists. Retrying cannot
-    # help: the file will not be there on the hundredth attempt either, and the loop
-    # spent eight minutes of backoff before saying so. Once, then out, naming the cause.
+    # 23 is "some files were not transferred" — here almost always a tracked file deleted
+    # but not staged, which `git ls-files --cached` still lists. Retrying cannot help: it
+    # will not be there on the hundredth attempt either, and the loop spends eight minutes
+    # of backoff before saying so. Once, then out, naming the cause.
     if [ "$rc" -eq 23 ]; then
       echo "rsync: rc=23, some sources were not transferred — see the link_stat lines" >&2
       echo "       above. A tracked file deleted but not staged is still in the file" >&2
@@ -110,14 +102,10 @@ stage_cargo_test_binary() {
   local target=$1 staging=$2
   shift 2
   local exec_path
-  # `set -o pipefail` in the caller is what makes a compile failure land here as a
-  # build failure rather than as an empty result reported as a missing binary.
-  #
-  # The filter forwards compiler messages to stderr rather than dropping them. Under
-  # --message-format=json cargo puts its DIAGNOSTICS on stdout as json too, so a filter
-  # that keeps only the artifact line eats every error and warning -- and the failure
-  # then read "building X failed (cargo output above)" with nothing above it. Forwarded
-  # as they stream, so a long build shows its first error when it happens.
+  # `set -o pipefail` in the caller is what makes a compile failure land here as a build
+  # failure rather than an empty result read as a missing binary. The filter forwards
+  # compiler messages to stderr as they stream: under --message-format=json cargo puts
+  # DIAGNOSTICS on stdout too, so keeping only the artifact line eats every error.
   if ! exec_path=$(cargo test --no-run -p peacockdb-core --test "$target" \
       --message-format=json "$@" \
     | python3 -c '

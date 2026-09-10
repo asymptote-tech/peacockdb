@@ -4,12 +4,9 @@
 //! and what went into it, the device's regions say what it cost and what came back. Neither
 //! half is a row on its own.
 //!
-//! TSV, and the conditions of the run — timing mode, build profile, allocator — are in
-//! the file's `#` heading rather than in every row: they are constant across a run, and
-//! the heading is free text where the allocator's description keeps its commas.
-//!
-//! `hbm_bytes` is deliberately absent: it comes from Nsight and is joined in later on the
-//! same tuple.
+//! TSV, with the run's conditions — timing mode, build profile, allocator — in the `#`
+//! heading rather than in every row. `hbm_bytes` is deliberately absent: it comes from
+//! Nsight and is joined in later on the same tuple.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, Write};
@@ -26,28 +23,12 @@ pub const RECORD_PATH_ENV: &str = "PEACOCK_RECORD_PATH";
 /// One row per cuDF call, keyed by `(dataset, sf, query, plan node, recipe step, call)`.
 ///
 /// Six coordinates because that is what identifies a call: one plan node publishes several
-/// recipe steps, and a batched run drives each of them once per batch per lane. Fewer, and
-/// a row cannot say what it measured.
+/// recipe steps, and a batched run drives each once per batch per lane.
 ///
-/// `node_seq` is the POST-order position, which is what recipes are addressed by and what
-/// `recipe_seq` lives in the same space as. The driver numbers nodes pre-order — its
-/// `emitted[0]` is the root — so a writer walking the report has to translate, and a writer
-/// that forgets produces two plausible numbers from two different orders. The only symptom
-/// is a join against `--- recipes ---` that quietly matches the wrong node.
-///
-/// `lane` is the DRIVING lane: the one the node was called on, not the one it emits into.
-/// The two differ at a scatter and at a cross-lane accumulator, and it is the driving one
-/// that a call belongs to.
-///
-/// `run_index` is which of the case's executions the row came from — the seventh
-/// coordinate, and the one that makes a row unique. It is derivable, and written anyway:
-/// a repeat of `call_index` 0 marks where an execution ended, so every consumer could
-/// count. `hbm.tsv` is such a consumer, and two implementations of one counting rule are
-/// two chances to disagree about which execution a row belongs to.
-///
-/// The cost CATEGORY is deliberately not among them: it is a lookup in `cost_model.conf`,
-/// which changes on its own, and a column would freeze the taxonomy as it stood when the
-/// rows were written.
+/// `node_seq` is the POST-order position, the space recipes are addressed in; the driver
+/// numbers pre-order, so a writer that forgets to translate produces a plausible number
+/// from the wrong order. `lane` is the DRIVING lane. `run_index` is the seventh: derivable
+/// from where `call_index` restarts, written anyway, since two counting rules can disagree.
 pub const COLUMNS: &[&str] = &[
     "dataset",
     "sf",
@@ -177,21 +158,14 @@ pub fn declared_steps(recipes: &RecipePlan) -> BTreeMap<usize, BTreeSet<Seq>> {
 
 /// One execution's rows against what its plan declares.
 ///
-/// Two statements, and the row count follows from them rather than being counted: every
-/// row names a step its own node publishes, and the calls to a step are numbered `0..n`
-/// with no gap. A run's rows are then exactly Σ over the declared steps of the calls made
-/// to each — a total the plan predicts, not one the producer reports about itself.
+/// Two statements, and the row count follows rather than being counted: every row names a
+/// step its own node publishes, and a step's calls are numbered `0..n` with no gap. The
+/// total is then what the PLAN predicts, not what the producer reports about itself.
 ///
-/// It exists for the two ways this record can be wrong while looking right. A `node_seq`
-/// taken from the driver's pre-order walk still names a node that exists and still pairs
-/// with a seq that exists; only the PAIR is wrong, and a join against `--- recipes ---`
-/// then matches the wrong line and says nothing. A dropped call leaves every remaining row
-/// well formed and the totals merely smaller.
-///
-/// Rows of ONE execution, which it also checks: a case appends ten, and their
-/// `call_index` sequences restart, so two executions handed here at once would read as a
-/// step called twice. `run_index` says which execution a row is, and a mixed batch is
-/// caught by name rather than surfacing as that.
+/// It exists for the two ways this record is wrong while looking right: a `node_seq` from
+/// the pre-order walk names a node that exists and pairs with a seq that exists — only the
+/// PAIR is wrong — and a dropped call leaves every remaining row well formed. Rows of ONE
+/// execution, checked too, since `call_index` restarts at each.
 pub fn rows_match_the_recipes(
     rows: &[String],
     declared: &BTreeMap<usize, BTreeSet<Seq>>,

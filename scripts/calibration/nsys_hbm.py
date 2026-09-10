@@ -286,12 +286,10 @@ def main():
 
     rows = read_record(args.record)
     cases = cases_in(ranges)
-    # Only the call ranges, each tagged with the case containing it. The `p<k>` ranges
-    # nested inside them are skipped rather than summed: they lie INSIDE the call range,
-    # so integrating both would count their bytes twice, and a partition is not a unit
-    # that can be priced on its own — the calls' shared prologue is charged to p0.
-    # Dropped here rather than filtered later, so every count and message below is about
-    # calls.
+    # Only the call ranges, each tagged with its containing case. The `p<k>` ranges nest
+    # INSIDE them, so integrating both would count the same bytes twice — and a partition
+    # cannot be priced alone anyway, its shared prologue being charged to p0. Dropped
+    # here, so every count and message below is about calls.
     skipped = sum(1 for _, _, t in ranges if nvtx_names.is_partition(t))
     calls = []
     for a, b, text in ranges:

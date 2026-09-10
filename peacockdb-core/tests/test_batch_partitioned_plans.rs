@@ -965,18 +965,13 @@ fn address_of(node: &dyn GpuNode) -> usize {
 /// A row's `node_seq` names the steps its `--- recipes ---` line prints.
 ///
 /// Not the numbering — that is
-/// [`the_index_and_the_recipes_number_the_same_nodes_the_same_way`], over a hundred plans
-/// and against a walk written out by hand. What is left after it, and what this adds, is
-/// the SEQ SET: the section says node N addresses `#3` and `#4`, the record writes rows
-/// pairing N with `#3` and `#4`, and the join a reader makes between the two files rests
-/// on the two statements being the same statement. Nothing else compares them.
+/// [`the_index_and_the_recipes_number_the_same_nodes_the_same_way`]. What this adds is the
+/// SEQ SET: the section says node N addresses `#3` and `#4`, the record pairs N with `#3`
+/// and `#4`, and a reader's join between the two files rests on those being one statement.
+/// Nothing else compares them.
 ///
-/// The line-to-node mapping is a precondition rather than the point, and is asserted as
-/// one: both walks are pre-order, so the names have to line up before the seqs mean
-/// anything.
-///
-/// Here rather than in the benchmark binary because a plan needs no device and this suite
-/// runs in CI, where the two readings are actually edited.
+/// The line-to-node mapping is a precondition, asserted as one. Here rather than in the
+/// benchmark binary because a plan needs no device, and this suite runs in CI.
 #[tokio::test]
 async fn a_rows_node_seq_names_the_steps_its_recipes_line_prints() {
     use peacockdb_core::batch_partitioned::driver::nodes_as_recorded;

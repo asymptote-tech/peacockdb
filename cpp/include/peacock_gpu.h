@@ -132,16 +132,12 @@ void peacock_set_nvtx_ranges(int on);
 /// Open a named NVTX range in peacockdb's domain that spans until
 /// peacock_nvtx_pop_range, and close it.
 ///
-/// For a BENCHMARK HARNESS to name the case it is about to run. A node range is named
-/// `<seq>.<call_index> <kind>` and seq numbering restarts with every plan, so a capture
-/// holding several queries cannot say from the names which one a call belongs to; a
-/// range around the case answers it by containment.
+/// For a BENCHMARK HARNESS to name the case it is about to run: a node range is named
+/// `<seq>.<call_index> <kind>` and seq numbering restarts per plan, so only containment
+/// says which query a call belongs to.
 ///
-/// No-ops while peacock_set_nvtx_ranges is off, and nothing in the engine calls either —
-/// a shipping query pays nothing for them because it never reaches them.
-///
+/// No-ops while peacock_set_nvtx_ranges is off, and nothing in the engine calls either.
 /// One level: pushing twice without popping replaces rather than nests.
-///
 /// @param name borrowed for the duration of the call; NVTX copies it.
 void peacock_nvtx_push_range(const char* name);
 void peacock_nvtx_pop_range(void);
@@ -176,22 +172,14 @@ typedef struct PeacockNodeRegion {
 
 /// Drain the device intervals recorded since the last call, in execution order.
 ///
-/// Only PEACOCK_NODE_TIMING_EVENTS produces any. Separate from
-/// peacock_executor_execute_node because the answer does not exist when a node returns
-/// — the point of events. Call it after the root peacock_result_from_handle and before
-/// peacock_executor_end_plan, which destroys the events.
-///
-/// What is returned is released, so two calls do not double-report. Regions with an
-/// incomplete pair (a node that threw, or one that never touched the device) are absent
-/// rather than zero; their host halves are still in PeacockNodeStats.
+/// Only PEACOCK_NODE_TIMING_EVENTS produces any. Call it after the root
+/// peacock_result_from_handle and before peacock_executor_end_plan, which destroys them.
+/// What is returned is released, so two calls do not double-report.
 ///
 /// @param out      Caller array of `cap` entries.
-/// @param out_count Number of regions RECORDED, not the number that fit — that is what
-///                  the caller must size against. Exceeding `cap` FAILS the call (the
-///                  first `cap` are still written) and the surplus is gone, the drain
-///                  having happened: a truncated collection is indistinguishable from a
-///                  device that did less work. Size `cap` as node count ×
-///                  target_partitions and it cannot arise.
+/// @param out_count Regions RECORDED, not the number that fit. Exceeding `cap` FAILS the
+///                  call and the surplus is gone, the drain having happened. Size it as
+///                  node count × target_partitions.
 /// @return 0 on success, non-zero on failure (see peacock_last_error).
 int peacock_executor_collect_node_regions(peacock_executor_t* executor,
                                         PeacockNodeRegion* out, uint64_t cap,

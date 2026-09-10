@@ -1,14 +1,11 @@
 //! Joining the two halves of a measurement: what this side recorded per call, and what the
 //! device reported per region.
 //!
-//! Neither half is a measurement on its own. The driver knows WHERE a call was — which
-//! node, which lane, which batch — and the device knows WHAT it cost and what it produced.
-//! They meet on `(seq, call_index)`, a key both sides count to independently and in the
-//! same order.
-//!
-//! What comes out is a [`Measured`] per call, and the module is named for that rather than
-//! for time: the output of a call in the middle of a node's chain is reported here and
-//! nowhere else, because nothing on this side ever built a batch from it.
+//! Neither half is a measurement alone: the driver knows WHERE a call was, the device
+//! knows WHAT it cost. They meet on `(seq, call_index)`, a key both count to independently
+//! and in the same order. What comes out is a [`Measured`] per call — named for the
+//! measurement and not for time, because the output of a call in the middle of a node's
+//! chain is reported here and nowhere else.
 
 use std::collections::HashMap;
 
@@ -19,15 +16,12 @@ use crate::batch_partitioned::recipe::Seq;
 /// cost. Its key is `(seq, call_index)`, which is what an `AbiCall` carries — the two
 /// records are halves of one row and meet there.
 ///
-/// Here rather than in `gpu_backend`, for the reason `AbiCalls` lives in `executor`: this
-/// is what a measurement IS, and the backend fills one in. It is not the ABI struct — that
-/// is `PeacockNodeRegion`, and `collect_regions` copies out of it field by field — so
-/// nothing about it needs the FFI, and a plain `rust-only` build that has no backend at
-/// all still has a driver that compiles.
+/// Here rather than in `gpu_backend` for the reason `AbiCalls` lives in `executor`: this
+/// is what a measurement IS, and the backend fills one in. Not the ABI struct, so a
+/// `rust-only` build with no backend still has a driver that compiles.
 ///
-/// One call can answer with several of these, one per output partition: a scatter's lanes,
-/// a scan driven off a batch map. The shared prologue is charged to partition 0, so a
-/// call's cost is the SUM over its partitions and never one of them.
+/// One call can answer with several, one per output partition. The shared prologue is
+/// charged to partition 0, so a call's cost is the SUM over its partitions.
 #[derive(Debug, Clone, Copy)]
 pub struct Region {
     pub seq: Seq,
@@ -96,11 +90,8 @@ impl Measured {
 /// Every call of a run, measured — at both granularities a reader needs.
 ///
 /// The device answers per `(seq, call_index)`, so **the split between the seqs of one
-/// driver call is measured**, not guessed. Keeping only a per-entry total would throw that
-/// away and then attribute the total to each seq, which reports a merge that produced one
-/// row as having produced six.
-///
-/// The two consumers want different units and both are honest:
+/// driver call is measured**: a per-entry total alone would attribute the whole to each
+/// seq. The two consumers want different units, and both are honest:
 ///
 /// | | unit | why |
 /// |---|---|---|

@@ -1,35 +1,24 @@
 //! Benchmark run over the batch-partitioned corpus: every query
-//! [`corpus_benchmark_cases.inc`](common/corpus_benchmark_cases.inc) names, timed at the
-//! modes it names.
+//! [`corpus_benchmark_cases.inc`](common/corpus_benchmark_cases.inc) names, at the modes
+//! it names. Asserts nothing about an answer — correctness is `test_gpu_bp_corpus`.
 //!
-//! Asserts nothing about an answer — correctness for these queries is `test_gpu_bp_corpus`.
-//! Each case warms up once, runs `BENCH_MEASURED_RUNS` times and keeps the second-smallest
-//! by end-to-end time; see `common::corpus_benchmark`.
-//!
-//! NOT run by CI (see `INTENTIONALLY_NOT_IN_CI` in test_ci_coverage.rs): it needs a GPU,
-//! takes tens of minutes, and its output is a measurement rather than a gate. Build and
-//! run it with `scripts/build-test-shadgpu.sh --build-benchmarks` and `--run-benchmarks`,
-//! which is also what compiles it under `[profile.benchmarks]` rather than the
-//! opt-level-1 default, or on the host directly:
-//!
-//!   ./peacock_gpu_benchmarks --nocapture --test-threads=1
-//!
-//! `--test-threads=1` is not optional — cuDF/RMM share one process-wide pool, and
-//! concurrent queries would time each other's contention.
+//! NOT run by CI (`INTENTIONALLY_NOT_IN_CI` says why): it needs a GPU, takes tens of
+//! minutes, and measures rather than gates. `build-test-shadgpu.sh --build-benchmarks`
+//! and `--run-benchmarks` build it under `[profile.benchmarks]` and run it; on the host
+//! directly it is `--nocapture --test-threads=1`, and the threads are not optional —
+//! cuDF/RMM share one process-wide pool.
 #![cfg(not(feature = "rust-only"))]
 mod common;
 
 /// A benchmark declaration's reading: one test per enabled mode, and no test at all for
 /// `none` — a query written down and deliberately not timed.
 ///
-/// Both arms register, and that asymmetry with the tests is the point: `none` is a record
-/// rather than an omission, so the file of every mode carries a marker for it instead of
-/// leaving it absent for an unstated reason.
+/// Both arms register, and that asymmetry is the point: `none` is a record rather than an
+/// omission, so every mode's file carries a marker instead of an unexplained absence.
 ///
-/// The mode reaches the case as its own spelling rather than as a resolved `BpMode`, for
-/// the reason `corpus_gpu` does the same: a `&'static BpMode` in a generated function body
-/// would need the table indexed at expansion time, and `mode_named`'s panic — which names
-/// the five — is a better failure than a subscript.
+/// The mode arrives as its macro spelling, not a resolved `BpMode`: a `&'static BpMode` in
+/// a generated body would need the table indexed at expansion time, and `mode_named`'s
+/// panic is a better failure than a subscript.
 macro_rules! corpus_query_benchmark {
     ($dataset:ident, $sf:expr, $query:ident, none) => {
         inventory::submit! {

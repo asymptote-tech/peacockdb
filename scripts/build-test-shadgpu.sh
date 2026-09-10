@@ -225,40 +225,20 @@ if [ "$RSYNC" -eq 1 ]; then
     [ -f "$RUST_TESTS_STAGING/$t" ] && strip --strip-debug "$RUST_TESTS_STAGING/$t"
   done
 
-  # Source is cpp/install/ and NOT cpp/install/* : with a glob rsync gets several
-  # sources and --delete stops meaning what it looks like. It removes host orphans,
-  # which for a directory the remote runner globs is the difference between a stale
-  # binary sitting there and a stale binary executing. It cuts the other way too: the
-  # mirror covers rust-benchmarks/, so a gate push from a checkout that never ran
-  # --build-benchmarks deletes the benchmark binary off the host.
-  #
-  # -a, not -r. cpp/install/lib is a vendored tree full of soname chains
-  # (libglog.so.2 -> libglog.so.0.7.1, the left name being the DT_SONAME the linker
-  # asks for), and `rsync -r` skips symlinks — the host would get the target and not
-  # the name, and every binary would die at start on "loading shared libraries".
+  # cpp/install/ and NOT cpp/install/*: a glob makes --delete stop removing host
+  # orphans, and the runner globs that directory. The mirror covers rust-benchmarks/,
+  # so a gate push from a checkout without --build-benchmarks deletes the benchmark.
+  # -a, not -r: lib/ is soname chains, and -r skips the symlinks the linker asks for.
   resilient_rsync -a --delete cpp/install/ "$REMOTE:$REMOTE_REPO/cpp/install/"
   # The goldens the rust GPU tests assert against. Without this the host keeps
   # whatever a previous run left, so a locally-regenerated golden is compared
   # against a stale one and goes false-red.
   ssh "$REMOTE" "mkdir -p $REMOTE_REPO/testdata/goldens"
   resilient_rsync -r --delete testdata/goldens/ "$REMOTE:$REMOTE_REPO/testdata/goldens/"
-  # Everything else under testdata/ that the binaries READ rather than assert against:
-  # cost-registry.csv, cost_model.conf, the query .sql sets, tpch.minimal. Swept from
-  # git rather than named, because the hand-maintained list this replaces had gone
-  # stale five times. The fifth was the expensive one: cost_model.conf was added to
-  # build-test.sh's sweep and to nothing else, so the host kept the pre-taxonomy-split
-  # file and a calibration run came home tagged with categories that no longer
-  # exist -- wrong data rather than a red test.
-  #
-  # Additive, unlike the goldens push above: --delete here would erase whatever else
-  # provisions this host, and nothing under testdata/ that we do not track is ours to
-  # remove. Generated datasets are not swept -- they are git-ignored, which is what
-  # --exclude-standard turns on, and they live on the host at tens of GiB.
-  # Two tracked trees are excluded. goldens/ is owned by the --delete mirror above,
-  # and re-adding it here additively would be the mirror's opposite. benchmark-results/
-  # is WRITTEN on the host and travels back through --pull-benchmarks, so pushing a
-  # checkout's copy over it replaces the host's measurements with whatever this box
-  # last pulled.
+  # Everything else the binaries READ. Swept from git, not named: the hand-kept list
+  # this replaces went stale five times, once sending a run home tagged with categories
+  # that no longer existed. Additive, since untracked files here are not ours to delete.
+  # goldens/ belongs to the mirror above; benchmark-results/ is written on the host.
   fixtures=$(mktemp)
   git ls-files --cached --others --exclude-standard testdata \
     | grep -vE '^testdata/(goldens|benchmark-results)/' > "$fixtures"
@@ -512,16 +492,10 @@ remote_bench_script() {
     export PEACOCK_TPCH_SF40_DIR=/home/info/peacock-datasets/testdata/tpch.sf40
     export PEACOCK_TPCH_VEC_PARAMS=$REMOTE_REPO/testdata/tpch-vec-queries/query_params.jsonl
 
-    # The sf40 dataset is read in place, outside the repo, and the C++ suites reach it
-    # through the variable above. The rust side has no such variable: it resolves data
-    # as <testdata>/<dataset>.sf<sf> and nothing else, so a benchmark case at sf40 needs
-    # that name to exist. A symlink is what makes one convention cover both -- against
-    # adding a second way to name a dataset path, which is how a run ends up reading one
-    # dataset while reporting another. testdata/.gitignore already hides /tpch.sf*/.
-    #
-    # Only here, not in the gate: the gate's sf40 work is the C++ binaries, which use the
-    # variable. Never replaces what it finds -- a real directory under that name is
-    # someone else's provisioning of this shared host, and the run stops instead.
+    # The rust side resolves data as <testdata>/<dataset>.sf<sf> and nothing else, so a
+    # symlink is what lets sf40 live outside the repo without a second way to name a
+    # dataset path — which is how a run ends up reading one dataset and reporting another.
+    # Never replaces a real directory: that would be someone else's provisioning.
     sf40_link=\$PEACOCK_TESTDATA_DIR/tpch.sf40
     if [ -L "\$sf40_link" ]; then
       have=\$(readlink "\$sf40_link")
@@ -540,11 +514,10 @@ remote_bench_script() {
       echo "==> linked \$sf40_link -> \$PEACOCK_TPCH_SF40_DIR"
     fi
 
-    # Applied per-command on the benchmark binary alone rather than exported: this
-    # path carries glibc-2.35, and exporting it makes the host's own coreutils load
-    # the newer libc under the old loader and SIGSEGV — the mkdir/find/wc below would
-    # die and the run would report a bogus exit code having actually succeeded.
-    # (setup-glibc.sh warns about this at the end of --patch.)
+    # Per-command, never exported: this path carries glibc-2.35, and exporting it makes
+    # the host's own coreutils load the newer libc under the old loader and SIGSEGV — the
+    # mkdir/find/wc below would die and the run would report a bogus code having actually
+    # succeeded. (setup-glibc.sh warns about this at the end of --patch.)
     bench_ld=$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib
 
     bin=$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET
@@ -570,21 +543,16 @@ remote_bench_script() {
     # would read green having measured nothing. mktemp gives the comparison point.
     stamp=\$(mktemp)
 
-    # Filters as variables of the REMOTE shell, assigned from text this heredoc expands.
-    # \`printf %q ""\` is two quote CHARACTERS, and the difference between them being shell
-    # syntax and being data decides everything: assigned here, the remote shell reads
-    # them and the variable is empty; passed as a string through a function argument they
-    # survive as an argument \`''\`, which libtest matches against every test name and
-    # filters all nine out. That is exactly how the main pass of the first end-to-end run
-    # measured nothing and said "0 passed" where a green run belonged.
+    # Assigned as REMOTE shell variables, not passed as arguments. \`printf %q ""\` is two
+    # quote CHARACTERS: read by the shell they vanish, handed on as a string they survive
+    # as the argument \`''\`, which libtest matches against no test name at all. That is
+    # how the first end-to-end run measured nothing and reported "0 passed".
     main_filter=$filter_q
 
-    # Output goes to the terminal AND to \$blog, which the check below reads: libtest's
-    # own "test result: N passed" is the only honest answer to "did the filter match
-    # anything", and counting files that appeared is not the same question.
-    #
-    # --test-threads=1 is not optional: cuDF/RMM share one process-wide pool and one
-    # default stream, so concurrent cases would measure each other's contention.
+    # To the terminal AND to \$blog: libtest's own "N passed" is the only honest answer
+    # to "did the filter match anything". --test-threads=1 is not optional — cuDF/RMM
+    # share one pool and one default stream, so concurrent cases would measure each
+    # other's contention.
     bench_run() {
       local label=\$1 filter=\$2
       blog=/tmp/$BENCH_TARGET.\$label.log
@@ -593,16 +561,10 @@ remote_bench_script() {
       return \${PIPESTATUS[0]}
     }
 
-    # Red on "the filter matched nothing", NOT on "no .benchmark.txt appeared". The
-    # binary carries non-device tests of its own -- the record's switch, the section
-    # merge -- and a filter naming one of them runs, passes, and writes no tree file.
-    # Failing that is a red banner for a run that did exactly what was asked, which is
-    # how people learn to ignore the banner (the gate's \`rzero\` says the same).
-    #
-    # Per pass and immediately after it, not once at the end: two passes share nothing
-    # but the binary, and a check reading whichever log was written last would have let
-    # a main pass that ran nothing through on the strength of the HBM pass's one test.
-    # It did, once.
+    # Red on "the filter matched nothing", NOT on "no .benchmark.txt appeared": the
+    # binary carries tests that legitimately write no tree file, and failing those is how
+    # people learn to ignore a red banner. Per pass and right after it — a check reading
+    # whichever log was written last once passed a main pass that had run nothing.
     ran_check() {
       local label=\$1 filter=\$2
       local n
@@ -683,13 +645,10 @@ EOF
   # rides home on every later pull.
   resilient_rsync -r "$REMOTE:$REMOTE_REPO/testdata/benchmark-results/" testdata/benchmark-results/
   echo "==> fetched $(find testdata/benchmark-results -name '*.benchmark.txt' | wc -l) benchmark records"
-  # The record beside the tree. Missing is not an error -- --pull-benchmarks is also the
-  # recovery path for a run from before it existed and for one that died before writing
-  # it. The captures and what is derived from them are create_nsys_profile.sh's.
-  #
+  # The record beside the tree; the captures are create_nsys_profile.sh's. Missing is not
+  # an error — this is also the recovery path for a run that died before writing one.
   # Tested over ssh rather than by letting the transfer fail: resilient_rsync retries a
-  # missing source a hundred times before giving up, and eight minutes of backoff is not
-  # how "there is no record" should read.
+  # missing source a hundred times, and eight minutes of backoff reads as a hang.
   pull_one() {                    # pull_one <relative path> <what it is>
     local rel=$1 what=$2
     if ! ssh "$REMOTE" test -f "$REMOTE_REPO/testdata/$rel"; then
@@ -705,18 +664,10 @@ EOF
   }
   pull_one "$BENCH_RECORD_REL" "the calibration record"
 
-  # What came home that nothing here writes any more.
-  #
-  # The host tree accumulates and the pull has no --delete (see above), so a file whose
-  # naming scheme is gone rides home on EVERY later pull. That is how 128 legacy
-  # `<query>.<label>.benchmark.txt` files, deleted from the working tree, came back
-  # without a word and stayed for weeks: the deletion was never staged, and the next
-  # pull recreated them byte for byte.
-  #
-  # Told apart by shape, which is exact for this tree: a current file is
-  # `<mode>.benchmark.txt` — one dot — and every legacy one carries the query in the name
-  # too. Reported rather than deleted: what to keep is not this script's call, and a pull
-  # that quietly removed measurements would be the same silence from the other side.
+  # What came home that nothing here writes any more. The host tree accumulates and this
+  # pull has no --delete, so a file whose naming scheme is gone rides home on every later
+  # one. Told apart by shape: a current file is `<mode>.benchmark.txt`, one dot. Reported
+  # rather than deleted — quietly removing measurements is the same silence, mirrored.
   stale=$(find testdata/benchmark-results -name '*.*.benchmark.txt' | wc -l)
   if [ "$stale" -gt 0 ]; then
     echo "==> $stale file(s) here match no mode this build writes — a naming scheme that"

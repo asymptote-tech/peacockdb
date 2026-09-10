@@ -175,18 +175,16 @@ fn a_run_that_drained_renders_no_abandoned_at_all() {
     assert!(!text.contains("rows_skipped"), "{text}");
 }
 
-/// The same tree the execution golden renders, annotated with what it cost instead of what
-/// it produced — and rows and bytes deliberately absent, since the file beside this one
-/// already carries them.
+/// The same tree the execution golden renders, annotated with what it cost rather than
+/// what it produced; rows and bytes live in the file beside this one.
 ///
 /// The mock addresses no seq, so the device recorded nothing and every entry is `0` — a
 /// call that opened no region did no device work. The shape is what is pinned here; that
 /// a measured region never renders 0 is `a_region_that_rounds_to_nothing_still_ran`.
 ///
-/// Two shapes worth reading off this: `GpuUnload` carries no colon, because the colon
-/// separates a node from its properties and this file gives it none; and the source has one
-/// entry per batch and none for the step that found the queue empty, which made no call to
-/// record.
+/// Two shapes worth reading off this: `GpuUnload` carries no colon, having no properties
+/// to separate; and the source has one entry per batch and none for the step that found
+/// the queue empty, which made no call to record.
 #[test]
 fn a_timing_record_renders_the_tree_and_what_each_node_cost() {
     let script = Script::default().source("part", vec![vec![spec(10, 80), spec(7, 56)]]);

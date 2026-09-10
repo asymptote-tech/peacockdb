@@ -707,21 +707,14 @@ fn a_regeneration_does_not_make_the_read_only_path_write() {
 
 /// Every `total_us` in a benchmark file is the sum of the `time_us` beside it.
 ///
-/// The one thing about that file checkable without a device and without a second oracle:
-/// the renderer writes both numbers from the same measurement, so a file where they
-/// disagree is a file the renderer got wrong. That is the same claim the cost-tree cases
-/// above make — a golden with no external oracle is still checkable against its own
-/// redundancy.
+/// Checkable without a device and without a second oracle: the renderer writes both
+/// numbers from one measurement, so a file where they disagree is a file it got wrong.
 ///
-/// Every entry is a number, so the total is a plain sum with nothing to skip. A `0` is a
-/// call that opened no region — an accumulator below its compaction threshold, an unload
-/// exporting through a door that opens none — and a `1` is a region the clock rounded
-/// down, which is why the two are not the same digit.
+/// Every entry is a number, so the total is a plain sum. A `0` is a call that opened no
+/// region; a `1` is a region the clock rounded down — not the same digit.
 ///
-/// Absent files are skipped rather than failed: this tree is written by a run on a GPU
-/// host and a fresh checkout has none. What is NOT skipped is finding no file at all with
-/// timing lines in it — a check that silently examines nothing is the failure mode this
-/// suite exists to close.
+/// Absent files are skipped, since a fresh checkout has none. Finding NO file with timing
+/// lines is not skipped: a check that silently examines nothing is what this suite closes.
 #[test]
 fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
     let root = common::testdata_root().join("benchmark-results");
@@ -775,34 +768,15 @@ fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
 }
 
 /// The benchmark path must not touch the CPU tier — neither what it PRODUCES nor what it
-/// RUNS.
+/// RUNS, and the second is the prohibition this list used to miss.
 ///
-/// Two different prohibitions, and the second is the one this list used to miss.
+/// A golden it reads does not exist at sf40, so every case fails on a missing file.
+/// `CpuBackend` is worse: it WORKS, reporting plausible microseconds measured on the wrong
+/// machine with no field saying which backend produced them. `CpuBatch` is deliberately
+/// absent — an unload legitimately hands back a host batch.
 ///
-/// **Its goldens.** The measurement suite runs at sf40, where there are no `.cpu.txt`
-/// statistics and no `.result.txt` results, and where producing them would mean executing
-/// the query on the CPU over 42 GB of parquet. Reading one makes every case fail on a
-/// missing file, on the GPU host, long after the change.
-///
-/// **Its execution.** `CpuBackend` is a working backend: a case that drove it would not
-/// fail at all. It would produce a whole tree of plausible microseconds measured on the
-/// wrong machine, and nothing downstream — not the record, not a plot — carries a field
-/// that says which backend ran. That is worse than a missing file, and
-/// it is why the two names sit in one list.
-///
-/// Deliberately NOT `CpuBatch`: it lives on the GPU path legitimately, because an unload
-/// hands back a host batch. Forbidding it would break correct code and teach the next
-/// person to edit this list instead of their change.
-///
-/// Checked here, in the CPU tier, on a machine with no GPU, at the moment the call is
-/// added — rather than as a device failure hours later.
-///
-/// By source text rather than by types because the thing being forbidden is a CALL, and
-/// no type says "this function was not called". Line comments are stripped first: the
-/// point is calls, and a comment explaining why the benchmark does not read a golden must
-/// not itself be the failure. Two known limits — a `//` inside a string literal hides the
-/// rest of that line from the search, and a rename of any of these names silently empties
-/// the check. It is a tripwire, not a proof.
+/// A tripwire over source text, not a proof: no type says "this function was not called",
+/// and renaming any of these names empties the check in silence.
 #[test]
 fn the_benchmark_path_reads_no_cpu_side_golden() {
     // Every accessor in common/ that names a file the CPU tier writes, the oracle

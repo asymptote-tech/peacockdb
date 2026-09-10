@@ -30,18 +30,13 @@ fn main() {
 /// Bake how this crate was compiled into it, for `peacock_gpu_benchmarks` to write
 /// into every measurement record (`build_profile=`).
 ///
-/// The harness refuses to run from a non-release build, so this says WHICH release
-/// profile rather than whether it was one (`[profile.benchmarks]` in the workspace
-/// Cargo.toml says why the distinction is worth keeping). Baked at compile time
-/// because, unlike `allocator`, it is the one condition of a run the running process
-/// cannot ask about itself.
+/// The harness refuses a non-release build, so this says WHICH release profile. Baked at
+/// compile time because it is the one condition of a run the process cannot ask about.
 ///
-/// Cargo hands a build script `OPT_LEVEL` directly, but not the profile NAME:
-/// `PROFILE` collapses every release-inheriting profile to "release". The profile
-/// directory does carry it, and `OUT_DIR` is
-/// `<target>/<profile-dir>/build/<pkg>-<hash>/out` — hence the fourth ancestor.
-/// Unknown rather than a panic if that shape ever changes: a build script is the
-/// wrong place to fail the build over a diagnostic string.
+/// Cargo hands a build script `OPT_LEVEL` but not the profile NAME — `PROFILE` collapses
+/// every release-inheriting profile to "release". The profile directory carries it, and
+/// `OUT_DIR` is `<target>/<profile-dir>/build/<pkg>-<hash>/out`, hence the fourth
+/// ancestor. Unknown rather than a panic, a build script being the wrong place to fail.
 fn emit_build_profile(out_dir: &std::path::Path) {
     let profile_dir = out_dir
         .ancestors()

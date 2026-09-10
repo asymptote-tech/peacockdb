@@ -91,12 +91,10 @@ uint64_t logical_size_from_table(const cudf::table_view& table, uint64_t varlen_
 CallOutcome call_outcome(const TableResult& result) {
   const auto full = result.table->view();
 
-  // Drop `__rowcount__` before costing. `execute_project` synthesizes that column
-  // when the projection is empty (see project.cpp): cuDF cannot represent a
-  // 0-column table with rows, but DataFusion's `output_schema` for such a node
-  // genuinely has no fields. It is an artifact of the device representation, not a
-  // logical column, and charging it puts this end of the byte axis above Rust's by
-  // a whole column (tpcds q88/q90/q96).
+  // Drop `__rowcount__` before costing: `execute_project` synthesizes it for an empty
+  // projection because cuDF cannot hold a 0-column table with rows, while DataFusion's
+  // `output_schema` there genuinely has no fields. An artifact of the device
+  // representation; charging it puts this end a whole column high (tpcds q88/q90/q96).
   std::vector<cudf::column_view> logical_cols;
   logical_cols.reserve(full.num_columns());
   for (cudf::size_type i = 0; i < full.num_columns(); ++i) {
@@ -137,23 +135,16 @@ using scoped_range = ::nvtx3::scoped_range_in<peacock_domain>;
 
 std::atomic<bool> g_nvtx{false};
 
-/// The range the HARNESS opens, one per benchmark case, holding every node range the
-/// case produces.
+/// The range the HARNESS opens, one per benchmark case, holding every node range inside.
 ///
-/// It exists because a capture of several cases could not otherwise say which query a
-/// call belonged to: a node range is named `<seq>.<call_index> <kind>`, and seq numbering
-/// restarts with every plan, so q6 and q19 both open with `0.0 CudfScan`. Nesting answers
-/// it — the reader attributes a call to the case range containing it — and nothing has to
-/// be told the query on the command line.
+/// A node range is named `<seq>.<call_index> <kind>` and seq numbering restarts per plan,
+/// so q6 and q19 both open with `0.0 CudfScan`. Nesting is what tells a capture which
+/// query a call belonged to, without anyone naming it on a command line.
 ///
-/// ONE LEVEL, deliberately. A case is opened, its runs happen, it is closed; cases do not
-/// nest, because the benchmark binary runs `--test-threads=1` for reasons that have
-/// nothing to do with this. A stack would be machinery for a shape nothing produces.
-///
-/// THE ENGINE NEVER CALLS THIS. It is reached only through the two ABI entry points, and
-/// only the benchmark harness calls those. The `g_nvtx` check below is therefore not what
-/// keeps a shipping query from paying — not being called is — and is here so that a
-/// caller who does reach it while ranges are off pays one relaxed load and no string.
+/// ONE LEVEL: cases do not nest, so a stack would be machinery for a shape nothing
+/// produces. THE ENGINE NEVER CALLS THIS — only the two ABI entry points reach it, and
+/// only the harness calls those. The `g_nvtx` check below is therefore not what keeps a
+/// shipping query from paying; not being called is.
 std::optional<scoped_range>& harness_range() {
   static std::optional<scoped_range> range;
   return range;
@@ -496,12 +487,9 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
   RegionSink* sink = impl_->measuring();
   const uint64_t call_index =
       sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
-  // One per call, wrapping every partition it executes, so the per-partition ranges
-  // below nest inside the call they belong to.
-  //
-  // `<seq>.<call>` because seq alone does not identify a range: a batched run drives one
-  // seq many times and every repeat would carry the same name, leaving a capture unable
-  // to say which of them a record's row is about. Address first, kind after, since the
+  // One per call, so the per-partition ranges below nest inside it. `<seq>.<call>`
+  // because seq alone does not identify a range — a batched run drives one seq many
+  // times, and every repeat would carry the same name. Address first, kind after: the
   // address is what a record and an Nsight export join on.
   OptionalRange node_range([&] {
     return std::to_string(seq) + "." + std::to_string(call_index) + " " +
@@ -678,12 +666,10 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     }
     std::vector<std::string> column_names =
         owned.empty() ? std::vector<std::string>{} : owned[0].column_names;
-    // The concat + hash-scatter is shared by all N output partitions and charged to
-    // partition 0, so Σ-over-partitions still equals the node total; only the
-    // per-partition slice copies below are separable.
-    //
-    // p0's region stays open across both rather than closing here and reopening in the
-    // loop, because N output partitions must cost exactly N timed regions.
+    // The concat + hash-scatter is shared by all N partitions and charged to p0, so
+    // Σ-over-partitions still equals the node total; only the slice copies below are
+    // separable. p0's region stays open across both rather than closing and reopening,
+    // because N output partitions must cost exactly N timed regions.
     ScopedNodeTimer shared_timer(sink, seq, 0, call_index);
     // Only the multi-partition arm touches the device; a single input is a move.
     if (owned.size() != 1) mark_device_start();
