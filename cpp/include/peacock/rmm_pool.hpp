@@ -110,8 +110,8 @@ inline const RmmPoolStatus& install_rmm_pool(std::size_t bytes) {
   static auto upstream = std::make_unique<rmm::mr::cuda_memory_resource>();
   static std::unique_ptr<rmm::mr::pool_memory_resource<rmm::mr::cuda_memory_resource>> pool;
   // A request the device cannot meet fails here, a neighbour holding most of the card being the
-  // ordinary cause. Reported, not aborted — but no caller inspects the status, and an unpooled
-  // sf40 run does not run slowly, it loses tests to cudaErrorMemoryAllocation. The "could not be
+  // ordinary cause. Reported, not aborted — but nothing acts on Unavailable, and an unpooled sf40
+  // run does not run slowly, it loses tests to cudaErrorMemoryAllocation. The "could not be
   // built" line below is the diagnosis; without it that looks like a bug in the engine.
   try {
     pool = std::make_unique<rmm::mr::pool_memory_resource<rmm::mr::cuda_memory_resource>>(

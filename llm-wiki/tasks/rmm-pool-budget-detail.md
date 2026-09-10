@@ -280,7 +280,8 @@ section of `llm-wiki/prompts.md`.
 
 **Important — `rmm_pool.hpp` justified reporting-instead-of-aborting with two false claims.** It
 said the correctness binaries are still right without a pool and that any caller taking a timing
-refuses the run itself. No caller inspects the status — all six `main()`s discard it — and
+refuses the run itself. Nothing acts on `Unavailable` — the six `main()`s discard the return and
+the FFI only forwards it — and
 `tpch_golden.hpp:182` silently switches its peak source to a free-memory delta. The branch's own
 run shows an unpooled `peacock_tpch_tests` losing three of four tests. Carried over from master,
 but master's percentage sizing made `Unavailable` nearly unreachable and this change makes it the
@@ -314,3 +315,20 @@ That distinction is what `done` turns on, so the run to read is this one.
 shad-gpu re-checked twice: pid `1763830` still holds 53066 MiB, 90009 free of 143771. 69+69 needs
 138, so the tpch pair remains unrunnable. The first ssh timed out and the second answered — the
 flaky link `build-test.md` warns about, not a host that went away.
+
+### 2026-09-10 — round 2 closed, task at `completing`
+
+The reviewer checked `305c0da1` against what it meant and confirmed all three: the strings the two
+instruction texts now name match the code literally, the catch comment is at its four-line cap and
+its three claims are ones the tree supports, and the growable-pool argument is recorded as it was
+made. No blocking or important finding is outstanding.
+
+Two corrections to my own counting, neither actionable: the declaration comment is 10 lines, not 9
+— at the cap with no spare line — and #178 is 14 non-blank lines against a file whose other tickets
+sit at 15.
+
+One residual imprecision it would have dropped, fixed anyway because I was already in the line:
+"no caller inspects the status" is loosely false, since `gpu_executor.cpp:123-130` switches on
+`status.state` to fill `out_info`. What is true is that nothing *acts* on `Unavailable` — the six
+`main()`s discard the return and the FFI only forwards it. Both the comment and the paragraph above
+now say that.
