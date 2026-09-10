@@ -859,20 +859,27 @@ that.
 
 ### The fourth cudf-only break, and it was the fixpoint itself
 
-This is the third member of a family, and the family is worth more to the next reader than the
-three instances. **A check can be green because of its own structure rather than because the
-tree is clean.** Three in one task, each found by accident rather than by a test:
+This is one of four instances of the same thing, and the family is worth more to the next
+reader than the instances. **A check can be green because of its own structure rather than
+because the tree is clean.** Four in one task, none of them found by a test:
 
 | The check | Why it was green |
 |---|---|
+| proving a guard red, by grepping the run for `panicked at` | the violation did not build, so nothing panicked and nothing ran |
 | body-line conservation over a hoist | it filters comments out, so 35 dropped doc lines conserved perfectly |
 | task 1's residue gate | its exclusion list still held the four spellings this task retires |
 | the `private_interfaces` fixpoint | run under `rust-only`, which does not compile the GPU backend at all |
 
+The first is the sharpest, and it was found while proving the other guards: a `pub use`
+violation that collided with an existing name failed to *build*, so the test never ran, and a
+grep for the expected failure signature found nothing — which reads exactly like "the rule did
+not fire". A check of a check, green because the run never happened.
+
 The shape is the same each time: the check's own structure — what it filters, what it excludes,
-what shape it runs in — decides its answer before the tree does. None of the three could go red.
-The counter to all three is the same too: **read the check's structure before its output**, and
-where the structure has a scope, run it in every scope the tree has.
+what shape it runs in, whether it ran at all — decides its answer before the tree does. None of
+the four could go red. The counter is the same too: **read the check's structure before its
+output**; where the structure has a scope, run it in every scope the tree has; and read the
+exit status rather than grepping for the signature you expect.
 
 
 The first fixpoint ran under `--features rust-only`, where the GPU backend does not exist, so
@@ -998,3 +1005,56 @@ hole this whole family of findings is about.
 | case inventory | the ten new cases and nothing else |
 | doc and attribute sentences | nothing absent |
 | residue gate | the same five lines |
+
+## The full suite, once, at the end
+
+Local. verda still refuses our key (reprovisioned without it), and `build-test.md` says a local
+CPU run is fine.
+
+**What a package-wide command actually sweeps.** `cargo test --features rust-only -p
+peacockdb-core -p peacockdb` builds and runs **21 binaries**, not a tier — the whole CPU
+execution suite, the meta tier and the golden tier together. **1,031 cases passed, 0 failed, 2
+ignored** (the two `#[ignore]`d against #182, both pre-existing). `cargo test -p cost-report`
+adds 37.
+
+**Six of the 21 ran nothing, and that is not coverage:**
+
+| Binary | Why it ran zero cases |
+|---|---|
+| `unittests src/main.rs` | the CLI has no tests; `test_ci_coverage` asserts CI at least builds it |
+| `test_gpu_abi`, `test_gpu_batch`, `test_gpu_corpus`, `test_gpu_executors`, `test_gpu_recipe_walk` | file-gated on `not(rust-only)`, so under this build they compile to empty binaries and pass |
+
+`test_inc2_conformance` ran 3 of its 10 for the same reason. A binary that runs zero tests
+reports `ok`, which is why the count per binary is in the table above rather than a single
+total.
+
+**So the GPU half of this branch is proved by three clean builds and by nothing else.** No host
+this run could reach has a device. What that does and does not cover:
+
+- Covered: every GPU path compiles in the shape that links cuDF, including the conditionally
+  present half of `executor/`'s API, and every GPU test target still compiles against the moved
+  types. Four cudf-only breaks were caught this way across the task and none reached a commit.
+- Not covered: that the GPU backend still *behaves* the same. Nothing in this task rewrote an
+  executor body — the backends slice is a directory move, and every file in it is a `git`
+  rename at 93% or better — but the assertion rests on that fact, not on a run.
+
+### The whole task, measured
+
+| | |
+|---|---|
+| commits | 10, from `1676822d` to `11b17f83` |
+| files changed | 216 |
+| renames git detects | 85 |
+| goldens | 31 files touched, all in the quarantined `GpuHashJoin` commit; byte-identical since |
+| case inventory | one authorized change: `config.rs`'s two lib cases became two in `test_golden_format`, net zero |
+| documentation sentences | 4,071 before slice 3, 4,268 now; 48 absent, every one classified below |
+| `pub use` | 30 → 0 |
+| `pub(super)` | 85 → 0 |
+| `pub mod` outside `lib.rs` | 52 → 13, all inside the two exempt backend directories |
+
+The 48 absent sentences, by cause: 10 the deleted `config.rs`; 9 the `enforcer` → `accountant`
+rename the spec asks for; 13 module headers that became item docs or a component header,
+differing by a prefix or a clause; 5 doc links to paths that no longer exist; 4 renamed
+identifiers in prose; 3 task 1's `this mode` wording; 3 the dead `all_row_groups`; and the
+`#[allow]` that became an inner attribute. None is prose that was meant to survive: the nine
+that were are in the retroactive pass above, restored.
