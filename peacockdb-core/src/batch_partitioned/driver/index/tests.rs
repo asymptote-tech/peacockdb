@@ -24,7 +24,7 @@ fn plan() -> Box<dyn GpuNode> {
 /// The plan above in pre-order, which is the numbering every assertion here is written in.
 const PRE_ORDER: [&str; 8] = [
     "GpuUnload",
-    "GpuJoin",
+    "GpuHashJoin",
     "GpuCoalesceAllBatches",
     "GpuMergeSortedPartitions",
     "GpuSort",

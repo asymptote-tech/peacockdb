@@ -3,7 +3,7 @@ skipped: not enabled at this mode
 == q2
 storage_read_bytes=111199618 # GpuLoadParquet
 cuda_filter_bytes=5932 # GpuFilter
-cuda_hash_join_bytes=153651105 # GpuJoin
+cuda_hash_join_bytes=153651105 # GpuHashJoin
 cuda_aggregate_bytes=256752 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=326704 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -19,7 +19,7 @@ peacockdb_cost=737382823
 == q3
 storage_read_bytes=95837550 # GpuLoadParquet
 cuda_filter_bytes=98941 # GpuFilter
-cuda_hash_join_bytes=14244566 # GpuJoin
+cuda_hash_join_bytes=14244566 # GpuHashJoin
 cuda_aggregate_bytes=36666 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=9378 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -35,7 +35,7 @@ peacockdb_cost=110386873
 == q4
 storage_read_bytes=881542360 # GpuLoadParquet
 cuda_filter_bytes=2773642 # GpuFilter
-cuda_hash_join_bytes=1937860284 # GpuJoin
+cuda_hash_join_bytes=1937860284 # GpuHashJoin
 cuda_aggregate_bytes=42221827 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=588 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -51,7 +51,7 @@ peacockdb_cost=3254179573
 == q5
 storage_read_bytes=290062788 # GpuLoadParquet
 cuda_filter_bytes=366 # GpuFilter
-cuda_hash_join_bytes=14507036 # GpuJoin
+cuda_hash_join_bytes=14507036 # GpuHashJoin
 cuda_aggregate_bytes=303146 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=19804 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -71,7 +71,7 @@ skipped: not enabled at this mode
 == q8
 storage_read_bytes=97658916 # GpuLoadParquet
 cuda_filter_bytes=397718 # GpuFilter
-cuda_hash_join_bytes=6464486 # GpuJoin
+cuda_hash_join_bytes=6464486 # GpuHashJoin
 cuda_aggregate_bytes=213940 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=252 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -89,7 +89,7 @@ skipped: not enabled at this mode
 == q10
 storage_read_bytes=228705757 # GpuLoadParquet
 cuda_filter_bytes=7061 # GpuFilter
-cuda_hash_join_bytes=2319167 # GpuJoin
+cuda_hash_join_bytes=2319167 # GpuHashJoin
 cuda_aggregate_bytes=894 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=1368 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -105,7 +105,7 @@ peacockdb_cost=231135231
 == q11
 storage_read_bytes=394090496 # GpuLoadParquet
 cuda_filter_bytes=1817206 # GpuFilter
-cuda_hash_join_bytes=1102626321 # GpuJoin
+cuda_hash_join_bytes=1102626321 # GpuHashJoin
 cuda_aggregate_bytes=27825014 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=8186 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -125,7 +125,7 @@ skipped: not enabled at this mode
 == q15
 storage_read_bytes=51233653 # GpuLoadParquet
 cuda_filter_bytes=740 # GpuFilter
-cuda_hash_join_bytes=50380556 # GpuJoin
+cuda_hash_join_bytes=50380556 # GpuHashJoin
 cuda_aggregate_bytes=13946 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=5050 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -141,7 +141,7 @@ peacockdb_cost=154716020
 == q16
 storage_read_bytes=131252951 # GpuLoadParquet
 cuda_filter_bytes=20419 # GpuFilter
-cuda_hash_join_bytes=3601831 # GpuJoin
+cuda_hash_join_bytes=3601831 # GpuHashJoin
 cuda_aggregate_bytes=18863 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -161,7 +161,7 @@ skipped: not enabled at this mode
 == q19
 storage_read_bytes=145548327 # GpuLoadParquet
 cuda_filter_bytes=19513 # GpuFilter
-cuda_hash_join_bytes=4047854 # GpuJoin
+cuda_hash_join_bytes=4047854 # GpuHashJoin
 cuda_aggregate_bytes=21800 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=19386 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -177,7 +177,7 @@ peacockdb_cost=150092657
 == q21
 storage_read_bytes=336426243 # GpuLoadParquet
 cuda_filter_bytes=119947 # GpuFilter
-cuda_hash_join_bytes=492588867 # GpuJoin
+cuda_hash_join_bytes=492588867 # GpuHashJoin
 cuda_aggregate_bytes=1540434 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=8120 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -195,7 +195,7 @@ skipped: not enabled at this mode
 == q23
 storage_read_bytes=640311877 # GpuLoadParquet
 cuda_filter_bytes=137280 # GpuFilter
-cuda_hash_join_bytes=841295974 # GpuJoin
+cuda_hash_join_bytes=841295974 # GpuHashJoin
 cuda_aggregate_bytes=359800114 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=484 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=266848256 # GpuNestedLoopJoin, GpuCrossJoin
@@ -213,7 +213,7 @@ skipped: not enabled at this mode
 == q25
 storage_read_bytes=243576727 # GpuLoadParquet
 cuda_filter_bytes=3722 # GpuFilter
-cuda_hash_join_bytes=16983526 # GpuJoin
+cuda_hash_join_bytes=16983526 # GpuHashJoin
 cuda_aggregate_bytes=1332 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=612 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -231,7 +231,7 @@ skipped: not enabled at this mode
 == q29
 storage_read_bytes=206104651 # GpuLoadParquet
 cuda_filter_bytes=10141 # GpuFilter
-cuda_hash_join_bytes=13627751 # GpuJoin
+cuda_hash_join_bytes=13627751 # GpuHashJoin
 cuda_aggregate_bytes=1192 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=472 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -249,7 +249,7 @@ skipped: not enabled at this mode
 == q31
 storage_read_bytes=368053284 # GpuLoadParquet
 cuda_filter_bytes=13368 # GpuFilter
-cuda_hash_join_bytes=35411780 # GpuJoin
+cuda_hash_join_bytes=35411780 # GpuHashJoin
 cuda_aggregate_bytes=1723422 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=5146 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -267,7 +267,7 @@ skipped: not enabled at this mode
 == q33
 storage_read_bytes=215009887 # GpuLoadParquet
 cuda_filter_bytes=489672 # GpuFilter
-cuda_hash_join_bytes=2808989 # GpuJoin
+cuda_hash_join_bytes=2808989 # GpuHashJoin
 cuda_aggregate_bytes=219448 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=4852 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -283,7 +283,7 @@ peacockdb_cost=219913718
 == q34
 storage_read_bytes=123054544 # GpuLoadParquet
 cuda_filter_bytes=21687 # GpuFilter
-cuda_hash_join_bytes=22061298 # GpuJoin
+cuda_hash_join_bytes=22061298 # GpuHashJoin
 cuda_aggregate_bytes=268437 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=43948 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -301,7 +301,7 @@ skipped: not enabled at this mode
 == q37
 storage_read_bytes=254739705 # GpuLoadParquet
 cuda_filter_bytes=72630578 # GpuFilter
-cuda_hash_join_bytes=709618 # GpuJoin
+cuda_hash_join_bytes=709618 # GpuHashJoin
 cuda_aggregate_bytes=3081 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=474 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -317,7 +317,7 @@ peacockdb_cost=328087919
 == q38
 storage_read_bytes=94763215 # GpuLoadParquet
 cuda_filter_bytes=13452 # GpuFilter
-cuda_hash_join_bytes=35258205 # GpuJoin
+cuda_hash_join_bytes=35258205 # GpuHashJoin
 cuda_aggregate_bytes=4718291 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -335,7 +335,7 @@ skipped: not enabled at this mode
 == q40
 storage_read_bytes=76453127 # GpuLoadParquet
 cuda_filter_bytes=31940 # GpuFilter
-cuda_hash_join_bytes=166016015 # GpuJoin
+cuda_hash_join_bytes=166016015 # GpuHashJoin
 cuda_aggregate_bytes=105876 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=11720 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -351,7 +351,7 @@ peacockdb_cost=413368046
 == q41
 storage_read_bytes=1753262 # GpuLoadParquet
 cuda_filter_bytes=9525 # GpuFilter
-cuda_hash_join_bytes=7226 # GpuJoin
+cuda_hash_join_bytes=7226 # GpuHashJoin
 cuda_aggregate_bytes=586 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=182 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -367,7 +367,7 @@ peacockdb_cost=2715633
 == q42
 storage_read_bytes=95652506 # GpuLoadParquet
 cuda_filter_bytes=8952 # GpuFilter
-cuda_hash_join_bytes=2936822 # GpuJoin
+cuda_hash_join_bytes=2936822 # GpuHashJoin
 cuda_aggregate_bytes=5260 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=862 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -383,7 +383,7 @@ peacockdb_cost=98677130
 == q43
 storage_read_bytes=95263883 # GpuLoadParquet
 cuda_filter_bytes=7551 # GpuFilter
-cuda_hash_join_bytes=49785871 # GpuJoin
+cuda_hash_join_bytes=49785871 # GpuHashJoin
 cuda_aggregate_bytes=60134 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=1714 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -399,7 +399,7 @@ peacockdb_cost=175240371
 == q45
 storage_read_bytes=35052260 # GpuLoadParquet
 cuda_filter_bytes=1690 # GpuFilter
-cuda_hash_join_bytes=71107924 # GpuJoin
+cuda_hash_join_bytes=71107924 # GpuHashJoin
 cuda_aggregate_bytes=1480 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=1472 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -415,7 +415,7 @@ peacockdb_cost=180343891
 == q46
 storage_read_bytes=240936993 # GpuLoadParquet
 cuda_filter_bytes=17275 # GpuFilter
-cuda_hash_join_bytes=80857321 # GpuJoin
+cuda_hash_join_bytes=80857321 # GpuHashJoin
 cuda_aggregate_bytes=1628518 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=22922 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -431,7 +431,7 @@ peacockdb_cost=339242009
 == q48
 storage_read_bytes=264401252 # GpuLoadParquet
 cuda_filter_bytes=36155872 # GpuFilter
-cuda_hash_join_bytes=28183869 # GpuJoin
+cuda_hash_join_bytes=28183869 # GpuHashJoin
 cuda_aggregate_bytes=630 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -447,7 +447,7 @@ peacockdb_cost=333400874
 == q50
 storage_read_bytes=128747560 # GpuLoadParquet
 cuda_filter_bytes=252 # GpuFilter
-cuda_hash_join_bytes=52476681 # GpuJoin
+cuda_hash_join_bytes=52476681 # GpuHashJoin
 cuda_aggregate_bytes=6768 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=1764 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -463,7 +463,7 @@ peacockdb_cost=220220152
 == q52
 storage_read_bytes=95837550 # GpuLoadParquet
 cuda_filter_bytes=12280 # GpuFilter
-cuda_hash_join_bytes=2952928 # GpuJoin
+cuda_hash_join_bytes=2952928 # GpuHashJoin
 cuda_aggregate_bytes=47709 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=10614 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -481,7 +481,7 @@ skipped: not enabled at this mode
 == q55
 storage_read_bytes=95837550 # GpuLoadParquet
 cuda_filter_bytes=12674 # GpuFilter
-cuda_hash_join_bytes=2169336 # GpuJoin
+cuda_hash_join_bytes=2169336 # GpuHashJoin
 cuda_aggregate_bytes=38580 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=10476 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -497,7 +497,7 @@ peacockdb_cost=98171835
 == q56
 storage_read_bytes=216278572 # GpuLoadParquet
 cuda_filter_bytes=475632 # GpuFilter
-cuda_hash_join_bytes=2398683 # GpuJoin
+cuda_hash_join_bytes=2398683 # GpuHashJoin
 cuda_aggregate_bytes=85592 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=7260 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -513,7 +513,7 @@ peacockdb_cost=220795429
 == q58
 storage_read_bytes=172792436 # GpuLoadParquet
 cuda_filter_bytes=27 # GpuFilter
-cuda_hash_join_bytes=422939564 # GpuJoin
+cuda_hash_join_bytes=422939564 # GpuHashJoin
 cuda_aggregate_bytes=1492070 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=1344 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -529,7 +529,7 @@ peacockdb_cost=1023804129
 == q59
 storage_read_bytes=192901369 # GpuLoadParquet
 cuda_filter_bytes=5932 # GpuFilter
-cuda_hash_join_bytes=245187818 # GpuJoin
+cuda_hash_join_bytes=245187818 # GpuHashJoin
 cuda_aggregate_bytes=1552660 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=44814 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -545,7 +545,7 @@ peacockdb_cost=688465624
 == q60
 storage_read_bytes=216305911 # GpuLoadParquet
 cuda_filter_bytes=557790 # GpuFilter
-cuda_hash_join_bytes=6197333 # GpuJoin
+cuda_hash_join_bytes=6197333 # GpuHashJoin
 cuda_aggregate_bytes=537728 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=7260 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -561,7 +561,7 @@ peacockdb_cost=226362228
 == q61
 storage_read_bytes=313419059 # GpuLoadParquet
 cuda_filter_bytes=326742 # GpuFilter
-cuda_hash_join_bytes=312109169 # GpuJoin
+cuda_hash_join_bytes=312109169 # GpuHashJoin
 cuda_aggregate_bytes=255 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=102 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=34 # GpuNestedLoopJoin, GpuCrossJoin
@@ -577,7 +577,7 @@ peacockdb_cost=631715481
 == q62
 storage_read_bytes=30413112 # GpuLoadParquet
 cuda_filter_bytes=2974 # GpuFilter
-cuda_hash_join_bytes=124182348 # GpuJoin
+cuda_hash_join_bytes=124182348 # GpuHashJoin
 cuda_aggregate_bytes=337583 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=15582 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -597,7 +597,7 @@ skipped: not enabled at this mode
 == q66
 storage_read_bytes=163848789 # GpuLoadParquet
 cuda_filter_bytes=485848 # GpuFilter
-cuda_hash_join_bytes=412186680 # GpuJoin
+cuda_hash_join_bytes=412186680 # GpuHashJoin
 cuda_aggregate_bytes=152641 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=6938 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -613,7 +613,7 @@ peacockdb_cost=964993246
 == q68
 storage_read_bytes=287383508 # GpuLoadParquet
 cuda_filter_bytes=15308 # GpuFilter
-cuda_hash_join_bytes=22682761 # GpuJoin
+cuda_hash_join_bytes=22682761 # GpuHashJoin
 cuda_aggregate_bytes=420959 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=19016 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -629,7 +629,7 @@ peacockdb_cost=318198483
 == q69
 storage_read_bytes=188988788 # GpuLoadParquet
 cuda_filter_bytes=41960 # GpuFilter
-cuda_hash_join_bytes=1889305 # GpuJoin
+cuda_hash_join_bytes=1889305 # GpuHashJoin
 cuda_aggregate_bytes=56886 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=13682 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -645,7 +645,7 @@ peacockdb_cost=191786184
 == q71
 storage_read_bytes=213030529 # GpuLoadParquet
 cuda_filter_bytes=626774 # GpuFilter
-cuda_hash_join_bytes=5263795 # GpuJoin
+cuda_hash_join_bytes=5263795 # GpuHashJoin
 cuda_aggregate_bytes=125878 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=142632 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -661,7 +661,7 @@ peacockdb_cost=234704487
 == q73
 storage_read_bytes=123054544 # GpuLoadParquet
 cuda_filter_bytes=11134 # GpuFilter
-cuda_hash_join_bytes=6365314 # GpuJoin
+cuda_hash_join_bytes=6365314 # GpuHashJoin
 cuda_aggregate_bytes=74382 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=148 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -677,7 +677,7 @@ peacockdb_cost=133543601
 == q74
 storage_read_bytes=257052984 # GpuLoadParquet
 cuda_filter_bytes=1817206 # GpuFilter
-cuda_hash_join_bytes=534119804 # GpuJoin
+cuda_hash_join_bytes=534119804 # GpuHashJoin
 cuda_aggregate_bytes=15319984 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=7458 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -693,7 +693,7 @@ peacockdb_cost=922467954
 == q75
 storage_read_bytes=543650982 # GpuLoadParquet
 cuda_filter_bytes=458022 # GpuFilter
-cuda_hash_join_bytes=112541199 # GpuJoin
+cuda_hash_join_bytes=112541199 # GpuHashJoin
 cuda_aggregate_bytes=37050186 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=17860 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -709,7 +709,7 @@ peacockdb_cost=842315646
 == q76
 storage_read_bytes=210494887 # GpuLoadParquet
 cuda_filter_bytes=4427438 # GpuFilter
-cuda_hash_join_bytes=8680808 # GpuJoin
+cuda_hash_join_bytes=8680808 # GpuHashJoin
 cuda_aggregate_bytes=142946 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=16186 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -725,7 +725,7 @@ peacockdb_cost=247975688
 == q77
 storage_read_bytes=274299108 # GpuLoadParquet
 cuda_filter_bytes=1512 # GpuFilter
-cuda_hash_join_bytes=8056696 # GpuJoin
+cuda_hash_join_bytes=8056696 # GpuHashJoin
 cuda_aggregate_bytes=22760 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=6362 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=1465 # GpuNestedLoopJoin, GpuCrossJoin
@@ -741,7 +741,7 @@ peacockdb_cost=285743287
 == q78
 storage_read_bytes=379131820 # GpuLoadParquet
 cuda_filter_bytes=293855506 # GpuFilter
-cuda_hash_join_bytes=648897544 # GpuJoin
+cuda_hash_join_bytes=648897544 # GpuHashJoin
 cuda_aggregate_bytes=315275522 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=42116 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -757,7 +757,7 @@ peacockdb_cost=2434286197
 == q79
 storage_read_bytes=238032453 # GpuLoadParquet
 cuda_filter_bytes=24888 # GpuFilter
-cuda_hash_join_bytes=37048405 # GpuJoin
+cuda_hash_join_bytes=37048405 # GpuHashJoin
 cuda_aggregate_bytes=1097702 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=11852 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -773,7 +773,7 @@ peacockdb_cost=294321705
 == q80
 storage_read_bytes=396149604 # GpuLoadParquet
 cuda_filter_bytes=33639 # GpuFilter
-cuda_hash_join_bytes=511037175 # GpuJoin
+cuda_hash_join_bytes=511037175 # GpuHashJoin
 cuda_aggregate_bytes=189778 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=19804 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -791,7 +791,7 @@ skipped: not enabled at this mode
 == q82
 storage_read_bytes=266430410 # GpuLoadParquet
 cuda_filter_bytes=72630607 # GpuFilter
-cuda_hash_join_bytes=991359 # GpuJoin
+cuda_hash_join_bytes=991359 # GpuHashJoin
 cuda_aggregate_bytes=4723 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=432 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -807,7 +807,7 @@ peacockdb_cost=340062147
 == q83
 storage_read_bytes=21854142 # GpuLoadParquet
 cuda_filter_bytes=75 # GpuFilter
-cuda_hash_join_bytes=34331154 # GpuJoin
+cuda_hash_join_bytes=34331154 # GpuHashJoin
 cuda_aggregate_bytes=243136 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=3704 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -823,7 +823,7 @@ peacockdb_cost=96686678
 == q84
 storage_read_bytes=25538527 # GpuLoadParquet
 cuda_filter_bytes=3803 # GpuFilter
-cuda_hash_join_bytes=166857 # GpuJoin
+cuda_hash_join_bytes=166857 # GpuHashJoin
 cuda_aggregate_bytes=0 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=1939 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -841,7 +841,7 @@ skipped: not enabled at this mode
 == q87
 storage_read_bytes=94763215 # GpuLoadParquet
 cuda_filter_bytes=13452 # GpuFilter
-cuda_hash_join_bytes=37533084 # GpuJoin
+cuda_hash_join_bytes=37533084 # GpuHashJoin
 cuda_aggregate_bytes=6990715 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -857,7 +857,7 @@ peacockdb_cost=182942091
 == q88
 storage_read_bytes=579702016 # GpuLoadParquet
 cuda_filter_bytes=241872 # GpuFilter
-cuda_hash_join_bytes=97696714 # GpuJoin
+cuda_hash_join_bytes=97696714 # GpuHashJoin
 cuda_aggregate_bytes=6768 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=315 # GpuNestedLoopJoin, GpuCrossJoin
@@ -873,7 +873,7 @@ peacockdb_cost=677889998
 == q90
 storage_read_bytes=38113922 # GpuLoadParquet
 cuda_filter_bytes=128718 # GpuFilter
-cuda_hash_join_bytes=2442021 # GpuJoin
+cuda_hash_join_bytes=2442021 # GpuHashJoin
 cuda_aggregate_bytes=234 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=34 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=18 # GpuNestedLoopJoin, GpuCrossJoin
@@ -889,7 +889,7 @@ peacockdb_cost=40813717
 == q91
 storage_read_bytes=63979198 # GpuLoadParquet
 cuda_filter_bytes=3168851 # GpuFilter
-cuda_hash_join_bytes=12202070 # GpuJoin
+cuda_hash_join_bytes=12202070 # GpuHashJoin
 cuda_aggregate_bytes=690 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=350 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -907,7 +907,7 @@ skipped: not enabled at this mode
 == q93
 storage_read_bytes=149416339 # GpuLoadParquet
 cuda_filter_bytes=9 # GpuFilter
-cuda_hash_join_bytes=140380462 # GpuJoin
+cuda_hash_join_bytes=140380462 # GpuHashJoin
 cuda_aggregate_bytes=355768 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=4852 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -923,7 +923,7 @@ peacockdb_cost=439941165
 == q94
 storage_read_bytes=66302037 # GpuLoadParquet
 cuda_filter_bytes=13497 # GpuFilter
-cuda_hash_join_bytes=2045996 # GpuJoin
+cuda_hash_join_bytes=2045996 # GpuHashJoin
 cuda_aggregate_bytes=2627 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -939,7 +939,7 @@ peacockdb_cost=80079824
 == q95
 storage_read_bytes=95527012 # GpuLoadParquet
 cuda_filter_bytes=13497 # GpuFilter
-cuda_hash_join_bytes=180458870 # GpuJoin
+cuda_hash_join_bytes=180458870 # GpuHashJoin
 cuda_aggregate_bytes=5537 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -955,7 +955,7 @@ peacockdb_cost=299991665
 == q96
 storage_read_bytes=72433052 # GpuLoadParquet
 cuda_filter_bytes=20484 # GpuFilter
-cuda_hash_join_bytes=4502662 # GpuJoin
+cuda_hash_join_bytes=4502662 # GpuHashJoin
 cuda_aggregate_bytes=423 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -971,7 +971,7 @@ peacockdb_cost=76977114
 == q97
 storage_read_bytes=107721679 # GpuLoadParquet
 cuda_filter_bytes=5948 # GpuFilter
-cuda_hash_join_bytes=27245128 # GpuJoin
+cuda_hash_join_bytes=27245128 # GpuHashJoin
 cuda_aggregate_bytes=27245518 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -987,7 +987,7 @@ peacockdb_cost=189576282
 == q99
 storage_read_bytes=59750624 # GpuLoadParquet
 cuda_filter_bytes=2974 # GpuFilter
-cuda_hash_join_bytes=255875085 # GpuJoin
+cuda_hash_join_bytes=255875085 # GpuHashJoin
 cuda_aggregate_bytes=401729 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=15462 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin

@@ -32,7 +32,7 @@ use super::super::nodes::join::{
     JoinSide, NestedLoopJoinType, emits_both_sides, empty_build_answers_nothing, finish_join_type,
     per_call_join_type,
 };
-use super::super::nodes::{GpuCrossJoin, GpuJoin, GpuNestedLoopJoin};
+use super::super::nodes::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
 use super::{declared_as, placeholder, run_node};
 
 /// What a join does per call, built once. The `Option`s are the capability matrix in the
@@ -61,7 +61,7 @@ pub struct CpuJoin {
 
 impl CpuJoin {
     pub fn hash(
-        node: &GpuJoin,
+        node: &GpuHashJoin,
         build: &ArrowSchema,
         probe: &ArrowSchema,
         ctx: Arc<TaskContext>,
@@ -275,7 +275,7 @@ fn declared(batches: Vec<RecordBatch>, schema: &SchemaRef) -> Result<Vec<CpuBatc
 /// The join a probe batch runs: the node's keys and residual, and the type the call emits
 /// — the node's own where nothing finishes, the per-call one where something does.
 fn hash_join(
-    node: &GpuJoin,
+    node: &GpuHashJoin,
     join_type: JoinType,
     build: &ArrowSchema,
     probe: &ArrowSchema,
@@ -315,13 +315,13 @@ fn hash_join(
         PartitionMode::CollectLeft,
         node.null_equals_null,
     )
-    .map_err(|error| PlanError::Invalid(format!("GpuJoin: {error}")))?;
+    .map_err(|error| PlanError::Invalid(format!("GpuHashJoin: {error}")))?;
     Ok(Arc::new(join))
 }
 
 /// The probe keys this batch contributes, under the names they carry in the accumulation.
 fn key_project(
-    node: &GpuJoin,
+    node: &GpuHashJoin,
     probe: &ArrowSchema,
 ) -> Result<(Arc<dyn ExecutionPlan>, SchemaRef), PlanError> {
     let mut exprs: Vec<(Arc<dyn PhysicalExpr>, String)> = Vec::with_capacity(node.keys.len());
@@ -339,7 +339,7 @@ fn key_project(
 /// their names are the probe's, since the key project is what built that table — no
 /// residual and no projection, because the question is only which build rows matched.
 fn finish_join(
-    node: &GpuJoin,
+    node: &GpuHashJoin,
     build: &ArrowSchema,
     keys: &SchemaRef,
 ) -> Result<Arc<dyn ExecutionPlan>, PlanError> {
@@ -375,7 +375,7 @@ fn finish_join(
 /// LeftSemi over three build columns declaring two of them, which is where q20 was
 /// answering with a column the plan did not ask for.
 fn finish_project(
-    node: &GpuJoin,
+    node: &GpuHashJoin,
     emitted: SchemaRef,
     build: &ArrowSchema,
     probe: &ArrowSchema,
@@ -403,7 +403,7 @@ fn finish_project(
 /// column in the projection's order, a build one read from the anti join's output and a
 /// probe one as a typed NULL.
 fn pad_project(
-    node: &GpuJoin,
+    node: &GpuHashJoin,
     build: &ArrowSchema,
     probe: &ArrowSchema,
 ) -> Result<Arc<dyn ExecutionPlan>, PlanError> {

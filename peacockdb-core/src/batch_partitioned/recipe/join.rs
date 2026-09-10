@@ -19,7 +19,7 @@ use super::super::expr::Expr;
 use super::super::nodes::join::{
     JoinFilterColumn, JoinSide, NestedLoopJoinType, finish_join_type, per_call_join_type,
 };
-use super::super::nodes::{GpuJoin, GpuNestedLoopJoin};
+use super::super::nodes::{GpuHashJoin, GpuNestedLoopJoin};
 use super::super::schema::Schema;
 use super::expr_writer::write_expr;
 use super::node_writer;
@@ -27,7 +27,7 @@ use super::types::{Call, CallPattern, FbKind, Input, ProjectRole, Recipe};
 use super::writer::{Payload, Writer};
 
 pub(super) fn hash_join(
-    node: &GpuJoin,
+    node: &GpuHashJoin,
     inputs: &[&Schema],
     writer: &mut Writer,
 ) -> Result<Option<Recipe>, PlanError> {
@@ -140,7 +140,7 @@ pub(super) fn hash_join(
 /// emits — the node's for a probe-local join, the per-call one for an outer.
 fn probe_join<'a>(
     b: &mut FlatBufferBuilder<'a>,
-    node: &GpuJoin,
+    node: &GpuHashJoin,
     join_type: JoinType,
     build: &Schema,
     probe: &Schema,
@@ -197,7 +197,7 @@ fn probe_join<'a>(
 /// project is what makes the output the joined schema.
 fn finish_join<'a>(
     b: &mut FlatBufferBuilder<'a>,
-    node: &GpuJoin,
+    node: &GpuHashJoin,
     join_type: JoinType,
     build: &Schema,
     probe: &Schema,
@@ -240,7 +240,7 @@ fn finish_join<'a>(
 /// is what makes the concat at done cheap (#136).
 fn key_project<'a>(
     b: &mut FlatBufferBuilder<'a>,
-    node: &GpuJoin,
+    node: &GpuHashJoin,
     probe: &Schema,
     kids: &[WIPOffset<fb::PlanNode<'a>>],
 ) -> Result<Payload, PlanError> {
@@ -260,7 +260,7 @@ fn key_project<'a>(
 /// projection says.
 fn pad_project<'a>(
     b: &mut FlatBufferBuilder<'a>,
-    node: &GpuJoin,
+    node: &GpuHashJoin,
     build: &Schema,
     probe: &Schema,
     kids: &[WIPOffset<fb::PlanNode<'a>>],
@@ -287,7 +287,7 @@ fn pad_project<'a>(
 
 /// What the build-side semi family's finish emits, which is what a project above it
 /// indexes: the build side, and the boolean a mark join appends to it.
-fn finish_output(node: &GpuJoin, build: &Schema) -> Schema {
+fn finish_output(node: &GpuHashJoin, build: &Schema) -> Schema {
     if node.join_type != JoinType::LeftMark {
         return build.clone();
     }
@@ -304,7 +304,7 @@ fn finish_output(node: &GpuJoin, build: &Schema) -> Schema {
 /// The node's projection over the finish's own output: column refs and nothing else.
 fn narrow_project<'a>(
     b: &mut FlatBufferBuilder<'a>,
-    node: &GpuJoin,
+    node: &GpuHashJoin,
     emitted: &Schema,
     kids: &[WIPOffset<fb::PlanNode<'a>>],
 ) -> Result<Payload, PlanError> {
@@ -420,7 +420,7 @@ fn wire_join_type(join_type: JoinType) -> fb::JoinType {
 
 /// How many typed NULLs the pad project appends: the probe columns the join's projection
 /// keeps.
-fn padded_columns(node: &GpuJoin, build: &Schema, probe: &Schema) -> usize {
+fn padded_columns(node: &GpuHashJoin, build: &Schema, probe: &Schema) -> usize {
     let build_width = build.fields.fields().len() as u32;
     match &node.projection {
         Some(kept) => kept.iter().filter(|column| **column >= build_width).count(),

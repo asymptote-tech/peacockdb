@@ -96,8 +96,8 @@ fn joining(
     join_type: datafusion::common::JoinType,
     filter: Option<Expr>,
     filter_columns: Vec<join::JoinFilterColumn>,
-) -> GpuJoin {
-    GpuJoin::new(
+) -> GpuHashJoin {
+    GpuHashJoin::new(
         build,
         probe,
         join_type,
@@ -306,7 +306,7 @@ fn joined_distribution(
     keys: Vec<(u32, u32)>,
     output: &[&str],
 ) -> KeyDistribution {
-    let join = GpuJoin::new(
+    let join = GpuHashJoin::new(
         Given::input(build.0, build.1),
         Given::input(probe.0, probe.1),
         join_type,
@@ -441,7 +441,7 @@ fn sides_hashed_on_different_things_leave_the_output_with_no_claim() {
 fn a_projection_moves_the_claim_to_where_the_key_actually_lands() {
     // The output ordinal is neither side's: the projection drops a build column, so the
     // build key lands at 0 having been 1 in the crossed table.
-    let join = GpuJoin::new(
+    let join = GpuHashJoin::new(
         Given::input(hashed(vec![1], 4), &["other", "k"]),
         Given::input(hashed(vec![0], 4), &["fk"]),
         datafusion::common::JoinType::Inner,
@@ -496,7 +496,7 @@ fn a_semi_joins_projection_is_bounded_by_the_side_it_emits() {
     // A semi join emits the build side alone, so @2 is past its table even though the two
     // sides hold four columns between them — the bound that reads both sides would let it
     // through.
-    let join = GpuJoin::new(
+    let join = GpuHashJoin::new(
         Given::input(one_lane(BatchLayout::SingleBatch), &["k", "other"]),
         Given::input(one_lane(BatchLayout::SingleBatch), &["fk", "spare"]),
         datafusion::common::JoinType::LeftSemi,

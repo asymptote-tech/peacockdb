@@ -16,7 +16,7 @@ use crate::batch_partitioned::node::RowInterval;
 use crate::batch_partitioned::nodes::join::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
 use crate::batch_partitioned::nodes::{
     ExecutorCategory, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
-    GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuInterleave, GpuJoin,
+    GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave,
     GpuLimit, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin, GpuProject, GpuSort,
     GpuUnion, GpuUnload, NodeRef, as_node_ref, category_of,
 };
@@ -102,7 +102,7 @@ fn every_kind() -> Vec<Box<dyn GpuNode>> {
         )),
         merged,
         Box::new(GpuEmitPartitions::new(streaming(), vec![0], 2)),
-        Box::new(GpuJoin::new(
+        Box::new(GpuHashJoin::new(
             one_batch(),
             streaming(),
             JoinType::Inner,
@@ -383,12 +383,12 @@ fn a_state_value_too_large_for_its_declared_precision_ends_the_query() {
     );
 }
 
-fn semi_join(join_type: JoinType) -> GpuJoin {
+fn semi_join(join_type: JoinType) -> GpuHashJoin {
     let output = match join_type {
         JoinType::LeftSemi => schema_of(&GROUPED),
         _ => schema_of(&[GROUPED, GROUPED].concat()),
     };
-    GpuJoin::new(
+    GpuHashJoin::new(
         one_batch(),
         streaming(),
         join_type,

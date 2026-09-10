@@ -334,7 +334,7 @@ F9. **A cardinality estimate belongs on the join node, not in the model's signat
    width, build side replicated per match — which `scratch_bytes(n_rows, n_bytes)` cannot
    derive. It does not have to: the executor is constructed from the node, so an estimate
    the optimizer attaches at plan time reaches the model through `&self`, and the trait is
-   unchanged. `GpuJoin` therefore carries a fan-out figure (output rows / probe rows, the
+   unchanged. `GpuHashJoin` therefore carries a fan-out figure (output rows / probe rows, the
    ratio `CardinalityEstimator` already returns), constant 1.0 until
    [#19](../../llm-wiki/tickets.md). Corollary: **model ≥ measured is not an invariant.**
    The estimate can be wrong, so the model can come in under, and the enforcer is built for

@@ -9,7 +9,7 @@ use super::*;
 use crate::batch_partitioned::cpu_backend::join::CpuJoin;
 use crate::batch_partitioned::layout::PartitionLayout;
 use crate::batch_partitioned::nodes::join::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
-use crate::batch_partitioned::nodes::{GpuCrossJoin, GpuJoin, GpuNestedLoopJoin};
+use crate::batch_partitioned::nodes::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
 use datafusion::common::JoinType;
 
 const DIM: [(i64, &str); 3] = [(1, "a"), (2, "b"), (3, "c")];
@@ -71,8 +71,8 @@ fn side(columns: &[(&str, DataType)], batches: BatchLayout) -> Box<dyn GpuNode> 
     })
 }
 
-fn hash_join(join_type: JoinType, output: &[(&str, DataType)]) -> GpuJoin {
-    GpuJoin::new(
+fn hash_join(join_type: JoinType, output: &[(&str, DataType)]) -> GpuHashJoin {
+    GpuHashJoin::new(
         side(&dim_columns(), BatchLayout::SingleBatch),
         side(&fact_columns(), BatchLayout::MultipleBatches),
         join_type,
@@ -240,8 +240,8 @@ fn projecting_join(
     join_type: JoinType,
     projection: Vec<u32>,
     output: &[(&str, DataType)],
-) -> GpuJoin {
-    GpuJoin::new(
+) -> GpuHashJoin {
+    GpuHashJoin::new(
         side(&dim_columns(), BatchLayout::SingleBatch),
         side(&fact_columns(), BatchLayout::MultipleBatches),
         join_type,
@@ -422,7 +422,7 @@ fn a_nested_loop_left_join_pads_the_build_rows_no_pair_kept() {
 #[test]
 fn a_null_key_matches_a_null_key_in_the_finish_pass_when_the_node_says_so() {
     let with_nulls = |null_equals_null: bool| {
-        GpuJoin::new(
+        GpuHashJoin::new(
             side(&dim_columns(), BatchLayout::SingleBatch),
             side(&fact_columns(), BatchLayout::MultipleBatches),
             JoinType::LeftAnti,
@@ -434,7 +434,7 @@ fn a_null_key_matches_a_null_key_in_the_finish_pass_when_the_node_says_so() {
             schema_of(&dim_columns()),
         )
     };
-    let keyed_null = |node: &GpuJoin| {
+    let keyed_null = |node: &GpuHashJoin| {
         let join = CpuJoin::hash(
             node,
             &schema_of(&dim_columns()).fields,
@@ -510,9 +510,9 @@ fn residual() -> (Expr, Vec<JoinFilterColumn>) {
     )
 }
 
-fn filtered(join_type: JoinType, output: &[(&str, DataType)]) -> GpuJoin {
+fn filtered(join_type: JoinType, output: &[(&str, DataType)]) -> GpuHashJoin {
     let (filter, columns) = residual();
-    GpuJoin::new(
+    GpuHashJoin::new(
         side(&dim_columns(), BatchLayout::SingleBatch),
         // The planner makes a refusing shape's probe a single batch, and this is that
         // batch: what the matrix calls the legacy call is one call over the whole of it.

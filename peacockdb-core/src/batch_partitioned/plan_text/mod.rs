@@ -649,7 +649,7 @@ mod tests {
             4,
         )
         .await;
-        let join = line_with(&text, "GpuJoin");
+        let join = line_with(&text, "GpuHashJoin");
         assert!(
             join.contains("on=[(s_nationkey@1, c_nationkey@1)]"),
             "{text}"

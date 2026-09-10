@@ -18,7 +18,7 @@ use super::schema::Schema;
 pub use accumulators::{GpuAccumulateBatchesAndSort, GpuCoalesceAllBatches, GpuLimit};
 pub use aggregate::{AggregateBody, GpuAggregate, GpuAggregateBatches};
 pub use exec_ops::{GpuFilter, GpuProject, GpuSort};
-pub use join::{GpuCrossJoin, GpuJoin, GpuNestedLoopJoin};
+pub use join::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
 pub use partition_ops::{GpuEmitPartitions, GpuMergePartitions, GpuMergeSortedPartitions};
 pub use source::GpuLoadParquet;
 pub use union::{GpuInterleave, GpuUnion};
@@ -37,7 +37,7 @@ pub enum NodeRef<'a> {
     Limit(&'a GpuLimit),
     Aggregate(&'a GpuAggregate),
     AggregateBatches(&'a GpuAggregateBatches),
-    Join(&'a GpuJoin),
+    Join(&'a GpuHashJoin),
     CrossJoin(&'a GpuCrossJoin),
     NestedLoopJoin(&'a GpuNestedLoopJoin),
     MergePartitions(&'a GpuMergePartitions),
@@ -84,7 +84,7 @@ fn try_node_ref_of(any: &dyn std::any::Any) -> Option<NodeRef<'_>> {
         Some(NodeRef::Aggregate(n))
     } else if let Some(n) = any.downcast_ref::<GpuAggregateBatches>() {
         Some(NodeRef::AggregateBatches(n))
-    } else if let Some(n) = any.downcast_ref::<GpuJoin>() {
+    } else if let Some(n) = any.downcast_ref::<GpuHashJoin>() {
         Some(NodeRef::Join(n))
     } else if let Some(n) = any.downcast_ref::<GpuCrossJoin>() {
         Some(NodeRef::CrossJoin(n))
@@ -168,7 +168,7 @@ pub(crate) fn node_name(any: &dyn std::any::Any) -> &'static str {
         NodeRef::Limit(_) => "GpuLimit",
         NodeRef::Aggregate(_) => "GpuAggregate",
         NodeRef::AggregateBatches(_) => "GpuAggregateBatches",
-        NodeRef::Join(_) => "GpuJoin",
+        NodeRef::Join(_) => "GpuHashJoin",
         NodeRef::CrossJoin(_) => "GpuCrossJoin",
         NodeRef::NestedLoopJoin(_) => "GpuNestedLoopJoin",
         NodeRef::MergePartitions(_) => "GpuMergePartitions",

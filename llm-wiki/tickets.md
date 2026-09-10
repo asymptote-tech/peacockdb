@@ -296,7 +296,7 @@ Whether batch sizes can reach the accountant's binding pre-call check at all is 
 candidates failed structurally rather than by accident, so this is about the model, not a gap.
 
 `GpuCoalesceAllBatches` carries the largest estimate in none of the 120 `--- memory ---`
-sections at `tp4-rowgroup` — `GpuEmitPartitions` in 77, `GpuJoin` in 20, `GpuUnload` in 12 —
+sections at `tp4-rowgroup` — `GpuEmitPartitions` in 77, `GpuHashJoin` in 20, `GpuUnload` in 12 —
 so a rebatcher grows a node beside the binding one. `nested-loop-join`'s coalescer is 115 bytes
 against a 2,679-byte join. Of the two queries carrying their largest at a loader,
 `tpch/nested-limits` does move its peak under `Rebatch::AboveSources` (4,915,680 to 8,000,480,
@@ -377,7 +377,7 @@ ordinal moves one column twice leaving a hole — a wrong answer, not a throw, w
 needs the assert and not the observation. Land before [#155](#t155).
 
 <a id="t152"></a>
-### #152 — GpuJoin: the build handle does not survive a streamed probe
+### #152 — GpuHashJoin: the build handle does not survive a streamed probe
 `NodeSession::execute_node` erases every input handle it reads (`node_session.cpp` ~L250, ~L339,
 ~L427), but a streamed probe calls the join seq once per batch and needs it B times.
 
@@ -528,7 +528,7 @@ and row-group pruning. Shape: preprocessor → flat per-node intermediate
 `.duckdb_cost.txt` numbers must not move.
 
 <a id="t136"></a>
-### #136 — GpuJoin: build-side match tracking when the probe side streams
+### #136 — GpuHashJoin: build-side match tracking when the probe side streams
 Left-outer, full, semi, anti and mark need "which build rows matched across all probe batches",
 and that never crosses the ABI — every call rebuilds the join from scratch.
 

@@ -10,7 +10,7 @@ use crate::batch_partitioned::expr::{Expr, NamedExpr};
 use crate::batch_partitioned::layout::ColumnOrder;
 use crate::batch_partitioned::node::{GpuNode, RowInterval};
 use crate::batch_partitioned::nodes::{
-    GpuCoalesceAllBatches, GpuEmitPartitions, GpuFilter, GpuInterleave, GpuJoin, GpuLimit,
+    GpuCoalesceAllBatches, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave, GpuLimit,
     GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions, GpuProject, GpuSort, GpuUnion,
     GpuUnload,
 };
@@ -99,7 +99,7 @@ pub(super) fn interleave(branches: Vec<Box<dyn GpuNode>>) -> Box<dyn GpuNode> {
 /// The build side is always the left child, which is the orientation the schedule turns
 /// into "the build subtree drains first".
 pub(super) fn join(build: Box<dyn GpuNode>, probe: Box<dyn GpuNode>) -> Box<dyn GpuNode> {
-    Box::new(GpuJoin::new(
+    Box::new(GpuHashJoin::new(
         build,
         probe,
         JoinType::Inner,

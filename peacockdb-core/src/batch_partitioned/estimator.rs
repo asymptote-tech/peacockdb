@@ -303,7 +303,7 @@ impl<'a> Tree<'a> {
     }
 
     /// The key columns a finish pass accumulates, per probe row.
-    fn key_width(&self, join: &super::nodes::GpuJoin, probe: usize) -> u64 {
+    fn key_width(&self, join: &super::nodes::GpuHashJoin, probe: usize) -> u64 {
         let Some(schema) = self.nodes[probe].kind().schema() else {
             return 0;
         };

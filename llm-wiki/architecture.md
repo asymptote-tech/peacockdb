@@ -188,7 +188,7 @@ Four limits on the number it produces.
 | `GpuEmitPartitions` | PartitionEmitter | 1 → N per batch by hash scatter; one call per input batch |
 | `GpuAggregate` | Exec | aggregates one batch: init aggregators, plus the finalize where it is also the single-node shortcut |
 | `GpuAggregateBatches` | BatchAccumulator | merges pre-aggregated batches; compacts on a doubling threshold; emits at done |
-| `GpuJoin` | Join | the capability matrix below |
+| `GpuHashJoin` | Join | the capability matrix below |
 | `GpuCrossJoin`, `GpuNestedLoopJoin` | Join | two inputs, both one lane; broadcast variants are [#140](tickets.md#t140) |
 | `GpuUnion`, `GpuInterleave` | BatchForwarder | lane relabeling only. Union sums its inputs' lane counts and clears the hash; interleave takes output lane p from lane p of each input and so preserves it |
 | `GpuLimit` | BatchAccumulator, mid-plan only | an interval over a **one-lane** stream; streams and holds nothing |
@@ -409,10 +409,10 @@ project.
 
 | Mode | Also covers | What it becomes |
 |---|---|---|
-| **Inner** | multi-key and composite keys; `null_equals_null=true`; a residual filter, which still streams since every emitted row is decided by (build, this batch) | `GpuJoin{Inner}`, probe streams, no finish |
-| **Right outer** (probe side preserved) | a DataFusion Left-outer the swap moved | `GpuJoin{Right}`, probe streams, no finish — a probe row unmatched in this batch is unmatched everywhere, because the build side is complete before the first call |
-| **Left outer** (build side preserved) | a DataFusion Right-outer after the swap | `GpuJoin{Left}`, probe streams **with finish**; the accumulated probe keys are resident until it runs |
-| **Full outer** | — | `GpuJoin{Full}` — Left's finish, Right's per-call emission |
+| **Inner** | multi-key and composite keys; `null_equals_null=true`; a residual filter, which still streams since every emitted row is decided by (build, this batch) | `GpuHashJoin{Inner}`, probe streams, no finish |
+| **Right outer** (probe side preserved) | a DataFusion Left-outer the swap moved | `GpuHashJoin{Right}`, probe streams, no finish — a probe row unmatched in this batch is unmatched everywhere, because the build side is complete before the first call |
+| **Left outer** (build side preserved) | a DataFusion Right-outer after the swap | `GpuHashJoin{Left}`, probe streams **with finish**; the accumulated probe keys are resident until it runs |
+| **Full outer** | — | `GpuHashJoin{Full}` — Left's finish, Right's per-call emission |
 | **Build-side semi family** — `LeftSemi` | `LeftAnti`, `LeftMark`; the filtered forms, which take a single-batch probe | probe streams with finish, and **the per-call join disappears**: a probe call is only the key project, so the build side is untouched until the finish consumes it |
 | **Probe-side semi family** — `RightSemi` | `RightAnti` | probe streams, no finish — membership in a complete build side is a per-row question |
 | **Cross join** | — | `GpuCrossJoin`, both inputs one lane |
@@ -766,7 +766,7 @@ The mapping from a plan node to the seqs it addresses, and to the calls a driver
 | `GpuCoalesceAllBatches` | `CudfCoalescePartitions` | one collapse call over the lane's batch handles |
 | `GpuAggregateBatches` | `CudfCoalescePartitions` + `CudfAggregate{Merge}`, plus a `CudfProject` where it finalizes | one concat and one aggregate per compaction and again at done; the project runs once, at done |
 | `GpuEmitPartitions` | `CudfRepartition(Hash, 1→N)` | repartition arm, one call per batch → N handles |
-| `GpuJoin` | `CudfHashJoin`, plus the finish seqs — key project, concat, anti/semi join, pad project | map arm per (lane, probe batch); the build handle would need copying before each, since the call consumes it (#152) |
+| `GpuHashJoin` | `CudfHashJoin`, plus the finish seqs — key project, concat, anti/semi join, pad project | map arm per (lane, probe batch); the build handle would need copying before each, since the call consumes it (#152) |
 | `GpuCrossJoin`, `GpuNestedLoopJoin` | the same-kind node | one map-arm call |
 | `GpuLimit` | none | `slice_handle` on the two straddling batches, nothing on the rest — the bounds are runtime values |
 | `GpuMergePartitions`, `GpuUnion`, `GpuInterleave` | none, beyond the union's cast projects | routing in the driver, zero FFI calls |

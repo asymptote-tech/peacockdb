@@ -1,4 +1,4 @@
-//! The kinds whose recipe is more than one call, `GpuJoin` first: per join type, the seq
+//! The kinds whose recipe is more than one call, `GpuHashJoin` first: per join type, the seq
 //! set it emits and when each call is made, against the capability matrix. The trivial
 //! kinds are not tested here — the plan goldens run them over every corpus query, which is
 //! more coverage than a hand-built node would be.
@@ -11,7 +11,7 @@ use crate::batch_partitioned::layout::{BatchLayout, ColumnOrder, NodeKind, Parti
 use crate::batch_partitioned::nodes::GpuFilter;
 use crate::batch_partitioned::nodes::aggregate::AggregateBody;
 use crate::batch_partitioned::nodes::join::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
-use crate::batch_partitioned::nodes::{GpuAggregate, GpuJoin, GpuNestedLoopJoin};
+use crate::batch_partitioned::nodes::{GpuAggregate, GpuHashJoin, GpuNestedLoopJoin};
 use crate::generated::gpu_plan_generated::peacock::plan as fb;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::JoinType;
@@ -75,7 +75,7 @@ fn columns_of(columns: &[&str]) -> Schema {
 /// `dim(k, label)` joined to `fact(fk, v)`, the pair the capability matrix works its
 /// examples on. `filter` is a residual over both sides, which is what moves a mode off
 /// the streaming path.
-fn join(join_type: JoinType, filter: bool, projection: Option<Vec<u32>>) -> GpuJoin {
+fn join(join_type: JoinType, filter: bool, projection: Option<Vec<u32>>) -> GpuHashJoin {
     let build = Given::input(BatchLayout::SingleBatch, &["k", "label"]);
     let probe = Given::input(BatchLayout::MultipleBatches, &["fk", "v"]);
     let (residual, columns) = if filter {
@@ -100,7 +100,7 @@ fn join(join_type: JoinType, filter: bool, projection: Option<Vec<u32>>) -> GpuJ
     } else {
         (None, Vec::new())
     };
-    GpuJoin::new(
+    GpuHashJoin::new(
         build,
         probe,
         join_type,
@@ -113,7 +113,7 @@ fn join(join_type: JoinType, filter: bool, projection: Option<Vec<u32>>) -> GpuJ
     )
 }
 
-fn recipe_for(node: &GpuJoin) -> Recipe {
+fn recipe_for(node: &GpuHashJoin) -> Recipe {
     let build = columns_of(&["k", "label"]);
     let probe = columns_of(&["fk", "v"]);
     join::hash_join(node, &[&build, &probe], &mut Writer::new())
@@ -631,8 +631,8 @@ fn a_payload_the_wire_cannot_carry_fails_the_plan_and_names_where() {
 /// pass is the half that has to answer in the node's declared shape: the anti join emits
 /// every build column whatever the projection says, so what the pad project keeps is the
 /// whole question.
-fn projecting_left_join() -> GpuJoin {
-    GpuJoin::new(
+fn projecting_left_join() -> GpuHashJoin {
+    GpuHashJoin::new(
         Given::input(BatchLayout::SingleBatch, &["k", "label"]),
         Given::input(BatchLayout::MultipleBatches, &["fk", "v"]),
         JoinType::Left,
@@ -647,7 +647,7 @@ fn projecting_left_join() -> GpuJoin {
 
 /// The buffer a join's recipe addresses, so a case can read the payload rather than the
 /// call list.
-fn written(node: &GpuJoin) -> (Recipe, Vec<u8>) {
+fn written(node: &GpuHashJoin) -> (Recipe, Vec<u8>) {
     let mut writer = Writer::new();
     let recipe = join::hash_join(
         node,
@@ -684,8 +684,8 @@ fn a_finishing_joins_pad_project_emits_the_columns_the_node_declares() {
 /// output is the build side, so its projection only narrows — and publishing no call for
 /// that narrowing is what left the device emitting every build column while the CPU
 /// emitted what the node declared.
-fn projecting_semi_join(join_type: JoinType, kept: Vec<u32>, output: &[&str]) -> GpuJoin {
-    GpuJoin::new(
+fn projecting_semi_join(join_type: JoinType, kept: Vec<u32>, output: &[&str]) -> GpuHashJoin {
+    GpuHashJoin::new(
         Given::input(BatchLayout::SingleBatch, &["k", "label"]),
         Given::input(BatchLayout::MultipleBatches, &["fk", "v"]),
         join_type,
@@ -751,7 +751,7 @@ fn a_projecting_mark_joins_recipe_keeps_the_mark_as_a_column_and_not_as_a_null()
 /// the row, and a project that keeps every column is a call for nothing.
 #[test]
 fn a_semi_join_that_narrows_nothing_publishes_no_project_after_its_finish() {
-    let node = GpuJoin::new(
+    let node = GpuHashJoin::new(
         Given::input(BatchLayout::SingleBatch, &["k", "label"]),
         Given::input(BatchLayout::MultipleBatches, &["fk", "v"]),
         JoinType::LeftSemi,

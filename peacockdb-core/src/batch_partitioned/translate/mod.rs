@@ -36,8 +36,8 @@ use super::node::{GpuNode, RowInterval};
 use super::nodes::join::{JoinFilterColumn, JoinSide, NestedLoopJoinType, capability};
 use super::nodes::{
     GpuAccumulateBatchesAndSort, GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter,
-    GpuInterleave, GpuJoin, GpuLimit, GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions,
-    GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion, GpuUnload,
+    GpuHashJoin, GpuInterleave, GpuLimit, GpuLoadParquet, GpuMergePartitions,
+    GpuMergeSortedPartitions, GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion, GpuUnload,
 };
 use super::parquet_meta::{parquet_table_name, survivor_metadata};
 use super::partitioner::{Batching, RowGroupMeta, partition};
@@ -339,7 +339,7 @@ impl Translator {
             ),
             None => (None, Vec::new()),
         };
-        Ok(Box::new(GpuJoin::new(
+        Ok(Box::new(GpuHashJoin::new(
             build,
             probe,
             *join.join_type(),

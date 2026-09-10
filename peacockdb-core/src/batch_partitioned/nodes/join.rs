@@ -328,7 +328,7 @@ fn joined_layout() -> PartitionLayout {
 fn check_keys(keys: &[(u32, u32)], build: &Schema, probe: &Schema) -> Result<(), PlanError> {
     if keys.is_empty() {
         return Err(PlanError::Invalid(
-            "GpuJoin: an equi-join with no keys is a cross join — the planner emits \
+            "GpuHashJoin: an equi-join with no keys is a cross join — the planner emits \
              GpuCrossJoin for that shape"
                 .to_string(),
         ));
@@ -349,7 +349,7 @@ fn check_keys(keys: &[(u32, u32)], build: &Schema, probe: &Schema) -> Result<(),
         for ordinal in ordinals {
             if ordinal as usize >= width {
                 return Err(PlanError::Invalid(format!(
-                    "GpuJoin: {side} key @{ordinal} is past the {width} columns that side has"
+                    "GpuHashJoin: {side} key @{ordinal} is past the {width} columns that side has"
                 )));
             }
         }
@@ -614,7 +614,7 @@ pub(crate) fn emitted_columns(join_type: JoinType, build: usize, probe: usize) -
 /// capability matrix says otherwise, and lane p of each side holds exactly the rows that
 /// can match lane p of the other.
 #[derive(Debug)]
-pub struct GpuJoin {
+pub struct GpuHashJoin {
     kind: NodeKind,
     pub join_type: JoinType,
     /// (build ordinal, probe ordinal) per key, in the order the join hashes them.
@@ -629,7 +629,7 @@ pub struct GpuJoin {
     probe: Box<dyn GpuNode>,
 }
 
-impl GpuJoin {
+impl GpuHashJoin {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         build: Box<dyn GpuNode>,
@@ -676,7 +676,7 @@ impl GpuJoin {
     }
 }
 
-impl GpuNode for GpuJoin {
+impl GpuNode for GpuHashJoin {
     fn kind(&self) -> &NodeKind {
         &self.kind
     }
@@ -692,7 +692,7 @@ impl GpuNode for GpuJoin {
         );
         if build.n != probe.n {
             return Err(PlanError::Invalid(format!(
-                "GpuJoin: lane p of one side must hold what can match lane p of the other, \
+                "GpuHashJoin: lane p of one side must hold what can match lane p of the other, \
                  but the sides carry {} and {} lanes",
                 build.n, probe.n
             )));
@@ -705,7 +705,7 @@ impl GpuNode for GpuJoin {
                 || !hashed_on(&probe, self.keys.iter().map(|(_, p)| *p).collect())
             {
                 return Err(PlanError::Invalid(
-                    "GpuJoin: several lanes are co-partitioned only if both sides were \
+                    "GpuHashJoin: several lanes are co-partitioned only if both sides were \
                      hashed on the join keys, in key order — the planner inserts \
                      GpuEmitPartitions on each side"
                         .to_string(),
@@ -714,7 +714,7 @@ impl GpuNode for GpuJoin {
         }
         if build.batch_layout != BatchLayout::SingleBatch {
             return Err(PlanError::Invalid(
-                "GpuJoin: its build side must be one batch per lane — the planner inserts \
+                "GpuHashJoin: its build side must be one batch per lane — the planner inserts \
                  GpuCoalesceAllBatches below it"
                     .to_string(),
             ));
@@ -722,14 +722,14 @@ impl GpuNode for GpuJoin {
         let capability = self.capability()?;
         if !capability.probe_streams && probe.batch_layout != BatchLayout::SingleBatch {
             return Err(PlanError::Invalid(format!(
-                "GpuJoin{{{:?}}} with a residual filter cannot stream its probe — the planner \
+                "GpuHashJoin{{{:?}}} with a residual filter cannot stream its probe — the planner \
                  inserts GpuCoalesceAllBatches below it",
                 self.join_type
             )));
         }
         if let Some(filter) = &self.filter {
             check_filter_columns(
-                "GpuJoin",
+                "GpuHashJoin",
                 filter,
                 &self.filter_columns,
                 &input_schema(self.build.as_ref()),
@@ -742,7 +742,7 @@ impl GpuNode for GpuJoin {
         );
         check_keys(&self.keys, &build_schema, &probe_schema)?;
         check_projection(
-            "GpuJoin",
+            "GpuHashJoin",
             self.join_type,
             self.projection.as_ref(),
             &build_schema,

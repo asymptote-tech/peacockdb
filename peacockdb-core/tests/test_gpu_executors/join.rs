@@ -10,7 +10,7 @@ use super::*;
 use datafusion::common::JoinType;
 use peacockdb_core::batch_partitioned::gpu_backend::emit::GpuEmitter;
 use peacockdb_core::batch_partitioned::gpu_backend::join::GpuJoin as GpuJoinExec;
-use peacockdb_core::batch_partitioned::nodes::{GpuEmitPartitions, GpuFilter, GpuJoin};
+use peacockdb_core::batch_partitioned::nodes::{GpuEmitPartitions, GpuFilter, GpuHashJoin};
 
 /// The joined row: both sides' columns, which for this fixture is `k, v` twice.
 fn joined_columns() -> ArrowSchema {
@@ -37,7 +37,7 @@ fn left_join_tree(join_type: JoinType, output: &ArrowSchema) -> Box<dyn GpuNode>
         None,
         Schema::new(Arc::new(columns())),
     );
-    Box::new(GpuJoin::new(
+    Box::new(GpuHashJoin::new(
         mapped(vec![vec![vec![2]]]),
         Box::new(probe),
         join_type,
@@ -139,7 +139,7 @@ fn every_member_of_the_semi_family_streams_and_answers_at_done() {
             ]
             .concat(),
         );
-        let tree: Box<dyn GpuNode> = Box::new(GpuJoin::new(
+        let tree: Box<dyn GpuNode> = Box::new(GpuHashJoin::new(
             mapped(vec![vec![vec![2]]]),
             mapped(vec![vec![vec![0], vec![1]]]),
             join_type,
@@ -195,7 +195,7 @@ fn every_member_of_the_semi_family_streams_and_answers_at_done() {
 #[test]
 fn a_projecting_semi_joins_finish_emits_the_column_the_node_declares() {
     let out = schema_of(&[("v", DataType::Int64)]);
-    let tree: Box<dyn GpuNode> = Box::new(GpuJoin::new(
+    let tree: Box<dyn GpuNode> = Box::new(GpuHashJoin::new(
         mapped(vec![vec![vec![2]]]),
         mapped(vec![vec![vec![0], vec![1]]]),
         JoinType::LeftSemi,
@@ -252,7 +252,7 @@ fn a_projecting_semi_joins_finish_emits_the_column_the_node_declares() {
 #[test]
 fn a_second_probe_batch_of_a_copying_join_is_refused_by_name() {
     let out = joined_columns();
-    let tree: Box<dyn GpuNode> = Box::new(GpuJoin::new(
+    let tree: Box<dyn GpuNode> = Box::new(GpuHashJoin::new(
         mapped(vec![vec![vec![2]]]),
         mapped(vec![vec![vec![0], vec![1]]]),
         JoinType::Inner,
@@ -338,7 +338,7 @@ fn a_scatter_answers_with_one_handle_per_lane() {
 #[test]
 fn a_finish_over_no_probe_keys_hands_the_build_side_up() {
     let out = columns();
-    let tree: Box<dyn GpuNode> = Box::new(GpuJoin::new(
+    let tree: Box<dyn GpuNode> = Box::new(GpuHashJoin::new(
         mapped(vec![vec![vec![2]]]),
         mapped(vec![vec![vec![0]]]),
         JoinType::LeftAnti,

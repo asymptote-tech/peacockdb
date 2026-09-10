@@ -79,7 +79,7 @@ fn a_join_probe_that_fails_ends_the_query() {
     fails_at(
         join_plan().as_ref(),
         &join_script().failing_at(FailAt::Probe),
-        "GpuJoin",
+        "GpuHashJoin",
         0,
     );
 }
@@ -95,7 +95,7 @@ fn a_call_that_consumes_its_executor_can_fail_too() {
             finish_rows: 3,
             build_residency: 64,
         });
-    fails_at(join_plan().as_ref(), &script, "GpuJoin", 0);
+    fails_at(join_plan().as_ref(), &script, "GpuHashJoin", 0);
 }
 
 #[test]
