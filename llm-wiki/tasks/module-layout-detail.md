@@ -1232,10 +1232,20 @@ environment gap, not a regression, and it costs a debugging round every dispatch
 
 "The full suite, once, at the end" says the GPU half of this branch is proved by three clean
 builds and by nothing else, because no host this run could reach has a device. That was true of
-the local run and is not true of the branch. CI run on `b0f84b5f` — the round-1 head, the last
-commit before this one to touch code — is green on every job that runs: both cuDF legs, the
-25.02 GPU build, the cost report, the S3 metadata check, and the remote GPU tier. The GPU tests
-ran on a device.
+the local run and is not true of the branch. A CI run on the round-1 head was green on every job
+that runs: both cuDF legs, the 25.02 GPU build, the cost report, the S3 metadata check, and the
+remote GPU tier. The GPU tests ran on a device.
+
+**That head was `b0f84b5f`, and the rebase replaced it with `de1b4c81`.** `git branch --contains
+b0f84b5f` is empty, so a reader chasing the SHA finds nothing in the branch and cannot tell a
+rewritten commit from a fabricated one. Two sentences here were wrong as well as stale: the run
+was not on "the last commit before this one to touch code" — its own parent touched
+`gpu_backend/mod.rs` — and it is the *reason* the green transfers that matters, not the hash.
+The reason is that every `src/` change above it is import order, a doc comment moved onto the
+right struct, and two comment lines. Cite a rebased SHA in a detail file and it becomes a
+dangling reference the moment the chain moves; cite what the diff contains and it stays true.
+
+`done` waits on a green run whose commit is an ancestor of the head, not on this one.
 
 Two heads above it are documentation only and get a changed-paths skip, which is not a gate and
 not evidence. Read the green on the last code head, not on the tip.
