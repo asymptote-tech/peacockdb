@@ -375,9 +375,14 @@ TEST_F(CudfNodes, OperatorTimings) {
   note_peak();
 }
 
+// Per-operator timings over sf40 lineitem, PEACOCK_NODES_ROWS rows at a time; measured peak
+// 8.95 GiB at the default row count (llm-wiki/tasks/rmm-pool-budget-detail.md). 10 GiB covers
+// it; a bigger sweep is a manual run that raises this line with its own measurement.
+constexpr std::size_t kPoolBytes = 10ull << 30;
+
 // Same entry point as the other gtest binaries here (the conda cudf ships no gtest_main).
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  peacock::install_rmm_pool();
+  peacock::install_rmm_pool(kPoolBytes);
   return RUN_ALL_TESTS();
 }

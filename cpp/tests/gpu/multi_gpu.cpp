@@ -12,7 +12,7 @@
 
 #include <rmm/aligned.hpp>
 
-#include "peacock/rmm_pool.hpp"  // the shared sizing percentages (install stays local; see below)
+#include "peacock/rmm_pool.hpp"  // the percentages, ours alone now (install stays local)
 
 namespace peacock_mgpu {
 
@@ -49,15 +49,10 @@ WorkerPool::WorkerPool(int num_gpus) {
                      cudaError_t e = cudaDeviceEnablePeerAccess(p, 0);
                      if (e == cudaErrorPeerAccessAlreadyEnabled) cudaGetLastError();
                    }
-                   // Size the pool off THIS device's free memory (never hardcode). 85% initial
-                   // so a query's whole working set fits without a mid-query growth event
-                   // (another cudaMalloc — the very sync we are avoiding); 95% ceiling.
-                   //
-                   // The percentages come from peacock/rmm_pool.hpp so the three installers
-                   // in the tree cannot drift apart; the install itself stays here, because
-                   // a pool per worker on the device that worker owns is a different
-                   // lifecycle from the process-wide one that header installs. The DISCRETE
-                   // pair unconditionally: multi-GPU means discrete parts by construction.
+                   // Off THIS device's free memory: 85% initial so a query's working set
+                   // fits without a mid-query growth event, 95% ceiling. These percentages
+                   // serve this file alone now — every other caller passes measured bytes —
+                   // and the install stays here because a pool per worker is its own lifecycle.
                    std::size_t free = 0, total = 0;
                    MG_CUDA_TRY(cudaMemGetInfo(&free, &total));
                    const std::size_t initial =

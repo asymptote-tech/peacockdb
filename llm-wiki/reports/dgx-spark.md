@@ -225,5 +225,7 @@ so the engine need not care where a buffer was filled.
   `PEACOCK_NODES_ROWS` drives the scale curves above.
 - `cpp/tests/gpu/test_tpch_streamed.cpp` (`peacock_tpch_streamed_tests`) —
   `PEACOCK_STREAM_CHUNK_MB` / `PEACOCK_STREAM_PASS_MB` drive the chunk sweep.
-- Pool sizing: `PEACOCK_RMM_POOL_INIT_PCT=<n>`. The no-pool rows were taken before the
-  switch that produced them was removed; there is no unpooled configuration now.
+- Pool sizing: each binary's own `kPoolBytes` beside its `main()`, since the percentage these
+  rows were taken under, and the `PEACOCK_RMM_POOL_INIT_PCT` that overrode it, are both gone
+  (`llm-wiki/archive/historical-comments.md`). The no-pool rows were taken before the switch that
+  produced them was removed; there is no unpooled configuration now.

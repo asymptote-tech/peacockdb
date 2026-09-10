@@ -121,8 +121,13 @@ TEST(CudfGpu, SparkPartitionIdsMatchComet2ColWithNulls) {
   EXPECT_EQ(ids, (std::vector<int32_t>{3, 7, 1, 0, 4, 2}));
 }
 
+// Six-row literal columns and the murmur3 kernel — no dataset at all; measured peak 912
+// bytes (llm-wiki/tasks/rmm-pool-budget-detail.md). 1 GiB is a floor rather than a
+// measurement: nothing here can approach it, and it leaves the timing-floor tests room.
+constexpr std::size_t kPoolBytes = 1ull << 30;
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  peacock::install_rmm_pool();
+  peacock::install_rmm_pool(kPoolBytes);
   return RUN_ALL_TESTS();
 }

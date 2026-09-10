@@ -59,3 +59,162 @@ a backgrounded shad-gpu cycle has been killed mid-build with no error and nothin
 ### 2026-09-10 — dispatch 1
 
 Board set to `building`. Developer dispatched with the plan's five tasks. Nothing measured yet.
+
+### 2026-09-10 — developer, tasks 1-5
+
+**Host at measurement.** The card was idle for the first three binaries, then a foreign tenant
+(`kirill`, 51-53 GiB, a python venv) appeared and stayed for the rest of the session. It cannot
+distort a peak — the statistics adaptor counts what cuDF *asked for*, not what the device had —
+but it does bound what a pool can reserve, and it is why the two-at-once run below is not the
+clean experiment the spec wanted.
+
+#### Task 1 — the six measured peaks
+
+Each binary printed `peak_allocated_bytes()` after `RUN_ALL_TESTS()` (scaffolding, since
+reverted). The counter is the run's high-water of *live requested* bytes: the adaptor sits above
+the pool, and `pop_counters` folds each test's scope into the run's, so the number is the largest
+working set the binary ever held.
+
+| Binary | Source | Dataset | Runs | Peak bytes | GiB | Where the peak is |
+|---|---|---|---|---|---|---|
+| `peacock_gpu_tests` | `test_cudf.cpp` | none — 6-row literals | every gpu-tests job | 912 | 0.0000008 | murmur3 over 6 rows |
+| `peacock_plan_tests` | `test_plan_executor.cpp` | `tpch.minimal`, 19 MB | every gpu-tests job | 3,031,456 | 0.0028 | across 27 hand-built plans |
+| `peacock_tpch_tests` | `test_tpch.cpp` | `tpch.sf40` | every gpu-tests job | 72,391,864,720 | 67.42 | `Q1GroupByAggregates` |
+| `peacock_tpchv_tests` | `test_tpchv.cpp` | `tpch.sf40` + embeddings | every gpu-tests job | 26,677,262,880 | 24.85 | `Q11VectorBruteForce` |
+| `peacock_cudf_node_tests` | `test_cudf_nodes.cpp` | `tpch.sf40` lineitem | manual | 9,608,558,464 | 8.95 | `CudfNodes.OperatorTimings` |
+| `peacock_tpch_streamed_tests` | `test_tpch_streamed.cpp` | `tpch.sf40` | manual, **26.02 only** | 604,797,680 | 0.56 | `Q1Streamed` |
+
+Per-test peaks, for the two suites where they differ: tpch q6 19.72, q1 67.42, q3 13.96, q8 21.24;
+tpchv q11v 24.85, q12v 21.63, q10v 22.68, q9v 24.78; streamed q6 0.21, q1 0.56, q3 0.41, q8 0.33.
+
+The 67.42 GiB figure independently confirms the one already written on #178.
+
+**The two manual binaries needed work to measure at all.** Both are `EXCLUDE_FROM_ALL` and neither
+is installed, so `--push-binaries` never carries them. `peacock_cudf_node_tests` builds on the
+25.02 leg and was shipped to `$REMOTE_REPO/scratch-manual/`. `peacock_tpch_streamed_tests` does
+**not** build on 25.02 at all — it includes `cudf/join/filtered_join.hpp`, which is 26.02-only, as
+its own comment says — so it was built from `cpp/build26` against `~/data/miniforge3/envs/rapids`
+(26.02) and run against the host's `~/miniforge3/envs/rapids-2602/lib`. Both had their interpreter
+patched by hand (`patchelf --set-interpreter /home/info/glibc-2.35/lib/ld-linux-x86-64.so.2`);
+neither belongs in `cpp/install/bin`, where the gate's `peacock_*_tests` glob would sweep them in.
+
+#### Task 2 — the budget is NOT the peak, and the device said so
+
+The first pass took each peak, rounded it up, and went red: `peacock_tpch_tests` at a 68 GiB budget
+(peak 67.42) and `peacock_tpchv_tests` at 28 GiB (peak 24.85) both died with
+`std::bad_alloc: out_of_memory ... Maximum pool size exceeded`.
+
+Root cause, from `pool_memory_resource.hpp` in the 25.02 env: when `initial == maximum`,
+`size_to_grow()` returns 0 for any request the free list cannot serve whole, and `try_to_expand`
+fails immediately. The pool can never take another upstream block, so its *arena* has to be
+bigger than the peak of requests by whatever the allocation pattern leaves unusable. q1 died
+asking upstream for 3.53 GiB with 3.27 GiB nominally free inside a 68 GiB pool.
+
+So the budgets were bisected on the device — a rebuild of one target, an rsync of one binary, a
+`patchelf`, a run, per step:
+
+| Binary | Peak | Fails at | Passes at | Declared | Why that number |
+|---|---|---|---|---|---|
+| `peacock_tpch_tests` | 67.42 GiB | **68 GiB** | **69 GiB** | 69 GiB | the threshold, and the most that lets two share a 139.7 GiB card |
+| `peacock_tpchv_tests` | 24.85 GiB | **28 GiB** | **29 GiB** | 30 GiB | the round step above the threshold |
+| `peacock_cudf_node_tests` | 8.95 GiB | — | 10 GiB | 10 GiB | confirmed on device first try |
+| `peacock_tpch_streamed_tests` | 0.56 GiB | — | 2 GiB | 2 GiB | covers the `PEACOCK_STREAM_CHUNK_MB` sweep |
+| `peacock_gpu_tests` | 912 B | — | 1 GiB | 1 GiB | a floor; nothing here can approach it |
+| `peacock_plan_tests` | 2.9 MiB | — | 1 GiB | 1 GiB | the same floor |
+
+The four CI binaries sum to 101 GiB against a 139.7 GiB device, and they run one at a time.
+
+**`peacock_tpch_tests` is the binary that cannot be made comfortable.** Its budget has ~1.6% over
+its peak because the device caps it: 70 GiB would be a kinder margin and two of those do not fit.
+Whichever way that trade is taken, one of the spec's two asks gives — and the ask the spec calls
+"the failure this task exists to make unreachable" is the two-at-once one.
+
+**The integrated percentages were deleted, not kept.** The plan said all four constants stay; only
+`kDiscreteInitialPercent` / `kDiscreteMaximumPercent` have a reader after this change, and
+`multi_gpu.cpp` takes the discrete pair unconditionally (multi-GPU means discrete parts). A
+constant nothing reads cannot carry the comment the spec asks for — "they serve `multi_gpu.cpp`
+alone" — so the integrated pair went to `llm-wiki/archive/historical-comments.md`, which is where
+`coding-style.md` sends reasoning whose code has gone. `llm-wiki/reports/dgx-spark.md` keeps the
+measured row it justified.
+
+`PEACOCK_RMM_POOL_INIT_PCT` went with them: it overrode a percentage that no longer exists, and
+with `initial == maximum == the budget` the question it was there to answer ("is this cost pool
+growth?") is answered by construction — there is no growth. `dgx-spark.md` says so now.
+
+#### Task 3 — the FFI
+
+`peacock_install_rmm_pool(uint64_t bytes, PeacockRmmPoolInfo* out_info)`. `uint64_t` rather than
+the plan's `size_t`: every other byte count in `peacock_gpu.h` is `uint64_t`, and one name for one
+thing across the FFI is the rule that matters here. No Rust caller exists — the extern declaration
+in `peacockdb-ffi/src/lib.rs` is the whole Rust surface — so nothing else moved.
+
+**`gpu_memory_limit` was considered and left exactly as found** (`gpu_executor.cpp:99`, stored and
+never read). A pool's size is the natural home for it, which is precisely why touching it is #148
+and a decision about the product: it would change where every shipping query's memory comes from.
+The doc comment on `peacock_install_rmm_pool` now says the entry point does not read it.
+
+#### Task 4 — on the device
+
+Full GPU tier, `scripts/build-test-shadgpu.sh --run`, exit 0: C++ 11 + 5 + 27 + 4 + 4 = 51 cases,
+rust 4 + 8 + 31 + 10 + 10 = 63 cases, no skips, no golden moved. Every golden this tier asserts is
+read inside those tests; nothing regenerated anything. The pool lines read exactly the declared
+budgets — `1.0`, `1.0`, `69.0`, `30.0 GiB reserved` — so `initial_bytes == maximum_bytes ==` the
+constant, and no percentage of anything survives in the output.
+
+**Two at once, first form: two `peacock_tpchv_tests`, both passed.** With the foreign tenant still
+holding 53 GiB, instance A saw 86.9 GiB free and took its 30 GiB; instance B saw 56.9 GiB free and
+took *the same 30 GiB*, which is the whole point — under the old rule B would have asked for 85% of
+what A had left. Both exited 0, 4 tests each.
+
+**Two at once, second form: two `peacock_tpch_tests`, and the second failed.** A took its 69 GiB;
+B found ~21 GiB, could not build a 69 GiB pool, said so, and ran on the default resource, where
+three of its four tests died with `cudaErrorMemoryAllocation`. That is the designed degradation
+working — loud, at the pool line, before any test ran — but it is **not** a clean test of the
+spec's requirement: 69 + 69 = 138 GiB needs an otherwise-idle 139.7 GiB card, and a stranger held
+a third of it. The experiment wants a re-run on an idle device; see the run log entry that follows
+for whether one was possible.
+
+#### Local verification
+
+- 25.02 C++ build: clean, no new warnings.
+- 26.02 C++ build (`cpp/build26`): clean; the only warnings are the two pre-existing
+  `cudf::round` / `cudf::strings::like` deprecations in `src/expr.cpp`.
+- FFI: `scripts/cargo-cudf.sh test -p peacockdb-ffi --test test_ffi` — 2 passed, 0 failed.
+- `git clang-format` reports no modifications.
+
+**A trap for the next developer on this host.** `scripts/build.sh --configure` passes only
+`-Dcudf_ROOT`, and `find_package(cuvs REQUIRED CONFIG)` takes no hint from it, so a cold
+`cpp/build` in a fresh worktree fails at configure with "Could not find a package configuration
+file provided by cuvs". CI does not hit it because the rapids container has the conda prefix on
+`CMAKE_PREFIX_PATH`. Export `cuvs_ROOT=$CUDF_ROOT` before the first configure of a new build dir.
+
+#### What is left undone: two `peacock_tpch_tests` on an idle card
+
+The card was polled for 25 minutes after the gate went green (13:03-13:28 local) and the foreign
+tenant never dropped below 53 GiB, so the spec's exact experiment — two `peacock_tpch_tests`, both
+pooled, both green — was not reachable in this session. What it needs is an idle device and one
+command:
+
+```bash
+ssh shad-gpu 'PATCHED_LD=/home/info/peacockdb/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:$HOME/miniforge3/envs/rapids-cuda-12.2/lib:$LD_LIBRARY_PATH
+run() { env LD_LIBRARY_PATH="$PATCHED_LD" PEACOCK_TESTDATA_DIR=/home/info/peacockdb/testdata \
+  PEACOCK_TPCH_SF40_DIR=/home/info/peacock-datasets/testdata/tpch.sf40 \
+  PEACOCK_TPCH_GOLDEN_DIR=/home/info/peacockdb/testdata/goldens/tpch.sf40 \
+  /home/info/peacockdb/cpp/install/bin/peacock_tpch_tests > /tmp/tpch.par.$1.log 2>&1; echo "$1 rc=$?"; }
+(run A & run B & wait)'
+```
+
+The arithmetic it is testing: 69 + 69 = 138 GiB against 139.74 GiB free on an idle card, so the
+second pool has about 1.2 GiB of slack once the first has its 69 GiB and both processes hold a
+CUDA context. It should fit and it is close, which is the honest state of it — the same sentence
+that says the budget could not be given a kinder margin. If it does not fit, the second run says
+so at its pool line and carries on unpooled, which is the failure mode the design chose.
+
+The tpchv pair is the same experiment one size down and it passed with a stranger on the card,
+which is the part that could be proven here.
+
+#### Host left as found
+
+`cpp/install/bin` on shad-gpu holds the five CI binaries and nothing else; the two scratch
+directories used for the manual binaries (`scratch-manual`, `scratch-2602`) were removed. The
+patched binaries on the host are the ones this branch built.

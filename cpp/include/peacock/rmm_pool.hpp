@@ -1,28 +1,13 @@
-// Pooled device allocator: the sizing rule, and the one function that installs it.
-//
-// cuDF allocates every intermediate through rmm's current device resource, and rmm's
-// default is a bare cudaMalloc/cudaFree per allocation. A query that materializes dozens of
-// multi-GiB intermediates therefore pays a driver round trip — and on a unified-memory part
-// a page-table walk and a zeroing pass — per intermediate. That is not background noise:
-// on GB10, TPC-H q1 over the whole table measured 76.5 s without a pool.
-//
-// This header lives under `cpp/include/` rather than `cpp/tests/` because three different
-// callers install the same pool and must not drift:
-//   - the single-GPU gtest binaries, from their main();
-//   - `peacock_install_rmm_pool` in the FFI, so a Rust caller — which cannot include a
-//     C++ header — gets the same allocator the gtest binaries have. Without it two
-//     families of numbers are taken under different allocators and quietly compared
-//     (llm-wiki/archive/archived-tickets.md #151);
-//   - `multi_gpu.cpp` keeps its own per-device installation, because a pool per worker
-//     thread on the device that worker owns is a different lifecycle, but reads the
-//     percentages from here.
-//
-// The engine still does not install this on its own behalf: no path under `cpp/src/` calls
-// it except the FFI entry point above, which nothing in this workspace invokes today. So
-// a shipping query still allocates the expensive way, and `gpu_memory_limit` is still
-// accepted and ignored. That is #148, deliberately left open here: making the engine
-// self-install changes where every shipping query's memory comes from and what
-// `gpu_memory_limit` means, which is a decision about the product, not about measurement.
+// Pooled device allocator: one function, installing a pool of the size its caller asks for.
+// rmm's default is a cudaMalloc/cudaFree per allocation, so a query that materializes dozens
+// of multi-GiB intermediates pays a driver round trip each — TPC-H q1 over the whole table
+// measured 76.5 s that way on GB10. It lives under cpp/include/ because a Rust caller cannot
+// include a C++ header and must get the same allocator the gtest binaries have
+// (llm-wiki/archive/archived-tickets.md #151). Callers pass the bytes they measured rather
+// than a share of the device, so two binaries fit on one card (llm-wiki/tickets.md #178).
+// Nothing under cpp/src/ installs it for the engine, so a shipping query still allocates the
+// expensive way and gpu_memory_limit is still stored and ignored — that is #148, a decision
+// about the product rather than about measurement.
 #pragma once
 
 // RMM flattened rmm/mr/device/*.hpp into rmm/mr/*.hpp after 25.02, and peacock_tpch_tests
@@ -45,7 +30,6 @@
 
 #include <cstddef>
 #include <cstdio>
-#include <cstdlib>
 #include <exception>
 #include <memory>
 
@@ -56,23 +40,13 @@ inline std::size_t pool_align_down(std::size_t n) {
   return n - (n % rmm::CUDA_ALLOCATION_ALIGNMENT);
 }
 
-// Two sizing regimes, because "free device memory" means different things on the two kinds
-// of machine.
-//
-// On a DISCRETE part, VRAM is the GPU's alone: reserving 85% of it up front costs the host
-// nothing, and it buys a query whose whole working set fits without a mid-query growth
-// event — itself another cudaMalloc, the very sync the pool exists to avoid.
-//
-// On an INTEGRATED part there is one pool of memory and the "device" reservation comes
-// straight out of what the OS has for page cache and for the parquet reader's own host
-// buffers. Reserving 85% there would starve the read path to speed up the compute path. So
-// the initial reservation is small and the ceiling is what stays generous: growth events
-// are a handful of cudaMallocs across a query, not one per intermediate, which is the cost
-// that actually mattered.
+// Percentage sizing for multi_gpu.cpp alone, which installs a pool per worker thread on the
+// device that worker owns: manual, two GPUs, never in CI, and so no part of #178's collision.
+// It takes these unconditionally, since multi-GPU means discrete parts — VRAM is the GPU's
+// own there, so reserving most of it up front costs the host nothing and buys a query whose
+// working set fits without a mid-query growth event. Every other caller passes bytes.
 inline constexpr int kDiscreteInitialPercent = 85;
 inline constexpr int kDiscreteMaximumPercent = 95;
-inline constexpr int kIntegratedInitialPercent = 25;
-inline constexpr int kIntegratedMaximumPercent = 90;
 
 // What install_rmm_pool() actually did — not what it was asked to do.
 //
@@ -86,7 +60,7 @@ struct RmmPoolStatus {
     Unavailable,  // the pool could not be built; the default resource is still in place
   };
   State state = State::Unavailable;
-  bool integrated = false;
+  bool integrated = false;  // reported for the log line; nothing here sizes by device kind
   std::size_t free_bytes = 0;
   std::size_t initial_bytes = 0;
   std::size_t maximum_bytes = 0;
@@ -102,16 +76,18 @@ inline std::unique_ptr<StatsMr>& stats_mr() {
   return mr;
 }
 
-// Installs a pooled resource for the current device and returns what happened. Call before
+// Installs a pool of `bytes` for the current device and returns what happened. Call before
 // any cuDF work; the resources are function-local statics because rmm stores a non-owning
 // pointer to the current resource and the callers outlive any narrower scope.
 //
-// IDEMPOTENT, and that is load-bearing now that this is reachable from the FFI: a second
-// call returns the first call's outcome without building a second pool. Overwriting the
-// statics instead would drop a resource that live allocations still point into, and the
-// a harness of many #[test] functions in one process is exactly the shape that would
-// find it.
-inline const RmmPoolStatus& install_rmm_pool() {
+// The request is never clamped: a host that cannot meet it keeps the default resource and
+// reports Unavailable, because a pool smaller than the one asked for silently changes what
+// every number taken over it means.
+//
+// IDEMPOTENT, and load-bearing now that this is reachable from the FFI: a second call
+// returns the first one's outcome whatever it asks for, rather than dropping a resource that
+// live allocations still point into.
+inline const RmmPoolStatus& install_rmm_pool(std::size_t bytes) {
   static RmmPoolStatus status;
   static bool done = false;
   if (done) return status;
@@ -123,33 +99,24 @@ inline const RmmPoolStatus& install_rmm_pool() {
   cudaGetDeviceProperties(&prop, device);
   status.integrated = prop.integrated != 0;
 
+  // Free memory is reported, never used for sizing: it is what turns a failed reservation
+  // into a diagnosis — the request against what the device actually had left.
   std::size_t free_bytes = 0, total = 0;
-  if (cudaMemGetInfo(&free_bytes, &total) != cudaSuccess || free_bytes == 0) {
-    std::fprintf(stderr, "[rmm] no device memory info; leaving the default resource in place\n");
-    return status;  // Unavailable
-  }
-  status.free_bytes = free_bytes;
+  if (cudaMemGetInfo(&free_bytes, &total) == cudaSuccess) status.free_bytes = free_bytes;
 
-  // The initial percentage is overridable so "is this cost pool growth?" can be answered by
-  // measurement rather than argument: reserve enough up front that no growth is possible and
-  // see whether the cost moves.
-  int init_pct = prop.integrated ? kIntegratedInitialPercent : kDiscreteInitialPercent;
-  const char* pct = std::getenv("PEACOCK_RMM_POOL_INIT_PCT");
-  if (pct && *pct) init_pct = std::atoi(pct);
-  const int max_pct = prop.integrated ? kIntegratedMaximumPercent : kDiscreteMaximumPercent;
-  const std::size_t initial = pool_align_down(free_bytes / 100 * init_pct);
-  const std::size_t maximum = pool_align_down(free_bytes / 100 * max_pct);
+  // Initial == maximum: the caller asked for the working set it measured, so reserve it up
+  // front and leave no growth event to pay for mid-query.
+  const std::size_t size = pool_align_down(bytes);
 
   static auto upstream = std::make_unique<rmm::mr::cuda_memory_resource>();
   static std::unique_ptr<rmm::mr::pool_memory_resource<rmm::mr::cuda_memory_resource>> pool;
-  // Both percentages come off FREE memory, so on a shared host the reservation can fail
-  // outright — a neighbour holding most of the device leaves an initial size that was
-  // computed a moment ago and is no longer there. Report it instead of aborting here: the
-  // correctness binaries are still right without a pool, and the one caller for which that
-  // is not true — anything taking a timing — refuses the run on Unavailable itself.
+  // A request the device cannot meet fails here, a neighbour holding most of the card being
+  // the ordinary cause. Report it instead of aborting: the correctness binaries are still
+  // right without a pool, and the one caller for which that is not true — anything taking a
+  // timing — refuses the run on Unavailable itself.
   try {
     pool = std::make_unique<rmm::mr::pool_memory_resource<rmm::mr::cuda_memory_resource>>(
-        upstream.get(), initial, maximum);
+        upstream.get(), size, size);
     // The statistics adaptor sits ABOVE the pool, so it counts what the query asked for
     // rather than what the pool reserved. That distinction is the whole reason it is here:
     // once a pool owns the memory, cudaMemGetInfo stops moving during a query, so the
@@ -160,18 +127,18 @@ inline const RmmPoolStatus& install_rmm_pool() {
     std::fprintf(stderr,
                  "[rmm] pool of %.1f GiB could not be built (%s); leaving the default "
                  "resource in place\n",
-                 initial / 1073741824.0, e.what());
+                 size / 1073741824.0, e.what());
     pool.reset();
     return status;  // Unavailable
   }
   rmm::mr::set_current_device_resource(stats_mr().get());
 
   status.state = RmmPoolStatus::State::Installed;
-  status.initial_bytes = initial;
-  status.maximum_bytes = maximum;
-  std::fprintf(stderr, "[rmm] pool on %s: initial %.1f GiB, max %.1f GiB of %.1f GiB free\n",
-               prop.integrated ? "an integrated device" : "a discrete device",
-               initial / 1073741824.0, maximum / 1073741824.0, free_bytes / 1073741824.0);
+  status.initial_bytes = size;
+  status.maximum_bytes = size;
+  std::fprintf(stderr, "[rmm] pool on %s: %.1f GiB reserved of %.1f GiB free\n",
+               prop.integrated ? "an integrated device" : "a discrete device", size / 1073741824.0,
+               free_bytes / 1073741824.0);
   return status;
 }
 

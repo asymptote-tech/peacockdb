@@ -104,7 +104,7 @@ const char* peacock_gpu_version() {
 // Benchmark instrumentation
 // ---------------------------------------------------------------------------
 
-int peacock_install_rmm_pool(PeacockRmmPoolInfo* out_info) {
+int peacock_install_rmm_pool(uint64_t bytes, PeacockRmmPoolInfo* out_info) {
   if (!out_info) return 1;
 
   // install_rmm_pool() is idempotent and already degrades to the default resource on a
@@ -113,7 +113,7 @@ int peacock_install_rmm_pool(PeacockRmmPoolInfo* out_info) {
   // code for the reason argued on the declaration: no pool is a slower run, not a dead one.
   peacock::RmmPoolStatus status;
   try {
-    status = peacock::install_rmm_pool();
+    status = peacock::install_rmm_pool(static_cast<std::size_t>(bytes));
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[peacock_install_rmm_pool] error: %s\n", e.what());
   } catch (...) {
