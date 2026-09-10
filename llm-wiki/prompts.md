@@ -191,6 +191,12 @@ state, and a watchdog restarts you.
   the failure in the detail file. Restoring `reviewing` without re-running anything is how a
   rebase that quietly broke something reaches the completeness pass looking approved.
 
+  **A rebase over documentation alone re-verifies nothing.** Where every commit it brings across
+  touches only `**.md` and `llm-wiki/**`, nothing a test reads has moved, so the task keeps the
+  state it held and a `done` task stays `done`. `pipeline.yml` says the same thing from the other
+  side — it skips a wholly-documentation diff — so a CI re-run would report green having built
+  nothing. Judge it by what the rebase actually carried, not by what the tasks above it were about.
+
   Work one branch to completion before you rebase the next. Rebase the lowest branch, and mark
   every task above it whose branch already exists `rebase needed(<prev>)` at once, before you
   fix anything on the one you just moved — that write is the only thing that survives you dying
