@@ -359,3 +359,12 @@ carry no `cfg` and the rust-only leg compiled them warning-free.
 `the_payload_golden_carries_what_each_call_hands_the_executor` at `test_plan_goldens.rs:229`.
 Drift inherited from master, corrected here rather than left for a later pass. `cost-report`'s
 `sha_links is never used` warning is on master too, at the same function.
+
+## Do not rebase this branch again
+
+Both rebases are finished, the re-verification is green, and `a7d690e6` has been reworded off WIP
+— the branch tip is now `b8e16dda`, force-pushed over the pre-residue `7ed0bcf9`. The board still
+reads `rebase needed(done)` for one reason only: `done` asserts the PR is green, and CI has not yet
+run on the new head. The last transition is the one place a coordinator waits. When run against
+`b8e16dda` on PR #141 is green, set the board to `done` and take task 2. If it is red, that is a
+finding for a developer, and the board drops to `building`.
