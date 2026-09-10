@@ -1221,3 +1221,15 @@ first move; the quarantined `GpuHashJoin` rename superseded it, and the bar the 
 `test_plan_goldens` fails 13 of 19 with `register the tables: IoError NotFound` unless
 `PEACOCK_TESTDATA_DIR` points at a scratch root of symlinks, as slice 2 describes. It is an
 environment gap, not a regression, and it costs a debugging round every dispatch that meets it.
+
+## CI answers the question the local run could not
+
+"The full suite, once, at the end" says the GPU half of this branch is proved by three clean
+builds and by nothing else, because no host this run could reach has a device. That was true of
+the local run and is not true of the branch. CI run on `b0f84b5f` — the round-1 head, the last
+commit before this one to touch code — is green on every job that runs: both cuDF legs, the
+25.02 GPU build, the cost report, the S3 metadata check, and the remote GPU tier. The GPU tests
+ran on a device.
+
+Two heads above it are documentation only and get a changed-paths skip, which is not a gate and
+not evidence. Read the green on the last code head, not on the tip.
