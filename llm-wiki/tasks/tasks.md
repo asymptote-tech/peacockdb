@@ -46,7 +46,7 @@ module, one ticket page. No Rust file moves and no behaviour changes, which make
 every derived artifact reproduces byte for byte. `src/batch_partitioned/` is the one name left
 standing, for task 2 to move once rather than twice.
 
-### 2. [`module-layout.md`](module-layout.md) — state: blocked(completeness approved) — PR #143
+### 2. [`module-layout.md`](module-layout.md) — state: done — PR #143
 
 `peacockdb-core/src/batch_partitioned/**` moves up to `src/`, laid out as components whose whole API
 is declared in `mod.rs` with the implementation behind private modules. `plan_batch_partitioned`
@@ -54,7 +54,7 @@ becomes `planner::plan` and `batch_partitioned_driver` becomes `executor::run` a
 acquire those names; `peacockdb/src/main.rs` moves with them. The 170 public items stay public here
 — what changes is where they are declared and what may reach past them.
 
-### 3. [`rmm-pool-budget.md`](rmm-pool-budget.md) — closes [#178](../tickets.md#t178) — state: new
+### 3. [`rmm-pool-budget.md`](rmm-pool-budget.md) — closes [#178](../tickets.md#t178) — state: approved to build
 
 Six gtest binaries reserve 85% of free VRAM from `main()`, and two of them are not sf40 tests at
 all, so an ordinary CI run puts four such processes on a shared card. Each declares an explicit
