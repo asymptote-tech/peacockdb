@@ -74,3 +74,19 @@ Both agents noted the spec is not frozen — six of the twelve commits rewrote i
 expected finish moved from empty to five to six over them. Each of the six survivors was checked
 independently and all are deliberate, but "the gate lands where the spec says" is partly
 self-fulfilling here. The signoff says so.
+
+## Second rebase, onto `d55ff42c`
+
+The control file still said `rebase` at the 18:17 restart, and master had moved one commit
+past the `e7e22600` the first rebase used. Replayed with no conflict at all — master's one
+commit carries `tasks.md` (tasks 3 and 4 to `approved to build`) and one line of
+`scripts/ensemble-watchdog.sh`, and nothing else. Again no code, no test, no golden, no
+fixture, so the first rebase's re-verification argument still stands unchanged.
+
+## The four residues, unproven at the restart
+
+The 17:52 run dispatched a developer to fix the four sites the blind gate hid, and the run was
+terminated before it reported. The edits were in the working tree, unverified. They are now
+`a7d690e6`, deliberately labelled WIP: two `RunError` display arms in `error.rs`, the module
+doc in `mod.rs`, and a temp-dir name in `parquet_meta.rs`. A developer proves them before the
+commit is reworded and the signoff written.
