@@ -1528,3 +1528,31 @@ rule is one case and its fixtures are pinned where the file's other reader fixtu
 | `visibility-dump.py`, both modes | 578 records, identical to `visibility-final.txt` |
 | residue gate | five lines, from three different working directories |
 | rustfmt | the eight leaf files this task dirtied are clean |
+
+## The GPU tier is red on three runs, and it is not this branch
+
+`GPU Tests (remote)` fails one case and only one, on three consecutive runs across both
+branches: `TpchSf40.Q1GroupByAggregates`, in about 3.9 seconds each, with `std::bad_alloc:
+out_of_memory` from `pool_memory_resource.hpp:276`, an upstream request of 3,786,160,128 bytes
+against a maximum pool size. Every other C++ case passes, all five Rust binaries pass, and every
+other job in the pipeline passes.
+
+    34503055191  ENS-drop-mode-name  4a10d586  17:02Z
+    34503077487  ENS-module-layout   b7d2860c  17:05Z
+    34505375877  ENS-module-layout   0686573b  17:13Z
+
+**The first reading was #178 and it was wrong.** That ticket is two CI runs sharing the host with
+a pool sized for one, and `pipeline.yml:448` already carries `concurrency: group: shad-gpu,
+cancel-in-progress: false` — commit `15209636`, "one GPU job at a time, because there is one GPU".
+The three GPU steps began 3 and 8 minutes apart, which is the queue doing its job. #178 also says
+the failure lands in whichever run started second and re-running alone passes; this one
+reproduces three times at the same case and the same duration, which is deterministic.
+
+**The fact that rules out both branches.** `4a10d586` is task 1, and task 1 went `done` on run
+34467909214 at 10:47Z, green on every job including this one. Between that green and this red,
+the only thing that happened to the branch is a rebase carrying `54497ae8`, which touches
+`tasks.md`. The same code passed at 10:47 and fails at 17:02. Neither branch changes any C++ —
+the `cpp/` diff is empty against master.
+
+So the cause is on the host or in what sizes that pool, not in the tree. An analyst is on it;
+its finding lands below.
