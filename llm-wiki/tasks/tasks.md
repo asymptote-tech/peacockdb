@@ -54,7 +54,14 @@ becomes `planner::plan` and `batch_partitioned_driver` becomes `executor::run` a
 acquire those names; `peacockdb/src/main.rs` moves with them. The 170 public items stay public here
 — what changes is where they are declared and what may reach past them.
 
-### 3. [`test-layout.md`](test-layout.md) — state: blocked(approved to build)
+### 3. [`rmm-pool-budget.md`](rmm-pool-budget.md) — closes [#178](../tickets.md#t178) — state: new
+
+Six gtest binaries reserve 85% of free VRAM from `main()`, and two of them are not sf40 tests at
+all, so an ordinary CI run puts four such processes on a shared card. Each declares an explicit
+byte budget measured from the pool's own statistics adaptor instead. Touches `cpp/` and one wiki
+page, so it is independent of the three layout tasks around it.
+
+### 4. [`test-layout.md`](test-layout.md) — state: blocked(approved to build)
 
 Of 170 public items in `peacockdb-core/src`, 108 are public only because `tests/*.rs` are separate
 crates that see the library the way crates.io would. Moving the eleven targets that force them, plus
@@ -62,7 +69,7 @@ the murmur gate, down into `src/` takes that surface from 108 to eight. The move
 sweep and the separation of test code from production code happen together, because none is worth
 its own pass over the same files.
 
-### 4. [`test-support.md`](test-support.md) — state: blocked(approved to build)
+### 5. [`test-support.md`](test-support.md) — state: blocked(approved to build)
 
 The last eight — `GpuNode`, `validate`, `RunReport`, `render_run`, `GpuBackend`, `GpuContext`,
 `RecipePlan`, `attach_recipes` — exist for the two corpus targets that deliberately stay external,
