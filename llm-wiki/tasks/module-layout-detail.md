@@ -1585,3 +1585,25 @@ Not #148: that is the engine installing no allocator, and this pool is the test 
 Worth knowing for the re-run: the documentation-only commits above this head skip `gpu-tests`
 entirely, so their green carries no GPU verdict at all. Only a run on a head that touches code
 proves anything here.
+
+### And then the host stopped accepting the artifacts at all
+
+Two attempts to get a real GPU verdict on `26ce6806` both died in the same step, `Rsync
+artifacts and testdata to remote`, before any test ran:
+
+    102980473342  17:40Z → 18:11Z   31 min, cancelled in rsync
+    102991522577  18:13Z → 18:28Z   15 min, cancelled in rsync
+
+`Setup SSH` succeeds each time and every later step is skipped, so the host answers and then the
+transfer does not finish. `build-test.md` already calls this link flaky and the job carries
+resilient rsync with retries; this is past what those absorb. The two durations differ, so it is
+not one fixed timeout expiring.
+
+Read with the memory finding, this is one story rather than two. A host whose device is 70% held
+by a foreign tenant, whose parquet loads went from 369 ms to 2783 ms on the same files, and which
+now cannot complete an rsync, is a host under load — not three separate faults. The RMM ceiling
+was the first symptom to produce a clean error message.
+
+So the branch is blocked on `shad-gpu` being usable, and no run on it means anything until then.
+The transitions before this one are all closed: both completeness passes are done and the
+signoff is written.
