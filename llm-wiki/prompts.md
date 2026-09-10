@@ -81,6 +81,13 @@ Transitions, one trigger each:
 - to `completeness approved`: both completeness passes are closed.
 - to `done`: CI is green on that PR. Terminal for the ensemble; the human merges.
 
+Every one of these is a write the coordinator owes the board. On each of the intermediate
+transitions — `building`, `reviewing`, `completing`, `completeness approved` — the
+coordinator edits the task's state in `llm-wiki/tasks/tasks.md` **on its own work branch**
+and commits it as part of that step, not in a batch at the end. The branch's board is what
+a restarted coordinator or the watchdog reads, so a state left stale there is a state that
+never happened.
+
 Progress rule, in order: any `rebase needed(...)` first — rebase, then restore the
 parenthesised state; then `approved to build`; then any `building`, `reviewing` or
 `completing` left mid-flight by a crashed run.
