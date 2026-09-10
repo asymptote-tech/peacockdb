@@ -445,6 +445,9 @@ jobs:
     # GPU contend for its memory, and --test-threads=1 keeps one test at a time inside a
     # process but cannot reach across two. Queued rather than cancel-in-progress: a
     # cancelled run can leave both its REMOTE_DIR and the device's state behind.
+    # A wedged remote must cost minutes, not GitHub's six-hour default. The suite itself runs
+    # well inside this; if it ever does not, raise it deliberately rather than removing it.
+    timeout-minutes: 120
     concurrency:
       group: shad-gpu
       cancel-in-progress: false
@@ -479,6 +482,9 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           # Trust-on-first-use: acceptable for CI since runners are ephemeral.
+          # The keepalives are not decoration. build-test.md records this link as flaky, and
+          # without them a session that stops answering blocks until the job's own limit: the
+          # transfer step hung for hours twice before they were added.
           cat > ~/.ssh/config <<EOF
           Host gpu
               HostName llm-gpu0h200.velkerr.ru
@@ -486,13 +492,29 @@ jobs:
               IdentityFile ~/.ssh/id_ed25519
               StrictHostKeyChecking accept-new
               UserKnownHostsFile ~/.ssh/known_hosts_ci
+              ConnectTimeout 15
+              ServerAliveInterval 30
+              ServerAliveCountMax 4
           EOF
 
       - name: Rsync artifacts and testdata to remote
+        timeout-minutes: 20
         run: |
+          # Three tries with a widening pause, and a stalled transfer gives up after five
+          # minutes of silence. scripts/build-test-shadgpu.sh has carried this for the same
+          # reason; CI did not, and a flaky link here was an unbounded hang rather than a retry.
+          rsync_retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              rsync -a --timeout=300 "$@" && return 0
+              printf 'rsync attempt %d failed; retrying in %ds\n' "$attempt" "$((attempt * 15))" >&2
+              sleep "$((attempt * 15))"
+            done
+            return 1
+          }
           ssh gpu "mkdir -p $REMOTE_DIR/cpp/install $REMOTE_DIR/testdata $REMOTE_DIR/scripts"
           # Fresh binaries — --delete keeps cpp/install/ clean across runs.
-          rsync -a --delete cpp/install/ gpu:$REMOTE_DIR/cpp/install/
+          rsync_retry --delete cpp/install/ gpu:$REMOTE_DIR/cpp/install/
           # Query SQL + minimal dataset + testdata generator + committed goldens.
           # testdata/goldens carries the per-mode `.cpu.txt` files the device tier reads
           # read-only — the sections the cpu tier authored are what a device run is checked
@@ -507,7 +529,7 @@ jobs:
           # that has now bitten four times. A sweep of git-tracked testdata files
           # would end the class; kept as a named entry here only to keep this push
           # small and low-risk. See the follow-up.
-          rsync -a testdata/tpch-queries testdata/tpcds-queries testdata/tpch.minimal \
+          rsync_retry testdata/tpch-queries testdata/tpcds-queries testdata/tpch.minimal \
             testdata/goldens \
             testdata/tpch-vec-queries \
             testdata/generate_testdata.sh \
@@ -515,7 +537,7 @@ jobs:
             gpu:$REMOTE_DIR/testdata/
           # Ship the updated setup-glibc.sh so its patch_rust_dir step is
           # present on the host (not just the older /home/info/ copy).
-          rsync -a scripts/setup-glibc.sh gpu:$REMOTE_DIR/scripts/
+          rsync_retry scripts/setup-glibc.sh gpu:$REMOTE_DIR/scripts/
           chmod +x cpp/install/bin/* cpp/install/rust-tests/* 2>/dev/null || true
           ssh gpu "chmod +x \
             $REMOTE_DIR/cpp/install/bin/* \

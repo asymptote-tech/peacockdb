@@ -6,15 +6,17 @@
 - **Run a chain**: one coordinator per chain, each in its own worktree.
 
       git worktree add ../peacockdb-<chain> <chain-branch>
-      cd ../peacockdb-<chain> && ../peacockdb/scripts/ensemble-watchdog.sh <chain-branch>
+      cd ../peacockdb-<chain> && ../peacockdb/scripts/ensemble-watchdog.sh --non-interactive <chain-branch>
 
   It runs unattended until every task reaches `done` — PR open, CI green — or until it stalls.
 - **Watch it, or steer it, from inside that worktree**, where its own `.claude/ensemble/`
   lives — status, control and log are per-worktree, never here. `<chain>.status` says why it
   stopped, `<chain>.log` is everything it said, and `echo rebase > .claude/ensemble/<chain>.control`
   reaches it (`pause` and `stop` too). A coordinator reads only its own branch, so `rebase` is
-  also how tasks and board edits you made on master get to it. `ENSEMBLE_INTERACTIVE=1` lets
-  you type at it instead.
+  also how tasks and board edits you made on master get to it. Drop `--non-interactive` to type
+  at it instead — that is the default, so the flag is what asks for the unattended form.
+  A run that hits a usage limit is not a stall: the watchdog waits it out and resumes by
+  itself, backing off 5, 15, 30 then 60 minutes.
 - **Merging is yours**: ask the helper. It merges oldest-first and archives the specs.
 - **Clean up after a merge**: `git worktree remove ../peacockdb-<chain>` takes that chain's
   status, control and log with it, and its build tree — an ignored `target/` neither blocks
