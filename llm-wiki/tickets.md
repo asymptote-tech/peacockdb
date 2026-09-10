@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 201), which is also the counter for
+New tickets take the next free number (currently 202), which is also the counter for
 `tasks/bp-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -18,7 +18,7 @@ reference still resolves there.
 | [Critical correctness](#critical-correctness) | 14 | #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 26 | #200 #199 #198 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
+| [Infrastructure / process](#infrastructure--process) | 27 | #201 #200 #199 #198 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
 
 ## Critical correctness
 
@@ -692,6 +692,27 @@ tripped, so something can branch on it, but there is nowhere to record into — 
 trip log, and `Underestimate` is the precedent for what one would look like. Related: #91.
 
 ## Infrastructure / process
+
+<a id="t201"></a>
+### #201 — the LIKE pattern answers "what is a null literal" the other way
+
+`expr.cpp:904` builds `cudf::string_scalar pattern(psv->string_val()->str(), true)` — validity
+hardcoded on a scalar taken from a wire `ScalarValue`, which is the defect ten AST literal arms above
+it stopped having. It is NOT reachable with a null and needs no guard: `:902` already throws "LIKE
+pattern must be a string literal" when `string_val()` is absent, and the serializer writes a typed
+null as `is_null` with NO `string_val` (`plan_serializer.rs:397`), the two being mutually exclusive by
+construction. So a `LIKE NULL` is refused loudly rather than dereferenced or silently matched as an
+empty string.
+
+What is left is that one file answers the same question two ways: ten arms read `is_null` and this
+one refuses the shape before the question arises. Neither is wrong; nothing says the second is
+deliberate, and the hardcoded `true` reads as an oversight the ten arms just corrected everywhere
+else.
+
+Worth deciding rather than leaving: `x LIKE NULL` is NULL for every row in SQL, so the refusal is a
+limitation and not a wrong answer. Making it answer means routing a null pattern away from
+`cudf::strings::like` entirely, since a null scalar pattern is not what that kernel takes — which is
+a shape change rather than a validity flag, and is why this is a ticket rather than an eleventh arm.
 
 <a id="t200"></a>
 ### #200 — `finish_output` hand-rolls a DataFusion rule that DataFusion exposes
