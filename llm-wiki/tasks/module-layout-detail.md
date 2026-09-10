@@ -1233,3 +1233,76 @@ ran on a device.
 
 Two heads above it are documentation only and get a changed-paths skip, which is not a gate and
 not evidence. Read the green on the last code head, not on the tip.
+
+## Review round 2
+
+No blocking findings. The reviewer re-derived the mechanical core rather than reading the
+evidence: goldens 170/170 against `goldens-after-rename.sha256` with an empty `testdata/` diff
+since the quarantined rename; zero bare `pub` outside the exempt files; exactly nine `pub mod`
+outside `lib.rs`, all nine registered; zero `pub use` and zero `pub(super)`; zero super-climbs
+leaving a component under the corrected depth, with 37 files sitting exactly at their cap; all
+nine `forced_by` entries true in both directions by its own reimplementation; and no FFI type
+reachable from a rust-only path.
+
+Round 1 is closed. Both of round 2's open questions resolve for the branch: the facade revert is
+right, because the deleted call compiled only through an exemption granted for two external test
+files and `files_naming` skips `peacockdb-core/src` by design, so nothing could record an in-crate
+caller; and the widened `names_the_module` is sharper rather than weaker, since no code shape was
+found that matches without forcing the `pub mod`.
+
+### The one site where the tree breaks the rule it ships
+
+A repo-wide sweep for a cross-component subcomponent reach inside `src` returns exactly one hit:
+
+    peacockdb-core/src/wire/tests.rs:829  use crate::executor::cpu_backend::join::CpuJoin;
+
+It predates the task — `787c1e5c:peacockdb-core/src/batch_partitioned/recipe/tests.rs:824` is the
+same line. Nothing else does it in any form.
+
+Its expiry is the problem, not its existence. The layout test has no reader for this shape;
+`no_subcomponent_reaches_a_sibling` compares siblings under one parent. So when `test-layout.md`
+moves `test_cpu_executors.rs` and `injection.rs` into `src/`, the `forced_by` expiry will say the
+`cpu_backend` wall can go up, and taking it up is an `E0603` on this line. That is the same
+"half a claim expires wrong" shape the revert cited as its own reason. Loud rather than silent,
+which is why it is important and not blocking.
+
+### coding-style.md states three rules the tree deliberately breaks
+
+Line 117 says the components in `lib.rs` are the only `pub mod` in the crate; lines 106-108 say
+nothing else in a component carries `pub` or `pub mod`; line 144 says the subcomponent rule is
+enforced across components. Nine `pub mod` are exempt, 60 bare `pub` items sit behind that
+exemption, and the cross-component rule has one live violation. The page does not mention the
+exemption at all, so a developer who greps `pub mod` cannot tell a violation from a sanctioned
+exception.
+
+### Nits worth taking while the developer is in these files
+
+- `test_module_layout.rs:378-380` — the stated reason for matching the path exactly is wrong. A
+  file naming `gpu_backend::accumulate::GpuAccumulator` does force `gpu_backend` to be `pub mod`,
+  because the path traverses it. The consequence is stuck-red rather than a hole: if
+  `test_gpu_executors.rs` alone stops naming `executor/gpu_backend`, the forward half goes red and
+  the three child-naming files cannot re-justify the entry.
+- `test_module_layout.rs:467` — `names_the_module` matches comments and string literals, so both
+  halves of the expiry can be satisfied by prose. No live instance; every match outside the guard
+  file is a `use` line.
+- Comment caps: `test_module_layout.rs:673` is 13 lines against a cap of 10, `:22` is 11, and
+  `:511` is a 5-line in-body comment against a cap of 4.
+- Four files that were rustfmt-clean at the branch base are not after `b0f84b5f`, and the dirt is
+  the line it added: `gpu_backend/backend.rs:8-9,13,15`, `gpu_backend/source.rs:13`,
+  `cpu_backend/tests/backend.rs:12`.
+- `14eb0308` also stopped `pub_declarations` counting `<`/`>` as nesting. It is a correct fix —
+  a `pub const X = 1 << 20;` would have swallowed every declaration below it — and it is pinned by
+  a fixture, but neither the commit message nor "Finishing the residue" says it happened.
+- `no_public_signature_names_a_type_from_a_private_module` matches `alias::` and `module::`
+  prefixes only, so a bare type imported out of a private module and named in a `pub fn` signature
+  would pass. Not live: the only such import is `Trip` into `executor/driver/mod.rs:25`, which
+  declares no `pub` items.
+- `test_module_layout.rs:604-620` advances seven bytes after a hit, so one `super::super::x` at
+  depth 0 is reported twice. Message noise.
+
+### A count the round-1 note reads too small
+
+The exemption still covers 60 bare `pub` items across seven implementation modules, which
+`a_components_api_is_declared_in_its_mod_rs` does not read at all. The narrowing moved it from
+91 items across 13 files to 82 across 9, or 60 once the two subcomponent `mod.rs` facades that
+test skips anyway are excluded. The same fourteen types force it, so the shape is right.
