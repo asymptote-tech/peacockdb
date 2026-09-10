@@ -1,32 +1,13 @@
 //! `GpuUnload`: the boundary crossing, and the only node whose output is a CPU batch.
 
+use super::GpuUnload;
 use std::any::Any;
 
-use super::super::error::PlanError;
-use super::super::layout::NodeKind;
-use super::super::node::{GpuNode, RowInterval};
+use super::NodeKind;
+use super::PlanError;
 use super::accumulators::check_ordered_prefix;
 use super::input_layout;
-
-/// Carries a root-adjacent limit's `skip`/`fetch`, because the interval belongs to the
-/// crossing: it is a statement about which rows are worth moving over PCIe, and trimming
-/// after the transfer ships an unbounded prefix to drop it.
-#[derive(Debug)]
-pub struct GpuUnload {
-    kind: NodeKind,
-    pub interval: Option<RowInterval>,
-    input: Box<dyn GpuNode>,
-}
-
-impl GpuUnload {
-    pub fn new(input: Box<dyn GpuNode>, interval: Option<RowInterval>) -> Self {
-        Self {
-            kind: NodeKind::Sink,
-            interval,
-            input,
-        }
-    }
-}
+use super::{GpuNode, RowInterval};
 
 impl GpuNode for GpuUnload {
     fn kind(&self) -> &NodeKind {

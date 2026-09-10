@@ -7,8 +7,8 @@
 //! rotation are that same rule.
 
 use super::{BatchForwarder, Forwarder};
-use crate::batch_partitioned::node::GpuNode;
-use crate::batch_partitioned::nodes::{NodeRef, as_node_ref};
+use crate::plan::GpuNode;
+use crate::plan::{NodeRef, as_node_ref};
 
 impl BatchForwarder for Forwarder {
     fn sources_of(&self, out_lane: usize) -> Vec<(usize, usize)> {

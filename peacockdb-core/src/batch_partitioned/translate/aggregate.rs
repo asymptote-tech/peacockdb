@@ -13,15 +13,15 @@ use datafusion::physical_plan::coalesce_partitions::CoalescePartitionsExec;
 use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::{ExecutionPlan, Partitioning};
 
-use super::super::aggregates::{AggCall, Merge, PlanAgg, decomposition, finalize, resolve};
-use super::super::error::PlanError;
-use super::super::expr::{Expr, NamedExpr};
 use super::super::expr_translate::translate_expr;
-use super::super::layout::BatchLayout;
-use super::super::node::GpuNode;
-use super::super::nodes::{AggregateBody, GpuAggregate, GpuAggregateBatches};
-use super::super::schema::{AggStateColumns, Schema};
 use super::{Translator, batches, hash_key_ordinals, lanes};
+use crate::plan::BatchLayout;
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::plan::{AggCall, Merge, PlanAgg, decomposition, finalize, resolve};
+use crate::plan::{AggStateColumns, Schema};
+use crate::plan::{AggregateBody, GpuAggregate, GpuAggregateBatches};
+use crate::plan::{Expr, NamedExpr};
 
 impl Translator {
     pub(super) fn aggregate(

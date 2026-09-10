@@ -8,14 +8,14 @@ use std::sync::Arc;
 use datafusion::physical_plan::ExecutionPlan;
 
 use super::Translator;
-use crate::batch_partitioned::aggregates::PlanAgg;
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::expr::{BinaryOp, Expr};
-use crate::batch_partitioned::layout::KeyDistribution;
-use crate::batch_partitioned::node::{GpuNode, RowInterval};
-use crate::batch_partitioned::nodes::join::{NestedLoopJoinType, capability};
-use crate::batch_partitioned::nodes::{NodeRef, as_node_ref};
-use crate::batch_partitioned::partitioner::Batching;
+use crate::plan::Batching;
+use crate::plan::KeyDistribution;
+use crate::plan::PlanAgg;
+use crate::plan::PlanError;
+use crate::plan::{BinaryOp, Expr};
+use crate::plan::{GpuNode, RowInterval};
+use crate::plan::{NestedLoopJoinType, capability};
+use crate::plan::{NodeRef, as_node_ref};
 
 /// Plain DataFusion planning at tp1 over the committed minimal dataset — this mode
 /// translates the physical plan rather than annotating it, so no GPU rule runs.

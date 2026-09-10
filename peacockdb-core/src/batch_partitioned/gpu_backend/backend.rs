@@ -8,10 +8,6 @@ use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
 use peacockdb_ffi::raw::PeacockExecutor;
 
-use super::super::error::PlanError;
-use super::super::node::GpuNode;
-use super::super::nodes::join::per_call_join_type;
-use super::super::nodes::{NodeRef, as_node_ref};
 use super::accumulate::{GpuAccumulator, GpuPartitionAccumulator};
 use super::emit::GpuEmitter;
 use super::join::{GpuJoin, GpuProbingJoin};
@@ -27,6 +23,10 @@ use crate::executor::{
     LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin, RowRange,
     SourceExecutor, SourceStep, UnloadExecutor,
 };
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::plan::per_call_join_type;
+use crate::plan::{NodeRef, as_node_ref};
 use crate::wire::RecipePlan;
 
 /// The threshold a batch aggregate compacts at, until the driver derives one from the

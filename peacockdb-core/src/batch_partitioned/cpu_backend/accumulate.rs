@@ -16,17 +16,17 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
 
-use crate::executor::CpuBatch;
-use super::super::error::PlanError;
-use crate::executor::{BackendError, CallResult, CallStats, LaneEvent};
 use super::super::expr_physical::physical_projection;
-use super::super::node::{GpuNode, RowInterval};
-use super::super::nodes::aggregate::{Phase, finalize_columns};
-use super::super::nodes::{
+use super::{aggregate_exec, declared_as, lex_ordering, placeholder, run_node};
+use crate::executor::CpuBatch;
+use crate::executor::{BackendError, CallResult, CallStats, LaneEvent};
+use crate::plan::PlanError;
+use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregateBatches, GpuCoalesceAllBatches, GpuLimit,
     GpuMergeSortedPartitions,
 };
-use super::{aggregate_exec, declared_as, lex_ordering, placeholder, run_node};
+use crate::plan::{GpuNode, RowInterval};
+use crate::plan::{Phase, finalize_columns};
 
 /// A `BatchAccumulator` node's executor, one variant per node.
 pub enum CpuAccumulator {

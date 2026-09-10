@@ -8,8 +8,8 @@ use std::fmt;
 use super::generated::peacock::plan as fb;
 use super::read::node_at;
 use super::{CallPattern, FbKind, Input, Payloads, ProjectRole, Recipe, RecipePlan, fb_text};
-use crate::batch_partitioned::node::GpuNode;
-use crate::batch_partitioned::nodes::category_of;
+use crate::plan::GpuNode;
+use crate::plan::category_of;
 
 /// One line per node, in plan order. A node that makes no ABI call says `none` rather
 /// than nothing: "this node touches no device" and "the pass missed it" have to look

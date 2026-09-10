@@ -34,7 +34,7 @@ struct Session {
 }
 
 impl Session {
-    fn open(tree: &dyn peacockdb_core::batch_partitioned::GpuNode, what: &str) -> Self {
+    fn open(tree: &dyn peacockdb_core::plan::GpuNode, what: &str) -> Self {
         let recipes = attach_recipes(tree).unwrap_or_else(|e| panic!("{what}: no recipes: {e}"));
         let mut executor: *mut PeacockExecutor = std::ptr::null_mut();
         assert_eq!(

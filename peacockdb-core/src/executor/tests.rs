@@ -1,6 +1,6 @@
 use super::*;
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::layout::NodeKind;
+use crate::plan::NodeKind;
+use crate::plan::PlanError;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use std::sync::Arc;

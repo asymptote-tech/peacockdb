@@ -10,7 +10,7 @@ use super::*;
 use datafusion::common::JoinType;
 use peacockdb_core::batch_partitioned::gpu_backend::emit::GpuEmitter;
 use peacockdb_core::batch_partitioned::gpu_backend::join::GpuJoin as GpuJoinExec;
-use peacockdb_core::batch_partitioned::nodes::{GpuEmitPartitions, GpuFilter, GpuHashJoin};
+use peacockdb_core::plan::{GpuEmitPartitions, GpuFilter, GpuHashJoin};
 
 /// The joined row: both sides' columns, which for this fixture is `k, v` twice.
 fn joined_columns() -> ArrowSchema {

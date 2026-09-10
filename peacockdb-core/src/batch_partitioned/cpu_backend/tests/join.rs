@@ -7,9 +7,9 @@
 
 use super::*;
 use crate::batch_partitioned::cpu_backend::join::CpuJoin;
-use crate::batch_partitioned::layout::PartitionLayout;
-use crate::batch_partitioned::nodes::join::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
-use crate::batch_partitioned::nodes::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
+use crate::plan::PartitionLayout;
+use crate::plan::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
+use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
 use datafusion::common::JoinType;
 
 const DIM: [(i64, &str); 3] = [(1, "a"), (2, "b"), (3, "c")];

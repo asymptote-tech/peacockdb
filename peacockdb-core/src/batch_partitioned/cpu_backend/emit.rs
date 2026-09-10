@@ -16,9 +16,9 @@ use datafusion::physical_expr::expressions::Column;
 use crate::spark_partitioning::rows_per_lane;
 
 use crate::executor::CpuBatch;
-use super::super::error::PlanError;
 use crate::executor::{BackendError, CallResult, CallStats};
-use super::super::nodes::GpuEmitPartitions;
+use crate::plan::GpuEmitPartitions;
+use crate::plan::PlanError;
 
 pub struct CpuEmitter {
     hash_keys: Vec<Arc<dyn PhysicalExpr>>,

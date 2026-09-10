@@ -11,11 +11,11 @@ use super::*;
 
 use datafusion::common::JoinType;
 use peacockdb_core::batch_partitioned::gpu_backend::backend::{GpuBackend, GpuContext};
-use peacockdb_core::batch_partitioned::nodes::{
+use peacockdb_core::executor::Backend;
+use peacockdb_core::plan::{
     ExecutorCategory, GpuAccumulateBatchesAndSort, GpuEmitPartitions, GpuHashJoin, GpuUnload,
     category_of,
 };
-use peacockdb_core::executor::Backend;
 use peacockdb_core::wire::attach_recipes;
 
 /// The tree children-first, which is the numbering a recipe is addressed by and what the

@@ -4,8 +4,8 @@
 use std::fmt::Write as _;
 
 use crate::batch_partitioned::estimator::MemoryModel;
-use crate::batch_partitioned::node::GpuNode;
-use crate::batch_partitioned::nodes::{NodeRef, as_node_ref};
+use crate::plan::GpuNode;
+use crate::plan::{NodeRef, as_node_ref};
 
 /// The sibling memory golden: the same tree, carrying what the estimator derived rather
 /// than what the planner decided. Sources also print the batch size they were given, which

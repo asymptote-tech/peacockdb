@@ -16,8 +16,8 @@ use datafusion::physical_expr::expressions::{
 };
 use datafusion::physical_plan::PhysicalExpr;
 
-use super::error::PlanError;
-use super::expr::{BinaryOp, ColumnRef, Expr, UnaryOp};
+use crate::plan::PlanError;
+use crate::plan::{BinaryOp, ColumnRef, Expr, UnaryOp};
 
 pub fn translate_expr(
     expr: &Arc<dyn PhysicalExpr>,

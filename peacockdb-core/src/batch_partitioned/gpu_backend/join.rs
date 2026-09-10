@@ -15,12 +15,12 @@ use datafusion::common::JoinType;
 
 use peacockdb_ffi::raw::PeacockExecutor;
 
-use super::super::error::PlanError;
-use super::super::nodes::join::empty_build_answers_nothing;
 use super::{execute_node, produced};
 use crate::executor::Batch;
 use crate::executor::GpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats};
+use crate::plan::PlanError;
+use crate::plan::empty_build_answers_nothing;
 use crate::wire::{CallPattern, FbKind, Input, ProjectRole, Recipe, Seq};
 
 /// One call of a join's recipe: the seq, and the inputs it names in order. Each named

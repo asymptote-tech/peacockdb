@@ -29,10 +29,10 @@ use peacockdb_ffi::raw::{
 
 use crate::memory::logical_size_from_schema;
 
-use super::error::PlanError;
 use crate::executor::CpuBatch;
 use crate::executor::GpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats, RowRange};
+use crate::plan::PlanError;
 use crate::wire::{CallPattern, FbKind, Input, Recipe, Seq};
 
 /// A node's calls, in order — the batch into the first, each output into the next.

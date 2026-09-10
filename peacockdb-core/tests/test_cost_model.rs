@@ -193,10 +193,10 @@ fn every_node_kind_is_in_exactly_one_cost_category() {
 /// constructing one node of each kind, for the reason the writer's field cover reads the
 /// fbs: a list of instances can miss a kind, where the exhaustive match cannot.
 fn node_kind_names() -> Vec<&'static str> {
-    const SOURCE: &str = include_str!("../src/batch_partitioned/nodes/mod.rs");
+    const SOURCE: &str = include_str!("../src/plan/mod.rs");
     let body = SOURCE
         .split_once("pub(crate) fn node_name(")
-        .expect("nodes/mod.rs declares node_name")
+        .expect("plan/mod.rs declares node_name")
         .1;
     let body = body.split_once("\n}").expect("node_name has a body").0;
     let names: Vec<&str> = body

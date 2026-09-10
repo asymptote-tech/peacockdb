@@ -10,10 +10,10 @@ use std::path::PathBuf;
 use clap::Parser;
 use datafusion::arrow::util::pretty::print_batches;
 use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
-use peacockdb_core::executor::run;
 use peacockdb_core::batch_partitioned::plan::{
     BatchSizing, PlanKnobs, SMALL_TABLE_BYTES, plan_batch_partitioned,
 };
+use peacockdb_core::executor::run;
 use peacockdb_core::{build_session_state, register_tables_for};
 
 #[derive(Parser)]

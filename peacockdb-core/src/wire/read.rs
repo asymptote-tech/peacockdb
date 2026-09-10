@@ -8,7 +8,7 @@
 use super::generated::peacock::plan as fb;
 
 use super::RecipePlan;
-use crate::batch_partitioned::error::PlanError;
+use crate::plan::PlanError;
 
 /// The node at `seq`, by the post-order the C++ indexes with — children in
 /// `node_children` order, then the node.

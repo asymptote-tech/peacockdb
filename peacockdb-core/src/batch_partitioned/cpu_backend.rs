@@ -35,16 +35,16 @@ use datafusion::physical_plan::sorts::sort::SortExec;
 
 use single_node::execute_single_node;
 
-use super::aggregates::{AggCall, PlanAgg};
-use crate::executor::CpuBatch;
-use super::error::PlanError;
-use crate::executor::{BackendError, CallResult, CallStats, RowRange};
 use super::expr_physical::{physical_expr, physical_projection};
-use super::layout::ColumnOrder;
-use super::node::GpuNode;
-use super::nodes::aggregate::{AggregateBody, Phase, finalize_columns, state_funcs};
-use super::nodes::{GpuAggregate, GpuFilter, GpuProject, GpuSort};
-use super::schema::Schema;
+use crate::executor::CpuBatch;
+use crate::executor::{BackendError, CallResult, CallStats, RowRange};
+use crate::plan::ColumnOrder;
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::plan::Schema;
+use crate::plan::{AggCall, PlanAgg};
+use crate::plan::{AggregateBody, Phase, finalize_columns, state_funcs};
+use crate::plan::{GpuAggregate, GpuFilter, GpuProject, GpuSort};
 
 /// One DataFusion node with its child left as a placeholder, and the columns this mode
 /// says it produces. [`execute_single_node`] replaces the children with the batches it is
@@ -326,7 +326,7 @@ fn aggregate_exec(
     registry: &dyn FunctionRegistry,
 ) -> Result<Arc<dyn ExecutionPlan>, PlanError> {
     let input_schema = Arc::new(input.clone());
-    let named = |exprs: &[super::expr::Expr]| -> Result<Vec<_>, PlanError> {
+    let named = |exprs: &[crate::plan::Expr]| -> Result<Vec<_>, PlanError> {
         exprs
             .iter()
             .enumerate()

@@ -13,11 +13,11 @@ use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_execute_scan_rowgroups,
 };
 
-use super::super::error::PlanError;
-use super::super::nodes::GpuLoadParquet;
 use super::{last_error, produced};
 use crate::executor::GpuBatch;
 use crate::executor::{BackendError, CallStats};
+use crate::plan::GpuLoadParquet;
+use crate::plan::PlanError;
 use crate::wire::{AbiSymbol, CallPattern, Input, Recipe, Seq};
 
 /// A lane's reads, in the order the mapping named them.

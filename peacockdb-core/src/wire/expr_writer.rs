@@ -9,8 +9,8 @@ use flatbuffers::{FlatBufferBuilder, WIPOffset};
 use super::generated::peacock::plan as fb;
 use super::serialize::{convert_data_type, serialize_scalar_value};
 
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::expr::{BinaryOp, Expr, UnaryOp};
+use crate::plan::PlanError;
+use crate::plan::{BinaryOp, Expr, UnaryOp};
 
 /// Write one expression, children first, as FlatBuffers requires.
 pub(crate) fn write_expr<'a>(

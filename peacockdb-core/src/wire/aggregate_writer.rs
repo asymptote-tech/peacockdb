@@ -17,11 +17,10 @@ use super::serialize::serialize_schema;
 use super::expr_writer::write_expr;
 use super::node_writer;
 use super::writer::Payload;
-use crate::batch_partitioned::aggregates::AggCall;
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::nodes;
-use crate::batch_partitioned::nodes::aggregate::{AggregateBody, Phase};
-use crate::batch_partitioned::schema::Schema;
+use crate::plan::AggCall;
+use crate::plan::PlanError;
+use crate::plan::Schema;
+use crate::plan::{AggregateBody, Phase};
 
 pub(crate) fn aggregate<'a>(
     b: &mut FlatBufferBuilder<'a>,
@@ -104,7 +103,7 @@ fn group_name_at(state: &Schema, position: usize) -> &str {
 }
 
 /// The finalize as the project it becomes — the columns are
-/// [`nodes::aggregate::finalize_columns`](super::super::nodes::aggregate::finalize_columns);
+/// [`finalize_columns`](crate::plan::finalize_columns);
 /// this writes what that names.
 pub(crate) fn finalize_project<'a>(
     b: &mut FlatBufferBuilder<'a>,
@@ -113,7 +112,7 @@ pub(crate) fn finalize_project<'a>(
     output: &Schema,
     kids: &[WIPOffset<fb::PlanNode<'a>>],
 ) -> Result<Payload, PlanError> {
-    let columns = nodes::aggregate::finalize_columns(body, state, output)?;
+    let columns = crate::plan::finalize_columns(body, state, output)?;
     let mut exprs = Vec::with_capacity(columns.len());
     for column in &columns {
         exprs.push(write_expr(b, &column.expr)?);
@@ -130,14 +129,14 @@ pub(crate) fn finalize_project<'a>(
 
 /// The aggregators as the wire declares them, in the order their state columns appear —
 /// which aggregate is which, and what it is called, is
-/// [`nodes::aggregate::state_funcs`](super::super::nodes::aggregate::state_funcs); this
+/// [`state_funcs`](crate::plan::state_funcs); this
 /// writes what that names.
 fn state_funcs<'a>(
     b: &mut FlatBufferBuilder<'a>,
     body: &AggregateBody,
     state: &Schema,
 ) -> Result<(Vec<WIPOffset<fb::AggregateFuncNode<'a>>>, bool), PlanError> {
-    let declared = nodes::aggregate::state_funcs(body, state)?;
+    let declared = crate::plan::state_funcs(body, state)?;
     let mut funcs = Vec::with_capacity(declared.len());
     let mut folded = false;
     for func in &declared {

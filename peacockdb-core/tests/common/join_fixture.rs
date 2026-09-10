@@ -20,9 +20,9 @@ use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::{ExecutionPlan, Partitioning};
 use datafusion::prelude::ParquetReadOptions;
 
-use peacockdb_core::batch_partitioned::error::PlanError;
-use peacockdb_core::batch_partitioned::node::GpuNode;
 use peacockdb_core::batch_partitioned::plan::{BatchSizing, PlanKnobs, plan_batch_partitioned};
+use peacockdb_core::plan::GpuNode;
+use peacockdb_core::plan::PlanError;
 
 /// Lanes for the co-partitioned cases.
 pub const LANES: usize = 4;

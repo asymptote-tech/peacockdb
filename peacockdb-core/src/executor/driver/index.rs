@@ -6,10 +6,10 @@
 //! are snapshotted here because [`GpuNode::children`] builds a `Vec` per call, and the
 //! schedule asks for them on every step.
 
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::node::GpuNode;
-use crate::batch_partitioned::nodes::{ExecutorCategory, category_of};
 use crate::executor::{IndexedNode, JoinShape, PlanIndex, PlanShape};
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::plan::{ExecutorCategory, category_of};
 
 pub(crate) fn build<'a>(root: &'a dyn GpuNode) -> Result<PlanIndex<'a>, PlanError> {
     let mut nodes = Vec::new();

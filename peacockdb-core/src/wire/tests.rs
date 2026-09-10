@@ -8,16 +8,16 @@ use super::generated::peacock::plan as fb;
 use super::read::node_at;
 use super::writer::Writer;
 use super::*;
-use crate::batch_partitioned::aggregates::{AggCall, PlanAgg};
-use crate::batch_partitioned::expr::{BinaryOp, Expr, NamedExpr};
-use crate::batch_partitioned::layout::{BatchLayout, ColumnOrder, NodeKind, PartitionLayout};
-use crate::batch_partitioned::nodes::aggregate::AggregateBody;
-use crate::batch_partitioned::nodes::join::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
-use crate::batch_partitioned::nodes::{
+use crate::plan::AggregateBody;
+use crate::plan::Schema;
+use crate::plan::{AggCall, PlanAgg};
+use crate::plan::{BatchLayout, ColumnOrder, NodeKind, PartitionLayout};
+use crate::plan::{BinaryOp, Expr, NamedExpr};
+use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuFilter, GpuHashJoin,
     GpuNestedLoopJoin,
 };
-use crate::batch_partitioned::schema::Schema;
+use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::JoinType;
 use datafusion::common::ScalarValue;
@@ -59,7 +59,7 @@ impl GpuNode for Given {
         Vec::new()
     }
 
-    fn validate_schemas_and_partitions(&self) -> Result<(), crate::batch_partitioned::PlanError> {
+    fn validate_schemas_and_partitions(&self) -> Result<(), crate::plan::PlanError> {
         Ok(())
     }
 
@@ -584,16 +584,16 @@ fn a_finalize_that_does_not_fill_the_declared_output_is_refused() {
 ///
 /// A leaf would prove nothing here — the counts agree either way when nothing was taken.
 fn filter_over_scan_with_an_interval() -> GpuFilter {
-    let scan = crate::batch_partitioned::parquet_meta::ScanMetadata {
+    let scan = crate::plan::ScanMetadata {
         file: "/orders.parquet".to_string(),
-        groups: vec![crate::batch_partitioned::partitioner::RowGroupMeta {
+        groups: vec![crate::plan::RowGroupMeta {
             index: 0,
             rows: 10,
             bytes: 100,
         }],
         can_be_null: vec![false],
     };
-    let load = crate::batch_partitioned::nodes::GpuLoadParquet::new(
+    let load = crate::plan::GpuLoadParquet::new(
         "orders".to_string(),
         vec![0],
         vec![vec![vec![0]]],

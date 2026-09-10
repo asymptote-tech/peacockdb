@@ -31,8 +31,8 @@ mod tests;
 
 use datafusion::common::JoinType;
 
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::node::GpuNode;
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
 
 use generated::peacock::plan as fb;
 

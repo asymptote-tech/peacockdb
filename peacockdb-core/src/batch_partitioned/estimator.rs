@@ -13,11 +13,11 @@ use std::collections::HashMap;
 
 use datafusion::arrow::datatypes::{Fields, Schema as ArrowSchema};
 
-use super::error::PlanError;
-use super::layout::NodeKind;
-use super::node::GpuNode;
-use super::nodes::{NodeRef, as_node_ref};
 use crate::memory::logical_size_from_schema;
+use crate::plan::GpuNode;
+use crate::plan::NodeKind;
+use crate::plan::PlanError;
+use crate::plan::{NodeRef, as_node_ref};
 
 /// What a golden's `--- memory ---` section renders: a figure per node in canonical
 /// post-order, and the batch size each source was given.
@@ -303,7 +303,7 @@ impl<'a> Tree<'a> {
     }
 
     /// The key columns a finish pass accumulates, per probe row.
-    fn key_width(&self, join: &super::nodes::GpuHashJoin, probe: usize) -> u64 {
+    fn key_width(&self, join: &crate::plan::GpuHashJoin, probe: usize) -> u64 {
         let Some(schema) = self.nodes[probe].kind().schema() else {
             return 0;
         };
@@ -369,7 +369,7 @@ impl<'a> Tree<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::batch_partitioned::partitioner::Batching;
+    use crate::plan::Batching;
     use crate::batch_partitioned::plan::BatchSizing;
     use crate::batch_partitioned::translate::Translator;
     use std::path::PathBuf;

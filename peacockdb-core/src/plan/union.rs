@@ -2,41 +2,14 @@
 //! branch type normalization the union kernel does inside the executor is a per-branch `GpuProject`
 //! the planner inserts, which is what leaves these two as pure routing.
 
+use super::{GpuInterleave, GpuUnion};
 use std::any::Any;
 
-use super::super::error::PlanError;
-use super::super::layout::{BatchLayout, KeyDistribution, NodeKind, PartitionLayout, SortOrder};
-use super::super::node::GpuNode;
-use super::super::schema::Schema;
+use super::GpuNode;
+use super::PlanError;
+use super::Schema;
 use super::input_layout;
-
-/// Output lanes are the sum of its branches', and output lane k is served by exactly one
-/// of them, so no row changes lane and no lane waits on another. The hash a branch
-/// carried says nothing about the union's numbering, so it goes.
-#[derive(Debug)]
-pub struct GpuUnion {
-    kind: NodeKind,
-    branches: Vec<Box<dyn GpuNode>>,
-}
-
-impl GpuUnion {
-    pub fn new(branches: Vec<Box<dyn GpuNode>>, schema: Schema) -> Self {
-        let n = branches.iter().map(|b| input_layout(b.as_ref()).n).sum();
-        // Output lane k is one branch's lane, forwarded batch for batch, so an order and a
-        // one-batch lane survive wherever every branch has them. The hash does not: lane k
-        // means something different in each branch's numbering.
-        let layout = PartitionLayout {
-            n,
-            key_distribution: KeyDistribution::NotSpecified,
-            sort_order: agreed_sort_order(&branches),
-            batch_layout: agreed_batch_layout(&branches),
-        };
-        Self {
-            kind: NodeKind::Intermediate { layout, schema },
-            branches,
-        }
-    }
-}
+use super::{BatchLayout, KeyDistribution, NodeKind, PartitionLayout, SortOrder};
 
 impl GpuNode for GpuUnion {
     fn kind(&self) -> &NodeKind {
@@ -53,38 +26,6 @@ impl GpuNode for GpuUnion {
 
     fn as_any(&self) -> &dyn Any {
         self
-    }
-}
-
-/// Output lane p is lane p of each branch, which is why every branch must carry the same
-/// hash: the distribution is what makes lane p of one branch belong beside lane p of the
-/// next, and it survives because no row changes lane.
-#[derive(Debug)]
-pub struct GpuInterleave {
-    kind: NodeKind,
-    branches: Vec<Box<dyn GpuNode>>,
-}
-
-impl GpuInterleave {
-    pub fn new(branches: Vec<Box<dyn GpuNode>>, schema: Schema) -> Self {
-        let first = input_layout(branches.first().expect("interleave has branches").as_ref());
-        // Lane p holds every branch's lane p, so each batch is still whatever it was — an
-        // order within a batch survives — but k branches make k batches out of one lane.
-        let batch_layout = if branches.len() == 1 {
-            agreed_batch_layout(&branches)
-        } else {
-            BatchLayout::MultipleBatches
-        };
-        let layout = PartitionLayout {
-            n: first.n,
-            key_distribution: first.key_distribution.clone(),
-            sort_order: agreed_sort_order(&branches),
-            batch_layout,
-        };
-        Self {
-            kind: NodeKind::Intermediate { layout, schema },
-            branches,
-        }
     }
 }
 
@@ -183,4 +124,42 @@ fn check_branch_schemas(
         }
     }
     Ok(())
+}
+
+pub(crate) fn new_union(branches: Vec<Box<dyn GpuNode>>, schema: Schema) -> GpuUnion {
+    let n = branches.iter().map(|b| input_layout(b.as_ref()).n).sum();
+    // Output lane k is one branch's lane, forwarded batch for batch, so an order and a
+    // one-batch lane survive wherever every branch has them. The hash does not: lane k
+    // means something different in each branch's numbering.
+    let layout = PartitionLayout {
+        n,
+        key_distribution: KeyDistribution::NotSpecified,
+        sort_order: agreed_sort_order(&branches),
+        batch_layout: agreed_batch_layout(&branches),
+    };
+    GpuUnion {
+        kind: NodeKind::Intermediate { layout, schema },
+        branches,
+    }
+}
+
+pub(crate) fn new_interleave(branches: Vec<Box<dyn GpuNode>>, schema: Schema) -> GpuInterleave {
+    let first = input_layout(branches.first().expect("interleave has branches").as_ref());
+    // Lane p holds every branch's lane p, so each batch is still whatever it was — an
+    // order within a batch survives — but k branches make k batches out of one lane.
+    let batch_layout = if branches.len() == 1 {
+        agreed_batch_layout(&branches)
+    } else {
+        BatchLayout::MultipleBatches
+    };
+    let layout = PartitionLayout {
+        n: first.n,
+        key_distribution: first.key_distribution.clone(),
+        sort_order: agreed_sort_order(&branches),
+        batch_layout,
+    };
+    GpuInterleave {
+        kind: NodeKind::Intermediate { layout, schema },
+        branches,
+    }
 }

@@ -2,70 +2,21 @@
 //! where the capability matrix allows it; the equi-join is co-partitioned, while cross and
 //! nested-loop need both inputs in one lane, having no key to co-locate on (#140).
 
+use super::{
+    GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin, JoinCapability, JoinFilterColumn, JoinSide,
+    NestedLoopJoinType,
+};
 use std::any::Any;
 
-use super::super::error::PlanError;
-use super::super::expr::ColumnRef;
-use super::super::expr::Expr;
+use super::ColumnRef;
+use super::Expr;
+use super::PlanError;
 use datafusion::common::JoinType;
 
-use super::super::layout::{BatchLayout, KeyDistribution, NodeKind, PartitionLayout, SortOrder};
-use super::super::node::GpuNode;
-use super::super::schema::Schema;
+use super::GpuNode;
+use super::Schema;
+use super::{BatchLayout, KeyDistribution, NodeKind, PartitionLayout, SortOrder};
 use super::{input_layout, input_schema};
-
-/// DataFusion's join type, restricted to what a nested-loop join can run: the C++ rejects
-/// anything else outright.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NestedLoopJoinType {
-    Inner,
-    Left,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JoinSide {
-    Build,
-    Probe,
-}
-
-/// Where one column of a join filter's own table comes from. The filter is written
-/// against a schema of its own — neither side's, and not the joined one — so its
-/// ordinals mean nothing without this map.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct JoinFilterColumn {
-    pub side: JoinSide,
-    pub index: u32,
-}
-
-#[derive(Debug)]
-pub struct GpuCrossJoin {
-    kind: NodeKind,
-    /// Ordinals into the crossed table, `[build columns…, probe columns…]`. `None` is
-    /// every column of it — a `CrossJoinExec` has no projection, and a predicate-free
-    /// nested-loop join that lands here may.
-    pub projection: Option<Vec<u32>>,
-    build: Box<dyn GpuNode>,
-    probe: Box<dyn GpuNode>,
-}
-
-impl GpuCrossJoin {
-    pub fn new(
-        build: Box<dyn GpuNode>,
-        probe: Box<dyn GpuNode>,
-        projection: Option<Vec<u32>>,
-        schema: Schema,
-    ) -> Self {
-        Self {
-            kind: NodeKind::Intermediate {
-                layout: joined_layout(),
-                schema,
-            },
-            projection,
-            build,
-            probe,
-        }
-    }
-}
 
 impl GpuNode for GpuCrossJoin {
     fn kind(&self) -> &NodeKind {
@@ -89,49 +40,6 @@ impl GpuNode for GpuCrossJoin {
 
     fn as_any(&self) -> &dyn Any {
         self
-    }
-}
-
-/// The predicate is the join: `conditional_inner_join` evaluates it per pair, or a cross
-/// join and a mask where it is not AST-able.
-#[derive(Debug)]
-pub struct GpuNestedLoopJoin {
-    kind: NodeKind,
-    pub join_type: NestedLoopJoinType,
-    pub filter: Expr,
-    /// One entry per column the filter's own schema has, in its order.
-    pub filter_columns: Vec<JoinFilterColumn>,
-    /// Ordinals into the crossed table, as DataFusion computed them. Dropping it leaves
-    /// the node declaring the projected columns and emitting all of them, so every
-    /// ordinal above it reads one column of some other one (#135).
-    pub projection: Option<Vec<u32>>,
-    build: Box<dyn GpuNode>,
-    probe: Box<dyn GpuNode>,
-}
-
-impl GpuNestedLoopJoin {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        build: Box<dyn GpuNode>,
-        probe: Box<dyn GpuNode>,
-        join_type: NestedLoopJoinType,
-        filter: Expr,
-        filter_columns: Vec<JoinFilterColumn>,
-        projection: Option<Vec<u32>>,
-        schema: Schema,
-    ) -> Self {
-        Self {
-            kind: NodeKind::Intermediate {
-                layout: joined_layout(),
-                schema,
-            },
-            join_type,
-            filter,
-            filter_columns,
-            projection,
-            build,
-            probe,
-        }
     }
 }
 
@@ -298,7 +206,7 @@ enum Emits {
 /// Whether the join's output carries a column from each side. False for the two semi
 /// families and for a mark join, whose row is one side's — read by an executor deciding
 /// whether the columns it owes have to be invented or only selected.
-pub fn emits_both_sides(join_type: JoinType) -> bool {
+pub(crate) fn emits_both_sides(join_type: JoinType) -> bool {
     matches!(emits(join_type), Emits::BothSides)
 }
 
@@ -313,7 +221,7 @@ fn emits(join_type: JoinType) -> Emits {
 
 /// One lane, many batches, no order and no key: cross and nested-loop joins have no key to
 /// co-locate on, so nothing about the inputs' layout survives them.
-fn joined_layout() -> PartitionLayout {
+pub(crate) fn joined_layout() -> PartitionLayout {
     PartitionLayout {
         n: 1,
         key_distribution: KeyDistribution::NotSpecified,
@@ -490,33 +398,14 @@ fn collect_column_refs<'a>(expr: &'a Expr, into: &mut Vec<&'a ColumnRef>) {
     }
 }
 
-/// What the capability matrix says about one join mode: whether the probe side can stream
-/// batch by batch, and whether the lane owes a pass at done for what a streamed probe
-/// cannot know — which build rows matched at least once (#136).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct JoinCapability {
-    pub probe_streams: bool,
-    pub needs_finish: bool,
-}
-
-impl JoinCapability {
-    /// Whether the whole join is one call: no probe keys kept and no finish pass.
-    ///
-    /// True where nothing needs a finish, and also where the probe cannot stream — the
-    /// planner makes that probe a single batch, and one call over the whole of it is the
-    /// plain join node the wire has always carried. Asked by the recipe writer for what to
-    /// publish and by an executor for what to build, because answering it twice is how a
-    /// filtered semi join ended up on the finish path with its residual dropped.
-    pub fn answers_in_one_call(&self) -> bool {
-        !self.probe_streams || !self.needs_finish
-    }
-}
-
 /// The three refused shapes are refusals of a defect or a missing cuDF variant, not of
 /// this mode: an outer join's residual filter is applied after the outer gather and drops
 /// the padded rows (#153), and no swapped `mixed_*` variant exists for the right-handed
 /// semi family.
-pub fn capability(join_type: JoinType, has_filter: bool) -> Result<JoinCapability, PlanError> {
+pub(crate) fn capability(
+    join_type: JoinType,
+    has_filter: bool,
+) -> Result<JoinCapability, PlanError> {
     let streaming = |needs_finish| {
         Ok(JoinCapability {
             probe_streams: true,
@@ -560,7 +449,7 @@ pub fn capability(join_type: JoinType, has_filter: bool) -> Result<JoinCapabilit
 /// empty answer and the lane can end without a call. False for the three types that
 /// preserve unmatched PROBE rows: what they owe is the probe side, padded or not, and
 /// making it takes a call over a build table that does not exist.
-pub fn empty_build_answers_nothing(join_type: JoinType) -> bool {
+pub(crate) fn empty_build_answers_nothing(join_type: JoinType) -> bool {
     match join_type {
         JoinType::Inner
         | JoinType::Left
@@ -578,7 +467,7 @@ pub fn empty_build_answers_nothing(join_type: JoinType) -> bool {
 /// first call.
 ///
 /// `None` is the build-side semi family, whose probe call is only the key project.
-pub fn per_call_join_type(join_type: JoinType) -> Option<JoinType> {
+pub(crate) fn per_call_join_type(join_type: JoinType) -> Option<JoinType> {
     match join_type {
         JoinType::Left => Some(JoinType::Inner),
         JoinType::Full => Some(JoinType::Right),
@@ -591,7 +480,7 @@ pub fn per_call_join_type(join_type: JoinType) -> Option<JoinType> {
 /// build rows nothing ever matched; the semi family asks its own question, and asks it
 /// with the node's own NULL semantics, so the pass substitutes for a legacy single call
 /// rather than improving on it (#59, #80).
-pub fn finish_join_type(join_type: JoinType) -> JoinType {
+pub(crate) fn finish_join_type(join_type: JoinType) -> JoinType {
     match join_type {
         JoinType::Left | JoinType::Full => JoinType::LeftAnti,
         semi @ (JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark) => semi,
@@ -607,72 +496,6 @@ pub(crate) fn emitted_columns(join_type: JoinType, build: usize, probe: usize) -
         Emits::BuildSide => build,
         Emits::BuildSideAndMark => build + 1,
         Emits::ProbeSide => probe,
-    }
-}
-
-/// An equi-join: the build side is one batch per lane, the probe streams unless the
-/// capability matrix says otherwise, and lane p of each side holds exactly the rows that
-/// can match lane p of the other.
-#[derive(Debug)]
-pub struct GpuHashJoin {
-    kind: NodeKind,
-    pub join_type: JoinType,
-    /// (build ordinal, probe ordinal) per key, in the order the join hashes them.
-    pub keys: Vec<(u32, u32)>,
-    pub filter: Option<Expr>,
-    pub filter_columns: Vec<JoinFilterColumn>,
-    /// From DataFusion, per join: `false` — the SQL default — means a NULL key matches
-    /// nothing, `true` is what a set operation lowered to a join needs.
-    pub null_equals_null: bool,
-    pub projection: Option<Vec<u32>>,
-    build: Box<dyn GpuNode>,
-    probe: Box<dyn GpuNode>,
-}
-
-impl GpuHashJoin {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        build: Box<dyn GpuNode>,
-        probe: Box<dyn GpuNode>,
-        join_type: JoinType,
-        keys: Vec<(u32, u32)>,
-        filter: Option<Expr>,
-        filter_columns: Vec<JoinFilterColumn>,
-        null_equals_null: bool,
-        projection: Option<Vec<u32>>,
-        schema: Schema,
-    ) -> Self {
-        let build_layout = input_layout(build.as_ref());
-        let mut layout = input_layout(probe.as_ref());
-        // The lane count survives, and so does a hash the input earned: a join does not
-        // move a row between lanes. Dropping that is what makes a correct plan fail the
-        // co-location guard above an aggregate.
-        layout.key_distribution = joined_key_distribution(
-            join_type,
-            &keys,
-            &build_layout,
-            &layout,
-            input_schema(build.as_ref()).fields.fields().len() as u32,
-            projection.as_ref(),
-        );
-        // The output is the join's own rows in the order its probe batches arrive.
-        layout.sort_order = SortOrder::NotSpecified;
-        layout.batch_layout = BatchLayout::MultipleBatches;
-        Self {
-            kind: NodeKind::Intermediate { layout, schema },
-            join_type,
-            keys,
-            filter,
-            filter_columns,
-            null_equals_null,
-            projection,
-            build,
-            probe,
-        }
-    }
-
-    pub fn capability(&self) -> Result<JoinCapability, PlanError> {
-        capability(self.join_type, self.filter.is_some())
     }
 }
 
@@ -752,5 +575,46 @@ impl GpuNode for GpuHashJoin {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_hash_join(
+    build: Box<dyn GpuNode>,
+    probe: Box<dyn GpuNode>,
+    join_type: JoinType,
+    keys: Vec<(u32, u32)>,
+    filter: Option<Expr>,
+    filter_columns: Vec<JoinFilterColumn>,
+    null_equals_null: bool,
+    projection: Option<Vec<u32>>,
+    schema: Schema,
+) -> GpuHashJoin {
+    let build_layout = input_layout(build.as_ref());
+    let mut layout = input_layout(probe.as_ref());
+    // The lane count survives, and so does a hash the input earned: a join does not
+    // move a row between lanes. Dropping that is what makes a correct plan fail the
+    // co-location guard above an aggregate.
+    layout.key_distribution = joined_key_distribution(
+        join_type,
+        &keys,
+        &build_layout,
+        &layout,
+        input_schema(build.as_ref()).fields.fields().len() as u32,
+        projection.as_ref(),
+    );
+    // The output is the join's own rows in the order its probe batches arrive.
+    layout.sort_order = SortOrder::NotSpecified;
+    layout.batch_layout = BatchLayout::MultipleBatches;
+    GpuHashJoin {
+        kind: NodeKind::Intermediate { layout, schema },
+        join_type,
+        keys,
+        filter,
+        filter_columns,
+        null_equals_null,
+        projection,
+        build,
+        probe,
     }
 }

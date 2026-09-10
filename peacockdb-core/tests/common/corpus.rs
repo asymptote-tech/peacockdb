@@ -12,8 +12,8 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::execution::context::SessionContext;
 use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
 use peacockdb_core::batch_partitioned::plan::plan_batch_partitioned;
-use peacockdb_core::batch_partitioned::{GpuNode, validate};
 use peacockdb_core::executor::{RunReport, run};
+use peacockdb_core::plan::{GpuNode, validate};
 use peacockdb_core::plan_text::render_run;
 
 use super::cost_model::CostModel;
@@ -54,7 +54,7 @@ pub async fn plan_at(
         .unwrap_or_else(|e| panic!("{what}: this mode refuses it: {e}"));
     // The planner's own check, made again: the driver asks only for canonical form, so a
     // tree that met neither would run and answer.
-    validate::validate(tree.as_ref()).unwrap_or_else(|e| panic!("{what} is not a plan: {e}"));
+    validate(tree.as_ref()).unwrap_or_else(|e| panic!("{what} is not a plan: {e}"));
     (ctx, tree)
 }
 

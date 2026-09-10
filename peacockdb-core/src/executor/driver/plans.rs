@@ -6,17 +6,17 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::JoinType;
 
-use crate::batch_partitioned::expr::{Expr, NamedExpr};
-use crate::batch_partitioned::layout::ColumnOrder;
-use crate::batch_partitioned::node::{GpuNode, RowInterval};
-use crate::batch_partitioned::nodes::{
+use crate::plan::ColumnOrder;
+use crate::plan::RowGroupMeta;
+use crate::plan::ScanMetadata;
+use crate::plan::Schema;
+use crate::plan::{Expr, NamedExpr};
+use crate::plan::{
     GpuCoalesceAllBatches, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave, GpuLimit,
     GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions, GpuProject, GpuSort, GpuUnion,
     GpuUnload,
 };
-use crate::batch_partitioned::parquet_meta::ScanMetadata;
-use crate::batch_partitioned::partitioner::RowGroupMeta;
-use crate::batch_partitioned::schema::Schema;
+use crate::plan::{GpuNode, RowInterval};
 
 pub(crate) fn schema() -> Schema {
     Schema::new(Arc::new(ArrowSchema::new(vec![Field::new(

@@ -19,9 +19,9 @@ mod plans;
 #[cfg(test)]
 mod tests;
 
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::node::GpuNode;
 use crate::executor::{Backend, PlanIndex, RunError, RunReport};
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
 use accounting::Trip;
 
 /// Run `root` to completion on `B`. `budget` of `None` accounts without ever tripping.

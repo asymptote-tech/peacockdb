@@ -3,46 +3,21 @@
 //! `GpuAggregate` runs per batch; `GpuAggregateBatches` merges pre-aggregated batches and
 //! emits at done.
 
+use super::{AggregateBody, GpuAggregate, GpuAggregateBatches, StateFunc};
 use std::any::Any;
 
-use super::super::aggregates::{AggCall, AggFunc, Merge, PlanAgg, decomposition};
-use super::super::error::PlanError;
-use super::super::expr::{Expr, NamedExpr};
-use super::super::layout::{BatchLayout, KeyDistribution, NodeKind, PartitionLayout, SortOrder};
-use super::super::node::GpuNode;
-use super::super::schema::{AggStateColumns, Schema};
-use super::{check_column_refs, input_layout, input_schema};
-
-/// Which side of the decomposition a node runs: state built from raw values, or state
-/// merged from state. `Partial` and `Merge` on the wire — never `Final`, which also
-/// finalizes, and in this mode a finalize is a project of its own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Phase {
-    Init,
-    Merge,
-}
-
-/// One aggregator as both engines name it: the SQL name the executor knows, the call whose
-/// arguments it reads, and the output column it fills.
-///
-/// Order is load-bearing and not cosmetic. A state-shaped input is read positionally, by a
-/// cursor walking each aggregate's state width, so an aggregate listed out of order reads
-/// another one's columns. Everything but the Welford triple is one of ours to one SQL name;
-/// the triple folds into the `stddev`/`var` it decomposes, at the position of the first of
-/// its three, because neither engine has an `m2` of its own.
-pub struct StateFunc<'a> {
-    pub name: &'static str,
-    pub call: &'a AggCall,
-    pub alias: String,
-    /// Whether this one is a folded triple, which is what makes its state three columns
-    /// wide rather than one.
-    pub welford: bool,
-}
+use super::GpuNode;
+use super::PlanError;
+use super::{AggCall, AggFunc, Merge, PlanAgg, decomposition};
+use super::{AggStateColumns, Schema};
+use super::{BatchLayout, KeyDistribution, NodeKind, PartitionLayout, SortOrder};
+use super::{Expr, NamedExpr};
+use super::{input_layout, input_schema};
 
 /// The aggregators a body declares over a state schema, in the order their state columns
 /// appear. One rule, read by the recipe writer for the wire and by the CPU backend for
 /// DataFusion — a second copy of it would be a second answer to which column is whose.
-pub fn state_funcs<'a>(
+pub(crate) fn state_funcs<'a>(
     body: &'a AggregateBody,
     state: &'a Schema,
 ) -> Result<Vec<StateFunc<'a>>, PlanError> {
@@ -85,7 +60,7 @@ pub fn state_funcs<'a>(
 /// `__grouping_id` an init expanding grouping sets emits beside the keys and every node
 /// above it groups on. The group list alone is one short of the state exactly there, and
 /// a state position read one column early names the aggregator before the right one.
-pub fn key_width(body: &AggregateBody) -> usize {
+pub(crate) fn key_width(body: &AggregateBody) -> usize {
     body.group_by.len() + usize::from(!body.grouping_sets.is_empty())
 }
 
@@ -121,7 +96,7 @@ fn welford_owners<'a>(body: &AggregateBody, state: &'a Schema) -> Vec<Option<&'a
 
 /// What the executor calls this aggregate, which is DataFusion's own name plus the `ddof`
 /// spelled into it: `stddev` is the sample form and `stddev_pop` the population one.
-pub fn sql_name(func: AggFunc, ddof: u32) -> &'static str {
+pub(crate) fn sql_name(func: AggFunc, ddof: u32) -> &'static str {
     match (func, ddof) {
         (AggFunc::Stddev, 0) => "stddev_pop",
         (AggFunc::Stddev, _) => "stddev",
@@ -168,7 +143,7 @@ fn agg_name(agg: PlanAgg) -> Result<&'static str, PlanError> {
 /// columns and no keys to read them by. Both the width and the key positions are checked
 /// rather than assumed: the keys are taken by position, so a state whose first columns are
 /// not the keys would pass the width check and project state columns as keys.
-pub fn finalize_columns(
+pub(crate) fn finalize_columns(
     body: &AggregateBody,
     state: &Schema,
     output: &Schema,
@@ -221,89 +196,6 @@ pub fn finalize_columns(
     Ok(columns)
 }
 
-/// The aggregators and the optional `final` list every aggregate node carries. A node
-/// with no `final` emits its state; one with a `final` emits the finalized columns, and
-/// that is the only thing distinguishing the positions — the single-node shortcut is
-/// init aggregators and finalize expressions on the same node.
-#[derive(Debug)]
-pub struct AggregateBody {
-    pub group_by: Vec<Expr>,
-    /// One mask per grouping set, in key order — true where that key is NULL in that set.
-    /// Empty unless this node expands grouping sets, which only an init node does: it
-    /// emits `__grouping_id` as an ordinary column and every node above groups on the
-    /// keys plus that column.
-    pub grouping_sets: Vec<Vec<bool>>,
-    /// The NULL substituted for each key a set excludes, in key order.
-    pub null_exprs: Vec<Expr>,
-    pub aggs: Vec<AggCall>,
-    /// One expression per aggregate output column, and not per output column: a group key is
-    /// not finalized and is not here, so this list is shorter than the node's output
-    /// schema by the number of keys. The project that carries it emits the keys first, and
-    /// `recipe::aggregate_writer::finalize_project` is the one place that rule lives.
-    pub finalize: Option<Vec<NamedExpr>>,
-}
-
-impl AggregateBody {
-    /// References inside `aggs` index the node's input; references inside `finalize`
-    /// index the node's own intermediate table, `[group keys…, state columns…]`.
-    fn validate(&self, node: &str, input: &Schema, intermediate: &Schema) -> Result<(), PlanError> {
-        for key in &self.group_by {
-            check_column_refs(key, input, node)?;
-        }
-        for call in &self.aggs {
-            for arg in &call.args {
-                check_column_refs(arg, input, node)?;
-            }
-        }
-        for column in self.finalize.iter().flatten() {
-            check_column_refs(&column.expr, intermediate, node)?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct GpuAggregate {
-    kind: NodeKind,
-    pub body: AggregateBody,
-    intermediate: Schema,
-    input: Box<dyn GpuNode>,
-}
-
-impl GpuAggregate {
-    /// `intermediate` is `[group keys…, state columns…]` — what the aggregators produce,
-    /// and what a finalize expression reads. It is also the output schema where there is
-    /// no finalize.
-    pub fn new(
-        input: Box<dyn GpuNode>,
-        body: AggregateBody,
-        intermediate: Schema,
-        schema: Schema,
-    ) -> Self {
-        let mut layout = input_layout(input.as_ref());
-        // Grouping re-keys the rows, so no input order survives — but a hash on columns the
-        // group list re-emits does: those rows are still where the hash put them, at the
-        // ordinals the keys now occupy.
-        layout.sort_order = SortOrder::NotSpecified;
-        layout.key_distribution = regrouped_key_distribution(&layout, &body);
-        Self {
-            kind: NodeKind::Intermediate { layout, schema },
-            body,
-            intermediate,
-            input,
-        }
-    }
-}
-
-impl GpuAggregate {
-    /// `[group keys…, state columns…]` — what the aggregators produce, and where the
-    /// state annotations live. The output schema is the finalized one where this node
-    /// finalizes, so a consumer of the state reads this instead.
-    pub fn intermediate(&self) -> &Schema {
-        &self.intermediate
-    }
-}
-
 impl GpuNode for GpuAggregate {
     fn kind(&self) -> &NodeKind {
         &self.kind
@@ -323,43 +215,6 @@ impl GpuNode for GpuAggregate {
 
     fn as_any(&self) -> &dyn Any {
         self
-    }
-}
-
-#[derive(Debug)]
-pub struct GpuAggregateBatches {
-    kind: NodeKind,
-    pub body: AggregateBody,
-    intermediate: Schema,
-    input: Box<dyn GpuNode>,
-}
-
-impl GpuAggregateBatches {
-    pub fn new(
-        input: Box<dyn GpuNode>,
-        body: AggregateBody,
-        intermediate: Schema,
-        schema: Schema,
-    ) -> Self {
-        let mut layout = input_layout(input.as_ref());
-        layout.sort_order = SortOrder::NotSpecified;
-        layout.key_distribution = regrouped_key_distribution(&layout, &body);
-        // It emits everything it merged, once, at done.
-        layout.batch_layout = BatchLayout::SingleBatch;
-        Self {
-            kind: NodeKind::Intermediate { layout, schema },
-            body,
-            intermediate,
-            input,
-        }
-    }
-}
-
-impl GpuAggregateBatches {
-    /// The state this node merges into, before any finalize of its own — see
-    /// [`GpuAggregate::intermediate`].
-    pub fn intermediate(&self) -> &Schema {
-        &self.intermediate
     }
 }
 
@@ -585,5 +440,44 @@ mod tests {
         let sets = vec![vec![false, false], vec![false, true]];
         let claim = regrouped_key_distribution(&hashed_on(vec![7]), &body(vec![7, 3], sets));
         assert_eq!(claim, KeyDistribution::ByHash { hash_keys: vec![0] });
+    }
+}
+
+pub(crate) fn new_aggregate(
+    input: Box<dyn GpuNode>,
+    body: AggregateBody,
+    intermediate: Schema,
+    schema: Schema,
+) -> GpuAggregate {
+    let mut layout = input_layout(input.as_ref());
+    // Grouping re-keys the rows, so no input order survives — but a hash on columns the
+    // group list re-emits does: those rows are still where the hash put them, at the
+    // ordinals the keys now occupy.
+    layout.sort_order = SortOrder::NotSpecified;
+    layout.key_distribution = regrouped_key_distribution(&layout, &body);
+    GpuAggregate {
+        kind: NodeKind::Intermediate { layout, schema },
+        body,
+        intermediate,
+        input,
+    }
+}
+
+pub(crate) fn new_aggregate_batches(
+    input: Box<dyn GpuNode>,
+    body: AggregateBody,
+    intermediate: Schema,
+    schema: Schema,
+) -> GpuAggregateBatches {
+    let mut layout = input_layout(input.as_ref());
+    layout.sort_order = SortOrder::NotSpecified;
+    layout.key_distribution = regrouped_key_distribution(&layout, &body);
+    // It emits everything it merged, once, at done.
+    layout.batch_layout = BatchLayout::SingleBatch;
+    GpuAggregateBatches {
+        kind: NodeKind::Intermediate { layout, schema },
+        body,
+        intermediate,
+        input,
     }
 }

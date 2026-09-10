@@ -4,7 +4,7 @@ The code is authoritative: where this page and the code disagree, fix the page r
 reading, and say so.
 
 Pipeline: SQL → DataFusion logical/physical plan → the engine's node tree
-(`peacockdb-core/src/batch_partitioned/`) → a recipe plan in the FlatBuffers vocabulary
+(`peacockdb-core/src/plan/`) → a recipe plan in the FlatBuffers vocabulary
 (`flatbuffers/gpu_plan.fbs`) → the C++/cuDF executor, one node at a time. One tree runs on
 either backend: `CpuBackend` relays a call to DataFusion, `GpuBackend` makes it through the
 C ABI.
@@ -53,7 +53,7 @@ What DataFusion is reused for is its planning, never its execution:
 
 The layer makes a conscious decision per DataFusion node kind, and an unrecognized one is a
 plan-time error naming it — never a silent pass-through. Expressions are translated the same
-way, kind by kind, into the engine's own IR (`batch_partitioned/expr.rs`), because a column
+way, kind by kind, into the engine's own IR (`plan/mod.rs`), because a column
 reference is an ordinal into a child whose column order the engine decides. Ordinals rebase at
 every node the layer inserts, so a per-branch cast project or an inserted merge shifts every
 reference above it.
@@ -242,7 +242,7 @@ never a mean of means. And **the Welford pair merges by `merge_m2`**, which the 
 the combine is not a per-column reduction: it needs the count-weighted mean and the cross term.
 `ddof` is 1 for the sample forms and 0 for the population ones.
 
-The registry lives in `batch_partitioned/aggregates.rs` as two enums — `AggFunc`, what SQL asked
+The registry lives in `plan/mod.rs` as two enums — `AggFunc`, what SQL asked
 for, and `PlanAgg`, what a node runs — with state names and types from DataFusion's
 `state_fields()` so our split cannot drift from the split it planned. Adding an aggregate is a
 row there rather than an arm in C++; an aggregate that cannot be decomposed at all (a true
@@ -501,8 +501,8 @@ broadcast filter is the optimization #27 was archived for.)
 
 ### Traits
 
-The types are in `batch_partitioned/` and the code is what they are; what follows is why they
-have the shape they do.
+The types are declared in `plan/mod.rs` and the code is what they are; what follows is why
+they have the shape they do.
 
 **Layout and schema live inside `NodeKind`** rather than as two `Option`s that must be `None`
 together: a sink structurally has neither, everything else always has both, and there is nothing

@@ -20,7 +20,7 @@ fn a_join_whose_build_side_is_many_batches_names_the_node_that_fixes_it() {
 
 #[test]
 fn a_join_filter_column_mapped_to_the_wrong_side_is_caught_at_plan_time() {
-    use super::join::{JoinFilterColumn, JoinSide};
+    use crate::plan::{JoinFilterColumn, JoinSide};
     let build = Given::input(one_lane(BatchLayout::SingleBatch), &["k"]);
     let probe = Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]);
     let schema = Schema::new(Arc::new(ArrowSchema::new(vec![
@@ -95,7 +95,7 @@ fn joining(
     probe: Box<dyn GpuNode>,
     join_type: datafusion::common::JoinType,
     filter: Option<Expr>,
-    filter_columns: Vec<join::JoinFilterColumn>,
+    filter_columns: Vec<JoinFilterColumn>,
 ) -> GpuHashJoin {
     GpuHashJoin::new(
         build,
@@ -170,12 +170,12 @@ fn a_join_that_cannot_stream_its_probe_over_many_batches_names_the_node_that_fix
             DataType::Boolean,
         )),
         vec![
-            join::JoinFilterColumn {
-                side: join::JoinSide::Build,
+            JoinFilterColumn {
+                side: JoinSide::Build,
                 index: 0,
             },
-            join::JoinFilterColumn {
-                side: join::JoinSide::Probe,
+            JoinFilterColumn {
+                side: JoinSide::Probe,
                 index: 0,
             },
         ],
@@ -199,12 +199,12 @@ fn a_join_shape_the_capability_matrix_refuses_is_refused_at_validation() {
             DataType::Boolean,
         )),
         vec![
-            join::JoinFilterColumn {
-                side: join::JoinSide::Build,
+            JoinFilterColumn {
+                side: JoinSide::Build,
                 index: 0,
             },
-            join::JoinFilterColumn {
-                side: join::JoinSide::Probe,
+            JoinFilterColumn {
+                side: JoinSide::Probe,
                 index: 0,
             },
         ],
@@ -224,8 +224,8 @@ fn a_join_filter_reference_past_its_map_is_caught_at_plan_time() {
             Expr::column(1, "fk"),
             DataType::Boolean,
         )),
-        vec![join::JoinFilterColumn {
-            side: join::JoinSide::Build,
+        vec![JoinFilterColumn {
+            side: JoinSide::Build,
             index: 0,
         }],
     );
@@ -264,12 +264,12 @@ fn a_left_nested_loop_join_streaming_its_probe_names_the_node_that_fixes_it() {
             DataType::Boolean,
         ),
         vec![
-            join::JoinFilterColumn {
-                side: join::JoinSide::Build,
+            JoinFilterColumn {
+                side: JoinSide::Build,
                 index: 0,
             },
-            join::JoinFilterColumn {
-                side: join::JoinSide::Probe,
+            JoinFilterColumn {
+                side: JoinSide::Probe,
                 index: 0,
             },
         ],

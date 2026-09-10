@@ -20,8 +20,8 @@ use datafusion::physical_expr::expressions::{
 };
 use datafusion::physical_plan::PhysicalExpr;
 
-use super::error::PlanError;
-use super::expr::{BinaryOp, Expr, NamedExpr, UnaryOp};
+use crate::plan::PlanError;
+use crate::plan::{BinaryOp, Expr, NamedExpr, UnaryOp};
 
 /// `Sqrt` has no DataFusion unary, so it resolves through the registry like any other
 /// function — the same `sqrt` a query would have used, rather than a second implementation.

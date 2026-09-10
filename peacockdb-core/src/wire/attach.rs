@@ -6,15 +6,15 @@
 use super::writer::Writer;
 use super::{AbiSymbol, Call, CallPattern, FbKind, Input, ProjectRole, Recipe, RecipePlan};
 use super::{aggregate_writer, join, node_writer};
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::node::GpuNode;
-use crate::batch_partitioned::nodes::aggregate::Phase;
-use crate::batch_partitioned::nodes::{
+use crate::plan::GpuNode;
+use crate::plan::Phase;
+use crate::plan::PlanError;
+use crate::plan::Schema;
+use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuCoalesceAllBatches,
     GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuLimit, GpuLoadParquet, GpuMergeSortedPartitions,
     GpuProject, GpuSort, GpuUnload, NodeRef, as_node_ref,
 };
-use crate::batch_partitioned::schema::Schema;
 
 /// Build the recipe plan for a finished tree. It runs after planning because a recipe is
 /// a statement about a node, and a node is not finished until the plan is.

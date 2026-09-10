@@ -9,19 +9,19 @@
 
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
-use super::error::PlanError;
-use super::layout::{KeyDistribution, NodeKind, SortOrder};
-use super::node::GpuNode;
-use super::nodes::join::emitted_columns;
-use super::nodes::{AggregateBody, GpuCrossJoin, GpuNestedLoopJoin, NodeRef, try_as_node_ref};
-use super::schema::Schema;
+use super::GpuNode;
+use super::PlanError;
+use super::Schema;
+use super::emitted_columns;
+use super::{AggregateBody, GpuCrossJoin, GpuNestedLoopJoin, NodeRef, try_as_node_ref};
+use super::{KeyDistribution, NodeKind, SortOrder};
 
 /// Post-order, so a child's complaint comes before its parent's.
 ///
 /// Public because the planner is not the only thing that builds a tree: a test that
 /// rewrites a planned one into a shape no planner emits needs the same check the planner
 /// ran, and the driver does not make it — [`check_canonical_form`] is all it asks for.
-pub fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
+pub(crate) fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
     if !matches!(root.kind(), NodeKind::Sink) {
         return Err(PlanError::Invalid(format!(
             "{}: a plan ends at the crossing back to the host — the planner roots it in \
@@ -121,7 +121,7 @@ fn below(node: &dyn GpuNode, accept: &dyn Fn(&dyn GpuNode) -> bool) -> bool {
 /// are the ones DataFusion planned, and nothing else states it: every node below is
 /// checked against its own children, so a whole tree can be internally consistent and
 /// answer a different query.
-pub(super) fn check_output_schema(
+pub(crate) fn check_output_schema(
     root: &dyn GpuNode,
     planned: &ArrowSchema,
 ) -> Result<(), PlanError> {
@@ -387,15 +387,7 @@ fn annotated_state(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::batch_partitioned::aggregates::AggFunc;
-    use crate::batch_partitioned::expr::{Expr, NamedExpr};
-    use crate::batch_partitioned::layout::{BatchLayout, ColumnOrder, PartitionLayout, SortOrder};
-    use crate::batch_partitioned::node::RowInterval;
-    use crate::batch_partitioned::nodes::{
-        GpuFilter, GpuLimit, GpuMergePartitions, GpuProject, GpuUnload,
-    };
-    use crate::batch_partitioned::schema::AggStateColumns;
+    use crate::plan::*;
     use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
     use std::any::Any;
     use std::sync::Arc;
@@ -740,8 +732,6 @@ mod tests {
         // Keys plus state where it hands state on. The aggregate is the node whose schema
         // carries the annotations a merge reads, so a width slip there mis-numbers the
         // state columns rather than only the output.
-        use crate::batch_partitioned::aggregates::{AggCall, PlanAgg};
-        use crate::batch_partitioned::nodes::GpuAggregate;
 
         let input = source(one_column("n", DataType::Int64), PartitionLayout::new(1));
         let body = AggregateBody {

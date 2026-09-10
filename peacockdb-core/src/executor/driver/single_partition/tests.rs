@@ -4,10 +4,10 @@
 
 use std::sync::atomic::Ordering;
 
-use super::*;
 use super::super::accounting::ResidentAccountant;
 use super::super::mock::{JoinRule, Mock, Script, spec};
 use super::super::plans;
+use super::*;
 use crate::executor::Batch;
 
 fn accountant() -> ResidentAccountant {
@@ -27,7 +27,7 @@ fn site<'a>(script: &'a Script, node: &'a dyn GpuNode) -> LaneSite<'a, Mock> {
     LaneSite {
         post_order: 0,
         ctx: script,
-        category: crate::batch_partitioned::nodes::category_of(node),
+        category: crate::plan::category_of(node),
         node,
         lane: 0,
         slot: slot(),

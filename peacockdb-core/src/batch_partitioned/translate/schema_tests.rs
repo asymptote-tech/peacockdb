@@ -12,13 +12,13 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::DataType;
 
 use super::Translator;
-use crate::batch_partitioned::aggregates::AggFunc;
-use crate::batch_partitioned::expr::{BinaryOp, Expr};
-use crate::batch_partitioned::node::GpuNode;
-use crate::batch_partitioned::nodes::{NodeRef, as_node_ref};
-use crate::batch_partitioned::partitioner::Batching;
 use crate::batch_partitioned::plan::{BatchSizing, PlanKnobs, plan_batch_partitioned};
-use crate::batch_partitioned::schema::{AggStateColumns, Schema};
+use crate::plan::AggFunc;
+use crate::plan::Batching;
+use crate::plan::GpuNode;
+use crate::plan::{AggStateColumns, Schema};
+use crate::plan::{BinaryOp, Expr};
+use crate::plan::{NodeRef, as_node_ref};
 
 /// The committed minimal dataset, whose `p_retailprice` and `c_acctbal` are
 /// `Decimal128(15,2)` — the two columns every decimal assertion below starts from.
@@ -328,7 +328,7 @@ async fn a_pass_through_node_carries_its_inputs_own_schema() {
 async fn planned(
     sql: &str,
     target_partitions: usize,
-) -> Result<(), crate::batch_partitioned::PlanError> {
+) -> Result<(), crate::plan::PlanError> {
     let plan = physical_plan_for(sql, target_partitions).await;
     plan_batch_partitioned(&plan, knobs(target_partitions)).map(|_| ())
 }
@@ -382,7 +382,7 @@ async fn the_planner_refuses_a_tree_its_validation_rejects() {
         ));
 
     match plan_batch_partitioned(&unsorted_merge, knobs(1)) {
-        Err(crate::batch_partitioned::PlanError::Invalid(said)) => assert!(
+        Err(crate::plan::PlanError::Invalid(said)) => assert!(
             said.contains("GpuMergeSortedPartitions") && said.contains("GpuSort"),
             "the planner's refusal names the wrong fix: {said}"
         ),
@@ -418,7 +418,7 @@ async fn the_planner_refuses_a_root_that_does_not_emit_what_the_query_asked_for(
     let partial = partial_of(&plan).expect("a partial aggregate to root at");
 
     match plan_batch_partitioned(&partial, knobs(4)) {
-        Err(crate::batch_partitioned::PlanError::Invalid(said)) => assert!(
+        Err(crate::plan::PlanError::Invalid(said)) => assert!(
             said.contains("the plan emits") && said.contains("$sum"),
             "the planner's refusal names the wrong columns: {said}"
         ),

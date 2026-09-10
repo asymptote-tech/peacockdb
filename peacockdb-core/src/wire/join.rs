@@ -18,13 +18,13 @@ use super::expr_writer::write_expr;
 use super::node_writer;
 use super::writer::{Payload, Writer};
 use super::{Call, CallPattern, FbKind, Input, ProjectRole, Recipe};
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::expr::Expr;
-use crate::batch_partitioned::nodes::join::{
+use crate::plan::Expr;
+use crate::plan::PlanError;
+use crate::plan::Schema;
+use crate::plan::{GpuHashJoin, GpuNestedLoopJoin};
+use crate::plan::{
     JoinFilterColumn, JoinSide, NestedLoopJoinType, finish_join_type, per_call_join_type,
 };
-use crate::batch_partitioned::nodes::{GpuHashJoin, GpuNestedLoopJoin};
-use crate::batch_partitioned::schema::Schema;
 
 pub(crate) fn hash_join(
     node: &GpuHashJoin,

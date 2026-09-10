@@ -11,10 +11,10 @@
 
 use datafusion::common::JoinType;
 
-use super::error::PlanError;
-use super::expr::Expr;
-use super::node::GpuNode;
-use super::nodes::{NodeRef, as_node_ref};
+use crate::plan::Expr;
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::plan::{NodeRef, as_node_ref};
 
 /// Refuses an anti or mark join whose NULLs can meet under SQL semantics. Everything else
 /// plans: semi honours the flag, and `null_equals_null=true` is asking for the equality the
@@ -132,7 +132,7 @@ pub fn can_be_null(node: &dyn GpuNode) -> Vec<bool> {
         }
         NodeRef::CrossJoin(_) => [child(0), child(1)].concat(),
         NodeRef::NestedLoopJoin(join) => {
-            use super::nodes::join::NestedLoopJoinType;
+            use crate::plan::NestedLoopJoinType;
             let (build, probe) = (child(0), child(1));
             match join.join_type {
                 NestedLoopJoinType::Inner => [build, probe].concat(),
@@ -162,7 +162,7 @@ fn joined_can_be_null(join_type: JoinType, build: &[bool], probe: &[bool]) -> Ve
 }
 
 fn aggregate_can_be_null(
-    body: &super::nodes::AggregateBody,
+    body: &crate::plan::AggregateBody,
     input: &[bool],
     width: usize,
 ) -> Vec<bool> {
@@ -202,7 +202,7 @@ fn expr_can_be_null(expr: &Expr, input: &[bool]) -> bool {
         Expr::Cast { expr, .. } => expr_can_be_null(expr, input),
         // A predicate answers true or false about a NULL rather than becoming one.
         Expr::Unary { op, arg } => match op {
-            super::expr::UnaryOp::IsNull | super::expr::UnaryOp::IsNotNull => false,
+            crate::plan::UnaryOp::IsNull | crate::plan::UnaryOp::IsNotNull => false,
             _ => expr_can_be_null(arg, input),
         },
         // No ELSE is an implicit NULL, and every branch is a value the CASE can return.

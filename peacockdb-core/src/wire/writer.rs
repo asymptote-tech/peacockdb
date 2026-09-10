@@ -13,7 +13,7 @@ use flatbuffers::{FlatBufferBuilder, UnionWIPOffset, WIPOffset};
 use super::generated::peacock::plan as fb;
 
 use super::Seq;
-use crate::batch_partitioned::error::PlanError;
+use crate::plan::PlanError;
 
 /// The seq a failing payload would have taken, appended to the reason rather than wrapped
 /// around it: a second `PlanError` around the first prints its prefix twice.

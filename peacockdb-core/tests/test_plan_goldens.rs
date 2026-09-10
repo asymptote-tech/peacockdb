@@ -10,9 +10,9 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use peacockdb_core::batch_partitioned::node::GpuNode;
 use peacockdb_core::batch_partitioned::plan::{PlanKnobs, plan_batch_partitioned};
-use peacockdb_core::batch_partitioned::{ExecutorCategory, category_of};
+use peacockdb_core::plan::GpuNode;
+use peacockdb_core::plan::{ExecutorCategory, category_of};
 use peacockdb_core::plan_text::{render_plan, render_plan_memory};
 use peacockdb_core::wire::{Payloads, attach_recipes, check_seq_kinds, depth, render_plan_recipes};
 
@@ -87,7 +87,7 @@ async fn render_query(
 /// `not runnable`, never `refused:` — the plan plans, validates and runs on the CPU, and
 /// what failed is the crossing to the device. Naming its ticket is not decoration: the
 /// meta test below asserts that every line of this shape names a ticket that exists.
-fn recipes_of(tree: &dyn peacockdb_core::batch_partitioned::GpuNode) -> String {
+fn recipes_of(tree: &dyn peacockdb_core::plan::GpuNode) -> String {
     match attach_recipes(tree) {
         Ok(plan) => render_plan_recipes(tree, &plan, Payloads::Omitted),
         Err(e) => format!("not runnable: {}\n", relative_to_testdata(&e.to_string())),

@@ -11,22 +11,22 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::execution::TaskContext;
 
-use crate::executor::{Backend, NodeExecutors};
-use crate::executor::CpuBatch;
-use super::super::error::PlanError;
-use crate::executor::{
-    BackendError, BatchAccumulatorExecutor, CallResult, ExecExecutor, Executor, JoinExecutor,
-    LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin, RowRange,
-    SourceExecutor, SourceStep, UnloadExecutor,
-};
-use crate::executor::forwarder_for;
-use super::super::node::GpuNode;
-use super::super::nodes::{NodeRef, as_node_ref};
 use super::accumulate::{CpuAccumulator, CpuPartitionAccumulator};
 use super::emit::CpuEmitter;
 use super::join::{CpuJoin, CpuProbingJoin};
 use super::source::CpuSource;
 use super::{CpuExec, CpuUnload};
+use crate::executor::CpuBatch;
+use crate::executor::forwarder_for;
+use crate::executor::{Backend, NodeExecutors};
+use crate::executor::{
+    BackendError, BatchAccumulatorExecutor, CallResult, ExecExecutor, Executor, JoinExecutor,
+    LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin, RowRange,
+    SourceExecutor, SourceStep, UnloadExecutor,
+};
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::plan::{NodeRef, as_node_ref};
 
 /// The threshold a batch aggregate compacts at, until the driver derives one from the
 /// budget the way the loader's batch size is derived (#142).

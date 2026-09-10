@@ -374,6 +374,102 @@ Visibility snapshot: `visibility-after-slice4.txt`, `visibility-items-after-slic
 
 #### Owed work, carried forward
 
-The whole-crate `pub` narrowing (the spec's "54 items lose `pub`") is still owed, and belongs
-after the backends slice and before the layout test. `private_interfaces` is why it cannot be
-done per slice against a zero-warning baseline.
+Two items, both tracked by the coordinator and both to be closed before the task ends.
+
+1. **The whole-crate `pub` narrowing** — the spec's "54 items lose `pub`". It belongs after the
+   backends slice and before the layout test. `private_interfaces` is why it cannot be done per
+   slice against a zero-warning baseline: narrowing `Forwarder` alone, while `pub enum
+   NodeExecutors` still names it, raises the lint.
+2. **Two cases the layout test owes**, both discovered here rather than designed:
+   - **The `E0603` probe**, as a case rather than a command someone once ran. A component's
+     implementation module must be unreachable from outside the crate, and `wire::generated` is
+     the strongest instance: the whole point of the slice is that 7,336 lines are private.
+   - **The nominal-visibility hole.** `private_interfaces` compares against a type's *nominal*
+     visibility, not its reachable one. flatc emits `pub struct` / `pub enum`, so a type that
+     no path outside `wire` can name is still nominally public, and a `pub fn` in `wire/mod.rs`
+     returning one compiles silently — `FbKind::wire_kind` was exactly that. rustc cannot be
+     asked this question, so the test has to ask it, and the test's own comment has to say why
+     it is not redundant with the compiler. Without that sentence the next reader deletes it.
+
+### Slice 5 — `plan`, the facade
+
+Ready to commit. No golden moved, the case inventory is identical in both shapes, all three
+builds are clean at zero warnings, and `pub use` is now **zero** crate-wide.
+
+#### This slice is a consolidation, not a move, and the rename check will say so
+
+Every one of the eighteen nodes loses its struct declaration and its constructor body to
+`plan/mod.rs` and keeps only its `impl GpuNode` and the constructor's real body. So a per-file
+similarity against the old path is low by construction — `nodes/unload.rs` retains 17% of its
+text, `nodes/mod.rs` 4%, `exec_ops.rs` 25% — and `git diff -M` will report most of these as
+delete-plus-add rather than as renames. That is the design and not a rewrite; the files that
+did move whole score as moves (`validate.rs` 0.99, the three `tests/` files 0.98–1.00).
+
+The aggregate check that replaces per-file similarity: over the twelve old files and the new
+`plan/`, 4,447 body lines before and 4,634 after, with **50** lines present before and absent
+after. Every one of the 50 is a known rewrite — `Self {` becoming `GpuX {` in a hoisted
+constructor, `join::JoinFilterColumn` losing its now-redundant module prefix, `self.` becoming
+`interval.`/`node.` in the two delegated `&self` bodies, and the module-path rewrites.
+
+#### The hoist dropped 35 doc lines, and only a second check found them
+
+The tool that moved inherent `impl` blocks into the facade started each method at its `fn`
+line, so the `///` block and any `#[…]` above it were left behind — twelve doc comments and two
+`#[allow(clippy::too_many_arguments)]`. Nothing goes red for that: the build is clean, the
+tests pass, and a line-level comparison that filters comments out (which the first one did)
+reports full conservation. It was caught by comparing doc and attribute lines specifically,
+old against new. All 35 are restored; the one that is deliberately gone is
+`GpuNode::as_any`'s link to `nodes::as_node_ref`, which now reads `[`as_node_ref`]`.
+
+**Worth carrying into the remaining slices:** a body-line comparison is not enough to prove a
+hoist lost nothing. Compare doc and attribute lines as their own set.
+
+#### What the one-expression rule cost
+
+Seventeen inherent methods have bodies of more than one statement, so their bodies became free
+functions the facade delegates to in one line: fifteen constructors, `RowInterval::range_of`
+(now `plan/interval.rs`) and `GpuLoadParquet::largest_batch_bytes`. The other 28 inherent
+methods are one expression and keep their bodies in the facade — which is why `plan/mod.rs` is
+1,301 lines rather than the spec's estimated 980. `mod.rs` has no length limit in this task, and
+a check confirms the rule holds: no inherent method and no free function in `plan/mod.rs` has a
+statement-level `;` at depth zero.
+
+#### Files the spec's tree does not list
+
+- **`plan/interval.rs`** — `RowInterval::range_of`'s three statements.
+- **`plan/error.rs`** — `PlanError`'s two trait impls. A trait impl belongs in an
+  implementation module and `PlanError` had no other home.
+- `plan/expr.rs` and `plan/schema.rs` are **gone**: everything in them was a declaration, so
+  nothing was left behind. Their module docs are section comments in the facade, above the
+  declarations they describe.
+- **`plan/common.rs`** is exactly the spec's five functions plus `direction`, the private
+  helper one of them uses.
+
+#### The executor-to-planner edge is gone
+
+`validate.rs` moving into `plan/` removes the edge the spec names at what was
+`driver/partitioned.rs:28`: the driver now calls `crate::plan::check_canonical_form`, a
+component API, rather than reaching into the planner's validation pass.
+
+#### Evidence
+
+| Check | Result |
+|---|---|
+| `--lib` | 437 passed |
+| `test_plan_goldens` | 19 passed |
+| `test_cpu_corpus` | 448 passed |
+| `test_cpu_end_to_end` | 24 passed, 2 ignored |
+| `test_ci_coverage` / `test_corpus_goldens` / `test_cost_model` / `test_golden_format` | 7 / 20 / 3 / 24 passed |
+| `test_layout_injection` / `test_null_analysis` / `test_planner_join_{capability,refusals}` / `test_cpu_executors` | 4 / 8 / 13 / 10 / 1 passed |
+| three builds | 0 warnings each |
+| goldens | byte-identical to `goldens-after-rename.sha256` |
+| case inventory, both shapes | identical |
+| residue gate | the same seven lines |
+| `pub use` / `pub(super)` | 0 and 7, the seven all in `batch_partitioned/{cpu_backend,gpu_backend,translate}` |
+| bare `pub` outside a `mod.rs` | none in `plan/`, `wire/`, `executor/` or `plan_text/` |
+| doc and attribute lines | conserved, after the repair above |
+
+`test_cost_model`'s `node_kind_names` reads `node_name`'s source text; its `include_str!` now
+points at `plan/mod.rs` and its panic message names that file.
+
+Visibility snapshot: `visibility-after-slice5.txt`, `visibility-items-after-slice5.txt`.

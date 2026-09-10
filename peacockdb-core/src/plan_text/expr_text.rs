@@ -7,9 +7,9 @@ use std::fmt::Write as _;
 use datafusion::common::ScalarValue;
 
 use super::node_text::{name_at, quoted, type_text};
-use crate::batch_partitioned::expr::{BinaryOp, ColumnRef, Expr, UnaryOp};
-use crate::batch_partitioned::nodes::join::{JoinFilterColumn, JoinSide};
-use crate::batch_partitioned::schema::Schema;
+use crate::plan::Schema;
+use crate::plan::{BinaryOp, ColumnRef, Expr, UnaryOp};
+use crate::plan::{JoinFilterColumn, JoinSide};
 
 pub(crate) fn expr_text(expr: &Expr) -> String {
     // An ordinary reference indexes the node's input, which is the line below it.
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn every_expression_form_renders_readably() {
-        use crate::batch_partitioned::expr::{BinaryOp, UnaryOp};
+        use crate::plan::{BinaryOp, UnaryOp};
         let column = Expr::column(2, "s");
         let cast = Expr::Cast {
             expr: Box::new(Expr::column(0, "a")),

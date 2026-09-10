@@ -9,9 +9,9 @@ use super::super::mock::{AccRule, EmitRule, Mock, Script, spec};
 use super::super::plans::*;
 use super::*;
 
-use crate::executor::{Backend, NodeExecutors};
-use crate::executor::Batch;
 use super::super::mock::MockBatch;
+use crate::executor::Batch;
+use crate::executor::{Backend, NodeExecutors};
 use crate::executor::{
     BatchAccumulatorExecutor, PartitionEmitterExecutor, SourceExecutor, SourceStep,
 };

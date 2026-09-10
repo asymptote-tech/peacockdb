@@ -23,17 +23,17 @@ use datafusion::physical_plan::joins::{
 };
 use datafusion::physical_plan::projection::ProjectionExec;
 
-use crate::executor::CpuBatch;
-use super::super::error::PlanError;
-use crate::executor::{BackendError, CallResult, CallStats};
 use super::super::expr_physical::physical_expr;
-use super::super::node::GpuNode;
-use super::super::nodes::join::{
+use super::{declared_as, placeholder, run_node};
+use crate::executor::CpuBatch;
+use crate::executor::{BackendError, CallResult, CallStats};
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::plan::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
+use crate::plan::{
     JoinSide, NestedLoopJoinType, emits_both_sides, empty_build_answers_nothing, finish_join_type,
     per_call_join_type,
 };
-use super::super::nodes::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
-use super::{declared_as, placeholder, run_node};
 
 /// What a join does per call, built once. The `Option`s are the capability matrix in the
 /// only form an executor needs it: a call it does not make is a call it does not have.
@@ -154,7 +154,7 @@ impl CpuJoin {
     /// done.
     fn one_call(
         join: Arc<dyn ExecutionPlan>,
-        kind: &super::super::layout::NodeKind,
+        kind: &crate::plan::NodeKind,
         ctx: Arc<TaskContext>,
     ) -> Calls {
         Calls {
@@ -433,8 +433,8 @@ fn pad_project(
 /// The residual, rebuilt against the intermediate schema its column map names — the same
 /// reconstruction the wire's own reader makes, since the map is the same map.
 fn join_filter(
-    filter: &super::super::expr::Expr,
-    columns: &[super::super::nodes::join::JoinFilterColumn],
+    filter: &crate::plan::Expr,
+    columns: &[crate::plan::JoinFilterColumn],
     build: &ArrowSchema,
     probe: &ArrowSchema,
     registry: &TaskContext,

@@ -15,23 +15,23 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::{JoinType, ScalarValue};
 
-use peacockdb_core::batch_partitioned::GpuNode;
-use peacockdb_core::batch_partitioned::aggregates::{AggCall, AggFunc, PlanAgg, decomposition};
-use peacockdb_core::batch_partitioned::expr::{Expr, NamedExpr};
-use peacockdb_core::batch_partitioned::layout::ColumnOrder;
-use peacockdb_core::batch_partitioned::node::RowInterval;
-use peacockdb_core::batch_partitioned::nodes::join::{
+use peacockdb_core::plan::GpuNode;
+use peacockdb_core::plan::{AggCall, AggFunc, PlanAgg, decomposition};
+use peacockdb_core::plan::{Expr, NamedExpr};
+use peacockdb_core::plan::ColumnOrder;
+use peacockdb_core::plan::RowInterval;
+use peacockdb_core::plan::{
     JoinFilterColumn, JoinSide, NestedLoopJoinType,
 };
-use peacockdb_core::batch_partitioned::nodes::{
+use peacockdb_core::plan::{
     AggregateBody, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
     GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave,
     GpuLimit, GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin,
     GpuProject, GpuSort, GpuUnion, GpuUnload, NodeRef, as_node_ref,
 };
-use peacockdb_core::batch_partitioned::parquet_meta::ScanMetadata;
-use peacockdb_core::batch_partitioned::partitioner::RowGroupMeta;
-use peacockdb_core::batch_partitioned::schema::Schema;
+use peacockdb_core::plan::ScanMetadata;
+use peacockdb_core::plan::RowGroupMeta;
+use peacockdb_core::plan::Schema;
 
 /// `node` rebuilt over `children`, which are the rewritten children in the order
 /// [`GpuNode::children`] reports them. Handed a node's own children back it is the

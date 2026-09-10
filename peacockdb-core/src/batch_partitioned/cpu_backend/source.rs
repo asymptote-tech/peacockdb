@@ -17,9 +17,9 @@ use datafusion::parquet::arrow::arrow_reader::{
 };
 
 use crate::executor::CpuBatch;
-use super::super::error::PlanError;
 use crate::executor::{BackendError, CallStats};
-use super::super::nodes::GpuLoadParquet;
+use crate::plan::GpuLoadParquet;
+use crate::plan::PlanError;
 
 /// A lane's reads, in the order the mapping named them.
 pub struct CpuSource {

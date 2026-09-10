@@ -4,12 +4,12 @@
 //! oracle is written down rather than computed by anything under test.
 
 use super::*;
-use crate::batch_partitioned::aggregates::{AggCall, AggFunc, PlanAgg};
-use crate::batch_partitioned::expr::{BinaryOp, Expr, NamedExpr};
-use crate::batch_partitioned::layout::{BatchLayout, NodeKind, PartitionLayout};
-use crate::batch_partitioned::node::GpuNode;
-use crate::batch_partitioned::nodes::aggregate::AggregateBody;
-use crate::batch_partitioned::schema::{AggStateColumns, Schema};
+use crate::plan::AggregateBody;
+use crate::plan::GpuNode;
+use crate::plan::{AggCall, AggFunc, PlanAgg};
+use crate::plan::{AggStateColumns, Schema};
+use crate::plan::{BatchLayout, NodeKind, PartitionLayout};
+use crate::plan::{BinaryOp, Expr, NamedExpr};
 use datafusion::arrow::array::{Array, ArrayRef, Int32Array, Int64Array, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field};
 use datafusion::common::ScalarValue;
@@ -50,7 +50,7 @@ impl GpuNode for Given {
     fn children(&self) -> Vec<&dyn GpuNode> {
         Vec::new()
     }
-    fn validate_schemas_and_partitions(&self) -> Result<(), crate::batch_partitioned::PlanError> {
+    fn validate_schemas_and_partitions(&self) -> Result<(), crate::plan::PlanError> {
         Ok(())
     }
     fn as_any(&self) -> &dyn Any {

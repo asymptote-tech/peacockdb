@@ -25,9 +25,9 @@ mod tests;
 
 use datafusion::arrow::array::RecordBatch;
 
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::node::{GpuNode, RowInterval};
-use crate::batch_partitioned::nodes::ExecutorCategory;
+use crate::plan::ExecutorCategory;
+use crate::plan::PlanError;
+use crate::plan::{GpuNode, RowInterval};
 
 #[cfg(not(feature = "rust-only"))]
 use peacockdb_ffi::raw::PeacockExecutor;

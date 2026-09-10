@@ -11,8 +11,8 @@ use datafusion::arrow::array::{
     Array, ArrayRef, Float64Array, Int32Array, RecordBatch, StringArray,
 };
 use datafusion::common::ScalarValue;
-use datafusion::execution::context::SessionContext;
 use datafusion::execution::TaskContext;
+use datafusion::execution::context::SessionContext;
 use datafusion::logical_expr::ColumnarValue;
 
 fn batch() -> RecordBatch {
@@ -243,7 +243,7 @@ fn a_function_the_session_does_not_have_is_refused_by_name() {
 fn every_expression_kind_has_a_lowering() {
     let sample = Expr::Literal(ScalarValue::Int32(Some(1)));
     let all = [
-        Expr::Column(crate::batch_partitioned::expr::ColumnRef {
+        Expr::Column(crate::plan::ColumnRef {
             index: 0,
             name: "n".to_string(),
         }),

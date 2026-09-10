@@ -1,7 +1,7 @@
 use super::node_text::quoted;
 use super::*;
-use crate::batch_partitioned::partitioner::Batching;
 use crate::batch_partitioned::translate::Translator;
+use crate::plan::Batching;
 use std::path::PathBuf;
 
 async fn rendered(sql: &str, target_partitions: usize) -> String {

@@ -6,20 +6,20 @@
 //! is asked here instead.
 
 use super::*;
-use crate::executor::Backend;
 use crate::batch_partitioned::cpu_backend::accumulate::CpuAccumulator;
 use crate::batch_partitioned::cpu_backend::backend::CpuBackend;
 use crate::batch_partitioned::cpu_backend::join::CpuJoin;
+use crate::executor::Backend;
 use crate::executor::Executor;
-use crate::batch_partitioned::layout::{ColumnOrder, PartitionLayout};
-use crate::batch_partitioned::node::RowInterval;
-use crate::batch_partitioned::nodes::join::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
-use crate::batch_partitioned::nodes::{
+use crate::plan::RowInterval;
+use crate::plan::{ColumnOrder, PartitionLayout};
+use crate::plan::{
     ExecutorCategory, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
     GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave,
     GpuLimit, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin, GpuProject, GpuSort,
     GpuUnion, GpuUnload, NodeRef, as_node_ref, category_of,
 };
+use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
 use datafusion::common::JoinType;
 
 /// A stub input with a layout stated, since a join's two sides differ in exactly that.

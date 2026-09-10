@@ -14,14 +14,14 @@ use std::mem;
 
 use super::StepError;
 use super::accounting::{Held, ResidentAccountant, Slot};
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::node::GpuNode;
-use crate::batch_partitioned::nodes::ExecutorCategory;
 use crate::executor::{
     Backend, BackendError, BatchAccumulatorExecutor, CallKind, CallStats, CpuBatch, ExecExecutor,
     JoinExecutor, NodeExecutors, ProbingJoin, RowRange, RunError, SourceExecutor, SourceStep,
     UnloadExecutor,
 };
+use crate::plan::ExecutorCategory;
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
 
 pub(crate) const BUILD_SLOT: usize = 0;
 pub(crate) const PROBE_SLOT: usize = 1;

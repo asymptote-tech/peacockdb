@@ -15,15 +15,15 @@ use super::accounting::{Held, ResidentAccountant, Slot, Trip};
 use super::index::PROBE_CHILD;
 use super::scheduler::Scheduler;
 use super::single_partition::{Avail, LaneCall, LaneDriver, LaneOutputs, LaneSite};
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::node::GpuNode;
-use crate::batch_partitioned::nodes::ExecutorCategory;
-use crate::batch_partitioned::validate::check_canonical_form;
 use crate::executor::{
     Backend, BackendError, Batch, BatchForwarder, CallKind, CpuBatch, EmittedBatch, Forwarder,
     LaneEvent, NodeExecutors, PartitionAccumulatorExecutor, PartitionEmitterExecutor, PlanIndex,
     ROOT, RowRange, RunError, RunReport, TraceEvent,
 };
+use crate::plan::ExecutorCategory;
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::plan::check_canonical_form;
 
 /// A step neither moves a batch nor finalizes a lane only if the schedule is wrong, so a
 /// run that does not end is a bug here rather than a query that is merely large.

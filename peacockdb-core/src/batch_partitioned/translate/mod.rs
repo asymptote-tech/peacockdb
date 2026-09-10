@@ -28,20 +28,21 @@ use datafusion::physical_plan::sorts::sort_preserving_merge::SortPreservingMerge
 use datafusion::physical_plan::union::{InterleaveExec, UnionExec};
 use datafusion::physical_plan::windows::{BoundedWindowAggExec, WindowAggExec};
 
-use super::error::PlanError;
-use super::expr::{Expr, NamedExpr};
 use super::expr_translate::translate_expr;
-use super::layout::{BatchLayout, ColumnOrder, KeyDistribution};
-use super::node::{GpuNode, RowInterval};
-use super::nodes::join::{JoinFilterColumn, JoinSide, NestedLoopJoinType, capability};
-use super::nodes::{
+use super::parquet_meta::{parquet_table_name, survivor_metadata};
+use super::partitioner::partition;
+use crate::plan::PlanError;
+use crate::plan::Schema;
+use crate::plan::{BatchLayout, ColumnOrder, KeyDistribution};
+use crate::plan::{Batching, RowGroupMeta};
+use crate::plan::{Expr, NamedExpr};
+use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter,
     GpuHashJoin, GpuInterleave, GpuLimit, GpuLoadParquet, GpuMergePartitions,
     GpuMergeSortedPartitions, GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion, GpuUnload,
 };
-use super::parquet_meta::{parquet_table_name, survivor_metadata};
-use super::partitioner::{Batching, RowGroupMeta, partition};
-use super::schema::Schema;
+use crate::plan::{GpuNode, RowInterval};
+use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType, capability};
 
 mod aggregate;
 #[cfg(test)]

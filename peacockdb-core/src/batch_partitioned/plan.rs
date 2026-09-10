@@ -11,13 +11,13 @@ use std::sync::Arc;
 
 use datafusion::physical_plan::ExecutionPlan;
 
-use super::error::PlanError;
 use super::estimator::{MemoryModel, estimate};
-use super::node::GpuNode;
 use super::nulls::refuse_null_unsafe_joins;
-use super::partitioner::Batching;
 use super::translate::Translator;
-use super::validate::{check_output_schema, validate};
+use crate::plan::Batching;
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::plan::{check_output_schema, validate};
 
 /// A source reading less than this stops being worth splitting: it has nothing to gain
 /// from lanes and would pay a shuffle for them.

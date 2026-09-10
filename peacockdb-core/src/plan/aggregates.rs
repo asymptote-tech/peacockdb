@@ -7,63 +7,13 @@
 //! split cannot drift from the one DataFusion planned; the state *names* are ours,
 //! since the golden and every later reference read them.
 
+use super::{AggFunc, AggSpec, Decomposition, Merge, PlanAgg};
 use datafusion::arrow::datatypes::{DataType, Field};
 
-use super::error::PlanError;
-use super::expr::{BinaryOp, Expr, UnaryOp};
+use super::PlanError;
+use super::{BinaryOp, Expr, UnaryOp};
 
-/// What sql asked for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AggFunc {
-    Sum,
-    Min,
-    Max,
-    Count,
-    Avg,
-    Stddev,
-    Var,
-}
-
-/// What a node runs. `Avg` is never one — decomposing it is the point — and `MergeM2`
-/// is never an `AggFunc`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlanAgg {
-    Sum,
-    Min,
-    Max,
-    Count,
-    Mean,
-    M2,
-    MergeM2,
-}
-
-/// How a state merges. `Combined` exists only because `merge_m2` is not a per-column
-/// reduction: it needs the count-weighted mean and the cross term.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Merge {
-    PerColumn(&'static [PlanAgg]),
-    Combined(PlanAgg),
-}
-
-/// `state` pairs each column's name suffix with the aggregator producing it, so a column
-/// and its aggregator cannot desync. `merge` is listed rather than derived: the rule
-/// would be "the same aggregator, except count merges by sum", and that exception is the
-/// whole content.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Decomposition {
-    pub state: &'static [(&'static str, PlanAgg)],
-    pub merge: Merge,
-}
-
-/// One aggregate as sql wrote it: the function, and the `ddof` that separates the sample
-/// forms from the population ones.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AggSpec {
-    pub func: AggFunc,
-    pub ddof: u32,
-}
-
-pub fn resolve(name: &str) -> Result<AggSpec, PlanError> {
+pub(crate) fn resolve(name: &str) -> Result<AggSpec, PlanError> {
     let (func, ddof) = match name {
         "sum" => (AggFunc::Sum, 0),
         "min" => (AggFunc::Min, 0),
@@ -83,23 +33,7 @@ pub fn resolve(name: &str) -> Result<AggSpec, PlanError> {
     Ok(AggSpec { func, ddof })
 }
 
-impl PlanAgg {
-    /// The name the aggregator goes by, in a plan line and in DataFusion's own state
-    /// field names (`avg(x)[count]`), which is how our state columns find their types.
-    pub fn tag(self) -> &'static str {
-        match self {
-            Self::Sum => "sum",
-            Self::Min => "min",
-            Self::Max => "max",
-            Self::Count => "count",
-            Self::Mean => "mean",
-            Self::M2 => "m2",
-            Self::MergeM2 => "merge_m2",
-        }
-    }
-}
-
-pub fn decomposition(func: AggFunc) -> Decomposition {
+pub(crate) fn decomposition(func: AggFunc) -> Decomposition {
     const WELFORD: Decomposition = Decomposition {
         state: &[
             ("$count", PlanAgg::Count),
@@ -135,21 +69,11 @@ pub fn decomposition(func: AggFunc) -> Decomposition {
     }
 }
 
-/// One aggregator call: what it runs, over which expressions, and the columns it
-/// produces. `merge_m2` is the reason `outputs` is a list — it returns its three state
-/// columns together.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AggCall {
-    pub func: PlanAgg,
-    pub args: Vec<Expr>,
-    pub outputs: Vec<Field>,
-}
-
 /// The expression that turns merged state into the aggregate's output column. A rename
 /// for the five simple aggregates, a divide for `avg`, and a `CASE` over a `sqrt` for
 /// the Welford pair — all of them ordinary IR, which is what replaces the hardwired
 /// `avg_div` and `std_finalize` arms.
-pub fn finalize(spec: AggSpec, state: &[Field], state_at: u32, out_type: &DataType) -> Expr {
+pub(crate) fn finalize(spec: AggSpec, state: &[Field], state_at: u32, out_type: &DataType) -> Expr {
     let column = |offset: usize| Expr::column(state_at + offset as u32, state[offset].name());
     match spec.func {
         AggFunc::Sum | AggFunc::Min | AggFunc::Max | AggFunc::Count => column(0),

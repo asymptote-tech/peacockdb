@@ -12,14 +12,14 @@ use super::serialize::serialize_schema;
 
 use super::expr_writer::write_expr;
 use super::writer::Payload;
-use crate::batch_partitioned::error::PlanError;
-use crate::batch_partitioned::expr::Expr;
-use crate::batch_partitioned::layout::ColumnOrder;
-use crate::batch_partitioned::nodes::{
+use crate::plan::ColumnOrder;
+use crate::plan::Expr;
+use crate::plan::PlanError;
+use crate::plan::Schema;
+use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuEmitPartitions, GpuFilter, GpuLoadParquet,
     GpuMergeSortedPartitions, GpuProject, GpuSort,
 };
-use crate::batch_partitioned::schema::Schema;
 
 type Kids<'a, 'b> = &'b [WIPOffset<fb::PlanNode<'a>>];
 

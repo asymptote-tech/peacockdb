@@ -16,11 +16,11 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::DataType;
 use datafusion::execution::context::SessionContext;
 
-use peacockdb_core::batch_partitioned::GpuNode;
 use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
 use peacockdb_core::batch_partitioned::plan::plan_batch_partitioned;
 use peacockdb_core::executor::{RunError, When};
 use peacockdb_core::executor::{RunReport, run};
+use peacockdb_core::plan::GpuNode;
 
 use common::injection::{
     CAP, Dimensions, Drain, Empties, Injected, InjectedContext, Injection, PlannedMode, Rebatch,
@@ -219,7 +219,7 @@ fn sorted_rows(batches: &[RecordBatch]) -> Option<Vec<Vec<u8>>> {
 /// rather than at the call sites: an injected run leaks exactly as visibly as a planned
 /// one, and a batch held and never released shows in neither's rows.
 fn run_and_check(
-    tree: &dyn peacockdb_core::batch_partitioned::GpuNode,
+    tree: &dyn peacockdb_core::plan::GpuNode,
     task: &std::sync::Arc<datafusion::execution::TaskContext>,
     injection: Injection,
     oracle: &Oracle<'_>,
@@ -230,7 +230,7 @@ fn run_and_check(
     // and the driver asks only for canonical form. Without this a rewrite that broke a
     // node's requirements would run and answer, which is the failure this whole tier is
     // about.
-    peacockdb_core::batch_partitioned::validate::validate(tree)
+    peacockdb_core::plan::validate(tree)
         .unwrap_or_else(|error| panic!("{what} is not a plan: {error}"));
     let report = run::<Injected>(tree, &ctx, None)
         .unwrap_or_else(|error| panic!("{what}: {error}"));
@@ -425,7 +425,7 @@ async fn a_two_key_group_by_over_many_rows_does_not_emit_a_group_twice() {
 #[tokio::test]
 async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
     use peacockdb_core::executor::CallKind;
-    use peacockdb_core::batch_partitioned::nodes::{NodeRef, as_node_ref};
+    use peacockdb_core::plan::{NodeRef, as_node_ref};
 
     let data_dir = data_dir_for("tpch", "1");
     let sql = std::fs::read_to_string(queries_dir_for("tpch").join("nested-limits.sql"))
@@ -493,9 +493,9 @@ async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
 
     /// The mid-plan limit's index in the driver's pre-order numbering, which is the tree
     /// walked children-after-self.
-    fn limit_node(root: &dyn peacockdb_core::batch_partitioned::GpuNode) -> usize {
+    fn limit_node(root: &dyn peacockdb_core::plan::GpuNode) -> usize {
         fn walk(
-            node: &dyn peacockdb_core::batch_partitioned::GpuNode,
+            node: &dyn peacockdb_core::plan::GpuNode,
             next: &mut usize,
         ) -> Option<usize> {
             let here = *next;
@@ -512,7 +512,7 @@ async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
 
     /// How many batches every source in the plan could produce — the mapping's own count,
     /// which is what a scan that ran to the end would have read.
-    fn batches_offered(node: &dyn peacockdb_core::batch_partitioned::GpuNode) -> usize {
+    fn batches_offered(node: &dyn peacockdb_core::plan::GpuNode) -> usize {
         let here = match as_node_ref(node) {
             NodeRef::LoadParquet(load) => load.partition_groups.iter().map(Vec::len).sum(),
             _ => 0,
@@ -681,7 +681,7 @@ async fn the_model_is_compared_against_what_the_calls_measured() {
 async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
     use common::injection::{Drain, Empties, Rebatch};
     use peacockdb_core::executor::CallKind;
-    use peacockdb_core::batch_partitioned::nodes::{NodeRef, as_node_ref};
+    use peacockdb_core::plan::{NodeRef, as_node_ref};
 
     let data_dir = data_dir_for("tpch", "1");
     let sql = std::fs::read_to_string(queries_dir_for("tpch").join("nested-loop-join.sql"))
@@ -769,7 +769,7 @@ async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
         "the empty-batch setting fired on none of the {pulls} pulls"
     );
 
-    fn sources_in(node: &dyn peacockdb_core::batch_partitioned::GpuNode) -> usize {
+    fn sources_in(node: &dyn peacockdb_core::plan::GpuNode) -> usize {
         usize::from(matches!(as_node_ref(node), NodeRef::LoadParquet(_)))
             + node
                 .children()

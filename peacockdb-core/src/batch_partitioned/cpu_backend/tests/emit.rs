@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::batch_partitioned::cpu_backend::emit::CpuEmitter;
-use crate::batch_partitioned::nodes::GpuEmitPartitions;
+use crate::plan::GpuEmitPartitions;
 
 const LANES: usize = 4;
 

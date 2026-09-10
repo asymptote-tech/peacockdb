@@ -5,14 +5,15 @@
 //! column-chunk totals over the projected columns: a varchar's width is a property of
 //! the data, and the file already knows it.
 
+use crate::plan::ScanMetadata;
 use std::collections::BTreeSet;
 
 use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 
-use super::error::PlanError;
-use super::partitioner::RowGroupMeta;
 use crate::gpu_rowgroup_prune::surviving_row_groups;
+use crate::plan::PlanError;
+use crate::plan::RowGroupMeta;
 
 /// The table a scan reads, named after the parquet file rather than declared anywhere:
 /// DataFusion's `ParquetExec` carries paths, and the plan text and every node above it
@@ -26,21 +27,6 @@ pub fn parquet_table_name(parquet: &ParquetExec) -> Option<String> {
         .next()?
         .strip_suffix(".parquet")
         .map(String::from)
-}
-
-/// What one read of a scan's metadata tells the planner: the row groups it will read, and
-/// whether each projected column has a NULL in any of them.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScanMetadata {
-    /// The one file the groups below are numbered in. DataFusion's file groups are byte
-    /// ranges rather than files, so several of them carry one path; a row-group index means
-    /// nothing without the file it indexes, and the node reads its own from here.
-    pub file: String,
-    pub groups: Vec<RowGroupMeta>,
-    /// Per projected column, in projection order. Declared nullability says nothing — every
-    /// column in both benchmarks is declared nullable, primary keys included — so this is
-    /// the statistic instead, and an absent count reads as "yes" rather than "no".
-    pub can_be_null: Vec<bool>,
 }
 
 pub fn survivor_metadata(parquet: &ParquetExec) -> Result<ScanMetadata, PlanError> {

@@ -18,8 +18,8 @@ mod wiring;
 use super::StepError;
 use super::mock::{Mock, Script};
 use super::partitioned::Driver;
-use crate::batch_partitioned::node::GpuNode;
 use crate::executor::{CallKind, PlanIndex, RunError, RunReport, TraceEvent};
+use crate::plan::GpuNode;
 
 /// Run to completion under no budget, which is what most flow cases want.
 fn run(root: &dyn GpuNode, script: &Script) -> RunReport {

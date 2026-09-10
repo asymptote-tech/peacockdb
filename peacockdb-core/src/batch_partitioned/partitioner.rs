@@ -7,31 +7,8 @@
 //! column-chunk totals over the projected columns: a varchar's width is a property of
 //! the data, and the file metadata already holds the answer.
 
-use super::error::PlanError;
-
-/// One surviving row group, in file order. `index` is its index in the file, which is
-/// what the scan passes to `set_row_groups` — survivors are post-pruning, so it is not
-/// the position in this slice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RowGroupMeta {
-    pub index: u32,
-    pub rows: u64,
-    pub bytes: u64,
-}
-
-/// How a lane's row groups are cut into batches. Three named forms rather than one number
-/// with special values: which one a mode uses is a statement about the mode, and a target
-/// of one byte reaching the same place would hide it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Batching {
-    /// One batch per lane — the whole chunk arrives at once.
-    Off,
-    /// One batch per row group: the finest the mapping can express, since a row group is
-    /// its minimum granularity, and the only form that needs no budget.
-    PerRowGroup,
-    /// Batches packed to the size the estimator solved for this source.
-    Sized { target_batch_bytes: usize },
-}
+use crate::plan::PlanError;
+use crate::plan::{Batching, RowGroupMeta};
 
 /// Survivors → partitions → batches → row-group indices.
 ///

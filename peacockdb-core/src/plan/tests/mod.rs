@@ -3,12 +3,7 @@
 //! precisely because the translation layer is what inserts the fix — so a hand-built
 //! input is the only thing that can show the guard working.
 
-use super::*;
-use crate::batch_partitioned::aggregates::{AggCall, AggFunc, PlanAgg};
-use crate::batch_partitioned::expr::{BinaryOp, NamedExpr};
-use crate::batch_partitioned::layout::{BatchLayout, ColumnOrder, NodeKind};
-use crate::batch_partitioned::node::RowInterval;
-use crate::batch_partitioned::nodes::join::NestedLoopJoinType;
+use crate::plan::*;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use std::any::Any;
 use std::sync::Arc;
@@ -268,7 +263,7 @@ fn batch_sorted_lane() -> PartitionLayout {
 
 #[test]
 fn a_scan_the_partitioner_gave_no_lanes_is_caught_at_plan_time() {
-    let scan = crate::batch_partitioned::parquet_meta::ScanMetadata {
+    let scan = ScanMetadata {
         file: "/nation.parquet".to_string(),
         groups: Vec::new(),
         can_be_null: vec![false],
@@ -502,7 +497,7 @@ fn a_merge_on_a_prefix_of_its_inputs_order_is_allowed() {
 fn declaring_state(func: AggFunc, columns: &[&str], positions: Vec<u32>) -> Box<dyn GpuNode> {
     let mut schema = self::columns(columns);
     schema.group_keys = vec![0];
-    schema.agg_state = vec![crate::batch_partitioned::schema::AggStateColumns {
+    schema.agg_state = vec![super::AggStateColumns {
         output: "n".to_string(),
         func,
         ddof: 0,
@@ -628,17 +623,15 @@ fn a_union_branch_naming_its_columns_differently_is_refused() {
 }
 
 fn loading(partition_groups: Vec<Vec<Vec<u32>>>, survivors: Vec<u32>) -> GpuLoadParquet {
-    let scan = crate::batch_partitioned::parquet_meta::ScanMetadata {
+    let scan = ScanMetadata {
         file: "/nation.parquet".to_string(),
         groups: survivors
             .into_iter()
-            .map(
-                |index| crate::batch_partitioned::partitioner::RowGroupMeta {
-                    index,
-                    rows: 100,
-                    bytes: 1000,
-                },
-            )
+            .map(|index| RowGroupMeta {
+                index,
+                rows: 100,
+                bytes: 1000,
+            })
             .collect(),
         can_be_null: vec![false],
     };

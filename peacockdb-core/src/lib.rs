@@ -3,6 +3,7 @@ pub mod config;
 pub mod executor;
 pub mod gpu_rowgroup_prune;
 pub mod memory;
+pub mod plan;
 pub mod plan_text;
 pub mod spark_partitioning;
 pub mod wire;

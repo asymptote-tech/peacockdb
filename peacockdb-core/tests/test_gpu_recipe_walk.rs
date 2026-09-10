@@ -16,11 +16,11 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::ipc::reader::StreamReader;
 use datafusion::common::JoinType;
 
-use peacockdb_core::batch_partitioned::node::GpuNode;
-use peacockdb_core::batch_partitioned::nodes::{NodeRef, as_node_ref};
 use peacockdb_core::batch_partitioned::plan::{BatchSizing, PlanKnobs, plan_batch_partitioned};
-use peacockdb_core::batch_partitioned::{ExecutorCategory, category_of};
 use peacockdb_core::executor::{BatchForwarder, forwarder_for};
+use peacockdb_core::plan::GpuNode;
+use peacockdb_core::plan::{ExecutorCategory, category_of};
+use peacockdb_core::plan::{NodeRef, as_node_ref};
 use peacockdb_core::wire::{
     AbiSymbol, Call, CallPattern, FbKind, Input, ProjectRole, Recipe, RecipePlan, Seq,
     attach_recipes,

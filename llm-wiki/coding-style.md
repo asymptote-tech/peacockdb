@@ -3,8 +3,9 @@
 - **Create useful abstractions.** New code should introduce (or reuse) abstractions that
   make later reuse easy — a shared driver, a trait, a helper — rather than copies of
   similar logic.
-- **Small files:** under 1000 lines. Split by responsibility (`batch_partitioned/nodes/`,
-  one file per node family, and `batch_partitioned/cpu_backend/` are the pattern).
+- **Small files:** under 1000 lines. Split by responsibility (`plan/`, one file per node
+  family, and `executor/cpu_backend/` are the pattern). A component's `mod.rs` is exempt: it
+  is a facade of declarations, and the limit it wants is set once the layout has settled.
 - **Interfaces/traits in separate files** from their implementations
   (`executor/mod.rs` declares the seven category traits and `Backend`; the batch types are
   implemented in `executor/{cpu_batch,gpu_batch}.rs`).

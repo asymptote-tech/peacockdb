@@ -12,18 +12,18 @@ use std::sync::{Arc, Mutex};
 use datafusion::arrow::array::{Int64Array, RecordBatch};
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 
-use crate::executor::{Backend, NodeExecutors};
 use crate::executor::Batch;
 use crate::executor::CpuBatch;
-use crate::batch_partitioned::error::PlanError;
+use crate::executor::forwarder_for;
+use crate::executor::{Backend, NodeExecutors};
 use crate::executor::{
     BackendError, BatchAccumulatorExecutor, CallResult, CallStats, ExecExecutor, Executor,
     JoinExecutor, LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin,
     RowRange, SourceExecutor, SourceStep, UnloadExecutor,
 };
-use crate::executor::forwarder_for;
-use crate::batch_partitioned::node::GpuNode;
-use crate::batch_partitioned::nodes::{ExecutorCategory, NodeRef, as_node_ref, category_of};
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::plan::{ExecutorCategory, NodeRef, as_node_ref, category_of};
 
 /// Rows and bytes, which is all any assertion here reads off a batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
