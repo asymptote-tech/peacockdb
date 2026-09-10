@@ -407,6 +407,15 @@ Rules that keep this healthy:
   tests and passes, so say which binaries actually executed; and a filter naming a query
   matches no test whose name is a property rather than a query, so exercising those takes a
   filter that matches them or a separate run.
+- **A GPU binary needs a fixed amount of free VRAM now, not a share of what it finds.** Each
+  gtest main reserves a measured byte budget: `peacock_tpch_tests` 69 GiB, `peacock_tpchv_tests`
+  30, and 1 GiB each for `peacock_gpu_tests` and `peacock_plan_tests`. Below its budget a binary
+  does not shrink — the pool is not built and it runs on rmm's default resource, which for the
+  sf40 pair is not slower but red. Read `[rmm] pool of N GiB could not be built` at the top of the
+  log first: the `cudaErrorMemoryAllocation` failures under it are its consequence, not separate
+  bugs. shad-gpu is a 143.7 GiB H200 shared with work outside this repo, so check `nvidia-smi`
+  before debugging a red GPU tier ([#178](tickets.md#t178)). The budgets are H200 numbers;
+  verda-gpu has never been sized against them.
 - **Prefer verda for large CPU runs** (whole suite or big selections). It is not always
   up (the human starts it manually) — falling back to a local run is completely fine.
 - **Comparing files across hosts: use checksums, and `LC_ALL=C sort` for any listing.**

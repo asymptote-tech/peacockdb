@@ -50,10 +50,10 @@ inline constexpr int kDiscreteMaximumPercent = 95;
 
 // What install_rmm_pool() actually did — not what it was asked to do.
 //
-// Unavailable is a host problem, not a configuration: nothing asks for it and the sizes
-// below are meaningless when it happens. The gtest binaries carry on regardless, since a
-// correctness result does not depend on the allocator; a caller taking timings asserts,
-// since a time does.
+// Unavailable is a host problem, not a configuration: nothing asks for it. The two pool sizes
+// are 0 when it happens, but free_bytes is still filled — the request against what the device
+// had left is the whole diagnosis. Nothing acts on the state either; see install_rmm_pool,
+// where an unpooled sf40 run loses tests rather than running slowly.
 struct RmmPoolStatus {
   enum class State {
     Installed,    // a pool is the current device resource

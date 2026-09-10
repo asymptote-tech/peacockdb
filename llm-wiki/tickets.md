@@ -485,11 +485,13 @@ same answer. The gap was fixed three times already — `multi_gpu.cpp`, the gtes
 benchmark harness, the last two sharing `cpp/include/peacock/rmm_pool.hpp`
 ([#151](archive/archived-tickets.md#t151)); the engine is the only one of the four that ships.
 The second half is the same fix: `gpu_memory_limit` is documented as a bound, stored at
-`gpu_executor.cpp:99` and never read — the #132 shape one level up — and a pool's `maximum` IS
-that bound. Care: install per device before any cuDF call, tear down on the owning thread
-(`set_per_device_resource(id, nullptr)` misses the ref map), and size by host kind, an
-integrated part's reservation sharing the page cache's pool. Tests: the GPU tiers stay
-byte-identical, plus a case asserting a small limit is honoured.
+`gpu_executor.cpp:99` and never read — the #132 shape one level up. Care: install per device
+before any cuDF call, and tear down on the owning thread (`set_per_device_resource(id, nullptr)`
+misses the ref map). Two questions #178 did not answer for the engine: whether the limit is a
+reservation or a ceiling — the test binaries take `initial == maximum` because it fails loudly —
+and how an integrated part is sized, whose only implementation went with the percentages
+(`archive/historical-comments.md`). Tests: the GPU tiers stay byte-identical, plus a case
+asserting a small limit is honoured.
 
 <a id="t19"></a>
 ### #19 — the planner has no cardinality estimate, and the memory model pays for it
@@ -786,8 +788,9 @@ left and died in `pool_memory_resource` with `std::bad_alloc`, always in whichev
 **Tentatively closed**, by two changes. `15209636` gave `gpu-tests` `concurrency: {group:
 shad-gpu, cancel-in-progress: false}`, so our own runs queue rather than overlap. Then each binary
 took a measured byte budget beside its `main()` — 69 GiB for `peacock_tpch_tests`, 30 for
-`peacock_tpchv_tests`, 1 GiB each for the other two — so two of ours fit a 139.7 GiB device. Two
-`peacock_tpchv_tests` at once: both pooled, both green.
+`peacock_tpchv_tests`, 1 GiB each for the other two. Two `peacock_tpchv_tests` at once: both
+pooled, both green. The tpch pair is arithmetic and not yet a run: 69+69 leaves 1.2 GiB of a
+139.7 GiB card, and no idle card has been free since.
 
 It cannot be proven closed from here: the host is shared with work outside this repo, and a
 stranger holding a third of the card still fails us (2026-09-10). **The pool line says whose

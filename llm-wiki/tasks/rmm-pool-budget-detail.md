@@ -332,3 +332,45 @@ One residual imprecision it would have dropped, fixed anyway because I was alrea
 `status.state` to fill `out_info`. What is true is that nothing *acts* on `Unavailable` — the six
 `main()`s discard the return and the FFI only forwards it. Both the comment and the paragraph above
 now say that.
+
+### 2026-09-10 — the completeness pass: two readings, eight findings
+
+**What is wrong** (reviewer) and **what is missing** (analyst), taken separately and compared
+here. Nits dropped on both sides. The two lists overlapped on exactly one thing — the deleted
+integrated regime — which each reached from its own end.
+
+Applied by the coordinator, all markdown or comments:
+
+- **blocking** — `rmm_pool.hpp:53-56` still carried, verbatim from master, the claim round 1
+  recorded as fixed: "the gtest binaries carry on regardless … a caller taking timings asserts".
+  Round 1's rewrite landed only on the catch block, so the header argued both sides, and the false
+  half sat above `State::Unavailable` itself, where a reader looks first. `peacock_gpu.h:77-78` had
+  the matching residue — "sizes in bytes, 0 unless INSTALLED" — while `free_bytes` is deliberately
+  filled on failure and copied out at `gpu_executor.cpp:132`. Both rewritten.
+- **blocking** — `build-test.md` said nothing about a change to how the tree is tested, which is
+  the one page that correction is owed in the same commit. A GPU binary no longer adapts to what is
+  free: below its budget it does not shrink, it runs unpooled, and for the sf40 pair that is red
+  rather than slow. Added the budgets, the line to read first, and that these are H200 numbers
+  verda-gpu has never been sized against.
+- **important** — [#148](../tickets.md#t148) pointed at deleted code. Its "size by host kind" care
+  note named an implementation that went with the percentages, and "a pool's `maximum` IS that
+  bound" describes the growable shape #178 rejected. Both are now open questions on the ticket
+  rather than settled instructions.
+- **important** — the archive heading read "(removed 2026-09-10)", which makes a live constraint
+  look like history. The integrated *reason* did not go away: every budget is an H200 number, so on
+  GB10 `peacock_tpch_tests` asks for 69 GiB of a machine whose 121.7 GiB is also its system RAM,
+  which is the case the 25% initial existed to prevent.
+- **important** — #178 claimed "two of ours fit a 139.7 GiB device" and offered only the tpchv pair
+  as evidence. It now says the tpch pair is arithmetic and not yet a run.
+
+Handed to a developer, because they are code rather than comments — see the next entry.
+
+**`architecture.md` was falsified nowhere**, and that is an answer rather than a gap. All four
+passages that mention the pool or the ABI describe where the symbol lives and who calls it; the
+page never described the sizing rule, so nothing about it moved. It does not describe the new rule
+either, and that is deliberate — growth on that page waits for a human to ask.
+
+**On the unproven tpch pair, both readings landed in the same place**: it does not undermine the
+change, but it leaves the headline number a prediction. The tpchv pair proves the rule — a fixed
+budget does not shrink when a neighbour arrives, instance B took its declared 30 GiB from 56.9 GiB
+free — and says nothing about the number: 30+30 has 80 GiB of slack where 69+69 has 1.2.

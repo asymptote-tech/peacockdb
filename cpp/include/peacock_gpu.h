@@ -74,9 +74,11 @@ enum {
   PEACOCK_RMM_POOL_UNAVAILABLE = 1
 };
 
-/// Outcome of installing the pooled device allocator — sizes in bytes, 0 unless
-/// `state` is PEACOCK_RMM_POOL_INSTALLED. initial_bytes == maximum_bytes == the
-/// aligned-down request: a byte budget is reserved whole, so the pool never grows.
+/// Outcome of installing the pooled device allocator. The two pool sizes are 0 unless
+/// `state` is PEACOCK_RMM_POOL_INSTALLED; `free_bytes` is filled either way, since a
+/// failed reservation is diagnosed by the request against what the device had left.
+/// initial_bytes == maximum_bytes == the aligned-down request: a budget is reserved
+/// whole, so the pool never grows.
 typedef struct PeacockRmmPoolInfo {
   int32_t state;       ///< one of PEACOCK_RMM_POOL_*
   int32_t integrated;  ///< 1 on an integrated part; reported, not a sizing input
