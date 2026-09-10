@@ -681,6 +681,18 @@ four survivor spellings now absent so the whole-line exclusion matches nothing, 
 `test_ci_coverage.rs:431` is gone: its assert message named "the inline `#[cfg(test)]` modules
 (batch_partitioned, config)", and neither module exists. It now names the count instead.
 
+**The general rule, because task 3 inherits this gate.** *An exclusion that outlives its
+reason is a hole shaped like the project's history.* A gate is written with exclusions for the
+spellings that are deliberate **at the time it is written**. Every one of those has an expiry —
+the change that retires the spelling — and nothing reminds anyone. Until then the gate reads
+green over exactly the text it was told to ignore, which is indistinguishable from a clean
+tree. This is the same shape as the doc-comment class above: **a check that is green for a
+structural reason rather than because the tree is clean.** The two together are what this task
+found that no test could.
+
+So: when a spelling is retired, delete it from the exclusion list in the same commit. And when
+inheriting a gate, read its exclusions before its output.
+
 **Three residues the gate could not see, and why.** `driver/partitioned.rs`'s module doc said
 `batch_partitioned_driver` and two comments in `schema_tests.rs` said `plan_batch_partitioned`.
 Both spellings are in the gate's *survivor* list — deliberate for task 1, residue for this one —
@@ -790,3 +802,85 @@ Snapshots: `visibility-after-slice7.txt`, `visibility-items-after-slice7.txt`,
 Its header claims 1,562 cases and says it is the sum of the N column. The column sums to
 **1,558**, both at `accf25f0` and now — my two edits to it cancel. Pre-existing, and the spec
 gives that table to `test-layout.md`, so it is reported rather than fixed.
+
+## The `pub` narrowing
+
+Its own commit, after every component landed and before the layout test. `pub(super)` is now
+zero crate-wide and so is `pub use`.
+
+### What left, and why
+
+**43 items narrowed `pub` → `pub(crate)`, 6 `pub(super)` → `pub(crate)`, 4 deleted.** The full
+list is the diff between `visibility-after-slice7.txt` and `visibility-after-narrowing.txt`;
+the four deletions are the part to read:
+
+| Deleted | Why |
+|---|---|
+| `Schema::position_of` | no caller anywhere, in any shape |
+| `AggregateBatches::compactions` (GPU) | no caller; the CPU twin is used by a test and kept under `#[cfg(test)]` |
+| `plan::sql_name` | a facade delegation nothing called; `aggregate::sql_name` is the used one and keeps the doc |
+| `plan_text::expr_text` | the same shape; `expr_text::expr_text` is the used one, and now carries the doc the facade had |
+
+Three more items had their only callers behind a `cfg`, so they carry the same `cfg` rather
+than a wider `pub` that hides the fact: `JoinCapability::makes_a_finish_pass` and
+`Schema::state_for` are `#[cfg(test)]`, and `Input::is_build_side` is
+`#[cfg(not(feature = "rust-only"))]` — its one caller is the GPU backend.
+
+### The spec's 54 is not reachable, and rustc is what says so
+
+The spec names twelve of the 54 explicitly. Six of those twelve **cannot** be narrowed:
+`ColumnRef`, `SortOrder`, `UnaryOp`, `MemoryModel`, `JoinCapability` and `Forwarder` are all
+reachable through a `pub` field or a `pub` signature — `Expr::Column(ColumnRef)`,
+`PartitionLayout::sort_order`, `planner::plan`'s return, `NodeExecutors::BatchForwarder`. An
+external caller obtains a value of each without any file naming the type, so an
+import-based sweep says "unused" and is wrong.
+
+`private_interfaces` is what sees this, and the method that works is a **fixpoint**: narrow
+everything the outside does not import, then re-widen whatever the lint names, and repeat,
+because widening one type exposes the next. It converged in two rounds and re-widened
+eighteen types.
+
+`narrow.py` and `external-names.py` in this directory are the two halves, and both are
+deliberately conservative: a method name is kept if the identifier appears *anywhere* outside
+the crate, because `.bytes()` at a call site carries no path to match on. Over-keeping is a
+`pub` that should have narrowed; under-keeping is a broken build, and the three shapes report
+that.
+
+### The fourth cudf-only break, and it was the fixpoint itself
+
+The first fixpoint ran under `--features rust-only`, where the GPU backend does not exist, so
+the lint could not see `Collapse`, `GpuSource` or `GpuProbingJoin`. The cudf build then failed
+with `E0446: crate-private type GpuSource in public interface`. **A lint-driven fixpoint is only
+as complete as the shapes it is run in** — it has to converge in the shape that compiles the
+conditional half, and `E0446` is an error there rather than a warning, which is the only reason
+it could not have shipped.
+
+The same shape produced the fourth dead item: the GPU `AggregateBatches::compactions` is dead
+only in the cudf build, and `--features rust-only` is silent about it.
+
+### A splitter artefact in the doc check, worth knowing before it is mistaken for a loss
+
+`doc-attr-check.py` cuts on `.` or `:` followed by a capital or a backtick. Deleting the
+`sql_name` facade left its doc reported as two absent sentences even though the identical prose
+sits on `aggregate::sql_name` — the two copies were wrapped at different columns, so the colon
+fell inside a line in one and at a line end in the other, and one copy split where the other did
+not. **Compare the text, not the count.**
+
+### Evidence
+
+| Check | Result |
+|---|---|
+| `--lib` | 435 passed |
+| `test_plan_goldens` | 19 passed |
+| `test_cpu_corpus` | 448 passed |
+| `test_cpu_end_to_end` | 24 passed, 2 ignored |
+| the seven cheap tiers | 7 / 20 / 3 / 26 / 4 / 8 / 13 / 10 / 1 passed |
+| three builds | 0 warnings each |
+| goldens | byte-identical |
+| case inventory, both shapes | identical — nothing moved, nothing was added |
+| doc and attribute sentences | one splitter artefact, no prose lost |
+| residue gate | the same five lines |
+| `pub use` / `pub(super)` | 0 and 0 |
+
+Snapshots: `visibility-after-narrowing.txt`, `visibility-items-after-narrowing.txt`,
+`doc-sentences-after-narrowing.txt`.

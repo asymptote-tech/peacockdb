@@ -123,7 +123,7 @@ pub fn physical_expr(
 }
 
 /// A project list, in the shape `ProjectionExec` takes.
-pub fn physical_projection(
+pub(crate) fn physical_projection(
     exprs: &[NamedExpr],
     input: &ArrowSchema,
     registry: &dyn FunctionRegistry,

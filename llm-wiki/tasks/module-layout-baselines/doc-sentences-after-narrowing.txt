@@ -22,6 +22,10 @@
 #[cfg(not(feature = "rust-only"))]
 #[cfg(not(feature = "rust-only"))]
 #[cfg(not(feature = "rust-only"))]
+#[cfg(not(feature = "rust-only"))]
+#[cfg(test)]
+#[cfg(test)]
+#[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
@@ -1874,6 +1878,7 @@ How many nodes are unconsumed — a caller's mark for [`Writer::reduce`].
 How many rows either side of the first difference a failure prints.
 How many rows have gone past, which is what a driver reads to know the interval is satisfied and the pulls can stop.
 How many sources this translator reached, which is what pairs a pass with the one that sized it: the two address a source by nothing but that order.
+How many times the accumulation compacted, which is what the doubling threshold is asserted on.
 How many times the threshold was reached.
 How many typed NULLs the pad project appends: the probe columns the join's projection keeps.
 How rows were routed into lanes.
@@ -2291,6 +2296,7 @@ One type with a variant per node, since a backend names one type for the categor
 One walk builds that buffer and records, per plan node, the calls it makes and the seqs they address; `llm-wiki/architecture.md` has the table it implements.
 One walk of the finished tree: build the buffer, and record per node the calls it makes.
 Only `enabled` and `skip` produce a test (and therefore a registration); `disabled` (commented-out invocation) and `na` (mode never applied to this query) must be ABSENT from the inventory.
+Only a test asks.
 Only an unload's decision is made here, its range being an argument of the driver's own call.
 Only an unload's, which is the one operator whose output is not `B::Batch`.
 Only for queries whose sole divergence from the oracle is float summation reassociation: a run at more than one lane sums in a different association order than DataFusion's single-lane pass, drifting ~1 ULP.
@@ -3729,7 +3735,6 @@ What the device side uses: a device that can author its own golden proves nothin
 What the driver hands a backend when it builds an executor set.
 What the driver tests assert is calls — pull counts, queue bounds, release — so an operator here only has to produce the right number of batches of the right size at the right moment.
 What the executor calls this aggregate, which is DataFusion's own name plus the `ddof` spelled into it:
-What the executor calls this aggregate, which is DataFusion's own name plus the `ddof` spelled into it:
 What the finish would have computed is known without it — nothing matched — so an anti join hands its build side up, which is the answer and the one this backend can express.
 What the first pass assumes.
 What the golden's `early_exit=` marker names, and the reason a lane can be short of what its plan called for: not a bool, because a reader of a smaller number needs to know which limit produced it.
@@ -4102,7 +4107,6 @@ Zero-row batches emitted instead of advancing, over every source and lane.
 `sources_of` allocates, and the readiness predicate asks for it on every step.
 `sources_of` materialized once per out lane: the predicate asks for it on every step, and the trait's `Vec` would be an allocation each time.
 `state` pairs each column's name suffix with the aggregator producing it, so a column and its aggregator cannot desync.
-`stddev` is the sample form and `stddev_pop` the population one.
 `stddev` is the sample form and `stddev_pop` the population one.
 `survivors`, `can_be_null` and an aggregate's intermediate schema reach no plan line, so a rebuild could drop any of the three and render identically.
 `target_partitions` is what was asked for, and the small-table rule can leave a query at one lane anyway.

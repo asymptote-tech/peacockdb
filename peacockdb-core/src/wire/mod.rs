@@ -162,10 +162,11 @@ pub enum Input {
 }
 
 impl Input {
+    #[cfg(not(feature = "rust-only"))]
     /// Whether this input is the build side, handed over or copied. Asked by an executor
     /// pricing a call: a probe call that names neither is a call the build side does not
     /// have to be there for.
-    pub fn is_build_side(&self) -> bool {
+    pub(crate) fn is_build_side(&self) -> bool {
         matches!(self, Self::BuildSide | Self::BuildSideCopy)
     }
 

@@ -34,7 +34,7 @@ mod schema_tests;
 #[cfg(test)]
 mod tests;
 
-pub struct Translator {
+pub(crate) struct Translator {
     /// Lanes a source is partitioned into, before the small-table rule.
     pub target_partitions: usize,
     pub batching: Batching,
@@ -63,18 +63,18 @@ impl Translator {
 
     /// How many sources this translator reached, which is what pairs a pass with the one
     /// that sized it: the two address a source by nothing but that order.
-    pub fn sources_reached(&self) -> usize {
+    pub(crate) fn sources_reached(&self) -> usize {
         self.next_source.get()
     }
 
     /// The second pass: each source gets the batch size the estimator solved for it,
     /// rather than the one number the first pass had to assume.
-    pub fn with_source_targets(mut self, targets: Vec<u64>) -> Self {
+    pub(crate) fn with_source_targets(mut self, targets: Vec<u64>) -> Self {
         self.source_targets = targets;
         self
     }
 
-    pub fn with_small_table_bytes(mut self, bytes: u64) -> Self {
+    pub(crate) fn with_small_table_bytes(mut self, bytes: u64) -> Self {
         self.small_table_bytes = bytes;
         self
     }

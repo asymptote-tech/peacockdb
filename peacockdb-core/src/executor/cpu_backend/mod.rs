@@ -300,7 +300,7 @@ fn placeholder(schema: &ArrowSchema) -> Arc<dyn ExecutionPlan> {
 /// too, so a skipped grouping reaches the finalize as duplicate keys and comes out as
 /// extra rows. A device never skips, so this is also what keeps the two engines' answers
 /// the same.
-pub(super) fn always_aggregating(ctx: Arc<TaskContext>) -> Arc<TaskContext> {
+pub(crate) fn always_aggregating(ctx: Arc<TaskContext>) -> Arc<TaskContext> {
     let config = ctx.session_config().clone().set_usize(
         "datafusion.execution.skip_partial_aggregation_probe_rows_threshold",
         usize::MAX,

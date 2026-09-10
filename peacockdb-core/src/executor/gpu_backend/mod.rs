@@ -180,7 +180,7 @@ fn decode(bytes: &[u8]) -> Result<Vec<RecordBatch>, BackendError> {
 
 /// What a call produced, priced by the schema the node declares: the ABI reports rows and
 /// varlen content, and the fixed width per row is the schema's.
-pub(super) fn produced(
+pub(crate) fn produced(
     executor: *mut PeacockExecutor,
     handle: u64,
     stats: PeacockNodeStats,
@@ -201,7 +201,7 @@ pub(super) fn produced(
 /// One `execute_node` against the seq a recipe named, its handles grouped by the child
 /// slot each fills. The call CONSUMES them, so a caller hands over batches it will not
 /// release itself.
-pub(super) fn execute_node(
+pub(crate) fn execute_node(
     executor: *mut PeacockExecutor,
     seq: Seq,
     kind: FbKind,
@@ -222,7 +222,7 @@ pub(super) fn execute_node(
 
 /// The same call where the output count is a plan value: a scatter's N lanes. Every other
 /// node this backend drives takes the one-output form above.
-pub(super) fn execute_node_many(
+pub(crate) fn execute_node_many(
     executor: *mut PeacockExecutor,
     seq: Seq,
     kind: FbKind,
@@ -261,7 +261,7 @@ pub(super) fn execute_node_many(
     Ok(handles.into_iter().zip(stats).collect())
 }
 
-pub(super) fn last_error(executor: *mut PeacockExecutor) -> String {
+pub(crate) fn last_error(executor: *mut PeacockExecutor) -> String {
     let message = unsafe { peacock_last_error(executor) };
     if message.is_null() {
         return "no message".to_string();

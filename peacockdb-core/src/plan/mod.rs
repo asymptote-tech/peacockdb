@@ -164,7 +164,7 @@ impl Expr {
         }
     }
 
-    pub fn unary(op: UnaryOp, arg: Expr) -> Self {
+    pub(crate) fn unary(op: UnaryOp, arg: Expr) -> Self {
         Self::Unary {
             op,
             arg: Box::new(arg),
@@ -227,11 +227,8 @@ impl Schema {
         }
     }
 
-    pub fn position_of(&self, column: &str) -> Option<u32> {
-        self.fields.index_of(column).ok().map(|i| i as u32)
-    }
-
-    pub fn state_for(&self, output: &str) -> Option<&AggStateColumns> {
+    #[cfg(test)]
+    pub(crate) fn state_for(&self, output: &str) -> Option<&AggStateColumns> {
         self.agg_state.iter().find(|s| s.output == output)
     }
 }
@@ -289,7 +286,7 @@ impl KeyDistribution {
     /// The `hash_keys ⊆ group columns` rule a final aggregate's input must satisfy:
     /// rows of one group are co-located only when the shuffle keyed on a subset of
     /// the columns being grouped.
-    pub fn is_subset_of(&self, group_columns: &[u32]) -> bool {
+    pub(crate) fn is_subset_of(&self, group_columns: &[u32]) -> bool {
         match self {
             Self::NotSpecified => false,
             Self::ByHash { hash_keys } => hash_keys.iter().all(|k| group_columns.contains(k)),
@@ -310,7 +307,7 @@ pub enum SortOrder {
 impl SortOrder {
     /// An order on no columns is no order, so it canonicalizes — otherwise two layouts
     /// that mean the same thing compare unequal.
-    pub fn batch_sorted(columns: Vec<ColumnOrder>) -> Self {
+    pub(crate) fn batch_sorted(columns: Vec<ColumnOrder>) -> Self {
         if columns.is_empty() {
             Self::NotSpecified
         } else {
@@ -349,7 +346,7 @@ impl PartitionLayout {
     }
 
     /// Whole stream ordered, not merely each batch — what a top-N after a sort needs.
-    pub fn is_stream_sorted(&self) -> bool {
+    pub(crate) fn is_stream_sorted(&self) -> bool {
         self.sort_order.is_batch_sorted() && self.batch_layout == BatchLayout::SingleBatch
     }
 }
@@ -408,7 +405,7 @@ pub struct AggSpec {
 impl PlanAgg {
     /// The name the aggregator goes by, in a plan line and in DataFusion's own state
     /// field names (`avg(x)[count]`), which is how our state columns find their types.
-    pub fn tag(self) -> &'static str {
+    pub(crate) fn tag(self) -> &'static str {
         match self {
             Self::Sum => "sum",
             Self::Min => "min",
@@ -538,7 +535,7 @@ impl GpuLimit {
 /// merged from state. `Partial` and `Merge` on the wire — never `Final`, which also
 /// finalizes, and in this mode a finalize is a project of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Phase {
+pub(crate) enum Phase {
     Init,
     Merge,
 }
@@ -551,7 +548,7 @@ pub enum Phase {
 /// another one's columns. Everything but the Welford triple is one of ours to one SQL name;
 /// the triple folds into the `stddev`/`var` it decomposes, at the position of the first of
 /// its three, because neither engine has an `m2` of its own.
-pub struct StateFunc<'a> {
+pub(crate) struct StateFunc<'a> {
     pub name: &'static str,
     pub call: &'a AggCall,
     pub alias: String,
@@ -772,7 +769,7 @@ impl JoinCapability {
     /// plain join node the wire has always carried. Asked by the recipe writer for what to
     /// publish and by an executor for what to build, because answering it twice is how a
     /// filtered semi join ended up on the finish path with its residual dropped.
-    pub fn answers_in_one_call(&self) -> bool {
+    pub(crate) fn answers_in_one_call(&self) -> bool {
         !self.probe_streams || !self.needs_finish
     }
 }
@@ -922,7 +919,7 @@ impl GpuLoadParquet {
     /// The largest batch the mapping produces. One batch per lane, one per row group and a
     /// budgeted size are three different answers to this, which is why the model reads it
     /// off the mapping rather than off the budget.
-    pub fn largest_batch_bytes(&self) -> u64 {
+    pub(crate) fn largest_batch_bytes(&self) -> u64 {
         largest_batch_bytes(self)
     }
 }
@@ -1034,14 +1031,14 @@ impl RowInterval {
     }
 
     /// True once no further row could change the answer — what `is_satisfied` asks.
-    pub fn satisfied_by(&self, seen: u64) -> bool {
+    pub(crate) fn satisfied_by(&self, seen: u64) -> bool {
         self.stop().is_some_and(|stop| seen >= stop)
     }
 
     /// Which rows of the next batch are wanted, or `None` to release it uncalled. `seen`
     /// is how many rows of the stream have already gone past this node, which is a count
     /// across lanes and therefore the driver's rather than an executor's.
-    pub fn range_of(&self, seen: u64, n_rows: u64) -> Option<RowRange> {
+    pub(crate) fn range_of(&self, seen: u64, n_rows: u64) -> Option<RowRange> {
         interval::range_of(self, seen, n_rows)
     }
 }
@@ -1175,7 +1172,7 @@ pub enum ExecutorCategory {
 impl ExecutorCategory {
     /// One instance per (node, lane); the rest are one per node, being the cross-lane
     /// points. A forwarder has no executor at all — the driver owns its rotation.
-    pub fn is_lane_scoped(&self) -> bool {
+    pub(crate) fn is_lane_scoped(&self) -> bool {
         matches!(
             self,
             Self::Source | Self::Exec | Self::BatchAccumulator | Self::Join | Self::Unload
@@ -1236,7 +1233,7 @@ pub(crate) fn node_name(any: &dyn std::any::Any) -> &'static str {
 /// The aggregators a body declares over a state schema, in the order their state columns
 /// appear. One rule, read by the recipe writer for the wire and by the CPU backend for
 /// DataFusion — a second copy of it would be a second answer to which column is whose.
-pub fn state_funcs<'a>(
+pub(crate) fn state_funcs<'a>(
     body: &'a AggregateBody,
     state: &'a Schema,
 ) -> Result<Vec<StateFunc<'a>>, PlanError> {
@@ -1251,12 +1248,6 @@ pub fn key_width(body: &AggregateBody) -> usize {
     aggregate::key_width(body)
 }
 
-/// What the executor calls this aggregate, which is DataFusion's own name plus the `ddof`
-/// spelled into it: `stddev` is the sample form and `stddev_pop` the population one.
-pub fn sql_name(func: AggFunc, ddof: u32) -> &'static str {
-    aggregate::sql_name(func, ddof)
-}
-
 /// The finalize as the project it becomes: the group keys straight through, then one
 /// expression per aggregate output column, named as the node declares its output.
 ///
@@ -1264,7 +1255,7 @@ pub fn sql_name(func: AggFunc, ddof: u32) -> &'static str {
 /// columns and no keys to read them by. Both the width and the key positions are checked
 /// rather than assumed: the keys are taken by position, so a state whose first columns are
 /// not the keys would pass the width check and project state columns as keys.
-pub fn finalize_columns(
+pub(crate) fn finalize_columns(
     body: &AggregateBody,
     state: &Schema,
     output: &Schema,
@@ -1275,7 +1266,7 @@ pub fn finalize_columns(
 /// Whether the join's output carries a column from each side. False for the two semi
 /// families and for a mark join, whose row is one side's — read by an executor deciding
 /// whether the columns it owes have to be invented or only selected.
-pub fn emits_both_sides(join_type: JoinType) -> bool {
+pub(crate) fn emits_both_sides(join_type: JoinType) -> bool {
     join::emits_both_sides(join_type)
 }
 
@@ -1311,13 +1302,13 @@ pub fn per_call_join_type(join_type: JoinType) -> Option<JoinType> {
 /// build rows nothing ever matched; the semi family asks its own question, and asks it
 /// with the node's own NULL semantics, so the pass substitutes for a legacy single call
 /// rather than improving on it (#59, #80).
-pub fn finish_join_type(join_type: JoinType) -> JoinType {
+pub(crate) fn finish_join_type(join_type: JoinType) -> JoinType {
     join::finish_join_type(join_type)
 }
 
 /// How many columns a join emits before any projection of its own — the count half of
 /// [`emits`], which is the same fact its carry-over rule reads.
-pub fn emitted_columns(join_type: JoinType, build: usize, probe: usize) -> usize {
+pub(crate) fn emitted_columns(join_type: JoinType, build: usize, probe: usize) -> usize {
     join::emitted_columns(join_type, build, probe)
 }
 
@@ -1348,7 +1339,7 @@ pub fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
 
 /// The canonical-form rules a driver needs to have been applied before it runs, so a mock
 /// plan meets the same refusal a planned one would.
-pub fn check_canonical_form(root: &dyn GpuNode) -> Result<(), PlanError> {
+pub(crate) fn check_canonical_form(root: &dyn GpuNode) -> Result<(), PlanError> {
     validate::check_canonical_form(root)
 }
 
@@ -1356,6 +1347,6 @@ pub fn check_canonical_form(root: &dyn GpuNode) -> Result<(), PlanError> {
 /// are the ones DataFusion planned, and nothing else states it: every node below is
 /// checked against its own children, so a whole tree can be internally consistent and
 /// answer a different query.
-pub fn check_output_schema(root: &dyn GpuNode, planned: &ArrowSchema) -> Result<(), PlanError> {
+pub(crate) fn check_output_schema(root: &dyn GpuNode, planned: &ArrowSchema) -> Result<(), PlanError> {
     validate::check_output_schema(root, planned)
 }

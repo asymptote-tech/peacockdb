@@ -171,10 +171,11 @@ impl CpuJoin {
         }
     }
 
+    #[cfg(test)]
     /// Whether this join keeps probe keys and answers at done, rather than being one call
     /// and nothing else. Read by the test that holds the two readers of that rule to one
     /// answer; the rule itself is `JoinCapability::answers_in_one_call`.
-    pub fn makes_a_finish_pass(&self) -> bool {
+    pub(crate) fn makes_a_finish_pass(&self) -> bool {
         self.calls.finish.is_some()
     }
 
@@ -213,12 +214,12 @@ pub struct CpuProbingJoin {
 
 impl CpuProbingJoin {
     /// The build side, resident from `set_build` until the call that consumes it.
-    pub fn build_bytes(&self) -> usize {
+    pub(crate) fn build_bytes(&self) -> usize {
         self.build.get_array_memory_size()
     }
 
     /// The probe keys a finishing type keeps until its finish pass runs (#136).
-    pub fn accumulated_bytes(&self) -> usize {
+    pub(crate) fn accumulated_bytes(&self) -> usize {
         self.accumulated
             .iter()
             .map(RecordBatch::get_array_memory_size)
@@ -228,7 +229,7 @@ impl CpuProbingJoin {
     /// Whether a probe call reads the build side at all. False for the build-side semi
     /// family, whose probe call is the key project alone — and the accounting has to know,
     /// because a transient charged for a read that never happens refuses work that fits.
-    pub fn probe_reads_build(&self) -> bool {
+    pub(crate) fn probe_reads_build(&self) -> bool {
         self.calls.per_call.is_some()
     }
 

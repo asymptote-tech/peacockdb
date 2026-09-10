@@ -259,7 +259,7 @@ impl RowRange {
     /// so that the two cannot disagree — this is the same rule for the backend that never
     /// crosses the ABI, and the two answering differently would be a divergence no test
     /// of either one alone could see.
-    pub fn clamp(&self, n_rows: u64) -> (u64, u64) {
+    pub(crate) fn clamp(&self, n_rows: u64) -> (u64, u64) {
         row_range::clamp(self, n_rows)
     }
 }

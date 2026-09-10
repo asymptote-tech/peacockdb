@@ -63,7 +63,7 @@ pub(crate) fn type_structural_size(dt: &DataType, rows: usize) -> usize {
 /// var-length CONTENT bytes — the data-dependent term, which is what a device measures and
 /// a batch of Arrow arrays is read for. Everything else is a function of the schema, so
 /// the two engines charge a row the same bytes without either reading the other's arrays.
-pub fn logical_size_from_schema(schema: &Schema, rows: usize, varlen_content_bytes: usize) -> usize {
+pub(crate) fn logical_size_from_schema(schema: &Schema, rows: usize, varlen_content_bytes: usize) -> usize {
     schema
         .fields()
         .iter()
@@ -75,7 +75,7 @@ pub fn logical_size_from_schema(schema: &Schema, rows: usize, varlen_content_byt
 /// Σ var-length CONTENT bytes across all columns of one batch — the data-dependent term
 /// of [`logical_size_from_schema`], and the CPU's spelling of what a device reports as
 /// `varlen_content_bytes`. Flat columns only.
-pub fn batch_varlen_content_bytes(batch: &RecordBatch) -> usize {
+pub(crate) fn batch_varlen_content_bytes(batch: &RecordBatch) -> usize {
     let schema = batch.schema();
     let rows = batch.num_rows();
     (0..schema.fields().len())

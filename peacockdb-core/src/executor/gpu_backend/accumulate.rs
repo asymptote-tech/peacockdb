@@ -276,11 +276,7 @@ pub struct AggregateBatches {
 }
 
 impl AggregateBatches {
-    pub fn compactions(&self) -> usize {
-        self.compactions
-    }
-
-    pub fn held_bytes(&self) -> usize {
+    pub(crate) fn held_bytes(&self) -> usize {
         self.state.as_ref().map(Batch::byte_size).unwrap_or(0)
             + self.pending.iter().map(Batch::byte_size).sum::<usize>()
     }

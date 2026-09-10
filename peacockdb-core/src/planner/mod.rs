@@ -103,14 +103,14 @@ pub fn plan(
     pipeline::plan(root, knobs)
 }
 
-pub fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, PlanError> {
+pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, PlanError> {
     memory_estimation::estimate(root, budget)
 }
 
 /// Refuses an anti or mark join whose NULLs can meet under SQL semantics. Everything else
 /// plans: semi honours the flag, and `null_equals_null=true` is asking for the equality the
 /// executor hardcodes.
-pub fn refuse_null_unsafe_joins(root: &dyn GpuNode) -> Result<(), PlanError> {
+pub(crate) fn refuse_null_unsafe_joins(root: &dyn GpuNode) -> Result<(), PlanError> {
     nulls::refuse_null_unsafe_joins(root)
 }
 

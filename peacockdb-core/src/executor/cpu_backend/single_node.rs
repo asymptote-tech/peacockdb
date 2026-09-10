@@ -22,7 +22,7 @@ use futures::StreamExt;
 
 /// Execute exactly one plan node, fed by its children's already-computed batches in child
 /// order.
-pub(super) async fn execute_single_node(
+pub(crate) async fn execute_single_node(
     node: &Arc<dyn ExecutionPlan>,
     inputs: Vec<Vec<RecordBatch>>,
     task_ctx: Arc<TaskContext>,

@@ -11,6 +11,7 @@ use crate::plan::Schema;
 use crate::plan::{BinaryOp, ColumnRef, Expr, UnaryOp};
 use crate::plan::{JoinFilterColumn, JoinSide};
 
+/// One expression, with every column reference as `name@ordinal`.
 pub(crate) fn expr_text(expr: &Expr) -> String {
     // An ordinary reference indexes the node's input, which is the line below it.
     expr_text_resolved(expr, &|reference| {

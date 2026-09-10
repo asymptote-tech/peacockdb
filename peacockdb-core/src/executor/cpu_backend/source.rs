@@ -77,7 +77,7 @@ impl CpuSource {
     }
 
     /// The next batch, or `None` where the mapping gave this lane nothing more.
-    pub fn read_next(&mut self) -> Result<Option<(CpuBatch, CallStats)>, BackendError> {
+    pub(crate) fn read_next(&mut self) -> Result<Option<(CpuBatch, CallStats)>, BackendError> {
         let Some(groups) = self.batches.pop_front() else {
             return Ok(None);
         };

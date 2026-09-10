@@ -16,7 +16,6 @@ mod run_text;
 mod tests;
 
 use crate::executor::RunReport;
-use crate::plan::Expr;
 use crate::plan::GpuNode;
 use crate::planner::MemoryModel;
 
@@ -24,11 +23,6 @@ use crate::planner::MemoryModel;
 /// per node; an execution golden does not, since what it records is what ran.
 pub fn render_plan(root: &dyn GpuNode) -> String {
     node_text::render_plan(root)
-}
-
-/// One expression, with every column reference as `name@ordinal`.
-pub fn expr_text(expr: &Expr) -> String {
-    expr_text::expr_text(expr)
 }
 
 /// The `--- memory ---` section: what the estimator predicted, per node.

@@ -142,19 +142,19 @@ pub struct GpuProbingJoin {
 impl GpuProbingJoin {
     /// The build side, from `set_build` until the call that consumes it — `None` after,
     /// because the surface has no copy and the recipe says which call takes it.
-    pub fn build_bytes(&self) -> usize {
+    pub(crate) fn build_bytes(&self) -> usize {
         self.build.as_ref().map_or(0, GpuBatch::byte_size)
     }
 
     /// The probe keys a finishing type keeps until its finish pass runs (#136).
-    pub fn accumulated_bytes(&self) -> usize {
+    pub(crate) fn accumulated_bytes(&self) -> usize {
         self.accumulated.iter().map(GpuBatch::byte_size).sum()
     }
 
     /// Whether a probe call reads the build side at all. False for the build-side semi
     /// family, whose probe call is the key project alone — and the accounting has to know,
     /// because a transient charged for a read that never happens refuses work that fits.
-    pub fn probe_reads_build(&self) -> bool {
+    pub(crate) fn probe_reads_build(&self) -> bool {
         self.join
             .per_probe
             .iter()

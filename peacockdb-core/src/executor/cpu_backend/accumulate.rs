@@ -320,11 +320,14 @@ pub struct AggregateBatches {
 }
 
 impl AggregateBatches {
-    pub fn compactions(&self) -> usize {
+    /// How many times the accumulation compacted, which is what the doubling threshold is
+    /// asserted on. Only a test asks.
+    #[cfg(test)]
+    pub(crate) fn compactions(&self) -> usize {
         self.compactions
     }
 
-    pub fn held_bytes(&self) -> usize {
+    pub(crate) fn held_bytes(&self) -> usize {
         self.state
             .as_ref()
             .map(RecordBatch::get_array_memory_size)
