@@ -4,7 +4,7 @@
 > checkbox (`- [ ]`) syntax. A task ends by appending its state to
 > `llm-wiki/tasks/visibility-detail.md` and handing back — it does **not** commit.
 
-**Goal:** take `peacockdb-core` from the 174 bare `pub` items task 4 leaves to eight, move the
+**Goal:** take `peacockdb-core` from the 174 bare `pub` items tasks 4 and 5 leave to eight, move the
 corpus harness behind a feature, delete the exemption registers, and write the rules that keep it
 that way.
 
@@ -13,7 +13,7 @@ component needs nothing more, and only the CLI's entry points need bare `pub`. `
 turns the rule into a compiler check, and its warning count is the work list. Task 5 put the corpus harness behind the feature, so
 nothing outside the crate needs an engine type before this task starts.
 
-**Tech Stack:** Rust 2024, cargo features and the self dev-dependency trick, `unreachable_pub`,
+**Tech Stack:** Rust 2024, `unreachable_pub`,
 `scripts/visibility-dump.py`, `test_module_layout.rs`.
 
 **Spec:** [`visibility.md`](visibility.md) — read it before Task 1.
@@ -77,9 +77,9 @@ CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/case-inventory.sh gpu 
 grep -c 'PubModule {\|CrossComponentReach {' peacockdb-core/tests/test_module_layout.rs
 ```
 
-`PUB_MODULES` should be empty after task 3, `CROSS_COMPONENT_REACHES` empty, `PUB_OUTSIDE_A_MOD_RS`
-two entries. If `PUB_MODULES` is not empty, stop and say so — task 3 did not finish and this task
-cannot start.
+`PUB_MODULES` should be empty — task 4 emptied it as it moved the files that forced each entry —
+`CROSS_COMPONENT_REACHES` empty, `PUB_OUTSIDE_A_MOD_RS` two entries. If `PUB_MODULES` is not empty,
+stop and say so: task 4 did not finish and this task cannot start.
 
 - [ ] **Step 4: Turn the lint on**
 

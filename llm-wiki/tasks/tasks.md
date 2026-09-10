@@ -61,7 +61,7 @@ all, so an ordinary CI run puts four such processes on a shared card. Each decla
 byte budget measured from the pool's own statistics adaptor instead. Touches `cpp/` and one wiki
 page, so it is independent of the three layout tasks around it.
 
-### 4. [`test-layout.md`](test-layout.md) — state: blocked(approved to build)
+### 4. [`test-layout.md`](test-layout.md) — state: approved to build
 
 Of 170 public items in `peacockdb-core/src`, 108 are public only because `tests/*.rs` are separate
 crates that see the library the way crates.io would. Moving the eleven targets that force them, plus
@@ -69,7 +69,7 @@ the murmur gate, down into `src/` takes that surface from 108 to eight. The move
 sweep and the separation of test code from production code happen together, because none is worth
 its own pass over the same files.
 
-### 5. [`test-support.md`](test-support.md) — state: blocked(approved to build)
+### 5. [`test-support.md`](test-support.md) — state: approved to build
 
 The corpus harness — 698 lines — joins the helpers task 4 put in `src/test_support/`, and the two
 corpus binaries reach it through three functions whose signatures carry no engine type. That is
@@ -77,7 +77,7 @@ what stops the last eight items needing `pub`. Small and semantic on purpose: it
 reviewer reads line by line, so it does not share a branch with task 6's three hundred one-word
 demotions.
 
-### 6. [`visibility.md`](visibility.md) — state: blocked(approved to build)
+### 6. [`visibility.md`](visibility.md) — state: approved to build
 
 174 bare `pub` items become eight, `unreachable_pub` goes on to keep them there, both exemption
 registers are deleted and `coding-style.md`'s Visibility section stops carrying an exemption at

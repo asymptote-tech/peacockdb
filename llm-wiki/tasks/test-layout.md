@@ -2,8 +2,9 @@
 
 Kind: production
 
-Fourth of five, after [`module-layout.md`](module-layout.md) and
-[`rmm-pool-budget.md`](rmm-pool-budget.md), and before [`test-support.md`](test-support.md).
+Fourth of six, after [`module-layout.md`](module-layout.md) and
+[`rmm-pool-budget.md`](rmm-pool-budget.md), and before [`test-support.md`](test-support.md) and
+[`visibility.md`](visibility.md).
 
 170 top-level items in `peacockdb-core/src` are `pub`. Eight are named by another crate; the other
 108 are `pub` only because `peacockdb-core/tests/*.rs` are separate crates that see the library the
@@ -574,7 +575,8 @@ lesson: the same shape, five components with a commit each, run as one dispatch 
 hours and died on a context limit with the work unreported.
 
 **Slice 0 comes before any move**, because nothing can move until it exists: the `gpu` feature with
-its `compile_error!`, `src/tests/testdata.rs` with the seven existing sites converted to it, and
+its `compile_error!`, the `test-support` feature with `test_support/testdata.rs` and the seven
+existing sites converted to it, and
 `test_module_layout` extended with the rules above. It moves no test and its proof is that the
 three build shapes still compile and the suite is unchanged.
 
