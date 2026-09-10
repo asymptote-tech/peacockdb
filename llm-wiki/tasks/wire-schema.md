@@ -33,9 +33,9 @@ precision exists nowhere.
 ### 1. Write `output_schema` on the wire
 
 `PlanNode.output_schema: Schema` already exists in `gpu_plan.fbs` and is documented "Output schema of
-this node". The bp writer never fills it: `fb::PlanNode::create` appears once on this path, in
+this node". The writer never fills it: `fb::PlanNode::create` appears once on this path, in
 `Writer::push` (`recipe/writer.rs:97`), with `output_schema: None`. That is the whole change — every
-bp node goes through that funnel, `GpuNode::schema()` is node-local with nothing to derive, and
+node goes through that funnel, `GpuNode::schema()` is node-local with nothing to derive, and
 `serialize_schema` already fills `decimal_precision`/`decimal_scale` from `Decimal128(p, s)`.
 
 Write it for **every** node, not only where a decimal appears: `fb_text.rs`'s own header warns that

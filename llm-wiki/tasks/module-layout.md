@@ -374,6 +374,12 @@ component that caused it rather than found at the end across a 138-file diff.
   by match, so a survivor spelling anywhere on a line hides real residue sharing it. That was
   latent when task 1 closed; this task moves the files those 170 lines live in, which is exactly
   the motion that turns it live.
+- **Drop the gate's `':!peacockdb-core/src'` exclusion once the directory is gone.** It exists only
+  to spare `src/batch_partitioned/`, and this task removes that name. Left in place it hides the
+  whole crate: task 1's completeness pass found four residues inside that tree precisely because
+  nothing read it, and after this move the exclusion would blind the gate to everything the task
+  touched. Run the gate without it, and expect the three mapping sites plus whatever `README.md`
+  and `source.py` still say about `ParquetBatchPartitioner`.
 - **Every grep in this task takes `--untracked`.** `git grep` does not see untracked files, so a
   sweep run before staging is blind to exactly the files being moved — in task 1 a gate reported
   clean while residue sat in four renamed files. This task moves every file in the crate, so the

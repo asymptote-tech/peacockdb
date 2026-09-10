@@ -172,10 +172,18 @@ quietly changed.
   **The exclusion is line-scoped, which is the one hole left in it.** `grep -vE` drops the whole
   line, so a deliberate survivor anywhere on a line shields real residue sharing it —
   `mod batch_partitioned; // renamed from test_batch_partitioned_plans` is invisible to the gate.
-  Latent rather than live today: stripping the six survivor spellings from every excluded line and
-  re-matching returns nothing. But 170 lines carry a survivor spelling, and the later tasks move
-  the tree those lines live in, so re-run that strip-and-rematch after each slice rather than
-  assuming it still holds.
+  Latent rather than live in what the gate reads: stripping the six survivor spellings from every
+  excluded line and re-matching returns nothing there. But 170 lines carry a survivor spelling, and
+  the later tasks move the tree those lines live in, so re-run that strip-and-rematch after each
+  slice rather than assuming it still holds.
+
+  **The `peacockdb-core/src` exclusion is the larger hole, and it was live.** The pathspec drops the
+  mode's own module, so the gate never reads the tree this task is named after, and the completeness
+  pass found four hits inside it: `error.rs`'s two `RunError` display strings, `mod.rs`'s module doc,
+  and a temp-dir name in `parquet_meta.rs`. The same pattern scoped to `peacockdb-core/src`, with the
+  survivor spellings stripped per line, must land on one — `gpu_rowgroup_prune.rs:151`'s mapping
+  site. Task 2 removes the directory that forces the exclusion; until then that scoped form is the
+  only thing that reads inside it.
 
   At the finish it lands on **six**, all deliberate: the three `batch→partition` mapping sites,
   `README.md:371` and `source.py:3` naming `ParquetBatchPartitioner` (the same structure, not the

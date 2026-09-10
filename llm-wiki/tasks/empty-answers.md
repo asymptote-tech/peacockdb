@@ -16,7 +16,7 @@ and separating them would mean building it twice.
 
 **Depends on [`wire-schema.md`](wire-schema.md), and that dependency is the whole reason this is
 small.** Both tickets say "unfreezing buys a make-empty-of-schema call and the refusals go", written
-when nothing on the wire carried a bp node's schema. Once `PlanNode.output_schema` is populated, the
+when nothing on the wire carried a node's schema. Once `PlanNode.output_schema` is populated, the
 call is not needed at all: `execute_node` already holds the node
 (`node_session.cpp:190`), so it can answer with an empty table rather than throw. **No new ABI
 symbol.** The C++ said so before either of us did — `node_session.cpp:257`:

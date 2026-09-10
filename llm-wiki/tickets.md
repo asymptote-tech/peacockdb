@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 197), which is also the counter for
+New tickets take the next free number (currently 198), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -340,7 +340,7 @@ Saying it fires shortcuts the aggregate sequence already specifies: a 1-partitio
 input needs one `GpuAggregate` carrying both `aggs` and `final`, and a single-batch-per-partition
 input skips the first `GpuAggregateBatches`. Join build sides need nothing new — `translate/mod.rs`
 already elides their coalesce when the input is `SingleBatch`. So the change is one declaration
-and the plans get smaller by themselves. Every bp golden moves, which is its real cost.
+and the plans get smaller by themselves. Every plan golden moves, which is its real cost.
 
 <a id="t155"></a>
 ### #155 — umbrella: join execution through a wider C and FlatBuffers API

@@ -39,3 +39,38 @@ post-rebase SHA `7ed0bcf9`:
 The `.gitignore` change in the rebase only un-ignores `.claude/agents/` and
 `.claude/commands/`, so it widens what `--untracked` can see rather than narrowing it. No
 gate went blind.
+
+## The completeness pass
+
+Run on the rebased branch: a reviewer asking what is wrong and an analyst asking what is
+missing, neither seeing the other's list. No blocking findings on either side. Both
+independently re-derived the spec's Validation section and found it holds — the 33 golden
+renames are byte-exact apart from 94 `mode=` lines and the 75 quarantined refusal lines, the
+payload digests never moved, the case inventory maps 1:1 under prefix removal, and the two
+registry CSVs agree.
+
+Seven important findings between them, four of which are the same underlying fact.
+
+**The gate could not see `peacockdb-core/src`.** Gate 1 excludes that tree by pathspec, to
+spare `src/batch_partitioned/`, so nothing read the mode's own module. Four sites inside it
+still named the mode: `error.rs`'s two `RunError` display arms, `mod.rs`'s module doc, and a
+temp-dir name in `parquet_meta.rs`. `PlanError`'s arms had been reworded and `RunError`'s were
+simply missed. The spec's claim that the line-scoped hole was "latent rather than live" was
+true only of what the gate reads; the spec now says so and names the scoped check that finds
+these. `module-layout.md` gains the consequence for task 2: once the directory is gone the
+exclusion has nothing left to spare and would blind the gate to the whole crate.
+
+**Bare `bp` survived in four llm-wiki lines** that neither exemption covers — `tickets.md:343`
+and three lines in the ENS-casts specs `wire-schema.md` and `empty-answers.md`. Gate 2 excludes
+`llm-wiki` whole and `\bbp[-_]` would not match a bare word anyway, so nothing mechanical was
+ever going to catch them.
+
+**The free-ticket counter was not advanced.** This branch filed #197 while `tickets.md:9` still
+advertised 197 as free, across an ID space shared with `tasks/active-tickets.md`. Now 198.
+
+The board entry lagged its own rebase, which is the fifth. Fixed with the signoff.
+
+Both agents noted the spec is not frozen — six of the twelve commits rewrote it, and the gate's
+expected finish moved from empty to five to six over them. Each of the six survivors was checked
+independently and all are deliberate, but "the gate lands where the spec says" is partly
+self-fulfilling here. The signoff says so.
