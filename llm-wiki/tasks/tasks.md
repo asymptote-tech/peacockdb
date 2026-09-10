@@ -38,7 +38,7 @@ shared. 75 queries carry #152. Memory accounting is deliberately out of scope an
 The layout refactor. It may not run beside the ENS-casts chain: both rewrite the same tree, so
 rebasing one across the other is a whole-tree conflict.
 
-### 1. [`drop-mode-name.md`](drop-mode-name.md) — state: rebase needed(done)
+### 1. [`drop-mode-name.md`](drop-mode-name.md) — state: done — PR #141
 
 Names only. "Batch partitioned" and its `bp` abbreviation qualify against an alternative that no
 longer exists, so every occurrence goes — identifiers, mode labels, golden filenames, one Python

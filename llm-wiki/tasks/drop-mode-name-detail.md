@@ -429,3 +429,10 @@ changed-paths job skips the build on those heads and reports a run that is green
 compiled anything — `39ec0bf3`'s run 34429881858 is exactly that shape, and reading it as the
 gate would be reading a skip. The run that decides this task is 34429841177 on `b8e16dda`.
 A docs-only head above a green code head does not need its own run.
+
+## Done
+
+Run 34429841177 against `b8e16dda` is green across the whole pipeline — both cuDF versions, the
+25.02 GPU build, the remote GPU tier, the cost report, and the changed-paths and S3 metadata jobs.
+That closes the one claim the local dispatch could not make, the cudf leg. Board set to `done`;
+PR #141 is the human's to merge.
