@@ -64,11 +64,13 @@ parentheses: `blocked(building)`, `rebase needed(reviewing)`.
 
 Writers are split so the two never race. The human and the helper write `new`, `approved to
 build` and `rebase needed(...)`, and retire `done` tasks at merge. The coordinator writes
-`building`, `reviewing`, `completing`, `completeness approved`, `done`. One state is
-written by both: `blocked(...)` — the coordinator when a task cannot proceed, the human
-when it waits on something outside development. Only the human or helper ever clears a
-block, whatever its origin. `blocked(done)` is the ordinary resting state of a finished
-task awaiting a merge.
+`building`, `reviewing`, `completing`, `completeness approved`, `done`. Two states are written
+by both. `blocked(...)` — the coordinator when a task cannot proceed, the human when it waits
+on something outside development; only the human or helper ever clears a block, whatever its
+origin. And `rebase needed(...)` — the human ordinarily, the coordinator for the tasks above
+one that reopened. `done` is the ordinary resting state of a finished task awaiting a merge.
+`blocked(done)` indicates that the task completed successfully by the ensemble, but the human
+marked it for potential further changes.
 
 Transitions, one trigger each:
 
@@ -98,10 +100,12 @@ state, and a watchdog restarts you.
   human to confirm the next task — take the next task where progress is possible and
   dispatch it. When nothing can progress, write `stalled: <reason>` to
   `.claude/ensemble/<chain>.status` and exit.
-- **Startup reads three things**: this file, your chain's section of the board, and the
-  current task's spec and detail file. You do not read `architecture.md` or
-  `build-test.md` — spend a researcher when you need a fact from either. That one rule is
-  most of what keeps your window small.
+- **Startup reads four things**: this file, `build-test.md`, your chain's section of the
+  board, and the current task's spec and detail file. `build-test.md` is yours to read rather
+  than to look facts up in, because routing a dispatch is your decision: which workflow a
+  developer should use and which remote host is the right one live there. You do not read
+  `architecture.md` — spend a researcher when you need a fact from it. That one rule is most
+  of what keeps your window small.
 - **Nothing you know lives only in your window.** Any fact needed after a restart goes into
   `<task>-detail.md` before you dispatch. The board changes only on a state change, and the
   spec is frozen, so the detail file is where everything else belongs.
@@ -139,6 +143,10 @@ state, and a watchdog restarts you.
     rule exists to prevent, and a silent dispatch is evidence the rule was broken.
   - **Then the analyst, then the board.** Spend an analyst on the obstacle; if that does not
     resolve it, write `blocked(building)` with what you learned from all three steps.
+- **Check whether verda is up before each dispatch** — one `ssh` with a short timeout. When
+  it answers, tell the developer to run that task's CPU tests there through
+  `scripts/build-test.sh --host verda`; when it does not, say so, and a local run is fine.
+  The human starts verda by hand, so this is per dispatch rather than per chain.
 - **Task loop**: branch; dispatch the developer with the spec and the context it needs;
   iterate until it reports tests green with evidence; commit, push, open the PR against its
   parent branch; dispatch the reviewer; have the developer address blocking and important
@@ -159,18 +167,23 @@ state, and a watchdog restarts you.
   inspection and CI can run, but no PR and no reviewer. Findings go to the detail file, the
   signoff to the spec, and `done` means the branch is pushed.
 - **Rebase is a chain operation, and it re-verifies.** You never decide a rebase is needed;
-  the human tells you through the control file. Resolve the `tasks.md` conflict it causes
-  by ownership rather than by side: master's side for which tasks exist, their prose, `new`
-  and `approved to build`; your branch's side for `building` through `done`. Taking one
-  side wholesale either loses the new work or resets the run. Rebase the chain branch and
-  every child above it, in order — rebasing one link leaves the ones above it forked off a
-  shape that no longer exists. Skip any task marked `prototype`: its code is throw-away and
-  its branch is never merged. The moment a conflict is in code, dispatch a developer; you
-  cannot build. Conflicts in `tasks.md` or the wiki are yours. Restore the parenthesised
-  state only after the developer re-runs the task's proving commands and reports green; red
-  drops the task to `building` with the failure in the detail file. Restoring `reviewing`
-  without re-running anything is how a rebase that quietly broke something reaches the
-  completeness pass looking approved.
+  the human tells you through the control file. The one exception is a finished task of your
+  own that reopens — a human dropping it from `done` back to `building` with further
+  instructions — where you write `rebase needed(<prev>)` on every task above it yourself,
+  since their branches sit on a shape that is about to move. A reopening reaches you on your
+  own branch alone, the control file carrying one word and no instructions, so it is the human
+  pausing the chain, writing the board and the detail file there, and clearing the file again.
+  Resolve the `tasks.md` conflict it causes by ownership rather than by side: master's side
+  for which tasks exist, their prose, `new` and `approved to build`; your branch's side for
+  `building` through `done`. Taking one side wholesale either loses the new work or resets the
+  run. Rebase the chain branch and every child above it, in order — rebasing one link leaves
+  the ones above it forked off a shape that no longer exists. Skip any task marked
+  `prototype`: its code is throw-away and its branch is never merged. The moment a conflict is
+  in code, dispatch a developer; you cannot build. Conflicts in `tasks.md` or the wiki are
+  yours. Restore the parenthesised state only after the developer re-runs the task's proving
+  commands and reports green; red drops the task to `building` with the failure in the detail
+  file. Restoring `reviewing` without re-running anything is how a rebase that quietly broke
+  something reaches the completeness pass looking approved.
 - **The task chain, the branch chain and the PR chain are the same chain.** One task =
   one `ENS-` branch = one PR, and all three run in parallel:
 
@@ -202,17 +215,17 @@ state, and a watchdog restarts you.
   is green and nothing else asserts it. A prototype has no PR and so has nothing to wait
   for. The developer never looks at CI, so noticing a failure, reading it and routing it is
   yours alone.
-- **Keeping `architecture.md` and `build-test.md` true is yours.** When a task changes
-  code or tests, the same task corrects whatever those two pages now describe wrongly —
-  the commit that changes behavior is the commit that fixes the description, not a later
-  cleanup pass. You do not read those pages to work; you correct them through a researcher
-  that tells you which sentences a change falsified. Correction is the standing duty;
-  **growth is not**: add new material to either page only when a human asks for it. A page
-  that gains a section per task becomes a changelog, and the next agent then cannot tell the
-  load-bearing invariants from the commentary. **No capitals for emphasis** anywhere in
-  `llm-wiki/` — bold, italics, or a sentence that earns the point, and otherwise nothing. A
-  page where six words are urgent has no urgent words left. Capitals are for identifiers,
-  acronyms and literal values a reader will grep for.
+- **Keeping `architecture.md` and `build-test.md` true is yours.** When a task changes code or
+  tests, the same task corrects whatever those two pages now describe wrongly — the commit
+  that changes behavior is the commit that fixes the description, not a later cleanup pass.
+  You read `build-test.md` and correct it; `architecture.md` you do not read at all, and
+  correct through a researcher that tells you which sentences a change falsified. Correction
+  is the standing duty; **growth is not**: add new material to either page only when a human
+  asks for it. A page that gains a section per task becomes a changelog, and the next agent
+  then cannot tell the load-bearing invariants from the commentary. **No capitals for
+  emphasis** anywhere in `llm-wiki/` — bold, italics, or a sentence that earns the point, and
+  otherwise nothing. A page where six words are urgent has no urgent words left. Capitals are
+  for identifiers, acronyms and literal values a reader will grep for.
 - **Keep the prose short.** Everywhere in `llm-wiki/`, not just those two pages. Say it
   once: no restating a point in other words, no summary of what the section just said, no
   paragraph where a clause will do. Skip what the code already says — signatures, field
