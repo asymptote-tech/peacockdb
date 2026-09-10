@@ -15,6 +15,7 @@ pub mod emit;
 pub mod join;
 mod source;
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
@@ -35,22 +36,22 @@ use crate::executor::{BackendError, CallResult, CallStats, RowRange};
 use crate::plan::PlanError;
 use crate::wire::{CallPattern, FbKind, Input, Recipe, Seq};
 
-/// A node's calls, in order — the batch into the first, each output into the next.
-///
-/// The session pointer is BORROWED, as everywhere on the GPU path: the session outlives
-/// every executor drawn from it, and the handles it hands back.
 /// A lane's reads, in the order the mapping named them.
 ///
 /// `pub` because `Backend::Source` names it, so a caller holding a `GpuBackend` reaches it
 /// without any file importing the type.
 pub struct GpuSource {
-    pub(crate) executor: *mut peacockdb_ffi::raw::PeacockExecutor,
-    pub(crate) seq: crate::wire::Seq,
+    pub(crate) executor: *mut PeacockExecutor,
+    pub(crate) seq: Seq,
     /// The row groups per batch this lane still owes, front first.
-    pub(crate) batches: std::collections::VecDeque<Vec<u32>>,
-    pub(crate) schema: datafusion::arrow::datatypes::SchemaRef,
+    pub(crate) batches: VecDeque<Vec<u32>>,
+    pub(crate) schema: SchemaRef,
 }
 
+/// A node's calls, in order — the batch into the first, each output into the next.
+///
+/// The session pointer is BORROWED, as everywhere on the GPU path: the session outlives
+/// every executor drawn from it, and the handles it hands back.
 pub struct GpuExec {
     executor: *mut PeacockExecutor,
     calls: Vec<(Seq, FbKind)>,

@@ -1142,3 +1142,82 @@ What the residue does, from the diff:
 
 None of it is proven: no build, no test run, no evidence anywhere. It is dispatched as work to
 finish, not as work to trust.
+
+## Finishing the residue
+
+Two of the five modified files survive. The layout test's sharpened readers and the
+`gpu_backend` doc-block repair were right and are kept, with three comments corrected and one
+guard added. The `physical_expr` facade deletion was a mistake and is reverted.
+
+### What the residue got wrong
+
+- `files_naming`'s doc claimed `peacockdb/src/main.rs` names `executor::cpu_backend`. It does
+  not — it names `executor::CpuBackend` and `executor::run`, and nothing outside
+  `peacockdb-core/tests` names any of the nine exempt paths today. The workspace-wide sweep is
+  still the right reader, for the reason the comment now gives: what forces an exemption is any
+  code outside the crate, not one crate's tests. Same correction on `names_the_module`, which
+  claimed the uppercase reader had dropped a file that forces an exemption.
+- The `file!()` exclusion was asserted only to resolve, not to work. A `file!()` whose form
+  drifts from what the walk yields would leave the guard reporting itself, and the assert would
+  still pass. `each_reader_sees_the_violation_and_not_its_near_miss` now pins both halves: this
+  file is a match for the needle, and `files_naming` does not return it.
+- `executor/mod.rs` lost a blank line and was not rustfmt-clean. The whole layout test was not
+  either, at head as well as in the residue, so it was run through rustfmt as a leaf — it
+  declares no `mod`, so nothing below it moved.
+
+### The facade hop is the wall, not a hop
+
+The residue deleted `executor::physical_expr` and pointed `plan/tests/aggregate.rs` at
+`executor::cpu_backend::physical_expr`. The spec's own rule refuses that: only the parent
+component's own code may use a subcomponent, and `plan` is not `executor`. It compiles only
+because `cpu_backend` is an exempt `pub mod`, and the exemption was granted for two external
+test files — so the change leans on the exemption for a reason `forced_by` cannot record,
+since `files_naming` skips `peacockdb-core/src` by design. The exemption's expiry would then
+announce that the wall can go up while an in-crate caller still needs it down, which is the
+defect "half a claim expires wrong" is about. Reverted, with `cpu_backend/mod.rs`'s doc, which
+described the deleted hop.
+
+`peacockdb-core/src/wire/tests.rs:829` already does the same thing — `use
+crate::executor::cpu_backend::join::CpuJoin` from the `wire` component. It predates this task.
+A reader for it belongs in the exemption test, but `CpuJoin` is a type and cannot be delegated
+through `executor/mod.rs`, so closing it means moving that test or declaring the type in
+`executor`. Left as a finding; not production behaviour, so no ticket.
+
+### Every changed reader was watched red, each with a control
+
+| Mutation | Result | Control |
+|---|---|---|
+| drop `test_cpu_executors.rs` from `executor/cpu_backend` | red: "is forced by peacockdb-core/tests/test_cpu_executors.rs, which forced_by does not name" | the other nine cases pass |
+| `forced_by` back to the tests-relative `test_gpu_executors.rs` | red on both halves: names a file that no longer exists, and is forced by one it does not name | the repo-root form is green |
+| a line naming `cpu_backend::CpuExec` added to `peacockdb/src/main.rs` | red naming `peacockdb/src/main.rs` | listing `peacockdb/src/main.rs` in `forced_by` turns it green, so the forward lookup resolves a non-test crate too |
+| the same line, with the sweep restricted to `peacockdb-core` | green — the hole the workspace sweep closes | |
+| `names_the_module` back to uppercase-only | red on the `physical_expr` fixture | |
+| `names_the_module` widened to `contains` | red on the `join::CpuJoin` fixture, so the reader got sharper rather than permissive | |
+| `out.retain` dropped from `files_naming` | red twice: the new fixture, and the exemption test reporting the guard file itself | with the retain, green |
+
+### Evidence
+
+| Check | Result |
+|---|---|
+| rust-only, all targets | 0 warnings |
+| default, lib+bin | 0 warnings |
+| default, all targets | 0 warnings |
+| `test_module_layout` | 10 passed |
+| `--lib` | 435 passed |
+| `test_plan_goldens` | 19 passed |
+| `test_ci_coverage` | 7 passed |
+| goldens | byte-identical to `goldens-after-rename.sha256`, digest `e071580a…` |
+| case inventory, both shapes | byte-identical to the two `-final` baselines |
+| residue gate | the same five lines |
+| doc sentences | three absent, all reworded doc comments on the two readers |
+| rustfmt | both touched files clean |
+
+The dispatch named `27eac51d…` as the golden digest. That is `goldens.sha256`, taken before the
+first move; the quarantined `GpuHashJoin` rename superseded it, and the bar the spec sets is
+`goldens-after-rename.sha256`. No golden is modified in the working tree at all.
+
+### The parquet is still not in this worktree
+
+`test_plan_goldens` fails 13 of 19 with `register the tables: IoError NotFound` unless
+`PEACOCK_TESTDATA_DIR` points at a scratch root of symlinks, as slice 2 describes. It is an
+environment gap, not a regression, and it costs a debugging round every dispatch that meets it.
