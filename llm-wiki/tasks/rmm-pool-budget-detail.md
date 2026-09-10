@@ -467,3 +467,17 @@ attribution those two texts ask a reader to make is finally supported by what is
 manual binaries were built here (25.02 `cpp/build` for the node timings, 26.02 `cpp/build26` for
 the streamed one, run against the host's `rapids-2602` env) and shipped to that scratch directory,
 never to `install/bin`, where the gate's glob would sweep them in.
+
+### 2026-09-10 — completeness approved, waiting on CI
+
+Signoff written at the end of the spec. `build-test.md` gained the override sentence the developer
+flagged, so the page now says both that a budget is a hard floor and how to move it.
+
+**The run that decides `done` is `34533749485`, on `a02e8cb5`.** It is a full run, not a skip: the
+changed-paths gate compares the *push* range rather than the PR, and that push carried `c3b4910b`
+— the code — together with the documentation head above it. The five earlier green runs on this
+branch are a mix of full runs and documentation skips, so none of them substitutes for it.
+
+If a restart lands here: the task is `completeness approved`, everything is pushed, and the only
+remaining transition is `done` once that run is green. Nothing else is outstanding except the tpch
+pair, which is named in the signoff and is not a blocker.
