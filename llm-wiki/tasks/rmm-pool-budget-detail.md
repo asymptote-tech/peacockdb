@@ -218,3 +218,20 @@ which is the part that could be proven here.
 `cpp/install/bin` on shad-gpu holds the five CI binaries and nothing else; the two scratch
 directories used for the manual binaries (`scratch-manual`, `scratch-2602`) were removed. The
 patched binaries on the host are the ones this branch built.
+
+### 2026-09-10 — rebase onto master, on the control file's word
+
+The control file said `rebase` while the developer was still in its dispatch. Committed the work
+first, then rebased `ENS-rmm-pool-budget` from `d0670c3e` onto `f6dcde07` — ten commits, and
+**every one of them documentation**: `llm-wiki/coding-style.md`, `tasks.md`, the two layout specs
+and their impl plans, and a new task 6 (`visibility.md`) with its plan. No code, no test, no
+golden, no workflow.
+
+So the rebase re-verifies nothing and the task keeps the state it held. `pipeline.yml` skips a
+wholly-documentation diff for the same reason, so a CI re-run would report green having built
+nothing.
+
+No conflict. Master's copy of the board carries the task list and the prose — the human unblocked
+tasks 4 and 5 and added task 6 — and this branch's copy carries task 3 at `building`; the two
+edits did not touch the same lines. Nothing above this task has a branch, so there was nothing to
+mark `rebase needed`. Control file cleared.
