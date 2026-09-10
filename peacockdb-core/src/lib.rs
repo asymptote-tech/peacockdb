@@ -6,6 +6,9 @@
 //! one, and `plan_text` renders any of it. `common` is the row-byte formula all four price
 //! by. The reasons behind each shape are in `llm-wiki/architecture.md`.
 
+#[cfg(all(feature = "gpu", feature = "rust-only"))]
+compile_error!("gpu needs the FFI linked; rust-only removes it. Pass one or neither.");
+
 pub mod common;
 pub mod executor;
 pub mod plan;

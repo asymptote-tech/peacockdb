@@ -5,6 +5,9 @@ edition = "2024"
 
 [features]
 rust-only = ["peacockdb-ffi/rust-only"]
+# Device tests. Not propagated to peacockdb-ffi: that crate is a C ABI binding with no
+# device-conditional code, so a feature there would be a knob nothing reads.
+gpu = []
 
 [build-dependencies]
 flatc-fork = "0.6"

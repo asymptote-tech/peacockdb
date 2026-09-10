@@ -123,3 +123,80 @@ shape). The `gpu` shape cannot be measured until plan task 2 adds the feature.
   rung (`tests` to `ffi_tests`) reads as drift by design, as does a case leaving an integration
   target for `--lib`. It proves that a slice moved nothing; the leaf-name union across shapes is
   what proves that a slice moved cases without losing one.
+
+### 2026-09-10 — slice 2 done: the `gpu` feature and the mutually-exclusive guard
+
+Plan task 2, steps 1-6. Two source files changed — `peacockdb-core/Cargo.toml` (`gpu = []`) and
+`peacockdb-core/src/lib.rs` (the `compile_error!`, three lines above `pub mod common;`) — plus one
+new baseline, `llm-wiki/tasks/test-layout-baselines/inv-gpu.txt`. No test moved and no test file
+was touched. Not committed.
+
+#### The guard was watched go red, and watched fail to fire first
+
+`cargo build --features "gpu rust-only" -p peacockdb-core` was run three times, and the middle run
+is the one that matters:
+
+1. Before the feature existed: `error: the package 'peacockdb-core' does not contain this feature:
+   gpu`, exit 101. That is cargo refusing an unknown name, not the guard.
+2. After `gpu = []` and **before** the `compile_error!`: `Finished dev profile in 16.95s`, exit 0.
+   The contradictory pair builds happily on its own — so the guard is the only thing that rejects
+   it, and it had a real failure to catch.
+3. After the guard: `error: gpu needs the FFI linked; rust-only removes it. Pass one or neither.`
+   at `peacockdb-core/src/lib.rs:10:1`, then `could not compile peacockdb-core (lib) due to 1
+   previous error`, exit 101. The message is the guard's own text, not a link failure.
+
+#### The three shapes, all cold for `peacockdb-core`
+
+`cargo clean -p peacockdb-core` first in each target dir, so these are real measurements and not
+slice 1's 0.18s warm no-op.
+
+| Shape | Command | Result | `^warning` |
+|---|---|---|---|
+| `rust-only` | `cargo build --features rust-only -p peacockdb-core` | ok, 16.9s (1599 files cleaned first) | 0 |
+| default | `scripts/cargo-cudf.sh build -p peacockdb-core` | ok, 19.1s (541 files cleaned first) | 0 |
+| `gpu` | `scripts/cargo-cudf.sh build -p peacockdb-core --features gpu` | ok, 18.9s | 0 |
+
+The first two match slice 1's recorded 0 and 0. The `gpu` build needed no clean: a different
+feature set is a different fingerprint, so it recompiled the crate anyway — which also means the
+default and `gpu` shapes evict each other's `peacockdb-core` artifacts inside the one
+`target-cudf-rapids-cuda-12.2` dir. That is the script's design, not thrash to diagnose, but it is
+why a `gpu` inventory costs a crate rebuild every time it follows a default-shape one.
+
+#### Nothing moved, in either shape that already existed
+
+Both fresh inventories are **byte-identical** to slice 1's baselines, not merely `identical` under
+the normaliser:
+
+- `scripts/case-inventory.sh rust-only` — 4m06s, 1089 lines, `diff` clean.
+  `scripts/compare-inventory.sh rust-only <baseline> <fresh>` → `case inventory (rust-only):
+  identical`, exit 0.
+- `CUDF_ROOT=... scripts/case-inventory.sh cudf` — 5m31s, 1157 lines, `diff` clean.
+  `compare-inventory.sh cudf` → `case inventory (cudf): identical`, exit 0.
+- `goldens.sha256` and `visibility.txt` re-taken and `diff`ed against the baselines: both identical.
+  The 170 goldens and all 578 visibility records are where slice 1 left them.
+
+#### The `gpu` baseline now exists
+
+`CUDF_ROOT=... scripts/case-inventory.sh gpu` — 53s, exit 0, stored as
+`llm-wiki/tasks/test-layout-baselines/inv-gpu.txt` (sha256 `b44f705f…279cfc`). **435 `--lib` cases**,
+`--lib` only by the script's design. Its `--lib` section is byte-identical to the `--lib` section of
+both `inv-cudf.txt` and `inv-rust-only.txt`, which is the expected answer today: `gpu = []` gates
+nothing yet, so all three shapes see the same 435. Task 9 is where that number moves.
+
+This was the first run of the `gpu` arm against a real feature. It behaved: the list came back 435
+and not 0, so `LD_LIBRARY_PATH` resolved and the arm did not hit the empty-list failure mode
+`build-test.md` warns about.
+
+#### Findings for the slices after this one
+
+- **`compare-inventory.sh` still rejects `gpu`.** `scripts/compare-inventory.sh gpu <base> <fresh>`
+  prints `usage: compare-inventory.sh rust-only|cudf …` and exits 1. Verified, not assumed. There is
+  now a `gpu` baseline that the comparison tool cannot read, so the slice that first needs to prove
+  the `gpu` shape moved nothing — task 9 — has to add the arm or `diff` by hand. Left alone here
+  because task 2's six steps do not include it.
+- **rustfmt was not run on `lib.rs`.** It is the crate root, and rustfmt follows `mod` declarations
+  into every file below it (`coding-style.md`). The two added lines were fed to `rustfmt --edition
+  2024` on their own instead and came back unchanged.
+- `Cargo.lock` did not change; adding an empty feature to a workspace member does not touch it.
+- Both target dirs are now warm and hold every test binary for their shape, so the next slice's
+  first build is incremental.
