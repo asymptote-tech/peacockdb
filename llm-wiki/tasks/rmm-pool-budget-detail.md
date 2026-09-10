@@ -299,3 +299,18 @@ legible. The blocking fix is what makes it legible.
 Nits dropped, except three that cost nothing where I was already editing: the declaration comment
 in `rmm_pool.hpp` was 11 lines against the 10-line cap, `IDEMPOTENT` was capitals for emphasis, and
 `reports/dgx-spark.md`'s "(default)" row is no longer a default.
+
+### 2026-09-10 — round 2 out, CI armed, card still held
+
+Round 1's three findings were applied by the coordinator rather than a developer: all of them were
+markdown or code comments, which are the coordinator's to write. Commit `305c0da1`, pushed. The
+same reviewer was asked to confirm the fixes rather than a fresh one, so it checks its own wording
+against what landed.
+
+CI run `34529171969` is on `305c0da1`, the first head since `4f73be96` that carries a code file —
+the two heads between them were documentation and took the changed-paths skip, which is not a gate.
+That distinction is what `done` turns on, so the run to read is this one.
+
+shad-gpu re-checked twice: pid `1763830` still holds 53066 MiB, 90009 free of 143771. 69+69 needs
+138, so the tpch pair remains unrunnable. The first ssh timed out and the second answered — the
+flaky link `build-test.md` warns about, not a host that went away.
