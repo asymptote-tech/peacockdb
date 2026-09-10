@@ -226,9 +226,9 @@ Three things the arrows are there to make checkable:
   ~7% slow, so its record exists to be read for bytes and never for microseconds. They meet
   on the record's tuple — `(dataset, sf, query, mode, node_seq, recipe_seq, call_index,
   run_index)` — which is why the record carries one rather than a node number.
-- **Every derived file has exactly one producer.** `hbm.tsv` had none until
-  `create_nsys_profile.sh` existed: it was written by hand once and then rode along, older
-  than the capture beside it, while `plot.py` drew a panel from it.
+- **Every derived file has exactly one producer, and the pipeline runs it.** A file that
+  only a human regenerates goes stale in silence: nothing checks it against the capture it
+  claims to describe, and a panel drawn from a stale one looks exactly like a fresh one.
 - **`plot.py` is the only thing that draws.** A second generator would be a second reading
   of the record's columns, and two readings disagree the first time a column moves.
 - **The text is committed and the captures are not.** The `.benchmark.txt` tree, the four
@@ -497,7 +497,8 @@ scripts/docker-build.sh --no-image -- ./scripts/build-test-shadgpu.sh --build-be
 ./scripts/build-test-shadgpu.sh --benchmark-status     # going? finished? log tail
 ./scripts/build-test-shadgpu.sh --pull-benchmarks      # once it reports finished
 
-# 5. the derived records: two Nsight passes, their captures, calls.tsv and hbm.tsv
+# 5. the derived records: both Nsight passes, their captures, calls.tsv and hbm.tsv.
+#    No flag runs both, which is what a full collection wants; --trace or --hbm picks one.
 ./scripts/create_nsys_profile.sh
 
 # 6. every panel and index.html, from one call
