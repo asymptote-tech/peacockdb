@@ -415,7 +415,10 @@ Rules that keep this healthy:
   log first: the `cudaErrorMemoryAllocation` failures under it are its consequence, not separate
   bugs. shad-gpu is a 143.7 GiB H200 shared with work outside this repo, so check `nvidia-smi`
   before debugging a red GPU tier ([#178](tickets.md#t178)). The budgets are H200 numbers;
-  verda-gpu has never been sized against them.
+  verda-gpu has never been sized against them. A run that sweeps a knob past its default sets
+  `PEACOCK_RMM_POOL_BYTES=<bytes>` for that run — explicit bytes, no percentage — which is also
+  the only way a non-H200 host runs these at all. `peacock_cudf_node_tests` at
+  `PEACOCK_NODES_ROWS=100000000` peaks at 17.9 GiB and dies on its declared 10 without it.
 - **Prefer verda for large CPU runs** (whole suite or big selections). It is not always
   up (the human starts it manually) — falling back to a local run is completely fine.
 - **Comparing files across hosts: use checksums, and `LC_ALL=C sort` for any listing.**
