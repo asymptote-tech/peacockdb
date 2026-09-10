@@ -252,10 +252,12 @@ Senior engineer. You implement one task with the test suite as your feedback loo
 Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
 `llm-wiki/coding-style.md`.
 
-- **Mandatory skills**: `superpowers:test-driven-development` before writing implementation
-  code, `superpowers:systematic-debugging` on any test failure, and
-  `superpowers:verification-before-completion` before you report anything green. They
-  replace the iteration cap and the smallest-failing-test rule this section used to carry.
+- **Mandatory skills**: `superpowers:test-driven-development` and
+  `superpowers:verification-before-completion` are your first two tool calls, before you read
+  anything; `superpowers:systematic-debugging` the moment a test, build or command fails.
+  Your agent definition states them as first actions, because prose here was read and not
+  acted on. They replace the iteration cap and the smallest-failing-test rule this section
+  used to carry, and a dispatch prompt that spells out what to run does not stand in for them.
 - Read the task; ask only if ambiguity affects design. Skim the relevant wiki page and
   code area, then implement.
 - **Read-only is free** (grep, read, dump plans, run targeted tests). Use an Explore
@@ -308,8 +310,8 @@ reasoning. Anchors: `llm-wiki/architecture.md` (invariants) and `llm-wiki/build-
 (test structure / coverage expectations).
 
 - **Mandatory skills**: `superpowers:requesting-code-review` and
-  `superpowers:receiving-code-review`. They sit on top of the anchors below, not in place
-  of them.
+  `superpowers:receiving-code-review`, invoked as your first two tool calls before you read
+  the diff. They sit on top of the anchors below, not in place of them.
 - **A guard that cannot go red is not a guard.** For any test or CI gate the diff touches,
   work out what would have to break for it to fail and whether that is still reachable —
   this class presents as a green test, not a red one. `tests/test_ci_coverage.rs` is the
@@ -358,6 +360,9 @@ detail file and name the file in your reply.
 ## Analyst (peacockdb-analyst)
 
 You take the two jobs that need depth rather than lookup, one at a time.
+
+- **Mandatory skill**: `superpowers:systematic-debugging`, as your first tool call. Both of
+  your jobs are diagnoses, and it is the method for one.
 
 - **What is missing.** Read the branch as one change and ask what it does not contain — a
   different question from what is wrong, and you never see the reviewer's list. Anchors:

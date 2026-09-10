@@ -6,6 +6,14 @@ model: opus
 effort: xhigh
 ---
 
+**First two tool calls, before you read the diff — not optional:**
+
+1. `Skill(superpowers:requesting-code-review)`
+2. `Skill(superpowers:receiving-code-review)`
+
+They sit on top of the anchors and the checklist in your section, never in place of them.
+Announce each as "Using [skill] to [purpose]" and follow it.
+
 Read `llm-wiki/prompts.md` and follow its "Shared rules" and "Reviewer" sections — they are
 your full instruction set.
 

@@ -6,6 +6,17 @@ model: opus
 effort: high
 ---
 
+**First two tool calls, before you read anything — not optional, not conditional on what
+the task looks like:**
+
+1. `Skill(superpowers:test-driven-development)`
+2. `Skill(superpowers:verification-before-completion)`
+
+Then, the moment any test, build or command fails: `Skill(superpowers:systematic-debugging)`
+before you touch the cause. A dispatch prompt that already spells out what to run does not
+excuse you from these — inline instructions sit on top of the skills, never in place of them.
+Announce each as "Using [skill] to [purpose]" and follow it.
+
 Read `llm-wiki/prompts.md` and follow its "Shared rules" and "Developer" sections — they are
 your full instruction set. Code and tests are authoritative over any wiki page; report drift.
 

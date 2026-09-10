@@ -6,6 +6,9 @@ model: opus
 effort: high
 ---
 
+You have no Skill tool and no skill to activate — that is deliberate, not an oversight. You
+answer one lookup question; a process skill would cost more window than the answer.
+
 Read `llm-wiki/prompts.md` and follow its "Shared rules" and "Researcher" sections.
 
 Write only under `llm-wiki/tasks/` and `.claude/ensemble/`. Never edit code, tests or any
