@@ -826,6 +826,8 @@ fn the_finish_join_reads_the_accumulated_keys_under_the_names_they_carry() {
 /// wrong rather than for the ones we thought to write down.
 #[test]
 fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
+    // The one place a component names another's subcomponent, registered in
+    // `test_module_layout.rs` and dying with the `cpu_backend` exemption that permits it.
     use crate::executor::cpu_backend::join::CpuJoin;
     use datafusion::execution::context::SessionContext;
 

@@ -1306,3 +1306,104 @@ The exemption still covers 60 bare `pub` items across seven implementation modul
 `a_components_api_is_declared_in_its_mod_rs` does not read at all. The narrowing moved it from
 91 items across 13 files to 82 across 9, or 60 once the two subcomponent `mod.rs` facades that
 test skips anyway are excluded. The same fourteen types force it, so the shape is right.
+
+## Round 2, closed
+
+### The reader, and where the register lives
+
+`only_the_parent_component_names_a_subcomponent` in `peacockdb-core/tests/test_module_layout.rs`,
+the eleventh case. Two helpers behind it. `subcomponent_paths` derives the set from the tree
+rather than listing it — a directory with a `mod.rs` that is neither a component nor a test
+module, at any depth — and returns the five there are today: `executor/{cpu_backend,driver,
+gpu_backend}` and `planner/{translator,translator/scan_mapping}`. `cross_component_reaches` then
+reads every file under `src/`, skips the subcomponents of its own component, and looks for
+`crate::<parent>::<sub>::`, reporting the deepest path only so one line is not named twice.
+
+The register is `CROSS_COMPONENT_REACHES`, a `&[CrossComponentReach { file, path, why }]` beside
+`PUB_MODULES`. One entry: `wire/tests.rs` reaching `executor/cpu_backend`. It is checked in both
+directions, like `forced_by` — an entry whose line is gone is reported, and so is a reach the
+register does not name. `wire/tests.rs:829` now carries two lines saying why it is there and that
+it dies with the `cpu_backend` exemption.
+
+What the reader buys `coding-style.md:144`: the claim is not "enforced across components" flat.
+rustc enforces it wherever a subcomponent is declared `mod`, and enforces nothing for the two
+declared `pub mod` — which is where the test takes over, with one registered exception. The
+honest wording is "the compiler enforces it except behind the `pub mod` exemption, where the
+layout test checks it and the exceptions are named".
+
+### Prose no longer satisfies an expiry
+
+`code_only` drops line comments, and both expiry readers run through it — `names_the_module` for
+the `forced_by` halves and `cross_component_reaches` for the register. A commented-out `use` held
+an exemption open from one side and a sentence about one satisfied it from the other. Line
+comments only: this crate writes no block comments, and a `//` inside a string can at worst hide
+a later match on that line, which under-reports rather than over-reports. String literals are
+still matched, which is why `files_naming` needs its `file!()` exclusion at all.
+
+### Every new and changed reader was watched red, with a control
+
+| Mutation | Result | Control |
+|---|---|---|
+| register entry pointed at `wire/mod.rs` | red both ways: the entry no longer names it, and `wire/tests.rs` names it unregistered | |
+| a second, bogus entry (`plan/mod.rs` → `executor/gpu_backend`) | red on the expiry half alone | the real entry stays silent |
+| a real `use crate::executor::cpu_backend::CpuExec;` added to `plan/mod.rs` | red naming `plan/mod.rs` | the same `use` inside `executor/mod.rs` is green — its own component |
+| the same line, commented out, in `plan/mod.rs` | green | |
+| `code_only` made the identity | red on the commented-out fixture | |
+| `code_only` made to drop the whole line | red on the `use …; // why` fixture, so it strips the comment and not the code | the nine `forced_by` entries still pass, so nothing live was stripped away |
+
+One mutation failed to build rather than to run, and the exit status caught it — the hazard this
+file already records under "A hazard met while proving the rules red".
+
+### Nits taken
+
+`pub_declarations`' angle-bracket change, which round 1 made and did not record: a `<` counted as
+an open leaves `1 << 20` two deep, so the `;` ending a `pub const` is missed and every declaration
+below it is swallowed — the guard reporting nothing while reading nothing. Only `(` and `[` nest
+now, pinned by a fixture.
+
+The `files_naming` doc claimed that counting `gpu_backend::accumulate::GpuAccumulator` for the
+parent would make the parent look forced by files that force only the child. It does traverse
+`gpu_backend` and does force that wall down. The behaviour stands and the trade is now stated:
+attributing a child's callers to the parent would let one file justify an entry it never names,
+and the cost is a stuck red when `test_gpu_executors.rs` stops naming `executor/gpu_backend`.
+
+Three comments were over their caps and are trimmed: the `PubModule` doc at 11 lines, the
+`pub_declarations` doc at 13, and a 5-line in-body comment in the sibling reader.
+
+`gpu_backend/backend.rs`, `gpu_backend/source.rs` and `cpu_backend/tests/backend.rs` were clean
+at `b0f84b5f^` and are clean again. All three are leaves, so rustfmt moved nothing below them.
+
+### Not taken, with reasons
+
+- `tests/test_cpu_end_to_end.rs` carries nine hunks of its own, but it had four at `787c1e5c` and
+  nine at `b0f84b5f^`, so the review rounds did not add them. It declares `mod common;`, so
+  formatting it reformats thirty hunks across `tests/common/`. Same shape for
+  `cpu_backend/expr_physical.rs`, which declares `mod tests;`.
+- `tests/common/corpus_gpu.rs` gained one import-order hunk from `b0f84b5f` on top of two it
+  already had, and formatting it would take all three.
+- The super-climb reader's duplicate report. The fix is one token — advance `7 * climbs` rather
+  than `7` — but it changes a reader that was watched red on a particular shape, and what is wrong
+  is a repeated line in a failure message. Not worth re-proving the reader for.
+
+### The case inventory gains exactly one line
+
+The eleventh case is a deliberate addition, so both `-final` inventories differ by its name and
+the count line above it, and by nothing else. The baselines are left as they are rather than
+re-taken, so the coordinator's reference for the next round is still the one it wrote.
+
+### Evidence
+
+| Check | Result |
+|---|---|
+| rust-only, all targets | 0 warnings |
+| default, lib+bin | 0 warnings |
+| default, all targets | 0 warnings |
+| `test_module_layout` | 11 passed |
+| `--lib` | 435 passed |
+| `test_plan_goldens` | 19 passed |
+| `test_ci_coverage` | 7 passed |
+| goldens | byte-identical, `e071580a…` |
+| case inventory, both shapes | the one new case and nothing else |
+| residue gate | the same five lines |
+| doc sentences | eleven absent, every one a comment rewritten above |
+| rustfmt | the five files this round touched are clean |

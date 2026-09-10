@@ -13,11 +13,11 @@ use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_execute_scan_rowgroups,
 };
 
+use super::GpuSource;
 use super::{last_error, produced};
 use crate::executor::GpuBatch;
 use crate::executor::{BackendError, CallStats};
 use crate::plan::GpuLoadParquet;
-use super::GpuSource;
 use crate::plan::PlanError;
 use crate::wire::{AbiSymbol, CallPattern, Input, Recipe};
 

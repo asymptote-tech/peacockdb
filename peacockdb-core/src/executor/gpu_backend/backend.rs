@@ -6,13 +6,11 @@
 
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
-
+use super::GpuSource;
 use super::accumulate::{GpuAccumulator, GpuPartitionAccumulator};
 use super::emit::GpuEmitter;
 use super::join::{GpuJoin, GpuProbingJoin};
-use super::GpuSource;
 use super::{GpuExec, GpuExport};
-use crate::executor::{GpuBackend, GpuContext};
 use crate::executor::Batch;
 use crate::executor::CpuBatch;
 use crate::executor::GpuBatch;
@@ -23,6 +21,7 @@ use crate::executor::{
     LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin, RowRange,
     SourceExecutor, SourceStep, UnloadExecutor,
 };
+use crate::executor::{GpuBackend, GpuContext};
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::per_call_join_type;

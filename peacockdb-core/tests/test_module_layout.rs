@@ -26,10 +26,9 @@ const TEST_DIRS: &[&str] = &["tests"];
 /// half the crate's remaining `pub` surface — behind an exception granted for fourteen types,
 /// and two of the eleven inner `pub mod` were forced by nothing at all.
 ///
-/// `forced_by` names the files that do the forcing, and it is verified rather than trusted:
-/// each must exist and must still name the path. That is the exemption's expiry —
-/// `test-layout.md` moves these targets into `src/`, and on the day it does this goes red and
-/// says the wall can go up.
+/// `forced_by` names the files that force it, verified rather than trusted: each must exist
+/// and must still name the path. That is the expiry — `test-layout.md` moves these targets
+/// into `src/`, and on that day this goes red and says the wall can go up.
 struct PubModule {
     path: &'static str,
     forced_by: &'static [&'static str],
@@ -88,6 +87,25 @@ const PUB_MODULES: &[PubModule] = &[
         forced_by: &["peacockdb-core/tests/test_gpu_executors/join.rs"],
     },
 ];
+
+/// A file that names a subcomponent of a component that is not its own.
+///
+/// The layout forbids it and rustc refuses it wherever the subcomponent is declared `mod`, so
+/// this can only happen behind a `PUB_MODULES` exemption. Verified in both directions like
+/// `forced_by`: an entry whose line is gone is reported, and so is a reach nothing here names.
+/// Without the first the register outlives its line; without the second it is decoration.
+struct CrossComponentReach {
+    file: &'static str,
+    path: &'static str,
+    why: &'static str,
+}
+
+const CROSS_COMPONENT_REACHES: &[CrossComponentReach] = &[CrossComponentReach {
+    file: "wire/tests.rs",
+    path: "executor/cpu_backend",
+    why: "one test builds the CPU join beside the recipe it checks, and CpuJoin is a type, so \
+          no one-line delegation in executor/mod.rs can carry it; it dies with the exemption",
+}];
 
 /// Files that legitimately carry `pub` outside a `mod.rs`: the crate root, and the shared
 /// formula module the rules name alongside `mod.rs`.
@@ -375,14 +393,14 @@ fn every_pub_mod_exemption_is_still_forced_by_what_it_names() {
 
 /// Every file outside `peacockdb-core/src` that names this module path, repo-root relative.
 ///
-/// The path exactly, not as a prefix: `gpu_backend::accumulate::GpuAccumulator` names
-/// `gpu_backend/accumulate`, and counting it for `gpu_backend` too would make the parent
-/// exemption look forced by files that force only the child.
+/// The path exactly, not as a prefix. `gpu_backend::accumulate::GpuAccumulator` does traverse
+/// `gpu_backend`, so it forces that wall down too, but it counts only for the child: letting a
+/// child's callers justify the parent would let one file justify an entry it never names. The
+/// cost is a stuck red — when `test_gpu_executors.rs` stops naming `executor/gpu_backend`, the
+/// forward half goes red and no child-naming file can re-justify the entry.
 ///
-/// Every workspace member's `src` and `tests`, not `peacockdb-core/tests` alone: what forces
-/// an exemption is any code outside the crate that names the module, and `peacockdb` already
-/// names `peacockdb_core::executor` items from `src/main.rs`. Members come from `Cargo.toml`,
-/// the same authority `test_ci_coverage.rs` reads, rather than a second hardcoded list.
+/// Every workspace member's `src` and `tests`: what forces an exemption is any code outside the
+/// crate that names the module. Members come from `Cargo.toml`, as `test_ci_coverage.rs` reads.
 fn files_naming(module: &str) -> Vec<String> {
     let root = repo_root();
     let needle = format!("peacockdb_core::{module}::");
@@ -457,6 +475,22 @@ fn workspace_members() -> Vec<String> {
     members
 }
 
+/// The text with line comments dropped, since prose is not a use of anything.
+///
+/// Both expiries read whole files, and both are two-directional, so a commented-out `use` would
+/// hold an exemption open from one side and a sentence about one would satisfy it from the
+/// other. Line comments only: this crate writes no block comments, and a `//` inside a string
+/// can at worst hide a later match on that line, which is the direction that under-reports.
+fn code_only(text: &str) -> String {
+    text.lines()
+        .map(|l| match l.find("//") {
+            Some(i) => &l[..i],
+            None => l,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Does this text name the module and then something in it, rather than a module below it?
 ///
 /// The test is "not another `::`", not "starts with a capital". A free function or a `pub
@@ -465,6 +499,7 @@ fn workspace_members() -> Vec<String> {
 /// today, so the fixtures in `each_reader_sees_the_violation_and_not_its_near_miss` are what
 /// keeps this half honest. `{` is a brace group of several names, `*` a glob.
 fn names_the_module(text: &str, needle: &str) -> bool {
+    let text = &code_only(text);
     text.match_indices(needle).any(|(i, _)| {
         let tail = &text[i + needle.len()..];
         let mut chars = tail.chars();
@@ -508,11 +543,10 @@ fn no_subcomponent_reaches_a_sibling() {
                         continue;
                     }
                     let text = read(&rel);
-                    // `super::` from `<a>/mod.rs` is the parent, so `super::<b>::` there is
-                    // the edge; every level deeper inside `<a>` takes one more `super::`.
-                    // Derived from the file's own depth rather than fixed at two: nesting is
-                    // three deep, so `scan_mapping/partition.rs` reaching `memory_estimation`
-                    // takes three and a reader that stopped at two would pass it.
+                    // `super::` from `<a>/mod.rs` is already the parent; every level deeper
+                    // inside `<a>` takes one more. Derived from the file's own depth rather
+                    // than fixed at two, since nesting is three deep and `scan_mapping/`
+                    // reaching `memory_estimation` takes three.
                     let mut needles = vec![absolute.clone()];
                     let depth = rel.components().count();
                     for climbs in 1..=depth {
@@ -566,6 +600,107 @@ fn subcomponents_by_parent() -> Vec<(String, Vec<String>)> {
     }
     out.retain(|(_, kids)| kids.len() > 1);
     out
+}
+
+/// Every subcomponent under `src/`, as its path from the crate root.
+///
+/// Derived from the tree rather than listed: a directory with a `mod.rs` that is neither a
+/// component nor a test module is a subcomponent, at whatever depth it sits.
+fn subcomponent_paths() -> Vec<String> {
+    let mut out = Vec::new();
+    for rel in sources() {
+        if rel.file_name().is_none_or(|n| n != "mod.rs") {
+            continue;
+        }
+        let Some(dir) = rel.parent() else { continue };
+        let name = dir
+            .file_name()
+            .expect("a directory name")
+            .to_string_lossy()
+            .to_string();
+        if dir.parent().is_none_or(|p| p.as_os_str().is_empty())
+            || TEST_DIRS.contains(&name.as_str())
+        {
+            continue;
+        }
+        out.push(dir.to_string_lossy().replace('\\', "/"));
+    }
+    out
+}
+
+/// Every place a component names another component's subcomponent, as (file, subcomponent).
+fn cross_component_reaches() -> Vec<(String, String)> {
+    let subs = subcomponent_paths();
+    let mut found = Vec::new();
+    for rel in sources() {
+        let Some(component) = component_of(&rel) else {
+            continue;
+        };
+        let text = code_only(&read(&rel));
+        let hits: Vec<&String> = subs
+            .iter()
+            .filter(|sub| !sub.starts_with(&format!("{component}/")))
+            .filter(|sub| text.contains(&format!("crate::{}::", sub.replace('/', "::"))))
+            .collect();
+        for sub in &hits {
+            // The deepest path only: `crate::planner::translator::scan_mapping::` contains
+            // `crate::planner::translator::`, and reporting both names one line twice.
+            if hits
+                .iter()
+                .any(|other| other.starts_with(&format!("{sub}/")))
+            {
+                continue;
+            }
+            found.push((rel.to_string_lossy().replace('\\', "/"), (*sub).clone()));
+        }
+    }
+    found
+}
+
+/// **Only the parent component's own code may use a subcomponent.** rustc enforces it wherever
+/// the subcomponent is `mod`, and stops the moment one is `pub mod` — so the nine `PUB_MODULES`
+/// entries are exactly where the claim needs a test rather than a compiler.
+///
+/// The register is the point, not the count. A reach that is merely tolerated has no expiry, so
+/// the day `forced_by` says the `cpu_backend` wall can go up, taking it up is an `E0603` on a
+/// line nobody wrote down.
+#[test]
+fn only_the_parent_component_names_a_subcomponent() {
+    let found = cross_component_reaches();
+    let mut stale = Vec::new();
+    for entry in CROSS_COMPONENT_REACHES {
+        assert!(
+            !entry.why.is_empty(),
+            "{} reaches {} for no stated reason",
+            entry.file,
+            entry.path
+        );
+        if !found
+            .iter()
+            .any(|(f, p)| f == entry.file && p == entry.path)
+        {
+            stale.push(format!(
+                "  {} no longer names {}, so the entry can go",
+                entry.file, entry.path
+            ));
+        }
+    }
+    for (file, path) in &found {
+        if !CROSS_COMPONENT_REACHES
+            .iter()
+            .any(|e| e.file == file && e.path == path)
+        {
+            stale.push(format!(
+                "  {file} names {path}, which belongs to another component"
+            ));
+        }
+    }
+    assert!(
+        stale.is_empty(),
+        "the subcomponent wall is not where the register says it is:\n{}\n\nWhat another \
+         component needs is declared in the component's own mod.rs.",
+        stale.join("\n")
+    );
 }
 
 /// How many `super::`s a file can use before it leaves its own component.
@@ -673,16 +808,13 @@ fn no_public_signature_names_a_type_from_a_private_module() {
 /// Every `pub` item's declaration — from the `pub` to the `{` or `;` that ends the signature —
 /// with the line it starts on.
 ///
-/// The whole signature, not its first line: rustfmt wraps a signature past 100 columns, and
-/// fourteen `pub fn` in this crate's `mod.rs` files span several lines, `executor::run` and
-/// `planner::plan` among them. A reader that matched one line could not see a parameter or a
-/// return type, which for this rule is most of what a signature is.
+/// The whole signature, not its first line: rustfmt wraps past 100 columns, and fourteen
+/// `pub fn` in this crate's `mod.rs` files span several lines, `executor::run` among them. A
+/// reader matching one line could not see a parameter or a return type.
 ///
-/// Only `(` and `[` nest. `<` and `>` deliberately do not: a shift in a `pub const` — `1 << 20`
-/// — reads as two opens that never close, so the terminating `;` sits at depth 2 and the
-/// accumulator runs on, swallowing every `pub` item after it and reporting none of them. `;`
-/// and `{` cannot appear inside `<…>` in any signature this crate writes, so tracking angle
-/// brackets bought nothing and cost that. `[` still nests, for `[u8; 4]`.
+/// Only `(` and `[` nest. A `<` counted as an open leaves `1 << 20` two deep, so the `;` that
+/// should end a `pub const` is missed and every declaration below it is swallowed. Nothing in
+/// this crate's signatures puts `;` or `{` inside `<…>`, so angle brackets buy nothing.
 fn pub_declarations(text: &str) -> Vec<(usize, String)> {
     let lines: Vec<&str> = text.lines().collect();
     let mut out = Vec::new();
@@ -945,6 +1077,14 @@ fn each_reader_sees_the_violation_and_not_its_near_miss() {
         ),
         "a deeper module segment forces the child, not this one"
     );
+    assert!(
+        !names_the_module("// use peacockdb_core::executor::cpu_backend::CpuExec;", n),
+        "a commented-out use holds no wall down, so it must not hold an exemption open"
+    );
+    assert!(names_the_module(
+        "use peacockdb_core::executor::cpu_backend::CpuExec; // why",
+        n
+    ));
 
     // Those fixtures make this file itself a match, which is what makes the `file!()`
     // exclusion in `files_naming` load-bearing rather than decorative. Matched on the file
