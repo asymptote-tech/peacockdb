@@ -210,21 +210,21 @@ Three layers, and only the first is discipline.
   still be wrong: a `#[cfg(test)]` attribute anywhere other than on a test-module declaration —
   which is how test code creeps back into a production file one item at a time — `coding-style.md`
   now says why the attribute cannot double as a `dead_code` silencer, and roughly twenty item-level
-  uses across seven files answer to that, not the four this spec once named. `planner::translate`
-  and `executor::physical_expr` are the documented pair, and both are **kept**: they are production
-  entry points whose only callers are tests, so they lose the `cfg` and carry `#[allow(dead_code)]`
-  with the reason written at the site. `translate` earns it because the shipping path cannot
-  substitute — its doc says it hands back a tree "without the pipeline around it: no validation, no
-  null analysis and no memory model", which is what a test asserting on an unvalidated tree needs
-  and what `plan()` will never return; the pipeline cannot call it either, since it builds a
-  `Translator` with `small_table_bytes` and source targets and runs it twice, seeding the second
-  pass from the first. **The chain collapses to one item**: `planner::translate` calls
-  `Translator::new(..).translate(plan)` directly and `translator::translate`, itself `cfg(test)`
-  and called only from here, is deleted — twelve lines out, one allowance instead of two. A parent
-  naming its own subcomponent's type is what the layout already sanctions. `physical_expr` earns it because a test in `plan`
-  cannot name `cpu_backend`'s internals, which is the same wall the rest of this task raises. The
-  difference from the `cfg` is the point: the item stays compiled and type-checked in a release
-  build, so it cannot rot unnoticed; only the warning goes. A name and a
+  uses across seven files answer to that, not the four this spec once named. `planner::translate`,
+  `planner::translate_expr` and `executor::physical_expr` are the documented set, and they are
+  **test helpers, not production items**: each exists to hand one test in one other component a
+  fact it cannot reach itself. They keep `#[cfg(test)]` and stay in their component's `mod.rs`,
+  because visibility pins them there — a helper must name what its own component owns while its
+  caller is elsewhere, so the two can never sit together. That is the one carve-out to "a
+  test-only path carries `test` in its name", and `coding-style.md` now states it. Each has
+  exactly one caller today and each doc comment must name it; `translate`'s says "three of them,
+  in two other components" and is already wrong, which is why the layout test reads the comment
+  and the callers together rather than trusting either. **The chain still collapses**:
+  `planner::translate` calls `Translator::new(..).translate(plan)` directly and
+  `translator::translate` — `cfg(test)` too, and called only from here — is deleted, twelve lines
+  out. What those fifteen lines buy is `plan_text/tests.rs` entire: 236 lines checking the
+  renderer against what the planner emits from real SQL, which neither `plan()` nor a hand-built
+  tree can stand in for. A name and a
   gate that disagree at either rung — `ffi_tests` without `not(rust-only)`, `gpu_tests` without `gpu`,
   or either gate on a module named `tests` — since the runs select by path and a mismatch either
   loses a case or drags it onto the wrong host; `driver/partitioned.rs` carries four

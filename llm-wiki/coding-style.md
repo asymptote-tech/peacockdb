@@ -45,13 +45,21 @@
   script still exits non-zero.
 - **No defensive code for impossible scenarios**; trust internal invariants and framework
   guarantees. No fallbacks or feature flags the task didn't ask for.
-- **`#[cfg(test)]` marks test code, and nothing else.** It means "compile this only when the
-  crate is built as a test", so it belongs on a test module and on the fixtures and helpers
-  inside one. It is not a way to silence `dead_code` on production code whose only caller today
-  is a test: an item behind it is invisible to a release build, so it is never type-checked
-  against a change made for shipping code and rots without a word. Such an item is `pub(crate)`
-  like any other, and the warning is the honest signal that nothing ships it — answer it with a
-  caller, with deletion, or with `#[allow(dead_code)]` and the reason at the site.
+- **`#[cfg(test)]` marks test code, and test code is what exists to serve tests** — whether or
+  not it contains an assertion. A one-line wrapper that hands a test an object it could not
+  otherwise reach is test code; being compiled only in a test build is exactly right for it,
+  since a test build is the only build that can matter to it.
+- **A test-only entry point may sit in a component's `mod.rs`, and nowhere else in `src/`.**
+  Test code otherwise lives in a path carrying `test`, but a cross-component helper cannot: it
+  must name what its own component owns, while its caller is in another component, so the two
+  can never sit together. Declare it in the facade like anything else that crosses a boundary,
+  and let its doc name the test that needs it — that comment is the only register there is, and
+  a stale one is how the set grows without anyone deciding to grow it.
+- **What `#[cfg(test)]` is not is a way to quiet `dead_code` on production code.** An item behind
+  it is absent from a release build, so it is never type-checked against a change made for
+  shipping code. A production item that nothing ships yet stays `pub(crate)` and keeps its
+  warning, which is the honest signal — answer that with a caller, with deletion, or with
+  `#[allow(dead_code)]` and the reason at the site.
 - **A bug the review finds ships with a regression test**, red before the fix — a defect proved
   only by the reader who found it is one the next refactor is free to restore.
 - **No scope-creep refactors**: a bug fix doesn't need surrounding cleanup.

@@ -315,15 +315,23 @@ yet.
 
 - [ ] **Step 3: Answer the item-level gates, and there are about twenty, not four**
 
-Two kinds, and they part different ways. **Test code hiding in a production file** — fixtures and
-helpers, `executor/driver/partitioned.rs`'s four among them — moves into the `mod tests` that uses
-it. **A production entry point whose only caller is a test** — `planner::translate` — which absorbs
-`translator::translate` and deletes it, since that one is `cfg(test)` too and has no other caller —
-`executor::physical_expr`, and whatever else the guard names in `planner/mod.rs`,
-`planner/translator/mod.rs`, `cpu_backend/mod.rs` and `plan/mod.rs` — loses the `cfg`, stays
-`pub(crate)`, and takes `#[allow(dead_code)]` with the reason at the site: which test needs it and
-why the shipping path cannot serve. It then stays compiled and type-checked in a release build,
-which is the whole difference from the attribute it drops.
+Two kinds, and they part different ways.
+
+**Test code in an implementation file** — fixtures and helpers, `executor/driver/partitioned.rs`'s
+four among them — moves into the `mod tests` that uses it. Nothing pins it where it is.
+
+**A cross-component test entry point** — `planner::translate`, `planner::translate_expr`,
+`executor::physical_expr`, and whatever else the guard names in `planner/translator/mod.rs`,
+`cpu_backend/mod.rs` and `plan/mod.rs` — **stays exactly where it is, with its `cfg(test)`**. It is
+test code, and visibility pins it to that `mod.rs`: it must name what its own component owns while
+its caller is in another. Teach the layout test the carve-out rather than moving them, and make it
+read the doc comment too: the comment names the test that needs it, and a comment naming callers
+that no longer exist is how this set grows unnoticed. `translate`'s comment is already wrong — it
+claims three callers in two components and has one.
+
+While you are there, collapse `planner::translate` into `Translator::new(..).translate(plan)` and
+delete `translator::translate`, which is `cfg(test)` as well and called only from here. Twelve
+lines out, one helper instead of two.
 
 Re-run: all five assertions pass, and `cargo build --features rust-only -p peacockdb-core` reports
 no new warnings against Task 1's baseline.
