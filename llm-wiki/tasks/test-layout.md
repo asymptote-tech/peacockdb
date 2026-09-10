@@ -485,7 +485,7 @@ compile of the DataFusion stack, and the cache-thrash rule in `build-test.md` is
 
 **Two counts, and only one of them is this task's.** Bare `pub` in `src/` is a raw number in the
 hundreds — 249 measured after task 2 — and it stays there, because most of those items are `pub`
-for no reason anyone can name and demoting them is [`test-support.md`](test-support.md)'s subject.
+for no reason anyone can name and demoting them is [`visibility.md`](visibility.md)'s subject.
 What this task ends is `pub` **that an external consumer forces**, and that count reaches eight.
 
 Sixteen items are `pub` for a reason at the end of this task, in six files: the CLI's eight, plus `GpuNode` and `validate`
@@ -515,7 +515,8 @@ of them back down.
 - **`coding-style.md`'s visibility section is amended, not rewritten**: the previous task states
   the rules, this one records what this task settled — the exemption register empty, `pub mod` down
   to six, and eight items still `pub` because a test crate forces them, which
-  [`test-support.md`](test-support.md) then removes along with the rest of the raw count. The
+  [`test-support.md`](test-support.md) unforces and [`visibility.md`](visibility.md) then removes
+  along with the rest of the raw count. The
   `test_support` signature rule belongs to [`test-support.md`](test-support.md), which is where
   the corpus facade makes it load-bearing; the feature itself arrives here.
 - **`architecture.md`** needs the Execution section's driver and accountant paths, the wire-format

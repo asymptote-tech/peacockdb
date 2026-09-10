@@ -71,8 +71,15 @@ its own pass over the same files.
 
 ### 5. [`test-support.md`](test-support.md) — state: blocked(approved to build)
 
-The last eight — `GpuNode`, `validate`, `RunReport`, `render_run`, `GpuBackend`, `GpuContext`,
-`RecipePlan`, `attach_recipes` — exist for the two corpus targets that deliberately stay external,
-through the harness they share. Removing them leaves `peacockdb-core` exposing exactly what the CLI
-needs. Those two targets stay outside because they are the genuine end-to-end tier, 456 cases, and
-two binaries are what keeps `inventory`'s one-binary-per-engine property.
+The corpus harness — 698 lines — joins the helpers task 4 put in `src/test_support/`, and the two
+corpus binaries reach it through three functions whose signatures carry no engine type. That is
+what stops the last eight items needing `pub`. Small and semantic on purpose: it is a diff a
+reviewer reads line by line, so it does not share a branch with task 6's three hundred one-word
+demotions.
+
+### 6. [`visibility.md`](visibility.md) — state: blocked(approved to build)
+
+174 bare `pub` items become eight, `unreachable_pub` goes on to keep them there, both exemption
+registers are deleted and `coding-style.md`'s Visibility section stops carrying an exemption at
+all. It is also the sweep: the formatting hunks, comment wording and guard fixes that tasks 1-3
+deferred without naming a task.
