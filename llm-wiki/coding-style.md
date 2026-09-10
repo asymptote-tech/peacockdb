@@ -45,6 +45,13 @@
   script still exits non-zero.
 - **No defensive code for impossible scenarios**; trust internal invariants and framework
   guarantees. No fallbacks or feature flags the task didn't ask for.
+- **`#[cfg(test)]` marks test code, and nothing else.** It means "compile this only when the
+  crate is built as a test", so it belongs on a test module and on the fixtures and helpers
+  inside one. It is not a way to silence `dead_code` on production code whose only caller today
+  is a test: an item behind it is invisible to a release build, so it is never type-checked
+  against a change made for shipping code and rots without a word. Such an item is `pub(crate)`
+  like any other, and the warning is the honest signal that nothing ships it — answer it with a
+  caller, with deletion, or with `#[allow(dead_code)]` and the reason at the site.
 - **A bug the review finds ships with a regression test**, red before the fix — a defect proved
   only by the reader who found it is one the next refactor is free to restore.
 - **No scope-creep refactors**: a bug fix doesn't need surrounding cleanup.

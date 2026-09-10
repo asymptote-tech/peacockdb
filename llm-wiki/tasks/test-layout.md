@@ -208,8 +208,13 @@ Three layers, and only the first is discipline.
   lint. That is the guarantee: it is the compiler, not a convention.
 - **The layout test checks the shape**, because three things the compiler is happy with would
   still be wrong: a `#[cfg(test)]` attribute anywhere other than on a test-module declaration —
-  which is how test code creeps back into a production file one item at a time; a name and a gate
-  that disagree at either rung — `ffi_tests` without `not(rust-only)`, `gpu_tests` without `gpu`,
+  which is how test code creeps back into a production file one item at a time — `coding-style.md`
+  now says why the attribute cannot double as a `dead_code` silencer, and roughly twenty item-level
+  uses across seven files answer to that, not the four this spec once named. `planner::translate`
+  and `executor::physical_expr` are the documented pair: production entry points with only test
+  callers, which become plain `pub(crate)` and carry `#[allow(dead_code)]` with the reason, since a
+  test in `plan_text` cannot reach `planner::translator` and that is why they exist. A name and a
+  gate that disagree at either rung — `ffi_tests` without `not(rust-only)`, `gpu_tests` without `gpu`,
   or either gate on a module named `tests` — since the runs select by path and a mismatch either
   loses a case or drags it onto the wrong host; `driver/partitioned.rs` carries four
   item-level `#[cfg(test)]` attributes today (lines 670, 675, 680, 685); they are the first
