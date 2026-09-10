@@ -76,7 +76,7 @@ pub fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, PlanErro
         )));
     }
     // Where the estimated constants alone exhaust the budget, batches are sized against the
-    // ones we know and the enforcer owns the rest.
+    // ones we know and the accountant owns the rest.
     let remainder = budget
         .checked_sub(accumulator_bytes)
         .filter(|left| *left > 0)

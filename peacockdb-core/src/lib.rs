@@ -1,7 +1,9 @@
 pub mod batch_partitioned;
 pub mod config;
+pub mod executor;
 pub mod gpu_rowgroup_prune;
 pub mod memory;
+pub mod plan_text;
 #[allow(unused_imports, dead_code, clippy::all)]
 pub mod generated {
     pub mod gpu_plan_generated {

@@ -10,7 +10,7 @@
 use super::*;
 
 use datafusion::common::JoinType;
-use peacockdb_core::batch_partitioned::backend::Backend;
+use peacockdb_core::executor::Backend;
 use peacockdb_core::batch_partitioned::gpu_backend::backend::{GpuBackend, GpuContext};
 use peacockdb_core::batch_partitioned::nodes::{
     ExecutorCategory, GpuAccumulateBatchesAndSort, GpuEmitPartitions, GpuHashJoin, GpuUnload,

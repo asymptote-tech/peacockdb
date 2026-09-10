@@ -33,7 +33,7 @@ impl RowInterval {
     /// Which rows of the next batch are wanted, or `None` to release it uncalled. `seen`
     /// is how many rows of the stream have already gone past this node, which is a count
     /// across lanes and therefore the driver's rather than an executor's.
-    pub fn range_of(&self, seen: u64, n_rows: u64) -> Option<super::executor::RowRange> {
+    pub fn range_of(&self, seen: u64, n_rows: u64) -> Option<crate::executor::RowRange> {
         let start = self.skip.saturating_sub(seen);
         let stop = match self.stop() {
             Some(stop) => n_rows.min(stop.saturating_sub(seen)),
@@ -41,7 +41,7 @@ impl RowInterval {
         };
         // `then`, not `then_some`: the subtraction is the answer only when it is in range,
         // and an eager argument underflows on every batch of the skip prefix.
-        (start < stop).then(|| super::executor::RowRange {
+        (start < stop).then(|| crate::executor::RowRange {
             offset: start,
             length: stop - start,
         })

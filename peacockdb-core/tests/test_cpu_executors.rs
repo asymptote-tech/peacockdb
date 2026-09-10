@@ -16,7 +16,7 @@ use datafusion::common::ScalarValue;
 use datafusion::execution::TaskContext;
 use datafusion::execution::context::SessionContext;
 
-use peacockdb_core::batch_partitioned::CpuBatch;
+use peacockdb_core::executor::CpuBatch;
 use peacockdb_core::batch_partitioned::aggregates::{AggCall, PlanAgg};
 use peacockdb_core::batch_partitioned::cpu_backend::CpuExec;
 use peacockdb_core::batch_partitioned::cpu_backend::accumulate::CpuAccumulator;

@@ -6,8 +6,8 @@
 - **Small files:** under 1000 lines. Split by responsibility (`batch_partitioned/nodes/`,
   one file per node family, and `batch_partitioned/cpu_backend/` are the pattern).
 - **Interfaces/traits in separate files** from their implementations
-  (`batch_partitioned/executor.rs`, `batch_partitioned/node.rs` and
-  `batch_partitioned/backend.rs` are the models).
+  (`executor/mod.rs` declares the seven category traits and `Backend`; the batch types are
+  implemented in `executor/{cpu_batch,gpu_batch}.rs`).
 - **Short functions:** under 150 lines in most cases.
 - **Comments say *why*, briefly.** Only non-obvious constraints, invariants, and gotchas —
   never what the next line does, never process history. If a comment documents an

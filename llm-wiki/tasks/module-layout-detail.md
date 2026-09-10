@@ -183,3 +183,97 @@ belongs before each dispatch.
 `Permission denied (publickey)`: the box was reprovisioned and our key is not on it. Falling
 back to local CPU runs, which that page says is fine. The human has to re-key verda before
 any dispatch can use it.
+
+### Slice 3 — `plan_text` and `executor` (with `driver` inside it)
+
+Ready to commit. No golden moved, the case inventory is identical in both shapes, and all three
+builds are clean at zero warnings.
+
+#### What the slice contains, and why it is bigger than "move `driver/`"
+
+`driver` cannot become `executor/driver` without an `executor/mod.rs` for it to hang from, and
+what has to be declared there pulls the rest of the component in with it. So the slice moves the
+whole of `executor/` except `cpu_backend/` and `gpu_backend/`, which are the backends slice.
+`batch_partitioned/{executor,backend,batch,cpu_batch,gpu_batch,forwarder}.rs` are gone: their
+declarations are in `executor/mod.rs` and their trait impls in implementation modules beside it.
+`error.rs` is split as the spec's table says — `RunError` and `When` to `executor/mod.rs`,
+`PlanError` left behind until the `plan` slice.
+
+#### `PlanIndex` being component API drags three more types up with it
+
+The spec puts `RunReport`, `PlanIndex` and `ROOT` in `executor/mod.rs` because `plan_text/run_text.rs`
+walks the report through the driver's own index. `PlanIndex` has `pub` fields typed `IndexedNode`
+and `PlanShape`, and `PlanShape` has a `Vec<JoinShape>`, so all three have to be declared in
+`executor/mod.rs` too — a parent cannot name a type that lives inside a private child module.
+`JoinShape` and `PlanShape` are the scheduler's vocabulary and read oddly at the component's
+surface. The alternative is to stop `run_text` using `PlanIndex`, which is an API redesign this
+task is not allowed to make. Recorded rather than fixed.
+
+#### The one-expression rule costs four delegations
+
+`mod.rs` bodies are one expression, so the four inherent methods whose bodies are two statements
+delegate to a free function in an implementation module: `RowRange::clamp` → `row_range::clamp`,
+`GpuBatch::consume` → `gpu_batch::consume`, `PlanIndex::build` → `driver::build_index` →
+`index::build`, `PlanIndex::slot` → `driver::slot_of` → `index::slot`. The last two are two hops
+because `driver` is a subcomponent: `executor/mod.rs` may only reach it through `driver/mod.rs`.
+
+#### Visibility levels are preserved, and narrowing is a separate pass
+
+Every item keeps the level it had, except `pub(super)` → `pub(crate)` (45 sites in
+`driver/{mock,plans}.rs`) and the 30 `pub use` that are inlined. The spec's "54 items lose `pub`"
+is deliberately **not** done per slice: `Forwarder` is one of the 54 and appears in `pub enum
+NodeExecutors`, so narrowing it alone raises `private_interfaces` against a zero-warning baseline.
+It wants one pass over the whole crate once every component has moved. Left undone at the end of
+the task this would be a gap, so it is listed here as owed work.
+
+#### rustfmt on a `mod.rs` reformats the whole component
+
+`coding-style.md` already says a `mod.rs` is not one file for formatting. Method used instead: copy
+`src/` to a scratch tree, run rustfmt there, and take the result wholesale only for the files this
+slice authored, and only the leading `use` run for files where nothing but imports changed. The
+alternative — formatting the tree — reformats `fb_text.rs` and `recipes.rs` bodies that predate the
+installed rustfmt, which would both bury the diff and break rename detection.
+
+#### Rename detection has to be done by hand here
+
+`git diff -M --summary` cannot report a rename whose new path is untracked, and staging to make it
+visible would mutate the index. A similarity pass over (deleted, untracked) pairs stands in: every
+moved file scores 0.65 or better against its new path. The three that pair with nothing —
+`backend.rs`, `batch.rs`, `executor.rs` — are the files whose declarations folded into
+`executor/mod.rs`, which is the intended shape and not a rewrite.
+
+#### `ResidentAccountant` has its name back
+
+"the enforcer" and "resident enforcer" are gone from `architecture.md` (6), `tickets.md` (2) and
+five code comments. `llm-wiki/archive/` keeps them: it records what things were called at the time.
+
+#### The trap the rust-only build cannot see
+
+`test_gpu_abi.rs` named `batch_partitioned::GpuBatch` and `executor/mod.rs` kept a
+`ManuallyDrop` import that only the cudf shape compiles. Both were invisible to a green rust-only
+build and both were caught by shape 3 — which is the spec's reason for insisting on three builds.
+
+#### Evidence
+
+| Check | Result |
+|---|---|
+| `--lib` | 437 passed |
+| `test_plan_goldens` | 19 passed |
+| `test_cpu_corpus` | 448 passed |
+| `test_cpu_end_to_end` | 24 passed, 2 ignored |
+| `test_ci_coverage` / `test_corpus_goldens` / `test_cost_model` / `test_golden_format` | 7 / 20 / 3 / 24 passed |
+| `test_layout_injection` / `test_null_analysis` / `test_planner_join_{capability,refusals}` / `test_cpu_executors` | 4 / 8 / 13 / 10 / 1 passed |
+| three builds | 0 warnings each |
+| goldens | byte-identical to `goldens-after-rename.sha256` |
+| case inventory, both shapes | identical |
+| residue gate | the same seven lines |
+| `pub use` / `pub(super)` in `executor/` and `plan_text/` | none; 18 and 35 remain, all in components not yet moved |
+
+Visibility snapshot for the next slice: `visibility-after-slice3.txt`,
+`visibility-items-after-slice3.txt`.
+
+#### The parquet root, again
+
+Every golden-driven run needs `PEACOCK_TESTDATA_DIR` pointed at the scratch symlink root described
+under slice 2 — this worktree has no `testdata/tpch.sf1`. verda is unreachable this run (its host
+key changed and the box no longer takes our key), so all of the above ran locally.

@@ -36,9 +36,9 @@ use datafusion::physical_plan::sorts::sort::SortExec;
 use single_node::execute_single_node;
 
 use super::aggregates::{AggCall, PlanAgg};
-use super::cpu_batch::CpuBatch;
+use crate::executor::CpuBatch;
 use super::error::PlanError;
-use super::executor::{BackendError, CallResult, CallStats, RowRange};
+use crate::executor::{BackendError, CallResult, CallStats, RowRange};
 use super::expr_physical::{physical_expr, physical_projection};
 use super::layout::ColumnOrder;
 use super::node::GpuNode;

@@ -1,0 +1,140 @@
+//! Flow, backpressure, limits and accounting, over the mock backend.
+//!
+//! Every case asserts on calls — pull counts, queue bounds, batch release, the trace —
+//! rather than on the rows that came back: a limit test that checks the rows passes just
+//! as well when the whole input was read and thrown away.
+
+mod budget;
+mod counts;
+mod failure;
+mod flow;
+mod instrument;
+mod limit;
+mod memory;
+mod render;
+mod stress;
+mod wiring;
+
+use super::StepError;
+use super::mock::{Mock, Script};
+use super::partitioned::Driver;
+use crate::batch_partitioned::node::GpuNode;
+use crate::executor::{CallKind, PlanIndex, RunError, RunReport, TraceEvent};
+
+/// Run to completion under no budget, which is what most flow cases want.
+fn run(root: &dyn GpuNode, script: &Script) -> RunReport {
+    run_with(root, script, None).expect("the plan runs")
+}
+
+fn run_with(
+    root: &dyn GpuNode,
+    script: &Script,
+    budget: Option<usize>,
+) -> Result<RunReport, RunError> {
+    // Construction can refuse — the planner's canonical form is checked there — so this
+    // propagates rather than unwrapping, which is what the refusal case asserts on.
+    Driver::<Mock>::new(root, script, budget)?.run(10_000)
+}
+
+fn driver<'a>(root: &'a dyn GpuNode, script: &'a Script) -> Driver<'a, Mock> {
+    driver_with(root, script, None)
+}
+
+fn driver_with<'a>(
+    root: &'a dyn GpuNode,
+    script: &'a Script,
+    budget: Option<usize>,
+) -> Driver<'a, Mock> {
+    let mut driver = Driver::<Mock>::new(root, script, budget).expect("the plan indexes");
+    driver.seed();
+    driver
+}
+
+/// Drive to the failure, and report what the driver had recorded when it stopped — which
+/// is how a refused call is told from one that ran and failed.
+fn last_call_before_failing(driver: &mut Driver<'_, Mock>) -> Option<CallKind> {
+    loop {
+        match driver.step() {
+            Ok(true) => continue,
+            Ok(false) => panic!("the run ended without failing"),
+            Err(_) => return driver.last_call(),
+        }
+    }
+}
+
+fn calls(report: &RunReport, kind: CallKind) -> Vec<&TraceEvent> {
+    report
+        .trace
+        .iter()
+        .filter(|event| event.call == kind)
+        .collect()
+}
+
+fn count(report: &RunReport, kind: CallKind) -> usize {
+    calls(report, kind).len()
+}
+
+fn rows_returned(report: &RunReport) -> usize {
+    report
+        .batches
+        .iter()
+        .map(|batch| batch.record_batch().num_rows())
+        .sum()
+}
+
+/// Every run that finished has to have released what it held, and a peak of zero means the
+/// accountant watched nothing.
+fn assert_accounted(report: &RunReport) {
+    assert_eq!(
+        report.in_flight_bytes, 0,
+        "a batch was held and never released"
+    );
+    // The bytes balancing is not the counts balancing: a release of nothing subtracts
+    // nothing and still counts, which is how a cross-lane accumulator's lane-done events
+    // made these disagree with the invariant the report states.
+    assert_eq!(
+        report.holds, report.releases,
+        "{} batches held and {} released",
+        report.holds, report.releases
+    );
+    assert!(
+        report.peak_bytes > 0,
+        "a run that peaked at zero observed nothing"
+    );
+}
+
+/// The conservation law, lane for lane: every row a node emitted was taken by its parent or
+/// left standing by an early exit, and a row in neither vanished. That is a defect no
+/// inequality can see, which is why it sits beside `in_flight_bytes` returning to zero and
+/// `holds == releases` rather than in place of them. The tree is walked through the index
+/// the report is addressed by, so nothing here re-derives a child list.
+fn assert_conserved(root: &dyn GpuNode, report: &RunReport) {
+    let index = PlanIndex::build(root).expect("the tree the run was made over indexes");
+    for (node, indexed) in index.nodes.iter().enumerate() {
+        for (slot, child) in indexed.children.iter().enumerate() {
+            for lane in 0..report.lanes_of[*child] {
+                let emitted: u64 = report.emitted[*child][lane]
+                    .iter()
+                    .map(|batch| batch.rows)
+                    .sum();
+                assert_eq!(
+                    report.consumed[node][slot][lane] + report.abandoned[*child][lane],
+                    emitted,
+                    "{} slot {slot} lane {lane}: against {}",
+                    indexed.node.name(),
+                    index.nodes[*child].node.name()
+                );
+            }
+        }
+    }
+}
+
+fn protocol_error(result: Result<RunReport, RunError>, mentions: &str) {
+    match result {
+        Err(RunError::Protocol(said)) => assert!(
+            said.contains(mentions),
+            "the protocol error says the wrong thing: {said}"
+        ),
+        other => panic!("expected a protocol error naming {mentions:?}, got {other:?}"),
+    }
+}

@@ -16,9 +16,9 @@ use datafusion::parquet::arrow::arrow_reader::{
     ArrowReaderMetadata, ArrowReaderOptions, ParquetRecordBatchReaderBuilder,
 };
 
-use super::super::cpu_batch::CpuBatch;
+use crate::executor::CpuBatch;
 use super::super::error::PlanError;
-use super::super::executor::{BackendError, CallStats};
+use crate::executor::{BackendError, CallStats};
 use super::super::nodes::GpuLoadParquet;
 
 /// A lane's reads, in the order the mapping named them.

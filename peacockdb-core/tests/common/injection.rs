@@ -17,7 +17,7 @@ use datafusion::execution::TaskContext;
 use datafusion::execution::context::SessionContext;
 
 use peacockdb_core::batch_partitioned::GpuNode;
-use peacockdb_core::batch_partitioned::backend::{Backend, NodeExecutors};
+use peacockdb_core::executor::{Backend, NodeExecutors};
 use peacockdb_core::batch_partitioned::cpu_backend::accumulate::{
     CpuAccumulator, CpuPartitionAccumulator,
 };
@@ -26,9 +26,9 @@ use peacockdb_core::batch_partitioned::cpu_backend::emit::CpuEmitter;
 use peacockdb_core::batch_partitioned::cpu_backend::join::{CpuJoin, CpuProbingJoin};
 use peacockdb_core::batch_partitioned::cpu_backend::source::CpuSource;
 use peacockdb_core::batch_partitioned::cpu_backend::{CpuExec, CpuUnload};
-use peacockdb_core::batch_partitioned::cpu_batch::CpuBatch;
+use peacockdb_core::executor::CpuBatch;
 use peacockdb_core::batch_partitioned::error::PlanError;
-use peacockdb_core::batch_partitioned::executor::{
+use peacockdb_core::executor::{
     BackendError, BatchAccumulatorExecutor, CallResult, CallStats, ExecExecutor, Executor,
     JoinExecutor, LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin,
     RowRange, SourceExecutor, SourceStep, UnloadExecutor,

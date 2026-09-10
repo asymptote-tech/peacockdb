@@ -6,11 +6,11 @@
 //! is asked here instead.
 
 use super::*;
-use crate::batch_partitioned::backend::Backend;
+use crate::executor::Backend;
 use crate::batch_partitioned::cpu_backend::accumulate::CpuAccumulator;
 use crate::batch_partitioned::cpu_backend::backend::CpuBackend;
 use crate::batch_partitioned::cpu_backend::join::CpuJoin;
-use crate::batch_partitioned::executor::Executor;
+use crate::executor::Executor;
 use crate::batch_partitioned::layout::{ColumnOrder, PartitionLayout};
 use crate::batch_partitioned::node::RowInterval;
 use crate::batch_partitioned::nodes::join::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
@@ -277,7 +277,7 @@ fn every_node_kind_builds_the_executor_its_category_names() {
     }
 }
 
-/// The enforcer reads `scratch_bytes` BEFORE the call, so a transient charged for a read
+/// The accountant reads `scratch_bytes` BEFORE the call, so a transient charged for a read
 /// that never happens refuses a query that fits. The build-side semi family's probe call
 /// is the key project alone — it does not touch the build side — and this charged it
 /// anyway until the review found it.

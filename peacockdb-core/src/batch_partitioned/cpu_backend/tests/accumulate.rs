@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::batch_partitioned::cpu_backend::accumulate::{CpuAccumulator, CpuPartitionAccumulator};
-use crate::batch_partitioned::executor::LaneEvent;
+use crate::executor::LaneEvent;
 use crate::batch_partitioned::node::RowInterval;
 use crate::batch_partitioned::nodes::{
     GpuAccumulateBatchesAndSort, GpuAggregateBatches, GpuCoalesceAllBatches, GpuLimit,

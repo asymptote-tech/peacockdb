@@ -614,7 +614,7 @@ throws all but one number away. Keep it, as a tree shaped like the plan, one est
 
 `ParquetBatchPartitioner` emits it beside the row-group mapping. Nothing in the plan's
 executability depends on it, but a wrong estimate is not free: too low and the query dies at the
-enforcer's `scratch_bytes` pre-check, or as a cuda OOM below that. Neither is a wrong answer,
+accountant's `scratch_bytes` pre-check, or as a cuda OOM below that. Neither is a wrong answer,
 and #142 handles both gracefully later; a better estimate makes fewer queries reach either. Two
 consumers, neither existing yet. **Placement** moves subtrees onto the CPU where the GPU cannot
 hold them — the `Backend` trait already makes that a matter of choosing per node. **Refinement
@@ -679,7 +679,7 @@ planner refuses the shape at plan time.
 ### #142 — no recourse for oversized batches
 Nothing downstream of the loader can split a batch: minimum load granularity is one row
 group, `GpuCoalesceAllBatches` before a join build side can exceed any budget, and the
-planner deliberately still produces a plan — `driver/accounting.rs` then trips at run time and
+planner deliberately still produces a plan — `executor/driver/accounting.rs` then trips at run time and
 the query dies cleanly. Recourse options, deferred until better estimators and adaptive execution: a split
 operator (needs a C++ slice-to-handles entry point), or adaptive replanning on trip (re-plan
 with more partitions or smaller batches) — the second being the only one that would make a trip

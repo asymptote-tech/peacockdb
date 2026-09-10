@@ -16,7 +16,7 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::ipc::reader::StreamReader;
 use datafusion::common::JoinType;
 
-use peacockdb_core::batch_partitioned::forwarder::{BatchForwarder, forwarder_for};
+use peacockdb_core::executor::{BatchForwarder, forwarder_for};
 use peacockdb_core::batch_partitioned::node::GpuNode;
 use peacockdb_core::batch_partitioned::nodes::{NodeRef, as_node_ref};
 use peacockdb_core::batch_partitioned::plan::{BatchSizing, PlanKnobs, plan_batch_partitioned};

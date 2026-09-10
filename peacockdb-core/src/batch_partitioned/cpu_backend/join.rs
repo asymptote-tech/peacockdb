@@ -23,9 +23,9 @@ use datafusion::physical_plan::joins::{
 };
 use datafusion::physical_plan::projection::ProjectionExec;
 
-use super::super::cpu_batch::CpuBatch;
+use crate::executor::CpuBatch;
 use super::super::error::PlanError;
-use super::super::executor::{BackendError, CallResult, CallStats};
+use crate::executor::{BackendError, CallResult, CallStats};
 use super::super::expr_physical::physical_expr;
 use super::super::node::GpuNode;
 use super::super::nodes::join::{

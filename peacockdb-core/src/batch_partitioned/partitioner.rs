@@ -38,7 +38,7 @@ pub enum Batching {
 /// Contiguous chunks balanced by row count; within a chunk, consecutive row groups pack
 /// greedily while bytes stay under target. A row group over target is still its own
 /// batch — one row group is the minimum granularity, and the planner always emits a plan
-/// (the enforcer owns the runtime consequence, #142). Contiguity is policy, not a cuDF
+/// (the accountant owns the runtime consequence, #142). Contiguity is policy, not a cuDF
 /// requirement; changing it regenerates goldens and is treated as that.
 pub fn partition(
     survivors: &[RowGroupMeta],

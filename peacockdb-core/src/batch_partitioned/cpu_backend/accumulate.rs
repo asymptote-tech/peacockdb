@@ -16,9 +16,9 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
 
-use super::super::cpu_batch::CpuBatch;
+use crate::executor::CpuBatch;
 use super::super::error::PlanError;
-use super::super::executor::{BackendError, CallResult, CallStats, LaneEvent};
+use crate::executor::{BackendError, CallResult, CallStats, LaneEvent};
 use super::super::expr_physical::physical_projection;
 use super::super::node::{GpuNode, RowInterval};
 use super::super::nodes::aggregate::{Phase, finalize_columns};

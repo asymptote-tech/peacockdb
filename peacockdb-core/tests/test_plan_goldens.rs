@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use peacockdb_core::batch_partitioned::node::GpuNode;
 use peacockdb_core::batch_partitioned::plan::{PlanKnobs, plan_batch_partitioned};
-use peacockdb_core::batch_partitioned::plan_text::{
+use peacockdb_core::plan_text::{
     Payloads, render_plan, render_plan_memory, render_plan_recipes,
 };
 use peacockdb_core::batch_partitioned::recipe::{attach_recipes, check_seq_kinds, depth};
@@ -898,7 +898,7 @@ async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
                 continue;
             };
             let positions =
-                peacockdb_core::batch_partitioned::driver::post_order_of_every_node(tree.as_ref())
+                peacockdb_core::executor::post_order_of_every_node(tree.as_ref())
                     .expect("the plan indexes");
             let mut nodes = Vec::new();
             collect(tree.as_ref(), &mut nodes);

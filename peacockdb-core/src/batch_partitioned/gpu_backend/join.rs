@@ -15,10 +15,10 @@ use datafusion::common::JoinType;
 
 use peacockdb_ffi::raw::PeacockExecutor;
 
-use super::super::batch::Batch;
+use crate::executor::Batch;
 use super::super::error::PlanError;
-use super::super::executor::{BackendError, CallResult, CallStats};
-use super::super::gpu_batch::GpuBatch;
+use crate::executor::{BackendError, CallResult, CallStats};
+use crate::executor::GpuBatch;
 use super::super::nodes::join::empty_build_answers_nothing;
 use super::super::recipe::{CallPattern, FbKind, Input, ProjectRole, Recipe, Seq};
 use super::{execute_node, produced};

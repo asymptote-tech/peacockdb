@@ -11,8 +11,8 @@ use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
 use peacockdb_ffi::raw::PeacockExecutor;
 
 use super::super::error::PlanError;
-use super::super::executor::{BackendError, CallResult, CallStats};
-use super::super::gpu_batch::GpuBatch;
+use crate::executor::{BackendError, CallResult, CallStats};
+use crate::executor::GpuBatch;
 use super::super::recipe::{CallPattern, FbKind, Input, Recipe, Seq};
 use super::{execute_node_many, produced};
 

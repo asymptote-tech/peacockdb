@@ -167,10 +167,10 @@ Four limits on the number it produces.
   on a cardinality estimate, and with today's trivial estimators ([#19](tickets.md#t19)) that is
   one row per input row — tpch q1 groups 6M rows into four and is modelled at 3.8 GB. Refusing
   on that would turn "we do not know" into "you cannot run this", so it goes in the memory
-  section as the worst case it is and the enforcer decides at run time.
+  section as the worst case it is and `ResidentAccountant` decides at run time.
 - The output is a target, not a bound: the mapping is quantized to whole row groups.
 - The inputs are estimates. Underestimating amplification produces a batch too large and a query
-  the enforcer kills; overestimating produces one too small and a query that is merely slower,
+  the accountant kills; overestimating produces one too small and a query that is merely slower,
   so the derived target rounds down onto a coarse grid — a drifting estimate should not
   regenerate every golden.
 
@@ -334,7 +334,7 @@ threshold to twice what that compaction left behind. A low-cardinality aggregate
 state and the threshold never moves. A high-cardinality one leaves a state the size of its
 input, so the threshold doubles away: compactions land at geometrically growing sizes and total
 re-scan work is linear in the rows that pass through. Residency then grows, which is the honest
-answer for that shape, and the enforcer is the backstop ([#142](tickets.md#t142)).
+answer for that shape, and `ResidentAccountant` is the backstop ([#142](tickets.md#t142)).
 
 **The shuffle beneath a final aggregate is coalesced first.** `GpuMergePartitions` forwards its
 L lanes' batches without concatenating, so without a `GpuCoalesceAllBatches` between the two the
@@ -556,7 +556,7 @@ was handed, exactly where the successful path would have.
 
 `resident_bytes` and `scratch_bytes` stay infallible, the line being between a method that does
 work and one that reports a number the executor already holds. An accountant handed a failure
-instead of a figure has nothing to do with it: zero stops the enforcer enforcing, unbounded
+instead of a figure has nothing to do with it: zero stops the check enforcing anything, unbounded
 kills a query over a reporting hiccup, and skipping the check disables the guard silently.
 
 **Executor construction is the backend's**, as `Backend::executors_for(ctx, node, post_order,
@@ -574,10 +574,11 @@ order, forwarding one batch per visit, skipping empty sources and retiring finis
 
 ### The scheduling rule
 
-Two drivers, both single-threaded, push-based and deterministic. In `driver/`, `partitioned.rs`
-owns the tree, the queues and the three cross-lane categories; `single_partition.rs` owns one
-lane of one lane-scoped node as a state machine; and `scheduler.rs` decides what runs next from
-plain numbers, with no backend, batch or executor in sight.
+Two drivers, both single-threaded, push-based and deterministic. In `executor/driver/`,
+`partitioned.rs` owns the tree, the queues and the three cross-lane categories;
+`single_partition.rs` owns one lane of one lane-scoped node as a state machine; and
+`scheduler.rs` decides what runs next from plain numbers, with no backend, batch or executor in
+sight.
 
 Every node carries a **height** (distance to the root) and an **order** (pre-order index). A
 node is **runnable** when any of its lanes can make progress: a source always can, another node
@@ -656,7 +657,7 @@ slot instead, a consumed executor holding nothing. `CallStats.scratch_bytes` is 
 CPU directly, a device through RMM hooks — so model quality is observable and under-estimates
 are recorded with their magnitude.
 
-Four things in `driver/accounting.rs` are load-bearing.
+Four things in `executor/driver/accounting.rs` are load-bearing.
 
 - **The executor total is a cache refreshed one slot at a time**, never a sum over live
   executors — which would force the accountant to hold references to executors the driver owns
@@ -680,14 +681,14 @@ consult `&self`, which is what that permission is for. A model that returns zero
 cheap call, it is a guard switched off, and it fails open.
 
 **Model ≥ measured is not an invariant.** `scratch_bytes` rests on a cardinality figure for a
-join and assumed selectivity for a filter, so it will sometimes come in low. The enforcer's
+join and assumed selectivity for a filter, so it will sometimes come in low. The accountant's
 contract is "fail cleanly when an accounted total at a check point exceeds budget", not "the
 budget is never exceeded" and not "the peak stays under it".
 
 Four rules were measured rather than designed, over the whole corpus under a 2 GiB accountant;
 the cases are in [`archive/designs.md`](archive/designs.md).
 
-- **`resident_bytes()` is a total for the enforcer to check, never a numerator for a per-row
+- **`resident_bytes()` is a total for the accountant to check, never a numerator for a per-row
   cost** — only the executor knows which part scales with build rows. Dividing it mispriced one
   call at 2.0 TB and declined a query whose whole run peaked at 11.5 MB.
 - **A build-preserving join's residency grows with the probe side**, since it holds key columns

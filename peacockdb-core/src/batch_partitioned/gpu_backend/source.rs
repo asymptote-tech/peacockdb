@@ -14,8 +14,8 @@ use peacockdb_ffi::raw::{
 };
 
 use super::super::error::PlanError;
-use super::super::executor::{BackendError, CallStats};
-use super::super::gpu_batch::GpuBatch;
+use crate::executor::{BackendError, CallStats};
+use crate::executor::GpuBatch;
 use super::super::nodes::GpuLoadParquet;
 use super::super::recipe::{AbiSymbol, CallPattern, Input, Recipe, Seq};
 use super::{last_error, produced};

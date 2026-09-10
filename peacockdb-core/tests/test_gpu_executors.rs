@@ -27,7 +27,7 @@ use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 
 use peacockdb_core::batch_partitioned::aggregates::{AggCall, PlanAgg};
 
-use peacockdb_core::batch_partitioned::executor::RowRange;
+use peacockdb_core::executor::RowRange;
 
 use peacockdb_core::batch_partitioned::expr::{BinaryOp, Expr, NamedExpr};
 
@@ -51,7 +51,7 @@ use peacockdb_core::batch_partitioned::recipe::{AbiSymbol, Recipe, RecipePlan, a
 
 use peacockdb_core::batch_partitioned::schema::Schema;
 
-use peacockdb_core::batch_partitioned::{Batch, CpuBatch, GpuBatch};
+use peacockdb_core::executor::{Batch, CpuBatch, GpuBatch};
 
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,

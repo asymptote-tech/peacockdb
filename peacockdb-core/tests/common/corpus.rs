@@ -11,9 +11,9 @@ use std::sync::{Mutex, OnceLock};
 use datafusion::arrow::array::RecordBatch;
 use datafusion::execution::context::SessionContext;
 use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
-use peacockdb_core::batch_partitioned::driver::{RunReport, batch_partitioned_driver};
+use peacockdb_core::executor::{RunReport, run};
 use peacockdb_core::batch_partitioned::plan::plan_batch_partitioned;
-use peacockdb_core::batch_partitioned::plan_text::render_run;
+use peacockdb_core::plan_text::render_run;
 use peacockdb_core::batch_partitioned::{GpuNode, validate};
 
 use super::result_text::ResultDigest;
@@ -62,7 +62,7 @@ pub async fn plan_at(
 pub async fn run_cpu(dataset: &str, sf: &str, query: &str, mode: &Mode) -> CpuRun {
     let what = format!("{dataset}/{query} at {}", mode.name);
     let (ctx, tree) = plan_at(dataset, sf, query, mode).await;
-    let report = batch_partitioned_driver::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+    let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
         .unwrap_or_else(|e| panic!("{what}: {e}"));
     let batches = report
         .batches

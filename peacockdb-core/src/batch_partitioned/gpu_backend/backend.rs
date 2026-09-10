@@ -8,17 +8,17 @@ use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
 use peacockdb_ffi::raw::PeacockExecutor;
 
-use super::super::backend::{Backend, NodeExecutors};
-use super::super::batch::Batch;
-use super::super::cpu_batch::CpuBatch;
+use crate::executor::{Backend, NodeExecutors};
+use crate::executor::Batch;
+use crate::executor::CpuBatch;
 use super::super::error::PlanError;
-use super::super::executor::{
+use crate::executor::{
     BackendError, BatchAccumulatorExecutor, CallResult, ExecExecutor, Executor, JoinExecutor,
     LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin, RowRange,
     SourceExecutor, SourceStep, UnloadExecutor,
 };
-use super::super::forwarder::forwarder_for;
-use super::super::gpu_batch::GpuBatch;
+use crate::executor::forwarder_for;
+use crate::executor::GpuBatch;
 use super::super::node::GpuNode;
 use super::super::nodes::join::per_call_join_type;
 use super::super::nodes::{NodeRef, as_node_ref};
@@ -219,7 +219,7 @@ impl Executor for GpuAccumulator {
         self.held_bytes()
     }
     /// What it holds plus what arrives: a compaction reads both at once, and the merge
-    /// about to fold them is the transient the enforcer has to have room for.
+    /// about to fold them is the transient the accountant has to have room for.
     fn scratch_bytes(&self, _n_rows: u64, n_bytes: usize) -> usize {
         self.held_bytes() + n_bytes
     }
@@ -297,7 +297,7 @@ impl Executor for GpuProbingJoin {
     }
     /// The build side only where a probe call reads it: the build-side semi family's probe
     /// call is the key project, and charging it the build side would refuse a query that
-    /// fits, since the enforcer reads this before the call rather than after it.
+    /// fits, since the accountant reads this before the call rather than after it.
     fn scratch_bytes(&self, _n_rows: u64, n_bytes: usize) -> usize {
         if self.probe_reads_build() {
             self.build_bytes() + n_bytes
