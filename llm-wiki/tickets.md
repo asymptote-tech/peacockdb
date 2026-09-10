@@ -327,7 +327,7 @@ run is a second guess on top of the first.
 
 The loader declares `MultipleBatches` unconditionally
 ([architecture.md](architecture.md#modes-and-knobs)), so no downstream node may assume one
-batch per partition. That was incremental simplicity rather than a missing fact: `partitioner.rs`
+batch per partition. That was incremental simplicity rather than a missing fact: `scan_mapping/partition.rs`
 computes the row-group → (partition, batch) mapping once at plan time and everything downstream
 consumes it verbatim, so the batch count per lane is `partition_groups[lane].len()` — known in all
 three batching forms, `Sized` included, since the planner cuts by bytes and the loader only
@@ -338,7 +338,7 @@ node rather than of a lane: a source with lanes of one and two batches stays `Mu
 
 Saying it fires shortcuts the aggregate sequence already specifies: a 1-partition single-batch
 input needs one `GpuAggregate` carrying both `aggs` and `final`, and a single-batch-per-partition
-input skips the first `GpuAggregateBatches`. Join build sides need nothing new — `translate/mod.rs`
+input skips the first `GpuAggregateBatches`. Join build sides need nothing new — `translator/nodes.rs`
 already elides their coalesce when the input is `SingleBatch`. So the change is one declaration
 and the plans get smaller by themselves. Every plan golden moves, which is its real cost.
 
@@ -818,7 +818,7 @@ the producing expression's.
 Both engines price a node from the declared schema, so a wrong type moves no golden byte. T16
 confirmed it on a device: cuDF's Welford count exports Int64 where every plan declares UInt64.
 
-T17 closed the widening arm only (`widened_decimal`, `cpu_backend.rs`). The signed arm remains:
+T17 closed the widening arm only (`widened_decimal`, `executor/cpu_backend/`). The signed arm remains:
 `avg` declares its count state UInt64 and DataFusion's accumulator produces Int64 — no widening, and
 it must not be escaped the same way, since accepting it masks what the device showed. The queries
 disabled on this return with the fix, not by loosening the guard. Its column runs 1 to 10 over T19's
@@ -869,7 +869,7 @@ they are refusals rather than work.
 `TRY_CAST`, the regex match operator, an unrecognized binary operator, and an unrecognized
 expression kind are each refused by name at translation.
 
-Every one is a gap in `expr_translate.rs` rather than a limit of the surface: the C++ has
+Every one is a gap in `planner/translator/expr.rs` rather than a limit of the surface: the C++ has
 `build_expr` cases for most of them, and what is missing is our mapping. They are refusals
 because no corpus query carries one, so the cost of each is one arm and its test. `IN ()`
 belongs to this family but does not parse, so it is reachable only from a constructor and is
@@ -975,7 +975,7 @@ binaries, goldens and data but never source, so a compile-time path is a path th
 not have. `tests/common/mod.rs testdata_root()` solves that by honouring `PEACOCK_TESTDATA_DIR`
 first, which `build-test.sh` sets for remote runs. The residual is the crate's own unit tests
 — six sites under `peacockdb-core/src/` reaching `tpch.minimal`, in `memory_estimation/`,
-`parquet_meta.rs`, `plan_text/mod.rs` and `translate/{tests,schema_tests}.rs` — which is
+`scan_mapping/parquet_meta.rs`, `plan_text/mod.rs` and `translator/{tests,schema_tests}.rs` — which is
 exactly why a remote CPU host needs a `/media/data/peacockdb` symlink and why `--gpu` runs,
 which set the env var, do not.
 

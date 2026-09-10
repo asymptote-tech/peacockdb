@@ -101,6 +101,57 @@ the exception rather than as the example.
   argues a design is in the wrong place. Point at the ticket or the task spec instead, which
   is where a later reader will look anyway.
 
+## Visibility
+
+- A component or subcomponent is a directory with `mod.rs`. Its whole API — structs, enums,
+  traits, functions, constants — is declared there. Nowhere else in the component carries
+  `pub` or `pub mod`.
+- Implementation modules are declared `mod x;` and their items are `pub(crate)`. The module's
+  own privacy is the boundary: a path through a private module is refused whatever the item
+  says, so `plan::exec_ops` cannot be named from outside `plan` and `pub(super)` is not needed.
+- **A subcomponent is declared `mod`, not `pub mod`** — `mod scan_mapping;` in
+  `planner/translator/mod.rs`, never `pub mod scan_mapping;`. `pub mod` would make
+  `planner::translator::scan_mapping::Mapping` nameable crate-wide and the subcomponent wall
+  would exist only on paper. What a sibling component needs is declared in the component's own
+  `mod.rs`.
+- `lib.rs` declares the components `pub mod`, and they are the only `pub mod` in the crate.
+- **Nesting may go three deep** where the innermost earns it: `planner/translator/scan_mapping/`
+  is 720 lines behind three entry points. The same rule applies at each level — `mod`, not
+  `pub mod`. A directory with a one-item facade and a hundred lines behind it is an
+  implementation module wearing a directory; the test is whether the body justifies the wall.
+- `pub use` is not allowed. Inline the declaration into `mod.rs`, or into `common.rs` for what
+  the implementation modules share. A child reaches into its parent; a parent never re-exports
+  a child.
+- A body in `mod.rs` is one expression. Declarations, and delegations of exactly one line.
+- A struct keeps its inherent `impl`, and that block lives in `mod.rs` with one-line bodies. A
+  trait is for two or more implementors. A trait per struct would also break every `const fn`
+  and associated const, which trait items cannot be.
+- An implementation module may implement any trait for a type declared in its own component's
+  `mod.rs`, and may define free functions the `mod.rs` delegates to. It may not declare types
+  or traits that form the component's API.
+- Absolute `crate::` paths across a component boundary, `super::` only within one.
+- `mod.rs` and `common.rs` have no length limit. Every other file keeps the 1000-line one.
+
+### What that buys, and what has to be tested
+
+Three claims, and only the first two are the compiler's.
+
+- **A component is reachable only through its `mod.rs`.** Enforced: every implementation module
+  is private, so naming one from outside is `E0603: module is private`.
+- **A subcomponent is reachable only through its own `mod.rs`, and only from inside its parent
+  component.** Enforced by the same mechanism, once the declaration is `mod` rather than
+  `pub mod`.
+- **Only the parent component's own code may use a subcomponent.** Enforced *across* components.
+  Not enforced *within* one: Rust's rule is "the module and its descendants", and sibling
+  subcomponents are descendants of the parent. There is no visibility level meaning "my parent
+  but not my siblings" — `pub(super)`, `pub(crate)` and `pub(in path)` all give the same set.
+
+So two things fall to `peacockdb-core/tests/test_module_layout.rs`: sibling reach between
+implementation modules, and where a `pub` appears at all, which nothing in rustc checks. A type
+from a private module in a public signature is a third — `private_interfaces` reads a type's
+nominal visibility, so an unreachable type that is spelled `pub` passes it silently. Without
+that test none of these rules can go red.
+
 ## Antipatterns
 
 Most of these shipped here and cost something, and are recorded with the case that

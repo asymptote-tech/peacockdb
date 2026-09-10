@@ -993,7 +993,7 @@ Where the ordinals come from and where they land:
 
 | Reference | Written by | Read by |
 |---|---|---|
-| `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/wire/expr_writer.rs), off the ordinal `expr_translate` read from DataFusion's `Column::index()` | [`build_expr`](../cpp/src/expr.cpp) for the AST path, [`build_column`](../cpp/src/expr.cpp) for the column path |
+| `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/wire/expr_writer.rs), off the ordinal `planner/translator/expr.rs` read from DataFusion's `Column::index()` | [`build_expr`](../cpp/src/expr.cpp) for the AST path, [`build_column`](../cpp/src/expr.cpp) for the column path |
 | `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join.cpp`](../cpp/src/operators/join.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
 | join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`join.cpp`](../cpp/src/operators/join.cpp) — ColumnRef only, anything else throws |
 | `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
