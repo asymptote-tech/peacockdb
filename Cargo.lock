@@ -2151,6 +2151,7 @@ dependencies = [
  "futures",
  "inventory",
  "paste",
+ "peacockdb-core",
  "peacockdb-ffi",
  "sha2",
  "tokio",

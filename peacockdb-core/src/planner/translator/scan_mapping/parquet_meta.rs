@@ -119,7 +119,7 @@ mod tests {
     use std::sync::Arc;
 
     fn minimal() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.minimal")
+        crate::test_support::testdata_minimal_dir()
     }
 
     /// The scan under a query, which is what carries the projection and the pruning

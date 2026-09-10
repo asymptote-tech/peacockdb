@@ -15,6 +15,8 @@ use std::hash::{Hash, Hasher};
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
 
+use super::ResultDigest;
+
 /// How many rows either side of the first difference a failure prints.
 const EXCERPT: usize = 3;
 
@@ -49,7 +51,7 @@ fn render_row(columns: &[ArrayFormatter<'_>], row: usize, out: &mut String) {
 /// of different widths render the same logical row the same way. The padded form cannot do
 /// this: its widths are a function of the whole answer, and it carries a header and borders
 /// that are not rows at all.
-pub fn rendered_rows(batches: &[RecordBatch]) -> Vec<String> {
+pub(crate) fn rendered_rows(batches: &[RecordBatch]) -> Vec<String> {
     let mut rows = Vec::new();
     let mut rendered = String::new();
     for batch in batches {
@@ -99,22 +101,7 @@ fn schema_digest(batches: &[RecordBatch]) -> u64 {
     hasher.finish()
 }
 
-/// An answer as what a comparison needs of it: its schema, and its rows' digests sorted.
-/// Eight bytes a row, which is what makes it safe to hold — an answer held whole is the
-/// thing this module exists to stop materializing.
-#[derive(PartialEq, Eq, Clone)]
-pub struct ResultDigest {
-    schema: u64,
-    rows: Vec<u64>,
-}
-
-impl ResultDigest {
-    pub fn rows(&self) -> usize {
-        self.rows.len()
-    }
-}
-
-pub fn digest_of(batches: &[RecordBatch]) -> ResultDigest {
+pub(crate) fn digest_of(batches: &[RecordBatch]) -> ResultDigest {
     ResultDigest {
         schema: schema_digest(batches),
         rows: row_digests(batches)
@@ -125,14 +112,13 @@ pub fn digest_of(batches: &[RecordBatch]) -> ResultDigest {
 }
 
 /// Whether the two answers are the same multiset of rows under the same schema.
-pub fn results_agree(expected: &[RecordBatch], actual: &[RecordBatch]) -> bool {
+pub(crate) fn results_agree(expected: &[RecordBatch], actual: &[RecordBatch]) -> bool {
     digest_of(expected) == digest_of(actual)
 }
 
-
 /// What a failure prints: the first row the two disagree on, with a few either side, from a
 /// second pass over the rows the digests named. Bounded on purpose.
-pub fn first_difference(expected: &[RecordBatch], actual: &[RecordBatch]) -> String {
+pub(crate) fn first_difference(expected: &[RecordBatch], actual: &[RecordBatch]) -> String {
     if schema_digest(expected) != schema_digest(actual) {
         return format!(
             "the column names differ — expected {:?}, actual {:?}",
@@ -194,7 +180,7 @@ fn row_at(batches: &[RecordBatch], mut at: usize) -> String {
 /// A lower bound on the rendered size: the cells alone, without the padding and borders the
 /// table adds. Stops the moment it passes `cap`, so an answer far above it costs one row of
 /// memory and no full rendering.
-pub fn exceeds_rendered_size(batches: &[RecordBatch], cap: usize) -> bool {
+pub(crate) fn exceeds_rendered_size(batches: &[RecordBatch], cap: usize) -> bool {
     let mut total = 0usize;
     let mut rendered = String::new();
     for batch in batches {
@@ -208,4 +194,108 @@ pub fn exceeds_rendered_size(batches: &[RecordBatch], cap: usize) -> bool {
         }
     }
     false
+}
+
+pub(crate) fn assert_results_match(
+    expected: &[RecordBatch],
+    actual: &[RecordBatch],
+    rel_tol: Option<f64>,
+    query: &str,
+) {
+    let Some(tol) = rel_tol else {
+        // Digests rather than two rendered tables: `assert_eq!` evaluates both arguments
+        // before comparing a byte, so the exact arm materialized the whole answer twice to
+        // answer yes or no. The excerpt is built only where the answer is no.
+        assert!(
+            results_agree(expected, actual),
+            "result for {query} differs from oracle (exact compare)\n{}",
+            first_difference(expected, actual)
+        );
+        return;
+    };
+
+    use std::collections::HashMap;
+
+    use datafusion::arrow::array::{Array, Float64Array};
+    use datafusion::arrow::datatypes::DataType;
+    use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
+
+    // key (non-float columns, formatted) -> list of the row's Float64 cells.
+    fn index(batches: &[RecordBatch]) -> HashMap<String, Vec<Vec<f64>>> {
+        let mut m: HashMap<String, Vec<Vec<f64>>> = HashMap::new();
+        let opts = FormatOptions::default();
+        for b in batches {
+            let s = b.schema();
+            let floats: Vec<usize> = (0..s.fields().len())
+                .filter(|&i| s.field(i).data_type() == &DataType::Float64)
+                .collect();
+            // One formatter per keyed column, not per cell: the float columns are not
+            // keyed on and are never formatted, and the rest are built once for the batch.
+            let keyed: Vec<(usize, ArrayFormatter<'_>)> = (0..s.fields().len())
+                .filter(|c| !floats.contains(c))
+                .map(|c| (c, ArrayFormatter::try_new(b.column(c), &opts).unwrap()))
+                .collect();
+            for r in 0..b.num_rows() {
+                let mut key = String::new();
+                for (_, f) in &keyed {
+                    key.push_str(&f.value(r).to_string());
+                    key.push('\u{1}');
+                }
+                let vals = floats
+                    .iter()
+                    .map(|&c| {
+                        let a = b.column(c).as_any().downcast_ref::<Float64Array>().unwrap();
+                        if a.is_null(r) { f64::NAN } else { a.value(r) }
+                    })
+                    .collect();
+                m.entry(key).or_default().push(vals);
+            }
+        }
+        m
+    }
+
+    // Stable order for the float-tuples within one key group (NaN treated as equal).
+    fn tuple_cmp(a: &[f64], b: &[f64]) -> std::cmp::Ordering {
+        for (p, q) in a.iter().zip(b) {
+            match p.partial_cmp(q) {
+                Some(std::cmp::Ordering::Equal) | None => continue,
+                Some(o) => return o,
+            }
+        }
+        std::cmp::Ordering::Equal
+    }
+
+    let (mut em, am) = (index(expected), index(actual));
+    assert_eq!(
+        em.len(),
+        am.len(),
+        "approx compare: distinct non-float row keys differ for {query} (expected {}, actual {})",
+        em.len(),
+        am.len()
+    );
+    for (key, mut avs) in am {
+        let mut evs = em.remove(&key).unwrap_or_else(|| {
+            panic!("approx compare: actual row key absent from expected for {query}")
+        });
+        assert_eq!(
+            evs.len(),
+            avs.len(),
+            "approx compare: row multiplicity differs for a key in {query}"
+        );
+        evs.sort_by(|a, b| tuple_cmp(a, b));
+        avs.sort_by(|a, b| tuple_cmp(a, b));
+        for (ev, av) in evs.iter().zip(&avs) {
+            for (e, a) in ev.iter().zip(av) {
+                if e.is_nan() && a.is_nan() {
+                    continue;
+                }
+                let d = (e - a).abs();
+                let rel = if *e != 0.0 { d / e.abs() } else { d };
+                assert!(
+                    rel <= tol,
+                    "approx compare: float cell rel diff {rel:.3e} > tol {tol:.0e} for {query} (expected={e}, actual={a})"
+                );
+            }
+        }
+    }
 }

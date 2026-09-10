@@ -25,12 +25,11 @@ set -euo pipefail
 # and run them against the remote's cuDF runtime. There is no --patch step
 # (the remote is a modern-glibc host, unlike the shad-gpu path).
 #
-# NOTE: the Rust CPU test crates bake their testdata path from CARGO_MANIFEST_DIR
-# (cargo canonicalizes symlinks), so a binary built here looks for testdata at
-# this box's absolute repo path (e.g. /media/data/peacockdb/testdata). Until they
-# honor PEACOCK_TESTDATA_DIR (issue #49), the remote must expose that same path —
-# e.g. a symlink /media/data/peacockdb -> <remote repo>. The GPU test crate DOES
-# honor PEACOCK_TESTDATA_DIR, which --gpu sets, so it needs no such symlink.
+# NOTE: every Rust test binary honors PEACOCK_TESTDATA_DIR now, unit tests included,
+# and falls back to the compile-time path (CARGO_MANIFEST_DIR, symlinks canonicalized)
+# only where it is unset. --gpu and --rust-only set it below; the plain cpu mode does
+# not, so that one still looks for testdata at this box's absolute repo path and the
+# remote must expose the same — e.g. a symlink /media/data/peacockdb -> <remote repo>.
 
 # ---- defaults (override via flags) -----------------------------------------
 HOST=""                                                       # ssh destination, e.g. dmitry@86.38.182.185 (required)
@@ -559,14 +558,15 @@ if [ "$RUN" -eq 1 ]; then
   : "${PCK_TEST_FILTER:=}"
 
   # GPU tests share one process-wide cuDF/RMM pool, so they must run
-  # sequentially (--test-threads=1) and locate testdata via PEACOCK_TESTDATA_DIR
-  # (the GPU crate honors it). CPU tests have neither constraint.
+  # sequentially (--test-threads=1). CPU tests have neither constraint. Every mode
+  # could point PEACOCK_TESTDATA_DIR at the remote tree now; the plain cpu one does
+  # not yet, and its remote still needs the build box's path (see the note up top).
   if [ "$MODE" = "gpu" ]; then
     THREADS_ARG="--test-threads=1"
     TESTDATA_ENV="export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata"
   elif [ "$RUST_ONLY" -eq 1 ]; then
     THREADS_ARG=""
-    # rust-only test crates honor PEACOCK_TESTDATA_DIR -> point at the remote testdata.
+    # -> the remote testdata rather than the build box's path.
     TESTDATA_ENV="export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata"
   else
     THREADS_ARG=""

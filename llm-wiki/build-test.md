@@ -116,7 +116,8 @@ sha256 matches local). Notes on the rows above:
   GPU job; the sf40 goldens are committed (see below), so CI compares without touching
   40 GB.
 - verda reaches the tree through a `/media/data/peacockdb` symlink to
-  `~/peacockdb` — the CPU test crates bake the testdata path at compile time (#49).
+  `~/peacockdb`. Every test binary honours `PEACOCK_TESTDATA_DIR`, but the plain cpu mode
+  of `build-test.sh` does not set it, so those binaries fall back to the build box's path.
 
 ## Golden files
 
@@ -450,9 +451,9 @@ Rules that keep this healthy:
   code, and all three be wrong.
   The tpch **embeddings cache is NOT syncable** — a per-host intermediate
   (`fetch_embeddings.sh`, ~1.8 GB, gitignored); regenerate it where you need it.
-- Remote CPU runs ship built binaries + goldens + data only — never source. The CPU test
-  crates bake the testdata path at compile time (#49), so the remote needs a
-  `/media/data/peacockdb` symlink.
+- Remote CPU runs ship built binaries + goldens + data only — never source. The plain cpu
+  mode does not set `PEACOCK_TESTDATA_DIR`, so its binaries fall back to the compile-time
+  path and the remote needs a `/media/data/peacockdb` symlink.
 - **Large runs (test or regen): arm a monitor that reports progress every 5 minutes** —
   progress may stall (flaky links, OOM kills), and a silent stall looks identical to a
   long run.

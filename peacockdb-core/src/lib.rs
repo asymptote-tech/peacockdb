@@ -14,6 +14,8 @@ pub mod executor;
 pub mod plan;
 pub mod plan_text;
 pub mod planner;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 pub mod wire;
 
 use std::path::{Path, PathBuf};

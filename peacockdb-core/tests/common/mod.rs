@@ -1,58 +1,65 @@
-//! Shared test harness: where the fixtures live, how a result is rendered and compared,
-//! and the golden-reading helpers every tier uses.
+//! Shared test harness: what the corpus binaries still keep here, and the way in to the
+//! rest of it in `peacockdb_core::test_support`.
 //!
 //! Each integration-test crate includes this via `#[macro_use] mod common;`, and every
-//! suite uses a subset, so dead code is fine.
-#![allow(dead_code)]
+//! suite uses a subset, so dead code and an unused re-export are both fine.
+#![allow(dead_code, unused_imports)]
 
-pub mod memory_limit;
-pub mod mode;
 pub mod corpus;
 pub mod corpus_golden;
 #[cfg(not(feature = "rust-only"))]
 pub mod corpus_gpu;
 pub mod cost_model;
-pub mod golden_text;
 pub mod injection;
 pub mod join_fixture;
 pub mod rebuild;
-pub mod registry;
-pub mod result_text;
 
 use std::path::PathBuf;
 
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::arrow::util::pretty::pretty_format_batches;
 
-use memory_limit::MemoryLimit;
+pub use peacockdb_core::test_support::{
+    GPU_BUDGET, assert_results_match, data_dir_for, golden_dir_for, queries_dir_for,
+    testdata_minimal_dir, testdata_root, total_rows,
+};
 
-/// The budget a device run is given, and the one `mode::TIER` plans against: a run
-/// under a budget the plan was not priced for measures a plan nobody wrote down.
-pub const GPU_BUDGET: usize = MemoryLimit::Mini.bytes();
+// Four of the harness modules live in `peacockdb_core::test_support` now — the one copy the
+// crate's own tests and these binaries both read. They keep their names here so a suite still
+// says `common::mode::…` rather than being rewritten by a task that is not about it.
+pub mod memory_limit {
+    pub use peacockdb_core::test_support::MemoryLimit;
+}
+
+pub mod mode {
+    pub use peacockdb_core::test_support::{BUDGET, MODES, Mode, TIER, mode_named};
+}
+
+pub mod golden_text {
+    pub use peacockdb_core::test_support::{
+        NodeLine, RunNode, line_difference, ordered_sections, parse_node_line, parse_run_section,
+        section_differences,
+    };
+}
+
+pub mod registry {
+    pub use peacockdb_core::test_support::{
+        CorpusDeclaration, CsvRow, RegistryEntry, assert_registry_matches_csv, load_csv, stem,
+    };
+}
+
+pub mod result_text {
+    pub use peacockdb_core::test_support::{
+        ResultDigest, digest_of, exceeds_rendered_size, first_difference, rendered_rows,
+        results_agree,
+    };
+}
 
 /// Max rendered size for a committed `.result.txt` golden. Above this the golden is
 /// NOT written (full-result text doesn't scale — e.g. tpch anti-join renders ~240
 /// MB / 1.2M rows and trips the repo's push size guard). Large-result queries fall
 /// back to the live CPU oracle in the merged GPU test.
 pub const RESULT_GOLDEN_MAX_BYTES: usize = 256 * 1024;
-
-// --- parameterized testdata layout -----------------------------------------
-//   data    = <root>/<dataset>.sf<sf>/        (parquet)
-//   queries = <root>/<dataset>-queries/<query>.sql
-//   goldens = <root>/goldens/<dataset>.sf<sf>/<mode>-<tier>.{cpu,cost,result}.txt,
-//             one section per query, plus <mode>.plans.txt for the plan tier.
-// PEACOCK_TESTDATA_DIR overrides the compile-time root so a binary built on one
-// machine can run on another (e.g. shad-gpu).
-pub fn testdata_root() -> PathBuf {
-    if let Some(d) = std::env::var_os("PEACOCK_TESTDATA_DIR") {
-        return PathBuf::from(d);
-    }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata")
-}
-
-pub fn data_dir_for(dataset: &str, sf: &str) -> PathBuf {
-    testdata_root().join(format!("{dataset}.sf{sf}"))
-}
 
 /// A FIXED path that stands in for the testdata root when a plan's own BYTES are the
 /// thing under test.
@@ -100,18 +107,6 @@ pub fn canonical_data_dir(dataset: &str, sf: &str) -> PathBuf {
     canonical_root().join(format!("{dataset}.sf{sf}"))
 }
 
-pub fn queries_dir_for(dataset: &str) -> PathBuf {
-    testdata_root().join(format!("{dataset}-queries"))
-}
-
-pub fn golden_dir_for(dataset: &str, sf: &str) -> PathBuf {
-    testdata_root().join(format!("goldens/{dataset}.sf{sf}"))
-}
-
-pub fn testdata_minimal_dir() -> PathBuf {
-    testdata_root().join("tpch.minimal")
-}
-
 // --- result formatting ------------------------------------------------------
 /// Pretty-print batches with data rows sorted, for order-independent compares.
 pub fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
@@ -126,123 +121,6 @@ pub fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
         out.join("\n")
     } else {
         formatted
-    }
-}
-
-pub fn total_rows(batches: &[RecordBatch]) -> usize {
-    batches.iter().map(|b| b.num_rows()).sum()
-}
-
-/// Order-independent result comparison with an OPTIONAL relative tolerance on
-/// `Float64` columns.
-///
-/// - `rel_tol = None`: exact sorted-string equality (the default).
-/// - `rel_tol = Some(tol)`: rows are grouped by their NON-float columns
-///   (formatted) and every `Float64` cell must agree within `tol` relative error.
-///   Used only where the sole divergence from the DataFusion oracle is float
-///   summation reassociation across lanes (~1 ULP), which a run at more than one lane
-///   incurs and exact-string compare cannot tolerate.
-pub fn assert_results_match(
-    expected: &[RecordBatch],
-    actual: &[RecordBatch],
-    rel_tol: Option<f64>,
-    query: &str,
-) {
-    let Some(tol) = rel_tol else {
-        // Digests rather than two rendered tables: `assert_eq!` evaluates both arguments
-        // before comparing a byte, so the exact arm materialized the whole answer twice to
-        // answer yes or no. The excerpt is built only where the answer is no.
-        assert!(
-            result_text::results_agree(expected, actual),
-            "result for {query} differs from oracle (exact compare)\n{}",
-            result_text::first_difference(expected, actual)
-        );
-        return;
-    };
-
-    use std::collections::HashMap;
-
-    use datafusion::arrow::array::{Array, Float64Array};
-    use datafusion::arrow::datatypes::DataType;
-    use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
-
-    // key (non-float columns, formatted) -> list of the row's Float64 cells.
-    fn index(batches: &[RecordBatch]) -> HashMap<String, Vec<Vec<f64>>> {
-        let mut m: HashMap<String, Vec<Vec<f64>>> = HashMap::new();
-        let opts = FormatOptions::default();
-        for b in batches {
-            let s = b.schema();
-            let floats: Vec<usize> = (0..s.fields().len())
-                .filter(|&i| s.field(i).data_type() == &DataType::Float64)
-                .collect();
-            // One formatter per keyed column, not per cell: the float columns are not
-            // keyed on and are never formatted, and the rest are built once for the batch.
-            let keyed: Vec<(usize, ArrayFormatter<'_>)> = (0..s.fields().len())
-                .filter(|c| !floats.contains(c))
-                .map(|c| (c, ArrayFormatter::try_new(b.column(c), &opts).unwrap()))
-                .collect();
-            for r in 0..b.num_rows() {
-                let mut key = String::new();
-                for (_, f) in &keyed {
-                    key.push_str(&f.value(r).to_string());
-                    key.push('\u{1}');
-                }
-                let vals = floats
-                    .iter()
-                    .map(|&c| {
-                        let a = b.column(c).as_any().downcast_ref::<Float64Array>().unwrap();
-                        if a.is_null(r) { f64::NAN } else { a.value(r) }
-                    })
-                    .collect();
-                m.entry(key).or_default().push(vals);
-            }
-        }
-        m
-    }
-
-    // Stable order for the float-tuples within one key group (NaN treated as equal).
-    fn tuple_cmp(a: &[f64], b: &[f64]) -> std::cmp::Ordering {
-        for (p, q) in a.iter().zip(b) {
-            match p.partial_cmp(q) {
-                Some(std::cmp::Ordering::Equal) | None => continue,
-                Some(o) => return o,
-            }
-        }
-        std::cmp::Ordering::Equal
-    }
-
-    let (mut em, am) = (index(expected), index(actual));
-    assert_eq!(
-        em.len(),
-        am.len(),
-        "approx compare: distinct non-float row keys differ for {query} (expected {}, actual {})",
-        em.len(),
-        am.len()
-    );
-    for (key, mut avs) in am {
-        let mut evs = em
-            .remove(&key)
-            .unwrap_or_else(|| panic!("approx compare: actual row key absent from expected for {query}"));
-        assert_eq!(
-            evs.len(),
-            avs.len(),
-            "approx compare: row multiplicity differs for a key in {query}"
-        );
-        evs.sort_by(|a, b| tuple_cmp(a, b));
-        avs.sort_by(|a, b| tuple_cmp(a, b));
-        for (ev, av) in evs.iter().zip(&avs) {
-            for (e, a) in ev.iter().zip(av) {
-                if e.is_nan() && a.is_nan() {
-                    continue;
-                }
-                let d = (e - a).abs();
-                let rel = if *e != 0.0 { d / e.abs() } else { d };
-                assert!(
-                    rel <= tol,
-                    "approx compare: float cell rel diff {rel:.3e} > tol {tol:.0e} for {query} (expected={e}, actual={a})"
-                );
-            }
-        }
     }
 }
 

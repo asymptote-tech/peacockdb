@@ -24,43 +24,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-/// One test-macro invocation, submitted at the invocation site.
-///
-/// `kind` + `device` determine the CSV column (see [`column_for`]); keeping them
-/// separate rather than baking the column name into each macro means the mapping
-/// lives in exactly one place and can be unit-tested.
-#[derive(Debug)]
-pub struct RegistryEntry {
-    /// "cpu" | "gpu" — which engine ran the case.
-    pub kind: &'static str,
-    pub dataset: &'static str,
-    pub sf: &'static str,
-    /// Underscore form, as written in the macro (`shuffle_stddev`, `q12`).
-    pub query: &'static str,
-    /// The mode's ident, as `mode` spells it (`tp4_sized`).
-    pub device: &'static str,
-    /// "enabled" | "skip"
-    pub state: &'static str,
-}
-
-inventory::collect!(RegistryEntry);
-
-/// One `corpus_query!` line as declared, whatever it expanded to. Separate from
-/// [`RegistryEntry`], which is per enabled (query, mode): this is per QUERY, and it is
-/// submitted by the `none` arm too, so a declaration with no cases is still readable.
-///
-/// What reads it is the pairing between the two oracles, which is a property of the line
-/// rather than of a run.
-#[derive(Debug)]
-pub struct CorpusDeclaration {
-    pub dataset: &'static str,
-    pub sf: &'static str,
-    pub query: &'static str,
-    pub cpu_oracle: &'static str,
-    pub gpu_oracle: &'static str,
-}
-
-inventory::collect!(CorpusDeclaration);
+use super::{CsvRow, RegistryEntry};
 
 /// The CSV's per-mode columns, in file order.
 ///
@@ -76,7 +40,7 @@ inventory::collect!(CorpusDeclaration);
 /// Flat rather than a repeated group: the file has two independent readers, `registry.rs`
 /// and `cost-report`, and both parse by header name. A repeated group would need the two to
 /// agree on a decoding convention as well, which is one more place to drift.
-pub const COLUMNS: [&str; 15] = [
+pub(crate) const COLUMNS: [&str; 15] = [
     "tp1_single",
     "tp1_rowgroup",
     "tp4_single",
@@ -96,7 +60,7 @@ pub const COLUMNS: [&str; 15] = [
 
 /// Map a registration to its CSV column: the engine it ran on and the mode it ran at,
 /// composed rather than parsed off a label.
-pub fn column_for(kind: &str, device: &str) -> Option<&'static str> {
+pub(crate) fn column_for(kind: &str, device: &str) -> Option<&'static str> {
     match kind {
         "cpu" | "gpu" => mode_column(kind, device),
         _ => None,
@@ -109,7 +73,7 @@ pub fn column_for(kind: &str, device: &str) -> Option<&'static str> {
 /// unlisted one is `None` and the registration is reported unmappable, rather than being
 /// silently binned into whichever column a prefix match reached first.
 fn mode_column(kind: &str, mode: &str) -> Option<&'static str> {
-    let known = super::mode::MODES.iter().any(|m| m.ident() == mode);
+    let known = super::MODES.iter().any(|m| m.ident() == mode);
     let suffix = known.then_some(mode)?;
     COLUMNS
         .iter()
@@ -117,34 +81,14 @@ fn mode_column(kind: &str, mode: &str) -> Option<&'static str> {
         .copied()
 }
 
-/// A parsed CSV row.
-#[derive(Debug, Clone)]
-pub struct CsvRow {
-    pub dataset: String,
-    pub sf: String,
-    pub query: String,
-    /// column -> state
-    pub states: BTreeMap<String, String>,
-    /// "ok" | "fail" — whether create_physical_plan succeeds for this query.
-    pub plan_status: String,
-    pub features: Vec<String>,
-    pub tickets: Vec<String>,
-}
-
-/// The spelling everything but the CSV uses. The CSV's query column is a Rust identifier —
-/// the macro takes it as one — so a query is `scan_limit` there and `scan-limit` in every
-/// golden section, query file and case name. The two are compared in enough places that a
-/// hyphenated query matching no row reads as absent rather than as wrong: `authoritative_mode`
-/// returned None for the whole of T19's first batch and nothing went red. This is the one
-/// conversion, called at every point the two names meet.
-pub fn stem(query: &str) -> String {
+pub(crate) fn stem(query: &str) -> String {
     query.replace('_', "-")
 }
 
 /// The 15 hand-assigned feature codes. Not derived from SQL and not asserted
 /// against it — but the SET is closed, so a typo'd code fails rather than silently
 /// creating a new one-off category that renders as an unknown chip in the widget.
-pub const FEATURE_CODES: [&str; 15] = [
+pub(crate) const FEATURE_CODES: [&str; 15] = [
     "window_functions",
     "rollup",
     "grouping_sets",
@@ -162,14 +106,14 @@ pub const FEATURE_CODES: [&str; 15] = [
     "limit_offset",
 ];
 
-pub fn registry_csv_path() -> std::path::PathBuf {
+pub(crate) fn registry_csv_path() -> std::path::PathBuf {
     super::testdata_root().join("cost-registry.csv")
 }
 
 /// Parse the committed registry CSV. Panics with a precise message on malformed
 /// input — this is a committed fixture, so a parse failure is a bug to fix, not a
 /// condition to tolerate.
-pub fn load_csv() -> Vec<CsvRow> {
+pub(crate) fn load_csv() -> Vec<CsvRow> {
     let path = registry_csv_path();
     // Name the PROVISIONING requirement, not just the io error: a bare "No such
     // file or directory" on a remote host reads as "the registry check is broken"
@@ -189,13 +133,20 @@ pub fn load_csv() -> Vec<CsvRow> {
         )
     });
     let mut lines = text.lines();
-    let header: Vec<&str> = lines.next().expect("registry CSV is empty").split(',').collect();
+    let header: Vec<&str> = lines
+        .next()
+        .expect("registry CSV is empty")
+        .split(',')
+        .collect();
     let expect: Vec<&str> = ["dataset", "sf", "query"]
         .into_iter()
         .chain(COLUMNS)
         .chain(["plan_status", "features", "tickets"])
         .collect();
-    assert_eq!(header, expect, "registry CSV header changed; update COLUMNS to match");
+    assert_eq!(
+        header, expect,
+        "registry CSV header changed; update COLUMNS to match"
+    );
 
     let mut rows = Vec::new();
     for (i, line) in lines.enumerate() {
@@ -250,8 +201,10 @@ pub fn load_csv() -> Vec<CsvRow> {
                 );
             }
         }
-        let features: Vec<String> =
-            f[4 + COLUMNS.len()].split_whitespace().map(str::to_string).collect();
+        let features: Vec<String> = f[4 + COLUMNS.len()]
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
         for feat in &features {
             assert!(
                 FEATURE_CODES.contains(&feat.as_str()),
@@ -260,7 +213,10 @@ pub fn load_csv() -> Vec<CsvRow> {
                 i + 2
             );
         }
-        let tickets: Vec<String> = f[5 + COLUMNS.len()].split_whitespace().map(str::to_string).collect();
+        let tickets: Vec<String> = f[5 + COLUMNS.len()]
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
         for t in &tickets {
             assert!(
                 t.chars().all(|c| c.is_ascii_digit()),
@@ -314,7 +270,10 @@ pub fn load_csv() -> Vec<CsvRow> {
 /// check to "only verify what this binary happens to register" — is what keeps the
 /// check meaningful when a column IS split again: a whole column going missing must
 /// still fail. Stale entries are rejected below, so an empty list cannot rot.
-pub fn assert_registry_matches_csv(owned_columns: &[&str], elsewhere: &[(&str, &str, &str, &str)]) {
+pub(crate) fn assert_registry_matches_csv(
+    owned_columns: &[&str],
+    elsewhere: &[(&str, &str, &str, &str)],
+) {
     for c in owned_columns {
         assert!(COLUMNS.contains(c), "unknown column {c:?}");
     }
@@ -399,7 +358,9 @@ pub fn assert_registry_matches_csv(owned_columns: &[&str], elsewhere: &[(&str, &
     for (d, s, q, c) in elsewhere {
         let key = (d.to_string(), s.to_string(), q.to_string());
         let Some(row) = csv.get(&key) else {
-            problems.push(format!("`elsewhere` names a query with no CSV row: {d} sf{s} {q}"));
+            problems.push(format!(
+                "`elsewhere` names a query with no CSV row: {d} sf{s} {q}"
+            ));
             continue;
         };
         let state = row.states.get(*c).map(String::as_str).unwrap_or("na");

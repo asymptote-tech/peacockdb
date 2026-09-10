@@ -1,38 +1,14 @@
 //! Reading the golden text format: `== <query>` sections, and the node lines inside one.
 //!
+//! The two shapes it hands back, `NodeLine` and `RunNode`, are declared in `mod.rs`: they
+//! cross out of the component, and the bodies that build them are here.
+//!
 //! One reader, because the format is one format. The plan goldens, the cost derivation and
 //! the corpus tiers all split on the same header and all read the same node line, and three
 //! readers that agree by luck is what this replaces — the divergence is the cost, never the
 //! duplication.
 
-/// A node line: its name, its depth in the tree, and every field it carries.
-///
-/// Indentation is the tree, two spaces per level, so `depth` is what a caller pairs a node
-/// with its parent by. Fields keep file order and are borrowed from the line.
-pub struct NodeLine<'a> {
-    pub name: &'a str,
-    pub depth: usize,
-    pub fields: Vec<(&'a str, &'a str)>,
-}
-
-impl<'a> NodeLine<'a> {
-    pub fn field(&self, key: &str) -> Option<&'a str> {
-        self.fields
-            .iter()
-            .find(|(name, _)| *name == key)
-            .map(|(_, value)| *value)
-    }
-
-    /// The field as a count. `None` when the field is absent; panics when it is present and
-    /// not a number, since that is a renderer defect rather than a line of another kind.
-    pub fn count(&self, key: &str) -> Option<u64> {
-        self.field(key).map(|value| {
-            value.parse().unwrap_or_else(|e| {
-                panic!("{}: field `{key}={value}` is not a count: {e}", self.name)
-            })
-        })
-    }
-}
+use super::{NodeLine, RunNode};
 
 /// Parse one line of a golden as a node line, or `None` for a line of any other kind.
 ///
@@ -41,7 +17,7 @@ impl<'a> NodeLine<'a> {
 /// fields after `, `. That rule is what separates it from the per-batch continuation line,
 /// a legacy `pK:` sub-line, a `== ` header, a `--- memory ---` marker and a cost category,
 /// none of which start with a capital.
-pub fn parse_node_line(line: &str) -> Option<NodeLine<'_>> {
+pub(crate) fn parse_node_line(line: &str) -> Option<NodeLine<'_>> {
     let indent = line.len() - line.trim_start().len();
     let trimmed = &line[indent..];
     if !trimmed.starts_with(|c: char| c.is_ascii_uppercase()) {
@@ -100,7 +76,7 @@ fn split_key(field: &str) -> (&str, &str) {
 
 /// Sections in file order: `(query, body)` at each `== ` header, names as the file writes
 /// them.
-pub fn ordered_sections(text: &str) -> Vec<(String, String)> {
+pub(crate) fn ordered_sections(text: &str) -> Vec<(String, String)> {
     let mut sections: Vec<(String, String)> = Vec::new();
     for line in text.lines() {
         match line.strip_prefix("== ") {
@@ -121,7 +97,7 @@ pub fn ordered_sections(text: &str) -> Vec<(String, String)> {
 /// runs past a thousand characters, which the CI log drops, so even the dump it prints
 /// arrives unreadable. One line per query, each naming the column that moved, is what
 /// survives the log and what a person can scan.
-pub fn section_differences(canonical: &str, actual: &str) -> Vec<String> {
+pub(crate) fn section_differences(canonical: &str, actual: &str) -> Vec<String> {
     let expected = ordered_sections(canonical);
     let produced = ordered_sections(actual);
     let mut said = Vec::new();
@@ -156,7 +132,7 @@ pub fn section_differences(canonical: &str, actual: &str) -> Vec<String> {
 /// The first line of a section that differs, as the column it differs at and a window
 /// either side. A plan line is long enough that printing two of them whole says less than
 /// pointing at the character, and a long line is the one the log drops.
-pub fn line_difference(expected: &str, actual: &str) -> String {
+pub(crate) fn line_difference(expected: &str, actual: &str) -> String {
     for (number, (want, got)) in expected.lines().zip(actual.lines()).enumerate() {
         if want == got {
             continue;
@@ -212,28 +188,11 @@ fn window(line: &str, at: usize) -> String {
     )
 }
 
-/// A node as an execution golden records it: its line, and the per-batch record beneath.
-///
-/// `in_rows` is nested by child and then by that child's lane; `batch_rows` and
-/// `batch_bytes` by this node's lane and then by batch. `abandoned` is per lane and
-/// present only where a run left something behind, and `rows_skipped` is a total.
-pub struct RunNode<'a> {
-    pub line: NodeLine<'a>,
-    pub in_rows: Vec<Vec<u64>>,
-    pub batch_rows: Vec<Vec<u64>>,
-    pub batch_bytes: Vec<Vec<u64>>,
-    pub abandoned: Vec<u64>,
-    pub rows_skipped: u64,
-    /// Indices into the same vector. Depth is the tree, so the parent of a node is the
-    /// nearest one above it at one less.
-    pub children: Vec<usize>,
-}
-
 /// One `.cpu.txt` section: the early-exit marker and every node under it, in file order.
 ///
 /// Panics on a line the format does not allow, since a section is written by our own
 /// renderer — a shape nobody produces is a defect to name, not a case to tolerate.
-pub fn parse_run_section(body: &str) -> (String, Vec<RunNode<'_>>) {
+pub(crate) fn parse_run_section(body: &str) -> (String, Vec<RunNode<'_>>) {
     let mut lines = body.lines();
     let marker = lines
         .next()

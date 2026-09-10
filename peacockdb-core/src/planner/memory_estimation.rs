@@ -338,12 +338,11 @@ mod tests {
     use super::*;
     use crate::plan::Batching;
     use crate::planner::{BatchSizing, PlanKnobs, plan, translate};
-    use std::path::PathBuf;
 
     const BUDGET: u64 = 2 * 1024 * 1024 * 1024;
 
     async fn modelled(sql: &str, target_partitions: usize, budget: u64) -> MemoryModel {
-        let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.minimal");
+        let data = crate::test_support::testdata_minimal_dir();
         let ctx = crate::register_tables_for(crate::build_session_state(target_partitions), &data)
             .await
             .expect("register the minimal tables");
@@ -368,7 +367,7 @@ mod tests {
     /// Planned end to end at one of the three batching forms, which is what decides the
     /// mapping the model then prices.
     async fn modelled_as(sql: &str, target_partitions: usize, sizing: BatchSizing) -> MemoryModel {
-        let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.minimal");
+        let data = crate::test_support::testdata_minimal_dir();
         let ctx = crate::register_tables_for(crate::build_session_state(target_partitions), &data)
             .await
             .expect("register the minimal tables");
@@ -393,7 +392,7 @@ mod tests {
     }
 
     async fn refused(sql: &str, target_partitions: usize, budget: u64) -> PlanError {
-        let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.minimal");
+        let data = crate::test_support::testdata_minimal_dir();
         let ctx = crate::register_tables_for(crate::build_session_state(target_partitions), &data)
             .await
             .expect("register the minimal tables");

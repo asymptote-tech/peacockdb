@@ -8,6 +8,10 @@ rust-only = ["peacockdb-ffi/rust-only"]
 # Device tests. Not propagated to peacockdb-ffi: that crate is a C ABI binding with no
 # device-conditional code, so a feature there would be a knob nothing reads.
 gpu = []
+# The shared test harness in `src/test_support/`. Turned on by the self dev-dependency
+# below rather than by any CI flag, so `cargo test` sees the module and `cargo build`
+# cannot name it. `inventory` comes with it: the registry lives there now.
+test-support = ["dep:inventory"]
 
 [build-dependencies]
 flatc-fork = "0.6"
@@ -24,8 +28,14 @@ peacockdb-ffi = { path = "../peacockdb-ffi" }
 # the DataFusion-45-compatible release (df ^45 / arrow ^54.1); 0.10 would force a df49 bump.
 # default-features off to keep it lean.
 datafusion-comet-spark-expr = { version = "0.6.0", default-features = false }
+# Only for `test-support`: `test_support::RegistryEntry` is collected here and submitted by
+# the test binaries, so the collect! side has to be in the library's own dependency set.
+inventory = { version = "0.3", optional = true }
 
 [dev-dependencies]
+# Turns `test-support` on for `cargo test` and leaves it off for `cargo build`, so the
+# harness needs no flag from CI and a plain build cannot see it.
+peacockdb-core = { path = ".", features = ["test-support"] }
 datafusion = "45"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 sha2 = "0.10"   # plan-bytes wire-format digests (already in the graph via DataFusion)
