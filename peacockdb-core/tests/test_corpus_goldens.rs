@@ -704,3 +704,141 @@ fn a_regeneration_does_not_make_the_read_only_path_write() {
         "the read-only path wrote under a regeneration"
     );
 }
+
+/// Every `total_us` in a benchmark file is the sum of the `time_us` beside it.
+///
+/// Checkable without a device and without a second oracle: the renderer writes both
+/// numbers from one measurement, so a file where they disagree is a file it got wrong.
+///
+/// Every entry is a number, so the total is a plain sum. A `0` is a call that opened no
+/// region; a `1` is a region the clock rounded down — not the same digit.
+///
+/// Absent files are skipped, since a fresh checkout has none. Finding NO file with timing
+/// lines is not skipped: a check that silently examines nothing is what this suite closes.
+#[test]
+fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
+    let root = common::testdata_root().join("benchmark-results");
+    let mut files = Vec::new();
+    collect_benchmark_files(&root, &mut files);
+
+    let mut checked = 0;
+    for path in &files {
+        let text = std::fs::read_to_string(path).expect("a benchmark file");
+        for (n, line) in text.lines().enumerate() {
+            let Some(rest) = line.trim().strip_prefix("time_us=") else {
+                continue;
+            };
+            let (array, total) = rest
+                .split_once(" total_us=")
+                .unwrap_or_else(|| panic!("{}:{}: no total_us on {line:?}", path.display(), n + 1));
+            // Every number between the brackets, in one pass: the nesting says which lane
+            // a call was on and the sum does not care.
+            let entries: Vec<&str> = array
+                .trim_matches(|c| c == '[' || c == ']')
+                .split(|c| c == ',' || c == '[' || c == ']')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
+            let numbers: Vec<u64> = entries
+                .iter()
+                .map(|e| {
+                    e.parse().unwrap_or_else(|_| {
+                        panic!("{}:{}: {e:?} is not a number — {line:?}", path.display(), n + 1)
+                    })
+                })
+                .collect();
+            let want = numbers.iter().sum::<u64>().to_string();
+            assert_eq!(
+                total,
+                want,
+                "{}:{}: total_us disagrees with the {} entries beside it — {line:?}",
+                path.display(),
+                n + 1,
+                numbers.len()
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        files.is_empty() || checked > 0,
+        "{} benchmark file(s) and not one timing line: the format moved and this check \
+         is reading past it",
+        files.len()
+    );
+}
+
+/// The benchmark path must not touch the CPU tier — neither what it PRODUCES nor what it
+/// RUNS, and the second is the prohibition this list used to miss.
+///
+/// A golden it reads does not exist at sf40, so every case fails on a missing file.
+/// `CpuBackend` is worse: it WORKS, reporting plausible microseconds measured on the wrong
+/// machine with no field saying which backend produced them. `CpuBatch` is deliberately
+/// absent — an unload legitimately hands back a host batch.
+///
+/// A tripwire over source text, not a proof: no type says "this function was not called",
+/// and renaming any of these names empties the check in silence.
+#[test]
+fn the_benchmark_path_reads_no_cpu_side_golden() {
+    // Every accessor in common/ that names a file the CPU tier writes, the oracle
+    // comparison mode, and the CPU backend itself. The first five are about READING what
+    // the CPU produced; the last is about RUNNING on it, which fails in the opposite way
+    // — silently, with numbers.
+    const FORBIDDEN: &[&str] = &[
+        "cpu_golden",
+        "result_golden",
+        "cost_golden",
+        "CpuOracle",
+        "CpuBackend",
+    ];
+    // The files the benchmark path is its own. `corpus.rs` is not among them: the path
+    // borrows `plan_at` from it, and the rest of that file is the corpus tier, which reads
+    // goldens for a living. A whole-file check cannot separate the two.
+    const SOURCES: &[&str] = &[
+        "tests/peacock_gpu_benchmarks.rs",
+        "tests/common/corpus_benchmark.rs",
+        "tests/common/gpu_session.rs",
+    ];
+
+    for rel in SOURCES {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "cannot read {}: {e}. This guard names the benchmark path by path; if \
+                 the file moved, point it at the new one rather than dropping it.",
+                path.display()
+            )
+        });
+        let code: String = text
+            .lines()
+            .map(|l| l.split_once("//").map_or(l, |(before, _)| before))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for name in FORBIDDEN {
+            assert!(
+                !code.contains(name),
+                "{rel} mentions `{name}`. The benchmark suite runs at sf40 and must not \
+                 touch the CPU tier. A golden it reads does not exist there and cannot \
+                 be produced, so every case fails on a missing file — on the GPU host, \
+                 long after the change. `CpuBackend` is worse: it WORKS, and the run \
+                 would report a tree of plausible microseconds measured on the wrong \
+                 machine, with no column anywhere saying which backend produced them. \
+                 If the benchmark genuinely needs a CPU-side input, that is a decision \
+                 about the sf40 suite, not an edit to this list."
+            );
+        }
+    }
+}
+
+fn collect_benchmark_files(dir: &Path, into: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_benchmark_files(&path, into);
+        } else if path.to_string_lossy().ends_with(".benchmark.txt") {
+            into.push(path);
+        }
+    }
+}

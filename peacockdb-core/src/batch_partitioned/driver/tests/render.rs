@@ -10,7 +10,11 @@
 use super::super::mock::{EmitRule, Script, spec};
 use super::super::plans::*;
 use super::*;
-use crate::batch_partitioned::plan_text::{render_plan, render_run};
+use crate::batch_partitioned::driver::{join_regions, nodes_as_recorded};
+use crate::batch_partitioned::driver::{Measured, Region};
+use crate::batch_partitioned::executor::AbiCalls;
+use crate::batch_partitioned::recipe::FbKind;
+use crate::batch_partitioned::plan_text::{render_plan, render_run, render_timings};
 
 #[test]
 fn a_chain_renders_the_tree_and_what_each_node_produced() {
@@ -169,4 +173,130 @@ fn a_run_that_drained_renders_no_abandoned_at_all() {
     let text = render_run(plan.as_ref(), &report);
     assert!(!text.contains("abandoned"), "{text}");
     assert!(!text.contains("rows_skipped"), "{text}");
+}
+
+/// The same tree the execution golden renders, annotated with what it cost rather than
+/// what it produced; rows and bytes live in the file beside this one.
+///
+/// The mock addresses no seq, so the device recorded nothing and every entry is `0` — a
+/// call that opened no region did no device work. The shape is what is pinned here; that
+/// a measured region never renders 0 is `a_region_that_rounds_to_nothing_still_ran`.
+///
+/// Two shapes worth reading off this: `GpuUnload` carries no colon, having no properties
+/// to separate; and the source has one entry per batch and none for the step that found
+/// the queue empty, which made no call to record.
+#[test]
+fn a_timing_record_renders_the_tree_and_what_each_node_cost() {
+    let script = Script::default().source("part", vec![vec![spec(10, 80), spec(7, 56)]]);
+    let plan = unload(filter(source("part", 1)));
+    let report = run(plan.as_ref(), &script);
+    let (times, unclaimed) = join_regions(&report, &[]);
+    assert!(unclaimed.is_empty(), "no regions, so none go unclaimed");
+    assert_eq!(
+        render_timings(plan.as_ref(), &times),
+        "\
+GpuUnload
+  time_us=[[0,0]] total_us=0
+  GpuFilter: predicate=k@0, lanes=1, batches=multiple
+    time_us=[[0,0]] total_us=0
+    GpuLoadParquet: table=part, projections=[k@0], partition_groups=[[[0]]], lanes=1, \
+batches=multiple
+      time_us=[[0,0]] total_us=0
+"
+    );
+}
+
+/// A region the clock rounded to nothing renders `1`, not `0`.
+///
+/// The two zeros in the tree above mean "no region opened", and this is the other case:
+/// something ran on the device and took under a microsecond. Collapsing them would make a
+/// call that ran indistinguishable from one that never happened, and the file is read for
+/// exactly that difference.
+///
+/// The mock addresses no seq of its own, so the recorded call is stamped here — which is
+/// also the only way this suite reaches the renderer's numeric path at all.
+#[test]
+fn a_region_that_rounds_to_nothing_still_ran() {
+    let script = Script::default().source("part", vec![vec![spec(10, 80), spec(7, 56)]]);
+    let plan = unload(filter(source("part", 1)));
+    let mut report = run(plan.as_ref(), &script);
+
+    // GpuFilter is pre-order 1, the index `abi_calls` is in; its one lane made two calls.
+    let calls = &mut report.abi_calls[1][0];
+    for (position, seq) in [7u32, 8].into_iter().enumerate() {
+        let mut made = AbiCalls::armed(true);
+        made.record(seq, FbKind::Filter, 0, None);
+        calls[position] = made;
+    }
+    let regions = [region(7, 0, 0, 4), region(8, 0, 30, 1)];
+    let (times, unclaimed) = join_regions(&report, &regions);
+    assert!(unclaimed.is_empty(), "both regions belong to a recorded call");
+
+    let text = render_timings(plan.as_ref(), &times);
+    assert!(
+        text.contains("time_us=[[1,30]] total_us=31"),
+        "a rounded-down region is 1 and the total is the sum of what is printed:\n{text}"
+    );
+}
+
+/// The two node indexes stay apart: `node_seq` is the tree's post-order, and the report is
+/// walked in the driver's pre-order.
+///
+/// Asserted on a chain where the two disagree at every node — a three-node chain has the
+/// root at pre-order 0 and post-order 2 — because a writer that emitted the walk index
+/// instead would produce numbers that look exactly as plausible.
+#[test]
+fn the_recorded_node_index_is_the_post_order_not_the_walk_order() {
+    let plan = unload(filter(source("part", 1)));
+    let recorded = nodes_as_recorded(plan.as_ref()).expect("the tree indexes");
+    let walk: Vec<usize> = (0..recorded.len()).collect();
+    let post: Vec<usize> = recorded.iter().map(|(_, post)| *post).collect();
+    assert_eq!(
+        recorded.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+        ["GpuUnload", "GpuFilter", "GpuLoadParquet"],
+        "pre-order names the root first"
+    );
+    assert_eq!(post, [2, 1, 0], "post-order names the leaf first");
+    assert_ne!(walk, post, "the two orders are what a writer must not confuse");
+}
+
+/// A driver call addressing two seqs is measured as two, and the entry is their sum.
+///
+/// The distinction is the whole reason the join keeps both granularities. Costing an entry
+/// and handing the total to each of its seqs reports a merge that produced one row as
+/// having produced everything its entry did — which is what it did before this test.
+#[test]
+fn each_seq_of_one_driver_call_keeps_its_own_measurement() {
+    let script = Script::default().source("part", vec![vec![spec(10, 80)]]);
+    let plan = unload(filter(source("part", 1)));
+    let report = run(plan.as_ref(), &script);
+    let regions = [
+        region(7, 0, 40, 4),
+        region(8, 0, 60, 1),
+    ];
+    let (measured, unclaimed) = join_regions(&report, &regions);
+    assert_eq!(unclaimed.len(), 2, "the mock addresses no seq, so neither is claimed");
+
+    let first = measured.call(7, 0).expect("the device answered for it");
+    let second = measured.call(8, 0).expect("and for the other");
+    assert_eq!((first.device_us, first.out_rows), (40, 4));
+    assert_eq!((second.device_us, second.out_rows), (60, 1), "not the pair's total");
+}
+
+/// A region with the numbers a case wants to assert on, built here because the mock backend
+/// addresses no seq and so produces none of its own.
+fn region(seq: u32, call_index: u64, device_us: u64, out_rows: u64) -> Region {
+    Region {
+        seq,
+        partition: 0,
+        call_index,
+        measured: Measured {
+            host_setup_us: 0,
+            host_submit_us: device_us,
+            device_us,
+            out_rows,
+            out_bytes: out_rows * 8,
+            regions: 1,
+        },
+    }
 }

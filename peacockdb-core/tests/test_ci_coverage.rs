@@ -40,6 +40,14 @@ const INTENTIONALLY_NOT_IN_CI: &[(&str, Exemption)] = &[
     ("test_gpu_abi", Exemption::GpuJob),
     ("test_gpu_recipe_walk", Exemption::GpuJob),
     ("test_gpu_executors", Exemption::GpuJob),
+    ("test_node_timing", Exemption::GpuJob),
+    ("peacock_gpu_benchmarks", Exemption::NotRun(
+        "GPU host only, tens of minutes, and it MEASURES rather than asserts — there is \
+         nothing for a merge gate to go red on. Correctness for the queries it times is \
+         test_gpu_bp_corpus's, which runs them at the sf a wrong answer is legible at. \
+         NOT Exemption::GpuJob: that variant claims membership in the gpu-tests staging \
+         array and is verified against it — this target is deliberately not in it",
+    )),
     ("test_gpu_bp_corpus", Exemption::GpuJob),
     ("test_ci_coverage", Exemption::NotRun("this test")),
 ];

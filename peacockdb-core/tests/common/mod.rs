@@ -7,14 +7,19 @@
 
 pub mod bp_mode;
 pub mod corpus;
+#[cfg(not(feature = "rust-only"))]
+pub mod corpus_benchmark;
 pub mod corpus_golden;
 #[cfg(not(feature = "rust-only"))]
 pub mod corpus_gpu;
 pub mod cost_model;
+#[cfg(not(feature = "rust-only"))]
+pub mod gpu_session;
 pub mod golden_text;
 pub mod injection;
 pub mod join_fixture;
 pub mod rebuild;
+pub mod record;
 pub mod registry;
 pub mod result_text;
 

@@ -18,6 +18,8 @@ pub mod expr;
 pub mod expr_physical;
 pub mod expr_translate;
 pub mod forwarder;
+#[cfg(not(feature = "rust-only"))]
+pub mod instrument;
 pub mod layout;
 pub mod node;
 pub mod nodes;

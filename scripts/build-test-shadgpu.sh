@@ -2,61 +2,119 @@
 #
 # Build for the GPU host, ship, patch, and gate on it.
 #
-# --build runs wherever a cuDF toolchain lives, in practice inside
-# scripts/docker-build.sh. Every later phase needs this workstation's ssh keys and is
-# refused in the container, where the failure would otherwise be an ssh error deep inside
-# a phase and read as a broken host.
+# The gate (--run) and the benchmark run (--run-benchmarks) are one script because they
+# share a toolchain, target dir, push and patch. They must never share an exit code: one
+# number cannot mean both "correctness passed" and "measurement completed", and OR-ing
+# them makes a benchmark-infrastructure failure read as a test regression. Hence the
+# validation block, and two staging dirs:
+#
+#   cpp/install/rust-tests/        swept by --run's glob      -> gate
+#   cpp/install/rust-benchmarks/   not swept                  -> measurement
+#
+# --run enforces that rather than documenting it: a benchmark binary under rust-tests/
+# turns the run red.
+#
+# --build / --build-benchmarks need a cuDF toolchain, in practice scripts/docker-build.sh.
+# Every later phase needs this workstation's ssh keys and is refused in the container,
+# where the failure would surface as an ssh error deep inside a phase.
 #
 # USAGE
 #   ./scripts/build-test-shadgpu.sh --all                # build+push+patch+run
 #
-# A run takes tens of minutes, so it has a detached form: it belongs to the GPU host and
-# you come back for the result.
-#   ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-detached
-#   ./scripts/build-test-shadgpu.sh --run-status         # going? finished? log tail
+# Both runs take tens of minutes, hence a detached form for each:
+#   ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks-detached
+#   ./scripts/build-test-shadgpu.sh --benchmark-status    # going? finished? log tail
+#   ./scripts/build-test-shadgpu.sh --pull-benchmarks     # once it reports finished
 #
-#   PCK_TEST_FILTER=q6 ./scripts/build-test-shadgpu.sh --run
+#   PCK_TEST_FILTER=bench_tpch_sf1_q1 ./scripts/build-test-shadgpu.sh --run-benchmarks
+#
+# BENCHMARK OUTPUT
+#   testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt
+# one file per (dataset, mode), holding a section per query timed at that mode. A run
+# with no filter times every declared mode, and each mode's sections land in its own
+# file — the modes do not share one. Written on the GPU host and copied back by
+# --pull-benchmarks; llm-wiki/build-test.md has the file format.
+#
+#   testdata/calibration/records.tsv        (git-ignored)
+# The same run also emits calibration rows, one per cuDF CALL. Unconditionally
+# rather than behind a flag: the rows are derived from the run that wrote the tree
+# above, and a flag someone has to remember is a way for the two to silently
+# disagree about which measurement they describe. Truncated at the start of every
+# run -- one file per run is what a reader gets, and appending across runs would mix
+# build profiles and allocators under one header. One file for every mode: `mode`
+# is a column, and what must not mix is the CONDITIONS, which the `# run:` heading
+# holds and record.rs refuses to merge across.
+#
 
-# pipefail so a failing cargo in stage_cargo_test_binary's pipeline is reported as
-# a build failure rather than as a missing binary. The remote scripts deliberately
-# do not inherit this: see launch_remote.
+# pipefail so a failing cargo in stage_cargo_test_binary's pipeline reports as a build
+# failure, not a missing binary. The remote scripts do not inherit it: see launch_remote.
 set -euo pipefail
 
-# Toolchain pinning, CARGO_TARGET_DIR, REMOTE/REMOTE_REPO, resilient_rsync and
-# stage_cargo_test_binary. One copy, shared by every phase below.
+# Toolchain pinning, CARGO_TARGET_DIR, REMOTE/REMOTE_REPO, resilient_rsync,
+# stage_cargo_test_binary.
 . "$(dirname "${BASH_SOURCE[0]}")/lib/shadgpu-env.sh"
 
 # Rust integration tests that link libpeacock_gpu.so and must run on the GPU host.
-RUST_TESTS=(test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_bp_corpus)
+RUST_TESTS=(test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_bp_corpus test_node_timing)
 RUST_TESTS_STAGING=cpp/install/rust-tests
+
+# The measurement target and its own staging dir. setup-glibc.sh patches both.
+BENCH_TARGET=peacock_gpu_benchmarks
+BENCH_STAGING=cpp/install/rust-benchmarks
+# Relative to testdata/ on both sides, so one name drives the remote export and the pull.
+BENCH_RECORD_REL=calibration/records.tsv
+# opt-3: the default test profile leaves workspace crates at opt-level 1 and so measures
+# a host overhead that is not the engine's. See `[profile.benchmarks]` in Cargo.toml.
+BENCH_PROFILE=benchmarks
 
 # Runner, log, exit code and run id of a detached run, per phase. Outside
 # cpp/install/, which --push-binaries mirrors with --delete.
 REMOTE_STATE=$REMOTE_REPO/.run-state
 
 BUILD=0
+BUILD_BENCH=0
 RSYNC=0
 PATCH=0
 RUN=0
 RUN_ATTACHED=0
 RUN_DETACH=0
 RUN_STATUS=0
-# Both spellings of the run set RUN; RUN_ATTACHED exists so the contradiction between
-# them is still visible after both have set it.
+RUN_BENCH=0
+RUN_BENCH_ATTACHED=0
+BENCH_DETACH=0
+BENCH_STATUS=0
+PULL_BENCH=0
+# Both spellings of each run set RUN/RUN_BENCH; the *_ATTACHED flags exist so the
+# contradiction between them is still visible after both have set it.
 
 usage() {
   cat >&2 <<'USAGE'
 Usage: build-test-shadgpu.sh [flags]
 
   --build                     C++ build+install, stage the rust tests
+  --build-benchmarks          C++ build+install, stage the measurement target
   --push-binaries             mirror cpp/install/ to the host + goldens + registry
   --patch                     glibc-patch the shipped binaries on the host
   --run                       the correctness gate
   --run-detached              setsid on the host; poll with --run-status
   --run-status                read-only: still going / finished / log tail
+  --run-benchmarks            attached measurement run
+  --run-benchmarks-detached   setsid on the host; poll with --benchmark-status
+  --benchmark-status          read-only: still going / finished / log tail
+  --pull-benchmarks           fetch testdata/benchmark-results/ and the calibration record
+
   --all                       = --build --push-binaries --patch --run
 
---run-status exits 0 only when the latest run finished with 0.
+Knobs read from the environment, not flags:
+  PCK_TEST_FILTER=<sub>       cargo-test name filter forwarded to the rust binaries
+
+--all deliberately does NOT imply the benchmark phases: that is what keeps a
+measurement out of the merge gate.
+
+Nsight captures are scripts/create_nsys_profile.sh, which runs against the binaries
+this script pushes.
+
+A status flag exits 0 only when the latest run of that phase finished with 0.
 USAGE
   exit 1
 }
@@ -66,11 +124,16 @@ USAGE
 while [ $# -gt 0 ]; do
   case "$1" in
     --build) BUILD=1 ;;
+    --build-benchmarks) BUILD_BENCH=1 ;;
     --push-binaries) RSYNC=1 ;;
     --patch) PATCH=1 ;;
     --run) RUN=1; RUN_ATTACHED=1 ;;
     --run-detached) RUN=1; RUN_DETACH=1 ;;
     --run-status) RUN_STATUS=1 ;;
+    --run-benchmarks) RUN_BENCH=1; RUN_BENCH_ATTACHED=1 ;;
+    --run-benchmarks-detached) RUN_BENCH=1; BENCH_DETACH=1 ;;
+    --benchmark-status) BENCH_STATUS=1 ;;
+    --pull-benchmarks) PULL_BENCH=1 ;;
     --all) BUILD=1; RSYNC=1; PATCH=1; RUN=1; RUN_ATTACHED=1 ;;
     *) echo "Unknown flag: $1" >&2; usage ;;
   esac
@@ -78,23 +141,38 @@ while [ $# -gt 0 ]; do
 done
 
 # --- validation: every contradiction named, none resolved by argument order ---
-# All of it before the first side effect: half a deploy followed by "you cannot do
-# that" is worse than either outcome on its own.
+# Before the first side effect: half a deploy followed by "you cannot do that" is worse
+# than either outcome alone.
 die() { echo "$*" >&2; exit 1; }
 
+if [ "$RUN" -eq 1 ] && [ "$RUN_BENCH" -eq 1 ]; then
+  die "a gate run with a benchmark run: one exit code cannot mean both 'correctness
+     passed' and 'measurement completed'. Run them as two invocations."
+fi
 if [ "$RUN_ATTACHED" -eq 1 ] && [ "$RUN_DETACH" -eq 1 ]; then
   die "--run with --run-detached: pick who owns the process."
 fi
+if [ "$RUN_BENCH_ATTACHED" -eq 1 ] && [ "$BENCH_DETACH" -eq 1 ]; then
+  die "--run-benchmarks with --run-benchmarks-detached: pick who owns the process."
+fi
+if [ "$PULL_BENCH" -eq 1 ] && [ "$BENCH_DETACH" -eq 1 ]; then
+  # Reject rather than silently downgrade: the run has not finished, so a pull here
+  # returns a partial tree that looks like a completed measurement.
+  die "--pull-benchmarks with --run-benchmarks-detached: the run has not finished yet.
+     Poll with --benchmark-status, then --pull-benchmarks."
+fi
 if [ -f /.dockerenv ] \
-   && [ $((RSYNC + PATCH + RUN + RUN_STATUS)) -gt 0 ]; then
-  die "only --build works inside the builder container;
+   && [ $((RSYNC + PATCH + RUN + RUN_STATUS + RUN_BENCH + BENCH_STATUS + PULL_BENCH)) -gt 0 ]; then
+  die "only --build / --build-benchmarks work inside the builder container;
      the remaining phases need this workstation's ssh access to $REMOTE."
 fi
 
 # --- build --------------------------------------------------------------------
-# The C++ half is not optional: the staged binary resolves libpeacock_gpu.so from
-# cpp/install/lib. A fresh binary against a stale .so fails to link on the GPU host.
-if [ "$BUILD" -eq 1 ]; then
+# The C++ half is not optional for either target: the staged binary resolves
+# libpeacock_gpu.so from cpp/install/lib, and the per-node timing lives in that library.
+# A fresh binary against a stale .so fails to link on the host, or — if the symbol
+# happens to resolve — reports zeros for every node.
+if [ "$BUILD" -eq 1 ] || [ "$BUILD_BENCH" -eq 1 ]; then
   ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --gcc-version "$GCC_VERSION" --configure
   ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --gcc-version "$GCC_VERSION" --build
   ./scripts/build.sh --cudf_ROOT "$CUDF_ROOT" --gcc-version "$GCC_VERSION" --install
@@ -130,6 +208,14 @@ if [ "$BUILD" -eq 1 ]; then
   done
 fi
 
+if [ "$BUILD_BENCH" -eq 1 ]; then
+  # The first build under $BENCH_PROFILE is a cold compile of the whole DataFusion
+  # stack plus a third libpeacock_gpu.so — peacockdb-ffi's OUT_DIR lives inside the
+  # profile directory. One-time per profile; the correctness caches are untouched.
+  rm -rf "$BENCH_STAGING"
+  stage_cargo_test_binary "$BENCH_TARGET" "$BENCH_STAGING" --profile "$BENCH_PROFILE"
+fi
+
 # --- push ---------------------------------------------------------------------
 if [ "$RSYNC" -eq 1 ]; then
   # Unstripped binaries are ~565MB each against ~155MB stripped, and the link to the
@@ -139,30 +225,27 @@ if [ "$RSYNC" -eq 1 ]; then
     [ -f "$RUST_TESTS_STAGING/$t" ] && strip --strip-debug "$RUST_TESTS_STAGING/$t"
   done
 
-  # --delete on every push here, and the source is cpp/install/ rather than
-  # cpp/install/* : with a glob rsync gets several sources and --delete stops
-  # meaning what it looks like. It removes host orphans, which for a directory the
-  # remote runner globs is the difference between a stale binary sitting there and
-  # a stale binary executing.
-  #
-  # -a, not -r. cpp/install/lib is a vendored dependency tree full of soname chains
-  # (libglog.so.2 -> libglog.so.0.7.1, where the left name is the DT_SONAME the
-  # dynamic linker asks for), and `rsync -r` skips symlinks: the host would receive
-  # libglog.so.0.7.1 and nothing named libglog.so.2, and every binary would die at
-  # start with "error while loading shared libraries".
+  # cpp/install/ and NOT cpp/install/*: a glob makes --delete stop removing host
+  # orphans, and the runner globs that directory. The mirror covers rust-benchmarks/,
+  # so a gate push from a checkout without --build-benchmarks deletes the benchmark.
+  # -a, not -r: lib/ is soname chains, and -r skips the symlinks the linker asks for.
   resilient_rsync -a --delete cpp/install/ "$REMOTE:$REMOTE_REPO/cpp/install/"
   # The goldens the rust GPU tests assert against. Without this the host keeps
   # whatever a previous run left, so a locally-regenerated golden is compared
   # against a stale one and goes false-red.
   ssh "$REMOTE" "mkdir -p $REMOTE_REPO/testdata/goldens"
   resilient_rsync -r --delete testdata/goldens/ "$REMOTE:$REMOTE_REPO/testdata/goldens/"
-  # A committed fixture the registry tests read; goldens alone leave them failing on
-  # "cannot read cost-registry.csv", which is a mis-provisioned run rather than a
-  # product fault. Every provisioning path names its files by hand, so a new fixture
-  # has to be added to each one independently.
-  resilient_rsync -a testdata/cost-registry.csv "$REMOTE:$REMOTE_REPO/testdata/"
-  # The query text every corpus case reads: a missing file is loud, a stale one silently runs old SQL.
-  resilient_rsync -a testdata/tpch-queries testdata/tpcds-queries "$REMOTE:$REMOTE_REPO/testdata/"
+  # Everything else the binaries READ. Swept from git, not named: the hand-kept list
+  # this replaces went stale five times, once sending a run home tagged with categories
+  # that no longer existed. Additive, since untracked files here are not ours to delete.
+  # goldens/ belongs to the mirror above; benchmark-results/ is written on the host.
+  fixtures=$(mktemp)
+  git ls-files --cached --others --exclude-standard testdata \
+    | grep -vE '^testdata/(goldens|benchmark-results)/' > "$fixtures"
+  [ -s "$fixtures" ] || die "no tracked testdata fixtures found -- the git sweep is wrong"
+  echo "==> push $(wc -l < "$fixtures") committed testdata fixtures -> $REMOTE"
+  resilient_rsync -a --files-from="$fixtures" ./ "$REMOTE:$REMOTE_REPO/"
+  rm -f "$fixtures"
   # Our setup-glibc.sh, so --patch uses the version that knows both rust dirs.
   ssh "$REMOTE" "mkdir -p $REMOTE_REPO/scripts"
   resilient_rsync -a scripts/setup-glibc.sh "$REMOTE:$REMOTE_REPO/scripts/"
@@ -187,9 +270,8 @@ fi
 # later one's result. That is a property of the runner, not of the launcher.
 #
 # Each launch writes a fresh run id and removes the previous exit code. The runner
-# writes "<id> <rc>" last, and a status call reports a result only when that id
-# matches the id of the latest launch — otherwise an older run's completion reads
-# as this one's.
+# writes "<id> <rc>" last, and a status call reports a result only when that id is
+# the latest launch's — otherwise an older run's completion reads as this one's.
 remote_state_paths() {
   phase_runner=$REMOTE_STATE/$1.sh
   phase_log=$REMOTE_STATE/$1.log
@@ -286,6 +368,7 @@ EOF
 : "${PCK_TEST_FILTER:=}"
 filter_q=$(printf '%q' "$PCK_TEST_FILTER")
 
+
 # --- run: the correctness gate ------------------------------------------------
 # Knobs, set in the caller's env rather than as flags:
 #   PEACOCK_GPU_DEBUG=1    PCK_TRACE + a per-node cudaStreamSynchronize in
@@ -314,6 +397,9 @@ remote_gate_script() {
     # and segfault, which is why both loops below use shell builtins to read a log.
     PATCHED_LD=$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\$LD_LIBRARY_PATH
 
+    # Deliberately no \`set -e\`, matching CI: run every binary even after one fails and
+    # OR the codes into rc. Under set -e a SIGSEGV in one GPU binary cost us every
+    # later result, which read as "not run" but looked like "fine".
     rc=0
 
     # Glob peacock_*_tests, matching CI: a hardcoded name meant three of the four
@@ -396,6 +482,122 @@ remote_gate_script() {
 EOF
 }
 
+# --- run: the benchmark measurement -------------------------------------------
+# PEACOCK_GPU_DEBUG is deliberately not forwarded here, unlike in the gate: it adds
+# a cudaStreamSynchronize after every operator, which changes exactly the thing
+# being measured, and the numbers would not be comparable with any other run.
+remote_bench_script() {
+  cat <<EOF
+    export PEACOCK_TESTDATA_DIR=$REMOTE_REPO/testdata
+    export PEACOCK_TPCH_SF40_DIR=/home/info/peacock-datasets/testdata/tpch.sf40
+    export PEACOCK_TPCH_VEC_PARAMS=$REMOTE_REPO/testdata/tpch-vec-queries/query_params.jsonl
+
+    # The rust side resolves data as <testdata>/<dataset>.sf<sf> and nothing else, so a
+    # symlink is what lets sf40 live outside the repo without a second way to name a
+    # dataset path — which is how a run ends up reading one dataset and reporting another.
+    # Never replaces a real directory: that would be someone else's provisioning.
+    sf40_link=\$PEACOCK_TESTDATA_DIR/tpch.sf40
+    if [ -L "\$sf40_link" ]; then
+      have=\$(readlink "\$sf40_link")
+      if [ "\$have" != "\$PEACOCK_TPCH_SF40_DIR" ]; then
+        echo "!!! \$sf40_link -> \$have, expected \$PEACOCK_TPCH_SF40_DIR"
+        exit 1
+      fi
+    elif [ -e "\$sf40_link" ]; then
+      echo "!!! \$sf40_link exists and is not a symlink -- not touching it"
+      exit 1
+    elif [ ! -d "\$PEACOCK_TPCH_SF40_DIR" ]; then
+      echo "!!! no sf40 dataset at \$PEACOCK_TPCH_SF40_DIR"
+      exit 1
+    else
+      ln -s "\$PEACOCK_TPCH_SF40_DIR" "\$sf40_link"
+      echo "==> linked \$sf40_link -> \$PEACOCK_TPCH_SF40_DIR"
+    fi
+
+    # Per-command, never exported: this path carries glibc-2.35, and exporting it makes
+    # the host's own coreutils load the newer libc under the old loader and SIGSEGV — the
+    # mkdir/find/wc below would die and the run would report a bogus code having actually
+    # succeeded. (setup-glibc.sh warns about this at the end of --patch.)
+    bench_ld=$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib
+
+    bin=$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET
+    if [ ! -x "\$bin" ]; then
+      echo "!!! benchmark binary not found at \$bin"
+      echo "    Build it with --build-benchmarks and ship it with --push-binaries."
+      echo "    (A --push-binaries from a checkout that never built benchmarks mirrors"
+      echo "     it away again — see the --delete note in build-test-shadgpu.sh.)"
+      exit 1
+    fi
+
+    results=\$PEACOCK_TESTDATA_DIR/benchmark-results
+    mkdir -p "\$results"
+
+    # Calibration rows alongside the tree. Removed rather than appended to:
+    # record.rs writes the header only into a fresh file, so a leftover from an
+    # earlier run would swallow this one's rows under the earlier one's heading.
+    export PEACOCK_RECORD_PATH=\$PEACOCK_TESTDATA_DIR/$BENCH_RECORD_REL
+    mkdir -p "\$(dirname "\$PEACOCK_RECORD_PATH")"
+    rm -f "\$PEACOCK_RECORD_PATH"
+    # What this run wrote, not what is on the host: the tree accumulates across runs,
+    # so a total can only go red on a first-ever run and a filter that matches nothing
+    # would read green having measured nothing. mktemp gives the comparison point.
+    stamp=\$(mktemp)
+
+    # Assigned as REMOTE shell variables, not passed as arguments. \`printf %q ""\` is two
+    # quote CHARACTERS: read by the shell they vanish, handed on as a string they survive
+    # as the argument \`''\`, which libtest matches against no test name at all. That is
+    # how the first end-to-end run measured nothing and reported "0 passed".
+    main_filter=$filter_q
+
+    # To the terminal AND to \$blog: libtest's own "N passed" is the only honest answer
+    # to "did the filter match anything". --test-threads=1 is not optional — cuDF/RMM
+    # share one pool and one default stream, so concurrent cases would measure each
+    # other's contention.
+    bench_run() {
+      local label=\$1 filter=\$2
+      blog=/tmp/$BENCH_TARGET.\$label.log
+      LD_LIBRARY_PATH="\$bench_ld:\${LD_LIBRARY_PATH:-}" \\
+        "\$bin" --nocapture --test-threads=1 \$filter 2>&1 | tee "\$blog"
+      return \${PIPESTATUS[0]}
+    }
+
+    # Red on "the filter matched nothing", NOT on "no .benchmark.txt appeared": the
+    # binary carries tests that legitimately write no tree file, and failing those is how
+    # people learn to ignore a red banner. Per pass and right after it — a check reading
+    # whichever log was written last once passed a main pass that had run nothing.
+    ran_check() {
+      local label=\$1 filter=\$2
+      local n
+      n=\$(sed -n 's/^test result:.* \([0-9][0-9]*\) passed.*/\1/p' \\
+            "/tmp/$BENCH_TARGET.\$label.log" | awk '{n += \$1} END {print n + 0}')
+      if [ "\$n" -eq 0 ]; then
+        echo "!!! the \$label pass ran no tests (filter '\$filter' matched nothing?)"
+        exit 1
+      fi
+      echo "==> the \$label pass ran \$n tests"
+    }
+
+    echo "==> $BENCH_TARGET (filter=$filter_q)"
+    bench_run main "\$main_filter"
+    status=\$?
+    if [ "\$status" -ne 0 ]; then
+      echo "!!! $BENCH_TARGET FAILED (exit \$status)"
+      exit "\$status"
+    fi
+    ran_check main "\$main_filter"
+    written=\$(find "\$results" -name '*.benchmark.txt' -newer "\$stamp" | wc -l)
+    total=\$(find "\$results" -name '*.benchmark.txt' | wc -l)
+    rm -f "\$stamp"
+    echo "==> benchmark records written by this run: \$written (on host: \$total)"
+    echo "==> calibration rows: \$(grep -vc '^#' "\$PEACOCK_RECORD_PATH" 2>/dev/null || echo 0)"
+    # Not a failure: see ran_check. The main pass having run tests is already established.
+    if [ "\$written" -eq 0 ]; then
+      echo "==> no .benchmark.txt written: none of the tests that ran times a case"
+    fi
+
+EOF
+}
+
 run_rc=0
 if [ "$RUN" -eq 1 ]; then
   remote_gate_script | launch_remote gate "$RUN_DETACH" || run_rc=$?
@@ -405,6 +607,86 @@ if [ "$run_rc" -ne 0 ]; then exit "$run_rc"; fi
 status_rc=0
 if [ "$RUN_STATUS" -eq 1 ]; then
   report_status gate || status_rc=$?
+fi
+if [ "$BENCH_STATUS" -eq 1 ]; then
+  report_status benchmark || status_rc=$?
+fi
+
+if [ "$PULL_BENCH" -eq 1 ]; then
+  # The detached workflow is two invocations, and this is the second one: pulling
+  # mid-run brings home a partial tree that looks like a finished measurement. Three
+  # states, and only the first is a refusal — a run that died left its records intact,
+  # and collecting them is the documented recovery, so that one says so and pulls.
+  remote_state_paths benchmark
+  pull_state=$(ssh "$REMOTE" bash <<EOF
+    id=\$(cat $phase_id 2>/dev/null || true)
+    if [ -z "\$id" ] || grep -q "^\$id " $phase_rc 2>/dev/null; then
+      echo settled
+    elif pgrep -f $phase_runner > /dev/null; then
+      echo running
+    else
+      echo died
+    fi
+EOF
+  )
+  case "$pull_state" in
+    running)
+      die "a benchmark run is still going on $REMOTE; --pull-benchmarks now would bring
+     home a partial tree. Poll with --benchmark-status." ;;
+    died)
+      echo "!!! the last benchmark run on $REMOTE left no exit code — it died partway." >&2
+      echo "    Pulling anyway: what it wrote before that is intact, but the tree is a" >&2
+      echo "    partial run's output, not a completed measurement." >&2 ;;
+  esac
+  mkdir -p testdata/benchmark-results
+  # No --delete, unlike every push: a filtered run rewrites only the cases it ran,
+  # and mirroring would wipe every record of the others. Nothing prunes the host
+  # tree either, so a renamed case's record lives there until someone removes it and
+  # rides home on every later pull.
+  resilient_rsync -r "$REMOTE:$REMOTE_REPO/testdata/benchmark-results/" testdata/benchmark-results/
+  echo "==> fetched $(find testdata/benchmark-results -name '*.benchmark.txt' | wc -l) benchmark records"
+  # The record beside the tree; the captures are create_nsys_profile.sh's. Missing is not
+  # an error — this is also the recovery path for a run that died before writing one.
+  # Tested over ssh rather than by letting the transfer fail: resilient_rsync retries a
+  # missing source a hundred times, and eight minutes of backoff reads as a hang.
+  pull_one() {                    # pull_one <relative path> <what it is>
+    local rel=$1 what=$2
+    if ! ssh "$REMOTE" test -f "$REMOTE_REPO/testdata/$rel"; then
+      echo "==> $what: nothing on the host"
+      return 0
+    fi
+    mkdir -p "testdata/$(dirname "$rel")"
+    resilient_rsync "$REMOTE:$REMOTE_REPO/testdata/$rel" "testdata/$rel"
+    case "$rel" in
+      *.tsv) echo "==> $what: $(grep -vc '^#' "testdata/$rel") rows" ;;
+      *)     echo "==> $what: $(du -h "testdata/$rel" | cut -f1)" ;;
+    esac
+  }
+  pull_one "$BENCH_RECORD_REL" "the calibration record"
+
+  # What came home that nothing here writes any more. The host tree accumulates and this
+  # pull has no --delete, so a file whose naming scheme is gone rides home on every later
+  # one. Told apart by shape: a current file is `<mode>.benchmark.txt`, one dot. Reported
+  # rather than deleted — quietly removing measurements is the same silence, mirrored.
+  stale=$(find testdata/benchmark-results -name '*.*.benchmark.txt' | wc -l)
+  if [ "$stale" -gt 0 ]; then
+    echo "==> $stale file(s) here match no mode this build writes — a naming scheme that"
+    echo "    is gone. If the host still holds copies, a pull brings them back, so check"
+    echo "    there before concluding a local delete stuck:"
+    find testdata/benchmark-results -name '*.*.benchmark.txt' | head -3 | sed 's/^/      /'
+    echo "      ssh $REMOTE \"find $REMOTE_REPO/testdata/benchmark-results -name '*.*.benchmark.txt' -delete\""
+  fi
+
+  # What is here now, not what this pull moved. The two differ whenever a filter ran, and
+  # the question a caller has after one invocation is "do I have what the plots need" —
+  # which is about the tree, not about the transfer.
+  echo "==> what is here now:"
+  for f in $(find testdata/benchmark-results -name '*.benchmark.txt' | sort); do
+    echo "      $f ($(grep -c '^== ' "$f") queries)"
+  done
+  for rel in "$BENCH_RECORD_REL"; do
+    [ -f "testdata/$rel" ] && echo "      testdata/$rel ($(($(grep -vc '^#' "testdata/$rel") - 1)) rows)"
+  done
 fi
 
 exit "$status_rc"

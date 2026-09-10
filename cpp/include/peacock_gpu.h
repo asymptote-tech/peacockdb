@@ -60,10 +60,9 @@ const char* peacock_last_error(peacock_executor_t* executor);
 /// varlen_content_bytes — keeping the byte-accounting formula single-sourced in Rust.
 typedef struct PeacockNodeStats {
   uint64_t rows;
+  /// Σ over var-length (string) output columns of content bytes; additive across
+  /// columns, so one total suffices.
   uint64_t varlen_content_bytes;
-  /// Microseconds this OUTPUT PARTITION took; 0 unless peacock_set_node_timing(1)
-  /// is in effect. A node's time is the Σ over its partitions.
-  uint64_t time_us;
 } PeacockNodeStats;
 
 /// What peacock_install_rmm_pool() did. Values, not a bitfield.
@@ -93,8 +92,8 @@ typedef struct PeacockRmmPoolInfo {
 /// measures the engine under the same allocator instead of producing numbers that are
 /// quietly compared with theirs.
 ///
-/// The engine does NOT call this on its own behalf, so a shipping query is
-/// unaffected; making it self-installing is llm-wiki/tickets.md #148.
+/// The engine does not call this for itself, so a shipping query is unaffected; making
+/// it self-installing is #148.
 ///
 /// @param out_info  Filled with what actually happened. Required.
 /// @return 0 unless out_info is NULL — NOT non-zero on UNAVAILABLE, which still
@@ -103,24 +102,88 @@ typedef struct PeacockRmmPoolInfo {
 ///         pool and one taken without differ by more than noise.
 int peacock_install_rmm_pool(PeacockRmmPoolInfo* out_info);
 
-/// Turn per-node timing on/off (process-global; off by default).
-///
-/// Enabling it makes peacock_executor_execute_node synchronize the default stream at
-/// every measurement boundary and fill PeacockNodeStats::time_us. That sync is what
-/// makes the number real and also what makes it costly, so this is opt-in: correct
-/// for a measurement, wrong for production.
-void peacock_set_node_timing(int enable);
+/// Per-node timing modes for peacock_set_node_timing.
+enum {
+  /// The default, and the only mode a shipping query runs in.
+  PEACOCK_NODE_TIMING_OFF = 0,
+  /// CUDA events around the device work, host clock around the host work, no sync
+  /// inside the region. Device times do not exist when a node returns — read them with
+  /// peacock_executor_collect_node_regions after the root materialize.
+  PEACOCK_NODE_TIMING_EVENTS = 1
+};
 
-/// Cost of the measurement itself, in microseconds: the timed region every node
-/// pays, wrapped around no work (clock reads + a sync of an already-idle stream).
+/// Select the per-node timing mode (process-global; OFF by default).
 ///
-/// A node's time_us is real work PLUS one of these, so a node at or below this
-/// number is not "cheap" — it is below what the method can resolve. Report it next
-/// to the node times; do NOT subtract it from them.
+/// Opt-in because EVENTS is not free: it allocates an event pair per region and holds it
+/// until collection.
 ///
-/// Returns the second-smallest of `samples` (clamped to >= 2). Requires a live CUDA
-/// context and no concurrent work on the default stream. Returns 0 on CUDA error.
-uint64_t peacock_measure_timing_floor_us(unsigned samples);
+/// @param mode one of PEACOCK_NODE_TIMING_*. Unknown values are treated as OFF.
+void peacock_set_node_timing(int mode);
+
+/// Emit NVTX ranges around plan nodes and their output partitions (process-global;
+/// off by default). Independent of peacock_set_node_timing: a profiling run wants
+/// the node boundaries without the event pairs, whose recording is device work a
+/// capture would attribute to the node.
+///
+/// @param on nonzero to emit. Cheap but not free when on, and nothing reads the
+///        ranges unless a profiler is attached.
+void peacock_set_nvtx_ranges(int on);
+
+/// Open a named NVTX range in peacockdb's domain that spans until
+/// peacock_nvtx_pop_range, and close it.
+///
+/// For a BENCHMARK HARNESS to name the case it is about to run: a node range is named
+/// `<seq>.<call_index> <kind>` and seq numbering restarts per plan, so only containment
+/// says which query a call belongs to.
+///
+/// No-ops while peacock_set_nvtx_ranges is off, and nothing in the engine calls either.
+/// One level: pushing twice without popping replaces rather than nests.
+/// @param name borrowed for the duration of the call; NVTX copies it.
+void peacock_nvtx_push_range(const char* name);
+void peacock_nvtx_pop_range(void);
+
+/// One collected device interval: which node output partition it belongs to, and
+/// what the device spent on it.
+/// One timed region: which call it was, and everything measured about it.
+///
+/// Separate from PeacockNodeStats because the two have different consumers. Stats come
+/// back on every call and the driver needs both numbers; nothing on the execution path
+/// reads any of these, so carrying them there made a shipping query pay per call.
+typedef struct PeacockNodeRegion {
+  uint64_t seq;
+  uint64_t partition;
+  /// Calls already made against this seq in this session when this one began; 0 for the
+  /// first. Per CALL, so the partitions of one call share it.
+  uint64_t call_index;
+  uint64_t host_setup_us;
+  uint64_t host_submit_us;
+  /// 0 where the region recorded no complete event pair — it touched no device, or the
+  /// events could not be created.
+  uint64_t device_us;
+  /// Rows this call answered with, for this output partition. The driver already has the
+  /// figure in PeacockNodeStats; this copy is for the calibration record, whose row is one
+  /// CALL — a node driving several hands back only the last one's.
+  uint64_t rows;
+  /// C++'s own reconstruction of the byte total. Compared against Rust's wherever Rust has
+  /// one; consumed where it does not — a call in the middle of a node's chain is priced
+  /// here and nowhere else. See NodeRegion::logical_bytes in plan_executor.h.
+  uint64_t logical_bytes;
+} PeacockNodeRegion;
+
+/// Drain the device intervals recorded since the last call, in execution order.
+///
+/// Only PEACOCK_NODE_TIMING_EVENTS produces any. Call it after the root
+/// peacock_result_from_handle and before peacock_executor_end_plan, which destroys them.
+/// What is returned is released, so two calls do not double-report.
+///
+/// @param out      Caller array of `cap` entries.
+/// @param out_count Regions RECORDED, not the number that fit. Exceeding `cap` FAILS the
+///                  call and the surplus is gone, the drain having happened. Size it as
+///                  node count × target_partitions.
+/// @return 0 on success, non-zero on failure (see peacock_last_error).
+int peacock_executor_collect_node_regions(peacock_executor_t* executor,
+                                        PeacockNodeRegion* out, uint64_t cap,
+                                        uint64_t* out_count);
 
 /// Load a plan for node-by-node execution. Parses + verifies once and indexes
 /// nodes in post-order. Replaces any previously loaded plan on this executor.
