@@ -368,3 +368,64 @@ reads `rebase needed(done)` for one reason only: `done` asserts the PR is green,
 run on the new head. The last transition is the one place a coordinator waits. When run against
 `b8e16dda` on PR #141 is green, set the board to `done` and take task 2. If it is red, that is a
 finding for a developer, and the board drops to `building`.
+
+## Independent re-proof of the residues (2026-09-09, parallel developer)
+
+A second developer ran the same proof concurrently in this worktree and reached the same
+verdict; the two runs raced on `./target` and on the goldens without either seeing a
+non-empty diff. Recorded here for what the other run did not cover.
+
+**Both feature sets build clean, cuDF included.** After `third_party/cudf` was populated the
+cuDF leg does build here: `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 CARGO_BUILD_JOBS=3
+scripts/cargo-cudf.sh build -p peacockdb-core -p peacockdb` finished in 8m56s and
+`... -p peacockdb-core -p peacockdb-ffi --all-targets` in 9m44s, both zero warnings. The second
+one links the five GPU test binaries, so the reworded `RunError` arms compile in the tier that
+runs on a device. Rust-only, forced by touching `lib.rs`: zero warnings. Zero is the count in
+all three; no earlier count is on record to compare against.
+
+**The device tier was not run, and here is what is missing without it.** shad-gpu's last run,
+`20260909T113124-164836`, is green but predates the residues, and this worktree has no
+`cpp/build*` or `cpp/install`, so `--build` is a cold C++/CUDA build before anything ships. What
+a device would add is nil for these three hunks: `RunError::Protocol` and `CallFailed` are
+constructed nowhere in `peacockdb-core/tests`, `peacockdb-ffi` or `cpp` (the only `RunError` a
+test names is `BudgetExceeded`, which renders `{message}` and is untouched), no file under
+`testdata/` carries either display prefix, and the third hunk is a `#[cfg(test)]` temp-dir name
+in the lib, which no integration binary runs. CI on #141 is the device claim.
+
+**Gate counts, re-run under `LC_ALL=C.UTF-8` on `39ec0bf3`.** Gate 1 six, gates 2 and 3 empty,
+the `peacockdb-core/src`-scoped form one — `gpu_rowgroup_prune.rs:151`. Two numbers the spec
+gives have moved with the tree and are worth not re-deriving: the gate-1 exclusion now drops
+**166** lines, not 170, and stripping the six survivor spellings from all 166 and re-matching
+returns nothing, so the line-scoped hole is still latent. The locale behaviour is exactly as
+documented — the same gate under `LC_ALL=C` reports three, because `.` cannot span the arrow.
+
+**One nit, not applied.** `parquet_meta.rs` was rustfmt-clean before the edit and is not after:
+the shorter temp-dir string lets the `format!` fit on one 99-column line, and coding-style asks
+for rustfmt over the files a change touches. `rustfmt --edition 2024
+peacockdb-core/src/batch_partitioned/parquet_meta.rs` produces exactly that one hunk and nothing
+else. Left unapplied because the signoff is written; the rest of the tree is not
+rustfmt-clean (551 hunks), so nothing else follows from it.
+
+**Two more lines of inherited drift in `build-test.md`.** Line 46 gives the cost-report renderer
+41 cases; the crate has 37 `#[test]` and the target reports 37, on master as well as here. And
+line 134 still names the recipe-payload case `tpch_and_tpcds_recipe_payloads`, the same stale
+name that was corrected at line 35.
+
+## Disposition of the second developer's three items
+
+The two `build-test.md` drifts are corrected in this commit: the cost-report renderer count is
+37, not 41, and the recipe-payload row names
+`the_payload_golden_carries_what_each_call_hands_the_executor`. Both were wrong on master too.
+One capitalised word on the `.result.txt` row went with them.
+
+The rustfmt hunk in `parquet_meta.rs` is left for task 2. It is a nit — the tree is not
+rustfmt-clean anywhere else — and this task is closed, but task 2 moves that exact file, so the
+reformat costs nothing there and reopens nothing here.
+
+## Which SHA carries the green
+
+`b8e16dda` is the last head whose tree contains code. Everything above it is markdown, so the
+changed-paths job skips the build on those heads and reports a run that is green without having
+compiled anything — `39ec0bf3`'s run 34429881858 is exactly that shape, and reading it as the
+gate would be reading a skip. The run that decides this task is 34429841177 on `b8e16dda`.
+A docs-only head above a green code head does not need its own run.
