@@ -32,10 +32,6 @@ struct NodeStats {
   /// Σ over var-length (string) output columns of content bytes
   /// (offsets[n]-offsets[0]); additive across columns, so one total suffices.
   uint64_t varlen_content_bytes = 0;
-  /// Host microseconds this OUTPUT PARTITION took; 0 unless timing is on. A node's
-  /// time is Σ over its partitions. The batch-partitioned path reads the three-term
-  /// split out of `NodeRegion` instead; this stays for the node-at-a-time caller.
-  uint64_t time_us = 0;
 };
 
 /// How per-node regions are measured. Off by default: measuring is not free.

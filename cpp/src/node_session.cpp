@@ -537,10 +537,10 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
             scan, map_groups
                       ? cudf::host_span<const uint32_t>{map_groups->data(), map_groups->size()}
                       : cudf::host_span<const uint32_t>{});
-        const auto [setup_us, submit_us] = timer.stop();
+        timer.stop();
         {
           const auto outcome = call_outcome(result);
-          if (out_stats) out_stats[p] = NodeStats{outcome.rows, outcome.varlen_content_bytes, setup_us + submit_us};
+          if (out_stats) out_stats[p] = NodeStats{outcome.rows, outcome.varlen_content_bytes};
           if (sink) record_outcome(*sink, outcome);
         }
         uint64_t handle = impl_->next_handle++;
@@ -632,10 +632,10 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
       mark_device_start();
       result.table = cudf::concatenate(views);
     }
-    const auto [setup_us, submit_us] = timer.stop();
+    timer.stop();
     {
       const auto outcome = call_outcome(result);
-      if (out_stats) out_stats[0] = NodeStats{outcome.rows, outcome.varlen_content_bytes, setup_us + submit_us};
+      if (out_stats) out_stats[0] = NodeStats{outcome.rows, outcome.varlen_content_bytes};
       if (sink) record_outcome(*sink, outcome);
     }
     uint64_t handle = impl_->next_handle++;
@@ -721,10 +721,12 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
       TableResult part;
       part.column_names = column_names;
       part.table = std::make_unique<cudf::table>(slice);
-      const auto [setup_us, submit_us] = (p == 0) ? shared_timer.stop() : own->stop();
+      // Closed either way: the region's own halves go into it, and nothing here reads
+      // the pair back.
+      if (p == 0) shared_timer.stop(); else own->stop();
       {
         const auto outcome = call_outcome(part);
-        if (out_stats) out_stats[p] = NodeStats{outcome.rows, outcome.varlen_content_bytes, setup_us + submit_us};
+        if (out_stats) out_stats[p] = NodeStats{outcome.rows, outcome.varlen_content_bytes};
         if (sink) record_outcome(*sink, outcome);
       }
       uint64_t handle = impl_->next_handle++;
@@ -765,10 +767,10 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     }
     ScopedNodeTimer timer(sink, seq, p, call_index);
     TableResult result = execute_one(node, std::move(inputs));
-    const auto [setup_us, submit_us] = timer.stop();
+    timer.stop();
     {
       const auto outcome = call_outcome(result);
-      if (out_stats) out_stats[p] = NodeStats{outcome.rows, outcome.varlen_content_bytes, setup_us + submit_us};
+      if (out_stats) out_stats[p] = NodeStats{outcome.rows, outcome.varlen_content_bytes};
       if (sink) record_outcome(*sink, outcome);
     }
     uint64_t handle = impl_->next_handle++;
@@ -820,10 +822,10 @@ uint64_t NodeSession::execute_scan_rowgroups(uint64_t seq,
     throw std::runtime_error("NodeSession::execute_scan_rowgroups: seq " + std::to_string(seq) +
                              " reading row groups [" + groups + "]: " + e.what());
   }
-  const auto [setup_us, submit_us] = timer.stop();
+  timer.stop();
   {
     const auto outcome = call_outcome(result);
-    if (out_stats) *out_stats = NodeStats{outcome.rows, outcome.varlen_content_bytes, setup_us + submit_us};
+    if (out_stats) *out_stats = NodeStats{outcome.rows, outcome.varlen_content_bytes};
     if (sink) record_outcome(*sink, outcome);
   }
   uint64_t handle = impl_->next_handle++;

@@ -893,14 +893,14 @@ Three conventions the signatures do not carry:
   past the end empty, an overrun clamped. It is the same convention on `slice_handle` and
   `result_from_handle`, which are otherwise the two halves of the limit rule — one produces
   a handle, the other a result.
-- **Instrumentation is process-global, off by default, and nothing in this workspace turns
-  any of it on.** Without the pool every cuDF intermediate is a `cudaMalloc`/`cudaFree` round
+- **Instrumentation is process-global and off by default; only `peacock_gpu_benchmarks`
+  turns it on.** Without the pool every cuDF intermediate is a `cudaMalloc`/`cudaFree` round
   trip ([#148](tickets.md#t148)); the gtest binaries install it from their own `main()`, and
-  this symbol exists for a Rust caller that cannot include the C++ header. Node timing makes
-  `execute_node` synchronize the default stream at every measurement boundary, which is what
-  makes `time_us` execution rather than kernel submission and also what serializes what cuDF
-  would otherwise pipeline. The floor is what an empty timed region costs, and it is never
-  subtracted: a node at or below it is unresolved, not cheap.
+  this symbol exists for a Rust caller that cannot include the C++ header. Node timing puts
+  CUDA events around the device work and the host clock around the host work, with no sync
+  inside the region — so a measured run is not a serialized one, which is what lets its
+  numbers stand for the unmeasured run. Device times do not exist when a node returns and
+  are drained afterwards by `peacock_executor_collect_node_regions`.
 - **`peacock_executor_create` takes a byte limit it does not enforce.** Residency is the
   Rust driver's accounting; see [Memory accounting](#memory-accounting).
 

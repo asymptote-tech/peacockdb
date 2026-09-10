@@ -21,9 +21,6 @@ pub mod raw {
         /// Σ over var-length (string) output columns of content bytes; additive across
         /// columns, so one total suffices.
         pub varlen_content_bytes: u64,
-        /// Microseconds this output partition took; 0 unless
-        /// [`peacock_set_node_timing`] is on. A node's time is Σ over partitions.
-        pub time_us: u64,
     }
 
     /// What [`peacock_install_rmm_pool`] did — sizes are 0 unless `state` is

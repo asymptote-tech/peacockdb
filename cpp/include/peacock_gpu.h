@@ -63,9 +63,6 @@ typedef struct PeacockNodeStats {
   /// Σ over var-length (string) output columns of content bytes; additive across
   /// columns, so one total suffices.
   uint64_t varlen_content_bytes;
-  /// Microseconds this OUTPUT PARTITION took; 0 unless peacock_set_node_timing is on.
-  /// A node's time is the Σ over its partitions.
-  uint64_t time_us;
 } PeacockNodeStats;
 
 /// What peacock_install_rmm_pool() did. Values, not a bitfield.
