@@ -277,3 +277,103 @@ Visibility snapshot for the next slice: `visibility-after-slice3.txt`,
 Every golden-driven run needs `PEACOCK_TESTDATA_DIR` pointed at the scratch symlink root described
 under slice 2 — this worktree has no `testdata/tpch.sf1`. verda is unreachable this run (its host
 key changed and the box no longer takes our key), so all of the above ran locally.
+
+### Slice 4 — `wire`, and `generated` behind the wall
+
+Ready to commit. No golden moved, the case inventory is identical in both shapes, all three
+builds are clean at zero warnings, and the flatc surface is now unreachable from outside the
+component — proven by the compiler, not asserted:
+
+```
+$ rustc --edition 2024 --crate-type lib --extern peacockdb_core=<rlib> probe.rs
+error[E0603]: module `generated` is private
+```
+
+where `probe.rs` names `peacockdb_core::wire::generated::peacock::plan::PlanNodeKind`.
+
+#### What moved
+
+All eleven files that name flatc's output, exactly as the spec predicted: nine from `recipe/`
+plus `plan_text/{fb_text,recipes}.rs`, which therefore move a second time — slice 3 carried them
+up with `plan_text` and this slice puts them where they belong. `lib.rs`'s `pub mod generated`
+becomes `wire/generated.rs`, declared `mod generated;`.
+
+Two files the spec's tree does not list, both forced:
+
+- **`wire/attach.rs`.** `recipe/mod.rs` held `attach_recipes` plus `walk`, `emit` and fifteen
+  per-node arms, none of them one-expression bodies. `wire/mod.rs` is declarations and one-line
+  delegations, so the walk needs an implementation module and `recipes.rs` is taken by the
+  renderer.
+- **`wire/serialize.rs`**, which is `recipe/wire.rs` renamed. Left alone it would be
+  `wire::wire`, and its three functions serialize scalars, types and schemas.
+
+`recipe/types.rs` is gone: its vocabulary is `wire/mod.rs` and its two `Display` impls are in
+`recipes.rs`, which is the renderer they feed. `wire/mod.rs` is 354 lines against the spec's
+estimate of about 300.
+
+#### `generated.rs` flattens one level
+
+The include goes straight into `wire/generated.rs` rather than into a nested
+`gpu_plan_generated` module, so the path is `generated::peacock::plan` and not
+`generated::gpu_plan_generated::peacock::plan`. All eleven import lines were being rewritten
+anyway, and the extra level bought nothing once the module was private. The
+`#[allow(unused_imports, dead_code, clippy::all)]` is kept as an inner attribute with a comment
+saying why it stops being cosmetic: while the module was `pub` in `lib.rs` everything was
+externally reachable and `dead_code` could not fire; private to one component, every generated
+type the crate does not name is dead code.
+
+#### `node_at` and `payload_text` stay inside the wall, against the spec's list
+
+The spec lists both among what `wire/mod.rs` exposes. Both return or take flatc types
+(`fb::PlanNode`), so declaring them `pub` in `mod.rs` would put a type from the private module
+into the component's public signature — which is the one thing making `generated` private is
+for. Nothing outside `wire` names either: their only caller is `recipes.rs`, which is now
+inside. So both are `pub(crate)` in their implementation modules. Recorded as a deliberate
+departure.
+
+`FbKind::wire_kind` is the one item declared in `wire/mod.rs` whose signature names a type from
+the private module. It is narrowed from `pub` to `pub(crate)`; its two callers are both inside
+`wire`. Note that rustc does **not** warn here — `private_interfaces` reads the type's nominal
+visibility, and flatc emits `pub`, so an unreachable-but-nominally-public type passes silently.
+The check has to be made by reading, which is why the layout test in the next slice should carry
+it.
+
+#### The rust-only build cannot see a broken `gpu_backend`
+
+A path rewrite turned `use super::super::recipe::…` into `use super::crate::wire::…` in five
+`gpu_backend` files. Shape 1 was green — those files are `#[cfg(not(feature = "rust-only"))]` —
+and shape 2 failed with `E0433: crate in paths can only be used in start position`. Second time
+this slice sequence that a cudf-only break got through a green rust-only build.
+
+#### A slice-3 defect fixed here
+
+`plan_text/{expr_text,run_text}.rs` shipped in slice 3 with a mis-ordered `use` block: the
+helper that reordered them took a file's *first* contiguous `use` run rather than the one that
+changed, and those two files have three runs. Both are rustfmt-ordered now, and the helper used
+in this slice takes the whole span from the first `use` to the last.
+
+#### Evidence
+
+| Check | Result |
+|---|---|
+| `--lib` | 437 passed |
+| `test_plan_goldens` | 19 passed |
+| `test_cpu_corpus` | 448 passed |
+| `test_cpu_end_to_end` | 24 passed, 2 ignored |
+| `test_ci_coverage` / `test_corpus_goldens` / `test_cost_model` / `test_golden_format` | 7 / 20 / 3 / 24 passed |
+| `test_layout_injection` / `test_null_analysis` / `test_planner_join_{capability,refusals}` / `test_cpu_executors` | 4 / 8 / 13 / 10 / 1 passed |
+| three builds | 0 warnings each |
+| goldens | byte-identical to `goldens-after-rename.sha256` |
+| case inventory, both shapes | identical |
+| residue gate | the same seven lines |
+| `generated` reachability | `E0603` from outside the crate |
+| `pub use` / `pub(super)` | 15 and 8, all in `batch_partitioned/{nodes,translate,cpu_backend}` and the crate root |
+| rename detection | every moved file scores 0.89 or better against its new path |
+
+Visibility snapshot: `visibility-after-slice4.txt`, `visibility-items-after-slice4.txt`.
+
+#### Owed work, carried forward
+
+The whole-crate `pub` narrowing (the spec's "54 items lose `pub`") is still owed, and belongs
+after the backends slice and before the layout test. `private_interfaces` is why it cannot be
+done per slice against a zero-warning baseline.

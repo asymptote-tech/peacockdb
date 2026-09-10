@@ -3,16 +3,21 @@
 //! kinds are not tested here — the plan goldens run them over every corpus query, which is
 //! more coverage than a hand-built node would be.
 
+use super::attach::{accumulate_and_sort, aggregate, aggregate_batches};
+use super::generated::peacock::plan as fb;
+use super::read::node_at;
 use super::writer::Writer;
 use super::*;
 use crate::batch_partitioned::aggregates::{AggCall, PlanAgg};
 use crate::batch_partitioned::expr::{BinaryOp, Expr, NamedExpr};
 use crate::batch_partitioned::layout::{BatchLayout, ColumnOrder, NodeKind, PartitionLayout};
-use crate::batch_partitioned::nodes::GpuFilter;
 use crate::batch_partitioned::nodes::aggregate::AggregateBody;
 use crate::batch_partitioned::nodes::join::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
-use crate::batch_partitioned::nodes::{GpuAggregate, GpuHashJoin, GpuNestedLoopJoin};
-use crate::generated::gpu_plan_generated::peacock::plan as fb;
+use crate::batch_partitioned::nodes::{
+    GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuFilter, GpuHashJoin,
+    GpuNestedLoopJoin,
+};
+use crate::batch_partitioned::schema::Schema;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::JoinType;
 use datafusion::common::ScalarValue;

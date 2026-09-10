@@ -7,19 +7,19 @@
 use datafusion::arrow::datatypes::Field;
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
-use crate::generated::gpu_plan_generated::peacock::plan as fb;
-use super::wire::serialize_schema;
+use super::generated::peacock::plan as fb;
+use super::serialize::serialize_schema;
 
-use super::super::error::PlanError;
-use super::super::expr::Expr;
-use super::super::layout::ColumnOrder;
-use super::super::nodes::{
+use super::expr_writer::write_expr;
+use super::writer::Payload;
+use crate::batch_partitioned::error::PlanError;
+use crate::batch_partitioned::expr::Expr;
+use crate::batch_partitioned::layout::ColumnOrder;
+use crate::batch_partitioned::nodes::{
     GpuAccumulateBatchesAndSort, GpuEmitPartitions, GpuFilter, GpuLoadParquet,
     GpuMergeSortedPartitions, GpuProject, GpuSort,
 };
-use super::super::schema::Schema;
-use super::expr_writer::write_expr;
-use super::writer::Payload;
+use crate::batch_partitioned::schema::Schema;
 
 type Kids<'a, 'b> = &'b [WIPOffset<fb::PlanNode<'a>>];
 
@@ -77,7 +77,7 @@ fn sort_keys<'a>(
 /// One path, because the node reads one file: cuDF takes one row-group vector per source,
 /// so a path repeated per DataFusion file group answers `Must specify row groups for each
 /// source` — or, with no override, reads the file once per entry and concatenates.
-pub(super) fn scan<'a>(
+pub(crate) fn scan<'a>(
     b: &mut FlatBufferBuilder<'a>,
     node: &GpuLoadParquet,
     output: &Schema,
@@ -100,7 +100,7 @@ pub(super) fn scan<'a>(
     })
 }
 
-pub(super) fn filter<'a>(
+pub(crate) fn filter<'a>(
     b: &mut FlatBufferBuilder<'a>,
     node: &GpuFilter,
     kids: Kids<'a, '_>,
@@ -124,7 +124,7 @@ pub(super) fn filter<'a>(
     })
 }
 
-pub(super) fn project<'a>(
+pub(crate) fn project<'a>(
     b: &mut FlatBufferBuilder<'a>,
     node: &GpuProject,
     kids: Kids<'a, '_>,
@@ -143,7 +143,7 @@ pub(super) fn project<'a>(
 
 /// A project built from expressions the caller already wrote — the join's key and pad
 /// projects come this way, since neither is a plan node of its own.
-pub(super) fn project_payload<'a>(
+pub(crate) fn project_payload<'a>(
     b: &mut FlatBufferBuilder<'a>,
     exprs: Vec<WIPOffset<fb::Expr<'a>>>,
     names: Vec<WIPOffset<&'a str>>,
@@ -167,7 +167,7 @@ pub(super) fn project_payload<'a>(
 
 /// Per batch, so partitions are preserved: the collapse to one stream is a node of its
 /// own in this mode, never a side effect of a sort.
-pub(super) fn sort<'a>(
+pub(crate) fn sort<'a>(
     b: &mut FlatBufferBuilder<'a>,
     node: &GpuSort,
     input: &Schema,
@@ -192,7 +192,7 @@ pub(super) fn sort<'a>(
 /// The sort an accumulating node runs per batch before its merge: same node, and the
 /// `fetch` rides the merge rather than the per-batch sorts, which must keep every row a
 /// later batch could outrank.
-pub(super) fn accumulating_sort<'a>(
+pub(crate) fn accumulating_sort<'a>(
     b: &mut FlatBufferBuilder<'a>,
     node: &GpuAccumulateBatchesAndSort,
     input: &Schema,
@@ -214,7 +214,7 @@ pub(super) fn accumulating_sort<'a>(
     })
 }
 
-pub(super) fn merge_sorted<'a>(
+pub(crate) fn merge_sorted<'a>(
     b: &mut FlatBufferBuilder<'a>,
     keys: &[ColumnOrder],
     fetch: Option<usize>,
@@ -238,7 +238,7 @@ pub(super) fn merge_sorted<'a>(
 
 /// The merge a `GpuMergeSortedPartitions` runs, which is the same node one level up: k
 /// sorted lanes into one stream, the `fetch` applied to the result.
-pub(super) fn merge_partitions<'a>(
+pub(crate) fn merge_partitions<'a>(
     b: &mut FlatBufferBuilder<'a>,
     node: &GpuMergeSortedPartitions,
     input: &Schema,
@@ -249,7 +249,7 @@ pub(super) fn merge_partitions<'a>(
 
 /// The collapse arm: it concatenates whatever k handles the call passes, which is why the
 /// node carries nothing but its input.
-pub(super) fn coalesce_partitions<'a>(
+pub(crate) fn coalesce_partitions<'a>(
     b: &mut FlatBufferBuilder<'a>,
     kids: Kids<'a, '_>,
 ) -> Payload {
@@ -267,7 +267,7 @@ pub(super) fn coalesce_partitions<'a>(
 
 /// One lane into N by Spark murmur3 on the hash keys — the routing both engines share,
 /// so a row lands in the same lane on either.
-pub(super) fn repartition<'a>(
+pub(crate) fn repartition<'a>(
     b: &mut FlatBufferBuilder<'a>,
     node: &GpuEmitPartitions,
     input: &Schema,
@@ -296,7 +296,7 @@ pub(super) fn repartition<'a>(
 }
 
 /// A typed NULL literal, which is what pads a probe column an anti join never emitted.
-pub(super) fn null_literal<'a>(
+pub(crate) fn null_literal<'a>(
     b: &mut FlatBufferBuilder<'a>,
     field: &Field,
 ) -> Result<WIPOffset<fb::Expr<'a>>, PlanError> {
@@ -307,7 +307,7 @@ pub(super) fn null_literal<'a>(
 
 /// One column's declared field, for a caller that needs its name or its type — a key
 /// project naming what it kept, a pad literal typed by what it stands in for.
-pub(super) fn field_at(schema: &Schema, ordinal: u32) -> &Field {
+pub(crate) fn field_at(schema: &Schema, ordinal: u32) -> &Field {
     schema
         .fields
         .fields()

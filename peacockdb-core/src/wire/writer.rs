@@ -10,10 +10,10 @@
 
 use flatbuffers::{FlatBufferBuilder, UnionWIPOffset, WIPOffset};
 
-use crate::generated::gpu_plan_generated::peacock::plan as fb;
+use super::generated::peacock::plan as fb;
 
-use super::super::error::PlanError;
-use super::types::Seq;
+use super::Seq;
+use crate::batch_partitioned::error::PlanError;
 
 /// The seq a failing payload would have taken, appended to the reason rather than wrapped
 /// around it: a second `PlanError` around the first prints its prefix twice.
@@ -25,12 +25,12 @@ fn at_seq(why: PlanError, seq: Seq) -> PlanError {
 }
 
 /// A recipe-plan node under construction: which kind it is and its union payload.
-pub(super) struct Payload {
+pub(crate) struct Payload {
     pub kind: fb::PlanNodeKind,
     pub value: WIPOffset<UnionWIPOffset>,
 }
 
-pub(super) struct Writer<'a> {
+pub(crate) struct Writer<'a> {
     builder: FlatBufferBuilder<'a>,
     /// Created and not yet taken as somebody's child, oldest first.
     pool: Vec<WIPOffset<fb::PlanNode<'a>>>,
@@ -38,7 +38,7 @@ pub(super) struct Writer<'a> {
 }
 
 impl<'a> Writer<'a> {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             builder: FlatBufferBuilder::new(),
             pool: Vec::new(),
@@ -52,7 +52,7 @@ impl<'a> Writer<'a> {
     /// taken is in the message. Nothing is substituted: a placeholder would be a node the
     /// recipe names as one kind and the buffer holds as another, and running it would
     /// return an empty or concatenated table rather than an error.
-    pub(super) fn node<F>(&mut self, arity: usize, build: F) -> Result<Seq, PlanError>
+    pub(crate) fn node<F>(&mut self, arity: usize, build: F) -> Result<Seq, PlanError>
     where
         F: FnOnce(
             &mut FlatBufferBuilder<'a>,
@@ -109,7 +109,7 @@ impl<'a> Writer<'a> {
     }
 
     /// How many nodes are unconsumed — a caller's mark for [`Writer::reduce`].
-    pub(super) fn mark(&self) -> usize {
+    pub(crate) fn mark(&self) -> usize {
         self.pool.len()
     }
 
@@ -117,7 +117,7 @@ impl<'a> Writer<'a> {
     /// that is all there is, or — the third rule — a structural union over the branches it
     /// did not consume, because an unreachable node is never indexed and every seq above
     /// it would shift with nothing saying why.
-    pub(super) fn reduce(&mut self, mark: usize) -> Result<(), PlanError> {
+    pub(crate) fn reduce(&mut self, mark: usize) -> Result<(), PlanError> {
         if self.pool.len() - mark <= 1 {
             return Ok(());
         }
@@ -141,7 +141,7 @@ impl<'a> Writer<'a> {
     /// Finish on the one offset left, which is the root by construction: the last node
     /// created is the last visited in post-order. Returns the bytes and how many fb nodes
     /// went into them — stubs and structural unions included, since the C++ indexes those.
-    pub(super) fn finish(mut self) -> Result<(Vec<u8>, Seq), PlanError> {
+    pub(crate) fn finish(mut self) -> Result<(Vec<u8>, Seq), PlanError> {
         let root = match self.pool.as_slice() {
             [root] => *root,
             other => {

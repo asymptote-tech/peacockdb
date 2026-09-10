@@ -14,9 +14,9 @@
 use std::fmt::Write as _;
 
 use super::node_text::{join_parts, node_line_parts};
+use crate::batch_partitioned::node::GpuNode;
 use crate::executor::RunReport;
 use crate::executor::{PlanIndex, ROOT};
-use crate::batch_partitioned::node::GpuNode;
 
 /// `root` as it ran: the early-exit marker, then one node per line with its per-batch
 /// record beneath it.

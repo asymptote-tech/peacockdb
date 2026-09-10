@@ -5,14 +5,14 @@
 //! claim — a seq means the same node on both sides — and the check that it holds
 //! ([`check_seq_kinds`]) is not a rendering concern.
 
-use crate::generated::gpu_plan_generated::peacock::plan as fb;
+use super::generated::peacock::plan as fb;
 
-use super::super::error::PlanError;
 use super::RecipePlan;
+use crate::batch_partitioned::error::PlanError;
 
 /// The node at `seq`, by the post-order the C++ indexes with — children in
 /// `node_children` order, then the node.
-pub fn node_at<'a>(plan: &fb::GpuPlan<'a>, seq: u32) -> Option<fb::PlanNode<'a>> {
+pub(crate) fn node_at<'a>(plan: &fb::GpuPlan<'a>, seq: u32) -> Option<fb::PlanNode<'a>> {
     let mut position = 0;
     let root = plan.root()?;
     find(root, seq, &mut position)
@@ -85,7 +85,6 @@ fn pair<'a>(
     left.into_iter().chain(right).collect()
 }
 
-
 /// Every published seq resolves to a node, and to a node of the kind its recipe claims.
 ///
 /// The two halves are separate failures. A seq that resolves to nothing means the tree is
@@ -93,7 +92,7 @@ fn pair<'a>(
 /// seq above the gap addresses the wrong node. A seq that resolves to the wrong kind means
 /// the claim and the buffer disagree about what a call runs, which no golden would catch:
 /// both are rendered from the same recipe.
-pub fn check_seq_kinds(plan: &RecipePlan) -> Result<(), PlanError> {
+pub(crate) fn check_seq_kinds(plan: &RecipePlan) -> Result<(), PlanError> {
     // The depth the C++ verifier allows, since a recipe plan is a chain and is as deep as
     // it is long (#169).
     let options = flatbuffers::VerifierOptions {
@@ -131,7 +130,7 @@ pub fn check_seq_kinds(plan: &RecipePlan) -> Result<(), PlanError> {
 /// How deep the recipe plan is. A chain of nodes is as deep as it is long, and the C++
 /// verifier refuses a plan past its depth limit at `begin_plan` — the whole query, before
 /// any call, which is #169. Read here rather than guessed so a test can watch the headroom.
-pub fn depth(plan: &RecipePlan) -> Result<usize, PlanError> {
+pub(crate) fn depth(plan: &RecipePlan) -> Result<usize, PlanError> {
     let options = flatbuffers::VerifierOptions {
         max_depth: 1024,
         ..Default::default()

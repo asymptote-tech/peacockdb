@@ -15,13 +15,13 @@ use peacockdb_ffi::raw::{PeacockExecutor, peacock_executor_slice_handle};
 
 use crate::memory::logical_size_from_schema;
 
-use crate::executor::Batch;
 use super::super::error::PlanError;
-use crate::executor::{BackendError, CallResult, CallStats, LaneEvent};
-use crate::executor::GpuBatch;
 use super::super::node::RowInterval;
-use super::super::recipe::{AbiSymbol, Call, CallPattern, FbKind, Input, Recipe, Seq};
 use super::{execute_node, last_error, produced};
+use crate::executor::Batch;
+use crate::executor::GpuBatch;
+use crate::executor::{BackendError, CallResult, CallStats, LaneEvent};
+use crate::wire::{AbiSymbol, Call, CallPattern, FbKind, Input, Recipe, Seq};
 
 /// A `BatchAccumulator` node's executor, one variant per node.
 pub enum GpuAccumulator {

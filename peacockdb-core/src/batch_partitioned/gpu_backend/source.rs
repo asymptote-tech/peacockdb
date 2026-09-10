@@ -14,11 +14,11 @@ use peacockdb_ffi::raw::{
 };
 
 use super::super::error::PlanError;
-use crate::executor::{BackendError, CallStats};
-use crate::executor::GpuBatch;
 use super::super::nodes::GpuLoadParquet;
-use super::super::recipe::{AbiSymbol, CallPattern, Input, Recipe, Seq};
 use super::{last_error, produced};
+use crate::executor::GpuBatch;
+use crate::executor::{BackendError, CallStats};
+use crate::wire::{AbiSymbol, CallPattern, Input, Recipe, Seq};
 
 /// A lane's reads, in the order the mapping named them.
 pub struct GpuSource {

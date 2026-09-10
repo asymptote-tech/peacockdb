@@ -1,11 +1,40 @@
-//! What a recipe is made of: the four ABI symbols, the legacy node kinds they address,
-//! the handles a call is passed, and when the driver makes it.
+//! Everything that knows what a flat buffer looks like: the recipe vocabulary, the writers
+//! that build the plan the C++ is handed, the reader, and the two renderers.
+//!
+//! The C++ side never sees the plan tree. It is sent a plan in the legacy vocabulary whose
+//! nodes exist to be addressed — a menu of parameterized kernels — and the driver then calls
+//! the ABI as often as its own schedule wants. One walk builds that buffer and records, per
+//! plan node, the calls it makes and the seqs they address; `llm-wiki/architecture.md` has
+//! the table it implements.
+//!
+//! A node that makes no ABI call gets no recipe, and the absence is a statement about the
+//! node rather than a gap: a forwarder routes batches and touches no device.
+//!
+//! `generated` is private to this component, which is the whole reason the wall is drawn
+//! here: eleven files name flatc's output and use 73 of its types between them, so it can
+//! only be private if all eleven are inside with it.
 
-use std::fmt;
+mod aggregate_writer;
+mod attach;
+mod expr_writer;
+mod fb_text;
+mod generated;
+mod join;
+mod node_writer;
+mod read;
+mod recipes;
+mod serialize;
+mod writer;
+
+#[cfg(test)]
+mod tests;
 
 use datafusion::common::JoinType;
 
-use crate::generated::gpu_plan_generated::peacock::plan as fb;
+use crate::batch_partitioned::error::PlanError;
+use crate::batch_partitioned::node::GpuNode;
+
+use generated::peacock::plan as fb;
 
 /// A node of the recipe plan, addressed by its position in it. The number is the whole
 /// content of an address, which is why a call carries nothing else about the node it runs.
@@ -82,7 +111,7 @@ pub enum FbKind {
 impl FbKind {
     /// The node kind on the wire. What a recipe claims and what the buffer holds are
     /// checked against each other through this — see `read::check_seq_kinds`.
-    pub fn wire_kind(&self) -> fb::PlanNodeKind {
+    pub(crate) fn wire_kind(&self) -> fb::PlanNodeKind {
         match self {
             Self::Scan => fb::PlanNodeKind::CudfScan,
             Self::Filter => fb::PlanNodeKind::CudfFilter,
@@ -196,7 +225,7 @@ pub struct Call {
 impl Call {
     /// A call against a recipe-plan node. The symbol follows from the kind: only a scan
     /// takes the row-group override, and everything else is the generic entry point.
-    pub(super) fn seq(seq: Seq, kind: FbKind, inputs: Vec<Input>, when: CallPattern) -> Self {
+    pub(crate) fn seq(seq: Seq, kind: FbKind, inputs: Vec<Input>, when: CallPattern) -> Self {
         Self {
             symbol: match kind {
                 FbKind::Scan => AbiSymbol::ExecuteScanRowGroups,
@@ -208,7 +237,7 @@ impl Call {
         }
     }
 
-    pub(super) fn bare(symbol: AbiSymbol, inputs: Vec<Input>, when: CallPattern) -> Self {
+    pub(crate) fn bare(symbol: AbiSymbol, inputs: Vec<Input>, when: CallPattern) -> Self {
         Self {
             symbol,
             target: None,
@@ -225,7 +254,7 @@ pub struct Recipe {
 }
 
 impl Recipe {
-    pub(super) fn of(calls: Vec<Call>) -> Self {
+    pub(crate) fn of(calls: Vec<Call>) -> Self {
         Self { calls }
     }
 
@@ -238,59 +267,87 @@ impl Recipe {
     }
 }
 
-/// `per batch: execute_node(#3 CudfFilter, batch)`, the calls grouped under the pattern
-/// that drives them — which is how the mapping table reads them too, per probe call and
-/// at finish. What the plan line already carries is not repeated: a golden that states a
-/// thing twice is one a reader stops checking.
-impl fmt::Display for Recipe {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut groups: Vec<(CallPattern, Vec<String>)> = Vec::new();
-        for call in &self.calls {
-            let target = match call.target {
-                Some((seq, kind)) => format!("#{seq} {kind}, "),
-                None => String::new(),
-            };
-            let inputs: Vec<&str> = call.inputs.iter().map(Input::text).collect();
-            let text = format!("{}({target}{})", call.symbol.name(), inputs.join(", "));
-            match groups.last_mut() {
-                Some((when, calls)) if *when == call.when => calls.push(text),
-                _ => groups.push((call.when, vec![text])),
-            }
-        }
-        let phases: Vec<String> = groups
-            .iter()
-            .map(|(when, calls)| format!("{}: {}", when.text(), calls.join(", ")))
-            .collect();
-        write!(f, "{}", phases.join("; "))
+/// Whether the recipes section prints what each call passes the executor, or only which
+/// kernel it addresses. One renderer either way: two would drift, and the ten mode goldens
+/// and the payload golden would then disagree about a plan neither of them changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Payloads {
+    Omitted,
+    Shown,
+}
+
+/// Every node's recipe, indexed by the post-order position the estimator and the memory
+/// golden already number by, plus the bytes those recipes address.
+///
+/// That index is a position in the TREE and a [`Seq`] is an address in the recipe plan:
+/// they part company at the first node with two calls, and a driver holding both at once
+/// has to keep them apart.
+#[derive(Debug, Default)]
+pub struct RecipePlan {
+    recipes: Vec<Option<Recipe>>,
+    bytes: Vec<u8>,
+    wire_nodes: Seq,
+}
+
+impl RecipePlan {
+    /// By post-order position in the tree, not by seq. `None` where that node makes no ABI
+    /// call at all, which is what a forwarder does.
+    pub fn get(&self, node: usize) -> Option<&Recipe> {
+        self.recipes.get(node).and_then(|recipe| recipe.as_ref())
+    }
+
+    /// Nodes in the PLAN TREE — this mode's own, the length the memory model's per-node
+    /// vector has, and what a consumer checks its own tree against before reading a `None`
+    /// as an answer.
+    pub fn nodes(&self) -> usize {
+        self.recipes.len()
+    }
+
+    /// Nodes in the RECIPE PLAN — the fb tree, stubs and structural unions included, which
+    /// is what `peacock_executor_begin_plan` reports through `out_node_count`.
+    ///
+    /// Deliberately not [`RecipePlan::nodes`] and deliberately named apart: the two count
+    /// different trees and mostly disagree — a node with several calls, a stub, a union
+    /// each separate them — so a driver that checked the wrong one against the C++ would
+    /// be comparing two true numbers about two different things.
+    pub fn wire_nodes(&self) -> usize {
+        self.wire_nodes as usize
+    }
+
+    /// The serialized recipe plan: what `peacock_executor_begin_plan` is given, and what
+    /// every seq in every recipe indexes into.
+    ///
+    /// A plan that exists is one every seq of which holds the kind its recipe claims —
+    /// [`attach_recipes`] fails rather than substituting anything for a payload it cannot
+    /// write, so there is no second accessor and no caveat to remember.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 }
 
-impl fmt::Display for FbKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Scan => write!(f, "CudfScan"),
-            Self::Filter => write!(f, "CudfFilter"),
-            Self::Project(ProjectRole::ProbeKeys) => write!(f, "CudfProject{{probe keys}}"),
-            Self::Project(ProjectRole::Finalize) => write!(f, "CudfProject{{finalize}}"),
-            Self::Project(ProjectRole::NullPad { nulls }) => {
-                write!(f, "CudfProject{{build columns + {nulls} null}}")
-            }
-            Self::Project(ProjectRole::Narrow) => write!(f, "CudfProject{{narrow}}"),
-            Self::PlainProject => write!(f, "CudfProject"),
-            Self::Aggregate { merge } => {
-                write!(
-                    f,
-                    "CudfAggregate{{{}}}",
-                    if *merge { "Merge" } else { "Partial" }
-                )
-            }
-            Self::Sort => write!(f, "CudfSort"),
-            Self::SortPreservingMerge => write!(f, "CudfSortPreservingMerge"),
-            Self::CoalescePartitions => write!(f, "CudfCoalescePartitions"),
-            Self::Repartition { lanes } => write!(f, "CudfRepartition{{Hash, 1→{lanes}}}"),
-            Self::HashJoin { join_type } => write!(f, "CudfHashJoin{{{join_type:?}}}"),
-            Self::CrossJoin => write!(f, "CudfCrossJoin"),
-            Self::NestedLoopJoin => write!(f, "CudfNestedLoopJoin"),
-        }
-    }
+/// Build the recipe plan for a finished tree. It runs after planning because a recipe is
+/// a statement about a node, and a node is not finished until the plan is.
+///
+/// `Err` where a node's payload cannot be written — an expression the wire has no shape
+/// for (#168) — because a plan missing one node's arguments is not a plan the C++ can be
+/// handed, and the alternative is a buffer whose every later seq has to be checked against
+/// a list to be trusted.
+pub fn attach_recipes(root: &dyn GpuNode) -> Result<RecipePlan, PlanError> {
+    attach::attach_recipes(root)
+}
+
+/// Every published seq holds a node of the kind its recipe claims.
+pub fn check_seq_kinds(plan: &RecipePlan) -> Result<(), PlanError> {
+    read::check_seq_kinds(plan)
+}
+
+/// How deep the serialized plan is, which the C++ verifier bounds.
+pub fn depth(plan: &RecipePlan) -> Result<usize, PlanError> {
+    read::depth(plan)
+}
+
+/// The `--- recipes ---` section: what each node asks of the device, under the same tree
+/// the plan renders, so a line reads against the node above it.
+pub fn render_plan_recipes(root: &dyn GpuNode, plan: &RecipePlan, payloads: Payloads) -> String {
+    recipes::render_plan_recipes(root, plan, payloads)
 }

@@ -11,10 +11,10 @@
 //! stays because it costs nothing and goes red on the day that construction stops holding.
 
 use datafusion::arrow::array::RecordBatch;
-use peacockdb_core::executor::run;
 use peacockdb_core::batch_partitioned::gpu_backend::backend::{GpuBackend, GpuContext};
+use peacockdb_core::executor::run;
 use peacockdb_core::plan_text::render_run;
-use peacockdb_core::batch_partitioned::recipe::{RecipePlan, attach_recipes};
+use peacockdb_core::wire::{RecipePlan, attach_recipes};
 use peacockdb_ffi::raw::{
     PeacockExecutor, peacock_executor_begin_plan, peacock_executor_create,
     peacock_executor_destroy, peacock_executor_end_plan, peacock_last_error,

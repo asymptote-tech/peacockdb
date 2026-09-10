@@ -6,11 +6,11 @@
 use datafusion::arrow::datatypes::DataType;
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
-use crate::generated::gpu_plan_generated::peacock::plan as fb;
-use super::wire::{convert_data_type, serialize_scalar_value};
+use super::generated::peacock::plan as fb;
+use super::serialize::{convert_data_type, serialize_scalar_value};
 
-use super::super::error::PlanError;
-use super::super::expr::{BinaryOp, Expr, UnaryOp};
+use crate::batch_partitioned::error::PlanError;
+use crate::batch_partitioned::expr::{BinaryOp, Expr, UnaryOp};
 
 /// Write one expression, children first, as FlatBuffers requires.
 pub(crate) fn write_expr<'a>(

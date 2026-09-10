@@ -1,86 +1,20 @@
-//! The recipe plan: the buffer the C++ is handed, and per node the ABI calls it drives.
+//! One walk of the finished tree: build the buffer, and record per node the calls it makes.
 //!
-//! The C++ side never sees this mode's tree. It is sent a plan in the legacy vocabulary
-//! whose nodes exist to be addressed — a menu of parameterized kernels — and the driver
-//! then calls the ABI as often as its own schedule wants. One walk builds that buffer and
-//! records, per plan node, the calls it makes and the seqs they address;
-//! `llm-wiki/architecture.md` has the table it implements.
-//!
-//! A node that makes no ABI call gets no recipe, and the absence is a statement about the
-//! node rather than a gap: a forwarder routes batches and touches no device.
+//! Seqs ascend with the order the nodes are built, which is the order the C++ indexes them —
+//! `writer.rs` has the three rules that keep those the same sequence.
 
-mod aggregate_writer;
-mod expr_writer;
-mod join;
-mod node_writer;
-mod read;
-mod types;
-mod wire;
-mod writer;
-
-use super::error::PlanError;
-use super::node::GpuNode;
-use super::nodes::{
+use super::writer::Writer;
+use super::{AbiSymbol, Call, CallPattern, FbKind, Input, ProjectRole, Recipe, RecipePlan};
+use super::{aggregate_writer, join, node_writer};
+use crate::batch_partitioned::error::PlanError;
+use crate::batch_partitioned::node::GpuNode;
+use crate::batch_partitioned::nodes::aggregate::Phase;
+use crate::batch_partitioned::nodes::{
     GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuCoalesceAllBatches,
     GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuLimit, GpuLoadParquet, GpuMergeSortedPartitions,
     GpuProject, GpuSort, GpuUnload, NodeRef, as_node_ref,
 };
-use super::schema::Schema;
-use super::nodes::aggregate::Phase;
-use writer::Writer;
-
-pub use read::{check_seq_kinds, depth};
-pub use read::node_at;
-pub use types::{AbiSymbol, Call, CallPattern, FbKind, Input, ProjectRole, Recipe, Seq};
-
-/// Every node's recipe, indexed by the post-order position the estimator and the memory
-/// golden already number by, plus the bytes those recipes address.
-///
-/// That index is a position in the TREE and a [`Seq`] is an address in the recipe plan:
-/// they part company at the first node with two calls, and a driver holding both at once
-/// has to keep them apart.
-#[derive(Debug, Default)]
-pub struct RecipePlan {
-    recipes: Vec<Option<Recipe>>,
-    bytes: Vec<u8>,
-    wire_nodes: Seq,
-}
-
-impl RecipePlan {
-    /// By post-order position in the tree, not by seq. `None` where that node makes no ABI
-    /// call at all, which is what a forwarder does.
-    pub fn get(&self, node: usize) -> Option<&Recipe> {
-        self.recipes.get(node).and_then(|recipe| recipe.as_ref())
-    }
-
-    /// Nodes in the PLAN TREE — this mode's own, the length the memory model's per-node
-    /// vector has, and what a consumer checks its own tree against before reading a `None`
-    /// as an answer.
-    pub fn nodes(&self) -> usize {
-        self.recipes.len()
-    }
-
-    /// Nodes in the RECIPE PLAN — the fb tree, stubs and structural unions included, which
-    /// is what `peacock_executor_begin_plan` reports through `out_node_count`.
-    ///
-    /// Deliberately not [`RecipePlan::nodes`] and deliberately named apart: the two count
-    /// different trees and mostly disagree — a node with several calls, a stub, a union
-    /// each separate them — so a driver that checked the wrong one against the C++ would
-    /// be comparing two true numbers about two different things.
-    pub fn wire_nodes(&self) -> usize {
-        self.wire_nodes as usize
-    }
-
-    /// The serialized recipe plan: what `peacock_executor_begin_plan` is given, and what
-    /// every seq in every recipe indexes into.
-    ///
-    /// A plan that exists is one every seq of which holds the kind its recipe claims —
-    /// [`attach_recipes`] fails rather than substituting anything for a payload it cannot
-    /// write, so there is no second accessor and no caveat to remember.
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-}
+use crate::batch_partitioned::schema::Schema;
 
 /// Build the recipe plan for a finished tree. It runs after planning because a recipe is
 /// a statement about a node, and a node is not finished until the plan is.
@@ -89,7 +23,7 @@ impl RecipePlan {
 /// for (#168) — because a plan missing one node's arguments is not a plan the C++ can be
 /// handed, and the alternative is a buffer whose every later seq has to be checked against
 /// a list to be trusted.
-pub fn attach_recipes(root: &dyn GpuNode) -> Result<RecipePlan, PlanError> {
+pub(crate) fn attach_recipes(root: &dyn GpuNode) -> Result<RecipePlan, PlanError> {
     let mut writer = Writer::new();
     let mut recipes = Vec::new();
     walk(root, &mut writer, &mut recipes)?;
@@ -226,7 +160,7 @@ fn sort(
 /// State from raw values, per batch — and the finalize where the translation gave this
 /// node one, which it does only for a single-batch lane, where one batch is already the
 /// whole of every group.
-fn aggregate(
+pub(crate) fn aggregate(
     aggregate_node: &GpuAggregate,
     inputs: &[&Schema],
     writer: &mut Writer,
@@ -263,7 +197,7 @@ fn aggregate(
 
 /// Sorted as the batches arrive, merged once at done: the merge arm takes whatever k
 /// handles the call hands it, so the lane's batch count is a runtime number.
-fn accumulate_and_sort(
+pub(crate) fn accumulate_and_sort(
     node: &GpuAccumulateBatchesAndSort,
     inputs: &[&Schema],
     writer: &mut Writer,
@@ -308,7 +242,7 @@ fn coalesce_all_batches(
 /// A compaction runs exactly what done runs, which is what makes the doubling threshold a
 /// scheduling decision rather than a second computation. Where it finalizes, the finalize
 /// rides a project of its own — ours, so both engines evaluate the same expression.
-fn aggregate_batches(
+pub(crate) fn aggregate_batches(
     merge: &GpuAggregateBatches,
     inputs: &[&Schema],
     writer: &mut Writer,
@@ -429,6 +363,3 @@ fn unload(
         CallPattern::PerHandle,
     )])))
 }
-
-#[cfg(test)]
-mod tests;

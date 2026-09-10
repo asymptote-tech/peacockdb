@@ -17,7 +17,6 @@ use datafusion::execution::TaskContext;
 use datafusion::execution::context::SessionContext;
 
 use peacockdb_core::batch_partitioned::GpuNode;
-use peacockdb_core::executor::{Backend, NodeExecutors};
 use peacockdb_core::batch_partitioned::cpu_backend::accumulate::{
     CpuAccumulator, CpuPartitionAccumulator,
 };
@@ -26,19 +25,20 @@ use peacockdb_core::batch_partitioned::cpu_backend::emit::CpuEmitter;
 use peacockdb_core::batch_partitioned::cpu_backend::join::{CpuJoin, CpuProbingJoin};
 use peacockdb_core::batch_partitioned::cpu_backend::source::CpuSource;
 use peacockdb_core::batch_partitioned::cpu_backend::{CpuExec, CpuUnload};
-use peacockdb_core::executor::CpuBatch;
 use peacockdb_core::batch_partitioned::error::PlanError;
-use peacockdb_core::executor::{
-    BackendError, BatchAccumulatorExecutor, CallResult, CallStats, ExecExecutor, Executor,
-    JoinExecutor, LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin,
-    RowRange, SourceExecutor, SourceStep, UnloadExecutor,
-};
 use peacockdb_core::batch_partitioned::nodes::join::empty_build_answers_nothing;
 use peacockdb_core::batch_partitioned::nodes::{
     GpuCoalesceAllBatches, GpuEmitPartitions, GpuLoadParquet, GpuMergeSortedPartitions, GpuUnload,
     NodeRef, as_node_ref,
 };
 use peacockdb_core::batch_partitioned::schema::Schema;
+use peacockdb_core::executor::CpuBatch;
+use peacockdb_core::executor::{Backend, NodeExecutors};
+use peacockdb_core::executor::{
+    BackendError, BatchAccumulatorExecutor, CallResult, CallStats, ExecExecutor, Executor,
+    JoinExecutor, LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin,
+    RowRange, SourceExecutor, SourceStep, UnloadExecutor,
+};
 
 use super::rebuild::{key, lanes_of, rebuild, scan_of, schema_of, sorted, source};
 

@@ -12,14 +12,12 @@ use std::path::{Path, PathBuf};
 
 use peacockdb_core::batch_partitioned::node::GpuNode;
 use peacockdb_core::batch_partitioned::plan::{PlanKnobs, plan_batch_partitioned};
-use peacockdb_core::plan_text::{
-    Payloads, render_plan, render_plan_memory, render_plan_recipes,
-};
-use peacockdb_core::batch_partitioned::recipe::{attach_recipes, check_seq_kinds, depth};
 use peacockdb_core::batch_partitioned::{ExecutorCategory, category_of};
+use peacockdb_core::plan_text::{render_plan, render_plan_memory};
+use peacockdb_core::wire::{Payloads, attach_recipes, check_seq_kinds, depth, render_plan_recipes};
 
-use common::mode::{MODES, Mode, mode_named};
 use common::golden_text::{ordered_sections, section_differences};
+use common::mode::{MODES, Mode, mode_named};
 use common::{data_dir_for, golden_dir_for, queries_dir_for};
 
 fn queries(dataset: &str) -> Vec<(String, PathBuf)> {

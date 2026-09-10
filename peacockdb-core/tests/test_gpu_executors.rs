@@ -47,7 +47,7 @@ use peacockdb_core::batch_partitioned::parquet_meta::ScanMetadata;
 
 use peacockdb_core::batch_partitioned::partitioner::RowGroupMeta;
 
-use peacockdb_core::batch_partitioned::recipe::{AbiSymbol, Recipe, RecipePlan, attach_recipes};
+use peacockdb_core::wire::{AbiSymbol, Recipe, RecipePlan, attach_recipes};
 
 use peacockdb_core::batch_partitioned::schema::Schema;
 

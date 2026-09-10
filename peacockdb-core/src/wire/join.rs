@@ -12,21 +12,21 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::JoinType;
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
-use crate::generated::gpu_plan_generated::peacock::plan as fb;
+use super::generated::peacock::plan as fb;
 
-use super::super::error::PlanError;
-use super::super::expr::Expr;
-use super::super::nodes::join::{
-    JoinFilterColumn, JoinSide, NestedLoopJoinType, finish_join_type, per_call_join_type,
-};
-use super::super::nodes::{GpuHashJoin, GpuNestedLoopJoin};
-use super::super::schema::Schema;
 use super::expr_writer::write_expr;
 use super::node_writer;
-use super::types::{Call, CallPattern, FbKind, Input, ProjectRole, Recipe};
 use super::writer::{Payload, Writer};
+use super::{Call, CallPattern, FbKind, Input, ProjectRole, Recipe};
+use crate::batch_partitioned::error::PlanError;
+use crate::batch_partitioned::expr::Expr;
+use crate::batch_partitioned::nodes::join::{
+    JoinFilterColumn, JoinSide, NestedLoopJoinType, finish_join_type, per_call_join_type,
+};
+use crate::batch_partitioned::nodes::{GpuHashJoin, GpuNestedLoopJoin};
+use crate::batch_partitioned::schema::Schema;
 
-pub(super) fn hash_join(
+pub(crate) fn hash_join(
     node: &GpuHashJoin,
     inputs: &[&Schema],
     writer: &mut Writer,
@@ -321,7 +321,7 @@ fn narrow_project<'a>(
     Ok(node_writer::project_payload(b, exprs, names, kids[0]))
 }
 
-pub(super) fn cross_join_payload<'a>(
+pub(crate) fn cross_join_payload<'a>(
     b: &mut FlatBufferBuilder<'a>,
     kids: &[WIPOffset<fb::PlanNode<'a>>],
 ) -> Payload {
@@ -340,7 +340,7 @@ pub(super) fn cross_join_payload<'a>(
 
 /// Inner streams; Left takes a single-batch probe, since the finish trick accumulates
 /// keys and a predicate join has none. So Left's one call may consume the build outright.
-pub(super) fn nested_loop_join(
+pub(crate) fn nested_loop_join(
     node: &GpuNestedLoopJoin,
     _inputs: &[&Schema],
     writer: &mut Writer,

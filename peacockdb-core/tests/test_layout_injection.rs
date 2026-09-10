@@ -13,9 +13,9 @@ use common::injection::{
 };
 use common::rebuild::{every_kind, fields_with_one_value, rebuild_tree};
 use peacockdb_core::batch_partitioned::GpuNode;
+use peacockdb_core::batch_partitioned::validate::validate;
 use peacockdb_core::executor::Batch;
 use peacockdb_core::plan_text::render_plan;
-use peacockdb_core::batch_partitioned::validate::validate;
 use std::collections::BTreeSet;
 
 // ── the rewrite, before anything is rewritten ───────────────────────────────

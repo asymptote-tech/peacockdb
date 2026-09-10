@@ -11,14 +11,14 @@ use std::sync::{Mutex, OnceLock};
 use datafusion::arrow::array::RecordBatch;
 use datafusion::execution::context::SessionContext;
 use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
-use peacockdb_core::executor::{RunReport, run};
 use peacockdb_core::batch_partitioned::plan::plan_batch_partitioned;
-use peacockdb_core::plan_text::render_run;
 use peacockdb_core::batch_partitioned::{GpuNode, validate};
+use peacockdb_core::executor::{RunReport, run};
+use peacockdb_core::plan_text::render_run;
 
-use super::result_text::ResultDigest;
-use super::mode::{MODES, Mode, mode_named};
 use super::cost_model::CostModel;
+use super::mode::{MODES, Mode, mode_named};
+use super::result_text::ResultDigest;
 use super::{
     RESULT_GOLDEN_MAX_BYTES, assert_results_match, batches_to_sorted_str, corpus_golden,
     data_dir_for, queries_dir_for, registry, result_text, total_rows,

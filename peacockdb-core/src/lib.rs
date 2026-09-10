@@ -4,13 +4,8 @@ pub mod executor;
 pub mod gpu_rowgroup_prune;
 pub mod memory;
 pub mod plan_text;
-#[allow(unused_imports, dead_code, clippy::all)]
-pub mod generated {
-    pub mod gpu_plan_generated {
-        include!(concat!(env!("OUT_DIR"), "/gpu_plan_generated.rs"));
-    }
-}
 pub mod spark_partitioning;
+pub mod wire;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

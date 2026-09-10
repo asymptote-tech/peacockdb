@@ -14,8 +14,8 @@ use datafusion::arrow::ipc::reader::StreamReader;
 use peacockdb_core::batch_partitioned::plan::{
     BatchSizing, PlanKnobs, SMALL_TABLE_BYTES, plan_batch_partitioned,
 };
-use peacockdb_core::batch_partitioned::recipe::{AbiSymbol, attach_recipes};
 use peacockdb_core::executor::GpuBatch;
+use peacockdb_core::wire::{AbiSymbol, attach_recipes};
 use peacockdb_core::{build_session_state, register_tables_for};
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,

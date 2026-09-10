@@ -9,7 +9,7 @@ use datafusion::arrow::datatypes::{DataType as ArrowDataType, SchemaRef};
 use datafusion::common::ScalarValue as DfScalarValue;
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
-use crate::generated::gpu_plan_generated::peacock::plan as fb;
+use super::generated::peacock::plan as fb;
 
 pub(crate) fn serialize_scalar_value<'a>(
     b: &mut FlatBufferBuilder<'a>,

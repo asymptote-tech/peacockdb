@@ -6,7 +6,7 @@
 
 use std::fmt::Write as _;
 
-use crate::generated::gpu_plan_generated::peacock::plan as fb;
+use super::generated::peacock::plan as fb;
 
 /// One field per line, indented under the call that addresses it. Only what the node
 /// carries: a field the writer left unset is absent here rather than printed as a default,

@@ -8,10 +8,8 @@
 //! an explicit cast's target means nothing.
 
 mod expr_text;
-mod fb_text;
 mod memory;
 mod node_text;
-mod recipes;
 mod run_text;
 
 #[cfg(test)]
@@ -20,17 +18,7 @@ mod tests;
 use crate::batch_partitioned::estimator::MemoryModel;
 use crate::batch_partitioned::expr::Expr;
 use crate::batch_partitioned::node::GpuNode;
-use crate::batch_partitioned::recipe::RecipePlan;
 use crate::executor::RunReport;
-
-/// Whether the recipes section prints what each call passes the executor, or only which
-/// kernel it addresses. One renderer either way: two would drift, and the ten mode goldens
-/// and the payload golden would then disagree about a plan neither of them changed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Payloads {
-    Omitted,
-    Shown,
-}
 
 /// The plan under `root`, one line per node. The plan golden carries the declared schema
 /// per node; an execution golden does not, since what it records is what ran.
@@ -46,12 +34,6 @@ pub fn expr_text(expr: &Expr) -> String {
 /// The `--- memory ---` section: what the estimator predicted, per node.
 pub fn render_plan_memory(root: &dyn GpuNode, model: &MemoryModel) -> String {
     memory::render_plan_memory(root, model)
-}
-
-/// The `--- recipes ---` section: what each node asks of the device, under the same tree
-/// the plan renders, so a line reads against the node above it.
-pub fn render_plan_recipes(root: &dyn GpuNode, plan: &RecipePlan, payloads: Payloads) -> String {
-    recipes::render_plan_recipes(root, plan, payloads)
 }
 
 /// The execution golden: the plan with what each node actually ran under it.

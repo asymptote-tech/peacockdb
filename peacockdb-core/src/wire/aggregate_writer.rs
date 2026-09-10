@@ -11,19 +11,19 @@
 
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
-use crate::generated::gpu_plan_generated::peacock::plan as fb;
-use super::wire::serialize_schema;
+use super::generated::peacock::plan as fb;
+use super::serialize::serialize_schema;
 
-use super::super::aggregates::AggCall;
-use super::super::error::PlanError;
-use super::super::nodes;
-use super::super::nodes::aggregate::{AggregateBody, Phase};
-use super::super::schema::Schema;
 use super::expr_writer::write_expr;
 use super::node_writer;
 use super::writer::Payload;
+use crate::batch_partitioned::aggregates::AggCall;
+use crate::batch_partitioned::error::PlanError;
+use crate::batch_partitioned::nodes;
+use crate::batch_partitioned::nodes::aggregate::{AggregateBody, Phase};
+use crate::batch_partitioned::schema::Schema;
 
-pub(super) fn aggregate<'a>(
+pub(crate) fn aggregate<'a>(
     b: &mut FlatBufferBuilder<'a>,
     body: &AggregateBody,
     phase: Phase,
@@ -106,7 +106,7 @@ fn group_name_at(state: &Schema, position: usize) -> &str {
 /// The finalize as the project it becomes — the columns are
 /// [`nodes::aggregate::finalize_columns`](super::super::nodes::aggregate::finalize_columns);
 /// this writes what that names.
-pub(super) fn finalize_project<'a>(
+pub(crate) fn finalize_project<'a>(
     b: &mut FlatBufferBuilder<'a>,
     body: &AggregateBody,
     state: &Schema,

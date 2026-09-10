@@ -734,10 +734,10 @@ the C++ side ever sees of a query. Wherever this page says "the flat buffers", "
 format" or "serialized", that is what it means.
 
 What crosses is not the plan tree. It is a menu of parameterized kernels whose nodes exist
-to be addressed: the recipe writer (`batch_partitioned/recipe/`) emits one node per call a
-driver will make, and each node's recipe publishes the post-order sequence numbers its calls
-name. The vocabulary is frozen: a kernel takes a whole input and answers with a whole table,
-and a driver that wants less asks for it by calling more often rather than by changing the
+to be addressed: the recipe writer (`wire/`) emits one node per call a driver will make, and
+each node's recipe publishes the post-order sequence numbers its calls name. The vocabulary
+is frozen: a kernel takes a whole input and answers with a whole table, and a driver that
+wants less asks for it by calling more often rather than by changing the
 node. [What the frozen surface costs](#what-the-frozen-surface-costs) is the bill.
 
 Two spellings, and the prefix is the tell: `Cudf*` is a flat-buffer node table, the thing
@@ -993,11 +993,11 @@ Where the ordinals come from and where they land:
 
 | Reference | Written by | Read by |
 |---|---|---|
-| `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/expr_writer.rs), off the ordinal `expr_translate` read from DataFusion's `Column::index()` | [`build_expr`](../cpp/src/expr.cpp) for the AST path, [`build_column`](../cpp/src/expr.cpp) for the column path |
-| `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/node_writer.rs), [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join.cpp`](../cpp/src/operators/join.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
-| join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`join.cpp`](../cpp/src/operators/join.cpp) — ColumnRef only, anything else throws |
-| `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
-| sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) |
+| `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/wire/expr_writer.rs), off the ordinal `expr_translate` read from DataFusion's `Column::index()` | [`build_expr`](../cpp/src/expr.cpp) for the AST path, [`build_column`](../cpp/src/expr.cpp) for the column path |
+| `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join.cpp`](../cpp/src/operators/join.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
+| join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`join.cpp`](../cpp/src/operators/join.cpp) — ColumnRef only, anything else throws |
+| `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
+| sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/wire/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) |
 
 `cpp/src/` holds 22 `->index()` reads and 48 `.column(…)` calls, so this is the engine's most
 common operation and the one with the least ceremony around it.
@@ -1057,9 +1057,8 @@ Half of the table above is not a choice the C++ side makes — it reads a value 
 already computed and the recipe writer wrote down. That is deliberate: an option carried in
 the flat buffers cannot be re-derived differently by the two engines, so anything where
 cuDF's own inference could drift from DataFusion's is serialized rather than inferred. The
-writers are all under
-[`batch_partitioned/recipe/`](../peacockdb-core/src/batch_partitioned/recipe/), so the paths
-below are relative to it.
+writers are all under [`wire/`](../peacockdb-core/src/wire/), so the paths below are relative
+to it.
 
 | Flat-buffer field | Written by | Taken from | Becomes |
 |---|---|---|---|

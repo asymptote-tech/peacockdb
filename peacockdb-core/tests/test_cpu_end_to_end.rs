@@ -16,11 +16,11 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::DataType;
 use datafusion::execution::context::SessionContext;
 
-use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
-use peacockdb_core::executor::{RunReport, run};
-use peacockdb_core::batch_partitioned::plan::plan_batch_partitioned;
 use peacockdb_core::batch_partitioned::GpuNode;
+use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
+use peacockdb_core::batch_partitioned::plan::plan_batch_partitioned;
 use peacockdb_core::executor::{RunError, When};
+use peacockdb_core::executor::{RunReport, run};
 
 use common::injection::{
     CAP, Dimensions, Drain, Empties, Injected, InjectedContext, Injection, PlannedMode, Rebatch,

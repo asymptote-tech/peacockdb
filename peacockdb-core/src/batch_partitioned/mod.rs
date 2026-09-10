@@ -18,7 +18,6 @@ pub mod nulls;
 pub mod parquet_meta;
 pub mod partitioner;
 pub mod plan;
-pub mod recipe;
 pub mod schema;
 pub mod translate;
 pub mod validate;

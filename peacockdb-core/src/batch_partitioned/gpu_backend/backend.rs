@@ -8,26 +8,26 @@ use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
 use peacockdb_ffi::raw::PeacockExecutor;
 
-use crate::executor::{Backend, NodeExecutors};
-use crate::executor::Batch;
-use crate::executor::CpuBatch;
 use super::super::error::PlanError;
-use crate::executor::{
-    BackendError, BatchAccumulatorExecutor, CallResult, ExecExecutor, Executor, JoinExecutor,
-    LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin, RowRange,
-    SourceExecutor, SourceStep, UnloadExecutor,
-};
-use crate::executor::forwarder_for;
-use crate::executor::GpuBatch;
 use super::super::node::GpuNode;
 use super::super::nodes::join::per_call_join_type;
 use super::super::nodes::{NodeRef, as_node_ref};
-use super::super::recipe::RecipePlan;
 use super::accumulate::{GpuAccumulator, GpuPartitionAccumulator};
 use super::emit::GpuEmitter;
 use super::join::{GpuJoin, GpuProbingJoin};
 use super::source::GpuSource;
 use super::{GpuExec, GpuExport};
+use crate::executor::Batch;
+use crate::executor::CpuBatch;
+use crate::executor::GpuBatch;
+use crate::executor::forwarder_for;
+use crate::executor::{Backend, NodeExecutors};
+use crate::executor::{
+    BackendError, BatchAccumulatorExecutor, CallResult, ExecExecutor, Executor, JoinExecutor,
+    LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin, RowRange,
+    SourceExecutor, SourceStep, UnloadExecutor,
+};
+use crate::wire::RecipePlan;
 
 /// The threshold a batch aggregate compacts at, until the driver derives one from the
 /// budget the way the loader's batch size is derived (#142).

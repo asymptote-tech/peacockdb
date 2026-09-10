@@ -11,10 +11,10 @@ use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
 use peacockdb_ffi::raw::PeacockExecutor;
 
 use super::super::error::PlanError;
-use crate::executor::{BackendError, CallResult, CallStats};
-use crate::executor::GpuBatch;
-use super::super::recipe::{CallPattern, FbKind, Input, Recipe, Seq};
 use super::{execute_node_many, produced};
+use crate::executor::GpuBatch;
+use crate::executor::{BackendError, CallResult, CallStats};
+use crate::wire::{CallPattern, FbKind, Input, Recipe, Seq};
 
 pub struct GpuEmitter {
     executor: *mut PeacockExecutor,
