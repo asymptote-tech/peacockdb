@@ -435,11 +435,14 @@ A docs-only head above a green code head does not need its own run.
 Run 34429841177 against `b8e16dda` is green across the whole pipeline — both cuDF versions, the
 25.02 GPU build, the remote GPU tier, the cost report, and the changed-paths and S3 metadata jobs.
 That closes the one claim the local dispatch could not make, the cudf leg. Board set to `done`;
-PR #141 is the human's to merge.
+PR #141 is the human's to merge. Nothing here is left open; the one
+deferral is the `parquet_meta.rs` rustfmt hunk, which task 2 inherits with the file.
 
-## Done
+## Who owns this chain
 
-Run 34429841177 on `b8e16dda` finished green on every job: both cuDF legs, the 25.02 GPU build,
-the remote GPU tier, the cost report, changed-paths and the S3 metadata check. Board set to
-`done`, PR #141 open against master for the human to merge. Nothing in this task is left open;
-the one deferral is the `parquet_meta.rs` rustfmt hunk, which task 2 inherits with the file.
+Two `claude -p` coordinators were orphaned into this worktree by earlier restarts (PIDs 208257,
+209476) and raced the watchdog's own coordinator (210045) over the same branch. Both orphans
+reached the same verdict on task 1 independently, which is why the detail file briefly carried
+two `## Done` sections and why several commits replay each other. 210045 is the one to keep.
+Neither orphan wrote `.claude/ensemble/ENS-drop-mode-name.status`: the watchdog reads that file,
+and `stalled` would have stopped a chain that was progressing.
