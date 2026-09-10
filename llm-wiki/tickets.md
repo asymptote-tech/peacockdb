@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 198), which is also the counter for
+New tickets take the next free number (currently 201), which is also the counter for
 `tasks/bp-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -18,7 +18,7 @@ reference still resolves there.
 | [Critical correctness](#critical-correctness) | 14 | #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 23 | #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
+| [Infrastructure / process](#infrastructure--process) | 26 | #200 #199 #198 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
 
 ## Critical correctness
 
@@ -692,6 +692,56 @@ tripped, so something can branch on it, but there is nowhere to record into — 
 trip log, and `Underestimate` is the precedent for what one would look like. Related: #91.
 
 ## Infrastructure / process
+
+<a id="t200"></a>
+### #200 — `finish_output` hand-rolls a DataFusion rule that DataFusion exposes
+
+`join.rs:290` builds the finish call's output as the build side plus a `mark` boolean for LeftMark.
+That is `build_join_schema`'s LeftMark arm (`joins/utils.rs:626`) rewritten — field name, type and
+non-nullability included — with nothing comparing the two.
+
+Not the same value as the join seq's, which is why `wire-schema.md` left it: the finish runs at
+`finish_join_type(node.join_type)` rather than the node's, so Left's finish is a LeftAnti whose
+schema is the build side while the node's `join_schema()` is left ++ right. `GpuJoin::intermediate()`
+answers the probe seq and cannot answer this one.
+
+The fix is the same shape as [#198](#t198): ask DataFusion for the finish's join type rather than
+restating its rule, so a change on their side reaches us as a compile or a test rather than as a
+divergence nobody is looking for.
+
+<a id="t199"></a>
+### #199 — the probe key project's schema is derived twice, once per backend
+
+`cpu_backend/join.rs:323` builds a DataFusion `ProjectionExec` and takes `project.schema()`;
+`gpu_backend`'s `key_schema` clones the probe's field per key by hand. Same rule, two
+implementations, nothing comparing them — the shape of [#130](archive/archived-tickets.md#t130).
+
+They agree on names and types and can differ on nullability: DataFusion recomputes it from the
+expression, the hand-written one inherits the field. Every key today is a bare column reference,
+where the two agree, so nothing is wrong now — the divergence arrives with the first key that is an
+expression.
+
+Unifying them means deciding whose nullability is right and routing one answer through both
+backends, which is why `wire-schema.md` did not do it: that task moved the hand-written one so the
+recipe writer could stop adding a third, and stopped there.
+
+<a id="t198"></a>
+### #198 — `reduce` builds a union over branches nothing consumed, and it has no defined output
+
+`writer.rs:145` emits a structural `CudfUnion` over the branches a node did not consume. If it ever
+ran, `execute_union` would concatenate two unrelated orphan subtrees — throwing on mismatched types,
+or succeeding and producing a table that means nothing. Neither is an output the plan can declare,
+which is how it was found: `wire-schema.md` puts `output_schema` on every fb node and this is the one
+node with no true answer to write.
+
+No corpus plan contains one — `grep -c CudfUnion testdata/goldens/bp-recipe-payloads.txt` is 0 and no
+`.plans.txt` has one — so the arm is reachable by construction and unexercised, and no golden would
+catch a wrong choice made about it. That is what makes it a ticket rather than a judgement call
+inside the task: the question is not what schema to write but whether the node should be emitted at
+all.
+
+Until it is answered, `output_schema` is left unset on this one node, which the fb reader already
+handles and which asserts nothing false.
 
 <a id="t197"></a>
 ### #197 — the moved rust-only tests have never once built against a restored cache
