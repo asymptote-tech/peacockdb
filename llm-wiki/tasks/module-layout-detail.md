@@ -1556,3 +1556,32 @@ the `cpp/` diff is empty against master.
 
 So the cause is on the host or in what sizes that pool, not in the tree. An analyst is on it;
 its finding lands below.
+
+### The pool is 95% of free memory, and something else was holding the device
+
+Each gtest main prints what it got, and that line settles it:
+
+    green  34467909214  10:58Z   initial 118.3 GiB, max 132.3 GiB of 139.2 GiB free
+    red    34503055191  17:02Z   initial  35.8 GiB, max  40.0 GiB of  42.2 GiB free
+
+`TpchSf40.Q1GroupByAggregates` has an allocator high-water of 67.42 GiB, byte-identical across
+every green run today. A 40.0 GiB ceiling cannot hold it: the red logs die at 38.82 GiB peak
+asking upstream for 3.53 GiB. So 97.5 GiB of the 139.7 GiB device was held by something that is
+not us, stable to under 0.1 GiB across four process starts and three runs 31 minutes apart.
+
+`cpp/include/peacock/rmm_pool.hpp:140-141` takes both the initial and the maximum as percentages
+of *free* memory at process start, read from `cudaMemGetInfo`. A neighbour on the device
+therefore sets our ceiling, and `pipeline.yml` sets no RMM variable at all —
+`PEACOCK_RMM_POOL_INIT_PCT` moves only the initial. Q1 passes iff free is above about 71 GiB.
+
+Three things corroborate a live tenant rather than anything of ours. Every other sf40 test's
+high-water is identical to the hundredth of a GiB in green and red — same code, same data, only
+the ceiling moved. The free figure is constant within a job and across the three serialized runs,
+which a leak of ours would not be. And parquet load times blew up seven-fold on the same files,
+369 ms to 2783 ms, so the host's RAM is under pressure too.
+
+Not #148: that is the engine installing no allocator, and this pool is the test harness's own.
+
+Worth knowing for the re-run: the documentation-only commits above this head skip `gpu-tests`
+entirely, so their green carries no GPU verdict at all. Only a run on a head that touches code
+proves anything here.
