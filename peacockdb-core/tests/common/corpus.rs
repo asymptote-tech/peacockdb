@@ -10,15 +10,15 @@ use std::sync::{Mutex, OnceLock};
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::execution::context::SessionContext;
-use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
-use peacockdb_core::batch_partitioned::driver::{RunReport, batch_partitioned_driver};
-use peacockdb_core::batch_partitioned::plan::plan_batch_partitioned;
-use peacockdb_core::batch_partitioned::plan_text::render_run;
-use peacockdb_core::batch_partitioned::{GpuNode, validate};
+use peacockdb_core::executor::CpuBackend;
+use peacockdb_core::executor::{RunReport, run};
+use peacockdb_core::plan::{GpuNode, validate};
+use peacockdb_core::plan_text::render_run;
+use peacockdb_core::planner;
 
-use super::result_text::ResultDigest;
-use super::mode::{MODES, Mode, mode_named};
 use super::cost_model::CostModel;
+use super::mode::{MODES, Mode, mode_named};
+use super::result_text::ResultDigest;
 use super::{
     RESULT_GOLDEN_MAX_BYTES, assert_results_match, batches_to_sorted_str, corpus_golden,
     data_dir_for, queries_dir_for, registry, result_text, total_rows,
@@ -50,11 +50,11 @@ pub async fn plan_at(
         .create_physical_plan()
         .await
         .unwrap_or_else(|e| panic!("{what}: no physical plan: {e}"));
-    let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs())
         .unwrap_or_else(|e| panic!("{what}: this mode refuses it: {e}"));
     // The planner's own check, made again: the driver asks only for canonical form, so a
     // tree that met neither would run and answer.
-    validate::validate(tree.as_ref()).unwrap_or_else(|e| panic!("{what} is not a plan: {e}"));
+    validate(tree.as_ref()).unwrap_or_else(|e| panic!("{what} is not a plan: {e}"));
     (ctx, tree)
 }
 
@@ -62,7 +62,7 @@ pub async fn plan_at(
 pub async fn run_cpu(dataset: &str, sf: &str, query: &str, mode: &Mode) -> CpuRun {
     let what = format!("{dataset}/{query} at {}", mode.name);
     let (ctx, tree) = plan_at(dataset, sf, query, mode).await;
-    let report = batch_partitioned_driver::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+    let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
         .unwrap_or_else(|e| panic!("{what}: {e}"));
     let batches = report
         .batches

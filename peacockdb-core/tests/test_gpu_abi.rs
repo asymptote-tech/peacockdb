@@ -11,11 +11,10 @@ mod common;
 use datafusion::arrow::array::{Array, Int64Array, RecordBatch};
 use datafusion::arrow::ipc::reader::StreamReader;
 
-use peacockdb_core::batch_partitioned::GpuBatch;
-use peacockdb_core::batch_partitioned::plan::{
-    BatchSizing, PlanKnobs, SMALL_TABLE_BYTES, plan_batch_partitioned,
-};
-use peacockdb_core::batch_partitioned::recipe::{AbiSymbol, attach_recipes};
+use peacockdb_core::executor::GpuBatch;
+use peacockdb_core::planner;
+use peacockdb_core::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};
+use peacockdb_core::wire::{AbiSymbol, attach_recipes};
 use peacockdb_core::{build_session_state, register_tables_for};
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,
@@ -61,7 +60,7 @@ impl LoadedPlan {
             .create_physical_plan()
             .await
             .unwrap();
-        let (tree, _memory) = plan_batch_partitioned(&plan, KNOBS).expect("this mode plans it");
+        let (tree, _memory) = planner::plan(&plan, KNOBS).expect("this mode plans it");
         let recipes = attach_recipes(tree.as_ref()).expect("a planned tree has recipes");
         let scan_seq = recipes
             .get(0)

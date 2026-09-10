@@ -16,10 +16,11 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::DataType;
 use datafusion::execution::context::SessionContext;
 
-use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
-use peacockdb_core::batch_partitioned::driver::{RunReport, batch_partitioned_driver};
-use peacockdb_core::batch_partitioned::plan::plan_batch_partitioned;
-use peacockdb_core::batch_partitioned::{GpuNode, RunError, When};
+use peacockdb_core::executor::CpuBackend;
+use peacockdb_core::executor::{RunError, When};
+use peacockdb_core::executor::{RunReport, run};
+use peacockdb_core::plan::GpuNode;
+use peacockdb_core::planner;
 
 use common::injection::{
     CAP, Dimensions, Drain, Empties, Injected, InjectedContext, Injection, PlannedMode, Rebatch,
@@ -96,7 +97,7 @@ async fn sql_answers_match_datafusion(
             .create_physical_plan()
             .await
             .expect("the query has a physical plan");
-        let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+        let (tree, _memory) = planner::plan(&plan, mode.knobs())
             .unwrap_or_else(|error| panic!("{dataset}/{query} at {name}: {error}"));
         run_and_check(
             tree.as_ref(),
@@ -218,7 +219,7 @@ fn sorted_rows(batches: &[RecordBatch]) -> Option<Vec<Vec<u8>>> {
 /// rather than at the call sites: an injected run leaks exactly as visibly as a planned
 /// one, and a batch held and never released shows in neither's rows.
 fn run_and_check(
-    tree: &dyn peacockdb_core::batch_partitioned::GpuNode,
+    tree: &dyn peacockdb_core::plan::GpuNode,
     task: &std::sync::Arc<datafusion::execution::TaskContext>,
     injection: Injection,
     oracle: &Oracle<'_>,
@@ -229,9 +230,9 @@ fn run_and_check(
     // and the driver asks only for canonical form. Without this a rewrite that broke a
     // node's requirements would run and answer, which is the failure this whole tier is
     // about.
-    peacockdb_core::batch_partitioned::validate::validate(tree)
+    peacockdb_core::plan::validate(tree)
         .unwrap_or_else(|error| panic!("{what} is not a plan: {error}"));
-    let report = batch_partitioned_driver::<Injected>(tree, &ctx, None)
+    let report = run::<Injected>(tree, &ctx, None)
         .unwrap_or_else(|error| panic!("{what}: {error}"));
     let actual: Vec<RecordBatch> = report
         .batches
@@ -423,8 +424,8 @@ async fn a_two_key_group_by_over_many_rows_does_not_emit_a_group_twice() {
 /// query holds every count below.
 #[tokio::test]
 async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
-    use peacockdb_core::batch_partitioned::driver::CallKind;
-    use peacockdb_core::batch_partitioned::nodes::{NodeRef, as_node_ref};
+    use peacockdb_core::executor::CallKind;
+    use peacockdb_core::plan::{NodeRef, as_node_ref};
 
     let data_dir = data_dir_for("tpch", "1");
     let sql = std::fs::read_to_string(queries_dir_for("tpch").join("nested-limits.sql"))
@@ -445,10 +446,10 @@ async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
             .create_physical_plan()
             .await
             .expect("the query has a physical plan");
-        let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+        let (tree, _memory) = planner::plan(&plan, mode.knobs())
             .unwrap_or_else(|error| panic!("nested-limits at {name}: {error}"));
         let offered = batches_offered(tree.as_ref());
-        let report = batch_partitioned_driver::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+        let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
             .unwrap_or_else(|error| panic!("nested-limits at {name}: {error}"));
         let calls = |kind: CallKind| report.trace.iter().filter(|e| e.call == kind).count();
 
@@ -492,9 +493,9 @@ async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
 
     /// The mid-plan limit's index in the driver's pre-order numbering, which is the tree
     /// walked children-after-self.
-    fn limit_node(root: &dyn peacockdb_core::batch_partitioned::GpuNode) -> usize {
+    fn limit_node(root: &dyn peacockdb_core::plan::GpuNode) -> usize {
         fn walk(
-            node: &dyn peacockdb_core::batch_partitioned::GpuNode,
+            node: &dyn peacockdb_core::plan::GpuNode,
             next: &mut usize,
         ) -> Option<usize> {
             let here = *next;
@@ -511,7 +512,7 @@ async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
 
     /// How many batches every source in the plan could produce — the mapping's own count,
     /// which is what a scan that ran to the end would have read.
-    fn batches_offered(node: &dyn peacockdb_core::batch_partitioned::GpuNode) -> usize {
+    fn batches_offered(node: &dyn peacockdb_core::plan::GpuNode) -> usize {
         let here = match as_node_ref(node) {
             NodeRef::LoadParquet(load) => load.partition_groups.iter().map(Vec::len).sum(),
             _ => 0,
@@ -566,10 +567,10 @@ async fn a_query_has_a_smallest_budget_that_fits_and_trips_a_byte_below_it() {
         .create_physical_plan()
         .await
         .expect("the query has a physical plan");
-    let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs())
         .unwrap_or_else(|error| panic!("nested-loop-join at {name}: {error}"));
 
-    let watching = batch_partitioned_driver::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+    let watching = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
         .expect("the unbudgeted run finishes");
     assert!(
         watching.peak_bytes > 0,
@@ -584,7 +585,7 @@ async fn a_query_has_a_smallest_budget_that_fits_and_trips_a_byte_below_it() {
     // build side — is 920 bytes on its own. So the gap is that side plus whatever else was
     // resident at the instant the check ran, not that side alone.
     let fits = |budget: usize| {
-        batch_partitioned_driver::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), Some(budget)).is_ok()
+        run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), Some(budget)).is_ok()
     };
     // The observed peak is a floor for the search and not the answer, per the block above.
     let (mut low, mut high) = (watching.peak_bytes, watching.peak_bytes * 8);
@@ -609,7 +610,7 @@ async fn a_query_has_a_smallest_budget_that_fits_and_trips_a_byte_below_it() {
         watching.peak_bytes
     );
 
-    match batch_partitioned_driver::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), Some(high - 1)) {
+    match run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), Some(high - 1)) {
         Err(RunError::BudgetExceeded { when, message }) => {
             assert_eq!(when, When::PreCall, "{message}");
             assert!(
@@ -653,9 +654,9 @@ async fn the_model_is_compared_against_what_the_calls_measured() {
         .create_physical_plan()
         .await
         .expect("the query has a physical plan");
-    let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs())
         .unwrap_or_else(|error| panic!("filter-project at {name}: {error}"));
-    let report = batch_partitioned_driver::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+    let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
         .expect("the run finishes");
     assert!(
         report.measured_calls > 0,
@@ -679,8 +680,8 @@ async fn the_model_is_compared_against_what_the_calls_measured() {
 #[tokio::test]
 async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
     use common::injection::{Drain, Empties, Rebatch};
-    use peacockdb_core::batch_partitioned::driver::CallKind;
-    use peacockdb_core::batch_partitioned::nodes::{NodeRef, as_node_ref};
+    use peacockdb_core::executor::CallKind;
+    use peacockdb_core::plan::{NodeRef, as_node_ref};
 
     let data_dir = data_dir_for("tpch", "1");
     let sql = std::fs::read_to_string(queries_dir_for("tpch").join("nested-loop-join.sql"))
@@ -702,13 +703,13 @@ async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
         .create_physical_plan()
         .await
         .expect("the query has a physical plan");
-    let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs())
         .unwrap_or_else(|error| panic!("nested-loop-join at {name}: {error}"));
 
     let run = |injection: Injection| {
         let injected = apply(tree.as_ref(), injection, SEED);
         let context = InjectedContext::new(ctx.task_ctx(), injection, SEED);
-        let report = batch_partitioned_driver::<Injected>(injected.as_ref(), &context, None)
+        let report = run::<Injected>(injected.as_ref(), &context, None)
             .unwrap_or_else(|error| panic!("nested-loop-join at {}: {error}", injection.label()));
         let pulls = report
             .trace
@@ -768,7 +769,7 @@ async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
         "the empty-batch setting fired on none of the {pulls} pulls"
     );
 
-    fn sources_in(node: &dyn peacockdb_core::batch_partitioned::GpuNode) -> usize {
+    fn sources_in(node: &dyn peacockdb_core::plan::GpuNode) -> usize {
         usize::from(matches!(as_node_ref(node), NodeRef::LoadParquet(_)))
             + node
                 .children()
@@ -808,7 +809,7 @@ async fn a_degenerate_hash_under_a_right_outer_is_refused_by_name() {
         .create_physical_plan()
         .await
         .expect("the query has a physical plan");
-    let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs())
         .unwrap_or_else(|error| panic!("q93 at {name}: {error}"));
     assert!(
         planned_mode(name, tree.as_ref()).owes_probe_when_empty,
@@ -831,7 +832,7 @@ async fn a_degenerate_hash_under_a_right_outer_is_refused_by_name() {
         },
         SEED,
     );
-    match batch_partitioned_driver::<Injected>(injected.as_ref(), &context, None) {
+    match run::<Injected>(injected.as_ref(), &context, None) {
         Err(error) => {
             let message = error.to_string();
             assert!(
@@ -926,7 +927,7 @@ impl PlannedQuery {
             .create_physical_plan()
             .await
             .expect("the query has a physical plan");
-        let (tree, _memory) = plan_batch_partitioned(&plan, mode.knobs())
+        let (tree, _memory) = planner::plan(&plan, mode.knobs())
             .unwrap_or_else(|error| panic!("{query} at {name}: {error}"));
         let lanes = planned_mode(name, tree.as_ref()).lanes;
         Self { ctx, tree, lanes }
@@ -935,7 +936,7 @@ impl PlannedQuery {
     fn run(&self, injection: Injection, budget: Option<usize>) -> Result<RunReport, RunError> {
         let injected = apply(self.tree.as_ref(), injection, SEED);
         let context = InjectedContext::new(self.ctx.task_ctx(), injection, SEED);
-        batch_partitioned_driver::<Injected>(injected.as_ref(), &context, budget)
+        run::<Injected>(injected.as_ref(), &context, budget)
     }
 
     /// The smallest budget a shape completes at, and the peak it was seen holding. Searched

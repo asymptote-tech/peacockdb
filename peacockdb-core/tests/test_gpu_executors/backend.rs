@@ -10,13 +10,13 @@
 use super::*;
 
 use datafusion::common::JoinType;
-use peacockdb_core::batch_partitioned::backend::Backend;
-use peacockdb_core::batch_partitioned::gpu_backend::backend::{GpuBackend, GpuContext};
-use peacockdb_core::batch_partitioned::nodes::{
-    ExecutorCategory, GpuAccumulateBatchesAndSort, GpuEmitPartitions, GpuJoin, GpuUnload,
+use peacockdb_core::executor::Backend;
+use peacockdb_core::executor::{GpuBackend, GpuContext};
+use peacockdb_core::plan::{
+    ExecutorCategory, GpuAccumulateBatchesAndSort, GpuEmitPartitions, GpuHashJoin, GpuUnload,
     category_of,
 };
-use peacockdb_core::batch_partitioned::recipe::attach_recipes;
+use peacockdb_core::wire::attach_recipes;
 
 /// The tree children-first, which is the numbering a recipe is addressed by and what the
 /// driver hands `executors_for`.
@@ -58,7 +58,7 @@ fn tree() -> Box<dyn GpuNode> {
     );
     // A LeftSemi: its probe call is the key project alone, so the join arm takes the
     // branch that derives a key schema rather than the one that does not.
-    let joined = GpuJoin::new(
+    let joined = GpuHashJoin::new(
         Box::new(build),
         Box::new(GpuEmitPartitions::new(source(), vec![0], 2)),
         JoinType::LeftSemi,

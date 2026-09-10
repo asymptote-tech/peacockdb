@@ -5,16 +5,16 @@
 //! names a golden. It ignores the regeneration variables rather than honouring them — a
 //! device that can author its own golden proves nothing against it.
 //!
-//! What the tree assertion is worth is worth stating: `batch_partitioned_driver` is generic
+//! What the tree assertion is worth is worth stating: `run` is generic
 //! over the backend, so both engines walk one driver over one plan and produce the same
 //! shape by construction. The evidence is the rows and the bytes under it. The shape check
 //! stays because it costs nothing and goes red on the day that construction stops holding.
 
 use datafusion::arrow::array::RecordBatch;
-use peacockdb_core::batch_partitioned::driver::batch_partitioned_driver;
-use peacockdb_core::batch_partitioned::gpu_backend::backend::{GpuBackend, GpuContext};
-use peacockdb_core::batch_partitioned::plan_text::render_run;
-use peacockdb_core::batch_partitioned::recipe::{RecipePlan, attach_recipes};
+use peacockdb_core::executor::run;
+use peacockdb_core::executor::{GpuBackend, GpuContext};
+use peacockdb_core::plan_text::render_run;
+use peacockdb_core::wire::{RecipePlan, attach_recipes};
 use peacockdb_ffi::raw::{
     PeacockExecutor, peacock_executor_begin_plan, peacock_executor_create,
     peacock_executor_destroy, peacock_executor_end_plan, peacock_last_error,
@@ -34,7 +34,7 @@ struct Session {
 }
 
 impl Session {
-    fn open(tree: &dyn peacockdb_core::batch_partitioned::GpuNode, what: &str) -> Self {
+    fn open(tree: &dyn peacockdb_core::plan::GpuNode, what: &str) -> Self {
         let recipes = attach_recipes(tree).unwrap_or_else(|e| panic!("{what}: no recipes: {e}"));
         let mut executor: *mut PeacockExecutor = std::ptr::null_mut();
         assert_eq!(
@@ -90,8 +90,8 @@ pub async fn gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, gpu_orac
     let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
     let mut session = Session::open(tree.as_ref(), &what);
     let ctx = session.context();
-    let report = batch_partitioned_driver::<GpuBackend>(tree.as_ref(), &ctx, None)
-        .unwrap_or_else(|e| panic!("{what}: {e}"));
+    let report =
+        run::<GpuBackend>(tree.as_ref(), &ctx, None).unwrap_or_else(|e| panic!("{what}: {e}"));
     assert_eq!(report.in_flight_bytes, 0, "{what} ended holding batches");
     assert_eq!(
         report.holds, report.releases,
@@ -116,7 +116,13 @@ pub async fn gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, gpu_orac
 /// would be absent: a `golden_exact` where the section is a marker is a test that fails on
 /// correct behaviour, and a `live_cpu` where a committed section serves spends a device-side
 /// cpu run on a comparison a file makes faster and harder.
-fn assert_oracle_suits_the_golden(dataset: &str, sf: &str, query: &str, gpu_oracle: &str, what: &str) {
+fn assert_oracle_suits_the_golden(
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    gpu_oracle: &str,
+    what: &str,
+) {
     let section = corpus_golden::section_of(&corpus_golden::result_golden(dataset, sf), query);
     let frozen = !section.starts_with(corpus_golden::SKIPPED);
     match gpu_result_mode(gpu_oracle) {

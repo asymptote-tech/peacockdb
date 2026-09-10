@@ -129,7 +129,7 @@ class _PandasJoin(JoinExecutor):
 
     def finish_and_fetch(self):
         outputs = self._finish()
-        # Nothing stays resident after the finish, so the enforcer can drop this executor.
+        # Nothing stays resident after the finish, so the accountant can drop this executor.
         self.build = None
         return [PandasBatch(f, f"({self.name}⋈finish)") for f in outputs], no_scratch()
 

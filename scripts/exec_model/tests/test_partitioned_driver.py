@@ -285,7 +285,7 @@ def test_in_flight_bytes_return_to_zero_and_the_peak_is_recorded():
     assert driver.accountant.peak > 0
 
 
-def test_the_enforcer_trips_cleanly_on_a_tight_budget():
+def test_the_accountant_trips_cleanly_on_a_tight_budget():
     with raises(ResidentBudgetExceeded):
         run(shuffle_aggregate_plan(lanes=4, batches_per_lane=8, rows=100), budget=1_000)
 

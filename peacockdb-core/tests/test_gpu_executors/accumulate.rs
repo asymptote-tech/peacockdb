@@ -5,17 +5,15 @@
 
 use super::*;
 
-use peacockdb_core::batch_partitioned::aggregates::AggFunc;
-use peacockdb_core::batch_partitioned::executor::LaneEvent;
-use peacockdb_core::batch_partitioned::gpu_backend::accumulate::{
-    GpuAccumulator, GpuPartitionAccumulator,
-};
-use peacockdb_core::batch_partitioned::node::RowInterval;
-use peacockdb_core::batch_partitioned::nodes::{
+use peacockdb_core::executor::LaneEvent;
+use peacockdb_core::executor::gpu_backend::accumulate::{GpuAccumulator, GpuPartitionAccumulator};
+use peacockdb_core::plan::AggFunc;
+use peacockdb_core::plan::AggStateColumns;
+use peacockdb_core::plan::RowInterval;
+use peacockdb_core::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregateBatches, GpuCoalesceAllBatches, GpuLimit,
     GpuMergeSortedPartitions,
 };
-use peacockdb_core::batch_partitioned::schema::AggStateColumns;
 
 /// Held bytes at which a compaction runs. Large enough that nothing here compacts before
 /// done, since what these cases are about is the answer rather than the schedule.

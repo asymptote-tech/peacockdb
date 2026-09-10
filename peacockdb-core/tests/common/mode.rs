@@ -6,8 +6,8 @@
 //! needs someone to remember to write one, and nothing reddens if they do not. There is
 //! nothing to copy from instead.
 
-use peacockdb_core::batch_partitioned::plan::{BatchSizing, PlanKnobs};
-use peacockdb_core::config::MemoryLimit;
+use super::memory_limit::MemoryLimit;
+use peacockdb_core::planner::{BatchSizing, PlanKnobs};
 
 /// The tier every mode is planned at. The plan goldens are written here, so a failure
 /// anywhere reads against a committed plan rather than a shape nothing records. The
@@ -16,7 +16,7 @@ use peacockdb_core::config::MemoryLimit;
 pub const TIER: MemoryLimit = MemoryLimit::Mini;
 pub const BUDGET: u64 = TIER.bytes() as u64;
 
-pub use peacockdb_core::batch_partitioned::plan::SMALL_TABLE_BYTES;
+pub use peacockdb_core::planner::SMALL_TABLE_BYTES;
 
 /// One planning mode: what the goldens call it, and the two knobs that make it distinct.
 pub struct Mode {

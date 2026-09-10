@@ -7,7 +7,7 @@
 
 use std::ptr;
 
-use peacockdb_core::batch_partitioned::{Batch, GpuBatch};
+use peacockdb_core::executor::{Batch, GpuBatch};
 
 fn detached(handle: u64, num_rows: usize, byte_size: usize) -> GpuBatch {
     GpuBatch::new(ptr::null_mut(), handle, num_rows, byte_size)

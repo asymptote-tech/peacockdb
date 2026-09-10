@@ -80,7 +80,7 @@ def _segments(t, bands, tag="customer_demographics"):
     """customer_demographics narrowed to the (marital status, education) pairs any arm names.
 
     1.9M rows, so it is declared a fact and streams through its filter: scanned as one batch
-    it is 730 MB of python strings and the resident enforcer trips, which is the enforcer
+    it is 730 MB of python strings and the resident accountant trips, which is the accountant
     being right on real data.
     """
     demographics = fact(t, "customer_demographics",

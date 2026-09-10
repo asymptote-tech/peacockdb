@@ -15,23 +15,21 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::{JoinType, ScalarValue};
 
-use peacockdb_core::batch_partitioned::GpuNode;
-use peacockdb_core::batch_partitioned::aggregates::{AggCall, AggFunc, PlanAgg, decomposition};
-use peacockdb_core::batch_partitioned::expr::{Expr, NamedExpr};
-use peacockdb_core::batch_partitioned::layout::ColumnOrder;
-use peacockdb_core::batch_partitioned::node::RowInterval;
-use peacockdb_core::batch_partitioned::nodes::join::{
-    JoinFilterColumn, JoinSide, NestedLoopJoinType,
-};
-use peacockdb_core::batch_partitioned::nodes::{
+use peacockdb_core::plan::ColumnOrder;
+use peacockdb_core::plan::GpuNode;
+use peacockdb_core::plan::RowGroupMeta;
+use peacockdb_core::plan::RowInterval;
+use peacockdb_core::plan::ScanMetadata;
+use peacockdb_core::plan::Schema;
+use peacockdb_core::plan::{AggCall, AggFunc, PlanAgg, decomposition};
+use peacockdb_core::plan::{
     AggregateBody, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
-    GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuInterleave, GpuJoin,
+    GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave,
     GpuLimit, GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin,
     GpuProject, GpuSort, GpuUnion, GpuUnload, NodeRef, as_node_ref,
 };
-use peacockdb_core::batch_partitioned::parquet_meta::ScanMetadata;
-use peacockdb_core::batch_partitioned::partitioner::RowGroupMeta;
-use peacockdb_core::batch_partitioned::schema::Schema;
+use peacockdb_core::plan::{Expr, NamedExpr};
+use peacockdb_core::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
 
 /// `node` rebuilt over `children`, which are the rewritten children in the order
 /// [`GpuNode::children`] reports them. Handed a node's own children back it is the
@@ -91,7 +89,7 @@ pub fn rebuild(node: &dyn GpuNode, children: Vec<Box<dyn GpuNode>>) -> Box<dyn G
             // Named rather than two calls in argument position: both sides are the same
             // type, so a swap is a wrong plan the compiler cannot see.
             let (build, probe) = (one(), one());
-            Box::new(GpuJoin::new(
+            Box::new(GpuHashJoin::new(
                 build,
                 probe,
                 join.join_type,
@@ -286,7 +284,7 @@ pub fn every_kind() -> Vec<Box<dyn GpuNode>> {
         )),
         // A join carrying its residual, the filter's own column map, NULL = NULL and a
         // projection; and one carrying none of them.
-        Box::new(GpuJoin::new(
+        Box::new(GpuHashJoin::new(
             source(None),
             source(Some(7)),
             JoinType::LeftSemi,
@@ -306,7 +304,7 @@ pub fn every_kind() -> Vec<Box<dyn GpuNode>> {
             Some(vec![0, 3]),
             columns(),
         )),
-        Box::new(GpuJoin::new(
+        Box::new(GpuHashJoin::new(
             other_source(),
             source(None),
             JoinType::Inner,

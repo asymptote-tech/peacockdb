@@ -3,11 +3,12 @@
 - **Create useful abstractions.** New code should introduce (or reuse) abstractions that
   make later reuse easy — a shared driver, a trait, a helper — rather than copies of
   similar logic.
-- **Small files:** under 1000 lines. Split by responsibility (`batch_partitioned/nodes/`,
-  one file per node family, and `batch_partitioned/cpu_backend/` are the pattern).
+- **Small files:** under 1000 lines. Split by responsibility (`plan/`, one file per node
+  family, and `executor/cpu_backend/` are the pattern). A component's `mod.rs` is exempt: it
+  is a facade of declarations, and the limit it wants is set once the layout has settled.
 - **Interfaces/traits in separate files** from their implementations
-  (`batch_partitioned/executor.rs`, `batch_partitioned/node.rs` and
-  `batch_partitioned/backend.rs` are the models).
+  (`executor/mod.rs` declares the seven category traits and `Backend`; the batch types are
+  implemented in `executor/{cpu_batch,gpu_batch}.rs`).
 - **Short functions:** under 150 lines in most cases.
 - **Comments say *why*, briefly.** Only non-obvious constraints, invariants, and gotchas —
   never what the next line does, never process history. If a comment documents an
@@ -99,6 +100,81 @@ the exception rather than as the example.
   diff is the detail — a message that restates the diff is read by nobody, and one that
   argues a design is in the wrong place. Point at the ticket or the task spec instead, which
   is where a later reader will look anyway.
+
+## Visibility
+
+- A component or subcomponent is a directory with `mod.rs`. Its whole API — structs, enums,
+  traits, functions, constants — is declared there. Nowhere else in the component carries
+  `pub` or `pub mod`, except where a test crate forces it — see the exemption below.
+- Implementation modules are declared `mod x;` and their items are `pub(crate)`. The module's
+  own privacy is the boundary: a path through a private module is refused whatever the item
+  says, so `plan::exec_ops` cannot be named from outside `plan` and `pub(super)` is not needed.
+- **A subcomponent is declared `mod`, not `pub mod`** — `mod scan_mapping;` in
+  `planner/translator/mod.rs`, never `pub mod scan_mapping;`. `pub mod` would make
+  `planner::translator::scan_mapping::Mapping` nameable crate-wide and the subcomponent wall
+  would exist only on paper. What a sibling component needs is declared in the component's own
+  `mod.rs`.
+- `lib.rs` declares the components `pub mod`. Nine more `pub mod` exist, every one forced by a
+  test crate and every one registered; nothing else in the crate may add one.
+- **Nesting may go three deep** where the innermost earns it: `planner/translator/scan_mapping/`
+  is 720 lines behind three entry points. The same rule applies at each level — `mod`, not
+  `pub mod`. A directory with a one-item facade and a hundred lines behind it is an
+  implementation module wearing a directory; the test is whether the body justifies the wall.
+- `pub use` is not allowed. Inline the declaration into `mod.rs`, or into `common.rs` for what
+  the implementation modules share. A child reaches into its parent; a parent never re-exports
+  a child.
+- A body in `mod.rs` is one expression. Declarations, and delegations of exactly one line.
+- A struct keeps its inherent `impl`, and that block lives in `mod.rs` with one-line bodies. A
+  trait is for two or more implementors. A trait per struct would also break every `const fn`
+  and associated const, which trait items cannot be.
+- An implementation module may implement any trait for a type declared in its own component's
+  `mod.rs`, and may define free functions the `mod.rs` delegates to. It may not declare types
+  or traits that form the component's API.
+- Absolute `crate::` paths across a component boundary, `super::` only within one.
+- `mod.rs` and `common.rs` have no length limit. Every other file keeps the 1000-line one.
+
+### What that buys, and what has to be tested
+
+Three claims, and only the first two are the compiler's.
+
+- **A component is reachable only through its `mod.rs`.** Enforced: every implementation module
+  is private, so naming one from outside is `E0603: module is private`.
+- **A subcomponent is reachable only through its own `mod.rs`, and only from inside its parent
+  component.** Enforced by the same mechanism, once the declaration is `mod` rather than
+  `pub mod`.
+- **Only the parent component's own code may use a subcomponent.** Enforced across components
+  wherever the subcomponent is declared `mod`, and not at all where it is `pub mod`, which is
+  what the exemption below leaves open. Not enforced *within* one component either: Rust's rule
+  is "the module and its descendants", and sibling subcomponents are descendants of the parent.
+  There is no visibility level meaning "my parent but not my siblings" — `pub(super)`,
+  `pub(crate)` and `pub(in path)` all give the same set.
+
+So two things fall to `peacockdb-core/tests/test_module_layout.rs`: sibling reach between
+implementation modules, and where a `pub` appears at all, which nothing in rustc checks. A type
+from a private module in a public signature is a third — `private_interfaces` reads a type's
+nominal visibility, so an unreachable type that is spelled `pub` passes it silently. Without
+that test none of these rules can go red.
+
+### The exemption, and why it is a register rather than a habit
+
+`tests/*.rs` are separate crates, so a test that drives a subcomponent directly can only reach
+it through a `pub mod`. Nine subcomponent paths under `executor/` are declared that way for that
+reason, and 60 `pub` items sit behind them.
+
+Every one is registered in `test_module_layout.rs` with the files that force it, and the
+register is checked both ways: an entry whose named files no longer force it is reported, and so
+is a file that forces an entry the list omits. Half a claim expires wrong — a list naming one of
+four forcing files goes green the day that file is fixed, and says the wall can go up while
+three files still need it. `test-layout.md` moves those test files into `src/`, and the whole
+exemption expires with them.
+
+`CROSS_COMPONENT_REACHES` is the same shape for the rule rustc cannot enforce behind a
+`pub mod`. It has one entry today, `wire/tests.rs` naming `executor::cpu_backend::join::CpuJoin`,
+which predates the layout and dies with the exemption that lets it compile.
+
+Do not read a `pub mod` in this crate as licence to add one. The register is the difference
+between a sanctioned exception and a violation, and a `pub mod` that is not in it is a
+violation.
 
 ## Antipatterns
 

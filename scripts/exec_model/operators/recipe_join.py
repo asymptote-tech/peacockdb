@@ -68,7 +68,7 @@ class RecipeJoin(JoinExecutor):
         # given by the *build* row count to price one output row. Feeding it the
         # accumulation turned 94 MB of keys over thirty build rows into megabytes per row
         # and a scratch estimate three orders of magnitude too large — TPC-DS q37 tripped
-        # the enforcer on an 11.7M-row probe that fits comfortably. The accumulation is
+        # the accountant on an 11.7M-row probe that fits comfortably. The accumulation is
         # still resident and still counted; it is just not a per-output-row cost.
         return merged_scratch(self.build_bytes(), self.build_rows, self.fanout,
                               n_rows, n_bytes)

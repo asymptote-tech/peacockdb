@@ -1,0 +1,153 @@
+//! Compute surviving parquet row-group indices for a source, so the GPU
+//! scan (cuDF `read_parquet` `set_row_groups`) decodes ONLY the groups that can
+//! match the scan's static predicate — matching the CPU oracle, which DataFusion's
+//! `ParquetExec` already prunes the same way.
+//!
+//! PARITY BY CONSTRUCTION: we reuse the SAME machinery DataFusion's `ParquetExec`
+//! uses for CPU-side row-group pruning — its pushed-down `predicate()` run through a
+//! `PruningPredicate` over `RowGroupPruningStatistics` (a faithful port of
+//! datafusion-44's internal `row_group_filter.rs`). Same predicate + same row-group
+//! stats => identical surviving set. SCOPE: single-source scans with a static
+//! pushdown predicate (TPC-H q6/q1/q14/q15-style). Multi-file, no predicate, or
+//! join/dynamic (date_dim) ranges => `None` (read all groups, as today; #16).
+//!
+//! STATS-ONLY pruning: this uses `PruningPredicate` over column-chunk min/max/null
+//! statistics, NOT the separate bloom-filter prune step cuDF/DataFusion can also do.
+//! Moot today: our DuckDB `COPY ... (FORMAT parquet)` files carry no bloom filters, so
+//! the CPU oracle doesn't bloom-prune either => the stats-only survivor set is EXACTLY
+//! the oracle's. If bloom-filter parquet is ever introduced, the CPU oracle would prune
+//! MORE (equality predicates); our stats-only survivors would then be a safe SUPERSET —
+//! the GPU reads a few extra groups and `GpuFilterExec` drops their rows, so NO data
+//! loss, but the GPU scan row count could exceed the `.cpu.txt` oracle. Add bloom
+//! pruning here too if that day comes.
+
+use std::sync::Arc;
+
+use datafusion::arrow::array::ArrayRef;
+use datafusion::arrow::datatypes::Schema;
+use datafusion::common::Column;
+use datafusion::datasource::physical_plan::ParquetExec;
+use datafusion::parquet::arrow::arrow_reader::statistics::StatisticsConverter;
+use datafusion::parquet::file::metadata::RowGroupMetaData;
+use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
+use datafusion::parquet::schema::types::SchemaDescriptor;
+use datafusion::physical_optimizer::pruning::{PruningPredicate, PruningStatistics};
+
+/// Faithful port of datafusion-44 `row_group_filter::RowGroupPruningStatistics`:
+/// adapts parquet row-group column-chunk statistics to the `PruningStatistics`
+/// the `PruningPredicate` consumes. Kept identical so GPU pruning == CPU pruning.
+struct RowGroupPruningStatistics<'a> {
+    parquet_schema: &'a SchemaDescriptor,
+    row_group_metadatas: Vec<&'a RowGroupMetaData>,
+    arrow_schema: &'a Schema,
+}
+
+impl<'a> RowGroupPruningStatistics<'a> {
+    fn metadata_iter(&'a self) -> impl Iterator<Item = &'a RowGroupMetaData> + 'a {
+        self.row_group_metadatas.iter().copied()
+    }
+
+    fn converter<'b>(&'a self, column: &'b Column) -> Option<StatisticsConverter<'a>> {
+        StatisticsConverter::try_new(&column.name, self.arrow_schema, self.parquet_schema).ok()
+    }
+}
+
+impl PruningStatistics for RowGroupPruningStatistics<'_> {
+    fn min_values(&self, column: &Column) -> Option<ArrayRef> {
+        self.converter(column)?
+            .row_group_mins(self.metadata_iter())
+            .ok()
+    }
+    fn max_values(&self, column: &Column) -> Option<ArrayRef> {
+        self.converter(column)?
+            .row_group_maxes(self.metadata_iter())
+            .ok()
+    }
+    fn num_containers(&self) -> usize {
+        self.row_group_metadatas.len()
+    }
+    fn null_counts(&self, column: &Column) -> Option<ArrayRef> {
+        self.converter(column)?
+            .row_group_null_counts(self.metadata_iter())
+            .ok()
+            .map(|c| Arc::new(c) as ArrayRef)
+    }
+    fn row_counts(&self, column: &Column) -> Option<ArrayRef> {
+        self.converter(column)?
+            .row_group_row_counts(self.metadata_iter())
+            .ok()
+            .flatten()
+            .map(|c| Arc::new(c) as ArrayRef)
+    }
+    fn contained(
+        &self,
+        _column: &Column,
+        _values: &std::collections::HashSet<datafusion::scalar::ScalarValue>,
+    ) -> Option<datafusion::arrow::array::BooleanArray> {
+        None
+    }
+}
+
+/// Surviving row-group indices for `parquet`'s single source under its pushdown
+/// predicate. `None` => no pruning applicable (read all groups): no predicate,
+/// not exactly one file, unreadable metadata, or the predicate prunes nothing.
+pub(crate) fn surviving_row_groups(parquet: &ParquetExec) -> Option<Vec<u32>> {
+    let predicate = parquet.predicate()?; // None when nothing was pushed down (e.g. #16 dynamic)
+    let config = parquet.base_config();
+
+    // Single-source only — cuDF set_row_groups is per-source; keep scope tight.
+    // At target_partitions>1 DataFusion splits ONE physical file into several
+    // byte-RANGE PartitionedFile entries (all the same path), so accept any number
+    // of entries as long as they all reference the SAME file; reject genuine
+    // multi-file scans (distinct paths, #16).
+    let path = single_source_path(config)?;
+
+    // Read row-group metadata (sync; the parquet is local at serialize time).
+    let file = std::fs::File::open(&path).ok()?;
+    let reader = SerializedFileReader::new(file).ok()?;
+    let meta = reader.metadata();
+    let groups: Vec<&RowGroupMetaData> = meta.row_groups().iter().collect();
+    if groups.is_empty() {
+        return None;
+    }
+    let parquet_schema = meta.file_metadata().schema_descr();
+
+    let pruning = PruningPredicate::try_new(predicate.clone(), config.file_schema.clone()).ok()?;
+    let stats = RowGroupPruningStatistics {
+        parquet_schema,
+        row_group_metadatas: groups,
+        arrow_schema: config.file_schema.as_ref(),
+    };
+    // `keep[i] == false` => row group i cannot match the predicate (prune it).
+    let keep = pruning.prune(&stats).ok()?;
+    let survivors: Vec<u32> = keep
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &k)| if k { Some(i as u32) } else { None })
+        .collect();
+
+    // Nothing pruned -> behave exactly as today (empty list = cuDF reads all groups).
+    if survivors.len() == keep.len() {
+        None
+    } else {
+        Some(survivors)
+    }
+}
+
+/// Absolute local path of the single physical file backing a ParquetExec, or
+/// `None` if the scan touches more than one distinct file. At target_partitions>1
+/// DataFusion splits one file into several byte-range `PartitionedFile` entries —
+/// all the same path — so we key on the distinct path set, not the entry count.
+/// `object_meta.location` is an object_store Path (leading '/' stripped); we
+/// assume a '/'-rooted LOCAL filesystem object store, which holds for the
+/// serialize-time / planner use here. Degrades SAFELY otherwise (open fails → None).
+fn single_source_path(
+    config: &datafusion::datasource::physical_plan::FileScanConfig,
+) -> Option<String> {
+    let mut iter = config.file_groups.iter().flatten();
+    let first = iter.next()?.object_meta.location.clone();
+    if iter.any(|f| f.object_meta.location != first) {
+        return None; // genuine multi-file scan — out of scope (#16)
+    }
+    Some(format!("/{first}"))
+}

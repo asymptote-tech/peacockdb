@@ -85,7 +85,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             mode: Partial
                             group_by: c_custkey@0
                             count(orders.o_orderkey): count(o_orderkey@1)
-                        GpuJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfProject{probe keys}, batch copy), execute_node(#7 CudfHashJoin{Inner}, build copy, batch); at done: execute_node(#8 CudfCoalescePartitions, accumulated keys), execute_node(#10 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#11 CudfProject{build columns + 1 null}, prior output)
+                        GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfProject{probe keys}, batch copy), execute_node(#7 CudfHashJoin{Inner}, build copy, batch); at done: execute_node(#8 CudfCoalescePartitions, accumulated keys), execute_node(#10 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#11 CudfProject{build columns + 1 null}, prior output)
                             #6 CudfProject{probe keys}
                               o_custkey: o_custkey@1
                             #7 CudfHashJoin{Inner}
@@ -131,7 +131,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
     GpuSort: calling_lanes=4, per batch: execute_node(#24 CudfSort, batch)
         #24 CudfSort
           by: s_suppkey@0 asc nulls last
-      GpuJoin: calling_lanes=4, per probe batch: execute_node(#23 CudfHashJoin{Inner}, build copy, batch)
+      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#23 CudfHashJoin{Inner}, build copy, batch)
           #23 CudfHashJoin{Inner}
             join_type: Inner
             keys: (total_revenue@4, max(revenue0.total_revenue)@0)
@@ -142,7 +142,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
               #11 CudfRepartition{Hash, 1→4}
                 partitioning: Hash, 4
                 hash: total_revenue@4
-            GpuJoin: calling_lanes=1, per probe batch: execute_node(#10 CudfHashJoin{Inner}, build copy, batch)
+            GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#10 CudfHashJoin{Inner}, build copy, batch)
                 #10 CudfHashJoin{Inner}
                   join_type: Inner
                   keys: (s_suppkey@0, supplier_no@0)
@@ -262,7 +262,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                         mode: Partial
                         group_by: s_name@0
                         count(*): count(1)
-                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#30 CudfHashJoin{LeftAnti}, build, batch)
+                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#30 CudfHashJoin{LeftAnti}, build, batch)
                         #30 CudfHashJoin{LeftAnti}
                           join_type: LeftAnti
                           keys: (l_orderkey@1, l_orderkey@0)
@@ -271,7 +271,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                           projection: [0]
                       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#25 CudfCoalescePartitions, lane batches)
                           #25 CudfCoalescePartitions
-                        GpuJoin: calling_lanes=4, per probe batch: execute_node(#24 CudfHashJoin{LeftSemi}, build, batch)
+                        GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#24 CudfHashJoin{LeftSemi}, build, batch)
                             #24 CudfHashJoin{LeftSemi}
                               join_type: LeftSemi
                               keys: (l_orderkey@1, l_orderkey@0)
@@ -284,7 +284,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                   partitioning: Hash, 4
                                   hash: l_orderkey@1
                               GpuMergePartitions: none
-                                GpuJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
+                                GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
                                     #18 CudfHashJoin{Inner}
                                       join_type: Inner
                                       keys: (n_nationkey@0, s_nationkey@1)
@@ -308,7 +308,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                         partitioning: Hash, 4
                                         hash: s_nationkey@1
                                     GpuMergePartitions: none
-                                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#16 CudfHashJoin{Inner}, build copy, batch)
+                                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#16 CudfHashJoin{Inner}, build copy, batch)
                                           #16 CudfHashJoin{Inner}
                                             join_type: Inner
                                             keys: (o_orderkey@0, l_orderkey@2)
@@ -333,7 +333,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                               partitioning: Hash, 4
                                               hash: l_orderkey@2
                                           GpuMergePartitions: none
-                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#14 CudfHashJoin{Inner}, build copy, batch)
+                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#14 CudfHashJoin{Inner}, build copy, batch)
                                                 #14 CudfHashJoin{Inner}
                                                   join_type: Inner
                                                   keys: (s_suppkey@0, l_suppkey@1)
@@ -451,7 +451,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             files: /tmp/peacock-plan-bytes-root/tpch.sf1/customer.parquet
                             schema: [c_phone:Utf8View, c_acctbal:Decimal128]
                 GpuMergePartitions: none
-                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#12 CudfProject{probe keys}, batch); at done: execute_node(#13 CudfCoalescePartitions, accumulated keys), execute_node(#14 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#15 CudfProject{narrow}, prior output)
+                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#12 CudfProject{probe keys}, batch); at done: execute_node(#13 CudfCoalescePartitions, accumulated keys), execute_node(#14 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#15 CudfProject{narrow}, prior output)
                       #12 CudfProject{probe keys}
                         o_custkey: o_custkey@0
                       #13 CudfCoalescePartitions
@@ -607,7 +607,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                         #50 CudfFilter
                           predicate: (mark@8 Or mark@9)
                           projection: [0, 1, 2, 3, 4, 5, 6, 7]
-                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#46 CudfProject{probe keys}, batch); at done: execute_node(#47 CudfCoalescePartitions, accumulated keys), execute_node(#48 CudfHashJoin{LeftMark}, build, prior output), execute_node(#49 CudfProject{narrow}, prior output)
+                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#46 CudfProject{probe keys}, batch); at done: execute_node(#47 CudfCoalescePartitions, accumulated keys), execute_node(#48 CudfHashJoin{LeftMark}, build, prior output), execute_node(#49 CudfProject{narrow}, prior output)
                           #46 CudfProject{probe keys}
                             cs_ship_customer_sk: cs_ship_customer_sk@1
                           #47 CudfCoalescePartitions
@@ -627,7 +627,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             mark: mark@10
                         GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#37 CudfCoalescePartitions, lane batches)
                             #37 CudfCoalescePartitions
-                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#34 CudfProject{probe keys}, batch); at done: execute_node(#35 CudfCoalescePartitions, accumulated keys), execute_node(#36 CudfHashJoin{LeftMark}, build, prior output)
+                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#34 CudfProject{probe keys}, batch); at done: execute_node(#35 CudfCoalescePartitions, accumulated keys), execute_node(#36 CudfHashJoin{LeftMark}, build, prior output)
                               #34 CudfProject{probe keys}
                                 ws_bill_customer_sk: ws_bill_customer_sk@1
                               #35 CudfCoalescePartitions
@@ -636,7 +636,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 keys: (c_customer_sk@0, ws_bill_customer_sk@0)
                             GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#25 CudfCoalescePartitions, lane batches)
                                 #25 CudfCoalescePartitions
-                              GpuJoin: calling_lanes=4, per probe batch: execute_node(#22 CudfProject{probe keys}, batch); at done: execute_node(#23 CudfCoalescePartitions, accumulated keys), execute_node(#24 CudfHashJoin{LeftSemi}, build, prior output)
+                              GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#22 CudfProject{probe keys}, batch); at done: execute_node(#23 CudfCoalescePartitions, accumulated keys), execute_node(#24 CudfHashJoin{LeftSemi}, build, prior output)
                                   #22 CudfProject{probe keys}
                                     ss_customer_sk: ss_customer_sk@0
                                   #23 CudfCoalescePartitions
@@ -650,7 +650,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                         partitioning: Hash, 4
                                         hash: c_customer_sk@0
                                     GpuMergePartitions: none
-                                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#11 CudfHashJoin{Inner}, build copy, batch)
+                                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#11 CudfHashJoin{Inner}, build copy, batch)
                                           #11 CudfHashJoin{Inner}
                                             join_type: Inner
                                             keys: (c_current_cdemo_sk@1, cd_demo_sk@0)
@@ -662,7 +662,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                 partitioning: Hash, 4
                                                 hash: c_current_cdemo_sk@1
                                             GpuMergePartitions: none
-                                              GpuJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfHashJoin{Inner}, build copy, batch)
+                                              GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfHashJoin{Inner}, build copy, batch)
                                                   #6 CudfHashJoin{Inner}
                                                     join_type: Inner
                                                     keys: (ca_address_sk@0, c_current_addr_sk@2)
@@ -703,7 +703,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       partitioning: Hash, 4
                                       hash: ss_customer_sk@0
                                   GpuMergePartitions: none
-                                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#20 CudfHashJoin{Inner}, build copy, batch)
+                                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#20 CudfHashJoin{Inner}, build copy, batch)
                                         #20 CudfHashJoin{Inner}
                                           join_type: Inner
                                           keys: (d_date_sk@0, ss_sold_date_sk@0)
@@ -736,7 +736,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                   partitioning: Hash, 4
                                   hash: ws_bill_customer_sk@1
                               GpuMergePartitions: none
-                                GpuJoin: calling_lanes=4, per probe batch: execute_node(#32 CudfHashJoin{Inner}, build copy, batch)
+                                GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#32 CudfHashJoin{Inner}, build copy, batch)
                                     #32 CudfHashJoin{Inner}
                                       join_type: Inner
                                       keys: (d_date_sk@0, ws_sold_date_sk@0)
@@ -768,7 +768,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                               partitioning: Hash, 4
                               hash: cs_ship_customer_sk@1
                           GpuMergePartitions: none
-                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#44 CudfHashJoin{Inner}, build copy, batch)
+                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#44 CudfHashJoin{Inner}, build copy, batch)
                                 #44 CudfHashJoin{Inner}
                                   join_type: Inner
                                   keys: (d_date_sk@0, cs_sold_date_sk@0)
@@ -889,7 +889,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     #7 CudfProject
                                       quantity: ss_quantity@0
                                       list_price: ss_list_price@1
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfHashJoin{Inner}, build copy, batch)
                                       #6 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (d_date_sk@0, ss_sold_date_sk@0)
@@ -921,7 +921,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     #15 CudfProject
                                       quantity: cs_quantity@0
                                       list_price: cs_list_price@1
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#14 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#14 CudfHashJoin{Inner}, build copy, batch)
                                       #14 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (d_date_sk@0, cs_sold_date_sk@0)
@@ -953,7 +953,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     #23 CudfProject
                                       quantity: ws_quantity@0
                                       list_price: ws_list_price@1
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#22 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#22 CudfHashJoin{Inner}, build copy, batch)
                                       #22 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (d_date_sk@0, ws_sold_date_sk@0)
@@ -1014,7 +1014,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       group_by: i_brand_id@2, i_class_id@3, i_category_id@4
                                       sum(store_sales.ss_quantity * store_sales.ss_list_price): sum((cast(ss_quantity@0 as Decimal128(20, 0)) Multiply ss_list_price@1)::Decimal128(28, 2))
                                       count(*): count(1)
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#111 CudfProject{probe keys}, batch); at done: execute_node(#112 CudfCoalescePartitions, accumulated keys), execute_node(#113 CudfHashJoin{LeftSemi}, build, prior output), execute_node(#114 CudfProject{narrow}, prior output)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#111 CudfProject{probe keys}, batch); at done: execute_node(#112 CudfCoalescePartitions, accumulated keys), execute_node(#113 CudfHashJoin{LeftSemi}, build, prior output), execute_node(#114 CudfProject{narrow}, prior output)
                                       #111 CudfProject{probe keys}
                                         ss_item_sk: ss_item_sk@0
                                       #112 CudfCoalescePartitions
@@ -1034,7 +1034,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                             partitioning: Hash, 4
                                             hash: ss_item_sk@0
                                         GpuMergePartitions: none
-                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#44 CudfHashJoin{Inner}, build copy, batch)
+                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#44 CudfHashJoin{Inner}, build copy, batch)
                                               #44 CudfHashJoin{Inner}
                                                 join_type: Inner
                                                 keys: (d_date_sk@0, ss_sold_date_sk@0)
@@ -1067,7 +1067,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                       i_brand_id: i_brand_id@0
                                                       i_class_id: i_class_id@1
                                                       i_category_id: i_category_id@2
-                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#41 CudfHashJoin{Inner}, build copy, batch)
+                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#41 CudfHashJoin{Inner}, build copy, batch)
                                                       #41 CudfHashJoin{Inner}
                                                         join_type: Inner
                                                         keys: (i_item_sk@0, ss_item_sk@1)
@@ -1099,7 +1099,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                         GpuProject: calling_lanes=4, per batch: execute_node(#109 CudfProject, batch)
                                             #109 CudfProject
                                               ss_item_sk: i_item_sk@0
-                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#108 CudfHashJoin{Inner}, build copy, batch)
+                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#108 CudfHashJoin{Inner}, build copy, batch)
                                               #108 CudfHashJoin{Inner}
                                                 join_type: Inner
                                                 keys: (i_brand_id@1, brand_id@0), (i_class_id@2, class_id@1), (i_category_id@3, category_id@2)
@@ -1114,7 +1114,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     #47 CudfScan
                                                       files: /tmp/peacock-plan-bytes-root/tpcds.sf1/item.parquet
                                                       schema: [i_item_sk:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64]
-                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#107 CudfHashJoin{RightSemi}, build copy, batch)
+                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#107 CudfHashJoin{RightSemi}, build copy, batch)
                                                 #107 CudfHashJoin{RightSemi}
                                                   join_type: RightSemi
                                                   keys: (i_brand_id@0, brand_id@0), (i_class_id@1, class_id@1), (i_category_id@2, category_id@2)
@@ -1126,7 +1126,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                       partitioning: Hash, 4
                                                       hash: i_brand_id@0, i_class_id@1, i_category_id@2
                                                   GpuMergePartitions: none
-                                                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#62 CudfHashJoin{Inner}, build copy, batch)
+                                                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#62 CudfHashJoin{Inner}, build copy, batch)
                                                         #62 CudfHashJoin{Inner}
                                                           join_type: Inner
                                                           keys: (d_date_sk@0, ws_sold_date_sk@0)
@@ -1156,7 +1156,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                 i_brand_id: i_brand_id@0
                                                                 i_class_id: i_class_id@1
                                                                 i_category_id: i_category_id@2
-                                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#59 CudfHashJoin{Inner}, build copy, batch)
+                                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#59 CudfHashJoin{Inner}, build copy, batch)
                                                                 #59 CudfHashJoin{Inner}
                                                                   join_type: Inner
                                                                   keys: (i_item_sk@0, ws_item_sk@1)
@@ -1192,7 +1192,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     #103 CudfAggregate{Partial}
                                                       mode: Partial
                                                       group_by: brand_id@0, class_id@1, category_id@2
-                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#102 CudfHashJoin{RightSemi}, build copy, batch)
+                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#102 CudfHashJoin{RightSemi}, build copy, batch)
                                                       #102 CudfHashJoin{RightSemi}
                                                         join_type: RightSemi
                                                         keys: (i_brand_id@0, brand_id@0), (i_class_id@1, class_id@1), (i_category_id@2, category_id@2)
@@ -1204,7 +1204,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                             partitioning: Hash, 4
                                                             hash: i_brand_id@0, i_class_id@1, i_category_id@2
                                                         GpuMergePartitions: none
-                                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#77 CudfHashJoin{Inner}, build copy, batch)
+                                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#77 CudfHashJoin{Inner}, build copy, batch)
                                                               #77 CudfHashJoin{Inner}
                                                                 join_type: Inner
                                                                 keys: (d_date_sk@0, cs_sold_date_sk@0)
@@ -1234,7 +1234,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                       i_brand_id: i_brand_id@0
                                                                       i_class_id: i_class_id@1
                                                                       i_category_id: i_category_id@2
-                                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#74 CudfHashJoin{Inner}, build copy, batch)
+                                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#74 CudfHashJoin{Inner}, build copy, batch)
                                                                       #74 CudfHashJoin{Inner}
                                                                         join_type: Inner
                                                                         keys: (i_item_sk@0, cs_item_sk@1)
@@ -1287,7 +1287,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                       brand_id: i_brand_id@0
                                                                       class_id: i_class_id@1
                                                                       category_id: i_category_id@2
-                                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#92 CudfHashJoin{Inner}, build copy, batch)
+                                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#92 CudfHashJoin{Inner}, build copy, batch)
                                                                       #92 CudfHashJoin{Inner}
                                                                         join_type: Inner
                                                                         keys: (d_date_sk@0, ss_sold_date_sk@0)
@@ -1317,7 +1317,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                               i_brand_id: i_brand_id@0
                                                                               i_class_id: i_class_id@1
                                                                               i_category_id: i_category_id@2
-                                                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#89 CudfHashJoin{Inner}, build copy, batch)
+                                                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#89 CudfHashJoin{Inner}, build copy, batch)
                                                                               #89 CudfHashJoin{Inner}
                                                                                 join_type: Inner
                                                                                 keys: (i_item_sk@0, ss_item_sk@1)
@@ -1392,7 +1392,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     #133 CudfProject
                                       quantity: ss_quantity@0
                                       list_price: ss_list_price@1
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#132 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#132 CudfHashJoin{Inner}, build copy, batch)
                                       #132 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (d_date_sk@0, ss_sold_date_sk@0)
@@ -1424,7 +1424,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     #141 CudfProject
                                       quantity: cs_quantity@0
                                       list_price: cs_list_price@1
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#140 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#140 CudfHashJoin{Inner}, build copy, batch)
                                       #140 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (d_date_sk@0, cs_sold_date_sk@0)
@@ -1456,7 +1456,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     #149 CudfProject
                                       quantity: ws_quantity@0
                                       list_price: ws_list_price@1
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#148 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#148 CudfHashJoin{Inner}, build copy, batch)
                                       #148 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (d_date_sk@0, ws_sold_date_sk@0)
@@ -1517,7 +1517,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       group_by: i_brand_id@2, i_class_id@3, i_category_id@4
                                       sum(catalog_sales.cs_quantity * catalog_sales.cs_list_price): sum((cast(cs_quantity@0 as Decimal128(20, 0)) Multiply cs_list_price@1)::Decimal128(28, 2))
                                       count(*): count(1)
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#237 CudfProject{probe keys}, batch); at done: execute_node(#238 CudfCoalescePartitions, accumulated keys), execute_node(#239 CudfHashJoin{LeftSemi}, build, prior output), execute_node(#240 CudfProject{narrow}, prior output)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#237 CudfProject{probe keys}, batch); at done: execute_node(#238 CudfCoalescePartitions, accumulated keys), execute_node(#239 CudfHashJoin{LeftSemi}, build, prior output), execute_node(#240 CudfProject{narrow}, prior output)
                                       #237 CudfProject{probe keys}
                                         ss_item_sk: ss_item_sk@0
                                       #238 CudfCoalescePartitions
@@ -1537,7 +1537,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                             partitioning: Hash, 4
                                             hash: cs_item_sk@0
                                         GpuMergePartitions: none
-                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#170 CudfHashJoin{Inner}, build copy, batch)
+                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#170 CudfHashJoin{Inner}, build copy, batch)
                                               #170 CudfHashJoin{Inner}
                                                 join_type: Inner
                                                 keys: (d_date_sk@0, cs_sold_date_sk@0)
@@ -1570,7 +1570,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                       i_brand_id: i_brand_id@0
                                                       i_class_id: i_class_id@1
                                                       i_category_id: i_category_id@2
-                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#167 CudfHashJoin{Inner}, build copy, batch)
+                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#167 CudfHashJoin{Inner}, build copy, batch)
                                                       #167 CudfHashJoin{Inner}
                                                         join_type: Inner
                                                         keys: (i_item_sk@0, cs_item_sk@1)
@@ -1602,7 +1602,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                         GpuProject: calling_lanes=4, per batch: execute_node(#235 CudfProject, batch)
                                             #235 CudfProject
                                               ss_item_sk: i_item_sk@0
-                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#234 CudfHashJoin{Inner}, build copy, batch)
+                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#234 CudfHashJoin{Inner}, build copy, batch)
                                               #234 CudfHashJoin{Inner}
                                                 join_type: Inner
                                                 keys: (i_brand_id@1, brand_id@0), (i_class_id@2, class_id@1), (i_category_id@3, category_id@2)
@@ -1617,7 +1617,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     #173 CudfScan
                                                       files: /tmp/peacock-plan-bytes-root/tpcds.sf1/item.parquet
                                                       schema: [i_item_sk:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64]
-                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#233 CudfHashJoin{RightSemi}, build copy, batch)
+                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#233 CudfHashJoin{RightSemi}, build copy, batch)
                                                 #233 CudfHashJoin{RightSemi}
                                                   join_type: RightSemi
                                                   keys: (i_brand_id@0, brand_id@0), (i_class_id@1, class_id@1), (i_category_id@2, category_id@2)
@@ -1629,7 +1629,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                       partitioning: Hash, 4
                                                       hash: i_brand_id@0, i_class_id@1, i_category_id@2
                                                   GpuMergePartitions: none
-                                                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#188 CudfHashJoin{Inner}, build copy, batch)
+                                                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#188 CudfHashJoin{Inner}, build copy, batch)
                                                         #188 CudfHashJoin{Inner}
                                                           join_type: Inner
                                                           keys: (d_date_sk@0, ws_sold_date_sk@0)
@@ -1659,7 +1659,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                 i_brand_id: i_brand_id@0
                                                                 i_class_id: i_class_id@1
                                                                 i_category_id: i_category_id@2
-                                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#185 CudfHashJoin{Inner}, build copy, batch)
+                                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#185 CudfHashJoin{Inner}, build copy, batch)
                                                                 #185 CudfHashJoin{Inner}
                                                                   join_type: Inner
                                                                   keys: (i_item_sk@0, ws_item_sk@1)
@@ -1695,7 +1695,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     #229 CudfAggregate{Partial}
                                                       mode: Partial
                                                       group_by: brand_id@0, class_id@1, category_id@2
-                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#228 CudfHashJoin{RightSemi}, build copy, batch)
+                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#228 CudfHashJoin{RightSemi}, build copy, batch)
                                                       #228 CudfHashJoin{RightSemi}
                                                         join_type: RightSemi
                                                         keys: (i_brand_id@0, brand_id@0), (i_class_id@1, class_id@1), (i_category_id@2, category_id@2)
@@ -1707,7 +1707,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                             partitioning: Hash, 4
                                                             hash: i_brand_id@0, i_class_id@1, i_category_id@2
                                                         GpuMergePartitions: none
-                                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#203 CudfHashJoin{Inner}, build copy, batch)
+                                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#203 CudfHashJoin{Inner}, build copy, batch)
                                                               #203 CudfHashJoin{Inner}
                                                                 join_type: Inner
                                                                 keys: (d_date_sk@0, cs_sold_date_sk@0)
@@ -1737,7 +1737,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                       i_brand_id: i_brand_id@0
                                                                       i_class_id: i_class_id@1
                                                                       i_category_id: i_category_id@2
-                                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#200 CudfHashJoin{Inner}, build copy, batch)
+                                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#200 CudfHashJoin{Inner}, build copy, batch)
                                                                       #200 CudfHashJoin{Inner}
                                                                         join_type: Inner
                                                                         keys: (i_item_sk@0, cs_item_sk@1)
@@ -1790,7 +1790,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                       brand_id: i_brand_id@0
                                                                       class_id: i_class_id@1
                                                                       category_id: i_category_id@2
-                                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#218 CudfHashJoin{Inner}, build copy, batch)
+                                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#218 CudfHashJoin{Inner}, build copy, batch)
                                                                       #218 CudfHashJoin{Inner}
                                                                         join_type: Inner
                                                                         keys: (d_date_sk@0, ss_sold_date_sk@0)
@@ -1820,7 +1820,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                               i_brand_id: i_brand_id@0
                                                                               i_class_id: i_class_id@1
                                                                               i_category_id: i_category_id@2
-                                                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#215 CudfHashJoin{Inner}, build copy, batch)
+                                                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#215 CudfHashJoin{Inner}, build copy, batch)
                                                                               #215 CudfHashJoin{Inner}
                                                                                 join_type: Inner
                                                                                 keys: (i_item_sk@0, ss_item_sk@1)
@@ -1895,7 +1895,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     #259 CudfProject
                                       quantity: ss_quantity@0
                                       list_price: ss_list_price@1
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#258 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#258 CudfHashJoin{Inner}, build copy, batch)
                                       #258 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (d_date_sk@0, ss_sold_date_sk@0)
@@ -1927,7 +1927,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     #267 CudfProject
                                       quantity: cs_quantity@0
                                       list_price: cs_list_price@1
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#266 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#266 CudfHashJoin{Inner}, build copy, batch)
                                       #266 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (d_date_sk@0, cs_sold_date_sk@0)
@@ -1959,7 +1959,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     #275 CudfProject
                                       quantity: ws_quantity@0
                                       list_price: ws_list_price@1
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#274 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#274 CudfHashJoin{Inner}, build copy, batch)
                                       #274 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (d_date_sk@0, ws_sold_date_sk@0)
@@ -2020,7 +2020,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       group_by: i_brand_id@2, i_class_id@3, i_category_id@4
                                       sum(web_sales.ws_quantity * web_sales.ws_list_price): sum((cast(ws_quantity@0 as Decimal128(20, 0)) Multiply ws_list_price@1)::Decimal128(28, 2))
                                       count(*): count(1)
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#363 CudfProject{probe keys}, batch); at done: execute_node(#364 CudfCoalescePartitions, accumulated keys), execute_node(#365 CudfHashJoin{LeftSemi}, build, prior output), execute_node(#366 CudfProject{narrow}, prior output)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#363 CudfProject{probe keys}, batch); at done: execute_node(#364 CudfCoalescePartitions, accumulated keys), execute_node(#365 CudfHashJoin{LeftSemi}, build, prior output), execute_node(#366 CudfProject{narrow}, prior output)
                                       #363 CudfProject{probe keys}
                                         ss_item_sk: ss_item_sk@0
                                       #364 CudfCoalescePartitions
@@ -2040,7 +2040,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                             partitioning: Hash, 4
                                             hash: ws_item_sk@0
                                         GpuMergePartitions: none
-                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#296 CudfHashJoin{Inner}, build copy, batch)
+                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#296 CudfHashJoin{Inner}, build copy, batch)
                                               #296 CudfHashJoin{Inner}
                                                 join_type: Inner
                                                 keys: (d_date_sk@0, ws_sold_date_sk@0)
@@ -2073,7 +2073,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                       i_brand_id: i_brand_id@0
                                                       i_class_id: i_class_id@1
                                                       i_category_id: i_category_id@2
-                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#293 CudfHashJoin{Inner}, build copy, batch)
+                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#293 CudfHashJoin{Inner}, build copy, batch)
                                                       #293 CudfHashJoin{Inner}
                                                         join_type: Inner
                                                         keys: (i_item_sk@0, ws_item_sk@1)
@@ -2105,7 +2105,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                         GpuProject: calling_lanes=4, per batch: execute_node(#361 CudfProject, batch)
                                             #361 CudfProject
                                               ss_item_sk: i_item_sk@0
-                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#360 CudfHashJoin{Inner}, build copy, batch)
+                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#360 CudfHashJoin{Inner}, build copy, batch)
                                               #360 CudfHashJoin{Inner}
                                                 join_type: Inner
                                                 keys: (i_brand_id@1, brand_id@0), (i_class_id@2, class_id@1), (i_category_id@3, category_id@2)
@@ -2120,7 +2120,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     #299 CudfScan
                                                       files: /tmp/peacock-plan-bytes-root/tpcds.sf1/item.parquet
                                                       schema: [i_item_sk:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64]
-                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#359 CudfHashJoin{RightSemi}, build copy, batch)
+                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#359 CudfHashJoin{RightSemi}, build copy, batch)
                                                 #359 CudfHashJoin{RightSemi}
                                                   join_type: RightSemi
                                                   keys: (i_brand_id@0, brand_id@0), (i_class_id@1, class_id@1), (i_category_id@2, category_id@2)
@@ -2132,7 +2132,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                       partitioning: Hash, 4
                                                       hash: i_brand_id@0, i_class_id@1, i_category_id@2
                                                   GpuMergePartitions: none
-                                                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#314 CudfHashJoin{Inner}, build copy, batch)
+                                                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#314 CudfHashJoin{Inner}, build copy, batch)
                                                         #314 CudfHashJoin{Inner}
                                                           join_type: Inner
                                                           keys: (d_date_sk@0, ws_sold_date_sk@0)
@@ -2162,7 +2162,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                 i_brand_id: i_brand_id@0
                                                                 i_class_id: i_class_id@1
                                                                 i_category_id: i_category_id@2
-                                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#311 CudfHashJoin{Inner}, build copy, batch)
+                                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#311 CudfHashJoin{Inner}, build copy, batch)
                                                                 #311 CudfHashJoin{Inner}
                                                                   join_type: Inner
                                                                   keys: (i_item_sk@0, ws_item_sk@1)
@@ -2198,7 +2198,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     #355 CudfAggregate{Partial}
                                                       mode: Partial
                                                       group_by: brand_id@0, class_id@1, category_id@2
-                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#354 CudfHashJoin{RightSemi}, build copy, batch)
+                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#354 CudfHashJoin{RightSemi}, build copy, batch)
                                                       #354 CudfHashJoin{RightSemi}
                                                         join_type: RightSemi
                                                         keys: (i_brand_id@0, brand_id@0), (i_class_id@1, class_id@1), (i_category_id@2, category_id@2)
@@ -2210,7 +2210,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                             partitioning: Hash, 4
                                                             hash: i_brand_id@0, i_class_id@1, i_category_id@2
                                                         GpuMergePartitions: none
-                                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#329 CudfHashJoin{Inner}, build copy, batch)
+                                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#329 CudfHashJoin{Inner}, build copy, batch)
                                                               #329 CudfHashJoin{Inner}
                                                                 join_type: Inner
                                                                 keys: (d_date_sk@0, cs_sold_date_sk@0)
@@ -2240,7 +2240,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                       i_brand_id: i_brand_id@0
                                                                       i_class_id: i_class_id@1
                                                                       i_category_id: i_category_id@2
-                                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#326 CudfHashJoin{Inner}, build copy, batch)
+                                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#326 CudfHashJoin{Inner}, build copy, batch)
                                                                       #326 CudfHashJoin{Inner}
                                                                         join_type: Inner
                                                                         keys: (i_item_sk@0, cs_item_sk@1)
@@ -2293,7 +2293,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                       brand_id: i_brand_id@0
                                                                       class_id: i_class_id@1
                                                                       category_id: i_category_id@2
-                                                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#344 CudfHashJoin{Inner}, build copy, batch)
+                                                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#344 CudfHashJoin{Inner}, build copy, batch)
                                                                       #344 CudfHashJoin{Inner}
                                                                         join_type: Inner
                                                                         keys: (d_date_sk@0, ss_sold_date_sk@0)
@@ -2323,7 +2323,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                               i_brand_id: i_brand_id@0
                                                                               i_class_id: i_class_id@1
                                                                               i_category_id: i_category_id@2
-                                                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#341 CudfHashJoin{Inner}, build copy, batch)
+                                                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#341 CudfHashJoin{Inner}, build copy, batch)
                                                                               #341 CudfHashJoin{Inner}
                                                                                 join_type: Inner
                                                                                 keys: (i_item_sk@0, ss_item_sk@1)
@@ -2399,7 +2399,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       group_by: cs_order_number@0
                       alias2: sum(cs_ext_ship_cost@1)
                       alias3: sum(cs_net_profit@2)
-                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#28 CudfProject{probe keys}, batch); at done: execute_node(#29 CudfCoalescePartitions, accumulated keys), execute_node(#30 CudfHashJoin{LeftAnti}, build, prior output)
+                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#28 CudfProject{probe keys}, batch); at done: execute_node(#29 CudfCoalescePartitions, accumulated keys), execute_node(#30 CudfHashJoin{LeftAnti}, build, prior output)
                       #28 CudfProject{probe keys}
                         cr_order_number: cr_order_number@0
                       #29 CudfCoalescePartitions
@@ -2408,7 +2408,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                         keys: (cs_order_number@0, cr_order_number@0)
                     GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#25 CudfCoalescePartitions, lane batches)
                         #25 CudfCoalescePartitions
-                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#24 CudfHashJoin{LeftSemi}, build, batch)
+                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#24 CudfHashJoin{LeftSemi}, build, batch)
                           #24 CudfHashJoin{LeftSemi}
                             join_type: LeftSemi
                             keys: (cs_order_number@1, cs_order_number@1)
@@ -2422,7 +2422,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 partitioning: Hash, 4
                                 hash: cs_order_number@1
                             GpuMergePartitions: none
-                              GpuJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
+                              GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
                                   #18 CudfHashJoin{Inner}
                                     join_type: Inner
                                     keys: (cc_call_center_sk@0, cs_call_center_sk@0)
@@ -2446,7 +2446,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       partitioning: Hash, 4
                                       hash: cs_call_center_sk@0
                                   GpuMergePartitions: none
-                                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#16 CudfHashJoin{Inner}, build copy, batch)
+                                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#16 CudfHashJoin{Inner}, build copy, batch)
                                         #16 CudfHashJoin{Inner}
                                           join_type: Inner
                                           keys: (ca_address_sk@0, cs_ship_addr_sk@0)
@@ -2470,7 +2470,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                             partitioning: Hash, 4
                                             hash: cs_ship_addr_sk@0
                                         GpuMergePartitions: none
-                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#14 CudfHashJoin{Inner}, build copy, batch)
+                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#14 CudfHashJoin{Inner}, build copy, batch)
                                               #14 CudfHashJoin{Inner}
                                                 join_type: Inner
                                                 keys: (d_date_sk@0, cs_ship_date_sk@0)
@@ -2554,7 +2554,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
               d_moy: d_moy@2
               mean: mean@3
               cov: cov@4
-          GpuJoin: calling_lanes=4, per probe batch: execute_node(#67 CudfHashJoin{Inner}, build copy, batch)
+          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#67 CudfHashJoin{Inner}, build copy, batch)
               #67 CudfHashJoin{Inner}
                 join_type: Inner
                 keys: (i_item_sk@1, i_item_sk@1), (w_warehouse_sk@0, w_warehouse_sk@0)
@@ -2631,7 +2631,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                             w_warehouse_sk: w_warehouse_sk@3
                                             w_warehouse_name: w_warehouse_name@4
                                             d_moy: d_moy@0
-                                        GpuJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
+                                        GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
                                             #18 CudfHashJoin{Inner}
                                               join_type: Inner
                                               keys: (d_date_sk@0, inv_date_sk@0)
@@ -2662,7 +2662,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     i_item_sk: i_item_sk@4
                                                     w_warehouse_sk: w_warehouse_sk@0
                                                     w_warehouse_name: w_warehouse_name@1
-                                                GpuJoin: calling_lanes=4, per probe batch: execute_node(#15 CudfHashJoin{Inner}, build copy, batch)
+                                                GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#15 CudfHashJoin{Inner}, build copy, batch)
                                                     #15 CudfHashJoin{Inner}
                                                       join_type: Inner
                                                       keys: (w_warehouse_sk@0, inv_warehouse_sk@1)
@@ -2688,7 +2688,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                             inv_warehouse_sk: inv_warehouse_sk@2
                                                             inv_quantity_on_hand: inv_quantity_on_hand@3
                                                             i_item_sk: i_item_sk@0
-                                                        GpuJoin: calling_lanes=4, per probe batch: execute_node(#12 CudfHashJoin{Inner}, build copy, batch)
+                                                        GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#12 CudfHashJoin{Inner}, build copy, batch)
                                                             #12 CudfHashJoin{Inner}
                                                               join_type: Inner
                                                               keys: (i_item_sk@0, inv_item_sk@1)
@@ -2783,7 +2783,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                           w_warehouse_sk: w_warehouse_sk@3
                                           w_warehouse_name: w_warehouse_name@4
                                           d_moy: d_moy@0
-                                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#52 CudfHashJoin{Inner}, build copy, batch)
+                                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#52 CudfHashJoin{Inner}, build copy, batch)
                                           #52 CudfHashJoin{Inner}
                                             join_type: Inner
                                             keys: (d_date_sk@0, inv_date_sk@0)
@@ -2814,7 +2814,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                   i_item_sk: i_item_sk@4
                                                   w_warehouse_sk: w_warehouse_sk@0
                                                   w_warehouse_name: w_warehouse_name@1
-                                              GpuJoin: calling_lanes=4, per probe batch: execute_node(#49 CudfHashJoin{Inner}, build copy, batch)
+                                              GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#49 CudfHashJoin{Inner}, build copy, batch)
                                                   #49 CudfHashJoin{Inner}
                                                     join_type: Inner
                                                     keys: (w_warehouse_sk@0, inv_warehouse_sk@1)
@@ -2840,7 +2840,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                           inv_warehouse_sk: inv_warehouse_sk@2
                                                           inv_quantity_on_hand: inv_quantity_on_hand@3
                                                           i_item_sk: i_item_sk@0
-                                                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#46 CudfHashJoin{Inner}, build copy, batch)
+                                                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#46 CudfHashJoin{Inner}, build copy, batch)
                                                           #46 CudfHashJoin{Inner}
                                                             join_type: Inner
                                                             keys: (i_item_sk@0, inv_item_sk@1)
@@ -2920,7 +2920,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                           cr_refunded_cash: cr_refunded_cash@2
                           w_state: w_state@3
                           i_item_id: i_item_id@4
-                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#25 CudfHashJoin{Inner}, build copy, batch)
+                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#25 CudfHashJoin{Inner}, build copy, batch)
                           #25 CudfHashJoin{Inner}
                             join_type: Inner
                             keys: (d_date_sk@0, cs_sold_date_sk@0)
@@ -2950,7 +2950,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                   cr_refunded_cash: cr_refunded_cash@3
                                   w_state: w_state@4
                                   i_item_id: i_item_id@0
-                              GpuJoin: calling_lanes=4, per probe batch: execute_node(#22 CudfHashJoin{Inner}, build copy, batch)
+                              GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#22 CudfHashJoin{Inner}, build copy, batch)
                                   #22 CudfHashJoin{Inner}
                                     join_type: Inner
                                     keys: (i_item_sk@0, cs_item_sk@1)
@@ -2981,7 +2981,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                           cs_sales_price: cs_sales_price@3
                                           cr_refunded_cash: cr_refunded_cash@4
                                           w_state: w_state@0
-                                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#19 CudfHashJoin{Inner}, build copy, batch)
+                                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#19 CudfHashJoin{Inner}, build copy, batch)
                                           #19 CudfHashJoin{Inner}
                                             join_type: Inner
                                             keys: (w_warehouse_sk@0, cs_warehouse_sk@1)
@@ -3008,7 +3008,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                   cs_item_sk: cs_item_sk@3
                                                   cs_sales_price: cs_sales_price@4
                                                   cr_refunded_cash: cr_refunded_cash@0
-                                              GpuJoin: calling_lanes=4, per probe batch: execute_node(#16 CudfHashJoin{Right}, build copy, batch)
+                                              GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#16 CudfHashJoin{Right}, build copy, batch)
                                                   #16 CudfHashJoin{Right}
                                                     join_type: Right
                                                     keys: (cr_order_number@1, cs_order_number@3), (cr_item_sk@0, cs_item_sk@2)
@@ -3058,7 +3058,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
               #18 CudfFilter
                 predicate: (case when IsNull(__always_true@2) then 0 else item_cnt@1 end Gt 0)
                 projection: [0]
-            GpuJoin: calling_lanes=1, per probe batch: execute_node(#12 CudfProject{probe keys}, batch copy), execute_node(#13 CudfHashJoin{Inner}, build copy, batch); at done: execute_node(#14 CudfCoalescePartitions, accumulated keys), execute_node(#16 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#17 CudfProject{build columns + 2 null}, prior output)
+            GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#12 CudfProject{probe keys}, batch copy), execute_node(#13 CudfHashJoin{Inner}, build copy, batch); at done: execute_node(#14 CudfCoalescePartitions, accumulated keys), execute_node(#16 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#17 CudfProject{build columns + 2 null}, prior output)
                 #12 CudfProject{probe keys}
                   i_manufact: i_manufact@1
                 #13 CudfHashJoin{Inner}
@@ -3166,7 +3166,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       #34 CudfFilter
                         predicate: ((((((((((substr(ca_zip@2, 1, 5) Eq '85669') Or (substr(ca_zip@2, 1, 5) Eq '86197')) Or (substr(ca_zip@2, 1, 5) Eq '88274')) Or (substr(ca_zip@2, 1, 5) Eq '83405')) Or (substr(ca_zip@2, 1, 5) Eq '86475')) Or (substr(ca_zip@2, 1, 5) Eq '85392')) Or (substr(ca_zip@2, 1, 5) Eq '85460')) Or (substr(ca_zip@2, 1, 5) Eq '80348')) Or (substr(ca_zip@2, 1, 5) Eq '81792')) Or mark@3)
                         projection: [0, 1, 2]
-                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#30 CudfProject{probe keys}, batch); at done: execute_node(#31 CudfCoalescePartitions, accumulated keys), execute_node(#32 CudfHashJoin{LeftMark}, build, prior output), execute_node(#33 CudfProject{narrow}, prior output)
+                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#30 CudfProject{probe keys}, batch); at done: execute_node(#31 CudfCoalescePartitions, accumulated keys), execute_node(#32 CudfHashJoin{LeftMark}, build, prior output), execute_node(#33 CudfProject{narrow}, prior output)
                         #30 CudfProject{probe keys}
                           i_item_id: i_item_id@0
                         #31 CudfCoalescePartitions
@@ -3191,7 +3191,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                   ca_city: ca_city@2
                                   ca_zip: ca_zip@3
                                   i_item_id: i_item_id@0
-                              GpuJoin: calling_lanes=4, per probe batch: execute_node(#23 CudfHashJoin{Inner}, build copy, batch)
+                              GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#23 CudfHashJoin{Inner}, build copy, batch)
                                   #23 CudfHashJoin{Inner}
                                     join_type: Inner
                                     keys: (i_item_sk@0, ws_item_sk@0)
@@ -3211,7 +3211,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       partitioning: Hash, 4
                                       hash: ws_item_sk@0
                                   GpuMergePartitions: none
-                                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#21 CudfHashJoin{Inner}, build copy, batch)
+                                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#21 CudfHashJoin{Inner}, build copy, batch)
                                         #21 CudfHashJoin{Inner}
                                           join_type: Inner
                                           keys: (d_date_sk@0, ws_sold_date_sk@0)
@@ -3242,7 +3242,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                 ws_sales_price: ws_sales_price@4
                                                 ca_city: ca_city@0
                                                 ca_zip: ca_zip@1
-                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
+                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
                                                 #18 CudfHashJoin{Inner}
                                                   join_type: Inner
                                                   keys: (ca_address_sk@0, c_current_addr_sk@3)
@@ -3268,7 +3268,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                         ws_item_sk: ws_item_sk@2
                                                         ws_sales_price: ws_sales_price@3
                                                         c_current_addr_sk: c_current_addr_sk@0
-                                                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#15 CudfHashJoin{Inner}, build copy, batch)
+                                                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#15 CudfHashJoin{Inner}, build copy, batch)
                                                         #15 CudfHashJoin{Inner}
                                                           join_type: Inner
                                                           keys: (c_customer_sk@0, ws_bill_customer_sk@2)
@@ -3414,7 +3414,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                           return_amt: return_amt@3
                                           net_loss: net_loss@4
                                           s_store_id: s_store_id@0
-                                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#15 CudfHashJoin{Inner}, build copy, batch)
+                                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#15 CudfHashJoin{Inner}, build copy, batch)
                                           #15 CudfHashJoin{Inner}
                                             join_type: Inner
                                             keys: (s_store_sk@0, store_sk@0)
@@ -3434,7 +3434,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                               partitioning: Hash, 4
                                               hash: store_sk@0
                                           GpuMergePartitions: none
-                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#13 CudfHashJoin{Inner}, build copy, batch)
+                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#13 CudfHashJoin{Inner}, build copy, batch)
                                                 #13 CudfHashJoin{Inner}
                                                   join_type: Inner
                                                   keys: (d_date_sk@0, date_sk@1)
@@ -3543,7 +3543,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                           return_amt: return_amt@3
                                           net_loss: net_loss@4
                                           cp_catalog_page_id: cp_catalog_page_id@0
-                                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#42 CudfHashJoin{Inner}, build copy, batch)
+                                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#42 CudfHashJoin{Inner}, build copy, batch)
                                           #42 CudfHashJoin{Inner}
                                             join_type: Inner
                                             keys: (cp_catalog_page_sk@0, page_sk@0)
@@ -3563,7 +3563,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                               partitioning: Hash, 4
                                               hash: page_sk@0
                                           GpuMergePartitions: none
-                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#40 CudfHashJoin{Inner}, build copy, batch)
+                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#40 CudfHashJoin{Inner}, build copy, batch)
                                                 #40 CudfHashJoin{Inner}
                                                   join_type: Inner
                                                   keys: (d_date_sk@0, date_sk@1)
@@ -3672,7 +3672,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                           return_amt: return_amt@3
                                           net_loss: net_loss@4
                                           web_site_id: web_site_id@0
-                                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#77 CudfHashJoin{Inner}, build copy, batch)
+                                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#77 CudfHashJoin{Inner}, build copy, batch)
                                           #77 CudfHashJoin{Inner}
                                             join_type: Inner
                                             keys: (web_site_sk@0, wsr_web_site_sk@0)
@@ -3692,7 +3692,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                               partitioning: Hash, 4
                                               hash: wsr_web_site_sk@0
                                           GpuMergePartitions: none
-                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#75 CudfHashJoin{Inner}, build copy, batch)
+                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#75 CudfHashJoin{Inner}, build copy, batch)
                                                 #75 CudfHashJoin{Inner}
                                                   join_type: Inner
                                                   keys: (d_date_sk@0, date_sk@1)
@@ -3737,7 +3737,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                           profit: 0::Decimal128(7, 2)
                                                           return_amt: wr_return_amt@3
                                                           net_loss: wr_net_loss@4
-                                                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#68 CudfProject{probe keys}, batch copy), execute_node(#69 CudfHashJoin{Inner}, build copy, batch); at done: execute_node(#70 CudfCoalescePartitions, accumulated keys), execute_node(#71 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#72 CudfProject{build columns + 3 null}, prior output)
+                                                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#68 CudfProject{probe keys}, batch copy), execute_node(#69 CudfHashJoin{Inner}, build copy, batch); at done: execute_node(#70 CudfCoalescePartitions, accumulated keys), execute_node(#71 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#72 CudfProject{build columns + 3 null}, prior output)
                                                           #68 CudfProject{probe keys}
                                                             ws_item_sk: ws_item_sk@0
                                                             ws_order_number: ws_order_number@2
@@ -3818,7 +3818,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                         mode: Partial
                         group_by: 
                         sum(store_sales.ss_ext_sales_price): sum(ss_ext_sales_price@0)
-                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#35 CudfHashJoin{Inner}, build copy, batch)
+                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#35 CudfHashJoin{Inner}, build copy, batch)
                         #35 CudfHashJoin{Inner}
                           join_type: Inner
                           keys: (i_item_sk@0, ss_item_sk@0)
@@ -3842,7 +3842,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             partitioning: Hash, 4
                             hash: ss_item_sk@0
                         GpuMergePartitions: none
-                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#33 CudfHashJoin{Inner}, build copy, batch)
+                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#33 CudfHashJoin{Inner}, build copy, batch)
                               #33 CudfHashJoin{Inner}
                                 join_type: Inner
                                 keys: (c_current_addr_sk@2, ca_address_sk@0)
@@ -3854,7 +3854,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     partitioning: Hash, 4
                                     hash: c_current_addr_sk@2
                                 GpuMergePartitions: none
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#27 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#27 CudfHashJoin{Inner}, build copy, batch)
                                       #27 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (ss_customer_sk@1, c_customer_sk@0)
@@ -3866,7 +3866,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                             partitioning: Hash, 4
                                             hash: ss_customer_sk@1
                                         GpuMergePartitions: none
-                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#22 CudfHashJoin{Inner}, build copy, batch)
+                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#22 CudfHashJoin{Inner}, build copy, batch)
                                               #22 CudfHashJoin{Inner}
                                                 join_type: Inner
                                                 keys: (d_date_sk@0, ss_sold_date_sk@0)
@@ -3890,7 +3890,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                   partitioning: Hash, 4
                                                   hash: ss_sold_date_sk@0
                                               GpuMergePartitions: none
-                                                GpuJoin: calling_lanes=4, per probe batch: execute_node(#20 CudfHashJoin{Inner}, build copy, batch)
+                                                GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#20 CudfHashJoin{Inner}, build copy, batch)
                                                     #20 CudfHashJoin{Inner}
                                                       join_type: Inner
                                                       keys: (p_promo_sk@0, ss_promo_sk@3)
@@ -3914,7 +3914,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                         partitioning: Hash, 4
                                                         hash: ss_promo_sk@3
                                                     GpuMergePartitions: none
-                                                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
+                                                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
                                                           #18 CudfHashJoin{Inner}
                                                             join_type: Inner
                                                             keys: (s_store_sk@0, ss_store_sk@3)
@@ -3985,7 +3985,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                         mode: Partial
                         group_by: 
                         sum(store_sales.ss_ext_sales_price): sum(ss_ext_sales_price@0)
-                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#72 CudfHashJoin{Inner}, build copy, batch)
+                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#72 CudfHashJoin{Inner}, build copy, batch)
                         #72 CudfHashJoin{Inner}
                           join_type: Inner
                           keys: (i_item_sk@0, ss_item_sk@0)
@@ -4009,7 +4009,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             partitioning: Hash, 4
                             hash: ss_item_sk@0
                         GpuMergePartitions: none
-                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#70 CudfHashJoin{Inner}, build copy, batch)
+                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#70 CudfHashJoin{Inner}, build copy, batch)
                               #70 CudfHashJoin{Inner}
                                 join_type: Inner
                                 keys: (ca_address_sk@0, c_current_addr_sk@2)
@@ -4033,7 +4033,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                   partitioning: Hash, 4
                                   hash: c_current_addr_sk@2
                               GpuMergePartitions: none
-                                GpuJoin: calling_lanes=4, per probe batch: execute_node(#68 CudfHashJoin{Inner}, build copy, batch)
+                                GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#68 CudfHashJoin{Inner}, build copy, batch)
                                     #68 CudfHashJoin{Inner}
                                       join_type: Inner
                                       keys: (ss_customer_sk@1, c_customer_sk@0)
@@ -4045,7 +4045,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                           partitioning: Hash, 4
                                           hash: ss_customer_sk@1
                                       GpuMergePartitions: none
-                                        GpuJoin: calling_lanes=4, per probe batch: execute_node(#63 CudfHashJoin{Inner}, build copy, batch)
+                                        GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#63 CudfHashJoin{Inner}, build copy, batch)
                                             #63 CudfHashJoin{Inner}
                                               join_type: Inner
                                               keys: (d_date_sk@0, ss_sold_date_sk@0)
@@ -4069,7 +4069,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                 partitioning: Hash, 4
                                                 hash: ss_sold_date_sk@0
                                             GpuMergePartitions: none
-                                              GpuJoin: calling_lanes=4, per probe batch: execute_node(#61 CudfHashJoin{Inner}, build copy, batch)
+                                              GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#61 CudfHashJoin{Inner}, build copy, batch)
                                                   #61 CudfHashJoin{Inner}
                                                     join_type: Inner
                                                     keys: (s_store_sk@0, ss_store_sk@3)
@@ -4130,7 +4130,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
               count(*): count(1)
           GpuProject: calling_lanes=4, per batch: execute_node(#72 CudfProject, batch)
               #72 CudfProject
-            GpuJoin: calling_lanes=4, per probe batch: execute_node(#71 CudfHashJoin{RightAnti}, build copy, batch)
+            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#71 CudfHashJoin{RightAnti}, build copy, batch)
                 #71 CudfHashJoin{RightAnti}
                   join_type: RightAnti
                   keys: (c_last_name@0, c_last_name@0), (c_first_name@1, c_first_name@1), (d_date@2, d_date@2)
@@ -4165,7 +4165,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 c_last_name: c_last_name@1
                                 c_first_name: c_first_name@0
                                 d_date: d_date@2
-                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#12 CudfHashJoin{Inner}, build copy, batch)
+                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#12 CudfHashJoin{Inner}, build copy, batch)
                                 #12 CudfHashJoin{Inner}
                                   join_type: Inner
                                   keys: (c_customer_sk@0, ws_bill_customer_sk@0)
@@ -4189,7 +4189,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       #10 CudfProject
                                         ws_bill_customer_sk: ws_bill_customer_sk@1
                                         d_date: d_date@0
-                                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#9 CudfHashJoin{Inner}, build copy, batch)
+                                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#9 CudfHashJoin{Inner}, build copy, batch)
                                         #9 CudfHashJoin{Inner}
                                           join_type: Inner
                                           keys: (d_date_sk@0, ws_sold_date_sk@0)
@@ -4229,7 +4229,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                     #67 CudfAggregate{Partial}
                       mode: Partial
                       group_by: c_last_name@0, c_first_name@1, d_date@2
-                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#66 CudfHashJoin{RightAnti}, build copy, batch)
+                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#66 CudfHashJoin{RightAnti}, build copy, batch)
                       #66 CudfHashJoin{RightAnti}
                         join_type: RightAnti
                         keys: (c_last_name@0, c_last_name@0), (c_first_name@1, c_first_name@1), (d_date@2, d_date@2)
@@ -4264,7 +4264,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       c_last_name: c_last_name@1
                                       c_first_name: c_first_name@0
                                       d_date: d_date@2
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#34 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#34 CudfHashJoin{Inner}, build copy, batch)
                                       #34 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (c_customer_sk@0, cs_bill_customer_sk@0)
@@ -4288,7 +4288,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                             #32 CudfProject
                                               cs_bill_customer_sk: cs_bill_customer_sk@1
                                               d_date: d_date@0
-                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#31 CudfHashJoin{Inner}, build copy, batch)
+                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#31 CudfHashJoin{Inner}, build copy, batch)
                                               #31 CudfHashJoin{Inner}
                                                 join_type: Inner
                                                 keys: (d_date_sk@0, cs_sold_date_sk@0)
@@ -4345,7 +4345,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       c_last_name: c_last_name@1
                                       c_first_name: c_first_name@0
                                       d_date: d_date@2
-                                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#56 CudfHashJoin{Inner}, build copy, batch)
+                                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#56 CudfHashJoin{Inner}, build copy, batch)
                                       #56 CudfHashJoin{Inner}
                                         join_type: Inner
                                         keys: (c_customer_sk@0, ss_customer_sk@0)
@@ -4369,7 +4369,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                             #54 CudfProject
                                               ss_customer_sk: ss_customer_sk@1
                                               d_date: d_date@0
-                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#53 CudfHashJoin{Inner}, build copy, batch)
+                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#53 CudfHashJoin{Inner}, build copy, batch)
                                               #53 CudfHashJoin{Inner}
                                                 join_type: Inner
                                                 keys: (d_date_sk@0, ss_sold_date_sk@0)
@@ -4450,7 +4450,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                           mode: Partial
                           group_by: cc_call_center_id@0, cc_name@1, cc_manager@2, cd_marital_status@4, cd_education_status@5
                           sum(catalog_returns.cr_net_loss): sum(cr_net_loss@3)
-                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#34 CudfHashJoin{Inner}, build copy, batch)
+                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#34 CudfHashJoin{Inner}, build copy, batch)
                           #34 CudfHashJoin{Inner}
                             join_type: Inner
                             keys: (hd_demo_sk@0, c_current_hdemo_sk@4)
@@ -4474,7 +4474,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                               partitioning: Hash, 4
                               hash: c_current_hdemo_sk@4
                           GpuMergePartitions: none
-                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#32 CudfHashJoin{Inner}, build copy, batch)
+                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#32 CudfHashJoin{Inner}, build copy, batch)
                                 #32 CudfHashJoin{Inner}
                                   join_type: Inner
                                   keys: (c_current_cdemo_sk@4, cd_demo_sk@0)
@@ -4486,7 +4486,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       partitioning: Hash, 4
                                       hash: c_current_cdemo_sk@4
                                   GpuMergePartitions: none
-                                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#26 CudfHashJoin{Inner}, build copy, batch)
+                                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#26 CudfHashJoin{Inner}, build copy, batch)
                                         #26 CudfHashJoin{Inner}
                                           join_type: Inner
                                           keys: (c_current_addr_sk@6, ca_address_sk@0)
@@ -4498,7 +4498,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                               partitioning: Hash, 4
                                               hash: c_current_addr_sk@6
                                           GpuMergePartitions: none
-                                            GpuJoin: calling_lanes=4, per probe batch: execute_node(#20 CudfHashJoin{Inner}, build copy, batch)
+                                            GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#20 CudfHashJoin{Inner}, build copy, batch)
                                                 #20 CudfHashJoin{Inner}
                                                   join_type: Inner
                                                   keys: (cr_returning_customer_sk@3, c_customer_sk@0)
@@ -4510,7 +4510,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                       partitioning: Hash, 4
                                                       hash: cr_returning_customer_sk@3
                                                   GpuMergePartitions: none
-                                                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#15 CudfHashJoin{Inner}, build copy, batch)
+                                                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#15 CudfHashJoin{Inner}, build copy, batch)
                                                         #15 CudfHashJoin{Inner}
                                                           join_type: Inner
                                                           keys: (d_date_sk@0, cr_returned_date_sk@3)
@@ -4534,7 +4534,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                             partitioning: Hash, 4
                                                             hash: cr_returned_date_sk@3
                                                         GpuMergePartitions: none
-                                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#13 CudfHashJoin{Inner}, build copy, batch)
+                                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#13 CudfHashJoin{Inner}, build copy, batch)
                                                               #13 CudfHashJoin{Inner}
                                                                 join_type: Inner
                                                                 keys: (cc_call_center_sk@0, cr_call_center_sk@2)
@@ -4641,7 +4641,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       group_by: ws_order_number@0
                       alias2: sum(ws_ext_ship_cost@1)
                       alias3: sum(ws_net_profit@2)
-                  GpuJoin: calling_lanes=4, per probe batch: execute_node(#41 CudfProject{probe keys}, batch); at done: execute_node(#42 CudfCoalescePartitions, accumulated keys), execute_node(#43 CudfHashJoin{LeftSemi}, build, prior output)
+                  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#41 CudfProject{probe keys}, batch); at done: execute_node(#42 CudfCoalescePartitions, accumulated keys), execute_node(#43 CudfHashJoin{LeftSemi}, build, prior output)
                       #41 CudfProject{probe keys}
                         wr_order_number: wr_order_number@0
                       #42 CudfCoalescePartitions
@@ -4650,7 +4650,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                         keys: (ws_order_number@0, wr_order_number@0)
                     GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#30 CudfCoalescePartitions, lane batches)
                         #30 CudfCoalescePartitions
-                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#27 CudfProject{probe keys}, batch); at done: execute_node(#28 CudfCoalescePartitions, accumulated keys), execute_node(#29 CudfHashJoin{LeftSemi}, build, prior output)
+                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#27 CudfProject{probe keys}, batch); at done: execute_node(#28 CudfCoalescePartitions, accumulated keys), execute_node(#29 CudfHashJoin{LeftSemi}, build, prior output)
                           #27 CudfProject{probe keys}
                             ws_order_number: ws_order_number@0
                           #28 CudfCoalescePartitions
@@ -4664,7 +4664,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 partitioning: Hash, 4
                                 hash: ws_order_number@0
                             GpuMergePartitions: none
-                              GpuJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
+                              GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#18 CudfHashJoin{Inner}, build copy, batch)
                                   #18 CudfHashJoin{Inner}
                                     join_type: Inner
                                     keys: (web_site_sk@0, ws_web_site_sk@0)
@@ -4688,7 +4688,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       partitioning: Hash, 4
                                       hash: ws_web_site_sk@0
                                   GpuMergePartitions: none
-                                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#16 CudfHashJoin{Inner}, build copy, batch)
+                                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#16 CudfHashJoin{Inner}, build copy, batch)
                                         #16 CudfHashJoin{Inner}
                                           join_type: Inner
                                           keys: (ca_address_sk@0, ws_ship_addr_sk@0)
@@ -4712,7 +4712,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                             partitioning: Hash, 4
                                             hash: ws_ship_addr_sk@0
                                         GpuMergePartitions: none
-                                          GpuJoin: calling_lanes=4, per probe batch: execute_node(#14 CudfHashJoin{Inner}, build copy, batch)
+                                          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#14 CudfHashJoin{Inner}, build copy, batch)
                                               #14 CudfHashJoin{Inner}
                                                 join_type: Inner
                                                 keys: (d_date_sk@0, ws_ship_date_sk@0)
@@ -4740,7 +4740,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     #12 CudfScan
                                                       files: /tmp/peacock-plan-bytes-root/tpcds.sf1/web_sales.parquet
                                                       schema: [ws_ship_date_sk:Int64, ws_ship_addr_sk:Int64, ws_web_site_sk:Int64, ws_order_number:Int64, ws_ext_ship_cost:Decimal128, ws_net_profit:Decimal128]
-                        GpuJoin: calling_lanes=4, per probe batch: execute_node(#26 CudfHashJoin{Inner}, build copy, batch)
+                        GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#26 CudfHashJoin{Inner}, build copy, batch)
                             #26 CudfHashJoin{Inner}
                               join_type: Inner
                               keys: (ws_order_number@1, ws_order_number@1)
@@ -4765,7 +4765,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 #24 CudfScan
                                   files: /tmp/peacock-plan-bytes-root/tpcds.sf1/web_sales.parquet
                                   schema: [ws_warehouse_sk:Int64, ws_order_number:Int64]
-                    GpuJoin: calling_lanes=4, per probe batch: execute_node(#40 CudfHashJoin{Inner}, build copy, batch)
+                    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#40 CudfHashJoin{Inner}, build copy, batch)
                         #40 CudfHashJoin{Inner}
                           join_type: Inner
                           keys: (wr_order_number@0, ws_order_number@0)
@@ -4780,7 +4780,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                               #31 CudfScan
                                 files: /tmp/peacock-plan-bytes-root/tpcds.sf1/web_returns.parquet
                                 schema: [wr_order_number:Int64]
-                      GpuJoin: calling_lanes=4, per probe batch: execute_node(#39 CudfHashJoin{Inner}, build copy, batch)
+                      GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#39 CudfHashJoin{Inner}, build copy, batch)
                           #39 CudfHashJoin{Inner}
                             join_type: Inner
                             keys: (ws_order_number@1, ws_order_number@1)
@@ -4847,7 +4847,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                     __common_expr_1: IsNotNull(customer_sk@1)
                     customer_sk: customer_sk@1
                     customer_sk: customer_sk@0
-                GpuJoin: calling_lanes=4, per probe batch: execute_node(#32 CudfProject{probe keys}, batch copy), execute_node(#33 CudfHashJoin{Right}, build copy, batch); at done: execute_node(#34 CudfCoalescePartitions, accumulated keys), execute_node(#36 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#37 CudfProject{build columns + 1 null}, prior output)
+                GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#32 CudfProject{probe keys}, batch copy), execute_node(#33 CudfHashJoin{Right}, build copy, batch); at done: execute_node(#34 CudfCoalescePartitions, accumulated keys), execute_node(#36 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#37 CudfProject{build columns + 1 null}, prior output)
                     #32 CudfProject{probe keys}
                       customer_sk: customer_sk@0
                       item_sk: item_sk@1
@@ -4890,7 +4890,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                   #7 CudfAggregate{Partial}
                                     mode: Partial
                                     group_by: cs_bill_customer_sk@0, cs_item_sk@1
-                                GpuJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfHashJoin{Inner}, build copy, batch)
+                                GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfHashJoin{Inner}, build copy, batch)
                                     #6 CudfHashJoin{Inner}
                                       join_type: Inner
                                       keys: (d_date_sk@0, cs_sold_date_sk@0)
@@ -4946,7 +4946,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                   #23 CudfAggregate{Partial}
                                     mode: Partial
                                     group_by: ss_customer_sk@1, ss_item_sk@0
-                                GpuJoin: calling_lanes=4, per probe batch: execute_node(#22 CudfHashJoin{Inner}, build copy, batch)
+                                GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#22 CudfHashJoin{Inner}, build copy, batch)
                                     #22 CudfHashJoin{Inner}
                                       join_type: Inner
                                       keys: (d_date_sk@0, ss_sold_date_sk@0)

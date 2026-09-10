@@ -296,7 +296,7 @@ Whether batch sizes can reach the accountant's binding pre-call check at all is 
 candidates failed structurally rather than by accident, so this is about the model, not a gap.
 
 `GpuCoalesceAllBatches` carries the largest estimate in none of the 120 `--- memory ---`
-sections at `tp4-rowgroup` — `GpuEmitPartitions` in 77, `GpuJoin` in 20, `GpuUnload` in 12 —
+sections at `tp4-rowgroup` — `GpuEmitPartitions` in 77, `GpuHashJoin` in 20, `GpuUnload` in 12 —
 so a rebatcher grows a node beside the binding one. `nested-loop-join`'s coalescer is 115 bytes
 against a 2,679-byte join. Of the two queries carrying their largest at a loader,
 `tpch/nested-limits` does move its peak under `Rebatch::AboveSources` (4,915,680 to 8,000,480,
@@ -327,7 +327,7 @@ run is a second guess on top of the first.
 
 The loader declares `MultipleBatches` unconditionally
 ([architecture.md](architecture.md#modes-and-knobs)), so no downstream node may assume one
-batch per partition. That was incremental simplicity rather than a missing fact: `partitioner.rs`
+batch per partition. That was incremental simplicity rather than a missing fact: `scan_mapping/partition.rs`
 computes the row-group → (partition, batch) mapping once at plan time and everything downstream
 consumes it verbatim, so the batch count per lane is `partition_groups[lane].len()` — known in all
 three batching forms, `Sized` included, since the planner cuts by bytes and the loader only
@@ -338,7 +338,7 @@ node rather than of a lane: a source with lanes of one and two batches stays `Mu
 
 Saying it fires shortcuts the aggregate sequence already specifies: a 1-partition single-batch
 input needs one `GpuAggregate` carrying both `aggs` and `final`, and a single-batch-per-partition
-input skips the first `GpuAggregateBatches`. Join build sides need nothing new — `translate/mod.rs`
+input skips the first `GpuAggregateBatches`. Join build sides need nothing new — `translator/nodes.rs`
 already elides their coalesce when the input is `SingleBatch`. So the change is one declaration
 and the plans get smaller by themselves. Every plan golden moves, which is its real cost.
 
@@ -377,7 +377,7 @@ ordinal moves one column twice leaving a hole — a wrong answer, not a throw, w
 needs the assert and not the observation. Land before [#155](#t155).
 
 <a id="t152"></a>
-### #152 — GpuJoin: the build handle does not survive a streamed probe
+### #152 — GpuHashJoin: the build handle does not survive a streamed probe
 `NodeSession::execute_node` erases every input handle it reads (`node_session.cpp` ~L250, ~L339,
 ~L427), but a streamed probe calls the join seq once per batch and needs it B times.
 
@@ -450,7 +450,8 @@ byte-identical, plus a case asserting a small limit is honoured.
 <a id="t19"></a>
 ### #19 — the planner has no cardinality estimate, and the memory model pays for it
 Widths are facts and source rows are facts — the schema, and the `rows`/`bytes` a scan reads
-off its surviving row groups at plan time (`batch_partitioned/parquet_meta.rs`). What a query
+off its surviving row groups at plan time (`planner/translator/scan_mapping/parquet_meta.rs`).
+What a query
 does to them is guessed: `estimator.rs::rows` has a filter pass every row, an aggregate emit
 one group per input row, and a join emit its larger side.
 
@@ -493,8 +494,9 @@ cardinality. Blocked by #19. Landing rewrites all plan goldens.
 
 <a id="t71"></a>
 ### #71 — GPU scan: no predicate pushdown into the cuDF read
-Partly addressed: stats-based row-group pruning exists (`gpu_rowgroup_prune.rs` → cuDF
-`set_row_groups`, parity with ParquetExec). Remaining: serialize the predicate itself
+Partly addressed: stats-based row-group pruning exists
+(`planner/translator/scan_mapping/rowgroup_prune.rs` → cuDF `set_row_groups`, parity with
+ParquetExec). Remaining: serialize the predicate itself
 into the cuDF `read_parquet` filter AST (page pruning / pre-filter during decode),
 multi-file scans, dynamic ranges (#16). Cause of red widget ratios on selective queries.
 
@@ -528,7 +530,7 @@ and row-group pruning. Shape: preprocessor → flat per-node intermediate
 `.duckdb_cost.txt` numbers must not move.
 
 <a id="t136"></a>
-### #136 — GpuJoin: build-side match tracking when the probe side streams
+### #136 — GpuHashJoin: build-side match tracking when the probe side streams
 Left-outer, full, semi, anti and mark need "which build rows matched across all probe batches",
 and that never crosses the ABI — every call rebuilds the join from scratch.
 
@@ -614,7 +616,7 @@ throws all but one number away. Keep it, as a tree shaped like the plan, one est
 
 `ParquetBatchPartitioner` emits it beside the row-group mapping. Nothing in the plan's
 executability depends on it, but a wrong estimate is not free: too low and the query dies at the
-enforcer's `scratch_bytes` pre-check, or as a cuda OOM below that. Neither is a wrong answer,
+accountant's `scratch_bytes` pre-check, or as a cuda OOM below that. Neither is a wrong answer,
 and #142 handles both gracefully later; a better estimate makes fewer queries reach either. Two
 consumers, neither existing yet. **Placement** moves subtrees onto the CPU where the GPU cannot
 hold them — the `Backend` trait already makes that a matter of choosing per node. **Refinement
@@ -679,7 +681,7 @@ planner refuses the shape at plan time.
 ### #142 — no recourse for oversized batches
 Nothing downstream of the loader can split a batch: minimum load granularity is one row
 group, `GpuCoalesceAllBatches` before a join build side can exceed any budget, and the
-planner deliberately still produces a plan — `driver/accounting.rs` then trips at run time and
+planner deliberately still produces a plan — `executor/driver/accounting.rs` then trips at run time and
 the query dies cleanly. Recourse options, deferred until better estimators and adaptive execution: a split
 operator (needs a C++ slice-to-handles entry point), or adaptive replanning on trip (re-plan
 with more partitions or smaller batches) — the second being the only one that would make a trip
@@ -744,8 +746,20 @@ under two minutes gave `std::bad_alloc: out_of_memory` in `pool_memory_resource`
 tests, at 14.38 GiB peak on a 139.7 GiB device — not a full device, two pools.
 
 It reads as a flaky GPU tier, which is the expensive way to meet it: the failure is in whichever
-run started second and re-running it alone passes. A concurrency group on the job, keyed on the
-host rather than the ref, is the fix.
+run started second and re-running it alone passes.
+
+**Fixed** by `15209636`: the job carries `concurrency: group: shad-gpu, cancel-in-progress: false`
+at `pipeline.yml:448`, so GPU jobs queue across runs and branches. Queued rather than cancelled,
+because a cancelled run leaves its `REMOTE_DIR` and the device's state behind.
+
+The same `std::bad_alloc` in `pool_memory_resource` still reaches CI from a different cause, so
+read the pool line before reaching for this ticket. Each gtest main sizes its pool at 95% of
+*free* device memory (`cpp/include/peacock/rmm_pool.hpp:141`) and prints what it got, so a
+neighbour on the device sets our ceiling: 132.3 GiB max on an idle device, 40.0 GiB when
+something else held 97.5 GiB. `TpchSf40.Q1GroupByAggregates` needs 67.42 GiB and is the first to
+die. Two of our runs colliding gives a different signature — the failure moves to whichever
+started second, and the free figure differs between them. A foreign tenant gives the same free
+figure to every run and fails them all identically.
 
 <a id="t176"></a>
 ### #176 — the CI coverage guard checks one direction only
@@ -816,7 +830,7 @@ the producing expression's.
 Both engines price a node from the declared schema, so a wrong type moves no golden byte. T16
 confirmed it on a device: cuDF's Welford count exports Int64 where every plan declares UInt64.
 
-T17 closed the widening arm only (`widened_decimal`, `cpu_backend.rs`). The signed arm remains:
+T17 closed the widening arm only (`widened_decimal`, `executor/cpu_backend/`). The signed arm remains:
 `avg` declares its count state UInt64 and DataFusion's accumulator produces Int64 — no widening, and
 it must not be escaped the same way, since accepting it masks what the device showed. The queries
 disabled on this return with the fix, not by loosening the guard. Its column runs 1 to 10 over T19's
@@ -867,7 +881,7 @@ they are refusals rather than work.
 `TRY_CAST`, the regex match operator, an unrecognized binary operator, and an unrecognized
 expression kind are each refused by name at translation.
 
-Every one is a gap in `expr_translate.rs` rather than a limit of the surface: the C++ has
+Every one is a gap in `planner/translator/expr.rs` rather than a limit of the surface: the C++ has
 `build_expr` cases for most of them, and what is missing is our mapping. They are refusals
 because no corpus query carries one, so the cost of each is one arm and its test. `IN ()`
 belongs to this family but does not parse, so it is reachable only from a constructor and is
@@ -914,8 +928,8 @@ targets CI does not run. The crate has none today: the one it had documented an 
 that no longer exists.
 
 There is now one pipeline to document, and it is three calls in a fixed order —
-`plan_batch_partitioned` for the tree, `attach_recipes` where a device is involved, and
-`batch_partitioned_driver` over a backend. `peacockdb/src/main.rs` is the only place that
+`planner::plan` for the tree, `wire::attach_recipes` where a device is involved, and
+`executor::run` over a backend. `peacockdb/src/main.rs` is the only place that
 sequence is written down, and a reader of the crate meets the three functions separately. A
 doctest on the entry it documents is the natural fix and the reason to close both halves at
 once: write it, run `cargo test --features rust-only -p peacockdb-core --doc` in the
@@ -972,8 +986,8 @@ It matters because a test binary is built on one host and run on another: remote
 binaries, goldens and data but never source, so a compile-time path is a path the remote does
 not have. `tests/common/mod.rs testdata_root()` solves that by honouring `PEACOCK_TESTDATA_DIR`
 first, which `build-test.sh` sets for remote runs. The residual is the crate's own unit tests
-— six sites under `src/batch_partitioned/` reaching `tpch.minimal`, in `estimator.rs`,
-`parquet_meta.rs`, `plan_text/mod.rs` and `translate/{tests,schema_tests}.rs` — which is
+— five files under `peacockdb-core/src/` reaching `tpch.minimal`: `planner/memory_estimation.rs`,
+`scan_mapping/parquet_meta.rs`, `plan_text/tests.rs` and `translator/{tests,schema_tests}.rs` — which is
 exactly why a remote CPU host needs a `/media/data/peacockdb` symlink and why `--gpu` runs,
 which set the env var, do not.
 

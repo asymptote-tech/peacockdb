@@ -37,7 +37,7 @@ def partition_row_groups(
     balanced by row count; within a chunk, consecutive row groups are packed greedily
     while the running row count stays under target. A single row group over target still
     becomes its own batch — one row group is the minimum granularity, and the planner
-    always produces a plan (the enforcer owns the runtime consequence, #142).
+    always produces a plan (the accountant owns the runtime consequence, #142).
     `target_batch_rows=None` is batching off: one batch per chunk.
     """
     if not row_groups:

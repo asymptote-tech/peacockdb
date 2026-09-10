@@ -12,10 +12,10 @@ use common::injection::{
     emitter_over_four_lanes, interior_edges, merge_over_sorted, rebatch_at, select,
 };
 use common::rebuild::{every_kind, fields_with_one_value, rebuild_tree};
-use peacockdb_core::batch_partitioned::GpuNode;
-use peacockdb_core::batch_partitioned::batch::Batch;
-use peacockdb_core::batch_partitioned::plan_text::render_plan;
-use peacockdb_core::batch_partitioned::validate::validate;
+use peacockdb_core::executor::Batch;
+use peacockdb_core::plan::GpuNode;
+use peacockdb_core::plan::validate;
+use peacockdb_core::plan_text::render_plan;
 use std::collections::BTreeSet;
 
 // ── the rewrite, before anything is rewritten ───────────────────────────────

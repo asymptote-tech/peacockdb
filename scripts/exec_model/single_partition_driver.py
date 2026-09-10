@@ -90,7 +90,7 @@ class SinglePartitionDriver:
         result = self._dispatch(inputs, rows)
         if result.finished:
             # A finished executor stops contributing to the accounted resident set: the
-            # enforcer's total is over live executors.
+            # accountant's total is over live executors.
             self._accountant.forget(self.label)
         return result
 

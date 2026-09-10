@@ -26,10 +26,10 @@ use datafusion::physical_plan::joins::{
 use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::{ExecutionPlan, Partitioning, PhysicalExpr};
 
-use peacockdb_core::batch_partitioned::error::PlanError;
-use peacockdb_core::batch_partitioned::layout::KeyDistribution;
-use peacockdb_core::batch_partitioned::node::GpuNode;
-use peacockdb_core::batch_partitioned::nodes::{NodeRef, as_node_ref};
+use peacockdb_core::plan::GpuNode;
+use peacockdb_core::plan::KeyDistribution;
+use peacockdb_core::plan::PlanError;
+use peacockdb_core::plan::{NodeRef, as_node_ref};
 
 fn equi(left: usize, right: usize) -> (Arc<dyn PhysicalExpr>, Arc<dyn PhysicalExpr>) {
     (

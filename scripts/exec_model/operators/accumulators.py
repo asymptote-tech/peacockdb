@@ -1,7 +1,7 @@
 """Accumulators: the nodes that hold rows back and emit at a defined point.
 
 These are where mandatory residency lives, so each one reports its held bytes through
-`resident_bytes()` — that is what the enforcer sums, and it is the difference between a
+`resident_bytes()` — that is what the accountant sums, and it is the difference between a
 node the memory model can see and one it cannot.
 """
 
@@ -229,7 +229,7 @@ class AggregateBatches(BatchAccumulatorExecutor):
     leaves a state as big as its input, so the threshold doubles away and the compactions
     land at geometrically growing sizes — total re-scan work linear in the rows that pass
     through, instead of quadratic — and it stops paying for a merge that merges nothing.
-    Residency then grows, which is the honest answer for that shape; the enforcer is the
+    Residency then grows, which is the honest answer for that shape; the accountant is the
     backstop (#142).
     """
 

@@ -25,33 +25,33 @@ use datafusion::parquet::arrow::ArrowWriter;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 
-use peacockdb_core::batch_partitioned::aggregates::{AggCall, PlanAgg};
+use peacockdb_core::plan::{AggCall, PlanAgg};
 
-use peacockdb_core::batch_partitioned::executor::RowRange;
+use peacockdb_core::executor::RowRange;
 
-use peacockdb_core::batch_partitioned::expr::{BinaryOp, Expr, NamedExpr};
+use peacockdb_core::plan::{BinaryOp, Expr, NamedExpr};
 
-use peacockdb_core::batch_partitioned::gpu_backend::{GpuExec, GpuExport};
+use peacockdb_core::executor::gpu_backend::{GpuExec, GpuExport};
 
-use peacockdb_core::batch_partitioned::layout::ColumnOrder;
+use peacockdb_core::plan::ColumnOrder;
 
-use peacockdb_core::batch_partitioned::node::GpuNode;
+use peacockdb_core::plan::GpuNode;
 
-use peacockdb_core::batch_partitioned::nodes::aggregate::AggregateBody;
+use peacockdb_core::plan::AggregateBody;
 
-use peacockdb_core::batch_partitioned::nodes::{
+use peacockdb_core::plan::{
     GpuAggregate, GpuFilter, GpuLoadParquet, GpuProject, GpuSort,
 };
 
-use peacockdb_core::batch_partitioned::parquet_meta::ScanMetadata;
+use peacockdb_core::plan::ScanMetadata;
 
-use peacockdb_core::batch_partitioned::partitioner::RowGroupMeta;
+use peacockdb_core::plan::RowGroupMeta;
 
-use peacockdb_core::batch_partitioned::recipe::{AbiSymbol, Recipe, RecipePlan, attach_recipes};
+use peacockdb_core::wire::{AbiSymbol, Recipe, RecipePlan, attach_recipes};
 
-use peacockdb_core::batch_partitioned::schema::Schema;
+use peacockdb_core::plan::Schema;
 
-use peacockdb_core::batch_partitioned::{Batch, CpuBatch, GpuBatch};
+use peacockdb_core::executor::{Batch, CpuBatch, GpuBatch};
 
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,

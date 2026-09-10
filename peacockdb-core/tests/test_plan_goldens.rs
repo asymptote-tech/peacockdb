@@ -10,16 +10,15 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use peacockdb_core::batch_partitioned::node::GpuNode;
-use peacockdb_core::batch_partitioned::plan::{PlanKnobs, plan_batch_partitioned};
-use peacockdb_core::batch_partitioned::plan_text::{
-    Payloads, render_plan, render_plan_memory, render_plan_recipes,
-};
-use peacockdb_core::batch_partitioned::recipe::{attach_recipes, check_seq_kinds, depth};
-use peacockdb_core::batch_partitioned::{ExecutorCategory, category_of};
+use peacockdb_core::plan::GpuNode;
+use peacockdb_core::plan::{ExecutorCategory, category_of};
+use peacockdb_core::plan_text::{render_plan, render_plan_memory};
+use peacockdb_core::planner;
+use peacockdb_core::planner::PlanKnobs;
+use peacockdb_core::wire::{Payloads, attach_recipes, check_seq_kinds, depth, render_plan_recipes};
 
-use common::mode::{MODES, Mode, mode_named};
 use common::golden_text::{ordered_sections, section_differences};
+use common::mode::{MODES, Mode, mode_named};
 use common::{data_dir_for, golden_dir_for, queries_dir_for};
 
 fn queries(dataset: &str) -> Vec<(String, PathBuf)> {
@@ -73,7 +72,7 @@ async fn render_query(
             );
         }
     };
-    match plan_batch_partitioned(&plan, knobs) {
+    match planner::plan(&plan, knobs) {
         Ok((tree, model)) => format!(
             "{}--- recipes ---\n{}--- memory ---\n{}",
             render_plan(tree.as_ref()),
@@ -89,7 +88,7 @@ async fn render_query(
 /// `not runnable`, never `refused:` — the plan plans, validates and runs on the CPU, and
 /// what failed is the crossing to the device. Naming its ticket is not decoration: the
 /// meta test below asserts that every line of this shape names a ticket that exists.
-fn recipes_of(tree: &dyn peacockdb_core::batch_partitioned::GpuNode) -> String {
+fn recipes_of(tree: &dyn peacockdb_core::plan::GpuNode) -> String {
     match attach_recipes(tree) {
         Ok(plan) => render_plan_recipes(tree, &plan, Payloads::Omitted),
         Err(e) => format!("not runnable: {}\n", relative_to_testdata(&e.to_string())),
@@ -258,7 +257,7 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
                 .create_physical_plan()
                 .await
                 .expect("the query plans");
-            let (tree, _) = plan_batch_partitioned(&plan, mode.knobs()).expect("this mode runs it");
+            let (tree, _) = planner::plan(&plan, mode.knobs()).expect("this mode runs it");
             let recipes = attach_recipes(tree.as_ref()).expect("a plan's recipes are structural");
             text.push_str(&format!("== {dataset} {name}\n"));
             text.push_str(&format!("sha256={}\n", digest_of(recipes.bytes())));
@@ -345,7 +344,7 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
             };
             // A query this mode refuses has no recipes to check; a query it plans has to
             // publish seqs that resolve.
-            let Ok((tree, _)) = plan_batch_partitioned(&plan, mode.knobs()) else {
+            let Ok((tree, _)) = planner::plan(&plan, mode.knobs()) else {
                 continue;
             };
             match attach_recipes(tree.as_ref()) {
@@ -891,14 +890,14 @@ async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
             let Ok(plan) = frame.create_physical_plan().await else {
                 continue;
             };
-            let Ok((tree, _)) = plan_batch_partitioned(&plan, mode.knobs()) else {
+            let Ok((tree, _)) = planner::plan(&plan, mode.knobs()) else {
                 continue;
             };
             let Ok(recipes) = attach_recipes(tree.as_ref()) else {
                 continue;
             };
             let positions =
-                peacockdb_core::batch_partitioned::driver::post_order_of_every_node(tree.as_ref())
+                peacockdb_core::executor::post_order_of_every_node(tree.as_ref())
                     .expect("the plan indexes");
             let mut nodes = Vec::new();
             collect(tree.as_ref(), &mut nodes);

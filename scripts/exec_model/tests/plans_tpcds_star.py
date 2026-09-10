@@ -169,7 +169,7 @@ def _demographics(t, tag="cd"):
     """customer_demographics, filtered to one segment.
 
     Declared a fact rather than a dimension: 1.9M rows scanned as one batch is 730 MB of
-    python strings and the resident enforcer trips, which is the enforcer being right on
+    python strings and the resident accountant trips, which is the accountant being right on
     real data. So it streams through its filter and only the survivors are collected.
     """
     return fact(t, "customer_demographics",

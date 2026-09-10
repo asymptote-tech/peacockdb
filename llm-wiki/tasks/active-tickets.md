@@ -172,7 +172,7 @@ Context rather than the reason for that scope: the plan is the corpus's largest 
 DEVICE-resident bytes where 13.1 GB is host RSS from a `CpuBackend` run — not the same quantity.
 
 Nothing refused it because the corpus tier passes no budget: `run_cpu` calls
-`batch_partitioned_driver(tree, &ctx.task_ctx(), None)`. Enabling it is a decision about every run
+`executor::run(tree, &ctx.task_ctx(), None)`. Enabling it is a decision about every run
 of that tier — 13 GB SIGKILLs a runner as an infrastructure failure, not a test failure.
 
 <a id="t191"></a>

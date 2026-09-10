@@ -5,6 +5,7 @@
 //! suite uses a subset, so dead code is fine.
 #![allow(dead_code)]
 
+pub mod memory_limit;
 pub mod mode;
 pub mod corpus;
 pub mod corpus_golden;
@@ -23,7 +24,7 @@ use std::path::PathBuf;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::arrow::util::pretty::pretty_format_batches;
 
-use peacockdb_core::config::MemoryLimit;
+use memory_limit::MemoryLimit;
 
 /// The budget a device run is given, and the one `mode::TIER` plans against: a run
 /// under a budget the plan was not priced for measures a plan nobody wrote down.

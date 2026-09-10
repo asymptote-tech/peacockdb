@@ -4,7 +4,7 @@ The code is authoritative: where this page and the code disagree, fix the page r
 reading, and say so.
 
 Pipeline: SQL → DataFusion logical/physical plan → the engine's node tree
-(`peacockdb-core/src/batch_partitioned/`) → a recipe plan in the FlatBuffers vocabulary
+(`peacockdb-core/src/plan/`) → a recipe plan in the FlatBuffers vocabulary
 (`flatbuffers/gpu_plan.fbs`) → the C++/cuDF executor, one node at a time. One tree runs on
 either backend: `CpuBackend` relays a call to DataFusion, `GpuBackend` makes it through the
 C ABI.
@@ -26,9 +26,9 @@ state stays resident, so the query fits a budget the table does not.
 
 ## Planning
 
-`plan_batch_partitioned()` takes DataFusion's physical plan, built at the target lane count
-by the caller, and **translates** it into the engine's node vocabulary
-(`batch_partitioned/translate/`). Translation, not annotation: a 1:1 wrapper carries
+`planner::plan()` takes DataFusion's physical plan, built at the target lane count by the
+caller, and **translates** it into the engine's node vocabulary (`planner/translator/`).
+Translation, not annotation: a 1:1 wrapper carries
 DataFusion's execution semantics along with it, and this model's semantics are different at
 every node.
 
@@ -53,7 +53,7 @@ What DataFusion is reused for is its planning, never its execution:
 
 The layer makes a conscious decision per DataFusion node kind, and an unrecognized one is a
 plan-time error naming it — never a silent pass-through. Expressions are translated the same
-way, kind by kind, into the engine's own IR (`batch_partitioned/expr.rs`), because a column
+way, kind by kind, into the engine's own IR (`plan/mod.rs`), because a column
 reference is an ordinal into a child whose column order the engine decides. Ordinals rebase at
 every node the layer inserts, so a per-branch cast project or an inserted merge shifts every
 reference above it.
@@ -112,7 +112,7 @@ to look for the difference.
 ### The row-group mapping
 
 The row-group → (lane, batch) mapping is computed once, at plan time, by a pure policy function
-(`batch_partitioned/partitioner.rs`), and everything else consumes its output: the loader
+(`planner/translator/scan_mapping/`), and everything else consumes its output: the loader
 stores it verbatim, the plan golden renders it verbatim as `partition_groups=[…]`, validation
 checks the declared lane count against it. One fact, one owner.
 
@@ -137,7 +137,7 @@ holds it. Type widths are for columns the plan creates rather than reads.
 ### Batch sizing
 
 `target_batch_bytes` is derived, not configured. The budget is what the hardware fixes; batch
-size is how the planner spends it, so an estimator pass (`batch_partitioned/estimator.rs`)
+size is how the planner spends it, so an estimator pass (`planner/memory_estimation.rs`)
 solves for it per source.
 
 The walk starts at each source and follows its batch upward to the nearest accumulator. Every
@@ -167,10 +167,10 @@ Four limits on the number it produces.
   on a cardinality estimate, and with today's trivial estimators ([#19](tickets.md#t19)) that is
   one row per input row — tpch q1 groups 6M rows into four and is modelled at 3.8 GB. Refusing
   on that would turn "we do not know" into "you cannot run this", so it goes in the memory
-  section as the worst case it is and the enforcer decides at run time.
+  section as the worst case it is and `ResidentAccountant` decides at run time.
 - The output is a target, not a bound: the mapping is quantized to whole row groups.
 - The inputs are estimates. Underestimating amplification produces a batch too large and a query
-  the enforcer kills; overestimating produces one too small and a query that is merely slower,
+  the accountant kills; overestimating produces one too small and a query that is merely slower,
   so the derived target rounds down onto a coarse grid — a drifting estimate should not
   regenerate every golden.
 
@@ -188,7 +188,7 @@ Four limits on the number it produces.
 | `GpuEmitPartitions` | PartitionEmitter | 1 → N per batch by hash scatter; one call per input batch |
 | `GpuAggregate` | Exec | aggregates one batch: init aggregators, plus the finalize where it is also the single-node shortcut |
 | `GpuAggregateBatches` | BatchAccumulator | merges pre-aggregated batches; compacts on a doubling threshold; emits at done |
-| `GpuJoin` | Join | the capability matrix below |
+| `GpuHashJoin` | Join | the capability matrix below |
 | `GpuCrossJoin`, `GpuNestedLoopJoin` | Join | two inputs, both one lane; broadcast variants are [#140](tickets.md#t140) |
 | `GpuUnion`, `GpuInterleave` | BatchForwarder | lane relabeling only. Union sums its inputs' lane counts and clears the hash; interleave takes output lane p from lane p of each input and so preserves it |
 | `GpuLimit` | BatchAccumulator, mid-plan only | an interval over a **one-lane** stream; streams and holds nothing |
@@ -242,7 +242,7 @@ never a mean of means. And **the Welford pair merges by `merge_m2`**, which the 
 the combine is not a per-column reduction: it needs the count-weighted mean and the cross term.
 `ddof` is 1 for the sample forms and 0 for the population ones.
 
-The registry lives in `batch_partitioned/aggregates.rs` as two enums — `AggFunc`, what SQL asked
+The registry lives in `plan/mod.rs` as two enums — `AggFunc`, what SQL asked
 for, and `PlanAgg`, what a node runs — with state names and types from DataFusion's
 `state_fields()` so our split cannot drift from the split it planned. Adding an aggregate is a
 row there rather than an arm in C++; an aggregate that cannot be decomposed at all (a true
@@ -334,7 +334,7 @@ threshold to twice what that compaction left behind. A low-cardinality aggregate
 state and the threshold never moves. A high-cardinality one leaves a state the size of its
 input, so the threshold doubles away: compactions land at geometrically growing sizes and total
 re-scan work is linear in the rows that pass through. Residency then grows, which is the honest
-answer for that shape, and the enforcer is the backstop ([#142](tickets.md#t142)).
+answer for that shape, and `ResidentAccountant` is the backstop ([#142](tickets.md#t142)).
 
 **The shuffle beneath a final aggregate is coalesced first.** `GpuMergePartitions` forwards its
 L lanes' batches without concatenating, so without a `GpuCoalesceAllBatches` between the two the
@@ -409,10 +409,10 @@ project.
 
 | Mode | Also covers | What it becomes |
 |---|---|---|
-| **Inner** | multi-key and composite keys; `null_equals_null=true`; a residual filter, which still streams since every emitted row is decided by (build, this batch) | `GpuJoin{Inner}`, probe streams, no finish |
-| **Right outer** (probe side preserved) | a DataFusion Left-outer the swap moved | `GpuJoin{Right}`, probe streams, no finish — a probe row unmatched in this batch is unmatched everywhere, because the build side is complete before the first call |
-| **Left outer** (build side preserved) | a DataFusion Right-outer after the swap | `GpuJoin{Left}`, probe streams **with finish**; the accumulated probe keys are resident until it runs |
-| **Full outer** | — | `GpuJoin{Full}` — Left's finish, Right's per-call emission |
+| **Inner** | multi-key and composite keys; `null_equals_null=true`; a residual filter, which still streams since every emitted row is decided by (build, this batch) | `GpuHashJoin{Inner}`, probe streams, no finish |
+| **Right outer** (probe side preserved) | a DataFusion Left-outer the swap moved | `GpuHashJoin{Right}`, probe streams, no finish — a probe row unmatched in this batch is unmatched everywhere, because the build side is complete before the first call |
+| **Left outer** (build side preserved) | a DataFusion Right-outer after the swap | `GpuHashJoin{Left}`, probe streams **with finish**; the accumulated probe keys are resident until it runs |
+| **Full outer** | — | `GpuHashJoin{Full}` — Left's finish, Right's per-call emission |
 | **Build-side semi family** — `LeftSemi` | `LeftAnti`, `LeftMark`; the filtered forms, which take a single-batch probe | probe streams with finish, and **the per-call join disappears**: a probe call is only the key project, so the build side is untouched until the finish consumes it |
 | **Probe-side semi family** — `RightSemi` | `RightAnti` | probe streams, no finish — membership in a complete build side is a per-row question |
 | **Cross join** | — | `GpuCrossJoin`, both inputs one lane |
@@ -501,8 +501,9 @@ broadcast filter is the optimization #27 was archived for.)
 
 ### Traits
 
-The types are in `batch_partitioned/` and the code is what they are; what follows is why they
-have the shape they do.
+The types are declared in `plan/mod.rs` and `executor/mod.rs` — the node vocabulary in the
+first, the batch and executor traits in the second — and the code is what they are; what follows
+is why they have the shape they do.
 
 **Layout and schema live inside `NodeKind`** rather than as two `Option`s that must be `None`
 together: a sink structurally has neither, everything else always has both, and there is nothing
@@ -556,7 +557,7 @@ was handed, exactly where the successful path would have.
 
 `resident_bytes` and `scratch_bytes` stay infallible, the line being between a method that does
 work and one that reports a number the executor already holds. An accountant handed a failure
-instead of a figure has nothing to do with it: zero stops the enforcer enforcing, unbounded
+instead of a figure has nothing to do with it: zero stops the check enforcing anything, unbounded
 kills a query over a reporting hiccup, and skipping the check disables the guard silently.
 
 **Executor construction is the backend's**, as `Backend::executors_for(ctx, node, post_order,
@@ -574,10 +575,11 @@ order, forwarding one batch per visit, skipping empty sources and retiring finis
 
 ### The scheduling rule
 
-Two drivers, both single-threaded, push-based and deterministic. In `driver/`, `partitioned.rs`
-owns the tree, the queues and the three cross-lane categories; `single_partition.rs` owns one
-lane of one lane-scoped node as a state machine; and `scheduler.rs` decides what runs next from
-plain numbers, with no backend, batch or executor in sight.
+Two drivers, both single-threaded, push-based and deterministic. In `executor/driver/`,
+`partitioned.rs` owns the tree, the queues and the three cross-lane categories;
+`single_partition.rs` owns one lane of one lane-scoped node as a state machine; and
+`scheduler.rs` decides what runs next from plain numbers, with no backend, batch or executor in
+sight.
 
 Every node carries a **height** (distance to the root) and an **order** (pre-order index). A
 node is **runnable** when any of its lanes can make progress: a source always can, another node
@@ -656,7 +658,7 @@ slot instead, a consumed executor holding nothing. `CallStats.scratch_bytes` is 
 CPU directly, a device through RMM hooks — so model quality is observable and under-estimates
 are recorded with their magnitude.
 
-Four things in `driver/accounting.rs` are load-bearing.
+Four things in `executor/driver/accounting.rs` are load-bearing.
 
 - **The executor total is a cache refreshed one slot at a time**, never a sum over live
   executors — which would force the accountant to hold references to executors the driver owns
@@ -680,14 +682,14 @@ consult `&self`, which is what that permission is for. A model that returns zero
 cheap call, it is a guard switched off, and it fails open.
 
 **Model ≥ measured is not an invariant.** `scratch_bytes` rests on a cardinality figure for a
-join and assumed selectivity for a filter, so it will sometimes come in low. The enforcer's
+join and assumed selectivity for a filter, so it will sometimes come in low. The accountant's
 contract is "fail cleanly when an accounted total at a check point exceeds budget", not "the
 budget is never exceeded" and not "the peak stays under it".
 
 Four rules were measured rather than designed, over the whole corpus under a 2 GiB accountant;
 the cases are in [`archive/designs.md`](archive/designs.md).
 
-- **`resident_bytes()` is a total for the enforcer to check, never a numerator for a per-row
+- **`resident_bytes()` is a total for the accountant to check, never a numerator for a per-row
   cost** — only the executor knows which part scales with build rows. Dividing it mispriced one
   call at 2.0 TB and declined a query whose whole run peaked at 11.5 MB.
 - **A build-preserving join's residency grows with the probe side**, since it holds key columns
@@ -733,10 +735,10 @@ the C++ side ever sees of a query. Wherever this page says "the flat buffers", "
 format" or "serialized", that is what it means.
 
 What crosses is not the plan tree. It is a menu of parameterized kernels whose nodes exist
-to be addressed: the recipe writer (`batch_partitioned/recipe/`) emits one node per call a
-driver will make, and each node's recipe publishes the post-order sequence numbers its calls
-name. The vocabulary is frozen: a kernel takes a whole input and answers with a whole table,
-and a driver that wants less asks for it by calling more often rather than by changing the
+to be addressed: the recipe writer (`wire/`) emits one node per call a driver will make, and
+each node's recipe publishes the post-order sequence numbers its calls name. The vocabulary
+is frozen: a kernel takes a whole input and answers with a whole table, and a driver that
+wants less asks for it by calling more often rather than by changing the
 node. [What the frozen surface costs](#what-the-frozen-surface-costs) is the bill.
 
 Two spellings, and the prefix is the tell: `Cudf*` is a flat-buffer node table, the thing
@@ -766,7 +768,7 @@ The mapping from a plan node to the seqs it addresses, and to the calls a driver
 | `GpuCoalesceAllBatches` | `CudfCoalescePartitions` | one collapse call over the lane's batch handles |
 | `GpuAggregateBatches` | `CudfCoalescePartitions` + `CudfAggregate{Merge}`, plus a `CudfProject` where it finalizes | one concat and one aggregate per compaction and again at done; the project runs once, at done |
 | `GpuEmitPartitions` | `CudfRepartition(Hash, 1→N)` | repartition arm, one call per batch → N handles |
-| `GpuJoin` | `CudfHashJoin`, plus the finish seqs — key project, concat, anti/semi join, pad project | map arm per (lane, probe batch); the build handle would need copying before each, since the call consumes it (#152) |
+| `GpuHashJoin` | `CudfHashJoin`, plus the finish seqs — key project, concat, anti/semi join, pad project | map arm per (lane, probe batch); the build handle would need copying before each, since the call consumes it (#152) |
 | `GpuCrossJoin`, `GpuNestedLoopJoin` | the same-kind node | one map-arm call |
 | `GpuLimit` | none | `slice_handle` on the two straddling batches, nothing on the rest — the bounds are runtime values |
 | `GpuMergePartitions`, `GpuUnion`, `GpuInterleave` | none, beyond the union's cast projects | routing in the driver, zero FFI calls |
@@ -915,7 +917,7 @@ of its own (below).
 **[`TableResult` / `NodeStats`](../cpp/src/plan_executor.h)** — the two value types every C++
 path returns. `NodeStats` carries only what C++ alone can measure — rows, var-length content
 bytes, and a time that is zero unless timing is on. The byte formula itself lives in Rust
-(`memory.rs`) so the two engines cannot drift.
+(`src/common.rs`) so the two engines cannot drift.
 
 **[`NodeInputs` and the operator dispatch](../cpp/src/peacock/operators.h)** — the contract
 every operator translation unit shares: one `execute_*` per wire node kind, plus `take_input`
@@ -964,10 +966,10 @@ cuDF exposes standard murmur3, which differs from Spark's spec in multi-column c
 handling.
 
 So placement is identical by construction rather than by agreement. The CPU side calls comet's
-`create_murmur3_hashes` (`spark_partitioning.rs`), the GPU side owns a bit-exact kernel
-(`spark_hash_partition.cu`) and reuses cuDF only for the scatter, and a live gate
-(`peacock_spark_partition_ids`, `test_inc2_conformance.rs`) proves the two agree over the same
-bytes.
+`create_murmur3_hashes` (`executor/cpu_backend/spark_partitioning.rs`), the GPU side owns a
+bit-exact kernel (`spark_hash_partition.cu`) and reuses cuDF only for the scatter, and a live
+gate (`peacock_spark_partition_ids`, `test_inc2_conformance.rs`) proves the two agree over the
+same bytes.
 
 ## C++ executor layout
 
@@ -992,11 +994,11 @@ Where the ordinals come from and where they land:
 
 | Reference | Written by | Read by |
 |---|---|---|
-| `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/expr_writer.rs), off the ordinal `expr_translate` read from DataFusion's `Column::index()` | [`build_expr`](../cpp/src/expr.cpp) for the AST path, [`build_column`](../cpp/src/expr.cpp) for the column path |
-| `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/node_writer.rs), [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join.cpp`](../cpp/src/operators/join.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
-| join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`join.cpp`](../cpp/src/operators/join.cpp) — ColumnRef only, anything else throws |
-| `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/batch_partitioned/recipe/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
-| sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/batch_partitioned/recipe/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) |
+| `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/wire/expr_writer.rs), off the ordinal `planner/translator/expr.rs` read from DataFusion's `Column::index()` | [`build_expr`](../cpp/src/expr.cpp) for the AST path, [`build_column`](../cpp/src/expr.cpp) for the column path |
+| `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join.cpp`](../cpp/src/operators/join.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
+| join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`join.cpp`](../cpp/src/operators/join.cpp) — ColumnRef only, anything else throws |
+| `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
+| sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/wire/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) |
 
 `cpp/src/` holds 22 `->index()` reads and 48 `.column(…)` calls, so this is the engine's most
 common operation and the one with the least ceremony around it.
@@ -1056,9 +1058,8 @@ Half of the table above is not a choice the C++ side makes — it reads a value 
 already computed and the recipe writer wrote down. That is deliberate: an option carried in
 the flat buffers cannot be re-derived differently by the two engines, so anything where
 cuDF's own inference could drift from DataFusion's is serialized rather than inferred. The
-writers are all under
-[`batch_partitioned/recipe/`](../peacockdb-core/src/batch_partitioned/recipe/), so the paths
-below are relative to it.
+writers are all under [`wire/`](../peacockdb-core/src/wire/), so the paths below are relative
+to it.
 
 | Flat-buffer field | Written by | Taken from | Becomes |
 |---|---|---|---|

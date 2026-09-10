@@ -428,8 +428,8 @@ fn every_rust_test_target_is_named_by_ci() {
         workflow_lines.iter().any(|l| line_runs_lib_tests(l)),
         "no workflow line runs the peacockdb-core LIB unit tests. Every other cargo \
          invocation passes --test, which selects integration targets only, so the \
-         inline #[cfg(test)] modules (batch_partitioned, config) would run locally \
-         and never at the merge gate. Add `cargo test --features rust-only \
+         inline #[cfg(test)] modules — 435 cases across every component — would run \
+         locally and never at the merge gate. Add `cargo test --features rust-only \
          -p peacockdb-core --lib` to the CPU tier."
     );
 
@@ -438,7 +438,7 @@ fn every_rust_test_target_is_named_by_ci() {
     assert!(
         workflow_lines.iter().any(|l| line_builds_the_cli(l)),
         "no workflow line builds the peacockdb CLI. It is the only caller of \
-         plan_batch_partitioned and the driver from outside the crate, and it has no test \
+         plan and the driver from outside the crate, and it has no test \
          target, so nothing else compiles it. Add `cargo build --features rust-only \
          -p peacockdb` to the CPU tier."
     );

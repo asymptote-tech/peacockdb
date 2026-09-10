@@ -276,9 +276,9 @@ rust_only_targets() {
       # verified from a shipped binary: none of that travels with it. Running
       # test_ci_coverage on verda compared today's binary against a pipeline.yml left
       # there by some earlier push — verda is not even a git checkout — so it failed
-      # for reasons that say nothing about the remote. Measured: it is the ONLY target
-      # that reaches outside testdata, so this excludes exactly one thing today and
-      # classifies the next one automatically.
+      # for reasons that say nothing about the remote. It classified the next one
+      # automatically, as intended: test_module_layout reads src/ and names repo_root
+      # for that reason, so today this excludes two.
       # It still runs locally and in CI, which is where a repo check belongs.
       if grep -qE 'repo_root|\.github/workflows' "$f"; then
         continue

@@ -1,14 +1,17 @@
-pub mod batch_partitioned;
-pub mod config;
-pub mod gpu_rowgroup_prune;
-pub mod memory;
-#[allow(unused_imports, dead_code, clippy::all)]
-pub mod generated {
-    pub mod gpu_plan_generated {
-        include!(concat!(env!("OUT_DIR"), "/gpu_plan_generated.rs"));
-    }
-}
-pub mod spark_partitioning;
+//! The engine: a lane holds a stream of batches rather than one resident table.
+//!
+//! Six components, each of which is its own `mod.rs` and nothing else. `plan` is the
+//! vocabulary — the nodes, the layout and schema they declare, and the rules a tree has to
+//! satisfy. `wire` is what crosses to the C++ side. `planner` builds a plan, `executor` runs
+//! one, and `plan_text` renders any of it. `common` is the row-byte formula all four price
+//! by. The reasons behind each shape are in `llm-wiki/architecture.md`.
+
+pub mod common;
+pub mod executor;
+pub mod plan;
+pub mod plan_text;
+pub mod planner;
+pub mod wire;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

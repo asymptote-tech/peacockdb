@@ -16,29 +16,27 @@ use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::execution::TaskContext;
 use datafusion::execution::context::SessionContext;
 
-use peacockdb_core::batch_partitioned::GpuNode;
-use peacockdb_core::batch_partitioned::backend::{Backend, NodeExecutors};
-use peacockdb_core::batch_partitioned::cpu_backend::accumulate::{
-    CpuAccumulator, CpuPartitionAccumulator,
-};
-use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
-use peacockdb_core::batch_partitioned::cpu_backend::emit::CpuEmitter;
-use peacockdb_core::batch_partitioned::cpu_backend::join::{CpuJoin, CpuProbingJoin};
-use peacockdb_core::batch_partitioned::cpu_backend::source::CpuSource;
-use peacockdb_core::batch_partitioned::cpu_backend::{CpuExec, CpuUnload};
-use peacockdb_core::batch_partitioned::cpu_batch::CpuBatch;
-use peacockdb_core::batch_partitioned::error::PlanError;
-use peacockdb_core::batch_partitioned::executor::{
+use peacockdb_core::executor::CpuBackend;
+use peacockdb_core::executor::CpuBatch;
+use peacockdb_core::executor::cpu_backend::accumulate::{CpuAccumulator, CpuPartitionAccumulator};
+use peacockdb_core::executor::cpu_backend::emit::CpuEmitter;
+use peacockdb_core::executor::cpu_backend::join::{CpuJoin, CpuProbingJoin};
+use peacockdb_core::executor::cpu_backend::source::CpuSource;
+use peacockdb_core::executor::cpu_backend::{CpuExec, CpuUnload};
+use peacockdb_core::executor::{Backend, NodeExecutors};
+use peacockdb_core::executor::{
     BackendError, BatchAccumulatorExecutor, CallResult, CallStats, ExecExecutor, Executor,
     JoinExecutor, LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin,
     RowRange, SourceExecutor, SourceStep, UnloadExecutor,
 };
-use peacockdb_core::batch_partitioned::nodes::join::empty_build_answers_nothing;
-use peacockdb_core::batch_partitioned::nodes::{
+use peacockdb_core::plan::GpuNode;
+use peacockdb_core::plan::PlanError;
+use peacockdb_core::plan::Schema;
+use peacockdb_core::plan::empty_build_answers_nothing;
+use peacockdb_core::plan::{
     GpuCoalesceAllBatches, GpuEmitPartitions, GpuLoadParquet, GpuMergeSortedPartitions, GpuUnload,
     NodeRef, as_node_ref,
 };
-use peacockdb_core::batch_partitioned::schema::Schema;
 
 use super::rebuild::{key, lanes_of, rebuild, scan_of, schema_of, sorted, source};
 
@@ -466,11 +464,7 @@ fn walk_edges(node: &dyn GpuNode, is_root: bool, next: &mut usize, edges: &mut V
 /// edge set with nothing eligible in it injects nothing, and a run that injected nothing
 /// is a run whose label claims a dimension it did not carry.
 pub fn node_count(root: &dyn GpuNode) -> usize {
-    1 + root
-        .children()
-        .into_iter()
-        .map(node_count)
-        .sum::<usize>()
+    1 + root.children().into_iter().map(node_count).sum::<usize>()
 }
 
 /// `root` rewritten into one injected shape. The tree comes back rebuilt whether or not
@@ -488,9 +482,8 @@ pub fn apply(root: &dyn GpuNode, injection: Injection, seed: u64) -> Box<dyn Gpu
                 .filter(|edge| edge.refused.is_none())
                 .map(|edge| edge.child)
                 .collect();
-            (!eligible.is_empty()).then(|| {
-                eligible[(mix(seed, injection.stamp()) % eligible.len() as u64) as usize]
-            })
+            (!eligible.is_empty())
+                .then(|| eligible[(mix(seed, injection.stamp()) % eligible.len() as u64) as usize])
         }
         _ => None,
     };

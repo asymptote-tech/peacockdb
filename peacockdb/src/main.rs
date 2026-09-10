@@ -9,11 +9,10 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use datafusion::arrow::util::pretty::print_batches;
-use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
-use peacockdb_core::batch_partitioned::driver::batch_partitioned_driver;
-use peacockdb_core::batch_partitioned::plan::{
-    BatchSizing, PlanKnobs, SMALL_TABLE_BYTES, plan_batch_partitioned,
-};
+use peacockdb_core::executor::CpuBackend;
+use peacockdb_core::executor::run;
+use peacockdb_core::planner;
+use peacockdb_core::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};
 use peacockdb_core::{build_session_state, register_tables_for};
 
 #[derive(Parser)]
@@ -49,9 +48,9 @@ async fn main() -> anyhow::Result<()> {
         budget: cli.memory_budget,
         small_table_bytes: SMALL_TABLE_BYTES,
     };
-    let (tree, _memory) = plan_batch_partitioned(&plan, knobs)
+    let (tree, _memory) = planner::plan(&plan, knobs)
         .map_err(|why| anyhow::anyhow!("this query cannot be planned: {why}"))?;
-    let report = batch_partitioned_driver::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+    let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
         .map_err(|why| anyhow::anyhow!("{why}"))?;
 
     let batches: Vec<_> = report

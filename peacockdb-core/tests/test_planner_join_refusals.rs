@@ -12,7 +12,7 @@
 mod common;
 
 use common::join_fixture::Fixture;
-use peacockdb_core::batch_partitioned::error::PlanError;
+use peacockdb_core::plan::PlanError;
 
 #[tokio::test]
 async fn an_outer_join_with_a_residual_filter_is_refused_naming_153() {
