@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 197), which is also the counter for
+New tickets take the next free number (currently 198), which is also the counter for
 `tasks/bp-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -18,7 +18,7 @@ reference still resolves there.
 | [Critical correctness](#critical-correctness) | 14 | #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 22 | #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
+| [Infrastructure / process](#infrastructure--process) | 23 | #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
 
 ## Critical correctness
 
@@ -692,6 +692,34 @@ tripped, so something can branch on it, but there is nowhere to record into — 
 trip log, and `Underestimate` is the precedent for what one would look like. Related: #91.
 
 ## Infrastructure / process
+
+<a id="t197"></a>
+### #197 — the moved rust-only tests have never once built against a restored cache
+
+`Planner join capability` is the first `--features rust-only` cargo step in `dataset-matrix`, and it
+carries the whole rust-only build: 839s, then 793s. In its old home, the `cost-report` job, the same
+step took 42s.
+
+Both numbers are cold. The 25.02 job on d2bf7d0 prints "No cache found." at its `Cache Rust build`
+step and then compiles 257 crates from `proc-macro2` up to `datafusion v45` inside the step —
+13m13s of dependency tree, not of tests. There is no warm measurement of this step in existence, so
+the 46-second difference between the two runs is two cold builds differing by runner noise.
+
+The miss is branch scoping, not feature graphs. The key moved when `CMAKE_GENERATOR` and `RUSTFLAGS`
+became job-level (32382ce), and the only save under the new key happened on `ENS-bp-corpus-rollout`.
+A run can restore caches from its own branch and from the default branch, so `ENS-bp-export-types`
+sees neither that one nor master's, which is still under the old key. The merge to master repopulates
+the new key there, and the first branch run after it is the first that can restore anything.
+
+`rust-only` is defined on `peacockdb-core` and forwards to `peacockdb-ffi` and nowhere else, so it
+never reaches the DataFusion/Arrow graph that `[profile.dev.package."*"] opt-level = 3` makes
+expensive. The dep artifacts are identical under both feature sets. Whatever the warm cost turns out
+to be, two feature graphs against one cache is not the mechanism.
+
+What is still unknown: the leg total against master, which is the only number that says whether the
+move added time or moved it — `dataset-matrix` builds the rust-only graph later in `Build Rust
+tests` regardless of where the seven sit. Measure that on a run that restores the cache, and only
+then decide whether anything needs doing.
 
 <a id="t196"></a>
 ### #196 — the table registrar's non-parquet guard does nothing, so a stray file panics
