@@ -107,12 +107,13 @@ state, and a watchdog restarts you.
   human to confirm the next task — take the next task where progress is possible and
   dispatch it. When nothing can progress, write `stalled: <reason>` to
   `.claude/ensemble/<chain>.status` and exit.
-- **Startup reads four things**: this file, `build-test.md`, your chain's section of the
-  board, and the current task's spec and detail file. `build-test.md` is yours to read rather
-  than to look facts up in, because routing a dispatch is your decision: which workflow a
-  developer should use and which remote host is the right one live there. You do not read
-  `architecture.md` — spend a researcher when you need a fact from it. That one rule is most
-  of what keeps your window small.
+- **Startup reads five things**: this file, `build-test.md`, `architecture.md`, your chain's
+  section of the board, and the current task's spec and detail file. `build-test.md` is yours
+  to read rather than to look facts up in, because routing a dispatch is your decision: which
+  workflow a developer should use and which remote host is the right one live there.
+  `architecture.md` you read so that a spec you are dispatching means something to you. Both
+  are copies from startup, so treat a fact you are about to act on as possibly stale once the
+  branch has moved, and spend a researcher to confirm it rather than answering from memory.
 - **Nothing you know lives only in your window.** Any fact needed after a restart goes into
   `<task>-detail.md` before you dispatch. The board changes only on a state change, and the
   spec is frozen, so the detail file is where everything else belongs.
@@ -123,10 +124,10 @@ state, and a watchdog restarts you.
 - **Read `.claude/ensemble/<chain>.control` after every subagent returns and before every
   dispatch.** It is the only thing that can hand a running chain new work, because
   `rebase needed(...)` is written on master where you cannot see it. One word per line:
-  `pause` — write the board and wait, re-reading the file; `rebase` — run the rebase
-  protocol now rather than at the next boundary; `stop` — write the board and exit cleanly.
-  Clear the file once you have acted on it. A dispatched subagent cannot be interrupted, so
-  one subagent is the floor on how fast you can answer.
+  `pause` — write the board and wait, re-reading the file; `rebase` — run the rebase protocol,
+  the whole chain and every branch in it, now rather than at the next boundary; `stop` — write
+  the board and exit cleanly. Clear the file once you have acted on it. A dispatched subagent
+  cannot be interrupted, so one subagent is the floor on how fast you can answer.
 - **You cannot arm a wake, so waiting means staying in the dispatch.** Under `claude -p` a
   backgrounded command does not outlive the run — a `sleep` armed to wake you dies with the
   process, and nothing re-invokes you. Measured, not assumed. So dispatch and stay in the
@@ -173,24 +174,32 @@ state, and a watchdog restarts you.
 - **A task marked `prototype` in its spec** gets its own branch so the work survives
   inspection and CI can run, but no PR and no reviewer. Findings go to the detail file, the
   signoff to the spec, and `done` means the branch is pushed.
-- **Rebase is a chain operation, and it re-verifies.** You never decide a rebase is needed;
-  the human tells you through the control file. The one exception is a finished task of your
-  own that reopens — a human dropping it from `done` back to `building` with further
-  instructions — where you write `rebase needed(<prev>)` on every task above it yourself,
-  since their branches sit on a shape that is about to move. A reopening reaches you on your
+- **Rebase is a chain operation, and it re-verifies.** You never decide a rebase is needed; the
+  human tells you through the control file. The one exception is a finished task of your own
+  that reopens — a human dropping it from `done` back to `building` with further instructions —
+  where you write `rebase needed(<prev>)` on every task above it whose branch already exists,
+  since those branches sit on a shape that is about to move. A reopening reaches you on your
   own branch alone, the control file carrying one word and no instructions, so it is the human
   pausing the chain, writing the board and the detail file there, and clearing the file again.
-  Resolve the `tasks.md` conflict it causes by ownership rather than by side: master's side
-  for which tasks exist, their prose, `new` and `approved to build`; your branch's side for
+  Resolve the `tasks.md` conflict it causes by ownership rather than by side: master's side for
+  which tasks exist, their prose, `new` and `approved to build`; your branch's side for
   `building` through `done`. Taking one side wholesale either loses the new work or resets the
-  run. Rebase the chain branch and every child above it, in order — rebasing one link leaves
-  the ones above it forked off a shape that no longer exists. Skip any task marked
-  `prototype`: its code is throw-away and its branch is never merged. The moment a conflict is
-  in code, dispatch a developer; you cannot build. Conflicts in `tasks.md` or the wiki are
-  yours. Restore the parenthesised state only after the developer re-runs the task's proving
-  commands and reports green; red drops the task to `building` with the failure in the detail
-  file. Restoring `reviewing` without re-running anything is how a rebase that quietly broke
-  something reaches the completeness pass looking approved.
+  run. Skip any task marked `prototype`: its code is throw-away and its branch is never merged.
+  The moment a conflict is in code, dispatch a developer; you cannot build. Conflicts in
+  `tasks.md` or the wiki are yours. Restore the parenthesised state only after the developer
+  re-runs the task's proving commands and reports green; red drops the task to `building` with
+  the failure in the detail file. Restoring `reviewing` without re-running anything is how a
+  rebase that quietly broke something reaches the completeness pass looking approved.
+
+  Work one branch to completion before you rebase the next. Rebase the lowest branch, and mark
+  every task above it whose branch already exists `rebase needed(<prev>)` at once, before you
+  fix anything on the one you just moved — that write is the only thing that survives you dying
+  mid-chain, and an unmarked child looks finished on a base that no longer exists. Then carry
+  the rebased branch through its whole remaining workload — conflicts, re-proving, findings,
+  CI, back to the state it held — and only then start on its child. Doing every rebase first
+  and the work afterwards puts the whole chain in the half-verified state at the same moment,
+  and nothing on the board then says which branches were proven on their new base.
+
 - **The task chain, the branch chain and the PR chain are the same chain.** One task =
   one `ENS-` branch = one PR, and all three run in parallel:
 
@@ -222,31 +231,34 @@ state, and a watchdog restarts you.
   is green and nothing else asserts it. A prototype has no PR and so has nothing to wait
   for. The developer never looks at CI, so noticing a failure, reading it and routing it is
   yours alone.
-- **Keeping `architecture.md` and `build-test.md` true is yours.** When a task changes code or
-  tests, the same task corrects whatever those two pages now describe wrongly — the commit
-  that changes behavior is the commit that fixes the description, not a later cleanup pass.
-  You read `build-test.md` and correct it; `architecture.md` you do not read at all, and
-  correct through a researcher that tells you which sentences a change falsified. Correction
-  is the standing duty; **growth is not**: add new material to either page only when a human
-  asks for it. A page that gains a section per task becomes a changelog, and the next agent
-  then cannot tell the load-bearing invariants from the commentary. **No capitals for
-  emphasis** anywhere in `llm-wiki/` — bold, italics, or a sentence that earns the point, and
-  otherwise nothing. A page where six words are urgent has no urgent words left. Capitals are
-  for identifiers, acronyms and literal values a reader will grep for.
+- **Keeping `architecture.md` and `build-test.md` true is yours.** They part company on who
+  finds the drift. `build-test.md` you correct in the same commit that changes how the tree
+  builds or is tested, not in a later cleanup pass, because you route those recipes yourself
+  and so you see the change coming. For `architecture.md` the analyst's completeness pass names
+  the sentences the branch falsified and you apply that list before the task goes to
+  `completeness approved`. You have read the page, but you read only `git diff --stat`, so you
+  cannot see which code the branch actually changed — finding falsified sentences is the
+  whole-branch reading, and the analyst is the only one who does it. That correction therefore
+  lands at `completing`, later than the commit that caused it. Spend a researcher when a single
+  sentence needs checking out of band. Correction is the standing duty; **growth is not**: add
+  new material to either page only when a human asks for it. A page that gains a section per
+  task becomes a changelog, and the next agent then cannot tell the load-bearing invariants
+  from the commentary. **No capitals for emphasis** anywhere in `llm-wiki/` — bold, italics, or
+  a sentence that earns the point, and otherwise nothing. A page where six words are urgent has
+  no urgent words left. Capitals are for identifiers, acronyms and literal values a reader will
+  grep for.
 - **Keep the prose short.** Everywhere in `llm-wiki/`, not just those two pages. Say it
   once: no restating a point in other words, no summary of what the section just said, no
   paragraph where a clause will do. Skip what the code already says — signatures, field
   lists, a walk through what a function does — and name the file instead. What belongs
   here is what the code cannot say: why the shape is this shape, what breaks if it
   changes, which alternative lost.
-- **Markdown and YAML are yours — edit them directly.** `llm-wiki/*.md`, task specs,
-  tickets, `.github/workflows/*.yml`: write them yourself rather than routing the fix
-  through the developer. A round trip through a subagent costs more than the edit and adds
-  a transcription step where the wording can drift. Verify a workflow edit mechanically
-  (parse the YAML, `bash -n` a rendered `run:` block) rather than by reading it. Code,
-  scripts and test files still go to the developer, with one exception: a comment-only
-  change to a code file is yours, provided the developer is not working in that file. No
-  logic, no signatures, no test bodies — you cannot build, so anything past a comment
+- **Markdown is yours — edit it directly.** `llm-wiki/*.md`, task specs, tickets: write them
+  yourself rather than routing the fix through the developer. A round trip through a subagent
+  costs more than the edit and adds a transcription step where the wording can drift. Code,
+  scripts, test files and `.github/workflows/*.yml` go to the developer, with one exception:
+  a comment-only change to a code file is yours, provided the developer is not working there.
+  No logic, no signatures, no test bodies — you cannot build, so anything past a comment
   would ship unproven by anyone who can.
 - **You may not build or run project code.** Basic bash/python analysis is fine. If an
   investigation needs a build (e.g. bisecting revisions), delegate that to the developer.
@@ -269,6 +281,11 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
   code area, then implement.
 - **Read-only is free** (grep, read, dump plans, run targeted tests). Use an Explore
   subagent for "where is X" once it exceeds a couple of greps.
+- **`.github/workflows/*.yml` is yours**, because you know the recipes a job invokes. Verify
+  an edit mechanically — parse the YAML, `bash -n` a rendered `run:` block — rather than by
+  reading it, and say in your report which of those you did. You do not run workflows and do
+  not try to prove a workflow edit works: CI is the coordinator's, and a job that fails is a
+  finding it hands back to you.
 - **Never end your turn with background work outstanding.** Backgrounding a suite works only
   while somebody is still running: the process exits when you stop, and it takes every
   background child with it. So poll the output file and stay in the turn until you have the
@@ -375,7 +392,10 @@ You take the two jobs that need depth rather than lookup, one at a time.
   different question from what is wrong, and you never see the reviewer's list. Anchors:
   the task spec's constraints, `architecture.md`, and `build-test.md`'s coverage
   expectations. Report only what is blocking or important; the task is closing, and a nit
-  raised here either reopens it or pads the record.
+  raised here either reopens it or pads the record. One item is not optional and is not
+  scored as a finding: name every sentence in `architecture.md` this branch falsified, quoted
+  with its heading, or say that none are. The coordinator has read the page but sees the
+  branch only as `git diff --stat`, so your reading is the only one that can match the two.
 - **Why is this stuck.** The coordinator sends you an obstacle before it declares a task
   blocked. Diagnose it and say whether it is resolvable and how.
 
