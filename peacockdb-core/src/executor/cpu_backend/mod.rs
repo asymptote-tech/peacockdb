@@ -10,10 +10,12 @@
 pub mod accumulate;
 pub mod backend;
 pub mod emit;
+pub mod expr_physical;
 pub mod join;
 mod merge_m2;
-pub mod source;
 mod single_node;
+pub mod source;
+mod spark_partitioning;
 
 use std::sync::Arc;
 
@@ -35,7 +37,6 @@ use datafusion::physical_plan::sorts::sort::SortExec;
 
 use single_node::execute_single_node;
 
-use super::expr_physical::{physical_expr, physical_projection};
 use crate::executor::CpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats, RowRange};
 use crate::plan::ColumnOrder;
@@ -45,6 +46,7 @@ use crate::plan::Schema;
 use crate::plan::{AggCall, PlanAgg};
 use crate::plan::{AggregateBody, Phase, finalize_columns, state_funcs};
 use crate::plan::{GpuAggregate, GpuFilter, GpuProject, GpuSort};
+use expr_physical::{physical_expr, physical_projection};
 
 /// One DataFusion node with its child left as a placeholder, and the columns this mode
 /// says it produces. [`execute_single_node`] replaces the children with the batches it is

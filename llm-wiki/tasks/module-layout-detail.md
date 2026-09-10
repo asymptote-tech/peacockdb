@@ -587,10 +587,24 @@ not fire; private inside `scan_mapping` it goes red immediately. Deleted rather 
 
 - It is the one entry in this slice's doc-and-attribute check, and the only prose lost.
 - It carried one of the residue gate's deliberate survivors — `gpu_rowgroup_prune.rs:151`'s
-  `scan-batch→partition` mapping site. **The gate now lands on six rather than seven, and the
-  composition is not the one the spec predicted**: three mapping sites rather than four, plus
-  `README.md`, `source.py` and `test_ci_coverage.rs:431`. The count matching the spec's expected
-  six is a coincidence of two changes, not the finish state.
+  `scan-batch→partition` mapping site.
+
+**The gate must be compared by composition, never by count.** The spec predicts it finishes on
+six: four `batch→partition` mapping sites plus `README.md` and `source.py`. It is on six now,
+and they are not those six. Name them:
+
+| Line | What it is |
+|---|---|
+| `cpp/src/node_session.cpp:220` | mapping site, deliberate |
+| `flatbuffers/gpu_plan.fbs:312` | mapping site, deliberate |
+| `flatbuffers/gpu_plan.fbs:346` | mapping site, deliberate |
+| `scripts/exec_model/README.md:371` | `ParquetBatchPartitioner`, the structure and not the mode |
+| `scripts/exec_model/operators/source.py:3` | the same |
+| `peacockdb-core/tests/test_ci_coverage.rs:431` | **task 2 residue**, and it goes when `batch_partitioned` does |
+
+The fourth mapping site is gone because it was the doc of the dead function this slice deleted,
+and the seventh line is still present. Two changes cancelling to the predicted number is the
+shape a reader who counts would call confirmation.
 
 #### `gpu_rowgroup_prune` loses its `gpu_`
 
@@ -643,3 +657,136 @@ helpers moving to `translate()`, the `plan_batch_partitioned` rename, and the ei
 | subcomponent reach | nothing outside `translator` names `scan_mapping`; nothing outside `planner` names its subcomponents |
 
 Visibility snapshot: `visibility-after-slice6.txt`, `visibility-items-after-slice6.txt`.
+
+### Slice 7 — the backends, and `batch_partitioned/` is gone
+
+Ready to commit. This is the last move. `peacockdb-core/src` is now `common.rs`, `lib.rs` and
+six component directories, and the name `batch_partitioned` appears nowhere in the tree.
+
+#### The gate finally reads the whole crate
+
+Task 1's residue gate has never once read `peacockdb-core/src`: the `':!peacockdb-core/src'`
+exclusion existed only to spare the directory this slice deletes. Run without it, and with the
+four survivor spellings now absent so the whole-line exclusion matches nothing, it lands on
+**five**, and the composition is what matters:
+
+| Line | What it is |
+|---|---|
+| `cpp/src/node_session.cpp:220` | mapping site, deliberate |
+| `flatbuffers/gpu_plan.fbs:312` | mapping site, deliberate |
+| `flatbuffers/gpu_plan.fbs:346` | mapping site, deliberate |
+| `scripts/exec_model/README.md:371` | `ParquetBatchPartitioner`, the structure and not the mode |
+| `scripts/exec_model/operators/source.py:3` | the same |
+
+`test_ci_coverage.rs:431` is gone: its assert message named "the inline `#[cfg(test)]` modules
+(batch_partitioned, config)", and neither module exists. It now names the count instead.
+
+**Three residues the gate could not see, and why.** `driver/partitioned.rs`'s module doc said
+`batch_partitioned_driver` and two comments in `schema_tests.rs` said `plan_batch_partitioned`.
+Both spellings are in the gate's *survivor* list — deliberate for task 1, residue for this one —
+and the strip-and-rematch found nothing else on those lines, so it stayed quiet. Found by
+grepping for `batch_partitioned` directly once the directory was gone. **The survivor list is
+what has to shrink as each spelling is retired; a gate whose exclusions outlive their reason is
+a gate with a hole in the shape of its own history.** The list now matches nothing, and is kept
+rather than deleted so the next reader can see it never fires.
+
+#### The exception this slice cannot avoid: `pub mod cpu_backend` / `pub mod gpu_backend`
+
+`test_cpu_executors` and `test_gpu_executors` construct backend executors directly — 14 types
+across `cpu_backend::{accumulate,backend,emit,join,source}` and
+`gpu_backend::{accumulate,backend,emit,join}` — and a separate crate cannot reach a private
+subcomponent. The rules leave three ways out and each breaks something:
+
+| | Cost |
+|---|---|
+| `pub mod cpu_backend;` | breaks "a subcomponent is declared `mod`, not `pub mod`"; no code moves |
+| declare the 14 types in `executor/mod.rs`, impls stay | breaks "a struct keeps its inherent `impl` in `mod.rs`"; drags `Calls`, `JoinCall`, `Stage` and `HeldBytes` up with them, as `PlanIndex` dragged `PlanShape` |
+| the full hoist | breaks nothing; converts 55 multi-statement inherent methods, **23 of them `&mut self` executor state machines on the per-batch path**, and the GPU half has no test this host can run |
+
+Taken the first. It is one line each, reversible, and its expiry is named in the spec:
+`test-layout.md` moves both targets into `src/` and the exemption goes with them. The comment
+in `executor/mod.rs` says so, and the layout test must list both by name rather than tolerate a
+pattern. The third option is the one the rules ask for and it can be done later at leisure;
+undoing a bad mechanical rewrite of the executors cannot.
+
+Everything inside those two directories that is genuinely unreachable was still narrowed:
+`spark_partitioning::rows_per_lane`, `merge_m2::{NAME, udaf}` — all in `mod`-private modules.
+
+#### The one inventory change in the whole task
+
+The spec says the case inventory comes back byte-identical, and it has for six slices. It does
+not here, and the spec is what changes it: `config.rs` is dismantled, so its two unit tests go
+with it. Measured rather than assumed:
+
+| | Baseline | Now |
+|---|---|---|
+| `--lib` | 437 | 435 |
+| `test_golden_format` | 24 | 26 |
+
+The two lib cases were `config::tests::{labels_round_trip, tiers_are_strictly_increasing}`, and
+both covered `MemoryLimit` as much as the deleted `TargetPartitions`. `MemoryLimit` survives, so
+its coverage had to: the two cases are now `test_golden_format::{every_tier_label_round_trips,
+tiers_are_strictly_increasing}`. Not beside the type in `tests/common/memory_limit.rs`, because
+`common` is compiled into every integration target and the cases would multiply by eighteen.
+`TargetPartitions`' own label round-trip is the only coverage genuinely gone, with the type.
+
+Net zero cases. `inv-{rust-only,cudf}-after-slice7.txt` are the new baseline.
+
+**A trap in reading that diff.** A `--lib` case line begins with `--lib`, so in `diff` output a
+removed one reads `---lib` and an added one `+--lib` — and a `grep '^[+-][^+-]'` filter drops
+every one of them. The first summary this produced showed only the `test_golden_format`
+additions and looked like a pure gain. Compare with `comm` on sorted files, not by eye over a
+diff.
+
+#### `config.rs`, `memory.rs`, `spark_partitioning.rs`
+
+- `config.rs` is gone. `MemoryLimit` is `tests/common/memory_limit.rs`, beside `mode.rs` —
+  **not `bp_mode.rs`, which the spec names; task 1 renamed it.** The first draft of that file's
+  header copied the spec's stale name and the `\bbp[-_]` gate caught it, which is the one time
+  in this task that gate has fired.
+- `memory.rs` is `src/common.rs`, the row-byte formula four components price by. It names no
+  FFI type, which is what lets it compile in every shape — the breach the spec warns about
+  would show as a rust-only link failure and does not.
+- `spark_partitioning.rs` is `executor/cpu_backend/spark_partitioning.rs` and is now private:
+  its only caller is `cpu_backend/emit.rs`.
+
+#### `lib.rs` gains the engine's module doc
+
+`batch_partitioned/mod.rs` carried "The engine: a lane holds a stream of batches rather than one
+resident table" and the sentence naming the vocabulary. Deleting the file would have deleted
+both — the doc-and-attribute check is what noticed — so `lib.rs` now opens with them, rewritten
+around the six components.
+
+#### The fourth cudf-only break did not happen
+
+Three of the previous four slices had one. This one built clean in all three shapes first time,
+which is worth recording as the thing that makes the three-build rule cheap: it is not that the
+rule never pays, it is that it costs nothing when it does not.
+
+#### Evidence
+
+| Check | Result |
+|---|---|
+| `--lib` | 435 passed |
+| `test_plan_goldens` | 19 passed |
+| `test_cpu_corpus` | 448 passed |
+| `test_cpu_end_to_end` | 24 passed, 2 ignored |
+| `test_ci_coverage` / `test_corpus_goldens` / `test_cost_model` / `test_golden_format` | 7 / 20 / 3 / 26 passed |
+| `test_layout_injection` / `test_null_analysis` / `test_planner_join_{capability,refusals}` / `test_cpu_executors` | 4 / 8 / 13 / 10 / 1 passed |
+| three builds | 0 warnings each, first attempt |
+| goldens | byte-identical to `goldens-after-rename.sha256` |
+| case inventory | the one authorized change above, net zero cases |
+| doc and attribute sentences | 15 absent, all accounted: 11 from the deleted `config.rs`, 3 reworded stale names, 1 carried into `lib.rs` |
+| residue gate, unexcluded, whole crate | five lines, named above |
+| rename detection | every moved file 0.98 or better; `config.rs` 0.49 because it was dismantled |
+| `pub use` / `pub(super)` | 0 and 6, the six all inside the two exempt backend directories |
+| bare `pub` outside a `mod.rs` | `lib.rs` (8, the crate's own surface), `common.rs` (2), and 25 inside the two exempt directories — nowhere else |
+
+Snapshots: `visibility-after-slice7.txt`, `visibility-items-after-slice7.txt`,
+`doc-sentences-after-slice7.txt`, `inv-{rust-only,cudf}-after-slice7.txt`.
+
+#### One drift found in `build-test.md`, not introduced here
+
+Its header claims 1,562 cases and says it is the sum of the N column. The column sums to
+**1,558**, both at `accf25f0` and now — my two edits to it cancel. Pre-existing, and the spec
+gives that table to `test-layout.md`, so it is reported rather than fixed.

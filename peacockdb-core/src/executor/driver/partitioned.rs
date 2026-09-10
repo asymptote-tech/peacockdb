@@ -1,4 +1,4 @@
-//! `batch_partitioned_driver` — the tree, the queues, the schedule, and everything
+//! [`run`](crate::executor::run) — the tree, the queues, the schedule, and everything
 //! cross-partition.
 //!
 //! One step runs every lane of the node the schedule picked: smallest height, ties

@@ -1,11 +1,16 @@
-pub mod batch_partitioned;
-pub mod config;
+//! The engine: a lane holds a stream of batches rather than one resident table.
+//!
+//! Six components, each of which is its own `mod.rs` and nothing else. `plan` is the
+//! vocabulary — the nodes, the layout and schema they declare, and the rules a tree has to
+//! satisfy. `wire` is what crosses to the C++ side. `planner` builds a plan, `executor` runs
+//! one, and `plan_text` renders any of it. `common` is the row-byte formula all four price
+//! by. The reasons behind each shape are in `llm-wiki/architecture.md`.
+
+pub mod common;
 pub mod executor;
-pub mod memory;
 pub mod plan;
 pub mod plan_text;
 pub mod planner;
-pub mod spark_partitioning;
 pub mod wire;
 
 use std::path::{Path, PathBuf};

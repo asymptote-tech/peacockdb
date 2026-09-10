@@ -16,14 +16,14 @@ use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::execution::TaskContext;
 use datafusion::execution::context::SessionContext;
 
-use peacockdb_core::batch_partitioned::cpu_backend::accumulate::{
+use peacockdb_core::executor::cpu_backend::accumulate::{
     CpuAccumulator, CpuPartitionAccumulator,
 };
-use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
-use peacockdb_core::batch_partitioned::cpu_backend::emit::CpuEmitter;
-use peacockdb_core::batch_partitioned::cpu_backend::join::{CpuJoin, CpuProbingJoin};
-use peacockdb_core::batch_partitioned::cpu_backend::source::CpuSource;
-use peacockdb_core::batch_partitioned::cpu_backend::{CpuExec, CpuUnload};
+use peacockdb_core::executor::cpu_backend::backend::CpuBackend;
+use peacockdb_core::executor::cpu_backend::emit::CpuEmitter;
+use peacockdb_core::executor::cpu_backend::join::{CpuJoin, CpuProbingJoin};
+use peacockdb_core::executor::cpu_backend::source::CpuSource;
+use peacockdb_core::executor::cpu_backend::{CpuExec, CpuUnload};
 use peacockdb_core::executor::CpuBatch;
 use peacockdb_core::executor::{Backend, NodeExecutors};
 use peacockdb_core::executor::{

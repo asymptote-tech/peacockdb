@@ -6,11 +6,11 @@
 //! is asked here instead.
 
 use super::*;
-use crate::batch_partitioned::cpu_backend::accumulate::CpuAccumulator;
-use crate::batch_partitioned::cpu_backend::backend::CpuBackend;
-use crate::batch_partitioned::cpu_backend::join::CpuJoin;
 use crate::executor::Backend;
 use crate::executor::Executor;
+use crate::executor::cpu_backend::accumulate::CpuAccumulator;
+use crate::executor::cpu_backend::backend::CpuBackend;
+use crate::executor::cpu_backend::join::CpuJoin;
 use crate::plan::RowInterval;
 use crate::plan::{ColumnOrder, PartitionLayout};
 use crate::plan::{

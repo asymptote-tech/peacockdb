@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every sentence of documentation, and every attribute, in peacockdb-core/src.
+"""Every sentence of documentation, and every attribute, in peacockdb-core/{src,tests}.
 
 Why this exists. Hoisting an item into a facade can leave the `///` block and the `#[…]`
 above it behind, and nothing goes red: the build is clean, the tests pass, the goldens do not
@@ -21,6 +21,10 @@ import re
 import subprocess
 import sys
 
+# Both trees: this task moves code from one into the other, and a checker that reads only
+# `src` reports such a move as a deletion.
+ROOTS = ["peacockdb-core/src", "peacockdb-core/tests"]
+
 MARKER = re.compile(r"^\s*(///|//!|//)\s?")
 ATTR = re.compile(r"^\s*#\[")
 
@@ -29,10 +33,11 @@ def files(rev):
     if rev is None:
         # The working tree, not the index: half of what this task moves is untracked and half
         # of what the index still lists is gone from disk.
-        for f in sorted(pathlib.Path("peacockdb-core/src").rglob("*.rs")):
-            yield f.read_text()
+        for root in ROOTS:
+            for f in sorted(pathlib.Path(root).rglob("*.rs")):
+                yield f.read_text()
         return
-    out = subprocess.run(["git", "ls-tree", "-r", "--name-only", rev, "--", "peacockdb-core/src"],
+    out = subprocess.run(["git", "ls-tree", "-r", "--name-only", rev, "--", *ROOTS],
                          capture_output=True, text=True).stdout
     for f in out.split():
         if f.endswith(".rs"):

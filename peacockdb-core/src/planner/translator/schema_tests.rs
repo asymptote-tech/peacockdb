@@ -322,7 +322,7 @@ async fn a_pass_through_node_carries_its_inputs_own_schema() {
     ));
 }
 
-/// The planner end to end, through `plan_batch_partitioned` rather than through a rule
+/// The planner end to end, through `planner::plan` rather than through a rule
 /// called directly: the two tests below are what pins that validation is wired into it at
 /// all — every other test here calls the translator or a node's own check.
 async fn planned(sql: &str, target_partitions: usize) -> Result<(), crate::plan::PlanError> {
@@ -361,8 +361,8 @@ async fn a_limit_inside_a_limit_plans() {
 #[tokio::test]
 async fn the_planner_refuses_a_tree_its_validation_rejects() {
     // A merge over batches nobody sorted. DataFusion never emits this shape, so it is
-    // built by hand — and the point is where the refusal comes from: `plan_batch_partitioned`
-    // itself, not `validate` called directly. Deleting the call from the planner turns this
+    // built by hand — and the point is where the refusal comes from: `planner::plan` itself,
+    // not `validate` called directly. Deleting the call from the planner turns this
     // red and nothing else.
     use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
     use datafusion::physical_plan::expressions::Column;

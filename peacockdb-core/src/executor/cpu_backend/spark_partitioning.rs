@@ -30,7 +30,7 @@ fn pmod(hash: i32, n: i32) -> i32 {
 }
 
 /// The rows of `batch` that belong to each of `lanes` lanes, in row order.
-pub fn rows_per_lane(
+pub(crate) fn rows_per_lane(
     batch: &RecordBatch,
     hash_exprs: &[Arc<dyn PhysicalExpr>],
     lanes: usize,

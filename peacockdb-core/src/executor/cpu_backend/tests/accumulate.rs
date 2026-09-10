@@ -5,8 +5,8 @@
 //! expected answer is hand-computed.
 
 use super::*;
-use crate::batch_partitioned::cpu_backend::accumulate::{CpuAccumulator, CpuPartitionAccumulator};
 use crate::executor::LaneEvent;
+use crate::executor::cpu_backend::accumulate::{CpuAccumulator, CpuPartitionAccumulator};
 use crate::plan::RowInterval;
 use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregateBatches, GpuCoalesceAllBatches, GpuLimit,

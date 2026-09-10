@@ -1,7 +1,7 @@
 //! [`CpuBatch`](super::CpuBatch)'s side of [`Batch`](super::Batch).
 
 use super::{Batch, CpuBatch};
-use crate::memory::{batch_varlen_content_bytes, logical_size_from_schema};
+use crate::common::{batch_varlen_content_bytes, logical_size_from_schema};
 
 impl Batch for CpuBatch {
     fn num_rows(&self) -> usize {

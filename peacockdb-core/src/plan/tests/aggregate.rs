@@ -4,7 +4,7 @@
 //! about the rule rather than about either reader.
 
 use super::*;
-use crate::batch_partitioned::expr_physical::physical_expr;
+use crate::executor::cpu_backend::expr_physical::physical_expr;
 use crate::plan::AggStateColumns;
 use crate::plan::{AggSpec, decomposition, finalize};
 use crate::plan::{finalize_columns, key_width, state_funcs};

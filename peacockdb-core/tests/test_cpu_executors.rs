@@ -18,9 +18,9 @@ use datafusion::execution::context::SessionContext;
 
 use peacockdb_core::executor::CpuBatch;
 use peacockdb_core::plan::{AggCall, PlanAgg};
-use peacockdb_core::batch_partitioned::cpu_backend::CpuExec;
-use peacockdb_core::batch_partitioned::cpu_backend::accumulate::CpuAccumulator;
-use peacockdb_core::batch_partitioned::cpu_backend::emit::CpuEmitter;
+use peacockdb_core::executor::cpu_backend::CpuExec;
+use peacockdb_core::executor::cpu_backend::accumulate::CpuAccumulator;
+use peacockdb_core::executor::cpu_backend::emit::CpuEmitter;
 use peacockdb_core::plan::{BinaryOp, Expr, NamedExpr};
 use peacockdb_core::plan::{
     BatchLayout, ColumnOrder, NodeKind, PartitionLayout,

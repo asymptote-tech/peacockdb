@@ -16,7 +16,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
 
-use super::super::expr_physical::physical_projection;
+use super::expr_physical::physical_projection;
 use super::{aggregate_exec, declared_as, lex_ordering, placeholder, run_node};
 use crate::executor::CpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats, LaneEvent};

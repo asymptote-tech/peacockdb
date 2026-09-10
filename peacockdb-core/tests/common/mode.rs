@@ -6,7 +6,7 @@
 //! needs someone to remember to write one, and nothing reddens if they do not. There is
 //! nothing to copy from instead.
 
-use peacockdb_core::config::MemoryLimit;
+use super::memory_limit::MemoryLimit;
 use peacockdb_core::planner::{BatchSizing, PlanKnobs};
 
 /// The tier every mode is planned at. The plan goldens are written here, so a failure

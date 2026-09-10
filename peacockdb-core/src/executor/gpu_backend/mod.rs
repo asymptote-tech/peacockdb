@@ -27,7 +27,7 @@ use peacockdb_ffi::raw::{
     peacock_result_free, peacock_result_from_handle,
 };
 
-use crate::memory::logical_size_from_schema;
+use crate::common::logical_size_from_schema;
 
 use crate::executor::CpuBatch;
 use crate::executor::GpuBatch;

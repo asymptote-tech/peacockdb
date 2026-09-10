@@ -8,6 +8,7 @@
 mod common;
 
 use common::golden_text::{ordered_sections, parse_node_line, section_differences};
+use common::memory_limit::MemoryLimit;
 
 // --- the section comparator --------------------------------------------------
 
@@ -463,4 +464,32 @@ fn the_sectioned_cost_fixture_reads_the_same_from_this_side() {
     };
     assert_eq!(total("q6"), 54_772_928);
     assert_eq!(total("q14"), 28_000_000);
+}
+
+// --- the budget tier a mode name carries -------------------------------------
+
+// `MemoryLimit`'s two cases, which used to sit in the crate's `config.rs`. That file is
+// gone and the type moved to `tests/common/`; a `#[cfg(test)] mod tests` beside it would
+// compile into every integration target, so the cases live in one of them instead. Here
+// because a tier label is part of the mode name a golden filename is built from.
+
+#[test]
+fn every_tier_label_round_trips() {
+    for m in [
+        MemoryLimit::Micro,
+        MemoryLimit::Mini,
+        MemoryLimit::Standard,
+        MemoryLimit::Full,
+    ] {
+        assert_eq!(MemoryLimit::from_label(m.label()), Some(m));
+    }
+    // The retired pre-tier label spelling must NOT resolve.
+    assert_eq!(MemoryLimit::from_label("mem2gib"), None);
+}
+
+#[test]
+fn tiers_are_strictly_increasing() {
+    assert!(MemoryLimit::Micro.bytes() < MemoryLimit::Mini.bytes());
+    assert!(MemoryLimit::Mini.bytes() < MemoryLimit::Standard.bytes());
+    assert!(MemoryLimit::Standard.bytes() < MemoryLimit::Full.bytes());
 }

@@ -23,9 +23,9 @@ use datafusion::logical_expr::{
 
 /// What this aggregate is called. Ours rather than DataFusion's: nothing in a session
 /// registers it, and the CPU backend hands the definition to the aggregate it builds.
-pub const NAME: &str = "merge_m2";
+pub(crate) const NAME: &str = "merge_m2";
 
-pub fn udaf() -> Arc<AggregateUDF> {
+pub(crate) fn udaf() -> Arc<AggregateUDF> {
     Arc::new(AggregateUDF::from(MergeM2::new()))
 }
 

@@ -6,7 +6,7 @@
 //! probe keys and answer at done rather than per call.
 
 use super::*;
-use crate::batch_partitioned::cpu_backend::join::CpuJoin;
+use crate::executor::cpu_backend::join::CpuJoin;
 use crate::plan::PartitionLayout;
 use crate::plan::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
 use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};

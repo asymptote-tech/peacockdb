@@ -5,7 +5,7 @@
 
 use super::*;
 
-use peacockdb_core::batch_partitioned::gpu_backend::accumulate::{
+use peacockdb_core::executor::gpu_backend::accumulate::{
     GpuAccumulator, GpuPartitionAccumulator,
 };
 use peacockdb_core::executor::LaneEvent;

@@ -31,7 +31,7 @@ use peacockdb_core::executor::RowRange;
 
 use peacockdb_core::plan::{BinaryOp, Expr, NamedExpr};
 
-use peacockdb_core::batch_partitioned::gpu_backend::{GpuExec, GpuExport};
+use peacockdb_core::executor::gpu_backend::{GpuExec, GpuExport};
 
 use peacockdb_core::plan::ColumnOrder;
 

@@ -916,7 +916,7 @@ of its own (below).
 **[`TableResult` / `NodeStats`](../cpp/src/plan_executor.h)** — the two value types every C++
 path returns. `NodeStats` carries only what C++ alone can measure — rows, var-length content
 bytes, and a time that is zero unless timing is on. The byte formula itself lives in Rust
-(`memory.rs`) so the two engines cannot drift.
+(`common.rs`) so the two engines cannot drift.
 
 **[`NodeInputs` and the operator dispatch](../cpp/src/peacock/operators.h)** — the contract
 every operator translation unit shares: one `execute_*` per wire node kind, plus `take_input`
@@ -965,10 +965,10 @@ cuDF exposes standard murmur3, which differs from Spark's spec in multi-column c
 handling.
 
 So placement is identical by construction rather than by agreement. The CPU side calls comet's
-`create_murmur3_hashes` (`spark_partitioning.rs`), the GPU side owns a bit-exact kernel
-(`spark_hash_partition.cu`) and reuses cuDF only for the scatter, and a live gate
-(`peacock_spark_partition_ids`, `test_inc2_conformance.rs`) proves the two agree over the same
-bytes.
+`create_murmur3_hashes` (`executor/cpu_backend/spark_partitioning.rs`), the GPU side owns a
+bit-exact kernel (`spark_hash_partition.cu`) and reuses cuDF only for the scatter, and a live
+gate (`peacock_spark_partition_ids`, `test_inc2_conformance.rs`) proves the two agree over the
+same bytes.
 
 ## C++ executor layout
 

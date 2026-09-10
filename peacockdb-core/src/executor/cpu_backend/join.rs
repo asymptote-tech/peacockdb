@@ -23,7 +23,7 @@ use datafusion::physical_plan::joins::{
 };
 use datafusion::physical_plan::projection::ProjectionExec;
 
-use super::super::expr_physical::physical_expr;
+use super::expr_physical::physical_expr;
 use super::{declared_as, placeholder, run_node};
 use crate::executor::CpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats};

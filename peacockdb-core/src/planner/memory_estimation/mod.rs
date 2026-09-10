@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use datafusion::arrow::datatypes::{Fields, Schema as ArrowSchema};
 
 use super::{MIN_TARGET_BATCH_BYTES, MemoryModel, SourceEstimate};
-use crate::memory::logical_size_from_schema;
+use crate::common::logical_size_from_schema;
 use crate::plan::GpuNode;
 use crate::plan::NodeKind;
 use crate::plan::PlanError;

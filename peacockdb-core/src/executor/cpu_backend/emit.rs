@@ -13,7 +13,7 @@ use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_expr::expressions::Column;
 
-use crate::spark_partitioning::rows_per_lane;
+use super::spark_partitioning::rows_per_lane;
 
 use crate::executor::CpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats};

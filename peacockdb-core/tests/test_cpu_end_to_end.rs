@@ -16,7 +16,7 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::DataType;
 use datafusion::execution::context::SessionContext;
 
-use peacockdb_core::batch_partitioned::cpu_backend::backend::CpuBackend;
+use peacockdb_core::executor::cpu_backend::backend::CpuBackend;
 use peacockdb_core::executor::{RunError, When};
 use peacockdb_core::executor::{RunReport, run};
 use peacockdb_core::plan::GpuNode;

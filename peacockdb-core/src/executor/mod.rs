@@ -17,6 +17,15 @@ mod errors;
 mod forwarder;
 mod row_range;
 
+// `pub mod`, which no other subcomponent in the crate is, and it is temporary. Two
+// integration targets construct backend executors directly — `test_cpu_executors` and
+// `test_gpu_executors` — and a separate crate cannot reach a private subcomponent. They are
+// two of the eleven `test-layout.md` moves into `src/`, and this goes with them. The layout
+// test lists both by name so the exception cannot spread quietly.
+pub mod cpu_backend;
+
+#[cfg(not(feature = "rust-only"))]
+pub mod gpu_backend;
 #[cfg(not(feature = "rust-only"))]
 mod gpu_batch;
 
