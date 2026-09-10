@@ -974,8 +974,8 @@ It matters because a test binary is built on one host and run on another: remote
 binaries, goldens and data but never source, so a compile-time path is a path the remote does
 not have. `tests/common/mod.rs testdata_root()` solves that by honouring `PEACOCK_TESTDATA_DIR`
 first, which `build-test.sh` sets for remote runs. The residual is the crate's own unit tests
-— six sites under `peacockdb-core/src/` reaching `tpch.minimal`, in `memory_estimation/`,
-`scan_mapping/parquet_meta.rs`, `plan_text/mod.rs` and `translator/{tests,schema_tests}.rs` — which is
+— five files under `peacockdb-core/src/` reaching `tpch.minimal`: `planner/memory_estimation.rs`,
+`scan_mapping/parquet_meta.rs`, `plan_text/tests.rs` and `translator/{tests,schema_tests}.rs` — which is
 exactly why a remote CPU host needs a `/media/data/peacockdb` symlink and why `--gpu` runs,
 which set the env var, do not.
 
