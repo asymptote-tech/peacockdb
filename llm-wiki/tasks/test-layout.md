@@ -211,9 +211,15 @@ Three layers, and only the first is discipline.
   which is how test code creeps back into a production file one item at a time — `coding-style.md`
   now says why the attribute cannot double as a `dead_code` silencer, and roughly twenty item-level
   uses across seven files answer to that, not the four this spec once named. `planner::translate`
-  and `executor::physical_expr` are the documented pair: production entry points with only test
-  callers, which become plain `pub(crate)` and carry `#[allow(dead_code)]` with the reason, since a
-  test in `plan_text` cannot reach `planner::translator` and that is why they exist. A name and a
+  and `executor::physical_expr` are the documented pair, and both are **kept**: they are production
+  entry points whose only callers are tests, so they lose the `cfg` and carry `#[allow(dead_code)]`
+  with the reason written at the site. `translate` earns it because the shipping path cannot
+  substitute — its doc says it hands back a tree "without the pipeline around it: no validation, no
+  null analysis and no memory model", which is precisely what a test asserting on an unvalidated
+  tree needs and what `plan()` will never return. `physical_expr` earns it because a test in `plan`
+  cannot name `cpu_backend`'s internals, which is the same wall the rest of this task raises. The
+  difference from the `cfg` is the point: the item stays compiled and type-checked in a release
+  build, so it cannot rot unnoticed; only the warning goes. A name and a
   gate that disagree at either rung — `ffi_tests` without `not(rust-only)`, `gpu_tests` without `gpu`,
   or either gate on a module named `tests` — since the runs select by path and a mismatch either
   loses a case or drags it onto the wrong host; `driver/partitioned.rs` carries four

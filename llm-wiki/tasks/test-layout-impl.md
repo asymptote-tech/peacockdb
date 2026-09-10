@@ -313,9 +313,19 @@ Expected: `cfg_test_appears_only_on_a_test_module` FAILS naming
 attributes. The other three pass vacuously today; there are no `ffi_tests` or `gpu_tests` modules
 yet.
 
-- [ ] **Step 3: Fix the four item-level gates**
+- [ ] **Step 3: Answer the item-level gates, and there are about twenty, not four**
 
-Move each gated item into the `mod tests` that uses it. Re-run: all four assertions pass.
+Two kinds, and they part different ways. **Test code hiding in a production file** — fixtures and
+helpers, `executor/driver/partitioned.rs`'s four among them — moves into the `mod tests` that uses
+it. **A production entry point whose only caller is a test** — `planner::translate`,
+`executor::physical_expr`, and whatever else the guard names in `planner/mod.rs`,
+`planner/translator/mod.rs`, `cpu_backend/mod.rs` and `plan/mod.rs` — loses the `cfg`, stays
+`pub(crate)`, and takes `#[allow(dead_code)]` with the reason at the site: which test needs it and
+why the shipping path cannot serve. It then stays compiled and type-checked in a release build,
+which is the whole difference from the attribute it drops.
+
+Re-run: all five assertions pass, and `cargo build --features rust-only -p peacockdb-core` reports
+no new warnings against Task 1's baseline.
 
 - [ ] **Step 4: Red-watch each new rule by construction**
 
