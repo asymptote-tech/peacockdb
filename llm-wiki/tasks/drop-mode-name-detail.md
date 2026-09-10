@@ -114,3 +114,40 @@ against the same commit with the same hazard called out: `RunError`'s two displa
 user-visible, the corpus goldens carry quarantined refusal lines, and a golden that moves is a
 finding rather than a regeneration. Same finish condition: on green, reword `a7d690e6` off WIP,
 write the signoff into the spec, set the board to `done`.
+
+## Restart of 2026-09-09 (third) — the dispatch is narrowed rather than repeated
+
+Two dispatches to prove `a7d690e6` have now died with their coordinator run, and nothing new
+reached the branch or this file after `8a7e0f25`. Both were handed the spec's whole Validation
+section as their command list, which is the full pipeline including the device tier — hours
+inside one call, with the coordinator holding the dispatch open the whole time. Repeating it a
+third time repeats the shape that failed. So this run establishes the hazard by grep first, and
+sends the developer a bounded list.
+
+**The golden hazard is not live.** The two reworded arms are `RunError`'s `Protocol` and
+`CallFailed` display strings. `git grep --untracked -iE 'protocol violation|call failed'` over
+the tree outside `llm-wiki` returns only `peacockdb-core/src` — comments, the two arms
+themselves, and test matches on the inner `said` payload, never on the display prefix. No file
+under `testdata/` carries either string. The quarantined refusal lines in the ten `.plans.txt`
+goldens come from `PlanError` at `error.rs:20` and `translate/mod.rs:221`, which this commit
+does not touch. So no golden can move, and the device tier is not the first reader of anything
+here.
+
+**The three gates are at the documented finish on `a7d690e6`**, re-run by hand under
+`LC_ALL=C.UTF-8`: gate 1 lands on the six deliberate survivors, the `peacockdb-core/src`-scoped
+form with survivor spellings stripped per line lands on the one mapping site
+(`gpu_rowgroup_prune.rs:151`), and gates 2 and 3 are empty. The four llm-wiki `bp` residues are
+gone bar `tasks.md:43`, which is the board describing the abbreviation the task removes — same
+exemption as the four specs. The free-ticket counter reads 198.
+
+**What the developer is asked to prove**, and nothing beyond it: a clean build on both feature
+sets against the recorded warning count; the lib tests over `batch_partitioned` (the `error`,
+`driver` and `parquet_meta` cases, the last because the commit renames a temp dir); a
+`UPDATE_CANONICAL=1` regen of the plan goldens and the cpu corpus tier with an empty `git diff`
+after it, `PEACOCK_REWRITE_RECIPE_BYTES` never set; and `test_ci_coverage`. The device tier is
+deliberately left to CI: the commit reaches no device path and no golden filename, and `done`
+already waits on the PR being green, so the device claim is made by the pipeline rather than by
+a dispatch long enough to die again.
+
+On green: reword `a7d690e6` off WIP, force-push (remote is still at the pre-residue `7ed0bcf9`),
+write the signoff into the spec, set the board to `done`, and wait for CI on #141.
