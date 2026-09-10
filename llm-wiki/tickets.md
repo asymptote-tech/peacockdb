@@ -784,16 +784,17 @@ Every gtest main reserved 85% of *free* VRAM, so a second process on the card go
 left and died in `pool_memory_resource` with `std::bad_alloc`, always in whichever started second.
 
 **Tentatively closed**, by two changes. `15209636` gave `gpu-tests` `concurrency: {group:
-shad-gpu, cancel-in-progress: false}` (`pipeline.yml:448`), so our own runs queue instead of
-overlapping. Then each binary took a measured byte budget beside its `main()` — 69 GiB for
-`peacock_tpch_tests`, 30 for `peacock_tpchv_tests`, 1 GiB each for the other two — so two of ours
-fit on a 139.7 GiB device. Measured: two `peacock_tpchv_tests` at once, both pooled, both green.
+shad-gpu, cancel-in-progress: false}`, so our own runs queue rather than overlap. Then each binary
+took a measured byte budget beside its `main()` — 69 GiB for `peacock_tpch_tests`, 30 for
+`peacock_tpchv_tests`, 1 GiB each for the other two — so two of ours fit a 139.7 GiB device. Two
+`peacock_tpchv_tests` at once: both pooled, both green.
 
 It cannot be proven closed from here: the host is shared with work outside this repo, and a
-stranger holding a third of the card still fails us (2026-09-10). **If a GPU tier fails with
-`std::bad_alloc` in `pool_memory_resource`: add a dated line here naming the run and the binary,
-re-run the job once, and do not debug it.** The evidence accumulates here until it says whether
-the sizing was wrong or the neighbour was greedy.
+stranger holding a third of the card still fails us (2026-09-10). **The pool line says whose
+failure it is.** `[rmm] pool of N GiB could not be built` is a neighbour — date a line here naming
+the run and the binary, re-run once, and do not debug it. A pool that *was* built and a test that
+then dies with `Maximum pool size exceeded` is ours: the budget is too small, it reproduces every
+time, and a re-run buys nothing.
 
 <a id="t176"></a>
 ### #176 — the CI coverage guard checks one direction only

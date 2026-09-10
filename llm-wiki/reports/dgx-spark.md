@@ -68,7 +68,7 @@ pages to the OS. Whole-table q6 load, by allocator condition:
 
 | condition | load |
 |---|--:|
-| pool, 25% of free reserved (default) | 337-353 ms |
+| pool, 25% of free reserved (the default then) | 337-353 ms |
 | pool, 60% reserved (growth impossible) | 338-346 ms |
 | pool, 5% reserved (growth forced) | 1762-1777 ms |
 | no pool | 850-857 ms |

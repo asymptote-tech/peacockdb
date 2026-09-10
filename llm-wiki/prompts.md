@@ -237,12 +237,13 @@ state, and a watchdog restarts you.
   is green and nothing else asserts it. A prototype has no PR and so has nothing to wait
   for. The developer never looks at CI, so noticing a failure, reading it and routing it is
   yours alone.
-- **A GPU tier that dies in `pool_memory_resource` is a neighbour, not a bug.** shad-gpu is shared
-  with work outside this repo, so `std::bad_alloc` from an RMM pool means somebody else was holding
-  the card. Add a dated line to [#178](tickets.md#t178) naming the run and the binary, re-run the
-  job once, and do not debug it — the evidence accumulates on the ticket until it says whether our
-  sizing is wrong or the neighbour was greedy. A dispatch spent diagnosing a machine we do not own
-  is a dispatch lost.
+- **A GPU tier that cannot build its pool is a neighbour, not a bug.** shad-gpu is shared with work
+  outside this repo, so `[rmm] pool of N GiB could not be built` means somebody else was holding the
+  card. Add a dated line to [#178](tickets.md#t178) naming the run and the binary, re-run the job
+  once, and do not debug it — a dispatch spent diagnosing a machine we do not own is a dispatch
+  lost. The opposite failure is ours and reproduces every time: a pool that *was* built and a test
+  that then dies with `Maximum pool size exceeded` means that binary's declared budget is too
+  small, and it goes to a developer rather than onto the ticket.
 - **Keeping `architecture.md` and `build-test.md` true is yours.** They part company on who
   finds the drift. `build-test.md` you correct in the same commit that changes how the tree
   builds or is tested, not in a later cleanup pass, because you route those recipes yourself

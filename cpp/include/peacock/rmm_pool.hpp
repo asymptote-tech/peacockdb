@@ -76,17 +76,16 @@ inline std::unique_ptr<StatsMr>& stats_mr() {
   return mr;
 }
 
-// Installs a pool of `bytes` for the current device and returns what happened. Call before
-// any cuDF work; the resources are function-local statics because rmm stores a non-owning
-// pointer to the current resource and the callers outlive any narrower scope.
+// Installs a pool of `bytes` for the current device and returns what happened. Call before any
+// cuDF work; the resources are function-local statics because rmm stores a non-owning pointer to
+// the current resource and the callers outlive any narrower scope.
 //
-// The request is never clamped: a host that cannot meet it keeps the default resource and
-// reports Unavailable, because a pool smaller than the one asked for silently changes what
-// every number taken over it means.
+// The request is never clamped: a host that cannot meet it keeps the default resource and reports
+// Unavailable, because a pool smaller than the one asked for silently changes what every number
+// taken over it means.
 //
-// IDEMPOTENT, and load-bearing now that this is reachable from the FFI: a second call
-// returns the first one's outcome whatever it asks for, rather than dropping a resource that
-// live allocations still point into.
+// Idempotent, and load-bearing now that the FFI reaches it: a second call returns the first one's
+// outcome whatever it asks for, rather than dropping a resource live allocations point into.
 inline const RmmPoolStatus& install_rmm_pool(std::size_t bytes) {
   static RmmPoolStatus status;
   static bool done = false;
@@ -110,10 +109,10 @@ inline const RmmPoolStatus& install_rmm_pool(std::size_t bytes) {
 
   static auto upstream = std::make_unique<rmm::mr::cuda_memory_resource>();
   static std::unique_ptr<rmm::mr::pool_memory_resource<rmm::mr::cuda_memory_resource>> pool;
-  // A request the device cannot meet fails here, a neighbour holding most of the card being
-  // the ordinary cause. Report it instead of aborting: the correctness binaries are still
-  // right without a pool, and the one caller for which that is not true — anything taking a
-  // timing — refuses the run on Unavailable itself.
+  // A request the device cannot meet fails here, a neighbour holding most of the card being the
+  // ordinary cause. Reported, not aborted — but no caller inspects the status, and an unpooled
+  // sf40 run does not run slowly, it loses tests to cudaErrorMemoryAllocation. The "could not be
+  // built" line below is the diagnosis; without it that looks like a bug in the engine.
   try {
     pool = std::make_unique<rmm::mr::pool_memory_resource<rmm::mr::cuda_memory_resource>>(
         upstream.get(), size, size);

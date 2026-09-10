@@ -256,3 +256,46 @@ from below by q1 failing at 68, and it is pinned there because `initial == maxim
 unable to grow. Whether a growable pool — a smaller initial with the budget as the maximum — is the
 better shape was not asked in the spec, and the answer changes what "the pool reserves what a binary
 needs" means.
+
+### 2026-09-10 — review round 1: 1 blocking, 2 important, 6 nits
+
+The code change itself came through clean: no clamp survives, every budget traces to the peak
+table, `gpu_memory_limit` is untouched, the percentages are confined to `multi_gpu.cpp`, and the
+four CI binaries run one at a time inside `pipeline.yml`'s `for` loop, so their 101 GiB never
+coexists.
+
+**Blocking — the retry-don't-debug instruction was keyed to a signature this change inverts.**
+Both directions were wrong after the branch. A neighbour can no longer produce `std::bad_alloc` in
+`pool_memory_resource`: the pool is taken whole up front, so a greedy tenant now fails at *install*
+with `[rmm] pool of N GiB could not be built`, and the tests die of `cudaErrorMemoryAllocation` —
+exactly what this branch's own two-at-once run recorded. Meanwhile `Maximum pool size exceeded`
+from `pool_memory_resource` now means the opposite: the pool *was* built and the declared budget is
+too small. That is ours, it reproduces every time, and with `peacock_tpch_tests` 1.6% over its peak
+it is the failure most likely to arrive next — so "re-run once and do not debug it" would have
+buried a real budget regression under dated lines forever.
+
+Fixed in both texts, keyed on the pool line rather than the exception: `llm-wiki/tickets.md` #178
+(still at its fifteen-line cap; the `pipeline.yml:448` reference paid for it) and the Coordinator
+section of `llm-wiki/prompts.md`.
+
+**Important — `rmm_pool.hpp` justified reporting-instead-of-aborting with two false claims.** It
+said the correctness binaries are still right without a pool and that any caller taking a timing
+refuses the run itself. No caller inspects the status — all six `main()`s discard it — and
+`tpch_golden.hpp:182` silently switches its peak source to a free-memory delta. The branch's own
+run shows an unpooled `peacock_tpch_tests` losing three of four tests. Carried over from master,
+but master's percentage sizing made `Unavailable` nearly unreachable and this change makes it the
+ordinary shared-card outcome, so the sentence became load-bearing and false. Rewritten to say what
+happens.
+
+**Important — the growable pool, answered.** A smaller initial with the budget as the maximum does
+*not* solve this better. `initial == maximum` is what buys the loud early failure; the alternative
+puts the failure back mid-query as `bad_alloc` inside `pool_memory_resource`, which is the precise
+signature #178 was filed about and the one a coordinator is told not to debug. It also reinstates
+growth events, which `reports/dgx-spark.md` measures at 5x. What the shape costs is margin — 69 GiB
+is pinned from below by q1 and from above by the two-at-once arithmetic, on one bisection, one
+dataset, one cuDF version — and that cost is tolerable only because a margin failure is now
+legible. The blocking fix is what makes it legible.
+
+Nits dropped, except three that cost nothing where I was already editing: the declaration comment
+in `rmm_pool.hpp` was 11 lines against the 10-line cap, `IDEMPOTENT` was capitals for emphasis, and
+`reports/dgx-spark.md`'s "(default)" row is no longer a default.
