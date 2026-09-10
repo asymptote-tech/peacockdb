@@ -226,3 +226,16 @@ comparison between engines.
 Every golden regenerates to an empty diff and the payload digests are byte-identical; the case
 inventory maps by prefix removal with no count changing; `cost-report` and the exec-model suite are
 green; the grep gates are empty; and CI is green with no new warnings against the recorded count.
+
+## Completeness signoff
+
+Solved under its constraints. Every derived artifact reproduces byte for byte: the 33 golden
+renames differ from their baselines only on the 94 `mode=` lines and the 75 quarantined refusal
+lines, the payload digests never moved, the case inventory maps 1:1 under prefix removal, and a
+final `UPDATE_CANONICAL=1` regen of the plan goldens and the cpu corpus left an empty diff.
+
+Two bandaids, both deliberate and both named above. The prose gate excludes `peacockdb-core/src`,
+which hid four residues until the completeness pass; the scoped form that finds them is written
+into the gate section, and task 2 removes the directory that forces the exclusion. And the spec
+was not frozen — six commits rewrote it, so "the gate lands where the spec says" is partly
+self-fulfilling; each of the six survivors was re-derived independently instead.
