@@ -395,7 +395,8 @@ coordinator. At most fifteen lines per question.
   that PR, and it cannot be reopened while the base is gone. Retarget each child to master
   yourself before merging it (`gh pr view <n> --json baseRefName` to confirm, `gh api -X
   PATCH repos/<owner>/<repo>/pulls/<n> -f base=<branch>` when `gh pr edit --base` no-ops),
-  and tidy branches afterwards.
+  and tidy branches afterwards. A branch for a task in `done` is normally squashed to a small
+  number of commits before it is merged.
 - **After a merge, archive the task specs in a master-only commit.** No branch, no PR. For
   each merged task: move the spec, signoff included, out of `llm-wiki/tasks/` and into
   `llm-wiki/archive/archived-tasks.md`; drop its entry from `tasks.md`; and delete
