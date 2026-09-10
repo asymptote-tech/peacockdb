@@ -137,7 +137,7 @@ holds it. Type widths are for columns the plan creates rather than reads.
 ### Batch sizing
 
 `target_batch_bytes` is derived, not configured. The budget is what the hardware fixes; batch
-size is how the planner spends it, so an estimator pass (`planner/memory_estimation/`)
+size is how the planner spends it, so an estimator pass (`planner/memory_estimation.rs`)
 solves for it per source.
 
 The walk starts at each source and follows its batch upward to the nearest accumulator. Every
@@ -501,8 +501,9 @@ broadcast filter is the optimization #27 was archived for.)
 
 ### Traits
 
-The types are declared in `plan/mod.rs` and the code is what they are; what follows is why
-they have the shape they do.
+The types are declared in `plan/mod.rs` and `executor/mod.rs` — the node vocabulary in the
+first, the batch and executor traits in the second — and the code is what they are; what follows
+is why they have the shape they do.
 
 **Layout and schema live inside `NodeKind`** rather than as two `Option`s that must be `None`
 together: a sink structurally has neither, everything else always has both, and there is nothing
@@ -916,7 +917,7 @@ of its own (below).
 **[`TableResult` / `NodeStats`](../cpp/src/plan_executor.h)** — the two value types every C++
 path returns. `NodeStats` carries only what C++ alone can measure — rows, var-length content
 bytes, and a time that is zero unless timing is on. The byte formula itself lives in Rust
-(`common.rs`) so the two engines cannot drift.
+(`src/common.rs`) so the two engines cannot drift.
 
 **[`NodeInputs` and the operator dispatch](../cpp/src/peacock/operators.h)** — the contract
 every operator translation unit shares: one `execute_*` per wire node kind, plus `take_input`
