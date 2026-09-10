@@ -1117,3 +1117,28 @@ gate today, and introducing one is not this task's.
 The word "mode" survives as a common noun in about twenty comments, referring to a thing task 1
 retired. It is a task-1 follow-up; rewriting twenty comment lines here would churn the
 doc-and-attribute baseline for no layout reason.
+
+## A dispatch died at 03:59, and left its work uncommitted
+
+A coordinator run ended between `9d92c159` (03:56) and the working tree it left behind (03:58,
+03:59). Five files were modified and never committed, and nothing in this file recorded them.
+The successor found them by mtime and reflog, not by a note, which is the failure mode the
+detail-file rule exists to prevent.
+
+What the residue does, from the diff:
+
+- `test_module_layout.rs` — the reverse half of the `forced_by` check swept `peacockdb-core/tests`
+  only, and matched an uppercase letter after the module path. Both are holes. `peacockdb/src/main.rs`
+  names `executor::cpu_backend` and no test-crate sweep could see it, and a free function is
+  lowercase, so `cpu_backend::physical_expr` — the exact shape the exemption exists for — was
+  dropped as a near-miss. The residue walks every `[workspace]` member's `src` and `tests`,
+  matches "not another `::`", excludes the guard file itself through `file!()`, and turns
+  `forced_by` entries into repo-root relative paths.
+- `executor/mod.rs` — the `physical_expr` facade hop is deleted; `plan/tests/aggregate.rs` now
+  names `executor::cpu_backend::physical_expr` directly, and the doc comment on the real item
+  says why a facade hop for one import is the wrong trade.
+- `gpu_backend/mod.rs` — a doc comment that had drifted onto the wrong struct is put back on
+  `GpuExec`, and `GpuSource`'s fields use the file's existing imports.
+
+None of it is proven: no build, no test run, no evidence anywhere. It is dispatched as work to
+finish, not as work to trust.
