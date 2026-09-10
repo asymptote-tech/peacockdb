@@ -1058,3 +1058,62 @@ differing by a prefix or a clause; 5 doc links to paths that no longer exist; 4 
 identifiers in prose; 3 task 1's `this mode` wording; 3 the dead `all_row_groups`; and the
 `#[allow]` that became an inner attribute. None is prose that was meant to survive: the nine
 that were are in the retroactive pass above, restored.
+
+## Review round 1
+
+The reviewer verified the mechanical core itself rather than reading the evidence table: it
+re-derived the golden substitution as a sorted-multiset identity, ran its own static `#[test]`
+census over both trees, and confirmed that no FFI type is reachable from a rust-only path. That
+is the reading the evidence table cannot substitute for, and it is why the table is not enough.
+
+Two of its findings were the layout test failing its own rule, and both had been watched red on
+a shape that could not exercise them. The super-climb reader took `rel.components().count() - 1`
+as depth, so a component facade got one free climb — the climb that leaves the component — and
+the red-watch had used a leaf file. The private-type reader matched an item's first line, so a
+wrapped signature hid its types; `executor::run` and `planner::plan` are both wrapped.
+
+### The family has five members and a shape
+
+The four findings this task recorded as one thing now take a sentence rather than a count. Every
+edit whose correctness depends on a type's visibility or its path is a cudf-only-break candidate
+wherever a `cfg(not(feature = "rust-only"))` impl names that type, and a green rust-only build is
+evidence about neither. The five are that sentence with different nouns: a name (`GpuBatch`), a
+path (`super::crate::`), a shadow (`plan(&plan, …)`), a visibility on a struct (`GpuSource` under
+the fixpoint), and a visibility on a `pub mod` (`GpuSource` again, through `Backend::Source`).
+
+The fifth arrived while fixing the third finding, which is the argument for building all three
+shapes after every edit rather than at slice boundaries.
+
+### A subtree exemption is the shape that grows
+
+Exempting `executor/cpu_backend` and `executor/gpu_backend` wholesale put 91 `pub` items across
+13 files behind an exception granted for fourteen types — over half the crate's remaining `pub`
+surface — and two of the eleven inner `pub mod` declarations were forced by nothing outside the
+crate at all. It is now one entry per module path, nine of them, each naming the files that
+force it.
+
+### Half a claim expires wrong
+
+A `forced_by` naming one of four forcing files goes green the day that file is fixed, and
+announces that the wall can go up while three files still need it. Both directions are checked
+now — a named file that no longer forces, and a forcing file the list omits — and the reverse
+direction caught the list's own first version.
+
+### A green control is half of watching a guard red
+
+Narrowing a reader and seeing the new shape fail proves the reader got sharper. Only a control
+proves it did not simply stop exempting: the same `pub` inside a path that is still exempt must
+still pass. Both belong in every red-watch, and the five mutations run for this round each had
+one.
+
+### Logged, not filed
+
+Neither is production behaviour, so neither gets a ticket.
+
+`cargo fmt --all -- --check` is not clean repo-wide — `cost-report/src/main.rs` has hand-aligned
+tables. There is no `rustfmt.toml` and no fmt or clippy step in `pipeline.yml`, so neither is a
+gate today, and introducing one is not this task's.
+
+The word "mode" survives as a common noun in about twenty comments, referring to a thing task 1
+retired. It is a task-1 follow-up; rewriting twenty comment lines here would churn the
+doc-and-attribute baseline for no layout reason.
