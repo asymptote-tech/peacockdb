@@ -237,6 +237,12 @@ state, and a watchdog restarts you.
   is green and nothing else asserts it. A prototype has no PR and so has nothing to wait
   for. The developer never looks at CI, so noticing a failure, reading it and routing it is
   yours alone.
+- **A GPU tier that dies in `pool_memory_resource` is a neighbour, not a bug.** shad-gpu is shared
+  with work outside this repo, so `std::bad_alloc` from an RMM pool means somebody else was holding
+  the card. Add a dated line to [#178](tickets.md#t178) naming the run and the binary, re-run the
+  job once, and do not debug it — the evidence accumulates on the ticket until it says whether our
+  sizing is wrong or the neighbour was greedy. A dispatch spent diagnosing a machine we do not own
+  is a dispatch lost.
 - **Keeping `architecture.md` and `build-test.md` true is yours.** They part company on who
   finds the drift. `build-test.md` you correct in the same commit that changes how the tree
   builds or is tested, not in a later cleanup pass, because you route those recipes yourself
@@ -442,14 +448,14 @@ coordinator. At most fifteen lines per question.
   makes two chains safe to run at once without locking a shared board.
 
       git worktree add ../peacockdb-<chain> <chain-branch>
-      cd ../peacockdb-<chain> && ../peacockdb/scripts/ensemble-watchdog.sh <chain-branch>
+      cd ../peacockdb-<chain> && ../peacockdb/scripts/ensemble-watchdog.sh --non-interactive <chain-branch>
 
   The watchdog refuses to run outside a chain worktree, and pins each worktree to the first
   chain it is run with. Tidy the worktree when the chain is merged.
 - **Reaching a running coordinator**: write one word to
   `.claude/ensemble/<chain>.control` — `pause`, `rebase` or `stop`. It is read after every
   subagent returns, so the answer is one subagent away at worst. Or run the watchdog with
-  `ENSEMBLE_INTERACTIVE=1` and talk to the coordinator directly.
+  no `--non-interactive` and talk to the coordinator directly, which is the default form.
 - Unlike the coordinator and reviewer you may build and run project code, and you may
   mutate git state on master. An interactive session has no developer to delegate to, and a
   CI failure on master cannot be diagnosed without a build.
