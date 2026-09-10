@@ -317,7 +317,8 @@ yet.
 
 Two kinds, and they part different ways. **Test code hiding in a production file** — fixtures and
 helpers, `executor/driver/partitioned.rs`'s four among them — moves into the `mod tests` that uses
-it. **A production entry point whose only caller is a test** — `planner::translate`,
+it. **A production entry point whose only caller is a test** — `planner::translate` — which absorbs
+`translator::translate` and deletes it, since that one is `cfg(test)` too and has no other caller —
 `executor::physical_expr`, and whatever else the guard names in `planner/mod.rs`,
 `planner/translator/mod.rs`, `cpu_backend/mod.rs` and `plan/mod.rs` — loses the `cfg`, stays
 `pub(crate)`, and takes `#[allow(dead_code)]` with the reason at the site: which test needs it and

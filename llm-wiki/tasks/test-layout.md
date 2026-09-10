@@ -215,8 +215,13 @@ Three layers, and only the first is discipline.
   entry points whose only callers are tests, so they lose the `cfg` and carry `#[allow(dead_code)]`
   with the reason written at the site. `translate` earns it because the shipping path cannot
   substitute — its doc says it hands back a tree "without the pipeline around it: no validation, no
-  null analysis and no memory model", which is precisely what a test asserting on an unvalidated
-  tree needs and what `plan()` will never return. `physical_expr` earns it because a test in `plan`
+  null analysis and no memory model", which is what a test asserting on an unvalidated tree needs
+  and what `plan()` will never return; the pipeline cannot call it either, since it builds a
+  `Translator` with `small_table_bytes` and source targets and runs it twice, seeding the second
+  pass from the first. **The chain collapses to one item**: `planner::translate` calls
+  `Translator::new(..).translate(plan)` directly and `translator::translate`, itself `cfg(test)`
+  and called only from here, is deleted — twelve lines out, one allowance instead of two. A parent
+  naming its own subcomponent's type is what the layout already sanctions. `physical_expr` earns it because a test in `plan`
   cannot name `cpu_backend`'s internals, which is the same wall the rest of this task raises. The
   difference from the `cfg` is the point: the item stays compiled and type-checked in a release
   build, so it cannot rot unnoticed; only the warning goes. A name and a
