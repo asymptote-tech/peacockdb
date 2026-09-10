@@ -105,3 +105,12 @@ even though task 1 is a names-only task. If a golden moves, that is a finding, n
 regeneration.
 
 On green: reword `a7d690e6` off WIP, write the signoff into the spec, set the board to `done`.
+
+## Restart of 2026-09-09 — the 18:2x dispatch died with its run
+
+Nothing new reached the branch or this file after `8da66b0e`, so the developer dispatched to
+prove `a7d690e6` was killed before it reported. Control file empty at this restart. Re-dispatched
+against the same commit with the same hazard called out: `RunError`'s two display arms are
+user-visible, the corpus goldens carry quarantined refusal lines, and a golden that moves is a
+finding rather than a regeneration. Same finish condition: on green, reword `a7d690e6` off WIP,
+write the signoff into the spec, set the board to `done`.
