@@ -46,7 +46,7 @@ module, one ticket page. No Rust file moves and no behaviour changes, which make
 every derived artifact reproduces byte for byte. `src/batch_partitioned/` is the one name left
 standing, for task 2 to move once rather than twice.
 
-### 2. [`module-layout.md`](module-layout.md) — state: approved to build
+### 2. [`module-layout.md`](module-layout.md) — state: building
 
 `peacockdb-core/src/batch_partitioned/**` moves up to `src/`, laid out as components whose whole API
 is declared in `mod.rs` with the implementation behind private modules. `plan_batch_partitioned`
