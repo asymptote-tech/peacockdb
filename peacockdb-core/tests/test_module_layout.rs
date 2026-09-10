@@ -12,9 +12,6 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-/// The six the crate root declares. Everything else under `src/` belongs to one of them.
-const COMPONENTS: &[&str] = &["common", "executor", "plan", "plan_text", "planner", "wire"];
-
 /// Directories that are a test module rather than a subcomponent: they have a `mod.rs`, and
 /// none of the rules about walls apply to them.
 const TEST_DIRS: &[&str] = &["tests"];
@@ -170,6 +167,22 @@ fn is_an_exempt_module(rel: &Path) -> bool {
         .any(|e| s == format!("{}.rs", e.path) || s == format!("{}/mod.rs", e.path))
 }
 
+/// The components, read from `lib.rs` rather than listed here.
+///
+/// `lib.rs` declares them `pub mod` and nothing else in the crate may, which
+/// `pub_mod_declares_a_component_and_nothing_else` keeps true — so that file is the source of
+/// truth and a seventh component cannot arrive without every reader seeing it. A hardcoded six
+/// silently exempted anything outside it from two rules, and `src/test_support/` is scheduled.
+fn components() -> Vec<String> {
+    let text = std::fs::read_to_string(src_root().join("lib.rs")).expect("read lib.rs");
+    let out = pub_mod_declarations(&text);
+    assert!(
+        !out.is_empty(),
+        "no `pub mod` components parsed from lib.rs"
+    );
+    out
+}
+
 /// The component a file belongs to, or `None` for the crate root's own files.
 fn component_of(rel: &Path) -> Option<String> {
     let first = rel
@@ -179,7 +192,7 @@ fn component_of(rel: &Path) -> Option<String> {
         .to_string_lossy()
         .to_string();
     let name = first.strip_suffix(".rs").unwrap_or(&first).to_string();
-    COMPONENTS.contains(&name.as_str()).then_some(name)
+    components().contains(&name).then_some(name)
 }
 
 // --- where `pub` may appear --------------------------------------------------
@@ -498,6 +511,10 @@ fn code_only(text: &str) -> String {
 /// the exemption. Nothing outside the crate names a lowercase item in these nine modules
 /// today, so the fixtures in `each_reader_sees_the_violation_and_not_its_near_miss` are what
 /// keeps this half honest. `{` is a brace group of several names, `*` a glob.
+// The mirror of `uses_module`'s widening, not taken here: a plain
+// `use peacockdb_core::executor::cpu_backend;` forces the wall and has no `::` after the path,
+// so the reverse half of `forced_by` would miss it. Nothing outside the crate spells it that
+// way today, and the attribution rule above differs, so the two readers stay separate.
 fn names_the_module(text: &str, needle: &str) -> bool {
     let text = &code_only(text);
     text.match_indices(needle).any(|(i, _)| {
@@ -628,6 +645,55 @@ fn subcomponent_paths() -> Vec<String> {
     out
 }
 
+/// The text with the whitespace after `::` removed, so a wrapped path is one string again.
+///
+/// A line ending in `::` is always a continued path in valid Rust, so nothing else is joined.
+/// Whitespace *before* `::` is left alone: `crate::executor\n    ::cpu_backend` is a spelling
+/// nothing here writes and rustfmt does not produce.
+fn tight_paths(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut after_colons = false;
+    for c in text.chars() {
+        if after_colons && c.is_whitespace() {
+            continue;
+        }
+        out.push(c);
+        after_colons = out.ends_with("::");
+    }
+    out
+}
+
+/// The identifier this text starts with, or the empty string.
+fn first_segment(text: &str) -> &str {
+    let end = text
+        .find(|c: char| !c.is_alphanumeric() && c != '_')
+        .unwrap_or(text.len());
+    &text[..end]
+}
+
+/// Does this text use `<parent>::<name>` — as a path, a module import, an alias, or a member of
+/// a brace group?
+///
+/// Every spelling, not just the fully-qualified one. `use crate::executor::cpu_backend;` and
+/// `... as cb;` name the module with no `::` after it, and on `cpu_backend` and `gpu_backend`
+/// this reader is the only defence there is — rustc refuses a reach into any other subcomponent
+/// with `E0603` whatever the spelling. One level of brace group is enough: a nested group's own
+/// first segment is what the split yields.
+fn uses_module(text: &str, parent: &str, name: &str) -> bool {
+    let text = tight_paths(text);
+    let needle = format!("{parent}::");
+    text.match_indices(&needle).any(|(i, _)| {
+        let tail = &text[i + needle.len()..];
+        match tail.strip_prefix('{') {
+            Some(group) => group
+                .split(['}', ';'])
+                .next()
+                .is_some_and(|g| g.split(',').any(|m| first_segment(m.trim_start()) == name)),
+            None => first_segment(tail) == name,
+        }
+    })
+}
+
 /// Every place a component names another component's subcomponent, as (file, subcomponent).
 fn cross_component_reaches() -> Vec<(String, String)> {
     let subs = subcomponent_paths();
@@ -640,7 +706,14 @@ fn cross_component_reaches() -> Vec<(String, String)> {
         let hits: Vec<&String> = subs
             .iter()
             .filter(|sub| !sub.starts_with(&format!("{component}/")))
-            .filter(|sub| text.contains(&format!("crate::{}::", sub.replace('/', "::"))))
+            .filter(|sub| {
+                let (parent, name) = sub.rsplit_once('/').expect("a subcomponent has a parent");
+                uses_module(
+                    &text,
+                    &format!("crate::{}", parent.replace('/', "::")),
+                    name,
+                )
+            })
             .collect();
         for sub in &hits {
             // The deepest path only: `crate::planner::translator::scan_mapping::` contains
@@ -1085,6 +1158,37 @@ fn each_reader_sees_the_violation_and_not_its_near_miss() {
         "use peacockdb_core::executor::cpu_backend::CpuExec; // why",
         n
     ));
+
+    // Every spelling of a reach, not just the fully-qualified one. A module import and an
+    // alias have no `::` after the path, and those were green on the two subcomponents where
+    // this reader is the only thing standing between the tree and a broken wall.
+    let (p, m) = ("crate::executor", "cpu_backend");
+    assert!(uses_module("use crate::executor::cpu_backend;", p, m));
+    assert!(uses_module("use crate::executor::cpu_backend as cb;", p, m));
+    assert!(uses_module(
+        "use crate::executor::cpu_backend::join::CpuJoin;",
+        p,
+        m
+    ));
+    assert!(uses_module(
+        "use crate::executor::{cpu_backend, CpuBatch};",
+        p,
+        m
+    ));
+    assert!(uses_module(
+        "use crate::executor::\n    cpu_backend::join::CpuJoin;",
+        p,
+        m
+    ));
+    assert!(!uses_module("use crate::executor::CpuBatch;", p, m));
+    assert!(
+        !uses_module("use crate::executor::cpu_backendish::X;", p, m),
+        "an identifier this one is a prefix of is a different module"
+    );
+    assert!(
+        !uses_module("use crate::executor::{driver, CpuBatch};", p, m),
+        "a brace group naming other members is not a reach into this one"
+    );
 
     // Those fixtures make this file itself a match, which is what makes the `file!()`
     // exclusion in `files_naming` load-bearing rather than decorative. Matched on the file

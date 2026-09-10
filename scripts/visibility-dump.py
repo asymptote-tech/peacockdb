@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Enumerate every `pub` / `pub(...)` item in peacockdb-core/src with its declaring file.
 
-The module-layout baseline (spec item 3) and the per-slice comparison run against it: the
-task moves declarations and removes none, so the (kind, name) multiset must not change.
-Records are `<scope> <vis> <kind> <name>\t<file>`, where scope is `top` for an item
-declared directly in a module and `impl` for one inside an `impl` block.
+A layout refactor moves declarations and removes none, so the (kind, name) multiset must not
+change across it, and `--items` is exactly that multiset. Records are
+`<scope> <vis> <kind> <name>\t<file>`, where scope is `top` for an item declared directly in a
+module and `impl` for one inside an `impl` block.
 
 Usage:
-  visibility-dump.py [root]            all records, sorted
-  visibility-dump.py --items [root]    just `<scope> <kind> <name>`, the move-invariant set
+  scripts/visibility-dump.py [root]            all records, sorted
+  scripts/visibility-dump.py --items [root]    just `<scope> <kind> <name>`
 """
 import re
 import sys

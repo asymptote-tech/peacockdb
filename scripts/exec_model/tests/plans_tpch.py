@@ -407,7 +407,7 @@ def plan_q18(t):
 
     The semi join is a **RightSemi**: the query emits the orders and the orders are the
     streamed side, so the small key set is the build and the join emits its probe rows.
-    Collecting 1.5M orders into a build batch instead is 270 MB, and the enforcer says so."""
+    Collecting 1.5M orders into a build batch instead is 270 MB, and the accountant says so."""
     customer = t("customer", ["c_custkey", "c_name"])
     orders = t("orders", ["o_orderkey", "o_custkey", "o_orderdate", "o_totalprice"])
     lineitem = t("lineitem", ["l_orderkey", "l_quantity"])

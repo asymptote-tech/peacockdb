@@ -22,11 +22,15 @@ deleted with this detail file when the task is archived.
 | File | What | Command |
 |---|---|---|
 | `goldens.sha256` | 170 files under `testdata/goldens/` | `find testdata/goldens -type f \| sort \| xargs sha256sum` |
-| `inv-rust-only.txt` | case inventory, rust-only shape | `case-inventory.sh rust-only` |
-| `inv-cudf.txt` | case inventory, cudf shape | `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 case-inventory.sh cudf` |
-| `visibility.txt` | every `pub`/`pub(...)` item with its declaring file | `visibility-dump.py peacockdb-core/src` |
-| `visibility-items.txt` | the same, file and visibility dropped — the move-invariant set | `visibility-dump.py --items peacockdb-core/src` |
-| `residue-gate.sh` | task 1's gate, `src` exclusion dropped, `--untracked`, strip-and-rematch | run it |
+| `inv-rust-only.txt` | case inventory, rust-only shape | `scripts/case-inventory.sh rust-only` |
+| `inv-cudf.txt` | case inventory, cudf shape | `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/case-inventory.sh cudf` |
+| `visibility.txt` | every `pub`/`pub(...)` item with its declaring file | `scripts/visibility-dump.py peacockdb-core/src` |
+| `visibility-items.txt` | the same, file and visibility dropped — the move-invariant set | `scripts/visibility-dump.py --items peacockdb-core/src` |
+| — | task 1's gate, `src` exclusion dropped, `--untracked`, strip-and-rematch | `scripts/residue-gate.sh` |
+
+The four tools moved to `scripts/` and outlive this task; the `.txt` dumps are run record and are
+deleted with this file. `inv-{rust-only,cudf}-final.txt` are the baselines to compare against, and
+`scripts/compare-inventory.sh` now takes the baseline as an argument rather than computing one.
 
 Digest of the golden list: `27eac51d87ed7a0e418f01893b5930c49048ce604349052ce686197e63615650`.
 
@@ -245,7 +249,9 @@ moved file scores 0.65 or better against its new path. The three that pair with 
 #### `ResidentAccountant` has its name back
 
 "the enforcer" and "resident enforcer" are gone from `architecture.md` (6), `tickets.md` (2) and
-five code comments. `llm-wiki/archive/` keeps them: it records what things were called at the time.
+seven code comments — five in this slice, two more in `executor/driver/` that the completeness
+pass found, plus about twenty in `scripts/exec_model/`, which "anywhere else" reaches.
+`llm-wiki/archive/` keeps them: it records what things were called at the time.
 
 #### The trap the rust-only build cannot see
 
@@ -1378,9 +1384,10 @@ at `b0f84b5f^` and are clean again. All three are leaves, so rustfmt moved nothi
 - `tests/test_cpu_end_to_end.rs` carries nine hunks of its own, but it had four at `787c1e5c` and
   nine at `b0f84b5f^`, so the review rounds did not add them. It declares `mod common;`, so
   formatting it reformats thirty hunks across `tests/common/`. Same shape for
-  `cpu_backend/expr_physical.rs`, which declares `mod tests;`.
-- `tests/common/corpus_gpu.rs` gained one import-order hunk from `b0f84b5f` on top of two it
-  already had, and formatting it would take all three.
+  `cpu_backend/expr_physical.rs`, which declares `mod tests;` and whose drift predates the task.
+  Everything else is taken: eight leaf files carried formatting drift this task introduced, and
+  all eight are clean. The `corpus_gpu.rs` count in the round-2 list was measured from
+  `b0f84b5f^` rather than from the branch base, so it read one hunk where two were the task's.
 - The super-climb reader's duplicate report. The fix is one token — advance `7 * climbs` rather
   than `7` — but it changes a reader that was watched red on a particular shape, and what is wrong
   is a repeated line in a failure message. Not worth re-proving the reader for.
@@ -1407,3 +1414,107 @@ re-taken, so the coordinator's reference for the next round is still the one it 
 | residue gate | the same five lines |
 | doc sentences | eleven absent, every one a comment rewritten above |
 | rustfmt | the five files this round touched are clean |
+
+## The completeness pass, closed
+
+### The reach reader saw one spelling of three
+
+`uses_module(text, parent, name)` replaces the single `crate::<parent>::<name>::` string. It
+matches the parent path and then asks what follows: an identifier equal to `name`, or a brace
+group with `name` as a top-level member. So all of these are caught now, and only the first was
+before —
+
+    use crate::executor::cpu_backend::join::CpuJoin;   // fully qualified
+    use crate::executor::cpu_backend;                  // the module itself
+    use crate::executor::cpu_backend as cb;            // an alias
+    use crate::executor::{cpu_backend, CpuBatch};      // a brace group at the parent
+
+`tight_paths` removes the whitespace after `::` first, so a `use` hand-broken across lines is one
+string again. A line ending in `::` is always a continued path in valid Rust, so nothing else is
+joined. What is still not caught: whitespace *before* `::`, which nothing writes and rustfmt does
+not produce. It is stated at the function rather than left for the next reader to discover.
+
+The register did not move: `wire/tests.rs` → `executor/cpu_backend`, and nothing else, under the
+widened predicate as under the narrow one.
+
+The mirror of this widening in `names_the_module` is *not* taken, and says so in a comment at the
+function: a plain `use peacockdb_core::executor::cpu_backend;` forces the wall with no `::` after
+it, so the reverse half of `forced_by` would miss it. Nothing outside the crate spells it that way
+today, and the two readers attribute differently — that one counts a traversal for the child only.
+
+### The components come from lib.rs
+
+`components()` reads `lib.rs`'s `pub mod` lines through `pub_mod_declarations`, which
+`pub_mod_declares_a_component_and_nothing_else` keeps honest. The hardcoded six silently exempted
+anything outside it from two readers, and `src/test_support/` is scheduled as a seventh.
+
+### Red-watched, with controls
+
+| Mutation | Result | Control |
+|---|---|---|
+| `uses_module` narrowed back to requiring `::` | red on the module-import fixture | the fully-qualified fixture still passes |
+| `uses_module` widened to a bare `contains` | red on `use crate::executor::CpuBatch;` | sharper, not permissive |
+| `tight_paths` made the identity | red on the hand-broken fixture | |
+| `use crate::executor::cpu_backend;` added to `plan/mod.rs` | red naming `plan/mod.rs` | the same import inside `executor` is green |
+| `... as cb;` added to `plan/mod.rs` | red naming `plan/mod.rs` | |
+| a real seventh component `src/test_support/` that reaches `cpu_backend` | red naming `test_support/mod.rs`, with no list edit | |
+| the same tree, with `components()` hardcoded back to six | green — the hole the derivation closes | |
+
+The `executor` control had to use an alias: `use crate::executor::cpu_backend;` inside
+`executor/mod.rs` is `E0255` against the `pub mod`, and a build that fails is not a green control.
+
+### `enforcer` is retired in code as well as in the wiki
+
+Two survivors in `src/` — `executor/driver/tests/memory.rs:1` and
+`executor/driver/accounting/tests.rs:193` — and twenty-one in `scripts/exec_model/`, which is what
+"anywhere else" reaches. All are the `ResidentAccountant`, which `exec_model/accounting.py` already
+calls by that name, so all became "the accountant". Two pytest functions were named after it and
+are renamed with them; nothing references either name. Comment and prose only.
+
+`llm-wiki/archive/` keeps the word by policy. Two live sites are deliberately left:
+`module-layout.md:158` is the sentence that retires it, and `refcounted-tables.md:252` is a frozen
+spec belonging to another task.
+
+### The tooling outlives the task
+
+`case-inventory.sh`, `compare-inventory.sh`, `visibility-dump.py` and `residue-gate.sh` are in
+`scripts/`. Only two computed anything from their own location.
+
+- `compare-inventory.sh` took its baseline from `dirname $0`, and that directory is deleted at
+  archive. It takes the baseline as an argument now, validates both files before reading either,
+  and rejects a shape it does not know.
+- `residue-gate.sh` excluded itself by living under `llm-wiki`, which its greps skip. From
+  `scripts/` it matched all four of its own greps. The first fix used `$0`, which is relative to
+  the caller's directory: git rejected the pathspec and *every section came back empty*, which
+  reads exactly like a clean tree. It resolves against the repo root now and checks the result.
+  Run from the root, from `peacockdb-core/`, and by absolute path: five lines each time.
+
+### The baselines are refreshed, and the delta is the whole authorized change
+
+`inv-{rust-only,cudf}-final.txt` were two lines stale. Re-taken; against the versions they
+replace, each differs by exactly:
+
+    -10 tests, 0 benchmarks
+    +11 tests, 0 benchmarks
+    +only_the_parent_component_names_a_subcomponent: test
+
+Nothing else, in either shape. `test_module_layout` finishes at **eleven** cases: the new fixtures
+went into `each_reader_sees_the_violation_and_not_its_near_miss` rather than a twelfth case, so the
+rule is one case and its fixtures are pinned where the file's other reader fixtures live.
+
+### Evidence
+
+| Check | Result |
+|---|---|
+| rust-only, all targets | 0 warnings |
+| default, lib+bin | 0 warnings |
+| default, all targets | 0 warnings |
+| `test_module_layout` | 11 passed |
+| `--lib` | 435 passed |
+| `test_plan_goldens` | 19 passed |
+| `test_ci_coverage` | 7 passed |
+| goldens | byte-identical, `e071580a…` |
+| case inventory, both shapes | identical to the refreshed `-final` files |
+| `visibility-dump.py`, both modes | 578 records, identical to `visibility-final.txt` |
+| residue gate | five lines, from three different working directories |
+| rustfmt | the eight leaf files this task dirtied are clean |

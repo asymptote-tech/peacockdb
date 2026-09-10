@@ -1,4 +1,4 @@
-"""Resident accounting and the enforcer, in the shape the spec's Memory accounting states.
+"""Resident accounting and enforcement, in the shape the spec's Memory accounting states.
 
     resident = Σ byte_size of driver-held in-flight batches
              + Σ cached resident_bytes() over live executors
@@ -20,7 +20,7 @@ means the run was not instrumented.
 estimates are wrong: a join's model rests on the optimizer's cardinality figure, a filter's
 on assumed selectivity, and neither is guaranteed. Under-estimates are recorded with their
 magnitude, so model quality is visible and a regression is noticeable — they are not
-asserted away. The enforcer is built for exactly this: its contract is "fail cleanly when
+asserted away. The accountant is built for exactly this: its contract is "fail cleanly when
 the accounted peak exceeds the budget", not "the accounting is never wrong".
 """
 

@@ -20,7 +20,7 @@ exactly like a passing one.
 has no dataset. Locally it falls back to the committed `testdata/tpch.minimal` when sf1 was
 never generated — for the four tables it uses the two are the same data, same schema and
 same row counts, so the assertions hold either way. Every plan there and in
-`test_end_to_end.py` runs under a real resident budget, so the enforcer is engaged rather
+`test_end_to_end.py` runs under a real resident budget, so the accountant is engaged rather
 than dormant.
 
 Every test file runs on its own with the stock python, no pytest:
@@ -337,7 +337,7 @@ F9. **A cardinality estimate belongs on the join node, not in the model's signat
    unchanged. `GpuHashJoin` therefore carries a fan-out figure (output rows / probe rows, the
    ratio `CardinalityEstimator` already returns), constant 1.0 until
    [#19](../../llm-wiki/tickets.md). Corollary: **model ≥ measured is not an invariant.**
-   The estimate can be wrong, so the model can come in under, and the enforcer is built for
+   The estimate can be wrong, so the model can come in under, and the accountant is built for
    that — its contract is "fail cleanly when the accounted peak exceeds the budget". The
    comparison is recorded with its magnitude and never asserted away.
 
@@ -375,5 +375,5 @@ defect against the engine, and do not change the engine to match a model it has 
 ## Not in this cut
 
 The plan-time `estimated_max_resident_size` estimator, which T6 derives in Rust directly
-rather than here. Window functions are refused by the design (#143). The enforcer is here
+rather than here. Window functions are refused by the design (#143). The accountant is here
 with the accounting formula, and trips cleanly on a tight budget.

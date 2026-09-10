@@ -1,4 +1,4 @@
-//! The enforcer through the drivers: what trips, what is merely recorded, and that a
+//! The accountant through the drivers: what trips, what is merely recorded, and that a
 //! finished run gave everything back.
 
 use super::super::mock::{JoinRule, Script, spec};

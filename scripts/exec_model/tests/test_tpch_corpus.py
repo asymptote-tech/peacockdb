@@ -1,6 +1,6 @@
 """TPC-H corpus queries: the oracle and the assertions.
 
-The lowerings live in `plans_tpch.py`; the short plan-shape tests, the enforcer tests and
+The lowerings live in `plans_tpch.py`; the short plan-shape tests, the accountant tests and
 the layout sweeps live in `test_tpch.py`. Split because they are two different suites: these
 read whole tables and run on manual dispatch, those run on every push in seconds.
 

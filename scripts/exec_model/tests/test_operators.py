@@ -304,7 +304,7 @@ def test_batching_on_packs_greedily_under_the_target():
 
 def test_a_row_group_over_target_still_becomes_its_own_batch():
     # Minimum granularity is one row group and the planner still produces a plan; the
-    # runtime consequence belongs to the enforcer (#142).
+    # runtime consequence belongs to the accountant (#142).
     mapping = source.partition_row_groups(source.split_row_groups(30, 30), 1, 5)
     assert mapping == [[[0]]]
 

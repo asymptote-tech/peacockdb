@@ -190,7 +190,7 @@ fn model_accuracy_is_recorded_rather_than_enforced() {
         scratch: 10,
     };
     let modelled = acct.begin_call(slot(0), &executor, 0, 0).unwrap();
-    // Under by 100x and the query still runs: the enforcer's contract is the accounted
+    // Under by 100x and the query still runs: the accountant's contract is the accounted
     // peak against the budget, not that the model was right.
     acct.end_call(slot(0), &executor, measured(1000), modelled)
         .expect("an under-estimate is a diagnostic, not a failure");

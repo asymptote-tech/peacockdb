@@ -54,10 +54,14 @@ impl<'a> RowGroupPruningStatistics<'a> {
 
 impl PruningStatistics for RowGroupPruningStatistics<'_> {
     fn min_values(&self, column: &Column) -> Option<ArrayRef> {
-        self.converter(column)?.row_group_mins(self.metadata_iter()).ok()
+        self.converter(column)?
+            .row_group_mins(self.metadata_iter())
+            .ok()
     }
     fn max_values(&self, column: &Column) -> Option<ArrayRef> {
-        self.converter(column)?.row_group_maxes(self.metadata_iter()).ok()
+        self.converter(column)?
+            .row_group_maxes(self.metadata_iter())
+            .ok()
     }
     fn num_containers(&self) -> usize {
         self.row_group_metadatas.len()
@@ -137,7 +141,9 @@ pub(crate) fn surviving_row_groups(parquet: &ParquetExec) -> Option<Vec<u32>> {
 /// `object_meta.location` is an object_store Path (leading '/' stripped); we
 /// assume a '/'-rooted LOCAL filesystem object store, which holds for the
 /// serialize-time / planner use here. Degrades SAFELY otherwise (open fails → None).
-fn single_source_path(config: &datafusion::datasource::physical_plan::FileScanConfig) -> Option<String> {
+fn single_source_path(
+    config: &datafusion::datasource::physical_plan::FileScanConfig,
+) -> Option<String> {
     let mut iter = config.file_groups.iter().flatten();
     let first = iter.next()?.object_meta.location.clone();
     if iter.any(|f| f.object_meta.location != first) {
@@ -145,4 +151,3 @@ fn single_source_path(config: &datafusion::datasource::physical_plan::FileScanCo
     }
     Some(format!("/{first}"))
 }
-

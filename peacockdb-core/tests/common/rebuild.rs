@@ -15,23 +15,21 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::{JoinType, ScalarValue};
 
-use peacockdb_core::plan::GpuNode;
-use peacockdb_core::plan::{AggCall, AggFunc, PlanAgg, decomposition};
-use peacockdb_core::plan::{Expr, NamedExpr};
 use peacockdb_core::plan::ColumnOrder;
+use peacockdb_core::plan::GpuNode;
+use peacockdb_core::plan::RowGroupMeta;
 use peacockdb_core::plan::RowInterval;
-use peacockdb_core::plan::{
-    JoinFilterColumn, JoinSide, NestedLoopJoinType,
-};
+use peacockdb_core::plan::ScanMetadata;
+use peacockdb_core::plan::Schema;
+use peacockdb_core::plan::{AggCall, AggFunc, PlanAgg, decomposition};
 use peacockdb_core::plan::{
     AggregateBody, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
     GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave,
     GpuLimit, GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin,
     GpuProject, GpuSort, GpuUnion, GpuUnload, NodeRef, as_node_ref,
 };
-use peacockdb_core::plan::ScanMetadata;
-use peacockdb_core::plan::RowGroupMeta;
-use peacockdb_core::plan::Schema;
+use peacockdb_core::plan::{Expr, NamedExpr};
+use peacockdb_core::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
 
 /// `node` rebuilt over `children`, which are the rewritten children in the order
 /// [`GpuNode::children`] reports them. Handed a node's own children back it is the

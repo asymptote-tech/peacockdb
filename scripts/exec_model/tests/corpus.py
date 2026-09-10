@@ -60,7 +60,7 @@ from ..operators.frame import concatenate
 from ..plan import Plan
 
 #: Generous against the plan-shape tests' real peaks (~tens of MB) and far from unbounded,
-#: so the enforcer is exercised on every call and a blown resident set fails the test.
+#: so the accountant is exercised on every call and a blown resident set fails the test.
 BUDGET = 256 * 1024 * 1024
 
 #: What a corpus query runs under. The legacy tiers' "mini" device is 2 GiB and this is the
@@ -377,7 +377,7 @@ def run_layouts(bench: str, query: str, root, budget: int | None = None):
             plan = injector.apply(root)
         got, driver = execute(plan, budget=budget or CORPUS_BUDGET)
         # What must hold whatever the layout was: nothing stranded, nothing still held,
-        # and a peak that the enforcer was actually watching.
+        # and a peak that the accountant was actually watching.
         assert driver.accountant.in_flight_bytes == 0, f"{query}/{label}: batches still held"
         assert 0 < driver.accountant.peak <= (budget or CORPUS_BUDGET), (
             f"{query}/{label}: peak {driver.accountant.peak}"

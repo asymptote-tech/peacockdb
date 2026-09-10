@@ -1,4 +1,4 @@
-"""Simple plans over real TPC-H tables, with the resident enforcer switched on.
+"""Simple plans over real TPC-H tables, with the resident accountant switched on.
 
 Not the TPC-H queries — hand-built plans of the shapes the mode exists for (filter into a
 shuffled aggregate, a small build side against a streamed probe, a top-N across lanes),
@@ -14,7 +14,7 @@ the four tables used here the two are the same data (same schema, same row count
 customer 150000, supplier 10000, nation 25, region 5), so the assertions hold either way.
 `part` is deliberately unused: its schema differs between the two.
 
-**The enforcer is on.** Every plan runs under a real budget, so the accounting path is
+**The accountant is on.** Every plan runs under a real budget, so the accounting path is
 live and a regression that blew the resident set would trip rather than pass quietly.
 """
 
@@ -214,11 +214,11 @@ def test_a_projection_over_real_column_types():
     same(got, want, "projection")
 
 
-# -- the enforcer -----------------------------------------------------------------
+# -- the accountant -----------------------------------------------------------------
 
 
 def test_a_tight_budget_fails_a_real_plan_cleanly():
-    # The enforcer trips on real data rather than only on synthetic fixtures, and it trips
+    # The accountant trips on real data rather than only on synthetic fixtures, and it trips
     # as a clean query failure, not an allocator death.
     customer = table("customer", ["c_custkey", "c_acctbal"], SHUFFLE_ROWS)
     scan = N.scan("customer", customer, 2, 2000, 4000)

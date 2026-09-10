@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Case inventory for one feature shape. Tests do not move in module-layout, so every
-# line must come back byte-identical after each slice.
-#   llm-wiki/tasks/module-layout-baselines/case-inventory.sh rust-only  > /tmp/inv.txt
+# Case inventory for one feature shape: every `--list` case of `--lib` and of each
+# `peacockdb-core/tests/test_*.rs` target, grouped by target. A refactor that moves no test
+# brings every line back byte-identical, which is what makes it a baseline.
+#   scripts/case-inventory.sh rust-only  > /tmp/inv.txt
 #   CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 \
-#     llm-wiki/tasks/module-layout-baselines/case-inventory.sh cudf     > /tmp/inv-cudf.txt
+#     scripts/case-inventory.sh cudf     > /tmp/inv-cudf.txt
 # A cudf-shape binary run without LD_LIBRARY_PATH lists zero cases instead of failing
 # (build-test.md), so the cudf shape prepends the FFI OUT_DIR and the cuDF lib dir.
 set -euo pipefail

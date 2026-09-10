@@ -5,14 +5,12 @@ use std::fmt::Write as _;
 use datafusion::arrow::datatypes::DataType;
 
 use super::expr_text::{expr_text, join_filter_text};
-use crate::plan::{AggCall, PlanAgg};
-use crate::plan::{Expr, NamedExpr};
-use crate::plan::{
-    BatchLayout, ColumnOrder, KeyDistribution, PartitionLayout, SortOrder,
-};
-use crate::plan::{GpuNode, RowInterval};
-use crate::plan::{AggregateBody, NodeRef, as_node_ref};
 use crate::plan::Schema;
+use crate::plan::{AggCall, PlanAgg};
+use crate::plan::{AggregateBody, NodeRef, as_node_ref};
+use crate::plan::{BatchLayout, ColumnOrder, KeyDistribution, PartitionLayout, SortOrder};
+use crate::plan::{Expr, NamedExpr};
+use crate::plan::{GpuNode, RowInterval};
 
 pub(crate) fn render_plan(root: &dyn GpuNode) -> String {
     let mut text = String::new();

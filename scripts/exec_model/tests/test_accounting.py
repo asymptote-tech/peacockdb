@@ -8,7 +8,7 @@ sum would give — caching is the whole point (it is what lets the Rust port dro
 accountant's references to every executor) and a cache that drifts is worse than no cache.
 Model-versus-measured is deliberately NOT among them. `scratch_bytes` is an estimate — a
 join's rests on the optimizer's cardinality figure, a filter's on assumed selectivity — so
-it will sometimes come in under, and the enforcer is built for that ("fail cleanly when the
+it will sometimes come in under, and the accountant is built for that ("fail cleanly when the
 accounted peak exceeds the budget"). What is tested is that under-estimates are *recorded*
 with their magnitude, not that they never happen.
 """
@@ -75,7 +75,7 @@ def test_resident_is_in_flight_plus_executor_state():
 
 def test_the_cached_executor_total_tracks_a_live_sum():
     # The cache is refreshed one instance at a time; it must still equal the sum over all
-    # of them, or the enforcer is deciding on a stale number.
+    # of them, or the accountant is deciding on a stale number.
     acct = ResidentAccountant()
     executors = {f"e{i}": StatefulExecutor(resident=i * 10) for i in range(5)}
     for label, executor in executors.items():
@@ -108,7 +108,7 @@ def test_releasing_a_batch_that_was_never_held_is_an_error():
         acct.release(MockBatch("ghost", 4))
 
 
-# -- the enforcer -----------------------------------------------------------------
+# -- the accountant -----------------------------------------------------------------
 
 
 def test_the_pre_check_trips_before_the_call_runs():

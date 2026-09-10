@@ -11,8 +11,8 @@
 //! stays because it costs nothing and goes red on the day that construction stops holding.
 
 use datafusion::arrow::array::RecordBatch;
-use peacockdb_core::executor::{GpuBackend, GpuContext};
 use peacockdb_core::executor::run;
+use peacockdb_core::executor::{GpuBackend, GpuContext};
 use peacockdb_core::plan_text::render_run;
 use peacockdb_core::wire::{RecipePlan, attach_recipes};
 use peacockdb_ffi::raw::{
@@ -90,8 +90,8 @@ pub async fn gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, gpu_orac
     let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
     let mut session = Session::open(tree.as_ref(), &what);
     let ctx = session.context();
-    let report = run::<GpuBackend>(tree.as_ref(), &ctx, None)
-        .unwrap_or_else(|e| panic!("{what}: {e}"));
+    let report =
+        run::<GpuBackend>(tree.as_ref(), &ctx, None).unwrap_or_else(|e| panic!("{what}: {e}"));
     assert_eq!(report.in_flight_bytes, 0, "{what} ended holding batches");
     assert_eq!(
         report.holds, report.releases,
@@ -116,7 +116,13 @@ pub async fn gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, gpu_orac
 /// would be absent: a `golden_exact` where the section is a marker is a test that fails on
 /// correct behaviour, and a `live_cpu` where a committed section serves spends a device-side
 /// cpu run on a comparison a file makes faster and harder.
-fn assert_oracle_suits_the_golden(dataset: &str, sf: &str, query: &str, gpu_oracle: &str, what: &str) {
+fn assert_oracle_suits_the_golden(
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    gpu_oracle: &str,
+    what: &str,
+) {
     let section = corpus_golden::section_of(&corpus_golden::result_golden(dataset, sf), query);
     let frozen = !section.starts_with(corpus_golden::SKIPPED);
     match gpu_result_mode(gpu_oracle) {

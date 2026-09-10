@@ -495,7 +495,7 @@ def test_a_mid_plan_limit_matches_the_oracle_at_every_config():
         assert list(got.double_v) == list(want.double_v), f"mid-plan limit {(parts, group, target)}"
 
 
-def test_the_enforcer_is_actually_engaged_in_these_runs():
+def test_the_accountant_is_actually_engaged_in_these_runs():
     # A budget of None would make every plan above pass whatever the accounting did. This
     # asserts the budget is live: the same plan trips when the budget is small enough.
     df = fixture()

@@ -5,10 +5,8 @@
 
 use super::*;
 
-use peacockdb_core::executor::gpu_backend::accumulate::{
-    GpuAccumulator, GpuPartitionAccumulator,
-};
 use peacockdb_core::executor::LaneEvent;
+use peacockdb_core::executor::gpu_backend::accumulate::{GpuAccumulator, GpuPartitionAccumulator};
 use peacockdb_core::plan::AggFunc;
 use peacockdb_core::plan::AggStateColumns;
 use peacockdb_core::plan::RowInterval;

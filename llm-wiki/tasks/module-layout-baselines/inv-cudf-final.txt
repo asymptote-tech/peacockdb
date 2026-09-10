@@ -1081,7 +1081,7 @@ the_degenerate_hash_puts_every_row_in_one_lane_and_still_emits_them_all: test
 the_selection_covers_every_mode_and_every_boundary: test
 == test_module_layout
 
-10 tests, 0 benchmarks
+11 tests, 0 benchmarks
 a_components_api_is_declared_in_its_mod_rs: test
 a_private_module_is_unreachable_from_outside_the_crate: test
 each_reader_sees_the_violation_and_not_its_near_miss: test
@@ -1091,6 +1091,7 @@ no_subcomponent_reaches_a_sibling: test
 no_super_path_climbs_out_of_its_component: test
 nothing_is_pub_super: test
 nothing_re_exports_with_pub_use: test
+only_the_parent_component_names_a_subcomponent: test
 pub_mod_declares_a_component_and_nothing_else: test
 == test_null_analysis
 
