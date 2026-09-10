@@ -23,6 +23,10 @@
 #[cfg(not(feature = "rust-only"))]
 #[cfg(not(feature = "rust-only"))]
 #[cfg(not(feature = "rust-only"))]
+#[cfg(not(feature = "rust-only"))]
+#[cfg(not(feature = "rust-only"))]
+#[cfg(test)]
+#[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
@@ -907,9 +911,10 @@ A `BatchAccumulator` node's executor, one variant per node.
 A `GpuLimit` streams whatever is set here, because that is what a limit is — see `executors_for`.
 A `golden_exact` where no committed section can serve is a test that fails on correct behaviour: the result is over the cap and has a marker instead, or the query's rows are not determined across modes and one mode's answer cannot be the authority for five.
 A `live_cpu` where a section does serve spends a device-side cpu run on a comparison a committed file makes faster and harder.
+A `mod.rs` **is** its directory rather than a file inside it, so one `super::` there is already the parent — `wire/mod.rs`'s first `super::` is the crate root.
 A `not runnable` line means the plan validates and runs on the CPU while one node's payload has no shape on the wire — so the registry stays out of it: its cell answers "does this query plan", which for these is yes, and a fourth state would make one cell answer two questions at once.
 A `pub mod` declares a component.
-A `pub mod` exemption claims a target outside the crate forces it.
+A `pub mod` exemption claims a file outside the crate forces it.
 A `pub` item anywhere else is API the facade does not list, which is the accident the whole layout exists to prevent — and nothing catches it, because a `pub` item in a private module is perfectly legal and perfectly invisible.
 A `pub` item declaration, at any indent — `pub(crate)`, `pub(super)` and `pub(in …)` are not this, and neither is a `pub` field, which is a property of a declaration made elsewhere.
 A `pub` item whose signature names a type from the component's own private module. **rustc does not warn here, and the reason is the point of this test.** `private_interfaces` compares against a type's *nominal* visibility. flatc emits `pub struct` / `pub enum`, so every type in `wire/generated.rs` is nominally public even though no path outside `wire` can name it — and a `pub fn` in `wire/mod.rs` returning one compiles silently.
@@ -1109,6 +1114,7 @@ A mid-plan limit:
 A mismatch falls back to the rendered form, so the message still says how they differ.
 A missing file and a missing section are different failures and say so: the first is a golden nobody has generated, the second is a query whose coverage is claimed and not recorded.
 A model reading the budget's target instead would say the same number for all three.
+A module inside a subcomponent that is `pub` because something outside the crate names it.
 A move between queues: the batch stays in flight, so nothing is accounted.
 A name as a single token: bare where it already is one, in backticks where it holds a character this rendering punctuates with — whitespace, a comma, a bracket, an `@`, or a backtick, which doubles.
 A name is not always an identifier:
@@ -1122,7 +1128,7 @@ A node of the recipe plan, addressed by its position in it.
 A node rebuilt over its own children is the node it was, per arm and per field.
 A node that declared its child's schema here would emit an extra column and shift every ordinal above it.
 A node that declares no layout — the unload — declares no lane count either, and its one lane is the list's own.
-A node that makes no ABI call gets no recipe, and the absence is a statement about the node rather than a gap: a forwarder routes batches and touches no device.
+A node that makes no ABI call gets no recipe, which is a statement about the node rather than a gap.
 A node that makes no ABI call says `none` rather than nothing: "this node touches no device" and "the pass missed it" have to look different, and a blank line makes them look the same.
 A node that moves rows rather than changing them emits its input's columns, so the two schemas must be the same fields and not merely the same count.
 A node the plan did not ask for, in two kinds.
@@ -1186,6 +1192,7 @@ A query this mode refuses has no recipes to check; a query it plans has to publi
 A query with no enabled mode has no result section to reason about, and its oracles are inert until one is enabled.
 A range naming no rows exports nothing at all, and there is nothing to free.
 A range naming no rows of a table that has them exports nothing at all, and the answer is still a batch of the sink's columns rather than a missing one.
+A reader that matched one line could not see a parameter or a return type, which for this rule is most of what a signature is.
 A reader that took one of these for a node would bin a continuation line's bytes into the cost, or diff a header as a tree.
 A real consumer above it, and not one that vanishes: the interval is mid-plan only when something above it goes on reading, and this is also what makes the tree canonical — the planner refuses a limit whose only parent is the sink.
 A real one may add its own state — the accountant's unit tests cover that — but keeping state out here is what lets a test trip the post-check without the pre-check firing first on the same figure.
@@ -1284,12 +1291,12 @@ A stddev's finalize, whole: the shape the fifth operator was appended for.
 A step gated on a matrix leg names a leg the matrix declares.
 A step neither moves a batch nor finalizes a lane only if the schedule is wrong, so a run that does not end is a bug here rather than a query that is merely large.
 A streamed probe cannot know which build rows matched, so the types that owe their build side a row keep the probe keys per batch and answer once at done (#136).
-A struct rather than a bare path, because the entry has to carry the thing a reader judges: not "is this still exempt?" but "is the claim still true?".
 A stub input over a state schema, which is what a merge reads.
 A stub input with a layout stated, since a join's two sides differ in exactly that.
 A stub input with the layout a join requires of that side: the build is one batch per lane, the probe streams.
 A stub is numbered here, before the node that takes it, for the same reason.
 A sub-expression that is itself an operator is parenthesized, so precedence is read off the line rather than assumed.
+A subtree exemption is the shape that grows: exempting `executor/cpu_backend` wholesale put 91 `pub` items across 13 files — over half the crate's remaining `pub` surface — behind an exception granted for fourteen types, and two of the eleven inner `pub mod` were forced by nothing at all.
 A tab occurs in data, so with one of those `("a\tb", "c")` and `("a", "b\tc")` render to one string and hash to one digest — two different answers agreeing, on the comparison that has no second opinion behind it.
 A tail that merely contains the word is not an interval.
 A target named only in such a step is "wired" while never executing — precisely the built-but-never-run hole (peacock_tpchv_tests) that this guard exists to close.
@@ -1458,12 +1465,12 @@ Both files hold the same section, headed differently: the mode goldens put it be
 Both filter columns pointed at the probe: @0 then reads a valid column of the wrong table, which nothing downstream could detect.
 Both fixtures being one character wide made the padding cancel.
 Both get the same share, and what separates their targets afterwards is their own size.
+Both halves are checked, because half a claim expires wrong: a `forced_by` that lists one of four forcing files goes green the day that one is fixed and announces the wall can go up while three files still need it.
 Both halves of `… as name` and the schema entry, which is where a reader resolves an ordinal: unquoted, the name's own space reads as the separator.
 Both hold today; asserting keeps a future edit from producing a row the widget would render incoherently.
 Both keys are NULL-free here, so only the filter and the type decide.
 Both limit lowerings, asserted on the calls that were and were not made.
 Both lists: a ticket keeps its number when it closes and moves to the archive, so reading only the open one would turn this red for a refusal whose blocker was fixed somewhere else — which is a stale refusal to delete, not a broken reference.
-Both of these are reachable only because two integration targets are separate crates that construct backend executors directly.
 Both paths, because they release in different places: a lane call's input goes back where the call failed, a cross-lane one before the result is even looked at.
 Both shapes of line that decline something:
 Both sides call the key `k`, so a lookup by name has two candidates and can only give up.
@@ -1549,6 +1556,7 @@ Counted per lane every lane would pass its own four rows and the query would ret
 Counted rather than netted: a total back at zero is also what releasing something never held would leave.
 Counted where it happens rather than inferred from the answer, which is unchanged either way: a seed under which no call fires would leave the setting carried in the label and in nothing else.
 Counters, not flags: one node can sit in two joins' probe subtrees, and a lift of one of them must not free it from the other.
+Counting path components and subtracting one gives every `mod.rs` a free climb, and that free climb is exactly the one that leaves the component: the reader was blind on the thirteen files most likely to import across a boundary while passing on every file that could not.
 Counting the group list alone leaves the row a column short, which the width check catches — a refusal where the query has an answer.
 Counting the input while the call runs asks for 1600 and cannot fit; pricing the call as if the input were already gone asks for 800 and would.
 Counting them counts the groups instead of the rows.
@@ -1625,6 +1633,7 @@ Derivable is why a CHECK can exist here, never why either value would be absent 
 Derivable is why a CHECK can exist, never why the value would be absent: a `golden_exact` where the section is a marker is a test that fails on correct behaviour, and a `live_cpu` where a committed section serves spends a device-side cpu run on a comparison a file makes faster and harder.
 Derive the `.cost.txt` body from a `.cpu.txt` body.
 Derived from the debug output rather than listed, so it goes red the day the field is added rather than the day something depends on it.
+Derived from the file's own depth rather than fixed at two: nesting is three deep, so `scan_mapping/partition.rs` reaching `memory_estimation` takes three and a reader that stopped at two would pass it.
 Derived from the settings here, and written down again in the selector's own case — a requirement read off the settings cannot catch a settings list that lost a value.
 Derived from the text just written rather than from the report it came from, so the cost is a function of the golden exactly as `test_cost_model` re-derives it.
 Derived rather than transcribed: restating `can_step`'s disjunction here would keep this green through any change made in both places.
@@ -1634,6 +1643,7 @@ Digests rather than two rendered tables:
 Directories that are a test module rather than a subcomponent: they have a `mod.rs`, and none of the rules about walls apply to them.
 Directory -> its subcomponent children.
 Division has spaces or a closing paren before it, so it is not one.
+Does this text name the module and then a type, rather than a module below it?
 Does this workflow line BUILD the `peacockdb` CLI? The bin target is the same hole one level down again: it has no test target, so the `--test` sweep cannot see it, and it is the only caller of the planner and the driver from outside the crate.
 Does this workflow line RUN the lib unit tests (`--lib`, not `--no-run`)? The inline `#[cfg(test)]` modules are a target class this guard was blind to: every other invocation in the workflows passes `--test`, which selects integration targets ONLY, so the crate's own unit tests ran locally and never at the merge gate.
 Does this workflow line actually RUN `--test <name>`? Matching is line-wise and deliberately strict, because a coverage guard that reports FALSE coverage is worse than no guard at all.
@@ -1689,6 +1699,7 @@ Equal lane counts are not co-location: both sides must be scattered on their key
 Equal shares rather than proportional ones: a proportional split hands the most budget to the source already producing the most bytes.
 Every `.rs` under `src/`, as a path relative to it.
 Every `pub mod <name>;` a file declares.
+Every `pub` item's declaration — from the `pub` to the `{` or `;` that ends the signature — with the line it starts on.
 Every `tests/*.rs` counts now.
 Every arm of the IR enum appears above: a new operator added to one side and not the other is what this count catches.
 Every arm reads its own node and the schemas above, and nothing else.
@@ -1708,7 +1719,6 @@ Every cell of both dimensions — nine join types crossed with a residual filter
 Every column reference must be in range of the schema it reads AND carry the name of the field at that position.
 Every consumer of those parameters goes through `as_node_ref` instead.
 Every cost section is derived from a `.cpu.txt` section that exists, and a skipped query is skipped in both.
-Every declaration the component offers is here.
 Every declaration the component offers is here; the implementation modules hold the trait impls, the constructors' bodies and the checks.
 Every edge of this plan declares an order — the sort made one, the accumulator merged its batches and the merge kept it — and only the edge under the merge is refused by the engine.
 Every edge whose child is not a source, in pre-order.
@@ -1721,6 +1731,7 @@ Every executor was written to the trait's shape before a `Backend` existed to ch
 Every expression before every name, which is the order the payload golden was canonized in: a builder writes back to front, so interleaving the two would move bytes that mean the same thing.
 Every fb kind and every call shape the ten mode goldens hold appears in the payload golden too.
 Every field of a node that the fixture set gives one value, named `Node.field`.
+Every file under `tests/` that names this module path from outside the crate.
 Every golden holds its whole mode in `== <query>` sections, so the derivation is per section.
 Every hash join in a plan, in tree order.
 Every injected run asserts the same answer, which is exactly what a dimension that did nothing would also produce: a setting that never fired would pass every case above and prove nothing.
@@ -1799,7 +1810,7 @@ Everything else is the CPU type itself, reached through a second impl of its tra
 Everything else plans: semi honours the flag, and `null_equals_null=true` is asking for the equality the executor hardcodes.
 Everything else plans: semi honours the flag, and `null_equals_null=true` is asking for the equality the executor hardcodes.
 Everything else under `src/` belongs to one of them.
-Everything that knows what a flat buffer looks like: the recipe vocabulary, the writers that build the plan the C++ is handed, the reader, and the two renderers.
+Everything that knows what a flat buffer looks like: the vocabulary, the writers, the reader, and the two renderers.
 Everything the aggregators and the finalize expressions produce: a sum over no rows is NULL, and a stddev under its ddof is NULL by construction.
 Exact rather than coercible — a state column arriving as another type is a decomposition that has gone wrong upstream, and coercing it would merge the wrong numbers rather than say so.
 Exact sorted-string equality.
@@ -1904,6 +1915,7 @@ How a state merges.
 How deep the recipe plan is.
 How deep the serialized plan is, which the C++ verifier bounds.
 How far under: 2.0 means the call used twice what was modelled.
+How many `super::`s a file can use before it leaves its own component.
 How many batches each lane of `partition_groups=[[[0,1],[2]],[[3]]]` plans: the count of second-level lists, per first-level one.
 How many batches every source in the plan could produce — the mapping's own count, which is what a scan that ran to the end would have read.
 How many calls reported a measured transient rather than `None`.
@@ -1942,7 +1954,7 @@ Instead each binary asserts the CSV columns IT owns, in both directions, and tog
 Interleaving lanes keeps neither the hash that separated them nor an order that held within one of them.
 Intervals nest — each counts the stream its own node is handed — and the spec's limit lowering rule says why only the non-adjacent form ever arrives that way.
 Invariant: total == Σ output_bytes in the .cpu.txt (multipliers all 1.0).
-Is this file inside one of the `pub mod` subcomponents?
+Is this file the `mod.rs` or the module file of an exempt module path? The module itself, not what is under it:
 Is this the line that executes the binary, rather than a comment or the `[ -x … ]` test? Keyed on running `"$t"` AND redirecting to a log, not on the line starting with `"$t"`: the patched glibc is applied per command (`env LD_LIBRARY_PATH=… "$t" …`) rather than exported, and a reader anchored at the start of the line stops seeing the invocation the moment anything precedes it — a guard silently reading nothing, not a red one.
 It accumulates nothing and makes no backend call — the driver owns the rotation.
 It answers the same question as `select` and is checked against it over the whole cross product in the tests, because two readings of one rule are two rules.
@@ -1966,7 +1978,7 @@ It is held rather than consumed: which call takes it, and whether it survives th
 It is marked done as it is held, or the hold would stop it reporting and strand its parent — `LIMIT 0` is the case that forces it.
 It is not universal — contiguity is the stronger rule, so row groups differing by orders of magnitude inside one file can beat it.
 It is rebuilt into the one SQL aggregate it decomposes, which is what the schema's `agg_state` annotations are for: they say which output columns belong to which aggregate, and with what `ddof`.
-It is sent a plan in the legacy vocabulary whose nodes exist to be addressed — a menu of parameterized kernels — and the driver then calls the ABI as often as its own schedule wants.
+It is sent a menu of parameterized kernels whose nodes exist to be addressed, and the driver calls the ABI as often as its schedule wants; `llm-wiki/architecture.md` has the table this implements.
 It is the assertion behind the three structural rules in `recipe/writer.rs`: a stub for an unfilled slot, a node hanging off its own previous call, and a union over what a node did not consume.
 It is the gap `AggregateMode::Merge` was added to the wire to fill.
 It is the pad that makes this worth a case rather than the join: the anti join at done emits every build column whatever the projection says, so the project above it is what cuts the row down, and it walks the projection rather than the build side.
@@ -2083,6 +2095,7 @@ N lanes, nothing else declared — what a scan or a shuffle-free chain emits.
 NOT hardcoded reference values.
 NOT the golden's rendering — padding is a function of the whole answer, so the ten rows a limit returned and the millions the oracle streams past them would render the same row differently and nothing would ever be struck off.
 Name the PROVISIONING requirement, not just the io error: a bare "No such file or directory" on a remote host reads as "the registry check is broken" when it actually means "this host was not given the fixture".
+Named `repo_root` deliberately:
 Named for the call rather than for the node, since `GpuUnload` is the node.
 Named on its own so that an export which trimmed says so, rather than showing up as whichever operator the failing test was about.
 Named rather than counted: the day a second query joins mixed-join here, that is a fact about the mode worth a red test rather than a smaller number.
@@ -2250,6 +2263,7 @@ One corpus query at one mode: plan it, run it, and hold the answer to the oracle
 One cost category: where its bytes come from and how they are weighted.
 One direction only: nothing below the loader splits a batch ([#142](../../../llm-wiki/tickets.md#t142)), so the node is `GpuCoalesceAllBatches` merging a lane to one, and the finer direction is the mode axis already.
 One edge of the tree, addressed by the pre-order position of the node below it — the numbering `PlanIndex` uses, so an edge names the same node the driver would.
+One entry per **module path**, not per subtree.
 One entry per aggregate: the group keys pass through unnamed by this list.
 One entry per column the filter's own schema has, in its order.
 One expression per aggregate output column, and not per output column: a group key is not finalized and is not here, so this list is shorter than the node's output schema by the number of keys.
@@ -2293,6 +2307,8 @@ One node of every kind that reaches a backend.
 One node over the whole probe side, or one per batch where every emitted row is decided by (build, this batch).
 One node, one entry, however many batches it emitted — the worst source in the corpus has 96 in a lane, and a line per batch would make a node unfindable.
 One of ours by the name the executor knows it by.
+One of this engine's expressions back in DataFusion's own vocabulary, which is what the CPU backend hands its operators.
+One of this engine's expressions in DataFusion's vocabulary.
 One oracle for every shape below, computed above: it is the expensive half and it is invariant, which is what makes a layout that changes the answer a defect rather than a disagreement between two shapes of ours.
 One output short of the lane count.
 One parquet file: a key column carrying exactly the NULLs asked for, a value, and `padding` bytes per row to move the file across the size threshold.
@@ -2310,6 +2326,7 @@ One row by its position across the batches, rendered for a message.
 One row per group, and with no cardinality estimate the worst case is one group per input row (#19 is what would sharpen it).
 One row rendered as its cells.
 One rule per category for the whole plan: a test that needs two different emitters is a test about two plans.
+One rule rather than two: match the classifier rather than widening it.
 One rule runs through it — the ordinal is authoritative and the name comes from the declared schema at that position, so every column reference reads `name@ordinal` and a name disagreeing with its ordinal is visible rather than invisible.
 One rule, read by the recipe writer for the wire and by the CPU backend for DataFusion — a second copy of it would be a second answer to which column is whose.
 One rule, read by the recipe writer for the wire and by the CPU backend for DataFusion — a second copy of it would be a second answer to which column is whose.
@@ -2333,7 +2350,6 @@ One test per refusal, named for the shape and for the reason, over the fixture i
 One test-macro invocation, submitted at the invocation site.
 One type with a variant per behaviour, because a backend names one type for the category and what these four do differs completely.
 One type with a variant per node, since a backend names one type for the category.
-One walk builds that buffer and records, per plan node, the calls it makes and the seqs they address; `llm-wiki/architecture.md` has the table it implements.
 One walk of the finished tree: build the buffer, and record per node the calls it makes.
 Only `enabled` and `skip` produce a test (and therefore a registration); `disabled` (commented-out invocation) and `na` (mode never applied to this query) must be ABSENT from the inventory.
 Only a test asks.
@@ -2341,6 +2357,7 @@ Only an unload's decision is made here, its range being an argument of the drive
 Only an unload's, which is the one operator whose output is not `B::Batch`.
 Only for queries whose sole divergence from the oracle is float summation reassociation: a run at more than one lane sums in a different association order than DataFusion's single-lane pass, drifting ~1 ULP.
 Only one side was scattered on its join key, so the other's rows are not where the first one's are — and an aggregate above would answer per lane for a group that is spread across them.
+Only the GPU backend asks, so it carries the same cfg.
 Only the data half of the trait-object pointer is taken: the vtable half is not stable across casts, and identity is what is being compared.
 Only the driver can hold this: an unload instance is one lane's and the count is not.
 Only the executors are mock.
@@ -2499,6 +2516,7 @@ Refuses an anti or mark join whose NULLs can meet under SQL semantics.
 Refuses an anti or mark join whose NULLs can meet under SQL semantics.
 Refusing on that would turn "we do not know" into "you cannot run this".
 Relabel a leg or drop one and the steps gated on it stop running with that meta-test still green — and [#129](tickets.md#t129) records that the leg labels already disagree with their images, so the label is the untrustworthy half of a pair that seven steps now depend on.
+Relative paths, not file names.
 Released here rather than shipped and trimmed, which is the whole saving on an offset: the prefix a skip drops is unbounded.
 Rendering a plan as text: one line per node, indentation as the tree.
 Rendering one expression as text.
@@ -2660,18 +2678,18 @@ That asymmetry is what makes the reverse direction meaningful.
 That file is gone and the type moved to `tests/common/`; a `#[cfg(test)] mod tests` beside it would compile into every integration target, so the cases live in one of them instead.
 That index is a position in the TREE and a [`Seq`] is an address in the recipe plan: they part company at the first node with two calls, and a driver holding both at once has to keep them apart.
 That is a defect no inequality can see, which is why it sits beside `in_flight_bytes` returning to zero and `holds == releases` rather than in place of them.
-That is also what keeps the tier boundary structural: a rust-only target instantiates the drivers only at the CPU backend, so the GPU types are never named.
+That is also what keeps the tier boundary structural: a rust-only target instantiates the drivers only at the CPU backend.
 That is not a saving so much as what lets this type exist at all: summing over live executors means holding a reference to each, and the driver owns them mutably.
 That is not hypothetical — it is in `executor/mod.rs` today.
 That is not politeness — a CI log drops a line past a thousand characters, so a half-gigabyte diff spends the memory and produces something nobody can read.
 That is only true if the same key goes to the same lane every time it is seen.
 That is the assertion the defect was.
+That is the exemption's expiry — `test-layout.md` moves these targets into `src/`, and on the day it does this goes red and says the wall can go up.
 That is the point of one list: this binary cannot silently disagree with the other about which query exists.
 That is what a set operation wants and what SQL's `NOT IN` does not, and the difference only shows where NULLs can meet — which is why the refusal reads the data rather than the declared types: every column in both benchmarks is declared nullable, keys included.
 That is what lets a run count be cut without cutting what is proved.
 That is what lets the two backends and the goldens agree on what a batch is.
 That is what makes a scheduling corner reachable from a test that builds no plan.
-That is what the four entry points below are for:
 That is why it is an argument rather than a second kind of case.
 That rule is what separates it from the per-batch continuation line, a legacy `pK:` sub-line, a `== ` header, a `--- memory ---` marker and a cost category, none of which start with a capital.
 That set is SUBTRACTED from the CPU modes and matched WHOLE against `<crate>:<target>`, so the crate is kept rather than discarded: a line with the wrong crate subtracts nothing, and the target it names then runs on a machine with no GPU.
@@ -2690,6 +2708,7 @@ The CPU backend relays to DataFusion, so it needs the expressions back in DataFu
 The CPU backend with two of its executors wrapped.
 The CPU backend's batch, and what leaves the device at the unload.
 The CPU backend's executors: one DataFusion operator per node, run one batch at a time.
+The CPU backend: every call relays to a DataFusion operator.
 The CPU half of the contract in [`executor_cases.inc`]: every case driven through this backend and checked against the answer both engines owe.
 The CPU twin of this asserts the same thing over every node kind, and the gap here was a missing caller rather than a missing check — `executors_for` typechecked and nothing constructed it.
 The CSV spells a query as an identifier and every golden section spells it with hyphens, so a reader comparing the two directly finds no row and answers None — and None is a legal answer here, meaning "no mode is enabled".
@@ -2700,6 +2719,7 @@ The DIGEST is what is held, not the answer: eight bytes a row, so a hundred quer
 The FORWARD check applies to every registration this binary can see, even for a column another binary owns the reverse check for: if a test exists, its CSV cell must describe it correctly, full stop.
 The GPU backend looks a recipe up by the post-order it is given here, and a wrong number reaches it as another node's recipe rather than as an error — so the claim is checked against a walk written in this file, not against the one under test.
 The GPU backend's executors: a node's recipe is the instruction set, and running it is all these do.
+The GPU backend: every call crosses the ABI.
 The GPU step reports a failure, and has no way to report success over one.
 The GPU test binaries `scripts/build-test-shadgpu.sh` stages, from its `RUST_TESTS` array — what a developer's own run ships to the host.
 The IR is neither planner nor executor — it is what passes between them, and consumers span both halves.
@@ -2826,6 +2846,7 @@ The cast is a node rather than something the executor does behind the plan's bac
 The category check above passed, so these cannot be reached from a lane-scoped node; a backend that returns one is caught there.
 The category claim is the one the driver cannot make for itself: it checks the category it was handed against the node's, so a backend that builds the wrong executor is caught at run time and named — but only for a node some plan actually reaches.
 The check the planner made, made again: an injected tree is one no planner emitted, and the driver asks only for canonical form.
+The checkout this test reads.
 The child order `NodeSession::node_children` walks, which is what makes a seq mean the same node on both sides.
 The child's lane count, which is how many `Done` events a partition accumulator owes.
 The claim the matrix makes about this family, as a check rather than a sentence: its per-batch call touches neither the build side nor a copy of it, which is why it streams at no copy cost at all.
@@ -2930,12 +2951,11 @@ The executor applies the residual after the outer gather, so a padded row's NULL
 The executor contracts, one per node category.
 The executor for the node at `index` in the tree's post-order, which is what the recipes are indexed by.
 The executor overrides the thresholds, and this asserts what the executor DOES rather than what the context said — the difference being that a later site building an executor from an unguarded context still goes red here.
-The executor pointer is BORROWED, as everywhere else on the GPU path: the session outlives every batch drawn from it.
+The executor pointer is BORROWED, as everywhere else on this path: the session outlives every batch drawn from it.
 The executor says whether the lane owes nothing — six of the nine join types do — and the lane drains from there.
 The executor's own residency is a unit case; this is the claim the driver makes.
 The executor, in whichever state it is.
 The executors on a live GPU: each one handed its node's recipe and the batches a lane would give it.
-The exemption covers what is inside it too: a test naming `cpu_backend::accumulate::CpuAccumulator` needs both levels reachable, and the two expire together.
 The export does not consume the handle, so the batch is released here by going out of scope — which is the whole of what the row range buys: the rows wanted cross PCIe rather than the batch they sit in.
 The export holds nothing and its transient is the rows crossing out — the IPC buffer the range names, which is why a limit's range is worth having.
 The expression IR.
@@ -2974,9 +2994,9 @@ The finish pass emits the columns the node's projection keeps, in its order — 
 The finish pass holds the key columns of every probe row it has seen (#136), and the small table on the left is what keeps this a Left join — DataFusion swaps the sides, and remaps the type, when the right one is smaller.
 The finish pass is the half that has to answer in the node's declared shape: the anti join emits every build column whatever the projection says, so what the pad project keeps is the whole question.
 The finish pass is the reason this file exists: probe keys per batch, the concat at done, the anti join and the pad project.
+The first assumes one number per source and exists only to derive the real ones.
 The first line of a section that differs, as the column it differs at and a window either side.
 The first line of each stranded group, with its line number.
-The first pass assumes one number for every source and is used only to derive the real ones; the second is the plan.
 The first pass assumes one number for every source and is used only to derive the real ones; the second is the plan.
 The first probe batch can have the original; a second has nothing to be given, because the call that read it erased it.
 The first rule — a node takes the most recently created unconsumed offsets, so its children are the contiguous block immediately below it, which is what post-order means.
@@ -3094,6 +3114,7 @@ The line itself, submitted by both arms — a query with no enabled mode still d
 The list generates the fixtures, so leaving the set means leaving the list, and this reads the list.
 The loader: a lane reads the row groups the mapping gave it, one batch per call.
 The lock is on the file rather than in the process, and the distinction is what makes it sufficient: libtest runs a binary's cases as threads, so a `Mutex` would serialize those and nothing else — not `cargo nextest`, which gives each case its own process, and not two shells regenerating at once.
+The longest match only:
 The low-level Spark murmur3 API is public (not UDF-only).
 The macro's spelling of the same mode, `tp4_sized` — one derivation rather than a second field, so the two cannot disagree.
 The map arm; a top-N's `fetch` rides the node, so it trims each batch and whatever accumulates above it trims the merged result.
@@ -3200,6 +3221,7 @@ The ordinal is authoritative and the name is the declared schema's at that posit
 The ordinal is structural: build width 1, so the probe's key is at 1.
 The other LeftAnti here is a Left outer's DERIVED finish — different keys, no projection, and a pad project after it — so neither covers the other.
 The other direction, so the list cannot rot: a field that starts varying is one whose exemption has stopped being true.
+The other direction: a file that forces it and is not listed would keep the exemption alive after every listed file was fixed.
 The other half of the antipattern is a declaration INSERTED above an existing one, which takes its whole block and leaves no blank line anywhere; that is a property of a diff rather than of a tree, and no check here sees it.
 The other node that finalizes: the translation hands its finalize to the init itself where one batch in one lane is already the whole of every group, so no merge exists to carry it.
 The other two lists are bare names, and every target they carry is peacockdb-core's, so that is what a bare name means when set against the crate-qualified heredoc.
@@ -3222,6 +3244,7 @@ The part of it that cannot be an overestimate — a build side is its input's ro
 The partitioner decided at plan time which row groups each of a lane's batches reads, and this reads exactly those — so a lane's batch count and its rows are the plan's rather than a reader's chunking.
 The parts that are not zero, in the units they are declared in — `90 days` where the struct form spends sixty characters saying the same thing.
 The pass-through moves every height and every rank without touching a batch; the rebatcher also changes the shape batches arrive in, which is the property the prototype injects #139's node for — and this mode has one today, since a coalesce is N-to-1.
+The path exactly, not as a prefix:
 The path keeps them under a directory named for this one.
 The peak is an observation taken elsewhere and is not what is checked, so it can exceed a budget that never tripped — see the Memory accounting section of the task spec.
 The peak of this plan is one scan batch in flight, so the scan is where it is reached: the filter is 1:1 and releases its input as it produces.
@@ -3300,7 +3323,7 @@ The reason a query does not plan is the content of these files, and a ticket num
 The reason each one needs a test rather than a reviewer is recorded at the test that carries it.
 The reason, its ticket, and the seq the node would have taken — the three things a reader of the golden line needs, and the assertion that keeps the Err arm real: it would go quietly green the day the writer learns intervals, having stopped testing anything, so the message is checked rather than merely the failure.
 The reasons are `llm-wiki/architecture.md`, under Execution.
-The reasons behind each shape are in `llm-wiki/architecture.md`, under Execution.
+The reasons are in `llm-wiki/architecture.md`, under Execution.
 The reasons behind each shape are in `llm-wiki/architecture.md`.
 The rebasing the layer does at every inserted node is what makes this the likely slip: the ordinal stays valid and starts reading a different column.
 The recipe's calls in order, each one's prior output being the last one's.
@@ -3412,6 +3435,7 @@ The session is this executor's, not the batch's: a batch carries the pointer so 
 The session pointer is BORROWED, as everywhere on the GPU path: the session outlives every executor drawn from it, and the handles it hands back.
 The shape a join minted before it read its children: lanes hashed on a column nothing ever scattered by, which a co-partitioned join above would then trust.
 The shape check stays because it costs nothing and goes red on the day that construction stops holding.
+The shape does not move between them.
 The shape every join with no finish takes: one call per probe batch and nothing at done.
 The shape of an avg's finalize, which is the deepest thing the planner builds: a divide of two casts, under a CASE, under a NOT.
 The shape that would owe a row — a global aggregate's identity row, count 0 rather than no row — has one lane and no scatter above it, so its lane is never the empty one.
@@ -3461,7 +3485,6 @@ The table a scan reads, named after the parquet file rather than declared anywhe
 The table as two lanes: one row group in the first, two in the second.
 The target batch size goes; batching is this mode's own concern (#139).
 The targets `scripts/build-test.sh` treats as needing a device at run time, from its `gpu_runtime_targets()` heredoc, as `(crate, target)`.
-The targets whose existence outside the crate is the whole reason.
 The taxonomy + multipliers live in `common/cost_model.rs`.
 The taxonomy + multipliers live in the text file `testdata/cost_model.conf` (read at runtime, not compiled in): a multiplier can be retuned and the cost goldens regenerated without recompiling, and the config stays a plain editable file with no parser-crate dependency (the format is trivial whitespace columns).
 The test targets pipeline.yml's gpu-tests job stages and runs, read out of the committed workflow (`for t in <names>; do`).
@@ -3508,7 +3531,6 @@ The tree is walked through the index the report is addressed by, so nothing here
 The tree the parser rebuilds is the tree the indentation draws: every node but the root has exactly one parent, and the root is the only node at depth zero.
 The tree's recipes attached and its buffer handed to the device, which is the whole of what an executor needs before it can address a seq.
 The tree's shape does not move between them: lane counts come from row counts and pushed-down limits, never from the batch size.
-The tree's shape does not move between them: lane counts come from row counts and pushed-down limits, never from the batch size.
 The trivial kinds are not tested here — the plan goldens run them over every corpus query, which is more coverage than a hand-built node would be.
 The twin of C++'s `clamp_row_range` (`node_session.cpp`), which the export and the slice share so that the two cannot disagree — this is the same rule for the backend that never crosses the ABI, and the two answering differently would be a divergence no test of either one alone could see.
 The twin of C++'s `clamp_row_range` (`node_session.cpp`), which the export and the slice share so that the two cannot disagree — this is the same rule for the backend that never crosses the ABI, and the two answering differently would be a divergence no test of either one alone could see.
@@ -3552,6 +3574,7 @@ The whole handle, which is what every case above asks for after its node has run
 The whole of a cpu corpus case: plan, run, answer, and the three goldens.
 The whole of a device corpus case: plan, run on the device, then the two read-only assertions — the mode's `.cpu.txt` section, and the result the declaration names.
 The whole sequence, from the aggregators the partial declares: init per batch, a per-lane merge where a lane holds several batches, the shuffle where the lanes must be re-landed by group key, and the merge that finishes it.
+The whole signature, not its first line: rustfmt wraps a signature past 100 columns, and fourteen `pub fn` in this crate's `mod.rs` files span several lines, `executor::run` and `planner::plan` among them.
 The whole stream, not each batch: batches that are each sorted and not sorted against each other is exactly the shape that reads as ordered and is not.
 The whole tree rebuilt bottom-up, each node over its rebuilt children — the identity rewrite, and the walk every injected one is a variation of.
 The width check, shown going red: a finalize list that does not account for every non-key output column is a plan that answers with a column missing, which is a wrong answer rather than an error unless this refuses.
@@ -3583,7 +3606,6 @@ This file is for the rest — the claims that hold today because someone wrote t
 This is the SAME computation the #13 CpuNodeExecutor will use.
 This is the checked half of [`PAYLOAD_QUERIES`]'s claim.
 This is the claim `executors_for` taking a number rather than deriving one rests on.
-This is the exemption's expiry, and it is mechanical:
 This is the one conversion, called at every point the two names meet.
 This is the single source of truth for per-type widths.
 This is what the lock buys, stated as the outcome it prevents rather than as a mechanism nobody checks.
@@ -3652,7 +3674,7 @@ Two numberings computed by two walks in two files — one at plan time, one at r
 Two of the three forms are the plan already; only the budgeted one needs a number to start from, and the smallest the mapping can express is the one that assumes least.
 Two of them take runtime bounds instead of a seq, which is the reason they exist: a frozen node cannot carry a number that is known only once the rows have been counted.
 Two optional arguments follow: a tolerance, for a query whose answer is compared approximately, and the coverage, which decides whether the query runs the five modes alone or the injected shapes as well.
-Two passes, because the two halves define each other — a batch size needs the tree it flows through, and the tree's mapping needs a batch size.
+Two passes, because the halves define each other — a batch size needs the tree it flows through, and the tree's mapping needs a batch size.
 Two passes, because the two halves define each other — a batch size needs the tree it flows through, and the tree's mapping needs a batch size.
 Two passes.
 Two reasons, and both engines evaluate this expression: arrow refuses UInt64 - Int64 and Float64 / UInt64 outright rather than widening them, and a count below ddof would wrap rather than go negative in the count's own unsigned type — which is exactly the case the NULL arm is for.
@@ -3739,7 +3761,7 @@ What a source holds in total, over the columns it projects.
 What a writer holding no lock would have read: the file before q2 arrived.
 What an accumulator answers with at done: one batch of everything it held, and nothing at all where nothing arrived.
 What an executor is built from besides its node: the GPU's open session and the recipe plan its seqs address, the CPU's `TaskContext`.
-What an executor on this backend is built from: the open session, and the recipes whose seqs address the plan that session was given.
+What an executor on the GPU backend is built from: the open session, and the recipes whose seqs address the plan that session was given.
 What an executor was asked to do.
 What an unordered `LIMIT` does determine, asked of the same session: how many rows come back, and that each was in the unlimited answer.
 What arrives at a node while it holds its state: a join's probe batch, per lane.
@@ -3754,6 +3776,7 @@ What each source may spend, before its own amplification and size narrow it.
 What every call reports as measured scratch.
 What every executor models per input byte, before its own state.
 What every node declares about its columns: the arrow types, and the annotations a merging or finalizing node reads.
+What follows the path has to be a type or a brace group rather than another module segment.
 What is asserted is everything a plan depends on: the count, that no row is lost or doubled, and that a key's lane does not depend on the batch it arrived in.
 What is checked here is only that the instrument reads what it was set to — a few cases, not a suite.
 What is not is its execution semantics, which annotating a tree with wrappers carries along by accident.
@@ -3917,7 +3940,6 @@ Which trait drives a node, with the executor stored inline — the match compile
 Which variable reaches the message is a live choice in the driver — the emitter passes a literal 0 where the accumulator passes its lane — and a message hard-coded to lane 0 would pass every other case here.
 Whole stream ordered, not merely each batch — what a top-N after a sort needs.
 Whole-text asserts rather than substring ones: what the renderer is for is a file a comparator reads line for line, and a test that checks a line is there does not check that nothing else is.
-Why a `pub mod` subcomponent is tolerated.
 Why a call failed: a message and no kind, because there is one response to all of them.
 Why a rebatcher may not go here: the child declares an order and a coalesce clears it, so a parent that merges on the order refuses the plan and one that merely carries rows past it would take a different prefix under a row interval.
 Why a result has no section, and which mode decided it.
@@ -3934,7 +3956,9 @@ With one batch per lane there is nothing for a size threshold to size, so the ru
 With one, the ordinals at or above the build width are the probe's — here `v` alone.
 Without a projection every probe column is kept, so both are padded.
 Without that check, dropping a target from the array retires it silently while this exemption still excuses it — an execution mode disappearing with nothing red, which is the failure the pipeline comment warns about in prose but nothing enforced.
+Without the cfg a plain build reports it dead.
 Without the check the loss is silent, since the batches are simply dropped with the driver.
+Without the name this file is shipped to a CPU host where `sources()` panics on a missing `src/` and the probe cannot find its rlib.
 Without the reverse direction the CSV could claim coverage that no test provides — which is the exact failure mode this registry replaces.
 Without the second variable that run would rewrite the evidence and the diff would come home among the others.
 Without this a rewrite that broke a node's requirements would run and answer, which is the failure this whole tier is about.
@@ -3958,7 +3982,7 @@ Zero-row batches emitted instead of advancing, over every source and lane.
 [`CpuBatch`](super::CpuBatch)'s side of [`Batch`](super::Batch).
 [`Exemption::GpuJob`] makes a claim about a committed workflow array, so the claim is verified below; [`Exemption::NotRun`] asserts only that nothing runs the target, which nothing can confirm.
 [`GpuBatch::consume`] is that boundary, and the only place the release is skipped.
-[`GpuBatch`] and the GPU backend exist only where cuDF is linked, so their declarations carry the cfg rather than only their modules.
+[`GpuBatch`] and the GPU backend exist only where cuDF is linked, so the cfg sits on the declarations rather than only on their modules.
 [`GpuBatch`](super::GpuBatch)'s trait impls, and the one way out of it that skips the release.
 [`RowInterval`](super::RowInterval)'s range, which is three statements rather than one.
 [`RowRange`](super::RowRange)'s clamp, which C++'s `clamp_row_range` is the twin of.
@@ -3971,8 +3995,10 @@ Zero-row batches emitted instead of advancing, over every source and lane.
 [`run`](crate::executor::run) — the tree, the queues, the schedule, and everything cross-partition.
 [label, v]: one column from each side, and the build key dropped — so a pad that emitted the build side whole would produce three columns, not two.
 ` shape; a `none` row and a `not runnable` line are shapes of their own.
+`#[cfg(test)]` because its only caller outside `cpu_backend` is a test in `plan`, and a test in another component cannot reach an implementation module.
 `#[cfg(test)]` because only tests want a tree without the pipeline — three of them, in two other components.
 `#[cfg(test)]` for the same reason as [`translate`]: its only caller outside the translator is a test.
+`#[cfg(test)]`: the only caller outside this subcomponent is a test in `plan`, which reaches it through `executor`'s own entry point.
 `(kind, when)` per call, which is the pair the mapping table states.
 `(query, body)` at each `== ` header, names as the file writes them.
 `, or more fields after `, `.
@@ -4048,7 +4074,6 @@ Zero-row batches emitted instead of advancing, over every source and lane.
 `Sqrt` is the one expression with no DataFusion unary behind it: it exists because a stddev's finalize needs it.
 `UPDATE_CANONICAL`'s contract is a whole file, which a corpus file cannot honour from one case: the sections belong to different cases and a filtered run has only some of them.
 `Unbuilt` is a lane never entered — for a join that is still its build phase, since nothing has been set.
-`X/mod.rs` sits at X's own depth.
 `[[1,2],[3]]` — the bracket style every nested list in the format renders in.
 `[[a,b],[c]]` — the bracket style `partition_groups` renders in, so the two nestings a reader compares index for index also read alike.
 `[group keys…, state columns…]` — what the aggregators produce, and where the state annotations live.
@@ -4101,6 +4126,7 @@ Zero-row batches emitted instead of advancing, over every source and lane.
 `execute_node` erases every input handle it reads, and there is no copy symbol — `slice_handle` consumes its input too, so it moves rather than copies.
 `execute_node` erases what it reads, so the join call for the first probe batch takes the build side with it; a second batch has nothing to be given, and saying so is better than a handle that is not there.
 `execute_single_node` swaps it for a stream over the batches the call was handed, so what it holds is never read.
+`executor/cpu_backend/accumulate.rs` is exempt and `executor/cpu_backend/backend.rs` beside it is not.
 `false` when nothing is runnable, which is how a run ends.
 `false` — the SQL default — means a NULL key matches nothing, `true` is what a set operation lowered to a join needs.
 `fb::PlanNodeKind` carries no hint of `generated`.
@@ -4110,7 +4136,9 @@ Zero-row batches emitted instead of advancing, over every source and lane.
 `file_schema` is the projected fields and `projection` is left empty, which the C++ reads as "every column of the schema I was given".
 `filter` is a residual over both sides, which is what moves a mode off the streaming path.
 `finish_and_fetch` takes the executor by value, so on failure there is nothing left to hold a slot open — which is the same thing the query being over already means.
-`generated` is private to this component, which is the whole reason the wall is drawn here: eleven files name flatc's output and use 73 of its types between them, so it can only be private if all eleven are inside with it.
+`forced_by` names the files that do the forcing, and it is verified rather than trusted: each must exist and must still name the path.
+`generated` is private here, and that is why the wall is drawn where it is: eleven files name flatc's output, so it is private only if all eleven are inside with it.
+`gpu_backend::accumulate::GpuAccumulator` names `gpu_backend/accumulate`, and counting it for `gpu_backend` too would make the parent exemption look forced by files that force only the child.
 `in_rows` is nested by child and then by that child's lane; `batch_rows` and `batch_bytes` by this node's lane and then by batch.
 `index` is its index in the file, which is what the scan passes to `set_row_groups` — survivors are post-pruning, so it is not the position in this slice.
 `injected_queries!` is the only caller passing the second.
@@ -4129,7 +4157,6 @@ Zero-row batches emitted instead of advancing, over every source and lane.
 `k|v` per row, sorted, as the table writes its answers.
 `length: u64::MAX` means to the end.
 `llm-wiki/coding-style.md` has the rules.
-`llm-wiki/tasks/test-layout.md` moves those targets into `src/`, and this list goes with them.
 `m2` and `merge_m2` have none of their own: both are folded into the SQL aggregate whose state they are, above.
 `max(0, min(n, |unlimited| - m))` for `LIMIT n OFFSET m`: an offset past the end returns nothing, and a limit past what is left returns what is left.
 `merge_m2` is the reason `outputs` is a list — it returns its three state columns together.
@@ -4149,8 +4176,7 @@ Zero-row batches emitted instead of advancing, over every source and lane.
 `out_type` is DataFusion's declared output type. cuDF derives its own fixed-point result scale — division most visibly — so the declared one travels with the op.
 `peacock::partitioning::spark_hash_partition` is the device's copy and the live conformance gate proves the two agree bit for bit, so a second spelling on this side would be a divergence nothing else could see: the rows would still be joined, in the wrong lanes, and every per-partition count would drift from its golden.
 `per batch: execute_node(#3 CudfFilter, batch)`, the calls grouped under the pattern that drives them — which is how the mapping table reads them too, per probe call and at finish.
-`plan/exec_ops.rs` sits one below `plan`, so one `super::` reaches the component root and two would leave it.
-`plan` is the pipeline, and the other three are the pieces a test drives directly.
+`plan/common.rs` and `planner/translator/common.rs` are ordinary implementation modules that happen to share a name with the crate-level one, and a `file_name()` match exempted both.
 `plan` is the vocabulary — the nodes, the layout and schema they declare, and the rules a tree has to satisfy.
 `planner::plan` itself, not `validate` called directly.
 `planner` builds a plan, `executor` runs one, and `plan_text` renders any of it.
@@ -4163,6 +4189,7 @@ Zero-row batches emitted instead of advancing, over every source and lane.
 `pub use` re-exports a child through its parent, which is the one shape that makes the facade a lie: the item is declared in one place and named from another, so a reader of `mod.rs` cannot see what the component offers.
 `pub(crate)` and a `pub` field are not items the facade has to declare.
 `pub(super)` says "my parent", which is the level the design never wants: it is exactly as wide as `pub(crate)` for a module one deep and narrower in a way no rule here relies on, so it reads as a promise the layout does not make.
+`pub` because `Backend::Source` names it, so a caller holding a `GpuBackend` reaches it without any file importing the type.
 `q16` at four lanes peaks at 104.7 MB as planned and 77.9 MB with lane 0 drained, and its budget follows, 131.5 MB against 104.7 MB.
 `refused` is the planner's, and `not runnable` is the crossing's — the plan runs on the CPU and only the buffer cannot be built.
 `rfind` reaches inside an identifier, so this is the case that says the parse checks what it found.
@@ -4173,6 +4200,7 @@ Zero-row batches emitted instead of advancing, over every source and lane.
 `schema` is DataFusion's own for this projection — the types it coerced to, not a second derivation of them.
 `schema` is what the node declares it produces, which is what prices the batch — the ABI reports rows and varlen content, and the fixed width per row is the schema's.
 `scratch_bytes` is the measured transient; `None` when the run is not instrumented.
+`scripts/build-test.sh` decides which targets may be staged to a remote host by grepping a test's source for `repo_root` or `.github/workflows`, and a target that reads the tree cannot run anywhere the tree is not.
 `seen` is how many rows of the stream have already gone past this node, which is a count across lanes and therefore the driver's rather than an executor's.
 `shuffle-stddev` is what declares it: the Welford merge reassociates its sums and drifts a few ULP from a single-partition pass.
 `single_partition_driver` — one lane of one lane-scoped node.
@@ -4182,18 +4210,18 @@ Zero-row batches emitted instead of advancing, over every source and lane.
 `sources_of` materialized once per out lane: the predicate asks for it on every step, and the trait's `Vec` would be an allocation each time.
 `state` pairs each column's name suffix with the aggregator producing it, so a column and its aggregator cannot desync.
 `stddev` is the sample form and `stddev_pop` the population one.
-`super::` from `<a>/mod.rs` is the parent, so `super::<b>::` there is the edge; from deeper inside `<a>` it takes one more level.
+`super::` from `<a>/mod.rs` is the parent, so `super::<b>::` there is the edge; every level deeper inside `<a>` takes one more `super::`.
 `super::` is for inside a component; crossing one takes an absolute `crate::` path.
+`super::x::` is a substring of `super::super::x::`, and reporting both names one edge twice.
 `survivors`, `can_be_null` and an aggregate's intermediate schema reach no plan line, so a rebuild could drop any of the three and render identically.
 `target_partitions` is what was asked for, and the small-table rule can leave a query at one lane anyway.
 `target_partitions` varies them through the planner already.
-`test-layout.md` moves both targets into `src/`, and on the day it does, this goes red and says the wall can be raised.
 `tests/audit_foo.rs` is a real cargo target and was invisible purely because of its name.
 `then`, not `then_some`: the subtraction is the answer only when it is in range, and an eager argument underflows on every batch of the skip prefix.
 `tiny` and `nulls` differ only in what the null analysis reads off them — ten rows each, one with NULL keys — and `big` is a thousand rows.
 `tpcds/q33` is the only four-lane interleave, `tpch/nested_loop_join` and `tpch/nested_loop_left_join` are the two nested-loop forms, and `tpch/nested_limits` carries both row-interval lowerings.
 `tpcds_q33` would still pass, the tier's test count would not move, and the four-lane interleave — the one operator whose correctness IS a lane correspondence — would stop being injected at all.
-`translator` and `memory_estimation` are subcomponents, so only this file may reach them.
+`translator` and `memory_estimation` are subcomponents, so only this file may reach them; the four entry points below are what a test drives instead.
 `v` alone, so the column that survives is not the key: keeping the key would pass with a project that emitted the wrong column as readily as the right one.
 `wire::generated` is the case worth the machinery: 7,336 lines of flatc output whose privacy is the whole reason `wire/` is drawn where it is.
 `wire` is what crosses to the C++ side.

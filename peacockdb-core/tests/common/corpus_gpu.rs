@@ -11,7 +11,7 @@
 //! stays because it costs nothing and goes red on the day that construction stops holding.
 
 use datafusion::arrow::array::RecordBatch;
-use peacockdb_core::executor::gpu_backend::backend::{GpuBackend, GpuContext};
+use peacockdb_core::executor::{GpuBackend, GpuContext};
 use peacockdb_core::executor::run;
 use peacockdb_core::plan_text::render_run;
 use peacockdb_core::wire::{RecipePlan, attach_recipes};

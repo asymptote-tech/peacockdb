@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
+use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_execute_scan_rowgroups,
@@ -17,20 +17,12 @@ use super::{last_error, produced};
 use crate::executor::GpuBatch;
 use crate::executor::{BackendError, CallStats};
 use crate::plan::GpuLoadParquet;
+use super::GpuSource;
 use crate::plan::PlanError;
-use crate::wire::{AbiSymbol, CallPattern, Input, Recipe, Seq};
-
-/// A lane's reads, in the order the mapping named them.
-pub struct GpuSource {
-    executor: *mut PeacockExecutor,
-    seq: Seq,
-    /// The row groups per batch this lane still owes, front first.
-    batches: std::collections::VecDeque<Vec<u32>>,
-    schema: SchemaRef,
-}
+use crate::wire::{AbiSymbol, CallPattern, Input, Recipe};
 
 impl GpuSource {
-    pub fn new(
+    pub(crate) fn new(
         executor: *mut PeacockExecutor,
         recipe: &Recipe,
         node: &GpuLoadParquet,

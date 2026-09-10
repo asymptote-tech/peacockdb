@@ -6,13 +6,13 @@
 
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
-use peacockdb_ffi::raw::PeacockExecutor;
 
 use super::accumulate::{GpuAccumulator, GpuPartitionAccumulator};
 use super::emit::GpuEmitter;
 use super::join::{GpuJoin, GpuProbingJoin};
-use super::source::GpuSource;
+use super::GpuSource;
 use super::{GpuExec, GpuExport};
+use crate::executor::{GpuBackend, GpuContext};
 use crate::executor::Batch;
 use crate::executor::CpuBatch;
 use crate::executor::GpuBatch;
@@ -27,23 +27,10 @@ use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::per_call_join_type;
 use crate::plan::{NodeRef, as_node_ref};
-use crate::wire::RecipePlan;
 
 /// The threshold a batch aggregate compacts at, until the driver derives one from the
 /// budget the way the loader's batch size is derived (#142).
 const COMPACT_BYTES: usize = 1 << 26;
-
-/// What an executor on this backend is built from: the open session, and the recipes whose
-/// seqs address the plan that session was given.
-///
-/// The pointer is BORROWED, as everywhere on this path — the session outlives every
-/// executor drawn from it, and the handles they hand each other.
-pub struct GpuContext {
-    pub executor: *mut PeacockExecutor,
-    pub recipes: RecipePlan,
-}
-
-pub struct GpuBackend;
 
 impl Backend for GpuBackend {
     type Context = GpuContext;

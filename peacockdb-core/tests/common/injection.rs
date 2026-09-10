@@ -19,7 +19,7 @@ use datafusion::execution::context::SessionContext;
 use peacockdb_core::executor::cpu_backend::accumulate::{
     CpuAccumulator, CpuPartitionAccumulator,
 };
-use peacockdb_core::executor::cpu_backend::backend::CpuBackend;
+use peacockdb_core::executor::CpuBackend;
 use peacockdb_core::executor::cpu_backend::emit::CpuEmitter;
 use peacockdb_core::executor::cpu_backend::join::{CpuJoin, CpuProbingJoin};
 use peacockdb_core::executor::cpu_backend::source::CpuSource;

@@ -16,6 +16,7 @@ use super::emit::CpuEmitter;
 use super::join::{CpuJoin, CpuProbingJoin};
 use super::source::CpuSource;
 use super::{CpuExec, CpuUnload};
+use crate::executor::CpuBackend;
 use crate::executor::CpuBatch;
 use crate::executor::forwarder_for;
 use crate::executor::{Backend, NodeExecutors};
@@ -31,8 +32,6 @@ use crate::plan::{NodeRef, as_node_ref};
 /// The threshold a batch aggregate compacts at, until the driver derives one from the
 /// budget the way the loader's batch size is derived (#142).
 const COMPACT_BYTES: usize = 1 << 20;
-
-pub struct CpuBackend;
 
 impl Backend for CpuBackend {
     type Context = Arc<TaskContext>;

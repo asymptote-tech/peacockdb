@@ -27,7 +27,7 @@ use crate::plan::{BinaryOp, Expr, NamedExpr, UnaryOp};
 /// function — the same `sqrt` a query would have used, rather than a second implementation.
 const SQRT: &str = "sqrt";
 
-pub fn physical_expr(
+pub(crate) fn physical_expr(
     expr: &Expr,
     input: &ArrowSchema,
     registry: &dyn FunctionRegistry,

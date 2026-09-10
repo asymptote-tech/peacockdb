@@ -10,10 +10,10 @@
 //! output is priced by. Handles thread from one call to the next.
 
 pub mod accumulate;
-pub mod backend;
+mod backend;
 pub mod emit;
 pub mod join;
-pub mod source;
+mod source;
 
 use std::sync::Arc;
 
@@ -39,6 +39,18 @@ use crate::wire::{CallPattern, FbKind, Input, Recipe, Seq};
 ///
 /// The session pointer is BORROWED, as everywhere on the GPU path: the session outlives
 /// every executor drawn from it, and the handles it hands back.
+/// A lane's reads, in the order the mapping named them.
+///
+/// `pub` because `Backend::Source` names it, so a caller holding a `GpuBackend` reaches it
+/// without any file importing the type.
+pub struct GpuSource {
+    pub(crate) executor: *mut peacockdb_ffi::raw::PeacockExecutor,
+    pub(crate) seq: crate::wire::Seq,
+    /// The row groups per batch this lane still owes, front first.
+    pub(crate) batches: std::collections::VecDeque<Vec<u32>>,
+    pub(crate) schema: datafusion::arrow::datatypes::SchemaRef,
+}
+
 pub struct GpuExec {
     executor: *mut PeacockExecutor,
     calls: Vec<(Seq, FbKind)>,

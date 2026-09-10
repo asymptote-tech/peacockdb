@@ -171,10 +171,10 @@ impl CpuJoin {
         }
     }
 
-    #[cfg(test)]
     /// Whether this join keeps probe keys and answers at done, rather than being one call
     /// and nothing else. Read by the test that holds the two readers of that rule to one
     /// answer; the rule itself is `JoinCapability::answers_in_one_call`.
+    #[cfg(test)]
     pub(crate) fn makes_a_finish_pass(&self) -> bool {
         self.calls.finish.is_some()
     }

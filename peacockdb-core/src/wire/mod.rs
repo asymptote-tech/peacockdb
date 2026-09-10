@@ -1,18 +1,13 @@
-//! Everything that knows what a flat buffer looks like: the recipe vocabulary, the writers
-//! that build the plan the C++ is handed, the reader, and the two renderers.
+//! Everything that knows what a flat buffer looks like: the vocabulary, the writers, the
+//! reader, and the two renderers.
 //!
-//! The C++ side never sees the plan tree. It is sent a plan in the legacy vocabulary whose
-//! nodes exist to be addressed — a menu of parameterized kernels — and the driver then calls
-//! the ABI as often as its own schedule wants. One walk builds that buffer and records, per
-//! plan node, the calls it makes and the seqs they address; `llm-wiki/architecture.md` has
-//! the table it implements.
+//! The C++ side never sees the plan tree. It is sent a menu of parameterized kernels whose
+//! nodes exist to be addressed, and the driver calls the ABI as often as its schedule wants;
+//! `llm-wiki/architecture.md` has the table this implements. A node that makes no ABI call
+//! gets no recipe, which is a statement about the node rather than a gap.
 //!
-//! A node that makes no ABI call gets no recipe, and the absence is a statement about the
-//! node rather than a gap: a forwarder routes batches and touches no device.
-//!
-//! `generated` is private to this component, which is the whole reason the wall is drawn
-//! here: eleven files name flatc's output and use 73 of its types between them, so it can
-//! only be private if all eleven are inside with it.
+//! `generated` is private here, and that is why the wall is drawn where it is: eleven files
+//! name flatc's output, so it is private only if all eleven are inside with it.
 
 mod aggregate_writer;
 mod attach;
@@ -162,10 +157,10 @@ pub enum Input {
 }
 
 impl Input {
-    #[cfg(not(feature = "rust-only"))]
     /// Whether this input is the build side, handed over or copied. Asked by an executor
     /// pricing a call: a probe call that names neither is a call the build side does not
-    /// have to be there for.
+    /// have to be there for. Only the GPU backend asks, so it carries the same cfg.
+    #[cfg(not(feature = "rust-only"))]
     pub(crate) fn is_build_side(&self) -> bool {
         matches!(self, Self::BuildSide | Self::BuildSideCopy)
     }

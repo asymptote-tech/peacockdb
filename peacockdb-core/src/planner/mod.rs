@@ -1,15 +1,11 @@
 //! Planning a query: DataFusion's physical plan in, a node tree and its memory model out.
 //!
-//! Two passes, because the two halves define each other — a batch size needs the tree it
-//! flows through, and the tree's mapping needs a batch size. The first pass assumes one
-//! number for every source and is used only to derive the real ones; the second is the plan.
-//! The tree's shape does not move between them: lane counts come from row counts and
-//! pushed-down limits, never from the batch size.
+//! Two passes, because the halves define each other — a batch size needs the tree it flows
+//! through, and the tree's mapping needs a batch size. The first assumes one number per
+//! source and exists only to derive the real ones. The shape does not move between them.
 //!
-//! `translator` and `memory_estimation` are subcomponents, so only this file may reach them.
-//! That is what the four entry points below are for: `plan` is the pipeline, and the other
-//! three are the pieces a test drives directly.
-
+//! `translator` and `memory_estimation` are subcomponents, so only this file may reach them;
+//! the four entry points below are what a test drives instead.
 mod memory_estimation;
 mod nulls;
 mod pipeline;

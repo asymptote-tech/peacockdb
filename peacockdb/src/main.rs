@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use datafusion::arrow::util::pretty::print_batches;
-use peacockdb_core::executor::cpu_backend::backend::CpuBackend;
+use peacockdb_core::executor::CpuBackend;
 use peacockdb_core::executor::run;
 use peacockdb_core::planner;
 use peacockdb_core::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};

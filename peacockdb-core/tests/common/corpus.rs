@@ -10,7 +10,7 @@ use std::sync::{Mutex, OnceLock};
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::execution::context::SessionContext;
-use peacockdb_core::executor::cpu_backend::backend::CpuBackend;
+use peacockdb_core::executor::CpuBackend;
 use peacockdb_core::executor::{RunReport, run};
 use peacockdb_core::plan::{GpuNode, validate};
 use peacockdb_core::plan_text::render_run;

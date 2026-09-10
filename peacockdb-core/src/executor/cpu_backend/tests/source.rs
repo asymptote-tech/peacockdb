@@ -5,7 +5,7 @@
 //! row groups nobody chose cannot state that.
 
 use super::*;
-use crate::executor::cpu_backend::backend::CpuBackend;
+use crate::executor::CpuBackend;
 use crate::executor::{Backend, NodeExecutors};
 use crate::executor::{SourceExecutor, SourceStep};
 use crate::plan::GpuLoadParquet;

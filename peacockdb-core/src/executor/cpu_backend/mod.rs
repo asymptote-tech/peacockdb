@@ -8,9 +8,9 @@
 //! from under that block, which is what a driver has to leave room for (T17).
 
 pub mod accumulate;
-pub mod backend;
+mod backend;
 pub mod emit;
-pub mod expr_physical;
+mod expr_physical;
 pub mod join;
 mod merge_m2;
 mod single_node;
@@ -46,7 +46,7 @@ use crate::plan::Schema;
 use crate::plan::{AggCall, PlanAgg};
 use crate::plan::{AggregateBody, Phase, finalize_columns, state_funcs};
 use crate::plan::{GpuAggregate, GpuFilter, GpuProject, GpuSort};
-use expr_physical::{physical_expr, physical_projection};
+use expr_physical::physical_projection;
 
 /// One DataFusion node with its child left as a placeholder, and the columns this mode
 /// says it produces. [`execute_single_node`] replaces the children with the batches it is
@@ -76,7 +76,7 @@ impl CpuExec {
         ctx: Arc<TaskContext>,
     ) -> Result<Self, PlanError> {
         let child = placeholder(input);
-        let predicate = physical_expr(&node.predicate, input, ctx.as_ref())?;
+        let predicate = expr_physical::physical_expr(&node.predicate, input, ctx.as_ref())?;
         let filter = FilterExec::try_new(predicate, child)
             .map_err(|error| PlanError::Invalid(format!("GpuFilter: {error}")))?;
         let filter = match &node.projection {
@@ -334,7 +334,7 @@ fn aggregate_exec(
             .enumerate()
             .map(|(position, expr)| {
                 Ok((
-                    physical_expr(expr, input, registry)?,
+                    expr_physical::physical_expr(expr, input, registry)?,
                     key_name(state, position),
                 ))
             })
@@ -355,7 +355,7 @@ fn aggregate_exec(
     for (udaf, call, alias) in declared {
         let mut args = Vec::with_capacity(call.args.len());
         for arg in &call.args {
-            args.push(physical_expr(arg, input, registry)?);
+            args.push(expr_physical::physical_expr(arg, input, registry)?);
         }
         aggregates.push(Arc::new(
             AggregateExprBuilder::new(udaf, args)
@@ -527,6 +527,18 @@ fn lex_ordering(keys: &[ColumnOrder], input: &ArrowSchema) -> Result<LexOrdering
         ));
     }
     Ok(LexOrdering::new(exprs))
+}
+
+/// One of this engine's expressions in DataFusion's vocabulary. `#[cfg(test)]`: the only
+/// caller outside this subcomponent is a test in `plan`, which reaches it through
+/// `executor`'s own entry point.
+#[cfg(test)]
+pub(crate) fn physical_expr(
+    expr: &crate::plan::Expr,
+    input: &datafusion::arrow::datatypes::Schema,
+    registry: &dyn datafusion::execution::FunctionRegistry,
+) -> Result<std::sync::Arc<dyn datafusion::physical_plan::PhysicalExpr>, PlanError> {
+    expr_physical::physical_expr(expr, input, registry)
 }
 
 #[cfg(test)]

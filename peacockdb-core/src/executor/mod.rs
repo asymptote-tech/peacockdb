@@ -1,16 +1,13 @@
-//! Running a plan: the contracts a backend implements, the batch that crosses them, and
-//! the driver that walks the tree calling them.
+//! Running a plan: the contracts a backend implements, the batch that crosses them, and the
+//! driver that walks the tree calling them.
 //!
-//! Every declaration the component offers is here. The drivers are generic over
-//! [`Backend`], so each backend monomorphizes — no vtable, and `Drop` on a GPU handle is a
-//! direct call. That is also what keeps the tier boundary structural: a rust-only target
-//! instantiates the drivers only at the CPU backend, so the GPU types are never named.
+//! The drivers are generic over [`Backend`], so each backend monomorphizes — no vtable, and
+//! `Drop` on a GPU handle is a direct call. That is also what keeps the tier boundary
+//! structural: a rust-only target instantiates the drivers only at the CPU backend.
 //!
 //! The API is not the same in every feature shape. [`GpuBatch`] and the GPU backend exist
-//! only where cuDF is linked, so their declarations carry the cfg rather than only their
-//! modules. The reasons behind each shape are in `llm-wiki/architecture.md`, under
-//! Execution.
-
+//! only where cuDF is linked, so the cfg sits on the declarations rather than only on their
+//! modules. The reasons are in `llm-wiki/architecture.md`, under Execution.
 mod cpu_batch;
 mod driver;
 mod errors;
@@ -79,10 +76,9 @@ impl CpuBatch {
 /// what keeps a batch the driver abandons from leaking VRAM. A handle an FFI call
 /// consumed must skip that drop: C++ erased it, and releasing it again is a use of a
 /// dead handle. [`GpuBatch::consume`] is that boundary, and the only place the release
-/// is skipped.
+/// is skipped. The executor pointer is BORROWED, as everywhere else on this path: the
+/// session outlives every batch drawn from it.
 #[cfg(not(feature = "rust-only"))]
-/// The executor pointer is BORROWED, as everywhere else on the GPU path: the session
-/// outlives every batch drawn from it.
 pub struct GpuBatch {
     executor: *mut PeacockExecutor,
     handle: u64,
@@ -306,6 +302,24 @@ pub trait Backend: Sized {
     ) -> Result<NodeExecutors<Self>, PlanError>;
 }
 
+/// The CPU backend: every call relays to a DataFusion operator.
+pub struct CpuBackend;
+
+/// The GPU backend: every call crosses the ABI.
+#[cfg(not(feature = "rust-only"))]
+pub struct GpuBackend;
+
+/// What an executor on the GPU backend is built from: the open session, and the recipes whose
+/// seqs address the plan that session was given.
+///
+/// The pointer is BORROWED, as everywhere on this path — the session outlives every
+/// executor drawn from it, and the handles they hand each other.
+#[cfg(not(feature = "rust-only"))]
+pub struct GpuContext {
+    pub executor: *mut PeacockExecutor,
+    pub recipes: crate::wire::RecipePlan,
+}
+
 /// Which trait drives a node, with the executor stored inline — the match compiles to a
 /// jump. `ProbingJoin` is absent because it comes from `set_build`, not from the backend.
 pub enum NodeExecutors<B: Backend> {
@@ -355,6 +369,21 @@ pub enum Forwarder {
     /// Child-major: output lane p is lane p of each child, which is why the inputs must
     /// share a hash distribution.
     Interleave { children: usize, n: usize },
+}
+
+/// One of this engine's expressions back in DataFusion's own vocabulary, which is what the
+/// CPU backend hands its operators.
+///
+/// `#[cfg(test)]` because its only caller outside `cpu_backend` is a test in `plan`, and a
+/// test in another component cannot reach an implementation module. Without the cfg a plain
+/// build reports it dead.
+#[cfg(test)]
+pub(crate) fn physical_expr(
+    expr: &crate::plan::Expr,
+    input: &datafusion::arrow::datatypes::Schema,
+    registry: &dyn datafusion::execution::FunctionRegistry,
+) -> Result<std::sync::Arc<dyn datafusion::physical_plan::PhysicalExpr>, PlanError> {
+    cpu_backend::physical_expr(expr, input, registry)
 }
 
 /// The routing a node declares, which is a property of the node rather than of a backend —

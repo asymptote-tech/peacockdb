@@ -52,7 +52,6 @@ impl pub fn new	peacockdb-core/src/executor/gpu_backend/emit.rs
 impl pub fn new	peacockdb-core/src/executor/gpu_backend/join.rs
 impl pub fn new	peacockdb-core/src/executor/gpu_backend/mod.rs
 impl pub fn new	peacockdb-core/src/executor/gpu_backend/mod.rs
-impl pub fn new	peacockdb-core/src/executor/gpu_backend/source.rs
 impl pub fn new	peacockdb-core/src/executor/mod.rs
 impl pub fn new	peacockdb-core/src/executor/mod.rs
 impl pub fn new	peacockdb-core/src/executor/mod.rs
@@ -151,6 +150,7 @@ impl pub(crate) fn modelling	peacockdb-core/src/executor/driver/mock.rs
 impl pub(crate) fn new	peacockdb-core/src/executor/driver/accounting.rs
 impl pub(crate) fn new	peacockdb-core/src/executor/driver/partitioned.rs
 impl pub(crate) fn new	peacockdb-core/src/executor/driver/scheduler.rs
+impl pub(crate) fn new	peacockdb-core/src/executor/gpu_backend/source.rs
 impl pub(crate) fn new	peacockdb-core/src/wire/writer.rs
 impl pub(crate) fn next	peacockdb-core/src/executor/driver/scheduler.rs
 impl pub(crate) fn node	peacockdb-core/src/wire/writer.rs
@@ -240,7 +240,6 @@ top pub fn finalize	peacockdb-core/src/plan/mod.rs
 top pub fn forwarder_for	peacockdb-core/src/executor/mod.rs
 top pub fn key_width	peacockdb-core/src/plan/mod.rs
 top pub fn per_call_join_type	peacockdb-core/src/plan/mod.rs
-top pub fn physical_expr	peacockdb-core/src/executor/cpu_backend/expr_physical.rs
 top pub fn plan	peacockdb-core/src/planner/mod.rs
 top pub fn post_order_of_every_node	peacockdb-core/src/executor/mod.rs
 top pub fn register_tables_for	peacockdb-core/src/lib.rs
@@ -253,14 +252,11 @@ top pub fn run	peacockdb-core/src/executor/mod.rs
 top pub fn validate	peacockdb-core/src/plan/mod.rs
 top pub mod accumulate	peacockdb-core/src/executor/cpu_backend/mod.rs
 top pub mod accumulate	peacockdb-core/src/executor/gpu_backend/mod.rs
-top pub mod backend	peacockdb-core/src/executor/cpu_backend/mod.rs
-top pub mod backend	peacockdb-core/src/executor/gpu_backend/mod.rs
 top pub mod common	peacockdb-core/src/lib.rs
 top pub mod cpu_backend	peacockdb-core/src/executor/mod.rs
 top pub mod emit	peacockdb-core/src/executor/cpu_backend/mod.rs
 top pub mod emit	peacockdb-core/src/executor/gpu_backend/mod.rs
 top pub mod executor	peacockdb-core/src/lib.rs
-top pub mod expr_physical	peacockdb-core/src/executor/cpu_backend/mod.rs
 top pub mod gpu_backend	peacockdb-core/src/executor/mod.rs
 top pub mod join	peacockdb-core/src/executor/cpu_backend/mod.rs
 top pub mod join	peacockdb-core/src/executor/gpu_backend/mod.rs
@@ -268,7 +264,6 @@ top pub mod plan	peacockdb-core/src/lib.rs
 top pub mod plan_text	peacockdb-core/src/lib.rs
 top pub mod planner	peacockdb-core/src/lib.rs
 top pub mod source	peacockdb-core/src/executor/cpu_backend/mod.rs
-top pub mod source	peacockdb-core/src/executor/gpu_backend/mod.rs
 top pub mod wire	peacockdb-core/src/lib.rs
 top pub struct AggCall	peacockdb-core/src/plan/mod.rs
 top pub struct AggSpec	peacockdb-core/src/plan/mod.rs
@@ -283,7 +278,7 @@ top pub struct Coalesce	peacockdb-core/src/executor/cpu_backend/accumulate.rs
 top pub struct Collapse	peacockdb-core/src/executor/gpu_backend/accumulate.rs
 top pub struct ColumnOrder	peacockdb-core/src/plan/mod.rs
 top pub struct ColumnRef	peacockdb-core/src/plan/mod.rs
-top pub struct CpuBackend	peacockdb-core/src/executor/cpu_backend/backend.rs
+top pub struct CpuBackend	peacockdb-core/src/executor/mod.rs
 top pub struct CpuBatch	peacockdb-core/src/executor/mod.rs
 top pub struct CpuEmitter	peacockdb-core/src/executor/cpu_backend/emit.rs
 top pub struct CpuExec	peacockdb-core/src/executor/cpu_backend/mod.rs
@@ -297,10 +292,10 @@ top pub struct EmittedBatch	peacockdb-core/src/executor/mod.rs
 top pub struct GpuAccumulateBatchesAndSort	peacockdb-core/src/plan/mod.rs
 top pub struct GpuAggregate	peacockdb-core/src/plan/mod.rs
 top pub struct GpuAggregateBatches	peacockdb-core/src/plan/mod.rs
-top pub struct GpuBackend	peacockdb-core/src/executor/gpu_backend/backend.rs
+top pub struct GpuBackend	peacockdb-core/src/executor/mod.rs
 top pub struct GpuBatch	peacockdb-core/src/executor/mod.rs
 top pub struct GpuCoalesceAllBatches	peacockdb-core/src/plan/mod.rs
-top pub struct GpuContext	peacockdb-core/src/executor/gpu_backend/backend.rs
+top pub struct GpuContext	peacockdb-core/src/executor/mod.rs
 top pub struct GpuCrossJoin	peacockdb-core/src/plan/mod.rs
 top pub struct GpuEmitPartitions	peacockdb-core/src/plan/mod.rs
 top pub struct GpuEmitter	peacockdb-core/src/executor/gpu_backend/emit.rs
@@ -319,7 +314,7 @@ top pub struct GpuPartitionAccumulator	peacockdb-core/src/executor/gpu_backend/a
 top pub struct GpuProbingJoin	peacockdb-core/src/executor/gpu_backend/join.rs
 top pub struct GpuProject	peacockdb-core/src/plan/mod.rs
 top pub struct GpuSort	peacockdb-core/src/plan/mod.rs
-top pub struct GpuSource	peacockdb-core/src/executor/gpu_backend/source.rs
+top pub struct GpuSource	peacockdb-core/src/executor/gpu_backend/mod.rs
 top pub struct GpuUnion	peacockdb-core/src/plan/mod.rs
 top pub struct GpuUnload	peacockdb-core/src/plan/mod.rs
 top pub struct JoinCapability	peacockdb-core/src/plan/mod.rs
@@ -417,7 +412,7 @@ top pub(crate) fn emits_both_sides	peacockdb-core/src/plan/mod.rs
 top pub(crate) fn emitted_columns	peacockdb-core/src/plan/join.rs
 top pub(crate) fn emitted_columns	peacockdb-core/src/plan/mod.rs
 top pub(crate) fn empty_build_answers_nothing	peacockdb-core/src/plan/join.rs
-top pub(crate) fn estimate	peacockdb-core/src/planner/memory_estimation/mod.rs
+top pub(crate) fn estimate	peacockdb-core/src/planner/memory_estimation.rs
 top pub(crate) fn estimate	peacockdb-core/src/planner/mod.rs
 top pub(crate) fn execute_node	peacockdb-core/src/executor/gpu_backend/mod.rs
 top pub(crate) fn execute_node_many	peacockdb-core/src/executor/gpu_backend/mod.rs
@@ -488,6 +483,9 @@ top pub(crate) fn partition	peacockdb-core/src/planner/translator/scan_mapping/p
 top pub(crate) fn payload_text	peacockdb-core/src/wire/fb_text.rs
 top pub(crate) fn per_batch_sort	peacockdb-core/src/planner/translator/nodes.rs
 top pub(crate) fn per_call_join_type	peacockdb-core/src/plan/join.rs
+top pub(crate) fn physical_expr	peacockdb-core/src/executor/cpu_backend/expr_physical.rs
+top pub(crate) fn physical_expr	peacockdb-core/src/executor/cpu_backend/mod.rs
+top pub(crate) fn physical_expr	peacockdb-core/src/executor/mod.rs
 top pub(crate) fn physical_projection	peacockdb-core/src/executor/cpu_backend/expr_physical.rs
 top pub(crate) fn plan	peacockdb-core/src/planner/pipeline.rs
 top pub(crate) fn post_order_of_every_node	peacockdb-core/src/executor/driver/index.rs
