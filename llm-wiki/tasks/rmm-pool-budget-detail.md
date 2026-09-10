@@ -235,3 +235,24 @@ No conflict. Master's copy of the board carries the task list and the prose — 
 tasks 4 and 5 and added task 6 — and this branch's copy carries task 3 at `building`; the two
 edits did not touch the same lines. Nothing above this task has a branch, so there was nothing to
 mark `rebase needed`. Control file cleared.
+
+### 2026-09-10 — pushed, PR #144, reviewing
+
+Base `master`, three commits — the board write, the change, the rebase note. Commit count checked
+against the task, since a PR aimed past its parent carries the earlier tasks' commits.
+
+**The tpch pair is still unproven and it is a neighbour, not a bug.** Checked the card at the
+transition: `1763830 /home/kirill/sdg-moe-transfer-.../python` holding 53075 MiB of 143771, leaving
+90009 free. 69+69 needs 138, so the run cannot be attempted, and #178's own instruction says not to
+spend a dispatch on a machine we do not own. Retry when the card is idle:
+
+    ssh shad-gpu 'nvidia-smi --query-gpu=memory.free --format=csv,noheader'
+
+and the two-at-once command is recorded above under the developer's Task 4.
+
+**Open question for the review**, and the one thing in this diff that is not simply measured: 69 GiB
+is 49% of the card, so two tpch runs fit only where nothing else is resident. That number is pinned
+from below by q1 failing at 68, and it is pinned there because `initial == maximum` makes the pool
+unable to grow. Whether a growable pool — a smaller initial with the budget as the maximum — is the
+better shape was not asked in the spec, and the answer changes what "the pool reserves what a binary
+needs" means.
