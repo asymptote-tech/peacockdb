@@ -481,3 +481,15 @@ branch are a mix of full runs and documentation skips, so none of them substitut
 If a restart lands here: the task is `completeness approved`, everything is pushed, and the only
 remaining transition is `done` once that run is green. Nothing else is outstanding except the tpch
 pair, which is named in the signoff and is not a blocker.
+
+### 2026-09-10 — done
+
+CI run `34533749485` on `a02e8cb5` is green on every job: both cuDF legs, the 25.02 GPU build, the
+remote GPU tier, the cost report, changed-paths and the S3 metadata check. The GPU tier is the one
+worth naming — it ran the new budgets on shad-gpu with the foreign tenant still holding 53 GiB, so
+the four CI binaries took 1, 1, 69 and 30 GiB out of what was left and passed.
+
+`f946df6d` sits above it and is documentation, so its own run is a changed-paths skip. That is not
+a gate, and the head that carries code is the one `done` asserts.
+
+Terminal for the ensemble. The human merges.
