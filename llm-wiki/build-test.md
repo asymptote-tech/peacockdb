@@ -362,12 +362,11 @@ Rules that keep this healthy:
   `CUDF_ROOT=~/data/miniforge3/envs/rapids scripts/cargo-cudf.sh test -p peacockdb-core --test test_gpu_abi --no-run`
   For anything more than a one-off command, use `build-test.sh` / `build-test-shadgpu.sh`
   instead — they handle build, staging, shipping and running.
-- **A cudf-shape binary run without `LD_LIBRARY_PATH` reports zero tests, not an error.**
-  `libpeacock_gpu.so` lives in the FFI crate's `OUT_DIR`
-  (`target-cudf-*/debug/build/peacockdb-ffi-*/out/lib`) and nothing puts it on the loader
-  path, so `cargo test --test test_gpu_abi -- --list` prints a loader error on stderr and an
-  empty list on stdout. A `--list` count taken that way reads exactly like a file the
-  `rust-only` cfg compiled out — which is what makes it dangerous as a baseline. Prepend that
+- **A cudf-shape binary needs `LD_LIBRARY_PATH` to run at all.** `libpeacock_gpu.so` lives in
+  the FFI crate's `OUT_DIR` (`target-cudf-*/debug/build/peacockdb-ffi-*/out/lib`) and nothing
+  puts it on the loader path, so the binary exits 127 with a loader error on stderr and prints
+  nothing on stdout. It is loud, but a tool that reads stdout and ignores the status sees an
+  empty list, which reads exactly like a target the `rust-only` cfg compiled out. Prepend that
   dir and the cuDF root's `lib` before listing or running one by hand.
 - The FFI crate caches its cmake `cudf_DIR` in OUT_DIR; both build-test scripts clean it
   **only when the cuDF root changed** (stamp file `.peacock-ffi-cudf-root`);
