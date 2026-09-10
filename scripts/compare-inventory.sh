@@ -3,8 +3,8 @@
 #   scripts/compare-inventory.sh rust-only \
 #     llm-wiki/tasks/module-layout-baselines/inv-rust-only-final.txt /tmp/inv.txt
 # Integration targets compare verbatim. Lib cases are named by module path, which a layout
-# move changes by construction, so they compare on the suffix from the last `::tests::`
-# onward — unique across all 435, so the comparison is still exact.
+# move changes by construction, so they compare on the suffix from the last segment ending
+# in `tests` — `tests`, `ffi_tests`, `gpu_tests`, `schema_tests` — which is unique per case.
 #
 # The baseline is named rather than computed from this script's own directory: the baselines
 # live with the task that took them and are deleted when it is archived, and a default
