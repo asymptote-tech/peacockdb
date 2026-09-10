@@ -159,3 +159,27 @@ it.
 Post-rename comparands for later slices: `goldens-after-rename.sha256` (digest
 `e071580a018c62145a19ac258b6b883758f00e2edc5cf589f87e10941c235d21`),
 `visibility-after-rename.txt`, `visibility-items-after-rename.txt`.
+
+### Rebase, at the human's word through the control file
+
+`ENS-drop-mode-name` rebased onto `origin/master` (25 commits, no conflict), then
+`ENS-module-layout` onto it (3 commits, no conflict). Both force-pushed.
+
+What master carried across: `llm-wiki/prompts.md`, five `.claude/agents/*.md`, and a new
+`scripts/start_helper.sh` that nothing references. Nothing a build or a test reads moved, so
+by the documentation-only rule the rebase re-verifies nothing — task 1 stays `done`, task 2
+stays `building`, and no proving command is re-run for the rebase itself.
+
+Instruction-set changes this brought that affect the run: the coordinator now reads
+`build-test.md` and `architecture.md` at startup; `architecture.md`'s falsified sentences are
+named by the analyst at the completeness pass rather than corrected as the code changes;
+`.github/workflows/*.yml` is the developer's now, not the coordinator's; and a verda check
+belongs before each dispatch.
+
+### verda is not usable this run
+
+`ssh verda` failed on a changed host key. `build-test.md`'s documented remedy —
+`ssh-keygen -R` plus a re-keyscan — got past that and then hit
+`Permission denied (publickey)`: the box was reprovisioned and our key is not on it. Falling
+back to local CPU runs, which that page says is fine. The human has to re-key verda before
+any dispatch can use it.
