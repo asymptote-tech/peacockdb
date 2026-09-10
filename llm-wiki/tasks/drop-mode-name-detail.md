@@ -90,3 +90,18 @@ terminated before it reported. The edits were in the working tree, unverified. T
 `a7d690e6`, deliberately labelled WIP: two `RunError` display arms in `error.rs`, the module
 doc in `mod.rs`, and a temp-dir name in `parquet_meta.rs`. A developer proves them before the
 commit is reworded and the signoff written.
+
+## Run of 2026-09-09 18:2x — proving the residues
+
+No control file at start; the board still reads `rebase needed(done)`, and the rebase itself is
+finished (both of them). What stands between here and `done` is one thing: `a7d690e6` is
+unproven, so the rebase rule's "developer re-runs the proving commands and reports green" has
+not been satisfied for the tree as it now stands.
+
+Dispatched a developer against `a7d690e6` with the spec's Validation section as its command
+list. The one hazard named in the dispatch: `RunError`'s two display arms are user-visible
+strings, and the corpus goldens carry quarantined refusal lines, so this edit can move a golden
+even though task 1 is a names-only task. If a golden moves, that is a finding, not a
+regeneration.
+
+On green: reword `a7d690e6` off WIP, write the signoff into the spec, set the board to `done`.
