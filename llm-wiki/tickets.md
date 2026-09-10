@@ -746,8 +746,20 @@ under two minutes gave `std::bad_alloc: out_of_memory` in `pool_memory_resource`
 tests, at 14.38 GiB peak on a 139.7 GiB device — not a full device, two pools.
 
 It reads as a flaky GPU tier, which is the expensive way to meet it: the failure is in whichever
-run started second and re-running it alone passes. A concurrency group on the job, keyed on the
-host rather than the ref, is the fix.
+run started second and re-running it alone passes.
+
+**Fixed** by `15209636`: the job carries `concurrency: group: shad-gpu, cancel-in-progress: false`
+at `pipeline.yml:448`, so GPU jobs queue across runs and branches. Queued rather than cancelled,
+because a cancelled run leaves its `REMOTE_DIR` and the device's state behind.
+
+The same `std::bad_alloc` in `pool_memory_resource` still reaches CI from a different cause, so
+read the pool line before reaching for this ticket. Each gtest main sizes its pool at 95% of
+*free* device memory (`cpp/include/peacock/rmm_pool.hpp:141`) and prints what it got, so a
+neighbour on the device sets our ceiling: 132.3 GiB max on an idle device, 40.0 GiB when
+something else held 97.5 GiB. `TpchSf40.Q1GroupByAggregates` needs 67.42 GiB and is the first to
+die. Two of our runs colliding gives a different signature — the failure moves to whichever
+started second, and the free figure differs between them. A foreign tenant gives the same free
+figure to every run and fails them all identically.
 
 <a id="t176"></a>
 ### #176 — the CI coverage guard checks one direction only
