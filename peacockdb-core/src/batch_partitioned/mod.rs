@@ -1,5 +1,4 @@
-//! The batch-partitioned mode: a lane holds a stream of batches rather than one
-//! resident table.
+//! The engine: a lane holds a stream of batches rather than one resident table.
 //!
 //! This module is the vocabulary — plan nodes, the layout and schema they declare, and
 //! the executor contracts the drivers call. The reasons behind each shape are in

@@ -71,8 +71,8 @@ impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::BudgetExceeded { message, .. } => write!(f, "{message}"),
-            Self::Protocol(what) => write!(f, "batch-partitioned protocol violation: {what}"),
-            Self::CallFailed(what) => write!(f, "batch-partitioned call failed: {what}"),
+            Self::Protocol(what) => write!(f, "protocol violation: {what}"),
+            Self::CallFailed(what) => write!(f, "call failed: {what}"),
             Self::Backend(inner) => write!(f, "{inner}"),
         }
     }

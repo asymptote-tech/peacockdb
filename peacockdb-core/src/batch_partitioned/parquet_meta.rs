@@ -263,7 +263,7 @@ mod tests {
         // The mapping addresses one file's row groups, so a second file would be sized
         // from the first's — a wrong answer where an error belongs.
         let dir = std::env::temp_dir().join(format!(
-            "peacockdb-batch-partitioned-multifile-{}",
+            "peacockdb-multifile-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
