@@ -151,3 +151,211 @@ a dispatch long enough to die again.
 
 On green: reword `a7d690e6` off WIP, force-push (remote is still at the pre-residue `7ed0bcf9`),
 write the signoff into the spec, set the board to `done`, and wait for CI on #141.
+
+## Proving `a7d690e6` — developer run of 2026-09-09 (third dispatch)
+
+Bounded command list, per the narrowed dispatch. Progress recorded as it lands.
+
+- `cargo build --features rust-only -p peacockdb-core -p peacockdb` after touching
+  `peacockdb-core/src/lib.rs` and `peacockdb/src/main.rs` so both workspace crates actually
+  recompile (a fully cached build prints no warnings and so proves nothing about the count).
+  **Green in 10m33s, zero warnings.** No warning count is recorded anywhere in the spec or this
+  file — baseline 3 was taken but never written down — so zero is the count this run establishes.
+- Default (cudf) feature set: no warm `target-cudf-*` in this worktree, so it is a cold build
+  against `rapids-cuda-12.2` (cuDF 25.02, gcc-12) via `scripts/cargo-cudf.sh`, throttled to
+  `CARGO_BUILD_JOBS=3` per build-test.md's 15 GiB rule. Running in the background.
+- The strings the commit reworded are asserted nowhere: `git grep 'protocol violation|call
+  failed'` over the Rust tree hits only comments, the two arms themselves, and a `.expect()`
+  message. Confirms the coordinator's golden-hazard grep from the Rust side too.
+
+Note for the next developer: this harness caps a foreground command at 600s and moves anything
+longer to the background, so every build and suite here is a background run polled from the
+foreground, not a `timeout <n>` in front of a blocking call.
+
+### Results, on `2f6a3e52` (which carries `a7d690e6`)
+
+| command | result |
+|---|---|
+| `cargo build --features rust-only -p peacockdb-core -p peacockdb` | green, 10m33s, **0 warnings** |
+| `cargo test --features rust-only -p peacockdb-core --lib -- --test-threads=4` | **437 passed, 0 failed**, 0 warnings |
+| `UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test_plan_goldens -- --test-threads=2` | 19 passed, 0 failed |
+| `UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- --test-threads=2` | **448 passed, 0 failed**, 28m20s |
+| `cargo test --features rust-only -p peacockdb-core --test test_ci_coverage` | 7 passed, 0 failed |
+| `cargo test --features rust-only -p peacockdb-core --test test_plan_goldens` (verify, no regen) | 19 passed, 0 failed |
+
+`PEACOCK_REWRITE_RECIPE_BYTES` was never set, so
+`the_payload_golden_carries_what_each_call_hands_the_executor` compared the committed digests
+against freshly built bytes and passed.
+
+**`git diff` is empty outside `llm-wiki/`** after both regens. The regen did write: 33 files
+under `testdata/goldens/` and all ten `.plans.txt` plus `recipe-payloads.txt` have fresh mtimes
+and unchanged bytes. No golden moved, which is what the reworded `RunError` arms predicted.
+
+The three named cases all ran: `parquet_meta::tests::a_scan_over_several_files_is_refused_
+rather_than_measured_from_one` (the renamed temp dir), 133 `driver::` cases, and — worth
+recording — **`error.rs` has no `mod tests`**. The two reworded display arms are asserted
+nowhere: `driver/tests/failure.rs` matches `RunError::CallFailed(said)` on the payload, never on
+the rendered prefix. Pre-existing, and true of the old strings too, so it is not a regression;
+it is why the goldens rather than a unit test are what proves this edit inert.
+
+### The default (cudf) build cannot run in this worktree
+
+`CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/cargo-cudf.sh build` fails in
+`peacockdb-ffi`'s build script, before compiling anything of ours:
+
+    CMake Error at CMakeLists.txt:10 (include): include could not find requested file:
+      cpp/../third_party/cudf/cpp/../cmake/rapids_config.cmake
+
+`third_party/cudf` is an empty directory here — a new worktree does not populate submodules, and
+`cpp/CMakeLists.txt` bootstraps rapids-cmake out of the vendored tree even when building against
+a host cuDF install. Populating it is a git operation and a developer does not do those. This
+host also has no `nvidia-smi`, so `rapids_cuda_init_architectures` would have no native arch to
+detect either. Every dependency below the FFI crate did compile, so the failure is the submodule
+and nothing else.
+
+What stands in for the claim: the commit's three hunks are feature-independent — `error.rs` has
+no `cfg` anywhere, the `mod.rs` line is the module doc above the two
+`#[cfg(not(feature = "rust-only"))]` items, and the `parquet_meta.rs` line is inside
+`#[cfg(test)]`. So the cudf leg compiles the same three lines the rust-only leg just compiled
+warning-free. The remaining risk is carried by CI's dataset-matrix, which builds both cuDF legs
+and which `done` already waits on.
+
+### Drift, pre-existing on master
+
+`build-test.md:35` names the recipe-payload case `tpch_and_tpcds_recipe_payloads`. The test is
+`the_payload_golden_carries_what_each_call_hands_the_executor` (`test_plan_goldens.rs:229`), and
+master's copy of the file already has the new name with the old one in the page, so this branch
+did not cause it.
+
+### A second dispatch is running the same commands in this worktree, right now
+
+Two shell trees that are not this run's are executing in `/media/data/peacockdb-refactorings`
+while it works: one writing `/tmp/dmn-corpus.log` (an `UPDATE_CANONICAL=1` corpus regen that
+finished 448 passed at 19:28, then `test_cpu_end_to_end` + `test_cpu_executors`), and one
+writing `/tmp/verify-drop-mode-name/*.log` (lib, plan goldens, cpu corpus, cost-report,
+ci-coverage, then a sweep of ten more targets). Their logs corroborate this run — 448 corpus
+cases green, `test_corpus_goldens` 20 green, `test_cost_model` 3 green — and none of them was
+killed.
+
+So the two earlier dispatches did not die with their coordinator in the sense assumed here:
+**the coordinator's call returned, but the shell children kept running detached.** That matters
+twice. A restarted coordinator that concludes "nothing reached the branch, so the work did not
+happen" is reading a report that never came back, not an absent run. And two agents regenerating
+goldens into one working tree at once is a real hazard: an empty `git diff` stays a valid
+result, since both write the same bytes from the same code, but a red one could not be
+attributed without checking which run wrote last. Nothing was killed by this run except its own
+failed cudf build; the other trees were left alone because a live agent may still be waiting on
+them.
+
+## Independent verification of `a7d690e6` — 2026-09-09 18:2x–19:3x
+
+A second, concurrent dispatch. Its numbers agree with the section above line for line, so they
+are not repeated; what follows is only what it adds.
+
+### One finding: the tree is not rustfmt-clean at `parquet_meta.rs:262`
+
+Shortening the temp-dir name made the `format!` fit in 99 columns, so rustfmt now wants it on
+one line and the committed four-line form is hand-formatting. `coding-style.md` says to run
+rustfmt over the files you touched, and that did not happen for this hunk.
+
+    rustfmt --edition 2021 --check <copy of parquet_meta.rs>     # rc=1, one diff at :262
+    rustfmt --edition 2021 --check <copy of error.rs>            # clean
+
+The fix is rustfmt's own output:
+
+    let dir = std::env::temp_dir().join(format!("peacockdb-multifile-{}", std::process::id()));
+
+Not a CI failure — no workflow runs `cargo fmt`. Left unapplied because this dispatch was
+verification-only; the tree is at HEAD.
+
+**Trap while checking it:** rustfmt 1.8.0-stable **writes the file under `--check`** on this
+host. It reformatted `parquet_meta.rs` in place, which showed up as an unexpected ` M` in
+`git status`. Restored with `git checkout -- <path>` and re-checked on a copy in `/tmp`.
+Check formatting on a copy, never in the worktree.
+
+### The two hazards
+
+**Golden or assertion still expecting the old text — none.** `git grep --untracked` for
+`batch-partitioned protocol violation` and `batch-partitioned call failed` is empty tree-wide;
+`grep -rn` over all of `testdata/` for `batch.?partition`, `protocol violation` and
+`call failed` is empty. And the goldens structurally cannot carry them: every refusal line in a
+`.plans.txt` is `refused: unsupported: …` from `plan_batch_partitioned` or `not runnable:
+unsupported: …` from `attach_recipes`, and both return `PlanError`, whose arms were reworded in
+the quarantine commit. `RunError` is run-time and reaches no golden. Outside `src/`, `RunError`
+appears only in `test_cpu_end_to_end.rs`, and only its `BudgetExceeded` arm, whose `Display` is
+`{message}` and did not change.
+
+**The temp-dir rename — no collision.** Five `temp_dir()` sites in the tree, all distinct
+prefixes: `peacockdb-multifile-<pid>` (this one), `peacockdb-join-fixture-<pid>-<name>`,
+`peacock-cpu-source-<pid>.parquet`, `peacock-corpus-<pid>-<name>`,
+`peacock-gpu-executors-<pid>.parquet`. The case ran green:
+`batch_partitioned::parquet_meta::tests::a_scan_over_several_files_is_refused_rather_than_measured_from_one`.
+
+### The gates, by hand, `LC_ALL=C.UTF-8`, `--untracked`
+
+Gate 1 lands on the documented six; gates 2 and 3 empty; the `peacockdb-core/src`-scoped form
+with survivor spellings stripped per line lands on the one mapping site,
+`gpu_rowgroup_prune.rs:151`. Both of the spec's warnings reproduce exactly: `LC_ALL=C` drops
+gate 1 to **three** (the arrow sites), and the line-scoped strip-and-rematch over the excluded
+lines returns nothing — though there are now **166** such lines, not the 170 the spec records.
+
+`--untracked` makes no difference at HEAD (6 either way) because nothing is untracked any more.
+It mattered while the renames were in flight and stays in the command for the next slice.
+
+### Running the dataset tiers in this worktree
+
+`testdata/{tpch,tpcds}.sf1` do not exist here — they are gitignored and a worktree does not
+carry ignored files. `PEACOCK_TESTDATA_DIR` is the wrong lever: it moves the golden root too,
+and the goldens must come from this branch. Symlink the two dirs at the main checkout instead:
+
+    ln -sfn /media/data/peacockdb/testdata/tpch.sf1  testdata/tpch.sf1
+    ln -sfn /media/data/peacockdb/testdata/tpcds.sf1 testdata/tpcds.sf1
+
+**Delete them when done.** `testdata/.gitignore`'s `/tpch.sf*/` is a directory-only pattern, so
+it does not match a symlink: the two show up as `??` and a `git add -A testdata` would commit
+them. They also widen what a `--untracked` gate reads.
+
+### Why no GPU run
+
+Nothing a device executes can see this commit. `error.rs` has no `cfg`; the `mod.rs` line is a
+doc comment; the `parquet_meta.rs` line is `#[cfg(test)]` inside the lib, and `--lib` runs only
+in the rust-only CPU tier (`test_ci_coverage`'s `line_runs_lib_tests` check is over that step).
+No GPU target references `RunError`, and `test_gpu_corpus` reads cpu-authored sections
+read-only. A device run would re-prove the goldens, which the CPU regen already proved.
+
+## The residues are proven (2026-09-09, third run)
+
+The narrowed dispatch came back green: 0 warnings on the rust-only build of both crates, 437 lib
+cases, 19 plan-golden cases, 448 cpu-corpus cases, 7 `test_ci_coverage` cases, and a clean
+re-verify of the plan goldens after the regen. `git diff` was empty outside `llm-wiki/` — the 33
+golden files were rewritten with unchanged bytes, and `PEACOCK_REWRITE_RECIPE_BYTES` was never
+set, so the payload digests were compared rather than overwritten. No golden moved, as the grep
+predicted.
+
+**The two earlier dispatches were never killed.** Their shells were still running detached in
+this worktree, which is why nothing reached the branch: the coordinator's call returned without a
+report while the work carried on. Both have since finished, both green, and they cover eleven
+targets the narrowed list left out — `test_corpus_goldens` 20, `test_cost_model` 3,
+`test_cpu_end_to_end` 24, `test_cpu_executors` 1, `test_golden_format` 24,
+`test_layout_injection` 4, `test_null_analysis` 8, `test_planner_join_capability` 13,
+`test_planner_join_refusals` 10, `test_gpu_batch` 0 under rust-only, and `cost-report`'s own 37,
+which are the spec's registry guard. No processes are left running now.
+
+The lesson is not the one the previous two restarts drew. A dispatch whose coordinator dies keeps
+running and keeps writing into the shared tree, so a restarted coordinator can find a second agent
+regenerating goldens beside its own. That is harmless while every diff is empty and an attribution
+problem the moment one is not — check for foreign process trees in the worktree before dispatching,
+not only for what reached the branch.
+
+**The cudf leg could not be built here, for a reason now fixed.** `third_party/cudf` was an empty
+directory: a new worktree does not populate submodules, and `cpp/CMakeLists.txt:10` bootstraps
+rapids-cmake from the vendored tree even against a host cuDF install. Populated from the primary
+checkout with `git -c protocol.file.allow=always -c submodule."third_party/cudf".url=
+/media/data/peacockdb/third_party/cudf submodule update --init third_party/cudf`, so tasks 2-4 can
+build both feature sets here. The cudf leg of this commit is left to CI regardless: the three hunks
+carry no `cfg` and the rust-only leg compiled them warning-free.
+
+`build-test.md:35` named the recipe-payload case `tpch_and_tpcds_recipe_payloads`; it is
+`the_payload_golden_carries_what_each_call_hands_the_executor` at `test_plan_goldens.rs:229`.
+Drift inherited from master, corrected here rather than left for a later pass. `cost-report`'s
+`sha_links is never used` warning is on master too, at the same function.
