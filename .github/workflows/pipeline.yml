@@ -395,10 +395,6 @@ jobs:
           # test_gpu_bp_corpus = the corpus on a device, read against the sections the cpu
           #   tier authored — plan shape, per-batch lists and bytes, and the result where
           #   the query's line names a golden.
-          # test_node_timing = the timing method itself: that the events mode does not slow
-          #   the query it measures, and that its CUDA events bracket device work rather
-          #   than the host prologue. Every number under testdata/benchmark-results/ rests
-          #   on both, and nothing else checks either.
           # test_inc2_conformance = GPU vs comet Spark-murmur3 partition ids, bit-exact.
           # test_gpu_abi = the batch-partitioned ABI's three per-call symbols on a device;
           #   its companion test_gpu_batch needs no device and runs in dataset-matrix instead.
