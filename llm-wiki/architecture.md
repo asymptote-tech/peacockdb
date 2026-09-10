@@ -3,14 +3,14 @@
 The code is authoritative: where this page and the code disagree, fix the page rather than the
 reading, and say so.
 
-Pipeline: SQL → DataFusion logical/physical plan → the batch-partitioned node tree
+Pipeline: SQL → DataFusion logical/physical plan → the engine's node tree
 (`peacockdb-core/src/batch_partitioned/`) → a recipe plan in the FlatBuffers vocabulary
 (`flatbuffers/gpu_plan.fbs`) → the C++/cuDF executor, one node at a time. One tree runs on
 either backend: `CpuBackend` relays a call to DataFusion, `GpuBackend` makes it through the
 C ABI.
 
 A **lane** holds a *stream of batches* rather than one resident table, and that is the whole of
-why the mode exists. Load → filter at 1% selectivity → aggregate into few groups materializes
+why the engine is shaped this way. Load → filter at 1% selectivity → aggregate into few groups materializes
 the whole scan before the filter runs if a lane is one table; with batches only the aggregate's
 state stays resident, so the query fits a budget the table does not.
 
@@ -27,7 +27,7 @@ state stays resident, so the query fits a budget the table does not.
 ## Planning
 
 `plan_batch_partitioned()` takes DataFusion's physical plan, built at the target lane count
-by the caller, and **translates** it into this mode's node vocabulary
+by the caller, and **translates** it into the engine's node vocabulary
 (`batch_partitioned/translate/`). Translation, not annotation: a 1:1 wrapper carries
 DataFusion's execution semantics along with it, and this model's semantics are different at
 every node.
@@ -53,8 +53,8 @@ What DataFusion is reused for is its planning, never its execution:
 
 The layer makes a conscious decision per DataFusion node kind, and an unrecognized one is a
 plan-time error naming it — never a silent pass-through. Expressions are translated the same
-way, kind by kind, into the mode's own IR (`batch_partitioned/expr.rs`), because a column
-reference is an ordinal into a child whose column order this mode decides. Ordinals rebase at
+way, kind by kind, into the engine's own IR (`batch_partitioned/expr.rs`), because a column
+reference is an ordinal into a child whose column order the engine decides. Ordinals rebase at
 every node the layer inserts, so a per-branch cast project or an inserted merge shifts every
 reference above it.
 
@@ -79,13 +79,13 @@ the estimator's number.
 
 | Mode | Lanes | Batching | Budget |
 |---|---|---|---|
-| `bp-tp1-single` | 1 | `Off` | no |
-| `bp-tp1-rowgroup` | 1 | `PerRowGroup` | no |
-| `bp-tp4-single` | 4 | `Off` | no |
-| `bp-tp4-rowgroup` | 4 | `PerRowGroup` | no |
-| `bp-tp4-sized` | 4 | `Sized` | **yes** |
+| `tp1-single` | 1 | `Off` | no |
+| `tp1-rowgroup` | 1 | `PerRowGroup` | no |
+| `tp4-single` | 4 | `Off` | no |
+| `tp4-rowgroup` | 4 | `PerRowGroup` | no |
+| `tp4-sized` | 4 | `Sized` | **yes** |
 
-There is no `bp-tp1-sized`: at one lane a source takes essentially the whole budget, so the
+There is no `tp1-sized`: at one lane a source takes essentially the whole budget, so the
 sized form collapses to `Off` and the mode carries no signal. One mode takes a budget, and it
 records the tier in-band in its `--- memory ---` section since the label does not carry it;
 the other four reproduce from the data alone.
@@ -440,7 +440,8 @@ join, which asks both its inputs onto one lane, so the union declares 4+1+4.
 
 **Three shapes are refused at plan time.** Left, Right or Full with a residual filter, because
 `execute_hash_join` applies the filter after the outer gather and so demotes the ON condition to
-a WHERE ([#153](tickets.md#t153)) — a live defect in the engine, not a limitation of this mode.
+a WHERE ([#153](tickets.md#t153)) — a live defect in the C++ executor, not a limitation of the
+planner.
 RightSemi or RightAnti with a residual filter, because no swapped `mixed_*` variant exists; the
 fix is orientation rather than code. And a nested-loop join that is neither Inner nor Left,
 which the C++ rejects outright.
@@ -740,15 +741,15 @@ node. [What the frozen surface costs](#what-the-frozen-surface-costs) is the bil
 
 Two spellings, and the prefix is the tell: `Cudf*` is a flat-buffer node table, the thing
 the C++ dispatches on, with `GpuPlan` as the root table wrapping them. A `Gpu` name with no
-`Cudf` is one of this mode's own plan nodes and never crosses.
+`Cudf` is one of the engine's own plan nodes and never crosses.
 
-Three of the fifteen wire kinds have no writer: `CudfCoalesceBatches` (batching is this mode's
+Three of the fifteen wire kinds have no writer: `CudfCoalesceBatches` (batching is the engine's
 own and needs no node), `CudfLimit` (a limit is a row range on the export) and `CudfWindow` (no
 window function here yet, #143). They stay because the kernels behind them do.
 
 **Statement order is the wire format**: FlatBufferBuilder is a no-interning bump arena, so
 reordering writes changes bytes even with identical values, and
-[`goldens/bp-recipe-payloads.txt`](../testdata/goldens/bp-recipe-payloads.txt) pins each
+[`goldens/recipe-payloads.txt`](../testdata/goldens/recipe-payloads.txt) pins each
 payload's bytes with a digest beside it. Regenerating it to silence a red defeats its purpose.
 
 ### From node to seqs

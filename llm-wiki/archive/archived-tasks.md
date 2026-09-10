@@ -992,7 +992,7 @@ over lanes rather than anything a node produced. Plus the
 `pipeline.yml` steps `test_ci_coverage` requires, which are not engine code at all. Three more landed than that list, each approved on its own and each recorded here rather than
 only in the exchange that approved it: `CpuBatch::byte_size` pricing from the plan's schema, which
 is the one the headline forbids by name and which moved every budget decision in the engine; the
-`gpu_backend` guard closing [#181](../tasks/bp-tickets.md#t181); and `driver/mod.rs`'s `mod index` going
+`gpu_backend` guard closing [#181](../tasks/active-tickets.md#t181); and `driver/mod.rs`'s `mod index` going
 `pub(crate)` so the renderer walks the driver's own index rather than a second pre-order.
 
 Naming that surface is what gives the rule an edge, and the edge only holds against a list that
@@ -1032,12 +1032,12 @@ worst source in the corpus is tpcds `inventory` at `bp-tp1-rowgroup` with 96 bat
 lane, about two kilobytes across the two lists — so the comparator reports a moved section by
 name and never dumps the line.
 
-**A failing query is disabled with a ticket in [`bp-tickets.md`](../tasks/bp-tickets.md)**, not in the
+**A failing query is disabled with a ticket in [`active-tickets.md`](../tasks/active-tickets.md)**, not in the
 main list. Rollout tickets arrive in bulk when a sweep hits a wall and close in bulk when it is
 cleared, which is not what a triage pass reads for. The ID space is shared, so a number is never
 two things. `TicketIndex::load` reads two files and gains a third here, and it is
 not cosmetic: `cost-report` already exits 1 when a ticket the registry names resolves in neither
-file, so the first rollout ticket filed in `bp-tickets.md` fails the cost-report job until the
+file, so the first rollout ticket filed in `active-tickets.md` fails the cost-report job until the
 index reads it.
 
 **What proves the infra, since every way it fails is quiet.** A dropped section, a filtered
@@ -1244,7 +1244,7 @@ Seventeen queries at 88 (query, mode) cases, not twenty: enabling them is what f
 not run. `tpch/q1` and `tpch/q17` are out at every mode on [#163](../tickets.md#t163) — `avg`
 declares its count state `UInt64` and the accumulator produces `Int64`, which the ticket records
 from the device and which the cpu reaches too. `tpcds/q96` keeps both tp1 modes and loses the
-three tp4 ones to [#180](../tasks/bp-tickets.md#t180), where a shuffle puts a state merge under a
+three tp4 ones to [#180](../tasks/active-tickets.md#t180), where a shuffle puts a state merge under a
 `count(*)` declared non-nullable.
 
 The set is not topped back up to twenty. It was chosen as the smallest queries carrying no ticket
@@ -1255,7 +1255,7 @@ for.
 
 ~~**T19 — rollout.**~~ (done). Query-by-query enablement across the rest of the corpus on T18's macro,
 starting from the twenty it already carries. No production code changes, per T18: a query that
-does not run is disabled with a ticket in [`bp-tickets.md`](../tasks/bp-tickets.md), which is the whole
+does not run is disabled with a ticket in [`active-tickets.md`](../tasks/active-tickets.md), which is the whole
 output of this task besides the enabled rows. Not one line of `peacockdb-core/src` moves here:
 T18 left the goldens' own surface finished, so anything this task would have to change is by
 definition a query's blocker rather than the rollout's.
@@ -1266,7 +1266,7 @@ touching anything else has stopped being a rollout.** By hand:
 - the shared `corpus_query!` list, one file that every binary includes and reads through its own
   arm, as `gpu_cases.inc` is read today — so a query is enabled once, not once per engine;
 - `testdata/cost-registry.csv`, cells rather than rows: all 138 corpus queries already have one;
-- [`bp-tickets.md`](../tasks/bp-tickets.md), for what a query is disabled on — a whole query, or the
+- [`active-tickets.md`](../tasks/active-tickets.md), for what a query is disabled on — a whole query, or the
   subset of modes it is wrong at, which is the commoner case and the one whose ticket has to name
   the modes or the next reader re-derives them.
 
@@ -1369,7 +1369,7 @@ query from the injected tier would silently need a matching addition here, buys 
 run and costs the property that made the smaller list trustworthy.
 
 **A device cell's ticket names its FIRST failure, not its only one.** The causes are ordered by how
-far a plan gets: [#183](../tasks/bp-tickets.md#t183) is the unload refusing an export, at the end of a plan
+far a plan gets: [#183](../tasks/active-tickets.md#t183) is the unload refusing an export, at the end of a plan
 that ran, and [#152](../tickets.md#t152) is a join refusing its second probe batch, earlier. So a
 mode whose join takes one probe batch reaches the unload and fails on the string, while a mode whose
 join takes two never gets there — the same query reporting two different causes, chosen by the
@@ -1442,7 +1442,7 @@ is fixable here.
 cpu cells, and **zero** device cells beyond the six T18 left. So 76 rather than the 83 predicted, and
 that miss is worth more than the number: the ceiling was computed twice, corrected from a wrong 88-to-90
 down to 83, and was still high, because both computations counted only the blockers known at the
-time. [#190](../tasks/bp-tickets.md#t190) and [#192](../tasks/bp-tickets.md#t192) arrived after the projection. **A
+time. [#190](../tasks/active-tickets.md#t190) and [#192](../tasks/active-tickets.md#t192) arrived after the projection. **A
 ceiling derived from known causes is a bound on optimism, not a prediction** — unknown blockers only
 ever subtract.
 
@@ -1455,7 +1455,7 @@ regeneration whose diff nobody reads and a failure nobody can attribute: eleven 
 either way, so the batch size is the only thing that says which query moved which section. Five
 is small enough that a red run names its cause without bisecting and large enough that the
 regeneration cost is amortised. Each batch is its own commit — the five queries, their registry
-cells, the sections they filled, and whatever went to `bp-tickets.md` — so the history reads as
+cells, the sections they filled, and whatever went to `active-tickets.md` — so the history reads as
 the rollout it was, and a batch that goes wrong is reverted without taking the ninety-five with
 it.
 
@@ -1472,8 +1472,8 @@ reconstruct from an empty column.
 **Four tasks were specced during T19 and none of them is T20's.** They came out of what the rollout
 found, and each closes tickets the device column is actually blocked on rather than shapes the corpus
 lacks: [`refcounted-tables.md`](../tasks/refcounted-tables.md) for [#145](../tickets.md#t145) and
-[#152](../tickets.md#t152), [`casts.md`](../tasks/casts.md) for [#183](../tasks/bp-tickets.md#t183),
-[`wire-schema.md`](../tasks/wire-schema.md) for [#187](../tasks/bp-tickets.md#t187), and
+[#152](../tickets.md#t152), [`casts.md`](../tasks/casts.md) for [#183](../tasks/active-tickets.md#t183),
+[`wire-schema.md`](../tasks/wire-schema.md) for [#187](../tasks/active-tickets.md#t187), and
 [`empty-answers.md`](../tasks/empty-answers.md) for [#173](../tickets.md#t173) and
 [#175](../tickets.md#t175). Order matters twice: `casts.md` before `wire-schema.md`, which writes the
 schema `empty-answers.md` then reads. Between them they cover the two causes that hold 134 of the 138

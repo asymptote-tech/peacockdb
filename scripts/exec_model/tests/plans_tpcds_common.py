@@ -1,7 +1,7 @@
 """What every TPC-DS lowering in this suite is built out of.
 
 TPC-DS is a star schema, and a star has one shape: a fact table streaming past dimension
-tables small enough to sit in one batch. That shape is the shape the batch-partitioned mode
+tables small enough to sit in one batch. That shape is the shape the engine
 exists for, so it is worth saying once — `fact`, `dim` and `star` below — and then spending
 each query's lines on what is actually specific to it.
 

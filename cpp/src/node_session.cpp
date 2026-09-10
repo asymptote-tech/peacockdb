@@ -345,11 +345,10 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
   // the kernel is bit-equal to comet. Post-lowering the child is a
   // CudfCoalescePartitions (single handle), but concat defensively anyway.
   //
-  // That concat has no caller and is scheduled to go. The legacy budget rule always
-  // lowers a shuffle to CoalescePartitions + Repartition, and the batch-partitioned
-  // mode also hands this arm exactly one handle per call — its planner puts a
-  // GpuCoalesceAllBatches above the merge feeding an emit. Retire the branch when the
-  // legacy modes retire, rather than growing a second caller for it.
+  // That concat has no caller: the planner puts a GpuCoalesceAllBatches above the merge
+  // feeding an emit, so this arm is handed exactly one handle per call. The modes that
+  // lowered a shuffle differently are gone, so nothing will grow a second caller — #197
+  // retires it.
   if (node->node_type() == fb::PlanNodeKind_CudfRepartition &&
       node->node_as_CudfRepartition()->kind() == fb::PartitioningKind_Hash) {
     const fb::CudfRepartition* rp = node->node_as_CudfRepartition();

@@ -1,4 +1,4 @@
-# batch-partitioned execution model — Python prototype
+# execution model — Python prototype
 
 An emulation of the execution model in
 [`llm-wiki/architecture.md`](../../llm-wiki/architecture.md), built to settle the scheduling
@@ -57,8 +57,8 @@ as a script, so the relative imports resolve either way.
 | `accounting.py` | `ResidentAccountant` — the resident formula, the cached-delta executor total, and the budget trip (`ResidentBudgetExceeded`) |
 | `limit.py` | `RowInterval`, `RowRange`, and the per-batch decision behind the two lowerings |
 | `runtime.py` | per-node queue state and one lane's view of its inputs |
-| `batch_single_partition_driver.py` | one lane of one lane-scoped node |
-| `batch_partitioned_driver.py` | the scheduler and everything cross-partition |
+| `single_partition_driver.py` | one lane of one lane-scoped node |
+| `partitioned_driver.py` | the scheduler and everything cross-partition |
 | `operators/frame.py` | the pandas batch, and the rules that keep pandas inside cuDF's vocabulary |
 | `operators/expressions.py` | the expression IR — what `cudf::ast` accepts, nothing more |
 | `operators/aggregates.py` | aggregate specs and the init / merge / finalize decomposition, and the registry that emits each one's finalize expressions |
@@ -117,8 +117,8 @@ join waiting on its other side, and putting the build side on the left removes t
 One rule sits on top of the height rule: **a join in its build phase holds back its whole
 probe subtree**, transitively to the root. F3 below has the reasoning and the evidence.
 
-`batch_partitioned_driver` owns the tree, the queues, the schedule and the three cross-lane
-categories, and delegates each lane-scoped call to `batch_single_partition_driver`. The unit
+`partitioned_driver` owns the tree, the queues, the schedule and the three cross-lane
+categories, and delegates each lane-scoped call to `single_partition_driver`. The unit
 is one node's lane rather than a chain of them: min-height selection walks a batch up a
 chain node by node on its own.
 

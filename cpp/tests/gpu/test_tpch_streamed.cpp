@@ -153,7 +153,7 @@ cudf::timestamp_scalar<cudf::timestamp_D> date_scalar(int y, unsigned m, unsigne
 // Compaction is what keeps a streamed aggregate bounded: without it the partials are a
 // second copy of the input for a group-per-row aggregate. The threshold doubles after each
 // fold, so a query whose groups genuinely are numerous stops paying for folds that do not
-// reduce — the same discover-the-regime rule the batch-partitioned design uses, because the
+// reduce — the same discover-the-regime rule the engine uses, because the
 // planner has no cardinality estimate to be told the answer by (#19, #146).
 class PartialSet {
  public:

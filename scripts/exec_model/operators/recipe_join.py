@@ -6,7 +6,7 @@ making `execute_node(seq, handles)` calls against `recipe.NodeSession`, which ru
 cuDF the C++ runs. Both backends drive the same plans through the same driver, so a
 disagreement is a real one — the mode's version of two-engine correctness, one level down.
 
-What it is for: the batch-partitioned mode keeps the C++ side and the fbs frozen (three
+What it is for: the engine keeps the C++ side and the fbs frozen (three
 additive symbols, spec's "GPU execution through the frozen FFI"). That claim is only worth
 what the join can do, because the join is the operator whose state outlives a single call.
 So each type here is spelled as a sequence of nodes that exist and fields that exist, and

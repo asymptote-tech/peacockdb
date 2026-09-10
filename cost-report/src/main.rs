@@ -57,19 +57,19 @@ const FLAGS: &[&str] = &[
     "--published", "--sha", "--generated-at", "--repo", "--cost-diff", "--base",
 ];
 
-/// The batch-partitioned modes, in the fixed sequence every consumer reads them in: the
+/// The planning modes, in the fixed sequence every consumer reads them in: the
 /// widget's three cells, and the `.result.txt` authority. Last enabled wins in both.
-const BP_MODES: [&str; 5] = [
-    "bp-tp1-single",
-    "bp-tp1-rowgroup",
-    "bp-tp4-single",
-    "bp-tp4-rowgroup",
-    "bp-tp4-sized",
+const MODES: [&str; 5] = [
+    "tp1-single",
+    "tp1-rowgroup",
+    "tp4-single",
+    "tp4-rowgroup",
+    "tp4-sized",
 ];
 
-/// The budget tier the batch-partitioned execution goldens are written at, and so the
+/// The budget tier the execution goldens are written at, and so the
 /// suffix their filenames carry.
-const BP_TIER: &str = "mini";
+const TIER: &str = "mini";
 
 /// One row of `testdata/cost-registry.csv` — the widget's source of truth.
 ///
@@ -105,10 +105,10 @@ impl Registry {
         let (i_ds, i_q, i_feat, i_tick, i_ps) =
             (idx("dataset"), idx("query"), idx("features"), idx("tickets"), idx("plan_status"));
         // Every column the widget reads: the three groups at each of the five modes.
-        let columns: Vec<String> = BP_MODES
+        let columns: Vec<String> = MODES
             .iter()
             .flat_map(|mode| {
-                [BpGroup::Plan, BpGroup::Cpu, BpGroup::Gpu]
+                [ModeGroup::Plan, ModeGroup::Cpu, ModeGroup::Gpu]
                     .into_iter()
                     .map(|group| group.column(mode))
             })
@@ -173,7 +173,7 @@ struct Row {
     /// The cost, and which mode's file it came from: the last mode in the sequence whose
     /// cpu execution is enabled, so a query enabled at four of five is priced at the
     /// fourth rather than at none.
-    bp_peacockdb: Option<(String, u64)>,
+    peacockdb: Option<(String, u64)>,
 }
 
 impl Row {
@@ -194,20 +194,20 @@ impl Row {
 
     /// "Operational" for the summary line: the query runs on a device at some mode.
     fn operational(&self) -> bool {
-        BP_MODES
+        MODES
             .iter()
-            .any(|mode| self.state(&BpGroup::Gpu.column(mode)) == "enabled")
+            .any(|mode| self.state(&ModeGroup::Gpu.column(mode)) == "enabled")
     }
 
     /// PeacockDB Σout / DuckDB Σout, at the mode the cost came from.
-    fn bp_ratio(&self) -> Option<f64> {
-        let (_, peacock) = self.bp_peacockdb.as_ref()?;
+    fn ratio(&self) -> Option<f64> {
+        let (_, peacock) = self.peacockdb.as_ref()?;
         let duckdb = self.duckdb?;
         (duckdb > 0).then(|| *peacock as f64 / duckdb as f64)
     }
 
-    fn bp_bucket(&self) -> &'static str {
-        match self.bp_ratio() {
+    fn bucket(&self) -> &'static str {
+        match self.ratio() {
             None => "grey",
             Some(r) if r <= RATIO_GREEN_MAX => "green",
             Some(_) => "red",
@@ -216,7 +216,7 @@ impl Row {
 
 }
 
-/// Where each query's `== <query>` section starts, per batch-partitioned file: the line a
+/// Where each query's `== <query>` section starts, per golden file: the line a
 /// `#L<n>` anchor names. Keyed by the file stem, since a group and a mode name one file.
 type SectionLines = BTreeMap<String, BTreeMap<String, usize>>;
 
@@ -248,7 +248,7 @@ struct Links {
 }
 
 /// Which wiki file each ticket number's anchor lives in. `tickets.md` holds open work,
-/// `tasks/bp-tickets.md` the rollout's, and `archive/archived-tickets.md` the rest — and a
+/// `tasks/active-tickets.md` the rollout's, and `archive/archived-tickets.md` the rest — and a
 /// closed ticket keeps its registry cell, since a `na` should say which decision it rests
 /// on, so the link has to follow the number rather than assume the file. The id space is
 /// shared across all three, so a number is never two things.
@@ -325,7 +325,7 @@ impl TicketIndex {
         };
         Self {
             open: numbers(wiki.join("tickets.md")),
-            rollout: numbers(wiki.join("tasks/bp-tickets.md")),
+            rollout: numbers(wiki.join("tasks/active-tickets.md")),
             archived: numbers(wiki.join("archive/archived-tickets.md")),
         }
     }
@@ -336,7 +336,7 @@ impl TicketIndex {
         if self.open.contains(ticket) {
             Some("llm-wiki/tickets.md")
         } else if self.rollout.contains(ticket) {
-            Some("llm-wiki/tasks/bp-tickets.md")
+            Some("llm-wiki/tasks/active-tickets.md")
         } else if self.archived.contains(ticket) {
             Some("llm-wiki/archive/archived-tickets.md")
         } else {
@@ -451,7 +451,7 @@ fn main() {
     if !unresolved.is_empty() {
         eprintln!(
             "cost-report: {} ticket(s) named in the registry are in neither \
-             llm-wiki/tickets.md, llm-wiki/tasks/bp-tickets.md nor \
+             llm-wiki/tickets.md, llm-wiki/tasks/active-tickets.md nor \
              llm-wiki/archive/archived-tickets.md: {}",
             unresolved.len(),
             unresolved.into_iter().cloned().collect::<Vec<_>>().join(", ")
@@ -520,7 +520,7 @@ fn build_dataset(
                 features: r.features.clone(),
                 tickets: r.tickets.clone(),
                 duckdb: read_total(&canon.join(format!("{stem}.duckdb_cost.txt")), "duckdb_cost="),
-                bp_peacockdb: bp_cost(canon, &r.states, &r.query),
+                peacockdb: peacockdb_cost(canon, &r.states, &r.query),
             }
         })
         .collect();
@@ -537,14 +537,14 @@ fn build_dataset(
     Dataset { label, total, canon_rel, query_rel, rows, section_lines: section_lines(canon) }
 }
 
-/// The line each query's section opens on, for every batch-partitioned file a cell links at.
+/// The line each query's section opens on, for every golden a cell links at.
 /// A blob view cannot address a section by name but it can address a line, and landing on the
 /// file is landing at the top of one holding twenty sections today and ninety-nine after the
 /// rollout — which is not the distinction the widget is for.
 fn section_lines(canon: &Path) -> SectionLines {
     let mut all = BTreeMap::new();
-    for mode in BP_MODES {
-        for stem in [format!("{mode}.plans"), format!("{mode}-{BP_TIER}.cpu")] {
+    for mode in MODES {
+        for stem in [format!("{mode}.plans"), format!("{mode}-{TIER}.cpu")] {
             let Ok(text) = std::fs::read_to_string(canon.join(format!("{stem}.txt"))) else {
                 continue;
             };
@@ -559,16 +559,20 @@ fn section_lines(canon: &Path) -> SectionLines {
     all
 }
 
-/// This query's batch-partitioned cost: the section it has in the last mode's `.cost.txt`
+/// This query's engine cost: the section it has in the last mode's `.cost.txt`
 /// whose cpu cell is enabled. `None` where no mode is enabled, or where the section carries
 /// a marker rather than a run — a skipped section has no total, and rendering nothing is
 /// what says so.
-fn bp_cost(canon: &Path, states: &BTreeMap<String, String>, query: &str) -> Option<(String, u64)> {
-    let mode = BP_MODES.iter().rev().find(|mode| {
-        let column = format!("bp_cpu_{}", mode.trim_start_matches("bp-").replace('-', "_"));
+fn peacockdb_cost(
+    canon: &Path,
+    states: &BTreeMap<String, String>,
+    query: &str,
+) -> Option<(String, u64)> {
+    let mode = MODES.iter().rev().find(|mode| {
+        let column = format!("cpu_{}", mode.replace('-', "_"));
         states.get(&column).map(String::as_str) == Some("enabled")
     })?;
-    let text = std::fs::read_to_string(canon.join(format!("{mode}-{BP_TIER}.cost.txt"))).ok()?;
+    let text = std::fs::read_to_string(canon.join(format!("{mode}-{TIER}.cost.txt"))).ok()?;
     let total = entry_total(&text, query)?;
     Some((mode.to_string(), total))
 }
@@ -688,8 +692,8 @@ fn peacock_cell_md(value: Option<u64>, plan_url: Option<String>, cost_url: Optio
 /// address a section by name, so the link lands on the file and the reader finds the
 /// `== <query>` header — which is also where a refusal is, so an enabled query and a
 /// refused one link to the same place and differ in what the reader lands on.
-fn bp_cell_html(r: &Row, links: &Links, d: &Dataset, group: BpGroup) -> String {
-    let glyphs: Vec<String> = BP_MODES
+fn mode_cell_html(r: &Row, links: &Links, d: &Dataset, group: ModeGroup) -> String {
+    let glyphs: Vec<String> = MODES
         .iter()
         .map(|mode| {
             let state = r.state(&group.column(mode));
@@ -712,31 +716,31 @@ fn bp_cell_html(r: &Row, links: &Links, d: &Dataset, group: BpGroup) -> String {
     format!("<td class=\"mode\">{}</td>", glyphs.join(""))
 }
 
-fn bp_cell_md(r: &Row, group: BpGroup) -> String {
-    BP_MODES
+fn mode_cell_md(r: &Row, group: ModeGroup) -> String {
+    MODES
         .iter()
         .map(|mode| state_glyph(r.state(&group.column(mode))))
         .collect::<Vec<_>>()
         .join("")
 }
 
-/// Which of the three things a batch-partitioned cell reports, and what each reads.
+/// Which of the three things a mode cell reports, and what each reads.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum BpGroup {
+enum ModeGroup {
     Plan,
     Cpu,
     Gpu,
 }
 
-impl BpGroup {
+impl ModeGroup {
     /// The csv column for this group at one mode. Composed rather than looked up, and the
     /// mode set is the one table above: an unlisted mode has no column to compose.
     fn column(self, mode: &str) -> String {
-        let suffix = mode.trim_start_matches("bp-").replace('-', "_");
+        let suffix = mode.replace('-', "_");
         match self {
-            BpGroup::Plan => format!("bp_{suffix}"),
-            BpGroup::Cpu => format!("bp_cpu_{suffix}"),
-            BpGroup::Gpu => format!("bp_gpu_{suffix}"),
+            ModeGroup::Plan => suffix,
+            ModeGroup::Cpu => format!("cpu_{suffix}"),
+            ModeGroup::Gpu => format!("gpu_{suffix}"),
         }
     }
 
@@ -745,8 +749,8 @@ impl BpGroup {
     /// read one file.
     fn file(self, mode: &str) -> String {
         match self {
-            BpGroup::Plan => format!("{mode}.plans"),
-            _ => format!("{mode}-{BP_TIER}.cpu"),
+            ModeGroup::Plan => format!("{mode}.plans"),
+            _ => format!("{mode}-{TIER}.cpu"),
         }
     }
 }
@@ -927,7 +931,7 @@ fn render_html(
     let _ = write!(
         s,
         "<p class=\"legend\">Mode order within a cell: {}.</p>",
-        BP_MODES.join(", ")
+        MODES.join(", ")
     );
 
     for d in datasets {
@@ -942,9 +946,9 @@ fn render_html(
         );
         for r in &d.rows {
             let stem = r.stem();
-            let cost = r.bp_peacockdb.as_ref().map(|(_, total)| *total);
-            let cost_url = r.bp_peacockdb.as_ref().and_then(|(mode, _)| {
-                links.golden_url(d.canon_rel, &format!("{mode}-{BP_TIER}"), "cost.txt")
+            let cost = r.peacockdb.as_ref().map(|(_, total)| *total);
+            let cost_url = r.peacockdb.as_ref().and_then(|(mode, _)| {
+                links.golden_url(d.canon_rel, &format!("{mode}-{TIER}"), "cost.txt")
             });
             let dk_url = r.duckdb.and_then(|_| links.golden_url(d.canon_rel, &stem, "duckdb_cost.txt"));
             let modes = if r.plan_failed() {
@@ -952,22 +956,22 @@ fn render_html(
             } else {
                 format!(
                     "{}{}{}",
-                    bp_cell_html(r, links, d, BpGroup::Plan),
-                    bp_cell_html(r, links, d, BpGroup::Cpu),
-                    bp_cell_html(r, links, d, BpGroup::Gpu)
+                    mode_cell_html(r, links, d, ModeGroup::Plan),
+                    mode_cell_html(r, links, d, ModeGroup::Cpu),
+                    mode_cell_html(r, links, d, ModeGroup::Gpu)
                 )
             };
             let _ = write!(
                 s,
                 "<tr class=\"{}\"><td{}>{}</td>{}<td class=\"num sigma\">{}</td>\
                  <td class=\"num sigma\">{}</td><td class=\"num\">{}</td><td class=\"feat\">{}</td><td>{}</td></tr>",
-                r.bp_bucket(),
+                r.bucket(),
                 if r.n.is_none() { " class=\"micro\"" } else { "" },
                 query_cell_html(&r.query, links.query_url(d.query_rel, &stem)),
                 modes,
                 peacock_cell_html(cost, None, cost_url),
                 cost_cell_html(r.duckdb, dk_url),
-                ratio_or_dash(r.bp_ratio()),
+                ratio_or_dash(r.ratio()),
                 features_html(&r.features),
                 tickets_html(&r.tickets, links),
             );
@@ -1043,7 +1047,7 @@ fn render_markdown(
         let _ = write!(
             s,
             "<sub>Each cell is five glyphs, one per mode, in order: {}.</sub>\n\n",
-            BP_MODES.join(", ")
+            MODES.join(", ")
         );
         s.push_str(concat!(
             "<table>\n<tr><th>Query</th><th><sub>plan</sub></th><th><sub>cpu</sub></th>",
@@ -1053,19 +1057,19 @@ fn render_markdown(
         ));
         for r in &d.rows {
             let stem = r.stem();
-            let cost = r.bp_peacockdb.as_ref().map(|(_, total)| *total);
-            let ratio_cell = match r.bp_bucket() {
-                "red" => format!("{} 🔴", ratio_or_dash(r.bp_ratio())),
-                _ => ratio_or_dash(r.bp_ratio()),
+            let cost = r.peacockdb.as_ref().map(|(_, total)| *total);
+            let ratio_cell = match r.bucket() {
+                "red" => format!("{} 🔴", ratio_or_dash(r.ratio())),
+                _ => ratio_or_dash(r.ratio()),
             };
             let modes = if r.plan_failed() {
                 "<td colspan=\"3\"><sub>plan ✗</sub></td>".to_string()
             } else {
                 format!(
                     "<td><sub>{}</sub></td><td><sub>{}</sub></td><td><sub>{}</sub></td>",
-                    bp_cell_md(r, BpGroup::Plan),
-                    bp_cell_md(r, BpGroup::Cpu),
-                    bp_cell_md(r, BpGroup::Gpu)
+                    mode_cell_md(r, ModeGroup::Plan),
+                    mode_cell_md(r, ModeGroup::Cpu),
+                    mode_cell_md(r, ModeGroup::Gpu)
                 )
             };
             let _ = write!(
@@ -1497,8 +1501,8 @@ mod tests {
     /// unlisted defaults to "na".
     fn test_row(query: &str, modes: &[(&str, &str)], duckdb: Option<u64>) -> Row {
         let mut states = BTreeMap::new();
-        for mode in BP_MODES {
-            for group in [BpGroup::Plan, BpGroup::Cpu, BpGroup::Gpu] {
+        for mode in MODES {
+            for group in [ModeGroup::Plan, ModeGroup::Cpu, ModeGroup::Gpu] {
                 states.insert(group.column(mode), "na".to_string());
             }
         }
@@ -1513,7 +1517,7 @@ mod tests {
             features: vec![],
             tickets: vec![],
             duckdb,
-            bp_peacockdb: None,
+            peacockdb: None,
         }
     }
 
@@ -1575,7 +1579,7 @@ mod tests {
     /// using it.
     #[test]
     fn both_base_arms_read_the_same_section_of_a_multi_section_file() {
-        let repo_rel = "testdata/goldens/tpch.sf1/bp-tp4-sized-mini.cost.txt";
+        let repo_rel = "testdata/goldens/tpch.sf1/tp4-sized-mini.cost.txt";
         let out = std::process::Command::new("git")
             .args(["show", &format!("HEAD:{repo_rel}")])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -1590,7 +1594,7 @@ mod tests {
 
         // The directory arm, over a copy of exactly what the git arm reads.
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/base-arms-test");
-        let file = dir.join("goldens/tpch.sf1/bp-tp4-sized-mini.cost.txt");
+        let file = dir.join("goldens/tpch.sf1/tp4-sized-mini.cost.txt");
         std::fs::create_dir_all(file.parent().expect("a parent")).expect("mkdir");
         std::fs::write(&file, &text).expect("write");
 
@@ -1626,9 +1630,9 @@ mod tests {
     /// and the query link still resolves off it.
     #[test]
     fn a_section_label_names_the_query_and_the_mode() {
-        let rel = std::path::Path::new("goldens/tpch.sf1/bp-tp4-sized-mini.cost.txt");
+        let rel = std::path::Path::new("goldens/tpch.sf1/tp4-sized-mini.cost.txt");
         let label = section_label(rel, "q6");
-        assert_eq!(label, "tpch.sf1/q6 bp-tp4-sized-mini");
+        assert_eq!(label, "tpch.sf1/q6 tp4-sized-mini");
         let links = links_with_tickets(&[], &[]);
         assert_eq!(diff_query_url(&links, &label), None, "no sha, no link");
     }
@@ -1659,7 +1663,7 @@ mod tests {
         let links = links_with_every_file(&["170"], &["180"], &["103"]);
         let rendered = tickets_html(&["180".to_string()], &links);
         assert!(
-            rendered.contains("llm-wiki/tasks/bp-tickets.md#t180"),
+            rendered.contains("llm-wiki/tasks/active-tickets.md#t180"),
             "{rendered}"
         );
         assert!(rendered.contains(">#180<"), "{rendered}");
@@ -1699,7 +1703,7 @@ mod tests {
         let wiki = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../llm-wiki");
         let index = TicketIndex::load(&wiki);
         assert_eq!(index.path_for("170"), Some("llm-wiki/tickets.md"));
-        assert_eq!(index.path_for("180"), Some("llm-wiki/tasks/bp-tickets.md"));
+        assert_eq!(index.path_for("180"), Some("llm-wiki/tasks/active-tickets.md"));
         assert_eq!(
             index.path_for("103"),
             Some("llm-wiki/archive/archived-tickets.md")
@@ -1744,13 +1748,13 @@ mod tests {
     /// every other row exercises.
     #[test]
     fn a_query_that_does_not_plan_merges_its_three_mode_cells() {
-        let mut failed = test_row("q27", &[("bp_gpu_tp4_sized", "enabled")], None);
+        let mut failed = test_row("q27", &[("gpu_tp4_sized", "enabled")], None);
         failed.plan_status = "fail".to_string();
-        let d = bp_dataset();
+        let d = sample_dataset();
         let html = render_html(&[d], "u", &dry_links(), None, None);
         assert!(!html.contains("plan ✗"), "the fixture row plans: {html}");
 
-        let one = Dataset { rows: vec![failed], ..bp_dataset() };
+        let one = Dataset { rows: vec![failed], ..sample_dataset() };
         let html = render_html(&[one], "u", &dry_links(), None, None);
         assert!(html.contains("colspan=\"3\"") && html.contains("plan ✗"), "{html}");
         // Plan failure dominates an enabled cell: that combination is itself a bug and
@@ -1780,7 +1784,7 @@ mod tests {
     #[test]
     fn cost_cells_link_only_when_value_and_url_present() {
         let v = Some(43_308_088u64);
-        let url = Some("https://x/blob/abc/testdata/goldens/tpch.sf1/bp-tp4-sized-mini.cpu.txt".to_string());
+        let url = Some("https://x/blob/abc/testdata/goldens/tpch.sf1/tp4-sized-mini.cpu.txt".to_string());
         assert!(cost_cell_html(v, url.clone()).starts_with("<a href="));
         assert!(cost_cell_md(v, url).starts_with("<a href="));
         // value but no sha/url → plain text, no link.
@@ -1815,26 +1819,26 @@ mod tests {
     #[test]
     fn bucket_threshold_is_1_4() {
         let row = |p: u64, d: Option<u64>| {
-            let mut r = test_row("q1", &[("bp_cpu_tp4_sized", "enabled")], d);
-            r.bp_peacockdb = Some(("bp-tp4-sized".to_string(), p));
+            let mut r = test_row("q1", &[("cpu_tp4_sized", "enabled")], d);
+            r.peacockdb = Some(("tp4-sized".to_string(), p));
             r
         };
-        assert_eq!(row(14, Some(10)).bp_bucket(), "green"); // ratio 1.4 → green (≤)
-        assert_eq!(row(141, Some(100)).bp_bucket(), "red"); // ratio 1.41 → red
-        assert_eq!(row(14, None).bp_bucket(), "grey"); // no duckdb number → grey
+        assert_eq!(row(14, Some(10)).bucket(), "green"); // ratio 1.4 → green (≤)
+        assert_eq!(row(141, Some(100)).bucket(), "red"); // ratio 1.41 → red
+        assert_eq!(row(14, None).bucket(), "grey"); // no duckdb number → grey
     }
 
     #[test]
     fn peacock_cell_renders_plan_and_cost_links() {
-        let plan = Some("https://x/bp-tp4-sized-mini.cpu.txt".to_string());
-        let cost = Some("https://x/bp-tp4-sized-mini.cost.txt".to_string());
+        let plan = Some("https://x/tp4-sized-mini.cpu.txt".to_string());
+        let cost = Some("https://x/tp4-sized-mini.cost.txt".to_string());
         let html = peacock_cell_html(Some(43_308_088), plan.clone(), cost.clone());
         assert!(html.contains(">plan</a>") && html.contains(">cost</a>") && html.starts_with("41.30 MB ("));
         let md = peacock_cell_md(Some(43_308_088), plan, cost);
         // HTML anchors: the comment's table is raw HTML, where markdown link
         // syntax would render literally as brackets.
-        assert!(md.contains("<a href=\"https://x/bp-tp4-sized-mini.cpu.txt\">plan</a>"), "{md}");
-        assert!(md.contains("<a href=\"https://x/bp-tp4-sized-mini.cost.txt\">cost</a>"), "{md}");
+        assert!(md.contains("<a href=\"https://x/tp4-sized-mini.cpu.txt\">plan</a>"), "{md}");
+        assert!(md.contains("<a href=\"https://x/tp4-sized-mini.cost.txt\">cost</a>"), "{md}");
         assert!(md.starts_with("41.30 MB ("));
         // value but no urls (dry run) → plain bytes, no links.
         assert_eq!(peacock_cell_html(Some(43_308_088), None, None), "41.30 MB");
@@ -1953,7 +1957,7 @@ mod tests {
             total: 1,
             canon_rel: "testdata/goldens/tpch.sf1",
             query_rel: "testdata/tpch-queries",
-            rows: vec![test_row("q1", &[("bp_gpu_tp4_sized", "enabled")], Some(100))],
+            rows: vec![test_row("q1", &[("gpu_tp4_sized", "enabled")], Some(100))],
             section_lines: SectionLines::new(),
         }
     }
@@ -1962,11 +1966,11 @@ mod tests {
     /// `states` map built by hand.
     ///
     /// Every other widget test starts downstream of `load`, so all of them passed while
-    /// `load` read only `MODE_COLUMNS` and every batch-partitioned cell rendered `na` — a
+    /// `load` read only `MODE_COLUMNS` and every mode cell rendered `na` — a
     /// table of em-dashes, present and plausible and wrong. This is the only case that
     /// crosses the seam the defect was on.
     #[test]
-    fn the_loader_reads_the_batch_partitioned_columns() {
+    fn the_loader_reads_the_mode_columns() {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../testdata/fixtures/two-row-registry.csv");
         let registry = Registry::load(&path);
@@ -1974,21 +1978,21 @@ mod tests {
         assert_eq!(rows.len(), 2);
         let q6 = rows.iter().find(|r| r.query == "q6").expect("q6");
         assert_eq!(
-            q6.states.get("bp_tp1_single").map(String::as_str),
+            q6.states.get("tp1_single").map(String::as_str),
             Some("enabled"),
             "the loader did not read the plan columns"
         );
         assert_eq!(
-            q6.states.get("bp_cpu_tp1_single").map(String::as_str),
+            q6.states.get("cpu_tp1_single").map(String::as_str),
             Some("enabled")
         );
         assert_eq!(
-            q6.states.get("bp_gpu_tp1_single").map(String::as_str),
+            q6.states.get("gpu_tp1_single").map(String::as_str),
             Some("enabled")
         );
         let q1 = rows.iter().find(|r| r.query == "q1").expect("q1");
         assert_eq!(
-            q1.states.get("bp_cpu_tp1_single").map(String::as_str),
+            q1.states.get("cpu_tp1_single").map(String::as_str),
             Some("disabled"),
             "a disabled cell must not read as `na` either"
         );
@@ -1996,7 +2000,7 @@ mod tests {
 
     /// And what that reaches: a cell built from a loaded row is not five em-dashes.
     #[test]
-    fn a_loaded_row_renders_a_batch_partitioned_cell_with_content() {
+    fn a_loaded_row_renders_a_mode_cell_with_content() {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../testdata/fixtures/two-row-registry.csv");
         let registry = Registry::load(&path);
@@ -2009,43 +2013,43 @@ mod tests {
             "tpch",
         );
         let q6 = dataset.rows.iter().find(|r| r.query == "q6").expect("q6");
-        assert_eq!(bp_cell_md(q6, BpGroup::Plan), "✓✓———");
+        assert_eq!(mode_cell_md(q6, ModeGroup::Plan), "✓✓———");
         assert_ne!(
-            bp_cell_md(q6, BpGroup::Cpu),
+            mode_cell_md(q6, ModeGroup::Cpu),
             "—————",
             "every mode read as `na`, which is what an unread column looks like"
         );
     }
 
-    /// A batch-partitioned row: enabled at two plan modes, one cpu, none on a device, with
+    /// A registry row: enabled at two plan modes, one cpu, none on a device, with
     /// a cost the last enabled cpu mode carries.
     ///
     /// Its query is hyphenated on purpose. The registry spells one `scan_limit` and its golden
     /// section `== scan-limit`, so a cell looking its anchor up under the registry's spelling
     /// finds none and quietly links at the top of the file — which every `qNN` fixture passes.
-    fn bp_row() -> Row {
+    fn sample_row() -> Row {
         let mut r = test_row("scan_limit", &[], Some(100));
         for (column, state) in [
-            ("bp_tp1_single", "enabled"),
-            ("bp_tp1_rowgroup", "enabled"),
-            ("bp_cpu_tp1_single", "enabled"),
-            ("bp_gpu_tp1_single", "disabled"),
+            ("tp1_single", "enabled"),
+            ("tp1_rowgroup", "enabled"),
+            ("cpu_tp1_single", "enabled"),
+            ("gpu_tp1_single", "disabled"),
         ] {
             r.states.insert(column.to_string(), state.to_string());
         }
-        r.bp_peacockdb = Some(("bp-tp1-single".to_string(), 140));
+        r.peacockdb = Some(("tp1-single".to_string(), 140));
         r
     }
 
-    fn bp_dataset() -> Dataset {
+    fn sample_dataset() -> Dataset {
         Dataset {
             label: "TPC-H",
             total: 1,
             canon_rel: "testdata/goldens/tpch.sf1",
             query_rel: "testdata/tpch-queries",
-            rows: vec![bp_row()],
+            rows: vec![sample_row()],
             section_lines: SectionLines::from([(
-                "bp-tp1-single.plans".to_string(),
+                "tp1-single.plans".to_string(),
                 BTreeMap::from([("scan-limit".to_string(), 42)]),
             )]),
         }
@@ -2158,7 +2162,7 @@ mod tests {
             sha: Some("deadbeef".into()),
             tickets: TicketIndex { open: ["163".to_string()].into_iter().collect(), ..Default::default() },
         };
-        let mut d = bp_dataset();
+        let mut d = sample_dataset();
         d.rows[0].tickets = vec!["163".to_string()];
         let text = render_markdown(std::slice::from_ref(&d), "https://p/", false, &linked, None);
 
@@ -2181,9 +2185,9 @@ mod tests {
 
     #[test]
     fn both_renderings_carry_the_mode_table() {
-        let html = render_html(&[bp_dataset()], "https://p/", &no_links(), None, None);
+        let html = render_html(&[sample_dataset()], "https://p/", &no_links(), None, None);
         assert!(html.contains("TPC-H"), "{html}");
-        let md = render_markdown(&[bp_dataset()], "https://p/", false, &no_links(), None);
+        let md = render_markdown(&[sample_dataset()], "https://p/", false, &no_links(), None);
         assert!(md.contains("GPU-operational"), "{md}");
         // Four leading spaces is a code block, whatever produced them — and what produced
         // them here was a `\` continuation after a `\n\n`, which carries the source's own
@@ -2196,7 +2200,7 @@ mod tests {
              rather than as what it is:\n{md}"
         );
         // Five glyphs per cell, one per mode, and the modes named where a hover cannot.
-        assert!(md.contains(&BP_MODES.join(", ")), "{md}");
+        assert!(md.contains(&MODES.join(", ")), "{md}");
         for rendering in [&html, &md] {
             assert!(
                 rendering.contains("140"),
@@ -2216,16 +2220,16 @@ mod tests {
             sha: Some("deadbeef".into()),
             tickets: TicketIndex::default(),
         };
-        let d = bp_dataset();
-        let cell = bp_cell_html(&d.rows[0], &linked, &d, BpGroup::Plan);
+        let d = sample_dataset();
+        let cell = mode_cell_html(&d.rows[0], &linked, &d, ModeGroup::Plan);
         assert!(
-            cell.contains("bp-tp1-single.plans.txt#L42"),
+            cell.contains("tp1-single.plans.txt#L42"),
             "the glyph does not land on the section: {cell}"
         );
         // The mode with no line recorded still links, at the file: a missing anchor is worse
         // as a missing link.
         assert!(
-            cell.contains("bp-tp1-rowgroup.plans.txt\" title="),
+            cell.contains("tp1-rowgroup.plans.txt\" title="),
             "a mode with no recorded line lost its link entirely: {cell}"
         );
     }
@@ -2237,10 +2241,10 @@ mod tests {
             .join("../testdata/goldens/tpch.sf1");
         let lines = section_lines(&canon);
         let cpu = lines
-            .get("bp-tp1-single-mini.cpu")
+            .get("tp1-single-mini.cpu")
             .expect("the mode's execution golden");
         let at = *cpu.get("q6").expect("q6 has a section");
-        let text = std::fs::read_to_string(canon.join("bp-tp1-single-mini.cpu.txt")).unwrap();
+        let text = std::fs::read_to_string(canon.join("tp1-single-mini.cpu.txt")).unwrap();
         assert_eq!(
             text.lines().nth(at - 1),
             Some("== q6"),
@@ -2251,16 +2255,16 @@ mod tests {
     /// The three cells report three different things about one query, so a row enabled for
     /// planning and not for a device must not render alike in all three.
     #[test]
-    fn the_three_batch_partitioned_cells_report_three_different_things() {
-        let r = bp_row();
+    fn the_three_mode_cells_report_three_different_things() {
+        let r = sample_row();
         assert_eq!(
-            bp_cell_md(&r, BpGroup::Plan),
+            mode_cell_md(&r, ModeGroup::Plan),
             "✓✓———",
             "two of five planned"
         );
-        assert_eq!(bp_cell_md(&r, BpGroup::Cpu), "✓————", "one of five runs");
+        assert_eq!(mode_cell_md(&r, ModeGroup::Cpu), "✓————", "one of five runs");
         assert_eq!(
-            bp_cell_md(&r, BpGroup::Gpu),
+            mode_cell_md(&r, ModeGroup::Gpu),
             "✗————",
             "one off against a ticket"
         );

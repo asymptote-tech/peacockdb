@@ -6,13 +6,13 @@ branch, which is why two chains need no locking.
 
 ## Chain ENS-casts (base: master)
 
-### 1. [`casts.md`](casts.md) — closes [#183](bp-tickets.md#t183) — state: blocked(done)
+### 1. [`casts.md`](casts.md) — closes [#183](active-tickets.md#t183) — state: blocked(done)
 
 Rust only, no FFI, no C++. Predict the export type at plan time in `attach_recipes`, render it as
 `exports=`, and cast the one divergence that is inherent — cuDF has a single string type. The
 decimal is predicted here and deliberately not cast. Moves ten `.plans.txt`; 59 queries carry it.
 
-### 2. [`wire-schema.md`](wire-schema.md) — closes [#187](bp-tickets.md#t187) — state: blocked(done)
+### 2. [`wire-schema.md`](wire-schema.md) — closes [#187](active-tickets.md#t187) — state: blocked(done)
 
 Crosses the FFI but small: `Writer::push` is the one funnel that must fill `PlanNode.output_schema`,
 and the C++ carries a per-column precision into `column_metadata`, which cuDF currently defaults to
@@ -38,7 +38,7 @@ shared. 75 queries carry #152. Memory accounting is deliberately out of scope an
 The layout refactor. It may not run beside the ENS-casts chain: both rewrite the same tree, so
 rebasing one across the other is a whole-tree conflict.
 
-### 1. [`drop-mode-name.md`](drop-mode-name.md) — state: needs rebase(done)
+### 1. [`drop-mode-name.md`](drop-mode-name.md) — state: done — PR #141
 
 Names only. "Batch partitioned" and its `bp` abbreviation qualify against an alternative that no
 longer exists, so every occurrence goes — identifiers, mode labels, golden filenames, one Python

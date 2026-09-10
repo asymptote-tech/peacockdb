@@ -1,4 +1,4 @@
-//! The five batch-partitioned modes, and the knobs a run at one of them takes.
+//! The five planning modes, and the knobs a run at one of them takes.
 //!
 //! One table, because four tiers plan the same five shapes: the plan goldens, the end-to-end
 //! tier and the two corpus binaries. A second copy checked against this one is not the same
@@ -19,15 +19,15 @@ pub const BUDGET: u64 = TIER.bytes() as u64;
 pub use peacockdb_core::batch_partitioned::plan::SMALL_TABLE_BYTES;
 
 /// One planning mode: what the goldens call it, and the two knobs that make it distinct.
-pub struct BpMode {
-    /// The golden's spelling, `bp-tp4-sized`.
+pub struct Mode {
+    /// The golden's spelling, `tp4-sized`.
     pub name: &'static str,
     pub target_partitions: usize,
     pub sizing: BatchSizing,
 }
 
-impl BpMode {
-    /// The macro's spelling of the same mode, `bp_tp4_sized` — one derivation rather than
+impl Mode {
+    /// The macro's spelling of the same mode, `tp4_sized` — one derivation rather than
     /// a second field, so the two cannot disagree.
     pub fn ident(&self) -> String {
         self.name.replace('-', "_")
@@ -47,29 +47,29 @@ impl BpMode {
 /// the last enabled one wins in each. One lane and one batch is the degenerate end,
 /// row-group granularity is the finest the mapping expresses, and the sized mode is the
 /// only one a budget moves.
-pub const BP_MODES: [BpMode; 5] = [
-    BpMode {
-        name: "bp-tp1-single",
+pub const MODES: [Mode; 5] = [
+    Mode {
+        name: "tp1-single",
         target_partitions: 1,
         sizing: BatchSizing::OneBatchPerLane,
     },
-    BpMode {
-        name: "bp-tp1-rowgroup",
+    Mode {
+        name: "tp1-rowgroup",
         target_partitions: 1,
         sizing: BatchSizing::OneBatchPerRowGroup,
     },
-    BpMode {
-        name: "bp-tp4-single",
+    Mode {
+        name: "tp4-single",
         target_partitions: 4,
         sizing: BatchSizing::OneBatchPerLane,
     },
-    BpMode {
-        name: "bp-tp4-rowgroup",
+    Mode {
+        name: "tp4-rowgroup",
         target_partitions: 4,
         sizing: BatchSizing::OneBatchPerRowGroup,
     },
-    BpMode {
-        name: "bp-tp4-sized",
+    Mode {
+        name: "tp4-sized",
         target_partitions: 4,
         sizing: BatchSizing::Budgeted,
     },
@@ -77,12 +77,12 @@ pub const BP_MODES: [BpMode; 5] = [
 
 /// The mode a macro's ident names. Exhaustive over the table: an unlisted ident panics
 /// naming the set, rather than being routed to whichever mode a prefix reached first.
-pub fn mode_named(ident: &str) -> &'static BpMode {
-    BP_MODES
+pub fn mode_named(ident: &str) -> &'static Mode {
+    MODES
         .iter()
         .find(|mode| mode.ident() == ident)
         .unwrap_or_else(|| {
-            let known: Vec<String> = BP_MODES.iter().map(BpMode::ident).collect();
-            panic!("unknown batch-partitioned mode '{ident}' (expected one of {known:?})")
+            let known: Vec<String> = MODES.iter().map(Mode::ident).collect();
+            panic!("unknown mode '{ident}' (expected one of {known:?})")
         })
 }

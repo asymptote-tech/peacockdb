@@ -1,4 +1,4 @@
-"""`batch_single_partition_driver`: one lane's state machine, in isolation."""
+"""`single_partition_driver`: one lane's state machine, in isolation."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from collections import deque
 
 from .harness import main, raises
 from ..accounting import ResidentAccountant
-from ..batch_single_partition_driver import BatchSinglePartitionDriver, JoinPhase
+from ..single_partition_driver import SinglePartitionDriver, JoinPhase
 from ..errors import DriverError
 from ..layout import NodeKind, PartitionLayout
 from ..node import ExecutorCategory
@@ -64,7 +64,7 @@ def make_info(category, name="node", kind=NodeKind.INTERMEDIATE):
 
 def make_driver(category, executor, name="node"):
     accountant = ResidentAccountant()
-    driver = BatchSinglePartitionDriver(
+    driver = SinglePartitionDriver(
         make_info(category, name), 0, lambda: executor, accountant
     )
     return driver, accountant
@@ -200,7 +200,7 @@ def test_the_executor_is_built_on_the_first_step_not_before():
 
     info = make_info(ExecutorCategory.SOURCE, "load", NodeKind.SOURCE)
     accountant = ResidentAccountant()
-    driver = BatchSinglePartitionDriver(info, 0, factory, accountant)
+    driver = SinglePartitionDriver(info, 0, factory, accountant)
     empty = LaneInputs([])
 
     assert driver.can_step(empty)

@@ -9,7 +9,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/<file>.p
     __package__ = "scripts.exec_model.tests"
 
 from .harness import main
-from ..batch_partitioned_driver import batch_partitioned_driver
+from ..partitioned_driver import partitioned_driver
 from ..plan import Plan
 from .mocks import (
     MockSelector,
@@ -30,7 +30,7 @@ def node_names(driver):
 
 
 def run(root, budget=None):
-    driver = batch_partitioned_driver(Plan.build(root), MockSelector(), budget)
+    driver = partitioned_driver(Plan.build(root), MockSelector(), budget)
     driver.run()
     return driver
 
@@ -112,7 +112,7 @@ def test_a_collapse_point_narrows_the_wavefront_to_one_batch():
 
 def test_choice_is_the_minimum_height_among_runnable_nodes():
     plan = Plan.build(sink("unload", exec_node("filter", source("load", [[1, 1]]))))
-    driver = batch_partitioned_driver(plan, MockSelector())
+    driver = partitioned_driver(plan, MockSelector())
 
     assert driver.choose().info.node.name() == "load"  # the only runnable node
     driver.step()
@@ -137,7 +137,7 @@ def test_ties_break_leftmost_so_the_build_subtree_drains_first():
 
 def test_running_a_node_runs_every_one_of_its_partitions():
     plan = Plan.build(sink("unload", source("load", [[1], [1], [1], [1]])))
-    driver = batch_partitioned_driver(plan, MockSelector())
+    driver = partitioned_driver(plan, MockSelector())
     driver.step()
 
     load = driver.states[[s.info.node.name() for s in driver.states].index("load")]

@@ -218,7 +218,7 @@ impl Translator {
         }
         if any.is::<WindowAggExec>() || any.is::<BoundedWindowAggExec>() {
             return Err(PlanError::Unsupported(format!(
-                "{}: window functions do not plan in batch-partitioned mode (#143)",
+                "{}: window functions (#143)",
                 plan.name()
             )));
         }

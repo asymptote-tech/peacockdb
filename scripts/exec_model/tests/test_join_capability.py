@@ -1,6 +1,6 @@
 """Every join mode the engine can be asked for, on two backends that share no join code.
 
-The batch-partitioned mode keeps the FlatBuffers schema and the C++ operators frozen, and
+The engine keeps the FlatBuffers schema and the C++ operators frozen, and
 that claim is worth exactly what the join can do — the join being the one operator whose
 state has to survive a call. So each mode here runs twice: once on the pandas backend
 (`operators/joins.py`), once on the backend that answers every call by emitting fb nodes
@@ -493,7 +493,7 @@ def test_a_single_batch_probe_costs_no_copy_at_all():
 def legacy_call(join_type, build, probe, residual=None):
     """One `CudfHashJoin` over whole tables — the plan the legacy modes emit.
 
-    The same layer the batch-partitioned lowering uses, driven the way a single-batch probe
+    The same layer the lowering uses, driven the way a single-batch probe
     drives it, which is what makes the fallback in the capability matrix a known quantity
     rather than a hope.
     """

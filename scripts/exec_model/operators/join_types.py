@@ -6,7 +6,7 @@ the others. A cross join is not a member — the wire has a node kind for it
 (`CudfCrossJoin`) and no join type — and neither is a "nested loop" type: that is also a
 node kind, carrying `Inner` or `Left` from this same enum.
 
-**The capability question** the batch-partitioned mode asks of each type is one thing: with
+**The capability question** the engine asks of each type is one thing: with
 the build side complete and the probe side arriving in batches, can this type answer from
 one probe batch at a time? Three answers, and each is a property of where the type's
 unmatched rows come from:

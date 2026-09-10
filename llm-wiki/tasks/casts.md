@@ -6,11 +6,11 @@ Two device cells fail on the same class of thing — the device hands back a col
 is not the one the plan declared — and each is currently discovered at the boundary rather than
 predicted before it. This task writes the prediction down where it can be checked, and closes both.
 
-**This task closes [#183](bp-tickets.md#t183)** — the device exports `Utf8` where the sink declares
+**This task closes [#183](active-tickets.md#t183)** — the device exports `Utf8` where the sink declares
 `Utf8View` — by predicting the export type at plan time and casting the one divergence that is
 inherent.
 
-Its sibling [`wire-schema.md`](wire-schema.md) closes [#187](bp-tickets.md#t187) with the same
+Its sibling [`wire-schema.md`](wire-schema.md) closes [#187](active-tickets.md#t187) with the same
 derivation and the C++ half this task deliberately leaves out. Do this one first: it is Rust-only,
 and the prediction it writes down is what the other one then makes true for decimals.
 
@@ -121,10 +121,10 @@ the recipe writers while passing through them. Anything else found on the way is
 
 | golden | how it moves | why |
 |---|---|---|
-| `bp-*.plans.txt` (10 files) | every `GpuUnload` line gains `exports=` | new field; `GpuUnload` renders bare today |
+| `*.plans.txt` (10 files) | every `GpuUnload` line gains `exports=` | new field; `GpuUnload` renders bare today |
 | `<mode>-<tier>.cpu.txt` | **no change** | `memory.rs:43` prices `Utf8View` and `Utf8` identically at `(rows+1)*4`, and content size is Σ value lengths for both |
 | `<mode>-<tier>.cost.txt` | **no change** | derived from the `.cpu.txt` sections, which do not move |
-| `bp-<tier>.result.txt` | **no change** | values are unaffected; only types were ever in question |
+| `<tier>.result.txt` | **no change** | values are unaffected; only types were ever in question |
 | `testdata/cost-registry.csv` | device cells move off #183/#187 | see the device workflow below |
 
 `exports=` renders on every unload, including `exports=none` where nothing diverges. Omitting the
@@ -143,7 +143,7 @@ cell that is currently disabled. After the code lands:
 
 1. Run the affected corpus queries on `shad-gpu` with `build-test-shadgpu.sh`, in batches of about
    five, as T19 does. **59 queries carry #183** — every query with a string in its sink schema,
-   which is derivable from `bp-tp1-single.plans.txt` without running anything, and was: no query
+   which is derivable from `tp1-single.plans.txt` without running anything, and was: no query
    without a string in its sink carries #183, over 82 checked, with no exceptions.
 2. For each, **either enable the device cells or update the ticket**. A cell that now reaches a
    different cause is a cell whose ticket changes, not a cell that stays where it was — and the

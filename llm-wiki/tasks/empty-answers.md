@@ -16,7 +16,7 @@ and separating them would mean building it twice.
 
 **Depends on [`wire-schema.md`](wire-schema.md), and that dependency is the whole reason this is
 small.** Both tickets say "unfreezing buys a make-empty-of-schema call and the refusals go", written
-when nothing on the wire carried a bp node's schema. Once `PlanNode.output_schema` is populated, the
+when nothing on the wire carried a node's schema. Once `PlanNode.output_schema` is populated, the
 call is not needed at all: `execute_node` already holds the node
 (`node_session.cpp:190`), so it can answer with an empty table rather than throw. **No new ABI
 symbol.** The C++ said so before either of us did — `node_session.cpp:257`:
@@ -69,7 +69,7 @@ side on the existing one is the author's call — but the name must say which si
 since a reader who assumes the existing direction gets a plan that type-checks and pads the wrong
 columns.
 
-**Two corpus queries are waiting on it**, both found by T19: `tpch/q21` at `bp-tp4-single`, and
+**Two corpus queries are waiting on it**, both found by T19: `tpch/q21` at `tp4-single`, and
 `tpcds/q77`, whose `Right` outer at four lanes gets no build side. q77 is currently out of the
 end-to-end list with `tpch/q2` carrying its claim, because writing the CPU pad alone would make the
 oracle answer a query the device refuses. **Put q77 back on that list as part of this**, or the
@@ -112,8 +112,8 @@ reason it was removed outlives the reason.
 
 | golden | moves | why |
 |---|---|---|
-| `bp-*.plans.txt` | **yes**, where a Right/Full join gains a pad | a new recipe call renders in the node's recipe line |
-| `bp-recipe-payloads.txt` | **yes** | the pad project is a payload |
+| `*.plans.txt` | **yes**, where a Right/Full join gains a pad | a new recipe call renders in the node's recipe line |
+| `recipe-payloads.txt` | **yes** | the pad project is a payload |
 | `testdata/cost-registry.csv` | **yes** | cells move off #173 and #175 |
 | `<mode>-<tier>.cpu.txt`, `.cost.txt` | **yes**, for the queries that newly run | new sections, not changed ones |
 

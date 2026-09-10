@@ -142,7 +142,7 @@ The case that revealed it, in the test harness: `partition_mode("tp8-standard")`
 which executor a test ran was a side effect of how its golden file happened to be named.
 Adding a device — a memory-constrained genuine-8-way tier (#91) — would have routed it to
 the wrong executor with nothing failing. The mode is now a parameter stated at the call
-site. One lookup survives, `mode_named` in `tests/common/bp_mode.rs`, which resolves the
+site. One lookup survives, `mode_named` in `tests/common/mode.rs`, which resolves the
 mode ident a `corpus_query!` line writes: it is exhaustive, so an unknown one panics naming
 the five rather than planning some default nobody chose.
 

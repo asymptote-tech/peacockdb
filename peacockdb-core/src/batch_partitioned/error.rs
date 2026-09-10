@@ -1,12 +1,12 @@
-//! What planning and validation return. Both are plan-time: this mode refuses a shape
-//! it cannot run where the planner can see it, rather than throwing mid-query.
+//! What planning and validation return. Both are plan-time: a shape the engine cannot run
+//! is refused where the planner can see it, rather than throwing mid-query.
 
 use datafusion::error::DataFusionError;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanError {
-    /// A shape this mode does not implement — window functions (#143), a mixed
+    /// A shape the engine does not implement — window functions (#143), a mixed
     /// distinct (#62), a value-form CASE (#57). Names the shape, not the node's fix.
     Unsupported(String),
     /// A plan that violates what a node requires of its children. Names the fix, since
@@ -17,8 +17,8 @@ pub enum PlanError {
 impl fmt::Display for PlanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unsupported(what) => write!(f, "unsupported in batch-partitioned mode: {what}"),
-            Self::Invalid(what) => write!(f, "invalid batch-partitioned plan: {what}"),
+            Self::Unsupported(what) => write!(f, "unsupported: {what}"),
+            Self::Invalid(what) => write!(f, "invalid plan: {what}"),
         }
     }
 }
@@ -71,8 +71,8 @@ impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::BudgetExceeded { message, .. } => write!(f, "{message}"),
-            Self::Protocol(what) => write!(f, "batch-partitioned protocol violation: {what}"),
-            Self::CallFailed(what) => write!(f, "batch-partitioned call failed: {what}"),
+            Self::Protocol(what) => write!(f, "protocol violation: {what}"),
+            Self::CallFailed(what) => write!(f, "call failed: {what}"),
             Self::Backend(inner) => write!(f, "{inner}"),
         }
     }

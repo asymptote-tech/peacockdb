@@ -5,8 +5,8 @@
 //
 // Each probe answers a question peacockdb has to answer for GB10-class hardware:
 //   oversubscribe  - can a query allocate more than physical memory and page, or does it die?
-//                    (#142: the batch-partitioned mode has no recourse for an oversized batch)
-//   launch         - what does an empty kernel launch cost? the batch-partitioned mode runs
+//                    (#142: the engine has no recourse for an oversized batch)
+//   launch         - what does an empty kernel launch cost? the engine runs
 //                    one call per node per batch, so this is the floor on batching finer.
 //   first-touch    - on one pool, does it matter whether the CPU or the GPU wrote a page
 //                    first? if it does, where a buffer is filled changes what reading costs.

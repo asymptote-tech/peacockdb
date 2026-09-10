@@ -26,14 +26,14 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/<file>.p
 from . import mocks
 from .harness import main, raises
 from .mocks import MockSelector
-from ..batch_partitioned_driver import batch_partitioned_driver
+from ..partitioned_driver import partitioned_driver
 from ..errors import PlanError
 from ..limit import RowInterval, RowRange
 from ..plan import Plan
 
 
 def run(root, budget=None):
-    driver = batch_partitioned_driver(Plan.build(root), MockSelector(), budget)
+    driver = partitioned_driver(Plan.build(root), MockSelector(), budget)
     driver.run()
     return driver
 

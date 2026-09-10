@@ -18,7 +18,7 @@ macro_rules! corpus_query {
         $(
             paste::paste! {
                 #[tokio::test]
-                async fn [<bp_gpu_ $dataset _ $query _ $gpu>]() {
+                async fn [<gpu_ $dataset _ $query _ $gpu>]() {
                     common::corpus_gpu::gpu_case(
                         stringify!($dataset),
                         stringify!($sf),
@@ -31,7 +31,7 @@ macro_rules! corpus_query {
             }
             inventory::submit! {
                 RegistryEntry {
-                    kind: "bp_gpu",
+                    kind: "gpu",
                     dataset: stringify!($dataset),
                     sf: stringify!($sf),
                     query: stringify!($query),
@@ -58,10 +58,10 @@ include!("common/corpus_cases.inc");
 /// `--test-threads=1`, since cuDF and RMM share one process-wide pool.
 #[test]
 fn a_device_run_under_a_regeneration_writes_no_golden() {
-    let (dataset, sf, query, mode) = ("tpch", "1", "q6", "bp_tp1_single");
+    let (dataset, sf, query, mode) = ("tpch", "1", "q6", "tp1_single");
     let files = [
-        common::corpus_golden::cpu_golden(dataset, sf, "bp-tp1-single"),
-        common::corpus_golden::cost_golden(dataset, sf, "bp-tp1-single"),
+        common::corpus_golden::cpu_golden(dataset, sf, "tp1-single"),
+        common::corpus_golden::cost_golden(dataset, sf, "tp1-single"),
         common::corpus_golden::result_golden(dataset, sf),
     ];
     let before: Vec<Vec<u8>> = files
@@ -94,7 +94,7 @@ fn a_device_run_under_a_regeneration_writes_no_golden() {
     assert!(ran.is_ok(), "the case itself failed, so it proved nothing");
 }
 
-/// The five `bp_gpu_` columns against what this binary declares, in both directions. It
+/// The five `gpu_` columns against what this binary declares, in both directions. It
 /// runs only on the gpu host, because that is where these registrations are linked — so a
 /// gpu-column drift does not go red on the cpu leg, which is a consequence to know rather
 /// than a gap to close: `inventory` collects per linked binary.
@@ -102,11 +102,11 @@ fn a_device_run_under_a_regeneration_writes_no_golden() {
 fn the_registry_matches_the_gpu_corpus_in_both_directions() {
     common::registry::assert_registry_matches_csv(
         &[
-            "bp_gpu_tp1_single",
-            "bp_gpu_tp1_rowgroup",
-            "bp_gpu_tp4_single",
-            "bp_gpu_tp4_rowgroup",
-            "bp_gpu_tp4_sized",
+            "gpu_tp1_single",
+            "gpu_tp1_rowgroup",
+            "gpu_tp4_single",
+            "gpu_tp4_rowgroup",
+            "gpu_tp4_sized",
         ],
         &[],
     );

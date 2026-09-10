@@ -16,7 +16,7 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use common::bp_mode::{BP_MODES, mode_named};
+use common::mode::{MODES, mode_named};
 use common::corpus_golden::{
     Regeneration, SKIPPED, cost_golden, cpu_golden, merge_section, merged_text, result_golden,
 };
@@ -163,7 +163,7 @@ fn a_cleared_bit_turns_a_real_section_into_a_marker() {
 #[test]
 fn an_over_cap_result_is_a_marker_and_not_a_deletion() {
     let declared = skeleton(&[("q1", true)]);
-    let mode = mode_named("bp_tp4_sized");
+    let mode = mode_named("tp4_sized");
     let body = common::corpus::over_cap(Some(300_000), mode);
     let after = merged_text("", &declared, "q1", &body, Regeneration::Whole);
     assert_eq!(after, format!("== q1\n{body}"));
@@ -184,7 +184,7 @@ fn an_over_cap_result_is_a_marker_and_not_a_deletion() {
 fn corpus_files() -> Vec<(String, String, &'static str, PathBuf)> {
     let mut files = Vec::new();
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
-        for mode in &BP_MODES {
+        for mode in &MODES {
             files.push((
                 dataset.to_string(),
                 sf.to_string(),
@@ -403,7 +403,7 @@ fn rendered_rows(result: &str) -> usize {
 #[test]
 fn the_cost_golden_holds_the_same_queries_as_its_cpu_golden() {
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
-        for mode in &BP_MODES {
+        for mode in &MODES {
             let cpu = std::fs::read_to_string(cpu_golden(dataset, sf, mode.name)).expect("cpu");
             let cost = std::fs::read_to_string(cost_golden(dataset, sf, mode.name)).expect("cost");
             let names = |text: &str| -> Vec<(String, bool)> {
@@ -530,8 +530,8 @@ fn every_enabled_cell_has_a_section_with_content_and_every_disabled_one_a_marker
     let mut wrong: Vec<String> = Vec::new();
     let mut checked = 0;
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
-        for mode in &BP_MODES {
-            let column = format!("bp_cpu_{}", mode.ident().trim_start_matches("bp_"));
+        for mode in &MODES {
+            let column = format!("cpu_{}", mode.ident());
             let text = std::fs::read_to_string(cpu_golden(dataset, sf, mode.name))
                 .expect("the mode's golden");
             let sections: std::collections::BTreeMap<String, String> =
@@ -590,8 +590,8 @@ fn every_result_section_names_the_mode_that_would_author_it_now() {
             // `enabled | skip` is the pair `declared_sections` uses to decide a query has a
             // section at all, so counting only `enabled` would disagree with the writer about
             // who the author is — and disagree on the rarest cells.
-            let author = BP_MODES.iter().rev().find(|mode| {
-                let column = format!("bp_cpu_{}", mode.ident().trim_start_matches("bp_"));
+            let author = MODES.iter().rev().find(|mode| {
+                let column = format!("cpu_{}", mode.ident());
                 row.states.get(&column).is_some_and(|s| s == "enabled" || s == "skip")
             });
             assert_eq!(
@@ -611,8 +611,8 @@ fn every_result_section_names_the_mode_that_would_author_it_now() {
         .iter()
         .filter(|r| ["tpch", "tpcds"].contains(&r.dataset.as_str()) && r.sf == "1")
         .filter(|r| {
-            BP_MODES.iter().any(|mode| {
-                let column = format!("bp_cpu_{}", mode.ident().trim_start_matches("bp_"));
+            MODES.iter().any(|mode| {
+                let column = format!("cpu_{}", mode.ident());
                 r.states.get(&column).is_some_and(|s| s == "enabled" || s == "skip")
             })
         })
@@ -636,8 +636,8 @@ fn each_result_section_was_written_by_the_mode_entitled_to_write_it() {
                 .iter()
                 .find(|r| r.dataset == dataset && r.sf == sf && common::registry::stem(&r.query) == query)
                 .unwrap_or_else(|| panic!("{dataset}/{query}: a section with no registry row"));
-            let entitled = BP_MODES.iter().rev().find(|mode| {
-                let column = format!("bp_cpu_{}", mode.ident().trim_start_matches("bp_"));
+            let entitled = MODES.iter().rev().find(|mode| {
+                let column = format!("cpu_{}", mode.ident());
                 row.states.get(&column).map(String::as_str) == Some("enabled")
             });
             match (entitled, body.starts_with(SKIPPED)) {

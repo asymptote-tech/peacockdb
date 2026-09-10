@@ -25,13 +25,12 @@ jobs:
   # evaluates it against the WHOLE PR diff, not the commits just pushed, so a PR that
   # touches any code runs the full pipeline on every later docs-only push — measured,
   # not assumed: a docs-only push to #118 started run 31644108948 with the filter live.
-  # This job closes that case by classifying the push range itself.
   #
   # Fail-open by construction. It answers `code=true` — run everything — for any event
   # that is not a synchronize, a force push or rebase, an unreadable compare, a range at
   # the API's page limit, and any file it cannot place. Only a clean append of
-  # documentation skips. A wrong skip is also not a hole into master: the merge lands as
-  # a push whose own diff carries the code, and that run re-evaluates from scratch.
+  # documentation skips. A wrong skip is not a hole into master: merging there re-runs from
+  # scratch, and `branches: [master]` means a chain PR reaches that run when its root does.
   changes:
     name: Changed paths
     runs-on: ubuntu-latest
@@ -253,7 +252,7 @@ jobs:
       # that need no dataset.
       - name: Layout injection mechanism (Rust)
         if: matrix.cudf == '25.02'
-        run: cargo test --features rust-only -p peacockdb-core --test test_batch_partitioned_injection
+        run: cargo test --features rust-only -p peacockdb-core --test test_layout_injection
 
 
       - name: Validate sf1 datasets
@@ -274,7 +273,7 @@ jobs:
           # EVERY target the run step invokes must be listed here, or its compile
           # failure surfaces as a run-step failure and the split stops meaning
           # anything.
-          cargo test --no-run -p peacockdb-core --test test_batch_partitioned_plans --test test_gpu_batch
+          cargo test --no-run -p peacockdb-core --test test_plan_goldens --test test_gpu_batch
           cargo test --no-run -p peacockdb-ffi --test test_ffi
           # Separate line because of --features rust-only: cargo's fingerprint
           # includes the feature set, so this cannot share the invocation above.
@@ -282,12 +281,12 @@ jobs:
           # DataFusion/Arrow graph, so the extra compile is small.
           #
           # --lib rides HERE rather than on the default-feature line: the lib unit tests
-          # touch no FFI — config and the batch-partitioned planner, which is nearly all of
+          # touch no FFI — config and the planner, which is nearly all of
           # them — so under rust-only their binary does not link libpeacock_gpu, a smaller
           # link in the tier that has already hit tmpfs/SIGBUS at link time. It shares this
           # line's already-built rust-only fingerprint, so it costs no extra compile.
           cargo test --no-run --features rust-only -p peacockdb-core --lib \
-            --test test_cpu_executors --test test_cpu_batch_partitioned
+            --test test_cpu_executors --test test_cpu_end_to_end
           # The CLI, which has no test target of its own and so is named by nothing above.
           # It is the only caller of the planner and the driver from outside the crate, so a
           # signature change that the tests absorb still breaks it — and unbuilt, it breaks
@@ -308,14 +307,14 @@ jobs:
           # The plan tier first: it plans rather than executes, so its failures are the
           # ones worth seeing soonest. It plans real sf1 tables, reading row-group metadata
           # off the parquet, so it needs this tier's dataset.
-          cargo test -p peacockdb-core --test test_batch_partitioned_plans
+          cargo test -p peacockdb-core --test test_plan_goldens
           # GpuBatch's own surface, and it belongs in a CPU tier deliberately: the batch
           # is a handle plus a Drop, and the release it calls is null-guarded on the
           # executor, so nothing here needs a device. The GPU half of the ABI is
           # test_gpu_abi, staged for the gpu-tests job.
           cargo test -p peacockdb-core --test test_gpu_batch
           cargo test -p peacockdb-ffi --test test_ffi
-          # The inline #[cfg(test)] modules: config and the batch-partitioned planner,
+          # The inline #[cfg(test)] modules: config and the planner,
           # which is nearly all of them. Every other cargo invocation in this file passes
           # --test, which selects integration targets ONLY — so before this line the lib
           # unit tests ran locally and never in CI. test_ci_coverage asserts this line
@@ -330,11 +329,11 @@ jobs:
           # DataFusion on the same SQL, and eleven of them at injected layouts no
           # planner would emit — a rebatcher at an interior edge, a drained lane,
           # zero-row batches, a degenerate hash. Needs sf1, generated above; no device.
-          cargo test --features rust-only -p peacockdb-core --test test_cpu_batch_partitioned
+          cargo test --features rust-only -p peacockdb-core --test test_cpu_end_to_end
           # The corpus on the same path: every enabled query at every mode its line
           # declares, answers against DataFusion. Needs sf1, so it lives here and not
           # in the golden-only tier.
-          cargo test --features rust-only -p peacockdb-core --test test_cpu_bp_corpus
+          cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus
         env:
           # The pair's own two only; CMAKE_GENERATOR and RUSTFLAGS come from the job.
           LD_LIBRARY_PATH: /opt/conda/lib
@@ -392,17 +391,17 @@ jobs:
         run: |
           mkdir -p cpp/install/rust-tests
           # The five GPU targets, one line each; build-test.md's test table is the detail.
-          # test_gpu_bp_corpus = the corpus on a device, read against the sections the cpu
+          # test_gpu_corpus = the corpus on a device, read against the sections the cpu
           #   tier authored — plan shape, per-batch lists and bytes, and the result where
           #   the query's line names a golden.
           # test_inc2_conformance = GPU vs comet Spark-murmur3 partition ids, bit-exact.
-          # test_gpu_abi = the batch-partitioned ABI's three per-call symbols on a device;
+          # test_gpu_abi = the ABI's three per-call symbols on a device;
           #   its companion test_gpu_batch needs no device and runs in dataset-matrix instead.
           # test_gpu_recipe_walk = a recipe plan driven by hand, DataFusion as the oracle.
           # test_gpu_executors = the exec executors, each handed its recipe and one batch.
           # One line on purpose: the coverage guard reads the array below with a single
           # `lines().find`, so a continuation hides every target after the backslash.
-          for t in test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_bp_corpus; do
+          for t in test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_corpus; do
             exec_path=$(cargo test --no-run -p peacockdb-core --test "$t" \
                 --message-format=json \
               | python3 -c '
@@ -519,7 +518,7 @@ jobs:
           # Query SQL + minimal dataset + testdata generator + committed goldens.
           # testdata/goldens carries the per-mode `.cpu.txt` files the device tier reads
           # read-only — the sections the cpu tier authored are what a device run is checked
-          # against, so without them test_gpu_bp_corpus has nothing to compare to.
+          # against, so without them test_gpu_corpus has nothing to compare to.
           # cost-registry.csv is a committed fixture the registry test READS (it
           # asserts the CSV against the suite's link-time inventory); without it the
           # test dies on a missing file, which reads as a broken check rather than an
@@ -738,7 +737,7 @@ jobs:
       - name: DuckDB extraction unit tests (Python)
         run: python3 testdata/test_duckdb_cost.py
 
-      # The batch-partitioned execution-model prototype. No project code, so it belongs
+      # The execution-model prototype. No project code, so it belongs
       # in this cheap tier next to the extractor tests. The scheduler tests are stdlib
       # only; the operator tests need pandas, and they FAIL rather than skip when it is
       # absent — a skipped operator suite reads exactly like a passing one. Same

@@ -1,5 +1,4 @@
-//! Plan goldens for the batch-partitioned mode: one file per (bench, mode), holding every
-//! query the bench has.
+//! Plan goldens: one file per (bench, mode), holding every query the bench has.
 //!
 //! A section per query — the tree, then `--- recipes ---` and what each node asks of the
 //! device, then `--- memory ---` and the estimator's figures. The legacy `.plan.txt`
@@ -19,7 +18,7 @@ use peacockdb_core::batch_partitioned::plan_text::{
 use peacockdb_core::batch_partitioned::recipe::{attach_recipes, check_seq_kinds, depth};
 use peacockdb_core::batch_partitioned::{ExecutorCategory, category_of};
 
-use common::bp_mode::{BP_MODES, BpMode, mode_named};
+use common::mode::{MODES, Mode, mode_named};
 use common::golden_text::{ordered_sections, section_differences};
 use common::{data_dir_for, golden_dir_for, queries_dir_for};
 
@@ -38,7 +37,7 @@ fn queries(dataset: &str) -> Vec<(String, PathBuf)> {
     found
 }
 
-async fn render_bench(dataset: &str, sf: &str, mode: &BpMode) -> String {
+async fn render_bench(dataset: &str, sf: &str, mode: &Mode) -> String {
     let ctx = peacockdb_core::register_tables_for(
         peacockdb_core::build_session_state(mode.knobs().target_partitions),
         &data_dir_for(dataset, sf),
@@ -112,7 +111,7 @@ fn relative_to_testdata(text: &str) -> String {
         .replace(root.trim_start_matches('/'), "testdata")
 }
 
-fn golden(dataset: &str, sf: &str, mode: &BpMode) -> PathBuf {
+fn golden(dataset: &str, sf: &str, mode: &Mode) -> PathBuf {
     golden_dir_for(dataset, sf).join(format!("{}.plans.txt", mode.name))
 }
 
@@ -154,7 +153,7 @@ fn assert_or_update(path: &Path, actual: &str) {
 /// accumulating sort and a compaction real rather than degenerate. Not the sized mode:
 /// that one moves whenever the estimator does, and this file should move when a payload
 /// does.
-const PAYLOAD_MODE: &str = "bp_tp4_rowgroup";
+const PAYLOAD_MODE: &str = "tp4_rowgroup";
 
 /// The queries, and the rule for adding one.
 ///
@@ -272,7 +271,7 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
     }
     let path = common::testdata_root()
         .join("goldens")
-        .join("bp-recipe-payloads.txt");
+        .join("recipe-payloads.txt");
     // Three states, because the digests here are the only byte-level pin on what the C++ is
     // handed, and the documented way to refresh goldens is a bulk --update-canonical on
     // verda. Without the second variable that run would rewrite the evidence and the diff
@@ -405,7 +404,7 @@ const NOT_RUNNABLE: &[(&str, &str, &str)] = &[("tpch", "mixed-join", "168")];
 fn every_query_that_cannot_cross_the_wire_is_declared_and_every_declaration_is_true() {
     let mut found: Vec<(String, String)> = Vec::new();
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
-        for mode in &BP_MODES {
+        for mode in &MODES {
             let name = mode.name;
             let path = golden_dir_for(dataset, sf).join(format!("{name}.plans.txt"));
             for (query, body) in ordered_sections(&std::fs::read_to_string(&path).expect("a golden"))
@@ -438,11 +437,11 @@ fn every_query_that_cannot_cross_the_wire_is_declared_and_every_declaration_is_t
             .count();
         assert_eq!(
             carried,
-            BP_MODES.len(),
+            MODES.len(),
             "{dataset}/{query} is declared under #{ticket} but carries the line in {carried} of \
              the {} modes — a plan that crosses in one mode and not another is a finding, and a \
              declaration that has become false is stale",
-            BP_MODES.len()
+            MODES.len()
         );
     }
 }
@@ -509,14 +508,14 @@ fn the_payload_golden_covers_every_kind_and_call_shape_the_modes_produce() {
     let payloads = std::fs::read_to_string(
         common::testdata_root()
             .join("goldens")
-            .join("bp-recipe-payloads.txt"),
+            .join("recipe-payloads.txt"),
     )
     .expect("the payload golden");
     let covered = call_shapes(&payloads);
 
     let mut wanted = std::collections::BTreeSet::new();
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
-        for mode in &BP_MODES {
+        for mode in &MODES {
             let name = mode.name;
             let text = std::fs::read_to_string(
                 golden_dir_for(dataset, sf).join(format!("{name}.plans.txt")),
@@ -569,103 +568,103 @@ fn the_payload_golden_covers_every_kind_and_call_shape_the_modes_produce() {
     );
 }
 
-async fn check(dataset: &str, sf: &str, mode: &BpMode) {
+async fn check(dataset: &str, sf: &str, mode: &Mode) {
     let actual = render_bench(dataset, sf, &mode).await;
     assert_or_update(&golden(dataset, sf, &mode), &actual);
 }
 
 
 #[tokio::test]
-async fn tpch_bp_tp1_single() {
+async fn tpch_tp1_single() {
     check(
         "tpch",
         "1",
-        mode_named("bp_tp1_single"),
+        mode_named("tp1_single"),
     )
     .await;
 }
 
 #[tokio::test]
-async fn tpch_bp_tp1_rowgroup() {
+async fn tpch_tp1_rowgroup() {
     check(
         "tpch",
         "1",
-        mode_named("bp_tp1_rowgroup"),
+        mode_named("tp1_rowgroup"),
     )
     .await;
 }
 
 #[tokio::test]
-async fn tpch_bp_tp4_single() {
+async fn tpch_tp4_single() {
     check(
         "tpch",
         "1",
-        mode_named("bp_tp4_single"),
+        mode_named("tp4_single"),
     )
     .await;
 }
 
 #[tokio::test]
-async fn tpch_bp_tp4_rowgroup() {
+async fn tpch_tp4_rowgroup() {
     check(
         "tpch",
         "1",
-        mode_named("bp_tp4_rowgroup"),
+        mode_named("tp4_rowgroup"),
     )
     .await;
 }
 
 #[tokio::test]
-async fn tpch_bp_tp4_sized() {
-    check("tpch", "1", mode_named("bp_tp4_sized")).await;
+async fn tpch_tp4_sized() {
+    check("tpch", "1", mode_named("tp4_sized")).await;
 }
 
 #[tokio::test]
-async fn tpcds_bp_tp1_single() {
+async fn tpcds_tp1_single() {
     check(
         "tpcds",
         "1",
-        mode_named("bp_tp1_single"),
+        mode_named("tp1_single"),
     )
     .await;
 }
 
 #[tokio::test]
-async fn tpcds_bp_tp1_rowgroup() {
+async fn tpcds_tp1_rowgroup() {
     check(
         "tpcds",
         "1",
-        mode_named("bp_tp1_rowgroup"),
+        mode_named("tp1_rowgroup"),
     )
     .await;
 }
 
 #[tokio::test]
-async fn tpcds_bp_tp4_single() {
+async fn tpcds_tp4_single() {
     check(
         "tpcds",
         "1",
-        mode_named("bp_tp4_single"),
+        mode_named("tp4_single"),
     )
     .await;
 }
 
 #[tokio::test]
-async fn tpcds_bp_tp4_rowgroup() {
+async fn tpcds_tp4_rowgroup() {
     check(
         "tpcds",
         "1",
-        mode_named("bp_tp4_rowgroup"),
+        mode_named("tp4_rowgroup"),
     )
     .await;
 }
 
 #[tokio::test]
-async fn tpcds_bp_tp4_sized() {
-    check("tpcds", "1", mode_named("bp_tp4_sized")).await;
+async fn tpcds_tp4_sized() {
+    check("tpcds", "1", mode_named("tp4_sized")).await;
 }
 
-/// The registry's five `bp_` columns against the goldens, in both directions: every cell
+/// The registry's five plan columns against the goldens, in both directions: every cell
 /// says what its query's section says, and every section has a cell. Nothing registers
 /// these at link time — one golden holds every query — so the golden is what declares
 /// them and this is where the two are held to each other.
@@ -673,7 +672,7 @@ async fn tpcds_bp_tp4_sized() {
 fn the_registry_matches_the_goldens_in_both_directions() {
     let rows = common::registry::load_csv();
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
-        for mode in &BP_MODES {
+        for mode in &MODES {
             let name = mode.name;
             let sections = sections_of(&golden(dataset, sf, &mode));
             let column = name.replace('-', "_");
@@ -721,7 +720,7 @@ fn the_registry_matches_the_goldens_in_both_directions() {
 #[test]
 fn every_mode_has_a_golden_and_every_golden_has_a_mode() {
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
-        let mut expected: Vec<String> = BP_MODES
+        let mut expected: Vec<String> = MODES
             .iter()
             .map(|mode| format!("{}.plans.txt", mode.name))
             .collect();
@@ -730,7 +729,7 @@ fn every_mode_has_a_golden_and_every_golden_has_a_mode() {
             .expect("the golden directory")
             .filter_map(|entry| {
                 let name = entry.ok()?.file_name().to_str()?.to_string();
-                (name.starts_with("bp-") && name.ends_with(".plans.txt")).then_some(name)
+                name.ends_with(".plans.txt").then_some(name)
             })
             .collect();
         found.sort();
@@ -745,7 +744,7 @@ fn every_mode_has_a_golden_and_every_golden_has_a_mode() {
 #[test]
 fn no_refusal_in_a_golden_carries_a_host_path() {
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
-        for mode in &BP_MODES {
+        for mode in &MODES {
             let name = mode.name;
             let path = golden_dir_for(dataset, sf).join(format!("{name}.plans.txt"));
             let text = std::fs::read_to_string(&path).expect("a golden");
@@ -798,7 +797,7 @@ fn every_refusal_names_a_ticket_that_exists() {
         .map(|name| std::fs::read_to_string(wiki.join(name)).expect("the ticket list"))
         .collect::<String>();
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
-        for mode in &BP_MODES {
+        for mode in &MODES {
             let name = mode.name;
             let text = std::fs::read_to_string(
                 golden_dir_for(dataset, sf).join(format!("{name}.plans.txt")),
@@ -875,7 +874,7 @@ fn sections_of(path: &Path) -> std::collections::BTreeMap<String, String> {
 async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
     // Four lanes at row-group granularity: lanes and many batches at once, which is the
     // mode whose trees branch most.
-    let mode = mode_named("bp_tp4_rowgroup");
+    let mode = mode_named("tp4_rowgroup");
     let mut checked = 0;
     for dataset in ["tpch", "tpcds"] {
         let ctx = peacockdb_core::register_tables_for(

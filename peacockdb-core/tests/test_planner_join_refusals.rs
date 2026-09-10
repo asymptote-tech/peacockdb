@@ -1,4 +1,4 @@
-//! Every shape the batch-partitioned planner refuses, from the sql that reaches it.
+//! Every shape the planner refuses, from the sql that reaches it.
 //!
 //! One test per refusal, named for the shape and for the reason, over the fixture in
 //! `common::join_fixture`. Each asserts the ticket number is in the MESSAGE and not only

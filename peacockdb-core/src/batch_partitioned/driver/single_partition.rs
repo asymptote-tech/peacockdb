@@ -1,4 +1,4 @@
-//! `batch_single_partition_driver` — one lane of one lane-scoped node.
+//! `single_partition_driver` — one lane of one lane-scoped node.
 //!
 //! The four lane-scoped categories plus unload get one executor instance per (node, lane),
 //! and this is that instance's state machine: it decides which call the lane's current

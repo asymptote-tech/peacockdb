@@ -1,6 +1,6 @@
-# batch-partitioned tickets
+# active tickets
 
-Queries the batch-partitioned rollout disabled, and what has to change before each comes back.
+Queries the rollout disabled, and what has to change before each comes back.
 
 Separate from [`../tickets.md`](../tickets.md) because these are a rollout's worklist rather than
 the engine's: they arrive in bulk when a sweep hits a wall and close in bulk when it is cleared,
@@ -32,7 +32,7 @@ q96. Those rows carry `#181` on their gpu columns.
 <a id="t182"></a>
 ### #182 — two accounting properties are out of reach, and no budgeted run survives
 
-Pricing a batch from the plan's schema disabled two cases in `test_cpu_batch_partitioned.rs`,
+Pricing a batch from the plan's schema disabled two cases in `test_cpu_end_to_end.rs`,
 both `#[ignore]`d rather than deleted so they stay in `--list`. Neither property stopped being
 true. Deferred deliberately: T18's bar was results and node stats, not memory.
 
@@ -59,7 +59,7 @@ whole lane before emitting one batch — both live at the emit, a rows fact logi
 `nested-loop-join` cannot show it: one batch per lane, so the rebatcher merges one into one, and
 its old 318-byte move was arrow reallocating a single batch.
 
-Fix: repoint the second pair at `tpch/nested-limits` at `bp-tp4-rowgroup` (`BP_MODES[3]`), whose
+Fix: repoint the second pair at `tpch/nested-limits` at `tp4-rowgroup` (`MODES[3]`), whose
 `part` loader is `partition_groups=[[[0],[1]]]` — two batches in one lane — and is the plan's peak
 node at 983,071 estimated against 1,600,062 source bytes. Three milliseconds a run. It is already
 in the corpus and in the injected set, so nothing new is declared.
@@ -103,7 +103,7 @@ tolerance could see it — which is the failure the per-node golden exists for.
 The rule is the node reporting what it emitted where it should report what it consumed. It read as
 "one row instead of the group count" for three batches, because every early case was an aggregate
 with no group keys, whose output is one row: `tpcds/q96` expected 34 and reported `[[1]]`,
-`tpch/q14` expected 10 and `[[3,3,3,3]]` at `bp-tp4-sized` against `[[1,1,1,1]]`. T19's third batch
+`tpch/q14` expected 10 and `[[3,3,3,3]]` at `tp4-sized` against `[[1,1,1,1]]`. T19's third batch
 is what showed the general shape — `tpcds/q93` expects `[[7486]]` and reports `[[7169]]`, which is
 neither one nor a group count but is exactly that node's own output.
 
@@ -134,7 +134,7 @@ The value in question is the device's own export; DataFusion produces `(15,2)` t
 CPU tier is green. So this is two rules for produced-against-declared, one per engine, disagreeing
 on the same bytes — one tolerating and casting back, the other refusing. Whichever is right, one of
 them is wrong. Neighbour of [#163](../tickets.md#t163) for that reason, where
-[#183](bp-tickets.md#t183) is two representations of one value rather than two verdicts on it.
+[#183](active-tickets.md#t183) is two representations of one value rather than two verdicts on it.
 
 First plain decimal projection to reach a device in the corpus: q6's decimals are sums, whose
 declared type is already wide, which is why twenty queries went past this and the twenty-first did
@@ -153,7 +153,7 @@ anything upstream of it. Six device cells across T19's first two batches.
 num_rows`. The plan puts the interval in the scan, so the recipe carries both a row-group list and
 a row range, and the reader takes one or the other.
 
-The same plan shape as [#186](bp-tickets.md#t186) from the other side: where the interval sits in
+The same plan shape as [#186](active-tickets.md#t186) from the other side: where the interval sits in
 the scan, the CPU ignores it and answers six million rows and the device refuses the read outright.
 Neither engine runs it and they fail differently, so a fix for either has to decide what that shape
 means — push the limit into the reader, or keep the interval on the unload at every mode as the
@@ -178,11 +178,11 @@ of that tier — 13 GB SIGKILLs a runner as an infrastructure failure, not a tes
 <a id="t191"></a>
 ### #191 — the device exports Int16 for an extracted year the plan declared Int32
 
-`tpch/q8` at `bp-tp1-single`: `the exported stream is not the sink's rows: expected Int32 but found
+`tpch/q8` at `tp1-single`: `the exported stream is not the sink's rows: expected Int32 but found
 Int16 at column index 0`. That column is `o_year`, an `extract(year from o_orderdate)` — DataFusion
 types it `Int32` and the device answers `Int16`.
 
-**Not [#187](bp-tickets.md#t187), and merging them would lose the distinction.** That one is the
+**Not [#187](active-tickets.md#t187), and merging them would lose the distinction.** That one is the
 device *widening* a decimal, to 38 whatever the declaration says. This is the device *narrowing* an
 integer, to the natural width for a year rather than to a maximum. Opposite direction, different
 type family, and a fix for either says nothing about the other.
@@ -191,7 +191,7 @@ Not new behaviour either, only newly reached: `extract_year -> INT16` was alread
 place where the DataFusion type is an imperfect proxy for the cuDF one. What is new is a corpus
 query whose unload sees it.
 
-One cell, `tpch/q8` at `bp-tp1-single` — which is the only mode that gets far enough to reach the
+One cell, `tpch/q8` at `tp1-single` — which is the only mode that gets far enough to reach the
 unload, the other four stopping at [#152](../tickets.md#t152).
 
 <a id="t190"></a>
@@ -218,7 +218,7 @@ Why the corpus took until T19's sixth batch to reach it: `q11` is the first quer
 join projects at all. `nested-loop-join`, `nested-loop-left-join` and `cross-join` are `SELECT *`,
 so their projection is `None` and passing `None` is correct for every one of them.
 
-Device half untested — the CPU refuses first, as with [#189](bp-tickets.md#t189).
+Device half untested — the CPU refuses first, as with [#189](active-tickets.md#t189).
 
 <a id="t189"></a>
 ### #189 — the shuffle cannot hash a rollup's grouping-set id
@@ -237,14 +237,14 @@ means widening the murmur3 conformance gate with it, which is why this is not th
 looks like.
 
 First cause in T19's rollout that is not a device cause: the six before it were the device refusing
-or disagreeing. Three cells, `tpch/rollup-over-join` at `bp-tp4-single`, `bp-tp4-rowgroup` and
-`bp-tp4-sized`.
+or disagreeing. Three cells, `tpch/rollup-over-join` at `tp4-single`, `tp4-rowgroup` and
+`tp4-sized`.
 
 <a id="t186"></a>
 ### #186 — the CPU backend ignores a limit pushed into the scan
 
-`SELECT * FROM lineitem LIMIT 10` returns 6,001,215 rows at `bp-tp1-single` and
-`bp-tp1-rowgroup`. A wrong answer, not a refusal.
+`SELECT * FROM lineitem LIMIT 10` returns 6,001,215 rows at `tp1-single` and
+`tp1-rowgroup`. A wrong answer, not a refusal.
 
 At tp1 the planner puts the interval in the scan alone — `GpuLoadParquet: … limit=10` under a bare
 `GpuUnload` — and `CpuSource::new` (`cpu_backend/source.rs`) never reads `node.limit`. At the three
@@ -262,7 +262,7 @@ wrong answer. `tpch/scan-limit` is disabled at the two tp1 modes on this.
 <a id="t180"></a>
 ### #180 — a shuffled count(\*) merges to nullable against a non-nullable declaration
 
-`tpcds/q96` at `bp-tp4-single`, `bp-tp4-rowgroup` and `bp-tp4-sized`: "Column 'count(\*)' is
+`tpcds/q96` at `tp4-single`, `tp4-rowgroup` and `tp4-sized`: "Column 'count(\*)' is
 declared as non-nullable but contains null values". Both tp1 modes are clean and stay enabled.
 
 A shuffle is what puts a state merge under the aggregate, so the three tp4 modes reach a path the

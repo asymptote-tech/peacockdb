@@ -1,6 +1,6 @@
 """TPC-DS: the star queries — one fact table streaming past small dimensions.
 
-The shape the batch-partitioned mode is for, and the majority of the benchmark. A fact
+The shape the engine is for, and the majority of the benchmark. A fact
 table is the probe side of every join in the query, so it is scanned once, in batches, and
 never collected; the dimensions are filtered down and collected into one batch each. The
 aggregate at the top shuffles on its group keys, by which point it is holding a summary

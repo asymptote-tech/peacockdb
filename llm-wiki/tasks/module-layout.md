@@ -341,7 +341,10 @@ Nothing here may change what the engine computes, so the bar is the opposite of 
 
 It goes first, alone, and it is the only commit in the task whose diff touches `testdata/goldens/`.
 Sed the 13,246 lines, then regenerate and require an empty diff — the regeneration confirms the sed
-rather than authoring it. **Every later commit must show zero golden changes in `git diff --stat`,**
+rather than authoring it. **Plain `UPDATE_CANONICAL=1`, never with `PEACOCK_REWRITE_RECIPE_BYTES`:**
+without the second variable `test_plan_goldens` compares the committed payload digests against the
+bytes it just built and fails naming the file; with it, it rewrites them, and the digest agrees
+with itself having proved nothing. **Every later commit must show zero golden changes in `git diff --stat`,**
 and that is the single most valuable check in the task: a golden that moves after this point means
 the layout changed behaviour.
 
@@ -350,7 +353,7 @@ the layout changed behaviour.
 In this order: `plan_text` and `executor/driver` first, because they are already close to the target
 shape and prove the pattern cheaply; then `wire`, which is the largest single move and the one that
 makes `generated` private; then `plan`; then `planner`; then the backends. After each, run the lib
-unit tests plus `test_batch_partitioned_plans` — the cheap tier — so a break is localized to the
+unit tests plus `test_plan_goldens` — the cheap tier — so a break is localized to the
 component that caused it rather than found at the end across a 138-file diff.
 
 ### Per-commit checks
@@ -367,6 +370,21 @@ component that caused it rather than found at the end across a 138-file diff.
   no `pub use`; no `pub(super)`; subcomponents declared `mod`, not `pub mod`; and the item set
   unchanged from the baseline, since this task moves declarations and does not remove any. Run it
   at every component commit.
+- **Re-run task 1's strip-and-rematch after each slice.** Its residue gate excludes by line, not
+  by match, so a survivor spelling anywhere on a line hides real residue sharing it. That was
+  latent when task 1 closed; this task moves the files those 170 lines live in, which is exactly
+  the motion that turns it live.
+- **Drop the gate's `':!peacockdb-core/src'` exclusion once the directory is gone.** It exists only
+  to spare `src/batch_partitioned/`, and this task removes that name. Left in place it hides the
+  whole crate: task 1's completeness pass found four residues inside that tree precisely because
+  nothing read it, and after this move the exclusion would blind the gate to everything the task
+  touched. Run the gate without it, and expect the three mapping sites plus whatever `README.md`
+  and `source.py` still say about `ParquetBatchPartitioner`.
+- **Every grep in this task takes `--untracked`.** `git grep` does not see untracked files, so a
+  sweep run before staging is blind to exactly the files being moved — in task 1 a gate reported
+  clean while residue sat in four renamed files. This task moves every file in the crate, so the
+  blindness is total until each slice is staged. Run the sweeps after `git add`, or with
+  `--untracked`, and never before a move.
 - **`git diff -M --summary` reports renames**, not delete-plus-add. A file reported as both changed
   more than half its content, which a path rewrite and an import fix should not do.
 

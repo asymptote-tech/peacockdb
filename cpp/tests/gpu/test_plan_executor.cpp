@@ -173,7 +173,7 @@ static std::string get_string_value(const cudf::column_view& col,
 }
 
 /// A hand-built plan driven node by node, children first, each node handed its
-/// children's handles — the same walk the batch-partitioned driver makes over a real
+/// children's handles — the same walk the engine's driver makes over a real
 /// plan, and the only way a plan is executed since the whole-plan entry point retired.
 ///
 /// The seq a node takes is its post-order position, counted here as the walk reaches it.

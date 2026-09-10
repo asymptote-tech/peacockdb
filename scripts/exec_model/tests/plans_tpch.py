@@ -1,4 +1,4 @@
-"""TPC-H query plans, lowered by hand into the batch-partitioned nodes.
+"""TPC-H query plans, lowered by hand into the engine's nodes.
 
 Separated from the tests that run them for two reasons. A plan is a function of the
 **schemas**, not the rows — every builder here takes a table provider and never looks at

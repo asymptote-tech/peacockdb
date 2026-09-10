@@ -40,7 +40,7 @@ const INTENTIONALLY_NOT_IN_CI: &[(&str, Exemption)] = &[
     ("test_gpu_abi", Exemption::GpuJob),
     ("test_gpu_recipe_walk", Exemption::GpuJob),
     ("test_gpu_executors", Exemption::GpuJob),
-    ("test_gpu_bp_corpus", Exemption::GpuJob),
+    ("test_gpu_corpus", Exemption::GpuJob),
     ("test_ci_coverage", Exemption::NotRun("this test")),
 ];
 
@@ -661,7 +661,7 @@ fn is_rust_gpu_runner_invocation(line: &str) -> bool {
 
 /// Single-tenant GPU is one flag on two committed runner lines and nothing else. cuDF and
 /// RMM share a process-wide pool, so `--test-threads=1` is what keeps the device to one test
-/// at a time — and `test_gpu_bp_corpus.rs` spends it further, setting environment variables
+/// at a time — and `test_gpu_corpus.rs` spends it further, setting environment variables
 /// in an `unsafe` block whose safety argument is that flag. Dropping it from either runner
 /// makes that argument false, and until this test existed nothing said so.
 #[test]
@@ -672,7 +672,7 @@ fn both_gpu_runners_pass_test_threads_one() {
                 line.contains("--test-threads=1"),
                 "{rel} runs a staged GPU binary without --test-threads=1:\n  {line}\n\
                  cuDF/RMM share one process-wide pool, so concurrent cases OOM the device, and \
-                 the env-var writes in test_gpu_bp_corpus.rs are sound only while this flag holds."
+                 the env-var writes in test_gpu_corpus.rs are sound only while this flag holds."
             );
         }
     }
