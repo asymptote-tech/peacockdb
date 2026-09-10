@@ -30,6 +30,7 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <memory>
 
@@ -38,6 +39,17 @@ namespace peacock {
 // Pool sizes must be aligned to rmm's allocation granularity.
 inline std::size_t pool_align_down(std::size_t n) {
   return n - (n % rmm::CUDA_ALLOCATION_ALIGNMENT);
+}
+
+// The budget a binary actually takes: the constant it declared, or PEACOCK_RMM_POOL_BYTES
+// when that is set. Explicit bytes, never a percentage — a share of the device is what #178
+// was. It is here for the binaries whose peak scales with a knob of their own, which would
+// otherwise have to be rebuilt to be swept, and for a host that is not the H200 every budget
+// in this tree was measured on. A value under rmm's granularity is no pool and says so.
+inline std::size_t pool_budget_bytes(std::size_t declared) {
+  const char* env = std::getenv("PEACOCK_RMM_POOL_BYTES");
+  if (!env || !*env) return declared;
+  return static_cast<std::size_t>(std::strtoull(env, nullptr, 10));
 }
 
 // Percentage sizing for multi_gpu.cpp alone, which installs a pool per worker thread on the
@@ -76,9 +88,9 @@ inline std::unique_ptr<StatsMr>& stats_mr() {
   return mr;
 }
 
-// Installs a pool of `bytes` for the current device and returns what happened. Call before any
-// cuDF work; the resources are function-local statics because rmm stores a non-owning pointer to
-// the current resource and the callers outlive any narrower scope.
+// Installs a pool of `bytes` — or of PEACOCK_RMM_POOL_BYTES, see pool_budget_bytes — for the
+// current device, and returns what happened. Call before any cuDF work; the resources are
+// function-local statics because rmm keeps a non-owning pointer to the current one.
 //
 // The request is never clamped: a host that cannot meet it keeps the default resource and reports
 // Unavailable, because a pool smaller than the one asked for silently changes what every number
@@ -90,6 +102,20 @@ inline const RmmPoolStatus& install_rmm_pool(std::size_t bytes) {
   static RmmPoolStatus status;
   static bool done = false;
   if (done) return status;
+
+  // Aligned down first, because that is the size the pool would take: a request under rmm's
+  // granularity leaves nothing, and a pool of nothing is built happily and then fails every
+  // allocation with "Maximum pool size exceeded". Rejected before the idempotence latch, so a
+  // caller that asked for no pool has not spent the one installation this process gets.
+  const std::size_t requested = pool_budget_bytes(bytes);
+  const std::size_t size = pool_align_down(requested);
+  if (size == 0) {
+    std::fprintf(stderr,
+                 "[rmm] pool of %zu bytes could not be built (under rmm's %zu-byte allocation "
+                 "granularity); leaving the default resource in place\n",
+                 requested, static_cast<std::size_t>(rmm::CUDA_ALLOCATION_ALIGNMENT));
+    return status;  // Unavailable
+  }
   done = true;
 
   int device = 0;
@@ -105,8 +131,6 @@ inline const RmmPoolStatus& install_rmm_pool(std::size_t bytes) {
 
   // Initial == maximum: the caller asked for the working set it measured, so reserve it up
   // front and leave no growth event to pay for mid-query.
-  const std::size_t size = pool_align_down(bytes);
-
   static auto upstream = std::make_unique<rmm::mr::cuda_memory_resource>();
   static std::unique_ptr<rmm::mr::pool_memory_resource<rmm::mr::cuda_memory_resource>> pool;
   // A request the device cannot meet fails here, a neighbour holding most of the card being the
@@ -124,9 +148,9 @@ inline const RmmPoolStatus& install_rmm_pool(std::size_t bytes) {
     stats_mr() = std::make_unique<StatsMr>(pool.get());
   } catch (const std::exception& e) {
     std::fprintf(stderr,
-                 "[rmm] pool of %.1f GiB could not be built (%s); leaving the default "
-                 "resource in place\n",
-                 size / 1073741824.0, e.what());
+                 "[rmm] pool of %.1f GiB could not be built with %.1f GiB free (%s); "
+                 "leaving the default resource in place\n",
+                 size / 1073741824.0, free_bytes / 1073741824.0, e.what());
     pool.reset();
     return status;  // Unavailable
   }

@@ -100,10 +100,11 @@ typedef struct PeacockRmmPoolInfo {
 /// unaffected; making it self-installing is llm-wiki/tickets.md #148. It does not
 /// read `gpu_memory_limit` either — that is the same ticket.
 ///
-/// @param bytes     The pool to reserve. The caller chooses it from what it measured;
-///                  a request this host cannot meet is UNAVAILABLE, never a smaller
-///                  pool, because a pool of another size makes every number taken
-///                  over it mean something else.
+/// @param bytes     The pool to reserve, unless PEACOCK_RMM_POOL_BYTES overrides it. A
+///                  request this host cannot meet is UNAVAILABLE, never a smaller pool,
+///                  because a pool of another size makes every number taken over it mean
+///                  something else; so is one under rmm's 256-byte granularity, which rmm
+///                  would build and then fail every allocation in.
 /// @param out_info  Filled with what actually happened. Required.
 /// @return 0 unless out_info is NULL — NOT non-zero on UNAVAILABLE, which still
 ///         leaves a runnable default resource. Whether that is fatal is the

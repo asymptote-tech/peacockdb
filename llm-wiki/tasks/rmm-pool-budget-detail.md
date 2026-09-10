@@ -374,3 +374,96 @@ either, and that is deliberate — growth on that page waits for a human to ask.
 change, but it leaves the headline number a prediction. The tpchv pair proves the rule — a fixed
 budget does not shrink when a neighbour arrives, instance B took its declared 30 GiB from 56.9 GiB
 free — and says nothing about the number: 30+30 has 80 GiB of slack where 69+69 has 1.2.
+
+### 2026-09-10 — the completeness pass, the code half: five changes and four device runs
+
+The markdown and comment findings were applied by the coordinator (entry above). These five are
+code, and each was driven by a failing check before it was written.
+
+| # | Change | Where | Proved red by |
+|---|---|---|---|
+| 1 | the failure line carries what the device had | `rmm_pool.hpp` | observation on device, below |
+| 2 | `PEACOCK_RMM_POOL_BYTES`, explicit bytes | `rmm_pool.hpp` + 3 comments | override ignored: 1.0 GiB with the var set to 2 |
+| 3 | a request that aligns down to zero is `Unavailable` | `rmm_pool.hpp` | `test_ffi.rs`, INSTALLED with a 0-byte pool |
+| 4 | the pool is the declared budget | `test_cudf.cpp` | percentage sizing restored: 79759834880 vs 1073741824 |
+| 5 | `PEACOCK_TPCHV_K` named in the budget comment | `test_tpchv.cpp` | — comment |
+
+**The override is `pool_budget_bytes(declared)`, read once at the top of `install_rmm_pool`.** The
+test in (4) asserts against that function rather than against `kPoolBytes`, so it holds under a
+sweep instead of failing on one — and it still fails the moment a pool stops being the request.
+`peacock_gpu_tests` is the only binary with a case in it, which is the point: it is in every
+gpu-tests job and costs nothing.
+
+**Zero is rejected before the idempotence latch**, so a caller that asked for no pool has not
+spent the one installation the process gets. `PEACOCK_RMM_POOL_BYTES=0` is therefore a way to run
+any of these unpooled, and it says so on stderr.
+
+#### On the device — shad-gpu, 90009 MiB free of 143771, pid 1763830 (`kirill`) holding 53066
+
+The tenant never moved, so **two `peacock_tpch_tests` was not attempted**: 69+69 needs 138 GiB.
+Unchanged from the entry above; that experiment still wants an idle card.
+
+**The GPU tier is green and one case larger.** `scripts/build-test-shadgpu.sh --build`,
+`--push-binaries`, `--patch`, `--run` as four foreground calls, exit 0. C++ 11 + **6** + 27 + 4 + 4
+= 52 cases (was 51; the new one is `RmmPool.ReservesTheDeclaredBudget`), rust 4 + 8 + 31 + 10 + 10
+= 63, no skips, no golden moved. The four pool lines read `1.0`, `1.0`, `69.0`, `30.0 GiB reserved
+of 87.4 GiB free`. Run twice, identically: the second cycle was for two comment-only hunks landed
+after the first, so the green tier is the tree as it stands rather than the tree minus two comments.
+
+**`peacock_tpch_tests` in benchmark mode at 69 GiB — the run that had never been made — passes.**
+`PEACOCK_BENCHMARK=1 PEACOCK_BENCHMARK_RUNS=5`, 4 tests, exit 0. Six executions of q1's closure
+through a pool that cannot grow do not fragment its free list: the peak is 67.42 GiB, the same
+number one execution gives, because each run frees what it took before the next asks. That was
+the open risk at 1.6% headroom and it is now measured rather than hoped.
+
+| q | execute ms (2nd-min of 5) | all five | peak |
+|---|--:|---|--:|
+| q6 | 63.610 | 60.0 63.6 76.7 99.5 111.5 | 19.72 GiB |
+| q1 | 529.478 | 525.9 529.5 538.9 552.8 560.6 | 67.42 GiB |
+| q3 | 138.869 | 138.5 138.9 177.7 184.2 186.6 | 13.96 GiB |
+| q8 | 286.586 | 237.4 286.6 290.3 292.2 294.8 | 21.24 GiB |
+
+**Do not publish those times.** They are 2.2-6x `reports/benchmark-minimal.md`'s H200 column
+(19.2 / 239.9 / 40.1 / 47.7 ms) because a foreign tenant was computing on the card throughout.
+The 2nd-minimum protocol filters a jittery neighbour, not a resident one. The peaks are unaffected
+— the statistics adaptor counts what cuDF asked for — and the peaks are what this task is about.
+
+**The two sweep configurations the reports publish, with the override.** Both were run at the
+knob the report names, and both peaks are new to this file.
+
+| binary | knob | peak | budget it needs | result |
+|---|---|--:|---|---|
+| `peacock_cudf_node_tests` | `PEACOCK_NODES_ROWS=100000000` | **17.90 GiB** | 24 GiB via the override | 1 test, exit 0 |
+| `peacock_tpch_streamed_tests` | `PEACOCK_STREAM_CHUNK_MB=512` | **0.56 GiB** (q1; q6 0.21, q3 0.41, q8 0.33) | its declared 2 GiB is enough | 4 tests, exit 0 |
+
+The node sweep is the case the override exists for: at its declared 10 GiB the published 100M-row
+configuration dies with `Maximum pool size exceeded` after reaching 7.57 GiB, and nothing but a
+rebuild could have run it before this change. 24 GiB was a first try, not a bisection.
+
+**The streamed sweep does not need it here, and that is a host fact rather than a knob fact.**
+`benchmark-minimal.md`'s 2340 MiB q1 peak at 512 MiB chunks is a GB10 number; the same chunk size
+on H200 peaks at 577 MiB, four times smaller. So the 2 GiB budget holds on shad-gpu and would not
+hold on GB10 — which is the same sentence `build-test.md` already carries about these being H200
+numbers, now with a measurement under it. Both reports were corrected.
+
+**Also measured, since each is one line of evidence for a claim in the diff**: a 1 PiB request
+prints `[rmm] pool of 1048576.0 GiB could not be built with 87.4 GiB free (...)` — the figure
+finding (1) asked for, without which that line is a constant; and a 100-byte request prints the
+new granularity line and the binary carries on, 2 tests passing on the default resource.
+
+#### For the coordinator: one page this change makes incomplete
+
+`build-test.md`'s budget bullet is yours, and it now needs the override, since a GPU binary swept
+past its default is unrunnable without it. Suggested, after "verda-gpu has never been sized against
+them": *A run that sweeps a knob past its default sets `PEACOCK_RMM_POOL_BYTES=<bytes>` for that
+run — explicit bytes, no percentage — which is also the only way a non-H200 host runs these at
+all.* `#178` and the Coordinator section of `prompts.md` quote `[rmm] pool of N GiB could not be
+built`, which is still a literal prefix of the line; the free figure now follows it, so the
+attribution those two texts ask a reader to make is finally supported by what is printed.
+
+#### Host left as found
+
+`scratch-rmm` removed; `cpp/install/bin` holds the five CI binaries and nothing else. The two
+manual binaries were built here (25.02 `cpp/build` for the node timings, 26.02 `cpp/build26` for
+the streamed one, run against the host's `rapids-2602` env) and shipped to that scratch directory,
+never to `install/bin`, where the gate's glob would sweep them in.

@@ -796,7 +796,8 @@ TEST_F(TpchSf40Streamed, Q8Streamed) {
 
 // The same sf40 queries through bounded batches, which is the point of the file; measured peak
 // 0.56 GiB at the 128 MiB default chunk (llm-wiki/tasks/rmm-pool-budget-detail.md). 2 GiB covers
-// that with room; a PEACOCK_STREAM_CHUNK_MB sweep past it raises this line with its own number.
+// that with room, and the peak scales with PEACOCK_STREAM_CHUNK_MB: a sweep past it sets
+// PEACOCK_RMM_POOL_BYTES for the run rather than rebuilding, and a new default raises this line.
 constexpr std::size_t kPoolBytes = 2ull << 30;
 
 // Same entry point as the other gtest binaries here (the conda cudf ships no gtest_main).

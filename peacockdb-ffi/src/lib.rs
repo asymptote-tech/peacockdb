@@ -66,10 +66,11 @@ pub mod raw {
         /// the C++ header they install it from — measures the engine under the same
         /// allocator rather than producing numbers that get compared with theirs anyway.
         ///
-        /// `bytes` is the pool to reserve, chosen by the caller from what it measured.
-        /// A request this host cannot meet is [`PEACOCK_RMM_POOL_UNAVAILABLE`] and never
-        /// a smaller pool, since a pool of another size changes what every number taken
-        /// over it means.
+        /// `bytes` is the pool to reserve, chosen by the caller from what it measured,
+        /// unless `PEACOCK_RMM_POOL_BYTES` overrides it. A request this host cannot meet
+        /// is [`PEACOCK_RMM_POOL_UNAVAILABLE`] and never a smaller pool, since a pool of
+        /// another size changes what every number taken over it means; so is a request
+        /// under rmm's 256-byte granularity, which rmm would build and then fail into.
         ///
         /// Returns 0 unless `out_info` is null; NOT non-zero on
         /// [`PEACOCK_RMM_POOL_UNAVAILABLE`], which still leaves a runnable default

@@ -228,4 +228,6 @@ so the engine need not care where a buffer was filled.
 - Pool sizing: each binary's own `kPoolBytes` beside its `main()`, since the percentage these
   rows were taken under, and the `PEACOCK_RMM_POOL_INIT_PCT` that overrode it, are both gone
   (`llm-wiki/archive/historical-comments.md`). The no-pool rows were taken before the switch that
-  produced them was removed; there is no unpooled configuration now.
+  produced them was removed. **A sweep past a default needs `PEACOCK_RMM_POOL_BYTES`**: the
+  scale curves above run `PEACOCK_NODES_ROWS=100000000`, whose peak is 17.90 GiB against a
+  declared 10 GiB, so without an override the run dies on `Maximum pool size exceeded`.
