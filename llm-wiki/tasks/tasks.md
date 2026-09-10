@@ -63,9 +63,9 @@ page, so it is independent of the three layout tasks around it.
 
 ### 4. [`test-layout.md`](test-layout.md) — state: approved to build
 
-Of 170 public items in `peacockdb-core/src`, 108 are public only because `tests/*.rs` are separate
-crates that see the library the way crates.io would. Moving the eleven targets that force them, plus
-the murmur gate, down into `src/` takes that surface from 108 to eight. The move, the visibility
+Items in `peacockdb-core/src` are public partly because `tests/*.rs` are separate crates that see
+the library the way crates.io would. Moving the eleven targets that force them, plus the murmur
+gate, down into `src/` ends that reason for all but eight. The move, the visibility
 sweep and the separation of test code from production code happen together, because none is worth
 its own pass over the same files.
 

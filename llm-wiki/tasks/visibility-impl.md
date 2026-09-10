@@ -103,7 +103,7 @@ Record the number. Every later task lowers it; the last one leaves zero.
 
 ### Task 2: Fix the three guards before anything relies on them
 
-241 items are about to become private, which makes these guards matter more than they ever have.
+166 items are about to become private, which makes these guards matter more than they ever have.
 Two under-report today and one double-reports.
 
 **Files:**
@@ -181,8 +181,9 @@ Both must fall. A slice that moves neither moved the wrong thing.
 
 - [ ] **Step 1: Keep four, demote three**
 
-`plan`, `PlanKnobs`, `BatchSizing` and `SMALL_TABLE_BYTES` stay bare `pub` — the CLI names them.
-Everything else becomes `pub(crate)`.
+`plan`, `PlanKnobs`, `BatchSizing` and `SMALL_TABLE_BYTES` stay bare `pub` — the CLI names them —
+and so does every type their signatures name, which for `plan` means `GpuNode`, `MemoryModel` and
+`PlanError`. Walk the signatures and keep the closure; everything else becomes `pub(crate)`.
 
 - [ ] **Step 2: Build all three shapes**
 
@@ -209,8 +210,10 @@ the rule asks for: a bare `pub` is a claim the binary calls it.
 
 - [ ] **Step 1: Keep two, demote the rest**
 
-`run` and `CpuBackend` stay. `CpuJoin`, hoisted here by task 3 to raise the `cpu_backend` wall,
-becomes `pub(crate)` like the rest.
+`run` and `CpuBackend` stay, and so does every type their signatures name — `GpuNode`,
+`MemoryModel`, `RunReport`, `RunError`, `Backend` — or `private_interfaces` fires on the two items
+you kept. `has_finish_pass`, which task 4 declared here to raise the `cpu_backend` wall, is already
+`pub(crate)` and stays that way.
 
 - [ ] **Step 2: Build all three shapes, then the CLI**
 
@@ -377,9 +380,9 @@ The carry-over list from tasks 1-3, closed item by item.
 
 **Files:**
 - Modify: `peacockdb-core/src/planner/translator/scan_mapping/parquet_meta.rs`,
-  `peacockdb-core/tests/test_cpu_end_to_end.rs`,
-  `peacockdb-core/src/executor/cpu_backend/expr_physical.rs`,
-  `peacockdb-core/tests/common/corpus_gpu.rs`, `llm-wiki/tickets.md`
+  `peacockdb-core/src/executor/cpu_backend/expr_physical.rs`, plus the two that moved —
+  `test_cpu_end_to_end.rs` is under `src/tests/` after task 4 and `corpus_gpu.rs` under
+  `src/test_support/` after task 5. **Find them by name, not by the path written here**, `llm-wiki/tickets.md`
 
 - [ ] **Step 1: The rustfmt hunk task 1 deferred and task 2 never applied**
 
@@ -387,8 +390,9 @@ The carry-over list from tasks 1-3, closed item by item.
 rustfmt --edition 2021 --check peacockdb-core/src/planner/translator/scan_mapping/parquet_meta.rs
 ```
 
-Expected before: one hunk. Apply it. Then the three files task 2's second review round left:
-`test_cpu_end_to_end.rs`, `expr_physical.rs`, `corpus_gpu.rs`. Format the files themselves, never
+Expected before: one hunk. Apply it. Then the three files task 2's second review round left. Two of
+them have moved by now — `test_cpu_end_to_end.rs` into `src/tests/`, `corpus_gpu.rs` into
+`src/test_support/` — so locate them by name. Format the files themselves, never
 the crate.
 
 - [ ] **Step 2: The "mode" comments**
@@ -406,11 +410,12 @@ The murmur gate re-derives `pmod` and the seed-42 pre-fill locally instead of ca
 `rows_per_lane`, so one rule has two copies and only one is proven against comet. Production
 behaviour, so it earns a number. At most fifteen lines.
 
-- [ ] **Step 4: File the formatting ticket**
+- [ ] **Step 4: Record the formatting gap in `build-test.md`, not as a ticket**
 
 The repo is not rustfmt-clean, has no `rustfmt.toml`, and `pipeline.yml` runs neither a fmt nor a
-clippy step. Say what a fix would need — a config, a one-time sweep, a CI step — and that the sweep
-must not ride in a behaviour change.
+clippy step. That is CI shape, not production behaviour, and `prompts.md` forbids a ticket for it.
+Add a line to `build-test.md`'s CI section saying what a fix would need — a config, a one-time
+sweep, a step — and that the sweep must not ride in a behaviour change.
 
 - [ ] **Step 5: Final proof**
 

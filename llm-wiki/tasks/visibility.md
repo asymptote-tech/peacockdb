@@ -36,19 +36,21 @@ is this task's work, not an appendix to it.
 
 **Formatting and wording residues.** The `parquet_meta.rs` rustfmt hunk task 1 deferred to task 2
 was never applied and still reports. Three files were left unformatted in task 2's second review
-round — `tests/test_cpu_end_to_end.rs`, `cpu_backend/expr_physical.rs`, `tests/common/corpus_gpu.rs`.
+round — `test_cpu_end_to_end.rs` (which task 4 moves to `src/tests/`), `cpu_backend/expr_physical.rs`, and `corpus_gpu.rs` (which task 5 moves to `src/test_support/`).
 About twenty comments still use "mode" as a common noun for the thing task 1 retired.
 
 **Guards that under-report.** `no_public_signature_names_a_type_from_a_private_module` matches only
 `alias::`/`module::` prefixes, so a bare type imported out of a private module and named in a `pub`
-signature passes; that becomes load-bearing here, where the private set grows by 241 items.
+signature passes; that becomes load-bearing here, where the private set grows by 166 items.
 `names_the_module`'s reverse half misses `use peacockdb_core::executor::cpu_backend;` because there
 is no `::` after the path. The super-climb reader reports one `super::super::x` at depth 0 twice.
 
 **Two tickets to file rather than fix**, because each is a different subject: the murmur gate
 re-derives `pmod` and the seed-42 pre-fill locally instead of calling `rows_per_lane`, so one rule
 has two copies; and the repo is not rustfmt-clean, has no `rustfmt.toml`, and `pipeline.yml` runs
-neither a fmt nor a clippy step. Both are real, neither is visibility.
+neither a fmt nor a clippy step. Only the first earns a ticket: `prompts.md` files tickets for
+production behaviour and names cosmetics as the case never filed, so the formatting gap is recorded
+in `build-test.md`, where CI shape lives, and not in `tickets.md`.
 
 **One contradiction to correct in writing.** `module-layout.md` and
 `peacockdb-core/tests/common/memory_limit.rs` both say `test-layout.md` creates `src/test_support/`.
@@ -57,8 +59,8 @@ moves the file, or the next reader trusts the comment over the spec.
 
 **Baseline tooling outlives its task.** `module-layout-baselines/` is described as scaffolding
 deleted when that task is archived, but `visibility-dump.py`, `case-inventory.sh` and
-`compare-inventory.sh` are checks in tasks 3 and 4. Task 3 moves them to `scripts/`, where they
-stop being one task's property; `doc-attr-check.py`, `narrow.py` and `external-names.py` are task
+`compare-inventory.sh` are checks in tasks 3 and 4. They already live in `scripts/`, moved there by task 2's
+completeness commit; `doc-attr-check.py`, `narrow.py` and `external-names.py` are task
 2's own and die with it. This task inherits them there and adds nothing.
 
 ## The demotions
@@ -68,13 +70,17 @@ Task 3 raises the nine subcomponent walls as it moves the tests that forced them
 for its siblings, which needs `pub(crate)` and has been spelled `pub` because components are
 `pub mod`.
 
-**Turn on `#![warn(unreachable_pub)]` in `lib.rs` in the first slice, not the last.** The lint
-fires on exactly this — a `pub` item not reachable from outside the crate — and naming
-`pub(crate)` as the fix. Switched on first it is the work list: its warning count starts at the
-number of items still to demote and reaches zero when the task is done, so every slice has a
-number to move and the last one has nothing left to find. It stays at `warn` rather than `deny`:
-the crate's warning count is already a checked baseline, so a new one fails the check without a
-second mechanism.
+**`#![warn(unreachable_pub)]` goes on in the first slice, but it is a backstop, not the work
+list.** The lint fires on a `pub` item that is not reachable from outside the crate — and every one
+of the 174 sits in a component `lib.rs` declares `pub mod`, so it reports **zero today** and would
+report zero after a task that demoted nothing. It cannot measure this work.
+
+`scripts/visibility-dump.py` is the work list: `awk '$2=="pub" && $3!="mod"' | wc -l`, 174 falling
+to eight, one slice at a time. What the lint buys is the future — once a component's items are
+`pub(crate)`, a `pub` written inside a private module is unreachable and the lint says so, which is
+the rule enforcing itself after this task rather than during it. It stays at `warn`: the crate's
+warning count is already a checked baseline, so a new one fails that check without a second
+mechanism.
 
 Each component's `mod.rs` then keeps only what the CLI needs as bare `pub` and demotes the rest:
 `plan/mod.rs` (92 → 0), `executor/mod.rs` (48 → 2), `wire/mod.rs` (20 → 0), `planner/mod.rs`
@@ -99,7 +105,7 @@ fourth way by ending the separation, so the question is gone rather than deferre
 
 Two things confirm it rather than assume it. Measured on the post-task-2 tree, exactly one reach
 into the backend child modules comes from outside their own directory — `wire/tests.rs:831`'s
-`CpuJoin`, which task 3 hoists as a single type. `executor/driver`, the consumer that would justify
+`CpuJoin`, which task 4 replaces with a two-hop `has_finish_pass` delegation rather than a hoist. `executor/driver`, the consumer that would justify
 the other thirteen, names none of them: it goes through the `Backend` trait. And the hoist's
 destination works against this task — types declared in `executor/mod.rs` are there to be `pub`,
 while this task takes that file to two bare `pub` items, so hoisted types would land as
@@ -146,8 +152,10 @@ What arrives:
 - **The crate's API is the CLI's.** Bare `pub` in `src/` means "the binary calls this". Everything a
   component exposes to its siblings is `pub(crate)`. A new bare `pub` is a claim that the CLI needs
   it, and the layout test asks for the receipt.
-- **`#![warn(unreachable_pub)]` is what keeps that true**, and it is the reason the rule is not
-  merely a convention. Inside a private module `pub` and `pub(crate)` are identical to rustc —
+- **`#![warn(unreachable_pub)]` is what keeps that true afterwards**, once the components' items
+  are `pub(crate)` and a `pub` written inside a private module is genuinely unreachable. It cannot
+  measure the task itself — while a component is `pub mod`, every item in it is reachable and the
+  lint is silent. That is also why the rule is not merely a convention afterwards: Inside a private module `pub` and `pub(crate)` are identical to rustc —
   the module's own privacy is the wall — so the distinction is for the reader, for the blast radius
   when a module is ever opened, and for `private_interfaces`, which passes silently over a `pub`
   type that nothing can name and fires on the `pub(crate)` one. The lint is what makes the first of
@@ -170,7 +178,17 @@ Bare `pub` appears **eight times in `src/` outside the feature gate, in three fi
 | `plan`, `PlanKnobs`, `BatchSizing`, `SMALL_TABLE_BYTES` | `planner/mod.rs` |
 | `run`, `CpuBackend` | `executor/mod.rs` |
 
-`test_support/mod.rs` is a fourth file carrying bare `pub` and the only one behind a feature. The
+**The eight are not closed under their own signatures, and the table has to say so.** `plan`
+returns `Box<dyn GpuNode>` and `MemoryModel`; `run` takes `&dyn GpuNode` and a `B: Backend` and
+returns `RunReport` and `RunError`. A `pub` item whose signature names a `pub(crate)` type is a
+`private_interfaces` warning on the very item this table keeps — against a warning baseline this
+task checks. So the surface is these eight **plus the types they name**, and the first slice
+enumerates that closure from the signatures rather than guessing it: walk the eight, collect every
+type in their parameters and returns, and keep those `pub` too. If the closure comes out large,
+that is the honest size of the CLI's API and the table grows; what must not happen is eight `pub`
+items sitting on types nothing outside can name.
+
+`test_support/mod.rs` is a further file carrying bare `pub` and the only one behind a feature. The
 guard distinguishes them: eight unconditional items checked by file and name, a feature-gated set
 checked by signature.
 
@@ -197,13 +215,14 @@ than checked as outcomes. What moves is visibility, and a visibility regression 
 - **`pub mod` appears six times unconditionally, all in `lib.rs`**, plus `test_support` behind its
   feature — the same unconditional-versus-gated split the surface table makes. `PUB_MODULES` is
   deleted, not emptied: an empty register is an invitation.
-- **`unreachable_pub` reports zero.** Run the three build shapes and confirm. Then construct the
-  violation — spell one implementation-module item `pub` — and watch it warn, so the lint is known
-  to be on rather than assumed.
-- **`CROSS_COMPONENT_REACHES` is deleted**, and the reach it named is already gone — task 3 hoisted
-  `CpuJoin` into `executor/mod.rs` to raise the `cpu_backend` wall.
+- **`unreachable_pub` reports zero, and is known to be armed.** Run the three build shapes and
+  confirm zero — which is weak evidence on its own, since it also reported zero before the task. So
+  construct the violation: spell one item in a now-private implementation module `pub`, watch it
+  warn, revert. That is the check; the count is not.
+- **`CROSS_COMPONENT_REACHES` is deleted**, and the reach it named is already gone — task 4
+  replaced it with the `has_finish_pass` delegation when it raised the `cpu_backend` wall.
 - **The private-type-in-a-public-signature guard is fixed first, then relied on.** It matches only
-  path-prefixed types today; with 241 newly private items it is the guard most likely to be needed
+  path-prefixed types today; with 166 newly private items it is the guard most likely to be needed
   and most likely to miss. Fix it, prove it red on a bare imported type, then run it.
 - **Case counts and leaf-name sets identical to task 3's**, on all three shapes. Nothing moves
   tiers here; a count that shifts means a test followed the harness by accident.

@@ -192,7 +192,9 @@ same files. A helper with two audiences goes behind the feature; duplicating it 
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `crate::test_support::testdata::root() -> PathBuf`, plus `Mode`, `MODES`,
+- Produces: `crate::test_support::testdata_root() -> PathBuf` — declared in `mod.rs`, since every
+  module below it is private with `pub(crate)` items and the layout test reds on a bare `pub`
+  outside a `mod.rs` — plus `Mode`, `MODES`,
   `MemoryLimit`, the golden-text reader and the registry loader. In-crate code says
   `crate::test_support::…`; the binaries that stay say `peacockdb_core::test_support::…`.
 
@@ -214,7 +216,7 @@ In `lib.rs`: `#[cfg(feature = "test-support")] pub mod test_support;`
 //! compile-time path is a fallback and the environment wins (#49).
 use std::path::PathBuf;
 
-pub fn root() -> PathBuf {
+pub(crate) fn root() -> PathBuf {
     if let Some(dir) = std::env::var_os("PEACOCK_TESTDATA_DIR") {
         return PathBuf::from(dir);
     }
@@ -239,7 +241,7 @@ already fails on a bare `pub` outside a `mod.rs`, and `test-support.md` turns on
 
 - [ ] **Step 4: Convert the seven `CARGO_MANIFEST_DIR` sites**
 
-Each becomes `crate::test_support::testdata::root().join("tpch.minimal")`.
+Each becomes `crate::test_support::testdata_root().join("tpch.minimal")`.
 Run: `git grep -n 'CARGO_MANIFEST_DIR' -- peacockdb-core/src`
 Expected: no hits.
 
@@ -309,7 +311,7 @@ containing a test module contains `test`.
 
 Run: `cargo test --features rust-only -p peacockdb-core --test test_module_layout`
 Expected: `cfg_test_appears_only_on_a_test_module` FAILS naming
-`src/executor/driver/partitioned.rs` lines 670, 675, 680, 685 — four item-level `#[cfg(test)]`
+`src/executor/driver/partitioned.rs` lines 616, 621, 626, 631 — four item-level `#[cfg(test)]`
 attributes. The other three pass vacuously today; there are no `ffi_tests` or `gpu_tests` modules
 yet.
 
@@ -321,8 +323,15 @@ Two kinds, and they part different ways.
 four among them — moves into the `mod tests` that uses it. Nothing pins it where it is.
 
 **A cross-component test entry point** — `planner::translate`, `planner::translate_expr`,
-`executor::physical_expr`, and whatever else the guard names in `planner/translator/mod.rs`,
-`cpu_backend/mod.rs` and `plan/mod.rs` — **stays exactly where it is, with its `cfg(test)`**. It is
+`executor::physical_expr`, `plan::state_for`, and whatever else the guard names — **stays exactly
+where it is, with its `cfg(test)`**, along with any `#[cfg(test)] use` line that serves it.
+
+**Two are neither**, and need a decision recorded rather than a rule applied:
+`cpu_backend/accumulate.rs`'s `compactions` and `cpu_backend/join.rs`'s `makes_a_finish_pass` sit
+in implementation files and read private state, so they cannot move into a `mod tests` and the
+`mod.rs` carve-out does not cover them. The second becomes the body `has_finish_pass` delegates to
+and is renamed with it, which settles it; for the first, either give `cpu_backend/mod.rs` the
+question it answers, as `has_finish_pass` does, or record why it stays. It is
 test code, and visibility pins it to that `mod.rs`: it must name what its own component owns while
 its caller is in another. Teach the layout test the carve-out rather than moving them, and make it
 read the doc comment too: the comment names the test that needs it, and a comment naming callers
@@ -447,8 +456,9 @@ linked, so the gate is what keeps the rung honest.
 
 - [ ] **Step 4: Swap the CI step**
 
-In `pipeline.yml`, drop `--test test_gpu_batch` from the prebuild line and replace the run line
-  with
+In `pipeline.yml`, drop `--test test_gpu_batch` from the prebuild line at :276 **and add `--lib`
+to it** — that line's own rule is that every target the run step invokes is listed there — then
+replace the run line with
 `cargo test -p peacockdb-core --lib -- ffi_tests::` at default features, in the same job and the
 same feature shape. The job already compiles that shape for `peacockdb-ffi --test test_ffi`, so
 this is a swap, not a second compile of the DataFusion stack.
@@ -510,7 +520,28 @@ scripts/compare-inventory.sh rust-only llm-wiki/tasks/test-layout-baselines/inv-
 
 Expected: the four cases moved from `test_layout_injection` into `--lib`, nothing else changed.
 
-- [ ] **Step 5: Close the register entries this move invalidates**
+- [ ] **Step 5: Declare `has_finish_pass` before raising any wall**
+
+`wire/tests.rs` names `executor::cpu_backend::join::CpuJoin`. The moment `cpu_backend/mod.rs`
+declares `mod join;` privately that line is an `E0603`, so the replacement lands first — in this
+slice, not a later one:
+
+```rust
+// cpu_backend/mod.rs
+pub(crate) fn has_finish_pass(node: &GpuHashJoin, build: &ArrowSchema, probe: &ArrowSchema,
+    ctx: Arc<TaskContext>) -> Result<bool, PlanError> {
+    join::CpuJoin::hash(node, build, probe, ctx).map(|e| e.has_finish_pass())
+}
+// executor/mod.rs — same signature, one line, delegating to the above
+```
+
+Two hops, because `executor/mod.rs` cannot name a private module of `cpu_backend` either; this is
+the shape `executor::physical_expr` already uses. Rename `CpuJoin::makes_a_finish_pass` to
+`has_finish_pass` in the same step, then rewrite `wire/tests.rs:831` to call
+`crate::executor::has_finish_pass(...)`, keeping both halves of what it asserts: a refused cell
+gives `Err`, and an allowed cell's answer equals whether the recipe carries an `AtDone` call.
+
+- [ ] **Step 6: Close the register entries this move invalidates**
 
 `injection.rs` was the only forcer of `executor/cpu_backend/join` and `executor/cpu_backend/source`,
 and one of two for `executor/cpu_backend`, `.../accumulate` and `.../emit`. Drop the two entries
@@ -522,7 +553,7 @@ Run: `cargo test --features rust-only -p peacockdb-core --test test_module_layou
 Expected: green. Red on a stale entry means you dropped one half and not the other — the register
 is checked both ways.
 
-- [ ] **Step 6: Measure both ladders**
+- [ ] **Step 7: Measure both ladders**
 
 ```bash
 scripts/visibility-dump.py | awk '$2=="pub" && $3!="mod"' | wc -l
@@ -533,7 +564,7 @@ Expected: the surface materially below Task 1's figure — this is the slice tha
 demand — and the register at seven entries. A slice that moves neither number moved the wrong
 thing; record both either way.
 
-- [ ] **Step 7: Goldens unchanged, append to the detail file, hand back**
+- [ ] **Step 8: Goldens unchanged, append to the detail file, hand back**
 
 ---
 
@@ -607,25 +638,7 @@ exists to prevent.
 
 Run: `cargo test --features rust-only -p peacockdb-core --lib -- cpu_backend::tests`
 
-- [ ] **Step 3: Declare `has_finish_pass` in `executor/mod.rs`, and rename the method it calls**
-
-`wire/tests.rs` names `executor::cpu_backend::join::CpuJoin`, so the next step is an `E0603` on
-that line without this. Do not hoist the type — the test wants one answer, not the type:
-
-```rust
-pub(crate) fn has_finish_pass(node: &GpuJoin, build: &Fields, probe: &Fields,
-    ctx: Arc<TaskContext>) -> Result<bool, PlanError> {
-    cpu_backend::join::CpuJoin::hash(node, build, probe, ctx).map(|e| e.has_finish_pass())
-}
-```
-
-Rename `CpuJoin::makes_a_finish_pass` to `has_finish_pass` in the same step — `coding-style.md`
-says a bool-returning function reads as a claim, and "makes" promises an effect. Then rewrite
-`wire/tests.rs` to call `crate::executor::has_finish_pass(...)`, keeping both halves of what it
-asserts: a refused cell must give `Err`, and an allowed cell's answer must equal whether the
-recipe carries an `AtDone` call.
-
-- [ ] **Step 4: Close the `cpu_backend` group**
+- [ ] **Step 3: Close the `cpu_backend` group**
 
 `test_cpu_executors.rs` was the second forcer of `executor/cpu_backend`, `.../accumulate` and
 `.../emit`. Drop all three entries, demote those three `pub mod` to `mod`, convert their items to
@@ -634,7 +647,7 @@ recipe carries an `AtDone` call.
 Run: `cargo test --features rust-only -p peacockdb-core --test test_module_layout`
 Expected: green, with four entries left — all four `gpu_backend`, which Task 9 takes.
 
-- [ ] **Step 5: Measure both ladders, append, hand back**
+- [ ] **Step 4: Measure both ladders, append, hand back**
 
 ---
 
@@ -649,6 +662,10 @@ five modules) and `test_gpu_abi` (4) → `executor/gpu_backend/gpu_tests/`,
 - Delete: the four files (and `tests/test_gpu_executors/`)
 - Modify: `scripts/lib/shadgpu-env.sh` — `stage_cargo_test_binary` is here, not in
   `build-test-shadgpu.sh`
+- Modify: `scripts/build-test.sh` — a **second** inline resolver at :487-499 stages
+  `gpu_runtime_targets()` output with `--test "$t"`, and that same output is read as `pkg:target`
+  by the membership test at :271 and the subtraction at :347. Decide what shape the lib entry takes
+  in a list of `--test` names and make all three agree, or `--gpu` builds break
 - Modify: `scripts/build-test-shadgpu.sh` (`RUST_TESTS`), `scripts/build-test.sh`
   (`gpu_runtime_targets`, the murmur literal)
 - Modify: `.github/workflows/pipeline.yml` — **two** places: the staging loop, which duplicates the

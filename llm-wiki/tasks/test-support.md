@@ -29,8 +29,7 @@ one-binary-per-engine property resting on two `--test` targets rather than on th
 producing two compilations. The feature route would work and would make the registry guard depend
 on something that reads as unrelated to it.
 
-The two binaries name **none** of the eight. They call functions whose signatures are strings and
-test-local types: `cpu_case(dataset, sf, query, mode, oracle)`, `authoritative_mode`, `gpu_case`.
+The two binaries name **none** of the eight. They call functions whose signatures name no component type: `cpu_case(dataset, sf, query, mode, oracle)`, `authoritative_mode`, `gpu_case`.
 That is what makes the facade real rather than a rename. `over_cap` travels with `corpus.rs` and
 `test_corpus_goldens` reaches it the same way. `golden_text.rs` and `registry.rs` are already in
 `test_support` — task 4 moved them, because targets it moved needed them too. `corpus_golden.rs`,
@@ -58,7 +57,10 @@ check below is a scan of one file only if the API lives in one file.
 Being a child of the crate root it sees component facades and not their internals — the same level
 as `src/tests/`, and the reason it reaches `pub(crate)` items without any of them becoming `pub`.
 
-**Every `pub` in `test_support` takes and returns strings, `Mode`, `MemoryLimit` or nothing.** A
+**No `pub` in `test_support` names a type from `plan`, `planner`, `executor`, `wire` or
+`plan_text`.** That is the rule, stated by what it forbids rather than by a list of what it
+allows — the module holds a `PathBuf` root, a golden-text reader and a registry loader, none of
+which a list of "strings, `Mode`, `MemoryLimit`" would have permitted. A
 signature mentioning `GpuNode` or `RunReport` puts the item straight back on the surface under
 another name, and it compiles. This goes in `coding-style.md` beside the visibility rules, and the
 layout test enforces it.
@@ -76,12 +78,12 @@ and the failure mode is a harness that changed behaviour while moving.
 
 ### The checks
 
-- **The two binaries name none of the eight.** Grep them for `GpuNode`, `validate`, `RunReport`,
-  `render_run`, `GpuBackend`, `GpuContext`, `RecipePlan` and `attach_recipes`: no hits. A hit means
+- **Nothing under `peacockdb-core/tests/` names any of the eight.** Grep the whole directory, not
+  the two binaries: the names live in `tests/common/corpus.rs` and `corpus_gpu.rs` today, so a grep
+  of the binaries alone is green before the task starts and proves nothing. A hit means
   the facade is a rename, which is the one way this task can look done and not be.
 - **No engine type in a `test_support` signature.** Scan every `pub` in `test_support/mod.rs` and
-  assert its parameter and return types come from the allowed set — strings, `Mode`, `MemoryLimit`,
-  or nothing. Then construct the violation, `pub fn tree() -> Box<dyn GpuNode>`, and watch the
+  assert no parameter or return type comes from a component. Then construct the violation, `pub fn tree() -> Box<dyn GpuNode>`, and watch the
   layout test go red. This is the guard the whole facade rests on and the one that would otherwise
   never be exercised.
 - **The feature is off in a plain build**, proven by construction: reference `crate::test_support`

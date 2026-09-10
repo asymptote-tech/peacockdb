@@ -6,9 +6,11 @@ Fourth of six, after [`module-layout.md`](module-layout.md) and
 [`rmm-pool-budget.md`](rmm-pool-budget.md), and before [`test-support.md`](test-support.md) and
 [`visibility.md`](visibility.md).
 
-170 top-level items in `peacockdb-core/src` are `pub`. Eight are named by another crate; the other
-108 are `pub` only because `peacockdb-core/tests/*.rs` are separate crates that see the library the
-way crates.io would. This task moves the eleven targets that force them, plus the murmur gate, down
+249 items in `peacockdb-core/src` are bare `pub`, measured after task 2. Most are `pub` for no
+reason anyone can name — that is [`visibility.md`](visibility.md)'s subject. What this task ends is
+the subset that is `pub` **because `peacockdb-core/tests/*.rs` are separate crates** seeing the
+library the way crates.io would: 75 of them behind nine walls, and a hundred-odd more named
+directly. This task moves the eleven targets that force them, plus the murmur gate, down
 into `src/`, taking the surface from 108 test-driven items to **eight**. The last eight go in
 [`test-support.md`](test-support.md).
 
@@ -212,7 +214,8 @@ Three layers, and only the first is discipline.
   which is how test code creeps back into a production file one item at a time — `coding-style.md`
   now says why the attribute cannot double as a `dead_code` silencer, and roughly twenty item-level
   uses across seven files answer to that, not the four this spec once named. `planner::translate`,
-  `planner::translate_expr` and `executor::physical_expr` are the documented set, and they are
+  `planner::translate_expr`, `executor::physical_expr` and `plan::state_for` — whose caller is
+  `planner/translator/schema_tests.rs` — are the documented set, and they are
   **test helpers, not production items**: each exists to hand one test in one other component a
   fact it cannot reach itself. They keep `#[cfg(test)]` and stay in their component's `mod.rs`,
   because visibility pins them there — a helper must name what its own component owns while its
@@ -229,7 +232,7 @@ Three layers, and only the first is discipline.
   gate that disagree at either rung — `ffi_tests` without `not(rust-only)`, `gpu_tests` without `gpu`,
   or either gate on a module named `tests` — since the runs select by path and a mismatch either
   loses a case or drags it onto the wrong host; `driver/partitioned.rs` carries four
-  item-level `#[cfg(test)]` attributes today (lines 670, 675, 680, 685); they are the first
+  item-level `#[cfg(test)]` attributes today (lines 616, 621, 626, 631); they are the first
   thing the first rule finds, and they move into the module with the tests that use them.
 
 ### Testdata paths move with the tests, and #49 is in the way
@@ -237,8 +240,9 @@ Three layers, and only the first is discipline.
 `tests/common/mod.rs` honours `PEACOCK_TESTDATA_DIR`, overriding the compile-time root "so a binary
 built on one host can run on another". Every target that says `mod common` inherits that, including
 the ones staged to shad-gpu. Nothing in `src/` does: seven sites bake the path instead —
-`env!("CARGO_MANIFEST_DIR").join("../testdata/tpch.minimal")` in `estimator.rs` (×3),
-`parquet_meta.rs`, `plan_text/mod.rs`, `translate/tests.rs` and `translate/schema_tests.rs`. That is
+`env!("CARGO_MANIFEST_DIR").join("../testdata/tpch.minimal")` in `planner/memory_estimation.rs` (×3),
+`planner/translator/scan_mapping/parquet_meta.rs`, `plan_text/tests.rs` and
+`planner/translator/{tests,schema_tests}.rs` — the list `tickets.md` keeps under #49. That is
 the residual [#49](../tickets.md#t49) names.
 
 Moving eleven targets in-crate walks straight into it: they lose `testdata_root()` and land beside
@@ -247,7 +251,7 @@ built on another host**, which is the case the variable exists for.
 
 So this task closes that residual, and `test_support` is where the root belongs rather than
 `src/tests/` — the moved targets, the crate's own unit tests and the seven binaries that stay all
-need it, which is the same two-audience argument the feature exists for. `test_support/testdata.rs`
+need it, which is the same two-audience argument the feature exists for. `test_support/testdata.rs`, declared in `mod.rs`
 honours `PEACOCK_TESTDATA_DIR` with the same compile-time fallback; `tests/common/mod.rs`'s
 `testdata_root()` becomes a call to it rather than a second implementation, the seven `src` sites
 call it too, and #49 closes with the sweep. Two spellings of one rule is what that ticket is
@@ -262,9 +266,11 @@ with them". This task is where that happens, and it is not a consequence — it 
 
 `PUB_MODULES` in `test_module_layout.rs` holds nine entries, each naming the test files that force
 it, and **it is checked both ways**: an entry whose named files no longer force it is reported, and
-a `pub mod` that is not in the register is a violation. So a slice that moves a forcing file has
-exactly one green path — drop the entries that move invalidates **and** demote the `pub mod` they
-sanctioned, in the same commit. Leaving either half for later is a red build, not a tidy-up.
+a `pub mod` that is not in the register is a violation. The check is per **forcing file**, so a slice
+that moves one edits every `forced_by` list naming it — five entries name `injection.rs` — and
+demotes only the entries whose last forcer has now gone. Dropping an entry another target still
+forces breaks that target and trips the reverse half of the check. Editing the list and demoting
+what it empties are the same commit; leaving either for later is a red build, not a tidy-up.
 
 Which slice closes what follows from the register's own `forced_by` lists: the injector trio takes
 `cpu_backend/join` and `cpu_backend/source`, `test_cpu_executors` takes the rest of the
@@ -278,16 +284,25 @@ the three child-naming files cannot re-justify the entry. That is why the target
 line. The register concluded that no delegation could carry it — true of the *type*, and it
 stopped there. The test does not want the type: it builds a join per (join type, residual) cell
 and asks one question, whether the executor makes a finish pass, to compare against the recipe's
-`AtDone` call. So `executor/mod.rs` declares the question instead:
+`AtDone` call. So the components declare the question instead:
 
-    pub(crate) fn has_finish_pass(node: &GpuJoin, build: &Fields, probe: &Fields,
+    // cpu_backend/mod.rs
+    pub(crate) fn has_finish_pass(node: &GpuHashJoin, build: &ArrowSchema, probe: &ArrowSchema,
         ctx: Arc<TaskContext>) -> Result<bool, PlanError>
 
-One line, delegating into `cpu_backend`, obeying the `mod.rs` rule exactly and dragging nothing.
-It is also the honest shape: whether a join has a finish pass is precisely the fact the wire side
-and the executor side must agree on, so it belongs in the component's API rather than being
-reached around. `CpuJoin::makes_a_finish_pass` is renamed to `has_finish_pass` with it, per the
-predicate rule in `coding-style.md`. No hoist is needed here or in the next task.
+    // executor/mod.rs — the same signature, delegating to the above
+    pub(crate) fn has_finish_pass(...) -> Result<bool, PlanError>
+
+**Two delegations, not one**, because the wall this task raises is the reason: once
+`cpu_backend/mod.rs` declares `mod join;` privately, `executor/mod.rs` cannot name
+`cpu_backend::join::CpuJoin` either. That is the shape the tree already uses — `executor::physical_expr`
+delegates to `cpu_backend::physical_expr`, which reaches `expr_physical`. Each body is one line and
+drags nothing.
+
+Take it **in the slice that raises the `cpu_backend` wall, before the demotion**, or that slice's
+own `cargo test --lib` cannot pass: `wire/tests.rs` still reaches through the wall until the
+delegation exists. `CpuJoin::makes_a_finish_pass` is renamed `has_finish_pass` with it, per the
+predicate rule in `coding-style.md`. No hoist is needed here or in the tasks after.
 
 `CROSS_COMPONENT_REACHES`'s single entry is that same reach and dies with it. The register itself
 is deleted in task 4, not here: this task empties it, and an empty register is still a register.
@@ -298,11 +313,11 @@ is deleted in task 4, not here: this task empties it, and an empty register is s
 |---|---|:-:|--:|
 | `test_cpu_corpus` | `inventory` collects per linked binary; the registry needs two | rust | 448 |
 | `test_gpu_corpus` | the other half of that pair, and it writes env vars | **gpu** | 8 |
-| `test_golden_format` | the format reader, over strings | rust | 24 |
+| `test_golden_format` | the format reader, over strings | rust | 26 |
 | `test_corpus_goldens` | committed sections against their own arithmetic | rust | 20 |
 | `test_ci_coverage` | reads the workflow yaml | rust | 6 |
 | `test_cost_model` | `.cost.txt` re-derived from `.cpu.txt` | rust | 3 |
-| `test_module_layout` | reads the tree, as `test_ci_coverage` reads the yaml | rust | 35 |
+| `test_module_layout` | reads the tree, as `test_ci_coverage` reads the yaml | rust | 11 |
 
 `test_module_layout` is task 2's, not this task's to write — **this task extends it** with the
 rules below rather than inventing a layout test. Where this spec says "the layout test", it means
@@ -409,7 +424,7 @@ drifts, which is the distinction that matters.
 Assign each file by where its test module is declared, not by eye: `driver/accounting/tests.rs` is
 a unit test of an implementation module, `driver/tests/` is the subcomponent's, and `nodes/tests/`
 is `plan`'s. The cross-checks are one per rung plus the binaries, and **every figure in this table
-is pre-task-2**: it predates `test_module_layout`'s 35 cases and five target renames, so rebuild it
+is pre-task-2**: it predates `test_module_layout`'s cases and five target renames, so rebuild it
 from the baselines. The arithmetic that must hold is the page's, not this spec's — the two tables
 add to the headline figure.
 
@@ -485,8 +500,10 @@ compile of the DataFusion stack, and the cache-thrash rule in `build-test.md` is
 ## The surface, after this task
 
 **Two counts, and only one of them is this task's.** Bare `pub` in `src/` is a raw number in the
-hundreds — 249 measured after task 2 — and it stays there, because most of those items are `pub`
-for no reason anyone can name and demoting them is [`visibility.md`](visibility.md)'s subject.
+hundreds — 249 measured after task 2. This task takes the 75 behind the nine walls, because a
+`pub` item in a module it has just made private is what `unreachable_pub` is for and what the
+demotion of that wall means; the other 174 are `pub` for no reason anyone can name and are
+[`visibility.md`](visibility.md)'s subject.
 What this task ends is `pub` **that an external consumer forces**, and that count reaches eight.
 
 Sixteen items are `pub` for a reason at the end of this task, in six files: the CLI's eight, plus `GpuNode` and `validate`
@@ -520,9 +537,9 @@ of them back down.
   along with the rest of the raw count. The
   `test_support` signature rule belongs to [`test-support.md`](test-support.md), which is where
   the corpus facade makes it load-bearing; the feature itself arrives here.
-- **`architecture.md`** needs the Execution section's driver and accountant paths, the wire-format
-  section's writer paths (now `wire/`), and the Rehash section's `spark_partitioning.rs` pointer,
-  which moves into `executor/cpu_backend/` and whose conformance gate moves beside it.
+- **`architecture.md`** needs one line, not four: task 2 already corrected the driver and
+  accountant paths, the wire-format writer paths and the `spark_partitioning.rs` pointer. What is
+  left is the conformance gate's name at `architecture.md:971`, which this task's rename moves.
 
 ## Validation
 
@@ -536,12 +553,12 @@ checked differently.
    paths, because that is the set the move must preserve while the paths necessarily change.
 2. `sha256sum` over `testdata/goldens/`. No golden may move at all in this task.
 3. The `pub`/`pub(crate)` item dump from the end of task 2 — **it is a script, not a memory**:
-   `visibility-dump.py`, whose output at the end of that task is `visibility-items-final.txt`.
+   `visibility-dump.py`, whose output at the end of that task is `visibility-final.txt`.
    Re-run it here rather than inventing a second count, and state which of its rows the ladder
    below counts: bare `pub` only, test-gated items excluded. `case-inventory.sh` and
-   `compare-inventory.sh` beside it are the leaf-name tooling for (1). All three move out of
-   `module-layout-baselines/` into `scripts/` in this task's first slice: they are checks in this
-   task and in task 4, so they outlive the task that wrote them.
+   `compare-inventory.sh` beside it are the leaf-name tooling for (1). All three already live in
+   `scripts/`: task 2's completeness commit moved them there, because they are checks in this task
+   and the two after it.
 4. Warning counts from clean builds in all three feature shapes.
 
 **Every figure in this spec predates task 2** — which renamed five targets, added
@@ -575,7 +592,7 @@ lesson: the same shape, five components with a commit each, run as one dispatch 
 hours and died on a context limit with the work unreported.
 
 **Slice 0 comes before any move**, because nothing can move until it exists: the `gpu` feature with
-its `compile_error!`, the `test-support` feature with `test_support/testdata.rs` and the seven
+its `compile_error!`, the `test-support` feature with `test_support/testdata.rs`, declared in `mod.rs` and the seven
 existing sites converted to it, and
 `test_module_layout` extended with the rules above. It moves no test and its proof is that the
 three build shapes still compile and the suite is unchanged.
@@ -605,7 +622,10 @@ neither moved the wrong thing.
 ### Test code is separated
 
 - `git grep -n '#\[cfg(test)\]' -- peacockdb-core/src` returns only test-module declarations —
-  `mod tests` and `mod gpu_tests`. Anything else is test code in a production file, which is what
+  `mod tests`, `mod ffi_tests`, `mod gpu_tests` — and the cross-component entry points the
+  carve-out permits in a component's `mod.rs`, each with a doc naming its caller. The tree has 21
+  in eight files, including gated `use` lines above those entry points, which count as part of the
+  declaration they serve. Anything else is test code in a production file, which is what
   this task exists to end, and `driver/partitioned.rs` lines 670-685 are where it starts.
 - `git grep -n '#\[test\]' -- peacockdb-core/src` returns only paths containing `test`.
 - The transitive gate is checked by construction: add a line in `src/tests/` referencing a private
@@ -638,10 +658,10 @@ exactly eight items in `peacockdb-core` are `pub` because a test crate forces th
 forced by `corpus.rs` and `corpus_gpu.rs` and removed by [`test-support.md`](test-support.md);
 `PUB_MODULES` is empty and `pub mod` is down from 15 to six, counted by `visibility-dump.py`; the
 raw bare-`pub` count is whatever task 4 inherits and is not this task's claim. No
-production file contains a `#[test]`; no `#[cfg(test)]` sits anywhere but on a test-module
-declaration; every test module declares the lowest rung it needs and is named for it, with name
+production file contains a `#[test]`; no `#[cfg(test)]` sits anywhere but on a test-module declaration or a
+carve-out entry point in a component's `mod.rs`; every test module declares the lowest rung it needs and is named for it, with name
 and gate implying each other at both rungs above the floor; every test-only path in `src/` carries `test` in its name;
-`crate::test_support::testdata::root()` is the only testdata root anywhere, called by the crate's
+`crate::test_support::testdata_root()` is the only testdata root anywhere, called by the crate's
 unit tests, the moved targets and `tests/common/mod.rs` alike, and [#49](../tickets.md#t49) closes
 with it; a plain `cargo build` cannot name `test_support`; `test_ci_coverage` is near 300 lines and asserts one CI
 line per rung plus the CLI build; `build-test.md`'s two tables add to the headline; and the leaf-name
