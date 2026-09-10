@@ -769,6 +769,13 @@ jobs:
       - name: Every rust test target is wired into CI
         run: cargo test --features rust-only -p peacockdb-core --test test_ci_coverage
 
+      # The layout rules nothing in rustc checks: where `pub` may appear, whether a
+      # subcomponent reaches a sibling, and whether a component's private module is
+      # reachable from outside the crate. Text rules plus one probe that compiles against
+      # the built library, so it needs no dataset and no device.
+      - name: The module layout rules hold
+        run: cargo test --features rust-only -p peacockdb-core --test test_module_layout
+
       - name: Generate report
         env:
           # Golden cell links point at the code version the report was generated

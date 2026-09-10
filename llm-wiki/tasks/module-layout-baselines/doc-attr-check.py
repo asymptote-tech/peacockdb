@@ -13,6 +13,10 @@ whitespace collapsed: a sentence survives a move, a re-marking and a rewrap, and
 comparison then shows is prose that is genuinely gone or genuinely reworded — the set a reader
 has to judge one by one.
 
+One artefact to know before chasing it: the cut is on `.` or `:` followed by a capital or a
+backtick, so two copies of the same prose wrapped at different columns can split differently and
+one shows as absent while the other is present. Compare the text, not the count.
+
   doc-attr-check.py            # the working tree
   doc-attr-check.py <rev>      # that revision
 """

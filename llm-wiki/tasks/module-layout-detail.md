@@ -742,7 +742,7 @@ tiers_are_strictly_increasing}`. Not beside the type in `tests/common/memory_lim
 `common` is compiled into every integration target and the cases would multiply by eighteen.
 `TargetPartitions`' own label round-trip is the only coverage genuinely gone, with the type.
 
-Net zero cases. `inv-{rust-only,cudf}-after-slice7.txt` are the new baseline.
+Net zero cases. `inv-{rust-only,cudf}-final.txt` are the new baseline.
 
 **A trap in reading that diff.** A `--lib` case line begins with `--lib`, so in `diff` output a
 removed one reads `---lib` and an added one `+--lib` — and a `grep '^[+-][^+-]'` filter drops
@@ -794,8 +794,7 @@ rule never pays, it is that it costs nothing when it does not.
 | `pub use` / `pub(super)` | 0 and 6, the six all inside the two exempt backend directories |
 | bare `pub` outside a `mod.rs` | `lib.rs` (8, the crate's own surface), `common.rs` (2), and 25 inside the two exempt directories — nowhere else |
 
-Snapshots: `visibility-after-slice7.txt`, `visibility-items-after-slice7.txt`,
-`doc-sentences-after-slice7.txt`, `inv-{rust-only,cudf}-after-slice7.txt`.
+Snapshots: the `*-final.txt` files in the baselines directory.
 
 #### One drift found in `build-test.md`, not introduced here
 
@@ -811,8 +810,8 @@ zero crate-wide and so is `pub use`.
 ### What left, and why
 
 **43 items narrowed `pub` → `pub(crate)`, 6 `pub(super)` → `pub(crate)`, 4 deleted.** The full
-list is the diff between `visibility-after-slice7.txt` and `visibility-after-narrowing.txt`;
-the four deletions are the part to read:
+list is the diff of `visibility-dump.py`'s output across `59b973ac`; the four deletions are
+the part to read:
 
 | Deleted | Why |
 |---|---|
@@ -826,7 +825,19 @@ than a wider `pub` that hides the fact: `JoinCapability::makes_a_finish_pass` an
 `Schema::state_for` are `#[cfg(test)]`, and `Input::is_build_side` is
 `#[cfg(not(feature = "rust-only"))]` — its one caller is the GPU backend.
 
-### The spec's 54 is not reachable, and rustc is what says so
+### Counting imports is the wrong instrument, and that is the correction to carry
+
+**The general fact, which outlives the number: an import-based sweep cannot see a type that is
+reachable through a `pub` field or a `pub` signature — and those are the types that are most
+publicly reachable, not least.** `Expr::Column(ColumnRef)` is the worked example. No file
+outside the crate writes `ColumnRef`; every file that matches on an `Expr` obtains one. A sweep
+over imports reports it unused and is exactly wrong.
+
+So the spec's "54 lose `pub`" is not a target and 43 is not a better one. What holds is the
+method: narrow what the outside does not import, then let `private_interfaces` re-widen what it
+names, and iterate to a fixpoint. The count falls out; it is not the check. A spec that gives a
+number and twelve examples invites the next reader to treat the number as the check, which is
+the one reading that cannot work.
 
 The spec names twelve of the 54 explicitly. Six of those twelve **cannot** be narrowed:
 `ColumnRef`, `SortOrder`, `UnaryOp`, `MemoryModel`, `JoinCapability` and `Forwarder` are all
@@ -847,6 +858,22 @@ the crate, because `.bytes()` at a call site carries no path to match on. Over-k
 that.
 
 ### The fourth cudf-only break, and it was the fixpoint itself
+
+This is the third member of a family, and the family is worth more to the next reader than the
+three instances. **A check can be green because of its own structure rather than because the
+tree is clean.** Three in one task, each found by accident rather than by a test:
+
+| The check | Why it was green |
+|---|---|
+| body-line conservation over a hoist | it filters comments out, so 35 dropped doc lines conserved perfectly |
+| task 1's residue gate | its exclusion list still held the four spellings this task retires |
+| the `private_interfaces` fixpoint | run under `rust-only`, which does not compile the GPU backend at all |
+
+The shape is the same each time: the check's own structure — what it filters, what it excludes,
+what shape it runs in — decides its answer before the tree does. None of the three could go red.
+The counter to all three is the same too: **read the check's structure before its output**, and
+where the structure has a scope, run it in every scope the tree has.
+
 
 The first fixpoint ran under `--features rust-only`, where the GPU backend does not exist, so
 the lint could not see `Collapse`, `GpuSource` or `GpuProbingJoin`. The cudf build then failed
@@ -882,5 +909,92 @@ not. **Compare the text, not the count.**
 | residue gate | the same five lines |
 | `pub use` / `pub(super)` | 0 and 0 |
 
-Snapshots: `visibility-after-narrowing.txt`, `visibility-items-after-narrowing.txt`,
-`doc-sentences-after-narrowing.txt`.
+Snapshots: the `*-final.txt` files in the baselines directory. The full before/after for this
+commit is the diff between the branch's `59b973ac^` and `59b973ac` trees.
+
+## The layout test
+
+`peacockdb-core/tests/test_module_layout.rs`, its own commit, wired into pipeline.yml's CPU
+tier beside `test_ci_coverage`. Ten cases. It reads the committed tree and compiles one probe
+against the built library; no dataset, no device.
+
+### Every rule was watched red
+
+The spec asks for this and it is the only way to know a guard is wired up. Each violation was
+constructed in the tree, the test run, the message read, and the tree restored.
+
+| Rule | The violation | What it said |
+|---|---|---|
+| `pub_mod_declares_a_component_and_nothing_else` | `pub mod translator;` in `planner/mod.rs` | "`pub mod` outside lib.rs makes a subcomponent nameable crate-wide, and the wall it was given then exists only on paper: planner/mod.rs declares `pub mod translator;`" |
+| `a_components_api_is_declared_in_its_mod_rs` | `pub fn new_project` in `plan/exec_ops.rs` | "these items are `pub` outside a mod.rs, so they are component API nothing declared: plan/exec_ops.rs:110" |
+| `nothing_re_exports_with_pub_use` | `pub use std::fmt::Debug;` in `wire/mod.rs` | "`pub use` is not allowed — inline the declaration into mod.rs … wire/mod.rs:19" |
+| `nothing_is_pub_super` | `pub(super) fn input_layout` in `plan/common.rs` | "`pub(super)` is not a level this layout uses … plan/common.rs:9" |
+| `no_subcomponent_reaches_a_sibling` | `use super::translator::Translator` in `planner/memory_estimation/mod.rs` | "a subcomponent reaches a sibling, which nothing in rustc refuses: planner/memory_estimation/mod.rs names `super::translator::`" |
+| `no_super_path_climbs_out_of_its_component` | `use super::super::plan_text::…` in `plan/exec_ops.rs` | "these `super::` chains leave their own component: plan/exec_ops.rs:7 … climbs 2 from depth 1" |
+| `no_public_signature_names_a_type_from_a_private_module` | `pub fn wire_kind` in `wire/mod.rs` | "a `pub` item names a type from a module private to its own component, so the type escapes by inference even though no path can reach it: wire/mod.rs:117" |
+| `a_private_module_is_unreachable_from_outside_the_crate` | `pub mod generated;` in `wire/mod.rs` | "`wire::generated` compiled from outside the crate. flatc's 7,336 lines are supposed to be private to one component" |
+| `every_pub_mod_exemption_still_has_the_target_that_forces_it` | renamed a target in the exemption | "these `pub mod` exemptions have outlived the targets that forced them … The subcomponent can be `mod` again" |
+| `each_reader_sees_the_violation_and_not_its_near_miss` | made `pub_mod_declarations` a naive `contains` | "assertion failed: pub_mod_declarations(\"    pub modelled: usize,\").is_empty()" |
+
+**Two of those violations compiled with zero warnings**, which is the case for the test
+existing at all:
+
+- `use super::translator::Translator` from a sibling subcomponent. `pub(super)`, `pub(crate)`
+  and `pub(in path)` all give a subcomponent's siblings the same access as its parent, and
+  there is no level meaning "my parent but not my siblings". rustc accepted it; only this test
+  refused it.
+- `pub fn wire_kind(&self) -> fb::PlanNodeKind`. Confirmed by building it deliberately:
+  `cargo build` said **nothing**. `private_interfaces` compares against a type's *nominal*
+  visibility, and flatc emits `pub`, so a type no path outside `wire` can name is nominally
+  public. The test's comment says this, because a reader who assumes the compiler covers it
+  will delete the test as redundant.
+
+### One near-miss the readers had to be built around
+
+`executor/mod.rs` has `pub modelled: usize` — a field of `Underestimate`. A
+`contains("pub mod")` reader counts it as a subcomponent declaration. The reader matches at a
+word boundary and requires the `;`, and `each_reader_sees_the_violation_and_not_its_near_miss`
+pins that with the real line.
+
+### The `E0603` probe, and why it needs a control
+
+It compiles a two-line snippet against the `peacockdb_core` rlib beside the running test
+binary — `current_exe().parent()`, not a hardcoded path, because this crate is built into
+`target/` and `target-cudf-*` and a guess would read the wrong build or none.
+
+A probe that fails for the wrong reason — wrong rlib, missing `-L` — is indistinguishable from
+a probe that proved something. So the negative case is preceded by a positive control that
+must compile (`wire::Recipe`), and the failure is matched on `E0603` and `generated` rather
+than on "it failed".
+
+### A hazard met while proving the rules red
+
+The first `pub use` violation was `pub use attach::attach_recipes;`, which collides with the
+`pub fn attach_recipes` in the same file: the **build** failed with `E0255`, the test never
+ran, and grepping the output for `panicked at` found nothing — which read as "the rule did not
+fire". It is the family again, one level further in: *a check of a check can be green because
+the run never happened*. Read the exit status, not the expected signature. The violation that
+proves the rule is `pub use std::fmt::Debug;`, which compiles.
+
+### The exemption has a mechanical expiry
+
+`PUB_SUBCOMPONENTS` lists `executor/cpu_backend` and `executor/gpu_backend` with the targets
+that force them. The field is not decoration: `every_pub_mod_exemption_still_has_the_target_that
+_forces_it` asserts each named target exists, so when `test-layout.md` moves them into `src/`
+the test goes red and says the wall can go up. An exemption without a verified claim is the
+hole this whole family of findings is about.
+
+### Evidence
+
+| Check | Result |
+|---|---|
+| `test_module_layout` | 10 passed |
+| every rule | seen red, table above |
+| `test_ci_coverage` | 7 passed — it demanded the new target be wired, and accepts it now |
+| pipeline.yml | parses as YAML; the rendered `run:` block passes `bash -n` |
+| `--lib` / `test_plan_goldens` | 435 / 19 passed |
+| three builds | 0 warnings each |
+| goldens | byte-identical |
+| case inventory | the ten new cases and nothing else |
+| doc and attribute sentences | nothing absent |
+| residue gate | the same five lines |
