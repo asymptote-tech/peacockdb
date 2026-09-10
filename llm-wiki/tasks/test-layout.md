@@ -307,9 +307,11 @@ It keeps its job and loses most of its subject. From 720 lines:
 - Its own matcher unit tests stay whole. They are the reason this guard can go red at all.
 
 It gains assertions, and they are the most important ones in the file, because the ladder puts one
-CI line under each rung and nothing else says a rung stopped running. **Four lines must exist**:
-`--lib` under `--features rust-only`, `--lib` at default features, `--lib --features gpu --
---test-threads=1 gpu_tests::` on shad-gpu, and the CLI build. Each names its rung's filter, so each
+CI line under each rung and nothing else says a rung stopped running. **Four things must exist**:
+a `--lib` step under `--features rust-only`, a `--lib -- ffi_tests::` step at default features,
+the staged lib binary in the GPU job's array **with `gpu_tests::` reaching it in the run loop**,
+and the CLI build. The third is the one that is not a command line — the guard reads the staging
+array and the loop, the way it already reads `for t in …` today. Each names its rung's filter, so each
 lists exactly its own rung: the device line carries the 55 cases that move into `--lib` in this
 task, and the default-features line the three of the middle rung, under `-- ffi_tests::`. Each gets the red-watch below — delete
 the line, confirm the guard fails — because each is the only thing standing between a rung and
@@ -423,9 +425,15 @@ a bigger change to those scripts than to the lists.
   argument**: under the ladder it holds every rung, so an unfiltered run would put the CPU unit
   cases through `--test-threads=1` on the one serial host. The loop passes arguments to every
   staged binary alike, so this is a per-binary argument the loop does not have today.
-- **The `PASSED 0 tests` guard becomes load-bearing.** A path filter that matches nothing runs no
-  cases and exits 0 — a rename of the `gpu_tests` convention would be invisible without it. It is
-  already there, and the spec's point is that it is now what catches this, not an incidental check.
+- **The zero-test guard becomes load-bearing, and the two runners disagree about it.** A path
+  filter that matches nothing runs no cases and exits 0, so a rename of the `gpu_tests` convention
+  would be invisible without it. `pipeline.yml` arms it unconditionally — it reads `running 0
+  tests` from the log and fails. `build-test-shadgpu.sh` suppresses it exactly when a filter is
+  set (`elif [ "$rzero" -eq 1 ] && [ -z $filter_q ]`), on the reasonable ground that a
+  `PCK_TEST_FILTER` legitimately matches nothing. **The lib binary's `gpu_tests::` argument must
+  therefore not travel as `PCK_TEST_FILTER`**: it is part of what the binary is, not a
+  developer's selection, and the guard must stay armed for it. Keep the two distinct in the script
+  or the backstop is off in the one place a developer runs the suite by hand.
 
 **`build-test.sh`**
 
@@ -446,9 +454,11 @@ a bigger change to those scripts than to the lists.
 - The "derived suite must not be EMPTY" guard stays and gets closer to firing. With one derived
   target left it is one move away from being the thing that catches a mistake, so leave it.
 
-**`pipeline.yml`** takes the same three-list change, plus two steps. The device one is
-`cargo test --lib --features gpu -- --test-threads=1 gpu_tests::` on shad-gpu. The other is the
-middle rung: `cargo test -p peacockdb-core --lib -- ffi_tests::` at default features on
+**`pipeline.yml`** takes the same three-list change, plus one new step and one changed loop.
+**shad-gpu never runs cargo** — the job stages prebuilt binaries and the remote loop executes
+`$REMOTE_DIR/cpp/install/rust-tests/*` with `--nocapture --test-threads=1`. So the device rung is
+a staged binary, not a command line: the staging array gains the lib target and the run loop
+passes `gpu_tests::` to that one binary and to no other. The new step is the middle rung: `cargo test -p peacockdb-core --lib -- ffi_tests::` at default features on
 dataset-matrix, which
 **replaces the `--test test_gpu_batch` step it retires** — the job already compiles that feature
 shape for `test_gpu_batch` and `peacockdb-ffi --test test_ffi`, so this is a swap, not a second
@@ -569,9 +579,9 @@ neither moved the wrong thing.
 - **Name and gate agree in both directions.** The layout test asserts it by reading the tree:
   construct a `gpu_tests` module without the gate, and a `gpu`-gated module not called `gpu_tests`,
   and watch each go red.
-- On shad-gpu, `cargo test --lib --features gpu -- --test-threads=1 gpu_tests::` runs the device set
+- On shad-gpu the staged lib binary, run with `--test-threads=1 gpu_tests::`, covers the device set
   in roughly what the five staged binaries took. Materially longer means the filter is selecting
-  more than it should; `PASSED 0 tests` means it is selecting nothing.
+  more than it should; `running 0 tests` means it is selecting nothing, and the guard must say so.
 
 ### Test code is separated
 

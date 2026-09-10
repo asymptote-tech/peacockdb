@@ -664,10 +664,19 @@ It matches `target.name` against a `--test` name in cargo's json. The lib test t
 Stage it as `peacockdb_core_gpu_lib` — the run loop globs `cpp/install/rust-tests/*` and a bare
 crate name reads as ambiguous beside the target binaries.
 
-- [ ] **Step 4: Give the lib binary its filter argument**
+- [ ] **Step 4: Give the lib binary its filter argument, and keep it out of `PCK_TEST_FILTER`**
 
-The run loop passes `--test-threads=1` to every staged binary alike; the lib binary alone also
+Both run loops pass `--test-threads=1` to every staged binary alike; the lib binary alone also
 takes `gpu_tests::`. Set `RUST_TESTS=(test_gpu_corpus)` — one entry.
+
+The argument must be part of what that binary is, not a developer's selection.
+`build-test-shadgpu.sh:378` disarms its zero-test guard whenever a filter is set —
+`elif [ "$rzero" -eq 1 ] && [ -z $filter_q ]` — so routing `gpu_tests::` through
+`PCK_TEST_FILTER` would remove the backstop from the one binary that most needs it.
+`pipeline.yml`'s loop arms the guard unconditionally; make the script agree for this argument.
+
+Do both places: `scripts/lib/shadgpu-env.sh` and `pipeline.yml`'s inline staging loop, which
+duplicates the same resolver and does not pass `--features gpu` today.
 
 - [ ] **Step 5: Shrink `gpu_runtime_targets()` and delete the murmur literal**
 
@@ -691,7 +700,7 @@ scripts/build-test-shadgpu.sh --run-status
 
 Run this in the foreground and stay in the call — a backgrounded shad-gpu cycle is killed
 mid-build. Expected: the 55 cases pass, and the run takes roughly what the five staged binaries
-took. Materially longer means the filter selects more than it should; `PASSED 0 tests` means it
+took. Materially longer means the filter selects more than it should; `running 0 tests` means it
 selects nothing.
 
 - [ ] **Step 8: Close the four `gpu_backend` entries**
@@ -768,8 +777,10 @@ tests stay whole — they are the reason this guard can go red at all.
 - [ ] **Step 2: Assert four lines exist**
 
 `--lib` under `--features rust-only`; `--lib -- ffi_tests::` at default features;
-`--lib --features gpu -- --test-threads=1 gpu_tests::` on shad-gpu; and the CLI build. Follow
-`line_runs_lib_tests` and `line_builds_the_cli` — they are the pattern for reading a workflow line.
+the staged lib binary in the GPU job's `for t in …` array, with `gpu_tests::` reaching it in the
+remote run loop; and the CLI build. Follow `line_runs_lib_tests` and `line_builds_the_cli` for the
+first two, and `gpu_job_staged_targets()` for the third — shad-gpu runs prebuilt binaries, never
+cargo, so there is no command line there to assert.
 
 - [ ] **Step 3: Red-watch all four**
 
