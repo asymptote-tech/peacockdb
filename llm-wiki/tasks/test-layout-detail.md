@@ -2039,3 +2039,8 @@ dump 696 records. All unchanged from slice 10, as they must be — no code moved
 - verda unreachable throughout; shad-gpu not needed. Both target dirs were cleaned for the cold
   counts and rebuilt; `./target` holds the rust-only package build, `target-cudf-*` the `gpu`
   `--lib` fingerprint last.
+
+### 2026-09-11 — all twelve slices in; task 4 is reviewing, PR #145 against `ENS-rmm-pool-budget`
+
+Slice 11 committed as `d30e15e6`. Twenty-one commits over task 3's tip, 124 files, and the PR's
+commit count matches the branch's, so it carries this task alone. Review round 1 dispatched.
