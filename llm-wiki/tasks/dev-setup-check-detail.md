@@ -10,7 +10,7 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   will target master. Board moved to `building`; developer dispatched with the impl plan.
 - 2026-09-11 23:28Z — developer returned green: new case red then green, four workflows
   recorded below (exec_model timed out at 900 s; shad-gpu `--patch --run` red on glibc 2.38).
-  Committed, pushed, PR opened against master; board moved to `reviewing`.
+  Committed, pushed, PR #146 opened against master (3 commits, base verified); board moved to `reviewing`.
 - Pre-dispatch checks, from the coordinator's own shell: `ssh dev` and `ssh verda` both fail
   with `Could not resolve hostname` — `~/.ssh/config` carries only `shad-gpu`. So verda is
   down (local runs), and workflow 3's `--host dev` is expected to fail at the first ssh. The

@@ -127,7 +127,7 @@ a device refusal an outcome rather than an abort, and records the real limits as
 Throwaway. Lives on this branch only, never on master; the PR is closed unmerged and nothing is
 archived.
 
-### 1. [`dev-setup-check.md`](dev-setup-check.md) — state: reviewing
+### 1. [`dev-setup-check.md`](dev-setup-check.md) — state: reviewing — PR #146
 
 Every documented workflow run once from the host `dev` by the ensemble with nobody attached, and
 what each did recorded in the detail file. Two lines of code so CI sees a code diff: one
