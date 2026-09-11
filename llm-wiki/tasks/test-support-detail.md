@@ -261,3 +261,9 @@ rule, 170 goldens identical, 263/200/7, two doc hits, no workflow flag. The pack
 minutes here against the ~15 the dispatch budgeted, with the corpus binary at 307 s against 508 s
 last time — the default testdata root instead of the composed `/tmp` one is the only difference
 in the invocation.
+
+### 2026-09-11 — reviewing: PR #147 against `ENS-test-layout`
+
+Plan task 3 green in the fresh window (entry above). Committed as `83e90c4f`, pushed, PR #147
+opened against `ENS-test-layout` — base verified, 5 commits, the branch alone. The cudf shape
+is CI's to build on this PR. Reviewer round 1 dispatched next.
