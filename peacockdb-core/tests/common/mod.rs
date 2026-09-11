@@ -10,18 +10,15 @@ pub mod corpus_golden;
 #[cfg(not(feature = "rust-only"))]
 pub mod corpus_gpu;
 pub mod cost_model;
-pub mod injection;
 pub mod join_fixture;
-pub mod rebuild;
 
 use std::path::PathBuf;
 
 use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::arrow::util::pretty::pretty_format_batches;
 
 pub use peacockdb_core::test_support::{
-    GPU_BUDGET, assert_results_match, data_dir_for, golden_dir_for, queries_dir_for,
-    testdata_minimal_dir, testdata_root, total_rows,
+    GPU_BUDGET, assert_results_match, batches_to_sorted_str, data_dir_for, golden_dir_for,
+    queries_dir_for, testdata_minimal_dir, testdata_root, total_rows,
 };
 
 // Four of the harness modules live in `peacockdb_core::test_support` now — the one copy the
@@ -105,23 +102,6 @@ fn point_canonical_root() -> PathBuf {
 /// [`canonical_root`] for one dataset.
 pub fn canonical_data_dir(dataset: &str, sf: &str) -> PathBuf {
     canonical_root().join(format!("{dataset}.sf{sf}"))
-}
-
-// --- result formatting ------------------------------------------------------
-/// Pretty-print batches with data rows sorted, for order-independent compares.
-pub fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
-    let formatted = pretty_format_batches(batches).unwrap().to_string();
-    let lines: Vec<&str> = formatted.lines().collect();
-    if lines.len() > 4 {
-        let mut data = lines[3..lines.len() - 1].to_vec();
-        data.sort_unstable();
-        let mut out = lines[..3].to_vec();
-        out.extend(data);
-        out.push(lines[lines.len() - 1]);
-        out.join("\n")
-    } else {
-        formatted
-    }
 }
 
 /// Float-tolerant comparison of two `batches_to_sorted_str` renderings. The data

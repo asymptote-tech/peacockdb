@@ -10,24 +10,24 @@
 //! injected shapes, which are ones it never would. `small_table_bytes` is constant across
 //! both, so a join's co-partitioning is the knob neither turns.
 
-mod common;
-
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::DataType;
 use datafusion::execution::context::SessionContext;
 
-use peacockdb_core::executor::CpuBackend;
-use peacockdb_core::executor::{RunError, When};
-use peacockdb_core::executor::{RunReport, run};
-use peacockdb_core::plan::GpuNode;
-use peacockdb_core::planner;
+use crate::executor::CpuBackend;
+use crate::executor::{RunError, When};
+use crate::executor::{RunReport, run};
+use crate::plan::GpuNode;
+use crate::planner;
 
-use common::injection::{
+use super::injection::{
     CAP, Dimensions, Drain, Empties, Injected, InjectedContext, Injection, PlannedMode, Rebatch,
     SEED, apply, node_count, planned_mode, select,
 };
-use common::mode::{MODES, Mode};
-use common::{assert_results_match, batches_to_sorted_str, data_dir_for, queries_dir_for};
+use crate::test_support::{MODES, Mode};
+use crate::test_support::{
+    assert_results_match, batches_to_sorted_str, data_dir_for, queries_dir_for,
+};
 
 /// Where a Welford merge is the only divergence: this mode decomposes the aggregate into
 /// an init, two merges and a finalize, and DataFusion computes it in one pass, so the last
@@ -65,10 +65,9 @@ async fn sql_answers_match_datafusion(
 ) {
     let data_dir = data_dir_for(dataset, "1");
 
-    let oracle_ctx =
-        peacockdb_core::register_tables_for(peacockdb_core::build_session_state(1), &data_dir)
-            .await
-            .expect("register the tables");
+    let oracle_ctx = crate::register_tables_for(crate::build_session_state(1), &data_dir)
+        .await
+        .expect("register the tables");
     let expected = oracle_ctx
         .sql(sql)
         .await
@@ -80,12 +79,15 @@ async fn sql_answers_match_datafusion(
     // Encoded once: `assert_results_match` renders both sides per call, so one oracle
     // against thirty runs is rendered thirty times, and on a million-row result that is
     // most of the tier. The tolerance path indexes rather than renders and keeps its own.
-    let expected_rows = tolerance.is_none().then(|| sorted_rows(&expected)).flatten();
+    let expected_rows = tolerance
+        .is_none()
+        .then(|| sorted_rows(&expected))
+        .flatten();
     let mut planned = Vec::new();
     for mode in &MODES {
         let name = mode.name;
-        let ctx = peacockdb_core::register_tables_for(
-            peacockdb_core::build_session_state(mode.target_partitions),
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.target_partitions),
             &data_dir,
         )
         .await
@@ -219,7 +221,7 @@ fn sorted_rows(batches: &[RecordBatch]) -> Option<Vec<Vec<u8>>> {
 /// rather than at the call sites: an injected run leaks exactly as visibly as a planned
 /// one, and a batch held and never released shows in neither's rows.
 fn run_and_check(
-    tree: &dyn peacockdb_core::plan::GpuNode,
+    tree: &dyn crate::plan::GpuNode,
     task: &std::sync::Arc<datafusion::execution::TaskContext>,
     injection: Injection,
     oracle: &Oracle<'_>,
@@ -230,10 +232,9 @@ fn run_and_check(
     // and the driver asks only for canonical form. Without this a rewrite that broke a
     // node's requirements would run and answer, which is the failure this whole tier is
     // about.
-    peacockdb_core::plan::validate(tree)
-        .unwrap_or_else(|error| panic!("{what} is not a plan: {error}"));
-    let report = run::<Injected>(tree, &ctx, None)
-        .unwrap_or_else(|error| panic!("{what}: {error}"));
+    crate::plan::validate(tree).unwrap_or_else(|error| panic!("{what} is not a plan: {error}"));
+    let report =
+        run::<Injected>(tree, &ctx, None).unwrap_or_else(|error| panic!("{what}: {error}"));
     let actual: Vec<RecordBatch> = report
         .batches
         .iter()
@@ -376,17 +377,17 @@ end_to_end!(tpch, shuffle_stddev, Some(WELFORD_TOLERANCE));
 
 // Eleven queries, four of which carry a shape no other query here has — see INJECTED.
 injected_queries!(
-    tpch/nested_loop_join,
-    tpch/nested_loop_left_join,
-    tpch/anti_join,
-    tpcds/q97,
-    tpcds/q16,
-    tpcds/q45,
-    tpcds/q8,
-    tpcds/q93,
-    tpcds/q33,
-    tpcds/q2,
-    tpch/nested_limits
+    tpch / nested_loop_join,
+    tpch / nested_loop_left_join,
+    tpch / anti_join,
+    tpcds / q97,
+    tpcds / q16,
+    tpcds / q45,
+    tpcds / q8,
+    tpcds / q93,
+    tpcds / q33,
+    tpcds / q2,
+    tpch / nested_limits
 );
 
 // ── the aggregate that stops aggregating ────────────────────────────────────
@@ -424,8 +425,8 @@ async fn a_two_key_group_by_over_many_rows_does_not_emit_a_group_twice() {
 /// query holds every count below.
 #[tokio::test]
 async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
-    use peacockdb_core::executor::CallKind;
-    use peacockdb_core::plan::{NodeRef, as_node_ref};
+    use crate::executor::CallKind;
+    use crate::plan::{NodeRef, as_node_ref};
 
     let data_dir = data_dir_for("tpch", "1");
     let sql = std::fs::read_to_string(queries_dir_for("tpch").join("nested-limits.sql"))
@@ -433,8 +434,8 @@ async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
     let mut most_offered = 0;
     for mode in &MODES {
         let name = mode.name;
-        let ctx = peacockdb_core::register_tables_for(
-            peacockdb_core::build_session_state(mode.target_partitions),
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.target_partitions),
             &data_dir,
         )
         .await
@@ -493,11 +494,8 @@ async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
 
     /// The mid-plan limit's index in the driver's pre-order numbering, which is the tree
     /// walked children-after-self.
-    fn limit_node(root: &dyn peacockdb_core::plan::GpuNode) -> usize {
-        fn walk(
-            node: &dyn peacockdb_core::plan::GpuNode,
-            next: &mut usize,
-        ) -> Option<usize> {
+    fn limit_node(root: &dyn crate::plan::GpuNode) -> usize {
+        fn walk(node: &dyn crate::plan::GpuNode, next: &mut usize) -> Option<usize> {
             let here = *next;
             *next += 1;
             if matches!(as_node_ref(node), NodeRef::Limit(_)) {
@@ -512,7 +510,7 @@ async fn a_limit_slices_at_most_two_batches_and_stops_the_scan() {
 
     /// How many batches every source in the plan could produce — the mapping's own count,
     /// which is what a scan that ran to the end would have read.
-    fn batches_offered(node: &dyn peacockdb_core::plan::GpuNode) -> usize {
+    fn batches_offered(node: &dyn crate::plan::GpuNode) -> usize {
         let here = match as_node_ref(node) {
             NodeRef::LoadParquet(load) => load.partition_groups.iter().map(Vec::len).sum(),
             _ => 0,
@@ -554,8 +552,8 @@ async fn a_query_has_a_smallest_budget_that_fits_and_trips_a_byte_below_it() {
         .expect("the query text");
     let mode = &MODES[3];
     let name = mode.name;
-    let ctx = peacockdb_core::register_tables_for(
-        peacockdb_core::build_session_state(mode.target_partitions),
+    let ctx = crate::register_tables_for(
+        crate::build_session_state(mode.target_partitions),
         &data_dir,
     )
     .await
@@ -584,9 +582,8 @@ async fn a_query_has_a_smallest_budget_that_fits_and_trips_a_byte_below_it() {
     // Measured here: peak 8,222, smallest fitting budget 9,556, and region — this join's
     // build side — is 920 bytes on its own. So the gap is that side plus whatever else was
     // resident at the instant the check ran, not that side alone.
-    let fits = |budget: usize| {
-        run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), Some(budget)).is_ok()
-    };
+    let fits =
+        |budget: usize| run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), Some(budget)).is_ok();
     // The observed peak is a floor for the search and not the answer, per the block above.
     let (mut low, mut high) = (watching.peak_bytes, watching.peak_bytes * 8);
     assert!(fits(high), "the query does not run at eight times its peak");
@@ -641,8 +638,8 @@ async fn the_model_is_compared_against_what_the_calls_measured() {
         .expect("the query text");
     let mode = &MODES[3];
     let name = mode.name;
-    let ctx = peacockdb_core::register_tables_for(
-        peacockdb_core::build_session_state(mode.target_partitions),
+    let ctx = crate::register_tables_for(
+        crate::build_session_state(mode.target_partitions),
         &data_dir,
     )
     .await
@@ -656,8 +653,7 @@ async fn the_model_is_compared_against_what_the_calls_measured() {
         .expect("the query has a physical plan");
     let (tree, _memory) = planner::plan(&plan, mode.knobs())
         .unwrap_or_else(|error| panic!("filter-project at {name}: {error}"));
-    let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
-        .expect("the run finishes");
+    let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None).expect("the run finishes");
     assert!(
         report.measured_calls > 0,
         "no call reported a measured transient, so there was nothing to compare the model \
@@ -679,9 +675,9 @@ async fn the_model_is_compared_against_what_the_calls_measured() {
 /// prove nothing. So each is read off the trace against the same plan uninjected.
 #[tokio::test]
 async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
-    use common::injection::{Drain, Empties, Rebatch};
-    use peacockdb_core::executor::CallKind;
-    use peacockdb_core::plan::{NodeRef, as_node_ref};
+    use super::injection::{Drain, Empties, Rebatch};
+    use crate::executor::CallKind;
+    use crate::plan::{NodeRef, as_node_ref};
 
     let data_dir = data_dir_for("tpch", "1");
     let sql = std::fs::read_to_string(queries_dir_for("tpch").join("nested-loop-join.sql"))
@@ -690,8 +686,8 @@ async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
     // lanes and there is a lane to drain.
     let mode = &MODES[2];
     let name = mode.name;
-    let ctx = peacockdb_core::register_tables_for(
-        peacockdb_core::build_session_state(mode.target_partitions),
+    let ctx = crate::register_tables_for(
+        crate::build_session_state(mode.target_partitions),
         &data_dir,
     )
     .await
@@ -751,7 +747,10 @@ async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
         drain: Drain::FirstLane,
         ..Injection::NONE
     });
-    assert_eq!(drained_first, 0, "the drained lane read {drained_first} times");
+    assert_eq!(
+        drained_first, 0,
+        "the drained lane read {drained_first} times"
+    );
     assert_eq!(
         drained_pulls, pulls,
         "draining a lane changed how many batches were read, so rows moved rather than \
@@ -769,13 +768,9 @@ async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
         "the empty-batch setting fired on none of the {pulls} pulls"
     );
 
-    fn sources_in(node: &dyn peacockdb_core::plan::GpuNode) -> usize {
+    fn sources_in(node: &dyn crate::plan::GpuNode) -> usize {
         usize::from(matches!(as_node_ref(node), NodeRef::LoadParquet(_)))
-            + node
-                .children()
-                .into_iter()
-                .map(sources_in)
-                .sum::<usize>()
+            + node.children().into_iter().map(sources_in).sum::<usize>()
     }
 }
 
@@ -789,15 +784,15 @@ async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
 /// refusal the engine makes rather than a shape nobody tried.
 #[tokio::test]
 async fn a_degenerate_hash_under_a_right_outer_is_refused_by_name() {
-    use common::injection::{Hash, planned_mode};
+    use super::injection::{Hash, planned_mode};
 
     let data_dir = data_dir_for("tpcds", "1");
     let sql =
         std::fs::read_to_string(queries_dir_for("tpcds").join("q93.sql")).expect("the query text");
     let mode = &MODES[2];
     let name = mode.name;
-    let ctx = peacockdb_core::register_tables_for(
-        peacockdb_core::build_session_state(mode.target_partitions),
+    let ctx = crate::register_tables_for(
+        crate::build_session_state(mode.target_partitions),
         &data_dir,
     )
     .await
@@ -809,8 +804,8 @@ async fn a_degenerate_hash_under_a_right_outer_is_refused_by_name() {
         .create_physical_plan()
         .await
         .expect("the query has a physical plan");
-    let (tree, _memory) = planner::plan(&plan, mode.knobs())
-        .unwrap_or_else(|error| panic!("q93 at {name}: {error}"));
+    let (tree, _memory) =
+        planner::plan(&plan, mode.knobs()).unwrap_or_else(|error| panic!("q93 at {name}: {error}"));
     assert!(
         planned_mode(name, tree.as_ref()).owes_probe_when_empty,
         "q93 is here because its Right outer owes its probe side, and this plan has none"
@@ -914,8 +909,8 @@ impl PlannedQuery {
         let name = mode.name;
         let sql = std::fs::read_to_string(queries_dir_for(dataset).join(format!("{query}.sql")))
             .expect("the query text");
-        let ctx = peacockdb_core::register_tables_for(
-            peacockdb_core::build_session_state(mode.target_partitions),
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.target_partitions),
             &data_dir_for(dataset, "1"),
         )
         .await

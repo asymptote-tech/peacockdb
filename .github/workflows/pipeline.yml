@@ -246,14 +246,6 @@ jobs:
         if: matrix.cudf == '25.02'
         run: cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens
 
-      # The injection mechanism against itself: the plan rebuild is identity per arm
-      # and per field, and the selector's output is a cover rather than a prefix.
-      # Reads no parquet — the plans are hand-built and the four cases are the ones
-      # that need no dataset.
-      - name: Layout injection mechanism (Rust)
-        if: matrix.cudf == '25.02'
-        run: cargo test --features rust-only -p peacockdb-core --test test_layout_injection
-
 
       - name: Validate sf1 datasets
         run: |
@@ -286,7 +278,7 @@ jobs:
           # the default-feature one above carries the ffi rung as well. Each shares its
           # own line's already-built fingerprint, so neither costs an extra compile.
           cargo test --no-run --features rust-only -p peacockdb-core --lib \
-            --test test_cpu_executors --test test_cpu_end_to_end
+            --test test_cpu_executors
           # The CLI, which has no test target of its own and so is named by nothing above.
           # It is the only caller of the planner and the driver from outside the crate, so a
           # signature change that the tests absorb still breaks it — and unbuilt, it breaks
@@ -314,22 +306,18 @@ jobs:
           # of that ABI is test_gpu_abi, staged for the gpu-tests job.
           cargo test -p peacockdb-core --lib -- ffi_tests::
           cargo test -p peacockdb-ffi --test test_ffi
-          # The inline #[cfg(test)] modules: config and the planner,
-          # which is nearly all of them. Every other cargo invocation in this file passes
-          # --test, which selects integration targets ONLY — so before this line the lib
-          # unit tests ran locally and never in CI. test_ci_coverage asserts this line
-          # exists.
+          # The cpu rung, entire: every in-crate test module that needs neither the FFI
+          # nor a device. Every other cargo invocation in this file passes --test, which
+          # selects integration targets ONLY — so before this line the lib unit tests ran
+          # locally and never in CI. It needs the sf1 dataset generated above, because the
+          # end-to-end tier and the injector's own cases moved in here. test_ci_coverage
+          # asserts this line exists.
           cargo test --features rust-only -p peacockdb-core --lib
           # The executor contract both engines owe, from one table: this runs its rows on
           # the CPU backend and the gpu-tests job runs the same rows on a device. Neither
           # half proves the contract alone, which is why the table is shared rather than
           # copied. Synthetic data written by the test, so no dataset and no device.
           cargo test --features rust-only -p peacockdb-core --test test_cpu_executors
-          # SQL in, rows out: every query planned and run at all five modes against
-          # DataFusion on the same SQL, and eleven of them at injected layouts no
-          # planner would emit — a rebatcher at an interior edge, a drained lane,
-          # zero-row batches, a degenerate hash. Needs sf1, generated above; no device.
-          cargo test --features rust-only -p peacockdb-core --test test_cpu_end_to_end
           # The corpus on the same path: every enabled query at every mode its line
           # declares, answers against DataFusion. Needs sf1, so it lives here and not
           # in the golden-only tier.

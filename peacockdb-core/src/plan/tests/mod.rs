@@ -66,6 +66,7 @@ fn invalid(result: Result<(), PlanError>, mentions: &str) {
 
 mod aggregate;
 mod joins;
+mod layout_injection;
 
 #[test]
 fn a_reference_past_its_inputs_columns_is_caught_at_plan_time() {

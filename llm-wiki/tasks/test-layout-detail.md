@@ -709,3 +709,189 @@ reset, on the developer's judgement once it compiles.
 
 verda at re-dispatch: reachable but reprovisioned — host key changed, and after re-keying the new
 host refuses the key (`Permission denied (publickey)`). Local runs for this slice.
+
+### 2026-09-10 — slice 6 done: the injector trio, `test_layout_injection` and `test_cpu_end_to_end` into `src/`
+
+Plan task 6, steps 1-8, plus task 10's steps 1-3. Not committed. Resumed from the tree the
+19:00 dispatch left; nothing in it was reset. Five files created, four deleted, 21 modified:
+
+- Created `peacockdb-core/src/tests/{mod.rs,injection.rs,rebuild.rs,end_to_end.rs}` and
+  `peacockdb-core/src/plan/tests/layout_injection.rs`.
+- Deleted `peacockdb-core/tests/common/{injection,rebuild}.rs`, `tests/test_layout_injection.rs`,
+  `tests/test_cpu_end_to_end.rs`.
+- Modified `src/lib.rs` (`#[cfg(test)] mod tests;`), `src/plan/tests/mod.rs`,
+  `src/executor/mod.rs`, `src/executor/cpu_backend/{mod,join,source,backend}.rs`,
+  `cpu_backend/tests/{backend,join}.rs`, `src/wire/tests.rs`, `src/test_support/{mod,result_text}.rs`,
+  `tests/common/mod.rs`, `tests/test_module_layout.rs`, `.github/workflows/pipeline.yml`,
+  `scripts/compare-inventory.sh`, `llm-wiki/{build-test,coding-style,tickets}.md`.
+
+#### What was kept from the dead dispatch, what changed, what was added
+
+The partial tree compiled and its `--lib` run was green on first contact, so it was kept whole.
+Three decisions in it are the right ones and are recorded here as this slice's:
+
+- **`test_cpu_end_to_end` came forward from plan task 10.** It was the fourth consumer of
+  `common::injection` (step 1's grep: `test_layout_injection.rs`, `test_cpu_end_to_end.rs`,
+  `test_planner_join_capability.rs`, `test_planner_join_refusals.rs`), and once the trio left the
+  crate boundary it could not stay behind. Task 10's own steps 1-3 are therefore done here: both
+  `#[ignore]` attributes and their `#182` messages travelled verbatim, and the run is 24 passed, 2
+  ignored. Task 10 has nothing left but its ladder reading.
+- **`join_fixture.rs` stayed in `tests/common/`.** Its only consumers are the two planner targets
+  task 7 moves, and a file with no in-crate reader would be dead code under `src/tests/` until then.
+- **`CpuSource`, `CpuJoin` and `CpuProbingJoin` are declared in `cpu_backend/mod.rs`**, with
+  `join::Calls` `pub(crate)` for the field. Not a choice: `backend.rs` writes `type Source =
+  CpuSource; type Join = CpuJoin;` in the `Backend` impl, and an associated type of a public trait
+  impl must be nominally `pub` — `pub(crate)` on any of the three is `error[E0446]: crate-private
+  type in public interface`, tried and reverted. A `pub struct` left inside a now-private `mod
+  join` would satisfy rustc while escaping by inference through `<CpuBackend as Backend>::Join`,
+  which is the case `no_public_signature_names_a_type_from_a_private_module` exists for, and
+  `CpuExec` and `CpuUnload` already sit in `mod.rs` for the same reason. So the three types are
+  the subcomponent's API and `source.rs`/`join.rs` are its implementation.
+- `batches_to_sorted_str` moved from `tests/common/mod.rs` into `test_support/result_text.rs` with
+  a `mod.rs` delegate: `end_to_end.rs` needed it from inside the crate and
+  `assert_sorted_str_approx` still needs it from outside — the two-audience case the feature is
+  for. One new bare `pub` in `test_support`, which the ladder excludes.
+
+Changed by this dispatch: two `use` lines in `cpu_backend/mod.rs` were out of rustfmt's order
+(`parquet` sorts before `physical_expr`) and were moved; three wiki sentences below. Added: every
+measurement, and the red-watches.
+
+#### `has_finish_pass`, two hops, and the register that grew by two
+
+`cpu_backend/mod.rs` declares `pub(crate) fn has_finish_pass(node, build, probe, ctx) ->
+Result<bool, PlanError>` as `CpuJoin::hash(..).map(|e| e.has_finish_pass())`; `executor/mod.rs`
+declares the same signature delegating to it; `CpuJoin::makes_a_finish_pass` is
+`has_finish_pass`. `wire/tests.rs` calls `crate::executor::has_finish_pass` and keeps both halves:
+a refused cell is `Err`, an allowed cell's `bool` equals whether the recipe carries an `AtDone`
+call. All three are `#[cfg(test)]`, so `TEST_ONLY_ITEMS` goes **8 → 10**: the `makes_a_finish_pass`
+entry becomes `has_finish_pass` called by `cpu_backend/mod.rs`, and the two delegates are
+registered with their callers — the same three-entry shape `physical_expr` already has. The `use
+crate::executor::cpu_backend::join::CpuJoin` line and the comment naming the exemption are gone
+from `wire/tests.rs`, so `CROSS_COMPONENT_REACHES` is **empty**; the register stays, as the spec
+says, until task 4 of the chain deletes it.
+
+#### The register, watched red in both directions on this tree
+
+| Probe | What fired | What it printed |
+|---|---|---|
+| `executor/cpu_backend/join` put back in `PUB_MODULES`, forced by `injection.rs` | `every_pub_mod_exemption_is_still_forced_by_what_it_names` | `executor/cpu_backend/join names peacockdb-core/tests/common/injection.rs, which no longer exists` |
+| the `wire/tests.rs` reach put back in `CROSS_COMPONENT_REACHES` | `only_the_parent_component_names_a_subcomponent` | `wire/tests.rs no longer names executor/cpu_backend, so the entry can go` |
+| `TEST_ONLY_ITEMS` entry renamed back to `makes_a_finish_pass` | `cfg_test_appears_only_on_a_test_module` | ``join.rs: `makes_a_finish_pass` is registered as test-only and no longer carries a `#[cfg(test)]`; drop the entry`` (and `has_finish_pass` reported as unregistered) |
+| `mod join;` → `pub mod join;` with no register entry | `pub_mod_declares_a_component_and_nothing_else` | ``executor/cpu_backend/mod.rs declares `pub mod join;` `` |
+
+Each reverted; `test_module_layout` is 16 passed on the final tree.
+
+#### CI
+
+`pipeline.yml`: the `Layout injection mechanism (Rust)` step is deleted, `--test
+test_cpu_end_to_end` is out of the rust-only prebuild and the run step, and the comment above
+the rust-only `--lib` line now says it needs sf1 because the end-to-end tier rides in it. `grep
+test_layout_injection\|test_cpu_end_to_end` over the file → no hits. Checked mechanically: the
+file parses as YAML (7 jobs), and `bash -n` over all 32 rendered `run:` blocks (33 in slice 5,
+one step fewer) is clean. `test_ci_coverage` is 7 passed; a deleted target needs no exemption.
+
+#### Inventories — the 30 leaves moved, and the two summary lines that went
+
+Set equality computed over leaf names (last `::` segment), per shape and over the union of the
+three, as sets and as multisets; the baselines on disk are untouched and the fresh files are
+`/tmp/inv6-{rust-only,cudf,gpu}.txt`.
+
+| Shape | Lines | Leaves lost | Leaves gained | Duplicated leaves |
+|---|---|---|---|---|
+| `rust-only` | 1086 vs 1089 | none | slice 4's five layout cases | 3, unchanged |
+| `cudf` | 1153 vs 1157 | none | the same five | 10, unchanged |
+| `gpu` (`--lib` only) | 471 vs 438 | none | 33: the 30 below plus slice 5's three `ffi_tests` — the ladder, `gpu` ⊃ `rust-only` | 3, unchanged |
+| union of three | 1092 distinct vs 1087 | none | the same five | 10, unchanged |
+
+Per-leaf target movement, `rust-only`: 26 `test_cpu_end_to_end → --lib` (as
+`tests::end_to_end::<leaf>`), 4 `test_layout_injection → --lib` (as
+`plan::tests::layout_injection::<leaf>`), nothing else. `--lib` is 435 → **465** in `rust-only`
+and 438 → **468** in `cudf` and `gpu`. The two summary lines that disappeared with their binaries:
+`test_cpu_end_to_end  26 tests, 0 benchmarks` and `test_layout_injection  4 tests, 0 benchmarks`.
+`compare-inventory.sh` reports `DRIFTED` for all three, as it must when cases change target.
+
+`compare-inventory.sh` now accepts `gpu`: the dead dispatch added the arm (two lines and a
+comment), and this is the first slice whose `gpu` row is the tool's answer rather than a hand
+`diff`. Its `rc=1` above is the `DRIFTED` verdict, not the usage error slices 2-5 recorded.
+
+#### Everything measured, on the final tree
+
+| Check | Result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core` (whole package, `--test-threads=2`) | **1037 passed, 0 failed, 2 ignored**, exit 0 — 18 result lines, two fewer binaries than slice 5 |
+| `… --lib` | 463 passed, 2 ignored (435 + 4 + 26) |
+| `… --lib -- tests::end_to_end` | 24 passed, 2 ignored, both `#[ignore]` against #182 |
+| `… --lib -- plan::tests::layout_injection` | 4 passed |
+| `… --test test_module_layout` | 16 passed |
+| `… --test test_ci_coverage` | 7 passed |
+| `cargo build --features rust-only -p peacockdb-core`, cold | 0 warnings |
+| `cargo test --features rust-only -p peacockdb-core --no-run`, cold | 0 warnings |
+| `scripts/cargo-cudf.sh build -p peacockdb-core`, cold | 0 warnings |
+| `scripts/cargo-cudf.sh build -p peacockdb-core --features gpu` | 0 warnings |
+| `sha256sum` over `testdata/goldens` | identical, 170 files — before and after the suite |
+| `rustfmt --edition 2024 --check` on the twelve touched leaf files | clean |
+| the `mod.rs` files (`cpu_backend`, `executor`, `plan/tests`, `test_support`) | clean against empty stub children, so the `mod` chain was not followed into pre-existing files; `src/tests/mod.rs` clean directly, every child being this slice's |
+
+Suites ran with `PEACOCK_TESTDATA_DIR=/tmp/peacock-testdata-slice3`, slice 3's composed root,
+which still exists. No device suite: nothing here touches a device path. verda refused the key,
+so everything ran locally.
+
+#### The ladder — the first slice that moves it
+
+- Bare `pub` excluding `mod`: **290 → 283**, and **249 → 241 excluding `test_support`**. Eight
+  `impl pub fn` in `join.rs` and `source.rs` demoted to `pub(crate)`; one `pub fn` gained in
+  `test_support/mod.rs`.
+- `pub mod`: **16 → 14**. `PUB_MODULES`: **9 → 7**. `CROSS_COMPONENT_REACHES`: **1 → 0**.
+  `TEST_ONLY_ITEMS`: **8 → 10**.
+- Visibility dump 640 → **684**, +44 net: 39 `pub(crate)` items from `injection.rs` and
+  `rebuild.rs`, now inside `src/` where the dump reads; `pub(crate) mod injection` and `pub(crate)
+  mod rebuild` (the two planner targets task 7 moves reach them as `crate::tests::…`);
+  `join::Calls`; the two `has_finish_pass` delegates; `batches_to_sorted_str` twice; minus the two
+  `pub mod`. The three struct declarations moved files without changing count.
+- `#[cfg(test)]` occurrences in `src/`: 46 → **51**: one more test-module declaration (`lib.rs`),
+  two registered delegates, two mentions inside their doc comments.
+
+#### Where a measurement contradicts the spec or plan
+
+- **The spec's "108 → 79" for this slice is not what the ladder measures.** The production count
+  went 249 → 241: the trio forced `pub mod` on `join` and `source`, whose *items* are now
+  `pub(crate)`, but the three executor types stay `pub` in `mod.rs` (E0446 above) and every other
+  `cpu_backend` item is still forced by `test_cpu_executors.rs`. The bulk of the 108 the spec
+  counted are items in `plan/mod.rs` and `executor/mod.rs` that the trio named through a
+  component wall that stays — moving the caller in-crate does not demote them, and by the spec's
+  own accounting those are task 4's. Recorded, not bent.
+- **Plan step 6's "converting their items to `pub(crate)` — the compiler names every consumer"
+  is true of the functions and false of the three types**, for the E0446 reason.
+- **The `TEST_ONLY_ITEMS` register grows here rather than shrinking**, 8 → 10, which the plan's
+  step 5 does not say: two delegates are two more `#[cfg(test)]` items outside a test path.
+- `end_to_end.rs` is **1052 lines**, over `coding-style.md`'s 1000. It was 1057 as
+  `test_cpu_end_to_end.rs` and moved verbatim (rustfmt shortened it); the layout test carries no
+  length rule, so nothing went red. Left for the reviewer to decide: splitting is not a move.
+
+#### Documentation the change falsified, fixed here
+
+- `llm-wiki/build-test.md`: the End-to-end and Layout-injection rows point at the new paths, the
+  dataset-matrix step list no longer names the two targets, and the layout-rules row no longer
+  says "the one cross-component reach". The `Runs` column and the arithmetic are task 12's.
+- `llm-wiki/coding-style.md`: "Nine more exist under `executor/`" is seven, and
+  `CROSS_COMPONENT_REACHES` is noted empty. `makes_a_finish_pass` stays in the Names section as
+  the example of what the predicate rule forbids, which is still true.
+- `llm-wiki/tickets.md` #182: `boundary()` is in `src/tests/end_to_end.rs`. The #176 line naming
+  a `--test test_cpu_end_to_end` step is history of a CI failure and stays.
+
+#### For the slices after this one
+
+- Task 7's two planner targets are now the only consumers of `join_fixture.rs`, and they reach the
+  injector as `crate::tests::injection` once inside. `src/tests/mod.rs` declares `injection` and
+  `rebuild` `pub(crate) mod` for exactly that; `end_to_end` is private.
+- Task 8 (`test_cpu_executors`) is now the sole forcer of all three remaining `cpu_backend`
+  entries; when it moves, `cpu_backend`, `accumulate` and `emit` demote together and the register
+  drops to the four `gpu_backend` entries.
+- Task 10 has only its step 3 left: the ladder reading and the check that the only `pub` items a
+  test crate still forces are the eight `corpus.rs`/`corpus_gpu.rs` names.
+- rustfmt rewrote `injected_queries!(tpch/nested_loop_join, …)` as `tpch / nested_loop_join`
+  inside `end_to_end.rs` — same tokens, the macro's `$dataset:ident / $query:ident` arm is
+  unchanged. `--check` now holds on the file; a `#[rustfmt::skip]` would restore the reading.
+- Both target dirs were `cargo clean -p peacockdb-core`ed for the cold counts and then rebuilt
+  by the package run (`./target`) and the `gpu` build (`target-cudf-*`, which now holds the `gpu`
+  fingerprint, not the default one).

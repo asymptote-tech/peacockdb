@@ -15,26 +15,26 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::{JoinType, ScalarValue};
 
-use peacockdb_core::plan::ColumnOrder;
-use peacockdb_core::plan::GpuNode;
-use peacockdb_core::plan::RowGroupMeta;
-use peacockdb_core::plan::RowInterval;
-use peacockdb_core::plan::ScanMetadata;
-use peacockdb_core::plan::Schema;
-use peacockdb_core::plan::{AggCall, AggFunc, PlanAgg, decomposition};
-use peacockdb_core::plan::{
+use crate::plan::ColumnOrder;
+use crate::plan::GpuNode;
+use crate::plan::RowGroupMeta;
+use crate::plan::RowInterval;
+use crate::plan::ScanMetadata;
+use crate::plan::Schema;
+use crate::plan::{AggCall, AggFunc, PlanAgg, decomposition};
+use crate::plan::{
     AggregateBody, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
     GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave,
     GpuLimit, GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin,
     GpuProject, GpuSort, GpuUnion, GpuUnload, NodeRef, as_node_ref,
 };
-use peacockdb_core::plan::{Expr, NamedExpr};
-use peacockdb_core::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
+use crate::plan::{Expr, NamedExpr};
+use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
 
 /// `node` rebuilt over `children`, which are the rewritten children in the order
 /// [`GpuNode::children`] reports them. Handed a node's own children back it is the
 /// identity, which is the property everything else here rests on.
-pub fn rebuild(node: &dyn GpuNode, children: Vec<Box<dyn GpuNode>>) -> Box<dyn GpuNode> {
+pub(crate) fn rebuild(node: &dyn GpuNode, children: Vec<Box<dyn GpuNode>>) -> Box<dyn GpuNode> {
     let name = node.name();
     let mut children = children.into_iter();
     let mut one = || {
@@ -141,7 +141,7 @@ pub fn rebuild(node: &dyn GpuNode, children: Vec<Box<dyn GpuNode>>) -> Box<dyn G
 
 /// The whole tree rebuilt bottom-up, each node over its rebuilt children — the identity
 /// rewrite, and the walk every injected one is a variation of.
-pub fn rebuild_tree(node: &dyn GpuNode) -> Box<dyn GpuNode> {
+pub(crate) fn rebuild_tree(node: &dyn GpuNode) -> Box<dyn GpuNode> {
     let children = node
         .children()
         .into_iter()
@@ -153,7 +153,7 @@ pub fn rebuild_tree(node: &dyn GpuNode) -> Box<dyn GpuNode> {
 /// The metadata read a loader was built from, back out of the fields it kept — the file
 /// the row-group indices are numbered in, the survivors and their statistics. One
 /// statement of it, since the injector rebuilds loaders too.
-pub fn scan_of(load: &GpuLoadParquet) -> ScanMetadata {
+pub(crate) fn scan_of(load: &GpuLoadParquet) -> ScanMetadata {
     ScanMetadata {
         file: load.file.clone(),
         groups: load.survivors.clone(),
@@ -173,7 +173,7 @@ fn body_of(body: &AggregateBody) -> AggregateBody {
     }
 }
 
-pub fn schema_of(node: &dyn GpuNode) -> Schema {
+pub(crate) fn schema_of(node: &dyn GpuNode) -> Schema {
     node.kind()
         .schema()
         .unwrap_or_else(|| panic!("{} declares a schema", node.name()))
@@ -182,7 +182,7 @@ pub fn schema_of(node: &dyn GpuNode) -> Schema {
 
 /// An emitter's lane count is what it emits into, which is its own declared layout — its
 /// input's is where the rows come from and is a different number.
-pub fn lanes_of(node: &dyn GpuNode) -> usize {
+pub(crate) fn lanes_of(node: &dyn GpuNode) -> usize {
     node.kind()
         .layout()
         .unwrap_or_else(|| panic!("{} declares a layout", node.name()))
@@ -198,7 +198,7 @@ pub fn lanes_of(node: &dyn GpuNode) -> usize {
 /// Hand-built rather than planned from sql, because what is proved is per arm and per
 /// field: a corpus plan covers only the combinations its queries happen to produce, and
 /// several of these fields appear in no corpus query at all.
-pub fn every_kind() -> Vec<Box<dyn GpuNode>> {
+pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
     vec![
         source(Some(7)),
         other_source(),
@@ -391,7 +391,7 @@ pub fn every_kind() -> Vec<Box<dyn GpuNode>> {
 
 /// Two lanes, three row groups between them, and a column that holds a NULL beside one
 /// that does not — the loader's fields that no plan line prints.
-pub fn source(limit: Option<usize>) -> Box<dyn GpuNode> {
+pub(crate) fn source(limit: Option<usize>) -> Box<dyn GpuNode> {
     let groups: Vec<RowGroupMeta> = (0..3)
         .map(|index| RowGroupMeta {
             index,
@@ -440,7 +440,7 @@ fn other_source() -> Box<dyn GpuNode> {
 /// A sorted stream, as the planner makes one: a per-batch sort, and the accumulator that
 /// merges those batches into one. The accumulator requires the order below it, so the sort
 /// is not decoration.
-pub fn sorted(input: Box<dyn GpuNode>, key: ColumnOrder) -> Box<dyn GpuNode> {
+pub(crate) fn sorted(input: Box<dyn GpuNode>, key: ColumnOrder) -> Box<dyn GpuNode> {
     let sorted = Box::new(GpuSort::new(input, vec![key], None));
     Box::new(GpuAccumulateBatchesAndSort::new(sorted, vec![key], None))
 }
@@ -486,7 +486,7 @@ fn column(index: u32, name: &str) -> Expr {
     Expr::column(index, name)
 }
 
-pub fn key(column: u32) -> ColumnOrder {
+pub(crate) fn key(column: u32) -> ColumnOrder {
     ColumnOrder {
         column,
         ascending: column == 0,
@@ -544,7 +544,7 @@ fn sum_body(finalize: bool) -> AggregateBody {
 /// A node's own fields only. The tree is walked through `children()` and each node's debug
 /// split at its outermost braces, so a nested `Expr` or `Schema` is one value rather than
 /// something to parse — what is asserted is the level `rebuild` writes.
-pub fn fields_with_one_value(fixtures: &[Box<dyn GpuNode>]) -> Vec<String> {
+pub(crate) fn fields_with_one_value(fixtures: &[Box<dyn GpuNode>]) -> Vec<String> {
     let mut seen: BTreeMap<(&'static str, String), BTreeSet<String>> = BTreeMap::new();
     for fixture in fixtures {
         for node in every_node(fixture.as_ref()) {

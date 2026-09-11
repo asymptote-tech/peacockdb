@@ -135,11 +135,12 @@ the exception rather than as the example.
   `pub mod scan_mapping;`, which would make `planner::translator::scan_mapping::Mapping`
   nameable crate-wide and leave the wall on paper. What a sibling component needs is declared in
   the component's own `mod.rs`.
-- `lib.rs` declares the components `pub mod`. Nine more exist under `executor/`, every one
+- `lib.rs` declares the components `pub mod`. Seven more exist under `executor/`, every one
   forced by a test crate reaching a subcomponent, every one registered in `PUB_MODULES` with the
   files that force it and checked both ways. They expire when `test-layout.md` moves those files
   into `src/`; a `pub mod` outside the register is a violation, not a precedent.
-  `CROSS_COMPONENT_REACHES` is the same shape for the reach rustc cannot see behind a `pub mod`.
+  `CROSS_COMPONENT_REACHES` is the same shape for a reach rustc cannot see behind a `pub mod`,
+  and is empty today.
 - **Nesting may go three deep** where the innermost earns it — `planner/translator/scan_mapping/`
   is 720 lines behind three entry points — under the same `mod` rule at each level. A directory
   with a one-item facade and a hundred lines behind it is an implementation module wearing one.

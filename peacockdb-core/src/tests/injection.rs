@@ -16,24 +16,24 @@ use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::execution::TaskContext;
 use datafusion::execution::context::SessionContext;
 
-use peacockdb_core::executor::CpuBackend;
-use peacockdb_core::executor::CpuBatch;
-use peacockdb_core::executor::cpu_backend::accumulate::{CpuAccumulator, CpuPartitionAccumulator};
-use peacockdb_core::executor::cpu_backend::emit::CpuEmitter;
-use peacockdb_core::executor::cpu_backend::join::{CpuJoin, CpuProbingJoin};
-use peacockdb_core::executor::cpu_backend::source::CpuSource;
-use peacockdb_core::executor::cpu_backend::{CpuExec, CpuUnload};
-use peacockdb_core::executor::{Backend, NodeExecutors};
-use peacockdb_core::executor::{
+use crate::executor::CpuBackend;
+use crate::executor::CpuBatch;
+use crate::executor::cpu_backend::CpuSource;
+use crate::executor::cpu_backend::accumulate::{CpuAccumulator, CpuPartitionAccumulator};
+use crate::executor::cpu_backend::emit::CpuEmitter;
+use crate::executor::cpu_backend::{CpuExec, CpuUnload};
+use crate::executor::cpu_backend::{CpuJoin, CpuProbingJoin};
+use crate::executor::{Backend, NodeExecutors};
+use crate::executor::{
     BackendError, BatchAccumulatorExecutor, CallResult, CallStats, ExecExecutor, Executor,
     JoinExecutor, LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin,
     RowRange, SourceExecutor, SourceStep, UnloadExecutor,
 };
-use peacockdb_core::plan::GpuNode;
-use peacockdb_core::plan::PlanError;
-use peacockdb_core::plan::Schema;
-use peacockdb_core::plan::empty_build_answers_nothing;
-use peacockdb_core::plan::{
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::plan::Schema;
+use crate::plan::empty_build_answers_nothing;
+use crate::plan::{
     GpuCoalesceAllBatches, GpuEmitPartitions, GpuLoadParquet, GpuMergeSortedPartitions, GpuUnload,
     NodeRef, as_node_ref,
 };
@@ -42,11 +42,11 @@ use super::rebuild::{key, lanes_of, rebuild, scan_of, schema_of, sorted, source}
 
 /// At most this many injected runs per query: 30 is 212 s for the eleven queries serially,
 /// and the cover the selector guarantees is 13 of them.
-pub const CAP: usize = 30;
+pub(crate) const CAP: usize = 30;
 
 /// One seed for the tier: which candidates are chosen and which calls emit an empty batch
 /// are both functions of it, so a failure reproduces.
-pub const SEED: u64 = 17;
+pub(crate) const SEED: u64 = 17;
 
 // ── the decorator ──────────────────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ pub const SEED: u64 = 17;
 /// the driver pulls until a source is exhausted, and a source that can always answer
 /// without advancing never is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Empties {
+pub(crate) enum Empties {
     Never,
     /// Percent of calls, decided from the seed and the source's address rather than from
     /// a shared generator — two runs of one setting make the same calls.
@@ -74,7 +74,7 @@ impl Empties {
 /// every key into one lane satisfies it — nothing above a scatter may depend on how evenly
 /// the lanes were loaded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Hash {
+pub(crate) enum Hash {
     AsPlanned,
     /// Every key into lane 0. Applied at every emitter, so both sides of a join still meet.
     Degenerate,
@@ -83,9 +83,9 @@ pub enum Hash {
 /// The CPU backend with two of its executors wrapped. Everything else is the CPU type
 /// itself, reached through a second impl of its trait rather than through a wrapper that
 /// would only forward.
-pub struct Injected;
+pub(crate) struct Injected;
 
-pub struct InjectedContext {
+pub(crate) struct InjectedContext {
     pub task: Arc<TaskContext>,
     pub empties: Empties,
     pub hash: Hash,
@@ -97,7 +97,7 @@ pub struct InjectedContext {
 }
 
 impl InjectedContext {
-    pub fn new(task: Arc<TaskContext>, injection: Injection, seed: u64) -> Self {
+    pub(crate) fn new(task: Arc<TaskContext>, injection: Injection, seed: u64) -> Self {
         Self {
             task,
             empties: injection.empties,
@@ -108,7 +108,7 @@ impl InjectedContext {
     }
 
     /// Zero-row batches emitted instead of advancing, over every source and lane.
-    pub fn empty_batches(&self) -> usize {
+    pub(crate) fn empty_batches(&self) -> usize {
         self.emitted.load(Ordering::Relaxed)
     }
 }
@@ -168,7 +168,7 @@ impl Backend for Injected {
     }
 }
 
-pub struct InjectedSource {
+pub(crate) struct InjectedSource {
     inner: CpuSource,
     /// An empty batch still declares the columns its consumers read.
     schema: Arc<ArrowSchema>,
@@ -234,7 +234,7 @@ impl SourceExecutor<Injected> for InjectedSource {
     }
 }
 
-pub struct InjectedEmitter {
+pub(crate) struct InjectedEmitter {
     inner: CpuEmitter,
     lanes: usize,
     hash: Hash,
@@ -342,7 +342,7 @@ fn mix(seed: u64, value: u64) -> u64 {
 /// ([#142](../../../llm-wiki/tickets.md#t142)), so the node is `GpuCoalesceAllBatches`
 /// merging a lane to one, and the finer direction is the mode axis already.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Rebatch {
+pub(crate) enum Rebatch {
     None,
     AboveSources,
     AboveInterior,
@@ -352,14 +352,14 @@ pub enum Rebatch {
 /// lane that produced nothing because its row groups went to its neighbour is a drained
 /// lane, and one whose rows were dropped is a wrong answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Drain {
+pub(crate) enum Drain {
     None,
     FirstLane,
 }
 
 /// One injected shape: two rewrites of the tree and two wraps of the calls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Injection {
+pub(crate) struct Injection {
     pub rebatch: Rebatch,
     pub drain: Drain,
     pub empties: Empties,
@@ -369,7 +369,7 @@ pub struct Injection {
 impl Injection {
     /// The plan as planned and the calls as written — what every mode already runs, and
     /// the row every crossing is read against.
-    pub const NONE: Self = Self {
+    pub(crate) const NONE: Self = Self {
         rebatch: Rebatch::None,
         drain: Drain::None,
         empties: Empties::Never,
@@ -394,7 +394,7 @@ impl Injection {
             + 4096 * u64::from(self.hash == Hash::Degenerate)
     }
 
-    pub fn label(&self) -> String {
+    pub(crate) fn label(&self) -> String {
         let mut parts = Vec::new();
         match self.rebatch {
             Rebatch::None => {}
@@ -420,7 +420,7 @@ impl Injection {
 
 /// One edge of the tree, addressed by the pre-order position of the node below it — the
 /// numbering `PlanIndex` uses, so an edge names the same node the driver would.
-pub struct Edge {
+pub(crate) struct Edge {
     pub child: usize,
     pub node: &'static str,
     /// Why a rebatcher may not go here: the child declares an order and a coalesce clears
@@ -433,7 +433,7 @@ pub struct Edge {
 const REFUSED_BY_ORDER: &str = "a coalesce clears the order this stream declares";
 
 /// Every edge whose child is not a source, in pre-order.
-pub fn interior_edges(root: &dyn GpuNode) -> Vec<Edge> {
+pub(crate) fn interior_edges(root: &dyn GpuNode) -> Vec<Edge> {
     let mut edges = Vec::new();
     let mut next = 0;
     walk_edges(root, true, &mut next, &mut edges);
@@ -463,14 +463,14 @@ fn walk_edges(node: &dyn GpuNode, is_root: bool, next: &mut usize, edges: &mut V
 /// How many nodes a tree has, which is what says a rebatcher was actually inserted: an
 /// edge set with nothing eligible in it injects nothing, and a run that injected nothing
 /// is a run whose label claims a dimension it did not carry.
-pub fn node_count(root: &dyn GpuNode) -> usize {
+pub(crate) fn node_count(root: &dyn GpuNode) -> usize {
     1 + root.children().into_iter().map(node_count).sum::<usize>()
 }
 
 /// `root` rewritten into one injected shape. The tree comes back rebuilt whether or not
 /// anything was injected, so every run in a crossing is compared against a plan that took
 /// the same path.
-pub fn apply(root: &dyn GpuNode, injection: Injection, seed: u64) -> Box<dyn GpuNode> {
+pub(crate) fn apply(root: &dyn GpuNode, injection: Injection, seed: u64) -> Box<dyn GpuNode> {
     let at = match injection.rebatch {
         // From the seed rather than the first eligible edge, which is the top of the tree
         // on every plan: the loader edges belong to the other setting, so taking the top
@@ -525,7 +525,7 @@ fn rewrite(
 /// A rebatcher above a named edge whatever the eligibility rule says. The refusal a
 /// forbidden edge earns is demonstrated with this rather than predicted — the rule and
 /// the engine agreeing is the claim.
-pub fn rebatch_at(root: &dyn GpuNode, child: usize) -> Box<dyn GpuNode> {
+pub(crate) fn rebatch_at(root: &dyn GpuNode, child: usize) -> Box<dyn GpuNode> {
     let mut next = 0;
     rewrite(
         root,
@@ -541,7 +541,7 @@ pub fn rebatch_at(root: &dyn GpuNode, child: usize) -> Box<dyn GpuNode> {
 /// A plan whose every interior edge is a forbidden one: a sort, the accumulator that
 /// merges its batches and the k-way merge above them each declare an order, and a coalesce
 /// at any of those edges clears it.
-pub fn merge_over_sorted() -> Box<dyn GpuNode> {
+pub(crate) fn merge_over_sorted() -> Box<dyn GpuNode> {
     Box::new(GpuUnload::new(
         Box::new(GpuMergeSortedPartitions::new(
             sorted(source(None), key(0)),
@@ -577,7 +577,7 @@ fn drained(load: &GpuLoadParquet, schema: Schema) -> Box<dyn GpuNode> {
 /// setting means anything there: draining needs a second lane to move the rows to, and a
 /// degenerate hash needs a scatter to be degenerate at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PlannedMode {
+pub(crate) struct PlannedMode {
     pub name: &'static str,
     pub lanes: usize,
     pub shuffles: bool,
@@ -591,7 +591,7 @@ pub struct PlannedMode {
 /// What this query's plan at this mode turned out to be. Read off the tree rather than
 /// off the knobs: `target_partitions` is what was asked for, and the small-table rule can
 /// leave a query at one lane anyway.
-pub fn planned_mode(name: &'static str, root: &dyn GpuNode) -> PlannedMode {
+pub(crate) fn planned_mode(name: &'static str, root: &dyn GpuNode) -> PlannedMode {
     fn walk(node: &dyn GpuNode, mode: &mut PlannedMode) {
         match as_node_ref(node) {
             NodeRef::LoadParquet(load) => mode.lanes = mode.lanes.max(load.partition_groups.len()),
@@ -618,7 +618,7 @@ pub fn planned_mode(name: &'static str, root: &dyn GpuNode) -> PlannedMode {
 /// The values each dimension takes. The high empty-batch setting is a percentage rather
 /// than every call: a source that never advances is a source the driver never exhausts.
 #[derive(Debug, Clone)]
-pub struct Dimensions {
+pub(crate) struct Dimensions {
     pub rebatch: Vec<Rebatch>,
     pub drain: Vec<Drain>,
     pub empties: Vec<Empties>,
@@ -638,20 +638,20 @@ impl Default for Dimensions {
 
 /// One run: the mode that planned it and what was injected into it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Candidate {
+pub(crate) struct Candidate {
     pub mode: usize,
     pub injection: Injection,
 }
 
 impl Candidate {
-    pub fn label(&self, modes: &[PlannedMode]) -> String {
+    pub(crate) fn label(&self, modes: &[PlannedMode]) -> String {
         format!("{} {}", modes[self.mode].name, self.injection.label())
     }
 }
 
 /// Every mode crossed with every setting, minus the combinations that mean nothing at
 /// that mode: one lane has no lane to drain, and a plan with no scatter has no hash.
-pub fn candidates(modes: &[PlannedMode], dimensions: &Dimensions) -> Vec<Candidate> {
+pub(crate) fn candidates(modes: &[PlannedMode], dimensions: &Dimensions) -> Vec<Candidate> {
     let mut out = Vec::new();
     for (index, mode) in modes.iter().enumerate() {
         for rebatch in &dimensions.rebatch {
@@ -689,7 +689,7 @@ pub fn candidates(modes: &[PlannedMode], dimensions: &Dimensions) -> Vec<Candida
 ///
 /// Seeded rather than sampled: the order is a hash of the seed and the candidate's
 /// position, so two runs choose the same set and a failure is reproducible.
-pub fn select(
+pub(crate) fn select(
     modes: &[PlannedMode],
     dimensions: &Dimensions,
     cap: usize,
@@ -782,7 +782,7 @@ fn requirements(modes: &[PlannedMode], dimensions: &Dimensions) -> Vec<(String, 
 /// One scatter's output for a batch of keys, under either hash. Reached through
 /// `executors_for` rather than built by hand, so what it measures is the executor the
 /// driver would have been handed.
-pub fn emitter_over_four_lanes(keys: &[i64], hash: Hash) -> Vec<CpuBatch> {
+pub(crate) fn emitter_over_four_lanes(keys: &[i64], hash: Hash) -> Vec<CpuBatch> {
     let node = GpuEmitPartitions::new(source(None), vec![0], 4);
     let ctx = InjectedContext::new(
         SessionContext::new().task_ctx(),

@@ -370,6 +370,12 @@ pub fn first_difference(expected: &[RecordBatch], actual: &[RecordBatch]) -> Str
     result_text::first_difference(expected, actual)
 }
 
+/// The answer rendered as a table with its data rows sorted, so two runs that emit the
+/// same rows in different orders compare equal.
+pub fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
+    result_text::batches_to_sorted_str(batches)
+}
+
 /// A lower bound on the rendered size, stopping the moment it passes `cap`.
 pub fn exceeds_rendered_size(batches: &[RecordBatch], cap: usize) -> bool {
     result_text::exceeds_rendered_size(batches, cap)

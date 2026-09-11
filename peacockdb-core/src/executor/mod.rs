@@ -389,6 +389,21 @@ pub(crate) fn physical_expr(
     cpu_backend::physical_expr(expr, input, registry)
 }
 
+/// Whether the CPU executor for this join keeps probe keys and answers at done.
+///
+/// `#[cfg(test)]` because its only caller is `wire/tests.rs`, which checks that answer
+/// against the recipe's `AtDone` call. Two hops rather than one: `cpu_backend` declares
+/// `mod join;` privately, so this module cannot name `CpuJoin` either.
+#[cfg(test)]
+pub(crate) fn has_finish_pass(
+    node: &crate::plan::GpuHashJoin,
+    build: &datafusion::arrow::datatypes::Schema,
+    probe: &datafusion::arrow::datatypes::Schema,
+    ctx: std::sync::Arc<datafusion::execution::TaskContext>,
+) -> Result<bool, PlanError> {
+    cpu_backend::has_finish_pass(node, build, probe, ctx)
+}
+
 /// The routing a node declares, which is a property of the node rather than of a backend —
 /// every backend would compute the same thing, so it is read off the node by whoever routes.
 pub fn forwarder_for(node: &dyn GpuNode) -> Forwarder {

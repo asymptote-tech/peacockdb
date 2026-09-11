@@ -2,6 +2,8 @@
 # Compare a fresh case inventory against a baseline one.
 #   scripts/compare-inventory.sh rust-only \
 #     llm-wiki/tasks/module-layout-baselines/inv-rust-only-final.txt /tmp/inv.txt
+# The three shapes are the build ladder, and `gpu` reads like the other two: the shape names
+# the pair of files being compared, and nothing in the normalisation depends on it.
 # Integration targets compare verbatim. Lib cases are named by module path, which a layout
 # move changes by construction, so they compare on the suffix from the last segment ending
 # in `tests` — `tests`, `ffi_tests`, `gpu_tests`, `schema_tests` — which is unique per case.
@@ -10,11 +12,11 @@
 # live with the task that took them and are deleted when it is archived, and a default
 # pointing into a directory that stops existing is a tool that breaks silently later.
 set -uo pipefail
-usage="usage: compare-inventory.sh rust-only|cudf <baseline-file> <fresh-file>"
+usage="usage: compare-inventory.sh rust-only|cudf|gpu <baseline-file> <fresh-file>"
 shape="${1:?$usage}"
 base="${2:?$usage}"
 fresh="${3:?$usage}"
-case "$shape" in rust-only|cudf) ;; *) echo "$usage" >&2; exit 1 ;; esac
+case "$shape" in rust-only|cudf|gpu) ;; *) echo "$usage" >&2; exit 1 ;; esac
 for f in "$base" "$fresh"; do
   [ -f "$f" ] || { echo "compare-inventory.sh: no such inventory: $f" >&2; exit 1; }
 done

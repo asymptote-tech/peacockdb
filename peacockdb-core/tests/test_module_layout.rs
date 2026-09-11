@@ -38,32 +38,15 @@ struct PubModule {
 const PUB_MODULES: &[PubModule] = &[
     PubModule {
         path: "executor/cpu_backend",
-        forced_by: &[
-            "peacockdb-core/tests/common/injection.rs",
-            "peacockdb-core/tests/test_cpu_executors.rs",
-        ],
+        forced_by: &["peacockdb-core/tests/test_cpu_executors.rs"],
     },
     PubModule {
         path: "executor/cpu_backend/accumulate",
-        forced_by: &[
-            "peacockdb-core/tests/common/injection.rs",
-            "peacockdb-core/tests/test_cpu_executors.rs",
-        ],
+        forced_by: &["peacockdb-core/tests/test_cpu_executors.rs"],
     },
     PubModule {
         path: "executor/cpu_backend/emit",
-        forced_by: &[
-            "peacockdb-core/tests/common/injection.rs",
-            "peacockdb-core/tests/test_cpu_executors.rs",
-        ],
-    },
-    PubModule {
-        path: "executor/cpu_backend/join",
-        forced_by: &["peacockdb-core/tests/common/injection.rs"],
-    },
-    PubModule {
-        path: "executor/cpu_backend/source",
-        forced_by: &["peacockdb-core/tests/common/injection.rs"],
+        forced_by: &["peacockdb-core/tests/test_cpu_executors.rs"],
     },
     PubModule {
         path: "executor/gpu_backend",
@@ -101,12 +84,7 @@ struct CrossComponentReach {
     why: &'static str,
 }
 
-const CROSS_COMPONENT_REACHES: &[CrossComponentReach] = &[CrossComponentReach {
-    file: "wire/tests.rs",
-    path: "executor/cpu_backend",
-    why: "one test builds the CPU join beside the recipe it checks, and CpuJoin is a type, so \
-          no one-line delegation in executor/mod.rs can carry it; it dies with the exemption",
-}];
+const CROSS_COMPONENT_REACHES: &[CrossComponentReach] = &[];
 
 /// Files that legitimately carry `pub` outside a `mod.rs`: the crate root, and the shared
 /// formula module the rules name alongside `mod.rs`.
@@ -1103,13 +1081,23 @@ const TEST_ONLY_ITEMS: &[TestOnlyItem] = &[
     },
     TestOnlyItem {
         file: "executor/cpu_backend/join.rs",
-        item: "makes_a_finish_pass",
-        called_by: &["wire/tests.rs"],
+        item: "has_finish_pass",
+        called_by: &["executor/cpu_backend/mod.rs"],
+    },
+    TestOnlyItem {
+        file: "executor/cpu_backend/mod.rs",
+        item: "has_finish_pass",
+        called_by: &["executor/mod.rs"],
     },
     TestOnlyItem {
         file: "executor/cpu_backend/mod.rs",
         item: "physical_expr",
         called_by: &["executor/mod.rs"],
+    },
+    TestOnlyItem {
+        file: "executor/mod.rs",
+        item: "has_finish_pass",
+        called_by: &["wire/tests.rs"],
     },
     TestOnlyItem {
         file: "executor/mod.rs",

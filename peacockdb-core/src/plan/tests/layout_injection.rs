@@ -5,17 +5,15 @@
 //! that reason — a case that needs no parquet runs in a second on any host, and one buried
 //! in a tier that takes minutes is one nobody runs while iterating.
 
-mod common;
-
-use common::injection::{
+use crate::executor::Batch;
+use crate::plan::GpuNode;
+use crate::plan::validate;
+use crate::plan_text::render_plan;
+use crate::tests::injection::{
     CAP, Candidate, Dimensions, Drain, Edge, Empties, Hash, Injection, PlannedMode, Rebatch, SEED,
     emitter_over_four_lanes, interior_edges, merge_over_sorted, rebatch_at, select,
 };
-use common::rebuild::{every_kind, fields_with_one_value, rebuild_tree};
-use peacockdb_core::executor::Batch;
-use peacockdb_core::plan::GpuNode;
-use peacockdb_core::plan::validate;
-use peacockdb_core::plan_text::render_plan;
+use crate::tests::rebuild::{every_kind, fields_with_one_value, rebuild_tree};
 use std::collections::BTreeSet;
 
 // ── the rewrite, before anything is rewritten ───────────────────────────────
@@ -126,7 +124,8 @@ fn the_selection_covers_every_mode_and_every_boundary() {
     });
     // Named, because the red case at the end is this same predicate over a thinned
     // settings list: what makes the assertion above load-bearing is that it fails there.
-    let above_sources = |candidate: &Candidate| candidate.injection.rebatch == Rebatch::AboveSources;
+    let above_sources =
+        |candidate: &Candidate| candidate.injection.rebatch == Rebatch::AboveSources;
     carries("rebatcher above the sources", &above_sources);
     carries("rebatcher at an interior edge", &|candidate| {
         candidate.injection.rebatch == Rebatch::AboveInterior
@@ -159,11 +158,14 @@ fn the_selection_covers_every_mode_and_every_boundary() {
     // values — so a cap that low still carries everything asserted above. That is what
     // lets a run count be cut without cutting what is proved.
     let smallest = select(&modes, &Dimensions::default(), 14, SEED);
-    assert!(smallest.len() <= 14, "{} runs at a cap of 14", smallest.len());
+    assert!(
+        smallest.len() <= 14,
+        "{} runs at a cap of 14",
+        smallest.len()
+    );
     for candidate in &chosen {
-        let carried = |holds: &dyn Fn(&Candidate) -> bool| {
-            !holds(candidate) || smallest.iter().any(holds)
-        };
+        let carried =
+            |holds: &dyn Fn(&Candidate) -> bool| !holds(candidate) || smallest.iter().any(holds);
         assert!(
             carried(&|other| other.mode == candidate.mode)
                 && carried(&|other| other.injection.rebatch == candidate.injection.rebatch)
@@ -190,7 +192,9 @@ fn the_selection_covers_every_mode_and_every_boundary() {
         ..Dimensions::default()
     };
     assert!(
-        !select(&modes, &thinner, CAP, SEED).iter().any(above_sources),
+        !select(&modes, &thinner, CAP, SEED)
+            .iter()
+            .any(above_sources),
         "a settings list without a rebatcher still produced one, so the cover assertion \
          above would hold over a set that had lost the dimension"
     );

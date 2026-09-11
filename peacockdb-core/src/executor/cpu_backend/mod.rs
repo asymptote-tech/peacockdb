@@ -11,12 +11,13 @@ pub mod accumulate;
 mod backend;
 pub mod emit;
 mod expr_physical;
-pub mod join;
+mod join;
 mod merge_m2;
 mod single_node;
-pub mod source;
+mod source;
 mod spark_partitioning;
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
@@ -26,6 +27,8 @@ use datafusion::arrow::util::display::FormatOptions;
 use datafusion::execution::context::SessionContext;
 use datafusion::execution::{FunctionRegistry, TaskContext};
 use datafusion::logical_expr::AggregateUDF;
+use datafusion::parquet::arrow::ProjectionMask;
+use datafusion::parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use datafusion::physical_expr::aggregate::AggregateExprBuilder;
 use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
 use datafusion::physical_plan::ExecutionPlan;
@@ -57,6 +60,34 @@ struct Stage {
     /// partial aggregate names its state columns after the accumulators it ran, and this
     /// mode names them in the schema every reference above resolves against.
     declared: SchemaRef,
+}
+
+/// A lane's reads, in the order the mapping named them.
+///
+/// Declared here rather than in `source` for the reason every executor type below is: the
+/// `Backend` impl names it and `src/tests/injection.rs` builds one, so it is this
+/// subcomponent's API and `source` is its implementation.
+pub struct CpuSource {
+    file: String,
+    /// The footer, parsed once: a lane reads the same file once per batch, and re-parsing
+    /// it per call is the whole of what a scan does besides decoding.
+    metadata: ArrowReaderMetadata,
+    projection: ProjectionMask,
+    /// The row groups per batch this lane still owes, front first.
+    batches: VecDeque<Vec<usize>>,
+    schema: SchemaRef,
+}
+
+/// A join before its build side arrives.
+pub struct CpuJoin {
+    calls: join::Calls,
+}
+
+/// A join with its build side set, taking probe batches.
+pub struct CpuProbingJoin {
+    build: RecordBatch,
+    calls: join::Calls,
+    accumulated: Vec<RecordBatch>,
 }
 
 /// A node's operators in call order, each one's output the next one's input — one for a
@@ -539,6 +570,21 @@ pub(crate) fn physical_expr(
     registry: &dyn datafusion::execution::FunctionRegistry,
 ) -> Result<std::sync::Arc<dyn datafusion::physical_plan::PhysicalExpr>, PlanError> {
     expr_physical::physical_expr(expr, input, registry)
+}
+
+/// Whether the CPU executor for this join keeps probe keys and answers at done.
+///
+/// `#[cfg(test)]`, and called by `executor/mod.rs`, which carries it to `wire/tests.rs` —
+/// the test compares the answer against the recipe's `AtDone` call. The question crosses
+/// the wall and the type does not: `join` is this subcomponent's own.
+#[cfg(test)]
+pub(crate) fn has_finish_pass(
+    node: &crate::plan::GpuHashJoin,
+    build: &ArrowSchema,
+    probe: &ArrowSchema,
+    ctx: Arc<TaskContext>,
+) -> Result<bool, PlanError> {
+    CpuJoin::hash(node, build, probe, ctx).map(|executor| executor.has_finish_pass())
 }
 
 #[cfg(test)]

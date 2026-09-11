@@ -14,6 +14,7 @@ use std::hash::{Hash, Hasher};
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
+use datafusion::arrow::util::pretty::pretty_format_batches;
 
 use super::ResultDigest;
 
@@ -297,5 +298,23 @@ pub(crate) fn assert_results_match(
                 );
             }
         }
+    }
+}
+
+/// Pretty-print batches with the data rows sorted, for order-independent compares. Unlike
+/// the comparators above this renders the whole answer, so it is for the small ones: a
+/// caller with a large result wants `results_agree`.
+pub(crate) fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
+    let formatted = pretty_format_batches(batches).unwrap().to_string();
+    let lines: Vec<&str> = formatted.lines().collect();
+    if lines.len() > 4 {
+        let mut data = lines[3..lines.len() - 1].to_vec();
+        data.sort_unstable();
+        let mut out = lines[..3].to_vec();
+        out.extend(data);
+        out.push(lines[lines.len() - 1]);
+        out.join("\n")
+    } else {
+        formatted
     }
 }

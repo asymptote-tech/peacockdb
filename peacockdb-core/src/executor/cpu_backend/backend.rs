@@ -13,9 +13,8 @@ use datafusion::execution::TaskContext;
 
 use super::accumulate::{CpuAccumulator, CpuPartitionAccumulator};
 use super::emit::CpuEmitter;
-use super::join::{CpuJoin, CpuProbingJoin};
-use super::source::CpuSource;
 use super::{CpuExec, CpuUnload};
+use super::{CpuJoin, CpuProbingJoin, CpuSource};
 use crate::executor::CpuBackend;
 use crate::executor::CpuBatch;
 use crate::executor::forwarder_for;
