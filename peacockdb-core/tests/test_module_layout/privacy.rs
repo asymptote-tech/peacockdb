@@ -69,27 +69,44 @@ fn no_test_support_signature_names_a_component_type() {
         "test_support/mod.rs glob-imports a component, so the names a signature can use \
          cannot be read off the file; import them by name"
     );
-    let mut found = Vec::new();
-    let declared = pub_declarations(&text).into_iter().chain(pub_fields(&text));
-    for (n, declaration) in declared {
-        let signature = signature_only(&code_only(&declaration));
-        if let Some(name) = component_type_in(&signature, &components, &imported) {
-            let head = declaration.lines().next().unwrap_or("").trim();
-            found.push(format!(
-                "  {}:{}: {head} names `{name}`",
-                rel.display(),
-                n + 1
-            ));
-        }
-    }
+    let found: Vec<String> = component_types_on_the_surface(&text, &components)
+        .into_iter()
+        .map(|(n, head, name)| format!("  {}:{}: {head} names `{name}`", rel.display(), n + 1))
+        .collect();
     assert!(
         found.is_empty(),
         "a `pub` in test_support names a type from a component, so the type is on the surface \
-         under the harness's name and the facade is a rename:\n{}\n\nTake and return strings, \
-         paths, `Mode`, `MemoryLimit` and the harness's own types; the engine type stays behind \
-         a pub(crate) body.",
+         under the harness's name and the facade is a rename:\n{}\n\nNo parameter, return or \
+         `pub` field names a component's type; std, arrow and the harness's own types are what \
+         remain. The engine type stays behind a pub(crate) body.",
         found.join("\n")
     );
+}
+
+/// Every declaration in a `test_support/mod.rs` text that puts a component type on the
+/// surface, as (line, first line of the declaration, the type named): each bare `pub` item
+/// with its body where the body is signature — a `pub enum`'s variants, a `pub trait`'s
+/// methods — each `pub` field, and each `type` alias below bare `pub`, since an alias is one
+/// `pub fn` away from the surface and checking it once catches an alias of an alias at its root.
+pub(crate) fn component_types_on_the_surface(
+    text: &str,
+    components: &[String],
+) -> Vec<(usize, String, String)> {
+    let imported = component_imports(text, components);
+    let declared = pub_declarations(text)
+        .into_iter()
+        .chain(pub_fields(text))
+        .chain(type_aliases(text));
+    let mut found = Vec::new();
+    for (n, declaration) in declared {
+        let signature = signature_only(&code_only(&declaration));
+        if let Some(name) = component_type_in(&signature, components, &imported) {
+            let head = declaration.lines().next().unwrap_or("").trim().to_string();
+            found.push((n, head, name));
+        }
+    }
+    found.sort();
+    found
 }
 
 /// The names a `use crate::<component>…;` binds in this file: each member of a brace group
@@ -127,8 +144,14 @@ pub(crate) fn component_imports(text: &str, components: &[String]) -> Vec<String
             }
             match tail[2..].strip_prefix('{') {
                 Some(group) => {
+                    // `{self, …}` binds the module the group sits under, not the word.
                     for member in split_members(group.trim_end_matches('}')) {
-                        out.push(bound_name(&member));
+                        let name = bound_name(&member);
+                        out.push(if name == "self" {
+                            component.clone()
+                        } else {
+                            name
+                        });
                     }
                 }
                 None => out.push(match alias {
@@ -249,28 +272,48 @@ pub(crate) fn signature_only(declaration: &str) -> String {
     }
 }
 
-/// Every `pub` item's declaration — from the `pub` to the `{` or `;` that ends the signature —
-/// with the line it starts on.
+/// Every `pub` item's declaration, with the line it starts on: from the `pub` to the `{` or
+/// `;` that ends the signature — or, for a `pub enum` and a `pub trait`, to the `}` closing
+/// the body, since a variant's payload and a method's signature are the surface too.
 ///
 /// The whole signature, not its first line: rustfmt wraps past 100 columns, and fourteen
-/// `pub fn` in this crate's `mod.rs` files span several lines, `executor::run` among them. A
-/// reader matching one line could not see a parameter or a return type.
+/// `pub fn` in this crate's `mod.rs` files span several lines. A reader matching one line
+/// could not see a parameter or a return type.
 ///
 /// Only `(` and `[` nest. A `<` counted as an open leaves `1 << 20` two deep, so the `;` that
-/// should end a `pub const` is missed and every declaration below it is swallowed. Nothing in
-/// this crate's signatures puts `;` or `{` inside `<…>`, so angle brackets buy nothing.
+/// should end a `pub const` is missed and every declaration below it is swallowed.
 pub(crate) fn pub_declarations(text: &str) -> Vec<(usize, String)> {
+    declarations(text, is_bare_pub_item)
+}
+
+/// Every `type` alias below bare `pub` — `type` or `pub(…) type`, a `pub type` being a
+/// declaration already — with the line it starts on.
+pub(crate) fn type_aliases(text: &str) -> Vec<(usize, String)> {
+    declarations(text, |line| {
+        let t = line.trim_start();
+        t.starts_with("type ")
+            || t.strip_prefix("pub(")
+                .and_then(|rest| rest.split_once(')'))
+                .is_some_and(|(_, rest)| rest.trim_start().starts_with("type "))
+    })
+}
+
+fn declarations(text: &str, starts: impl Fn(&str) -> bool) -> Vec<(usize, String)> {
     let lines: Vec<&str> = text.lines().collect();
     let mut out = Vec::new();
     let mut i = 0;
     while i < lines.len() {
-        if !is_bare_pub_item(lines[i]) {
+        if !starts(lines[i]) {
             i += 1;
             continue;
         }
         let start = i;
+        let with_body = lines[i]
+            .trim_start()
+            .strip_prefix("pub ")
+            .is_some_and(|rest| rest.starts_with("enum ") || rest.starts_with("trait "));
         let mut acc = String::new();
-        let mut depth = 0i32;
+        let (mut depth, mut braces) = (0i32, 0i32);
         loop {
             acc.push_str(lines[i]);
             acc.push('\n');
@@ -279,7 +322,12 @@ pub(crate) fn pub_declarations(text: &str) -> Vec<(usize, String)> {
                 match c {
                     '(' | '[' => depth += 1,
                     ')' | ']' => depth -= 1,
-                    '{' | ';' if depth <= 0 => done = true,
+                    '{' if with_body => braces += 1,
+                    '}' if with_body => {
+                        braces -= 1;
+                        done |= braces == 0;
+                    }
+                    '{' | ';' if depth <= 0 && !with_body => done = true,
                     _ => {}
                 }
             }

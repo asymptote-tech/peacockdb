@@ -304,3 +304,66 @@ clean. Findings:
 For the signoff: the spec's "`corpus_golden.rs`, `result_text.rs` and `cost_model.rs` stay in
 `tests/common/` untouched" could not hold — `corpus.rs` calls into both and `src/` cannot see
 `tests/` — so the deviation is forced, and the reviewer asks that the signoff name it.
+
+### 2026-09-11 — round 1 fixes: the rule reads bodies and aliases, and says what it forbids
+
+Code half of round 1, on `2e25b738`. Two files, both in `tests/test_module_layout/`:
+`privacy.rs` and `near_miss.rs`. No other file; `git diff --stat -- src/test_support/mod.rs` is
+empty after the probes below. **`test_module_layout` stays at 17 cases** — every pin went into
+the one near-miss test, as the first entry's did — so the inventory expectation is unchanged.
+
+**Important 1, the reach.** First the finding was confirmed on the tree: with the three
+spellings appended to `mod.rs` — `pub enum Outcome { Planned(Box<dyn crate::plan::GpuNode>) }`,
+`pub trait Probe { fn tree(&self) -> Box<dyn crate::plan::GpuNode>; }`, and
+`type Tree = Box<dyn crate::plan::GpuNode>;` behind `pub fn laundered() -> Tree` — the rule
+ran green (`1 passed`). Then:
+
+- `pub_declarations` is now a thin call on `declarations(text, starts)`, and for a head line
+  that is `pub enum` or `pub trait` the capture runs to the `}` that closes the body, counted
+  by braces, rather than to the first `{`; a `;` inside a trait body no longer ends it. The
+  private-module rule shares the reader, so it reads enum and trait bodies in every component
+  `mod.rs` now too, and stays green on the tree. A trait's default method *bodies* are inside
+  that capture — a false positive there would be loud, not silent, and none exists.
+- `type_aliases(text)`: every `type` or `pub(…) type` alias, wrapped or not, read as a
+  declaration whose right-hand side is checked. Chosen over refusing a private `type` outright
+  because it is the same rule applied to one more declaration shape rather than a new
+  prohibition — an alias over std or harness types stays allowed — and because checking every
+  alias catches an alias of an alias at its root. A bare `pub type` is excluded there, being a
+  declaration already.
+- `component_types_on_the_surface(text, components)` is the composed scan — imports, `pub`
+  declarations with bodies, `pub` fields, aliases, `code_only`, `signature_only`,
+  `component_type_in` — returning `(line, head, name)` sorted, and the test formats it. The
+  composition is pinned in `near_miss.rs` on a fixture holding the spec's probe plus the three
+  spellings (expects exactly four hits at lines 1, 4, 7, 10) and on the same four shapes over
+  std, arrow and harness types plus a `pub(crate)` field and `MODES`'s initializer (expects
+  none). Per-reader pins beside it: an enum body ends at its own brace and carries the payload;
+  a trait's `;` does not end it; `type_aliases` sees a private and a `pub(crate)` alias, wrapped,
+  and not a `pub type` or a `let`.
+
+**Important 2, the message.** `privacy.rs`'s assertion now states the prohibition, matching the
+corrected `coding-style.md` bullet: "No parameter, return or `pub` field names a component's
+type; std, arrow and the harness's own types are what remain. The engine type stays behind a
+pub(crate) body."
+
+**Nit, `self`.** In `component_imports`, a group member that binds to `self` now pushes the
+component's name (`{self as p, …}` still binds `p`, via `bound_name`). Pinned: `use
+crate::planner::{self, BatchSizing};` binds `["planner", "BatchSizing"]`; `pub fn knobs(&self)
+-> planner::PlanKnobs {` is attributed to `planner`; `pub fn knobs(&self) -> usize {` names
+nothing.
+
+| Run | Result |
+|---|---|
+| The three spellings appended to `mod.rs`, before any change | **green** (`1 passed`) — the finding, confirmed |
+| Pins added to `near_miss.rs`, readers not yet written | `E0432: unresolved imports component_types_on_the_surface, type_aliases` |
+| Scan factored and `type_aliases` added, `self` and bodies not yet fixed | red at the first pin: ``assertion `left == right` failed: `self` in a group is the module it sits under / left: ["self", "BatchSizing"] / right: ["planner", "BatchSizing"]`` |
+| `self` and body capture fixed, the three spellings still in `mod.rs` | near-miss **ok**; the rule **red**: ``test_support/mod.rs:564: pub enum Outcome { names `crate::plan::GpuNode` `` / ``mod.rs:568: pub trait Probe { names `crate::plan::GpuNode` `` / ``mod.rs:572: type Tree = Box<dyn crate::plan::GpuNode>; names `crate::plan::GpuNode` `` — 16 passed, 1 failed; `no_public_signature_names_a_type_from_a_private_module` ok with bodies read |
+| `use crate::planner::{self, …}` plus `pub fn probe_knobs(&self) -> planner::PlanKnobs` on `impl Mode` (a first try as a free fn was not Rust: `self` parameter is only allowed in associated functions) | red, once: ``mod.rs:131: pub fn probe_knobs(&self) -> planner::PlanKnobs { names `planner` `` — not "names `self`" against every receiver |
+| `mod.rs` restored from a copy; `git diff --stat -- src/test_support/mod.rs` | empty |
+| `cargo test --features rust-only -p peacockdb-core --test test_module_layout` | **17 passed**, 0 failed, 0 warnings |
+| `cargo test --features rust-only -p peacockdb-core --test test_ci_coverage` | **8 passed**, 0 warnings |
+| `rustfmt --edition 2024 --check` on `privacy.rs`, `near_miss.rs` | clean (applied once: it re-wrapped three asserts and the `if`) |
+| Comment caps on both files | longest doc block 10 (`no_public_signature…`'s, pre-existing; `pub_declarations`'s trimmed from 11 back to 10), longest body comment 3 |
+| `git status --short` | the two test files and this one |
+
+Not re-run: the rust-only package (nothing outside the layout test's two files changed), the
+cudf shapes, the device cycle.
