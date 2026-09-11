@@ -26,84 +26,54 @@ branch, CI may run, **no PR and no reviewer**, and `done` means the branch is pu
 **Files:**
 - Modify: `peacockdb-core/src/executor/gpu_backend/mod.rs:176-184`
 
-- [ ] **Step 1: Read the site**
+- [ ] **Step 1: Read what the message already says**
 
 ```bash
 sed -n '165,190p' peacockdb-core/src/executor/gpu_backend/mod.rs
 ```
 
-`decode` returns `Vec<RecordBatch>`; `concat_batches(&self.schema, …)` then fails with a message that
-keeps only arrow's own text.
+`concat_batches` ends in `RecordBatch::try_new`, whose error is *"column types must match schema
+types, expected {field_type:?} but found {col_type:?} at column index {i}"*. **Both types are
+already there** — the tickets quote them. What is missing is the column name and the columns after
+the first.
 
-- [ ] **Step 2: Compare before concatenating**
+- [ ] **Step 2: Append the name, and report every column**
 
 ```rust
         let batches = decoded?;
-        // The survey's whole point: concat_batches reports that the schemas differ and
-        // not how, so sixty disabled cells fail with sixty identical lines. Read the
-        // device's own schema off the decoded batches and say what differs, per column.
-        //
-        // Every diverging column, not the first: a sink carrying a string and a narrow
-        // decimal is two findings, and reporting one is how a rollout concludes that
-        // fixing the string was enough.
-        if let Some(first) = batches.first() {
-            let exported = first.schema();
-            let declared = &self.schema;
-            let mut differ: Vec<String> = Vec::new();
-            if exported.fields().len() != declared.fields().len() {
-                differ.push(format!(
-                    "column count: declared {} and exported {}",
-                    declared.fields().len(),
-                    exported.fields().len()
-                ));
-            }
-            for (at, (d, e)) in declared
-                .fields()
-                .iter()
-                .zip(exported.fields().iter())
-                .enumerate()
-            {
-                if d.data_type() != e.data_type() {
-                    differ.push(format!(
-                        "column {at} {:?}: declared {} and exported {}",
-                        d.name(),
-                        d.data_type(),
-                        e.data_type()
-                    ));
-                } else if d.is_nullable() != e.is_nullable() {
-                    // Reported separately: a nullability difference is not a type
-                    // difference, and the export derives the flag from the data rather
-                    // than from a declaration. A survey that merged the two would file a
-                    // batch's contents as a type divergence.
-                    differ.push(format!(
-                        "column {at} {:?}: declared nullable={} and exported nullable={}",
-                        d.name(),
-                        d.is_nullable(),
-                        e.is_nullable()
-                    ));
-                }
-            }
-            if !differ.is_empty() {
-                // The original sentence is kept as the prefix: every ticket quotes it and
-                // a rollout greps for it.
-                return Err(BackendError::new(format!(
-                    "the exported stream is not the sink's rows: {}",
-                    differ.join("; ")
-                )));
-            }
-        }
         let batch = concat_batches(&self.schema, batches.iter()).map_err(|error| {
+            // try_new names both types and the index, and stops at the first mismatch.
+            // The name and the rest of the columns are what a rollout needs: a sink with
+            // a string and a narrow decimal is two findings, and reporting one is how a
+            // survey concludes that fixing the string was enough.
+            //
+            // Types only. try_new does not check nullability, so that difference never
+            // reaches here and never disabled a cell -- reporting it would put a class in
+            // the report that does not occur.
+            let also: Vec<String> = batches
+                .first()
+                .map(|first| {
+                    self.schema
+                        .fields()
+                        .iter()
+                        .zip(first.schema().fields().iter())
+                        .enumerate()
+                        .filter(|(_, (d, e))| d.data_type() != e.data_type())
+                        .map(|(at, (d, e))| {
+                            format!("{at} {:?}: {} vs {}", d.name(), d.data_type(), e.data_type())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             BackendError::new(format!(
-                "the exported stream is not the sink's rows: {error}"
+                "the exported stream is not the sink's rows: {error} (declared vs exported: {})",
+                also.join("; ")
             ))
         })?;
 ```
 
-`zip` truncates on a width mismatch, which is why the count is checked first and reported in the same
-list — the loop then says what it can about the columns both sides have.
-
-The `concat_batches` arm stays. It catches whatever this comparison does not, and leaving it is what
-keeps the change to one site instead of two.
+`zip` truncates on a width mismatch, which is harmless here: `try_new` has already refused on the
+count and its message carries it. This only enriches an error that is on its way out.
 
 - [ ] **Step 3: Prove the message on the CPU, before spending a device cycle**
 

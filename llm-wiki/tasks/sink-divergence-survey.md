@@ -2,21 +2,24 @@
 
 Kind: prototype
 
-Sixty-odd device cells are disabled against schema causes, and every one of them fails the same way:
+Sixty-odd device cells are disabled against schema causes, and every one of them fails at the sink.
+The corpus runs those queries on a device already. They already fail. **The evidence exists and
+almost nobody reads it.**
 
-```
-the exported stream is not the sink's rows: {error}
-```
+The message is better than it looks. `concat_batches` ends in `RecordBatch::try_new`, whose error is
+*"column types must match schema types, expected {declared} but found {exported} at column index
+{i}"* — so both types are already there, and the tickets quote them: #187 carries `expected
+Decimal128(15, 2) but found Decimal128(38, 2)`, #191 carries `expected Int32 but found Int16 at
+column index 0`.
 
-The corpus runs those queries on a device already. They already fail. **The evidence exists and is
-unreadable** — the message names neither the column, nor the type the plan declared, nor the type the
-device handed back, so a rollout that touches sixty queries produces sixty identical lines.
+Two things are missing, and they are small: the column **name**, and every column **after the
+first** — `try_new` reports one mismatch and stops. A sink carrying a string and a narrow decimal is
+two findings, and reporting one is how a rollout concludes that fixing the string was enough.
 
-This task makes that one message say what diverged, runs the corpus, and writes down what comes out.
+So this task is mostly the second half: **run the corpus and write down what comes out.** The code
+change is a handful of lines. The product is a report.
 
-**Its product is a report, not a feature.** `llm-wiki/reports/sink-divergence.md`. The branch is
-never merged; the message change is throw-away scaffolding, and if it turns out to be worth keeping,
-keeping it is a different task with a different justification.
+**`llm-wiki/reports/sink-divergence.md`.** The branch is never merged.
 
 ## Why this before anything larger
 
@@ -32,22 +35,21 @@ question `declared-schemas.md` is for, and this is what tells it which classes a
 
 ## The work
 
-### 1. The message names both types
+### 1. The message names the column, and every column
 
-`executor/gpu_backend/mod.rs:179` maps `concat_batches`' error to a string that discards everything
-useful. Before the concat, walk the decoded batches' schema against `self.schema` and report the
-first divergence — or all of them — as column name, declared type, exported type.
+`executor/gpu_backend/mod.rs:179` wraps `concat_batches`' error, which already carries both types.
+Append what it lacks: the column **name**, and the columns after the first.
 
-The decoded batches already carry the device's schema: `StreamReader::try_new` parses the IPC schema
-message before any batch, so `stream.schema()` answers even where no batch follows. Nothing new is
-needed and nothing is predicted.
+The decoded batches carry the device's schema — `StreamReader::try_new` parses the IPC schema message
+before any batch — so comparing it against `self.schema` costs nothing and needs no prediction.
 
-Report **every** diverging column rather than the first. A query whose sink has one string and one
-narrow decimal is two findings, and reporting one of them is how a rollout concludes that fixing the
-string is enough.
+**Keep the existing sentence as the prefix.** Every ticket quotes it and every rollout greps for it;
+this appends, it does not replace.
 
-Keep the existing sentence as the prefix so the failure is still greppable by the text every ticket
-quotes, and append what it was missing.
+**Compare types only.** `try_new` does not check nullability, so a nullable-versus-non-nullable
+difference never reaches the sink and never disabled a cell. Reporting it here would put a class in
+the report that does not occur, which is worse than omitting it — the report's whole use is telling
+the next task which classes are real.
 
 ### 2. Run the corpus and collect
 
