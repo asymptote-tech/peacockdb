@@ -683,3 +683,29 @@ root, at `--test-threads=2`. No device suite: nothing here touches a device path
 - `llm-wiki/build-test.md` keeps its stale `Runs` column and its arithmetic for task 12; only the
   two sentences this move falsified were touched — the GpuBatch row's example link, which pointed at
   a deleted file, and the dataset-matrix step list.
+
+### 2026-09-10 — slice 6 dispatched, and the dispatch died at 19:00
+
+The previous coordinator dispatched plan task 6 after committing slice 5 (`ec17a1d8`, 18:22).
+The developer worked until 19:00:04 — the newest mtimes in the tree — and the whole session hit
+the account's usage limit, which reset at 19:20. No slice 6 entry was written and nothing was
+committed; the partial tree is what the dispatch left.
+
+What the tree holds, from `git status` and `git diff --stat` only (21 files modified, 4 deleted,
+`src/tests/` and `src/plan/tests/layout_injection.rs` untracked):
+
+- `src/tests/{mod.rs,injection.rs,rebuild.rs,end_to_end.rs}` created; `tests/common/{injection,rebuild}.rs`,
+  `tests/test_layout_injection.rs` and `tests/test_cpu_end_to_end.rs` deleted. **`end_to_end` came
+  forward from plan task 10** because `test_cpu_end_to_end.rs` consumed `common::injection` — it
+  could not stay behind once the trio left the crate boundary. `join_fixture.rs` stayed in
+  `tests/common/`: its only consumers are the two planner targets task 7 moves.
+- `cpu_backend/{mod,join,source,backend}.rs`, `executor/mod.rs`, `wire/tests.rs` touched — the
+  `has_finish_pass` delegation and the wall (plan step 5-6), unproven.
+- `tests/test_module_layout.rs` (44 lines), `pipeline.yml` (26), `build-test.md` (9),
+  `compare-inventory.sh` (6), `test_support/{mod,result_text}.rs` touched.
+
+None of it has been built or measured since. The re-dispatch starts from this tree rather than a
+reset, on the developer's judgement once it compiles.
+
+verda at re-dispatch: reachable but reprovisioned — host key changed, and after re-keying the new
+host refuses the key (`Permission denied (publickey)`). Local runs for this slice.
