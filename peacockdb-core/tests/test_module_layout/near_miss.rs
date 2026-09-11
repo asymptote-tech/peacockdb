@@ -2,7 +2,10 @@
 
 use std::path::Path;
 
-use crate::privacy::{private_module_aliases, pub_declarations};
+use crate::privacy::{
+    component_imports, component_type_in, private_module_aliases, pub_declarations, pub_fields,
+    signature_only,
+};
 use crate::repo_root;
 use crate::test_code::{
     declared_item, declares_mod, doc_above, mod_declarations, names_cfg_feature, names_cfg_test,
@@ -66,6 +69,66 @@ fn each_reader_sees_the_violation_and_not_its_near_miss() {
     let wrapped = pub_declarations("pub fn f(\n    a: fb::T,\n) -> u8 {\n    0\n}");
     assert_eq!(wrapped.len(), 1);
     assert!(wrapped[0].0 == 0 && wrapped[0].1.contains("fb::T"));
+
+    // The harness's signature rule reads the names a `use crate::<component>` binds — wrapped,
+    // aliased, grouped at the crate root — and a signature naming one of them or an inline path.
+    // A field counts and a `pub(crate)` does not; a const's initializer is not its signature.
+    let comps: Vec<String> = ["plan", "planner"].map(String::from).to_vec();
+    assert_eq!(
+        component_imports(
+            "use crate::planner::{\n    BatchSizing, PlanKnobs as Knobs,\n};\nuse crate::plan;\n\
+             use crate::{plan::Expr, wire::Recipe};\nuse crate::test_support::Mode;\n\
+             use std::path::PathBuf;\n",
+            &comps
+        ),
+        ["BatchSizing", "Knobs", "plan", "Expr"]
+            .map(String::from)
+            .to_vec(),
+        "an alias is the name a signature uses, and a crate-root group is read member by member"
+    );
+    assert_eq!(
+        component_imports("use crate::plan::*;\n", &comps),
+        vec!["*".to_string()],
+        "a glob binds names the reader cannot enumerate, and says so"
+    );
+    let knobs = vec!["PlanKnobs".to_string()];
+    assert_eq!(
+        component_type_in("pub fn tree() -> crate::plan::Expr {", &comps, &[]),
+        Some("crate::plan::Expr".to_string())
+    );
+    assert_eq!(
+        component_type_in("pub fn knobs(&self) -> PlanKnobs {", &comps, &knobs),
+        Some("PlanKnobs".to_string())
+    );
+    assert_eq!(
+        component_type_in("pub fn knobs(&self) -> PlanKnobsExt {", &comps, &knobs),
+        None,
+        "a longer identifier is a different name"
+    );
+    assert_eq!(
+        component_type_in("pub fn root() -> PathBuf {", &comps, &knobs),
+        None
+    );
+    assert_eq!(
+        pub_fields(
+            "pub struct Mode {\n    pub name: &'static str,\n    pub(crate) sizing: BatchSizing,\n}\n"
+        ),
+        vec![(1, "    pub name: &'static str,".to_string())],
+        "a `pub` field is a surface, a `pub(crate)` one is not, and the struct line is an item"
+    );
+    assert_eq!(
+        signature_only("pub const MODES: [Mode; 5] = [Mode { sizing: BatchSizing::Budgeted }];"),
+        "pub const MODES: [Mode; 5] "
+    );
+    assert_eq!(
+        signature_only("pub type Knobs = crate::planner::PlanKnobs;"),
+        "pub type Knobs = crate::planner::PlanKnobs;",
+        "an alias's right-hand side is exactly the type it puts on the surface"
+    );
+    assert_eq!(
+        signature_only("pub const fn bytes(self) -> usize {"),
+        "pub const fn bytes(self) -> usize {"
+    );
 
     // A `mod.rs` is its own directory, so it gets one fewer climb than a file beside it — and
     // at depth 0 the subtraction must not wrap a `usize` into an unlimited budget.

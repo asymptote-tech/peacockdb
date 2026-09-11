@@ -2,9 +2,9 @@
 //! module's reach from outside the crate, proved by compiling against it.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::tree::{read, sources};
+use crate::tree::{code_only, components, read, sources};
 use crate::visibility::is_bare_pub_item;
 
 /// A `pub` item whose signature names a type from the component's own private module.
@@ -45,6 +45,208 @@ fn no_public_signature_names_a_type_from_a_private_module() {
          declare the type in the mod.rs.",
         found.join("\n")
     );
+}
+
+/// A `pub` in `test_support/mod.rs` whose signature names a type from a component.
+///
+/// The harness is what the corpus binaries reach the engine through, and it is a facade only
+/// while nothing it declares hands a component type across: `pub fn tree() -> Box<dyn GpuNode>`
+/// puts `GpuNode` back on the surface under another name, and it compiles. One file, because
+/// `a_components_api_is_declared_in_its_mod_rs` keeps every `pub` there; fields as well as
+/// parameters and returns, since a `pub` field is read across the same boundary. The components
+/// are read off `lib.rs` rather than listed, so an eighth is inside the rule the day it arrives.
+#[test]
+fn no_test_support_signature_names_a_component_type() {
+    let rel = Path::new("test_support/mod.rs");
+    let text = read(rel);
+    let components: Vec<String> = components()
+        .into_iter()
+        .filter(|c| c != "test_support")
+        .collect();
+    let imported = component_imports(&text, &components);
+    assert!(
+        !imported.iter().any(|name| name == "*"),
+        "test_support/mod.rs glob-imports a component, so the names a signature can use \
+         cannot be read off the file; import them by name"
+    );
+    let mut found = Vec::new();
+    let declared = pub_declarations(&text).into_iter().chain(pub_fields(&text));
+    for (n, declaration) in declared {
+        let signature = signature_only(&code_only(&declaration));
+        if let Some(name) = component_type_in(&signature, &components, &imported) {
+            let head = declaration.lines().next().unwrap_or("").trim();
+            found.push(format!(
+                "  {}:{}: {head} names `{name}`",
+                rel.display(),
+                n + 1
+            ));
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "a `pub` in test_support names a type from a component, so the type is on the surface \
+         under the harness's name and the facade is a rename:\n{}\n\nTake and return strings, \
+         paths, `Mode`, `MemoryLimit` and the harness's own types; the engine type stays behind \
+         a pub(crate) body.",
+        found.join("\n")
+    );
+}
+
+/// The names a `use crate::<component>…;` binds in this file: each member of a brace group
+/// or the single item, under its `as` alias where it has one, the module itself for a bare
+/// module import, and `*` for a glob. A crate-root group (`use crate::{plan::A, planner::B}`)
+/// is read member by member. Statements are joined across lines first, since rustfmt wraps a
+/// long group.
+pub(crate) fn component_imports(text: &str, components: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for statement in use_statements(text) {
+        let Some(path) = statement.strip_prefix("crate::") else {
+            continue;
+        };
+        let members = match path.strip_prefix('{') {
+            Some(group) => split_members(group.trim_end_matches('}')),
+            None => vec![path.to_string()],
+        };
+        for member in members {
+            // A group is peeled before an alias is looked for: the ` as ` inside
+            // `planner::{A, B as C}` belongs to `B`, not to the member.
+            let (head, alias) = match member.split_once(" as ") {
+                Some((head, alias)) if !member.contains('{') => (head.trim(), Some(alias.trim())),
+                _ => (member.trim(), None),
+            };
+            let Some(component) = components
+                .iter()
+                .find(|c| head == c.as_str() || head.starts_with(&format!("{c}::")))
+            else {
+                continue;
+            };
+            let tail = &head[component.len()..];
+            if tail.is_empty() {
+                out.push(alias.unwrap_or(component).to_string());
+                continue;
+            }
+            match tail[2..].strip_prefix('{') {
+                Some(group) => {
+                    for member in split_members(group.trim_end_matches('}')) {
+                        out.push(bound_name(&member));
+                    }
+                }
+                None => out.push(match alias {
+                    Some(alias) => alias.to_string(),
+                    None => bound_name(&tail[2..]),
+                }),
+            }
+        }
+    }
+    out
+}
+
+/// Every `use …;` in the text, joined across lines, without the keyword and the semicolon.
+fn use_statements(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut lines = text.lines();
+    while let Some(line) = lines.next() {
+        let Some(rest) = line.trim().strip_prefix("use ") else {
+            continue;
+        };
+        let mut statement = rest.trim().to_string();
+        while !statement.contains(';') {
+            let Some(more) = lines.next() else { break };
+            statement.push(' ');
+            statement.push_str(more.trim());
+        }
+        out.push(statement.split(';').next().unwrap_or("").trim().to_string());
+    }
+    out
+}
+
+/// A brace group's members, split at the commas outside any inner group.
+fn split_members(group: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let (mut depth, mut current) = (0usize, String::new());
+    for c in group.chars() {
+        match c {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
+        }
+        current.push(c);
+    }
+    out.push(current);
+    out.into_iter()
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .collect()
+}
+
+/// What a `use` member binds: its alias, else its last segment — `*` for a glob.
+fn bound_name(member: &str) -> String {
+    match member.split_once(" as ") {
+        Some((_, alias)) => alias.trim().to_string(),
+        None => member
+            .rsplit("::")
+            .next()
+            .unwrap_or(member)
+            .trim()
+            .to_string(),
+    }
+}
+
+/// The first component type this signature names: an inline `crate::<component>::` path, or
+/// one of the names a `use` bound, matched as a whole identifier so a longer name is not it.
+pub(crate) fn component_type_in(
+    signature: &str,
+    components: &[String],
+    imported: &[String],
+) -> Option<String> {
+    for component in components {
+        let needle = format!("crate::{component}::");
+        if let Some(i) = signature.find(&needle) {
+            let path: String = signature[i..]
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
+                .collect();
+            return Some(path);
+        }
+    }
+    imported
+        .iter()
+        .find(|name| {
+            signature.match_indices(name.as_str()).any(|(i, _)| {
+                let before = signature[..i].chars().next_back();
+                let after = signature[i + name.len()..].chars().next();
+                !before.is_some_and(|c| c.is_alphanumeric() || c == '_')
+                    && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+            })
+        })
+        .cloned()
+}
+
+/// Every `pub` field, with its line: a `pub` line that is not an item declaration.
+pub(crate) fn pub_fields(text: &str) -> Vec<(usize, String)> {
+    text.lines()
+        .enumerate()
+        .filter(|(_, line)| line.trim_start().starts_with("pub ") && !is_bare_pub_item(line))
+        .map(|(n, line)| (n, line.to_string()))
+        .collect()
+}
+
+/// A declaration without its initializer: a `pub const` or `pub static` runs to the `;`, and
+/// `MODES` spells `BatchSizing::Budgeted` in its value without putting the type in its type.
+pub(crate) fn signature_only(declaration: &str) -> String {
+    let t = declaration.trim_start();
+    let is_value = t.strip_prefix("pub ").is_some_and(|rest| {
+        (rest.starts_with("const ") && !rest.starts_with("const fn "))
+            || rest.starts_with("static ")
+    });
+    match (is_value, declaration.find('=')) {
+        (true, Some(i)) => declaration[..i].to_string(),
+        _ => declaration.to_string(),
+    }
 }
 
 /// Every `pub` item's declaration — from the `pub` to the `{` or `;` that ends the signature —

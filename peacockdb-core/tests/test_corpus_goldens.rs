@@ -11,16 +11,14 @@
 //! own redundancy. The cost tree has no external oracle — the golden is written by the run
 //! that will later check it — but a file that contradicts itself is a file the renderer got
 //! wrong, and the renderer is most of what could be wrong.
-#[macro_use]
-mod common;
 
 use std::path::{Path, PathBuf};
 
-use common::mode::{MODES, mode_named};
-use common::corpus_golden::{
-    Regeneration, SKIPPED, cost_golden, cpu_golden, merge_section, merged_text, result_golden,
+use peacockdb_core::test_support::{
+    MODES, Regeneration, SKIPPED, assert_section, cost_golden, cpu_golden, load_csv, merge_section,
+    merged_text, mode_named, ordered_sections, over_cap, parse_node_line, parse_run_section,
+    result_golden, stem,
 };
-use common::golden_text::{ordered_sections, parse_node_line, parse_run_section};
 
 // --- the write path ------------------------------------------------------------
 
@@ -164,7 +162,7 @@ fn a_cleared_bit_turns_a_real_section_into_a_marker() {
 fn an_over_cap_result_is_a_marker_and_not_a_deletion() {
     let declared = skeleton(&[("q1", true)]);
     let mode = mode_named("tp4_sized");
-    let body = common::corpus::over_cap(Some(300_000), mode);
+    let body = over_cap(Some(300_000), mode);
     let after = merged_text("", &declared, "q1", &body, Regeneration::Whole);
     assert_eq!(after, format!("== q1\n{body}"));
     let (_, held) = ordered_sections(&after).remove(0);
@@ -526,7 +524,7 @@ fn a_marker_is_never_read_as_a_run() {
 /// is reading.
 #[test]
 fn every_enabled_cell_has_a_section_with_content_and_every_disabled_one_a_marker() {
-    let rows = common::registry::load_csv();
+    let rows = load_csv();
     let mut wrong: Vec<String> = Vec::new();
     let mut checked = 0;
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
@@ -538,8 +536,8 @@ fn every_enabled_cell_has_a_section_with_content_and_every_disabled_one_a_marker
                 ordered_sections(&text).into_iter().collect();
             for row in rows.iter().filter(|r| r.dataset == dataset && r.sf == sf) {
                 let state = row.states.get(&column).map(String::as_str).unwrap_or("na");
-                let held = sections.get(&common::registry::stem(&row.query));
-                let at = format!("{dataset} {} {}", mode.name, common::registry::stem(&row.query));
+                let held = sections.get(&stem(&row.query));
+                let at = format!("{dataset} {} {}", mode.name, stem(&row.query));
                 match (state, held) {
                     ("enabled", None) => wrong.push(format!("{at}: enabled and has no section")),
                     ("enabled", Some(body)) if body.starts_with(SKIPPED) => {
@@ -572,7 +570,7 @@ fn every_enabled_cell_has_a_section_with_content_and_every_disabled_one_a_marker
 /// is the section this guard most needs to see.
 #[test]
 fn every_result_section_names_the_mode_that_would_author_it_now() {
-    let rows = common::registry::load_csv();
+    let rows = load_csv();
     let mut compared = 0;
     let mut markers = 0;
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
@@ -585,7 +583,7 @@ fn every_result_section_names_the_mode_that_would_author_it_now() {
             };
             let row = rows
                 .iter()
-                .find(|r| r.dataset == dataset && r.sf == sf && common::registry::stem(&r.query) == query)
+                .find(|r| r.dataset == dataset && r.sf == sf && stem(&r.query) == query)
                 .unwrap_or_else(|| panic!("{dataset}/{query}: a section with no registry row"));
             // `enabled | skip` is the pair `declared_sections` uses to decide a query has a
             // section at all, so counting only `enabled` would disagree with the writer about
@@ -628,13 +626,13 @@ fn every_result_section_names_the_mode_that_would_author_it_now() {
 /// body's own line would say so while nobody read it.
 #[test]
 fn each_result_section_was_written_by_the_mode_entitled_to_write_it() {
-    let rows = common::registry::load_csv();
+    let rows = load_csv();
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
         let text = std::fs::read_to_string(result_golden(dataset, sf)).expect("the result golden");
         for (query, body) in ordered_sections(&text) {
             let row = rows
                 .iter()
-                .find(|r| r.dataset == dataset && r.sf == sf && common::registry::stem(&r.query) == query)
+                .find(|r| r.dataset == dataset && r.sf == sf && stem(&r.query) == query)
                 .unwrap_or_else(|| panic!("{dataset}/{query}: a section with no registry row"));
             let entitled = MODES.iter().rev().find(|mode| {
                 let column = format!("cpu_{}", mode.ident());
@@ -691,7 +689,7 @@ fn a_regeneration_does_not_make_the_read_only_path_write() {
         std::env::set_var("PCK_UPDATE_SECTIONS", "1");
     }
     let wrote_anyway = std::panic::catch_unwind(|| {
-        common::corpus_golden::assert_section(&path, "q1", "a body from a run\n");
+        assert_section(&path, "q1", "a body from a run\n");
     });
     unsafe {
         std::env::remove_var("UPDATE_CANONICAL");

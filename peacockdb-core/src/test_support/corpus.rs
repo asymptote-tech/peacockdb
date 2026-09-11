@@ -2,40 +2,43 @@
 //!
 //! What a `corpus_query!` case does, minus the golden — the two corpus binaries define the
 //! macro and this is the body both of their cases reach. The declaration list is
-//! [`corpus_cases.inc`](corpus_cases.inc), included by each, so the two engines' coverage
-//! is read off one line per query rather than two lists that can disagree.
+//! `tests/common/corpus_cases.inc`, included by each, so the two engines' coverage is read
+//! off one line per query rather than two lists that can disagree.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::execution::context::SessionContext;
-use peacockdb_core::executor::CpuBackend;
-use peacockdb_core::executor::{RunReport, run};
-use peacockdb_core::plan::{GpuNode, validate};
-use peacockdb_core::plan_text::render_run;
-use peacockdb_core::planner;
 
-use super::cost_model::CostModel;
-use super::mode::{MODES, Mode, mode_named};
-use super::result_text::ResultDigest;
+use crate::executor::{CpuBackend, RunReport, run};
+use crate::plan::{GpuNode, validate};
+use crate::plan_text::render_run;
+use crate::planner;
+
 use super::{
-    RESULT_GOLDEN_MAX_BYTES, assert_results_match, batches_to_sorted_str, corpus_golden,
-    data_dir_for, queries_dir_for, registry, result_text, total_rows,
+    CostModel, MODES, Mode, ResultDigest, SKIPPED, assert_results_match, batches_to_sorted_str,
+    corpus_golden, data_dir_for, mode_named, queries_dir_for, registry, result_text, total_rows,
 };
 
+/// Max rendered size for a committed `.result.txt` golden. Above this the golden is
+/// NOT written (full-result text doesn't scale — e.g. tpch anti-join renders ~240
+/// MB / 1.2M rows and trips the repo's push size guard). Large-result queries fall
+/// back to the live CPU oracle in the merged GPU test.
+pub(crate) const RESULT_GOLDEN_MAX_BYTES: usize = 256 * 1024;
+
 /// A query planned and run at one mode, with everything a caller needs to check it.
-pub struct CpuRun {
-    pub tree: Box<dyn GpuNode>,
-    pub report: RunReport,
-    pub batches: Vec<RecordBatch>,
+pub(crate) struct CpuRun {
+    pub(crate) tree: Box<dyn GpuNode>,
+    pub(crate) report: RunReport,
+    pub(crate) batches: Vec<RecordBatch>,
 }
 
 /// Plan `query` at `mode`. Panics naming the query and the mode: a corpus case's whole
 /// context is those two, and a bare planner error names neither. The session comes back
 /// with the tree because both engines need it — the cpu backend runs against its task
 /// context and the device's oracle runs against the same session.
-pub async fn plan_at(
+pub(crate) async fn plan_at(
     dataset: &str,
     sf: &str,
     query: &str,
@@ -59,7 +62,7 @@ pub async fn plan_at(
 }
 
 /// Plan and run on the CPU backend, with the two accounting assertions every run makes.
-pub async fn run_cpu(dataset: &str, sf: &str, query: &str, mode: &Mode) -> CpuRun {
+pub(crate) async fn run_cpu(dataset: &str, sf: &str, query: &str, mode: &Mode) -> CpuRun {
     let what = format!("{dataset}/{query} at {}", mode.name);
     let (ctx, tree) = plan_at(dataset, sf, query, mode).await;
     let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
@@ -85,7 +88,7 @@ pub async fn run_cpu(dataset: &str, sf: &str, query: &str, mode: &Mode) -> CpuRu
 /// The answer against plain DataFusion at `target_partitions = 1`, asked whichever of the
 /// three ways this query's declaration names. Runs on every case, regenerating or not: a
 /// wrong answer must not reach a golden, and this is the check that stops it.
-pub async fn assert_answer(
+pub(crate) async fn assert_answer(
     dataset: &str,
     sf: &str,
     query: &str,
@@ -177,7 +180,7 @@ async fn assert_subset_of_unlimited(
 
 /// `max(0, min(n, |unlimited| - m))` for `LIMIT n OFFSET m`: an offset past the end returns
 /// nothing, and a limit past what is left returns what is left.
-pub fn wanted_rows(available: u64, skip: u64, fetch: Option<u64>) -> u64 {
+pub(crate) fn wanted_rows(available: u64, skip: u64, fetch: Option<u64>) -> u64 {
     let after_skip = available.saturating_sub(skip);
     match fetch {
         Some(n) => n.min(after_skip),
@@ -233,7 +236,7 @@ async fn assert_contained_in(
 }
 
 /// The rows a run returned, counted — what the containment check owes the oracle.
-pub fn owed_rows(batches: &[RecordBatch]) -> HashMap<String, usize> {
+pub(crate) fn owed_rows(batches: &[RecordBatch]) -> HashMap<String, usize> {
     let mut owed: HashMap<String, usize> = HashMap::new();
     for row in rows_of(batches) {
         *owed.entry(row).or_insert(0) += 1;
@@ -243,7 +246,7 @@ pub fn owed_rows(batches: &[RecordBatch]) -> HashMap<String, usize> {
 
 /// Strike off what this slice of the unlimited answer accounts for, and record which owed
 /// rows it holds at all — the two failures a leftover can mean are told apart by that.
-pub fn take_rows(
+pub(crate) fn take_rows(
     owed: &mut HashMap<String, usize>,
     batches: &[RecordBatch],
     held_at_all: &mut std::collections::HashSet<String>,
@@ -283,7 +286,7 @@ fn rows_of(batches: &[RecordBatch]) -> Vec<String> {
 /// last `limit` in the text, since a query can hold an inner one; anything else after it
 /// panics rather than being trimmed, so a query declaring this oracle without an unordered
 /// limit fails loudly instead of being compared against itself.
-pub fn without_its_limit(sql: &str, what: &str) -> (String, u64, Option<u64>) {
+pub(crate) fn without_its_limit(sql: &str, what: &str) -> (String, u64, Option<u64>) {
     let body = sql.trim().trim_end_matches(';');
     let at = body
         .to_ascii_lowercase()
@@ -330,8 +333,8 @@ async fn collect(ctx: &SessionContext, sql: &str, what: &str) -> Vec<RecordBatch
 }
 
 async fn session_for(dataset: &str, sf: &str, target_partitions: usize) -> SessionContext {
-    peacockdb_core::register_tables_for(
-        peacockdb_core::build_session_state(target_partitions),
+    crate::register_tables_for(
+        crate::build_session_state(target_partitions),
         &data_dir_for(dataset, sf),
     )
     .await
@@ -350,7 +353,7 @@ fn query_text(dataset: &str, query: &str) -> String {
 /// The oracle comparison comes first and runs whether or not this is a regenerating run —
 /// a wrong answer must never reach a golden, and freezing one is the only way this tier
 /// could record something no later run would question.
-pub async fn cpu_case(dataset: &str, sf: &str, query: &str, mode: &str, cpu_oracle: &str) {
+pub(crate) async fn cpu_case(dataset: &str, sf: &str, query: &str, mode: &str, cpu_oracle: &str) {
     let mode = mode_named(mode);
     let what = format!("{dataset}/{query} at {}", mode.name);
     let run = run_cpu(dataset, sf, query, mode).await;
@@ -391,11 +394,11 @@ fn cpu_column(mode: &Mode) -> String {
 /// sequence of five. Its authority is a property of the declaration and not of what
 /// happened to run, which is what keeps the one golden with no mode in its key well defined
 /// under a filtered regeneration — a run without the authority leaves the section alone.
-pub fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'static Mode> {
+pub(crate) fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'static Mode> {
     let rows = registry::load_csv();
-    let row = rows
-        .iter()
-        .find(|row| row.dataset == dataset && row.sf == sf && registry::stem(&row.query) == query)?;
+    let row = rows.iter().find(|row| {
+        row.dataset == dataset && row.sf == sf && registry::stem(&row.query) == query
+    })?;
     MODES.iter().rev().find(|mode| {
         row.states
             .get(&cpu_column(mode))
@@ -410,15 +413,14 @@ pub fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'stat
 /// The marker keeps first position and `mode=` follows it: `corpus_gpu` reads a leading
 /// SKIPPED as "this section holds no rows", so a mode line ahead of it would let a
 /// `golden_exact` declaration pass against a section with nothing to compare.
-pub fn over_cap(bytes: Option<usize>, mode: &Mode) -> String {
+pub(crate) fn over_cap(bytes: Option<usize>, mode: &Mode) -> String {
     let size = match bytes {
         Some(bytes) => format!("is {bytes} bytes, at or above"),
         None => "is at or above".to_string(),
     };
     format!(
         "{}the result {size} the {RESULT_GOLDEN_MAX_BYTES}-byte cap\nmode={}\n",
-        corpus_golden::SKIPPED,
-        mode.name
+        SKIPPED, mode.name
     )
 }
 
@@ -465,7 +467,7 @@ fn assert_result_section(
 /// or the count and the containment where the SQL determines no more than those. That is
 /// why it is an argument rather than a second kind of case.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum CpuOracle {
+pub(crate) enum CpuOracle {
     /// Exact sorted-string equality. The default.
     DataFusionExact,
     /// 1e-12 relative tolerance on Float64 columns. Only for queries whose sole
@@ -484,7 +486,7 @@ pub enum CpuOracle {
 
 impl CpuOracle {
     /// The `rel_tol` handed to the result compare. `None` = exact.
-    pub fn rel_tol(self) -> Option<f64> {
+    pub(crate) fn rel_tol(self) -> Option<f64> {
         match self {
             CpuOracle::DataFusionExact | CpuOracle::DataFusionSubset => None,
             CpuOracle::DataFusionApproximate => Some(1e-12),
@@ -495,7 +497,7 @@ impl CpuOracle {
 /// Map a `corpus_query!` oracle keyword to its [`CpuOracle`]. An unknown keyword panics
 /// naming the accepted set rather than falling through to the exact compare, which would
 /// make a typo read as the strictest oracle and pass.
-pub fn cpu_oracle_mode(s: &str) -> CpuOracle {
+pub(crate) fn cpu_oracle_mode(s: &str) -> CpuOracle {
     match s {
         "data_fusion_exact" => CpuOracle::DataFusionExact,
         "data_fusion_approximate" => CpuOracle::DataFusionApproximate,
