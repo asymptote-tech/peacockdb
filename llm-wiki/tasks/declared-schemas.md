@@ -217,8 +217,8 @@ no query that exercised it.
 | 10 | `SELECT CAST(n_nationkey AS BIGINT), CAST(n_nationkey AS DOUBLE) FROM nation` | tp1-single | cast targets, fixed-width |
 | 11 | `SELECT CAST(n_nationkey AS VARCHAR) FROM nation` | tp1-single | [#45](../tickets.md#t45) — a cast target that is not fixed-width |
 | 12 | `SELECT extract(year FROM o_orderdate) FROM orders` | tp1-single | [#191](active-tickets.md#t191) — integer **narrowing**, `Int16` exported where `Int32` was declared |
-| 13 | a query whose sink column is a `Date64` | tp1-single | the hole nothing covers. `Date64` maps to `TIMESTAMP_MILLISECONDS` and returns `Timestamp(ms, None)` — **a type the wire cannot express**, since `gpu_plan.fbs` has no `Timestamp` tag. It gets neither a cast nor a refusal today |
-| 14 | a query producing a `Timestamp` at the sink | tp1-single | the wire has no `Timestamp`, so `convert_data_type` should refuse at plan time. Assert the refusal is clean and names the type, rather than a panic — a refusal nobody has exercised |
+| 13 | a query whose sink column is a `Date64` | tp1-single | [#200](../tickets.md#t200) — `Date64` returns `Timestamp(ms, None)`, **a type the wire cannot express**. Neither cast nor refused today |
+| 14 | a query producing a `Timestamp` at the sink | tp1-single | [#200](../tickets.md#t200)'s other half: `convert_data_type` has no `Timestamp` arm, so the plan should be refused. Assert the refusal is clean and names the type rather than panicking — nobody has exercised it |
 | 15 | a scan yielding several batches into a coalesce | tp1-rowgroup | **the firings of one call agree with each other.** The mode is the point: `rowgroup` is what produces more than one batch per lane. Confirm against that mode's plan text and name the query in `-impl.md` |
 
 Two that are **not** walk queries, because they never reach a device:

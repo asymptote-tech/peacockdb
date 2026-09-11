@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 200), which is also the counter for
+New tickets take the next free number (currently 201), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,30 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 16 | #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Critical correctness](#critical-correctness) | 17 | #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
 
 ## Critical correctness
+
+<a id="t200"></a>
+### #200 — a Date64 comes back as a type the wire cannot name
+
+`fb_to_type_id` maps `Date64` to `TIMESTAMP_MILLISECONDS`, and `to_arrow_schema` maps that back to
+`Timestamp(ms, None)`. So a column declared `Date64` is exported as a timestamp.
+
+`gpu_plan.fbs` has no `Timestamp` in its `DataType` enum — `Date32` and `Date64` and nothing else in
+that family — so the type the device hands back cannot be expressed on the wire at all. Nothing
+casts it and nothing refuses it: a plan carrying a `Date64` at the sink dies at `concat_batches`
+with `expected Date64 but found Timestamp(Millisecond, None)`.
+
+No corpus column declares a `Date64`, so no cell is disabled against this and it was missed by a
+rollout over sixty queries. A user reaching one gets the failure with no ticket to read.
+
+The same gap seen from the other side: a query *producing* a `Timestamp` cannot be serialized, since
+`convert_data_type` has no arm for it. That refusal has never been exercised, and whether it is clean
+or a panic is unverified.
 
 <a id="t199"></a>
 ### #199 — a global aggregate on an empty lane drops its identity row on the device
