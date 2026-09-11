@@ -493,3 +493,13 @@ the four CI binaries took 1, 1, 69 and 30 GiB out of what was left and passed.
 a gate, and the head that carries code is the one `done` asserts.
 
 Terminal for the ensemble. The human merges.
+
+### 2026-09-11 — rebased onto master `02069415`; `rebase needed(done)` until re-proven
+
+The control file said `rebase`. Master carried `62335cff` (`cpp/CMakeLists.txt`: `cudf_ROOT`
+seeds `CMAKE_PREFIX_PATH`) and `02069415` (`build-test-shadgpu.sh` and `setup-glibc.sh` patch to
+the build host's glibc) past `188c23ce`, plus a docs-only report commit. The rebase applied
+clean, 12 commits, no conflict. Not documentation alone, so the task is `rebase needed(done)`
+until a developer re-runs the shad-gpu cycle from this box — now Ubuntu 24.04 / glibc 2.39, the
+host class `02069415` exists for — and CI is green on the rebased PR #144. The worktree has no
+`cpp/build26` or `target-cudf-*` yet, so this cycle's builds are cold.
