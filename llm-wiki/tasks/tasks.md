@@ -83,3 +83,20 @@ demotions.
 registers are deleted and `coding-style.md`'s Visibility section stops carrying an exemption at
 all. It is also the sweep: the formatting hunks, comment wording and guard fixes that tasks 1-3
 deferred without naming a task.
+
+### 7. [`declared-schemas.md`](declared-schemas.md) — state: approved to build
+
+The engine declares a schema per node and only the CPU backend is held to it — `declared_as` pulls
+every stage back to the declaration, and the device path has no equivalent. Declares a schema per
+*call* for the six arms that already have one, renders them in a new section of
+`recipe-payloads.txt` rendered Rust-side so the wire does not move, and measures them on a device
+through an exporter that casts to the declared type instead of relabelling. Fixes nothing: every
+disagreement is a `bug_` test. Last in the chain because it needs `wire/gpu_tests/`.
+
+### 8. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../tickets.md#t198) — state: approved to build
+
+`build_expr` builds ten literal scalars a second time and assumes validity, so a typed NULL inside an
+AST expression is a typed zero — a wrong value in arithmetic and a wrong row count in a comparison.
+One scalar builder, not a corrected copy. C++ only. Carries a test-helper repair first:
+`CreateScalarValue` gained `is_null` as field 2 and the gtest call sites kept their old positions, so
+every `make_int64_literal` builds the literal 0. Claims no cells.

@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 198), which is also the counter for
+New tickets take the next free number (currently 200), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,38 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 14 | #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Critical correctness](#critical-correctness) | 16 | #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
 
 ## Critical correctness
+
+<a id="t199"></a>
+### #199 — a global aggregate on an empty lane drops its identity row on the device
+
+`gpu_backend/accumulate.rs:307` answers an empty lane with nothing. The CPU counterpart has a
+`!self.grouped` clause and answers with the identity row — `count` is 0, not absent.
+
+So a global aggregate whose lane received no rows disagrees between the engines: the CPU emits one
+row and the device emits none. A wrong answer rather than a refusal, and nothing refuses it.
+Reachability is unverified — found by reading, not by a run — so the first thing it needs is a
+query that reaches an empty lane under a global aggregate.
+
+<a id="t198"></a>
+### #198 — a typed NULL inside an AST expression is a typed zero on the device
+
+`ScalarValue.is_null` is read in `build_scalar` (`expr.cpp:456`) and assumed `true` in
+`build_expr`'s ten literal arms (`:158`), so which answer a literal gives depends on which
+path evaluated it.
+
+A bare literal short-circuits to `build_scalar` and is null, as do `CASE` and `LIKE`, which
+`is_ast_able` refuses. What reaches the bug is `col <op> NULL::T` for a numeric `T` matching the
+column. In arithmetic that is a wrong value; in a comparison it is a wrong **row count**, since
+`col = NULL` is true wherever `col` is 0 and SQL says the row does not survive.
+
+No cell is disabled against this — it is a wrong answer inside cells that pass. Fixed by
+`tasks/typed-nulls.md`, which removes the second scalar builder rather than correcting it.
 
 <a id="t166"></a>
 ### #166 — physical planning drops a LIMIT interval, and the answer changes

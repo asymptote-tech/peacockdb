@@ -460,3 +460,10 @@ Wall-time runs of the C++ suites are manual; the protocol: `PEACOCK_BENCHMARK=1`
   (process-global cudf stream state across WorkerPool teardowns). Correctness (single
   execute) is fine in one process. Mean-type aggregates must decompose to partial
   SUM+COUNT — never average partial means.
+
+## Antipatterns
+
+- **A wait loop that matches itself.** `timeout 900 bash -c 'until ! pgrep -f "cargo test …";
+  do sleep 15; done'` can never exit: the wrapper's own command line contains the pattern, so
+  `pgrep -f` finds the waiter and the loop waits for itself. It ends only when the timeout
+  fires. Where a pattern is unavoidable, exclude the waiter's own pid.
