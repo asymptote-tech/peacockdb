@@ -219,3 +219,15 @@ Plan tasks 1-2 committed as `aae9cd9b`. The control file said `stop` when the de
 so the run ends here with task 5 at `building`. **Next: plan task 3** (the proof, in a fresh
 window) — then commit, push, PR against `ENS-test-layout`, review. Nothing is unproven in the
 tree: every check in the entry above ran on the committed state.
+
+### 2026-09-11 — plan task 3 dispatched: the proof, in a fresh window
+
+Fresh worktree at `47bd42bd`; the tree is code-identical to `aae9cd9b`, which the entry above
+measured. Hosts: verda's hostname does not resolve, so CPU shapes run locally; shad-gpu up with
+a neighbour at 37 GiB, not needed — plan task 3 has no device step and the device cycle above
+ran on this code. `/tmp/peacock-testdata-slice3` is gone; `testdata/{tpch,tpcds}.sf1` are
+symlinks into `/home/dmitry/peacockdb/testdata`. `target/` is warm for `rust-only`; no
+`target-cudf-*` exists here, so the cudf half of step 1 is left to CI's `cpp-build-2502` and
+`dataset-matrix` on the PR rather than paid as a cold opt-3 build for a shape the entry above
+already built from this code. The developer runs the rust-only half of step 1, steps 2-5, and
+the whole rust-only package as the handoff run.
