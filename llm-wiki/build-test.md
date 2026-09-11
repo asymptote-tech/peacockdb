@@ -373,6 +373,10 @@ Rules that keep this healthy:
   `PEACOCK_FFI_CLEAN=1` forces.
 - `cpp/build` stays 25.02, `cpp/build26` stays 26.02 — separate dirs also dodge cmake's
   stale `cudf_DIR` cache. Keep both even when stale.
+- `-Dcudf_ROOT` is the one prefix the scripts pass. `cpp/CMakeLists.txt` copies it into
+  `CMAKE_PREFIX_PATH`, so cuVS and Arrow come from the same env and a fresh build dir needs
+  nothing on PATH. Before that, a fresh dir configured only where the env's `bin` was on PATH,
+  which CI's image has and a dev host does not.
 - cuDF version scope: a functional GPU run on **25.02** (shad-gpu) is sufficient
   verification; **26.02 needs only to compile** (CI builds both legs).
 

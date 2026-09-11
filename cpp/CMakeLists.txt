@@ -57,6 +57,16 @@ else()
       "  - Set -Dcudf_ROOT=<path> or the cudf_ROOT environment variable to a cudf installation, or\n"
       "  - Set -DCUDF_BUILD_FROM_SOURCE=ON to build cudf from the vendored submodule.")
   endif()
+  # cudf_ROOT is a hint for cudf alone. cuVS and Arrow live in the same prefix and are found
+  # through CMAKE_PREFIX_PATH, so the prefix named once serves all three — as build.rs already
+  # does for the FFI build. Without this a fresh build dir configures only where the prefix's
+  # bin is on PATH, which CI's image has and a dev host does not.
+  if(NOT DEFINED cudf_ROOT AND DEFINED ENV{cudf_ROOT})
+    set(cudf_ROOT "$ENV{cudf_ROOT}")
+  endif()
+  if(DEFINED cudf_ROOT AND NOT DEFINED CMAKE_PREFIX_PATH AND NOT DEFINED ENV{CMAKE_PREFIX_PATH})
+    set(CMAKE_PREFIX_PATH "${cudf_ROOT}")
+  endif()
   find_package(cudf REQUIRED CONFIG)
   message(STATUS "Using host cudf: ${cudf_VERSION}")
 endif()
