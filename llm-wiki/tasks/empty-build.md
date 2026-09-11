@@ -17,11 +17,11 @@ table for an empty lane — `cpu_backend/emit.rs:73` via `RecordBatch::new_empty
 device via a deep-copied `cudf::slice(pv, {start, start})` carrying column names
 (`node_session.cpp:405`). The driver then drops it at the scatter.
 
-**But the scatter is the wrong place to stop dropping.** Measured off the goldens: **389,331**
-dropped empty batches across 692 emitter sites, of which only **244** sit on a permanently-empty
-lane. Keeping them all would be roughly a million extra FFI calls to deliver 244 useful ones, since
-every consumer but the forwarder makes a backend call per batch. **The scatter is out of scope and
-stays as it is.**
+**But it must not stop dropping unconditionally.** Measured off the goldens: **389,331** dropped
+empty batches across 692 emitter sites, of which only **244** sit on a permanently-empty lane.
+Keeping them all would be roughly a million extra FFI calls to deliver 244 useful ones, since every
+consumer but the forwarder makes a backend call per batch. So the drop stays as the default and is
+lifted only where a join above owes rows — **the guard is the task**, not the keeping.
 
 **`Right`, `Full` and `RightAnti` need no new mechanism.** Given a zero-row build batch,
 `avail.has[BUILD_SLOT]` is true, so the lane takes `SetBuild` rather than `NoBuild` — and
@@ -37,92 +37,128 @@ Rust guards short-circuit first. It blocks **zero** cells in `cost-registry.csv`
 
 ## The work
 
-### 1. The build side emits a zero-row batch
+### 1. The `false` branch that was never written
 
-Where the build's `GpuCoalesceAllBatches` emits nothing for a lane that received no rows, emit the
-zero-row batch instead, **guarded on `!empty_build_answers_nothing(join_type)`** so the six join
-types that owe nothing keep draining for free and pay nothing for this.
+The decision point already exists, in the right place, with the right information. The driver marks
+the lane, the join reads its own type, and `empty_build_answers_nothing` already answers:
 
-That guard is what keeps the cost at 244 batches rather than 389,331. `empty_build_answers_nothing`
-already exists and already makes the right decision in the right place; what was missing was what to
-do when it answers false.
+```rust
+// driver/single_partition.rs:183 — the driver routes an empty build lane
+ExecutorCategory::Join if self.awaits_build() && !avail.has[BUILD_SLOT] => LaneCall::NoBuild,
 
-Both engines move identically — there is one driver (`executor/mod.rs:630`) — and the CPU
-counterpart is `cpu_backend/accumulate.rs:138`.
+// gpu_backend/join.rs:103 — and the join asks the type what it owes
+let owes_nothing = self.join_type.map_or(true, empty_build_answers_nothing);
+if owes_nothing { return Ok(()); }
+Err(BackendError::new("... takes a call over a build table that does not exist (#175)"))
+```
 
-### 2. The comments that lie, and the ticket that is wrong
+**Nothing new marks anything.** `empty_build_answers_nothing` already makes the right decision in the
+right place; what is missing is only what to do when it answers `false`. An earlier draft of this
+spec proposed teaching a generic accumulator the join type through a plan-time or execution-time
+flag. That was solving a problem that does not exist, because the decision never belonged at the
+coalesce.
 
-`accumulate.rs:223` and `:325` say the device refuses where the code returns `Ok(empty)`. Fix them in
-this change; a doc comment asserting a refusal that does not happen is why #173's text describes four
-sites when it has one.
+What `without_build` lacks is a zero-row build **table** to call with.
 
-Correct #173's text to what is true, and correct #175's corpus reach: the registry names `tpcds q77`
-and `tpch q16`, not `q21` — `q21` is enabled at all five CPU modes and carries no #175 at all. The
-wiki's account of both is stale and is fixed here rather than filed.
+### 2. The table it lacks already exists, and the driver drops it
 
-### 3. The hazard, named rather than discovered
+`driver/partitioned.rs:381`:
 
-An empty probe batch is an extra probe call, and `gpu_backend/join.rs:303` refuses a second one —
-that is [#152](../tickets.md#t152). This task adds batches on the **build** side, not the probe side,
-so it should not reach it. Check it rather than assume it: a lane that gains a build batch must not
-gain a probe call.
+```rust
+for (lane, out) in outputs.into_iter().enumerate() {
+    // Empty scatter outputs are dropped here, so nothing empty traverses a chain
+    // because of hash skew.
+    if out.num_rows() == 0 { continue; }
+```
 
-### 4. Tests
+That `out` is a fully typed zero-row table — `RecordBatch::new_empty(schema)` on the CPU
+(`cpu_backend/emit.rs:73`), and on the device a deep-copied `cudf::slice(pv, {start, start})` carrying
+column names (`node_session.cpp:405`). It is dropped, and one lane later the join is told its build
+side is empty and refuses.
 
-- **an empty build lane answers with a zero-row batch** — for a join type that owes rows, and the
-  batch carries the declared column types rather than an empty shape. CPU first, since the CPU is
-  where the behaviour is cheap to assert.
-- **the six types that owe nothing still emit nothing** — the guard, asserted from the other side.
-  Without this the change is "every empty lane emits", which is the 389,331-batch version.
-- **`Right` pads from the build side and `RightAnti` returns every probe row** — the two answers the
-  C++ already computes, asserted end to end so that the claim "no new mechanism is needed" is proved
-  rather than argued.
-- **a build batch does not become a probe call** — the #152 hazard above.
+**Keep it where the join above owes rows, and nowhere else.** Not every empty lane: the spike priced
+that at 389,331 dropped batches to deliver the 244 that matter — roughly a million extra FFI calls,
+since every consumer but the forwarder makes a backend call per batch. The guard is
+`empty_build_answers_nothing` on the consuming join's type, the same predicate `without_build` reads,
+so the two cannot drift.
+
+**The open question, and it is answered before any code is written:** does the driver, at the
+scatter, know which consumer each lane feeds? It is the same `Driver` that later decides `NoBuild`,
+and `self.index` holds the tree, so the fact is reachable in principle — establish how. If the
+scatter cannot cheaply know its consumer, the fallback is to keep only what a join consumes and say
+so in the report. **It is not to invent a marker.**
+
+### 3. What the C++ then already computes
+
+With a zero-row build batch the lane takes `SetBuild` rather than `NoBuild`, and
+`operators/join.cpp:299` computes the answer that was missing: `Right` is `left_join(probe, build)`
+with `left_policy = NULLIFY`, which **is** the build-side pad, and `RightAnti` is `left_anti_join`
+over empty keys, which returns every probe row.
+
+So the parked spec's entire §2 — a new `ProjectRole`, a drain-walk routing change, a `without_build`
+signature change — buys something the C++ already does. None of it is in scope.
+
+### 4. The comments that lie, and the ticket that is wrong
+
+`cpu_backend/accumulate.rs:130` justifies the CPU emitting nothing *because* "the device's collapse of
+no handles is a refusal (#173)" — a false premise, so the two engines agree today for a reason that is
+not true. `gpu_backend/accumulate.rs:222` says "the device refuses that (#173)" where the code returns
+`Ok(Vec::new())`. Both are fixed here.
+
+Correct #173's text to the one site that refuses, and #175's corpus reach: the registry names `tpcds
+q77` and `tpch q16`, not `q21` — `q21` is enabled at all five CPU modes and carries no #175.
+
+### 5. The hazard, named rather than discovered
+
+An empty probe batch is an extra probe call, and `gpu_backend/join.rs:303` refuses a second one — that
+is [#152](../tickets.md#t152). This keeps batches on the **build** side, so it should not reach it.
+Check rather than assume: a lane that gains a build batch must not gain a probe call.
+
+### 6. Tests
+
+- **an empty build lane reaches `SetBuild`, not `NoBuild`** — the driver-level claim, asserted where
+  the routing happens rather than through the answer it eventually produces.
+- **the six types that owe nothing still drop their empty lanes** — the guard from the other side.
+  Without it the change is "keep every empty lane", which is the 389,331-batch version.
+- **`Right` pads from the build side and `RightAnti` returns every probe row** — end to end, so "the
+  C++ already computes this" is proved rather than argued.
+- **a build batch does not become a probe call** — the #152 hazard.
 - **`tpcds q77` and `tpch q16` run** — the two queries the registry says are waiting, on the CPU.
 
 ## Scope of code changes
 
-Every file this touches, and the one decision the spec does not make for you.
-
 | file | change |
 |---|---|
-| `executor/cpu_backend/accumulate.rs` | `one_batch` (`:138`) returns `Ok(Vec::new())` for an empty lane. It emits a zero-row batch of the declared schema instead, when the lane must answer. Its doc comment (`:130`–`:137`) rests on a false premise and is rewritten |
-| `executor/gpu_backend/accumulate.rs` | the same decision on the device side; `SortedRuns`' doc (`:222`) says "the device refuses that (#173)" while the code returns `Ok(Vec::new())` — one of the two lying comments |
-| `plan/join.rs:452` | `empty_build_answers_nothing` is read, not changed. It already decides correctly; what was missing is a caller for the `false` branch |
-| `llm-wiki/tickets.md` | #173's text cut to the one site that refuses; #175's corpus reach corrected to `tpcds q77` and `tpch q16` |
-| `llm-wiki/architecture.md` | `:606` and `:856` describe the old behaviour and stop being true |
+| `executor/driver/partitioned.rs:381` | the drop becomes conditional: a zero-row scatter output is kept where the consuming join's type owes rows |
+| `executor/gpu_backend/join.rs:103` | `without_build`'s `false` branch stops erroring — or becomes unreachable, if step 2 routes the lane to `SetBuild` before it is called. **Which of the two is the design, and this spec does not choose**: routing earlier is cleaner and may be impossible if the driver cannot know the consumer at the scatter |
+| `executor/cpu_backend/join.rs:185` | the CPU counterpart of whichever shape step 2 takes |
+| `executor/cpu_backend/accumulate.rs:130` | a doc comment resting on a false premise |
+| `executor/gpu_backend/accumulate.rs:222` | the other lying comment |
+| `llm-wiki/tickets.md` | #173 cut to its one real site; #175's corpus reach corrected |
+| `llm-wiki/architecture.md` | `:606` and `:856` describe the old behaviour |
 | goldens | 6 `.cpu.txt`, 6 `.cost.txt`, `cost-registry.csv` |
 
-**The open decision: how the accumulator learns it must answer.** `one_batch` and `SortedRuns` are
-generic accumulators — they do not know a join sits above them, and `empty_build_answers_nothing`
-takes a `JoinType` they have no access to. Two shapes, and the author picks one with reasons:
+**Not touched:** `operators/join.cpp`, which already computes both answers; `gpu_backend/join.rs`'s
+`finish_without_keys`, which is #173's surviving site and lives on the **probe** side; the ABI; the
+wire; and `empty_build_answers_nothing` itself, which is read and never changed.
 
-- **Plan time.** The planner builds the join and its build-side child together, so it can mark that
-  child "answers even when empty". A field on the node, and the accumulator reads it. Costs a node
-  field and possibly a recipe field; the decision is visible in the plan text, which is where a
-  reader would look for it.
-- **Execution time.** `executors_for` builds the join executor knowing its children, so the backend
-  can hand the flag down when it constructs the accumulator. Costs no plan change and renders
-  nowhere, so a wrong answer has no artifact to have been caught by.
-
-**Estimate the first before choosing the second.** A flag that renders in `.plans.txt` is a flag a
-reviewer can see, and this task's whole premise came from reading goldens. If plan time turns out to
-need a wire field, say so and stop — that is a larger task than this one and it should not grow into
-one quietly.
-
-**Not touched:** `driver/partitioned.rs` and the scatter; `operators/join.cpp`, which already computes
-both answers; `gpu_backend/join.rs`'s `finish_without_keys`, which is #173's surviving site and lives
-on the probe side; the ABI; the wire.
+**No new marker of any kind** — not a node field, not a recipe field, not a plan-text attribute. If
+the work appears to need one, the reading above is wrong and that is a finding to report rather than a
+scope increase.
 
 ## Restriction
 
-**The scatter is not touched.** `driver/partitioned.rs`'s drop of empty scatter outputs stays; the
-spike priced keeping it at ~10⁶ extra calls for 244 useful ones.
+**The drop stays the default.** `driver/partitioned.rs:381` keeps dropping empty scatter outputs
+everywhere except where the consuming join's type owes rows. An implementation that removes the drop
+and relies on something downstream to absorb the cost is the 389,331-batch version, and it is the one
+failure this task can produce that a green test suite would not catch.
 
-**No new ABI symbol, no `ProjectRole`, no `without_build` change, no wire change.** If the work seems
-to need one, the spike's reading was wrong and that is a finding to report, not a scope increase.
+**No new ABI symbol, no `ProjectRole`, no `without_build` signature change, no wire change, and no
+new marker.** If the work appears to need one, the reading in §1 and §2 is wrong, and that is a
+finding to report rather than a scope increase.
 
-Code changes are limited to the build-side emit and its guard, the two doc comments, and the tests.
+Code changes are limited to the conditional drop, whichever of the two shapes §2 settles on, the two
+doc comments, and the tests.
 
 ## Sequencing
 
