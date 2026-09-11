@@ -367,3 +367,21 @@ nothing.
 
 Not re-run: the rust-only package (nothing outside the layout test's two files changed), the
 cudf shapes, the device cycle.
+
+### 2026-09-11 — review round 2: 0 blocking, 0 important, 3 nits — the round closes
+
+Every round-1 item verified closed on `95a9ff31`; the reviewer re-ran its Python model of the
+new readers and the private-module rule with the body-reading capture over every `mod.rs`
+under `src/`: no false positive. Nits:
+
+- `declarations` (`privacy.rs:318`) counts braces over the raw line, so a `}` inside a
+  variant's doc comment ends a `pub enum`/`pub trait` body early and the lines below go unread
+  — silent. Fix: count over `code_only(lines[i])`. Not reachable today; **taken anyway**, one
+  line and a pin, because a silent hole in this guard is the class the task exists to close.
+- A `pub(crate) type` alias in a submodule reached by `use corpus::Tree;` in `mod.rs` binds a
+  name neither `component_imports` (reads `crate::` only) nor `type_aliases` (reads `mod.rs`
+  only) sees. Outside the spec's stated scan; no `type` line exists under `test_support/`.
+  Dropped.
+- Trait default method bodies now sit inside the private-module rule's capture, so a default
+  body in a component `mod.rs` calling into a private module reads as a signature — loud, and
+  none exists. Dropped.
