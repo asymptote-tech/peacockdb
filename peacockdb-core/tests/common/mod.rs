@@ -10,9 +10,6 @@ pub mod corpus_golden;
 #[cfg(not(feature = "rust-only"))]
 pub mod corpus_gpu;
 pub mod cost_model;
-pub mod join_fixture;
-
-use std::path::PathBuf;
 
 use datafusion::arrow::record_batch::RecordBatch;
 
@@ -57,52 +54,6 @@ pub mod result_text {
 /// MB / 1.2M rows and trips the repo's push size guard). Large-result queries fall
 /// back to the live CPU oracle in the merged GPU test.
 pub const RESULT_GOLDEN_MAX_BYTES: usize = 256 * 1024;
-
-/// A FIXED path that stands in for the testdata root when a plan's own BYTES are the
-/// thing under test.
-///
-/// A serialized plan legitimately embeds absolute parquet paths — the C++ side has to open
-/// those files — so the bytes depend on where the repo is checked out, and a digest of them
-/// would false-red in CI and on any dev box off /media/data. Substituting the path
-/// afterwards does not fix it: a FlatBuffer string is [len][bytes][pad], so a different root
-/// moves the length prefix, every later offset and the padding, and the result would be a
-/// digest of something that is not a real buffer. So the path is held constant instead: a
-/// symlink whose location is the same on every machine.
-pub fn canonical_root() -> PathBuf {
-    // Once per process, not once per call: the staged name below is unique per PROCESS, so
-    // two threads pointing the link at the same instant collide on it — one create fails
-    // EEXIST, or one remove deletes the other's before its rename.
-    static LINK: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    LINK.get_or_init(point_canonical_root).clone()
-}
-
-fn point_canonical_root() -> PathBuf {
-    let link = PathBuf::from("/tmp/peacock-plan-bytes-root");
-    let real = testdata_root();
-    // Re-pointed every run, since a stale link from another checkout would silently
-    // describe the wrong tree — but swapped rather than removed and recreated. Two test
-    // binaries use this path, and `cargo test` with no `--test` runs them at the same
-    // time: a remove-then-create leaves a window where the path does not resolve, and the
-    // other binary's parquet open fails for a reason that has nothing to do with it.
-    // A rename onto the name is atomic, so the path always resolves, to one root or the
-    // other — and both binaries derive the same root anyway.
-    #[cfg(unix)]
-    {
-        let staged = link.with_extension(std::process::id().to_string());
-        let _ = std::fs::remove_file(&staged);
-        std::os::unix::fs::symlink(&real, &staged).unwrap_or_else(|e| {
-            panic!("cannot create {} -> {}: {e}", staged.display(), real.display())
-        });
-        std::fs::rename(&staged, &link)
-            .unwrap_or_else(|e| panic!("cannot point {} at {}: {e}", link.display(), real.display()));
-    }
-    link
-}
-
-/// [`canonical_root`] for one dataset.
-pub fn canonical_data_dir(dataset: &str, sf: &str) -> PathBuf {
-    canonical_root().join(format!("{dataset}.sf{sf}"))
-}
 
 /// Float-tolerant comparison of two `batches_to_sorted_str` renderings. The data
 /// rows are grouped by their NON-numeric cells (so a ULP difference in a numeric

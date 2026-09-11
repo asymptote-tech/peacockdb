@@ -22,17 +22,17 @@ and `2gpu` rows also runs locally; large CPU batches go to verda.
 | Per-call ABI (Rust) | the three per-call symbols on a live GPU — a scan's row groups, an export range, a slice — and the release skipped exactly where a call consumed the handle | [test_gpu_abi](../peacockdb-core/tests/test_gpu_abi.rs) | shad-gpu | 4 |
 | GpuBatch surface (Rust) | what the batch reports, and that `consume` hands the handle over without releasing it. Needs no device: the release is null-guarded on the executor, so a CPU tier is its home | [executor::ffi_tests](../peacockdb-core/src/executor/ffi_tests/mod.rs) | dataset-matrix | 3 |
 | Cost-model goldens (Rust) | `.cost.txt` derivation from `.cpu.txt` × `cost_model.conf` | [cost_goldens_match_and_total_is_byte_identical](../peacockdb-core/tests/test_cost_model.rs#L36) | dataset-matrix | 3 |
-| Planner join capability (Rust) | every hash join type crossed with a residual filter, the co-partitioning and lane rules, and the null analysis both ways; writes its own parquet, so no dataset | [test_planner_join_capability](../peacockdb-core/tests/test_planner_join_capability.rs) | dataset-matrix | 13 |
-| Null analysis rules (Rust) | every rule in the can-this-column-be-NULL pass, on hand-built nodes — a source declares a not-nullable column here, which no corpus fixture can | [a_scalar_function_can_be_null_even_over_operands_that_cannot](../peacockdb-core/tests/test_null_analysis.rs) | dataset-matrix | 8 |
-| Planner join refusals (Rust) | every shape the planner refuses, from the SQL that provokes it; each asserts its ticket is in the message a user sees | [test_planner_join_refusals](../peacockdb-core/tests/test_planner_join_refusals.rs) | dataset-matrix | 10 |
-| Plan goldens, tp1-single (Rust) | 1 lane, one batch per chunk — the mode every other is read against; plan tree + `--- recipes ---` + `--- memory ---` per query, one file per bench | [tpch_tp1_single](../peacockdb-core/tests/test_plan_goldens.rs) | dataset-matrix | 2 |
-| Plan goldens, tp1-rowgroup (Rust) | 1 lane, one batch per row group: the finest the mapping expresses, and no budget; plan tree + `--- recipes ---` + `--- memory ---` per query, one file per bench | [tpch_tp1_rowgroup](../peacockdb-core/tests/test_plan_goldens.rs) | dataset-matrix | 2 |
-| Plan goldens, tp4-single (Rust) | 4 lanes, one batch per chunk — the shuffle shapes with batching inert; plan tree + `--- recipes ---` + `--- memory ---` per query, one file per bench | [tpch_tp4_single](../peacockdb-core/tests/test_plan_goldens.rs) | dataset-matrix | 2 |
-| Plan goldens, tp4-rowgroup (Rust) | 4 lanes at row-group granularity: lanes and many batches at once; plan tree + `--- recipes ---` + `--- memory ---` per query, one file per bench | [tpch_tp4_rowgroup](../peacockdb-core/tests/test_plan_goldens.rs) | dataset-matrix | 2 |
-| Plan goldens, tp4-sized (Rust) | 4 lanes, the estimator's target — **the only mode a budget tier moves**, recorded in-band; plan tree + `--- recipes ---` + `--- memory ---` per query, one file per bench | [tpch_tp4_sized](../peacockdb-core/tests/test_plan_goldens.rs) | dataset-matrix | 2 |
-| Plan goldens, meta (Rust) | the registry and the goldens agree both ways; every mode has a golden and every golden a mode; every refusal in a golden names a ticket that exists and carries no host path | [the_registry_matches_the_goldens_in_both_directions](../peacockdb-core/tests/test_plan_goldens.rs#L427) | dataset-matrix | 4 |
-| Recipe plan structure (Rust) | the claims the payload golden cannot make: every published seq resolves to the kind its recipe names, over every corpus query rather than only the payload subset; the payload set covers every fb kind and call shape the ten goldens hold; the queries that cannot cross the wire are declared; no plan approaches the verifier's depth cap ([#169](tickets.md#t169)); and the index's post-order agrees with the numbering `attach_recipes` gave, over the corpus, since the two are separate walks in separate files and [#134](tickets.md#t134) is the same pair one boundary over | [every_published_seq_addresses_the_kind_its_recipe_claims](../peacockdb-core/tests/test_plan_goldens.rs) | dataset-matrix | 4 |
-| Recipe payloads golden (Rust) | the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and call shape the mode goldens hold, and asserted to be one, so the membership grows when the mapping does — with every payload rendered and a sha256 over the bytes beside it | [the_payload_golden_carries_what_each_call_hands_the_executor](../peacockdb-core/tests/test_plan_goldens.rs#L229) | dataset-matrix | 1 |
+| Planner join capability (Rust) | every hash join type crossed with a residual filter, the co-partitioning and lane rules, and the null analysis both ways; writes its own parquet, so no dataset | [planner::tests::join_capability](../peacockdb-core/src/planner/tests/join_capability.rs) | dataset-matrix | 13 |
+| Null analysis rules (Rust) | every rule in the can-this-column-be-NULL pass, on hand-built nodes — a source declares a not-nullable column here, which no corpus fixture can | [a_scalar_function_can_be_null_even_over_operands_that_cannot](../peacockdb-core/src/planner/tests/null_analysis.rs) | dataset-matrix | 8 |
+| Planner join refusals (Rust) | every shape the planner refuses, from the SQL that provokes it; each asserts its ticket is in the message a user sees | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | dataset-matrix | 10 |
+| Plan goldens, tp1-single (Rust) | 1 lane, one batch per chunk — the mode every other is read against; plan tree + `--- recipes ---` + `--- memory ---` per query, one file per bench | [tpch_tp1_single](../peacockdb-core/src/planner/tests/plan_goldens.rs) | dataset-matrix | 2 |
+| Plan goldens, tp1-rowgroup (Rust) | 1 lane, one batch per row group: the finest the mapping expresses, and no budget; plan tree + `--- recipes ---` + `--- memory ---` per query, one file per bench | [tpch_tp1_rowgroup](../peacockdb-core/src/planner/tests/plan_goldens.rs) | dataset-matrix | 2 |
+| Plan goldens, tp4-single (Rust) | 4 lanes, one batch per chunk — the shuffle shapes with batching inert; plan tree + `--- recipes ---` + `--- memory ---` per query, one file per bench | [tpch_tp4_single](../peacockdb-core/src/planner/tests/plan_goldens.rs) | dataset-matrix | 2 |
+| Plan goldens, tp4-rowgroup (Rust) | 4 lanes at row-group granularity: lanes and many batches at once; plan tree + `--- recipes ---` + `--- memory ---` per query, one file per bench | [tpch_tp4_rowgroup](../peacockdb-core/src/planner/tests/plan_goldens.rs) | dataset-matrix | 2 |
+| Plan goldens, tp4-sized (Rust) | 4 lanes, the estimator's target — **the only mode a budget tier moves**, recorded in-band; plan tree + `--- recipes ---` + `--- memory ---` per query, one file per bench | [tpch_tp4_sized](../peacockdb-core/src/planner/tests/plan_goldens.rs) | dataset-matrix | 2 |
+| Plan goldens, meta (Rust) | the registry and the goldens agree both ways; every mode has a golden and every golden a mode; every refusal in a golden names a ticket that exists and carries no host path | [the_registry_matches_the_goldens_in_both_directions](../peacockdb-core/src/planner/tests/plan_goldens.rs#L708) | dataset-matrix | 4 |
+| Recipe plan structure (Rust) | the claims the payload golden cannot make: every published seq resolves to the kind its recipe names, over every corpus query rather than only the payload subset; the payload set covers every fb kind and call shape the ten goldens hold; the queries that cannot cross the wire are declared; no plan approaches the verifier's depth cap ([#169](tickets.md#t169)); and the index's post-order agrees with the numbering `attach_recipes` gave, over the corpus, since the two are separate walks in separate files and [#134](tickets.md#t134) is the same pair one boundary over | [every_published_seq_addresses_the_kind_its_recipe_claims](../peacockdb-core/src/planner/tests/plan_goldens.rs) | dataset-matrix | 4 |
+| Recipe payloads golden (Rust) | the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and call shape the mode goldens hold, and asserted to be one, so the membership grows when the mapping does — with every payload rendered and a sha256 over the bytes beside it | [the_payload_golden_carries_what_each_call_hands_the_executor](../peacockdb-core/src/planner/tests/plan_goldens.rs#L265) | dataset-matrix | 1 |
 | Golden text format (Rust) | the one reader of the format, over strings: the differ must name what moved, what is missing and what is out of order, and a node line must yield its name, depth and fields — every golden assertion in the tree is a comparison through it. The comma traps are cases, since `on=[(a@0, b@1)]` and `Decimal128(38, 15)` each carry one inside brackets | [a_section_that_moved_is_named_with_the_column_that_moved](../peacockdb-core/tests/test_golden_format.rs) | dataset-matrix | 26 |
 | Registry ↔ CSV (Rust) | each `cost-registry.csv` execution column matches the cases the corpus expands to, both directions — one binary per engine, since `inventory` collects per linked binary | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs), [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | dataset-matrix, shad-gpu | 2 |
 | CI wiring guard (Rust) | every Rust target must be named by a CI step — CI does not glob, the three lists that decide where a GPU target runs must agree, and both GPU runners must pass `--test-threads=1`, which is the whole of the single-tenant invariant inside a process and is what a device test's `unsafe { set_var }` rests on. Two classes the `--test` sweep cannot see are asserted line by line instead: the crate's `--lib` unit tests, and the CLI, which has no test target at all. The reader is scoped to the rust loop: a file-wide search passes on the comment above the command, and the C++ loop above it shares the loop variable and rightly carries no flag | [every_rust_test_target_is_named_by_ci](../peacockdb-core/tests/test_ci_coverage.rs#L323), [the_three_gpu_target_lists_agree](../peacockdb-core/tests/test_ci_coverage.rs#L419) | cost-report | 6 |
@@ -132,8 +132,8 @@ The generator scripts live in `testdata/`.
 
 | Golden | Produced by | Depends on | Asserted by |
 |---|---|---|---|
-| `<mode>.plans.txt` | `test_plan_goldens` with `UPDATE_CANONICAL=1` | sf1 parquet — row-group counts and per-column bytes decide `partition_groups` and the lane rules | the plan golden tiers, section by section |
-| `recipe-payloads.txt` | `test_plan_goldens` with `UPDATE_CANONICAL=1`<br>**and** `PEACOCK_REWRITE_RECIPE_BYTES=1` | sf1 parquet, and a fixed `/tmp` symlink for the testdata root — without it the payloads carry this machine's paths and so does the digest | <sub>the_payload_golden_carries_<br>what_each_call_hands_the_executor</sub> |
+| `<mode>.plans.txt` | `planner::tests::plan_goldens` (in `--lib`) with `UPDATE_CANONICAL=1` | sf1 parquet — row-group counts and per-column bytes decide `partition_groups` and the lane rules | the plan golden tiers, section by section |
+| `recipe-payloads.txt` | `planner::tests::plan_goldens` with `UPDATE_CANONICAL=1`<br>**and** `PEACOCK_REWRITE_RECIPE_BYTES=1` | sf1 parquet, and a fixed `/tmp` symlink for the testdata root — without it the payloads carry this machine's paths and so does the digest | <sub>the_payload_golden_carries_<br>what_each_call_hands_the_executor</sub> |
 | `<mode>-<tier>.cpu.txt` | the corpus cpu tier under `UPDATE_CANONICAL=1` (merge and prune) or `PCK_UPDATE_SECTIONS=1` (merge only) — never the GPU | sf1 parquet; one file per mode, a `== <query>` section each | the corpus cpu tier writes and verifies; the device tier verifies read-only |
 | `<mode>-<tier>.cost.txt` | derived from the sibling `.cpu.txt` **section**, × `cost_model.conf` | that `.cpu.txt`, `cost_model.conf` | the corpus cpu tier + `test_cost_model`, which re-derives every section independently |
 | `<tier>.result.txt` | the last mode a query declares, under either variable; a run without that mode leaves the section alone | sf1 parquet; one section per query, its `mode=` line naming the author | the corpus cpu tier; the device tier where `gpu_oracle` names a golden |
@@ -149,7 +149,7 @@ testdata/{tpch,tpcds}-queries/*.sql
                  ▼
         tpch.sf1 / tpcds.sf1   (parquet, gitignored)
           │
-          ├── test_plan_goldens, UPDATE_CANONICAL=1
+          ├── planner::tests::plan_goldens (--lib), UPDATE_CANONICAL=1
           │     ├──► <mode>.plans.txt
           │     └──► recipe-payloads.txt  [also needs PEACOCK_REWRITE_RECIPE_BYTES=1,
           │                                   and the fixed /tmp symlink]
@@ -216,14 +216,14 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   (conda gcc + ccache + pinned cmake/ninja), `ctest --test-dir cpp/build -L cpu`,
   generate + validate sf1 (pinned DuckDB — the TPC-DS dsdgen column types drift between
   releases and would move every plan golden), then the CPU rust tiers:
-  `test_plan_goldens`, the ffi rung as `--lib -- ffi_tests::` (which links the FFI but
-  touches no device), `peacockdb-ffi --test test_ffi`, plus rust-only `--lib`, `test_cpu_executors`,
+  the ffi rung as `--lib -- ffi_tests::` (which links the FFI but
+  touches no device), `peacockdb-ffi --test test_ffi`, plus rust-only `--lib` (which carries
+  the plan goldens and the planner's own tests), `test_cpu_executors`,
   and `test_cpu_corpus`. The `peacockdb` CLI is built here
   and not run: it has no test target, so this is the only thing that compiles it.
   The steps needing neither the generated dataset nor a device run on the 25.02 leg alone,
   since a rust-only test cannot see cuDF and a second leg would report the same failure twice:
-  the exec-model python, `test_planner_join_capability`, `test_planner_join_refusals`,
-  `test_null_analysis`, `test_cost_model`, `test_golden_format` and `test_corpus_goldens`.
+  the exec-model python, `test_cost_model`, `test_golden_format` and `test_corpus_goldens`.
   `CMAKE_GENERATOR` and `RUSTFLAGS` are job-level: cargo's fingerprint includes RUSTFLAGS,
   so a step carrying its own recompiles the dependency tree, and the image has ninja and no
   make, which flatc-fork's cmake needs told. Build and run are still separate steps, and
@@ -346,7 +346,7 @@ Rules that keep this healthy:
   green rust-only tier prove more per minute than re-running everything.
 - **Day-to-day iteration is the rust-only loop** — plain cargo into `./target`, no
   wrapper, no C++/CUDA:
-  `cargo test --features rust-only -p peacockdb-core --test test_plan_goldens`
+  `cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_goldens`
 - **Never run cudf-feature cargo builds in `./target`** — they would evict the rust-only
   cache and vice versa (the `ffi` feature and `cudf_ROOT` both change fingerprints, and
   the cudf side recompiles the DataFusion stack at opt-3). For one-off cudf/FFI cargo

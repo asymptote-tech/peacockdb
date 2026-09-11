@@ -895,3 +895,195 @@ so everything ran locally.
 - Both target dirs were `cargo clean -p peacockdb-core`ed for the cold counts and then rebuilt
   by the package run (`./target`) and the `gpu` build (`target-cudf-*`, which now holds the `gpu`
   fingerprint, not the default one).
+
+### 2026-09-10 — slice 7 done: the planner four → `planner/tests/`, and the fixture with them
+
+Plan task 7, steps 1-5. Not committed. Six files created, five deleted, eight modified:
+
+- Created `peacockdb-core/src/planner/tests/{mod,null_analysis,join_capability,join_refusals,plan_goldens}.rs`
+  and `peacockdb-core/src/tests/join_fixture.rs`.
+- Deleted `peacockdb-core/tests/{test_null_analysis,test_planner_join_capability,test_planner_join_refusals,test_plan_goldens}.rs`
+  and `tests/common/join_fixture.rs`.
+- Modified `src/planner/mod.rs` (`#[cfg(test)] mod tests;`), `src/tests/mod.rs` (`pub(crate) mod
+  join_fixture;`), `tests/common/mod.rs`, `src/test_support/registry.rs` and
+  `tests/test_golden_format.rs` (one comment each naming the old path), `.github/workflows/pipeline.yml`,
+  `llm-wiki/{build-test,tickets}.md`.
+
+#### One target at a time, and the negative control first
+
+`cargo test --features rust-only -p peacockdb-core --lib -- planner::tests --list` before any move:
+`0 tests, 0 benchmarks`, after a successful compile. Then in the plan's order, each followed by
+`--lib -- planner::tests` and the whole `--lib` at `--test-threads=2`:
+
+| After | `planner::tests` | whole `--lib` |
+|---|---|---|
+| `null_analysis` | 8 passed | 471 passed, 2 ignored |
+| `join_capability` + `join_refusals` (+ the fixture) | 31 passed | 494 passed, 2 ignored |
+| `plan_goldens` | 50 passed | 513 passed, 2 ignored |
+
+All four are `mod` under `planner/tests/mod.rs`, plain `#[cfg(test)]` at the component — pure Rust,
+no rung gate. `null_analysis.rs` reaches `can_be_null` as `super::super::can_be_null` (a child of
+`planner::tests`, so one `super::` is the test module, not the component); the other three name
+`crate::plan`, `crate::planner`, `crate::plan_text`, `crate::wire`, `crate::test_support` and
+`crate::tests::join_fixture`. `planner/memory_estimation/tests.rs` and `planner/translator/{tests,schema_tests}.rs`
+are untouched and still run — they are inside the 513.
+
+#### `join_fixture.rs`, and the one `tests/common` helper that moved with the goldens
+
+`git grep -n join_fixture` before the move: `tests/common/mod.rs:13` (the declaration) and the two
+planner targets, nothing else — slice 6's note holds. It is `src/tests/join_fixture.rs`,
+`pub(crate) mod` beside `injection` and `rebuild`, every `pub` in it `pub(crate)`; `use
+peacockdb_core::` → `use crate::`. Red-watched: one `pub const LANES` put back makes
+`a_components_api_is_declared_in_its_mod_rs` fail naming `tests/join_fixture.rs:29`, reverted.
+
+`canonical_root`, `point_canonical_root` and `canonical_data_dir` left `tests/common/mod.rs` too:
+`test_plan_goldens` was their only caller (`git grep canonical_` finds `corpus_golden.rs` mentioning
+the name in a comment and nothing else). They are private fns in `planner/tests/plan_goldens.rs`
+rather than `test_support` items — one audience, so the feature is not the place — and the in-body
+comment that said "two test binaries use this path" was cut to the atomic-rename reason, which is the
+part still true. `tests/common/mod.rs`'s now-unused `use std::path::PathBuf` went with them.
+`RESULT_GOLDEN_MAX_BYTES`, `assert_sorted_str_approx`, `GpuResultMode` and `gpu_result_mode` stay:
+only the corpus binaries read them. Nothing new went to `test_support`.
+
+#### `test_plan_goldens` verified and did not write
+
+`UPDATE_CANONICAL` was unset for every run (`echo ${UPDATE_CANONICAL-unset}` → `unset`). The goldens
+digest — `find testdata/goldens -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | diff -
+llm-wiki/tasks/test-layout-baselines/goldens.sha256` — is empty before the first move, after the
+first `planner::tests` run that included the goldens, and after the final package run: 170 files,
+byte-identical. `git status testdata` is empty.
+
+The wiki reader (`every_refusal_names_a_ticket_that_exists`) still reads
+`env!("CARGO_MANIFEST_DIR")/../llm-wiki`. Inside the crate the macro expands to the same
+`peacockdb-core/` it did in the integration binary — both are compiled from the same package
+manifest — so `../llm-wiki` still resolves to the checkout's wiki. It reads committed source, not
+testdata, which is what #49 exempts by name; `testdata_root()` is untouched by it, and the ticket's
+sentence naming the reader now names `planner/tests/plan_goldens.rs`.
+
+#### The register: nothing to edit
+
+No `PUB_MODULES` entry names any of the four files or `join_fixture.rs`: all seven remaining entries
+are forced by `test_cpu_executors.rs` (three) and `test_gpu_executors{,/*}.rs` (four), as slice 6
+left them. `test_module_layout` is 16 passed on the final tree; `test_ci_coverage` 7 passed after
+the workflow edit.
+
+#### CI, and the scripts
+
+`pipeline.yml`: the three 25.02-leg steps (`Planner join capability`, `Planner join refusals`,
+`Null analysis rules`) are deleted with their comments, and the block comment above them now
+describes the three steps that remain (`test_cost_model`, `test_golden_format`,
+`test_corpus_goldens`). The prebuild line `cargo test --no-run -p peacockdb-core --test
+test_plan_goldens --lib` is `… --lib`; the run step's `cargo test -p peacockdb-core --test
+test_plan_goldens` and its "plan tier first" comment are gone, and the comment on the rust-only
+`--lib` line now says the plan goldens are why it needs sf1. Checked mechanically: the file parses
+as YAML (7 jobs) and `bash -n` over all 29 rendered `run:` blocks is clean (32 in slice 6, three
+steps fewer). `git grep` for the four names over the whole tree outside `llm-wiki/tasks` and
+`llm-wiki/archive` → no hits.
+
+`scripts/build-test.sh`, `build-test-shadgpu.sh`, `scripts/lib/shadgpu-env.sh`: `git grep` for the
+four names → **no hits**, so nothing there ever named them as `--test` targets and #176's shape does
+not arise. Neither script was touched.
+
+#### Inventories — 50 leaves moved, four summary lines gone
+
+Fresh files in `/tmp/inv7-{rust-only,cudf,gpu}.txt`; baselines on disk untouched. Leaf-name sets
+(last `::` segment) compared per shape and over the union, as sets and multisets:
+
+| Shape | Lines | `--lib` | Leaves lost | Leaves gained | Duplicated leaves |
+|---|---|---|---|---|---|
+| `rust-only` | 1074 vs 1089 | 435 → 515 | none | slice 4's five layout cases | 3, unchanged |
+| `cudf` | 1141 vs 1157 | 438 → 518 | none | the same five | 10, unchanged |
+| `gpu` | 521 vs 438 | 435 → 518 | none | 83: the 80 moved so far plus slice 5's three `ffi_tests` — the ladder | 3, unchanged |
+| union of three | 1092 distinct vs 1087 | none | the same five | 10, unchanged |
+
+Per-leaf target movement this slice, identical in `rust-only` and `cudf`: 8 `test_null_analysis →
+--lib` (`planner::tests::null_analysis::<leaf>`), 13 `test_planner_join_capability → --lib`
+(`planner::tests::join_capability::`), 10 `test_planner_join_refusals → --lib`
+(`planner::tests::join_refusals::`), 19 `test_plan_goldens → --lib` (`planner::tests::plan_goldens::`).
+Slices 5 and 6's 33 read the same as before. The four summary lines that disappeared with their
+binaries: `test_null_analysis 8 tests, 0 benchmarks`, `test_plan_goldens 19 tests, 0 benchmarks`,
+`test_planner_join_capability 13 tests, 0 benchmarks`, `test_planner_join_refusals 10 tests, 0
+benchmarks`. `compare-inventory.sh` says `DRIFTED` for all three shapes, as it must.
+
+#### Everything measured, on the final tree
+
+| Check | Result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core` (whole package, `--test-threads=2`) | **1037 passed, 0 failed, 2 ignored**, exit 0 — 13 test executables, four fewer than slice 6 |
+| `… --lib` | 513 passed, 2 ignored (463 + 50) |
+| `… --lib -- planner::tests` | 50 passed |
+| `… --test test_module_layout` | 16 passed |
+| `… --test test_ci_coverage` | 7 passed |
+| `cargo build --features rust-only -p peacockdb-core`, cold | 0 warnings |
+| `cargo test --features rust-only -p peacockdb-core --no-run`, cold | 0 warnings, 13 executables |
+| `cargo build --features rust-only -p peacockdb` (the CLI) | 0 warnings |
+| `scripts/cargo-cudf.sh build -p peacockdb-core`, cold | 0 warnings |
+| `scripts/cargo-cudf.sh build -p peacockdb-core --features gpu` | 0 warnings |
+| `sha256sum` over `testdata/goldens` | identical, 170 files — before, between and after |
+| `rustfmt --edition 2024 --check` on the five moved leaves and `registry.rs` | clean (`null_analysis`, `plan_goldens` and `join_fixture` were formatted; the two join files came back clean as they were) |
+| `planner/tests/mod.rs`, `src/tests/mod.rs` | clean directly — every child is slice 6's or this slice's |
+| `planner/mod.rs`, `tests/test_golden_format.rs` | clean against stub children |
+
+Suites ran with `PEACOCK_TESTDATA_DIR=/tmp/peacock-testdata-slice3`, slice 3's composed root, which
+still exists. No device suite: nothing here touches a device path. verda refused the key, so
+everything ran locally.
+
+`plan_goldens.rs` is 958 lines after rustfmt (960 as `test_plan_goldens.rs`, plus 44 lines of
+`canonical_root` and its two companions, minus what rustfmt and the header lost) — under the
+1000-line rule.
+
+#### The ladder did not move, and the demotion that was tried
+
+- Bare `pub` excluding `mod`: **283**, **241 excluding `test_support`**. `pub mod`: **14**.
+  `PUB_MODULES`: **7**. `CROSS_COMPONENT_REACHES`: **0**. `TEST_ONLY_ITEMS`: **10**. All unchanged
+  from slice 6.
+- Visibility dump 684 → **696**: exactly `join_fixture.rs`'s eleven `pub(crate)` items and its
+  `pub(crate) mod` line, verified by `diff` against a dump of HEAD's tree — nothing else changed.
+- `#[cfg(test)]` occurrences in `src/` (`git grep -c`, summed): 52 → **53**, the one declaration in
+  `planner/mod.rs`.
+
+Seven items are now `pub` with no consumer outside the crate — `plan_text::{render_plan,
+render_plan_memory}`, `wire::{Payloads, check_seq_kinds, depth, render_plan_recipes}` and
+`executor::post_order_of_every_node` — found by grepping `tests/`, `peacockdb/src`,
+`cost-report/src` and `peacockdb-ffi` for every name the four files imported. **All seven were
+demoted to `pub(crate)` and reverted**: `cargo build --features rust-only -p peacockdb-core` then
+emits **36 `dead_code` warnings** (the seven, plus everything under them in `plan_text/` and
+`wire/recipes.rs` that only they reach), because their only callers are the plan-goldens test and
+the CLI does not render plans. That is `coding-style.md`'s honest signal — a production item with
+no shipping caller — and the answer it names is a caller, deletion or an `#[allow]` at the site,
+none of which is a move. The other 29 names the four files imported are still named by
+`test_cpu_executors`, `test_gpu_*`, the corpus binaries or the CLI, or sit in a `pub` field or
+enum variant (`KeyDistribution` in `PartitionLayout`, `GpuUnion` in `NodeRef`), so nothing this
+slice could bring down without a warning. Recorded for `visibility.md`.
+
+#### Where a measurement contradicts the spec or plan
+
+- **The plan's Interfaces line says this slice consumes `crate::tests::{injection, rebuild,
+  join_fixture}`.** It consumes only `join_fixture`: none of the four files named
+  `common::injection` or `common::rebuild` — slice 6's step-1 grep listed the two planner targets as
+  injector consumers, and that was `join_fixture`'s directory, not the injector. Nothing in
+  `planner/tests/` reaches `injection` or `rebuild`.
+- **The spec's "50 with the two executor tiers, 15 with three more"** is still not what the ladder
+  measures: 241 → 241 here, for the dead-code reason above. The spec's counting attributed these
+  items to the targets that named them; the compiler attributes them to the production code that
+  does not.
+- `build-test.md`'s `Runs` column and the table's arithmetic are task 12's and were left; only the
+  rows whose Examples link pointed at a deleted path (the planner-capability, null-analysis,
+  join-refusals and nine plan-goldens rows), the two golden-producer cells and the flow diagram
+  naming `test_plan_goldens`, the day-to-day-loop example command, and the dataset-matrix step list
+  were changed. The `#L427`/`#L229` anchors are `#L708`/`#L265` in the new file.
+
+#### For the slices after this one
+
+- Task 8 (`test_cpu_executors`) is now the sole forcer of the three `cpu_backend` entries, as slice
+  6 said; nothing here changed that.
+- `tests/common/mod.rs` is 172 lines and keeps only what the two corpus binaries and
+  `test_golden_format` read: the five delegating inline modules, `RESULT_GOLDEN_MAX_BYTES`,
+  `assert_sorted_str_approx`, `GpuResultMode`, `gpu_result_mode`. Nothing a later slice moves reads
+  it any more.
+- `canonical_root` lives in `planner/tests/plan_goldens.rs`; a device test that ever needs the fixed
+  `/tmp/peacock-plan-bytes-root` symlink has to reach it from there or move it to `src/tests/`.
+- The `gpu` inventory (`--lib` only) now reads 518 and will read the device set on top of it once
+  task 9 lands; `compare-inventory.sh gpu` works since slice 6.
+- Both target dirs were `cargo clean -p peacockdb-core`ed for the cold counts and then rebuilt by
+  the inventories and the package run; `target-cudf-*` holds the `gpu` fingerprint last.

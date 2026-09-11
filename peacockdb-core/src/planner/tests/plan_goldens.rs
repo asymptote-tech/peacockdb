@@ -6,20 +6,18 @@
 //! this mode declines renders its reason where its tree would be, so the file says what
 //! the mode does and does not run.
 
-mod common;
-
 use std::path::{Path, PathBuf};
 
-use peacockdb_core::plan::GpuNode;
-use peacockdb_core::plan::{ExecutorCategory, category_of};
-use peacockdb_core::plan_text::{render_plan, render_plan_memory};
-use peacockdb_core::planner;
-use peacockdb_core::planner::PlanKnobs;
-use peacockdb_core::wire::{Payloads, attach_recipes, check_seq_kinds, depth, render_plan_recipes};
-
-use common::golden_text::{ordered_sections, section_differences};
-use common::mode::{MODES, Mode, mode_named};
-use common::{data_dir_for, golden_dir_for, queries_dir_for};
+use crate::plan::GpuNode;
+use crate::plan::{ExecutorCategory, category_of};
+use crate::plan_text::{render_plan, render_plan_memory};
+use crate::planner;
+use crate::planner::PlanKnobs;
+use crate::test_support::{
+    MODES, Mode, data_dir_for, golden_dir_for, mode_named, ordered_sections, queries_dir_for,
+    section_differences, testdata_root,
+};
+use crate::wire::{Payloads, attach_recipes, check_seq_kinds, depth, render_plan_recipes};
 
 fn queries(dataset: &str) -> Vec<(String, PathBuf)> {
     let mut found: Vec<(String, PathBuf)> = std::fs::read_dir(queries_dir_for(dataset))
@@ -37,8 +35,8 @@ fn queries(dataset: &str) -> Vec<(String, PathBuf)> {
 }
 
 async fn render_bench(dataset: &str, sf: &str, mode: &Mode) -> String {
-    let ctx = peacockdb_core::register_tables_for(
-        peacockdb_core::build_session_state(mode.knobs().target_partitions),
+    let ctx = crate::register_tables_for(
+        crate::build_session_state(mode.knobs().target_partitions),
         &data_dir_for(dataset, sf),
     )
     .await
@@ -88,7 +86,7 @@ async fn render_query(
 /// `not runnable`, never `refused:` — the plan plans, validates and runs on the CPU, and
 /// what failed is the crossing to the device. Naming its ticket is not decoration: the
 /// meta test below asserts that every line of this shape names a ticket that exists.
-fn recipes_of(tree: &dyn peacockdb_core::plan::GpuNode) -> String {
+fn recipes_of(tree: &dyn GpuNode) -> String {
     match attach_recipes(tree) {
         Ok(plan) => render_plan_recipes(tree, &plan, Payloads::Omitted),
         Err(e) => format!("not runnable: {}\n", relative_to_testdata(&e.to_string())),
@@ -102,8 +100,8 @@ fn recipes_of(tree: &dyn peacockdb_core::plan::GpuNode) -> String {
 /// the object-store form that drops it. Nothing else in the message changes: what
 /// DataFusion said is the content, and only where it lives on this disk is not.
 fn relative_to_testdata(text: &str) -> String {
-    let root = std::fs::canonicalize(common::testdata_root())
-        .unwrap_or_else(|_| common::testdata_root())
+    let root = std::fs::canonicalize(testdata_root())
+        .unwrap_or_else(|_| testdata_root())
         .to_string_lossy()
         .into_owned();
     text.replace(&root, "testdata")
@@ -217,6 +215,50 @@ const PAYLOAD_QUERIES: [(&str, &str); 20] = [
 
 /// A digest of the bytes beside the text, because the two can disagree: a field the
 /// renderer does not print, an ordering that moves.
+/// A FIXED path that stands in for the testdata root when a plan's own BYTES are the
+/// thing under test.
+///
+/// A serialized plan legitimately embeds absolute parquet paths — the C++ side has to open
+/// those files — so the bytes depend on where the repo is checked out, and a digest of them
+/// would false-red in CI and on any dev box off /media/data. Substituting the path
+/// afterwards does not fix it: a FlatBuffer string is [len][bytes][pad], so a different root
+/// moves the length prefix, every later offset and the padding, and the result would be a
+/// digest of something that is not a real buffer. So the path is held constant instead: a
+/// symlink whose location is the same on every machine.
+fn canonical_root() -> PathBuf {
+    static LINK: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    LINK.get_or_init(point_canonical_root).clone()
+}
+
+fn point_canonical_root() -> PathBuf {
+    let link = PathBuf::from("/tmp/peacock-plan-bytes-root");
+    let real = testdata_root();
+    // Re-pointed every run, since a stale link from another checkout would silently
+    // describe the wrong tree — but by an atomic rename onto the name rather than a
+    // remove and a create, so a reader in another process never finds the path missing.
+    #[cfg(unix)]
+    {
+        let staged = link.with_extension(std::process::id().to_string());
+        let _ = std::fs::remove_file(&staged);
+        std::os::unix::fs::symlink(&real, &staged).unwrap_or_else(|e| {
+            panic!(
+                "cannot create {} -> {}: {e}",
+                staged.display(),
+                real.display()
+            )
+        });
+        std::fs::rename(&staged, &link).unwrap_or_else(|e| {
+            panic!("cannot point {} at {}: {e}", link.display(), real.display())
+        });
+    }
+    link
+}
+
+/// [`canonical_root`] for one dataset.
+fn canonical_data_dir(dataset: &str, sf: &str) -> PathBuf {
+    canonical_root().join(format!("{dataset}.sf{sf}"))
+}
+
 fn digest_of(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
@@ -239,9 +281,9 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
         }
         // Through the canonical root, so the paths the buffer embeds — and the digest
         // over them — are the same on every machine.
-        let ctx = peacockdb_core::register_tables_for(
-            peacockdb_core::build_session_state(mode.knobs().target_partitions),
-            &common::canonical_data_dir(dataset, "1"),
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.knobs().target_partitions),
+            &canonical_data_dir(dataset, "1"),
         )
         .await
         .expect("register the tables");
@@ -268,9 +310,7 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
             ));
         }
     }
-    let path = common::testdata_root()
-        .join("goldens")
-        .join("recipe-payloads.txt");
+    let path = testdata_root().join("goldens").join("recipe-payloads.txt");
     // Three states, because the digests here are the only byte-level pin on what the C++ is
     // handed, and the documented way to refresh goldens is a bulk --update-canonical on
     // verda. Without the second variable that run would rewrite the evidence and the diff
@@ -330,15 +370,17 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
     let mut uncrossable: Vec<String> = Vec::new();
     let mut deepest = (0usize, String::new());
     for dataset in ["tpch", "tpcds"] {
-        let ctx = peacockdb_core::register_tables_for(
-            peacockdb_core::build_session_state(mode.knobs().target_partitions),
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.knobs().target_partitions),
             &data_dir_for(dataset, "1"),
         )
         .await
         .expect("register the tables");
         for (name, path) in queries(dataset) {
             let sql = std::fs::read_to_string(&path).expect("the query text");
-            let Ok(frame) = ctx.sql(&sql).await else { continue };
+            let Ok(frame) = ctx.sql(&sql).await else {
+                continue;
+            };
             let Ok(plan) = frame.create_physical_plan().await else {
                 continue;
             };
@@ -406,7 +448,8 @@ fn every_query_that_cannot_cross_the_wire_is_declared_and_every_declaration_is_t
         for mode in &MODES {
             let name = mode.name;
             let path = golden_dir_for(dataset, sf).join(format!("{name}.plans.txt"));
-            for (query, body) in ordered_sections(&std::fs::read_to_string(&path).expect("a golden"))
+            for (query, body) in
+                ordered_sections(&std::fs::read_to_string(&path).expect("a golden"))
             {
                 let Some(line) = body.lines().find(|line| line.starts_with("not runnable")) else {
                     continue;
@@ -504,12 +547,9 @@ fn call_shapes(text: &str) -> std::collections::BTreeSet<String> {
 /// different things with different arguments.
 #[test]
 fn the_payload_golden_covers_every_kind_and_call_shape_the_modes_produce() {
-    let payloads = std::fs::read_to_string(
-        common::testdata_root()
-            .join("goldens")
-            .join("recipe-payloads.txt"),
-    )
-    .expect("the payload golden");
+    let payloads =
+        std::fs::read_to_string(testdata_root().join("goldens").join("recipe-payloads.txt"))
+            .expect("the payload golden");
     let covered = call_shapes(&payloads);
 
     let mut wanted = std::collections::BTreeSet::new();
@@ -572,45 +612,24 @@ async fn check(dataset: &str, sf: &str, mode: &Mode) {
     assert_or_update(&golden(dataset, sf, &mode), &actual);
 }
 
-
 #[tokio::test]
 async fn tpch_tp1_single() {
-    check(
-        "tpch",
-        "1",
-        mode_named("tp1_single"),
-    )
-    .await;
+    check("tpch", "1", mode_named("tp1_single")).await;
 }
 
 #[tokio::test]
 async fn tpch_tp1_rowgroup() {
-    check(
-        "tpch",
-        "1",
-        mode_named("tp1_rowgroup"),
-    )
-    .await;
+    check("tpch", "1", mode_named("tp1_rowgroup")).await;
 }
 
 #[tokio::test]
 async fn tpch_tp4_single() {
-    check(
-        "tpch",
-        "1",
-        mode_named("tp4_single"),
-    )
-    .await;
+    check("tpch", "1", mode_named("tp4_single")).await;
 }
 
 #[tokio::test]
 async fn tpch_tp4_rowgroup() {
-    check(
-        "tpch",
-        "1",
-        mode_named("tp4_rowgroup"),
-    )
-    .await;
+    check("tpch", "1", mode_named("tp4_rowgroup")).await;
 }
 
 #[tokio::test]
@@ -620,42 +639,22 @@ async fn tpch_tp4_sized() {
 
 #[tokio::test]
 async fn tpcds_tp1_single() {
-    check(
-        "tpcds",
-        "1",
-        mode_named("tp1_single"),
-    )
-    .await;
+    check("tpcds", "1", mode_named("tp1_single")).await;
 }
 
 #[tokio::test]
 async fn tpcds_tp1_rowgroup() {
-    check(
-        "tpcds",
-        "1",
-        mode_named("tp1_rowgroup"),
-    )
-    .await;
+    check("tpcds", "1", mode_named("tp1_rowgroup")).await;
 }
 
 #[tokio::test]
 async fn tpcds_tp4_single() {
-    check(
-        "tpcds",
-        "1",
-        mode_named("tp4_single"),
-    )
-    .await;
+    check("tpcds", "1", mode_named("tp4_single")).await;
 }
 
 #[tokio::test]
 async fn tpcds_tp4_rowgroup() {
-    check(
-        "tpcds",
-        "1",
-        mode_named("tp4_rowgroup"),
-    )
-    .await;
+    check("tpcds", "1", mode_named("tp4_rowgroup")).await;
 }
 
 #[tokio::test]
@@ -669,7 +668,7 @@ async fn tpcds_tp4_sized() {
 /// them and this is where the two are held to each other.
 #[test]
 fn the_registry_matches_the_goldens_in_both_directions() {
-    let rows = common::registry::load_csv();
+    let rows = crate::test_support::load_csv();
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
         for mode in &MODES {
             let name = mode.name;
@@ -876,8 +875,8 @@ async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
     let mode = mode_named("tp4_rowgroup");
     let mut checked = 0;
     for dataset in ["tpch", "tpcds"] {
-        let ctx = peacockdb_core::register_tables_for(
-            peacockdb_core::build_session_state(mode.knobs().target_partitions),
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.knobs().target_partitions),
             &data_dir_for(dataset, "1"),
         )
         .await
@@ -897,8 +896,7 @@ async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
                 continue;
             };
             let positions =
-                peacockdb_core::executor::post_order_of_every_node(tree.as_ref())
-                    .expect("the plan indexes");
+                crate::executor::post_order_of_every_node(tree.as_ref()).expect("the plan indexes");
             let mut nodes = Vec::new();
             collect(tree.as_ref(), &mut nodes);
             let mut children_first = Vec::new();

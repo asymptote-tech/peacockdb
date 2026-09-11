@@ -3,8 +3,8 @@
 //!
 //! Written rather than checked in: the null analysis reads parquet statistics, so a column
 //! is nullable here because a row group holds a NULL and never because it was declared so,
-//! and `tpch.minimal` holds none. Two test targets use it — what plans, and what is
-//! refused — and the row counts below decide both.
+//! and `tpch.minimal` holds none. Two test modules under `planner/tests/` use it — what
+//! plans, and what is refused — and the row counts below decide both.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,19 +20,19 @@ use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::{ExecutionPlan, Partitioning};
 use datafusion::prelude::ParquetReadOptions;
 
-use peacockdb_core::plan::GpuNode;
-use peacockdb_core::plan::PlanError;
-use peacockdb_core::planner;
-use peacockdb_core::planner::{BatchSizing, PlanKnobs};
+use crate::plan::GpuNode;
+use crate::plan::PlanError;
+use crate::planner;
+use crate::planner::{BatchSizing, PlanKnobs};
 
 /// Lanes for the co-partitioned cases.
-pub const LANES: usize = 4;
+pub(crate) const LANES: usize = 4;
 
 /// Between `tiny` and `big` below, so the small-source rule is reachable without writing a
 /// five-megabyte fixture.
-pub const SMALL_SOURCE_BYTES: u64 = 4 * 1024;
+pub(crate) const SMALL_SOURCE_BYTES: u64 = 4 * 1024;
 
-pub fn knobs(sizing: BatchSizing) -> PlanKnobs {
+pub(crate) fn knobs(sizing: BatchSizing) -> PlanKnobs {
     PlanKnobs {
         target_partitions: LANES,
         sizing,
@@ -51,13 +51,13 @@ pub fn knobs(sizing: BatchSizing) -> PlanKnobs {
 /// hundred and both files stay tiny. And `big` sits above the small-source byte threshold
 /// while the other two sit below it. Changing either count silently changes which join
 /// types the SQL below plans as.
-pub struct Fixture {
+pub(crate) struct Fixture {
     dir: PathBuf,
     ctx: SessionContext,
 }
 
 impl Fixture {
-    pub async fn new(name: &str) -> Self {
+    pub(crate) async fn new(name: &str) -> Self {
         let dir = std::env::temp_dir().join(format!(
             "peacockdb-join-fixture-{}-{name}",
             std::process::id()
@@ -86,8 +86,7 @@ impl Fixture {
         // Padded so it also sits above the byte threshold; the rows are never read.
         write(&dir, "big", &(1..=1000).map(Some).collect::<Vec<_>>(), 64);
 
-        let ctx =
-            SessionContext::new_with_state(peacockdb_core::build_session_state(LANES).state());
+        let ctx = SessionContext::new_with_state(crate::build_session_state(LANES).state());
         for table in ["tiny", "nulls", "big"] {
             ctx.register_parquet(
                 table,
@@ -101,7 +100,7 @@ impl Fixture {
     }
 
     /// A whole query, planned by DataFusion — which is what decides the join type.
-    pub async fn plan(&self, sql: &str) -> Arc<dyn ExecutionPlan> {
+    pub(crate) async fn plan(&self, sql: &str) -> Arc<dyn ExecutionPlan> {
         self.ctx
             .sql(sql)
             .await
@@ -112,14 +111,14 @@ impl Fixture {
     }
 
     /// The planner's refusal for a query, which must be a PlanError rather than a panic.
-    pub async fn refused(&self, sql: &str) -> PlanError {
+    pub(crate) async fn refused(&self, sql: &str) -> PlanError {
         let plan = self.plan(sql).await;
         planner::plan(&plan, knobs(BatchSizing::OneBatchPerRowGroup))
             .map(|_| ())
             .expect_err(sql)
     }
 
-    pub async fn scan(&self, table: &str) -> Arc<dyn ExecutionPlan> {
+    pub(crate) async fn scan(&self, table: &str) -> Arc<dyn ExecutionPlan> {
         self.ctx
             .sql(&format!("SELECT k, v FROM {table}"))
             .await
@@ -131,7 +130,7 @@ impl Fixture {
 
     /// The same scan, hash-partitioned on its key — what a shuffle would have left, and
     /// what a co-partitioned join needs on both sides.
-    pub async fn scattered(&self, table: &str) -> Arc<dyn ExecutionPlan> {
+    pub(crate) async fn scattered(&self, table: &str) -> Arc<dyn ExecutionPlan> {
         let scan = self.scan(table).await;
         Arc::new(
             RepartitionExec::try_new(
@@ -179,12 +178,12 @@ fn write(dir: &std::path::Path, name: &str, keys: &[Option<i64>], padding: usize
     writer.close().expect("close");
 }
 
-pub fn planned(plan: &Arc<dyn ExecutionPlan>) -> Result<Box<dyn GpuNode>, PlanError> {
+pub(crate) fn planned(plan: &Arc<dyn ExecutionPlan>) -> Result<Box<dyn GpuNode>, PlanError> {
     planner::plan(plan, knobs(BatchSizing::OneBatchPerRowGroup)).map(|(tree, _)| tree)
 }
 
 /// Every hash join in a plan, in tree order.
-pub fn join_types_in(plan: &Arc<dyn ExecutionPlan>) -> Vec<JoinType> {
+pub(crate) fn join_types_in(plan: &Arc<dyn ExecutionPlan>) -> Vec<JoinType> {
     let mut found = Vec::new();
     fn walk(plan: &Arc<dyn ExecutionPlan>, found: &mut Vec<JoinType>) {
         if let Some(join) = plan.as_any().downcast_ref::<HashJoinExec>() {

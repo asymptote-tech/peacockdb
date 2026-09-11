@@ -11,6 +11,9 @@ mod nulls;
 mod pipeline;
 mod translator;
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::Arc;
 
 use datafusion::physical_plan::ExecutionPlan;

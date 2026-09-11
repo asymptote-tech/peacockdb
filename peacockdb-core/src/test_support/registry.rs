@@ -32,7 +32,7 @@ use super::{CsvRow, RegistryEntry};
 /// are plan enablement, and they are the one group no test macro registers: the plan goldens
 /// are one file per mode rather than one file per query, so what declares a cell is the
 /// golden's section for that query, and
-/// `test_plan_goldens` is what holds the two to each other in both directions.
+/// `planner/tests/plan_goldens.rs` is what holds the two to each other in both directions.
 /// The `cpu_` and `gpu_` columns are execution, declared by `corpus_query!` through
 /// this inventory — one per engine because a query can be correct at five modes on the cpu
 /// and at two on a device.

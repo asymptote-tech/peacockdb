@@ -890,7 +890,7 @@ right-semi form carrying one cannot be expressed and the planner refuses it.
 Reachable: `SELECT b.v FROM big b WHERE EXISTS (SELECT 1 FROM tiny t WHERE t.k = b.k AND
 t.v < b.v)` plans as RightSemi with a residual once statistics make DataFusion swap the sides,
 so this is not a shape only a constructor produces. Pinned by the refusal test in
-`test_planner_join_capability.rs`. Two ways out: keep the emitted side as the build so the
+`src/planner/tests/join_capability.rs`. Two ways out: keep the emitted side as the build so the
 join stays a Left form and the existing `mixed_left_*` applies, which is a planner change; or
 a swapped `mixed_*` in cuDF, which is not ours. The first is cheap and has not been costed.
 
@@ -1037,6 +1037,6 @@ The sweep is not the one the integration tests got: a unit test cannot reach
 `tests/common/mod.rs`, so the fix is a `#[cfg(test)]` helper in `src` honouring
 `PEACOCK_TESTDATA_DIR` with the same fallback, and the two spellings then have to be held to
 each other or they are the drift this ticket is about one layer down.
-`test_ci_coverage.rs` and the fbs reader in `test_plan_goldens` are not this: their
+`test_ci_coverage.rs` and the wiki reader in `planner/tests/plan_goldens.rs` are not this: their
 `CARGO_MANIFEST_DIR` resolves the repo root to read committed source, not testdata, and no env
 var should redirect that.

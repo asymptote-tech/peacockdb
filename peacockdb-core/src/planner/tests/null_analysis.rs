@@ -4,7 +4,7 @@
 //! both sides, so a rule that answers "cannot be NULL" too readily permits a join we decided
 //! is wrong, silently and with no plan to look at. The refusal itself, the leaf that reads
 //! parquet statistics and the outer join's padding are covered against real files in
-//! `test_planner_join_capability.rs`; what is here is every other rule, asserted on
+//! `join_capability.rs`; what is here is every other rule, asserted on
 //! `can_be_null` directly, because a hand-built input can say "this column is not nullable"
 //! and a corpus fixture cannot — every column in both benchmarks is declared nullable.
 
@@ -13,16 +13,16 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::ScalarValue;
 
-use peacockdb_core::plan::RowGroupMeta;
-use peacockdb_core::plan::ScanMetadata;
-use peacockdb_core::plan::Schema;
-use peacockdb_core::plan::{
+use super::super::can_be_null;
+use crate::plan::RowGroupMeta;
+use crate::plan::ScanMetadata;
+use crate::plan::Schema;
+use crate::plan::{
     AggregateBody, GpuAggregate, GpuFilter, GpuLimit, GpuLoadParquet, GpuMergePartitions,
     GpuProject, GpuSort, GpuUnion,
 };
-use peacockdb_core::plan::{BinaryOp, Expr, NamedExpr};
-use peacockdb_core::plan::{GpuNode, RowInterval};
-use peacockdb_core::planner::can_be_null;
+use crate::plan::{BinaryOp, Expr, NamedExpr};
+use crate::plan::{GpuNode, RowInterval};
 
 /// A source declaring exactly the nullability asked for. The leaf reads this off parquet
 /// statistics; here it is stated, which is the only way to get a NOT-nullable column at all.

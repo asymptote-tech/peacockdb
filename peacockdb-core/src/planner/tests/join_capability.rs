@@ -3,15 +3,11 @@
 //! No goldens: a golden says a file moved, and what is under test here is which rule
 //! decided what. Two lists, both positive: the hand-built matrix of every join type
 //! crossed with a residual filter, and the sql that reaches each type. The shapes that are
-//! REFUSED live in `test_planner_join_refusals.rs`, since what plans and what does not
+//! REFUSED live in `join_refusals.rs`, since what plans and what does not
 //! read differently — except the three refusals no query reaches, which are at the end of
 //! this file because a constructor is the only way to build them.
 //!
-//! The fixture is `common::join_fixture`, shared with that file.
-
-mod common;
-
-use common::join_fixture::{Fixture, LANES, join_types_in, planned};
+//! The fixture is `crate::tests::join_fixture`, shared with that file.
 
 use std::sync::Arc;
 
@@ -26,10 +22,11 @@ use datafusion::physical_plan::joins::{
 use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::{ExecutionPlan, Partitioning, PhysicalExpr};
 
-use peacockdb_core::plan::GpuNode;
-use peacockdb_core::plan::KeyDistribution;
-use peacockdb_core::plan::PlanError;
-use peacockdb_core::plan::{NodeRef, as_node_ref};
+use crate::plan::GpuNode;
+use crate::plan::KeyDistribution;
+use crate::plan::PlanError;
+use crate::plan::{NodeRef, as_node_ref};
+use crate::tests::join_fixture::{Fixture, LANES, join_types_in, planned};
 
 fn equi(left: usize, right: usize) -> (Arc<dyn PhysicalExpr>, Arc<dyn PhysicalExpr>) {
     (
