@@ -121,3 +121,15 @@ stops for the human.** The walk is the only instrument that can ask what one cal
 panics on ten shapes — eight never taught, two the engine truly cannot run. Teaches the eight, makes
 a device refusal an outcome rather than an abort, and records the real limits as `bug_` tests naming
 #136, #152 and #175. No production code. Deliverable: a checked table of what it can drive.
+
+## Chain ENS-dev-setup-check (base: master)
+
+Throwaway. Lives on this branch only, never on master; the PR is closed unmerged and nothing is
+archived.
+
+### 1. [`dev-setup-check.md`](dev-setup-check.md) — state: approved to build
+
+Every documented workflow run once from the host `dev` by the ensemble with nobody attached, and
+what each did recorded in the detail file. Two lines of code so CI sees a code diff: one
+`#[test]` in `test_golden_format`, one comment in `test_cudf.cpp`. A workflow that fails is
+recorded, not repaired.
