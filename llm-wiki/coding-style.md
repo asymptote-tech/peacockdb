@@ -161,6 +161,35 @@ revealed them, because the general rule is easy to nod along to and hard to reco
 your own diff. An entry with no case attached is stated generically on purpose; add the
 case when one turns up.
 
+### Building around a bug
+
+You find a bug while doing something else, and fixing it is not in this task. You may not
+design around it. A branch, a filter, a flag or an enum variant that exists only to avoid the
+broken path bakes the bug into the shape of the code, and the shape outlives the fix: the fix
+lands, the scaffolding stays, and no later reader can tell it from a requirement.
+
+Three steps instead.
+
+- **Attribute it to a ticket** — an existing one if it is the same bug, a new one otherwise.
+- **Write a test named `bug_<what it does wrong>`**, asserting the wrong behaviour, with the
+  ticket number in a comment above it. It passes today. It is the record that the behaviour is
+  known and unfixed, and it goes red the moment someone fixes the bug — which is the signal to
+  delete it, in that same change. The Names rule against ticket numbers still holds: the prefix
+  says what the test is, and the number lives in the comment.
+- **Leave the production code alone.** No special case whose only reason is the bug.
+
+Every other test in the tree asserts what is right. A `bug_` test is the one place that asserts
+what is wrong, so the prefix is what stops a reader taking a scar for a requirement — and it
+makes "which known-wrong behaviours does the engine still have" a grep instead of a memory.
+
+The case, on the casts branch: `exports.rs` predicted three ways the device's exported type can
+differ from the declared one and carried the reason as an enum — one inherent to cuDF, one a bug
+with a fix due in the next task (#187), one assumed unreachable. The cast at the unload then
+filtered on the reason name, so the bug had a variant of its own and that variant steered the
+dispatch. The third case fell out of the whitelist with nothing failing. Under this rule the bug
+is a `bug_` test and not a variant, and the cast is decided by whether the divergence is
+inherent.
+
 ### Encapsulation violations
 
 Reaching past an interface into what it was meant to hide — reading or writing private
@@ -218,3 +247,17 @@ through an anonymous-namespace `thread_local`, which is per-translation-unit —
 the file would have silently forked the variable and re-executed whole subtrees (correct
 answers, exponential cost, invisible to correctness tests). Pass inputs and outputs
 explicitly through parameters; never smuggle them through thread-locals or globals.
+
+### A reader that stops at the first match
+
+Code that searches text for a marker — a section header, a delimiter, an attribute in a golden
+file — and takes the first hit, in a file where a second hit is possible. It is correct for
+every input anyone has written so far, which is why it passes review and keeps passing.
+
+Four instances turned up in one branch: a reader that took the first section of a report, one
+that took the first segment of a diff line, one that took the first invocation in a script, and
+a golden header that was cut short at the first occurrence of an attribute. Each was green
+until a second thing appeared beside the first.
+
+Read every match, or write the one line that says why the first is the right one. "There is
+only ever one today" is a sentence that stops being true with nobody touching the reader.

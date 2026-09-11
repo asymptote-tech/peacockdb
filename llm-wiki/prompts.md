@@ -361,6 +361,11 @@ reasoning. Anchors: `llm-wiki/architecture.md` (invariants) and `llm-wiki/build-
   `--test-threads=1`); two-engine correctness (CPU and GPU consume the same plan IR — no
   engine-specific plan nodes); deterministic cost (no wall-clock in the fast tier);
   `rust-only` is the tier boundary (no FFI types reachable from rust-only paths).
+- **Answer the question you meant, not the one your command typed.** A search finds text; the
+  question behind it is usually about behaviour, and the two come apart. "Which places hardcode
+  this value" and "which places are unguarded" return the same hits, because the guard sits a few
+  lines above the match, where the search never looked. Open the code around a hit before you
+  report it, and when a finding rests on a search, say which search it was.
 - **A page states facts, not type names.** Checking whether a schema or signature change left a
   wiki page true by grepping for the changed identifier answers a narrower question: enum members,
   field origins and counts are spelled out in prose, so the sentences a change falsifies rarely
