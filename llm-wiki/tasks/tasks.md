@@ -111,7 +111,7 @@ One scalar builder, not a corrected copy. C++ only. Carries a test-helper repair
 `CreateScalarValue` gained `is_null` as field 2 and the gtest call sites kept their old positions, so
 every `make_int64_literal` builds the literal 0. Claims no cells.
 
-### 10. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: new
+### 10. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: approved to build
 
 **Conditional: its first task reads the survey's report, argues what is still worth teaching, and
 stops for the human.** The walk is the only instrument that can ask what one call produced, and it
@@ -119,7 +119,7 @@ panics on ten shapes — eight never taught, two the engine truly cannot run. Te
 a device refusal an outcome rather than an abort, and records the real limits as `bug_` tests naming
 #136, #152 and #175. No production code. Deliverable: a checked table of what it can drive.
 
-### 11. [`empty-build.md`](empty-build.md) — closes [#175](../tickets.md#t175) — state: new
+### 11. [`empty-build.md`](empty-build.md) — closes [#175](../tickets.md#t175) — state: approved to build
 
 A lane whose build side got no rows keeps its typed zero-row table where the join above owes rows, so
 `Right`, `Full` and `RightAnti` answer instead of refusing. No new marker — the driver routes
