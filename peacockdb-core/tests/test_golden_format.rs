@@ -129,6 +129,15 @@ fn a_bare_node_name_is_a_node_line() {
     assert!(node.fields.is_empty(), "{:?}", node.fields);
 }
 
+/// A field that is present and not a number is a renderer defect, not a line of another
+/// kind — so `count` panics naming the field, rather than reading it as absent.
+#[test]
+#[should_panic(expected = "field `output_rows=many` is not a count")]
+fn a_field_that_is_not_a_number_is_not_read_as_absent() {
+    let node = parse_node_line("  GpuFilter: output_rows=many").expect("a node line");
+    let _ = node.count("output_rows");
+}
+
 /// Every other line the corpus goldens hold. A reader that took one of these for a node
 /// would bin a continuation line's bytes into the cost, or diff a header as a tree.
 #[test]
