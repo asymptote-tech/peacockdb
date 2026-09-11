@@ -20,5 +20,6 @@ At archive time only the spec survives, moved into `../archive/archived-tasks.md
 signoff. The board entry goes, and `-impl.md` and `-detail.md` are deleted outright: they were
 scaffolding for a task that is now in the history.
 
-Keep specs short: goal, constraints, verification bar. Long-lived design facts belong in
+Keep specs short: goal, scope — the code and the component-level API expected to change —
+constraints, verification bar. Long-lived design facts belong in
 `architecture.md` and `build-test.md`.
