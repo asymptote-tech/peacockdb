@@ -1357,3 +1357,19 @@ diff (17 files modified, 9 deleted, three `gpu_tests/` directories untracked):
 
 None of it has been built or measured. The re-dispatch starts from this tree rather than a reset,
 on the developer's judgement once it compiles; plan task 9's steps 2-9 are all still open.
+
+### 2026-09-11 — the chain rebased again, over eight more documentation commits
+
+The control file said `rebase` (written 22:19 on the 10th, while slice 9's dispatch was still
+alive). Master had moved by eight commits since `edb66b21`, every one under `llm-wiki/**`: the
+casts/wire-schema/empty-answers chain dropped and archived, `operator-harness` and `operator-cases`
+specs and plans added as tasks 8-9 of this chain (the rest renumbered 10-13), a Scope rule in
+`prompts.md`'s helper section, and `README.md`'s spec outline.
+
+Slice 9's dead tree was committed first (`e1b45f2e` after the rebase) so the rebase had a clean
+tree to run on. `ENS-rmm-pool-budget` rebased clean, `e49a2c04` → `29546ff6`, twelve commits, no
+conflict; `ENS-test-layout` then rebased onto it with `--onto`, fourteen commits, no conflict; the
+diff between the old and new tips is master's documentation and nothing else, and the board
+merged by hunk without a conflict — task 3 `done`, task 4 this branch's state, tasks 8-13 master's.
+Documentation alone re-verifies nothing: task 3 stays `done`, task 4 goes `rebase needed(building)`
+→ `building` with no re-run. Slice 9's cudf-shape build is the first build on the new base.
