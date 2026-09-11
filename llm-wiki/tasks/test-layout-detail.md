@@ -1839,3 +1839,10 @@ restored. verda unreachable; everything local.
   1000-line rule; the split that would pay is the runner readers (`rust_gpu_runner_*`,
   `rung_reaches_the_binary`, the three-lists test) into a second file, which is not this
   task's move and was not made.
+
+### 2026-09-11 — slice 11 dispatched: plan task 12, the wiki from measured numbers
+
+Slice 10 committed as `4a2f653b`. This is the last slice: `build-test.md`'s two tables from the
+final inventories, `coding-style.md`'s rung ladder and its Visibility section brought to what the
+register now says, `architecture.md` checked, #49 retired, and the final proof. verda still
+unreachable; shad-gpu is not needed.
