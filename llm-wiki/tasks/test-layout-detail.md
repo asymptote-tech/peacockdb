@@ -2401,3 +2401,28 @@ Read section by section for the facts a move could touch, not for the moved name
   writers and `planner/translator/expr.rs`: all resolve.
 - The page has no sentence containing "crate", "feature", "cfg", "rust-only" or "integration";
   the only test placement it states is the gate above. All 27 relative links resolve.
+
+### 2026-09-11 — completeness pass, the reviewer's reading: 0 blocking, 1 important
+
+Read at `3468b8d4`, independent of the analyst's list above. Clean: no case lost or weakened (630 →
+636 `#[test]` names, six new, zero missing; the 467 macro cells at unchanged macro sites); every
+cudf-only baseline case under a `gpu_tests` path, `test_gpu_batch`'s three under `ffi_tests`,
+nothing under `tests`/`ffi_tests` naming `GpuBackend` or `peacockdb_ffi`; goldens 170/170; each
+rung assertion and each layout rule shown to empty its matcher on the deleting input;
+`--test-threads=1` on all three device runners; `rung_args` survives the unquoted heredocs and
+fails non-zero when the rung lists nothing.
+
+Important: `executor/cpu_backend/accumulate.rs:317` and `executor/cpu_backend/join.rs:174` — the
+two item-level `#[cfg(test)]` readers of private fields (`AggregateBatches::compactions`,
+`CpuJoin::has_finish_pass`) stay in implementation files, and the branch widened
+`TEST_ONLY_ITEMS` and `coding-style.md` ("A reader of a private field cannot either") to a second
+carve-out case to admit them, where `driver/partitioned.rs`'s four readers took the spec's route
+into `partitioned/tests.rs` as an inherent `impl` in a child `tests` module. Fix: `#[cfg(test)] mod
+tests;` in `accumulate.rs` with `accumulate/tests.rs` holding `impl AggregateBatches { pub(crate)
+fn compactions(&self) -> usize }`; likewise `join/tests.rs` holding `impl CpuJoin { pub(crate) fn
+has_finish_pass(&self) -> bool }` (a child of `join` sees `Calls.finish`; the existing
+`cpu_backend/mod.rs::has_finish_pass` entry point keeps calling it); drop the two register entries
+and the second-case sentence from `coding-style.md`.
+
+The two lists compared: no overlap. The analyst's `build-test.md` finding is applied (`15655730`);
+its `end_to_end.rs` finding and the reviewer's carve-out finding go to one developer.
