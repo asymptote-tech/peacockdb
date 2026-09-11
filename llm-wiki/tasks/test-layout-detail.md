@@ -2290,3 +2290,114 @@ Two nits: a doc comment reassigned by round 1's insertion in `planner/tests/plan
 (`digest_of`'s two lines now head `canonical_root`) — moved back by the coordinator, a comment-only
 change; and `test_code.rs`'s attribute walks treating any `#[`-led line as attribute-only, which is
 a false red on shapes rustfmt does not emit — the safe direction, left. Task 4 goes to `completing`.
+
+### 2026-09-11 — completeness pass, the analyst's reading
+
+Read at `3468b8d4` against `ENS-rmm-pool-budget` (`29546ff6`), 131 files. Nothing built; the
+checks are text over the tree, the diff, the baselines and the three wiki pages. **0 blocking,
+2 important**, three residuals recorded and not scored, and `architecture.md` has no falsified
+sentence.
+
+#### What holds, by the spec's own list
+
+- **The twelve targets are gone from `tests/` and sit where the table says, at the rung it
+  says.** `tests/` holds exactly the seven that stay (`test_ci_coverage`, `test_corpus_goldens`,
+  `test_cost_model`, `test_cpu_corpus`, `test_golden_format`, `test_gpu_corpus`,
+  `test_module_layout`) and `common/{corpus,corpus_cases.inc,corpus_golden,corpus_gpu,cost_model,mod}`.
+  The 31 test-module declarations in `src/` carry the gate their name requires: 27 `tests`/
+  `schema_tests` on `#[cfg(test)]`, `executor::ffi_tests` on `not(rust-only)`, and
+  `cpu_backend`, `gpu_backend` and `wire` `gpu_tests` on `feature = "gpu"`; `gpu_backend` keeps
+  its own `not(rust-only)` gate.
+- **No leaf lost.** Every one of the 1087 baseline leaf names is present as text in
+  `peacockdb-core/` except 466 that are macro-generated (`corpus_query!` cells in the two corpus
+  binaries, which did not move, and the 17 `end_to_end!`/`injected_queries!` queries), and
+  those macro sites carry the same arguments as before; both `#[ignore = "#182 …"]` travelled.
+- **The deliverables named by the dispatch are all in the tree**: the `compile_error!` at
+  `lib.rs:11`; `test_support/testdata.rs` as the one root, called by the seven `src` sites (now
+  `testdata_minimal_dir()` in `memory_estimation/tests.rs` ×3, `parquet_meta/tests.rs`,
+  `plan_text/tests.rs`, `translator/{tests,schema_tests}.rs`) and delegated to by
+  `tests/common/mod.rs`; `git grep CARGO_MANIFEST_DIR -- peacockdb-core` finds only source
+  readers and `build.rs`; #49 in the archive and out of the index; `driver/tests/{mock,plans}.rs`;
+  no `inc2` anywhere outside `llm-wiki/{tasks,archive}`; `build-test.sh`'s `GPUSET` is
+  `test_gpu_corpus` alone with the ten-line explanation gone; `RUST_TESTS=(test_gpu_corpus)`;
+  `peacockdb_core_gpu_lib` staged by both runners and CI with `gpu_tests::` carried as
+  `RUST_LIB_RUNG` / `rung=` and never as `PCK_TEST_FILTER`; `each_rung_has_its_ci_line_and_the_cli_is_built`
+  reads the four lines and the staged-lib reader demands `--features gpu`; `coding-style.md`
+  carries the test-code bullets and the ladder and no longer apologises for the murmur gate's
+  name; `build-test.md`'s tables re-add — cpu 987, ffi 5, gpu 63, second table 522 — to the
+  headline 1577.
+- **Test code is separated.** `#[test]` appears in no `src/` file whose path lacks `test`.
+  The `#[cfg(test)]` lines in `src/` that are not module declarations are the ten
+  `TEST_ONLY_ITEMS` entries and the six gated `use` lines serving them, as the register says;
+  the two in implementation files (`accumulate::compactions`, `join::has_finish_pass`) read
+  private fields. `pub mod` is the seven in `lib.rs`; no bare `pub` item outside a `mod.rs`,
+  `lib.rs` or `test_support/`.
+- **The staying binaries force nothing a moved target used to.** Every `peacockdb_core::` path
+  in `tests/` outside string fixtures is one of the spec's eight, one of the CLI's, or
+  `test_support`.
+- Every relative link on the three pages resolves, and every function-level example name in
+  `build-test.md` is in the file it links.
+
+#### Important
+
+1. **`build-test.md` says nothing about the `test-support` feature.** The branch adds a third
+   cargo feature and the page documents two: "What `rust-only` means" defines `rust-only` and
+   names `gpu`, and nothing on the page says that `src/test_support/` is now the shared harness,
+   that `tests/common/mod.rs` delegates to it, that the self dev-dependency turns the feature
+   on for `cargo test` and leaves it off for `cargo build`, or that no CI step passes it. The
+   only wiki mention is `coding-style.md`'s list of seven `pub mod`. The spec says "the feature
+   itself arrives here", plan task 12's file list does not name it, and no slice entry mentions
+   documenting it; `test-support.md` plans a `coding-style.md` rule, not a `build-test.md`
+   paragraph. Anchor: prompts.md, "Every commit keeps code, code comments, and llm-wiki content
+   in agreement"; `build-test.md`, "this page maps them". Fix: one paragraph beside "What
+   `rust-only` means" — the feature, the mechanism, the module, and the delegation.
+2. **`src/tests/end_to_end.rs` is 1052 lines and nobody decided.** `coding-style.md` exempts
+   `mod.rs` and `common.rs` from the 1000-line rule and nothing else. Slice 6 recorded the
+   overrun and left it "for the reviewer to decide"; review round 1 applied the same rule to
+   `test_module_layout.rs` and `test_ci_coverage.rs` as important and both were split; this
+   file was neither split nor mentioned. It is pre-existing — 1057 at the parent as
+   `test_cpu_end_to_end.rs` — which is a reason to carry it, but the record does not say so.
+   Fix: either split it under `src/tests/end_to_end/` the way the two guards were split, or
+   write the decision to leave it as a pre-existing overrun here, so the item is closed
+   rather than open.
+
+#### Residuals, recorded and not scored
+
+- `build-test.sh`'s `--gpu` and default modes have never executed the lib entry end to end
+  (verda reprovisioned, key refused). The `--rust-only` gate ran locally against real staged
+  binaries, and `rung_args` with a rung ran on shad-gpu through the other runner; round 2
+  accepted this. First `--host verda --gpu --all` after merge is its first execution.
+- The spec's transitive-gate probe (a `crate::tests::` reference in `plan/` failing `E0433`; a
+  private-item reference in `src/tests/` surviving `cargo build --release`) was not run. Every
+  cold production build in the log already proves there is no such reference, and the gate
+  is the compiler's own `cfg` semantics, so the probe is redundant rather than missing.
+- `cost-report/src/main.rs` keeps four `CARGO_MANIFEST_DIR` testdata paths inside `#[cfg(test)]`
+  fns; the archived #49 records why they stay (never staged). Outside this task's crate.
+
+#### `architecture.md` — no sentence falsified
+
+Read section by section for the facts a move could touch, not for the moved names.
+
+- **Rehash and the comet hash** — "a live gate (`peacock_spark_partition_ids`,
+  `cpu_backend/gpu_tests/murmur_conformance.rs`) proves the two agree over the same bytes":
+  the one sentence the branch edited, and it reads true; `create_murmur3_hashes` is still
+  called from `executor/cpu_backend/spark_partitioning.rs` as the sentence before it says.
+- **Interfaces** — "the conformance hook `peacock_spark_partition_ids`, which runs the murmur3
+  kernel over one Arrow C-data batch so the Rust side can compare it against comet's": true.
+- **Execution / Traits** — "The types are declared in `plan/mod.rs` and `executor/mod.rs` — the
+  node vocabulary in the first, the batch and executor traits in the second": true; the
+  branch moved executor *types* into `cpu_backend/mod.rs` and `gpu_backend/mod.rs`, which the
+  sentence does not claim to place. "Executor construction is the backend's, as
+  `Backend::executors_for(ctx, node, post_order, lane)`": unchanged signature.
+- **The scheduling rule** — the three `executor/driver/` files and "A naive rescan survives as a
+  test-only oracle compared pick by pick": all still there, the oracle in
+  `driver/scheduler/tests.rs`.
+- **Memory accounting** — "Four things in `executor/driver/accounting.rs` are load-bearing":
+  file unchanged.
+- **Planning** — `planner/translator/`, `planner/memory_estimation.rs`,
+  `planner/translator/scan_mapping/`, "Targeted unit tests are the coverage; the plan goldens
+  are not": paths resolve and the sentence's meaning is unchanged by where the goldens run.
+- **Column indexing** and **What the Rust side puts in the flat buffers** — the four `wire/`
+  writers and `planner/translator/expr.rs`: all resolve.
+- The page has no sentence containing "crate", "feature", "cfg", "rust-only" or "integration";
+  the only test placement it states is the gate above. All 27 relative links resolve.
