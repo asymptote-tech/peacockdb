@@ -2518,3 +2518,11 @@ without `PEACOCK_TESTDATA_DIR`; with it, 24 passed 2 ignored. Not a code finding
 Scratch: `/tmp/cp/` only. `git status` shows seven edits (`coding-style.md`, `build-test.md`,
 `tickets.md`, `accumulate.rs`, `join.rs`, `end_to_end.rs`, `test_code.rs`) and the three new
 directories `cpu_backend/accumulate/`, `cpu_backend/join/`, `src/tests/end_to_end/`.
+
+### 2026-09-11 — completeness approved
+
+Both readings closed: the reviewer's carve-out finding and the analyst's two are applied
+(`15655730`, `3910b678`); `architecture.md` has no falsified sentence to correct. Signoff appended
+to the spec. CI run 34641987973 on `a3070959` was green on every job; the head is now `3910b678`,
+which moves code (`cpu_backend/{accumulate,join}`, `src/tests/end_to_end/`), so `done` waits on
+its run.
