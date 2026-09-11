@@ -2274,3 +2274,19 @@ Both probe copies were deleted; `git status` shows nothing under `scripts/` but 
 Cases added: none. Pins added inside `each_reader_sees_the_violation_and_not_its_near_miss`: the
 one-line `declares_mod`, `mod_declarations` and `test_gates` inputs. Scratch: `/tmp/r1/` only;
 `cpp/build26/install/rust-tests/` and `cpp/install/rust-tests/` hold the staged binaries (ignored).
+
+### 2026-09-11 — review round 2: all eleven closed, 0 blocking, 0 important, 2 nits
+
+The reviewer re-ran its ported readers over the new tree: every round-1 finding closed, two of
+them differently than proposed and soundly — finding 2 (a binary that will not load was already red
+through the run status; the hole was a loaded lib whose rung listed nothing under a filter, now red
+in both runners) and finding 4 (the lib entry executed through the rendered `--rust-only` gate
+locally, verda being reprovisioned with the key refused; the `--gpu` and default modes of
+`build-test.sh` are still unexecuted end to end). Cargo cannot pick up the split files as targets
+(no `main.rs` under either directory); `workspace_test_targets()` and `rust_only_targets()` count
+the same eight.
+
+Two nits: a doc comment reassigned by round 1's insertion in `planner/tests/plan_goldens.rs`
+(`digest_of`'s two lines now head `canonical_root`) — moved back by the coordinator, a comment-only
+change; and `test_code.rs`'s attribute walks treating any `#[`-led line as attribute-only, which is
+a false red on shapes rustfmt does not emit — the safe direction, left. Task 4 goes to `completing`.

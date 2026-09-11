@@ -213,8 +213,6 @@ const PAYLOAD_QUERIES: [(&str, &str); 20] = [
     ("tpcds", "q40"),
 ];
 
-/// A digest of the bytes beside the text, because the two can disagree: a field the
-/// renderer does not print, an ordering that moves.
 /// A FIXED path that stands in for the testdata root when a plan's own BYTES are the
 /// thing under test.
 ///
@@ -259,6 +257,8 @@ fn canonical_data_dir(dataset: &str, sf: &str) -> PathBuf {
     canonical_root().join(format!("{dataset}.sf{sf}"))
 }
 
+/// A digest of the bytes beside the text, because the two can disagree: a field the
+/// renderer does not print, an ordering that moves.
 fn digest_of(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
