@@ -279,7 +279,7 @@ jobs:
           # The middle rung: every test module that needs the FFI linked and no device,
           # selected by path. GpuBatch's surface is all of it today — a handle plus a Drop
           # whose release is null-guarded, so nothing here reaches a card. The device half
-          # of that ABI is test_gpu_abi, staged for the gpu-tests job.
+          # of that ABI is `gpu_backend::gpu_tests::abi`, which the gpu-tests job runs.
           cargo test -p peacockdb-core --lib -- ffi_tests::
           cargo test -p peacockdb-ffi --test test_ffi
           # The cpu rung, entire: every in-crate test module that needs neither the FFI
@@ -338,8 +338,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       # Cache the Rust dep tree for the GPU test-binary build. Own shared-key: this
-      # job builds a different target set (test_gpu_executor/test_gpu_node) than
-      # dataset-matrix and runs in PARALLEL with it, so a shared key would only invite
+      # job builds a different feature shape (--features gpu) than dataset-matrix and
+      # runs in PARALLEL with it, so a shared key would only invite
       # same-run save contention for no same-run gain. It uses the same
       # RUSTFLAGS=-C debuginfo=0, so it warm-restores its own opt-3 deps.
       - name: Cache Rust build
@@ -350,35 +350,45 @@ jobs:
       - name: Build and stage rust GPU test binaries
         run: |
           mkdir -p cpp/install/rust-tests
-          # The five GPU targets, one line each; build-test.md's test table is the detail.
-          # test_gpu_corpus = the corpus on a device, read against the sections the cpu
-          #   tier authored — plan shape, per-batch lists and bytes, and the result where
-          #   the query's line names a golden.
-          # test_inc2_conformance = GPU vs comet Spark-murmur3 partition ids, bit-exact.
-          # test_gpu_abi = the ABI's three per-call symbols on a device; the batch surface
-          #   beside it needs none and runs as the ffi rung in dataset-matrix instead.
-          # test_gpu_recipe_walk = a recipe plan driven by hand, DataFusion as the oracle.
-          # test_gpu_executors = the exec executors, each handed its recipe and one batch.
-          # One line on purpose: the coverage guard reads the array below with a single
-          # `lines().find`, so a continuation hides every target after the backslash.
-          for t in test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_corpus; do
-            exec_path=$(cargo test --no-run -p peacockdb-core --test "$t" \
-                --message-format=json \
-              | python3 -c '
+          # The device rung, built with --features gpu; build-test.md's test table is the
+          # detail. The built path carries a metadata hash, so it is read out of cargo's
+          # json artifact lines: the line whose target has this name and kind.
+          resolve() {
+            python3 -c '
           import json, sys
-          name = sys.argv[1]
+          name, kind = sys.argv[1], sys.argv[2]
           for line in sys.stdin:
               try: m = json.loads(line)
               except ValueError: continue
-              if m.get("executable") and (m.get("target") or {}).get("name") == name:
+              target = m.get("target") or {}
+              if m.get("executable") and target.get("name") == name and kind in target.get("kind", []):
                   print(m["executable"]); break
-          ' "$t")
-            if [ -z "$exec_path" ] || [ ! -f "$exec_path" ]; then
-              echo "ERROR: failed to locate built binary for $t"; exit 1
+          ' "$1" "$2"
+          }
+          stage() {
+            if [ -z "$2" ] || [ ! -f "$2" ]; then
+              echo "ERROR: failed to locate built binary for $1"; exit 1
             fi
-            cp -f "$exec_path" "cpp/install/rust-tests/$t"
-            echo "--- Staged: $(ls -lh cpp/install/rust-tests/$t)"
+            cp -f "$2" "cpp/install/rust-tests/$1"
+            echo "--- Staged: $(ls -lh cpp/install/rust-tests/$1)"
+          }
+          # test_gpu_corpus = the corpus on a device, read against the sections the cpu
+          #   tier authored — plan shape, per-batch lists and bytes, and the result where
+          #   the query's line names a golden. It stays a binary because `inventory`
+          #   collects per linked binary and the registry needs two.
+          # One line on purpose: the coverage guard reads the array below with a single
+          # `lines().find`, so a continuation hides every target after the backslash.
+          for t in test_gpu_corpus; do
+            stage "$t" "$(cargo test --no-run -p peacockdb-core --test "$t" --features gpu \
+                --message-format=json | resolve "$t" test)"
           done
+          # The crate's own unit tests, whose `gpu_tests` modules exist only under the gpu
+          # feature: the recipe walk, the executors, the per-call ABI and the murmur gate.
+          # The lib binary holds every rung, so the run loop hands this one file `gpu_tests::`
+          # and no other. Staged under an explicit name, since the loop globs the directory
+          # and a bare `peacockdb_core` beside the target binary would read as one.
+          stage peacockdb_core_gpu_lib "$(cargo test --no-run -p peacockdb-core --lib --features gpu \
+              --message-format=json | resolve peacockdb_core lib)"
         env:
           CMAKE_GENERATOR: Ninja
           LD_LIBRARY_PATH: /opt/conda/lib
@@ -626,7 +636,11 @@ jobs:
               # CUDA context, cascading into bad_alloc/cudaErrorIllegalAddress
               # for every later test. Sequential is mandatory.
               tlog=$REMOTE_DIR/\$tname.rust.log
-              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 > "\$tlog" 2>&1 || rc=1
+              # The lib binary holds every rung; the device one is selected by path, and
+              # the zero-test guard below is what notices if that path stops matching.
+              rung=
+              [ "\$tname" = peacockdb_core_gpu_lib ] && rung=gpu_tests::
+              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 \$rung > "\$tlog" 2>&1 || rc=1
               rzero=0
               while IFS= read -r line; do
                 printf '%s\n' "\$line"

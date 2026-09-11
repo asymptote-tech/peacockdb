@@ -1,12 +1,11 @@
-// The contract the two backends answer to, as data.
-//
-// Each backend is proved against its own oracle over its own fixture, which says nothing
-// about the two agreeing — and a mode whose whole claim is that one plan runs on either
-// engine needs that said somewhere. The instrument is `corpus_cases.inc`'s: one table read
-// by both engines' tests, so a case added here reaches every engine claiming the shape.
-// `INPUT` is the fixture for both, and the device writes its parquet from it — a table one
-// side does not read is a table that proves the CPU twice. Plain `//` rather than `//!`
-// because `tests/test_gpu_executors.rs` still `include!`s this file as text.
+//! The contract the two backends answer to, as data.
+//!
+//! Each backend is proved against its own oracle over its own fixture, which says nothing
+//! about the two agreeing — and a mode whose whole claim is that one plan runs on either
+//! engine needs that said somewhere. The instrument is `corpus_cases.inc`'s: one table read
+//! by both engines' tests, so a case added here reaches every engine claiming the shape.
+//! `INPUT` is the fixture for both, and the device writes its parquet from it — a table one
+//! side does not read is a table that proves the CPU twice.
 
 /// The rows every case starts from, as `(k, v)`. Small enough to write an answer down, and
 /// split into three batches by the device fixture's row groups.
@@ -55,9 +54,9 @@ pub(crate) struct Case {
 /// The lane numbers below are a golden: they were taken from a run, and they are the
 /// contract rather than an observation, because co-partitioning is what every partitioned
 /// join rests on. The two engines hash with one rule — comet's Spark-murmur3 on this side,
-/// `spark_hash_partition` on the device, held bit-equal by `test_inc2_conformance` — so a
-/// row landing in a different lane on either engine means a join would silently drop
-/// matches, and this is where that goes red.
+/// `spark_hash_partition` on the device, held bit-equal by `murmur_conformance` under
+/// `cpu_backend::gpu_tests` — so a row landing in a different lane on either engine means a
+/// join would silently drop matches, and this is where that goes red.
 pub(crate) const CASES: &[Case] = &[
     Case {
         name: "a filter keeps the rows above its bound",

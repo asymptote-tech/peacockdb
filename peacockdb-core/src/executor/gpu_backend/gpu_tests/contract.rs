@@ -7,9 +7,9 @@
 
 use super::*;
 
-use peacockdb_core::executor::gpu_backend::accumulate::GpuAccumulator;
-use peacockdb_core::executor::gpu_backend::emit::GpuEmitter;
-use peacockdb_core::plan::{
+use super::super::{GpuAccumulator, GpuEmitter};
+use crate::tests::executor_cases::{CASES, Shape};
+use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregateBatches, GpuCoalesceAllBatches, GpuEmitPartitions,
 };
 

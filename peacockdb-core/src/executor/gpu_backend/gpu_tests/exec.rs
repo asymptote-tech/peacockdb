@@ -290,7 +290,7 @@ fn a_recipe_whose_calls_wait_for_done_is_refused_by_an_exec_executor() {
         ascending: true,
         nulls_first: false,
     }];
-    let tree: Box<dyn GpuNode> = Box::new(peacockdb_core::plan::GpuAccumulateBatchesAndSort::new(
+    let tree: Box<dyn GpuNode> = Box::new(crate::plan::GpuAccumulateBatchesAndSort::new(
         source(),
         keys,
         None,

@@ -81,7 +81,6 @@ fn cpu_reference_2col_partition_ids_for_probe() {
 /// process, over the SAME `cols` — assert bit-exact. NOT hardcoded reference values.
 /// Each `(Field, ArrayRef)` is a key column; they seed-chain left-to-right (composite
 /// keys). Requires a GPU + the cudf-linked build.
-#[cfg(not(feature = "rust-only"))]
 fn assert_gpu_matches_comet_live(cols: Vec<(datafusion::arrow::datatypes::Field, ArrayRef)>, n_parts: i32) {
     use datafusion::arrow::array::{Array, StructArray};
     use datafusion::arrow::ffi::{to_ffi, FFI_ArrowArray, FFI_ArrowSchema};
@@ -126,7 +125,6 @@ fn assert_gpu_matches_comet_live(cols: Vec<(datafusion::arrow::datatypes::Field,
 
 /// PERMANENT gate (STRING keys): 2 string columns (l_returnflag, l_linestatus)
 /// + a NULL in each (multi-key seeding + null-skip).
-#[cfg(not(feature = "rust-only"))]
 #[test]
 fn gpu_spark_partition_ids_match_comet_live() {
     use datafusion::arrow::datatypes::{DataType, Field};
@@ -148,7 +146,6 @@ fn gpu_spark_partition_ids_match_comet_live() {
 /// INT32 key conformance — edge values (0, -1, i32::MAX/MIN) + a NULL.
 /// int32 = one 4-byte LE block, no tail; exercises the generic fixed-width kernel
 /// and the negative/extreme two's-complement encodings + Spark null-skip.
-#[cfg(not(feature = "rust-only"))]
 #[test]
 fn gpu_spark_partition_ids_int32_match_comet_live() {
     use datafusion::arrow::array::Int32Array;
@@ -161,7 +158,6 @@ fn gpu_spark_partition_ids_int32_match_comet_live() {
 
 /// INT64 key conformance — the dominant surrogate-key (*_sk) case.
 /// int64 = two 4-byte LE blocks (low then high), no tail. Edge values + NULL.
-#[cfg(not(feature = "rust-only"))]
 #[test]
 fn gpu_spark_partition_ids_int64_match_comet_live() {
     use datafusion::arrow::array::Int64Array;
@@ -176,7 +172,6 @@ fn gpu_spark_partition_ids_int64_match_comet_live() {
 /// INT16, so a year-grouped query repartitions on an INT16 key). Spark widens short→int
 /// (4-byte hash); the GPU casts INT16→INT32 before the fixed kernel, so this proves the
 /// widened hash is bit-exact vs comet. Edge values + NULL.
-#[cfg(not(feature = "rust-only"))]
 #[test]
 fn gpu_spark_partition_ids_int16_match_comet_live() {
     use datafusion::arrow::array::Int16Array;
@@ -191,7 +186,6 @@ fn gpu_spark_partition_ids_int16_match_comet_live() {
 /// cuDF stores it as TIMESTAMP_DAYS = int32 days-since-epoch). Spark hashes DATE as the
 /// int32 day count (4-byte); the GPU bit-casts TIMESTAMP_DAYS→INT32, so this proves the
 /// days hash is bit-exact vs comet. Epoch, real dates, pre-epoch negative, NULL.
-#[cfg(not(feature = "rust-only"))]
 #[test]
 fn gpu_spark_partition_ids_date32_match_comet_live() {
     use datafusion::arrow::array::Date32Array;
@@ -206,7 +200,6 @@ fn gpu_spark_partition_ids_date32_match_comet_live() {
 /// (ss_customer_sk, ss_item_sk, ss_ticket_number are all int surrogate keys).
 /// Proves the seed-chain across multiple int columns, incl per-column NULLs (a null
 /// in ONE column of a row still folds the other columns — Spark skips only that col).
-#[cfg(not(feature = "rust-only"))]
 #[test]
 fn gpu_spark_partition_ids_composite_int_match_comet_live() {
     use datafusion::arrow::array::{Int32Array, Int64Array};
@@ -229,7 +222,6 @@ fn gpu_spark_partition_ids_composite_int_match_comet_live() {
 /// COMPOSITE MIXED-type key conformance (int64 + string, nulls in each) —
 /// proves the running seed chains correctly across type-heterogeneous columns (the
 /// general case: an int join/group key interleaved with a string dimension key).
-#[cfg(not(feature = "rust-only"))]
 #[test]
 fn gpu_spark_partition_ids_composite_mixed_match_comet_live() {
     use datafusion::arrow::array::Int64Array;

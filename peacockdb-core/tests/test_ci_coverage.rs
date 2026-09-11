@@ -36,10 +36,6 @@ enum Exemption {
 
 /// Targets deliberately absent from the CI tiers this guard sweeps.
 const INTENTIONALLY_NOT_IN_CI: &[(&str, Exemption)] = &[
-    ("test_inc2_conformance", Exemption::GpuJob),
-    ("test_gpu_abi", Exemption::GpuJob),
-    ("test_gpu_recipe_walk", Exemption::GpuJob),
-    ("test_gpu_executors", Exemption::GpuJob),
     ("test_gpu_corpus", Exemption::GpuJob),
     ("test_ci_coverage", Exemption::NotRun("this test")),
 ];

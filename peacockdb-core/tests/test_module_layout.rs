@@ -35,30 +35,7 @@ struct PubModule {
     forced_by: &'static [&'static str],
 }
 
-const PUB_MODULES: &[PubModule] = &[
-    PubModule {
-        path: "executor/gpu_backend",
-        forced_by: &["peacockdb-core/tests/test_gpu_executors.rs"],
-    },
-    PubModule {
-        path: "executor/gpu_backend/accumulate",
-        forced_by: &[
-            "peacockdb-core/tests/test_gpu_executors/accumulate.rs",
-            "peacockdb-core/tests/test_gpu_executors/contract.rs",
-        ],
-    },
-    PubModule {
-        path: "executor/gpu_backend/emit",
-        forced_by: &[
-            "peacockdb-core/tests/test_gpu_executors/contract.rs",
-            "peacockdb-core/tests/test_gpu_executors/join.rs",
-        ],
-    },
-    PubModule {
-        path: "executor/gpu_backend/join",
-        forced_by: &["peacockdb-core/tests/test_gpu_executors/join.rs"],
-    },
-];
+const PUB_MODULES: &[PubModule] = &[];
 
 /// A file that names a subcomponent of a component that is not its own.
 ///
@@ -128,8 +105,8 @@ fn read(rel: &Path) -> String {
 
 /// Is this file the `mod.rs` or the module file of an exempt module path?
 ///
-/// The module itself, not what is under it: `executor/gpu_backend/accumulate.rs` is exempt and
-/// `executor/gpu_backend/backend.rs` beside it is not.
+/// The module itself, not what is under it: an entry for `executor/gpu_backend/accumulate`
+/// would exempt `accumulate.rs` and not `backend.rs` beside it.
 fn is_an_exempt_module(rel: &Path) -> bool {
     let s = rel.to_string_lossy().replace('\\', "/");
     PUB_MODULES
@@ -379,8 +356,8 @@ fn every_pub_mod_exemption_is_still_forced_by_what_it_names() {
 /// The path exactly, not as a prefix. `gpu_backend::accumulate::GpuAccumulator` does traverse
 /// `gpu_backend`, so it forces that wall down too, but it counts only for the child: letting a
 /// child's callers justify the parent would let one file justify an entry it never names. The
-/// cost is a stuck red — when `test_gpu_executors.rs` stops naming `executor/gpu_backend`, the
-/// forward half goes red and no child-naming file can re-justify the entry.
+/// cost is a stuck red — when the one file naming `executor/gpu_backend` stops, the forward
+/// half goes red and no child-naming file can re-justify the entry.
 ///
 /// Every workspace member's `src` and `tests`: what forces an exemption is any code outside the
 /// crate that names the module. Members come from `Cargo.toml`, as `test_ci_coverage.rs` reads.

@@ -619,3 +619,6 @@ pub(crate) fn has_finish_pass(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_tests;

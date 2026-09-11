@@ -2,7 +2,7 @@
 //! through this backend and checked against the answer both engines owe.
 //!
 //! Agreement between two engines has its own module here for the reason
-//! `test_inc2_conformance` does — it is a claim about the pair, not about either side, and
+//! `gpu_tests::murmur_conformance` does — it is a claim about the pair, not about either side, and
 //! putting it among one side's cases makes it that side's opinion. Each executor's own
 //! tests stay in the files beside this one; this is the join between them.
 

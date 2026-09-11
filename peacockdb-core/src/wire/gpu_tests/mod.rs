@@ -8,21 +8,18 @@
 //!
 //! The oracle is DataFusion on the same SQL: a golden would pin a wrong finalize on its
 //! first run, and our CPU executor evaluates the very finalize the device is sent.
-#![cfg(not(feature = "rust-only"))]
-#[macro_use]
-mod common;
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::ipc::reader::StreamReader;
 use datafusion::common::JoinType;
 
-use peacockdb_core::executor::{BatchForwarder, forwarder_for};
-use peacockdb_core::plan::GpuNode;
-use peacockdb_core::plan::{ExecutorCategory, category_of};
-use peacockdb_core::plan::{NodeRef, as_node_ref};
-use peacockdb_core::planner;
-use peacockdb_core::planner::{BatchSizing, PlanKnobs};
-use peacockdb_core::wire::{
+use crate::executor::{BatchForwarder, forwarder_for};
+use crate::plan::GpuNode;
+use crate::plan::{ExecutorCategory, category_of};
+use crate::plan::{NodeRef, as_node_ref};
+use crate::planner;
+use crate::planner::{BatchSizing, PlanKnobs};
+use super::{
     AbiSymbol, Call, CallPattern, FbKind, Input, ProjectRole, Recipe, RecipePlan, Seq,
     attach_recipes,
 };
@@ -33,11 +30,11 @@ use peacockdb_ffi::raw::{
     peacock_result_from_handle,
 };
 
-use common::{GPU_BUDGET, assert_results_match, data_dir_for, total_rows};
+use crate::test_support::{GPU_BUDGET, assert_results_match, data_dir_for, total_rows};
 
 // The value the plan goldens are canonized at, so every shape below is one that tier
 // already renders.
-use peacockdb_core::planner::SMALL_TABLE_BYTES;
+use crate::planner::SMALL_TABLE_BYTES;
 
 /// Everything but the aggregates: one lane and one batch, which makes every recipe a
 /// single call per node and the walk a straight line.

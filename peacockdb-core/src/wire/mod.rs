@@ -24,6 +24,9 @@ mod writer;
 #[cfg(test)]
 mod tests;
 
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_tests;
+
 use datafusion::common::JoinType;
 
 use crate::plan::GpuNode;

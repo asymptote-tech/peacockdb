@@ -5,24 +5,21 @@
 //! prove is the boundary the driver will actually cross — the exported IPC decoded back
 //! into rows, and `GpuBatch`'s release skipped exactly when an FFI call consumed the
 //! handle.
-#![cfg(not(feature = "rust-only"))]
-#[macro_use]
-mod common;
 use datafusion::arrow::array::{Array, Int64Array, RecordBatch};
 use datafusion::arrow::ipc::reader::StreamReader;
 
-use peacockdb_core::executor::GpuBatch;
-use peacockdb_core::planner;
-use peacockdb_core::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};
-use peacockdb_core::wire::{AbiSymbol, attach_recipes};
-use peacockdb_core::{build_session_state, register_tables_for};
+use crate::executor::GpuBatch;
+use crate::planner;
+use crate::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};
+use crate::wire::{AbiSymbol, attach_recipes};
+use crate::{build_session_state, register_tables_for};
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,
     peacock_executor_destroy, peacock_executor_end_plan, peacock_executor_execute_scan_rowgroups,
     peacock_executor_slice_handle, peacock_result_free, peacock_result_from_handle,
 };
 
-use common::{GPU_BUDGET, testdata_minimal_dir};
+use crate::test_support::{GPU_BUDGET, testdata_minimal_dir};
 
 /// customer projected to c_custkey: the one committed fixture with two row groups
 /// (122880 + 27120), and a narrow column to read back.

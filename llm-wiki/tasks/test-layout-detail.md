@@ -1329,3 +1329,31 @@ so everything ran locally.
   a real target name would stop a grep finding a ghost.
 - Both target dirs were `cargo clean -p peacockdb-core`ed for the cold counts and rebuilt by the
   inventories and the package run; `target-cudf-*` holds the `gpu` fingerprint last.
+
+### 2026-09-10 — slice 9 dispatched, and the dispatch died at 22:21
+
+The previous coordinator committed slice 8 (`4ee0ce29`, 21:57) and dispatched plan task 9, the
+device four. The developer worked until 22:21:21 — the newest mtime, `scripts/build-test.sh` — and
+the session hit the account's usage limit, which did not reset until the next morning. No slice 9
+entry was written and nothing was committed; the partial tree is what the dispatch left, and it is
+committed as-is so a rebase can run under it.
+
+What the tree holds, from `git status`, `git diff --stat` and a few greps — not a reading of the
+diff (17 files modified, 9 deleted, three `gpu_tests/` directories untracked):
+
+- The four targets are gone from `tests/`: `test_gpu_abi.rs`, `test_gpu_executors.rs` and its five
+  children, `test_gpu_recipe_walk.rs`, `test_inc2_conformance.rs` — 3,348 lines. Ten new files under
+  `executor/gpu_backend/gpu_tests/` (`mod`, `abi`, `accumulate`, `backend`, `contract`, `exec`,
+  `join`), `wire/gpu_tests/mod.rs` and `executor/cpu_backend/gpu_tests/{mod,murmur_conformance}.rs` —
+  3,327 lines. All three declared `#[cfg(all(test, feature = "gpu"))] mod gpu_tests;`.
+- `executor/gpu_backend/mod.rs` and its four subcomponents are `mod`, not `pub mod`; `PUB_MODULES`
+  in the layout test is `&[]`. `gpu_backend/{accumulate,backend,emit,join,mod}.rs` carry the
+  visibility sweep (95, 20, 18, 39, 66 lines).
+- `src/tests/executor_cases.rs` has its `//!` header back and no `include!` names it anywhere —
+  the device half reads it as a module, as slice 8 asked.
+- `pipeline.yml` (66 lines), `scripts/build-test.sh` (49), `scripts/build-test-shadgpu.sh` (29),
+  `scripts/lib/shadgpu-env.sh` (46), `tests/test_ci_coverage.rs` (4), `tests/test_module_layout.rs`
+  (33) touched — the staging, the filter argument and the list shrink, unproven.
+
+None of it has been built or measured. The re-dispatch starts from this tree rather than a reset,
+on the developer's judgement once it compiles; plan task 9's steps 2-9 are all still open.

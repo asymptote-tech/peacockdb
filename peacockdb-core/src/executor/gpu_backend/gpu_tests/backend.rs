@@ -10,13 +10,13 @@
 use super::*;
 
 use datafusion::common::JoinType;
-use peacockdb_core::executor::Backend;
-use peacockdb_core::executor::{GpuBackend, GpuContext};
-use peacockdb_core::plan::{
+use crate::executor::Backend;
+use crate::executor::{GpuBackend, GpuContext};
+use crate::plan::{
     ExecutorCategory, GpuAccumulateBatchesAndSort, GpuEmitPartitions, GpuHashJoin, GpuUnload,
     category_of,
 };
-use peacockdb_core::wire::attach_recipes;
+use crate::wire::attach_recipes;
 
 /// The tree children-first, which is the numbering a recipe is addressed by and what the
 /// driver hands `executors_for`.

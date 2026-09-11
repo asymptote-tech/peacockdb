@@ -32,8 +32,15 @@ set -euo pipefail
 BUILD_GLIBC=$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)
 [ -n "$BUILD_GLIBC" ] || { echo "cannot read this host's glibc version from getconf" >&2; exit 1; }
 
-# Rust integration tests that link libpeacock_gpu.so and must run on the GPU host.
-RUST_TESTS=(test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_corpus)
+# The device rung, built with --features gpu: the one integration target that needs a
+# device, and the crate's own unit tests, whose `gpu_tests` modules exist only under that
+# feature. The lib binary holds every rung — a gpu build compiles the CPU and FFI test
+# modules too — so the run loop hands it RUST_LIB_ARGS, a path filter that selects the
+# device rung and nothing beneath it. That argument is part of what the binary is, not a
+# developer's PCK_TEST_FILTER: the zero-test guard stays armed for it.
+RUST_TESTS=(test_gpu_corpus)
+RUST_LIB_STAGED=peacockdb_core_gpu_lib
+RUST_LIB_ARGS=gpu_tests::
 RUST_TESTS_STAGING=cpp/install/rust-tests
 
 # Runner, log, exit code and run id of a detached run, per phase. Outside
@@ -132,8 +139,9 @@ if [ "$BUILD" -eq 1 ]; then
   rm -rf "$RUST_TESTS_STAGING"
   mkdir -p "$RUST_TESTS_STAGING"
   for t in "${RUST_TESTS[@]}"; do
-    stage_cargo_test_binary "$t" "$RUST_TESTS_STAGING"
+    stage_cargo_test_binary "$t" "$RUST_TESTS_STAGING" --features gpu
   done
+  stage_cargo_lib_binary "$RUST_LIB_STAGED" "$RUST_TESTS_STAGING" --features gpu
 fi
 
 # --- push ---------------------------------------------------------------------
@@ -141,7 +149,7 @@ if [ "$RSYNC" -eq 1 ]; then
   # Unstripped binaries are ~565MB each against ~155MB stripped, and the link to the
   # host is slow and bursty. --strip-debug keeps the dynamic symbol table patchelf
   # needs.
-  for t in "${RUST_TESTS[@]}"; do
+  for t in "${RUST_TESTS[@]}" "$RUST_LIB_STAGED"; do
     [ -f "$RUST_TESTS_STAGING/$t" ] && strip --strip-debug "$RUST_TESTS_STAGING/$t"
   done
 
@@ -366,8 +374,19 @@ remote_gate_script() {
       tname=\${t##*/}
       echo "--- \$tname"
       rlog=/tmp/\$tname.rustlog
+      # The lib binary takes its rung by path; a developer's filter then narrows inside
+      # that rung. libtest ORs its filters, so the intersection is a list of exact names,
+      # and the empty name under --exact matches nothing: no match runs no test.
+      if [ "\$tname" != "$RUST_LIB_STAGED" ]; then
+        args=($filter_q)
+      elif [ -z $filter_q ]; then
+        args=($RUST_LIB_ARGS)
+      else
+        mapfile -t names < <(env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --list $RUST_LIB_ARGS | sed -n 's/: test\$//p' | grep -F -- $filter_q)
+        args=(--exact '' "\${names[@]}")
+      fi
       # --test-threads=1: the GPU/RMM context is process-wide, parallel tests OOM.
-      env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 $filter_q > "\$rlog" 2>&1
+      env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 "\${args[@]}" > "\$rlog" 2>&1
       status=\$?
       # Zero tests is a fault only when nothing was filtered out: with a filter set,
       # every other binary legitimately matches nothing, and a red banner for a run

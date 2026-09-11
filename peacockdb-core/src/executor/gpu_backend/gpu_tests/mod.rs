@@ -6,9 +6,6 @@
 //! Parquet is the transport and not the subject: the ABI has no way to put a table on a
 //! device except to read one, so the source is a scan the test drives by hand — as T21's
 //! walk does, and for the same reason: a source executor is nobody's task yet.
-#![cfg(not(feature = "rust-only"))]
-#[macro_use]
-mod common;
 
 use std::path::PathBuf;
 
@@ -25,45 +22,45 @@ use datafusion::parquet::arrow::ArrowWriter;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 
-use peacockdb_core::plan::{AggCall, PlanAgg};
+use crate::plan::{AggCall, PlanAgg};
 
-use peacockdb_core::executor::RowRange;
+use crate::executor::RowRange;
 
-use peacockdb_core::plan::{BinaryOp, Expr, NamedExpr};
+use crate::plan::{BinaryOp, Expr, NamedExpr};
 
-use peacockdb_core::executor::gpu_backend::{GpuExec, GpuExport};
+use super::{GpuExec, GpuExport};
 
-use peacockdb_core::plan::ColumnOrder;
+use crate::plan::ColumnOrder;
 
-use peacockdb_core::plan::GpuNode;
+use crate::plan::GpuNode;
 
-use peacockdb_core::plan::AggregateBody;
+use crate::plan::AggregateBody;
 
-use peacockdb_core::plan::{
+use crate::plan::{
     GpuAggregate, GpuFilter, GpuLoadParquet, GpuProject, GpuSort,
 };
 
-use peacockdb_core::plan::ScanMetadata;
+use crate::plan::ScanMetadata;
 
-use peacockdb_core::plan::RowGroupMeta;
+use crate::plan::RowGroupMeta;
 
-use peacockdb_core::wire::{AbiSymbol, Recipe, RecipePlan, attach_recipes};
+use crate::wire::{AbiSymbol, Recipe, RecipePlan, attach_recipes};
 
-use peacockdb_core::plan::Schema;
+use crate::plan::Schema;
 
-use peacockdb_core::executor::{Batch, CpuBatch, GpuBatch};
+use crate::executor::{Batch, CpuBatch, GpuBatch};
 
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,
     peacock_executor_destroy, peacock_executor_end_plan, peacock_executor_execute_node, peacock_executor_execute_scan_rowgroups, peacock_last_error,
 };
 
-use common::GPU_BUDGET;
+use crate::test_support::GPU_BUDGET;
 
 // The rows are the contract's, so the two backends cannot claim one fixture and read two.
 // The device writes them into three row groups, which is how a lane comes to have three
 // batches.
-include!("../src/tests/executor_cases.rs");
+use crate::tests::executor_cases::INPUT;
 
 fn keys() -> Vec<&'static str> {
     INPUT.iter().map(|(k, _)| *k).collect()
@@ -314,16 +311,9 @@ fn summing(output: &str) -> AggregateBody {
     }
 }
 
-// A test target's child modules resolve against tests/ itself, and a file there would be
-// another target. The path keeps them under a directory named for this one.
-#[path = "test_gpu_executors/accumulate.rs"]
+mod abi;
 mod accumulate;
-
-#[path = "test_gpu_executors/backend.rs"]
 mod backend;
-#[path = "test_gpu_executors/contract.rs"]
 mod contract;
-#[path = "test_gpu_executors/exec.rs"]
 mod exec;
-#[path = "test_gpu_executors/join.rs"]
 mod join;

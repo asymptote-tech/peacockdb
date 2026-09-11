@@ -1,6 +1,6 @@
 //! `GpuBatch`'s own surface: what it reports, and which way out of it releases the
-//! handle. The release semantics against a live registry are in test_gpu_abi.rs, which
-//! needs a GPU; these need none, because `peacock_handle_release` is null-guarded on the
+//! handle. The release semantics against a live registry are in `gpu_backend/gpu_tests/abi.rs`,
+//! which needs a GPU; these need none, because `peacock_handle_release` is null-guarded on the
 //! executor pointer, so a batch built on a null one drops as a no-op. Not rust-only
 //! either way: `GpuBatch` exists only where the FFI is linked.
 use std::ptr;

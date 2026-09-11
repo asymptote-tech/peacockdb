@@ -15,7 +15,7 @@ use datafusion::common::JoinType;
 
 use peacockdb_ffi::raw::PeacockExecutor;
 
-use super::{execute_node, produced};
+use super::{GpuJoin, GpuProbingJoin, execute_node, produced};
 use crate::executor::Batch;
 use crate::executor::GpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats};
@@ -27,30 +27,16 @@ use crate::wire::{CallPattern, FbKind, Input, ProjectRole, Recipe, Seq};
 /// input is one child slot — the C++ reads its output count off the first slot, so two
 /// handles in one would ask for two outputs and be refused for a buffer it never needed.
 #[derive(Clone)]
-struct JoinCall {
+pub(crate) struct JoinCall {
     seq: Seq,
     kind: FbKind,
     inputs: Vec<Input>,
 }
 
-/// A join before its build side arrives.
-pub struct GpuJoin {
-    executor: *mut PeacockExecutor,
-    /// The node's own type, and `None` for the two joins that have none — cross and
-    /// nested-loop. What a finish over no keys owes is decided by this rather than read
-    /// back off the call list: two different nodes publish a LeftAnti at done, and one of
-    /// them owes padded rows.
-    join_type: Option<JoinType>,
-    per_probe: Vec<JoinCall>,
-    at_done: Vec<JoinCall>,
-    keys_schema: Option<SchemaRef>,
-    output: SchemaRef,
-}
-
 impl GpuJoin {
     /// `keys` is the schema of the probe keys a finishing join accumulates — the key
     /// project's output, which is the node's key columns and nothing else.
-    pub fn new(
+    pub(crate) fn new(
         executor: *mut PeacockExecutor,
         recipe: &Recipe,
         join_type: Option<JoinType>,
@@ -100,7 +86,7 @@ impl GpuJoin {
 
     /// This lane's build side finished with no batch — its scatter gave it no build rows.
     /// The type decides what it owes, and the rule is the one the CPU reads too.
-    pub fn without_build(self) -> Result<(), BackendError> {
+    pub(crate) fn without_build(self) -> Result<(), BackendError> {
         // Cross and nested-loop joins carry no type here and owe nothing either: every row
         // they emit is built from a build row, the Left form's padding included.
         let owes_nothing = self.join_type.map_or(true, empty_build_answers_nothing);
@@ -115,7 +101,7 @@ impl GpuJoin {
 
     /// The build side, which is one batch per lane. It is held rather than consumed: which
     /// call takes it, and whether it survives that call, is what the recipe says.
-    pub fn set_build(self, batch: GpuBatch) -> CallResult<GpuProbingJoin> {
+    pub(crate) fn set_build(self, batch: GpuBatch) -> CallResult<GpuProbingJoin> {
         Ok((
             GpuProbingJoin {
                 join: self,
@@ -126,17 +112,6 @@ impl GpuJoin {
             CallStats::default(),
         ))
     }
-}
-
-/// A join with its build side set, taking probe batches.
-pub struct GpuProbingJoin {
-    join: GpuJoin,
-    /// `None` once a call has consumed it, which is the last probe call for a join that
-    /// hands it over and the finish call for one that does not.
-    build: Option<GpuBatch>,
-    /// The probe keys each batch contributed, held until the finish concatenates them.
-    accumulated: Vec<GpuBatch>,
-    probes: u64,
 }
 
 impl GpuProbingJoin {
@@ -161,7 +136,7 @@ impl GpuProbingJoin {
             .any(|call| call.inputs.iter().any(Input::is_build_side))
     }
 
-    pub fn probe_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
+    pub(crate) fn probe_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
         self.probes += 1;
         let mut out = Vec::new();
         let mut batch = Some(batch);
@@ -182,7 +157,7 @@ impl GpuProbingJoin {
     /// The question a streamed probe could not answer, in the calls the recipe names: the
     /// keys concatenated, the finish join against the build side, and the pad where the
     /// node's output is the joined schema.
-    pub fn finish_and_fetch(mut self) -> CallResult<Vec<GpuBatch>> {
+    pub(crate) fn finish_and_fetch(mut self) -> CallResult<Vec<GpuBatch>> {
         if self.join.at_done.is_empty() {
             return Ok((Vec::new(), CallStats::default()));
         }

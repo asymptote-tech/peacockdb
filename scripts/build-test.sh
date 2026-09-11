@@ -236,14 +236,16 @@ done
 # Targets are classified ONCE, by what they REQUIRE, and each mode takes everything it
 # can support. Three hand-written lists is what this replaces: they drifted apart, and
 # the drift was always in the direction of running less than the mode could (--gpu
-# silently skipped test_inc2_conformance, the murmur3 conformance gate; the default
-# branch omitted four targets that build fine with the full feature set).
+# silently skipped the murmur3 conformance gate; the default branch omitted four
+# targets that build fine with the full feature set).
 #
 # A mode that BUILDS more must not RUN less. So:
 #   needs_cmake   file-gated on not(rust-only): cannot compile without libpeacock_gpu.
 #   rust_only     everything else — no cmake, no CUDA, CPU by construction.
 #   default       rust_only + needs_cmake, minus GPU-runtime-only targets.
 #   gpu           the GPU-runtime set.
+# Every mode also runs the crate's own unit tests, the `--lib` entry below, which no
+# `--test` derivation can see: it is not a file under tests/.
 #
 # The rust-only membership test is the FEATURE'S OWN DEFINITION (see build-test.md's
 # "What rust-only means"): a file-level `#![cfg(not(feature = "rust-only"))]` is exactly
@@ -287,27 +289,27 @@ rust_only_targets() {
   done
 }
 
+# The crate's own unit-test binary, as a suite entry. `--lib` is not a `--test` target, so
+# nothing derives it and every mode names it. The three build shapes nest — a `--features
+# gpu` lib holds the rust-only and FFI test modules too — and the filter each mode hands
+# the binary at run time (see the run loop) is what keeps the runs disjoint: the gpu mode
+# selects `gpu_tests::` and nothing beneath it. The staged file is named for its mode
+# because the shapes differ and a bare `peacockdb_core` beside the targets reads as one.
+LIB_TARGET=peacockdb-core:--lib
+lib_target() {
+  printf '%s\n' "$LIB_TARGET"
+}
+
 # The GPU-RUNTIME set: targets that need a GPU when they RUN, whatever they need to
 # compile. Declared once here and subtracted wherever a mode cannot satisfy it, rather
 # than filtered by name — `grep -v ':test_gpu_'` was the last name-convention dependency
-# in this file, and it let test_inc2_conformance through because the name does not match
-# the prefix.
-#
-# test_inc2_conformance is the case that exposed it. It is the ONLY test file that gates
-# per ITEM (`#[cfg(...)]`, 7 of them) instead of per FILE (`#![cfg(...)]`), so the
-# file-level membership test below cannot see it: with the full feature set its seven
-# live-GPU tests are ACTIVE and call peacock_spark_partition_ids through the FFI, which
-# on a CPU-only remote fails for want of a device — a red run that says nothing about the
-# code. Under --rust-only those same seven compile out and 3 pure-CPU comet checks
-# remain, which is harmless but still not this suite's job.
+# in this file. Plus the lib, whose device rung is the `gpu_tests` modules that only a
+# `--features gpu` build compiles.
 gpu_runtime_targets() {
   cat <<'GPUSET'
-peacockdb-core:test_gpu_abi
-peacockdb-core:test_gpu_recipe_walk
-peacockdb-core:test_gpu_executors
-peacockdb-core:test_inc2_conformance
 peacockdb-core:test_gpu_corpus
 GPUSET
+  lib_target
 }
 
 # Targets that need cmake to compile at all, in dependency-name order.
@@ -329,21 +331,26 @@ needs_cmake_targets() {
 
 if [ "$MODE" = "gpu" ]; then
   # GPU-runtime set. Kept in step with build-test-shadgpu.sh:RUST_TESTS and
-  # pipeline.yml's gpu-tests staging array — three runners had three lists and this
-  # one was short by test_inc2_conformance, the GPU<->comet bit-exact murmur3 gate.
+  # pipeline.yml's gpu-tests staging array — three runners had three lists and they
+  # drifted. The lib binary is built --features gpu and run on `gpu_tests::` alone.
   mapfile -t RUST_TESTS < <(gpu_runtime_targets)
   CPP_TEST_BIN=peacock_plan_tests
 elif [ "$RUST_ONLY" -eq 1 ]; then
-  # Golden regen / cpu+plan verify: no C++, no FFI.
-  mapfile -t RUST_TESTS < <(rust_only_targets)
+  # Golden regen / cpu+plan verify: no C++, no FFI. The lib here is the rust-only
+  # shape, run whole: the plan goldens and the end-to-end tier ride in it.
+  mapfile -t RUST_TESTS < <(
+    rust_only_targets
+    lib_target
+  )
   CPP_TEST_BIN=""
 else
   # Superset: everything rust-only can run, plus what only cmake makes buildable.
   # test_gpu_* are excluded — they compile here but need a GPU at RUNTIME, which is
-  # what --gpu is for.
+  # what --gpu is for. The lib at default features holds the cpu and ffi rungs, run whole.
   mapfile -t RUST_TESTS < <(
     rust_only_targets
     needs_cmake_targets | grep -vxF -f <(gpu_runtime_targets)
+    lib_target
   )
   CPP_TEST_BIN=peacock_cpu_tests
 fi
