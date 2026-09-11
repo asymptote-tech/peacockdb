@@ -195,6 +195,17 @@ The harness must not assume a query has rows — today an `assert!(total_rows > 
 
 ### 6. The queries
 
+**Check this list against [`reports/sink-divergence.md`](../reports/sink-divergence.md) before
+writing any of it.** The survey runs immediately before this task and measures the whole corpus for
+the cost of one error message; these thirteen were chosen from tickets and from reading the type
+table, which is a weaker basis. Where the survey shows a class does not occur, drop its query and say
+so. Where it shows a class nobody predicted, add one. A query kept only because it was written here
+first is the habit this chain exists to break.
+
+What the survey cannot tell you is where a divergence *entered* — it sees only the sink — so a class
+it reports is still worth measuring per call here. What it can tell you is which classes are worth
+the cost.
+
 Added to the shared list rather than replacing it; the queries already there keep their own tests and
 their own job of exercising node kinds.
 

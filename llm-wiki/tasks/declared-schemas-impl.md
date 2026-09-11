@@ -853,6 +853,20 @@ passes — the failure mode a `bug_` test is most prone to, because nobody looks
 **No generic assert-every-call loop.** A general "every firing matches its declaration" cannot be
 green beside this test, and every way around that is a whitelist or building around a bug.
 
+- [ ] **Step 1b: Reconcile the list with the survey first**
+
+```bash
+sed -n '1,80p' llm-wiki/reports/sink-divergence.md
+```
+
+`sink-divergence-survey.md` runs immediately before this task and measured the whole corpus. Compare
+its class table against the spec's thirteen queries: drop a query whose class the survey shows does
+not occur, add one for a class nobody predicted, and record both decisions in
+`declared-schemas-detail.md`. The spec requires this and it is the cheapest step in the task.
+
+If the report does not exist, the survey has not run — **stop and say so** rather than proceeding on
+the ticket-derived list.
+
 - [ ] **Step 2: Write the remaining twelve, each at the mode the spec's table names**
 
 Queries 2–13 of the spec. Each is its own `#[test]`, `bug_`-prefixed only where its assertion records
