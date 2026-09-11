@@ -1657,3 +1657,185 @@ Slice 9 committed as `94fe9d7f`. Plan task 10's move was absorbed by slice 6 (`e
 item still `pub` because a test crate names it, expected to be the eight `corpus.rs` and
 `corpus_gpu.rs` force — and that rides with plan task 11, the `test_ci_coverage` shrink and the
 four rung assertions each shown red. Plan task 12 is the slice after. verda still unreachable.
+
+### 2026-09-11 — slice 10 done: `test_ci_coverage` — one assertion per rung, each shown red
+
+Plan task 11, steps 1-5, and plan task 10's step 3 (the dump reading). Not committed. Two files
+modified, nothing created or deleted:
+
+- `peacockdb-core/tests/test_ci_coverage.rs` — 716 → 996 lines, 8 tests (7 before).
+- `llm-wiki/build-test.md` — the CI-wiring-guard row: its subject, its anchors, its N (6 → 8).
+
+`pipeline.yml`, `build-test.sh` and `build-test-shadgpu.sh` were edited only as red-watch
+probes and are byte-identical to HEAD (`git diff --stat -- .github scripts` empty). No `src/`
+file was touched, so the whole-package run was not repeated; slice 9's 1034 stands.
+
+#### The negative control: what the guard at HEAD could not see
+
+Before any edit, each of the four lines was deleted from `pipeline.yml` and the guard run:
+
+| Deleted | HEAD's guard |
+|---|---|
+| (a) `cargo test --features rust-only -p peacockdb-core --lib` | **7 passed** — `line_runs_lib_tests` was still satisfied by the ffi line, which is a `--lib` run too |
+| (b) `cargo test -p peacockdb-core --lib -- ffi_tests::` | **7 passed** — nothing read it |
+| (c1) the `stage peacockdb_core_gpu_lib "$(cargo test --no-run … --lib --features gpu …)"` line | **7 passed** — `gpu_job_staged_targets()` reads the `for t in test_…` array only |
+| (c2) `[ "\$tname" = peacockdb_core_gpu_lib ] && rung=gpu_tests::` | **7 passed** — nothing read it |
+| (d) `cargo build --features rust-only -p peacockdb` | 6 passed, 1 failed — the one line already guarded |
+
+So three of the four rungs could stop running with the guard green, and the fourth's assertion
+was answered by the wrong line. That is what this slice closes.
+
+#### What the guard reads now
+
+- **Two rung matchers over `line_runs_lib_tests`**: `line_runs_cpu_rung` (features `rust-only`,
+  no filter after `--`) and `line_runs_ffi_rung` (no `--features`, filter exactly `ffi_tests::`),
+  over two small tokenisers `cargo_features` and `lib_run_filter`. Each rung line fails the
+  other's matcher, which is the property (a) lacked.
+- **The device rung, read as structure and not as a command line**: `gpu_job_step(name)` cuts a
+  step body out of the workflow by its `name:` (it replaces `gpu_test_step()`, now
+  `gpu_job_step(GPU_RUN_STEP)`); `gpu_job_staged_targets()` reads the `for t in test_…` array
+  inside the staging step rather than anywhere in the file; `gpu_job_staged_by_name()` reads
+  every folded `stage <literal> …` line — the lib's, since the loop's is `stage "$t"` — and
+  `gpu_job_staged_lib()` takes the one that is `--no-run … --lib --features gpu`;
+  `gpu_job_lib_rung()` reads the run loop's `[ "$tname" = <name> ] && rung=<filter>` line as
+  `(name, filter)`. The assertion is then: a staged lib exists, the rung line names that file and
+  `gpu_tests::`, and every rust invocation in the loop carries `$rung`. The plan's "in the `for t
+  in …` array" is stale, as slice 9 said; what is asserted is what is there.
+- **The four assertions live in one new test**, `each_rung_has_its_ci_line_and_the_cli_is_built`,
+  and the `--lib`/CLI assertions that sat inside the sweep moved into it; the sweep keeps the
+  target enumeration, the `GpuJob` array check and the stale-entry check. `workflow_lines()` is
+  the shared reader.
+- **The three lists gain the lib.** `the_three_gpu_target_lists_agree` still compares
+  `{test_gpu_corpus}` three ways and now also reads `(staged name, rung)` from each runner:
+  pipeline.yml (staging line + loop line), `build-test-shadgpu.sh` (`RUST_LIB_STAGED`,
+  `RUST_LIB_RUNG`), `build-test.sh`'s `[ "$MODE" = "gpu" ]` branch (`LIB_STAGED`, `LIB_RUNG`);
+  all three must be `Some` and equal. Then `rung_reaches_the_binary` answers the question the
+  variables alone cannot: in each script the loop must hand `"$t"` and both variables to
+  `rung_args`, and every `"$t" --…` invocation in that loop must carry `"${args[@]}"`. The loop
+  is found from its feed line outward (`rposition` to the enclosing `for`), because the two
+  scripts head it differently (`for t in …rust-tests/*` and `for name in $RUST_TEST_NAMES`) —
+  the first draft anchored on `rust-tests/` and landed on a comment at `build-test.sh:234`,
+  which is the one wrong turn this slice took and it was red, not silent.
+- **`both_gpu_runners_pass_test_threads_one`** was checked against its question rather than its
+  string: the flag sits on the invocation line itself in both runners (`"$t" --nocapture
+  --test-threads=1 "${args[@]}"`), so it applies to every staged binary and nothing `rung_args`
+  returns can remove it. Probe s6 below shows the reader still fires.
+- The fixture at the old line 291 names `test_cpu_corpus`; `grep` for the seven retired target
+  names over the file finds nothing.
+
+#### Red-watch, `pipeline.yml` — every probe reverted, file byte-identical after
+
+| Probe | What fired | What it printed |
+|---|---|---|
+| (a) rust-only `--lib` line deleted | `each_rung_has_its_ci_line_and_the_cli_is_built` | `no workflow line runs the cpu rung — the lib whole under --features rust-only. … Add `cargo test --features rust-only -p peacockdb-core --lib` to dataset-matrix.` |
+| (b) `--lib -- ffi_tests::` line deleted | same | `no workflow line runs the ffi rung — `--lib -- ffi_tests::` at default features. … Add `cargo test -p peacockdb-core --lib -- ffi_tests::` to dataset-matrix.` |
+| (c1) the two-line `stage peacockdb_core_gpu_lib …` deleted | same | `the `Build and stage rust GPU test binaries` step stages no lib binary: no `stage <name> "$(cargo test --no-run … --lib --features gpu …)"` line. … Lines naming a file outright: []` |
+| (c2) the `rung=` line deleted | same | `the `Run GPU tests` loop hands no file a rung: no `[ "$tname" = <name> ] && rung=<filter>` line. The staged lib `peacockdb_core_gpu_lib` holds every rung, …` |
+| (c3) `\$rung` dropped from the invocation, assignment left | same | `a rust invocation in the `Run GPU tests` loop does not pass $rung, so the assignment above it reaches nothing: env LD_LIBRARY_PATH=… "\$t" --nocapture --test-threads=1 > "\$tlog" 2>&1 \|\| rc=1` |
+| (c4) rung keyed on `peacockdb_core_lib` | same | `… `peacockdb_core_gpu_lib` is staged, `peacockdb_core_lib` gets `gpu_tests::`` (`assert_eq` left/right printed) |
+| (c5) `rung=device_tests::` | same | `… `peacockdb_core_gpu_lib` is staged, `peacockdb_core_gpu_lib` gets `device_tests::`` |
+| (d) CLI build line deleted | same | `no workflow line builds the peacockdb CLI. … Add `cargo build --features rust-only -p peacockdb` to dataset-matrix.` |
+
+Every probe: 7 passed, 1 failed, the one test.
+
+#### Red-watch, the two scripts — every probe reverted, both files byte-identical after
+
+| Probe | What fired | What it printed |
+|---|---|---|
+| (s1) `RUST_LIB_STAGED=peacockdb_core` | `the_three_gpu_target_lists_agree` | `the three runners disagree about the lib binary or its rung — pipeline.yml Some(("peacockdb_core_gpu_lib", "gpu_tests::")), build-test-shadgpu.sh Some(("peacockdb_core", "gpu_tests::")), build-test.sh --gpu Some(("peacockdb_core_gpu_lib", "gpu_tests::"))` |
+| (s2) `RUST_LIB_RUNG=gpu::` | same | `… build-test-shadgpu.sh Some(("peacockdb_core_gpu_lib", "gpu::")) …` |
+| (s3) `build-test.sh` gpu branch `LIB_RUNG=""` | same | `… build-test.sh --gpu Some(("peacockdb_core_gpu_lib", "")) …` |
+| (s4) `build-test.sh`'s `mapfile … rung_args` line deleted | same | `scripts/build-test.sh: the lib's rung does not reach the binary — no line hands "$t", $LIB_STAGED and $LIB_RUNG to rung_args` |
+| (s5) `"\${args[@]}"` dropped from the shad-gpu invocation | same | `scripts/build-test-shadgpu.sh: the lib's rung does not reach the binary — an invocation runs without the arguments rung_args produced: env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 > "\$rlog" 2>&1` |
+| (s6) `--test-threads=1` dropped from the shad-gpu invocation | `both_gpu_runners_pass_test_threads_one` | `scripts/build-test-shadgpu.sh runs a staged GPU binary without --test-threads=1: env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture "\${args[@]}" > "\$rlog" 2>&1` |
+
+#### The matcher pins, watched in the other direction
+
+Each clause of the two rung matchers was weakened in turn to see the unit test refuse it:
+
+| Weakened | `line_matcher_rejects_both_false_coverage_modes` |
+|---|---|
+| cpu rung without the features check | **stayed green** on the first pass — nothing pinned "the lib whole at default features is not the cpu rung"; that pin was added, and the weakening then fails at it |
+| cpu rung without the filter check | red: `a filtered rust-only run is not the whole cpu rung` |
+| ffi rung without the features check | red: `ffi_tests:: under rust-only selects nothing` |
+| ffi rung matching a filter that merely starts with `ffi_tests::` | red: `a filter that merely starts with the rung's path is a narrower selection` |
+
+The device readers are pinned as line parsers: `staged_by_name_of` refuses `stage "$t" …` and
+`stage() {`; `lib_rung_of` refuses `[ -x "$t" ] || continue` and a commented-out assignment.
+
+#### Plan task 10 step 3: the dump, read
+
+`scripts/visibility-dump.py peacockdb-core/src` → 696 records (unchanged from slice 9). The
+test crates reach the crate only through `peacockdb_core::` paths — every such reference was
+listed (`grep -rhoE 'peacockdb_core::…' peacockdb-core/tests/`), and the `test_module_layout`
+hits are string fixtures, not reaches. Setting `test_support` aside (`pub` by design, excluded
+from the ladder), the items a test crate names are:
+
+| Named by | Items | Forced by |
+|---|---|---|
+| `corpus.rs` and `corpus_gpu.rs` | `GpuNode`, `validate` (`plan/mod.rs`); `RecipePlan`, `attach_recipes` (`wire/mod.rs`); `RunReport`, `GpuBackend`, `GpuContext` (`executor/mod.rs`); `render_run` (`plan_text/mod.rs`) | **a test crate alone — the spec's eight, exactly** |
+| `corpus.rs` | `CpuBackend`, `executor::run`, `planner::plan`, `register_tables_for`, `build_session_state` | the CLI too (`peacockdb/src/main.rs` names all five, plus `BatchSizing`, `PlanKnobs`, `SMALL_TABLE_BYTES` — the CLI's eight) |
+| `corpus_gpu.rs`, as methods | `RecipePlan::wire_nodes`, `RecipePlan::bytes` (`wire/mod.rs:315,325`) | a test crate alone — two `impl pub fn` items on one of the eight, which leave with it when `test-support.md` removes `RecipePlan` |
+| `corpus.rs`, `corpus_gpu.rs`, as a method | `CpuBatch::record_batch` | the CLI too (`main.rs:59`) |
+
+No other `pub` item outside `test_support` is named by a test crate: nothing is a lift the spec
+did not predict and nothing is a move that did not happen. The two `RecipePlan` methods are the
+one thing the spec's count of eight does not spell out, and they are the same forcing source.
+`GpuContext` is built by struct literal, so its fields — not items — are what `corpus_gpu.rs`
+reaches; no `GpuNode` trait method is called from either file.
+
+The two ladders, unchanged from slice 9 since no `src/` file moved:
+
+- Bare `pub` excluding `mod`: **242**, **200 excluding `test_support`** (178 `top pub` + 71
+  `impl pub`, minus the 7 `pub mod`). `pub mod`: **7**, all in `lib.rs` (`common`, `executor`,
+  `plan`, `plan_text`, `planner`, `wire`, `test_support`).
+- The register: `PUB_MODULES` **0**, `CROSS_COMPONENT_REACHES` **0**, `TEST_ONLY_ITEMS` 10. The
+  plan's `grep -c 'PubModule {\|CrossComponentReach {'` reads 2, which are the two struct
+  declarations; the arrays are `&[]`.
+
+#### Everything measured, on the final tree
+
+| Check | Result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core --test test_ci_coverage` | **8 passed**, 0 failed — `the_three_gpu_target_lists_agree`, `both_gpu_runners_pass_test_threads_one` and the new `each_rung_has_its_ci_line_and_the_cli_is_built` among them |
+| `… --test test_module_layout` | 16 passed |
+| `cargo test --features rust-only -p peacockdb-core --no-run` | 0 warnings |
+| `pipeline.yml` after every restore | parses as YAML (7 jobs); `bash -n` clean on all 29 rendered `run:` blocks (python `yaml.safe_load`, each `run:` written to a file and `bash -n`ed) |
+| `git diff --stat -- .github scripts` | empty — every probe restored from a copy taken before it |
+| `sha256sum` over `testdata/goldens` against `test-layout-baselines/goldens.sha256` | identical, 170 files |
+| `test_ci_coverage.rs` | 996 lines; not rustfmt-clean, as HEAD's was not (27 hunks at HEAD, all hand-wrapped assert messages; formatted it would be 1133 lines, over the 1000-line rule) — left in the file's own style, new lines kept within its existing 120-column maximum |
+| `git grep` over the file for the seven retired target names | no hits |
+
+No device run: nothing here touches a device path, and the scripts were only probed and
+restored. verda unreachable; everything local.
+
+#### Where a measurement contradicts the spec or plan
+
+- **"test_ci_coverage shrinks to about 300 lines"**: it is 996, from 716. The spec's estimate
+  assumed the lists were the bulk; they were four `INTENTIONALLY_NOT_IN_CI` entries and one
+  doc clause, gone in slice 9 (716 against master's 720). What remains is guards and their pins
+  — the matcher unit tests the spec says must stay whole — and this slice adds the four rung
+  assertions, four readers and their pins. Nothing in the file could be cut without deleting a
+  guard; recorded, not bent.
+- **The plan's "the staged lib binary in the GPU job's `for t in …` array"**: the lib is staged
+  by its own `stage` line, as slice 9 said, and that is what is asserted.
+- **The spec's table gives `test_ci_coverage` N = 6**; it is 8, and `build-test.md` now says so.
+- **The plan's register count command** (`grep -c 'PubModule {\|CrossComponentReach {'`) counts
+  the struct definitions and reads 2 at an empty register; the arrays are what is zero.
+
+#### Documentation the change falsified, fixed here
+
+- `llm-wiki/build-test.md`: the CI-wiring-guard row — one assertion per rung and the CLI, the
+  lib agreement across the three runners, three anchors (`#L610`, `#L680`, `#L753`), N = 8.
+  Nothing else on the page names the guard's subject in a way this slice changed.
+
+#### For plan task 12
+
+- The test table's `Runs`/`N` columns and the headline arithmetic, as slices 6-9 left them; the
+  CI-wiring-guard row is done.
+- The four device rows are one rung (55 on shad-gpu through one binary), and the murmur gate's
+  three CPU-runnable cases run on shad-gpu only — slice 9's note stands.
+- `test_ci_coverage.rs` sits at 996 lines. The next assertion added to it crosses the
+  1000-line rule; the split that would pay is the runner readers (`rust_gpu_runner_*`,
+  `rung_reaches_the_binary`, the three-lists test) into a second file, which is not this
+  task's move and was not made.

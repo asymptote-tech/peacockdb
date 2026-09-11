@@ -96,6 +96,39 @@ fn line_runs_lib_tests(line: &str) -> bool {
     after_ok && line.contains("cargo test") && line.contains("-p peacockdb-core")
 }
 
+/// The `--features` value a cargo line passes; `None` is the default set.
+fn cargo_features(line: &str) -> Option<&str> {
+    let mut toks = line.split_whitespace();
+    toks.find(|t| *t == "--features")?;
+    toks.next()
+}
+
+/// The path filter a `cargo test … -- <filter>` line hands libtest: the first token after
+/// `--` that is not a flag. `None` runs the binary whole.
+fn lib_run_filter(line: &str) -> Option<&str> {
+    let mut toks = line.split_whitespace();
+    toks.find(|t| *t == "--")?;
+    toks.find(|t| !t.starts_with('-'))
+}
+
+/// Does this line run the cpu rung — the lib whole, under `--features rust-only`?
+///
+/// Each rung is one `--lib` line, so [`line_runs_lib_tests`] alone cannot tell them apart:
+/// with the cpu line deleted the ffi line still satisfied it, and the rung was gone with
+/// nothing red. The rung is the feature set and the filter together.
+fn line_runs_cpu_rung(line: &str) -> bool {
+    line_runs_lib_tests(line)
+        && cargo_features(line) == Some("rust-only")
+        && lib_run_filter(line).is_none()
+}
+
+/// Does this line run the ffi rung — `--lib -- ffi_tests::` at default features?
+fn line_runs_ffi_rung(line: &str) -> bool {
+    line_runs_lib_tests(line)
+        && cargo_features(line).is_none()
+        && lib_run_filter(line) == Some("ffi_tests::")
+}
+
 /// Does this workflow line BUILD the `peacockdb` CLI?
 ///
 /// The bin target is the same hole one level down again: it has no test target, so the
@@ -109,20 +142,42 @@ fn line_builds_the_cli(line: &str) -> bool {
     after_ok && line.contains("cargo build")
 }
 
-/// The test targets pipeline.yml's gpu-tests job stages and runs, read out of the
-/// committed workflow (`for t in <names>; do`).
+const PIPELINE: &str = ".github/workflows/pipeline.yml";
+const SHADGPU: &str = "scripts/build-test-shadgpu.sh";
+const BUILD_TEST: &str = "scripts/build-test.sh";
+const GPU_STAGING_STEP: &str = "Build and stage rust GPU test binaries";
+const GPU_RUN_STEP: &str = "Run GPU tests";
+
+/// The body of one step of pipeline.yml's GPU jobs, by its `name:`.
+fn gpu_job_step(name: &str) -> String {
+    let text = std::fs::read_to_string(repo_root().join(PIPELINE)).expect("read pipeline.yml");
+    let needle = format!("- name: {name}");
+    let mut lines = text.lines().skip_while(|l| !l.contains(&needle));
+    lines.next().unwrap_or_else(|| {
+        panic!(
+            "pipeline.yml has no `{name}` step — the GPU job was reshaped and the guards \
+             that read it now read nothing"
+        )
+    });
+    lines
+        .take_while(|l| !l.trim_start().starts_with("- name:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The `--test` targets pipeline.yml's gpu-tests job stages and runs, read out of the
+/// staging step's `for t in <names>; do` array.
 ///
 /// Parsed rather than duplicated: this is the array a [`Exemption::GpuJob`] entry
 /// points at, so a copy here would defeat the check it exists to make.
 fn gpu_job_staged_targets() -> BTreeSet<String> {
-    let text = std::fs::read_to_string(repo_root().join(".github/workflows/pipeline.yml"))
-        .expect("read pipeline.yml");
-    let line = text
+    let step = gpu_job_step(GPU_STAGING_STEP);
+    let line = step
         .lines()
         .find(|l| l.trim_start().starts_with("for t in test_"))
         .expect(
             "pipeline.yml has no `for t in test_…; do` staging loop — the gpu-tests \
-             staging step was renamed or removed, and every GpuJob exemption now rests \
+             staging step was reshaped, and every GpuJob exemption now rests \
              on an array that does not exist",
         );
     line.trim()
@@ -135,11 +190,53 @@ fn gpu_job_staged_targets() -> BTreeSet<String> {
         .collect()
 }
 
+/// The binaries the staging step names outright, as `(staged name, folded line)`: a
+/// `stage <name> "$(cargo …)"` with a literal name, not the array loop's `stage "$t"`.
+/// The lib is not a `--test` target, so it cannot ride in the array and is staged this
+/// way — which is why the array reader above cannot see it.
+fn gpu_job_staged_by_name() -> Vec<(String, String)> {
+    fold_continuations(&gpu_job_step(GPU_STAGING_STEP)).iter().filter_map(|l| staged_by_name_of(l)).collect()
+}
+
+/// Parse one folded staging line as `stage <literal name> …`, if it is one.
+fn staged_by_name_of(line: &str) -> Option<(String, String)> {
+    let mut toks = line.split_whitespace();
+    (toks.next()? == "stage").then_some(())?;
+    let name = toks.next()?;
+    (!name.starts_with(['"', '$'])).then(|| (name.to_string(), line.trim().to_string()))
+}
+
+/// The lib binary the gpu-tests job stages, as `(staged name, line)`: the one `stage`
+/// line naming a file outright whose cargo build is `--lib --features gpu`.
+fn gpu_job_staged_lib() -> Option<(String, String)> {
+    gpu_job_staged_by_name().into_iter().find(|(_, l)| {
+        l.contains("--lib") && cargo_features(l) == Some("gpu") && l.contains("--no-run")
+    })
+}
+
+/// The rung pipeline.yml's run loop hands one staged file, as `(staged name, filter)` —
+/// the `[ "$tname" = <name> ] && rung=<filter>` line. shad-gpu runs prebuilt binaries,
+/// never cargo, so the device rung is this line and not a command line.
+fn gpu_job_lib_rung() -> Option<(String, String)> {
+    rust_gpu_runner_loop(PIPELINE).iter().find_map(|l| lib_rung_of(l))
+}
+
+/// Parse one loop line as the rung assignment, if it is one.
+fn lib_rung_of(line: &str) -> Option<(String, String)> {
+    let line = line.trim_start();
+    if line.starts_with('#') {
+        return None;
+    }
+    let (cond, assign) = line.split_once("&&")?;
+    let filter = assign.trim().strip_prefix("rung=")?;
+    let name = cond.split_whitespace().rev().nth(1)?;
+    Some((name.to_string(), filter.to_string()))
+}
+
 /// The GPU test binaries `scripts/build-test-shadgpu.sh` stages, from its `RUST_TESTS`
 /// array — what a developer's own run ships to the host.
 fn shadgpu_staged_targets() -> BTreeSet<String> {
-    let text = std::fs::read_to_string(repo_root().join("scripts/build-test-shadgpu.sh"))
-        .expect("read build-test-shadgpu.sh");
+    let text = std::fs::read_to_string(repo_root().join(SHADGPU)).expect("read build-test-shadgpu.sh");
     let start = text.find("RUST_TESTS=(").expect(
         "build-test-shadgpu.sh has no RUST_TESTS=( array — the staging list was renamed, \
          and the check that it matches CI now rests on a list that does not exist",
@@ -148,14 +245,90 @@ fn shadgpu_staged_targets() -> BTreeSet<String> {
     text[start..end].split_whitespace().map(str::to_string).collect()
 }
 
+/// A script's lib binary on the GPU host, as `(staged name, rung)`: the first `<staged>=`
+/// and `<rung>=` assignments found in `text`, quotes stripped. The lib is not a `--test`
+/// target, so neither script lists it beside the targets — each names it in a pair of
+/// variables that the run loop hands to `rung_args`.
+fn script_lib(text: &str, staged: &str, rung: &str) -> Option<(String, String)> {
+    let assigned = |name: &str| {
+        text.lines().find_map(|l| {
+            let v = l.trim().strip_prefix(name)?.strip_prefix('=')?;
+            Some(v.trim_matches(['"', '\'']).to_string())
+        })
+    };
+    Some((assigned(staged)?, assigned(rung)?))
+}
+
+/// `build-test-shadgpu.sh`'s lib: `RUST_LIB_STAGED` and `RUST_LIB_RUNG`.
+fn shadgpu_staged_lib() -> Option<(String, String)> {
+    let text = std::fs::read_to_string(repo_root().join(SHADGPU)).expect("read build-test-shadgpu.sh");
+    script_lib(&text, "RUST_LIB_STAGED", "RUST_LIB_RUNG")
+}
+
+/// `build-test.sh`'s lib in `--gpu` mode: `LIB_STAGED` and `LIB_RUNG` inside the
+/// `[ "$MODE" = "gpu" ]` branch that sets them, since the cpu modes set the same two
+/// names to their own shapes.
+fn build_test_gpu_lib() -> Option<(String, String)> {
+    let text = std::fs::read_to_string(repo_root().join(BUILD_TEST)).expect("read build-test.sh");
+    let branch: String = text
+        .lines()
+        .skip_while(|l| !(l.contains("\"$MODE\" = \"gpu\"") && l.contains("then")))
+        .skip(1)
+        .take_while(|l| !matches!(l.trim(), s if s.starts_with("elif ") || s == "else" || s == "fi"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    script_lib(&branch, "LIB_STAGED", "LIB_RUNG")
+}
+
+/// Does the lib's rung reach the binary in this script's run loop? The rung sits in a
+/// variable, so its presence proves nothing: the loop must hand both variables to
+/// `rung_args` and every invocation must carry what it returned. Returns what is missing.
+fn rung_reaches_the_binary(text: &str, staged: &str, rung: &str) -> Result<(), String> {
+    let lines: Vec<&str> = text.lines().collect();
+    // The loop is found from the inside out: the two scripts head it differently (`for t
+    // in …rust-tests/*` and `for name in $RUST_TEST_NAMES`), and the feed line is the
+    // one thing both loops must carry.
+    let feed = lines
+        .iter()
+        .position(|l| {
+            !l.trim_start().starts_with('#')
+                && l.contains("rung_args \"\\$t\"")
+                && l.contains(&format!("${staged}"))
+                && l.contains(&format!("${rung}"))
+        })
+        .ok_or_else(|| format!("no line hands \"$t\", ${staged} and ${rung} to rung_args"))?;
+    let head = lines[..feed]
+        .iter()
+        .rposition(|l| l.trim_start().starts_with("for "))
+        .ok_or("the rung_args line is not inside a `for` loop")?;
+    let loop_body: Vec<&str> = lines[head..]
+        .iter()
+        .skip(1)
+        .take_while(|l| !l.trim_start().starts_with("done"))
+        .copied()
+        .collect();
+    // `"$t"` followed by a flag is the binary run with its arguments; the `[ -x "$t" ]`
+    // test and the feed line above both name `"$t"` and neither follows it with one.
+    let runs: Vec<&&str> = loop_body
+        .iter()
+        .filter(|l| !l.trim_start().starts_with('#') && l.contains("\"\\$t\" --"))
+        .collect();
+    if runs.is_empty() {
+        return Err("the loop runs no binary as `\"$t\" --…`".to_string());
+    }
+    match runs.iter().find(|l| !l.contains("\"\\${args[@]}\"")) {
+        Some(l) => Err(format!("an invocation runs without the arguments rung_args produced: {}", l.trim())),
+        None => Ok(()),
+    }
+}
+
 /// The targets `scripts/build-test.sh` treats as needing a device at run time, from its
 /// `gpu_runtime_targets()` heredoc, as `(crate, target)`. That set is SUBTRACTED from the
 /// CPU modes and matched WHOLE against `<crate>:<target>`, so the crate is kept rather than
 /// discarded: a line with the wrong crate subtracts nothing, and the target it names then
 /// runs on a machine with no GPU.
 fn gpu_runtime_targets() -> BTreeSet<(String, String)> {
-    let text = std::fs::read_to_string(repo_root().join("scripts/build-test.sh"))
-        .expect("read build-test.sh");
+    let text = std::fs::read_to_string(repo_root().join(BUILD_TEST)).expect("read build-test.sh");
     let start = text.find("<<'GPUSET'").expect(
         "build-test.sh has no GPUSET heredoc — gpu_runtime_targets() was renamed or \
          reshaped, and both the mode ladder and this check depend on its contents",
@@ -284,10 +457,51 @@ fn line_matcher_rejects_both_false_coverage_modes() {
     // --lib detection: a build is not a run, and the flag needs a word boundary.
     assert!(line_runs_lib_tests("          cargo test --features rust-only -p peacockdb-core --lib"));
     assert!(!line_runs_lib_tests(
-        "          cargo test --no-run --features rust-only -p peacockdb-core --lib --test test_cpu_executors"
+        "          cargo test --no-run --features rust-only -p peacockdb-core --lib --test test_cpu_corpus"
     ), "--no-run builds the lib target without running it");
     assert!(!line_runs_lib_tests("          cargo test -p peacockdb-core --test test_corpus"),
             "an integration-only invocation does not run the lib tests");
+
+    // The two lib rungs are both `--lib` runs, so each must fail the other's matcher or
+    // deleting one line leaves the other satisfying both — which is how the cpu rung's
+    // assertion was green with its line gone.
+    let cpu = "          cargo test --features rust-only -p peacockdb-core --lib";
+    let ffi = "          cargo test -p peacockdb-core --lib -- ffi_tests::";
+    assert!(line_runs_cpu_rung(cpu) && !line_runs_ffi_rung(cpu), "the cpu rung line is only the cpu rung");
+    assert!(line_runs_ffi_rung(ffi) && !line_runs_cpu_rung(ffi), "the ffi rung line is only the ffi rung");
+    assert!(
+        !line_runs_cpu_rung("          cargo test --features rust-only -p peacockdb-core --lib -- planner::"),
+        "a filtered rust-only run is not the whole cpu rung"
+    );
+    assert!(
+        !line_runs_cpu_rung("          cargo test -p peacockdb-core --lib"),
+        "the lib whole at default features links the FFI — it is not the rust-only rung"
+    );
+    assert!(
+        !line_runs_ffi_rung("          cargo test --features rust-only -p peacockdb-core --lib -- ffi_tests::"),
+        "ffi_tests:: under rust-only selects nothing — the rung is the default feature set"
+    );
+    assert!(
+        !line_runs_ffi_rung("          cargo test -p peacockdb-core --lib -- --test-threads=1 ffi_tests::x"),
+        "a filter that merely starts with the rung's path is a narrower selection"
+    );
+
+    // The device rung's two readers. The staging step's loop stages `"$t"` and defines
+    // `stage()`; neither is a file named outright. The run loop's `[ -x "$t" ]` test and
+    // a commented-out assignment are not the rung line.
+    let lib_line = r#"stage peacockdb_core_gpu_lib "$(cargo test --no-run -p peacockdb-core --lib \
+                       --features gpu --message-format=json | resolve peacockdb_core lib)""#;
+    let lib_line = &fold_continuations(lib_line)[0];
+    assert_eq!(staged_by_name_of(lib_line).map(|(n, _)| n).as_deref(), Some("peacockdb_core_gpu_lib"));
+    let loop_line = r#"stage "$t" "$(cargo test --no-run -p peacockdb-core --test "$t" --features gpu)""#;
+    assert!(staged_by_name_of(loop_line).is_none());
+    assert!(staged_by_name_of("stage() {").is_none());
+    assert_eq!(
+        lib_rung_of(r#"[ "\$tname" = peacockdb_core_gpu_lib ] && rung=gpu_tests::"#),
+        Some(("peacockdb_core_gpu_lib".to_string(), "gpu_tests::".to_string()))
+    );
+    assert!(lib_rung_of(r#"[ -x "\$t" ] || continue"#).is_none());
+    assert!(lib_rung_of(r#"# [ "\$tname" = peacockdb_core_gpu_lib ] && rung=gpu_tests::"#).is_none());
 
     // ...while a continued RUN step still counts, on any of its physical lines.
     let run_continued = "          cargo test -p peacockdb-core --test test_a \\\n\
@@ -308,8 +522,7 @@ fn line_matcher_rejects_both_false_coverage_modes() {
 /// of a pair that seven steps now depend on.
 #[test]
 fn every_matrix_gated_step_names_a_leg_the_matrix_declares() {
-    let text = std::fs::read_to_string(repo_root().join(".github/workflows/pipeline.yml"))
-        .expect("read pipeline.yml");
+    let text = std::fs::read_to_string(repo_root().join(PIPELINE)).expect("read pipeline.yml");
     let declared: BTreeSet<String> = text
         .lines()
         .filter_map(|l| l.trim().strip_prefix("- cudf: "))
@@ -378,26 +591,30 @@ fn workspace_test_targets() -> BTreeSet<(String, String)> {
     targets
 }
 
+/// Every line of every workflow, folded. Every workflow rather than pipeline.yml alone:
+/// a target named by any of them counts. Folded, not raw: see [`fold_continuations`] — a
+/// build invocation split across `\` would otherwise contribute continuation lines that
+/// look like run steps.
+fn workflow_lines() -> Vec<String> {
+    let wf_dir = repo_root().join(".github/workflows");
+    let mut lines: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&wf_dir).expect("read .github/workflows/") {
+        let path = entry.expect("dir entry").path();
+        if matches!(path.extension().and_then(|e| e.to_str()), Some("yml") | Some("yaml")) {
+            let text = std::fs::read_to_string(&path).expect("read workflow");
+            lines.extend(fold_continuations(&text));
+        }
+    }
+    assert!(!lines.is_empty(), "no workflow files found under .github/workflows");
+    lines
+}
+
 #[test]
 fn every_rust_test_target_is_named_by_ci() {
     let all = workspace_test_targets();
     let targets: BTreeSet<String> = all.iter().map(|(_, t)| t.clone()).collect();
     assert!(!targets.is_empty(), "found no tests/*.rs in any workspace crate — the enumeration is wrong, not the repo");
-
-    // Read every workflow, not just pipeline.yml: a target named by any of them counts.
-    let wf_dir = repo_root().join(".github/workflows");
-    let mut workflow_lines: Vec<String> = Vec::new();
-    for entry in std::fs::read_dir(&wf_dir).expect("read .github/workflows/") {
-        let path = entry.expect("dir entry").path();
-        if matches!(path.extension().and_then(|e| e.to_str()), Some("yml") | Some("yaml")) {
-            let text = std::fs::read_to_string(&path).expect("read workflow");
-            // Folded, NOT raw: see fold_continuations — a build invocation split
-            // across `\` would otherwise contribute continuation lines that look
-            // like run steps.
-            workflow_lines.extend(fold_continuations(&text));
-        }
-    }
-    assert!(!workflow_lines.is_empty(), "no workflow files found under .github/workflows");
+    let workflow_lines = workflow_lines();
 
     let exempt: BTreeSet<&str> = INTENTIONALLY_NOT_IN_CI.iter().map(|(n, _)| *n).collect();
 
@@ -415,28 +632,6 @@ fn every_rust_test_target_is_named_by_ci() {
          merge gate:\n{}\n\nWire each into .github/workflows/pipeline.yml, or add it to \
          INTENTIONALLY_NOT_IN_CI with a reason.",
         missing.iter().map(|t| format!("  - {t}")).collect::<Vec<_>>().join("\n")
-    );
-
-    // The lib unit tests are not an integration target, so the sweep above cannot see
-    // them. Assert the run line exists directly, or deleting it silently un-gates the
-    // inline #[cfg(test)] modules exactly as it did before this check.
-    assert!(
-        workflow_lines.iter().any(|l| line_runs_lib_tests(l)),
-        "no workflow line runs the peacockdb-core LIB unit tests. Every other cargo \
-         invocation passes --test, which selects integration targets only, so the \
-         inline #[cfg(test)] modules — 435 cases across every component — would run \
-         locally and never at the merge gate. Add `cargo test --features rust-only \
-         -p peacockdb-core --lib` to the CPU tier."
-    );
-
-    // The CLI has no test target at all, so neither the sweep above nor the --lib check
-    // reaches it. Asserted the same way and for the same reason.
-    assert!(
-        workflow_lines.iter().any(|l| line_builds_the_cli(l)),
-        "no workflow line builds the peacockdb CLI. It is the only caller of \
-         plan and the driver from outside the crate, and it has no test \
-         target, so nothing else compiles it. Add `cargo build --features rust-only \
-         -p peacockdb` to the CPU tier."
     );
 
     // F5: a GpuJob exemption CLAIMS the gpu-tests job runs the target. Verify that
@@ -475,6 +670,75 @@ fn every_rust_test_target_is_named_by_ci() {
         stale.is_empty(),
         "INTENTIONALLY_NOT_IN_CI names targets that no longer exist — remove them:\n  {}",
         stale.join("\n  ")
+    );
+}
+
+/// One CI line per rung, plus the CLI build. The ladder puts each rung's test modules in
+/// the one lib binary, selected by feature set and path filter, so no `--test` sweep can
+/// see them and nothing else says a rung stopped running. The device rung is not a command
+/// line at all — shad-gpu runs prebuilt binaries — so it is read as the staged lib binary
+/// plus the loop line that hands that one file `gpu_tests::`. Each assertion here is the
+/// only thing between its rung and silence; each was watched red with its line deleted.
+#[test]
+fn each_rung_has_its_ci_line_and_the_cli_is_built() {
+    let lines = workflow_lines();
+
+    assert!(
+        lines.iter().any(|l| line_runs_cpu_rung(l)),
+        "no workflow line runs the cpu rung — the lib whole under --features rust-only. \
+         Every in-crate test module that needs neither the FFI nor a device rides in it, \
+         and every other cargo invocation passes --test. Add `cargo test --features \
+         rust-only -p peacockdb-core --lib` to dataset-matrix."
+    );
+    assert!(
+        lines.iter().any(|l| line_runs_ffi_rung(l)),
+        "no workflow line runs the ffi rung — `--lib -- ffi_tests::` at default features. \
+         The modules gated `not(feature = \"rust-only\")` compile only there and select \
+         only by that path. Add `cargo test -p peacockdb-core --lib -- ffi_tests::` to \
+         dataset-matrix."
+    );
+
+    let (staged, line) = gpu_job_staged_lib().unwrap_or_else(|| {
+        panic!(
+            "the `{GPU_STAGING_STEP}` step stages no lib binary: no `stage <name> \"$(cargo \
+             test --no-run … --lib --features gpu …)\"` line. The device rung is the \
+             `gpu_tests` modules of that one binary, so without it nothing runs them. \
+             Lines naming a file outright: {:?}",
+            gpu_job_staged_by_name().iter().map(|(n, _)| n).collect::<Vec<_>>()
+        )
+    });
+    assert!(
+        line.contains("-p peacockdb-core"),
+        "the staged lib is not peacockdb-core's: {line}"
+    );
+    let (keyed, rung) = gpu_job_lib_rung().unwrap_or_else(|| {
+        panic!(
+            "the `{GPU_RUN_STEP}` loop hands no file a rung: no `[ \"$tname\" = <name> ] && \
+             rung=<filter>` line. The staged lib `{staged}` holds every rung, so unfiltered \
+             it runs the cpu cases on the device and filtered by nothing it runs the device \
+             cases nowhere — the zero-test guard sees the second, not the first."
+        )
+    });
+    assert_eq!(
+        (keyed.as_str(), rung.as_str()),
+        (staged.as_str(), "gpu_tests::"),
+        "the run loop keys the rung on a different file, or a different rung, from the lib \
+         the staging step ships — `{staged}` is staged, `{keyed}` gets `{rung}`"
+    );
+    for inv in rust_gpu_runner_invocations(PIPELINE) {
+        assert!(
+            inv.contains("\\$rung"),
+            "a rust invocation in the `{GPU_RUN_STEP}` loop does not pass $rung, so the \
+             assignment above it reaches nothing: {inv}"
+        );
+    }
+
+    assert!(
+        lines.iter().any(|l| line_builds_the_cli(l)),
+        "no workflow line builds the peacockdb CLI. It is the only caller of the planner \
+         and the driver from outside the crate, and it has no test target, so nothing \
+         else compiles it. Add `cargo build --features rust-only -p peacockdb` to \
+         dataset-matrix."
     );
 }
 
@@ -538,23 +802,31 @@ fn the_three_gpu_target_lists_agree() {
         "gpu_runtime_targets() names these, no CI staging step runs them, and no \
          INTENTIONALLY_NOT_IN_CI entry says that is deliberate: {orphaned:?}"
     );
-}
 
-/// The body of the `Run GPU tests` step, out of the committed workflow.
-fn gpu_test_step() -> String {
-    let text = std::fs::read_to_string(repo_root().join(".github/workflows/pipeline.yml"))
-        .expect("read pipeline.yml");
-    let mut lines = text.lines().skip_while(|l| !l.contains("- name: Run GPU tests"));
-    lines.next().unwrap_or_else(|| {
-        panic!(
-            "pipeline.yml has no `Run GPU tests` step — the GPU job was reshaped and the \
-             guards below now read nothing"
-        )
-    });
-    lines
-        .take_while(|l| !l.trim_start().starts_with("- name:"))
-        .collect::<Vec<_>>()
-        .join("\n")
+    // The lib is the one binary none of the three lists can hold — it is not a `--test`
+    // target — so each runner names it and its rung separately, and those must agree too:
+    // a runner staging the lib under another name runs it whole, cpu cases and all, on the
+    // one serial host, and a runner with another rung runs the device cases nowhere.
+    let ci_lib = gpu_job_staged_lib().map(|(n, _)| n).zip(gpu_job_lib_rung().map(|(_, r)| r));
+    let dev_lib = shadgpu_staged_lib();
+    let runtime_lib = build_test_gpu_lib();
+    assert!(
+        ci_lib.is_some() && dev_lib.is_some() && runtime_lib.is_some(),
+        "a runner no longer names the lib binary and its rung — pipeline.yml {ci_lib:?}, \
+         build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu {runtime_lib:?}"
+    );
+    assert!(
+        ci_lib == dev_lib && dev_lib == runtime_lib,
+        "the three runners disagree about the lib binary or its rung — pipeline.yml \
+         {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu {runtime_lib:?}"
+    );
+    let runners = [(SHADGPU, "RUST_LIB_STAGED", "RUST_LIB_RUNG"), (BUILD_TEST, "LIB_STAGED", "LIB_RUNG")];
+    for (rel, staged, rung) in runners {
+        let text = std::fs::read_to_string(repo_root().join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        if let Err(why) = rung_reaches_the_binary(&text, staged, rung) {
+            panic!("{rel}: the lib's rung does not reach the binary — {why}");
+        }
+    }
 }
 
 /// The GPU step reports a failure, and has no way to report success over one.
@@ -567,14 +839,14 @@ fn gpu_test_step() -> String {
 /// their output discarded and their zero-tests guard answering from a crash, job green.
 #[test]
 fn the_gpu_step_cannot_report_success_over_a_failure() {
-    let step = gpu_test_step();
+    let step = gpu_job_step(GPU_RUN_STEP);
 
     assert!(
         step.contains("exit \\$rc"),
         "the GPU step does not end by exiting the status it accumulated, so everything it \
          recorded in rc is discarded and the step is green whatever ran"
     );
-    for line in rust_gpu_runner_invocations(".github/workflows/pipeline.yml") {
+    for line in rust_gpu_runner_invocations(PIPELINE) {
         assert!(
             line.ends_with("|| rc=1"),
             "a staged rust GPU binary runs without folding its status into rc, so it cannot \
@@ -619,16 +891,8 @@ fn qualified((krate, target): &(String, String)) -> String {
 /// invocation carries a comment saying the flag is mandatory, so a file-wide `contains`
 /// survives the edit that matters — the flag dropped from the command, the comment left.
 fn rust_gpu_runner_invocations(rel: &str) -> Vec<String> {
-    let text = std::fs::read_to_string(repo_root().join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-    let mut after_header = text.lines().skip_while(|l| !is_rust_gpu_runner_loop_header(l));
-    after_header.next().unwrap_or_else(|| {
-        panic!(
-            "{rel} has no `for t in …rust-tests/*` loop — the runner was reshaped, and the \
-             single-tenant GPU invariant now rests on a loop this guard cannot find"
-        )
-    });
-    let found: Vec<String> = after_header
-        .take_while(|l| !l.trim_start().starts_with("done"))
+    let found: Vec<String> = rust_gpu_runner_loop(rel)
+        .iter()
         .filter(|l| is_rust_gpu_runner_invocation(l))
         .map(|l| l.trim().to_string())
         .collect();
@@ -638,6 +902,22 @@ fn rust_gpu_runner_invocations(rel: &str) -> Vec<String> {
          moved out of the loop, and this guard now reads nothing"
     );
     found
+}
+
+/// The body of a runner's rust loop, from its `for t in …rust-tests/*` header to `done`.
+fn rust_gpu_runner_loop(rel: &str) -> Vec<String> {
+    let text = std::fs::read_to_string(repo_root().join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let mut after_header = text.lines().skip_while(|l| !is_rust_gpu_runner_loop_header(l));
+    after_header.next().unwrap_or_else(|| {
+        panic!(
+            "{rel} has no `for t in …rust-tests/*` loop — the runner was reshaped, and the \
+             single-tenant GPU invariant now rests on a loop this guard cannot find"
+        )
+    });
+    after_header
+        .take_while(|l| !l.trim_start().starts_with("done"))
+        .map(str::to_string)
+        .collect()
 }
 
 fn is_rust_gpu_runner_loop_header(line: &str) -> bool {
@@ -662,7 +942,7 @@ fn is_rust_gpu_runner_invocation(line: &str) -> bool {
 /// makes that argument false, and until this test existed nothing said so.
 #[test]
 fn both_gpu_runners_pass_test_threads_one() {
-    for rel in [".github/workflows/pipeline.yml", "scripts/build-test-shadgpu.sh"] {
+    for rel in [PIPELINE, SHADGPU] {
         for line in rust_gpu_runner_invocations(rel) {
             assert!(
                 line.contains("--test-threads=1"),
