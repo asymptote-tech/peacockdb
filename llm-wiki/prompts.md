@@ -428,9 +428,16 @@ coordinator. At most fifteen lines per question.
   the spec, `llm-wiki/tasks/<task>.md`: what the task is, why this shape, what the
   constraints are. `superpowers:writing-plans` then produces `llm-wiki/tasks/<task>-impl.md`,
   the step-by-step plan. Keeping them apart is what lets the spec freeze while the plan stays
-  the developer's to work in. Both, plus the board entry at state `new`, are committed to
-  master. Mark the spec `prototype` or `production` — that is what tells the coordinator
-  whether to skip the reviewer and the PR.
+  the developer's to work in. Both, plus the board entry at state `new`, land on master — but
+  not as they are written. A spec under discussion stays in the working tree, uncommitted,
+  through however many rounds the human takes; the commit is the human's word that it is
+  final, and that commit is what freezes it. Committing each draft would put every
+  intermediate reading into the history the archive later keeps. Mark the spec `prototype` or
+  `production` — that is what tells the coordinator whether to skip the reviewer and the PR.
+  **Every spec carries a `## Scope` section**: the code expected to change, by path, and the
+  component-level API expected to change — facade items, trait signatures, ABI symbols, the
+  wire format — or "none". It is what the developer measures a diff against and the analyst
+  reads first, so a change outside it is a finding rather than a surprise.
 - **Administrative operations**: merging a chain and the archival commit; debugging a CI
   failure on master; repairing the board — clearing a block, marking `rebase needed(<prev>)`
   after a merge, resequencing a chain; ticket triage; retargeting PRs.
