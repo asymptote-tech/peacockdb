@@ -11,6 +11,10 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
 - 2026-09-11 23:28Z — developer returned green: new case red then green, four workflows
   recorded below (exec_model timed out at 900 s; shad-gpu `--patch --run` red on glibc 2.38).
   Committed, pushed, PR #146 opened against master (3 commits, base verified); board moved to `reviewing`.
+- 2026-09-11 23:35Z — review round 1: 0 blocking, 0 important, 1 nit (the `#L41` anchor on
+  `build-test.md`'s cuDF smoke row now points two lines early; left as is — the spec limits that
+  file to two counts and the branch never merges). Board moved to `completing`; completeness
+  pass dispatched: a fresh reviewer and a fresh analyst, neither seeing the other's list.
 - Pre-dispatch checks, from the coordinator's own shell: `ssh dev` and `ssh verda` both fail
   with `Could not resolve hostname` — `~/.ssh/config` carries only `shad-gpu`. So verda is
   down (local runs), and workflow 3's `--host dev` is expected to fail at the first ssh. The
@@ -85,6 +89,10 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   names only `test_tpch_corpus.py`; that is where the 900 s went. Whether the CI cost-report step
   globs the same 306 is for the coordinator to check — the developer does not read the workflow.
   Not re-run with a narrower set: a failing workflow is recorded, not repaired.
+  Coordinator, from the reviewer's reading: CI does not. `pipeline.yml` lists `test_tpch.py`,
+  `test_tpch_corpus.py` and `test_tpcds.py` as run elsewhere and globs the other ten files
+  (216 cases), and the cost-report job on `e68f82cc` went green. The timeout is the spec
+  command's shape — an `--ignore` one file short — not a host defect; no fix task needed.
 
 ## 26.02: build
 
