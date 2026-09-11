@@ -212,3 +212,10 @@ verda refuses the key; everything CPU-side ran here.
   a subset of its re-exports.
 - The `knobs`/`sizing` narrowing means a binary outside the crate cannot build `PlanKnobs` from a
   `Mode` any more; nothing outside did.
+
+### 2026-09-11 — stopped on the control file, after plan tasks 1-2
+
+Plan tasks 1-2 committed as `aae9cd9b`. The control file said `stop` when the developer returned,
+so the run ends here with task 5 at `building`. **Next: plan task 3** (the proof, in a fresh
+window) — then commit, push, PR against `ENS-test-layout`, review. Nothing is unproven in the
+tree: every check in the entry above ran on the committed state.
