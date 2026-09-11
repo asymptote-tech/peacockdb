@@ -231,3 +231,33 @@ symlinks into `/home/dmitry/peacockdb/testdata`. `target/` is warm for `rust-onl
 `dataset-matrix` on the PR rather than paid as a cold opt-3 build for a shape the entry above
 already built from this code. The developer runs the rust-only half of step 1, steps 2-5, and
 the whole rust-only package as the handoff run.
+
+### 2026-09-11 — plan task 3 done: the proof, in a fresh window
+
+Re-measured on `935af8da` (code-identical to `aae9cd9b`) by a developer who did not make the
+move. No code file changed; this entry is the only edit. Everything ran locally (verda's hostname
+does not resolve); no `PEACOCK_TESTDATA_DIR`, `UPDATE_CANONICAL` or `PCK_*` variable was set, so
+the binaries read the compile-time default root through the `testdata/{tpch,tpcds}.sf1`
+symlinks, and nothing could write a golden. The cudf half of step 1 was not run, per the dispatch:
+no `target-cudf-*` exists here, the entry above built it from this code with 0 warnings, and CI
+builds that shape on the PR. Every check is green.
+
+| Check | Result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core --no-run` | exit 0, **0 warnings**, 1m 37s; eight executables listed, `test_gpu_corpus` among them |
+| `cargo build --features rust-only -p peacockdb-core` | exit 0, **0 warnings** |
+| `cargo test --features rust-only -p peacockdb-core -- --test-threads=2`, the whole package, in the background under `timeout 2700` with a 2-minute monitor | **1036 passed, 0 failed, 2 ignored**, exit 0, 0 warnings, 9 result lines, ~8 min wall: `--lib` 514 passed / 2 ignored (125 s), `test_ci_coverage` 8, `test_corpus_goldens` 20, `test_cost_model` 3, `test_cpu_corpus` **448** (307 s), `test_golden_format` 26, `test_gpu_corpus` 0, `test_module_layout` **17**, doc-tests 0 |
+| `scripts/case-inventory.sh rust-only` vs `test-support-baselines/inv-rust-only.txt` | **1038 vs 1037**; `compare-inventory.sh` → `DRIFTED`, exit 1, and the unified diff is exactly two lines: `test_module_layout` `16 tests` → `17 tests` and `+ privacy::no_test_support_signature_names_a_component_type`. Per-binary: `--lib` 516, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_golden_format` 26, `test_module_layout` 17, `test_ci_coverage` 8, `test_cost_model` 3, `test_gpu_corpus` 0 |
+| Leaf-name set diff (last `::` segment, sorted unique) | 1034 → 1035, the one added name above; nothing removed |
+| `sha256sum` over `testdata/goldens` vs `goldens.sha256`, **after** the suite | `diff` empty, exit 0; 170 files both sides; `git status --short testdata/` empty |
+| `scripts/visibility-dump.py` | 748 records vs the baseline's 696; **bare `pub` excluding `mod`: 263 raw, 200 excluding `test_support`**; `pub mod` 7. Records outside `src/test_support/` are **byte-identical** to `visibility.txt` with its `test_support` lines dropped (`diff` exit 0, whether the filter is the substring or the path; the only record naming `test_support` outside that directory is `top pub mod test_support lib.rs`, present in both). `test_support` records: 63 → 115 |
+| `grep -rnw` for the eight names and `wire_nodes` over `peacockdb-core/tests/` | exactly the two doc-comment hits, `test_module_layout/privacy.rs:53-54`; no code line |
+| `grep -rnw bytes` over `peacockdb-core/tests/` | no `RecipePlan::bytes`: the `.bytes()` calls are `MemoryLimit::bytes()` in `test_golden_format.rs:492-494` (the harness's own type, `test_support/mod.rs:75`), plus the `near_miss.rs:129-130` string fixture and two prose comments. A bare substring grep also matches `output_bytes`/`batch_bytes`/`as_bytes` in five files, which is why the entry above's "two hits" is the whole-word reading |
+| `grep -rn 'test-support' .github scripts` | no hits, exit 1 |
+| `git status --short` | only this file |
+
+Nothing contradicts the previous entry's figures: 1036/0/2, 448, 17, 1038 vs 1037 by the one
+rule, 170 goldens identical, 263/200/7, two doc hits, no workflow flag. The package run was ~8
+minutes here against the ~15 the dispatch budgeted, with the corpus binary at 307 s against 508 s
+last time — the default testdata root instead of the composed `/tmp` one is the only difference
+in the invocation.
