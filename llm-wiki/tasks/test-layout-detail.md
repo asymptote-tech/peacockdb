@@ -1373,3 +1373,10 @@ diff between the old and new tips is master's documentation and nothing else, an
 merged by hunk without a conflict — task 3 `done`, task 4 this branch's state, tasks 8-13 master's.
 Documentation alone re-verifies nothing: task 3 stays `done`, task 4 goes `rebase needed(building)`
 → `building` with no re-run. Slice 9's cudf-shape build is the first build on the new base.
+
+### 2026-09-11 — slice 9 re-dispatched from the dead tree
+
+Hosts at dispatch: **verda** unreachable (connection timed out, so local runs for the CPU shapes);
+**shad-gpu** up, `llm-gpu0h200`, and the neighbour still holds 53 GiB of the 143.7 — the device
+run needs the card, so `[rmm] pool … could not be built` is the neighbour and goes to #178, not
+to a diagnosis. Cudf toolchain on this host: `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2`.
