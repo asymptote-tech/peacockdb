@@ -94,7 +94,22 @@ the corpus rollout that was happening anyway then reports which divergence class
 boundary and how often. Fixes nothing and enables no cell. It is what tells `declared-schemas` which
 classes are worth a harness.
 
-### 8. [`declared-schemas.md`](declared-schemas.md) — state: approved to build
+### 8. [`operator-harness.md`](operator-harness.md) — state: new
+
+One operator, one script of batches the test wrote, both backends, the outputs compared exactly.
+A test-only upload symbol puts an Arrow batch on the device; `Given` leaves plus one arm in
+`attach.rs` give a hand-built node its recipe with no plan; a driver per category, generic over
+`Backend`, runs the same calls on each side. Proven here on the seqless three — unload, limit and
+the round trip — and a guard that names every kind without a case.
+
+### 9. [`operator-cases.md`](operator-cases.md) — state: new
+
+Cases only, no mechanism: every seq-bearing operator through the harness — filter, project, the
+sorts, the accumulators, both aggregates, the scatter, nine hash-join types, cross, nested-loop
+and the scan. Each row is green or a `bug_` test with a ticket, and only a device run says which;
+#198 and #175 are expected to land as `bug_` tests that `typed-nulls` and `empty-build` then delete.
+
+### 10. [`declared-schemas.md`](declared-schemas.md) — state: approved to build
 
 The engine declares a schema per node and only the CPU backend is held to it — `declared_as` pulls
 every stage back to the declaration, and the device path has no equivalent. Declares a schema per
@@ -103,7 +118,7 @@ every stage back to the declaration, and the device path has no equivalent. Decl
 through an exporter that casts to the declared type instead of relabelling. Fixes nothing: every
 disagreement is a `bug_` test. Last in the chain because it needs `wire/gpu_tests/`.
 
-### 9. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../tickets.md#t198) — state: approved to build
+### 11. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../tickets.md#t198) — state: approved to build
 
 `build_expr` builds ten literal scalars a second time and assumes validity, so a typed NULL inside an
 AST expression is a typed zero — a wrong value in arithmetic and a wrong row count in a comparison.
@@ -111,7 +126,7 @@ One scalar builder, not a corrected copy. C++ only. Carries a test-helper repair
 `CreateScalarValue` gained `is_null` as field 2 and the gtest call sites kept their old positions, so
 every `make_int64_literal` builds the literal 0. Claims no cells.
 
-### 10. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: approved to build
+### 12. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: approved to build
 
 **Conditional: its first task reads the survey's report, argues what is still worth teaching, and
 stops for the human.** The walk is the only instrument that can ask what one call produced, and it
@@ -119,7 +134,7 @@ panics on ten shapes — eight never taught, two the engine truly cannot run. Te
 a device refusal an outcome rather than an abort, and records the real limits as `bug_` tests naming
 #136, #152 and #175. No production code. Deliverable: a checked table of what it can drive.
 
-### 11. [`empty-build.md`](empty-build.md) — closes [#175](../tickets.md#t175) — state: approved to build
+### 13. [`empty-build.md`](empty-build.md) — closes [#175](../tickets.md#t175) — state: approved to build
 
 A lane whose build side got no rows keeps its typed zero-row table where the join above owes rows, so
 `Right`, `Full` and `RightAnti` answer instead of refusing. No new marker — the driver routes
