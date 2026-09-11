@@ -15,6 +15,12 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   `build-test.md`'s cuDF smoke row now points two lines early; left as is — the spec limits that
   file to two counts and the branch never merges). Board moved to `completing`; completeness
   pass dispatched: a fresh reviewer and a fresh analyst, neither seeing the other's list.
+- 2026-09-11 23:50Z — completeness pass closed. Reviewer: 0 blocking, 0 important. Analyst: 0
+  blocking, 3 important, all about the record; `architecture.md` falsified sentences: none.
+  Applied: a `## Not driven` section (rows of the two tables the four workflows do not reach),
+  one sentence on what the exec-model timeout left unrun, and the CI evidence line below at
+  `done`. Waiting on run 34658235414 (the code commit `e68f82cc`); the head rollup shows every
+  job skipped because the later commits are doc-only.
 - Pre-dispatch checks, from the coordinator's own shell: `ssh dev` and `ssh verda` both fail
   with `Could not resolve hostname` — `~/.ssh/config` carries only `shad-gpu`. So verda is
   down (local runs), and workflow 3's `--host dev` is expected to fail at the first ssh. The
@@ -93,6 +99,8 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   `test_tpch_corpus.py` and `test_tpcds.py` as run elsewhere and globs the other ten files
   (216 cases), and the cost-report job on `e68f82cc` went green. The timeout is the spec
   command's shape — an `--ignore` one file short — not a host defect; no fix task needed.
+  What never started: `test_tpcds.py`'s last case (`q64`) and all 19 `test_tpch.py` cases —
+  the one python set that reads sf1 parquet on dev — so this run says nothing about those.
 
 ## 26.02: build
 
@@ -176,3 +184,122 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   `GLIBC_2.38` and the Rust binaries `GLIBC_2.39`, and shad-gpu's patch target is glibc 2.35 — older
   than what a dev-built binary needs, which a 22.04-class builder never hit. Not a `bad_alloc`, so
   not re-run. Not a bug in this branch; a host-shape finding for a task on master.
+
+## Not driven
+
+Rows of the two `build-test.md` tables the spec's four workflows do not reach, and why:
+
+- `scripts/docker-build.sh` (containerized): not in the spec's list; Docker 29.2.1 is on dev, so it
+  was reachable and simply not asked for. It is also the 22.04-class builder that would sidestep the
+  `GLIBC_2.38` red below — a master task deciding that fix should drive it.
+- `scripts/cost-report-preview.sh` (same row as cost-report): not asked for.
+- `scripts/build.sh` (C++ only, 25.02): driven indirectly — `build-test-shadgpu.sh --build` calls it
+  three times (`--configure`, `--build`, `--install`), so the `25.02: build` section covers it.
+- shad-gpu `--all`, `--run-detached`, `--run-status`: the spec asked for three foreground calls, so
+  the detached path — the documented one for a run that outlives ssh — is unproven here.
+- `--host verda --all` and `--host verda-gpu --gpu --all`: `verda` does not resolve from dev; the
+  same script ran as `--host dev` in three steps instead. verda-gpu was not attempted.
+- `nebius`: manual, no script; nothing to drive.
+
+## Analyst: completeness
+
+Read as one change: `git diff master...ENS-dev-setup-check` plus this file, against the spec's
+"Done when", "Constraints" and "Scope", the plan's four tasks, and the two `build-test.md` tables
+the spec says are driven whole. Nothing blocking. Three important items, all about the record,
+each a few lines the coordinator can write.
+
+### Table coverage — named in the tables, absent from the record
+
+Local build workflows (6 rows) and Remote hosts (4 rows), against the spec's four:
+
+| table row | driven? | accounted for by the spec's four? |
+|---|---|---|
+| rust-only | yes (workflow 1) | yes |
+| cost-report `cargo test -p cost-report` | yes (workflow 2) | yes; `scripts/cost-report-preview.sh` in the same row was not driven and is not named |
+| C++ only, cudf 25.02 `scripts/build.sh` | yes, indirectly: `build-test-shadgpu.sh --build` calls `scripts/build.sh --cudf_ROOT … --gcc-version 12` three times (`--configure`, `--build`, `--install`, script lines 98–100) | in effect; neither the spec nor the `25.02: build` section says so |
+| C++ + staged Rust, cudf 26.02 | yes (workflow 3) | yes |
+| Rust + cudf (FFI) | yes, "via build-test scripts", in both `--build` steps | yes; the manual `scripts/cargo-cudf.sh` form is the table's own alternative |
+| **Any of the above, containerized — `scripts/docker-build.sh`** | **no**. Docker 29.2.1 is installed on dev (`/usr/bin/docker`), so it was reachable | **no**, and the record does not say it was skipped |
+| shad-gpu `--build --push-binaries --patch --run` | yes (workflow 4) | yes; `--run-detached` / `--run-status` and `--all` not driven, and the spec's "three foreground calls" only half-explains that — `--run-detached` + `--run-status` is the documented path for a run that outlives ssh |
+| verda `--host verda --all` | no; `ssh verda` cannot resolve from dev (coordinator log) | by substitution: the same script ran as `--host dev`, in three steps rather than `--all` |
+| verda-gpu `--host verda-gpu --gpu --all` | no; not even resolved | no; the `--gpu` path is unexercised. Shares verda's volume, so nothing was lost this time |
+| nebius | manual | yes |
+
+The one row that is both reachable and unaccounted for is `docker-build.sh`. It matters more than
+its size: the shad-gpu red (`GLIBC_2.38`) is a dev-built binary needing a newer glibc than the
+2.35 shad-gpu is patched to, and the containerized build is exactly the 22.04-class builder that
+would not hit it. A master task reading "every workflow the two tables name" would take the
+containerized path as proven on dev. It is not, and the record should say so in one line.
+
+### Important 1 — record: name what was not driven
+
+Add a short "Not driven" list to this file: `scripts/docker-build.sh` (reachable, outside the
+spec's four), `build-test-shadgpu.sh --run-detached` / `--run-status` / `--all`,
+`build-test.sh --host verda-gpu --gpu --all`, `scripts/cost-report-preview.sh`, and the manual
+`scripts/cargo-cudf.sh` form. One line each, with why. Without it the record's coverage claim is
+wider than its evidence.
+
+### Important 2 — record: the CI half, and the head-rollup trap
+
+The spec says the coordinator's half — PR, CI green, `done` — "is the other half of what this
+task proves", and the two-line diff exists so CI runs. The record carries one sentence about CI
+("the cost-report job on `e68f82cc` went green"). At this reading:
+
+- run 34658235414 (`e68f82cc`, the code commit): `Changed paths` pass, `S3 datasets` pass,
+  `Cost report` pass, `build 25.02 for GPU` pass, `Deploy cost report` skipped (not master);
+  **`CI Pipeline (cudf 25.02)`, `(cudf 26.02)` and `GPU Tests (remote)` still in progress**.
+- runs 34658246721 (`526f47d9`) and 34658602026 (`ee479740`), the two board commits: doc-only,
+  so the `changes` gate skipped every job. `gh pr checks 146` therefore shows every job as
+  `skipping` and exits 0, because it reads the head commit's rollup. A coordinator that reads
+  "CI green" from `gh pr checks` on this PR reads a run that built nothing.
+
+Before `done`, the coordinator log needs: the run id judged, per-job outcome, and the sentence
+that the head rollup is all-`skipping` by design and where the real run lives. That is the
+"watching CI without a terminal" evidence the spec asks for, and today it is not in the record.
+
+### Important 3 — record: what the exec-model timeout did not run
+
+`case 286 of 306` is exact: pytest collects the thirteen files alphabetically, the ten prototype
+files are 216 cases, `test_tpcds.py` adds 71 (positions 217–287) and `test_tpch.py` 19
+(288–306); q23 is the 70th TPC-DS registration, position 286. So "the 285 before it all passed"
+is right, and it also means `test_tpcds.py`'s last case (q64) and **all 19 `test_tpch.py` cases
+never started**. `test_tpch.py` is the dataset-matrix "TPC-H plan shapes" set and the only
+python set that reads the sf1 parquet on dev, so its readiness there is unrecorded while the
+section reads as if the python tiers ran through. One sentence fixes it. The 216 the cost-report
+tier actually runs did all pass, so the coordinator's "no fix task needed" stands.
+
+### Checked and found complete
+
+- Constraints: the developer's diff is the three named files; no golden, no `Cargo.lock`, no
+  dependency moved; both failures recorded and not re-run; PR open, base `master` verified, 5
+  commits, unmerged. The `Host dev → localhost` entry that appeared mid-run is recorded with its
+  mtime and attributed outside the run — honest, and a host-shape fact for master.
+- Scope: `test_golden_format.rs` one `#[test]` pinning `count`'s panic branch, which no existing
+  case reached (the three other `count(` calls all assert `Some(n)`); `test_cudf.cpp` one comment
+  above the first `TEST`; `build-test.md` the two counts and nothing else. No stale copy of
+  `1569` / `Rust 1135` / `26` survives outside historical proposals under `llm-wiki/reports/`.
+- Plan tasks 1–4: every section the plan names exists in the plan's shape with command, host,
+  wall time, outcome, signature, notes.
+- Worktree: `git status` clean; only ignored build dirs, the two dataset symlinks and
+  `.claude/ensemble/` remain.
+
+### The two non-green outcomes — enough to act on without a re-run?
+
+- exec-model timeout: **yes.** Command, rc 124, the case at the kill and its ordinal, the cause
+  (`--ignore` one file short; `test_tpcds.py` is the 71-case DuckDB-oracle set CI runs from
+  `exec-model-corpus.yml`), and the CI comparison are all present. Add the one sentence above
+  about `test_tpch.py`. No master task is needed; the record should say that plainly.
+- shad-gpu `GLIBC_2.38`: **yes.** Verbatim loader line; the patch step verified; all ten binaries
+  failed at load; dev is Ubuntu 24.04 / glibc 2.39; `objdump -T` per binary (C++ and
+  `libpeacock_gpu.so` need 2.38, Rust 2.39); shad-gpu's target is the hand-built 2.35
+  (`scripts/setup-glibc.sh` `GLIBC_VERSION="2.35"`, host system 2.31 per that script's
+  comment). A master task can choose between raising that version and building through
+  `docker-build.sh` from the record alone. Not recorded, and not needed to act: which symbols
+  pull the 2.38/2.39 versions.
+
+### `architecture.md` sentences this branch falsified
+
+None. The branch changes no engine code, plan shape, wire format, tier placement or CI wiring.
+The one adjacent section, "Node display", describes the execution line's `output_rows` /
+`output_bytes` fields; the new case feeds `GpuFilter: output_rows=many` to the reader and pins a
+panic, which the page's format implies rather than contradicts.
