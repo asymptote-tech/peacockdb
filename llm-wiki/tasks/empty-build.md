@@ -82,11 +82,28 @@ since every consumer but the forwarder makes a backend call per batch. The guard
 `empty_build_answers_nothing` on the consuming join's type, the same predicate `without_build` reads,
 so the two cannot drift.
 
-**The open question, and it is answered before any code is written:** does the driver, at the
-scatter, know which consumer each lane feeds? It is the same `Driver` that later decides `NoBuild`,
-and `self.index` holds the tree, so the fact is reachable in principle — establish how. If the
-scatter cannot cheaply know its consumer, the fallback is to keep only what a join consumes and say
-so in the report. **It is not to invent a marker.**
+**Nothing here is known at plan time about emptiness, and nothing needs to be.** Emptiness is a
+runtime fact the driver already has — `out.num_rows() == 0`. What the guard adds is a *static* fact,
+and it is narrower than "a join is above":
+
+> this scatter's output feeds the **build** child of a join whose type owes rows when its build is
+> empty
+
+Three conditions, not one. The lane may feed no join; it may feed one through intermediate nodes, so
+it is a walk rather than a parent lookup; and it may feed the **probe** side — where keeping empty
+batches would add a probe call per empty lane and the second one is refused, which is
+[#152](../tickets.md#t152). The probe check is therefore not an optimisation: without it this task
+*causes* the hazard §5 tells it to watch for.
+
+`driver/index.rs` answers all three with what it already holds. `IndexedNode` carries
+`parent: Option<usize>` and `children: Vec<usize>`, and the sides are already named — `PROBE_CHILD`
+is 1, and `index/tests.rs:78` records that "the join's build side is its first child, which is what
+makes `BUILD_SLOT` zero". So: climb `parent` from the scatter until a node whose category is `Join`,
+check whether the child you came from is `children[0]`, and read that join's type. The index is built
+once from the tree, so this costs nothing per batch.
+
+**Compute it once, at index time, not per scatter output.** A walk per emitted batch would put a
+tree climb inside the hot path to answer a question whose answer cannot change.
 
 ### 3. What the C++ then already computes
 
@@ -122,14 +139,18 @@ Check rather than assume: a lane that gains a build batch must not gain a probe 
   Without it the change is "keep every empty lane", which is the 389,331-batch version.
 - **`Right` pads from the build side and `RightAnti` returns every probe row** — end to end, so "the
   C++ already computes this" is proved rather than argued.
-- **a build batch does not become a probe call** — the #152 hazard.
+- **a scatter feeding a probe side still drops its empties** — the condition that stops this task
+  causing #152 rather than merely avoiding it. Assert it on a plan whose scatter feeds a probe,
+  which is the case a test written only around the build side would never reach.
+- **a build batch does not become a probe call** — the #152 hazard from the other direction.
 - **`tpcds q77` and `tpch q16` run** — the two queries the registry says are waiting, on the CPU.
 
 ## Scope of code changes
 
 | file | change |
 |---|---|
-| `executor/driver/partitioned.rs:381` | the drop becomes conditional: a zero-row scatter output is kept where the consuming join's type owes rows |
+| `executor/driver/index.rs` | one field per indexed node, computed during `walk`: whether this node's output reaches the **build** child of a join whose type owes rows when empty. A parent climb over data the index already holds |
+| `executor/driver/partitioned.rs:381` | the drop reads that field instead of dropping unconditionally |
 | `executor/gpu_backend/join.rs:103` | `without_build`'s `false` branch stops erroring — or becomes unreachable, if step 2 routes the lane to `SetBuild` before it is called. **Which of the two is the design, and this spec does not choose**: routing earlier is cleaner and may be impossible if the driver cannot know the consumer at the scatter |
 | `executor/cpu_backend/join.rs:185` | the CPU counterpart of whichever shape step 2 takes |
 | `executor/cpu_backend/accumulate.rs:130` | a doc comment resting on a false premise |
@@ -142,9 +163,10 @@ Check rather than assume: a lane that gains a build batch must not gain a probe 
 `finish_without_keys`, which is #173's surviving site and lives on the **probe** side; the ABI; the
 wire; and `empty_build_answers_nothing` itself, which is read and never changed.
 
-**No new marker of any kind** — not a node field, not a recipe field, not a plan-text attribute. If
-the work appears to need one, the reading above is wrong and that is a finding to report rather than a
-scope increase.
+**No marker on the plan** — not a `GpuNode` field, not a recipe field, not a plan-text attribute, and
+nothing on the wire. The index field above is derived from the tree at index time and is not a
+declaration anybody writes; if the work appears to need one that *is* written, the reading above is
+wrong and that is a finding to report rather than a scope increase.
 
 ## Restriction
 
