@@ -76,3 +76,14 @@ Component-level API: none.
 The four workflows above have each been run from dev and recorded in the detail file with their
 outcome; the new case is green in the rust-only tier; the PR is open against master with CI green;
 the reviewer and the completeness pass have run; and the board says `done`.
+
+## Completeness signoff
+
+Solved under its constraints: three files plus the record, no golden, no dependency, nothing
+repaired. All four workflows were driven from dev by the ensemble unattended and recorded; the
+coordinator's half — branch, PR #146 against master, reviewer, both completeness readings, CI
+watched to green on the code commit — ran from `claude -p` under the watchdog. Two workflows did
+not go green and are left as findings for master: the exec-model pytest timed out at 900 s
+because the spec's `--ignore` is one file short, and every shad-gpu binary built on dev wants
+`GLIBC_2.38` where the patch target is 2.35. Shortcuts or bandaids: none. Not driven, by the
+spec's own list: `docker-build.sh`, `cost-report-preview.sh`, the shad-gpu detached path, verda.

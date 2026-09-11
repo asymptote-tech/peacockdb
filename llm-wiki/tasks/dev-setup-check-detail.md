@@ -21,6 +21,12 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   one sentence on what the exec-model timeout left unrun, and the CI evidence line below at
   `done`. Waiting on run 34658235414 (the code commit `e68f82cc`); the head rollup shows every
   job skipped because the later commits are doc-only.
+- 2026-09-12 00:04Z — CI green, board `done`. Judged on run 34658235414 (`e68f82cc`, the one
+  commit that carries code): Changed paths, S3 datasets, Cost report, cudf 25.02, cudf 26.02,
+  build 25.02 for GPU, GPU Tests (remote) all `success`; Deploy to Pages `skipped` as on every
+  PR. The later runs on `526f47d9`, `ee479740` and `2b0bab28` are doc-only pushes the `changes`
+  gate skipped wholesale, so `gh pr checks 146` at head reads as all-skipped and proves nothing.
+  Watched with `gh run watch --exit-status` from `claude -p` under the watchdog, no terminal.
 - Pre-dispatch checks, from the coordinator's own shell: `ssh dev` and `ssh verda` both fail
   with `Could not resolve hostname` — `~/.ssh/config` carries only `shad-gpu`. So verda is
   down (local runs), and workflow 3's `--host dev` is expected to fail at the first ssh. The
