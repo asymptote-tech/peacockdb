@@ -144,6 +144,10 @@ Check rather than assume: a lane that gains a build batch must not gain a probe 
   which is the case a test written only around the build side would never reach.
 - **a build batch does not become a probe call** — the #152 hazard from the other direction.
 - **`tpcds q77` and `tpch q16` run** — the two queries the registry says are waiting, on the CPU.
+- **holds and releases balance over a plan with empty lanes** — every kept batch takes
+  `acct.hold(held.bytes)` and owes a matching release. **Zero rows is not zero bytes**: an empty
+  batch still carries buffers, which is why that rule exists. The spike concluded accounting stays
+  paired by reading, and an imbalance surfaces days later as a budget error on an unrelated query.
 
 ## Scope of code changes
 
@@ -172,8 +176,12 @@ wrong and that is a finding to report rather than a scope increase.
 
 **The drop stays the default.** `driver/partitioned.rs:381` keeps dropping empty scatter outputs
 everywhere except where the consuming join's type owes rows. An implementation that removes the drop
-and relies on something downstream to absorb the cost is the 389,331-batch version, and it is the one
-failure this task can produce that a green test suite would not catch.
+and relies on something downstream to absorb the cost is the 389,331-batch version.
+
+**The goldens are what catch that**, and the check is a procedure rather than a hope: `.cpu.txt`
+carries per-batch lists, so keeping every empty lane would not slip through, it would explode six
+golden files. Review the batch-count delta and expect it in the low hundreds. A regeneration that
+accepts a diff of that size without reading it is the only way this failure ships.
 
 **No new ABI symbol, no `ProjectRole`, no `without_build` signature change, no wire change, and no
 new marker.** If the work appears to need one, the reading in §1 and §2 is wrong, and that is a
@@ -184,13 +192,18 @@ doc comments, and the tests.
 
 ## Sequencing
 
-After [`declared-schemas.md`](declared-schemas.md). Not a build dependency — this needs nothing that
-task produces — but that task's zero-row query is what establishes that a zero-row table crossing the
-boundary really does carry full type information, which is the premise this one rests on. Landing it
-the other way round means asserting the premise here and measuring it later.
+**No build dependency on any other task.** An earlier draft placed this after
+[`declared-schemas.md`](declared-schemas.md), reasoning that its zero-row query establishes that a
+zero-row table carries full type information across the boundary. That rationale does not survive the
+rewrite: this task never sends a zero-row table across the boundary — it hands one to a join. What it
+needs is that the scatter's zero-row output is well-typed for a join to consume, and the spike
+established that from the code (`cpu_backend/emit.rs:73`, `node_session.cpp:405`).
 
-It does **not** depend on `wire-schema.md`. The parked spec's claim that `output_schema` on the wire
-was the enabling change turns out to be about #173, which blocks nothing.
+It does **not** depend on `wire-schema.md` either. The parked spec's claim that `output_schema` on the
+wire was the enabling change is about #173, which blocks nothing.
+
+Place it where it is convenient. The one real constraint is the rebase across the layout refactor,
+which is what the parked `empty-answers.md` branch foundered on.
 
 ## Goldens, and how each moves
 
