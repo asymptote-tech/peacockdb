@@ -1649,3 +1649,11 @@ out, so the CPU shapes ran here.
 - Both target dirs were `cargo clean -p peacockdb-core`ed for the cold counts;
   `target-cudf-rapids-cuda-12.2` holds the `gpu` `--lib` fingerprint last, `./target` the
   rust-only package run's. `cpp/install/rust-tests/` holds the two staged binaries (ignored).
+
+### 2026-09-11 — slice 10 dispatched: plan task 11, and plan task 10's step 3
+
+Slice 9 committed as `94fe9d7f`. Plan task 10's move was absorbed by slice 6 (`end_to_end.rs`,
+24 passed, 2 ignored), so what remains of it is step 3 — reading the visibility dump for every
+item still `pub` because a test crate names it, expected to be the eight `corpus.rs` and
+`corpus_gpu.rs` force — and that rides with plan task 11, the `test_ci_coverage` shrink and the
+four rung assertions each shown red. Plan task 12 is the slice after. verda still unreachable.
