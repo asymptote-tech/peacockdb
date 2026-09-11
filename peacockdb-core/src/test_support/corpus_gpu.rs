@@ -5,10 +5,9 @@
 //! names a golden. It ignores the regeneration variables rather than honouring them — a
 //! device that can author its own golden proves nothing against it.
 //!
-//! What the tree assertion is worth is worth stating: `run` is generic
-//! over the backend, so both engines walk one driver over one plan and produce the same
-//! shape by construction. The evidence is the rows and the bytes under it. The shape check
-//! stays because it costs nothing and goes red on the day that construction stops holding.
+//! `run` is generic over the backend, so both engines walk one driver over one plan and
+//! produce the same shape by construction; the evidence is the rows and the bytes under it.
+//! The shape check stays because it costs nothing and goes red the day that stops holding.
 
 use std::collections::HashMap;
 

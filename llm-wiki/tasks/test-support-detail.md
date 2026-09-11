@@ -267,3 +267,40 @@ in the invocation.
 Plan task 3 green in the fresh window (entry above). Committed as `83e90c4f`, pushed, PR #147
 opened against `ENS-test-layout` — base verified, 5 commits, the branch alone. The cudf shape
 is CI's to build on this PR. Reviewer round 1 dispatched next.
+
+### 2026-09-11 — review round 1: 0 blocking, 2 important, 5 nits
+
+Reviewer's reading of PR #147. The move is behaviour-neutral (every non-mechanical change
+checked against `git show ENS-test-layout:…`), the facade is real, coverage unchanged, rungs
+clean. Findings:
+
+- **important, `privacy.rs`** — the rule scans a `pub` declaration up to its `{` and `pub`
+  field lines, so three spellings pass green: a `pub enum` variant payload
+  (`Planned(Box<dyn crate::plan::GpuNode>)`), a `pub trait`'s method signatures, and a private
+  alias laundering the type (`type Tree = Box<dyn crate::plan::GpuNode>; pub fn tree() -> Tree`).
+  None reachable today (`mod.rs` has no private `type`, both `pub enum`s fieldless, no
+  `pub trait`). The reviewer's Python simulation showed `pub type`, `pub use`, generic bounds,
+  multi-line `where`, an `impl` block's `pub fn`, `impl Trait` returns, fn-pointer params and a
+  tuple struct's `pub` field all go red. Fix: extend the capture to the matching `}` for
+  `pub enum`/`pub trait`, check a private `type` alias's right-hand side in `mod.rs`, and pin
+  the composition in `near_miss.rs` on a fixture holding the probe and these three.
+  → developer.
+- **important, `coding-style.md:162-164` and `privacy.rs:88-90`** — "takes and returns
+  strings, paths, its own types or nothing" is an allow-list the code does not satisfy
+  (`owed_rows(&[RecordBatch])`, `take_rows(&mut HashMap<String, usize>, …)`, `rel_tol:
+  Option<f64>`, `wanted_rows(u64, u64, Option<u64>)`); the spec states the rule by what it
+  forbids. Page fixed by the coordinator; the assertion message → developer.
+- nit, `privacy.rs:131,187` — `bound_name("self")` binds the literal `self` for
+  `use crate::planner::{self, …}`, so a violation spelled `planner::PlanKnobs` is reported as
+  "names `self`" against every `&self`. Loud but misleading. → developer, same file.
+- nit, `build-test.md:7` — header 1577/1142 → 1578/1143 (the layout row is 17). Fixed.
+- nit, `build-test.md:355` — "`over_cap` takes strings": it takes `Option<usize>` and `&Mode`
+  and is read by `test_corpus_goldens`. Fixed.
+- nit — stale comments: `test_cost_model.rs:4` named `common/cost_model.rs`,
+  `test_corpus_goldens.rs:679` said the gpu binary links through `mod common`. Fixed.
+- nit — file-top comments over the ten-line cap, carried from the originals:
+  `cost_model.rs` 12, `corpus_gpu.rs` 11. Trimmed to 10 each, rustfmt clean.
+
+For the signoff: the spec's "`corpus_golden.rs`, `result_text.rs` and `cost_model.rs` stay in
+`tests/common/` untouched" could not hold — `corpus.rs` calls into both and `src/` cannot see
+`tests/` — so the deviation is forced, and the reviewer asks that the signoff name it.

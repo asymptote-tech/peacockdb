@@ -1,7 +1,7 @@
 //! Cost-model goldens: derive each `<mode>-<tier>.cost.txt` from its sibling
 //! `<mode>-<tier>.cpu.txt` text, section by section, and assert it matches (or regenerate
 //! it under `UPDATE_CANONICAL=1`). Pure text — no executor, no dataset — so it runs in the
-//! plain CPU CI tier. The taxonomy + multipliers live in `common/cost_model.rs`.
+//! plain CPU CI tier. The taxonomy + multipliers live in `test_support/cost_model.rs`.
 //!
 //! Byte-identity invariant: at today's all-1.0 multipliers the `.cost.txt` total
 //! equals `Σ output_bytes` over the `.cpu.txt` tree.

@@ -676,7 +676,7 @@ fn each_result_section_was_written_by_the_mode_entitled_to_write_it() {
 /// Both variables set, a body that does NOT match, and the file must come back byte for
 /// byte with the verification still failing. Asserting the property rather than trusting
 /// that nothing on that path happens to call the write — the gpu binary links the write
-/// path through `mod common` exactly like every other binary.
+/// path through `test_support` exactly like every other binary.
 #[test]
 fn a_regeneration_does_not_make_the_read_only_path_write() {
     let path = scratch("read-only");

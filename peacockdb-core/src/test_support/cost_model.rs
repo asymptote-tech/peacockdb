@@ -1,15 +1,13 @@
 //! Cost taxonomy + multiplier config (loaded from `cost_model.conf`) and the
 //! `.cost.txt` generator.
 //!
-//! The `.cost.txt` golden is derived PURELY from the sibling `.cpu.txt` text:
-//! parse each node line's type + `output_bytes`, bin it into a category, then sum
-//! `multiplier * bytes` over the categories. No executor run — recomputing cost is
-//! a cheap text parse, so cost goldens regenerate without the expensive plan run.
+//! The `.cost.txt` golden is derived purely from the sibling `.cpu.txt` text: parse each
+//! node line's type + `output_bytes`, bin it into a category, then sum `multiplier * bytes`
+//! over the categories. No executor run, so cost goldens regenerate without the plan run.
 //!
-//! The taxonomy + multipliers live in the text file `testdata/cost_model.conf`
-//! (read at runtime, not compiled in): a multiplier can be retuned and the cost
-//! goldens regenerated without recompiling, and the config stays a plain editable
-//! file with no parser-crate dependency (the format is trivial whitespace columns).
+//! The taxonomy + multipliers live in `testdata/cost_model.conf`, read at runtime: a
+//! multiplier can be retuned and the goldens regenerated without recompiling, and the
+//! format is trivial whitespace columns, so no parser crate.
 
 use super::golden_text::{ordered_sections, parse_node_line};
 use super::{Category, CostModel, SKIPPED};

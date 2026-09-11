@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1577 test cases — Rust 1142, C++ 66, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1578 test cases — Rust 1143, C++ 66, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -351,9 +351,10 @@ registry, the result comparators, the corpus goldens and the corpus case itself 
 crate's unit tests reach as `crate::test_support::…` and the `tests/*.rs` binaries as
 `peacockdb_core::test_support::…`. The crate's dev-dependency on itself turns it on, so `cargo
 test` in every shape sees the module and `cargo build` cannot name it; no CI step and no script
-passes the flag. The two corpus binaries reach it directly and name no engine type — `cpu_case`,
-`gpu_case`, `authoritative_mode`, `over_cap` take strings — and `tests/common/mod.rs` is only
-re-exports, for the two suites written against its old module names. `corpus_cases.inc` stays
+passes the flag. The corpus binaries and `test_corpus_goldens` reach it directly through
+`cpu_case`, `gpu_case`, `authoritative_mode` and `over_cap`, whose signatures name no engine
+type, and `tests/common/mod.rs` is only re-exports, for the two suites written against its old
+module names. `corpus_cases.inc` stays
 beside it: each binary `include!`s it so `corpus_query!` expands, and `inventory::submit!` runs,
 in that binary alone.
 

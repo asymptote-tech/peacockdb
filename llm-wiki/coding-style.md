@@ -160,10 +160,10 @@ Kernighan's rules, written down after the fact rather than followed from the sta
   `corpus.rs` and `corpus_gpu.rs`, into `src/test_support/`; [`visibility.md`](tasks/visibility.md)
   removes them with the rest of the raw bare-`pub` count, which is 200 outside `test_support`.
 - **No `pub` in `test_support` names a type from another component.** The harness is what the
-  corpus binaries reach the engine through, and it is a facade only while every signature there
-  takes and returns strings, paths, its own types or nothing: `pub fn tree() -> Box<dyn GpuNode>`
-  puts `GpuNode` on the surface under another name, and it compiles. Parameters, returns and
-  `pub` fields alike; the engine type stays behind a `pub(crate)` body. The components are
+  corpus binaries reach the engine through, and it is a facade only while no parameter, return
+  or `pub` field there names a component's type — std, arrow and the harness's own types are
+  what remain: `pub fn tree() -> Box<dyn GpuNode>` puts `GpuNode` on the surface under another
+  name, and it compiles. The engine type stays behind a `pub(crate)` body. The components are
   whatever `lib.rs` declares, and `no_test_support_signature_names_a_component_type` scans
   `test_support/mod.rs`, the one file `a_components_api_is_declared_in_its_mod_rs` lets a `pub`
   appear in.
