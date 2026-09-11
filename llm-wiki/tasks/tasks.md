@@ -100,3 +100,13 @@ AST expression is a typed zero — a wrong value in arithmetic and a wrong row c
 One scalar builder, not a corrected copy. C++ only. Carries a test-helper repair first:
 `CreateScalarValue` gained `is_null` as field 2 and the gtest call sites kept their old positions, so
 every `make_int64_literal` builds the literal 0. Claims no cells.
+
+### 9. [`sink-divergence-survey.md`](sink-divergence-survey.md) — state: approved to build
+
+**Prototype — no PR, branch never merged; the product is
+[`reports/sink-divergence.md`](../reports/sink-divergence.md).** Sixty-odd disabled cells already fail
+at the sink with a message naming neither the column nor either type, so a rollout over sixty queries
+produces sixty identical lines. One error site changes to name column, declared and exported type;
+the corpus rollout that was happening anyway then reports which divergence classes actually reach the
+boundary and how often. Fixes nothing and enables no cell. It is what tells `declared-schemas` which
+classes are worth a harness.
