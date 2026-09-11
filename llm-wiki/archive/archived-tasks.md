@@ -1,8 +1,9 @@
 # Archived task specs
 
-Specs for tasks whose PR has merged, newest first. Each is the contract the work was
-done against, kept verbatim -- including the amendments and corrections made mid-task,
-since those are the part a later reader cannot reconstruct from the diff.
+Specs for tasks whose PR has merged, newest first, and for tasks dropped with their approach
+rejected, marked as such at the top of the entry. Each is the contract the work was done
+against, kept verbatim -- including the amendments and corrections made mid-task, since those
+are the part a later reader cannot reconstruct from the diff.
 
 The batch-partitioned rollout's task list is the first entry below, archived whole on
 2026-09-08: T0 through T19 and T21 are done, T20 is now [#195](../tickets.md#t195) and T22 is
@@ -14,6 +15,429 @@ The entry after it merged 2026-08-20 as PR #126, opened against ENS-bp-plan-skel
 retargeted to master when that base merged.
 
 
+
+---
+
+<!-- archived from llm-wiki/tasks/empty-answers.md -->
+
+**Obsolete — approach rejected, never merged; PR #138 closed 2026-09-10.** Superseded by `empty-build.md`, which showed the capability it proposed is one the engine does not need.
+
+# Answering with nothing: the table no call can build
+
+Kind: production
+
+Two refusals, one wall. A node owes rows it did not receive, and every entry point on the surface
+loads a table by reading one — so there is no call to make.
+
+- [#173](../tickets.md#t173) — a collapse of no handles, a merge of no runs, and a finish whose
+  probe produced no keys.
+- [#175](../tickets.md#t175) — a join whose build side produced no batch, where `Right`, `Full` and
+  `RightAnti` owe their probe side. #175 says it itself: *"the same wall as #173, reached from the
+  join instead of the accumulator."*
+
+**Both close here.** They are one task because they are one missing capability seen from two nodes,
+and separating them would mean building it twice.
+
+**Depends on [`wire-schema.md`](wire-schema.md), and that dependency is the whole reason this is
+small.** Both tickets say "unfreezing buys a make-empty-of-schema call and the refusals go", written
+when nothing on the wire carried a node's schema. Once `PlanNode.output_schema` is populated, the
+call is not needed at all: `execute_node` already holds the node
+(`node_session.cpp:190`), so it can answer with an empty table rather than throw. **No new ABI
+symbol.** The C++ said so before either of us did — `node_session.cpp:257`:
+
+> *"A collapse of nothing has no schema to answer with: **the node's own `output_schema` is absent on
+> a recipe plan**, and concatenating no views gives a table of no columns, which is not a batch
+> anything above can read."*
+
+## 1. #173 — an empty table of the declared schema
+
+Three sites refuse, and all three want the same thing:
+
+| site | what owes rows |
+|---|---|
+| `cpp/src/node_session.cpp:261-266` | a collapse with no input handles |
+| `gpu_backend/accumulate.rs:331` | a merge of no runs — "the collapse of nothing under another name" |
+| `gpu_backend/join.rs:236` | a finish whose probe was empty, so it has no keys to join against |
+
+In `execute_node`, build the answer from `node->output_schema()`: one `cudf::make_empty_column` per
+field (`cudf/column/column_factories.hpp:43`), assembled into a table with the declared names. The
+two Rust refusals then stop being refusals — the call they could not make is a call that now
+answers.
+
+**The global aggregate is the exception and must stay one.** #173: *"a global aggregate owes its
+identity row whatever arrived"* — `count` is 0, not absent. An empty-of-schema answer there would
+drop a row DataFusion produces, so the aggregate arm keeps its own path and this task must not
+collapse the two into "empty input, empty output".
+
+**The CPU backend already emits nothing in the same places**, deliberately, so the two engines agree.
+Check each site against its CPU counterpart as it changes: the point is not that the device stops
+refusing, it is that both engines answer the same thing.
+
+## 2. #175 — the probe side, padded or not
+
+`empty_build_answers_nothing` (`nodes/join.rs:563`) is already the right decision in the right place;
+what is missing is what to do when it returns false. Its own doc names the split:
+
+> *"what they owe is the probe side, **padded or not**"*
+
+- **`RightAnti` owes the probe side unpadded.** Its output is the probe columns alone, and an empty
+  build side makes every probe row unmatched — so the answer *is* the probe batch. **Route it, do
+  not call.** No pad, no kernel, no handle beyond the one the driver holds.
+- **`Right` and `Full` owe it padded**, with typed NULLs in the build columns. That is the mirror of
+  the pad that already exists: `ProjectRole::NullPad { nulls }` with `pad_project` and
+  `padded_columns` (`recipe/join.rs:114`, `:261`, `:423`) appends one NULL per **probe** column a
+  build-preserving join's projection keeps. This needs the same shape counting **build** columns.
+
+So the recipe gains one role, not a mechanism. Whether that is a second `ProjectRole` variant or a
+side on the existing one is the author's call — but the name must say which side is being padded,
+since a reader who assumes the existing direction gets a plan that type-checks and pads the wrong
+columns.
+
+**Two corpus queries are waiting on it**, both found by T19: `tpch/q21` at `tp4-single`, and
+`tpcds/q77`, whose `Right` outer at four lanes gets no build side. q77 is currently out of the
+end-to-end list with `tpch/q2` carrying its claim, because writing the CPU pad alone would make the
+oracle answer a query the device refuses. **Put q77 back on that list as part of this**, or the
+reason it was removed outlives the reason.
+
+## 3. Tests
+
+### Unit, Rust
+
+- **the empty-build decision by type** — `empty_build_answers_nothing` returns true for the six that
+  end the lane and false for `Right`, `Full`, `RightAnti`. It exists; assert it names all nine so a
+  tenth type cannot be added silently.
+- **`RightAnti` routes rather than calls** — a lane with an empty build side and a probe batch emits
+  that batch and makes no ABI call. The absence of the call is the assertion, not the rows.
+- **the build-side pad counts build columns** — the mirror of
+  `the_pad_project_appends_one_null_per_probe_column_the_projection_keeps`, written the same way and
+  next to it, so the two directions are read together. A projection keeping no build column pads
+  nothing.
+- **a pad in the wrong direction is caught** — assert the emitted NULL count against a join whose
+  build and probe widths **differ**. With equal widths both directions pass, which is how this ships
+  wrong.
+
+### Unit, gtest
+
+- **a collapse of no handles answers an empty table of the declared schema** — column count, names
+  and types from `output_schema`, zero rows. The test that pins the fix.
+- **the types are the declared ones, not defaults** — a schema with a `Decimal128(15,2)` and a
+  string, asserting both come back as themselves. An empty table of the wrong types is the failure
+  this cannot afford, since nothing downstream has rows to notice with.
+- **a global aggregate with no input still emits its identity row** — the exception, asserted rather
+  than assumed, because the natural implementation of everything above deletes it.
+
+### Recipe walk
+
+- **a query with an empty lane runs end to end** — the existing harness with a shape that leaves one
+  lane with no build side, driven at `target_partitions` > 1. Today it refuses; this is the first
+  test where an empty lane reaches the unload.
+
+## 4. Goldens and the device workflow
+
+| golden | moves | why |
+|---|---|---|
+| `*.plans.txt` | **yes**, where a Right/Full join gains a pad | a new recipe call renders in the node's recipe line |
+| `recipe-payloads.txt` | **yes** | the pad project is a payload |
+| `testdata/cost-registry.csv` | **yes** | cells move off #173 and #175 |
+| `<mode>-<tier>.cpu.txt`, `.cost.txt` | **yes**, for the queries that newly run | new sections, not changed ones |
+
+Device work, in batches of about five on `shad-gpu` with `build-test-shadgpu.sh`, as T19 does: the
+two known sightings first, then any cell whose ticket names #173 or #175. Expect the freed cells to
+land on whatever refuses next rather than going green — the causes are ordered, and #152 and #183 sit
+in front of most of the corpus. **Close #173 and #175 when their cells are gone from the registry**,
+not when the code lands.
+
+## 5. Out of scope
+
+The other frozen-surface refusals. This task buys exactly two capabilities — an empty table of a
+declared schema, and a probe side passed through padded or bare — and every other "the surface
+cannot express this" stays where it is. If a third refusal looks like it would fall out for free,
+that is a ticket, not an addition.
+
+---
+
+<!-- archived from llm-wiki/tasks/wire-schema.md -->
+
+**Obsolete — approach rejected, never merged; PR #137 closed 2026-09-10.** The divergence it removed on the wire is now to be found by the operator harness and fixed at its source, not carried as a per-column width.
+
+# The declared schema on the wire, and the precision the export is never told
+
+Kind: production
+
+**This task closes [#187](active-tickets.md#t187)** — the device widens a decimal the plan declared
+narrow — by giving the export the precision it currently defaults to 38 for, rather than by casting
+the result back.
+
+Sibling of [`casts.md`](casts.md), which predicts the divergence and deliberately does not fix this
+half. **Do that task first**: it writes down what the device returns for a declared type, and this
+one changes the answer for decimals.
+
+## Why it happens
+
+cuDF's decimal type carries **scale but not precision**. `export_table_to_ipc` builds its metadata as
+`col_meta.push_back({name})` — name only — so `decimals_to_arrow` falls back to
+`metadata.precision.value_or(max_precision<__int128_t>())`, which is
+`floor(128 · ln2 / ln10) = 38`. Every decimal exports at precision 38 with scale preserved. That is
+why `tpch/filter-project` declares `(15,2)` and receives `(38,2)`, and why `q6` never hit it: its
+sums declare `Decimal128(38,4)` already.
+
+**This is a missing argument, not two engine rules disagreeing.** #187's current text frames it as
+the CPU's `widened_decimal` and the device's concat reaching different verdicts on the same bytes.
+That framing is wrong and the ticket should be corrected as it closes.
+
+The Rust side already sends the value: `Field.decimal_precision` exists in `gpu_plan.fbs` and
+`serialize_schema` fills it from `Decimal128(p, s)`. It is dropped on the C++ side, after arrival —
+`TableResult` (`plan_executor.h:15`) is `table` + `column_names`, and once a column is in one, the
+precision exists nowhere.
+
+## The work
+
+### 1. Write `output_schema` on the wire
+
+`PlanNode.output_schema: Schema` already exists in `gpu_plan.fbs` and is documented "Output schema of
+this node". The writer never fills it: `fb::PlanNode::create` appears once on this path, in
+`Writer::push` (`recipe/writer.rs:97`), with `output_schema: None`. That is the whole change — every
+node goes through that funnel, `GpuNode::schema()` is node-local with nothing to derive, and
+`serialize_schema` already fills `decimal_precision`/`decimal_scale` from `Decimal128(p, s)`.
+
+Write it for **every** node, not only where a decimal appears: `fb_text.rs`'s own header warns that
+"not set" and "set to zero" are different instructions to the executor, and a conditional wire format
+is a worse thing to own than a slightly larger buffer.
+
+The C++ then reads it where `TableResult` is built (`plan_executor.h:15`, today `table` +
+`column_names` only), carries a per-column precision alongside the name, and
+`export_table_to_ipc` sets `column_metadata.precision` instead of leaving it empty. `operators/
+union.cpp:35` already reads an `output_schema` for the neighbouring problem — branches landing
+different fixed_point scales — so this is an existing mechanism reaching one more node kind rather
+than a new one.
+
+With precision on the wire, `export_type_for`'s `Decimal128(p,s) → Decimal128(38,s)` row stops being
+true: the divergence is removed rather than absorbed. Update the row in
+[`casts.md`](casts.md) and the prediction test that records it — the cast list never gains a decimal
+arm, because pinning a fixable omission into a golden would make it look inherent.
+
+**The C++ half was the open risk and it is closed.** The worry was that
+`node_session.cpp:517` does `result.column_names = input.column_names` — names propagating from
+*inputs* rather than from each node's declared output — which would mean precision had to be
+threaded from an origin. It does not. `execute_node` holds the node it is executing:
+
+```cpp
+const fb::PlanNode* node = impl_->post_order[seq];   // node_session.cpp:190
+```
+
+and every `TableResult` built inside it (`:267` collapse, `:355`/`:399` repartition) is in that
+scope, so `node->output_schema()` is directly readable once step 1 populates it. Line `:517` is
+`NodeSession::slice_handle`, which has no node because it slices an existing handle — it copies
+`input.column_names` from a `TableResult` that already exists, and precision rides along the same
+way. **No threading from an origin is required, and no signature changes.**
+
+### 2. `schema_text` renders precision and scale
+
+`fb_text.rs:229` formats fields as `{}:{:?}` over `f.data_type()`, so `recipe-payloads.txt` prints
+bare `Decimal128` while expressions on the same page print `Decimal128(23, 2)`. Two fields that are
+on the wire are invisible to the golden whose job is to pin the wire — a change to either, including
+one that broke step 1, would not move it. Render them for `Decimal128` fields.
+
+### 3. Unit tests
+
+Same idiom as [`casts.md`](casts.md) — build the node, run its recipe fn, `writer.finish()`,
+`flatbuffers::root::<fb::GpuPlan>`, `node_at(seq)`, assert on payload fields.
+
+- **precision reaches the payload** — assert `output_schema().fields()[i].decimal_precision()` is
+  the declared 15 rather than 0. Reuses the `(name, precision, scale)` schema helper `casts.md`
+  adds. **Red before step 1 lands**, which is the order `coding-style.md` asks for.
+- **every node carries a schema, not only the ones with decimals** — a node of plain `Int64`
+  columns still has `output_schema` set, since a conditional wire format is the thing step 1
+  declines to own.
+
+## Restriction
+
+**Code and test changes are limited to what is written above.** No refactor of `node_session.cpp`
+beyond carrying one field alongside `column_names`, no generalizing the export metadata past
+precision, no cleanup of `TableResult`'s neighbours. Anything else found on the way is a ticket.
+
+## Goldens, and how each moves
+
+| golden | how it moves | why |
+|---|---|---|
+| `recipe-payloads.txt` | **bytes** change on every node; text changes on decimal fields | step 1 adds `output_schema` everywhere, step 2 renders precision |
+| `*.plans.txt` | **no change** | plan text renders the Rust tree, which already knew the precision |
+| `<mode>-<tier>.cpu.txt`, `.cost.txt`, `.result.txt` | **no change** | values and byte pricing are unaffected; only a declared type moves |
+| `testdata/cost-registry.csv` | device cells move off #187 | see below |
+
+The payload golden is the one to review rather than accept: its bytes move for every node in every
+plan, and step 2 is what makes that diff legible instead of opaque.
+
+## Device workflow
+
+1. Run the **10 queries carrying #187** on `shad-gpu` with `build-test-shadgpu.sh`, in batches of
+   about five, as T19 does: `tpcds` q16 q33 q61 q77 q90 q94 q95, `tpch` q2, `filter-project`,
+   `hash-join`.
+2. For each, **either enable the device cells or update the ticket**. The causes are ordered, so a
+   cell that stops failing on #187 lands on whatever refuses next rather than going green — expect
+   [#152](../tickets.md#t152). A cell whose cause changed is a ticket edit, not a cell that stays
+   where it was.
+3. Close #187 only when its cells are gone from the registry, and correct its text as it closes.
+
+---
+
+<!-- archived from llm-wiki/tasks/casts.md -->
+
+**Obsolete — approach rejected, never merged; PR #136 closed 2026-09-10.** Predicting the export type at plan time and casting at the unload builds the divergence into the plan; the operator harness reports it instead.
+
+# Export types: predicted at plan time, carried on the wire
+
+Kind: production
+
+Two device cells fail on the same class of thing — the device hands back a column whose Arrow type
+is not the one the plan declared — and each is currently discovered at the boundary rather than
+predicted before it. This task writes the prediction down where it can be checked, and closes both.
+
+**This task closes [#183](active-tickets.md#t183)** — the device exports `Utf8` where the sink declares
+`Utf8View` — by predicting the export type at plan time and casting the one divergence that is
+inherent.
+
+Its sibling [`wire-schema.md`](wire-schema.md) closes [#187](active-tickets.md#t187) with the same
+derivation and the C++ half this task deliberately leaves out. Do this one first: it is Rust-only,
+and the prediction it writes down is what the other one then makes true for decimals.
+
+
+## Why they happen
+
+`unload` concatenates the decoded IPC batches against the sink's declared schema
+(`gpu_backend.rs:166`), and `concat_batches` requires exact type equality. Neither side is
+misbehaving:
+
+- cuDF has exactly one string type. `expr.cpp:74` maps the `Utf8View` tag to `type_id::STRING` and
+  `cudf::to_arrow_schema` maps that back to `arrow::utf8()`. The divergence is inherent and the
+  cast is the only place to absorb it.
+- cuDF's decimal type carries **scale but not precision**. `export_table_to_ipc` builds its metadata
+  as `col_meta.push_back({name})` — name only — so `decimals_to_arrow` falls back to
+  `metadata.precision.value_or(max_precision<__int128_t>())`, which is 38. Every decimal exports at
+  precision 38 with scale preserved. That is why `tpch/filter-project` declares `(15,2)` and receives
+  `(38,2)`, and why `q6` never hit it: its sums declare `Decimal128(38,4)` already.
+
+The second is a missing argument, not a disagreement between two engine rules. #187's current text
+frames it as the CPU's `widened_decimal` and the device's concat disagreeing about the same bytes;
+that framing is wrong and the ticket should be corrected when it is closed.
+
+## The work
+
+### 1. `export_type_for` — the composition, written down once
+
+The round trip Arrow → fb → cuDF → Arrow lives in three files and two languages today, so nobody can
+answer "what type will the device hand back for this column?" without reading `expr.cpp`. Make it a
+Rust function. It is total over the declared type for every case below.
+
+| declared | fb tag | cuDF | exported | |
+|---|---|---|---|---|
+| `Boolean`, `Int8`–`Int64`, `UInt8`–`UInt64`, `Float32/64` | direct | direct | same | identity |
+| `Utf8` | `Utf8` | `STRING` | `Utf8` | identity |
+| `Date32` | `Date32` | `TIMESTAMP_DAYS` | `Date32` | identity, via `to_arrow_schema`'s `default:` arm |
+| `Utf8View` | `Utf8View` | `STRING` | `Utf8` | **#183** |
+| `LargeUtf8` | `LargeUtf8` | `STRING` | `Utf8` | same shape, no corpus query reaches it |
+| `Date64` | `Date64` | `TIMESTAMP_MILLISECONDS` | `Timestamp(ms, None)` | no corpus query declares it |
+| `Decimal128(p,s)` | `Decimal128` | `DECIMAL128` | `Decimal128(38,s)` | **#187** — predicted here, **not cast here**; [`wire-schema.md`](wire-schema.md) removes the divergence instead |
+| `Null`, `Float16`, `Binary`, `LargeBinary`, `BinaryView` | mapped | **`EMPTY`** | — | **refuse** |
+
+The last row is not a cast. `convert_data_type` serializes all five and `fb_to_type_id` has no case
+for any of them, so they reach the device as a typeless column. `export_type_for` returns `Err` and
+the plan is refused at planning time, which is what happens to them today only by accident.
+
+### 2. Derive `exports` inside `attach_recipes`
+
+Not a separate pass and not in the recipe writers, which are the wire codec rather than a
+planning phase. The recipe walk already delivers the input:
+
+```rust
+fn unload(
+    _node: &GpuUnload,
+    _inputs: &[&Schema],     // the sink's declared schema, already here, unused
+    _writer: &mut Writer,
+) -> Result<Option<Recipe>, PlanError>
+```
+
+`_inputs` is exactly what `export_type_for` needs, handed to the one function already positioned at
+the sink. Deriving it there costs no second traversal and creates no second place that has to agree
+with the first — the hazard `driver/index.rs:151` exists to guard for node numbering.
+
+The result is a per-column identity-or-cast list, carried to `GpuSink::new`
+(`gpu_backend.rs:124`) alongside the schema the driver already passes it.
+
+**The cast at `unload` must be narrow.** `concat_batches` against the declared schema is today the
+only check that the device produces what the plan says it produces; it is what surfaced #187. A
+blanket cast-to-schema fixes #183 and destroys that. Only the arms the table marks as divergent are
+cast; every other mismatch still fails, as `export_table_to_ipc`'s `DECIMAL32/64 → DECIMAL128`
+widening is a named normalization rather than a general one.
+
+Two review points, both of which lose a check if missed:
+
+- `self.schema.fields().zip(batch.columns())` truncates silently on a column-count mismatch, which
+  `concat_batches` catches today. Check the length explicitly.
+- Non-string divergences would fail at `RecordBatch::try_new` rather than at `concat_batches`, so
+  `"the exported stream is not the sink's rows: {error}"` moves with them or #187-class failures lose
+  the message the tickets quote.
+
+### 3. Unit tests
+
+`recipe/tests.rs` already asserts on the buffer where the recipe cannot answer, with the idiom at
+`a_finalize_project_emits_the_group_keys_the_finalize_list_leaves_out`: build the node, run its
+recipe fn, `writer.finish()`, `flatbuffers::root::<fb::GpuPlan>`, `node_at(seq)`, assert on payload
+fields. No GPU, no session, no plan load.
+
+- **exports at the unload** — pure function of the input schema, so it needs neither the buffer nor
+  `finish()`. A `GpuUnload` over `Utf8View` + `Decimal128(15,2)` + `Int64` derives a list naming the
+  divergent columns and omitting the identity ones.
+- **the `EMPTY` class refuses** — `Binary`, `Null`, `Float16` return `Err` rather than passing
+  silently. This is the arm most likely to rot, since no corpus query reaches it.
+- **a decimal predicts but does not cast** — `export_type_for` reports `Decimal128(15,2) →
+  Decimal128(38,s)` and the unload's cast list omits it, so the prediction is recorded before its
+  fix exists. `columns_of` hardcodes `DataType::Int64`, so this needs a sibling taking
+  `(name, precision, scale)` — which [`wire-schema.md`](wire-schema.md) reuses.
+
+`recipe/tests.rs` is at 887 lines against the 1000-line cap. These land around 930 — under, but the
+next addition to that file forces the split rather than this one.
+
+## Restriction
+
+**Code and test changes are limited to what is written above.** No refactor of the surrounding
+writer, no generalizing `export_type_for` beyond the table, no second cast site, no cleanup of
+the recipe writers while passing through them. Anything else found on the way is a ticket.
+
+## Goldens, and how each moves
+
+| golden | how it moves | why |
+|---|---|---|
+| `*.plans.txt` (10 files) | every `GpuUnload` line gains `exports=` | new field; `GpuUnload` renders bare today |
+| `<mode>-<tier>.cpu.txt` | **no change** | `memory.rs:43` prices `Utf8View` and `Utf8` identically at `(rows+1)*4`, and content size is Σ value lengths for both |
+| `<mode>-<tier>.cost.txt` | **no change** | derived from the `.cpu.txt` sections, which do not move |
+| `<tier>.result.txt` | **no change** | values are unaffected; only types were ever in question |
+| `testdata/cost-registry.csv` | device cells move off #183/#187 | see the device workflow below |
+
+`exports=` renders on every unload, including `exports=none` where nothing diverges. Omitting the
+attribute would make "nothing diverges" and "the list was never computed" identical in the golden,
+which is the invisible-absence shape `coding-style.md` records twice.
+
+`exports=` is a Rust-side prediction that the C++ never receives: the unload writes no payload, so
+nothing on the wire describes the sink's columns. The golden is documentation and a tripwire, and
+the runtime check at `unload` is the only thing that enforces it. [`wire-schema.md`](wire-schema.md)
+is what makes it checkable against the buffer.
+
+## Device workflow
+
+The cast and the precision are not proved by a green CPU tier — every cell they exist for is a device
+cell that is currently disabled. After the code lands:
+
+1. Run the affected corpus queries on `shad-gpu` with `build-test-shadgpu.sh`, in batches of about
+   five, as T19 does. **59 queries carry #183** — every query with a string in its sink schema,
+   which is derivable from `tp1-single.plans.txt` without running anything, and was: no query
+   without a string in its sink carries #183, over 82 checked, with no exceptions.
+2. For each, **either enable the device cells or update the ticket**. A cell that now reaches a
+   different cause is a cell whose ticket changes, not a cell that stays where it was — and the
+   causes are ordered, so fixing #183 will move cells onto whatever refuses next rather than turning
+   them all green. Expect #152 to be the common landing place.
+3. Close #183 only when its cells are gone from the registry, not when the code lands. A ticket
+   whose cells are still disabled against it is not closed.
 
 ---
 

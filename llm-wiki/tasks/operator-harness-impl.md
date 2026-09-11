@@ -148,8 +148,8 @@ int peacock_handle_from_arrow(peacock_executor_t* executor, const void* schema,
 
 If `TableResult` is not in namespace `peacock`, or the two `ArrowSchema`/`ArrowArray` names need an
 include the file lacks, take them from how `peacock_spark_partition_ids` spells them. If, by the
-time this builds, `TableResult` carries a per-column precision (the casts chain's `wire-schema`
-adds one for #187), fill it from the C schema's decimal format string (`d:18,2`) for each decimal
+time this builds, `TableResult` carries a per-column precision (a fix for #187 would add one),
+fill it from the C schema's decimal format string (`d:18,2`) for each decimal
 column — an adopted decimal that exports at 38 would be the harness inventing the defect it is
 meant to find.
 

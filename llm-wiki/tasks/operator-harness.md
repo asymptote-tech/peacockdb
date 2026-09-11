@@ -55,7 +55,7 @@ Date32, Boolean, a key column with duplicates, a unique id — nulls in every co
 dyadic so sums compare exactly, deterministic from the seed. Zero rows is a legal argument and
 a case in its own right. Decimals are a second fixture, `decimals(rows, seed)`, and not a column
 of the first: the device exports every decimal at precision 38 whatever was declared
-([#187](active-tickets.md#t187), fixed on the unmerged casts chain), so a decimal in every batch
+([#187](active-tickets.md#t187), open and owned by no task), so a decimal in every batch
 would make every case that ticket's `bug_` test instead of the decimal cases alone.
 
 **A comparator.** `assert_same(cpu, gpu, Order)`: slot by slot — one slot per call, and per

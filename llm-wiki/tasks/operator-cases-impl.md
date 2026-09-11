@@ -68,7 +68,7 @@ per test.
 `synthetic`'s ordinals, used by every expression below: `0 id Int64`, `1 key Int32`, `2 i32`,
 `3 i64`, `4 f64`, `5 s Utf8`, `6 d Date32`, `7 b Boolean`. `decimals` is `0 id Int64`,
 `1 dec Decimal128(18,2)`, and every case over it is expected to land as `bug_` under #187 — the
-device exports a decimal at precision 38 — until the casts chain merges; write the green form,
+device exports a decimal at precision 38 — until #187 is fixed, which no task owns; write the green form,
 watch the schema line `same` reports, then pin it.
 
 The working rhythm for every task: write the cases green-form, run the family on shad-gpu with
