@@ -49,12 +49,14 @@
   not it contains an assertion. A one-line wrapper that hands a test an object it could not
   otherwise reach is test code; being compiled only in a test build is exactly right for it,
   since a test build is the only build that can matter to it.
-- **A test-only entry point may sit in a component's `mod.rs`, and nowhere else in `src/`.**
-  Test code otherwise lives in a path carrying `test`, but a cross-component helper cannot: it
-  must name what its own component owns, while its caller is in another component, so the two
-  can never sit together. Declare it in the facade like anything else that crosses a boundary,
-  and let its doc name the test that needs it — that comment is the only register there is, and
-  a stale one is how the set grows without anyone deciding to grow it.
+- **A test-only item may keep its `#[cfg(test)]` outside a test path in two cases only.**
+  Test code otherwise lives in a path carrying `test`. A cross-component entry point cannot: it
+  must name what its own module owns while its caller is in another component, so the two can
+  never sit together, and it is declared in that module's `mod.rs` like anything else crossing
+  a boundary. A reader of a private field cannot either: only the module declaring the field
+  and its children can see it. Both are registered in `test_module_layout.rs`'s
+  `TEST_ONLY_ITEMS`, which checks the item, its callers and the doc comment naming them — a
+  stale comment is how the set grows without anyone deciding to grow it.
 - **What `#[cfg(test)]` is not is a way to quiet `dead_code` on production code.** An item behind
   it is absent from a release build, so it is never type-checked against a change made for
   shipping code. A production item that nothing ships yet stays `pub(crate)` and keeps its

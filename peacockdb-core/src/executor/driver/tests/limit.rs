@@ -2,8 +2,8 @@
 //! rows returned passes just as well when the whole input was read and trimmed at the end,
 //! which is the thing this lowering exists to avoid.
 
-use super::super::mock::{Script, spec};
-use super::super::plans::*;
+use super::mock::{Script, spec};
+use super::plans::*;
 use super::*;
 
 /// Six batches of ten rows on one lane, over a chain the interval sits on top of.

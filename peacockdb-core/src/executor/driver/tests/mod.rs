@@ -4,6 +4,12 @@
 //! rather than on the rows that came back: a limit test that checks the rows passes just
 //! as well when the whole input was read and thrown away.
 
+/// The mock backend and the plans built on it, `pub(crate)` because the test modules of
+/// `driver`'s subcomponents drive the same backend and cannot see a private sibling.
+pub(crate) mod mock;
+/// See [`mock`].
+pub(crate) mod plans;
+
 mod budget;
 mod counts;
 mod failure;
@@ -16,7 +22,7 @@ mod stress;
 mod wiring;
 
 use super::StepError;
-use super::mock::{Mock, Script};
+use self::mock::{Mock, Script};
 use super::partitioned::Driver;
 use crate::executor::{CallKind, PlanIndex, RunError, RunReport, TraceEvent};
 use crate::plan::GpuNode;

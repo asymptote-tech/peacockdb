@@ -392,3 +392,175 @@ give. `pub mod` goes 15 → 16 for the new component; it is a component in `lib.
   fully rebuilt by the inventories, so they are warm again for all three shapes.
 - `compare-inventory.sh` still rejects `gpu`, as slice 2 found. The `gpu` comparison in the table
   above is a hand `diff`. Task 9 is the slice that has to fix this or keep diffing by hand.
+
+### 2026-09-10 — slice 4 done: the layout rules, and the tree that obeys them
+
+Plan task 4, steps 1-10. Not committed. Eleven files created, two moved, 33 code files and
+three wiki pages modified. The
+five new assertions live in `peacockdb-core/tests/test_module_layout.rs`, which goes 1211 →
+1874 lines.
+
+#### The five rules, and what each printed when it fired
+
+Every one was made to fail by construction and the violation reverted; the assertion names are
+the plan's, and the plan's "rule 1 / rule 2" labels are the two directions in the other order.
+
+| Violation | Assertion that fired | What it printed |
+|---|---|---|
+| `mod tests` renamed `mod gpu_tests`, gate left `#[cfg(test)]` | `a_test_module_is_named_for_its_rung` (and `a_rung_gate_implies_its_module_name`) | ``executor/row_range.rs:16: `mod gpu_tests` is gated #[cfg(test)] and its rung requires #[cfg(all(test, feature = "gpu"))]`` |
+| `#[cfg(all(test, feature = "gpu"))]` above `mod tests` | `a_rung_gate_implies_its_module_name` (and the first) | ``executor/row_range.rs:16: #[cfg(all(test, feature = "gpu"))] sits on `mod tests` and belongs on gpu_tests`` |
+| `#[cfg(test)] const X: u8 = 0;` in `planner/mod.rs` | `cfg_test_appears_only_on_a_test_module` | ``planner/mod.rs:145: #[cfg(test)] on `const X: u8 = 0` — test code in a production file`` |
+| `planner/helpers/mod.rs` holding a `#[test]` | `a_test_only_path_carries_test` | `planner/helpers/mod.rs` |
+| `#[cfg(test)] mod tests { }` appended to `planner/nulls.rs` | `a_test_module_lives_in_its_own_file` | `planner/nulls.rs:228: mod tests` |
+
+The register is checked four ways, each watched separately on `plan::state_for`:
+
+- doc stops naming the caller → ``plan/mod.rs:233: `state_for` is kept for planner/translator/schema_tests.rs, and its doc comment does not name it``
+- entry's item renamed → ``plan/mod.rs: `states_for` is registered as test-only and no longer carries a `#[cfg(test)]`; drop the entry`` (plus the item itself reported as unregistered)
+- `called_by` names a file that does not call it → ``plan/mod.rs: `state_for` names planner/translator/tests.rs as its caller and that file no longer calls it``
+- `called_by` names a file that is gone → ``… and that file is gone``
+
+Before the fix the three content rules were red and the two rung rules passed vacuously, which
+is what the plan predicted: there is no `ffi_tests` or `gpu_tests` module yet. The first run
+named 4 item-level gates in `partitioned.rs`, 10 inline `mod tests` blocks and 12 unnamed
+test-only paths.
+
+One reader bug was caught by its own near-miss fixture rather than by the tree:
+`declared_item` stripped `const ` as a qualifier and as a kind, so `pub const X: usize = 1 <<
+20;` came back nameless and would have been reported as an unregistered carve-out under a
+blank name. Fixed to strip `const fn` only.
+
+#### Step 3 found nineteen item-level gates, not four, and they part three ways
+
+**Moved** — `driver/partitioned.rs`'s four (`hops`, `release_all`, `queue_len`, `last_call`).
+They read three private fields of `Driver`, so `driver/tests/` cannot hold them: they went to a
+new `partitioned/tests.rs` as an inherent `impl`, whose `pub(crate)` methods stay reachable
+from `driver/tests/` because a method's visibility does not depend on the module the `impl` is
+written in. The plan says "moves into the `mod tests` that uses it"; that module could not see
+the fields, and widening them was the alternative.
+
+**Deleted** — `translator::translate`, twelve lines. `planner::translate` now calls
+`translator::Translator::new(..).translate(plan)` directly. `translator::translate_expr` stays:
+`expr` is a private module of `translator` and `planner/mod.rs` cannot name it.
+
+**Registered, eight entries in `TEST_ONLY_ITEMS`** — `cpu_backend::physical_expr`,
+`executor::physical_expr`, `plan::state_for`, `planner::translate`, `planner::translate_expr`,
+`translator::translate_expr`, and the two the plan calls neither: `accumulate.rs`'s
+`compactions` and `join.rs`'s `makes_a_finish_pass`. Plus six `#[cfg(test)] use` lines in
+`planner/mod.rs` and `planner/translator/mod.rs`, which the rule accepts in a file that holds
+an entry, as the spec's "gated `use` lines … count as part of the declaration they serve".
+
+Three notes on the register:
+
+- **`has_finish_pass` is task 6's, not this slice's.** Plan task 6 step 5 declares the two-hop
+  delegation and renames `CpuJoin::makes_a_finish_pass` with it, in the slice that raises the
+  `cpu_backend` wall; task 4's mention is a forward reference. Doing it here would have added a
+  second `#[cfg(test)]` item rather than removing one — `wire/tests.rs` reaches `CpuJoin`
+  through the live `PUB_MODULES` exemption today, so the mod.rs hop buys nothing until that
+  exemption goes. `coding-style.md` already states the rename; it is still true, just later.
+- **`compactions` stays where it is**, which is the decision the plan asks to be recorded. Its
+  caller is `cpu_backend/tests/accumulate.rs`, inside the same component, so a `cpu_backend/mod.rs`
+  entry point would cross no boundary; and the counter is a private field of `accumulate`, so
+  no test module can read it.
+- **The register is not a `mod.rs`-only carve-out.** Two of the eight sit in implementation
+  files because they read private state, and one sits in a subcomponent's `mod.rs`. The rule is
+  "registered, live, and documented", not "in a component's mod.rs" — the narrower rule would
+  have had to be weakened the moment it met `accumulate.rs`.
+
+Every doc comment on a registered item now names its caller by path, and the test reads the
+comment. `planner::translate`'s claimed "three of them, in two other components": it has two
+callers, `plan_text/tests.rs` and `planner/memory_estimation/tests.rs`.
+
+#### Steps 6-8: ten inline modules, not thirteen, and two renames
+
+`git grep -ln '#\[cfg(test)\]' -- peacockdb-core/src | xargs grep -ln 'mod tests {'` finds
+**ten**, not the plan's thirteen — task 2 moved and deleted the rest. Each `foo.rs` became
+`foo.rs` + `foo/tests.rs`: `executor/forwarder` (24 lines), `executor/row_range` (39),
+`plan/aggregate` (57), `plan/layout` (77), `plan/validate` (409), `plan_text/expr_text` (85),
+`planner/memory_estimation` (283), `planner/translator/expr` (262),
+`planner/translator/scan_mapping/parquet_meta` (170), `.../partition` (126). No import changed:
+a `foo/tests.rs` is still a child of `foo`, so `use super::*` resolves as before.
+
+`driver/mock.rs` → `driver/tests/mock.rs` and `driver/plans.rs` → `driver/tests/plans.rs`. This
+one is not free: `driver/index/tests.rs` and `driver/single_partition/tests.rs` drive the same
+mock backend from a sibling subcomponent, so the two modules are `pub(crate) mod` in
+`driver/tests/mod.rs` and those two files now say `super::super::tests::{mock,plans}`. Ten
+files under `driver/tests/` lost one `super::`.
+
+`TEST_DIRS` is `["tests", "ffi_tests", "gpu_tests"]` (step 5), before any module moves.
+
+#### Everything measured, on the final tree
+
+| Check | Result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core` (whole package) | **1037 passed, 0 failed, 2 ignored**, exit 0 — 20 test binaries |
+| `cargo test --features rust-only -p peacockdb-core --lib` | 435 passed, unchanged |
+| `cargo test … --test test_module_layout` | 16 passed |
+| `cargo build --features rust-only -p peacockdb-core`, cold | 0 warnings |
+| `cargo test --features rust-only -p peacockdb-core --no-run`, cold | 0 warnings, 20 executables |
+| `scripts/cargo-cudf.sh build -p peacockdb-core`, cold | 0 warnings |
+| `scripts/cargo-cudf.sh build -p peacockdb-core --features gpu`, cold | 0 warnings |
+| `sha256sum` over `testdata/goldens` | identical, 170 files — checked before and after the suite run |
+| `rustfmt --edition 2024 --check` on every file touched | clean |
+
+Suites ran with `PEACOCK_TESTDATA_DIR=/tmp/peacock-testdata-slice3`, slice 3's composed root;
+it still exists and still works. No device suite: nothing here touches a device path.
+
+#### Inventories — the one target whose leaf-name set legitimately grows
+
+| Shape | Result |
+|---|---|
+| `rust-only` | 1094 lines vs 1089. `compare-inventory.sh` → `DRIFTED`, and the whole diff is `test_module_layout` 11 → 16 |
+| `cudf` | 1162 vs 1157, the same five and nothing else |
+| `gpu` | 438 lines, **byte-identical** to `inv-gpu.txt` (hand `diff`; the tool still rejects `gpu`) |
+
+The five names task 12's arithmetic must subtract:
+`a_rung_gate_implies_its_module_name`, `a_test_module_is_named_for_its_rung`,
+`a_test_module_lives_in_its_own_file`, `a_test_only_path_carries_test`,
+`cfg_test_appears_only_on_a_test_module`.
+
+**No `--lib` case read as drift**, which is the thing this slice could most easily have broken:
+splitting `plan/validate.rs` moves 409 lines of cases from `plan::validate::tests::` to the
+same path under a different file, and the normaliser ignores it by design (slice 1, step 3).
+The baselines are unchanged on disk; the fresh inventories are in `/tmp` only.
+
+#### The ladder
+
+- Bare `pub` excluding `mod`: **290**, and **249 excluding `test_support`** — the production
+  number did not move, which is right: this slice moved test code and deleted one
+  `pub(crate)` fn.
+- `pub mod`: **16**, unchanged. `PUB_MODULES`: **9 entries**, unchanged.
+  `CROSS_COMPONENT_REACHES`: 1. `TEST_ONLY_ITEMS`: 8, new.
+- Visibility dump 639 → **640**: `translator::translate` out (−1), `pub(crate) mod mock` and
+  `pub(crate) mod plans` in (+2). Nothing else changed, verified by comparing the declaration
+  column against slice 1's `visibility.txt`.
+- `#[cfg(test)]` occurrences in `src/`: 50 → **46**: 25 test-module declarations, 8 registered
+  items, 6 gated `use` lines serving them, and 7 inside doc comments and prose.
+
+#### Documentation the change falsified, fixed here
+
+- `llm-wiki/coding-style.md`: the carve-out bullet said a test-only entry point may sit in a
+  component's `mod.rs` "and nowhere else in `src/`", and that its doc comment "is the only
+  register there is". Both are now false — two registered items are private-state readers in
+  implementation files, and `TEST_ONLY_ITEMS` is a register that checks the comment. Rewritten
+  to state the two cases and name the register.
+- `llm-wiki/build-test.md` line 39, the module-layout row: N was 11 and is 16, and the row
+  named two registers where there are three. The five new rules are named in one sentence.
+  Task 12 still owns the page's arithmetic.
+- `llm-wiki/architecture.md` needed nothing: its one mention of `partitioned.rs` is about what
+  the file owns, which did not change.
+
+#### For the slices after this one
+
+- **`partitioned/tests.rs` holds no `#[test]`.** It is a test module in the rung sense — gated,
+  named, and in a `test` path — whose whole content is an inherent `impl`. A slice that assumes
+  a `tests.rs` contains cases will mis-count it.
+- **`driver/tests/{mock,plans}.rs` are `pub(crate) mod`**, unlike every other module under a
+  `tests/` directory. Two subcomponent test modules depend on that; demoting them is an
+  `E0603` on four lines.
+- **The rung rules have never been satisfied by a real `ffi_tests` or `gpu_tests` module** —
+  they have only been watched red on a renamed `tests`. Task 5 is the first slice that makes
+  one pass for a real reason.
+- `compare-inventory.sh` still rejects `gpu`; unchanged from slices 2 and 3.
+- `planner/translator/expr.rs:176` fails `rustfmt --check` and did so at HEAD too — the
+  installed rustfmt disagrees with the one the line was written under. Left alone.

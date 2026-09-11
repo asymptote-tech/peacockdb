@@ -530,8 +530,8 @@ fn lex_ordering(keys: &[ColumnOrder], input: &ArrowSchema) -> Result<LexOrdering
 }
 
 /// One of this engine's expressions in DataFusion's vocabulary. `#[cfg(test)]`: the only
-/// caller outside this subcomponent is a test in `plan`, which reaches it through
-/// `executor`'s own entry point.
+/// caller outside this subcomponent is a test in `plan`, and it arrives through
+/// `executor/mod.rs`, which cannot name `expr_physical` either.
 #[cfg(test)]
 pub(crate) fn physical_expr(
     expr: &crate::plan::Expr,

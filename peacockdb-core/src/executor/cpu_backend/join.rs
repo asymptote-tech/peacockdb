@@ -172,8 +172,9 @@ impl CpuJoin {
     }
 
     /// Whether this join keeps probe keys and answers at done, rather than being one call
-    /// and nothing else. Read by the test that holds the two readers of that rule to one
-    /// answer; the rule itself is `JoinCapability::answers_in_one_call`.
+    /// and nothing else. Read by `wire/tests.rs`, which holds the two readers of that rule
+    /// to one answer; the rule itself is `JoinCapability::answers_in_one_call`. `calls` is
+    /// private to this module, so no test module can answer it instead.
     #[cfg(test)]
     pub(crate) fn makes_a_finish_pass(&self) -> bool {
         self.calls.finish.is_some()

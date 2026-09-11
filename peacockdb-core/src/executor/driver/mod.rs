@@ -13,10 +13,6 @@ mod scheduler;
 mod single_partition;
 
 #[cfg(test)]
-mod mock;
-#[cfg(test)]
-mod plans;
-#[cfg(test)]
 mod tests;
 
 use crate::executor::{Backend, PlanIndex, RunError, RunReport};

@@ -374,9 +374,9 @@ pub enum Forwarder {
 /// One of this engine's expressions back in DataFusion's own vocabulary, which is what the
 /// CPU backend hands its operators.
 ///
-/// `#[cfg(test)]` because its only caller outside `cpu_backend` is a test in `plan`, and a
-/// test in another component cannot reach an implementation module. Without the cfg a plain
-/// build reports it dead.
+/// `#[cfg(test)]` because its only caller is `plan/tests/aggregate.rs`, and a test in
+/// another component cannot reach an implementation module. Without the cfg a plain build
+/// reports it dead.
 #[cfg(test)]
 pub(crate) fn physical_expr(
     expr: &crate::plan::Expr,

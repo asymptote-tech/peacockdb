@@ -25,6 +25,9 @@ use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::check_canonical_form;
 
+#[cfg(test)]
+mod tests;
+
 /// A step neither moves a batch nor finalizes a lane only if the schedule is wrong, so a
 /// run that does not end is a bug here rather than a query that is merely large.
 const DEFAULT_MAX_STEPS: usize = 1_000_000;
@@ -611,26 +614,6 @@ impl<'a, B: Backend> Driver<'a, B> {
             })?;
         self.record_consumed(node, slot, lane, batch.rows());
         Ok(batch)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn hops(&self) -> (usize, usize) {
-        self.acct.hops()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn release_all(&mut self) -> Result<(), StepError> {
-        self.release_in_flight()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn queue_len(&self, node: usize, lane: usize) -> usize {
-        self.states[node].out_queues[lane].len()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn last_call(&self) -> Option<CallKind> {
-        self.trace.last().map(|event| event.call)
     }
 
     fn queued(&self, node: usize) -> usize {

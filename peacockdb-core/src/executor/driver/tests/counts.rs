@@ -5,8 +5,8 @@
 //! An equality on every run, with no exception keyed on node kind — the two that once
 //! looked like exceptions were measured and are not, and each is pinned below.
 
-use super::super::mock::{AccRule, EmitRule, Script, spec};
-use super::super::plans::*;
+use super::mock::{AccRule, EmitRule, Script, spec};
+use super::plans::*;
 use super::*;
 
 /// Node numbering is pre-order, so the root is 0 and a chain descends from it.

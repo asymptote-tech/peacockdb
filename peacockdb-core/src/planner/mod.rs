@@ -118,21 +118,22 @@ pub fn can_be_null(node: &dyn GpuNode) -> Vec<bool> {
 /// A DataFusion physical plan as a node tree, without the pipeline around it: no
 /// validation, no null analysis and no memory model.
 ///
-/// `#[cfg(test)]` because only tests want a tree without the pipeline — three of them, in
-/// two other components. They are the reason this exists rather than `Translator` being
-/// reachable: a subcomponent is the parent's alone, and a test in `plan_text` is not the
-/// parent.
+/// `#[cfg(test)]` because only tests want a tree without the pipeline: `plan_text/tests.rs`
+/// and `planner/memory_estimation/tests.rs`. They are the reason this exists rather than
+/// `Translator` being reachable: a subcomponent is the parent's alone, and a test in
+/// `plan_text` is not the parent.
 #[cfg(test)]
 pub(crate) fn translate(
     target_partitions: usize,
     batching: Batching,
     plan: &Arc<dyn ExecutionPlan>,
 ) -> Result<Box<dyn GpuNode>, PlanError> {
-    translator::translate(target_partitions, batching, plan)
+    translator::Translator::new(target_partitions, batching).translate(plan)
 }
 
 /// One DataFusion physical expression in this engine's own vocabulary. `#[cfg(test)]` for
-/// the same reason as [`translate`]: its only caller outside the translator is a test.
+/// the same reason as [`translate`]: its one caller is
+/// `executor/cpu_backend/expr_physical/tests.rs`, a test in another component.
 #[cfg(test)]
 pub(crate) fn translate_expr(
     expr: &Arc<dyn PhysicalExpr>,

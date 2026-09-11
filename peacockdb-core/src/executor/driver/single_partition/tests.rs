@@ -5,8 +5,8 @@
 use std::sync::atomic::Ordering;
 
 use super::super::accounting::ResidentAccountant;
-use super::super::mock::{JoinRule, Mock, Script, spec};
-use super::super::plans;
+use super::super::tests::mock::{JoinRule, Mock, Script, spec};
+use super::super::tests::plans;
 use super::*;
 use crate::executor::Batch;
 
@@ -39,7 +39,7 @@ fn batch(
     bytes: usize,
     acct: &mut ResidentAccountant,
 ) -> Held<<Mock as Backend>::Batch> {
-    let held = Held::of(super::super::mock::MockBatch { rows, bytes });
+    let held = Held::of(super::super::tests::mock::MockBatch { rows, bytes });
     acct.hold(held.bytes);
     held
 }
