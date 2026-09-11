@@ -345,6 +345,14 @@ execution suite — not just the golden/meta tier. Naming a tier takes `--test`.
 been mis-transcribed at least once; see the "refactor is verified with a subset" rule
 below.
 
+**A third feature, `test-support`, is never passed by hand.** It gates `src/test_support/`,
+the shared harness — the testdata root, the modes, the golden-text reader, the link-time
+registry, the result comparators — which the crate's unit tests reach as
+`crate::test_support::…` and the seven `tests/*.rs` binaries as `peacockdb_core::test_support::…`.
+The crate's dev-dependency on itself turns it on, so `cargo test` in every shape sees the module
+and `cargo build` cannot name it; no CI step and no script passes the flag. `tests/common/mod.rs`
+keeps only the corpus harness and re-exports the rest from it.
+
 ## Local build workflows and caches
 
 One cargo target dir per workflow — this is what prevents cache thrashing (feature flags
