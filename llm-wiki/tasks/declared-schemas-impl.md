@@ -907,6 +907,29 @@ One row per (node kind, call): declared or not; measured or not; and if measured
 carrying a named `bug_` test. **Declared and never measured is the row that matters** — it is a claim
 nothing checked, and without this table it is indistinguishable from a checked one.
 
+- [ ] **Step 1b: Open the `bug_` section in `build-test.md`**
+
+This task writes the chain's first `bug_` tests, so it builds the table they go in. Under
+`## Test categories`, below the categories table:
+
+```markdown
+### Known-wrong behaviour
+
+`bug_` tests, one per (divergence class, node kind), each asserting what the engine does wrong today
+and each deleted by the change that fixes it (`coding-style.md`, "Building around a bug"). **Not part
+of the grand total above.** Every row there counts coverage; these count defects, and summing the two
+would make the number rise when a bug is found.
+
+**Total: N.**
+
+| Test | Asserts | Ticket | Runs |
+|---|---|---|---|
+| `bug_a_declared_utf8view_is_exported_as_utf8` | a declared `Utf8View` is exported `Utf8` | #183 | shad-gpu |
+```
+
+Two properties to keep as it grows: the ticket column is what makes it a worklist rather than a list
+of curiosities, and a row that survives its ticket closing means the fix did not do what it claimed.
+
 - [ ] **Step 2: Record the runtime**
 
 cuDF 25.02, named in the table. #94 is version-specific by its own text, and on a version bump a

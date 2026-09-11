@@ -17,6 +17,18 @@ instead of an abort, and leaves behind a statement of what it can and cannot dri
 schemas and measures no types** — that is [`declared-schemas-derived.md`](declared-schemas-derived.md),
 which cannot be written against a harness that refuses its plans.
 
+## This task is conditional
+
+It sits behind [`sink-divergence-survey.md`](sink-divergence-survey.md) and
+[`declared-schemas.md`](declared-schemas.md), and **the survey may shrink it to nothing.** If every
+divergence class the corpus produces already surfaces at the sink, a harness that can drive
+intermediate calls buys little, and the `bug_` tests above are worth more than the teaching.
+
+So the first thing this task does is read `reports/sink-divergence.md` and say, in one paragraph,
+which of the shapes below are worth teaching given what the survey found. **The human decides whether
+it proceeds**, on that paragraph. A task that re-argues its own justification after the evidence
+arrives is cheaper than one that assumes it.
+
 ## Why this is its own task
 
 Three tasks were planned against a single sighting at the sink and each was planned wrong. The reason
@@ -29,33 +41,69 @@ So the harness is the shared blocker, and it is bought once.
 
 ## What it refuses today, and which kind each is
 
-**Harness gaps — shapes it was never taught.** These are not engine limitations; the device runs them
-under the real driver every day.
+**The list is a grep, not a reading.** Build it with
 
-| site | what it does | what it should do |
+```bash
+grep -n 'panic!\|assert!\|assert_eq!\|unreachable!' <the walk>
+```
+
+— 46 sites today, ten of which are refusals rather than ordinary assertions — and classify every one.
+A table assembled by reading is how the first draft of this spec listed six of ten.
+
+**The walk's own messages classify themselves**, which is the discriminator to use. A message ending
+*"and no shape here plans one"* or *"none is planned"* says the queries in this file do not produce
+that shape: a **harness gap**. A message citing a ticket says the engine cannot do it: an **engine
+limit**.
+
+### Harness gaps — shapes it was never taught
+
+The device runs these under the real driver every day.
+
+| site | what it refuses | what it should do |
 |---|---|---|
-| `resolve:220` | panics on `Input::AccumulatedKeys` | resolve it like any other input |
-| `make:289` | panics on a `Call::bare` | drive a call with no seq |
-| `resolve` | panics on `Input::RowRange` | supply the range the call's pattern implies |
-| `Walk::join:422` | asserts **every** join call is `PerProbeBatch` | drive `AtDone` join calls — the finish pass |
-| `Walk::join:440` | asserts `probe_lane.len() == 1` | drive a probe of several batches, which is what any tp4 join has |
-| `Walk::unload:460` | asserts `row_interval().is_none()` | drive an export with a row range |
+| `:221` | `Input::AccumulatedKeys`, `RowGroups`, `RowRange` — *"not a handle the walk holds"* | resolve each like any other input |
+| `:230` | more than one handle where it expects one | take the set the call names |
+| `:290` | a `Call::bare` — *"takes runtime bounds rather than a seq, and no shape here plans one"* | drive a call with no seq |
+| `:309` | a scan's recipe of more than one call | drive it; `declared-schemas` declares per call, so this stops being true |
+| `:379` | a recipe with nothing at `AtDone` — *"a streaming limit is the shape that reaches here, and none is planned"* | drive a streaming limit |
+| `:466` | a sink's recipe of more than one call | same reason as `:309` |
+| `:460` | an export with a row range — *"no shape here plans one"* | supply the range the pattern implies |
+| `:350` | a repartition where another kind appears | say which kind, and drive it |
 
-**A refusal treated as a crash.** `Session::execute:154` asserts `rc == 0`, so a plan the device
-declines aborts the walk. Several known refusals — a cast to a non-fixed-width target, a group key
-the shuffle hasher will not take — are then unreachable to any test that wants to *observe* them.
-Record the code and which call returned it, and let the walk continue or stop deliberately. A
-refusal is an outcome, not an accident.
+### Engine limits — refusals that are real, and get a `bug_` test
 
-**Genuine engine limitations, which stay refusals.** `driven()` declines Left and Full joins, cross
-and nested-loop joins, and the pad projections, because [#175](../tickets.md#t175) and
-[#152](../tickets.md#t152) mean the device cannot run them yet. **Do not teach the harness to drive
-those.** They are refused for a reason that lives outside this file, and a harness that pretends
-otherwise turns a known engine gap into a confusing test failure. What this task owes them is that
-the refusal says *which ticket*, so the next reader does not re-derive it.
+These are not harness gaps. The production code cannot drive the recipe, and the walk is telling the
+truth about the engine.
 
-Telling the two apart is the judgement this task exists to make, and the deliverable below is where
-the judgement is written down.
+| site | what it refuses | ticket |
+|---|---|---|
+| `:422` | a join whose calls are not all `PerProbeBatch` — *"a finish pass accumulates probe keys across batches"* | #136 |
+| `:441` | a probe of more than one batch — *"the call consumes the build handle with no ABI symbol to copy it"* | [#152](../tickets.md#t152) |
+| `driven()` | Left and Full joins, cross and nested-loop joins, the pad projections | [#175](../tickets.md#t175), [#152](../tickets.md#t152) |
+
+**Do not teach the harness to drive these.** But do not leave them as a bare `assert!` either:
+**each becomes a `bug_` test**, asserting that the engine refuses this shape, with its ticket named in
+a comment above it. `coding-style.md`'s rule applies exactly — the refusal is known-wrong production
+behaviour, and an assertion buried in a harness is building around it. A `bug_` test makes it
+greppable, makes "which shapes can this engine not run" a search rather than a memory, and goes red
+the day `refcounted-tables` closes #152 — which is the signal to delete it.
+
+```rust
+/// A streamed probe of more than one batch consumes the build handle and there is no ABI
+/// symbol to copy it, so the second call has nothing to join against.
+/// [#152](../../../../llm-wiki/tickets.md#t152) — delete this with the fix.
+#[test]
+fn bug_a_join_refuses_a_second_probe_batch() { … }
+```
+
+**A refusal treated as a crash.** `Session::execute` asserts `rc == 0`, so a plan the device declines
+aborts the walk rather than reporting. Several known refusals — a cast to a non-fixed-width target, a
+group key the shuffle hasher will not take — are unreachable to any test that wants to *observe* them.
+Return the code and the call that produced it. **Locate this site first**: it was named from a review
+and is not in the walk file itself.
+
+Telling the two kinds apart is the judgement this task exists to make, and the reach table below is
+where the judgement is written down.
 
 ## The work
 
@@ -91,8 +139,11 @@ table that drifts.
 
 ### 4. Tests
 
-- **each newly taught shape, driven** — one test per row of the first table, each naming a query that
-  produces that shape. A shape taught with no query reaching it is not taught.
+- **each newly taught shape, driven** — one test per row of the harness-gap table, each naming a query
+  that produces that shape. A shape taught with no query reaching it is not taught.
+- **each engine limit, as a `bug_` test** — one per row of the second table, asserting the refusal and
+  naming its ticket. These are the tests that outlive this task: they are the record of what the
+  engine cannot run, and each dies with its own fix rather than all at once.
 - **a refused plan reports its code and its call** — asserted on one of the four known refusals, so
   the mechanism is proved by something that actually refuses rather than by a fixture.
 - **the reach table matches the kinds the walk drives**, both directions, which is the existing
@@ -105,8 +156,13 @@ table that drifts.
 ## Restriction
 
 **No schemas.** This task declares nothing, adds no field to `Call`, and asserts nothing about types
-— that is the next task, and bundling them is how a harness change and a measurement change become
-one diff nobody can review.
+— that is `declared-schemas`, and bundling them is how a harness change and a measurement change
+become one diff nobody can review.
+
+**No engine limit is lifted.** A `bug_` test records a refusal; it never removes one. If teaching a
+shape turns out to need the engine to gain a capability, that is a different task — and it is
+probably [`refcounted-tables.md`](refcounted-tables.md), which closes #152 and would delete two of
+these tests on its own.
 
 **No production code.** Everything here is the walk, `Session`, and the reach table. If driving a
 shape requires a production change, that is the finding: stop and report it, because it means the

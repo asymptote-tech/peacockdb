@@ -258,6 +258,21 @@ a test per node would bury one bug under dozens. The class is what the test name
 **Never a shared table of expected divergences.** A table is a whitelist, and a whitelist is what let
 a `Date64` arm ship with no behaviour at all.
 
+### `bug_` tests get their own section in `build-test.md`
+
+This is the first task in the chain that writes any, so it is the one that makes them findable.
+`build-test.md`'s Test categories section gains a table of its own, below the categories table: one
+row per `bug_` test — the test, what wrong behaviour it asserts, its ticket, and where it runs.
+
+**It is counted separately and excluded from the grand total, and the page says why.** Every other
+row counts coverage. A `bug_` test counts a defect, and adding it to a coverage number means the
+number goes *up* when a bug is found — which is the reading the number exists to prevent. Its own
+total, stated beside the grand total, with one sentence saying the two measure opposite things.
+
+That table is also the answer to "which known-wrong behaviours does this engine still have", which is
+a question nothing in the repo answers today. It shrinks as fixes land, and a row that cannot be
+deleted when its ticket closes is a fix that did not do what it claimed.
+
 A divergence with no ticket gets one filed. A ticket whose text the catalog contradicts — #187 is
 framed as two engines disagreeing when it is a missing argument — gets corrected here, because this
 is the first evidence anyone has had.
