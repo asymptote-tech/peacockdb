@@ -166,16 +166,6 @@ impl CpuJoin {
         }
     }
 
-    /// Whether this join keeps probe keys and answers at done, rather than being one call
-    /// and nothing else. Called by `executor/cpu_backend/mod.rs`, which carries the
-    /// question out to `wire/tests.rs` — that test holds the two readers of the rule to
-    /// one answer, and the rule itself is `JoinCapability::answers_in_one_call`. `calls`
-    /// is private to this module, so no test module can answer it instead.
-    #[cfg(test)]
-    pub(crate) fn has_finish_pass(&self) -> bool {
-        self.calls.finish.is_some()
-    }
-
     /// This lane's build side finished with no batch, which a small table scattered over
     /// many lanes produces routinely. What it owes is the join type's answer.
     pub(crate) fn without_build(self) -> Result<(), BackendError> {
@@ -461,3 +451,6 @@ fn field_at(schema: &ArrowSchema, ordinal: u32) -> Result<&Arc<Field>, PlanError
         ))
     })
 }
+
+#[cfg(test)]
+mod tests;

@@ -2426,3 +2426,95 @@ and the second-case sentence from `coding-style.md`.
 
 The two lists compared: no overlap. The analyst's `build-test.md` finding is applied (`15655730`);
 its `end_to_end.rs` finding and the reviewer's carve-out finding go to one developer.
+
+### 2026-09-11 — completeness findings addressed
+
+Both findings applied at `2461ef71`, local runs (verda unreachable). Not committed. Nothing under
+`gpu_backend/` or `wire/gpu_tests/` changed, so no device run; the `gpu` shape was rebuilt to prove
+`cpu_backend` still compiles there.
+
+#### Finding A (reviewer) — the two private-field readers into child `tests` modules
+
+`accumulate.rs` and `join.rs` each gained `#[cfg(test)] mod tests;` at the foot, the shape
+`expr_physical.rs` has; `accumulate/tests.rs` holds `impl AggregateBatches { pub(crate) fn
+compactions }` and `join/tests.rs` holds `impl CpuJoin { pub(crate) fn has_finish_pass }`, each
+13 lines, the shape of `partitioned/tests.rs`. The callers did not move: `cpu_backend/tests/
+accumulate.rs::compactions_over` and the `cpu_backend/mod.rs::has_finish_pass` entry point (still
+registered, still carried by `executor/mod.rs` to `wire/tests.rs`). `TEST_ONLY_ITEMS` 10 → **8**,
+every entry in a `mod.rs`; its doc comment says one shape and stays at ten lines.
+`coding-style.md`'s bullet now says "one case only" and ends with where a private-field reader goes
+instead.
+
+Done in the dispatch's order, each step run:
+
+| Step | `cfg_test_appears_only_on_a_test_module` |
+|---|---|
+| entries deleted, items still in place | red, forward check: ``accumulate.rs:317: #[cfg(test)] on `pub(crate) fn compactions(&self) -> usize` — test code in a production file`` and the same for `join.rs:174` (15 passed, 1 failed) |
+| items moved | 16 passed |
+| one entry put back after the move (probe, reverted) | red, reverse check: ``join.rs: `has_finish_pass` is registered as test-only and no longer carries a `#[cfg(test)]`; drop the entry`` |
+
+**The layout rules accept a `tests.rs` with an `impl` and no `#[test]`**: none of the five reads a
+test module's body — `a_test_module_is_named_for_its_rung` and `a_rung_gate_implies_its_module_name`
+read the declaration and its gate, `a_test_module_lives_in_its_own_file` reads only whether the
+body is inline, `a_test_only_path_carries_test` needs the path to say `test`, and the register
+check reads gates outside test modules. Nor does `walls.rs` see a subcomponent: `accumulate/` and
+`join/` have no `mod.rs`. Slice 4 recorded the same for `partitioned/tests.rs`.
+
+#### Finding B (analyst) — `end_to_end.rs` split by subject
+
+`src/tests/end_to_end.rs` 1052 → **475**, with three children declared `mod` (no gate: `lib.rs`
+gates the subtree) and no `mod.rs`:
+
+- `end_to_end/limits.rs` (114): "what a limit costs, in calls rather than in rows" — the one case.
+- `end_to_end/dimensions.rs` (181): "that each dimension does something" — the injected-calls case
+  and the degenerate-hash refusal.
+- `end_to_end/accounting.rs` (306): "the accounting, on a real plan" — the budget boundary, the
+  model against the measured calls, `PlannedQuery`/`boundaries_under`, and the injected-shape
+  boundary. Both `#[ignore = "#182 …"]` are here, messages byte-identical to before.
+
+What stays in `end_to_end.rs` is the harness and what only it can read: `Coverage`, the oracle
+comparison, the two macros, the seventeen query cases, the two-key group by, and the two `#[test]`
+self-checks that read `sorted_rows`/`columns_of` and `INJECTED`.
+
+**Why `end_to_end.rs` beside `end_to_end/`, not `end_to_end/mod.rs`**: `walls.rs`'s
+`subcomponent_paths()` reads any directory with a `mod.rs` not named for a rung as a subcomponent,
+so `tests/end_to_end/mod.rs` would put a wall where there is none; and `coding-style.md` exempts
+`mod.rs` from the length rule as a facade of declarations, which a file holding the harness is
+not — renaming the overrun would have hidden it rather than split it. The children reach the
+injector as `crate::tests::injection`, the idiom `cpu_backend/tests/accumulate.rs` uses inside its
+own component; the two function-local `use super::injection` lines became the same.
+
+Text moved verbatim apart from: the relative `llm-wiki` links, which were `../../` since slice
+6's move and are now the right depth from each file (`../../../` and `../../../../`); two "above"
+cross-references that now point at another file, reworded; the duplicated "Eight `Executor`
+impls" paragraph, kept once as `accounting.rs`'s module doc; and rustfmt's ordering of one `use`.
+`tickets.md` #182 now names `end_to_end/accounting.rs` for `boundary()`; `build-test.md`'s End to
+end row names the three children. Nothing under `tests/` parses either page.
+
+`--list` leaf sets before and after, `sed 's/.*:://'`: identical, 26; the six moved cases now
+list as `tests::end_to_end::{accounting,dimensions,limits}::<leaf>`.
+
+The first run of the split tier failed 22 of 24 in 0.00s — `register the tables: IoError(…
+NotFound)` at `end_to_end.rs:73`, including the untouched macro cases — because I had run it
+without `PEACOCK_TESTDATA_DIR`; with it, 24 passed 2 ignored. Not a code finding.
+
+#### Everything measured, on the final tree
+
+| Check | Result |
+|---|---|
+| `PEACOCK_TESTDATA_DIR=/tmp/peacock-testdata-slice3 cargo test --features rust-only -p peacockdb-core -- --test-threads=2` | **1035 passed, 0 failed, 2 ignored**, rc 0, `warning` 0 times; lib 514, ci_coverage 8, corpus_goldens 20, cost_model 3, cpu_corpus 448, golden_format 26, gpu_corpus 0, module_layout 16 |
+| `--test test_module_layout` | 16 passed, register at 8, the red-watch above |
+| `--lib -- tests::end_to_end` | 24 passed, 2 ignored (151 s) |
+| `--lib -- cpu_backend::tests` | 65 passed (`compactions_over`'s caller among them); `--lib -- wire::tests` 21 passed |
+| `cargo build --features rust-only -p peacockdb-core` | 0 warnings |
+| `CUDF_ROOT=…/rapids-cuda-12.2 scripts/cargo-cudf.sh build -p peacockdb-core --features gpu` | rc 0, 0 warnings; `test --lib --features gpu --no-run` rc 0, 0 warnings |
+| `sha256sum` over `testdata/goldens/` vs `goldens.sha256`, as sorted sets | empty diff, 170 files, before the suite and after |
+| `scripts/case-inventory.sh rust-only` vs `inv-rust-only.txt`, leaf names | 1037 vs 1034; lost 3 = the murmur gate's CPU-runnable cases (device rung since slice 9); gained 6 = slice 4's five layout cases + slice 10's `each_rung_has_its_ci_line_and_the_cli_is_built`. Nothing else |
+| `rustfmt --edition 2024 --check` | `accumulate.rs`, `accumulate/tests.rs`, `join.rs`, `join/tests.rs`, `test_code.rs`, `end_to_end.rs`, `end_to_end/{accounting,dimensions,limits}.rs`: clean |
+| `wc -l`, files the length rule covers | `accumulate.rs` 414, `join.rs` 456, `test_code.rs` 604, `end_to_end.rs` 475, `accounting.rs` 306, `dimensions.rs` 181, `limits.rs` 114, the two new `tests.rs` 13 each |
+| `git grep -n '#\[cfg(test)\]' -- peacockdb-core/src` | 53 lines, as before, differently composed: **29** `mod tests`/`mod schema_tests` declarations (27 + the two new), **8** registered `TEST_ONLY_ITEMS` (all in a `mod.rs`), 6 gated `use` lines, 10 inside doc comments and prose. The item-level sites `accumulate.rs:317` and `join.rs:174` are gone |
+| ladders | `PUB_MODULES` 0, `CROSS_COMPONENT_REACHES` 0, `TEST_ONLY_ITEMS` **8**; bare `pub` unchanged (two `pub(crate)` methods moved, no `pub` added) |
+
+Scratch: `/tmp/cp/` only. `git status` shows seven edits (`coding-style.md`, `build-test.md`,
+`tickets.md`, `accumulate.rs`, `join.rs`, `end_to_end.rs`, `test_code.rs`) and the three new
+directories `cpu_backend/accumulate/`, `cpu_backend/join/`, `src/tests/end_to_end/`.

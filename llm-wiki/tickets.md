@@ -347,7 +347,7 @@ against a 2,679-byte join. Of the two queries carrying their largest at a loader
 the 1.63x its goldens predict) while its budget is peak+1 both times: `limit=28` means the
 modelled megabytes are never the transient that binds.
 
-A second thing falls out: `boundary()` in `src/tests/end_to_end.rs` searches upward from
+A second thing falls out: `boundary()` in `src/tests/end_to_end/accounting.rs` searches upward from
 the observed peak, so a query whose trip is below it reports an untested floor — the trip assert
 catches that rather than passing. Answering this needs a downward search, a different claim.
 

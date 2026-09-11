@@ -311,14 +311,6 @@ pub(crate) struct AggregateBatches {
 }
 
 impl AggregateBatches {
-    /// How many times the accumulation compacted, which is what the doubling threshold is
-    /// asserted on. Only `executor/cpu_backend/tests/accumulate.rs` asks, and it cannot
-    /// count them itself: the counter is a private field of this module.
-    #[cfg(test)]
-    pub(crate) fn compactions(&self) -> usize {
-        self.compactions
-    }
-
     pub(crate) fn held_bytes(&self) -> usize {
         self.state
             .as_ref()
@@ -417,3 +409,6 @@ fn declared(
         .map(|batch| declared_as(batch, schema))
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

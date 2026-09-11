@@ -23,9 +23,9 @@ const RUNGS: &[(&str, &str)] = &[
 
 /// An item that keeps a `#[cfg(test)]` of its own because no test module can hold it.
 ///
-/// Two shapes: a cross-component entry point sits in a component's `mod.rs` because it names
-/// what its component owns while its caller is a test in another; a private-state reader sits
-/// in the file that declares the field, since only that module and its children can see it.
+/// One shape: a cross-component entry point in a component's `mod.rs`, naming what its
+/// component owns for a test in another. A reader of a private field is not one — it goes
+/// into a child `tests` module of the declaring file as an inherent `impl` (`join/tests.rs`).
 ///
 /// `called_by` is verified both ways, like `PubModule::forced_by`: every file named must
 /// exist and must still call the item, and the doc comment must name every one of them. A
@@ -38,16 +38,6 @@ struct TestOnlyItem {
 }
 
 const TEST_ONLY_ITEMS: &[TestOnlyItem] = &[
-    TestOnlyItem {
-        file: "executor/cpu_backend/accumulate.rs",
-        item: "compactions",
-        called_by: &["executor/cpu_backend/tests/accumulate.rs"],
-    },
-    TestOnlyItem {
-        file: "executor/cpu_backend/join.rs",
-        item: "has_finish_pass",
-        called_by: &["executor/cpu_backend/mod.rs"],
-    },
     TestOnlyItem {
         file: "executor/cpu_backend/mod.rs",
         item: "has_finish_pass",
