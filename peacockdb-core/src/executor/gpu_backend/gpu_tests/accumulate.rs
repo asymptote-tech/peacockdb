@@ -5,8 +5,8 @@
 
 use super::*;
 
-use crate::executor::LaneEvent;
 use super::super::{GpuAccumulator, GpuPartitionAccumulator};
+use crate::executor::LaneEvent;
 use crate::plan::AggFunc;
 use crate::plan::AggStateColumns;
 use crate::plan::RowInterval;

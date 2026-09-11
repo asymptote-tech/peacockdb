@@ -68,10 +68,7 @@
 
 ## Names
 
-Kernighan's rules, written down after the fact rather than followed from the start:
-`test_inc2_conformance` is named after an increment, which the second bullet forbids, and
-renaming it would move the staging array, the exemption list and two pages — so it stands as
-the exception rather than as the example.
+Kernighan's rules, written down after the fact rather than followed from the start.
 
 - **Length is proportional to scope** (K&R §2.1). A loop index is `i`; a name crossing a
   module, a trait or the FFI earns words. Both halves bite: a paragraph-long name in a

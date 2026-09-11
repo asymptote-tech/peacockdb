@@ -1380,3 +1380,272 @@ Hosts at dispatch: **verda** unreachable (connection timed out, so local runs fo
 **shad-gpu** up, `llm-gpu0h200`, and the neighbour still holds 53 GiB of the 143.7 — the device
 run needs the card, so `[rmm] pool … could not be built` is the neighbour and goes to #178, not
 to a diagnosis. Cudf toolchain on this host: `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2`.
+
+### 2026-09-11 — slice 9 done: the device four → `gpu_tests`, and both scripts
+
+Plan task 9, steps 2-9 on the tree the dead dispatch left (`e1b45f2e`), plus its step 1 re-read
+and verified. Not committed. One file created, sixteen modified on top of that commit:
+
+- Created `scripts/lib/rung-args.sh` — `rung_args`, the one rule for what a staged rust binary
+  is run with on a GPU host, inlined into both runners' remote scripts.
+- Modified `scripts/build-test-shadgpu.sh`, `scripts/build-test.sh`, `scripts/cargo-cudf.sh`,
+  `peacockdb-core/src/executor/gpu_backend/{emit.rs, gpu_tests/{mod,accumulate,backend,contract,join}.rs}`,
+  `src/wire/gpu_tests/mod.rs` (rustfmt only, see below), `tests/test_ci_coverage.rs` (one doc
+  clause), `cpp/tests/gpu/test_cudf.cpp` (one comment path), `llm-wiki/{architecture,build-test,
+  coding-style,tickets}.md`.
+
+#### What the dead dispatch left, read against the plan
+
+The four targets are under `gpu_tests/` as the plan says — `test_gpu_recipe_walk` →
+`wire/gpu_tests/mod.rs`, `test_gpu_executors` and its five children plus `test_gpu_abi` →
+`executor/gpu_backend/gpu_tests/{mod,accumulate,backend,contract,exec,join,abi}.rs`,
+`test_inc2_conformance` → `executor/cpu_backend/gpu_tests/murmur_conformance.rs` — each declared
+`#[cfg(all(test, feature = "gpu"))] mod gpu_tests;`. Diffed against the old files with `git diff
+<old>:<path> <new>:<path>`: the moves are `peacockdb_core::` → `crate::`/`super::`, `common::` →
+`crate::test_support::`, the `#![cfg]`/`#[macro_use] mod common` header gone, the `#[path]`
+declarations gone, and in the murmur gate the seven per-item `#[cfg(not(feature = "rust-only"))]`
+gates dropped. The `include!` slice 8 flagged is gone: `gpu_tests/mod.rs` reads `use
+crate::tests::executor_cases::INPUT`, `contract.rs` reads `{CASES, Shape}`, and
+`executor_cases.rs` has its `//!` header. Nothing in it was unsalvageable; what it had not done
+was build, measure, or finish `build-test.sh`, which named the lib as `peacockdb-core:--lib` in
+every mode's list and then handed that to `cargo test --test --lib`.
+
+`gpu_backend/mod.rs` and its four subcomponents are `mod`; the five executor types
+(`GpuAccumulator`, `GpuPartitionAccumulator`, `GpuEmitter`, `GpuJoin`, `GpuProbingJoin`) are
+declared in `mod.rs` with their `impl`s left in the leaves — slice 8's shape, including
+`GpuAccumulator` as a `pub struct { state: accumulate::State }` over a `pub(crate) enum State`,
+which is what keeps the `private_interfaces` warning at zero. `LimitStream::seen` deleted on this
+side too (no caller; the build is 0 warnings without it).
+
+#### Step 2: the filter selects the device set and nothing else
+
+`scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu -- gpu_tests:: --list` →
+**55 tests**, every path `executor::cpu_backend::gpu_tests::murmur_conformance::` (10),
+`executor::gpu_backend::gpu_tests::{abi 4, accumulate 10, backend 2, contract 1, exec 12, join 6}`
+(35) or `wire::gpu_tests::` (10). The first attempt exited 127 — the cudf-shape binary needs
+`LD_LIBRARY_PATH` (`build-test.md`), and `--list` is a run — so the listing was taken the way
+`case-inventory.sh` takes it.
+
+#### Steps 3-4: the lib binary, staged and given its rung
+
+`scripts/lib/shadgpu-env.sh` (the dead dispatch's, kept): `stage_cargo_test_binary` and a new
+`stage_cargo_lib_binary` over one `stage_cargo_binary <name> <kind> <staged> <dir> <cargo args>`
+whose python matches `target.name` **and** `kind in target.kind` — the lib and its test binary
+share a name and a kind and only the latter has an `executable`. `--build` stages
+`cpp/install/rust-tests/{test_gpu_corpus, peacockdb_core_gpu_lib}` (1.17 GB unstripped),
+`--push-binaries` printed `deleting rust-tests/{test_inc2_conformance, test_gpu_recipe_walk,
+test_gpu_executors, test_gpu_abi}` on the host, so the mirror is exact.
+
+**The rung argument.** The dead dispatch had the right three-way rule inline in the shad-gpu
+gate — no filter: the lib gets `gpu_tests::`; filter set: an `--exact` list of the names `--list
+gpu_tests::` reports that contain the filter, since libtest ORs its filters and `PCK_TEST_FILTER`
+alone would have run CPU cases matching it on the device (`--list join` is 104 cases across the
+rungs, the intersection is 8). `build-test.sh` needed the same rule, so it is one function,
+`rung_args` in `scripts/lib/rung-args.sh`, and each runner's unquoted heredoc carries
+`$RUNG_ARGS_FN` (the file's text) and one line: `mapfile -t args < <(rung_args "\$t"
+<lib-name> <rung> <filter> [<env prefix>])`. An empty rung means a mode that runs its lib whole,
+which is what the cpu modes of `build-test.sh` pass. Exercised locally against the staged
+binaries before it went to the host: other binary/no filter → `['']`, other/`q6` → `[q6]`,
+lib/no filter → `[gpu_tests::]`, lib/`abi` → `[--exact, '', <4 abi names>]`, lib/`zzz` →
+`[--exact, '']` and the binary lists `0 tests` on it.
+
+`pipeline.yml` (the dead dispatch's, kept): the staging step defines `resolve <name> <kind>` and
+`stage <name> <path>`, stages `test_gpu_corpus` from the one-line `for t in` array and the lib as
+`peacockdb_core_gpu_lib`, both `--features gpu`; the remote loop sets `rung=gpu_tests::` for that
+one filename. CI has no `PCK_TEST_FILTER`, so the two-line form is right there and the guard
+(`running 0 tests`) stays unconditional. Checked mechanically: **YAML parses, 7 jobs; `bash -n`
+over all 29 rendered `run:` blocks clean**; and `resolve()` was cut out of the rendered staging
+step and run against real `--message-format=json` output — `peacockdb_core lib` names the lib
+test binary, `test_gpu_corpus test` names the corpus binary, `peacockdb_core test` names nothing.
+
+#### Steps 5-6: `build-test.sh`, and the two derived suites read by hand
+
+- The `GPUSET` heredoc is `peacockdb-core:test_gpu_corpus` alone; the murmur literal and the ten
+  lines above it are gone. **The lib is not in `gpu_runtime_targets()`**, against the plan's
+  wording: `test_ci_coverage::gpu_runtime_targets()` reads the heredoc and asserts every entry
+  matches an on-disk `--test` target, and the function is also the membership test
+  `rust_only_targets` runs per file, so a lib entry there would have been "the GPU-runtime set"
+  containing the rust-only lib. Each mode appends `lib_target` itself.
+- The entry is `peacockdb-core:<staged name>` like every other, and the staging loop maps that
+  name to `--lib` (`sel=(--lib); name=peacockdb_core; kind=lib`) with the kind-aware resolver.
+  The name is per shape — `peacockdb_core_gpu_lib`, `peacockdb_core_rust_only_lib`,
+  `peacockdb_core_lib` — so a `--run` after another mode's `--build` finds no binary rather
+  than the wrong one. `--gpu` builds with `CARGO_FEATURES="--features gpu"`, which the script
+  had never passed.
+- Derived suites, evaluated by extracting lines 254-370 with the mode variables preset:
+  `--gpu` → `test_gpu_corpus, peacockdb_core_gpu_lib` (2, `LIB_RUNG=gpu_tests::`);
+  `--rust-only` → `test_corpus_goldens, test_cost_model, test_cpu_corpus, test_golden_format,
+  peacockdb_core_rust_only_lib` (5); default → those four plus `peacockdb-ffi:test_ffi` and
+  `peacockdb_core_lib` (6). `needs_cmake_targets` yields `test_gpu_corpus` and `test_ffi`; minus
+  the GPU set, one. None empty; the guard stays.
+- The remote script rendered for `--gpu` and `--rust-only` (a copy with `ssh "$HOST" bash` →
+  `cat`, `--host dummy --run`) is `bash -n` clean and its loop line reads `mapfile -t args < <(rung_args
+  "$t" 'peacockdb_core_gpu_lib' 'gpu_tests::' q6\'s)`. The resolver was run for real once:
+  `cargo test --no-run --features rust-only -p peacockdb-core --lib --message-format=json |
+  python3 … peacockdb_core lib` → `target/debug/deps/peacockdb_core-4633673c43c91be2`.
+- **Unproven**: no remote ran `build-test.sh` (verda unreachable). The lib entry has never
+  executed under it in any mode.
+
+#### Step 7: on the device — four runs, one of them a red-watch
+
+Each phase its own foreground call under `timeout`. The first `--patch --run-detached` patched
+and then died on `ssh: Could not resolve hostname llm-gpu0h200.velkerr.ru: Temporary failure in
+name resolution` (rc 255, the link); `--run-detached` alone went through on the retry. No `[rmm]
+pool … could not be built`: every C++ binary reported its pool against **87.4 GiB free**, the
+neighbour notwithstanding.
+
+| Run | Script | Lib binary | Corpus | Result |
+|---|---|---|---|---|
+| 1 (`20260911T101059`) | the dead dispatch's inline rule | **55 passed, 519 filtered out, 9.47 s** | 8 passed, 5.38 s | exit 0, 5 C++ + 2 rust |
+| 2 (`…T101556`) | `rung_args` | 55 passed, 519 filtered out, 9.51 s | 8 passed | exit 0 |
+| 3 (`…T101829`), `PCK_RUN_CPP=0 PCK_TEST_FILTER=abi` | `rung_args` | **4 passed, 570 filtered out**, all four `gpu_backend::gpu_tests::abi::` | `running 0 tests`, no banner (filter set) | exit 0 |
+| red-watch (`…T101859`), a copy with `RUST_LIB_RUNG=nomatch_tests::` | `rung_args` | `running 0 tests`, 574 filtered out | 8 passed | **`!!! peacockdb_core_gpu_lib ran 0 tests … nothing was verified`, exit 1** |
+| 4 (`…T103603`), the final tree rebuilt, pushed and patched | `rung_args` | 55 passed, 519 filtered out, 9.20 s | 8 passed, 5.32 s | exit 0 |
+
+519 filtered out is the CPU rung (516) plus the FFI rung (3), which is the ladder read off the
+binary. Run 3 is the intersection: a filter that names 4 device cases and would name none of the
+CPU ones, on a binary holding all 574. The red-watch is the spec's backstop: the guard is armed
+for the lib's rung because the rung never travels as `PCK_TEST_FILTER`. The banner now prints
+the arguments the binary ran with rather than the filter, since for the lib they differ.
+
+"Roughly what the five staged binaries took" cannot be compared here — no log of the old five is
+on this host. What is measured: 55 cases in one process in 9.2 s, beside the corpus binary's 8
+in 5.3 s, each process paying its own RMM pool.
+
+#### Step 8: the wall, already down
+
+`PUB_MODULES` is `&[]`; `CROSS_COMPONENT_REACHES` 0; `TEST_ONLY_ITEMS` 10. `test_module_layout`
+**16 passed**. Red-watches on the final tree, each reverted:
+
+| Probe | What fired | What it printed |
+|---|---|---|
+| `mod gpu_backend;` → `pub mod gpu_backend;` in `executor/mod.rs` | `pub_mod_declares_a_component_and_nothing_else` | ``executor/mod.rs declares `pub mod gpu_backend;` `` (15 passed, 1 failed) |
+| `wire/mod.rs`'s `gpu_tests` gate → plain `#[cfg(test)]` | `a_test_module_is_named_for_its_rung` and `a_rung_gate_implies_its_module_name` | ``wire/mod.rs:28: `mod gpu_tests` is gated #[cfg(test)] and its rung requires #[cfg(all(test, feature = "gpu"))]`` (14 passed, 2 failed) |
+
+#### Inventories — the device set moved, and the three ungated cases with it
+
+Fresh files `/tmp/inv9-{rust-only,cudf,gpu}.txt`; baselines untouched. Leaf-name sets (last
+`::` segment) per shape against the baselines, as sets and multisets:
+
+| Shape | Lines | `--lib` | Leaves lost | Leaves gained | Duplicated leaves |
+|---|---|---|---|---|---|
+| `rust-only` | 1059 (1071 in slice 8) | 435 → 516, unchanged since slice 8 | **3**: `cpu_reference_2col_partition_ids_for_probe`, `pmod_handles_negative_hashes`, `step_i_comet_murmur3_public_api_compiles_and_runs` | slice 4's five | 3, unchanged |
+| `cudf` | 1071 (1138) | 435 → 519 | **48** = the 55 device leaves minus the 7 whose names the cpu tier shares | the same five | 10 → 3: the 7 shared names are no longer pairs here |
+| `gpu` | 577 (522) | 435 → 574 | none | 132 = the 84 of slices 5-8 plus 55, minus the 7 shared names already present | 3 → 10, **the cudf baseline's ten exactly** (7 cpu/gpu executor pairs, 3 driver pairs) |
+| union of three | 1092 distinct vs 1087 | | **none** | the same five | |
+
+The device set itself: the 55 leaves of `test_gpu_abi` + `test_gpu_executors` +
+`test_gpu_recipe_walk` + `test_inc2_conformance` in the cudf baseline **equal** the 55 leaves
+under `gpu_tests::` in the fresh `gpu` `--lib`, as sets. In the fresh `rust-only` and `cudf`
+inventories the only device leaves present are those 7 shared names, and each is the
+`cpu_backend::tests::` copy. The four `--test` summary blocks (`0 tests` under rust-only) are gone
+from both CPU inventories, which is the 12-line drop. `compare-inventory.sh` says `DRIFTED` for
+all three, as it must.
+
+**The coverage change.** The murmur gate's three cases without a device gate —
+`cpu_reference_2col_partition_ids_for_probe`, `pmod_handles_negative_hashes`,
+`step_i_comet_murmur3_public_api_compiles_and_runs` — ran on dataset-matrix under both CPU shapes
+until this slice. They are device-rung cases now, run on shad-gpu only: the whole-package
+rust-only count reads **1034 where slice 8 read 1037**, and that is them. The plan asked for the
+move whole and for this to be said; it is not a lost case (the union above has them), it is a
+case that changed host.
+
+#### Everything measured, on the final tree
+
+| Check | Result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core` (whole package, `--test-threads=2`) | **1034 passed, 0 failed, 2 ignored**, exit 0, 0 warnings, 8 result lines plus the doc-test line, `test_gpu_corpus` among them at 0 |
+| `… --lib` | 514 passed, 2 ignored |
+| `… --test test_module_layout` | 16 passed |
+| `… --test test_ci_coverage` | 7 passed |
+| `cargo build --features rust-only -p peacockdb-core`, cold (`cargo clean -p`) | 0 warnings |
+| `cargo test --features rust-only -p peacockdb-core --no-run`, cold | 0 warnings, 8 executables (12 in slice 8) |
+| `scripts/cargo-cudf.sh build -p peacockdb-core`, cold | 0 warnings |
+| `scripts/cargo-cudf.sh build -p peacockdb-core --features gpu`, cold | 0 warnings |
+| `scripts/cargo-cudf.sh test -p peacockdb-core --no-run`, cold | 0 warnings, 8 executables |
+| `scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run`, cold and again after rustfmt | 0 warnings |
+| `--lib --features gpu -- gpu_tests:: --list` | 55, all under `gpu_tests` paths |
+| `build-test-shadgpu.sh --build` (twice: before and after rustfmt) | 0 warnings, two binaries staged |
+| shad-gpu, final tree | 55 + 8 passed, exit 0 (table above) |
+| `sha256sum` over `testdata/goldens` | identical to the baseline, 170 files |
+| `pipeline.yml` | YAML parses (7 jobs), `bash -n` on 29 rendered `run:` blocks clean, `resolve()` run against real json |
+| `bash -n` on both scripts and on the rendered remote scripts (shad-gpu with and without a filter; `build-test.sh` `--gpu` and `--rust-only`) | clean |
+| `git grep '#\[cfg(test)\]' -- peacockdb-core/src`, summed | 53, unchanged |
+| `git grep -l '#\[test\]' -- peacockdb-core/src` outside a `test` path | 0 |
+| `rustfmt --edition 2024 --check` | `abi.rs`, `exec.rs`, `gpu_backend/{accumulate,backend,join}.rs`, `executor_cases.rs`, `cpu_backend/tests/contract.rs`, `ffi_tests/mod.rs` clean as they were; `gpu_tests/{accumulate,backend,contract,join}.rs` and `gpu_backend/gpu_tests/mod.rs`, `wire/gpu_tests/mod.rs` **formatted** (import order after `peacockdb_core::` → `crate::`; the old files were clean), `gpu_backend/emit.rs` formatted (one pre-existing hunk); the seven `mod.rs` clean against stub children |
+| `murmur_conformance.rs` | **left unformatted**: 11 hunks, 103 lines, all pre-existing in `test_inc2_conformance.rs` — a move, not a reformat |
+| `git grep` for the four old target names outside `llm-wiki/tasks`, `llm-wiki/archive`, `llm-wiki/reports` | no hits in code, scripts, workflows or the three wiki pages |
+
+Suites ran with `PEACOCK_TESTDATA_DIR=/tmp/peacock-testdata-slice3`. verda: connection timed
+out, so the CPU shapes ran here.
+
+#### The ladder — the `gpu_backend` wall, and the register at zero
+
+- Bare `pub` excluding `mod`: **265 → 242**, and **223 → 200 excluding `test_support`**.
+  Twenty-three down, the mirror of slice 8's eighteen plus five: eighteen `impl pub fn` →
+  `pub(crate)` (`accumulate.rs` 11, `emit.rs` 2, `join.rs` 5), four state structs (`Collapse`,
+  `SortedRuns`, `AggregateBatches`, `LimitStream`) → `pub(crate)`, and `seen` deleted. Also
+  `JoinCall` → `pub(crate)` and `GpuAccumulator` enum → struct, which move between rows rather
+  than off the count; the five executor types changed files without changing it.
+- `pub mod`: **11 → 7**. `PUB_MODULES`: **4 → 0**. `CROSS_COMPONENT_REACHES`: 0.
+  `TEST_ONLY_ITEMS`: 10.
+- Visibility dump 699 → **696**, `diff`ed against a dump of `7f358558`'s tree: exactly the items
+  above and nothing else.
+- **What still forces `pub`** on this side: `GpuSource`, `GpuExec`, `GpuExport`, `GpuAccumulator`,
+  `GpuPartitionAccumulator`, `GpuEmitter`, `GpuJoin`, `GpuProbingJoin` and the `pub fn`s on them
+  in `gpu_backend/mod.rs` — the associated types of `impl Backend for GpuBackend`, E0446 at
+  `pub(crate)`, as slices 6 and 8 found for the CPU side. Nothing outside the crate names them.
+
+#### Where a measurement contradicts the spec or plan
+
+- **The spec's "`pub mod` down from 15 to six" reads seven**: `lib.rs` declares `common`,
+  `executor`, `plan`, `plan_text`, `planner`, `wire` — the six — and `test_support`, which task 3
+  added after the spec was written. Every subcomponent `pub mod` is gone.
+- **Plan step 5, "`gpu_runtime_targets()` becomes `test_gpu_corpus` plus the lib entry"**: the
+  lib is appended per mode instead, for the two reasons under steps 5-6 (the coverage guard's
+  reader, and the function doubling as the rust-only membership test).
+- **Plan step 4 / the spec's runner section say nothing about a filter meeting the rung.** Both
+  runners forward `PCK_TEST_FILTER` to every binary, and libtest ORs filters, so the lib needed
+  the `--exact` intersection or a developer's filter would have turned the rung off. That is
+  `rung_args`, shared rather than written twice.
+- **The plan's "roughly what the five staged binaries took"** has no number to compare against on
+  this host; 9.2 s for 55 is what was measured.
+- **`build-test.md`'s cpp-build-2502 and gpu-tests bullets** described five staged targets and no
+  rung argument; rewritten from the scripts, not from the spec. The test table's `Runs`/`N`
+  columns and the headline arithmetic are task 12's, as slice 8 left them.
+
+#### Documentation the change falsified, fixed here
+
+- `llm-wiki/build-test.md`: the five test-table rows that linked the four old files now link
+  `cpu_backend/gpu_tests/murmur_conformance.rs`, `wire/gpu_tests/mod.rs`,
+  `gpu_backend/gpu_tests/{exec,abi}.rs` and name `gpu_backend::gpu_tests::contract`; the
+  cpp-build-2502 bullet stages the device rung as two binaries; the gpu-tests bullet says which
+  binary takes `gpu_tests::` and that `running 0 tests` is an error; the `cargo-cudf.sh` example
+  is `--lib --features gpu --no-run`; the `PCK_TEST_FILTER` bullet says how the gpu lib takes it.
+- `llm-wiki/architecture.md`: the murmur gate's path.
+- `llm-wiki/coding-style.md`: the paragraph excusing `test_inc2_conformance`'s name is gone with
+  the name.
+- `llm-wiki/tickets.md` #134: the three openers that compare and the one that does not, by module.
+- `cpp/tests/gpu/test_cudf.cpp:81`, `scripts/cargo-cudf.sh:5`: the path and the example.
+- `tests/test_ci_coverage.rs:490`: a clause naming `test_gpu_executor_misc`, a target that does
+  not exist (pre-existing; one line).
+
+#### For the slices after this one
+
+- **Task 10**: `src/tests/mod.rs` gains `end_to_end`; nothing here touches it. The rust-only
+  package count to move from is 1034.
+- **Task 11**: `gpu_job_staged_targets()` reads the one `for t in test_…` line, and the lib is
+  staged by a **separate** `stage peacockdb_core_gpu_lib …` line in the same step — the plan's
+  "in the GPU job's `for t in …` array" is not where it is, because that reader takes `test_`
+  names. The rung reaches the lib at `pipeline.yml:642` (`rung=gpu_tests::` keyed on the
+  filename) and in `build-test-shadgpu.sh` through `RUST_LIB_STAGED`/`RUST_LIB_RUNG` and the
+  `mapfile … rung_args` line, not on the invocation line the `--test-threads=1` reader matches.
+  `the_three_gpu_target_lists_agree` compares `{test_gpu_corpus}` three ways today and passes.
+  The fixture string at `test_ci_coverage.rs:291` still says `test_cpu_executors`.
+- **Task 12**: the test table's four device rows are one rung now (55 on shad-gpu through one
+  binary); the `Runs` column for the murmur gate's three CPU-runnable cases is `shad-gpu` only.
+- `build-test.sh`'s lib entry in all three modes is rendered and syntax-checked, never run — the
+  first `--host verda --rust-only --all` after this is its first execution.
+- Both target dirs were `cargo clean -p peacockdb-core`ed for the cold counts;
+  `target-cudf-rapids-cuda-12.2` holds the `gpu` `--lib` fingerprint last, `./target` the
+  rust-only package run's. `cpp/install/rust-tests/` holds the two staged binaries (ignored).

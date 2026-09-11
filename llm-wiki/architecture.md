@@ -968,7 +968,7 @@ handling.
 So placement is identical by construction rather than by agreement. The CPU side calls comet's
 `create_murmur3_hashes` (`executor/cpu_backend/spark_partitioning.rs`), the GPU side owns a
 bit-exact kernel (`spark_hash_partition.cu`) and reuses cuDF only for the scatter, and a live
-gate (`peacock_spark_partition_ids`, `test_inc2_conformance.rs`) proves the two agree over the
+gate (`peacock_spark_partition_ids`, `cpu_backend/gpu_tests/murmur_conformance.rs`) proves the two agree over the
 same bytes.
 
 ## C++ executor layout

@@ -13,16 +13,16 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::ipc::reader::StreamReader;
 use datafusion::common::JoinType;
 
+use super::{
+    AbiSymbol, Call, CallPattern, FbKind, Input, ProjectRole, Recipe, RecipePlan, Seq,
+    attach_recipes,
+};
 use crate::executor::{BatchForwarder, forwarder_for};
 use crate::plan::GpuNode;
 use crate::plan::{ExecutorCategory, category_of};
 use crate::plan::{NodeRef, as_node_ref};
 use crate::planner;
 use crate::planner::{BatchSizing, PlanKnobs};
-use super::{
-    AbiSymbol, Call, CallPattern, FbKind, Input, ProjectRole, Recipe, RecipePlan, Seq,
-    attach_recipes,
-};
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,
     peacock_executor_destroy, peacock_executor_end_plan, peacock_executor_execute_node,

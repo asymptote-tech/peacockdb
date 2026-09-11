@@ -36,9 +36,7 @@ use crate::plan::GpuNode;
 
 use crate::plan::AggregateBody;
 
-use crate::plan::{
-    GpuAggregate, GpuFilter, GpuLoadParquet, GpuProject, GpuSort,
-};
+use crate::plan::{GpuAggregate, GpuFilter, GpuLoadParquet, GpuProject, GpuSort};
 
 use crate::plan::ScanMetadata;
 
@@ -52,7 +50,8 @@ use crate::executor::{Batch, CpuBatch, GpuBatch};
 
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,
-    peacock_executor_destroy, peacock_executor_end_plan, peacock_executor_execute_node, peacock_executor_execute_scan_rowgroups, peacock_last_error,
+    peacock_executor_destroy, peacock_executor_end_plan, peacock_executor_execute_node,
+    peacock_executor_execute_scan_rowgroups, peacock_last_error,
 };
 
 use crate::test_support::GPU_BUDGET;
@@ -91,7 +90,9 @@ fn table() -> PathBuf {
     let batch = RecordBatch::try_new(Arc::new(columns()), vec![k, v]).expect("six rows");
     let file = std::fs::File::create(&path).expect("a writable temp dir");
     // Two rows per row group, so a lane can be read as one batch or as three.
-    let properties = WriterProperties::builder().set_max_row_group_size(2).build();
+    let properties = WriterProperties::builder()
+        .set_max_row_group_size(2)
+        .build();
     let mut writer = ArrowWriter::try_new(file, Arc::new(columns()), Some(properties))
         .expect("the writer opens");
     writer.write(&batch).expect("the rows are written");

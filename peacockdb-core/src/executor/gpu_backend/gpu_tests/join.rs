@@ -7,9 +7,9 @@
 
 use super::*;
 
-use datafusion::common::JoinType;
 use super::super::{GpuEmitter, GpuJoin as GpuJoinExec};
 use crate::plan::{GpuEmitPartitions, GpuFilter, GpuHashJoin};
+use datafusion::common::JoinType;
 
 /// The joined row: both sides' columns, which for this fixture is `k, v` twice.
 fn joined_columns() -> ArrowSchema {

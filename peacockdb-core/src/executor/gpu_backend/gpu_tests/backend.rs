@@ -9,7 +9,6 @@
 
 use super::*;
 
-use datafusion::common::JoinType;
 use crate::executor::Backend;
 use crate::executor::{GpuBackend, GpuContext};
 use crate::plan::{
@@ -17,6 +16,7 @@ use crate::plan::{
     category_of,
 };
 use crate::wire::attach_recipes;
+use datafusion::common::JoinType;
 
 /// The tree children-first, which is the numbering a recipe is addressed by and what the
 /// driver hands `executors_for`.

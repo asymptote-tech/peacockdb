@@ -8,10 +8,10 @@
 use super::*;
 
 use super::super::{GpuAccumulator, GpuEmitter};
-use crate::tests::executor_cases::{CASES, Shape};
 use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregateBatches, GpuCoalesceAllBatches, GpuEmitPartitions,
 };
+use crate::tests::executor_cases::{CASES, Shape};
 
 /// `k|v` per row, sorted, as the table writes its answers.
 fn rendered(batch: &CpuBatch) -> Vec<String> {

@@ -35,13 +35,16 @@ BUILD_GLIBC=$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)
 # The device rung, built with --features gpu: the one integration target that needs a
 # device, and the crate's own unit tests, whose `gpu_tests` modules exist only under that
 # feature. The lib binary holds every rung — a gpu build compiles the CPU and FFI test
-# modules too — so the run loop hands it RUST_LIB_ARGS, a path filter that selects the
+# modules too — so the run loop hands it RUST_LIB_RUNG, a path filter that selects the
 # device rung and nothing beneath it. That argument is part of what the binary is, not a
 # developer's PCK_TEST_FILTER: the zero-test guard stays armed for it.
 RUST_TESTS=(test_gpu_corpus)
 RUST_LIB_STAGED=peacockdb_core_gpu_lib
-RUST_LIB_ARGS=gpu_tests::
+RUST_LIB_RUNG=gpu_tests::
 RUST_TESTS_STAGING=cpp/install/rust-tests
+# rung_args, the one rule for what each staged binary is run with, sent to the host
+# inside the gate script below.
+RUNG_ARGS_FN=$(cat "$(dirname "${BASH_SOURCE[0]}")/lib/rung-args.sh")
 
 # Runner, log, exit code and run id of a detached run, per phase. Outside
 # cpp/install/, which --push-binaries mirrors with --delete.
@@ -330,6 +333,7 @@ remote_gate_script() {
     PATCHED_LD=$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-$BUILD_GLIBC/lib:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\$LD_LIBRARY_PATH
 
     rc=0
+$RUNG_ARGS_FN
 
     # Glob peacock_*_tests, matching CI: a hardcoded name meant three of the four
     # binaries never ran locally, so a "C++ green" sign-off covered one of them. The
@@ -374,17 +378,7 @@ remote_gate_script() {
       tname=\${t##*/}
       echo "--- \$tname"
       rlog=/tmp/\$tname.rustlog
-      # The lib binary takes its rung by path; a developer's filter then narrows inside
-      # that rung. libtest ORs its filters, so the intersection is a list of exact names,
-      # and the empty name under --exact matches nothing: no match runs no test.
-      if [ "\$tname" != "$RUST_LIB_STAGED" ]; then
-        args=($filter_q)
-      elif [ -z $filter_q ]; then
-        args=($RUST_LIB_ARGS)
-      else
-        mapfile -t names < <(env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --list $RUST_LIB_ARGS | sed -n 's/: test\$//p' | grep -F -- $filter_q)
-        args=(--exact '' "\${names[@]}")
-      fi
+      mapfile -t args < <(rung_args "\$t" $RUST_LIB_STAGED $RUST_LIB_RUNG $filter_q env LD_LIBRARY_PATH="\$PATCHED_LD")
       # --test-threads=1: the GPU/RMM context is process-wide, parallel tests OOM.
       env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 "\${args[@]}" > "\$rlog" 2>&1
       status=\$?
@@ -402,7 +396,7 @@ remote_gate_script() {
         echo "!!! \$tname FAILED (exit \$status)"
         rc=1
       elif [ "\$rzero" -eq 1 ] && [ -z $filter_q ]; then
-        echo "!!! \$tname ran 0 tests (filter $filter_q matched nothing?) — nothing was verified"
+        echo "!!! \$tname ran 0 tests (its arguments \${args[*]} matched nothing?) — nothing was verified"
         rc=1
       fi
       rust_ran=\$((rust_ran + 1))

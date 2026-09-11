@@ -15,11 +15,11 @@ and `2gpu` rows also runs locally; large CPU batches go to verda.
 
 | Category (lang) | Why | Examples | Runs | N |
 |---|---|---|---|---|
-| GPU↔comet murmur3 (Rust) | the linchpin gate: both sides place every row in the same partition, bit-exact | [gpu_spark_partition_ids_match_comet_live](../peacockdb-core/tests/test_inc2_conformance.rs#L131) | shad-gpu | 10 |
-| Recipe walk on a device (Rust) | the recipe plan driven by hand — begin_plan, the calls each recipe names, handles threaded between them, DataFusion on the same SQL as the oracle. One partition and one batch except the aggregates, which take two so a merge happens; `avg` asserts digits, since cuDF takes a divide's scale from its operands where arrow takes it from the declared type. A ROLLUP is here because its masks and NULL placeholders are the one payload the plan line does not imply, and one read re-walks every query to check the kinds a device has run against the kinds the file claims, in both directions | [an_average_finalizes_to_the_digits_the_oracle_computes](../peacockdb-core/tests/test_gpu_recipe_walk.rs) | shad-gpu | 10 |
-| Executor contract, both engines (Rust) | one table of input, calls and expected answer ([`executor_cases.rs`](../peacockdb-core/src/tests/executor_cases.rs)) run by the CPU backend here and by the device in `test_gpu_executors`, because a table one side does not read proves that side twice. Eleven rows: filter, project, the lane sorted with and without a fetch, coalesce, a merge with and without its finalize, a merge over state whose keys carry a grouping id, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden, since co-partitioning is what every partitioned join rests on | [executor::cpu_backend::tests::contract](../peacockdb-core/src/executor/cpu_backend/tests/contract.rs) | dataset-matrix | 1 |
-| Executors on a device (Rust) | each one handed its node's recipe — the exec nodes one batch at a time (filter, project, per-batch sort, aggregate with and without its finalize, the export with a row range, and an accumulator's recipe refused), the accumulators a stream of them (coalesce, the accumulating sort, the state merge, the Welford merge whose count exports Int64 against a UInt64 declaration ([#163](tickets.md#t163)), the mid-plan limit), and the joins what the matrix says a device runs: Inner at one probe batch, LeftAnti streamed through its finish pass, the scatter's N handles, and the refusals — Left and Full outright, a second probe batch, a zero-input collapse — each naming its ticket; plans hand-built over six rows the test writes itself, since the ABI loads a table only by reading one. `backend.rs` is the caller `executors_for` otherwise has none of: six of the seven categories built from a live session's recipes, and a node asked for at the wrong post-order refused, so the number is an address. The partition accumulator is the seventh and has no caller; its arm reads the child's lane count | [an_aggregate_that_finalizes_runs_both_of_its_calls](../peacockdb-core/tests/test_gpu_executors/exec.rs) | shad-gpu | 31 |
-| Per-call ABI (Rust) | the three per-call symbols on a live GPU — a scan's row groups, an export range, a slice — and the release skipped exactly where a call consumed the handle | [test_gpu_abi](../peacockdb-core/tests/test_gpu_abi.rs) | shad-gpu | 4 |
+| GPU↔comet murmur3 (Rust) | the linchpin gate: both sides place every row in the same partition, bit-exact | [gpu_spark_partition_ids_match_comet_live](../peacockdb-core/src/executor/cpu_backend/gpu_tests/murmur_conformance.rs) | shad-gpu | 10 |
+| Recipe walk on a device (Rust) | the recipe plan driven by hand — begin_plan, the calls each recipe names, handles threaded between them, DataFusion on the same SQL as the oracle. One partition and one batch except the aggregates, which take two so a merge happens; `avg` asserts digits, since cuDF takes a divide's scale from its operands where arrow takes it from the declared type. A ROLLUP is here because its masks and NULL placeholders are the one payload the plan line does not imply, and one read re-walks every query to check the kinds a device has run against the kinds the file claims, in both directions | [an_average_finalizes_to_the_digits_the_oracle_computes](../peacockdb-core/src/wire/gpu_tests/mod.rs) | shad-gpu | 10 |
+| Executor contract, both engines (Rust) | one table of input, calls and expected answer ([`executor_cases.rs`](../peacockdb-core/src/tests/executor_cases.rs)) run by the CPU backend here and by the device in `gpu_backend::gpu_tests::contract`, because a table one side does not read proves that side twice. Eleven rows: filter, project, the lane sorted with and without a fetch, coalesce, a merge with and without its finalize, a merge over state whose keys carry a grouping id, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden, since co-partitioning is what every partitioned join rests on | [executor::cpu_backend::tests::contract](../peacockdb-core/src/executor/cpu_backend/tests/contract.rs) | dataset-matrix | 1 |
+| Executors on a device (Rust) | each one handed its node's recipe — the exec nodes one batch at a time (filter, project, per-batch sort, aggregate with and without its finalize, the export with a row range, and an accumulator's recipe refused), the accumulators a stream of them (coalesce, the accumulating sort, the state merge, the Welford merge whose count exports Int64 against a UInt64 declaration ([#163](tickets.md#t163)), the mid-plan limit), and the joins what the matrix says a device runs: Inner at one probe batch, LeftAnti streamed through its finish pass, the scatter's N handles, and the refusals — Left and Full outright, a second probe batch, a zero-input collapse — each naming its ticket; plans hand-built over six rows the test writes itself, since the ABI loads a table only by reading one. `backend.rs` is the caller `executors_for` otherwise has none of: six of the seven categories built from a live session's recipes, and a node asked for at the wrong post-order refused, so the number is an address. The partition accumulator is the seventh and has no caller; its arm reads the child's lane count | [an_aggregate_that_finalizes_runs_both_of_its_calls](../peacockdb-core/src/executor/gpu_backend/gpu_tests/exec.rs) | shad-gpu | 31 |
+| Per-call ABI (Rust) | the three per-call symbols on a live GPU — a scan's row groups, an export range, a slice — and the release skipped exactly where a call consumed the handle | [executor::gpu_backend::gpu_tests::abi](../peacockdb-core/src/executor/gpu_backend/gpu_tests/abi.rs) | shad-gpu | 4 |
 | GpuBatch surface (Rust) | what the batch reports, and that `consume` hands the handle over without releasing it. Needs no device: the release is null-guarded on the executor, so a CPU tier is its home | [executor::ffi_tests](../peacockdb-core/src/executor/ffi_tests/mod.rs) | dataset-matrix | 3 |
 | Cost-model goldens (Rust) | `.cost.txt` derivation from `.cpu.txt` × `cost_model.conf` | [cost_goldens_match_and_total_is_byte_identical](../peacockdb-core/tests/test_cost_model.rs#L36) | dataset-matrix | 3 |
 | Planner join capability (Rust) | every hash join type crossed with a residual filter, the co-partitioning and lane rules, and the null analysis both ways; writes its own parquet, so no dataset | [planner::tests::join_capability](../peacockdb-core/src/planner/tests/join_capability.rs) | dataset-matrix | 13 |
@@ -229,9 +229,10 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   make, which flatc-fork's cmake needs told. Build and run are still separate steps, and
   their remaining env must stay byte-identical or the run step recompiles.
 - **cpp-build-2502** — builds the 25.02 C++ side, bundles the Arrow/Parquet runtime libs,
-  and stages `test_inc2_conformance`, `test_gpu_abi`, `test_gpu_recipe_walk`,
-  `test_gpu_executors` and `test_gpu_corpus` as the `cpp-install-25.02` artifact. Separate from dataset-matrix so the GPU job can start without
-  waiting for the CPU tests.
+  and stages the device rung, built `--features gpu`, as the `cpp-install-25.02` artifact:
+  `test_gpu_corpus` and the crate's own unit-test binary as `peacockdb_core_gpu_lib`, whose
+  `gpu_tests` modules exist only under that feature. Separate from dataset-matrix so the GPU
+  job can start without waiting for the CPU tests.
 - **gpu-tests** (needs cpp-build-2502) — ssh to **shad-gpu** into a per-run `REMOTE_DIR`:
   rsync artifact + testdata, patch the binaries for glibc 2.35, generate sf1 on the host
   if absent, then run. Three guards, each closing a hole that shipped: sf40 presence is
@@ -240,8 +241,11 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   by glob with a ran-any assertion (a hand-written list once let `peacock_tpchv_tests` be
   built, shipped and patched but never run); and any binary reporting `PASSED 0 tests` is
   an error. The staged rust binaries then run with `--test-threads=1` (cuDF/RMM share one
-  process-wide pool). No `set -e` — statuses are OR'd so one failure cannot skip the rest —
-  and `REMOTE_DIR` is removed on `always()`.
+  process-wide pool); `peacockdb_core_gpu_lib` alone also takes `gpu_tests::`, the path
+  filter that selects the device rung and leaves the CPU and FFI rungs it also holds to
+  dataset-matrix, and a rust binary reporting `running 0 tests` is the same error as the
+  C++ one. No `set -e` — statuses are OR'd so one failure cannot skip the rest — and
+  `REMOTE_DIR` is removed on `always()`.
 - **cost-report** — the report crate and its inputs, and nothing else: python
   `testdata/test_duckdb_cost.py`, the `scripts/exec_model/tests/test_*.py` prototype set,
   and `cargo test -p cost-report`. Then report generation, the PR-comment upsert and the
@@ -359,7 +363,7 @@ Rules that keep this healthy:
   build script (zstd-sys, bzip2-sys, lzma-sys, psm, blake3) and rebuilds the whole
   DataFusion stack above them — before this, alternating between the two entry points
   thrashed the cache each way:
-  `CUDF_ROOT=~/data/miniforge3/envs/rapids scripts/cargo-cudf.sh test -p peacockdb-core --test test_gpu_abi --no-run`
+  `CUDF_ROOT=~/data/miniforge3/envs/rapids scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run`
   For anything more than a one-off command, use `build-test.sh` / `build-test-shadgpu.sh`
   instead — they handle build, staging, shipping and running.
 - **A cudf-shape binary needs `LD_LIBRARY_PATH` to run at all.** `libpeacock_gpu.so` lives in
@@ -400,7 +404,8 @@ Rules that keep this healthy:
 | **nebius** | large CPU-only VM | manual |
 
 - **Testing the regen *mechanism* is not a full regen.** Scope it with `PCK_TEST_FILTER`
-  (forwarded to every staged binary) — two or three queries prove the path as well as
+  (forwarded to every staged binary; the gpu lib binary takes it inside its `gpu_tests::`
+  rung, as the exact names `--list` reports under both) — two or three queries prove the path as well as
   903 do, and a full `--update-canonical` run rewrites every golden on the remote and
   pulls the whole set back into a git working tree, where an unrelated diff can ride
   home in an unrelated commit. Note that a binary whose tests all filter out runs zero

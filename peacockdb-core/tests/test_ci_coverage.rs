@@ -487,7 +487,7 @@ fn every_rust_test_target_is_named_by_ci() {
 ///
 /// Not checked: a target exempted as `NotRun` may be absent from `gpu_runtime_targets()`
 /// with nothing red. No file says "needs a device" — that is what the hand-declared set is
-/// for, and `test_gpu_executor_misc` is that shape today.
+/// for.
 #[test]
 fn the_three_gpu_target_lists_agree() {
     let ci = gpu_job_staged_targets();

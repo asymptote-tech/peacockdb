@@ -947,7 +947,7 @@ The C++ reports how many fb nodes it indexed; `RecipePlan::wire_nodes()` is what
 created. Comparing them is the one free check that both sides number one tree, which every
 handle's seq rests on — and no library code reads it: `src/` never calls `begin_plan`, so
 outside the tests the number is returned and dropped. Three of the four test openers compare
-(`corpus_gpu.rs`, `test_gpu_recipe_walk`, `test_gpu_executors`); `test_gpu_abi` does not. Fix:
+(`corpus_gpu.rs`, `wire::gpu_tests`, `gpu_backend::gpu_tests`); `gpu_backend::gpu_tests::abi` does not. Fix:
 a helper beside `RecipePlan` that opens a plan and errors naming both numbers, used by all.
 
 <a id="t129"></a>

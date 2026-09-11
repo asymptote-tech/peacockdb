@@ -291,25 +291,36 @@ rust_only_targets() {
 
 # The crate's own unit-test binary, as a suite entry. `--lib` is not a `--test` target, so
 # nothing derives it and every mode names it. The three build shapes nest — a `--features
-# gpu` lib holds the rust-only and FFI test modules too — and the filter each mode hands
-# the binary at run time (see the run loop) is what keeps the runs disjoint: the gpu mode
-# selects `gpu_tests::` and nothing beneath it. The staged file is named for its mode
-# because the shapes differ and a bare `peacockdb_core` beside the targets reads as one.
-LIB_TARGET=peacockdb-core:--lib
+# gpu` lib holds the rust-only and FFI test modules too — and the argument the gpu mode
+# hands the binary at run time (LIB_RUNG, see the run loop) is what keeps the runs
+# disjoint: `gpu_tests::` selects the device rung and nothing beneath it. The entry is
+# `<package>:<staged name>` like every other, and the staging loop is what knows the name
+# means `--lib`. Named for its shape: a `--run` after another mode's `--build` then finds
+# no binary rather than the wrong one, and a bare `peacockdb_core` beside the targets
+# reads as one of them.
+if [ "$MODE" = "gpu" ]; then
+  LIB_STAGED=peacockdb_core_gpu_lib
+  LIB_RUNG=gpu_tests::
+elif [ "$RUST_ONLY" -eq 1 ]; then
+  LIB_STAGED=peacockdb_core_rust_only_lib
+  LIB_RUNG=""
+else
+  LIB_STAGED=peacockdb_core_lib
+  LIB_RUNG=""
+fi
 lib_target() {
-  printf '%s\n' "$LIB_TARGET"
+  printf 'peacockdb-core:%s\n' "$LIB_STAGED"
 }
 
 # The GPU-RUNTIME set: targets that need a GPU when they RUN, whatever they need to
 # compile. Declared once here and subtracted wherever a mode cannot satisfy it, rather
 # than filtered by name — `grep -v ':test_gpu_'` was the last name-convention dependency
-# in this file. Plus the lib, whose device rung is the `gpu_tests` modules that only a
-# `--features gpu` build compiles.
+# in this file. The lib is not in it: every mode runs its own shape of the lib, and the
+# gpu mode's device rung is selected at run time, not by membership here.
 gpu_runtime_targets() {
   cat <<'GPUSET'
 peacockdb-core:test_gpu_corpus
 GPUSET
-  lib_target
 }
 
 # Targets that need cmake to compile at all, in dependency-name order.
@@ -333,7 +344,10 @@ if [ "$MODE" = "gpu" ]; then
   # GPU-runtime set. Kept in step with build-test-shadgpu.sh:RUST_TESTS and
   # pipeline.yml's gpu-tests staging array — three runners had three lists and they
   # drifted. The lib binary is built --features gpu and run on `gpu_tests::` alone.
-  mapfile -t RUST_TESTS < <(gpu_runtime_targets)
+  mapfile -t RUST_TESTS < <(
+    gpu_runtime_targets
+    lib_target
+  )
   CPP_TEST_BIN=peacock_plan_tests
 elif [ "$RUST_ONLY" -eq 1 ]; then
   # Golden regen / cpu+plan verify: no C++, no FFI. The lib here is the rust-only
@@ -407,6 +421,7 @@ fi
 
 if [ "$BUILD" -eq 1 ]; then
   CARGO_FEATURES=""
+  [ "$MODE" = "gpu" ] && CARGO_FEATURES="--features gpu"
   if [ "$RUST_ONLY" -eq 1 ]; then
     # No C++/FFI — build the test binaries with --features rust-only (the part that
     # compiles locally without the cuDF toolchain). Goldens are rust-only artifacts.
@@ -490,19 +505,27 @@ if [ "$BUILD" -eq 1 ]; then
   for spec in "${RUST_TESTS[@]}"; do
     pkg="${spec%%:*}"
     t="${spec##*:}"
-    # cargo test --no-run prints a json artifact line per built target; the
-    # integration test we want has .target.name == $t and a non-null .executable.
-    exec_path=$(cargo test --no-run $CARGO_FEATURES -p "$pkg" --test "$t" \
+    # cargo test --no-run prints a json artifact line per built target; the one we want
+    # has a non-null .executable and the target's name and kind. The lib's test binary
+    # is named for the crate, with kind ["lib"] — the same line shape as the lib itself,
+    # which is why the executable check is what tells them apart.
+    if [ "$t" = "$LIB_STAGED" ]; then
+      sel=(--lib); name="${pkg//-/_}"; kind=lib
+    else
+      sel=(--test "$t"); name="$t"; kind=test
+    fi
+    exec_path=$(cargo test --no-run $CARGO_FEATURES -p "$pkg" "${sel[@]}" \
         --message-format=json \
       | python3 -c '
 import json, sys
-name = sys.argv[1]
+name, kind = sys.argv[1], sys.argv[2]
 for line in sys.stdin:
     try: m = json.loads(line)
     except ValueError: continue
-    if m.get("executable") and (m.get("target") or {}).get("name") == name:
+    target = m.get("target") or {}
+    if m.get("executable") and target.get("name") == name and kind in target.get("kind", []):
         print(m["executable"]); break
-' "$t")
+' "$name" "$kind")
     if [ -z "$exec_path" ] || [ ! -f "$exec_path" ]; then
       echo "ERROR: failed to locate built binary for $pkg:$t"; exit 1
     fi
@@ -602,6 +625,12 @@ if [ "$RUN" -eq 1 ]; then
   RUST_TEST_NAMES=""
   for spec in "${RUST_TESTS[@]}"; do RUST_TEST_NAMES="$RUST_TEST_NAMES ${spec##*:}"; done
 
+  # rung_args, the one rule for what each binary is run with — shared with
+  # build-test-shadgpu.sh's gate. The gpu mode's lib takes its rung on top of the
+  # developer's filter; the cpu modes run their lib whole, so LIB_RUNG is empty there.
+  RUNG_ARGS_FN=$(cat "$(dirname "${BASH_SOURCE[0]}")/lib/rung-args.sh")
+  filter_q=$(printf '%q' "$PCK_TEST_FILTER")
+
   echo "==> $MODE tests on $HOST"
   # Unquoted heredoc: $VARS expand locally; escape with \$ for remote expansion.
   ssh "$HOST" bash <<EOF
@@ -613,6 +642,7 @@ if [ "$RUN" -eq 1 ]; then
     $LD_ENV
     $TESTDATA_ENV
     $UPDATE_CANON_ENV
+$RUNG_ARGS_FN
 
     rc=0
 
@@ -626,7 +656,8 @@ if [ "$RUN" -eq 1 ]; then
       t="$REMOTE_DIR/cpp/install/rust-tests/\$name"
       [ -x "\$t" ] || { echo "--- \$name: missing, skipping"; continue; }
       echo "--- \$name"
-      "\$t" --nocapture $THREADS_ARG '$PCK_TEST_FILTER' || rc=1
+      mapfile -t args < <(rung_args "\$t" '$LIB_STAGED' '$LIB_RUNG' $filter_q)
+      "\$t" --nocapture $THREADS_ARG "\${args[@]}" || rc=1
     done
 
     exit \$rc
