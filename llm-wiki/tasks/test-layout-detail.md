@@ -1087,3 +1087,20 @@ slice could bring down without a warning. Recorded for `visibility.md`.
   task 9 lands; `compare-inventory.sh gpu` works since slice 6.
 - Both target dirs were `cargo clean -p peacockdb-core`ed for the cold counts and then rebuilt by
   the inventories and the package run; `target-cudf-*` holds the `gpu` fingerprint last.
+
+### 2026-09-10 — the chain rebased over master's fourteen documentation commits
+
+The control file said `rebase` after slice 7. Master had moved by fourteen commits since
+`f6dcde07`, every one touching only `llm-wiki/**`: five new task specs and plans, the
+hacks-audit report, tickets #198-#200, an Antipatterns section in `build-test.md`, one reviewer
+bullet in `prompts.md`, and tasks 7-11 appended to this chain's board section.
+
+`ENS-rmm-pool-budget` (task 3) rebased clean, `960add37` → `e49a2c04`, twelve commits replayed, no
+conflict; PR #144 still targets master with twelve commits. `ENS-test-layout` then rebased onto it
+with `--onto`, ten commits, no conflict; the diff between the old and new tips is master's
+documentation and nothing else. Per the protocol a rebase that carries documentation alone
+re-verifies nothing: task 3 stays `done`, task 4 goes `rebase needed(building)` → `building` with
+no re-run. Slice 8's whole-package run is the first build on the new base and will say if
+`tickets.md`'s merge broke a ticket reference a golden names.
+
+verda is still refusing the key. Both branches force-pushed with `--force-with-lease`.
