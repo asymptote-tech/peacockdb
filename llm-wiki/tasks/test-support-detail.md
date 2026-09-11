@@ -385,3 +385,22 @@ under `src/`: no false positive. Nits:
 - Trait default method bodies now sit inside the private-module rule's capture, so a default
   body in a component `mod.rs` calling into a private module reads as a signature — loud, and
   none exists. Dropped.
+
+### 2026-09-11 — control file said `rebase`: the chain moves onto master `02069415`
+
+Master carried three commits past `188c23ce`, the chain's base: `3ab7047c` (reports, docs only),
+`62335cff` (`cpp/CMakeLists.txt`: `cudf_ROOT` also seeds `CMAKE_PREFIX_PATH`, so cuVS and Arrow
+are found on a dev host) and `02069415` (`scripts/build-test-shadgpu.sh`, `scripts/setup-glibc.sh`:
+the patch step follows the build host's glibc). Not documentation alone, so it re-verifies. It
+is also why the human asked now: this box was reprovisioned to Ubuntu 24.04 / glibc 2.39 (the
+worktree dates from 21:43 UTC, the timezone in the watchdog log flipped from -07:00 to +00:00),
+and without `02069415` a binary built here dies at load on shad-gpu after a patch to 2.35.
+
+Branches with code: `ENS-rmm-pool-budget` (task 3, done, PR #144 → master), `ENS-test-layout`
+(task 4, done, PR #145), `ENS-test-support` (task 5, reviewing, PR #147). Files master changed
+that a branch also changed: `build-test.md` on all three (wiki, coordinator's), and
+`scripts/build-test-shadgpu.sh` on task 4 (code, developer's). `tasks.md` differs from master's
+only in the states and PR numbers of tasks 3-5, so every board conflict resolves to the branch.
+Order: task 3 rebased and carried back to `done` (developer re-runs its shad-gpu cycle — which is
+also the first device cycle from this host — then CI green on the rebased PR), then task 4 onto
+it, then task 5. Marks written on this board before anything moves.
