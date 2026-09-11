@@ -2044,3 +2044,41 @@ dump 696 records. All unchanged from slice 10, as they must be — no code moved
 
 Slice 11 committed as `d30e15e6`. Twenty-one commits over task 3's tip, 124 files, and the PR's
 commit count matches the branch's, so it carries this task alone. Review round 1 dispatched.
+
+### 2026-09-11 — review round 1: 0 blocking, 4 important, 7 nits
+
+The reviewer verified by text: every one of the 1087 baseline leaves present and in the module the
+spec names; both `#[ignore]`s travelled; all 29 test-module declarations agree name and gate;
+`gpu_tests::` 55, `ffi_tests::` 3, rust-only `--lib` 516; the `test_ci_coverage` readers ported
+and run over mutated copies of the workflow and scripts, every probe red; `build-test.md`'s
+arithmetic re-added; `pub mod` 7, bare `pub` 200 outside `test_support`.
+
+Important:
+
+1. `scripts/build-test.sh:349,357,367` — `lib_target` is appended in every mode, so `RUST_TESTS` is
+   never empty and the "derived suite must not be EMPTY" guard at `:395` can no longer fire. Fix:
+   derive into `DERIVED`, assert non-empty, then append the lib.
+2. `scripts/lib/rung-args.sh:27-28` — with a filter set, a failed `--list` pipeline (binary will
+   not load, wrong env prefix) yields the same `--exact ''` as an empty intersection, and
+   `build-test-shadgpu.sh:391` suppresses the zero-test guard because a filter is set. Reproduced
+   with `/bin/false` as the binary. Fix: capture the list, return non-zero on failure, read
+   `rung_args` through a checked assignment so the status reaches `rc`; print "0 of N rung cases
+   match" for a genuine empty intersection.
+3. `tests/test_module_layout.rs` is 1827 lines (1211 at the parent); `tests/test_ci_coverage.rs` is
+   996 only because rustfmt was withheld (1133 formatted). `coding-style.md`'s 1000-line rule
+   exempts `mod.rs`/`common.rs` only. Fix: `tests/test_module_layout/{…}.rs` submodules declared
+   with `mod` from the main file (same target — `workspace_test_targets()` reads `tests/*.rs`
+   only), the runner readers of `test_ci_coverage.rs` the same way, then rustfmt both.
+4. `scripts/build-test.sh:505-530,656-660` — no mode has executed the lib entry. Fix:
+   `scripts/build-test.sh --rust-only --build` locally (needs no host) proves the lib stages under
+   its shape name; a `--host verda --rust-only --all` when verda answers.
+
+Nits (5-11): `build-test.md:18` "a block's N is one CI line's case count" is false — the cpu
+header lists four lines; `build-test.md:370` and `case-inventory.sh:33-34` "no device case lives
+in a binary" contradicts `test_gpu_corpus` 8; `build-test.sh:657` a missing staged binary is
+"skipping" and green, and the loop has no `running 0 tests` guard; `test_module_layout.rs:1149`
+`declares_mod` misses a one-line `#[cfg(test)] mod gpu_tests;` — constructed input is green under
+both rung rules; comment caps: `test_module_layout.rs:1024` doc 11 lines, `compare-inventory.sh:2`
+header 12, `pipeline.yml:285/375/385` 7/6/5 lines above a command in a `run:` body; `lib.rs:3`
+"Six components" vs `coding-style.md` seven; `build-test.md:94` "was watched red" is history in a
+current-state page.
