@@ -248,3 +248,45 @@ Append `## 25.02: build`, `## 25.02: push-binaries`, `## 25.02: patch+run`. Then
 message to the coordinator: the four files touched, the proving command for the new case
 (`cargo test --features rust-only -p peacockdb-core --test test_golden_format`), and one line
 per workflow saying green, red or timed out.
+
+---
+
+### Task 5: The shad-gpu cycle again, on the rebased branch
+
+Added when the task was reopened. Tasks 1–4 are done and committed; **do not repeat them**. The
+branch now sits on master `02069415`, where `build-test-shadgpu.sh` reads this host's glibc
+(`getconf GNU_LIBC_VERSION` → 2.39 on dev) and patches to `~/glibc-2.39` on shad-gpu, which
+exists there already.
+
+**Files:**
+- Modify: `llm-wiki/tasks/dev-setup-check-detail.md` — append three sections
+
+**Interfaces:**
+- Consumes: the scripts as committed on the branch; nothing is edited.
+- Produces: `## 25.02 again: build`, `## 25.02 again: push-binaries`, `## 25.02 again: patch+run`.
+
+- [ ] **Step 1: Build**
+
+Run: `PCK_TEST_FILTER=q6 timeout 5400 scripts/build-test-shadgpu.sh --build`
+Expected: the warm `target-cudf-rapids-cuda-12.2` and ccache make this minutes, not an hour;
+the five GPU rust binaries staged again.
+
+- [ ] **Step 2: Push**
+
+Run: `timeout 1800 scripts/build-test-shadgpu.sh --push-binaries`
+Expected: `cpp/install/` mirrored to `shad-gpu:/home/info/peacockdb`.
+
+- [ ] **Step 3: Patch and run**
+
+Run: `PCK_TEST_FILTER=q6 timeout 5400 scripts/build-test-shadgpu.sh --patch --run`
+Expected: the patch log says `glibc 2.39 already installed in /home/info/glibc-2.39; skipping
+the build` and `Verified: every shipped executable uses /home/info/glibc-2.39/lib/ld-linux-x86-64.so.2`;
+then every `peacock_*_tests` passes, `test_gpu_corpus` runs its `q6` cells, the other four rust
+binaries report `0 passed` with the filter and the script does not call that a fault;
+`GPU test run OK`. A `std::bad_alloc` from `pool_memory_resource` is a neighbour on the card:
+record it, run this step once more, record that too.
+
+- [ ] **Step 4: Record and hand back**
+
+Append the three sections in the detail file's shape. Final message: no file touched but the
+detail file, the three commands, and green or red for each.

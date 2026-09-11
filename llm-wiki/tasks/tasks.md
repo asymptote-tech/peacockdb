@@ -127,9 +127,9 @@ a device refusal an outcome rather than an abort, and records the real limits as
 Throwaway. Lives on this branch only, never on master; the PR is closed unmerged and nothing is
 archived.
 
-### 1. [`dev-setup-check.md`](dev-setup-check.md) — state: done — PR #146
+### 1. [`dev-setup-check.md`](dev-setup-check.md) — state: building — PR #146
 
 Every documented workflow run once from the host `dev` by the ensemble with nobody attached, and
-what each did recorded in the detail file. Two lines of code so CI sees a code diff: one
-`#[test]` in `test_golden_format`, one comment in `test_cudf.cpp`. A workflow that fails is
-recorded, not repaired.
+what each did recorded in the detail file. Two lines of code so CI sees a code diff. A workflow
+that fails is recorded, not repaired. Reopened from `done` by the human after a rebase across
+master `02069415`: plan Task 5 runs the shad-gpu cycle once more, and nothing else.

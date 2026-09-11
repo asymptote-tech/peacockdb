@@ -50,6 +50,13 @@ A failure ends that workflow, not the task.
    chain. The filter scopes the rust binaries to one query; the C++ gate runs whole, because the
    script as written is what is under test.
 
+5. **shad-gpu cycle again, after the rebase.** Step 4 went red because every binary built
+   on dev wants `GLIBC_2.38` and the patch target was 2.35. Master `02069415` makes the patch
+   step follow the build host's glibc, and this branch was rebased across it, so the same three
+   calls run once more, unchanged: `PCK_TEST_FILTER=q6 scripts/build-test-shadgpu.sh --build`,
+   `--push-binaries`, `--patch --run`. The record gains three more sections. This is the one
+   step added after the signoff, and it is the only thing the reopened task does.
+
 The coordinator's half is not listed because it is not optional: branch, PR against master,
 reviewer, completeness pass, CI green, `done`. That the coordinator did each of those from a
 `claude -p` under the watchdog, without a terminal, is the other half of what this task proves.
@@ -75,7 +82,8 @@ Component-level API: none.
 
 The four workflows above have each been run from dev and recorded in the detail file with their
 outcome; the new case is green in the rust-only tier; the PR is open against master with CI green;
-the reviewer and the completeness pass have run; and the board says `done`.
+the reviewer and the completeness pass have run; and the board says `done`. Reopened once, for
+step 5: done again when the second shad-gpu cycle is recorded green and the board says `done`.
 
 ## Completeness signoff
 
