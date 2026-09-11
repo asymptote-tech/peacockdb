@@ -2526,3 +2526,11 @@ Both readings closed: the reviewer's carve-out finding and the analyst's two are
 to the spec. CI run 34641987973 on `a3070959` was green on every job; the head is now `3910b678`,
 which moves code (`cpu_backend/{accumulate,join}`, `src/tests/end_to_end/`), so `done` waits on
 its run.
+
+### 2026-09-11 — done
+
+CI run 34646970991 on `3910b678`, the head that carries code, is green on every job: both cuDF
+legs, the 25.02 GPU build, the remote device tier (the staged lib binary under `gpu_tests::`, plus
+the corpus binary), cost report, changed paths, S3 metadata. The docs-only head above it
+(`b19536b8`) took a changed-paths skip. Task 4 is `done`; PR #145 awaits the human's merge, after
+task 3's #144.
