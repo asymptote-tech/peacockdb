@@ -27,10 +27,13 @@ operators whose recipe has no seq, so nothing in the FlatBuffer can hide a wrong
 **An upload.** `peacock_handle_from_arrow(executor, schema, array, out_handle)`: an Arrow C-data
 import through `cudf::from_arrow` — the murmur3 hook at `gpu_executor.cpp:340` already does this
 — adopted into the live session's registry as a handle, `NodeSession::adopt(TableResult)`. The
-registry lives in the session, so `begin_plan` comes first. It is test-only and says so where it
-counts: the header comment, no `AbiSymbol` names it, no recipe can, and the Rust extern and the
-`GpuBatch` constructor over it are `cfg(test)`. The fetch side exists — `GpuExport` is what
-`GpuUnload` runs.
+registry lives in the session, so `begin_plan` comes first — and the seqless three load a plan
+of stubs alone, so that this is accepted is the first thing the task establishes. The symbol is
+test-only and says so where it counts: the header comment, no `AbiSymbol` names it, no recipe
+can, and the extern sits in `peacockdb-ffi` beside `peacock_spark_partition_ids`, the test-only
+hook already there — architecture.md's count of the ABI becomes seventeen, the conformance
+group two. The `GpuBatch` a test wraps the handle in is the existing constructor. The fetch
+side exists — `GpuExport` is what `GpuUnload` runs.
 
 **A stub leaf, and the recipe code unchanged but for one arm.** `Given` — the leaf
 `test_cpu_executors` already has, declaring a schema and a layout and nothing else — moves up
@@ -45,9 +48,12 @@ Decimal128, Utf8, Date32, Boolean, a key column with duplicates, a unique id —
 column, floats dyadic so sums compare exactly, deterministic from the seed. Zero rows is a
 legal argument and a case in its own right.
 
-**A comparator.** `assert_same(cpu, gpu, Order)`: schema, names and types included, and values,
-exact, after sorting both by every column; `Order::AsEmitted` for the sorts, whose synthetic
-keys carry no ties because neither engine's sort is stable. A type divergence fails — it is the
+**A comparator.** `assert_same(cpu, gpu, Order)`: slot by slot — one slot per call, and per
+lane for the emitter, since output timing is a function of the call sequence on both backends
+and a flattened multiset would pass a scatter that put a row in the wrong lane. Within a slot,
+schema — names and types — and values, exact, after sorting by every column; `Order::AsEmitted`
+for the sorts, whose synthetic keys carry no ties because neither engine's sort is stable.
+`CallStats` are not compared: the byte formula is shared and scratch is measured. A type divergence fails — it is the
 #183/#187/#191 shape, and a `bug_` test is where it belongs, not a cast in the comparator. The
 comparator ships with its own red cases: a differing value, a differing type, a differing row
 count, each shown to fail.
@@ -71,8 +77,32 @@ The three operators whose recipe carries no seq, plus the helper round trip:
 
 And a guard: every `NodeRef` kind is named by at least one case, in both directions, with the
 three forwarders as the listed exclusions — they have no executor and belong to the driver,
-which is tested elsewhere. The guard is what makes "comprehensive" a red test rather than a
-claim, and the list it reads is what task 9 grows.
+which is tested elsewhere. Each case declares its kind in a registry the guard reads; the guard
+never reads source text. It is what makes "comprehensive" a red test rather than a claim, and
+the registry is what task 9 grows.
+
+## Scope
+
+Code expected to change:
+
+- `cpp/include/peacock_gpu.h`, `cpp/src/gpu_executor.cpp`: `peacock_handle_from_arrow`;
+  `cpp/src/plan_executor.h`, `cpp/src/node_session.cpp`: `NodeSession::adopt`.
+- `peacockdb-ffi/src/lib.rs`: the extern, one entry.
+- `peacockdb-core/src/wire/attach.rs`: the `try_as_node_ref` arm in `emit`.
+- `peacockdb-core/src/tests/`: `Given` lifted from `executor/cpu_backend/tests/`, `synthetic`,
+  the comparator with its red cases, the kind registry and its guard.
+- `peacockdb-core/src/tests/gpu_tests/`: `Device`, `Script`, `Outcome`, `run_both`, and this
+  task's cases.
+- `llm-wiki/build-test.md`: one row; `llm-wiki/architecture.md`: the ABI count.
+- Nothing in `.github/workflows/`, `plan/`, `planner/`, `executor/`, or the wire format.
+
+Component-level API expected to change:
+
+- The C ABI: one additive symbol, test-only. `NodeSession`, the de facto C++ interface: `adopt`.
+- `wire::attach_recipes`: accepts a leaf outside the registry, which emits no seq. Its
+  signature and every other `wire/mod.rs` item are unchanged.
+- `crate::tests` and `crate::tests::gpu_tests`, test modules rather than components: the items
+  above are new. No component facade gains or loses an item.
 
 ## Constraints
 

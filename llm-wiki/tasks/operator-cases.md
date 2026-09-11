@@ -27,10 +27,10 @@ The right column names the tickets a row may land on; a row with none may still 
 | `GpuAccumulateBatchesAndSort` | several batches; one; none; `fetch` | [#173](../tickets.md#t173) |
 | `GpuMergeSortedPartitions` | N lanes each sorted; `fetch`; one lane empty; `Done` before any batch | [#173](../tickets.md#t173) |
 | `GpuCoalesceAllBatches` | several batches; one; none | [#173](../tickets.md#t173) |
-| `GpuAggregate` | each `PlanAgg`, grouped and global; grouping sets; a decimal sum's scale; a global aggregate over zero rows | [#199](../tickets.md#t199) |
-| `GpuAggregateBatches` | merge with and without its finalize; arrivals crossing the compaction threshold; `merge_m2`; a count merging by sum; an average's digits | [#163](../tickets.md#t163) |
-| `GpuEmitPartitions` | 4 lanes and 64; the lane each row lands in against the murmur3 of its key; lanes that receive nothing; null keys; two keys; a decimal key; one lane in and four out | [#184](active-tickets.md#t184), [#95](../tickets.md#t95) |
-| `GpuHashJoin` | each of the nine types × one probe batch and two × `null_equals_null` both ways × a residual filter where the matrix allows one; an empty build side; an empty probe | [#152](../tickets.md#t152), [#181](active-tickets.md#t181), [#175](../tickets.md#t175), [#159](../tickets.md#t159) |
+| `GpuAggregate` | each `PlanAgg`, grouped and global; the single-node shortcut carrying a finalize; grouping sets; a decimal sum's scale; a global aggregate over zero rows | [#199](../tickets.md#t199) |
+| `GpuAggregateBatches` | merge with and without its finalize; arrivals sized to cross the 1 MiB compaction threshold; `merge_m2`; a count merging by sum; an average's digits | [#163](../tickets.md#t163) |
+| `GpuEmitPartitions` | 4 lanes and 64, each lane compared as a slot; lanes that receive nothing; null keys; two keys; a decimal key; one lane in and four out | [#184](active-tickets.md#t184), [#95](../tickets.md#t95) |
+| `GpuHashJoin` | each of the nine types × one probe batch and two × `null_equals_null` both ways × a residual filter where the matrix allows one; with a projection; an empty build side; an empty probe | [#152](../tickets.md#t152), [#181](active-tickets.md#t181), [#175](../tickets.md#t175), [#159](../tickets.md#t159) |
 | `GpuCrossJoin` | two batches; one side empty | |
 | `GpuNestedLoopJoin` | Inner and Left with a predicate; with a projection | [#190](active-tickets.md#t190), [#160](../tickets.md#t160) |
 | `GpuLoadParquet` | both backends read one parquet the test wrote from a synthetic batch: one batch per row group; a limit; row groups and a limit together | [#186](active-tickets.md#t186), [#188](active-tickets.md#t188) |
@@ -48,12 +48,26 @@ Two of those tickets are closed by tasks below this one — [#198](../tickets.md
 record those tasks turn red and delete, which is the regression test each would otherwise
 have to write.
 
+## Scope
+
+Code expected to change:
+
+- `peacockdb-core/src/tests/gpu_tests/`: case files, one per backend family as the backends
+  are laid out — exec, accumulate, emit, join, source — and the kind registry entries. The
+  source file carries the one helper this task adds, a parquet writer over `synthetic`, local
+  to it.
+- `llm-wiki/tickets.md`: a ticket per new defect; `llm-wiki/build-test.md`: the count.
+- Nothing under `cpp/`, `peacockdb-ffi/`, or `peacockdb-core/src/` outside `tests/gpu_tests/`.
+
+Component-level API expected to change: none. A case that would need a production change to
+pass is a ticket and a `bug_` test, never the change.
+
 ## Constraints
 
 Those of the harness task, and:
 
-- No new mechanism. A case that needs a helper the harness lacks is a finding against the
-  harness task, not a helper added here.
+- No new mechanism beyond the parquet writer above. A case that needs a helper the harness
+  lacks is a finding against the harness task, not a helper added here.
 - Every row above exists as a case. The kind guard the harness carries extends to every
   `NodeRef` kind but the three forwarders, and a kind with no case is red.
 - Every divergence gets a ticket before it gets a `bug_` test, and a `bug_` test asserts the
