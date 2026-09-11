@@ -564,3 +564,122 @@ The baselines are unchanged on disk; the fresh inventories are in `/tmp` only.
 - `compare-inventory.sh` still rejects `gpu`; unchanged from slices 2 and 3.
 - `planner/translator/expr.rs:176` fails `rustfmt --check` and did so at HEAD too — the
   installed rustfmt disagrees with the one the line was written under. Left alone.
+
+### 2026-09-10 — slice 5 done: `test_gpu_batch` → `executor/ffi_tests/`, and the middle rung
+
+Plan task 5, steps 1-6. Not committed. One file created, one deleted, four modified:
+
+- Created `peacockdb-core/src/executor/ffi_tests/mod.rs` — the moved file, whole, minus its
+  `#![cfg(not(feature = "rust-only"))]` inner attribute, with `use peacockdb_core::executor::{Batch,
+  GpuBatch}` becoming `use super::{Batch, GpuBatch}` (same component, so `super::` and not `crate::`).
+- Deleted `peacockdb-core/tests/test_gpu_batch.rs`.
+- Modified `peacockdb-core/src/executor/mod.rs` (the declaration), `.github/workflows/pipeline.yml`
+  (four hunks), `llm-wiki/build-test.md` (two falsified sentences).
+
+#### The rung, watched in both directions
+
+The filtered list was run **before** the move as the negative control, in the same shape and with
+the same command:
+
+| When | `scripts/cargo-cudf.sh test -p peacockdb-core --lib -- ffi_tests:: --list` |
+|---|---|
+| before the move | `0 tests, 0 benchmarks` |
+| after | `3 tests, 0 benchmarks`, every one `executor::ffi_tests::…` |
+
+Named, not counted: `a_batch_reports_what_it_was_built_with`,
+`consume_yields_the_pair_the_ffi_call_needs`,
+`dropping_a_detached_batch_releases_against_nothing`. They run, too —
+`… --lib -- ffi_tests::` is `3 passed; 0 failed; 435 filtered out`.
+
+The lower rung: `cargo test --features rust-only -p peacockdb-core --lib -- ffi_tests:: --list` →
+`0 tests, 0 benchmarks`, exit 0, after a **successful compile** (`Compiling peacockdb-core` then
+`Finished`), which is the half of step 3 that matters — a link error would prove the gate wrong in
+the other direction. The rust-only `--lib` total is still 435; the cudf one is 438.
+
+#### The rung rules pass for a real reason, and were watched failing for one
+
+Slice 4 could only red-watch them on a renamed `mod tests`. Both now fire on the real module:
+setting its gate to plain `#[cfg(test)]` makes `a_test_module_is_named_for_its_rung` and
+`a_rung_gate_implies_its_module_name` fail, each naming `executor/mod.rs:32` and printing the gate
+the rung requires. Reverted; `test_module_layout` is 16 passed.
+
+#### Inventories — the three leaves moved, and nothing else did
+
+| Shape | Lines | Against the baseline |
+|---|---|---|
+| `rust-only` | 1092 vs 1089 | `test_module_layout` 11 → 16, and the `test_gpu_batch 0 tests` summary line gone with the binary. No case either way |
+| `cudf` | 1159 vs 1157 | the same five, plus the three leaves leaving `== test_gpu_batch` and arriving under `== --lib` as `ffi_tests::<leaf>` |
+| `gpu` | 441 vs 438 | the same three, 435 → 438 (hand `diff`; the tool still rejects `gpu`) |
+
+The `gpu` shape gaining them is the ladder working: `gpu` ⊃ ffi, so a device build compiles the
+middle rung too. "Nowhere else" is about targets, and no other target moved.
+
+Set equality was computed rather than read off the diff — leaf names extracted from both
+inventories and compared as multisets: **no leaf lost in either shape**, and the only gains are
+slice 4's five layout cases. Ten leaf names appear twice in the cudf inventory and three in
+rust-only; both figures are unchanged from the baselines (the cpu/device halves of the executor
+contract), so nothing this slice did duplicated a case.
+
+#### The CI swap, and how it was checked without running anything
+
+Four hunks in `pipeline.yml`, all in `dataset-matrix`:
+
+1. the prebuild at :276 — `--test test_gpu_batch` out, `--lib` in, so the line still names every
+   target the run step invokes;
+2. the run step — `cargo test -p peacockdb-core --test test_gpu_batch` becomes
+   `cargo test -p peacockdb-core --lib -- ffi_tests::`, same job, same feature shape;
+3. the comment above the rust-only prebuild, which claimed `--lib` rides there *rather than* on the
+   default-feature line. It now rides on both, as two different binaries, and the comment says so;
+4. the gpu job's target list comment, which named `test_gpu_batch` as `test_gpu_abi`'s companion.
+
+Checked three ways, none of them by reading: the file parses as YAML (7 jobs); `bash -n` over all
+33 rendered `run:` blocks is clean; and both rewritten cargo commands were run locally in the cudf
+shape. The second is worth keeping: the prebuild and the run step produced the **same lib
+executable hash** (`peacockdb_core-738b5b595d84f9c4`), which is what the build/run split rests on —
+a fingerprint mismatch would make the run step recompile silently.
+
+`test_ci_coverage` is 7 passed after the edits. Its sweep enumerates targets that exist, so a
+deleted target needs no exemption; the new line is asserted by task 11, not here.
+
+#### Everything measured, on the final tree
+
+| Check | Result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core` (whole package) | **1037 passed, 0 failed, 2 ignored**, exit 0 — 20 result lines, one fewer binary |
+| `cargo test … --test test_module_layout` | 16 passed |
+| `cargo test … --test test_ci_coverage` | 7 passed |
+| `scripts/cargo-cudf.sh test -p peacockdb-core --lib -- ffi_tests::` | 3 passed |
+| `cargo build --features rust-only -p peacockdb-core`, cold | 0 warnings |
+| `scripts/cargo-cudf.sh build -p peacockdb-core`, cold | 0 warnings |
+| `scripts/cargo-cudf.sh build -p peacockdb-core --features gpu`, cold | 0 warnings |
+| `sha256sum` over `testdata/goldens` | identical, 170 files — before and after the suite |
+| `rustfmt --edition 2024 --check` on the new file | clean |
+
+The package suite ran with `PEACOCK_TESTDATA_DIR=/tmp/peacock-testdata-slice3`, slice 3's composed
+root, at `--test-threads=2`. No device suite: nothing here touches a device path.
+
+#### The ladder did not move, and could not have
+
+- Bare `pub` excluding `mod`: **290**, **249 excluding `test_support`**. `pub mod`: **16**.
+  `PUB_MODULES`: **9**, `CROSS_COMPONENT_REACHES`: 1, `TEST_ONLY_ITEMS`: 8. Visibility dump 640
+  records. Every one unchanged from slice 4.
+- The plan calls this target "3 cases, 2 items", but the two items — `Batch` and `GpuBatch` in
+  `executor/mod.rs` — are still named from outside the crate by `test_gpu_abi`, `test_gpu_executors`
+  and `test_layout_injection`, which move in tasks 6 and 9. Nothing could be demoted here, and no
+  step asked for it. This slice is the shape proof; task 6 is the first that moves a number.
+
+#### For the slices after this one
+
+- **rustfmt reorders `mod` declarations alphabetically inside a contiguous group.** `mod tests;`
+  followed directly by `mod ffi_tests;` is a rustfmt diff; a blank line between them makes two
+  groups and keeps the ladder's reading order. Checked with a probe, since rustfmt on
+  `executor/mod.rs` itself would reformat every file below it.
+- `ffi_tests/mod.rs` is a directory with one file in it, as the plan's file list asks. Nothing
+  forces the directory today — `ffi_tests.rs` would pass every rule — but the next ffi case has
+  somewhere to land.
+- `compare-inventory.sh` still rejects `gpu`; unchanged from slices 2, 3 and 4. The `gpu` row above
+  is a hand `diff`, and that is now three slices in a row.
+- The baselines on disk are untouched; the fresh inventories are `/tmp/inv-{rust-only,cudf,gpu}.txt`.
+- `llm-wiki/build-test.md` keeps its stale `Runs` column and its arithmetic for task 12; only the
+  two sentences this move falsified were touched — the GpuBatch row's example link, which pointed at
+  a deleted file, and the dataset-matrix step list.

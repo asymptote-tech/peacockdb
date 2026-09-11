@@ -29,6 +29,9 @@ mod gpu_batch;
 #[cfg(test)]
 mod tests;
 
+#[cfg(all(test, not(feature = "rust-only")))]
+mod ffi_tests;
+
 use datafusion::arrow::array::RecordBatch;
 
 use crate::plan::ExecutorCategory;

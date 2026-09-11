@@ -3,11 +3,9 @@
 //! needs a GPU; these need none, because `peacock_handle_release` is null-guarded on the
 //! executor pointer, so a batch built on a null one drops as a no-op. Not rust-only
 //! either way: `GpuBatch` exists only where the FFI is linked.
-#![cfg(not(feature = "rust-only"))]
-
 use std::ptr;
 
-use peacockdb_core::executor::{Batch, GpuBatch};
+use super::{Batch, GpuBatch};
 
 fn detached(handle: u64, num_rows: usize, byte_size: usize) -> GpuBatch {
     GpuBatch::new(ptr::null_mut(), handle, num_rows, byte_size)
