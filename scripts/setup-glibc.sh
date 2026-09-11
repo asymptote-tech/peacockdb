@@ -1,7 +1,11 @@
 #!/bin/bash
 #
-# Download and build glibc 2.35 into a local prefix (no sudo required).
-# Then patchelf the test binaries to use it.
+# Download and build one glibc into a local prefix (no sudo required), then patchelf
+# the test binaries to use it. The version is the build host's — the glibc the shipped
+# binaries were linked against — and build-test-shadgpu.sh passes it in GLIBC_VERSION.
+# 2.35 is the default because a 22.04 build host and CI's container link against it;
+# a 24.04 host links against 2.39, and a binary patched to an older glibc than its
+# own dies at load with `version GLIBC_2.38 not found`. One prefix per version.
 #
 # Usage:
 #   ./scripts/setup-glibc.sh --repo-dir /path/to/peacockdb --install --patch
@@ -13,7 +17,7 @@
 
 set -euo pipefail
 
-GLIBC_VERSION="2.35"
+GLIBC_VERSION="${GLIBC_VERSION:-2.35}"
 PREFIX="$HOME/glibc-${GLIBC_VERSION}"
 BUILD_DIR="/tmp/glibc-build-${GLIBC_VERSION}"
 SRC_DIR="/tmp/glibc-${GLIBC_VERSION}"
@@ -69,6 +73,11 @@ CPP_BUILD_DIR="${REPO_DIR}/cpp/build"
 # -----------------------------------------------------------------------
 # Step 1: Build glibc
 # -----------------------------------------------------------------------
+
+if [ "$DO_INSTALL" -eq 1 ] && [ -f "$PREFIX/lib/libc.so.6" ]; then
+  echo "==> glibc ${GLIBC_VERSION} already installed in ${PREFIX}; skipping the build"
+  DO_INSTALL=0
+fi
 
 if [ "$DO_INSTALL" -eq 1 ]; then
 

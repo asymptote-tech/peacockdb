@@ -415,6 +415,12 @@ Rules that keep this healthy:
   settled it. Compare `sha256sum`/`md5sum` output, not directory listings.
 - Rented hosts change SSH host keys on reprovision: `ssh-keygen -R <host>` + re-keyscan
   rather than fighting the mismatch.
+- **The shad-gpu patch step uses the build host's glibc version.** shad-gpu runs glibc 2.31,
+  so shipped binaries are patched to a prefix under `~/glibc-<version>` there: 2.35 for a
+  22.04 build host and CI's container, 2.39 for a 24.04 host such as dev. The version is read
+  from `getconf` where the binaries are built, and the prefix is built once on the first patch
+  from that host class. A binary patched to a glibc older than its own dies at load with
+  `version GLIBC_2.38 not found`.
 - **Golden regen**: on verda via `scripts/build-test.sh --host verda --rust-only
   --update-canonical`, then `--pull-goldens` to bring regenerated goldens back; or
   locally with `UPDATE_CANONICAL=1 cargo test --features rust-only ...`. Sync is one

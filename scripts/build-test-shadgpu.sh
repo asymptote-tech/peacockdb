@@ -26,6 +26,12 @@ set -euo pipefail
 # stage_cargo_test_binary. One copy, shared by every phase below.
 . "$(dirname "${BASH_SOURCE[0]}")/lib/shadgpu-env.sh"
 
+# The glibc the binaries link against is this host's, and the host patches them to a
+# prefix of the same version: 2.35 from a 22.04 box, 2.39 from a 24.04 one. Read here,
+# where the binaries are built, and handed to both the patch and the run phase.
+BUILD_GLIBC=$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)
+[ -n "$BUILD_GLIBC" ] || { echo "cannot read this host's glibc version from getconf" >&2; exit 1; }
+
 # Rust integration tests that link libpeacock_gpu.so and must run on the GPU host.
 RUST_TESTS=(test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_corpus)
 RUST_TESTS_STAGING=cpp/install/rust-tests
@@ -169,7 +175,8 @@ if [ "$RSYNC" -eq 1 ]; then
 fi
 
 if [ "$PATCH" -eq 1 ]; then
-  ssh "$REMOTE" "$REMOTE_REPO/scripts/setup-glibc.sh --repo-dir $REMOTE_REPO --patch"
+  # --install is a no-op once the prefix exists; the first patch from a new host class builds it.
+  ssh "$REMOTE" "GLIBC_VERSION=$BUILD_GLIBC $REMOTE_REPO/scripts/setup-glibc.sh --repo-dir $REMOTE_REPO --install --patch"
 fi
 
 # --- the launcher -------------------------------------------------------------
@@ -310,9 +317,9 @@ remote_gate_script() {
     export PEACOCK_GPU_DEBUG='$PEACOCK_GPU_DEBUG'
     # cpp/install/lib first, so libpeacock_gpu.so resolves for the rust binaries:
     # their baked-in rpath points at the build host's cargo target. Applied per command
-    # and never exported: exported, this host's own coreutils load the patched glibc-2.35
+    # and never exported: exported, this host's own coreutils load the patched glibc
     # and segfault, which is why both loops below use shell builtins to read a log.
-    PATCHED_LD=$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\$LD_LIBRARY_PATH
+    PATCHED_LD=$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-$BUILD_GLIBC/lib:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\$LD_LIBRARY_PATH
 
     rc=0
 
