@@ -11,8 +11,8 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::execution::TaskContext;
 
-use super::accumulate::{CpuAccumulator, CpuPartitionAccumulator};
-use super::emit::CpuEmitter;
+use super::accumulate::State;
+use super::{CpuAccumulator, CpuEmitter, CpuPartitionAccumulator};
 use super::{CpuExec, CpuUnload};
 use super::{CpuJoin, CpuProbingJoin, CpuSource};
 use crate::executor::CpuBackend;
@@ -297,12 +297,12 @@ trait HeldBytes {
 
 impl HeldBytes for CpuAccumulator {
     fn held_bytes(&self) -> usize {
-        match self {
-            Self::Coalesce(state) => bytes_of(state.held()),
-            Self::Sorted(state) => bytes_of(state.held()),
-            Self::Aggregate(state) => state.held_bytes(),
+        match &self.state {
+            State::Coalesce(state) => bytes_of(state.held()),
+            State::Sorted(state) => bytes_of(state.held()),
+            State::Aggregate(state) => state.held_bytes(),
             // A limit holds nothing, which is the whole point of the slice symbol.
-            Self::Limit(_) => 0,
+            State::Limit(_) => 0,
         }
     }
 }

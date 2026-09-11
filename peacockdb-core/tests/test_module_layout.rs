@@ -37,18 +37,6 @@ struct PubModule {
 
 const PUB_MODULES: &[PubModule] = &[
     PubModule {
-        path: "executor/cpu_backend",
-        forced_by: &["peacockdb-core/tests/test_cpu_executors.rs"],
-    },
-    PubModule {
-        path: "executor/cpu_backend/accumulate",
-        forced_by: &["peacockdb-core/tests/test_cpu_executors.rs"],
-    },
-    PubModule {
-        path: "executor/cpu_backend/emit",
-        forced_by: &["peacockdb-core/tests/test_cpu_executors.rs"],
-    },
-    PubModule {
         path: "executor/gpu_backend",
         forced_by: &["peacockdb-core/tests/test_gpu_executors.rs"],
     },
@@ -140,8 +128,8 @@ fn read(rel: &Path) -> String {
 
 /// Is this file the `mod.rs` or the module file of an exempt module path?
 ///
-/// The module itself, not what is under it: `executor/cpu_backend/accumulate.rs` is exempt and
-/// `executor/cpu_backend/backend.rs` beside it is not.
+/// The module itself, not what is under it: `executor/gpu_backend/accumulate.rs` is exempt and
+/// `executor/gpu_backend/backend.rs` beside it is not.
 fn is_an_exempt_module(rel: &Path) -> bool {
     let s = rel.to_string_lossy().replace('\\', "/");
     PUB_MODULES
@@ -490,7 +478,7 @@ fn code_only(text: &str) -> String {
 ///
 /// The test is "not another `::`", not "starts with a capital". A free function or a `pub
 /// const` is lowercase, and a reader that wanted an uppercase letter drops a file that forces
-/// the exemption. Nothing outside the crate names a lowercase item in these nine modules
+/// the exemption. Nothing outside the crate names a lowercase item in the registered modules
 /// today, so the fixtures in `each_reader_sees_the_violation_and_not_its_near_miss` are what
 /// keeps this half honest. `{` is a brace group of several names, `*` a glob.
 // The mirror of `uses_module`'s widening, not taken here: a plain
@@ -713,7 +701,7 @@ fn cross_component_reaches() -> Vec<(String, String)> {
 }
 
 /// **Only the parent component's own code may use a subcomponent.** rustc enforces it wherever
-/// the subcomponent is `mod`, and stops the moment one is `pub mod` — so the nine `PUB_MODULES`
+/// the subcomponent is `mod`, and stops the moment one is `pub mod` — so the `PUB_MODULES`
 /// entries are exactly where the claim needs a test rather than a compiler.
 ///
 /// The register is the point, not the count. A reach that is merely tolerated has no expiry, so

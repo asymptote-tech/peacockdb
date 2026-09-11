@@ -1104,3 +1104,228 @@ no re-run. Slice 8's whole-package run is the first build on the new base and wi
 `tickets.md`'s merge broke a ticket reference a golden names.
 
 verda is still refusing the key. Both branches force-pushed with `--force-with-lease`.
+
+### 2026-09-10 — slice 8 done: `test_cpu_executors` → `executor/cpu_backend/tests/`, and the `cpu_backend` group closed
+
+Plan task 8, steps 1-4. Not committed. Two files created, two deleted, nineteen modified:
+
+- Created `peacockdb-core/src/executor/cpu_backend/tests/contract.rs` (the moved case) and
+  `peacockdb-core/src/tests/executor_cases.rs` (the shared table, from `tests/common/executor_cases.inc`).
+- Deleted `peacockdb-core/tests/test_cpu_executors.rs` and `tests/common/executor_cases.inc`.
+- Modified `src/executor/mod.rs`, `src/executor/cpu_backend/{mod,accumulate,emit,backend}.rs`,
+  `cpu_backend/tests/{mod,accumulate,backend,emit}.rs`, `src/tests/{mod,injection}.rs`,
+  `tests/test_gpu_executors.rs`, `tests/test_gpu_executors/contract.rs`, `tests/test_module_layout.rs`,
+  `.github/workflows/pipeline.yml`, `llm-wiki/{build-test,coding-style,tickets}.md`.
+
+The whole-package run on the clean rebased tree came first, since it was the first build on the new
+base: **1037 passed, 0 failed, 2 ignored, exit 0, 0 warnings** — nothing was red before the move.
+
+#### Step 1: the table is a module, `src/tests/executor_cases.rs`, and task 9's device half reads it as one
+
+Neither of the two shapes the plan offered — the `.inc` staying in `tests/common/` and `include!`d
+from `src/` by a `../../../../` path, or moving as text under `src/tests/` — was taken. The table is a
+**real module**: `pub(crate) mod executor_cases;` in `src/tests/mod.rs`, its five items `pub(crate)`
+(`INPUT`, `Shape`, `Shape::order_is_the_answer`, `Case`, `CASES`; the struct's fields stay `pub`,
+which the layout test's `is_bare_pub_item` excludes as fields), and the cpu half reads it as `use
+crate::tests::executor_cases::{CASES, INPUT, Shape}`. `src/tests/` is what the spec calls "the shared
+test support the component tests reach through `crate::tests::…`", and a table both engines' tests
+read is exactly that. Under the `.inc` shapes the two `include!`s would have outlived the move, and the
+table's `pub` items would sit in a file no guard reads — `sources()` in the layout test and
+`visibility-dump.py` both walk `*.rs` only, so an `.inc` under `src/` is invisible to both. Verified:
+`a_test_only_path_carries_test` follows `mod` declarations and `#[test]` lines in `.rs` files, and
+never an `include!`, so where the `.inc` lived was never its business either way.
+
+**The gpu binary reaches it by relative path until task 9**: `tests/test_gpu_executors.rs:66` is
+`include!("../src/tests/executor_cases.rs")`. Including a `.rs` as text is why the file's header is
+plain `//` and not `//!` — an inner doc attribute in an `include!` landing after other items is a
+compile error — and the header says so. **Task 9's device half must match this**: when
+`test_gpu_executors` lands under `executor/gpu_backend/gpu_tests/`, the `include!` goes and
+`contract.rs` there writes `use crate::tests::executor_cases::{…}` like the cpu half; the header can
+become `//!` in that same slice. The cudf-shape compile of the binary is the proof the path resolves:
+`scripts/cargo-cudf.sh test -p peacockdb-core --test test_gpu_executors --no-run` → 0 warnings, exit 0,
+and the cudf inventory lists its 31 cases as before.
+
+`pub` → `pub(crate)` on the five items is what made it a module the layout test accepts (`pub`
+outside a `mod.rs` is refused; `pub(crate)` is not). Inside the gpu binary the same text at the crate
+root is `pub(crate)` in a binary crate, which is fine. The stale `gpu_cases.inc` in the header — a
+file that no longer exists — became `corpus_cases.inc`, the instrument it was actually naming.
+
+#### The move itself
+
+`contract.rs` is `test_cpu_executors.rs` with `mod common` gone, `peacockdb_core::` → `crate::`, and
+four helpers **deduplicated against `cpu_backend/tests/mod.rs`** rather than carried: the binary's
+`Given::of(schema, BatchLayout::MultipleBatches)`, `columns(&[…])`, `rows()` and `ctx()` are
+`mod.rs`'s `Given::of_schema(schema)`, `schema_of(&[…])`, `schema_of(&GROUPED)` and `ctx()` to the
+token — the binary always passed `MultipleBatches`, and `GROUPED` is the same `(k Utf8, v Int64)` pair.
+Carrying them would have put two `Given`s in one module tree with `use super::*` silently shadowing
+one; the sibling files all take their helpers through that glob. Rung `tests`, no gate: the
+declaration is `mod contract;` in the existing `tests/mod.rs`, which was not overwritten.
+
+Negative control before the move: `cargo test --features rust-only -p peacockdb-core --lib --
+cpu_backend::tests::contract --list` → `0 tests, 0 benchmarks` after a successful compile. After:
+`-- cpu_backend::tests` → **65 passed** (64 + `contract::every_case_answers_what_the_contract_says`),
+whole `--lib` **514 passed, 2 ignored** (513 + 1).
+
+#### Step 3: the wall, and the two shapes rustc forced on the way up
+
+Dropping the three entries and demoting the three `pub mod` (`cpu_backend` in `executor/mod.rs`,
+`accumulate` and `emit` in `cpu_backend/mod.rs`) was watched in stages, each one red for a reason:
+
+1. Entries dropped, nothing else: `every_pub_mod_exemption_is_still_forced_by_what_it_names` red,
+   naming all three `… names peacockdb-core/tests/test_cpu_executors.rs, which no longer exists`.
+2. The three `pub mod` → `mod`: `cargo build` clean (rustc reads nominal visibility, so `pub` items
+   inside a private module are fine by it), and `a_components_api_is_declared_in_its_mod_rs` red
+   naming **21 items** in `accumulate.rs` and `emit.rs` — the whole surface the exemption had covered.
+3. Everything `pub(crate)`: **`E0446` on exactly three**, `type BatchAcc = CpuAccumulator`, `type
+   PartAcc = CpuPartitionAccumulator`, `type Emitter = CpuEmitter` in `backend.rs` — slice 6's finding
+   for `CpuSource`/`CpuJoin`, reproduced for the other three associated types. Plus one `dead_code`:
+   `LimitStream::seen`, `pub` with no caller anywhere (`git grep 'seen()'` → nothing outside its own
+   file), which the exemption had been hiding. **Deleted**, not `#[allow]`ed — its doc claimed a
+   driver reads it and none does.
+4. The three types declared in `cpu_backend/mod.rs` with their inherent `impl`s left in
+   `accumulate.rs`/`emit.rs` as `pub(crate)` methods — slice 6's `CpuJoin` shape. `CpuEmitter` and
+   `CpuPartitionAccumulator` have private fields and moved as they were. `CpuAccumulator` was an
+   **enum**, and an enum's variant payloads are as public as the enum: with `Coalesce`, `SortedRuns`,
+   `AggregateBatches` and `LimitStream` at `pub(crate)` rustc emits four `private_interfaces`
+   warnings (`type Coalesce is more private than the item CpuAccumulator::Coalesce::0 … reachable at
+   visibility pub`) — the "escapes by inference" case, seen by the compiler this time because
+   `<CpuBackend as Backend>::BatchAcc` makes the enum reachable. So it is now `pub struct
+   CpuAccumulator { state: accumulate::State }` over a `pub(crate) enum State` with the four variants:
+   the same private-field-over-`pub(crate)`-type shape as `CpuJoin { calls: join::Calls }`. Three
+   match sites changed (`accumulate.rs` twice, `backend.rs`'s `HeldBytes`, and
+   `tests/accumulate.rs`'s `compactions_over`); `backend.rs` and the test module see the private
+   field because both are descendants of `cpu_backend`.
+5. **`src/tests/injection.rs` reached through the wall** — `use crate::executor::cpu_backend::…` for
+   all eight executor types, `E0603` once `cpu_backend` is private, and slice 6 had not seen it
+   because the exemption was live. The injector needs the *types* (it is a `Backend` whose associated
+   types are the CPU backend's) but not the module: eight aliases at its top, `type CpuSource =
+   <CpuBackend as Backend>::Source;` and so on, `CpuProbingJoin` through `<CpuJoin as
+   JoinExecutor<CpuBackend>>::Probing`. That is the path production code names them by, no
+   `pub(crate) mod`, no new entry point, `TEST_ONLY_ITEMS` untouched at 10.
+
+`cpu_backend/tests/{accumulate,backend,emit}.rs` lost their `crate::executor::cpu_backend::accumulate::…`
+imports — the types now arrive through the `use super::*` chain like everything else in the module.
+
+Red-watches on the final tree, each reverted, `test_module_layout` **16 passed** after:
+
+| Probe | What fired | What it printed |
+|---|---|---|
+| `executor/cpu_backend/emit` put back, forced by `tests/test_gpu_executors.rs` (a file that exists) | `every_pub_mod_exemption_is_still_forced_by_what_it_names` | `executor/cpu_backend/emit names peacockdb-core/tests/test_gpu_executors.rs, which no longer reaches peacockdb_core::executor::cpu_backend::emit` |
+| `mod cpu_backend;` → `pub mod cpu_backend;` with no entry | `pub_mod_declares_a_component_and_nothing_else` | ``executor/mod.rs declares `pub mod cpu_backend;` `` |
+
+The register has **four entries, all `gpu_backend`**. `CROSS_COMPONENT_REACHES` was already empty
+(slice 6 deleted the entry the plan's step 3 mentions); nothing to delete here.
+
+#### CI, scripts, and the one literal left
+
+`pipeline.yml`: the rust-only prebuild's `--lib \ --test test_cpu_executors` is `--lib`, and the
+run step's `--test test_cpu_executors` line and its four-line comment are gone (the contract rides in
+the `--lib` line above it). `grep test_cpu_executors` over the file → no hits. Checked mechanically:
+the file parses as YAML (7 jobs) and `bash -n` over all **29** rendered `run:` blocks is clean, same
+count as slice 7 — the retired line was inside a block, not a step. `test_ci_coverage` is **7 passed**.
+
+`scripts/build-test.sh`, `build-test-shadgpu.sh`, `scripts/lib/*.sh`: `git grep test_cpu_executors --
+scripts .github` → **no hits**. Nothing ever named it as a `--test` literal, so #176's shape does not
+arise. One hit remains in the tree: `tests/test_ci_coverage.rs:291`, a string fixture in the matcher's
+own unit test (`--no-run … --lib --test test_cpu_executors`, asserting that `--no-run` is not a run).
+It is never handed to cargo; left for task 11, which rewrites that file.
+
+#### Inventories — one leaf moved, one summary line gone
+
+Fresh files `/tmp/inv8-{rust-only,cudf,gpu}.txt`; baselines on disk untouched. Leaf-name sets (last
+`::` segment) per shape and over the union, as sets and multisets:
+
+| Shape | Lines | `--lib` | Leaves lost | Leaves gained | Duplicated leaves |
+|---|---|---|---|---|---|
+| `rust-only` | 1071 vs 1089 | 435 → 516 | none | slice 4's five | 3, unchanged |
+| `cudf` | 1138 vs 1157 | 438 → 519 | none | the same five | 10, unchanged |
+| `gpu` | 522 vs 438 | 435 → 519 | none | 84: the 81 moved so far plus slice 5's three `ffi_tests` | 3, unchanged |
+| union of three | 1092 distinct vs 1087; multiset 1102 vs 1097 | | none | the same five | 10, unchanged |
+
+The moved leaf: `every_case_answers_what_the_contract_says`, `test_cpu_executors` → `--lib` as
+`executor::cpu_backend::tests::contract::every_case_answers_what_the_contract_says` in both shapes
+(in `cudf` its target set goes `{test_cpu_executors, test_gpu_executors}` → `{--lib,
+test_gpu_executors}`, the device half staying put — that is one of the ten cudf duplicates, and it
+is still ten). The summary line that disappeared with the binary: `test_cpu_executors  1 test, 0
+benchmarks`. `compare-inventory.sh` says `DRIFTED` for all three, as it must.
+
+#### Everything measured, on the final tree
+
+| Check | Result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core` (whole package, `--test-threads=2`), before any change | 1037 passed, 0 failed, 2 ignored, exit 0 |
+| the same, on the final tree | **1037 passed, 0 failed, 2 ignored**, exit 0 — 12 result lines, one fewer binary than slice 7 |
+| `… --lib` | 514 passed, 2 ignored |
+| `… --lib -- cpu_backend::tests` | 65 passed |
+| `… --test test_module_layout` | 16 passed |
+| `… --test test_ci_coverage` | 7 passed |
+| `cargo build --features rust-only -p peacockdb-core`, cold | 0 warnings |
+| `cargo test --features rust-only -p peacockdb-core --no-run`, cold | 0 warnings, 12 executables (13 in slice 7) |
+| `cargo build --features rust-only -p peacockdb` (the CLI) | 0 warnings |
+| `scripts/cargo-cudf.sh build -p peacockdb-core`, cold | 0 warnings |
+| `scripts/cargo-cudf.sh build -p peacockdb-core --features gpu` | 0 warnings |
+| `scripts/cargo-cudf.sh test -p peacockdb-core --test test_gpu_executors --no-run` | 0 warnings — the new `include!` path resolves |
+| `sha256sum` over `testdata/goldens` | identical, 170 files — before and after |
+| `rustfmt --edition 2024 --check` on the ten touched leaves | clean (`executor_cases.rs` was formatted: rustfmt folds `INPUT`'s six rows onto one line; the rest came back clean as they were) |
+| `cpu_backend/mod.rs`, `executor/mod.rs`, `cpu_backend/tests/mod.rs`, `src/tests/mod.rs` | clean against stub children |
+
+Suites ran with `PEACOCK_TESTDATA_DIR=/tmp/peacock-testdata-slice3`, which still exists. No device
+suite: the only device path touched is an `include!` line, proved by compiling. verda refused the key,
+so everything ran locally.
+
+#### The ladder — the `cpu_backend` wall, and what it brought down
+
+- Bare `pub` excluding `mod`: **283 → 265**, and **241 → 223 excluding `test_support`**. Eighteen
+  down: thirteen `impl pub fn` in `accumulate.rs` (11) and `emit.rs` (2) to `pub(crate)`, four state
+  structs (`Coalesce`, `SortedRuns`, `AggregateBatches`, `LimitStream`) to `pub(crate)`, and `seen`
+  deleted. The three executor types moved files without changing count.
+- `pub mod`: **14 → 11**. `PUB_MODULES`: **7 → 4**. `CROSS_COMPONENT_REACHES`: **0**.
+  `TEST_ONLY_ITEMS`: **10**.
+- Visibility dump 696 → **699**, `diff`ed against a dump of HEAD's tree: the eighteen above, plus
+  `pub(crate) enum State`, `pub(crate) mod executor_cases` and the table's five `pub(crate)` items.
+- `#[cfg(test)]` occurrences in `src/`: **53**, unchanged.
+- **What still forces `pub`**: `CpuSource`, `CpuExec`, `CpuAccumulator`, `CpuPartitionAccumulator`,
+  `CpuEmitter`, `CpuJoin`, `CpuProbingJoin`, `CpuUnload` in `cpu_backend/mod.rs` and every `pub fn`
+  on `CpuExec`/`CpuUnload` there — the associated types of `impl Backend for CpuBackend` (E0446 at
+  `pub(crate)`) and the methods an in-crate caller reaches through them. Nothing outside the crate
+  names any of them now; they are `pub` because `Backend` and `CpuBackend` are, which is
+  `visibility.md`'s subject.
+
+#### Where a measurement contradicts the spec or plan
+
+- **Plan step 3 says "delete the `CROSS_COMPONENT_REACHES` entry that named the reach you just
+  removed"** — there was none to delete; slice 6 emptied it with `has_finish_pass`. Step 3 was
+  written before slice 6 recorded that.
+- **"Convert their items to `pub(crate)`" holds for the functions and not for the types**, as
+  slice 6 found for `join`/`source` — and one step further here: a `pub(crate)` payload inside a
+  `pub` enum is a warning, not an error, so the enum had to become a struct to keep the build at 0.
+- **The plan's Interfaces line, "`executor_cases.inc`, which stays in `tests/common/` for now"**: it
+  did not stay, for the reasons under step 1. The one-copy invariant it exists for holds.
+- **The spec's "50 with the two executor tiers"**: the ladder reads 223 after this slice, not 50, for
+  the reason slices 6 and 7 gave — the spec counted items by the target that named them, the
+  compiler counts them by the production interface that keeps them reachable.
+
+#### Documentation the change falsified, fixed here
+
+- `llm-wiki/build-test.md`: the executor-contract row's two links point at the new paths, and the
+  dataset-matrix step list no longer names `test_cpu_executors`. The `Runs` column and the arithmetic
+  are task 12's.
+- `llm-wiki/coding-style.md`: "Seven more exist under `executor/`" is four.
+- `llm-wiki/tickets.md` #174: `executor_cases.inc` is `src/tests/executor_cases.rs`.
+- `tests/test_module_layout.rs`'s own prose: "the nine `PUB_MODULES` entries" and "these nine modules"
+  (stale since slice 6) no longer carry a number, and the exempt-module example is a `gpu_backend`
+  file, since `cpu_backend/accumulate.rs` is exempt no more.
+- `tests/test_gpu_executors/contract.rs:1` names `executor_cases.rs`.
+
+#### For the slices after this one
+
+- **Task 9**: `test_gpu_executors.rs:66` is `include!("../src/tests/executor_cases.rs")`; the device
+  half in `gpu_backend/gpu_tests/contract.rs` should `use crate::tests::executor_cases::{…}` and drop
+  the `include!`, after which the table's header can be `//!`. `gpu_backend/{accumulate,emit}.rs`
+  will meet the same `private_interfaces` question if `GpuAccumulator` is an enum with `pub(crate)`
+  payloads; the struct-over-`pub(crate)`-enum shape here is the answer that keeps warnings at 0.
+- The `gpu` inventory (`--lib` only) reads 519 and will read the device set on top once task 9 lands.
+- Task 11: the fixture string at `test_ci_coverage.rs:291` names `test_cpu_executors`; harmless, but
+  a real target name would stop a grep finding a ghost.
+- Both target dirs were `cargo clean -p peacockdb-core`ed for the cold counts and rebuilt by the
+  inventories and the package run; `target-cudf-*` holds the `gpu` fingerprint last.

@@ -10,6 +10,7 @@
 //! release build.
 
 mod end_to_end;
+pub(crate) mod executor_cases;
 pub(crate) mod injection;
 pub(crate) mod join_fixture;
 pub(crate) mod rebuild;

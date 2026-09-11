@@ -135,7 +135,7 @@ the exception rather than as the example.
   `pub mod scan_mapping;`, which would make `planner::translator::scan_mapping::Mapping`
   nameable crate-wide and leave the wall on paper. What a sibling component needs is declared in
   the component's own `mod.rs`.
-- `lib.rs` declares the components `pub mod`. Seven more exist under `executor/`, every one
+- `lib.rs` declares the components `pub mod`. Four more exist under `executor/`, every one
   forced by a test crate reaching a subcomponent, every one registered in `PUB_MODULES` with the
   files that force it and checked both ways. They expire when `test-layout.md` moves those files
   into `src/`; a `pub mod` outside the register is a violation, not a precedent.

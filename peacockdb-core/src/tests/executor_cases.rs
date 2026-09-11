@@ -2,26 +2,21 @@
 //
 // Each backend is proved against its own oracle over its own fixture, which says nothing
 // about the two agreeing — and a mode whose whole claim is that one plan runs on either
-// engine needs that said somewhere. The instrument is `gpu_cases.inc`'s: a case list
-// included by several targets, so a case added here reaches every engine claiming the
-// shape. `INPUT` is the fixture for both, and the device writes its parquet from it — a
-// table one side does not read is a table that proves the CPU twice.
+// engine needs that said somewhere. The instrument is `corpus_cases.inc`'s: one table read
+// by both engines' tests, so a case added here reaches every engine claiming the shape.
+// `INPUT` is the fixture for both, and the device writes its parquet from it — a table one
+// side does not read is a table that proves the CPU twice. Plain `//` rather than `//!`
+// because `tests/test_gpu_executors.rs` still `include!`s this file as text.
 
 /// The rows every case starts from, as `(k, v)`. Small enough to write an answer down, and
 /// split into three batches by the device fixture's row groups.
-pub const INPUT: [(&str, i64); 6] = [
-    ("a", 2),
-    ("b", 1),
-    ("a", 4),
-    ("b", 3),
-    ("a", 6),
-    ("b", 5),
-];
+pub(crate) const INPUT: [(&str, i64); 6] =
+    [("a", 2), ("b", 1), ("a", 4), ("b", 3), ("a", 6), ("b", 5)];
 
 /// What a case asks of a backend. One node each, since what is under test is the answer
 /// rather than a plan: a shape both engines run, driven the way that engine drives it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Shape {
+pub(crate) enum Shape {
     /// `v > n`, per batch.
     Filter { above: i64 },
     /// `v * 2`, per batch.
@@ -44,13 +39,13 @@ impl Shape {
     /// Whether the order of the answer is part of it. A sort's is — comparing its rows as
     /// a set is an assertion no unsorted sort could fail — while a grouped aggregate's is
     /// its hash table's and a scatter's is the lane walk's.
-    pub fn order_is_the_answer(&self) -> bool {
+    pub(crate) fn order_is_the_answer(&self) -> bool {
         matches!(self, Shape::SortLane { .. })
     }
 }
 
 /// One case: what it is called, what it does, and the answer both engines owe.
-pub struct Case {
+pub(crate) struct Case {
     pub name: &'static str,
     pub shape: Shape,
     /// The answer as `k|v` rows, sorted — or `lane|k|v` where the shape is a scatter.
@@ -63,7 +58,7 @@ pub struct Case {
 /// `spark_hash_partition` on the device, held bit-equal by `test_inc2_conformance` — so a
 /// row landing in a different lane on either engine means a join would silently drop
 /// matches, and this is where that goes red.
-pub const CASES: &[Case] = &[
+pub(crate) const CASES: &[Case] = &[
     Case {
         name: "a filter keeps the rows above its bound",
         shape: Shape::Filter { above: 3 },

@@ -1,89 +1,18 @@
-//! The CPU half of the contract in [`executor_cases.inc`]: every case driven through this
-//! backend and checked against the answer both engines owe.
+//! The CPU half of the contract in `crate::tests::executor_cases`: every case driven
+//! through this backend and checked against the answer both engines owe.
 //!
-//! Agreement between two engines has its own target here for the reason
+//! Agreement between two engines has its own module here for the reason
 //! `test_inc2_conformance` does — it is a claim about the pair, not about either side, and
-//! putting it inside one side's tests makes it that side's opinion. Each backend's own unit
-//! tests stay where they are; this is the join between them.
+//! putting it among one side's cases makes it that side's opinion. Each executor's own
+//! tests stay in the files beside this one; this is the join between them.
 
-mod common;
-
-use std::sync::Arc;
-
-use datafusion::arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray};
-use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
-use datafusion::common::ScalarValue;
-use datafusion::execution::TaskContext;
-use datafusion::execution::context::SessionContext;
-
-use peacockdb_core::executor::CpuBatch;
-use peacockdb_core::plan::{AggCall, PlanAgg};
-use peacockdb_core::executor::cpu_backend::CpuExec;
-use peacockdb_core::executor::cpu_backend::accumulate::CpuAccumulator;
-use peacockdb_core::executor::cpu_backend::emit::CpuEmitter;
-use peacockdb_core::plan::{BinaryOp, Expr, NamedExpr};
-use peacockdb_core::plan::{
-    BatchLayout, ColumnOrder, NodeKind, PartitionLayout,
+use super::*;
+use crate::plan::{
+    ColumnOrder, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
+    GpuCoalesceAllBatches, GpuEmitPartitions, GpuFilter, GpuProject,
 };
-use peacockdb_core::plan::GpuNode;
-use peacockdb_core::plan::AggregateBody;
-use peacockdb_core::plan::{
-    GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuCoalesceAllBatches,
-    GpuEmitPartitions, GpuFilter, GpuProject,
-};
-use peacockdb_core::plan::Schema;
-
-include!("common/executor_cases.inc");
-
-/// A child that declares a schema and a layout and nothing else.
-#[derive(Debug)]
-struct Given {
-    kind: NodeKind,
-}
-
-impl Given {
-    fn of(schema: Schema, batches: BatchLayout) -> Box<dyn GpuNode> {
-        Box::new(Given {
-            kind: NodeKind::Intermediate {
-                layout: PartitionLayout {
-                    batch_layout: batches,
-                    ..PartitionLayout::new(1)
-                },
-                schema,
-            },
-        })
-    }
-}
-
-impl GpuNode for Given {
-    fn kind(&self) -> &NodeKind {
-        &self.kind
-    }
-    fn children(&self) -> Vec<&dyn GpuNode> {
-        Vec::new()
-    }
-    fn validate_schemas_and_partitions(
-        &self,
-    ) -> Result<(), peacockdb_core::plan::PlanError> {
-        Ok(())
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-fn columns(fields: &[(&str, DataType)]) -> Schema {
-    Schema::new(Arc::new(ArrowSchema::new(
-        fields
-            .iter()
-            .map(|(name, kind)| Field::new(*name, kind.clone(), true))
-            .collect::<Vec<Field>>(),
-    )))
-}
-
-fn rows() -> Schema {
-    columns(&[("k", DataType::Utf8), ("v", DataType::Int64)])
-}
+use crate::tests::executor_cases::{CASES, INPUT, Shape};
+use datafusion::arrow::array::UInt8Array;
 
 /// The input as the lane's three batches, which is how the device's row groups deliver it.
 fn batches() -> Vec<CpuBatch> {
@@ -97,15 +26,11 @@ fn batches() -> Vec<CpuBatch> {
                 chunk.iter().map(|(_, v)| Some(*v)).collect::<Vec<_>>(),
             ));
             CpuBatch::new(
-                RecordBatch::try_new(rows().fields.clone(), vec![keys, values])
+                RecordBatch::try_new(schema_of(&GROUPED).fields.clone(), vec![keys, values])
                     .expect("the rows fit their schema"),
             )
         })
         .collect()
-}
-
-fn ctx() -> Arc<TaskContext> {
-    SessionContext::new().task_ctx()
 }
 
 /// `k|v` per row, sorted — the shape the table writes its answers in.
@@ -132,7 +57,7 @@ fn rendered(batches: &[CpuBatch]) -> Vec<String> {
 
 /// The state a `sum(v)` decomposes into, and the merge that folds it.
 fn summed(keys: &[(&str, DataType)]) -> (Schema, AggregateBody, AggregateBody) {
-    let state = columns(&[keys, &[("sum(v)", DataType::Int64)]].concat());
+    let state = schema_of(&[keys, &[("sum(v)", DataType::Int64)]].concat());
     let group_by: Vec<Expr> = keys
         .iter()
         .enumerate()
@@ -175,11 +100,11 @@ fn answer(shape: Shape) -> Vec<String> {
 }
 
 fn emitted(shape: Shape) -> Vec<String> {
-    let input = rows();
+    let input = schema_of(&GROUPED);
     match shape {
         Shape::Filter { above } => {
             let node = GpuFilter::new(
-                Given::of(input.clone(), BatchLayout::MultipleBatches),
+                Given::of_schema(input.clone()),
                 Expr::binary(
                     Expr::column(1, "v"),
                     BinaryOp::Gt,
@@ -192,9 +117,9 @@ fn emitted(shape: Shape) -> Vec<String> {
             per_batch(CpuExec::filter(&node, &input.fields, ctx()).expect("the filter builds"))
         }
         Shape::Double => {
-            let out = columns(&[("k", DataType::Utf8), ("v", DataType::Int64)]);
+            let out = schema_of(&GROUPED);
             let node = GpuProject::new(
-                Given::of(input.clone(), BatchLayout::MultipleBatches),
+                Given::of_schema(input.clone()),
                 vec![
                     NamedExpr::new(Expr::column(0, "k"), "k"),
                     NamedExpr::new(
@@ -213,7 +138,7 @@ fn emitted(shape: Shape) -> Vec<String> {
         }
         Shape::SortLane { fetch } => {
             let node = GpuAccumulateBatchesAndSort::new(
-                Given::of(input.clone(), BatchLayout::MultipleBatches),
+                Given::of_schema(input.clone()),
                 vec![ColumnOrder {
                     column: 1,
                     ascending: true,
@@ -226,8 +151,7 @@ fn emitted(shape: Shape) -> Vec<String> {
             at_done(accumulator)
         }
         Shape::CoalesceLane => {
-            let node =
-                GpuCoalesceAllBatches::new(Given::of(input.clone(), BatchLayout::MultipleBatches));
+            let node = GpuCoalesceAllBatches::new(Given::of_schema(input.clone()));
             at_done(CpuAccumulator::coalesce(&node, &input.fields))
         }
         Shape::SumByKey { finalize } => {
@@ -236,7 +160,7 @@ fn emitted(shape: Shape) -> Vec<String> {
             let output = match finalize {
                 true => {
                     merge.finalize = Some(vec![NamedExpr::new(Expr::column(1, "sum(v)"), "total")]);
-                    columns(&[("k", DataType::Utf8), ("total", DataType::Int64)])
+                    schema_of(&[("k", DataType::Utf8), ("total", DataType::Int64)])
                 }
                 false => state.clone(),
             };
@@ -250,12 +174,7 @@ fn emitted(shape: Shape) -> Vec<String> {
             let (state, _, merge) = summed(&keys);
             let with_id = |batch: CpuBatch| {
                 let batch = batch.into_record_batch();
-                let ids: ArrayRef = Arc::new(datafusion::arrow::array::UInt8Array::from(vec![
-                    0u8;
-                    batch
-                        .num_rows(
-                        )
-                ]));
+                let ids: ArrayRef = Arc::new(UInt8Array::from(vec![0u8; batch.num_rows()]));
                 let mut columns = vec![batch.column(0).clone(), ids];
                 columns.push(batch.column(1).clone());
                 CpuBatch::new(
@@ -264,7 +183,7 @@ fn emitted(shape: Shape) -> Vec<String> {
                 )
             };
             let node = GpuAggregateBatches::new(
-                Given::of(state.clone(), BatchLayout::MultipleBatches),
+                Given::of_schema(state.clone()),
                 merge,
                 state.clone(),
                 state.clone(),
@@ -288,11 +207,7 @@ fn emitted(shape: Shape) -> Vec<String> {
                 .collect()
         }
         Shape::ScatterLanes { lanes } => {
-            let node = GpuEmitPartitions::new(
-                Given::of(input.clone(), BatchLayout::MultipleBatches),
-                vec![0],
-                lanes,
-            );
+            let node = GpuEmitPartitions::new(Given::of_schema(input.clone()), vec![0], lanes);
             let mut emitter =
                 CpuEmitter::new(&node, lanes, &input.fields).expect("the emitter builds");
             let mut out = Vec::new();
@@ -335,7 +250,7 @@ fn merged(
     output: Schema,
 ) -> Vec<String> {
     let init_node = GpuAggregate::new(
-        Given::of(input.clone(), BatchLayout::MultipleBatches),
+        Given::of_schema(input.clone()),
         init,
         state.clone(),
         state.clone(),
@@ -343,7 +258,7 @@ fn merged(
     let mut partial =
         CpuExec::aggregate(&init_node, &input.fields, ctx()).expect("the init builds");
     let merge_node = GpuAggregateBatches::new(
-        Given::of(state.clone(), BatchLayout::MultipleBatches),
+        Given::of_schema(state.clone()),
         merge,
         state.clone(),
         output,

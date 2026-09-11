@@ -63,7 +63,7 @@ use common::GPU_BUDGET;
 // The rows are the contract's, so the two backends cannot claim one fixture and read two.
 // The device writes them into three row groups, which is how a lane comes to have three
 // batches.
-include!("common/executor_cases.inc");
+include!("../src/tests/executor_cases.rs");
 
 fn keys() -> Vec<&'static str> {
     INPUT.iter().map(|(k, _)| *k).collect()

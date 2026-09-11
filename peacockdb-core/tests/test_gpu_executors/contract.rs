@@ -1,4 +1,4 @@
-//! The device half of the contract in `executor_cases.inc`: the same table, the same
+//! The device half of the contract in `executor_cases.rs`: the same table, the same
 //! expectations, driven through this backend.
 //!
 //! What it adds over either side's own tests is the only thing neither can say — that two

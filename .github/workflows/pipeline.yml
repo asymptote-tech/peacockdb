@@ -258,8 +258,7 @@ jobs:
           # smaller link in the tier that has already hit tmpfs/SIGBUS at link time, while
           # the default-feature one above carries the ffi rung as well. Each shares its
           # own line's already-built fingerprint, so neither costs an extra compile.
-          cargo test --no-run --features rust-only -p peacockdb-core --lib \
-            --test test_cpu_executors
+          cargo test --no-run --features rust-only -p peacockdb-core --lib
           # The CLI, which has no test target of its own and so is named by nothing above.
           # It is the only caller of the planner and the driver from outside the crate, so a
           # signature change that the tests absorb still breaks it — and unbuilt, it breaks
@@ -291,11 +290,6 @@ jobs:
           # the injector's own cases run against it. test_ci_coverage asserts this line
           # exists.
           cargo test --features rust-only -p peacockdb-core --lib
-          # The executor contract both engines owe, from one table: this runs its rows on
-          # the CPU backend and the gpu-tests job runs the same rows on a device. Neither
-          # half proves the contract alone, which is why the table is shared rather than
-          # copied. Synthetic data written by the test, so no dataset and no device.
-          cargo test --features rust-only -p peacockdb-core --test test_cpu_executors
           # The corpus on the same path: every enabled query at every mode its line
           # declares, answers against DataFusion. Needs sf1, so it lives here and not
           # in the golden-only tier.

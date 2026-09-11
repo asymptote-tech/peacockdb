@@ -7,9 +7,9 @@
 //! thread on one node's stream. A sort past its in-place threshold spawns onto the runtime
 //! from under that block, which is what a driver has to leave room for (T17).
 
-pub mod accumulate;
+mod accumulate;
 mod backend;
-pub mod emit;
+mod emit;
 mod expr_physical;
 mod join;
 mod merge_m2;
@@ -30,7 +30,7 @@ use datafusion::logical_expr::AggregateUDF;
 use datafusion::parquet::arrow::ProjectionMask;
 use datafusion::parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use datafusion::physical_expr::aggregate::AggregateExprBuilder;
-use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
+use datafusion::physical_expr::{LexOrdering, PhysicalExpr, PhysicalSortExpr};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
 use datafusion::physical_plan::empty::EmptyExec;
@@ -88,6 +88,36 @@ pub struct CpuProbingJoin {
     build: RecordBatch,
     calls: join::Calls,
     accumulated: Vec<RecordBatch>,
+}
+
+/// A `BatchAccumulator` node's executor. What it holds between calls is one of four
+/// things, and `accumulate` owns them: a public variant would hand a caller the state a
+/// private module keeps.
+pub struct CpuAccumulator {
+    state: accumulate::State,
+}
+
+/// The one node of the partition-accumulator category: every lane's sorted stream merged
+/// into one at the last lane's done.
+///
+/// It takes one call per lane event because that is what round-robin driving produces, and
+/// the call carrying the last `Done` is the emitting one. Ties are broken partition-major
+/// — lane order, then arrival order inside a lane — which is what concatenating in lane
+/// order and sorting stably gives, and what a k-way merge over the same runs gives.
+pub struct CpuPartitionAccumulator {
+    per_lane: Vec<Vec<RecordBatch>>,
+    live: usize,
+    sort: Arc<dyn ExecutionPlan>,
+    fetch: Option<usize>,
+    schema: SchemaRef,
+    ctx: Arc<TaskContext>,
+}
+
+/// The scatter: one batch in, N out, some of them empty.
+pub struct CpuEmitter {
+    hash_keys: Vec<Arc<dyn PhysicalExpr>>,
+    lanes: usize,
+    schema: SchemaRef,
 }
 
 /// A node's operators in call order, each one's output the next one's input — one for a

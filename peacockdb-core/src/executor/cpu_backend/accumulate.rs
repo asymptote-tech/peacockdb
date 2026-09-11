@@ -17,7 +17,10 @@ use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
 
 use super::expr_physical::physical_projection;
-use super::{aggregate_exec, declared_as, lex_ordering, placeholder, run_node};
+use super::{
+    CpuAccumulator, CpuPartitionAccumulator, aggregate_exec, declared_as, lex_ordering,
+    placeholder, run_node,
+};
 use crate::executor::CpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats, LaneEvent};
 use crate::plan::PlanError;
@@ -28,8 +31,8 @@ use crate::plan::{
 use crate::plan::{GpuNode, RowInterval};
 use crate::plan::{Phase, finalize_columns};
 
-/// A `BatchAccumulator` node's executor, one variant per node.
-pub enum CpuAccumulator {
+/// What a `CpuAccumulator` holds between calls, one variant per node.
+pub(crate) enum State {
     Coalesce(Coalesce),
     Sorted(SortedRuns),
     Aggregate(AggregateBatches),
@@ -37,32 +40,36 @@ pub enum CpuAccumulator {
 }
 
 impl CpuAccumulator {
-    pub fn coalesce(_node: &GpuCoalesceAllBatches, input: &ArrowSchema) -> Self {
-        Self::Coalesce(Coalesce {
-            held: Vec::new(),
-            schema: Arc::new(input.clone()),
-        })
+    fn of(state: State) -> Self {
+        Self { state }
     }
 
-    pub fn sorted(
+    pub(crate) fn coalesce(_node: &GpuCoalesceAllBatches, input: &ArrowSchema) -> Self {
+        Self::of(State::Coalesce(Coalesce {
+            held: Vec::new(),
+            schema: Arc::new(input.clone()),
+        }))
+    }
+
+    pub(crate) fn sorted(
         node: &GpuAccumulateBatchesAndSort,
         input: &ArrowSchema,
         ctx: Arc<TaskContext>,
     ) -> Result<Self, PlanError> {
         let ordering = lex_ordering(&node.keys, input)?;
-        Ok(Self::Sorted(SortedRuns {
+        Ok(Self::of(State::Sorted(SortedRuns {
             held: Vec::new(),
             sort: Arc::new(SortExec::new(ordering, placeholder(input))),
             fetch: node.fetch,
             schema: Arc::new(input.clone()),
             ctx,
-        }))
+        })))
     }
 
     /// `compact_bytes` is the held-state size at which a compaction runs. It has no
     /// default here: the number comes from the same budget rule that sizes loader batches,
     /// which is the driver's (T17), and a stand-in default would be a policy nobody chose.
-    pub fn aggregate(
+    pub(crate) fn aggregate(
         node: &GpuAggregateBatches,
         input: &ArrowSchema,
         ctx: Arc<TaskContext>,
@@ -85,7 +92,7 @@ impl CpuAccumulator {
             None => None,
         };
         let ctx = super::always_aggregating(ctx);
-        Ok(Self::Aggregate(AggregateBatches {
+        Ok(Self::of(State::Aggregate(AggregateBatches {
             merge,
             finalize,
             state: None,
@@ -97,31 +104,31 @@ impl CpuAccumulator {
             held: state.fields.clone(),
             output: output.fields.clone(),
             ctx,
+        })))
+    }
+
+    pub(crate) fn limit(node: &GpuLimit) -> Self {
+        Self::of(State::Limit(LimitStream {
+            interval: node.interval,
+            seen: 0,
         }))
     }
 
-    pub fn limit(node: &GpuLimit) -> Self {
-        Self::Limit(LimitStream {
-            interval: node.interval,
-            seen: 0,
-        })
-    }
-
-    pub fn accumulate_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
-        match self {
-            Self::Coalesce(state) => state.accumulate_and_fetch(batch),
-            Self::Sorted(state) => state.accumulate_and_fetch(batch),
-            Self::Aggregate(state) => state.accumulate_and_fetch(batch),
-            Self::Limit(state) => state.accumulate_and_fetch(batch),
+    pub(crate) fn accumulate_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
+        match &mut self.state {
+            State::Coalesce(state) => state.accumulate_and_fetch(batch),
+            State::Sorted(state) => state.accumulate_and_fetch(batch),
+            State::Aggregate(state) => state.accumulate_and_fetch(batch),
+            State::Limit(state) => state.accumulate_and_fetch(batch),
         }
     }
 
-    pub fn mark_done_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
-        match self {
-            Self::Coalesce(state) => state.mark_done_and_fetch(),
-            Self::Sorted(state) => state.mark_done_and_fetch(),
-            Self::Aggregate(state) => state.mark_done_and_fetch(),
-            Self::Limit(state) => state.mark_done_and_fetch(),
+    pub(crate) fn mark_done_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
+        match self.state {
+            State::Coalesce(state) => state.mark_done_and_fetch(),
+            State::Sorted(state) => state.mark_done_and_fetch(),
+            State::Aggregate(state) => state.mark_done_and_fetch(),
+            State::Limit(state) => state.mark_done_and_fetch(),
         }
     }
 }
@@ -145,13 +152,13 @@ fn one_batch(schema: &SchemaRef, held: &[RecordBatch]) -> CallResult<Vec<CpuBatc
 }
 
 /// A lane's batches concatenated into one at done.
-pub struct Coalesce {
+pub(crate) struct Coalesce {
     held: Vec<RecordBatch>,
     schema: SchemaRef,
 }
 
 impl Coalesce {
-    pub fn held(&self) -> &[RecordBatch] {
+    pub(crate) fn held(&self) -> &[RecordBatch] {
         &self.held
     }
 
@@ -175,7 +182,7 @@ impl Coalesce {
 /// point: the top-N path keeps a bounded heap and does not preserve arrival order among
 /// ties, so which of two tied rows a limit kept would depend on the heap. An oracle cannot
 /// answer that differently from run to run.
-pub struct SortedRuns {
+pub(crate) struct SortedRuns {
     held: Vec<RecordBatch>,
     sort: Arc<dyn ExecutionPlan>,
     fetch: Option<usize>,
@@ -184,7 +191,7 @@ pub struct SortedRuns {
 }
 
 impl SortedRuns {
-    pub fn held(&self) -> &[RecordBatch] {
+    pub(crate) fn held(&self) -> &[RecordBatch] {
         &self.held
     }
 
@@ -209,24 +216,8 @@ impl SortedRuns {
     }
 }
 
-/// The one node of the partition-accumulator category: every lane's sorted stream merged
-/// into one at the last lane's done.
-///
-/// It takes one call per lane event because that is what round-robin driving produces, and
-/// the call carrying the last `Done` is the emitting one. Ties are broken partition-major
-/// — lane order, then arrival order inside a lane — which is what concatenating in lane
-/// order and sorting stably gives, and what a k-way merge over the same runs gives.
-pub struct CpuPartitionAccumulator {
-    per_lane: Vec<Vec<RecordBatch>>,
-    live: usize,
-    sort: Arc<dyn ExecutionPlan>,
-    fetch: Option<usize>,
-    schema: SchemaRef,
-    ctx: Arc<TaskContext>,
-}
-
 impl CpuPartitionAccumulator {
-    pub fn merge_sorted(
+    pub(crate) fn merge_sorted(
         node: &GpuMergeSortedPartitions,
         lanes: usize,
         input: &ArrowSchema,
@@ -244,11 +235,11 @@ impl CpuPartitionAccumulator {
     }
 
     /// What each lane is holding, for the accounting the driver sums.
-    pub fn per_lane(&self) -> impl Iterator<Item = &[RecordBatch]> {
+    pub(crate) fn per_lane(&self) -> impl Iterator<Item = &[RecordBatch]> {
         self.per_lane.iter().map(|lane| lane.as_slice())
     }
 
-    pub fn accumulate_and_fetch(
+    pub(crate) fn accumulate_and_fetch(
         &mut self,
         partition: usize,
         event: LaneEvent<CpuBatch>,
@@ -299,7 +290,7 @@ fn first_rows(batch: CpuBatch, fetch: Option<usize>) -> CpuBatch {
 /// are disjoint and nothing merges; never compacting holds the whole input where the
 /// cardinality is high. So arrivals are held until they cross the threshold, folded once,
 /// and the threshold set to twice what that fold left behind.
-pub struct AggregateBatches {
+pub(crate) struct AggregateBatches {
     merge: Arc<dyn ExecutionPlan>,
     /// The finalize project, where this node finishes the aggregate. Its presence is the
     /// only thing that distinguishes a merging node from a finalizing one.
@@ -390,18 +381,12 @@ impl AggregateBatches {
 /// the interval is dropped, one entirely inside is forwarded untouched, and only the two
 /// that straddle its ends are sliced. Its input is one lane — the node checks that — so
 /// the count it keeps is the count of the stream.
-pub struct LimitStream {
+pub(crate) struct LimitStream {
     interval: RowInterval,
     seen: u64,
 }
 
 impl LimitStream {
-    /// How many rows have gone past, which is what a driver reads to know the interval is
-    /// satisfied and the pulls can stop.
-    pub fn seen(&self) -> u64 {
-        self.seen
-    }
-
     fn accumulate_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
         let batch = batch.into_record_batch();
         let n_rows = batch.num_rows() as u64;

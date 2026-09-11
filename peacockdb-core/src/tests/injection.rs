@@ -18,11 +18,6 @@ use datafusion::execution::context::SessionContext;
 
 use crate::executor::CpuBackend;
 use crate::executor::CpuBatch;
-use crate::executor::cpu_backend::CpuSource;
-use crate::executor::cpu_backend::accumulate::{CpuAccumulator, CpuPartitionAccumulator};
-use crate::executor::cpu_backend::emit::CpuEmitter;
-use crate::executor::cpu_backend::{CpuExec, CpuUnload};
-use crate::executor::cpu_backend::{CpuJoin, CpuProbingJoin};
 use crate::executor::{Backend, NodeExecutors};
 use crate::executor::{
     BackendError, BatchAccumulatorExecutor, CallResult, CallStats, ExecExecutor, Executor,
@@ -39,6 +34,17 @@ use crate::plan::{
 };
 
 use super::rebuild::{key, lanes_of, rebuild, scan_of, schema_of, sorted, source};
+
+// The CPU backend's executors, named the way production code names them: through the
+// `Backend` impl, since `cpu_backend` is a subcomponent no crate-level module can see.
+type CpuSource = <CpuBackend as Backend>::Source;
+type CpuExec = <CpuBackend as Backend>::Exec;
+type CpuAccumulator = <CpuBackend as Backend>::BatchAcc;
+type CpuPartitionAccumulator = <CpuBackend as Backend>::PartAcc;
+type CpuEmitter = <CpuBackend as Backend>::Emitter;
+type CpuJoin = <CpuBackend as Backend>::Join;
+type CpuProbingJoin = <CpuJoin as JoinExecutor<CpuBackend>>::Probing;
+type CpuUnload = <CpuBackend as Backend>::Unload;
 
 /// At most this many injected runs per query: 30 is 212 s for the eleven queries serially,
 /// and the cover the selector guarantees is 13 of them.

@@ -825,7 +825,7 @@ same row-range rule for the two backends, and no test reads both.
 Its own doc says the risk: the two answering differently "would be a divergence no test of either
 one alone could see". They are not even comparable as written — one returns `(offset, length)`,
 the other `(begin, end)` — so the four Rust cases and the ten C++ cases each prove one side.
-`executor_cases.inc` is this repo's answer to that shape: one table of inputs and expected answers
+`src/tests/executor_cases.rs` is this repo's answer to that shape: one table of inputs and expected answers
 that both engines read. The claim that landed with the second clamp, "RowRange::clamp is now the
 one clamp", is what this corrects.
 
