@@ -1,13 +1,14 @@
 # Declared schemas implementation plan
 
 **Goal:** Declare what each of six recipe calls produces, render the declarations into a new section
-of `recipe-payloads.txt`, measure them on a device through a thin exporter, and record every
-disagreement as a named `bug_` test — fixing nothing.
+of `recipe-payloads.txt`, measure them on a device through the export that already exists, and
+record every disagreement as a named `bug_` test — fixing nothing.
 
 **Architecture:** `Call` gains an `Option<Schema>` filled only where the declaration already exists.
 A new section of the payload golden renders it Rust-side, before serialization, so the wire never
-changes. A test-only C++ export path preserves declared precision and nullability so the measurement
-is cuDF's answer rather than our exporter's defaults. Each query gets its own named device test.
+changes. The measurement uses the export that already exists — **no C++ change and no new ABI
+symbol** — which means precision and nullability are named as limitations rather than measured.
+Each query gets its own named device test.
 
 **Tech stack:** Rust, C++17/cuDF 25.02, flatbuffers. Device tests on `shad-gpu`.
 
@@ -64,7 +65,6 @@ The device rung is selected by path filter on the staged `--lib --features gpu` 
 | `peacockdb-core/src/wire/attach.rs` | the six arms declare |
 | `peacockdb-core/src/plan_text/mod.rs` | one `pub(crate) fn` rendering section B |
 | `peacockdb-core/src/planner/tests/…` | the golden test gains section B |
-| `cpp/src/gpu_executor.cpp` | the thin export path, test-only |
 | `peacockdb-core/src/wire/gpu_tests/schema_conformance.rs` | one named test per query |
 
 ---
@@ -156,7 +156,7 @@ this task already touches; leave the rest, and say so in the report.
 - [ ] **Step 5: Regenerate the plan goldens and review the diff**
 
 ```bash
-UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test_plan_goldens
+UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core planner::tests
 git diff --stat testdata/goldens/
 ```
 
@@ -276,10 +276,13 @@ fn scan(load: &GpuLoadParquet, node: &dyn GpuNode, writer: &mut Writer)
     ])))
 }
 
-fn filter(node: &GpuFilter, inputs: &[&Schema], writer: &mut Writer)
+fn filter(node: &GpuFilter, _inputs: &[&Schema], writer: &mut Writer)
     -> Result<Option<Recipe>, PlanError> {
-    // A filter drops rows and keeps columns, so its output is its input.
-    let output = inputs[0];
+    // NOT inputs[0]. GpuFilter carries a `projection` -- DataFusion's filter projects as
+    // well as filtering -- so a filter's output is its own schema and can be narrower
+    // than its input. The field's own doc says dropping it "would leave this node
+    // declaring its child's columns while emitting fewer".
+    let output = node.kind().schema().expect("a filter is not the exporter");
     let seq = writer.node(1, |b, kids| node_writer::filter(b, node, kids))?;
     Ok(Some(Recipe::of(vec![
         Call::seq(seq, FbKind::Filter, vec![Input::Batch], CallPattern::PerBatch)
@@ -486,7 +489,7 @@ query, under a header naming where it comes from:
 
 ```bash
 UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 \
-  cargo test --features rust-only -p peacockdb-core --test test_plan_goldens
+  cargo test --features rust-only -p peacockdb-core planner::tests
 git diff testdata/goldens/recipe-payloads.txt | grep -c '^[-+]sha256='
 ```
 
@@ -511,199 +514,7 @@ on the wire, the two sections become each other's check."
 
 ---
 
-### Task 5: A thin exporter that checks, for tests only
-
-Measured through the production path, precision is always 38 and nullability is whatever this
-batch's data happened to be — so two dimensions would report our defaults rather than the device.
-The thin path does not *relabel* them, which would assert the declaration and measure nothing. It
-**casts** to the declared type and lets the cast fail, which asks a question nothing in the engine
-currently asks: does the data the device produced actually satisfy the type the plan declared?
-
-That makes it the device-side analogue of `declared_as` (`cpu_backend/mod.rs:239`), which casts a
-widened decimal back on the CPU side and takes the error. If it holds across the corpus, the later
-task knows what the production fix looks like.
-
-**Files:**
-- Modify: `cpp/src/gpu_executor.cpp:49-90`
-- Create: a gtest for the two-path difference
-
-**Interfaces:**
-- Produces: a test-only export that takes the declared fields and either exports under them or
-  fails naming the column.
-
-- [ ] **Step 1: Confirm what the production path rewrites, and what 25.02 cannot express**
-
-`export_table_to_ipc` (`:52`) builds `col_meta.push_back({name})` — name only. `to_arrow_schema`
-then applies `metadata.precision.value_or(max_precision<__int128_t>())` = **38**, and each field's
-nullable flag comes from `col.has_nulls()`.
-
-```bash
-grep -n 'struct column_metadata' -A 12 "$cudf_ROOT/include/cudf/interop.hpp"
-```
-
-Expect `name` and `children_meta` and nothing else: **`column_metadata` has no `precision` member
-before 26.02.** That is why the 25.02 arm cannot pass precision through the supported channel, and
-why the earlier `wire-schema` attempt — which assumed it could — would have broken every device test
-while compiling cleanly on the other leg.
-
-- [ ] **Step 2: Add the version guard**
-
-```cpp
-#include <cudf/version_config.hpp>
-
-// column_metadata gained a precision member in 26.02. Before that the only way to state a
-// decimal's precision is to rebuild the Arrow schema after the import, which is what the
-// 25.02 arm below does. The guard exists so the two arms are visibly the same intent
-// rather than one looking like a workaround nobody revisited.
-#if CUDF_VERSION_MAJOR > 26 || (CUDF_VERSION_MAJOR == 26 && CUDF_VERSION_MINOR >= 2)
-#define PEACOCK_CUDF_METADATA_CARRIES_PRECISION 1
-#else
-#define PEACOCK_CUDF_METADATA_CARRIES_PRECISION 0
-#endif
-```
-
-- [ ] **Step 3: Write both arms**
-
-```cpp
-// Test-only export: the table under the schema the plan declared, or a failure naming the
-// column that does not fit it. Two dimensions differ from export_table_to_ipc and no
-// others -- decimal precision, and nullability.
-//
-// It CASTS rather than relabels. Relabelling would state the declaration and could never
-// fail, which measures nothing; the cast asks whether the values the device produced
-// satisfy the declared type. The device-side analogue of cpu_backend's declared_as.
-static void export_table_to_ipc_as_declared(
-    const cudf::table_view& tview,
-    const std::vector<std::string>& column_names,
-    const std::vector<PeacockDeclaredField>& declared,
-    uint8_t** out_bytes, uint64_t* out_len) {
-  // ... col_meta and the DECIMAL32/64 widening exactly as export_table_to_ipc does ...
-
-#if PEACOCK_CUDF_METADATA_CARRIES_PRECISION
-  // 26.02 and later: state the precision through the supported channel, so the schema
-  // to_arrow_schema produces is already the declared one and no rebuild is needed.
-  //
-  // DEAD ON THE LEG THAT RUNS. shad-gpu is 25.02 and CI's 26.02 leg only compiles, so
-  // nothing executes this today. It is written now because writing it later means
-  // rediscovering why the other arm exists.
-  for (size_t i = 0; i < col_meta.size(); ++i) {
-    col_meta[i].precision = declared[i].precision;
-  }
-  auto c_schema = cudf::to_arrow_schema(export_view, col_meta);
-  auto schema = arrow::ImportSchema(c_schema.get()).ValueOrDie();
-#else
-  // 25.02: column_metadata cannot carry precision, so the schema arrives with every
-  // decimal at 38 and we restate the types after the import. ImportRecordBatch does not
-  // cross-check the array against the schema's precision, which is what makes the
-  // substitution sound -- and why the cast below, not this rebuild, is the check.
-  auto c_schema = cudf::to_arrow_schema(export_view, col_meta);
-  auto schema = arrow::ImportSchema(c_schema.get()).ValueOrDie();
-#endif
-
-  if (declared.size() != static_cast<size_t>(schema->num_fields()))
-    throw std::runtime_error("declared fields and exported columns differ in number");
-
-  auto c_array = cudf::to_arrow_host(export_view);
-  auto batch = arrow::ImportRecordBatch(&c_array->array, schema).ValueOrDie();
-
-  // The check. Each column cast to what the plan declared; a value that does not fit the
-  // declared precision fails here and names its column, which is the finding.
-  arrow::FieldVector fields;
-  std::vector<std::shared_ptr<arrow::Array>> columns;
-  for (int i = 0; i < schema->num_fields(); ++i) {
-    auto f = schema->field(i);
-    auto col = batch->column(i);
-    auto want = f->type();
-    if (want->id() == arrow::Type::DECIMAL128)
-      want = arrow::decimal128(declared[i].precision, declared[i].scale);
-
-    if (!want->Equals(*f->type())) {
-      arrow::compute::CastOptions opts = arrow::compute::CastOptions::Safe(want);
-      auto cast = arrow::compute::Cast(col, opts);
-      if (!cast.ok())
-        throw std::runtime_error(
-            "column '" + f->name() + "' does not fit the " + want->ToString() +
-            " the plan declared: " + cast.status().ToString());
-      col = cast->make_array();
-    }
-
-    // Nullability is declared, not derived -- but checked, not asserted: a column the
-    // plan says cannot be null and which contains one is the finding, not a relabel.
-    if (!declared[i].nullable && col->null_count() > 0)
-      throw std::runtime_error(
-          "column '" + f->name() + "' is declared non-nullable and exported " +
-          std::to_string(col->null_count()) + " nulls");
-
-    fields.push_back(arrow::field(f->name(), col->type(), declared[i].nullable));
-    columns.push_back(col);
-  }
-  schema = arrow::schema(fields);
-  batch = arrow::RecordBatch::Make(schema, batch->num_rows(), columns);
-
-  // ... the writer, the buffer and the malloc exactly as export_table_to_ipc does ...
-}
-```
-
-- [ ] **Step 4: Settle safe-versus-unsafe before trusting the cast**
-
-Two things to establish rather than assume, because the whole instrument rests on them:
-
-1. **Does arrow-cpp's decimal→decimal narrowing cast actually reject an out-of-range value under
-   `Safe`?** Write a gtest over a `decimal128(38,2)` array holding a value needing 20 digits, cast to
-   `decimal128(15,2)`, and assert the status is an error. If it silently produces a NULL instead,
-   `Safe` is the wrong option here for the same reason `declared_as` rejected it — a NULL in the
-   result is indistinguishable from one the data had — and the arm must count nulls before and after
-   instead.
-2. **Confirm `PeacockDeclaredField`'s precision is the declared one**, not one re-derived from the
-   exported schema. A field populated from what came back would make the cast a no-op and the whole
-   check vacuous.
-
-Record both answers in `declared-schemas-detail.md`.
-
-- [ ] **Step 5: Prove the two paths differ where expected and nowhere else**
-
-```cpp
-TEST(ThinExport, TheDeclaredSchemaIsWhatTheThinPathReports) {
-  // A table of one Decimal128(15,2) column whose values all fit, and one nullable Int64
-  // column whose data happens to contain no null.
-  //
-  // Production: (38,2), because col_meta carries no precision; and non-nullable,
-  //             because the flag is col.has_nulls().
-  // Thin:       (15,2) and nullable, because those are what the plan declared and the
-  //             data satisfies them.
-  //
-  // Then assert the two agree on everything else -- column count, names, order, and the
-  // types of the non-decimal columns. A thin path differing anywhere else is not thin,
-  // and every extra difference is one the catalog would misread as cuDF's.
-}
-
-TEST(ThinExport, AValueTooWideForItsDeclaredPrecisionIsNamed) {
-  // The other half, and the one that makes this a measurement: a Decimal128(15,2)
-  // declaration over a value needing 20 digits fails, and the message names the column.
-  // Without this test the cast could be a no-op and nothing would say so.
-}
-```
-
-- [ ] **Step 6: Reuse the ABI entry point, or stop**
-
-`peacock_result_from_handle` is what the export goes through; give it the declared fields rather than
-adding a symbol. If it cannot carry them, **stop and report** — a new ABI symbol is outside this task
-and changes its shape.
-
-- [ ] **Step 7: Run the device cycle, commit**
-
-```bash
-git add cpp/src/gpu_executor.cpp cpp/tests/
-git commit -m "a thin export path that checks the declared type
-
-The production path defaults every decimal to 38 and derives nullability
-from the data, so measuring through it measures us. This one casts to what
-the plan declared and fails naming the column -- the device-side analogue
-of cpu_backend's declared_as. The 26.02 arm uses column_metadata::precision
-and is dead until that leg runs anything."
-```
-
-### Task 6: The harness, shared
+### Task 5: The harness, shared
 
 **Files:**
 - Modify: `peacockdb-core/src/wire/gpu_tests/` — the walk that `test-layout.md` moved there
@@ -740,22 +551,17 @@ assumption is the harness's rather than the engine's.
 pub(crate) fn exported_schema(
     executor: *mut PeacockExecutor,
     handle: u64,
-    declared: &Schema,
 ) -> Result<ArrowSchema, String> {
     let mut ipc: *mut u8 = std::ptr::null_mut();
     let mut len: u64 = 0;
+    // The export that already exists. No declared fields are passed and no symbol is
+    // added: what this reads is what the device produced under the production path,
+    // which is the thing the catalog is measuring.
     let rc = unsafe {
-        peacock_result_from_handle_as_declared(
-            executor,
-            handle,
-            declared_fields(declared).as_ptr(),
-            declared.fields.fields().len() as u64,
-            &mut ipc,
-            &mut len,
-        )
+        peacock_result_from_handle(executor, handle, 0, u64::MAX, &mut ipc, &mut len)
     };
     if rc != 0 {
-        return Err(format!("the thin export refused handle {handle}: rc={rc}"));
+        return Err(format!("the export refused handle {handle}: rc={rc}"));
     }
     let bytes = unsafe { std::slice::from_raw_parts(ipc, len as usize) };
     let schema = StreamReader::try_new(std::io::Cursor::new(bytes), None)
@@ -764,33 +570,11 @@ pub(crate) fn exported_schema(
     unsafe { peacock_result_free(ipc) };
     schema.map(|s| s.as_ref().clone())
 }
-
-/// The declared fields in the shape the C++ side takes them, built once per call.
-/// Precision and scale come from the plan, never from what came back -- a field
-/// populated from the export would make Task 5's cast a no-op and the check vacuous.
-fn declared_fields(schema: &Schema) -> Vec<PeacockDeclaredField> {
-    schema
-        .fields
-        .fields()
-        .iter()
-        .map(|field| {
-            let (precision, scale) = match field.data_type() {
-                DataType::Decimal128(p, s) => (*p, *s),
-                _ => (0, 0),
-            };
-            PeacockDeclaredField {
-                precision,
-                scale,
-                nullable: field.is_nullable(),
-            }
-        })
-        .collect()
-}
 ```
 
-**The exact symbol name and signature come from Task 5 step 6.** If `peacock_result_from_handle`
-could carry the declared fields, use it and drop the `_as_declared` suffix here; if Task 5 stopped
-and reported instead, this task stops too.
+**Confirm `peacock_result_from_handle`'s real signature before writing this** — the row range
+arguments above are from the header and may not be what it takes. It is the existing symbol either
+way; nothing new is added.
 
 - [ ] **Step 4: Commit**
 
@@ -805,7 +589,7 @@ engine's, and it refuses a filter that matches nothing."
 
 ---
 
-### Task 7: The queries, one named test each
+### Task 6: The queries, one named test each
 
 **Files:**
 - Modify: `peacockdb-core/src/wire/gpu_tests/schema_conformance.rs`
@@ -892,7 +676,7 @@ does not say which one produced it is the confusion that misfiled #187 in the fi
 
 ---
 
-### Task 8: The statement of what was measured
+### Task 7: The statement of what was measured
 
 The catalog's actual product, and the thing the earlier attempt never produced.
 

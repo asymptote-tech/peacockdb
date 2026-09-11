@@ -29,8 +29,8 @@ carries nulls may simply be re-flagged. Confirm what this arrow version validate
 rests on it.
 
 This task measures the side that is not held. It declares what each **call** produces, exports each
-call's output through a deliberately thin exporter, compares the two, and records every disagreement
-as a `bug_` test. It **fixes nothing**.
+call's output through the export that already exists, compares the two, and records every
+disagreement as a `bug_` test. It **fixes nothing**.
 
 It is the first of two. This one takes the six calls whose declaration is already in hand — scan,
 filter, project, sort, coalesce-all, exporter. [`declared-schemas-derived.md`](declared-schemas-derived.md)
@@ -61,9 +61,9 @@ this batch's data happened to be. That is the finding that reframed this task, a
 rather than measuring through it.
 
 **What is compared is therefore declared versus exported, and the exporter is a party that can be
-wrong.** Step 3 replaces two of the three rewrites, in a test-only path, with a *check* — so that
-what remains unexplained is cuDF's. The production exporter is not touched, and the difference
-between the two exporters is itself a finding worth writing down.
+wrong.** Two of the three rewrites — precision and nullability — are the exporter's own, so they are
+named as limitations rather than reported as divergences (step 3). What remains unexplained is
+cuDF's, and that is what the catalog records.
 
 This is not the first per-node assertion in the tree. `executor/gpu_backend`'s device tests already
 assert one node's declared output. This generalizes that to every call of every query in the list.
@@ -114,41 +114,31 @@ assuming: `aggregate_batches` (`attach.rs:245`) carries its intermediate-versus-
 *separate calls*, so nothing known contradicts it. If firings of one call disagree, the unit is
 (call, firing role) and both specs change rather than being patched.
 
-### 3. A thin exporter, for tests only — and it checks rather than states
+### 3. What the export can and cannot answer
 
-A second export path that differs from the production one in exactly two dimensions, precision and
-nullability, and in nothing else.
+The measurement uses the export that already exists. `peacock_result_from_handle` writes an IPC
+stream and `StreamReader::try_new(...).schema()` reads what the device produced — no C++ change, no
+new ABI symbol, no cuDF version question.
 
-**It casts to the declared type; it does not relabel.** The distinction is the whole value of it. A
-path that restated `Decimal128(15,2)` on the way out would assert the declaration, could never fail,
-and would measure nothing — worse, it would make precision and nullability *unmeasurable*, since
-exported would equal declared by construction. Casting asks a question nothing in the engine
-currently asks: **does the data the device produced actually satisfy the type the plan declared?** A
-value too wide for its declared precision fails, naming its column, and that failure is a finding.
+**Two dimensions it cannot answer, named here rather than measured badly.**
 
-Nullability the same way: compare the declared flag against the **actual null count**, which is a
-fact cuDF does hold. A column declared non-nullable that exported nulls is a finding, not a relabel.
+- **Precision.** cuDF's decimal carries a scale and no precision, and `column_metadata` has nowhere to
+  put one before 26.02 — it is name and children only. So every decimal exports at 38 whatever the
+  plan declared, and "what precision did the device produce" has no answer. The report records the
+  class as *our exporter's default*, not as a cuDF divergence. Getting this wrong is what sent
+  `wire-schema` to the wrong file.
+- **Nullability.** The export derives the flag from `col.has_nulls()`, so it reports what this batch
+  happened to contain rather than what was declared. A difference here is data, not a type error.
 
-This makes it the device-side analogue of `declared_as`, which casts a widened decimal back on the
-CPU side and takes the error rather than a silently-NULLed row. So the instrument doubles as a
-prototype of the production fix: if the cast holds across the corpus, the later task knows what to
-build. The production exporter is untouched — making it thin is that task's decision, and it needs
-the evidence this one produces.
+An earlier draft answered both with a second export path in C++ that cast to the declared type. It is
+cut. On 25.02 it restated nothing, so a successful cast meant exported equalled declared by
+construction — and the question it genuinely did ask, *does the data fit the declared precision*, is
+a **value** check that does not belong in a schema catalog. `declared_as` already asks it on the CPU
+side, and that is where the production fix will start.
 
-**How the precision is stated is version-dependent, and both arms are written.** `column_metadata`
-gained a `precision` member in **26.02**; before that it is name and children only. So the 26.02 arm
-passes precision through the supported channel, and the 25.02 arm restates the types after
-`ImportSchema` — `ImportRecordBatch` does not cross-check the array against the schema's precision,
-which is what makes that sound. Both are behind a `CUDF_VERSION_MAJOR`/`MINOR` guard.
-
-**The 26.02 arm is dead code today** and says so where it is written. `shad-gpu` runs 25.02 and CI's
-26.02 leg only compiles, so nothing executes it. It is written now because writing it later means
-rediscovering why the other arm exists — which is precisely the ground `wire-schema` lost when it
-chose a 26.02 mechanism and did not notice the leg that runs could not provide it.
-
-**Which exporter produced a finding is recorded with the finding.** A `(38,2)` through the production
-path is *our* default and not a cuDF divergence, and a catalog that cannot tell those apart sends the
-next task to the wrong file. That is exactly what happened to `wire-schema`.
+**What is left is what the catalog is for**: the type each call declares against the type the device
+handed back. That is where `Utf8View → Utf8`, an `extract`'s `Int32 → Int16`, a non-fixed-width cast
+target and a `Date64` live — and none of them needs a C++ line.
 
 ### 4. A second section in `recipe-payloads.txt`
 
@@ -216,18 +206,20 @@ no query that exercised it.
 | # | query | mode | what it pins |
 |---|---|---|---|
 | 1 | `SELECT n_name FROM nation` | tp1-single | `Utf8View` declared; cuDF has no such type, so `Utf8` at every node. One test for the class, not one per node |
-| 2 | `SELECT l_extendedprice FROM lineitem WHERE l_orderkey = 1` | tp1-single | narrow `Decimal128(15,2)` — [#187](active-tickets.md#t187), and the thin-versus-production exporter difference |
-| 3 | `SELECT CAST(l_extendedprice AS DECIMAL(38,4)) FROM lineitem WHERE l_orderkey = 1` | tp1-single | a decimal already at max precision. Through the production exporter it agrees **for the wrong reason**; the thin one is what makes that visible |
+| 2 | `SELECT l_extendedprice FROM lineitem WHERE l_orderkey = 1` | tp1-single | narrow `Decimal128(15,2)` — [#187](active-tickets.md#t187). Recorded as our exporter's default, since cuDF holds no precision to have diverged |
+| 3 | `SELECT CAST(l_extendedprice AS DECIMAL(38,4)) FROM lineitem WHERE l_orderkey = 1` | tp1-single | a decimal already at max precision, which agrees **for the wrong reason** — 38 is the default, not a measurement. The row exists so the report says so |
 | 4 | `SELECT l_shipdate FROM lineitem WHERE l_orderkey = 1` | tp1-single | `Date32` → `TIMESTAMP_DAYS` → back |
 | 5 | `SELECT l_orderkey, l_linenumber FROM lineitem WHERE l_orderkey = 1` | tp1-single | `Int64` and `Int32` identity |
 | 6 | `SELECT n_name FROM nation WHERE n_nationkey < 0` | tp1-single | the **zero-row** batch, and whether an empty string column types as a populated one |
 | 7 | `SELECT n_name AS label, n_nationkey AS id FROM nation` | tp1-single | column **names** survive the crossing. Declared-versus-device only: the CPU relabels names to the declaration, correctly, so it has no opinion to compare against |
-| 8 | `SELECT CASE WHEN n_nationkey > 10 THEN n_name END FROM nation` | tp1-single | **nullability**. The production exporter reports whether this batch happened to contain a null; the thin one compares the declared flag against the actual null count, so the answer is about the declaration being honoured rather than about the data |
+| 8 | `SELECT CASE WHEN n_nationkey > 10 THEN n_name END FROM nation` | tp1-single | **nullability**, and what the export can say about it: the flag comes from `col.has_nulls()`, so this records the limitation rather than a divergence |
 | 9 | `SELECT n_regionkey, n_nationkey FROM nation` | tp1-single | column **order and arity** — [#190](active-tickets.md#t190)'s uncaught half |
 | 10 | `SELECT CAST(n_nationkey AS BIGINT), CAST(n_nationkey AS DOUBLE) FROM nation` | tp1-single | cast targets, fixed-width |
 | 11 | `SELECT CAST(n_nationkey AS VARCHAR) FROM nation` | tp1-single | [#45](../tickets.md#t45) — a cast target that is not fixed-width |
 | 12 | `SELECT extract(year FROM o_orderdate) FROM orders` | tp1-single | [#191](active-tickets.md#t191) — integer **narrowing**, `Int16` exported where `Int32` was declared |
-| 13 | a scan yielding several batches into a coalesce | tp1-rowgroup | **the firings of one call agree with each other.** The mode is the point: `rowgroup` is what produces more than one batch per lane. Confirm against that mode's plan text and name the query in `-impl.md` |
+| 13 | a query whose sink column is a `Date64` | tp1-single | the hole nothing covers. `Date64` maps to `TIMESTAMP_MILLISECONDS` and returns `Timestamp(ms, None)` — **a type the wire cannot express**, since `gpu_plan.fbs` has no `Timestamp` tag. It gets neither a cast nor a refusal today |
+| 14 | a query producing a `Timestamp` at the sink | tp1-single | the wire has no `Timestamp`, so `convert_data_type` should refuse at plan time. Assert the refusal is clean and names the type, rather than a panic — a refusal nobody has exercised |
+| 15 | a scan yielding several batches into a coalesce | tp1-rowgroup | **the firings of one call agree with each other.** The mode is the point: `rowgroup` is what produces more than one batch per lane. Confirm against that mode's plan text and name the query in `-impl.md` |
 
 Two that are **not** walk queries, because they never reach a device:
 
