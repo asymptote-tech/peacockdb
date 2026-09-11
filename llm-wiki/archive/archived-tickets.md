@@ -27,6 +27,38 @@ the report rather than emitting one that goes nowhere.
 
 ## Done
 
+<a id="t49"></a>
+### #49 — Test crates bake CARGO_MANIFEST_DIR for testdata
+**Priority: low**
+
+Some tests read testdata through `env!("CARGO_MANIFEST_DIR")` instead of `testdata_root()`,
+so they only find their data where the build tree stood.
+
+It matters because a test binary is built on one host and run on another: remote CPU runs ship
+binaries, goldens and data but never source, so a compile-time path is a path the remote does
+not have. `tests/common/mod.rs testdata_root()` solves that by honouring `PEACOCK_TESTDATA_DIR`
+first, which `build-test.sh` sets for remote runs. The residual is the crate's own unit tests
+— five files under `peacockdb-core/src/` reaching `tpch.minimal`: `planner/memory_estimation.rs`,
+`scan_mapping/parquet_meta.rs`, `plan_text/tests.rs` and `translator/{tests,schema_tests}.rs` — which is
+exactly why a remote CPU host needs a `/media/data/peacockdb` symlink and why `--gpu` runs,
+which set the env var, do not.
+
+The sweep is not the one the integration tests got: a unit test cannot reach
+`tests/common/mod.rs`, so the fix is a `#[cfg(test)]` helper in `src` honouring
+`PEACOCK_TESTDATA_DIR` with the same fallback, and the two spellings then have to be held to
+each other or they are the drift this ticket is about one layer down.
+`test_ci_coverage.rs` and the wiki reader in `planner/tests/plan_goldens.rs` are not this: their
+`CARGO_MANIFEST_DIR` resolves the repo root to read committed source, not testdata, and no env
+var should redirect that.
+
+**Done 2026-09-11, by task 4 of chain `ENS-drop-mode-name` (`test-layout.md`, slice 3).** The
+crate has one testdata root, `test_support::testdata_root()`, honouring `PEACOCK_TESTDATA_DIR`
+with the compile-time fallback; the five `src` files call it and `tests/common/mod.rs`'s
+`testdata_root()` delegates to it, so there is no second spelling to drift. `git grep
+CARGO_MANIFEST_DIR -- peacockdb-core/src` finds nothing. `cost-report`'s four testdata sites stay
+as they are: that crate's tests run where the source is and are never staged, which is the case
+this ticket was about.
+
 <a id="t194"></a>
 ### #194 — the cost gate's git baseline ignores which section it was asked for
 

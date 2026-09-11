@@ -1846,3 +1846,196 @@ Slice 10 committed as `4a2f653b`. This is the last slice: `build-test.md`'s two 
 final inventories, `coding-style.md`'s rung ladder and its Visibility section brought to what the
 register now says, `architecture.md` checked, #49 retired, and the final proof. verda still
 unreachable; shad-gpu is not needed.
+
+### 2026-09-11 — slice 11 done: the wiki, from measured numbers
+
+Plan task 12, steps 1-6. Not committed. Four wiki files modified, no code, no script:
+`llm-wiki/build-test.md`, `llm-wiki/coding-style.md`, `llm-wiki/tickets.md`,
+`llm-wiki/archive/archived-tickets.md`. `architecture.md` was checked and needed nothing.
+
+#### Step 1-2: the two tables, and the arithmetic
+
+Fresh inventories on the final tree, `/tmp/inv11-{rust-only,cudf,gpu}.txt` (baselines on disk
+untouched). Every N in the first table is a per-module count read off the `gpu` inventory's `--lib`
+(574 cases, the superset) plus the seven binaries' counts from the `cudf` one, and `peacockdb-ffi`'s
+two. Each row's rung is its module's declaration: `tests` (cpu), `ffi_tests` (ffi), `gpu_tests`
+(gpu); each row's tier is the path — `tests/test_*.rs`, `src/tests/`, `<component>/tests/`,
+`<component>/<sub>/tests/`, `foo/tests.rs`.
+
+The first table, per block:
+
+- **cpu** 987 = `--lib` under `rust-only` 516 + `test_cpu_corpus` 448 + `test_corpus_goldens` 20 +
+  `test_cost_model` 3. The 516 by tier: crate integration internal 26 (`tests::end_to_end`);
+  component 59 + 4 + 50 + 21 + 13 + 1 = 148 (`plan::tests` 63 = rules 31, joins 23, aggregate 5,
+  layout injection 4; `planner::tests` 50 = capability 13, null analysis 8, refusals 10, plan goldens
+  19; `wire::tests` 21; `plan_text::tests` 13; `executor::tests` 1); subcomponent 90 + 65 + 38 = 193
+  (`driver::tests` 90; `cpu_backend::tests` 65 = 64 + the contract's 1; `translator::tests` 29 +
+  `schema_tests` 9); module unit 43 + 5 + 13 + 31 + 11 + 27 + 3 + 16 = 149 (driver's four
+  `accounting` 14, `index` 4, `scheduler` 15, `single_partition` 10; `forwarder` 3 + `row_range` 2;
+  `expr_physical` 13; `validate` 23 + `layout` 4 + `aggregate` 4; `memory_estimation` 11;
+  `translator::expr` 13 + `parquet_meta` 6 + `partition` 8; `expr_text` 3; `expr_writer` 16).
+  26 + 148 + 193 + 149 = 516. `test_cpu_corpus` 448 is 447 in Corpus cpu (444 cells + 3 declaration
+  checks) and 1 in Registry ↔ CSV, cpu.
+- **ffi** 5 = `executor::ffi_tests` 3 + `peacockdb-ffi --test test_ffi` 2. The `cudf` `--lib` is 519
+  = 516 + 3, and `ffi_tests::` matches 0 lines in the `rust-only` inventory.
+- **gpu** 63 = `--lib -- gpu_tests::` 55 (`cpu_backend::gpu_tests::murmur_conformance` 10,
+  `gpu_backend::gpu_tests::{abi 4, accumulate 10, backend 2, contract 1, exec 12, join 6}` = 35,
+  `wire::gpu_tests` 10) + `test_gpu_corpus` 8 (7 in Corpus device: 6 cells + the regeneration guard;
+  1 in Registry ↔ CSV, device). The `gpu` `--lib` is 574 = 519 + 55, and `gpu_tests::` matches 0
+  lines in the `cudf` inventory.
+
+First table 987 + 5 + 63 = **1055**. Second table, Rust: `test_golden_format` 26 +
+`test_ci_coverage` 8 + `test_module_layout` 16 + `cost-report` 37 (`cargo test -p cost-report --
+--list` → `37 tests`) = **87**. Rust 1055 + 87 = **1142**. C++ **66**: `--gtest_list_tests` on
+the five staged `cpp/install/bin/peacock_*_tests` binaries — cpu 11, gpu 6, plan 27, tpch 4,
+tpchv 4 — plus `TEST(` counts in the five sources that are not built here — streamed 4, nodes 1,
+multi-gpu 4 + 4 + 1. Python **369**: `def test_` counts, 41 (`test_duckdb_cost.py`) + 216 (the
+ten prototype files the CI step globs) + 19 (`test_tpch.py`) + 93 (`test_tpch_corpus.py` 22 +
+`plans_tpcds.QUERIES` 71). Headline **1577 = 1142 + 66 + 369**.
+
+**Against the headline the page carried**, 1569 = Rust 1135 + C++ 65 + Python 369: the old N
+column already summed to 1142 for Rust — slices 4 and 10 raised `test_module_layout` 11 → 16
+and `test_ci_coverage` 6 → 8 in the rows and nobody re-summed the header, so the "four-case
+discrepancy task 2 closed" had reopened by seven. C++ moves 65 → 66 because `peacock_gpu_tests`
+lists six cases: task 3 added `RmmPool.ReservesTheDeclaredBudget` and the row was never
+re-counted. Python is unchanged. Recorded, not bent: the header follows the rows.
+
+The check is mechanical — a script sums the N column per block and per table and compares
+against the block headers and the headline (`/tmp/s11-sum.py`, twelve lines of python;
+`blocks: cpu 987/987, ffi 5/5, gpu 63/63; computed (1577, 1142, 66, 369) == header`). Run on
+the old page it cannot parse two tables, which is the red; on the new one it says `OK`.
+
+Other changes on the page: every `#L<n>` anchor in both tables is gone — sixteen of the
+twenty-five pointed at a line that no longer holds the named case (`test_cost_model.rs#L36` is
+`fn cost_total`, `plan_goldens.rs#L708` is a format string, `main.rs#L1552` is blank), so the
+example name is the link and a file link is what stays true. The `Runs` legend says the first
+table carries the job in its block header. `case-inventory.sh`'s row names the `gpu` shape
+(slice 1's note). The `rust-only` section no longer says the GPU test files are gated at file
+level: `test_gpu_corpus` is, the `ffi_tests` modules are `not(rust-only)`, and the device tests
+are `gpu_tests` under `feature = "gpu"`.
+
+#### Step 3: `coding-style.md`
+
+Two bullets added above the `#[cfg(test)]` one: the test-code rules (no test code in a production
+file, `foo.rs` beside `foo/tests.rs`, `test` in every test-only path, `#[cfg(test)]` on a
+declaration only) and the rung ladder with both gates spelled out and the both-directions rule.
+The carve-out bullet lost its restatement of the path rule (one rule, one place). The Names
+section's `test_inc2_conformance` paragraph is gone — confirmed absent; slice 9 removed it. The
+Visibility bullet that said "Four more exist under `executor/` … They expire when `test-layout.md`
+moves those files" is present state now: seven `pub mod`, all in `lib.rs`, both registers empty;
+and a new bullet names the eight items `corpus.rs`/`corpus_gpu.rs` force, with the 200 raw count.
+
+#### Step 4: `architecture.md`, checked and not changed
+
+Each sentence the spec and plan name, grepped against the tree: "The scheduling rule" —
+`executor/driver/` with `partitioned.rs`, `single_partition.rs`, `scheduler.rs` (all exist);
+"Four things in `executor/driver/accounting.rs` are load-bearing" (exists); the wire-format
+table's `expr_writer.rs`, `node_writer.rs`, `join.rs`, `aggregate_writer.rs` under `wire/` (all
+exist); "Rehash and the comet hash" — `executor/cpu_backend/spark_partitioning.rs` and the gate
+at `cpu_backend/gpu_tests/murmur_conformance.rs` (both exist; slice 9 renamed the gate). All 27
+relative links in the page resolve, and so do every link in `build-test.md` and
+`coding-style.md`. Nothing false found, nothing edited.
+
+#### Step 5: #49 retired
+
+Moved whole from `tickets.md` to `archived-tickets.md` under Done, first entry, with a Done line:
+one testdata root, `test_support::testdata_root()`, called by the five `src` files and delegated
+to by `tests/common/mod.rs`; `git grep CARGO_MANIFEST_DIR -- peacockdb-core/src` is empty. The
+four `cost-report` sites slice 3 flagged stay: that crate's tests run where the source is and are
+never staged, which is outside what the ticket is about. Index row: Infrastructure 23 → 22, #49
+dropped; the anchors in the file and the numbers in the index are the same 80. Two code comments
+name #49 as the reason for the root (`test_support/{mod,testdata}.rs`) and stay — the number
+resolves in the archive.
+
+#### Step 6: final proof, on the final tree
+
+| Check | Result |
+|---|---|
+| `PEACOCK_TESTDATA_DIR=/tmp/peacock-testdata-slice3 cargo test --features rust-only -p peacockdb-core -- --test-threads=2` | **1035 passed, 0 failed, 2 ignored**, exit 0, `warning` 0 times in the log; 8 binaries: `--lib` 514 + 2 ignored, `test_ci_coverage` 8, `test_corpus_goldens` 20, `test_cost_model` 3, `test_cpu_corpus` 448, `test_golden_format` 26, `test_gpu_corpus` 0, `test_module_layout` 16 |
+| `sha256sum` over `testdata/goldens` vs `goldens.sha256` | empty diff, 170 files — before the suite and after it |
+| `cargo test --features rust-only -p peacockdb-core --no-run`, cold (`cargo clean -p`) | 0 warnings, 8 executables |
+| `scripts/cargo-cudf.sh build -p peacockdb-core`, cold | 0 warnings |
+| `scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run` | 0 warnings |
+| `test_support` probe: `pub fn probe_test_support()` in `lib.rs` naming `crate::test_support::testdata_root()` | `cargo build --features rust-only` → `error[E0433]: could not find test_support in the crate root`, rc 101; `cargo test … --lib --no-run` → Finished, rc 0; reverted, `git diff --stat -- peacockdb-core` empty |
+| `cargo test -p cost-report -- --list` | 37 tests |
+| `git grep -n '#\[cfg(test)\]' -- peacockdb-core/src` | 53 lines: 27 `mod tests`/`mod schema_tests` declarations (+4 `cfg(all(test, …))` rung gates found separately: `ffi_tests` ×1, `gpu_tests` ×3), 10 registered `TEST_ONLY_ITEMS`, 6 gated `use` lines serving them, 10 inside doc comments and prose. Nothing else |
+| `git grep -l '#\[test\]' -- peacockdb-core/src` | 48 files, every path containing `test`; 0 outside |
+| `test_module_layout` on the final tree | 16 passed (inside the package run) |
+
+Inventories — the three shapes against the baselines, leaf names (last `::` segment) as sets and
+multisets; `compare-inventory.sh` says `DRIFTED` for all three, as it must:
+
+| Shape | Cases | Leaves lost | Leaves gained | Duplicated leaves |
+|---|---|---|---|---|
+| `rust-only` | 1037 (baseline 1034) | the murmur gate's 3 CPU-runnable cases, now device rung (slice 9) | 6: slice 4's five layout cases, slice 10's `each_rung_has_its_ci_line_and_the_cli_is_built` | 3, unchanged |
+| `cudf` | 1048 (1097) | 48 = 55 device leaves − 7 names the cpu tier shares | the same 6 | 10 → 3, the 7 shared names no longer pairs here |
+| `gpu` | 574 (435) | none | 132 = the 133 moved into `--lib` − 7 shared + the 6 | 3 → 10, the cudf baseline's ten exactly |
+| union of three | 1093 distinct (1087) | **none** | the same 6 | |
+
+Against slice 9's `/tmp/inv9-*.txt` the only diff in every shape is `test_ci_coverage` 7 → 8.
+
+The ladders: bare `pub` excluding `mod` **242**, **200 excluding `test_support`** (74 struct,
+46 fn, 31 enum, 13 trait, 5 const, 2 type at top level; 70 `impl fn`, 1 `impl const`);
+`pub mod` **7**, all in `lib.rs` (`common`, `executor`, `plan`, `plan_text`, `planner`, `wire`,
+`test_support`); `PUB_MODULES` **0**, `CROSS_COMPONENT_REACHES` **0**, `TEST_ONLY_ITEMS` **10**;
+dump 696 records. All unchanged from slice 10, as they must be — no code moved.
+
+#### Where a measurement contradicts the spec, the plan or the dispatch
+
+- **The dispatch's "expect 1034 passed"** is slice 9's figure; slice 10 added one
+  `test_ci_coverage` case without re-running the package, so 1035 is right.
+- **The spec's "the four-case discrepancy that sum has today is closed here"** was a
+  seven-case one by the time this slice ran (above), and the C++ row was off by one for a
+  different reason. Both closed by re-summing.
+- **The spec's "`pub mod` is down from 15 to six"** reads seven, for slice 9's reason:
+  `test_support` is a component `lib.rs` declares, added by task 3 after the spec was written.
+- **The spec's "Done when" wording for the `#[cfg(test)]` carve-out** — "in a component's
+  `mod.rs`" — is narrower than what the tree holds and `coding-style.md` states: two registered
+  items sit in implementation files because they read private state (`accumulate::compactions`,
+  `join::has_finish_pass`) and one in a subcomponent's `mod.rs`. Slice 4 recorded the widening;
+  the register checks all ten.
+- **"`test_ci_coverage` is near 300 lines"**: 996, slice 10's finding, unchanged.
+- **The spec's cross-checks "one per rung plus the binaries"** hold as measured: 516 / 3 / 55
+  and the seven binaries, with each filtered rung matching nothing in the shape below it.
+
+#### "Done when", clause by clause
+
+- *exactly eight items `pub` because a test crate forces them, the named eight, forced by
+  `corpus.rs`/`corpus_gpu.rs`* — **holds**: the eight are `top pub` in the dump at the named
+  files, and the `use peacockdb_core::` lines of the two corpus files name exactly them beyond
+  what the CLI also names (slice 10's reading, re-grepped here).
+- *`PUB_MODULES` is empty* — **holds**, `&[]` at `test_module_layout.rs:38`.
+- *`pub mod` is down from 15 to six, counted by `visibility-dump.py`* — **seven**, not six:
+  the spec predates `test_support`; every subcomponent `pub mod` is gone, which is what the
+  clause means.
+- *the raw bare-`pub` count is whatever task 4 inherits* — 242, 200 outside `test_support`.
+- *no production file contains a `#[test]`* — **holds**, 48 files all under a `test` path.
+- *no `#[cfg(test)]` anywhere but a test-module declaration or a carve-out entry point* —
+  **holds** under the two-case rule (above); 27 + 4 declarations, 10 registered items, 6 gated
+  `use` lines, and the rest prose.
+- *every test module declares the lowest rung it needs and is named for it, both directions* —
+  **holds**: `a_test_module_is_named_for_its_rung` and `a_rung_gate_implies_its_module_name`
+  pass, and the filtered lists are 0 / 3 / 55 across the three shapes with no lower-rung case
+  in either filter.
+- *every test-only path in `src/` carries `test`* — **holds**, `a_test_only_path_carries_test`
+  passes.
+- *`crate::test_support::testdata_root()` is the only testdata root, and #49 closes* —
+  **holds**: no `CARGO_MANIFEST_DIR` in `peacockdb-core/src`, `tests/common/mod.rs` delegates,
+  #49 archived under Done.
+- *a plain `cargo build` cannot name `test_support`* — **holds**, the E0433 probe above.
+- *`test_ci_coverage` is near 300 lines and asserts one CI line per rung plus the CLI build* —
+  **996 lines**; the four assertions exist and were each watched red in slice 10.
+- *`build-test.md`'s two tables add to the headline* — **holds**, 1055 + 87 + 66 + 369 = 1577,
+  checked by script.
+- *the leaf-name set is the one the baselines recorded — moves, no deletions* — **holds**:
+  nothing lost in any shape or in the union; gained only the six cases slices 4 and 10 wrote.
+
+#### For the completeness pass
+
+- `/tmp/s11-sum.py` is the arithmetic check and lives in `/tmp` only; the page carries the
+  per-block totals in its header rows, so a reader can re-add by hand.
+- The C++ multi-GPU, streamed and node-timing rows are source counts (`TEST(` lines), not a
+  `--gtest_list_tests`: those binaries are `EXCLUDE_FROM_ALL` or manual and are not built here.
+- verda unreachable throughout; shad-gpu not needed. Both target dirs were cleaned for the cold
+  counts and rebuilt; `./target` holds the rust-only package build, `target-cudf-*` the `gpu`
+  `--lib` fingerprint last.

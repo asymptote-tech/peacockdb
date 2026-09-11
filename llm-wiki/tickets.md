@@ -18,7 +18,7 @@ reference still resolves there.
 | [Critical correctness](#critical-correctness) | 17 | #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 23 | #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
+| [Infrastructure / process](#infrastructure--process) | 22 | #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
 
@@ -1016,27 +1016,3 @@ version-gate the type then; the comment marks the site.
 thread count (`output_bytes`/`output_rows` are thread-invariant). Fine at sf1, too slow
 at sf10/sf100. Simplest fix: parallelize across queries, keep per-query threads=1; or
 drop/normalize the thread-sensitive field.
-
-<a id="t49"></a>
-### #49 — Test crates bake CARGO_MANIFEST_DIR for testdata
-**Priority: low**
-
-Some tests read testdata through `env!("CARGO_MANIFEST_DIR")` instead of `testdata_root()`,
-so they only find their data where the build tree stood.
-
-It matters because a test binary is built on one host and run on another: remote CPU runs ship
-binaries, goldens and data but never source, so a compile-time path is a path the remote does
-not have. `tests/common/mod.rs testdata_root()` solves that by honouring `PEACOCK_TESTDATA_DIR`
-first, which `build-test.sh` sets for remote runs. The residual is the crate's own unit tests
-— five files under `peacockdb-core/src/` reaching `tpch.minimal`: `planner/memory_estimation.rs`,
-`scan_mapping/parquet_meta.rs`, `plan_text/tests.rs` and `translator/{tests,schema_tests}.rs` — which is
-exactly why a remote CPU host needs a `/media/data/peacockdb` symlink and why `--gpu` runs,
-which set the env var, do not.
-
-The sweep is not the one the integration tests got: a unit test cannot reach
-`tests/common/mod.rs`, so the fix is a `#[cfg(test)]` helper in `src` honouring
-`PEACOCK_TESTDATA_DIR` with the same fallback, and the two spellings then have to be held to
-each other or they are the drift this ticket is about one layer down.
-`test_ci_coverage.rs` and the wiki reader in `planner/tests/plan_goldens.rs` are not this: their
-`CARGO_MANIFEST_DIR` resolves the repo root to read committed source, not testdata, and no env
-var should redirect that.
