@@ -378,7 +378,14 @@ $RUNG_ARGS_FN
       tname=\${t##*/}
       echo "--- \$tname"
       rlog=/tmp/\$tname.rustlog
-      mapfile -t args < <(rung_args "\$t" $RUST_LIB_STAGED $RUST_LIB_RUNG $filter_q env LD_LIBRARY_PATH="\$PATCHED_LD")
+      # A checked assignment, so a listing that fails is the binary not running rather
+      # than an empty intersection — which with a filter set the guard below excuses.
+      if ! args_text=\$(rung_args "\$t" $RUST_LIB_STAGED $RUST_LIB_RUNG $filter_q env LD_LIBRARY_PATH="\$PATCHED_LD"); then
+        echo "!!! \$tname could not list its cases — it was not run"
+        rc=1
+        continue
+      fi
+      mapfile -t args <<< "\$args_text"
       # --test-threads=1: the GPU/RMM context is process-wide, parallel tests OOM.
       env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 "\${args[@]}" > "\$rlog" 2>&1
       status=\$?

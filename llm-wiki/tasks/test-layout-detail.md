@@ -2082,3 +2082,195 @@ both rung rules; comment caps: `test_module_layout.rs:1024` doc 11 lines, `compa
 header 12, `pipeline.yml:285/375/385` 7/6/5 lines above a command in a `run:` body; `lib.rs:3`
 "Six components" vs `coding-style.md` seven; `build-test.md:94` "was watched red" is history in a
 current-state page.
+
+### 2026-09-11 — round 1 addressed
+
+All four important findings and the seven nits. Not committed. Files touched: `scripts/build-test.sh`,
+`scripts/build-test-shadgpu.sh`, `scripts/lib/rung-args.sh`, `scripts/case-inventory.sh`,
+`scripts/compare-inventory.sh`, `.github/workflows/pipeline.yml`, `peacockdb-core/src/lib.rs` (doc
+only), `peacockdb-core/tests/test_module_layout.rs` + new `tests/test_module_layout/{near_miss,
+privacy,test_code,tree,visibility,walls}.rs`, `peacockdb-core/tests/test_ci_coverage.rs` + new
+`tests/test_ci_coverage/runners.rs`, `llm-wiki/{build-test,coding-style}.md`. Every finding was
+verified on the tree before it was fixed; one (2) reproduces differently from how it was stated.
+
+#### 1 — the empty-suite guard could not fire: confirmed, fixed, watched
+
+Confirmed with a copy of HEAD's script whose three derivers `return 0`: `--rust-only --run` printed
+`peacockdb_core_rust_only_lib: missing, skipping` and exited **0**; `--gpu` got past the guard too.
+(The default mode did fire, for a side reason: `needs_cmake_targets | grep -vxF -f <(empty)` exits
+1 inside the process substitution and `set -e` ends it before `lib_target` prints — not a guard.)
+Fix as proposed: each mode derives into `DERIVED`, the guard reads `${#DERIVED[@]}`, then
+`RUST_TESTS=("${DERIVED[@]}" "$(lib_target)")`. The same three-way copy on the fixed script: all
+three modes print `error: the derived Rust suite is EMPTY for mode '…'` and exit 1.
+
+#### 2 — a failed `--list` and an empty intersection: distinguishable now, status reaches `rc`
+
+Verified at HEAD by sourcing `rung_args`: a lib binary that will not load (a stub exiting 127 with
+the loader's message) and a genuine empty intersection (`zzz` against the real lib) both returned
+`[--exact, '']`. **The reviewer's `/bin/false` case was not green at HEAD, though**: both runners
+then *run* the binary with those arguments, it fails to load again, and its non-zero status is
+folded into `rc` — reproduced through both rendered gates (`!!! peacockdb_core_gpu_lib FAILED (exit
+127)`, exit 1). What was green at HEAD is the adjacent case the same hole covers: a lib that loads
+but whose rung lists nothing (a rust-only lib staged under the gpu name; a renamed `gpu_tests`)
+under a filter — `--exact ''`, `running 0 tests`, guard suppressed, **exit 0 in both runners**.
+
+`rung_args` now captures the listing (`listed=$(…) || return 1`), returns 1 when the rung lists no
+case, prints `rung_args: 0 of N <rung> cases match '<filter>'` to stderr for a real empty
+intersection, and emits the empty name *before* `--exact` — a caller reading it through `$(…)`
+loses trailing newlines, and `--exact` alone runs every case (comment at the site). Both runners
+read it through a checked assignment, `if ! args_text=$(rung_args "$t" …); then echo "!!! … could
+not list its cases — it was not run"; rc=1; continue; fi; mapfile -t args <<< "$args_text"`. A
+temp-file form was tried first and dropped: its `> "$alog"` redirect matches
+`is_rust_gpu_runner_invocation`, which would then demand `--test-threads=1` on the listing line.
+
+Exercised locally on the staged rust-only lib, eight cases: other binary/no filter `['']`, other/`q6`
+`[q6]`, lib/no filter `[tests::]`, lib/empty rung `[q6]`, lib/`plan_goldens::tpcds_tp1` `['',
+--exact, <2 names>]` and the binary then runs exactly those 2, lib/`zzz` `['', --exact]` with the
+`0 of 516` line and the binary runs 0, lib will not load → return 1, rung `nomatch_tests::` →
+`lists no case`, return 1. Then the rendered gates (`ssh … bash` → `bash`, a local remote dir):
+
+| Case | `build-test.sh --gpu` HEAD → fixed | shad-gpu gate HEAD → fixed |
+|---|---|---|
+| A: lib will not load, filter `abi` | exit 1 (run failed) → exit 1, `could not list its cases` | exit 1 (`FAILED (exit 127)`) → exit 1, `could not list` |
+| B: rung lists nothing, filter `abi` | **exit 0** → exit 1, `gpu_tests:: lists no case` | **exit 0** → exit 1 |
+| C: rung lists nothing, no filter | **exit 0** (no zero guard, finding 7) → exit 1, `ran 0 tests … nothing was verified` | exit 1 at HEAD already (slice 9's guard) |
+| D: lib not staged, no filter | **exit 0**, `missing, skipping` → exit 1, `is not staged on the host` | n/a (globs) |
+| E/F: intersection of 2 / of 0, rung `tests::` | | 2 passed, 514 filtered / `0 of 516 … match 'zzz'`, `running 0 tests`, exit 0 |
+
+Both runners' rendered remote scripts (`--rust-only`, `--gpu`, default; shad-gpu with and without a
+filter) are `bash -n` clean; `test_ci_coverage` 8 passed over the edited scripts, so the
+`rung_reaches_the_binary` and `--test-threads=1` readers still find their lines.
+
+#### 3 — the two files over 1000 lines: split into submodules, rustfmt clean
+
+`tests/test_module_layout.rs` (1827) → a 43-line root holding the `//!` header, six `mod`
+declarations, and `repo_root`/`src_root` — the root keeps `repo_root` because `build-test.sh`'s
+classifier greps `tests/*.rs` for that name — plus `test_module_layout/`: `tree.rs` 79 (sources,
+components, `code_only`), `visibility.rs` 368 (where `pub` may appear, `PUB_MODULES`,
+`files_naming`), `walls.rs` 328 (sibling reach, `CROSS_COMPONENT_REACHES`, `super::` climbs),
+`privacy.rs` 224 (private types in signatures, the compile probe), `test_code.rs` 614 (`RUNGS`,
+`TEST_ONLY_ITEMS`, the mod-declaration readers, the four placement rules), `near_miss.rs` 279 (the
+one near-miss test). `tests/test_ci_coverage.rs` (996 unformatted) → 647 + `test_ci_coverage/
+runners.rs` 510 (the pipeline-gpu-job, shad-gpu and `build-test.sh` readers, `gpu_runtime_targets`,
+`rung_reaches_the_binary`, the invocation readers, and the four tests over them). All under 1000
+after `rustfmt --edition 2024`, which is now clean on both roots and every child.
+
+- **Declared with `#[path = "test_module_layout/x.rs"] mod x;`**, not a bare `mod`: a test target
+  is a crate root, so `mod x;` resolves to `tests/x.rs`, which cargo would make a target. The tree's
+  own precedent is the old `test_gpu_executors.rs`, same comment. A `tests/<name>/main.rs` layout
+  was rejected because `workspace_test_targets()` reads `tests/*.rs` and would stop counting it.
+- No `pub use`; cross-module items are `pub(crate)` and reached by `use crate::<module>::…` —
+  absolute paths, no `super::`. `grep` over the new files for `pub use` and `super::`: nothing.
+- `workspace_test_targets()` still counts 8 targets: the directories carry no `.rs` extension.
+  `case-inventory.sh`'s `find -maxdepth 1 -name 'test_*.rs'` the same.
+- `files_naming`'s own-file exclusion now excludes the target's directory and root file from
+  `file!()`, since the string fixtures live in `near_miss.rs` and the function in `visibility.rs`.
+  Red-watched: with the directory clause dropped, `each_reader_sees_the_violation_and_not_its_
+  near_miss` fails at "the guard states the rule and must not report itself as forcing the
+  exemption"; restored.
+- The layout test's own rules: every `#[test]` is under `tests/test_module_layout/` or
+  `tests/test_ci_coverage/`, both paths carrying `test`.
+- `--list` before and after, leaf names: `test_module_layout` 16 = 16, `test_ci_coverage` 8 = 8,
+  both sets identical. Paths gained a module prefix (`near_miss::each_reader…`, `runners::
+  the_three_gpu_target_lists_agree`), so a `compare-inventory.sh` line for these two targets moves
+  while the leaf set does not.
+- Wiki pointers moved with the items: `coding-style.md` names `test_module_layout/test_code.rs`'s
+  `TEST_ONLY_ITEMS` and `test_module_layout/{visibility,walls}.rs`'s registers; `build-test.md`'s
+  two example links now resolve to `privacy.rs` and `runners.rs`. Every `tests/` link on the page
+  resolves.
+
+#### 4 — the lib entry, executed
+
+`scripts/build-test.sh --rust-only --build` locally (twice, before and after the script edits):
+five binaries staged under `cpp/build26/install/rust-tests/`, the lib as
+**`peacockdb_core_rust_only_lib`** (1.1 GB unstripped), `--list` on it 516 tests, 0 warnings.
+`test_ci_coverage` and `test_module_layout` are not staged, as the classifier intends. Then the
+rendered `--rust-only --run` gate against those binaries, `REMOTE_DIR` a local directory holding
+them and a real `testdata/` copy: `test_corpus_goldens` 20, `test_cost_model` 3, `test_cpu_corpus`
+448, `test_golden_format` 26, **`peacockdb_core_rust_only_lib` 514 passed, 2 ignored**, exit 0 —
+on the final scripts, so the new loop (`tee`, `PIPESTATUS`, the zero guard) ran the whole rust-only
+suite once. One wrong turn: the first run had `testdata` as a symlink and the five tpcds plan
+goldens failed on q27's `file_groups` path — `relative_to_testdata` canonicalises the root but
+DataFusion prints the path it was given — a harness artefact, not a script or engine fault (verda's
+`$REMOTE_DIR/testdata` is a real directory); re-run with a real directory, green.
+
+**verda: answers, unusable.** `ssh verda` first refused with a changed ED25519 host key
+(reprovisioned); re-keyed per `build-test.md`'s rented-hosts rule (`ssh-keygen -R`, keyscan), and
+it then answers `Permission denied (publickey)` — the new instance does not carry this key. No
+`--host verda --rust-only --all`; the local rendered gate above is the lib entry's execution.
+
+#### 7 — a missing staged binary, and `running 0 tests`, in `build-test.sh`
+
+Agreed: the suite is named per mode and shape, so a binary the host lacks is a `--run` after
+another mode's `--build` — the very case the shape-named lib exists to expose — and skipping it
+green defeats that. Now `!!! <name> is not staged on the host — nothing was verified`, `rc=1`. The
+loop tees each binary into `/tmp/<name>.rustlog`, folds `PIPESTATUS[0]` into `rc`, and fails on
+`^running 0 tests` when no filter is set, the shad-gpu gate's rule. Cases C and D above.
+
+#### 8 — `declares_mod` and a one-line gate
+
+Confirmed red first: the pin `declares_mod("#[cfg(test)] mod gpu_tests;") == Some(("gpu_tests",
+false))` failed with `left: None`. `split_attributes` now strips a line's leading `#[…]`
+attributes; `declares_mod` reads past them, `mod_declarations` takes a `#[cfg(` on the
+declaration's own line as its gate before scanning upward, and `test_gates` sits a same-line gate
+on the rest of that line rather than on the next — the same hole, pinned too (`test_gates("#[cfg
+(test)] fn hops() {}\nmod tests;")[0].sits_on == "fn hops() {}"`). Tree red-watch: `wire/mod.rs`'s
+gate rewritten as `#[cfg(test)] mod gpu_tests;` on one line — both rung rules fire (`is gated
+#[cfg(test)] and its rung requires #[cfg(all(test, feature = "gpu"))]`; `sits on mod gpu_tests and
+belongs on a name below the rung its gate names`), 14 passed 2 failed; reverted, diff empty.
+
+#### 5, 6, 9, 10, 11 — the nits
+
+- 5: `build-test.md` line 18 now reads "a block's header sums its CI lines, one per binary" — the
+  cpu header is four lines in `pipeline.yml` (`--lib`, `test_cpu_corpus`, `test_corpus_goldens`,
+  `test_cost_model`), checked by grep.
+- 6: `test_gpu_corpus` is a `--test` binary holding 8 device cases, so "no device case lives in a
+  binary" was false. The true reason `gpu` lists `--lib` alone: no `tests/*.rs` reads `feature =
+  "gpu"` (grep: none), so the seven binaries list under `cudf` exactly what they would list under
+  `gpu`. Said so in `build-test.md` and `case-inventory.sh`.
+- 9: counted with a script over every touched file (contiguous comment lines; 10 at indent 0, 4
+  inside a body). Cut: `TestOnlyItem`'s doc 11 → 10, `compare-inventory.sh`'s header 12 → 10,
+  `pipeline.yml`'s three run-body comments 7/6/5 → 4/4/4. Counted and left: the overruns that
+  predate this branch (`build-test.sh` 8/110/233/275/…, `build-test-shadgpu.sh` 2/153/186,
+  `test_ci_coverage.rs`'s header and `gpu_runtime_targets` doc, `pipeline.yml` 157/181/251/…) —
+  `git blame` against the parent shows no line of those added here, and a comment-only pass over
+  them is a separate change.
+- 10: `lib.rs` says seven components and names `test_support` as the harness's, behind its feature.
+- 11: the "watched red" clause is gone from the CI-wiring-guard row.
+
+#### The shad-gpu run — one cycle on the new gate
+
+`--build` (0 warnings; `test_gpu_corpus` and `peacockdb_core_gpu_lib` staged), `--push-binaries`,
+`--patch --run-detached`, then `--run-status` polled; each a foreground call under `timeout`. No
+`[rmm] pool … could not be built`: every C++ binary reported its pool against 103 GiB free with
+37 GiB held by the neighbour.
+
+| Run | Result |
+|---|---|
+| `20260911T123134` (full gate) | 5 C++ binaries; **`peacockdb_core_gpu_lib` 55 passed, 519 filtered out, 14.9 s; `test_gpu_corpus` 8 passed**; `GPU test run OK`, exit 0 |
+| `PCK_RUN_CPP=0 PCK_TEST_FILTER=abi --run` | lib **4 passed, 570 filtered out**, all four `gpu_backend::gpu_tests::abi::`; corpus `running 0 tests`, no banner; exit 0 |
+| probe, a copy with `RUST_LIB_RUNG=nomatch_tests::`, filter `abi` | `rung_args: nomatch_tests:: lists no case in peacockdb_core_gpu_lib`, `!!! … could not list its cases — it was not run`, `ran 1 rust test binaries`, **exit 1** |
+| probe, a copy whose listing runs under `env LD_LIBRARY_PATH=/nonexistent`, filter `abi` | the loader's `libcudf.so: cannot open shared object file`, `!!! … could not list its cases`, **exit 1** — the reviewer's "wrong env prefix", provoked |
+| `PCK_RUN_CPP=0 --run`, the real gate again | 55 + 8, exit 0 — so the host's last recorded run is green |
+
+Both probe copies were deleted; `git status` shows nothing under `scripts/` but the five edits.
+
+#### Everything measured, on the final tree
+
+| Check | Result |
+|---|---|
+| `PEACOCK_TESTDATA_DIR=/tmp/peacock-testdata-slice3 cargo test --features rust-only -p peacockdb-core -- --test-threads=2` | **1035 passed, 0 failed, 2 ignored**, exit 0, `warning` 0 times, 9 result lines (8 binaries + doc-tests) |
+| `--test test_module_layout`, `--test test_ci_coverage` | 16 passed, 8 passed; leaf sets identical to the pre-split listing |
+| `scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run` (`CUDF_ROOT=…/rapids-cuda-12.2`) | 0 warnings |
+| `build-test-shadgpu.sh --build` | 0 warnings |
+| `sha256sum` over `testdata/goldens` vs `test-layout-baselines/goldens.sha256` | empty diff, 170 files |
+| `pipeline.yml` | YAML parses (7 jobs); all 29 rendered `run:` blocks `bash -n` clean |
+| `bash -n` | `build-test.sh`, `build-test-shadgpu.sh`, `lib/rung-args.sh`, `lib/shadgpu-env.sh`, `case-inventory.sh`, `compare-inventory.sh`, and the rendered remote scripts (three modes; shad-gpu with and without a filter): clean |
+| `rustfmt --edition 2024 --check` | `test_module_layout.rs` + six children, `test_ci_coverage.rs` + `runners.rs`: clean |
+| `wc -l`, files the length rule covers | `test_module_layout.rs` 43, `near_miss` 279, `privacy` 224, `test_code` 614, `tree` 79, `visibility` 368, `walls` 328; `test_ci_coverage.rs` 647, `runners.rs` 510; `build-test.sh` 704, `build-test-shadgpu.sh` 430, `rung-args.sh` 46, `case-inventory.sh` 53, `compare-inventory.sh` 33 |
+| `git grep -l '#\[test\]' -- peacockdb-core/src` outside a `test` path | 0 |
+| ladders | bare `pub` excluding `mod` **242**, **200 excluding `test_support`**; `pub mod` **7**; dump 696; `PUB_MODULES` 0, `CROSS_COMPONENT_REACHES` 0, `TEST_ONLY_ITEMS` 10 — unchanged, no `src/` code moved (`lib.rs` doc only) |
+
+Cases added: none. Pins added inside `each_reader_sees_the_violation_and_not_its_near_miss`: the
+one-line `declares_mod`, `mod_declarations` and `test_gates` inputs. Scratch: `/tmp/r1/` only;
+`cpp/build26/install/rust-tests/` and `cpp/install/rust-tests/` hold the staged binaries (ignored).

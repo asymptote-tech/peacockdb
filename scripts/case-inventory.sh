@@ -30,8 +30,8 @@ case "$shape" in
     export LD_LIBRARY_PATH="$ffi_out:$CUDF_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     ;;
   gpu)
-    # Top rung of the ladder. `--lib` only: after the moves there is no `--test` target
-    # left that a device case lives in.
+    # Top rung of the ladder. `--lib` only: no `--test` target reads the `gpu` feature, so
+    # the binaries list under `cudf` exactly what they would list here.
     : "${CUDF_ROOT:?set CUDF_ROOT for the gpu shape}"
     cargo="$root/scripts/cargo-cudf.sh"; feat=(--features gpu)
     targets=(--lib)

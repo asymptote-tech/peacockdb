@@ -283,12 +283,9 @@ jobs:
           cargo test -p peacockdb-core --lib -- ffi_tests::
           cargo test -p peacockdb-ffi --test test_ffi
           # The cpu rung, entire: every in-crate test module that needs neither the FFI
-          # nor a device. Every other cargo invocation in this file passes --test, which
-          # selects integration targets ONLY — so before this line the lib unit tests ran
-          # locally and never in CI. It needs the sf1 dataset generated above: the plan
-          # goldens read row-group metadata off the parquet, and the end-to-end tier and
-          # the injector's own cases run against it. test_ci_coverage asserts this line
-          # exists.
+          # nor a device. It needs the sf1 dataset generated above: the plan goldens read
+          # row-group metadata off the parquet, and the end-to-end tier runs against it.
+          # test_ci_coverage asserts this line exists.
           cargo test --features rust-only -p peacockdb-core --lib
           # The corpus on the same path: every enabled query at every mode its line
           # declares, answers against DataFusion. Needs sf1, so it lives here and not
@@ -372,10 +369,8 @@ jobs:
             cp -f "$2" "cpp/install/rust-tests/$1"
             echo "--- Staged: $(ls -lh cpp/install/rust-tests/$1)"
           }
-          # test_gpu_corpus = the corpus on a device, read against the sections the cpu
-          #   tier authored — plan shape, per-batch lists and bytes, and the result where
-          #   the query's line names a golden. It stays a binary because `inventory`
-          #   collects per linked binary and the registry needs two.
+          # test_gpu_corpus = the corpus on a device, against the sections the cpu tier
+          #   authored. A binary still: `inventory` collects per linked binary.
           # One line on purpose: the coverage guard reads the array below with a single
           # `lines().find`, so a continuation hides every target after the backslash.
           for t in test_gpu_corpus; do
@@ -383,10 +378,9 @@ jobs:
                 --message-format=json | resolve "$t" test)"
           done
           # The crate's own unit tests, whose `gpu_tests` modules exist only under the gpu
-          # feature: the recipe walk, the executors, the per-call ABI and the murmur gate.
-          # The lib binary holds every rung, so the run loop hands this one file `gpu_tests::`
-          # and no other. Staged under an explicit name, since the loop globs the directory
-          # and a bare `peacockdb_core` beside the target binary would read as one.
+          # feature. The lib holds every rung, so the run loop hands this one file
+          # `gpu_tests::`. Staged under an explicit name: the loop globs the directory, and
+          # a bare `peacockdb_core` beside the target binary would read as one.
           stage peacockdb_core_gpu_lib "$(cargo test --no-run -p peacockdb-core --lib --features gpu \
               --message-format=json | resolve peacockdb_core lib)"
         env:

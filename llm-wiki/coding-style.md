@@ -50,7 +50,7 @@
   `#[cfg(test)] mod tests { … }`. Every test-only path in `src/` carries `test` in its name
   (`src/tests/`, `plan/tests/`, `driver/tests/mock.rs`), so a reader tells test code from
   production code by the path alone. A `#[cfg(test)]` sits on a test-module declaration and
-  nowhere else, bar the register below. `test_module_layout.rs` checks all three.
+  nowhere else, bar the register below. `test_module_layout` checks all three.
 - **A test module declares the lowest build rung it needs, and its name says which.** The three
   shapes nest — `rust-only` ⊂ default ⊂ `gpu` — and a module says what it needs, never what it
   excludes: `#[cfg(test)] mod tests;` for pure Rust, `#[cfg(all(test, not(feature = "rust-only")))]
@@ -68,7 +68,7 @@
   caller is in another component, so the two can never sit together, and it is declared in that
   module's `mod.rs` like anything else crossing a boundary. A reader of a private field cannot
   either: only the module declaring the field and its children can see it. Both are registered in
-  `test_module_layout.rs`'s `TEST_ONLY_ITEMS`, which checks the item, its callers and the doc
+  `test_module_layout/test_code.rs`'s `TEST_ONLY_ITEMS`, which checks the item, its callers and the doc
   comment naming them — a stale comment is how the set grows without anyone deciding to grow it.
 - **What `#[cfg(test)]` is not is a way to quiet `dead_code` on production code.** An item behind
   it is absent from a release build, so it is never type-checked against a change made for
@@ -148,7 +148,7 @@ Kernighan's rules, written down after the fact rather than followed from the sta
 - `lib.rs` declares the components `pub mod`, and those seven — `common`, `executor`, `plan`,
   `plan_text`, `planner`, `wire`, `test_support` — are the only `pub mod` in the crate, counted by
   `scripts/visibility-dump.py`. `PUB_MODULES` and `CROSS_COMPONENT_REACHES` in
-  `test_module_layout.rs` are the registers for a `pub mod` or a cross-component reach a test crate
+  `test_module_layout/{visibility,walls}.rs` are the registers for a `pub mod` or a cross-component reach a test crate
   forces; both are empty, and a `pub mod` outside the register is a violation, not a precedent.
 - **Eight items are `pub` because a test crate forces them**: `GpuNode` and `validate`
   (`plan/mod.rs`), `RecipePlan` and `attach_recipes` (`wire/mod.rs`), `RunReport`, `GpuBackend`
@@ -168,7 +168,7 @@ Kernighan's rules, written down after the fact rather than followed from the sta
   `common.rs` have no length limit; every other file keeps the 1000-line one.
 - **What the compiler enforces**: a component is reachable only through its `mod.rs`, and a
   subcomponent only from inside its parent, both by module privacy. **What
-  `test_module_layout.rs` must**: sibling reach between implementation modules, where a `pub`
+  `test_module_layout` must**: sibling reach between implementation modules, where a `pub`
   appears at all, and a type from a private module in a public signature — `private_interfaces`
   reads nominal visibility, so an unreachable type spelled `pub` passes it silently.
 

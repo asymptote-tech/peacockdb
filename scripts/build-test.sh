@@ -340,31 +340,26 @@ needs_cmake_targets() {
   printf '%s\n' "peacockdb-ffi:test_ffi"
 }
 
+# The derived `--test` targets alone, so the emptiness guard below reads the derivation
+# and not the lib entry every mode appends after it.
 if [ "$MODE" = "gpu" ]; then
   # GPU-runtime set. Kept in step with build-test-shadgpu.sh:RUST_TESTS and
   # pipeline.yml's gpu-tests staging array — three runners had three lists and they
   # drifted. The lib binary is built --features gpu and run on `gpu_tests::` alone.
-  mapfile -t RUST_TESTS < <(
-    gpu_runtime_targets
-    lib_target
-  )
+  mapfile -t DERIVED < <(gpu_runtime_targets)
   CPP_TEST_BIN=peacock_plan_tests
 elif [ "$RUST_ONLY" -eq 1 ]; then
   # Golden regen / cpu+plan verify: no C++, no FFI. The lib here is the rust-only
   # shape, run whole: the plan goldens and the end-to-end tier ride in it.
-  mapfile -t RUST_TESTS < <(
-    rust_only_targets
-    lib_target
-  )
+  mapfile -t DERIVED < <(rust_only_targets)
   CPP_TEST_BIN=""
 else
   # Superset: everything rust-only can run, plus what only cmake makes buildable.
   # test_gpu_* are excluded — they compile here but need a GPU at RUNTIME, which is
   # what --gpu is for. The lib at default features holds the cpu and ffi rungs, run whole.
-  mapfile -t RUST_TESTS < <(
+  mapfile -t DERIVED < <(
     rust_only_targets
     needs_cmake_targets | grep -vxF -f <(gpu_runtime_targets)
-    lib_target
   )
   CPP_TEST_BIN=peacock_cpu_tests
 fi
@@ -391,8 +386,9 @@ fi
 
 # A derived suite that comes back EMPTY must be an error. `mapfile` from a helper that
 # prints nothing yields a zero-length array, every `for` body over it vanishes, and the
-# script exits 0 having run no tests — a derivation typo would report success.
-if [ ${#RUST_TESTS[@]} -eq 0 ]; then
+# script exits 0 having run no tests — a derivation typo would report success. Checked
+# before the lib is appended: that entry is named, not derived, and would hide an empty one.
+if [ ${#DERIVED[@]} -eq 0 ]; then
   # Print the MODE, not a flag string: there is no --cpu flag, and naming one in an
   # error message sends a reader who is already stuck to "Unknown flag: --cpu".
   echo "error: the derived Rust suite is EMPTY for mode '${MODE_FLAG:-default (cpu)}'." >&2
@@ -401,6 +397,7 @@ if [ ${#RUST_TESTS[@]} -eq 0 ]; then
   echo "       verified nothing." >&2
   exit 1
 fi
+RUST_TESTS=("${DERIVED[@]}" "$(lib_target)")
 
 # Push named testdata kinds local -> remote (before any --run that consumes them).
 # --delete keeps the remote subtree exact (drops files removed locally).
@@ -654,10 +651,28 @@ $RUNG_ARGS_FN
     echo "==> Rust $MODE integration tests (filter='$PCK_TEST_FILTER')"
     for name in $RUST_TEST_NAMES; do
       t="$REMOTE_DIR/cpp/install/rust-tests/\$name"
-      [ -x "\$t" ] || { echo "--- \$name: missing, skipping"; continue; }
+      # The suite is this mode's by name, so a binary the host lacks is a --run after
+      # another mode's --build, not a case to skip.
+      [ -x "\$t" ] || { echo "!!! \$name is not staged on the host — nothing was verified"; rc=1; continue; }
       echo "--- \$name"
-      mapfile -t args < <(rung_args "\$t" '$LIB_STAGED' '$LIB_RUNG' $filter_q)
-      "\$t" --nocapture $THREADS_ARG "\${args[@]}" || rc=1
+      # A checked assignment, so a listing that fails is the binary not running rather
+      # than an empty intersection — which with a filter set the guard below excuses.
+      if ! args_text=\$(rung_args "\$t" '$LIB_STAGED' '$LIB_RUNG' $filter_q); then
+        echo "!!! \$name could not list its cases — it was not run"
+        rc=1
+        continue
+      fi
+      mapfile -t args <<< "\$args_text"
+      rlog=/tmp/\$name.rustlog
+      "\$t" --nocapture $THREADS_ARG "\${args[@]}" 2>&1 | tee "\$rlog"
+      [ "\${PIPESTATUS[0]}" -eq 0 ] || rc=1
+      # Zero tests is a fault only when nothing was filtered out: with a filter set,
+      # every other binary legitimately matches nothing. The lib's rung is not the
+      # filter, so an unfiltered run that selects nothing is the rung gone stale.
+      if [ -z $filter_q ] && grep -q '^running 0 tests' "\$rlog"; then
+        echo "!!! \$name ran 0 tests (its arguments \${args[*]} matched nothing?) — nothing was verified"
+        rc=1
+      fi
     done
 
     exit \$rc

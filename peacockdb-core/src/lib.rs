@@ -1,10 +1,11 @@
 //! The engine: a lane holds a stream of batches rather than one resident table.
 //!
-//! Six components, each of which is its own `mod.rs` and nothing else. `plan` is the
+//! Seven components, each of which is its own `mod.rs` and nothing else. `plan` is the
 //! vocabulary — the nodes, the layout and schema they declare, and the rules a tree has to
 //! satisfy. `wire` is what crosses to the C++ side. `planner` builds a plan, `executor` runs
 //! one, and `plan_text` renders any of it. `common` is the row-byte formula all four price
-//! by. The reasons behind each shape are in `llm-wiki/architecture.md`.
+//! by. `test_support` is the harness's and exists only behind its feature. The reasons
+//! behind each shape are in `llm-wiki/architecture.md`.
 
 #[cfg(all(feature = "gpu", feature = "rust-only"))]
 compile_error!("gpu needs the FFI linked; rust-only removes it. Pass one or neither.");
