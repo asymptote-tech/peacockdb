@@ -246,3 +246,8 @@ behaviour change. `--lib` 551 passed / 2 ignored, `test_corpus_goldens` 20, rust
 Both readings closed: #158 corrected, #213 filed with its bullet and `merge_section`'s doc made
 true, task 13's inherited #175 premise recorded above, architecture.md's two sentences fixed.
 The signoff is on the spec. Awaiting CI.
+
+### 2026-09-12 — done
+
+CI green on `fea04b47` (run 34700882450: both cudf legs, the GPU build, the remote GPU tests, the
+cost report). PR #153 awaits the human's merge.
