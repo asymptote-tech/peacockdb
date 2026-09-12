@@ -452,3 +452,13 @@ the cap but tight — a `nested_cases.rs` beside it is the safer split, with the
 one-liners duplicated rather than a shared module added. `gpu_refuses_with` and
 `both_refuse_with` here are the fourth and fifth `bug_` helpers that belong to `Outcome`
 (plan task 8's tidy).
+
+### 2026-09-12 — plan task 6 dispatched: cross and nested-loop, in a fresh window
+
+Plan tasks 3-5 committed (`6d73838c`, `4212b2e5`, and the head above); the developer that carried
+them hands over here. What it settled: `join_cases.rs` is at 846 lines, so the cross and
+nested-loop cases go in `nested_cases.rs` beside it with the two fixture one-liners duplicated;
+the join fixture declares the padded side nullable, as the planner does; the seventh empty
+shape for the finishing types (build set, finish called, no probe call) is the only route to
+#173; five `bug_` helpers now sit across the case files and belong to `Outcome` — plan task 8's
+tidy. `PENDING` holds `GpuLoadParquet`, `GpuCrossJoin`, `GpuNestedLoopJoin`; the rung whole is 256.
