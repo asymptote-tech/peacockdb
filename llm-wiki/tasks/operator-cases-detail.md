@@ -962,3 +962,10 @@ bit order (#65), the cross and nested-loop call count (#152); and four statement
 behaviour now carry their ticket (the scan's limit #186/#188, the accumulators' `fetch` #204,
 the null-order row #202, semi-versus-anti #59). Signoff appended to the spec. `done` waits on
 CI for `4ced579d`, the head that carries code; the commits above it are documentation.
+
+### 2026-09-12 — done
+
+CI run `34683516406` on `4ced579d`, the head that carries code, green on every job: both cuDF
+legs, the 25.02 GPU build, the remote device tier (285 on the lib binary under `gpu_tests::`,
+the 76 `bug_` tests among them, plus the corpus binary), cost report, changed paths, S3
+metadata. Task 9 is `done`; PR #150 awaits the human's merge, after task 8's #149.
