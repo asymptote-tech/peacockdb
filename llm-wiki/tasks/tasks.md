@@ -74,7 +74,7 @@ the corpus rollout that was happening anyway then reports which divergence class
 boundary and how often. Fixes nothing and enables no cell. It is what tells `declared-schemas` which
 classes are worth a harness.
 
-### 8. [`operator-harness.md`](operator-harness.md) — state: building
+### 8. [`operator-harness.md`](operator-harness.md) — state: reviewing
 
 One operator, one script of batches the test wrote, both backends, the outputs compared exactly.
 A test-only upload symbol puts an Arrow batch on the device; `Given` leaves plus one arm in
