@@ -609,7 +609,10 @@ other side, and orienting the tree so the build side is the left child removes t
 at equal heights the leftmost node wins and the build subtree drains first.
 
 Hash skew needs no mechanism. A lane that receives nothing is never runnable, and empty scatter
-outputs are dropped at the emitter, so nothing empty traverses a chain.
+outputs are dropped at the emitter, so nothing empty traverses a chain. One exception: a
+scatter feeding the build side of a Right, Full or RightAnti join keeps its zero-row table,
+because that join owes its probe rows and needs a build table to make them ([#175](tickets.md#t175)).
+The index decides it once per node, from the tree.
 
 The schedule is maintained incrementally: a rank order from (height, order) computed once, a
 ready bitset over it, per-node ready-lane counters, and hold counters — counters rather than
@@ -860,9 +863,10 @@ below has a smallest unfreeze that removes it; deciding them together is
 nothing. A finish whose probe produced no keys refuses by name for Left, Full, LeftSemi and
 LeftMark ([#173](tickets.md#t173)) — a collapse of no handles and a merge of no runs never reach
 the C++, since the Rust side answers nothing before asking; a Right, Full or RightAnti lane whose
-build side was empty owes its probe rows padded and cannot make them, and both engines refuse
-it ([#175](tickets.md#t175)); and `PlaceholderRowExec` is a table of literals with no input at
-all ([#158](tickets.md#t158)).
+build side emitted no batch at all owes its probe rows padded and cannot make them, and both
+engines refuse it ([#212](tickets.md#t212)) — a scatter's empty lane is kept as a zero-row
+table instead ([#175](tickets.md#t175)); and `PlaceholderRowExec` is a table of literals with
+no input at all ([#158](tickets.md#t158)).
 
 The unfreeze is one call — a table of a schema and a literal row count. What makes it worth
 deciding rather than deferring is that the CPU answers the first and the third, so each is a

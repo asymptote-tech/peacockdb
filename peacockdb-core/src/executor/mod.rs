@@ -608,6 +608,16 @@ pub(crate) struct IndexedNode<'a> {
     /// Where this node's accounting slots start: one per lane when it is lane-scoped,
     /// one for the node otherwise.
     pub(crate) slot_base: usize,
+    /// Whether this node's output reaches the build child of a join whose type owes rows
+    /// when its build side is empty. Derived from the tree, once, at index time — a walk
+    /// per emitted batch would put a tree climb in the hot path to answer a question whose
+    /// answer cannot change.
+    ///
+    /// Three conditions and not one: the lane may feed no join; it may feed one through
+    /// intermediate nodes, so this is a climb rather than a parent lookup; and it may feed
+    /// the PROBE side, where keeping empty batches adds a probe call per empty lane and
+    /// the second is refused (#152).
+    pub(crate) feeds_owing_build: bool,
 }
 
 pub(crate) struct PlanIndex<'a> {
@@ -627,6 +637,12 @@ impl<'a> PlanIndex<'a> {
 
     pub(crate) fn slot(&self, node: usize, lane: usize) -> usize {
         driver::slot_of(self, node, lane)
+    }
+
+    /// Whether an empty batch from `node` is owed to a join above it — see
+    /// [`IndexedNode::feeds_owing_build`].
+    pub(crate) fn feeds_owing_build(&self, node: usize) -> bool {
+        self.nodes[node].feeds_owing_build
     }
 }
 

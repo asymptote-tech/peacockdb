@@ -169,3 +169,58 @@ fn a_slot_is_per_lane_only_where_the_executor_is() {
         "and a lane-scoped one bills its own"
     );
 }
+
+/// A scatter whose lane feeds the build child of a Right join is kept; one feeding a
+/// probe side, or an Inner join, is not. The probe case is the one that matters: keeping
+/// empties there adds a probe call per empty lane and the second is refused (#152), so
+/// this task would cause the hazard it was written to avoid.
+#[test]
+fn the_index_marks_only_lanes_feeding_a_build_side_that_owes_rows() {
+    use datafusion::common::JoinType;
+
+    // The middle node is deliberately not the join: the climb is a walk, not a parent
+    // lookup, and a test with the join directly above would pass on a one-step version.
+    let cases: [(&str, Box<dyn GpuNode>, bool); 4] = [
+        (
+            "a scatter under a Right join's build side",
+            unload(join_of(
+                JoinType::Right,
+                coalesce_all(emit(source("build", 1), 4)),
+                filter(source("probe", 4)),
+            )),
+            true,
+        ),
+        (
+            "a scatter under a Right join's probe side",
+            unload(join_of(
+                JoinType::Right,
+                coalesce_all(source("build", 4)),
+                filter(emit(source("probe", 1), 4)),
+            )),
+            false,
+        ),
+        (
+            "a scatter under an Inner join's build side",
+            unload(join_of(
+                JoinType::Inner,
+                coalesce_all(emit(source("build", 1), 4)),
+                filter(source("probe", 4)),
+            )),
+            false,
+        ),
+        (
+            "a scatter under no join at all",
+            unload(merge(emit(source("part", 1), 4))),
+            false,
+        ),
+    ];
+    for (what, plan, expected) in &cases {
+        let index = indexed(plan.as_ref());
+        let scatter = index
+            .nodes
+            .iter()
+            .position(|node| node.node.name() == "GpuEmitPartitions")
+            .expect("a scatter");
+        assert_eq!(index.feeds_owing_build(scatter), *expected, "{what}");
+    }
+}

@@ -99,10 +99,20 @@ pub(crate) fn interleave(branches: Vec<Box<dyn GpuNode>>) -> Box<dyn GpuNode> {
 /// The build side is always the left child, which is the orientation the schedule turns
 /// into "the build subtree drains first".
 pub(crate) fn join(build: Box<dyn GpuNode>, probe: Box<dyn GpuNode>) -> Box<dyn GpuNode> {
+    join_of(JoinType::Inner, build, probe)
+}
+
+/// `join` with its type chosen: what a lane owes when its build side is empty is the
+/// type's answer, so a test about that needs one that owes something.
+pub(crate) fn join_of(
+    join_type: JoinType,
+    build: Box<dyn GpuNode>,
+    probe: Box<dyn GpuNode>,
+) -> Box<dyn GpuNode> {
     Box::new(GpuHashJoin::new(
         build,
         probe,
-        JoinType::Inner,
+        join_type,
         vec![(0, 0)],
         None,
         Vec::new(),
