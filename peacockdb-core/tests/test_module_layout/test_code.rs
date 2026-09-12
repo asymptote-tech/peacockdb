@@ -51,7 +51,7 @@ const TEST_ONLY_ITEMS: &[TestOnlyItem] = &[
     TestOnlyItem {
         file: "executor/mod.rs",
         item: "has_finish_pass",
-        called_by: &["wire/tests.rs"],
+        called_by: &["wire/tests/mod.rs"],
     },
     TestOnlyItem {
         file: "executor/mod.rs",

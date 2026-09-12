@@ -210,7 +210,7 @@ feature, with signatures free of engine types.
   could not put them behind a `mod` wall while `test_gpu_executors` was a separate crate, and
   listed three answers to how a separate crate reaches them. Task 4 answered it a fourth way by
   ending the separation. Measured then, exactly one reach into the backend children came from
-  outside their directory — `wire/tests.rs`'s `CpuJoin`, replaced by the `has_finish_pass`
+  outside their directory — `wire/tests/mod.rs`'s `CpuJoin`, replaced by the `has_finish_pass`
   delegation — and `executor/driver` names none of them, going through `Backend`. Types hoisted
   into `executor/mod.rs` would land as `pub(crate)` and be no more reachable than they are in
   `accumulate.rs`, so the hoist has no consumer and no ticket: a rearrangement nothing calls for

@@ -390,7 +390,7 @@ pub(crate) fn physical_expr(
 
 /// Whether the CPU executor for this join keeps probe keys and answers at done.
 ///
-/// `#[cfg(test)]` because its only caller is `wire/tests.rs`, which checks that answer
+/// `#[cfg(test)]` because its only caller is `wire/tests/mod.rs`, which checks that answer
 /// against the recipe's `AtDone` call. Two hops rather than one: `cpu_backend` declares
 /// `mod join;` privately, so this module cannot name `CpuJoin` either.
 #[cfg(test)]

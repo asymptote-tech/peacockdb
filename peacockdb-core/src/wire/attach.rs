@@ -111,26 +111,35 @@ fn scan(
 ) -> Result<Option<Recipe>, PlanError> {
     let output = node.kind().schema().expect("a source declares its columns");
     let seq = writer.node(0, |b, _| node_writer::scan(b, load, output))?;
-    Ok(Some(Recipe::of(vec![Call::seq(
-        seq,
-        FbKind::Scan,
-        vec![Input::RowGroups],
-        CallPattern::PerBatch,
-    )])))
+    Ok(Some(Recipe::of(vec![
+        Call::seq(
+            seq,
+            FbKind::Scan,
+            vec![Input::RowGroups],
+            CallPattern::PerBatch,
+        )
+        .declaring(output),
+    ])))
 }
 
+/// Its own schema, not its input's: a filter projects as well as filters, so its output
+/// can be narrower than what it reads.
 fn filter(
     node: &GpuFilter,
     _inputs: &[&Schema],
     writer: &mut Writer,
 ) -> Result<Option<Recipe>, PlanError> {
+    let output = node.kind().schema().expect("every kind declares a schema");
     let seq = writer.node(1, |b, kids| node_writer::filter(b, node, kids))?;
-    Ok(Some(Recipe::of(vec![Call::seq(
-        seq,
-        FbKind::Filter,
-        vec![Input::Batch],
-        CallPattern::PerBatch,
-    )])))
+    Ok(Some(Recipe::of(vec![
+        Call::seq(
+            seq,
+            FbKind::Filter,
+            vec![Input::Batch],
+            CallPattern::PerBatch,
+        )
+        .declaring(output),
+    ])))
 }
 
 fn project(
@@ -138,13 +147,17 @@ fn project(
     _inputs: &[&Schema],
     writer: &mut Writer,
 ) -> Result<Option<Recipe>, PlanError> {
+    let output = node.kind().schema().expect("every kind declares a schema");
     let seq = writer.node(1, |b, kids| node_writer::project(b, node, kids))?;
-    Ok(Some(Recipe::of(vec![Call::seq(
-        seq,
-        FbKind::PlainProject,
-        vec![Input::Batch],
-        CallPattern::PerBatch,
-    )])))
+    Ok(Some(Recipe::of(vec![
+        Call::seq(
+            seq,
+            FbKind::PlainProject,
+            vec![Input::Batch],
+            CallPattern::PerBatch,
+        )
+        .declaring(output),
+    ])))
 }
 
 /// The map arm; a top-N's `fetch` rides the node, so it trims each batch and whatever
@@ -156,12 +169,10 @@ fn sort(
 ) -> Result<Option<Recipe>, PlanError> {
     let input = inputs[0];
     let seq = writer.node(1, |b, kids| node_writer::sort(b, node, input, kids))?;
-    Ok(Some(Recipe::of(vec![Call::seq(
-        seq,
-        FbKind::Sort,
-        vec![Input::Batch],
-        CallPattern::PerBatch,
-    )])))
+    // Rows reordered and trimmed, columns kept: what a sort emits is what it read.
+    Ok(Some(Recipe::of(vec![
+        Call::seq(seq, FbKind::Sort, vec![Input::Batch], CallPattern::PerBatch).declaring(input),
+    ])))
 }
 
 /// State from raw values, per batch — and the finalize where the translation gave this
@@ -232,18 +243,23 @@ pub(crate) fn accumulate_and_sort(
     ])))
 }
 
+/// A concat of the lane's batches: the columns it read, more rows.
 fn coalesce_all_batches(
     _node: &GpuCoalesceAllBatches,
-    _inputs: &[&Schema],
+    inputs: &[&Schema],
     writer: &mut Writer,
 ) -> Result<Option<Recipe>, PlanError> {
+    let input = inputs[0];
     let seq = writer.node(1, |b, kids| Ok(node_writer::coalesce_partitions(b, kids)))?;
-    Ok(Some(Recipe::of(vec![Call::seq(
-        seq,
-        FbKind::CoalescePartitions,
-        vec![Input::LaneBatches],
-        CallPattern::AtDone,
-    )])))
+    Ok(Some(Recipe::of(vec![
+        Call::seq(
+            seq,
+            FbKind::CoalescePartitions,
+            vec![Input::LaneBatches],
+            CallPattern::AtDone,
+        )
+        .declaring(input),
+    ])))
 }
 
 /// A compaction runs exactly what done runs, which is what makes the doubling threshold a
@@ -360,13 +376,17 @@ fn limit(
 /// Also no seq, and for the same reason: the row range the sink exports is counted across
 /// lanes at run time. A batch outside a root-adjacent interval is released without a call.
 fn unload(
-    _node: &GpuUnload,
+    node: &GpuUnload,
     _inputs: &[&Schema],
     _writer: &mut Writer,
 ) -> Result<Option<Recipe>, PlanError> {
-    Ok(Some(Recipe::of(vec![Call::bare(
-        AbiSymbol::ResultFromHandle,
-        vec![Input::Batch, Input::RowRange],
-        CallPattern::PerHandle,
-    )])))
+    let output = node.kind().schema().expect("every kind declares a schema");
+    Ok(Some(Recipe::of(vec![
+        Call::bare(
+            AbiSymbol::ResultFromHandle,
+            vec![Input::Batch, Input::RowRange],
+            CallPattern::PerHandle,
+        )
+        .declaring(output),
+    ])))
 }
