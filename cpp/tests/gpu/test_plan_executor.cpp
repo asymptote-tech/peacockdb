@@ -4,7 +4,6 @@
 #include "peacock_gpu.h"
 #include "plan_executor.h"
 #include "plan_executor_internal.h"
-#include "peacock/expr.h"
 #include "generated/gpu_plan_generated.h"
 
 #include <cudf/column/column_view.hpp>
@@ -20,6 +19,7 @@
 #include <cstdint>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -1420,9 +1420,9 @@ TEST(SliceHandle, AnUnknownHandleFails) {
 // --- Literals: a typed NULL on the AST path -----------------------------------
 //
 // A literal reaches the device as a ScalarValue whose is_null flag is what separates a
-// null from a zero. Both tests cast the Int32 column to Int64 so both operands infer to
-// the same type: is_ast_able's binary arm routes a mismatch to build_column, which
-// reads the flag and would answer correctly for the wrong reason.
+// null from a zero. The first two tests cast the Int32 column to Int64 so both operands
+// infer to the same type: is_ast_able's binary arm routes a mismatch to build_column,
+// which reads the flag and would answer correctly for the wrong reason.
 
 TEST(Literals, ATypedNullInsideAnAstExpressionIsNullAndNotZero) {
   flatbuffers::FlatBufferBuilder fbb;
@@ -1543,25 +1543,27 @@ TEST(Literals, ADecimalLiteralStillCarriesItsScaledValue) {
 }
 
 TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
-  // One row per fb::DataType. `literal` is false where build_scalar has no arm; the
-  // refusal must then name the type, or a type added to the wire later lands in a
-  // dispatch with no arm and the failure says nothing about which.
+  // One row per fb::DataType, each a bare `NULL::T` project. `answer` is the cuDF type of
+  // the null column that comes back (a decimal crosses as a scaled double, so FLOAT64;
+  // strings go through build_column, the rest through build_expr), or empty where
+  // build_scalar has no arm and the refusal must name the type.
   struct Case {
     fb::DataType type;
-    bool literal;
+    std::optional<cudf::type_id> answer;
   };
+  using id = cudf::type_id;
   const std::vector<Case> cases = {
-      {fb::DataType_Null, false},      {fb::DataType_Boolean, true},
-      {fb::DataType_Int8, true},       {fb::DataType_Int16, true},
-      {fb::DataType_Int32, true},      {fb::DataType_Int64, true},
-      {fb::DataType_UInt8, false},     {fb::DataType_UInt16, false},
-      {fb::DataType_UInt32, false},    {fb::DataType_UInt64, false},
-      {fb::DataType_Float16, false},   {fb::DataType_Float32, true},
-      {fb::DataType_Float64, true},    {fb::DataType_Utf8, true},
-      {fb::DataType_LargeUtf8, true},  {fb::DataType_Binary, false},
-      {fb::DataType_LargeBinary, false}, {fb::DataType_Date32, true},
-      {fb::DataType_Date64, false},    {fb::DataType_Decimal128, true},
-      {fb::DataType_Utf8View, true},   {fb::DataType_BinaryView, false},
+      {fb::DataType_Null, {}},           {fb::DataType_Boolean, id::BOOL8},
+      {fb::DataType_Int8, id::INT8},     {fb::DataType_Int16, id::INT16},
+      {fb::DataType_Int32, id::INT32},   {fb::DataType_Int64, id::INT64},
+      {fb::DataType_UInt8, {}},          {fb::DataType_UInt16, {}},
+      {fb::DataType_UInt32, {}},         {fb::DataType_UInt64, {}},
+      {fb::DataType_Float16, {}},        {fb::DataType_Float32, id::FLOAT32},
+      {fb::DataType_Float64, id::FLOAT64}, {fb::DataType_Utf8, id::STRING},
+      {fb::DataType_LargeUtf8, id::STRING}, {fb::DataType_Binary, {}},
+      {fb::DataType_LargeBinary, {}},    {fb::DataType_Date32, id::TIMESTAMP_DAYS},
+      {fb::DataType_Date64, {}},         {fb::DataType_Decimal128, id::FLOAT64},
+      {fb::DataType_Utf8View, id::STRING}, {fb::DataType_BinaryView, {}},
   };
   // The list is a copy of the enum; this is what makes it fail by count when the enum
   // grows, which is enough to send the next reader here.
@@ -1570,26 +1572,25 @@ TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
   for (const auto& c : cases) {
     const char* name = fb::EnumNameDataType(c.type);
     flatbuffers::FlatBufferBuilder fbb;
-    fb::ScalarValueBuilder sb(fbb);
-    sb.add_type(c.type);
-    sb.add_is_null(true);  // a typed null needs no value fields for any type
-    fbb.Finish(sb.Finish());
-    const auto* sv = flatbuffers::GetRoot<fb::ScalarValue>(fbb.GetBufferPointer());
+    auto buf = nation_project(fbb, make_null_literal(fbb, c.type), "nothing");
 
-    if (c.literal) {
-      std::unique_ptr<cudf::scalar> s;
-      ASSERT_NO_THROW(s = peacock::ast_scalar(sv)) << "ast_scalar refused " << name;
-      EXPECT_NO_THROW(peacock::ast_literal_for(*s)) << "no ast::literal arm for " << name;
+    if (!c.answer) {
+      try {
+        WholePlan plan(buf);
+        ADD_FAILURE() << "expected a refusal for " << name;
+      } catch (const std::exception& e) {
+        EXPECT_NE(std::string(e.what()).find(name), std::string::npos)
+            << "the refusal for " << name << " does not name it: " << e.what();
+      }
       continue;
     }
-    try {
-      auto s = peacock::ast_scalar(sv);
-      peacock::ast_literal_for(*s);
-      ADD_FAILURE() << "expected a refusal for " << name;
-    } catch (const std::exception& e) {
-      EXPECT_NE(std::string(e.what()).find(name), std::string::npos)
-          << "the refusal for " << name << " does not name it: " << e.what();
-    }
+    WholePlan plan(buf);
+    const auto& result = plan.result();
+    ASSERT_EQ(result.table->num_columns(), 1) << name;
+    auto view = result.table->view().column(0);
+    EXPECT_EQ(view.type().id(), *c.answer) << name;
+    ASSERT_EQ(view.size(), 25) << name;
+    EXPECT_EQ(view.null_count(), view.size()) << name;
   }
 }
 
