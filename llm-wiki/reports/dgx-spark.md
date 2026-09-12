@@ -68,7 +68,7 @@ pages to the OS. Whole-table q6 load, by allocator condition:
 
 | condition | load |
 |---|--:|
-| pool, 25% of free reserved (default) | 337-353 ms |
+| pool, 25% of free reserved (the default then) | 337-353 ms |
 | pool, 60% reserved (growth impossible) | 338-346 ms |
 | pool, 5% reserved (growth forced) | 1762-1777 ms |
 | no pool | 850-857 ms |
@@ -225,5 +225,9 @@ so the engine need not care where a buffer was filled.
   `PEACOCK_NODES_ROWS` drives the scale curves above.
 - `cpp/tests/gpu/test_tpch_streamed.cpp` (`peacock_tpch_streamed_tests`) —
   `PEACOCK_STREAM_CHUNK_MB` / `PEACOCK_STREAM_PASS_MB` drive the chunk sweep.
-- Pool sizing: `PEACOCK_RMM_POOL_INIT_PCT=<n>`. The no-pool rows were taken before the
-  switch that produced them was removed; there is no unpooled configuration now.
+- Pool sizing: each binary's own `kPoolBytes` beside its `main()`, since the percentage these
+  rows were taken under, and the `PEACOCK_RMM_POOL_INIT_PCT` that overrode it, are both gone
+  (`llm-wiki/archive/historical-comments.md`). The no-pool rows were taken before the switch that
+  produced them was removed. **A sweep past a default needs `PEACOCK_RMM_POOL_BYTES`**: the
+  scale curves above run `PEACOCK_NODES_ROWS=100000000`, whose peak is 17.90 GiB against a
+  declared 10 GiB, so without an override the run dies on `Maximum pool size exceeded`.

@@ -485,11 +485,13 @@ same answer. The gap was fixed three times already — `multi_gpu.cpp`, the gtes
 benchmark harness, the last two sharing `cpp/include/peacock/rmm_pool.hpp`
 ([#151](archive/archived-tickets.md#t151)); the engine is the only one of the four that ships.
 The second half is the same fix: `gpu_memory_limit` is documented as a bound, stored at
-`gpu_executor.cpp:99` and never read — the #132 shape one level up — and a pool's `maximum` IS
-that bound. Care: install per device before any cuDF call, tear down on the owning thread
-(`set_per_device_resource(id, nullptr)` misses the ref map), and size by host kind, an
-integrated part's reservation sharing the page cache's pool. Tests: the GPU tiers stay
-byte-identical, plus a case asserting a small limit is honoured.
+`gpu_executor.cpp:99` and never read — the #132 shape one level up. Care: install per device
+before any cuDF call, and tear down on the owning thread (`set_per_device_resource(id, nullptr)`
+misses the ref map). Two questions #178 did not answer for the engine: whether the limit is a
+reservation or a ceiling — the test binaries take `initial == maximum` because it fails loudly —
+and how an integrated part is sized, whose only implementation went with the percentages
+(`archive/historical-comments.md`). Tests: the GPU tiers stay byte-identical, plus a case
+asserting a small limit is honoured.
 
 <a id="t19"></a>
 ### #19 — the planner has no cardinality estimate, and the memory model pays for it
@@ -779,31 +781,27 @@ tables, no new dataset, plus the engine work it needs.
 - a wide `SELECT DISTINCT`: dedup whose state is the whole row, the compaction worst case.
 
 <a id="t178"></a>
-### #178 — two CI runs share the GPU host, and the pool is sized for one
-`gpu-tests` uses a per-run `REMOTE_DIR` so two runs do not overwrite each other's files, and
-nothing stops their test binaries running at the same time.
+### #178 — two runs share the GPU host, and the pool was sized for one
+Every gtest main reserved 85% of *free* VRAM, so a second process on the card got what the first
+left and died in `pool_memory_resource` with `std::bad_alloc`, always in whichever started second.
 
-Single-tenant GPU is an invariant this repo states and enforces *within* a process — GPU binaries
-run `--test-threads=1` because cuDF and RMM share one process-wide pool. Across runs it is enforced
-by nothing, and the RMM pool master installed makes the collision loud: two jobs overlapping by
-under two minutes gave `std::bad_alloc: out_of_memory` in `pool_memory_resource` on three sf40
-tests, at 14.38 GiB peak on a 139.7 GiB device — not a full device, two pools.
+**Tentatively closed**, by two changes. `15209636` gave `gpu-tests` `concurrency: {group:
+shad-gpu, cancel-in-progress: false}`, so our own runs queue rather than overlap. Then each binary
+took a measured byte budget beside its `main()` — 69 GiB for `peacock_tpch_tests`, 30 for
+`peacock_tpchv_tests`, 1 GiB each for the other two. Two `peacock_tpchv_tests` at once: both
+pooled, both green. The tpch pair is arithmetic and not yet a run: 69+69 leaves 1.2 GiB of a
+139.7 GiB card, and no idle card has been free since.
 
-It reads as a flaky GPU tier, which is the expensive way to meet it: the failure is in whichever
-run started second and re-running it alone passes.
+It cannot be proven closed from here: the host is shared with work outside this repo, and a
+stranger holding a third of the card still fails us (2026-09-10). **The pool line says whose
+failure it is.** `[rmm] pool of N GiB could not be built` is a neighbour — date a line here naming
+the run and the binary, re-run once, and do not debug it. A pool that *was* built and a test that
+then dies with `Maximum pool size exceeded` is ours: the budget is too small, it reproduces every
+time, and a re-run buys nothing.
 
-**Fixed** by `15209636`: the job carries `concurrency: group: shad-gpu, cancel-in-progress: false`
-at `pipeline.yml:448`, so GPU jobs queue across runs and branches. Queued rather than cancelled,
-because a cancelled run leaves its `REMOTE_DIR` and the device's state behind.
-
-The same `std::bad_alloc` in `pool_memory_resource` still reaches CI from a different cause, so
-read the pool line before reaching for this ticket. Each gtest main sizes its pool at 95% of
-*free* device memory (`cpp/include/peacock/rmm_pool.hpp:141`) and prints what it got, so a
-neighbour on the device sets our ceiling: 132.3 GiB max on an idle device, 40.0 GiB when
-something else held 97.5 GiB. `TpchSf40.Q1GroupByAggregates` needs 67.42 GiB and is the first to
-die. Two of our runs colliding gives a different signature — the failure moves to whichever
-started second, and the free figure differs between them. A foreign tenant gives the same free
-figure to every run and fails them all identically.
+- 2026-09-12: CI run `34659896447` on PR #144 (`d41f223a`), `peacock_tpch_tests`: `pool of 69.0
+  GiB could not be built with 14.9 GiB free` at 00:08 UTC; `peacock_tpchv_tests` four binaries
+  later saw 103.0 GiB free, so a stranger held ~129 GiB for those minutes. Re-run once.
 
 <a id="t176"></a>
 ### #176 — the CI coverage guard checks one direction only

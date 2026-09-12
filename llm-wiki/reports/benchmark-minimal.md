@@ -210,7 +210,9 @@ on; its execute times are 2nd-minimum of 5 like everything else.
 GB10 streamed peaks, from the allocator's own high-water mark: q6 861 MiB, q1 2340 MiB,
 q3 1003 MiB, q8 939 MiB, at 512 MiB chunks. The whole-table shape needs 11-62 GiB for the
 same queries, so on this host the streamed column is the one that would still run if the
-machine were shared.
+machine were shared. These peaks are the host's, not the knob's: the same 512 MiB chunks on
+H200 peak at 212/577/425/336 MiB. q1's 2340 exceeds the binary's declared 2 GiB, so
+reproducing that column on GB10 takes `PEACOCK_RMM_POOL_BYTES`.
 
 **Execute, q6/q3/q8: H200 leads by 2.3-8.8x**, against a 19x device-bandwidth advantage.
 The gap narrows as a query does more per byte — q6 is a scan-and-reduce and lands nearest

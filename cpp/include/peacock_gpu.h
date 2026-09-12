@@ -74,11 +74,14 @@ enum {
   PEACOCK_RMM_POOL_UNAVAILABLE = 1
 };
 
-/// Outcome of installing the pooled device allocator — sizes in bytes, 0 unless
-/// `state` is PEACOCK_RMM_POOL_INSTALLED.
+/// Outcome of installing the pooled device allocator. The two pool sizes are 0 unless
+/// `state` is PEACOCK_RMM_POOL_INSTALLED; `free_bytes` is filled either way, since a
+/// failed reservation is diagnosed by the request against what the device had left.
+/// initial_bytes == maximum_bytes == the aligned-down request: a budget is reserved
+/// whole, so the pool never grows.
 typedef struct PeacockRmmPoolInfo {
   int32_t state;       ///< one of PEACOCK_RMM_POOL_*
-  int32_t integrated;  ///< 1 on an integrated part, which is sized differently
+  int32_t integrated;  ///< 1 on an integrated part; reported, not a sizing input
   uint64_t free_bytes;
   uint64_t initial_bytes;
   uint64_t maximum_bytes;
@@ -94,14 +97,20 @@ typedef struct PeacockRmmPoolInfo {
 /// quietly compared with theirs.
 ///
 /// The engine does NOT call this on its own behalf, so a shipping query is
-/// unaffected; making it self-installing is llm-wiki/tickets.md #148.
+/// unaffected; making it self-installing is llm-wiki/tickets.md #148. It does not
+/// read `gpu_memory_limit` either — that is the same ticket.
 ///
+/// @param bytes     The pool to reserve, unless PEACOCK_RMM_POOL_BYTES overrides it. A
+///                  request this host cannot meet is UNAVAILABLE, never a smaller pool,
+///                  because a pool of another size makes every number taken over it mean
+///                  something else; so is one under rmm's 256-byte granularity, which rmm
+///                  would build and then fail every allocation in.
 /// @param out_info  Filled with what actually happened. Required.
 /// @return 0 unless out_info is NULL — NOT non-zero on UNAVAILABLE, which still
 ///         leaves a runnable default resource. Whether that is fatal is the
 ///         caller's call, and for anything being timed it is: a time taken with a
 ///         pool and one taken without differ by more than noise.
-int peacock_install_rmm_pool(PeacockRmmPoolInfo* out_info);
+int peacock_install_rmm_pool(uint64_t bytes, PeacockRmmPoolInfo* out_info);
 
 /// Turn per-node timing on/off (process-global; off by default).
 ///

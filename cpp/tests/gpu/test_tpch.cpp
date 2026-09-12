@@ -765,9 +765,15 @@ TEST_F(TpchSf40, Q8SevenTableJoin) {
                     std::chrono::duration<double, std::milli>(t_loaded - t0).count());
 }
 
+// sf40 read in place; measured peak 67.42 GiB, all of it in Q1GroupByAggregates. The pool
+// must be larger than that: it cannot grow, so a request its free list cannot serve whole is
+// bad_alloc — 68 GiB dies there and 69 passes (llm-wiki/tasks/rmm-pool-budget-detail.md).
+// 69 is also the most that lets two of these share a 139.7 GiB device, which is #178.
+constexpr std::size_t kPoolBytes = 69ull << 30;
+
 // Same entry point as the other gtest binaries here (the conda cudf ships no gtest_main).
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  peacock::install_rmm_pool();
+  peacock::install_rmm_pool(kPoolBytes);
   return RUN_ALL_TESTS();
 }

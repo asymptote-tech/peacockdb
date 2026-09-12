@@ -1365,8 +1365,13 @@ TEST(SliceHandle, AnUnknownHandleFails) {
   EXPECT_NE(plan.last_error().find("no plan loaded"), std::string::npos) << plan.last_error();
 }
 
+// Hand-built plans over tpch.minimal, 19 MB of parquet; measured peak 2.9 MiB
+// (llm-wiki/tasks/rmm-pool-budget-detail.md). 1 GiB is a floor, as in test_cudf.cpp: the
+// tables here are tens of rows and the number cannot grow into it by accident.
+constexpr std::size_t kPoolBytes = 1ull << 30;
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  peacock::install_rmm_pool();
+  peacock::install_rmm_pool(kPoolBytes);
   return RUN_ALL_TESTS();
 }

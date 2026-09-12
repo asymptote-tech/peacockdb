@@ -1184,9 +1184,16 @@ TEST_F(TpchSf40, Q9VectorCompositeJoin) {
                     std::chrono::duration<double, std::milli>(t_loaded - t0).count(), index_ms);
 }
 
+// sf40 plus the embedding columns and a cuVS brute-force search; measured peak 24.85 GiB, and
+// a pool that cannot grow needs more than its peak: 28 GiB dies in Q9VectorCompositeJoin and
+// 29 passes (llm-wiki/tasks/rmm-pool-budget-detail.md). 30 GiB is the round step above that.
+// PEACOCK_TPCHV_K sizes the per-query candidate set, so a run that raises it past the 131072
+// default sets PEACOCK_RMM_POOL_BYTES with it; CI runs the default this number was taken at.
+constexpr std::size_t kPoolBytes = 30ull << 30;
+
 // Same entry point as the other gtest binaries here (the conda cudf ships no gtest_main).
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  peacock::install_rmm_pool();
+  peacock::install_rmm_pool(kPoolBytes);
   return RUN_ALL_TESTS();
 }
