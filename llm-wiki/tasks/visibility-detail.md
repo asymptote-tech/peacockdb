@@ -121,3 +121,13 @@ spec's residue list.
 Files: `peacockdb-core/src/lib.rs`, `peacockdb-core/src/wire/generated.rs`,
 `peacockdb-core/tests/test_module_layout/{privacy,visibility,walls,near_miss}.rs`,
 `llm-wiki/tasks/visibility-baselines/` (new, five files).
+
+### 2026-09-12 — plan task 3 dispatched: `plan/mod.rs`, 92 items
+
+Plan tasks 1-2 committed as `71d35418`. Two things settled there for the slices ahead: the lint's
+count is a work list and not a gate — no `-D warnings`, no `[lints]`, no clippy or fmt step in
+`pipeline.yml`, so the spec's "checked warning baseline" is prose in `prompts.md`'s definition of
+done and nothing mechanical; and `wire/generated.rs` allows `unreachable_pub` beside the lints it
+already allows for flatc's output. The 26 items in the two backend facades are `impl Backend`
+associated types, reachable through the trait, so the lint never names them; the dump does, and
+the executor slice demotes them.
