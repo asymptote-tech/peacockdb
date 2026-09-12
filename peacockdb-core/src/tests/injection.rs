@@ -588,9 +588,9 @@ pub(crate) struct PlannedMode {
     pub lanes: usize,
     pub shuffles: bool,
     /// Whether the plan carries a join whose answer to an empty build side is its probe
-    /// side — Right, Full and RightAnti. Those refuse the call outright
-    /// ([#175](../../../llm-wiki/tickets.md#t175)), so a hash that leaves every lane but
-    /// one empty is a refusal rather than a shape, and the dimension has no meaning here.
+    /// side — Right, Full and RightAnti. A hash that leaves every lane but one empty is
+    /// what puts such a join over an empty build side, so this is what says a query is
+    /// the shape the two cases in `dimensions.rs` need.
     pub owes_probe_when_empty: bool,
 }
 
@@ -667,9 +667,7 @@ pub(crate) fn candidates(modes: &[PlannedMode], dimensions: &Dimensions) -> Vec<
                         if *drain == Drain::FirstLane && mode.lanes < 2 {
                             continue;
                         }
-                        if *hash == Hash::Degenerate
-                            && (!mode.shuffles || mode.owes_probe_when_empty)
-                        {
+                        if *hash == Hash::Degenerate && !mode.shuffles {
                             continue;
                         }
                         out.push(Candidate {
@@ -771,10 +769,7 @@ fn requirements(modes: &[PlannedMode], dimensions: &Dimensions) -> Vec<(String, 
             Box::new(move |candidate: &Candidate| candidate.injection.empties == value),
         ));
     }
-    if modes
-        .iter()
-        .any(|mode| mode.shuffles && !mode.owes_probe_when_empty)
-    {
+    if modes.iter().any(|mode| mode.shuffles) {
         for value in dimensions.hash.clone() {
             out.push((
                 format!("a hash {value:?}"),

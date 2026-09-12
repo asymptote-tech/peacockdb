@@ -1,5 +1,7 @@
 //! The schedule and the two holds, asserted on calls rather than on rows.
 
+use datafusion::common::JoinType;
+
 use super::mock::{AccRule, EmitRule, ExecRule, JoinRule, Script, spec};
 use super::plans::*;
 use super::*;
@@ -227,7 +229,8 @@ fn a_join_that_owes_nothing_without_a_build_side_ends_its_lane() {
 }
 
 /// The three types that preserve unmatched probe rows owe their probe side, and making it
-/// takes a call over a build table that does not exist (#175).
+/// takes a call over a build table that does not exist. A scatter no longer leaves a lane
+/// here (#175); an accumulator that emits nothing at all still does (#212).
 #[test]
 fn a_join_that_owes_its_probe_side_without_a_build_side_is_refused() {
     let plan = join_plan(1);
@@ -245,6 +248,161 @@ fn a_join_that_owes_its_probe_side_without_a_build_side_is_refused() {
         }
         other => panic!("expected the backend to refuse, got {other:?}"),
     }
+}
+
+// -- the empty build lane a join owes rows for (#175) -------------------------------
+
+/// unload <- join <- [coalesce <- emit(4) <- source(build, 1), filter <- source(probe, 4)]
+///
+/// The build side scattered over four lanes, with every build row sent to lane 0: the
+/// other three lanes' build sides are a typed zero-row table each.
+fn scattered_build_plan(join_type: JoinType) -> Box<dyn GpuNode> {
+    unload(join_of(
+        join_type,
+        coalesce_all(emit(source("build", 1), 4)),
+        filter(source("probe", 4)),
+    ))
+}
+
+fn scattered_build_script() -> Script {
+    Script::default()
+        .source("build", vec![vec![spec(4, 32)]])
+        .source("probe", vec![vec![spec(10, 80)]; 4])
+        .with_emit(EmitRule::ToLane(0))
+}
+
+/// A mock join that refuses `without_build`, so a lane reaching `NoBuild` fails the run
+/// rather than passing for the wrong reason.
+fn owing_probe() -> JoinRule {
+    JoinRule {
+        empty_build_owes_its_probe: true,
+        finish_rows: 0,
+        build_residency: 0,
+    }
+}
+
+/// The driver-level claim, asserted where the routing happens rather than through the
+/// answer it eventually produces: a test on the rows would pass for the wrong reason if
+/// the join happened to produce them some other way.
+#[test]
+fn an_empty_build_lane_reaches_set_build_rather_than_no_build() {
+    for join_type in [JoinType::Right, JoinType::Full, JoinType::RightAnti] {
+        let plan = scattered_build_plan(join_type);
+        let script = scattered_build_script().with_join(owing_probe());
+        let report = run(plan.as_ref(), &script);
+        assert_eq!(
+            (
+                count(&report, CallKind::SetBuild),
+                count(&report, CallKind::NoBuild)
+            ),
+            (4, 0),
+            "{join_type:?}: every lane set its build side, the three empty ones included"
+        );
+    }
+}
+
+/// The guard from the other side. Without it the change is "keep every empty lane", which
+/// is 389,331 batches instead of a few hundred.
+#[test]
+fn a_join_type_that_owes_nothing_still_drops_its_empty_lanes() {
+    for join_type in [
+        JoinType::Inner,
+        JoinType::Left,
+        JoinType::LeftSemi,
+        JoinType::LeftAnti,
+        JoinType::LeftMark,
+        JoinType::RightSemi,
+    ] {
+        let plan = scattered_build_plan(join_type);
+        let script = scattered_build_script();
+        let report = run(plan.as_ref(), &script);
+        assert!(
+            calls(&report, CallKind::Emit)
+                .iter()
+                .all(|event| event.outputs == 1),
+            "{join_type:?}: an empty lane was queued"
+        );
+        assert_eq!(
+            (
+                count(&report, CallKind::SetBuild),
+                count(&report, CallKind::NoBuild)
+            ),
+            (1, 3),
+            "{join_type:?}: the hot lane built and the other three asked what they owed"
+        );
+        assert_accounted(&report);
+    }
+}
+
+/// The condition that stops this task *causing* #152: an empty probe batch is an extra
+/// probe call, and the device refuses a second one. A test written only around the build
+/// side never reaches this plan shape.
+#[test]
+fn a_scatter_feeding_a_probe_side_still_drops_its_empties() {
+    let plan = unload(join_of(
+        JoinType::Right,
+        coalesce_all(source("build", 4)),
+        filter(emit(source("probe", 1), 4)),
+    ));
+    let script = Script::default()
+        .source("build", vec![vec![spec(4, 32)]; 4])
+        .source("probe", vec![vec![spec(10, 80)]])
+        .with_emit(EmitRule::ToLane(0))
+        .with_join(owing_probe());
+    let report = run(plan.as_ref(), &script);
+    assert!(
+        calls(&report, CallKind::Emit)
+            .iter()
+            .all(|event| event.outputs == 1),
+        "an empty probe lane was queued"
+    );
+    assert_eq!(
+        count(&report, CallKind::Probe),
+        1,
+        "only the lane that received rows made a probe call"
+    );
+    assert_eq!(count(&report, CallKind::SetBuild), 4);
+    assert_accounted(&report);
+}
+
+/// The #152 hazard from the other direction: the batch kept for the build side is set,
+/// and the probe calls are exactly the probe batches.
+#[test]
+fn a_build_batch_does_not_become_a_probe_call() {
+    let plan = scattered_build_plan(JoinType::Right);
+    let script = scattered_build_script().with_join(owing_probe());
+    let report = run(plan.as_ref(), &script);
+    assert_eq!(
+        count(&report, CallKind::Probe),
+        4,
+        "one probe call per scripted probe batch, and none for a build batch"
+    );
+    assert_eq!(
+        count(&report, CallKind::ReleaseUnwanted),
+        0,
+        "and no probe batch was released for want of a build side"
+    );
+}
+
+/// Zero rows is not zero bytes: a kept empty batch still carries buffers, takes
+/// `acct.hold` and owes a matching release. An imbalance surfaces days later as a budget
+/// error on an unrelated query.
+#[test]
+fn holds_and_releases_balance_over_a_plan_with_empty_lanes() {
+    let plan = scattered_build_plan(JoinType::Right);
+    let script = scattered_build_script().with_join(owing_probe());
+    let report = run(plan.as_ref(), &script);
+    // Node numbering is pre-order: 0 unload, 1 join, 2 coalesce, 3 emit.
+    let emitted: Vec<(u64, usize)> = report.emitted[3]
+        .iter()
+        .map(|lane| (lane[0].rows, lane[0].bytes))
+        .collect();
+    assert_eq!(
+        emitted,
+        vec![(4, 32), (0, 8), (0, 8), (0, 8)],
+        "the three empty lanes were kept, each holding its buffers"
+    );
+    assert_accounted(&report);
 }
 
 #[test]

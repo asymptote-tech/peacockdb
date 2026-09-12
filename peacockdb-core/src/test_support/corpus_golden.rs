@@ -99,14 +99,14 @@ pub(crate) fn assert_section(path: &Path, query: &str, body: &str) {
 
 /// Merge one section into the file under an advisory lock, and publish by rename.
 ///
-/// The lock is on the file rather than in the process, and the distinction is what makes it
-/// sufficient: libtest runs a binary's cases as threads, so a `Mutex` would serialize
-/// those and nothing else — not `cargo nextest`, which gives each case its own process, and
-/// not two shells regenerating at once. The rename is for the other half: a crash mid-write
-/// must not leave a truncated golden.
-///
-/// The read is inside the critical section, which is the whole point: a writer that read
-/// before another wrote would publish a file missing the other's section.
+/// The lock is on the file rather than in the process: libtest runs a binary's cases as
+/// threads, so a `Mutex` would serialize those and nothing else — not `cargo nextest`, and
+/// not two shells regenerating at once. The rename is for a crash mid-write, which must not
+/// leave a truncated golden. What holds: two writers that opened the same inode are
+/// serialized, and the read inside the critical section sees the earlier one's section.
+/// What does not: the lock is on the inode a writer opened, and the rename replaces that
+/// inode, so a writer that opened before another's rename holds a lock nobody contends,
+/// reads the old text, and publishes without the other's section (#213).
 pub(crate) fn merge_section(
     path: &Path,
     declared: &[(String, Option<String>)],

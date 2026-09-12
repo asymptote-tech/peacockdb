@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 212), which is also the counter for
+New tickets take the next free number (currently 214), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -16,9 +16,9 @@ reference still resolves there.
 | Section | Open | Tickets |
 |---|--:|---|
 | [Critical correctness](#critical-correctness) | 24 | #211 #210 #209 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
-| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
+| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #212 #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
+| [Infrastructure / process](#infrastructure--process) | 24 | #213 #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
 
@@ -304,6 +304,23 @@ a data dir panics instead of being skipped. Found during the comment audit.
 
 ## Blockers for disabled coverage
 
+<a id="t212"></a>
+### #212 — a build side that emits no batch at all still refuses Right, Full and RightAnti
+A Right, Full or RightAnti join whose build side hands the lane no batch is refused by name
+in `without_build`, where the answer owed is every probe row, padded or not.
+
+The scatter route to this is gone: `driver/partitioned.rs` keeps a zero-row scatter output
+where the join above owes rows ([#175](archive/archived-tickets.md#t175)), and the join then computes the answer. What
+remains is an upstream that emits nothing at all. Two shapes reach it. A limit that skips
+everything: `(SELECT ... FROM nation OFFSET 100) n RIGHT JOIN region r` plans
+`GpuCoalesceAllBatches <- GpuLimit skip=100` under the build side, at every mode. And tpcds
+q77 at the three tp4 modes: its Right outer's build side is a grouped aggregate over an Inner
+join, the Inner join's empty scatter lane drops as it should, its lane emits nothing, and the
+aggregate emits nothing where nothing arrived. Pinned by
+`bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti siblings
+(`gpu_tests/join_cases.rs`), and on the driver by
+`a_join_that_owes_its_probe_side_without_a_build_side_is_refused` (`driver/tests/flow.rs`).
+
 <a id="t206"></a>
 ### #206 — a float or boolean partition key is refused on the device
 
@@ -378,43 +395,21 @@ since all 31 using `count(*)` carry a WHERE, GROUP BY or JOIN and the rule canno
 
 The fix is small on the CPU and unavailable on a device: the node is a source of constant rows,
 and a table of literals made from no input is what the frozen surface has no call for — the same
-wall as [#173](#t173) and [#175](#t175). T17 was to have discharged it and did not: writing the
+wall as [#173](#t173) and [#212](#t212). T17 was to have discharged it and did not: writing the
 CPU half alone makes the oracle answer a query the device refuses, and the oracle is what the
 device is checked against. Waits on the make-a-table-of-literals call all three want.
 
-<a id="t175"></a>
-### #175 — an empty build side leaves three join types owing rows they cannot make
-`empty_build_answers_nothing` decides what a lane answers when its build side produced no batch.
-Six types owe nothing and end the lane; Right, Full and RightAnti owe their probe side.
-
-Owing the probe side means a call over a build table that does not exist, which the frozen surface
-has no way to express — the same wall as [#173](#t173), reached from the join instead of the
-accumulator. Both backends refuse by name rather than inventing an answer.
-
-The corpus reaches it twice: q21 at tp4-single, and tpcds q77, whose Right outer at four lanes
-gets no build side and owes its probe rows padded with NULLs. q77 is therefore out of the
-end-to-end list, with q2 carrying the union-that-cannot-interleave claim in its place — writing
-the CPU pad alone would make the oracle answer a query the device refuses.
-Unfreezing buys a pass-through of the probe side and the refusal goes. Pinned, both sides
-refusing, by `bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti
-siblings (`gpu_tests/join_cases.rs`) through `without_build`, which `empty-build.md`'s driver
-fix does not reach: retarget or delete them by hand. A zero-row build *batch* is not this.
-
 <a id="t173"></a>
-### #173 — the frozen surface cannot build a table out of nothing
-Every entry point loads a table by reading one, so a node owing rows it did not receive has no
-call to make. Three places hit it: a collapse of no handles, a merge of no runs, and a finish
-whose probe produced no keys and which owes an empty table or one of literals.
+### #173 — a finish whose probe produced no keys cannot make the table it owes
+`finish_without_keys` (`gpu_backend/join.rs`) refuses Left, Full, LeftSemi and LeftMark on the
+device when a lane's probe side accumulated no keys: what each owes cannot be loaded from nothing.
 
-Each refuses by name rather than inventing rows, and the CPU backend emits nothing in the same
-places so the two stay one engine. The exception is a global aggregate, which owes its identity
-row whatever arrived.
-
-Unfreezing buys a make-empty-of-schema call and the refusals go. Until then the refusal is the
-contract, and the shapes that reach it are the ones a lane can be empty in. The accumulators never
-reach it (both emit nothing before any call); the join's finish over no probe call at all does, for
-Left, Full, LeftSemi and LeftMark — `bug_…_finishing_with_no_probe_batch_is_refused_on_the_device`
-(`gpu_tests/join_cases.rs`); LeftAnti hands its build side up and agrees with the cpu.
+One site, on the probe side. LeftAnti hands its build side up and agrees with the cpu, which
+answers all five. The accumulators are not here: a collapse of no handles and a merge of no
+runs answer nothing on the Rust side before any call, on both engines, and the C++ guard in
+`node_session.cpp` behind them is unreachable. Unfreezing buys a make-empty-of-schema call and
+the refusal goes; until then it is the contract. Blocks no registry cell. Pinned by
+`bug_…_finishing_with_no_probe_batch_is_refused_on_the_device` (`gpu_tests/join_cases.rs`).
 
 <a id="t23"></a>
 ### #23 — Upgrade DataFusion 45→46+ to unblock q27/q70/q72/q86
@@ -512,7 +507,7 @@ node carries a projection the resident model sees a narrower row than the device
 
 It under-prices, which is the direction that matters: a budget that should refuse the call instead
 lets it run, and the failure arrives from the allocator rather than as the named refusal the
-accounting exists to produce. Pre-dates the narrowing project ([#175](#t175)'s neighbour work),
+accounting exists to produce. Pre-dates the narrowing project ([#175](archive/archived-tickets.md#t175)'s neighbour work),
 which only makes it legible — before it, the finish emitted every build column and the node
 declared fewer, silently.
 
@@ -893,6 +888,20 @@ tripped, so something can branch on it, but there is nowhere to record into — 
 trip log, and `Underestimate` is the precedent for what one would look like. Related: #91.
 
 ## Infrastructure / process
+
+<a id="t213"></a>
+### #213 — a golden regeneration can publish a file missing another writer's section
+`corpus_golden::merge_section` locks the inode it opened and `publish` renames a staged sibling
+onto the path, so a writer that opened before another's rename holds a lock on the old inode,
+reads stale text, and publishes without the other's section.
+
+Seen once on `ENS-empty-build`: a whole-corpus `UPDATE_CANONICAL=1` run published
+`tp4-single-mini.cpu.txt` without q16's section while its `.cost.txt` kept it; refilled with
+`PCK_UPDATE_SECTIONS=1 … --exact cpu_tpch_q16_tp4_single`. The doc on `merge_section` says the
+read inside the critical section prevents exactly this, which holds only while the path keeps
+one inode. A fix is a lock on a sibling lock file rather than on the file the rename replaces,
+or an open-after-lock. Test infrastructure, not the engine: no cell, no golden's content is
+wrong once the regeneration is re-read, which is why the rule to read a regeneration's diff exists.
 
 <a id="t201"></a>
 ### #201 — the murmur gate proves a copy of the lane rule, not the rule

@@ -222,14 +222,15 @@ fn sorted_rows(batches: &[RecordBatch]) -> Option<Vec<Vec<u8>>> {
 
 /// One run of one shape, against the one oracle. The two accounting assertions ride here
 /// rather than at the call sites: an injected run leaks exactly as visibly as a planned
-/// one, and a batch held and never released shows in neither's rows.
+/// one, and a batch held and never released shows in neither's rows. The report comes
+/// back for the cases that read the calls a correct answer was made with.
 fn run_and_check(
     tree: &dyn crate::plan::GpuNode,
     task: &std::sync::Arc<datafusion::execution::TaskContext>,
     injection: Injection,
     oracle: &Oracle<'_>,
     what: &str,
-) {
+) -> crate::executor::RunReport {
     let ctx = InjectedContext::new(task.clone(), injection, SEED);
     // The check the planner made, made again: an injected tree is one no planner emitted,
     // and the driver asks only for canonical form. Without this a rewrite that broke a
@@ -274,6 +275,7 @@ fn run_and_check(
             "{what}: no source call emitted an empty batch"
         );
     }
+    report
 }
 
 /// `end_to_end!(dataset, query)` — one test per query, so a failure names it. Two optional
@@ -363,9 +365,9 @@ end_to_end!(tpcds, q87);
 // A union that cannot interleave: its two unions carry branches that disagree on lane
 // count, which is what makes them unions rather than interleaves, and the lanes above are
 // their sum. q77 is the shape this claim was written for — 4+1+4 — and it is not here
-// because it is refused rather than untested: one of its Right outers gets a lane whose
-// build side is empty, and what that owes is its probe side padded, which takes a call the
-// recipe does not publish ([#175](../../../llm-wiki/tickets.md#t175)).
+// because its Right outer's build side emits no batch at all: the Inner join under it
+// drops its empty lane as it should, so the outer is refused by name
+// ([#212](../../../llm-wiki/tickets.md#t212)).
 // injected: tpcds/q2
 // Both row-interval lowerings on one root-to-leaf path — the root-adjacent one becoming
 // the unload's skip/fetch and the mid-plan one a limit over the scan — and the only

@@ -207,7 +207,7 @@ const BUILD_COPY: &str =
     "probe batch 2 has no build side left, since the call for batch 1 erased it (#152)";
 const PROBE_COPY: &str = "this join's recipe copies its probe batch — the key project keeps the keys and the join below it reads the same batch — and the ABI has no copy";
 const NO_KEYS: &str = "this lane's probe was empty, so its finish has no keys to join against";
-const NO_BUILD: &str = "this lane's build side is empty, and what this join owes is its probe side — which takes a call over a build table that does not exist (#175)";
+const NO_BUILD: &str = "this lane's build side is empty, and what this join owes is its probe side — which takes a call over a build table that does not exist (#212)";
 
 // One probe batch, every type.
 
@@ -451,7 +451,7 @@ operator_case! {
 }
 
 // Empty inputs, one case per type and shape. A zero-row build batch is a build table, and
-// the device pads over it like the cpu; only a build lane with no batch at all is #175.
+// the device pads over it like the cpu; only a build lane with no batch at all is #212.
 
 operator_case! {
     GpuHashJoin,
@@ -575,7 +575,8 @@ operator_case! {
     }
 }
 
-// #175 — with no build side the join owes its probe rows, over a table that does not exist.
+// #212 — with no build batch at all the join owes its probe rows, over a table that does
+// not exist. A scatter no longer leaves a lane here (#175); a limit that skips everything does.
 operator_case! {
     GpuHashJoin,
     fn bug_right_with_no_build_batch_is_refused_on_both() {
@@ -623,7 +624,8 @@ operator_case! {
     }
 }
 
-// #175 — with no build side the join owes its probe rows, over a table that does not exist.
+// #212 — with no build batch at all the join owes its probe rows, over a table that does
+// not exist. A scatter no longer leaves a lane here (#175); a limit that skips everything does.
 operator_case! {
     GpuHashJoin,
     fn bug_full_with_no_build_batch_is_refused_on_both() {
@@ -824,7 +826,8 @@ operator_case! {
     }
 }
 
-// #175 — with no build side the join owes its probe rows, over a table that does not exist.
+// #212 — with no build batch at all the join owes its probe rows, over a table that does
+// not exist. A scatter no longer leaves a lane here (#175); a limit that skips everything does.
 operator_case! {
     GpuHashJoin,
     fn bug_right_anti_with_no_build_batch_is_refused_on_both() {
