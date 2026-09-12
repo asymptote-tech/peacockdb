@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1780 test cases — Rust 1342, C++ 69, Python 369.** Beside it, **80 `bug_` tests**, in their own table under [Known-wrong behaviour](#known-wrong-behaviour): the grand total counts coverage and that table counts defects, and the two measure opposite things, so they are never added. The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, for two reasons — its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to, and its `bug_` tests are counted in their own table rather than in the row that holds them. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1780 test cases — Rust 1342, C++ 69, Python 369.** Beside it, **78 `bug_` tests**, in their own table under [Known-wrong behaviour](#known-wrong-behaviour): the grand total counts coverage and that table counts defects, and the two measure opposite things, so they are never added. The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, for two reasons — its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to, and its `bug_` tests are counted in their own table rather than in the row that holds them. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -74,7 +74,7 @@ unit (`foo.rs` beside `foo/tests.rs`).
 | FFI smoke | the crate links; executor lifecycle | [test_executor_lifecycle](../peacockdb-ffi/tests/test_ffi.rs) | 2 |
 | *component* | | | |
 | GpuBatch surface | what the batch reports, and that `consume` hands the handle over without releasing it. Needs no device: the release is null-guarded on the executor | [executor::ffi_tests](../peacockdb-core/src/executor/ffi_tests/mod.rs) | 3 |
-| **gpu — `--features gpu`: shad-gpu only. 312 cases: `--lib -- gpu_tests::` 304, `test_gpu_corpus` 8** | | | |
+| **gpu — `--features gpu`: shad-gpu only. 310 cases: `--lib -- gpu_tests::` 302, `test_gpu_corpus` 8** | | | |
 | *crate integration, external* | | | |
 | Corpus, device | the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a device and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden. Six cells today, `q6` at every mode and `q19` at `tp1-single`; the rest are off against [#152](tickets.md#t152), [#183](tasks/active-tickets.md#t183), [#184](tasks/active-tickets.md#t184), [#185](tasks/active-tickets.md#t185) and [#187](tasks/active-tickets.md#t187). The seventh case is that a device run under a regeneration writes no golden | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 7 |
 | Registry ↔ CSV, device | the gpu column of the registry, the other half of the pair | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
@@ -131,7 +131,7 @@ rise when a bug is found. The runtime every row was measured on is cuDF 25.02.02
 `rapids-cuda-12.2` env: a row that goes green after a version bump may mean the runtime moved
 rather than the fix landed.
 
-**Total: 80.**
+**Total: 78.**
 
 | Test | Asserts | Ticket | Runs |
 |---|---|---|---|
@@ -153,8 +153,6 @@ rather than the fix landed.
 | [`bug_decimal_arithmetic_is_exported_at_precision_38`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | computed decimal columns are exported at precision 38; scale and values hold | [#187](tasks/active-tickets.md#t187) | shad-gpu |
 | [`bug_a_cast_to_text_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | a cast of a number to text is refused on the column path | [#203](tickets.md#t203) | shad-gpu |
 | [`bug_a_value_case_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | a value-form CASE is refused on the device where the cpu answers | [#57](tickets.md#t57) | shad-gpu |
-| [`bug_a_typed_null_in_arithmetic_is_the_column_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | `i32 + NULL` is the column on the device, null only where the column was | [#198](tickets.md#t198) | shad-gpu |
-| [`bug_a_typed_null_literal_is_a_column_of_zeros_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | a bare numeric NULL in a select list is a column of zeros on the device | [#198](tickets.md#t198) | shad-gpu |
 | [`bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | descending with nulls last puts them first on the device | [#202](tickets.md#t202) | shad-gpu |
 | [`bug_a_descending_key_with_nulls_first_puts_them_last_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | descending with nulls first puts them last on the device | [#202](tickets.md#t202) | shad-gpu |
 | [`bug_a_left_join_refuses_its_first_probe_batch_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | a left join's first probe batch is refused: the key project and the join both consume it | [#152](tickets.md#t152) | shad-gpu |

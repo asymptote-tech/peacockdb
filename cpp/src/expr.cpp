@@ -22,6 +22,8 @@
 #include <cudf/transform.hpp>
 #include <cudf/unary.hpp>
 #include <cudf/utilities/default_stream.hpp>
+#include <cudf/utilities/traits.hpp>
+#include <cudf/utilities/type_dispatcher.hpp>
 #include <cudf/wrappers/durations.hpp>
 #include <cudf/wrappers/timestamps.hpp>
 
@@ -69,6 +71,7 @@ static cudf::type_id infer_expr_type(const fb::Expr* expr,
                                      cudf::table_view const& table);
 static std::unique_ptr<cudf::column> build_column_binary(
     const fb::Expr* expr, cudf::table_view const& table);
+static std::unique_ptr<cudf::scalar> build_scalar(const fb::ScalarValue* sv);
 
 
 cudf::type_id fb_to_type_id(fb::DataType dt) {
@@ -129,6 +132,44 @@ static cudf::ast::ast_operator fb_to_ast_op(fb::BinaryOp op) {
 // AST expression builder
 // ============================================================================
 
+/// The one place `ScalarValue.is_null` is read. A typed NULL literal is encoded with the
+/// flag set and its value fields unused, and the scalar is built invalid so cuDF treats it
+/// as a null of `type`. Two readers is what #198 was: the AST path built its own scalars
+/// and assumed validity.
+static bool literal_is_valid(const fb::ScalarValue* sv) { return !sv->is_null(); }
+
+/// `cudf::ast::literal` has four constructors and none of them takes a `cudf::scalar&`, so
+/// the concrete type has to be recovered. Dispatching on the scalar's own `type()` rather
+/// than on the fb tag keeps this honest about what was actually built.
+struct AstLiteralFor {
+  template <typename T>
+  std::unique_ptr<cudf::ast::literal> operator()(cudf::scalar& s) const {
+    if constexpr (cudf::is_numeric<T>()) {
+      return std::make_unique<cudf::ast::literal>(
+          static_cast<cudf::numeric_scalar<T>&>(s));
+    } else if constexpr (cudf::is_timestamp<T>()) {
+      return std::make_unique<cudf::ast::literal>(
+          static_cast<cudf::timestamp_scalar<T>&>(s));
+    } else if constexpr (cudf::is_duration<T>()) {
+      return std::make_unique<cudf::ast::literal>(
+          static_cast<cudf::duration_scalar<T>&>(s));
+    } else if constexpr (std::is_same_v<T, cudf::string_view>) {
+      return std::make_unique<cudf::ast::literal>(
+          static_cast<cudf::string_scalar&>(s));
+    } else {
+      // Named rather than defaulted: a type cuDF gains a scalar for lands here
+      // instead of silently producing no literal.
+      throw std::runtime_error(
+          "no cudf::ast::literal constructor for cudf type id " +
+          std::to_string(static_cast<int>(s.type().id())));
+    }
+  }
+};
+
+static std::unique_ptr<cudf::ast::literal> ast_literal_for(cudf::scalar& s) {
+  return cudf::type_dispatcher(s.type(), AstLiteralFor{}, s);
+}
+
 cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
                                          const JoinFilterColMap* col_map) {
   if (!expr || !expr->node())
@@ -159,94 +200,10 @@ cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
       auto* sv = lit->value();
       if (!sv) throw std::runtime_error("LiteralExpr has no value");
 
-      switch (sv->type()) {
-        case fb::DataType_Boolean: {
-          auto s = std::make_unique<cudf::numeric_scalar<bool>>(
-              sv->bool_val(), true);
-          auto& ref = *s;
-          ctx.scalars.push_back(std::move(s));
-          return ctx.keep(std::make_unique<cudf::ast::literal>(ref));
-        }
-        case fb::DataType_Int8: {
-          auto s = std::make_unique<cudf::numeric_scalar<int8_t>>(
-              static_cast<int8_t>(sv->int_val()), true);
-          auto& ref = *s;
-          ctx.scalars.push_back(std::move(s));
-          return ctx.keep(std::make_unique<cudf::ast::literal>(ref));
-        }
-        case fb::DataType_Int16: {
-          auto s = std::make_unique<cudf::numeric_scalar<int16_t>>(
-              static_cast<int16_t>(sv->int_val()), true);
-          auto& ref = *s;
-          ctx.scalars.push_back(std::move(s));
-          return ctx.keep(std::make_unique<cudf::ast::literal>(ref));
-        }
-        case fb::DataType_Int32: {
-          auto s = std::make_unique<cudf::numeric_scalar<int32_t>>(
-              static_cast<int32_t>(sv->int_val()), true);
-          auto& ref = *s;
-          ctx.scalars.push_back(std::move(s));
-          return ctx.keep(std::make_unique<cudf::ast::literal>(ref));
-        }
-        case fb::DataType_Int64: {
-          auto s = std::make_unique<cudf::numeric_scalar<int64_t>>(
-              sv->int_val(), true);
-          auto& ref = *s;
-          ctx.scalars.push_back(std::move(s));
-          return ctx.keep(std::make_unique<cudf::ast::literal>(ref));
-        }
-        case fb::DataType_Float32: {
-          auto s = std::make_unique<cudf::numeric_scalar<float>>(
-              static_cast<float>(sv->float_val()), true);
-          auto& ref = *s;
-          ctx.scalars.push_back(std::move(s));
-          return ctx.keep(std::make_unique<cudf::ast::literal>(ref));
-        }
-        case fb::DataType_Float64: {
-          auto s = std::make_unique<cudf::numeric_scalar<double>>(
-              sv->float_val(), true);
-          auto& ref = *s;
-          ctx.scalars.push_back(std::move(s));
-          return ctx.keep(std::make_unique<cudf::ast::literal>(ref));
-        }
-        case fb::DataType_Decimal128: {
-          // cuDF AST does not directly support Decimal128 literals.
-          // Promote to float64 for comparison.
-          __int128 val = (static_cast<__int128>(sv->decimal_hi()) << 64) |
-                         static_cast<unsigned __int128>(sv->decimal_lo());
-          int8_t scale = sv->decimal_scale();
-          double dval = static_cast<double>(val);
-          for (int8_t i = 0; i < scale; ++i) dval /= 10.0;
-          for (int8_t i = 0; i > scale; --i) dval *= 10.0;
-          auto s = std::make_unique<cudf::numeric_scalar<double>>(dval, true);
-          auto& ref = *s;
-          ctx.scalars.push_back(std::move(s));
-          return ctx.keep(std::make_unique<cudf::ast::literal>(ref));
-        }
-        case fb::DataType_Utf8:
-        case fb::DataType_LargeUtf8:
-        case fb::DataType_Utf8View: {
-          // cuDF AST literals accept string_scalar; cuDF doesn't distinguish
-          // owned vs. view strings on the device side, so all three flavors
-          // map to the same scalar type.
-          auto s = std::make_unique<cudf::string_scalar>(
-              std::string(sv->string_val() ? sv->string_val()->str() : ""), true);
-          auto& ref = *s;
-          ctx.scalars.push_back(std::move(s));
-          return ctx.keep(std::make_unique<cudf::ast::literal>(ref));
-        }
-        case fb::DataType_Date32: {
-          // Date32 = days since UNIX epoch (int32).
-          auto s = std::make_unique<cudf::timestamp_scalar<cudf::timestamp_D>>(
-              cudf::duration_D{static_cast<int32_t>(sv->int_val())}, true);
-          auto& ref = *s;
-          ctx.scalars.push_back(std::move(s));
-          return ctx.keep(std::make_unique<cudf::ast::literal>(ref));
-        }
-        default:
-          throw std::runtime_error(
-              "unsupported literal type: " + std::to_string(sv->type()));
-      }
+      auto scalar = build_scalar(sv);
+      auto& ref = *scalar;
+      ctx.scalars.push_back(std::move(scalar));
+      return ctx.keep(ast_literal_for(ref));
     }
 
     case fb::ExprNode_BinaryExprNode: {
@@ -451,9 +408,7 @@ bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table) {
 }
 
 static std::unique_ptr<cudf::scalar> build_scalar(const fb::ScalarValue* sv) {
-  // A typed NULL literal is encoded with is_null set; the value fields are
-  // unused. Each scalar is built invalid so cuDF treats it as null of `type`.
-  bool valid = !sv->is_null();
+  bool valid = literal_is_valid(sv);
   switch (sv->type()) {
     case fb::DataType_Boolean:
       return std::make_unique<cudf::numeric_scalar<bool>>(sv->bool_val(), valid);
@@ -491,7 +446,7 @@ static std::unique_ptr<cudf::scalar> build_scalar(const fb::ScalarValue* sv) {
     }
     default:
       throw std::runtime_error(
-          "unsupported scalar type in column path: " + std::to_string(sv->type()));
+          "unsupported scalar type: " + std::to_string(sv->type()));
   }
 }
 

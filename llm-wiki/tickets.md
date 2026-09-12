@@ -162,8 +162,9 @@ says the row does not survive.
 No cell is disabled against this — it is a wrong answer inside cells that pass. Fixed by
 `tasks/typed-nulls.md`, which removes the second scalar builder rather than correcting it;
 that spec's premise that a bare literal short-circuits to null is false, as the second pin
-shows. Pinned by `bug_a_typed_null_in_arithmetic_is_the_column_on_the_device` and
-`bug_a_typed_null_literal_is_a_column_of_zeros_on_the_device` (`gpu_tests/exec_cases.rs`).
+shows. The two `bug_` pins in `gpu_tests/exec_cases.rs` went red on the device once
+`build_expr` delegated to `build_scalar`, and were deleted in that change; the gtests
+`Literals.*` in `test_plan_executor.cpp` assert the right answer in their place.
 
 <a id="t166"></a>
 ### #166 — physical planning drops a LIMIT interval, and the answer changes

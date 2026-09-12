@@ -64,3 +64,51 @@ task. A filter matching no rust test trips the zero-test guard.
 example link; C++ 67 → 69 and the grand total 1778 → 1780 moved with it (the header is the sum
 of the N columns). No other wiki page counts these tests. `cpp/src/expr.cpp` untouched.
 `peacock_plan_tests` stays red on this branch until plan task 4 lands the fix.
+
+### 2026-09-12 — plan task 4 done: one scalar builder, both red tests green, the two pins deleted
+
+**Steps 1–3, `cpp/src/expr.cpp`.** `literal_is_valid` is the one reader of `ScalarValue.is_null`
+and `build_scalar` opens with it (its old two-line comment moved onto the new function).
+`AstLiteralFor` + `ast_literal_for` sit above `build_expr`: a `cudf::type_dispatcher` on the
+scalar's own `type()`, four `if constexpr` arms (`is_numeric`, which is `is_arithmetic` and so
+covers `bool`; `is_timestamp`; `is_duration`; `string_view`) and a named throw for the rest —
+which is where a `fixed_point_scalar` lands, since cuDF's `is_numeric` excludes fixed point. The
+literal arm is four lines: `build_scalar(sv)`, keep the scalar in `ctx.scalars`, wrap the
+borrowed reference. `build_scalar` needed a forward declaration beside the others at the file
+head because it is defined after `build_expr`. Two includes added (`utilities/traits.hpp`,
+`utilities/type_dispatcher.hpp`). One message corrected because the delegation made it false:
+`build_scalar`'s refusal said "in column path" and now serves both paths, so it says
+"unsupported scalar type: N". Nothing else in `expr.cpp` moved.
+
+**The decimal arm went with the plan's step 3 as written**: `build_scalar(sv)` directly, no
+double pre-conversion kept, so a `Decimal128` literal reaching `build_expr` today is refused by
+the dispatch's named throw rather than turned into a scaled double. Every device suite stayed
+green under that (below), which says no enabled cell puts a decimal literal on the AST path —
+`is_ast_able`'s binary arm refuses any decimal operand, so only a bare decimal literal, or one
+under a cast to Int64/Float64 or a unary, could. Plan task 5 restores the scaled-double form by
+converting the `ScalarValue` before the call, and its test is what pins that.
+
+**Runs** (`--build` rc 0, 0 warnings, twice; `--push-binaries --patch` rc 0, twice):
+- `20260912T115352-373441`, narrow (`PCK_TEST_FILTER=wire::gpu_tests::declared`), exit 0:
+  `peacock_cpu_tests` 12 passed; `peacock_gpu_tests` 6; `peacock_plan_tests` 29 passed with
+  `Literals.ATypedNullInsideAnAstExpressionIsNullAndNotZero` and
+  `Literals.AComparisonAgainstATypedNullKeepsNoRows` both `OK`; `peacock_tpch_tests` 4;
+  `peacock_tpchv_tests` 4; `peacockdb_core_gpu_lib` 15 passed 1 ignored; `test_gpu_corpus` 0 run.
+- `20260912T115535-373569`, filter empty, exit 1: the C++ five as above; `test_gpu_corpus` 8
+  passed; `peacockdb_core_gpu_lib` 301 passed, 2 failed — exactly the two `bug_` pins for #198,
+  each `cpu and gpu differ` at `compare.rs:35` where the "cpu" side is the wrong batch the pin
+  expected (the unchanged `i32` column; a column of zeros) and the device now answers every row
+  null in both. The device moved from wrong to right and nothing else moved.
+- Both pins deleted from `gpu_tests/exec_cases.rs` in this change, per `coding-style.md`'s
+  rule and the dispatch that named this as the change to do it in; `Int64Array` was theirs alone
+  and left the import. `build-test.md`: their two Known-wrong rows removed, the `bug_` total 80 →
+  78 in the header and the section (grand total unchanged, the two tables are never added).
+  `tickets.md` #198: the "Pinned by" sentence now says the pins went red and were deleted and
+  names the `Literals.*` gtests as what asserts the right answer; the ticket's move to the
+  archive stays task 9's.
+- `20260912T115856-374641`, filter empty, exit 0: the C++ five as above; `peacockdb_core_gpu_lib`
+  301 passed 0 failed 1 ignored; `test_gpu_corpus` 8 passed. No golden moved.
+
+`gpu_tests` is `#[cfg(all(test, feature = "gpu"))]`, so the rust-only rung cannot see the
+deletion and was not run. `rustfmt --check` clean on `exec_cases.rs`. Comment caps: the two
+new doc blocks are 4 and 3 lines; the one body comment 2.
