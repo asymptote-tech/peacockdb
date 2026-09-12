@@ -709,3 +709,7 @@ nothing.
 aggregate 13/7, accumulate 18/5, emit 12/3, hash join 45/40, cross and nested loop 11/7, source
 2/5. With the harness's own 26 (23 + 2 + 1) the module is 226; the rung is 281. Seven tickets
 added by this task (#202–#208), 22 tickets named by a `bug_` test.
+
+### 2026-09-12 — reviewing: PR against `ENS-operator-harness`
+
+Eight plan tasks committed; the last entry is the whole proof on `84ee8085`. Reviewer round 1 next.
