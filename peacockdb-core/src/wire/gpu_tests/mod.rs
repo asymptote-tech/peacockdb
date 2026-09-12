@@ -8,6 +8,7 @@
 //! group at `tp1-rowgroup`, and a join's probe is always one batch, so a recipe's own call
 //! order is the schedule. The oracle is DataFusion on the same SQL — a golden would pin a
 //! wrong finalize on its first run; the CPU executor evaluates what the device is sent.
+
 mod declared;
 mod walk;
 
@@ -59,6 +60,13 @@ async fn assert_walk_matches_datafusion(sql: &str, knobs: PlanKnobs) -> Vec<(Seq
     let walked = walk(sql, knobs).await;
     // An exact compare of two empty results holds having compared nothing, so a query whose
     // predicate selected none would prove only that the walk did not crash.
+    // A refused export leaves the batches short and would read as a wrong table below; the
+    // device's own message is the finding.
+    for firing in &walked.firings {
+        if let Err(refused) = &firing.exported {
+            panic!("{sql}: {} refused the export: {refused}", firing.label());
+        }
+    }
     assert!(
         total_rows(&walked.batches) > 0,
         "the walk exported no rows for {sql}"

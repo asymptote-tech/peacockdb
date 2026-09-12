@@ -404,7 +404,7 @@ async fn the_firings_of_one_call_export_one_schema() {
         // firing disagreeing with its call: the flag is the exporter's, not the device's.
         for (declared, exported) in &of_call {
             assert_eq!(declared, exported, "{label}");
-            assert_eq!(declared, &of_call[0].0, "{label}");
+            assert_eq!(exported, &of_call[0].1, "{label}: the firings disagree");
         }
     }
 }

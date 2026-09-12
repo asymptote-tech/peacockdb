@@ -6,6 +6,7 @@
 //! join's probe is always one batch, so a recipe's own call order is the schedule. The walk's
 //! own assertions stay in `mod.rs`; a firing's declared and exported schemas are recorded
 //! here for whichever test reads them.
+
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::ipc::reader::StreamReader;
