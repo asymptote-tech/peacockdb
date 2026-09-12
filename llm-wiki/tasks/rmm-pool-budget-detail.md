@@ -536,3 +536,10 @@ rewrites; the gate globs `cpp/install/bin` and never sees them.
 Host left as found: 37 GiB neighbour, 106 GiB free, nothing of ours running. Local tree clean but
 for this entry; `cpp/build26`, `cpp/install`, `target-cudf-rapids-cuda-12.2` are gitignored build
 products and stay warm for the next cycle.
+
+### 2026-09-12 — done again: green on the rebased code head `d41f223a`
+
+CI run `34659896447` on `d41f223a`: attempt 1 lost its GPU job to a neighbour (`peacock_tpch_tests`,
+`pool of 69.0 GiB could not be built with 14.9 GiB free`; dated on #178), every other job green;
+attempt 2 of the GPU job green. The two commits above `d41f223a` are documentation. `done`
+restored.
