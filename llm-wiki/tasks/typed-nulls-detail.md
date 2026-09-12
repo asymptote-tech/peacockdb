@@ -276,3 +276,8 @@ ignored; `test_gpu_corpus` 8 passed.
 `build-test.md` unchanged: `TEST(` in `test_plan_executor.cpp` is still 34, so Plan-executor 34,
 C++ 74, grand 1785, `bug_` 78 stand. `architecture.md:884-887` is true again: the tests'
 only `peacock/` includes are `rmm_pool.hpp` and `partitioning.hpp`, both under `cpp/include/`.
+
+### 2026-09-12 — completing: round 2 clean
+
+Round 2 on `65790689`: 0 blocking, 0 important, 0 nits. Completeness pass dispatched — a reviewer
+for what is wrong and a fresh analyst for what is missing, neither seeing the other's list.
