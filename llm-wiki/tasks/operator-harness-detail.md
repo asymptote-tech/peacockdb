@@ -567,3 +567,138 @@ pages; comment caps counted. Nits: the `Script` attribute's comment said `Exec` 
 constructed here (it is, by the refusal) — fixed by the coordinator; `Writer::leaf` returns a
 seq nobody reads — kept, the plan's signature. Board to `completing`; the completeness pass is
 two readings dispatched together.
+
+### 2026-09-12 — completeness pass, the analyst's reading
+
+Branch `ENS-operator-harness` at `1c27cec6` read as one diff against `ENS-visibility` (`2cb92f63`),
+30 files, asked what it does not contain. The three commits after the proof at `bd2758a4` touch
+the wiki and one doc comment, so the proof stands at HEAD.
+
+**0 blocking, 1 important.** No sentence in `architecture.md` is falsified.
+
+#### The one important finding
+
+**`GpuLimit` over no batch at all is missing.** The spec's "Empty inputs are separate cases
+everywhere, here and in task 9, one per shape — a zero-row batch, no batch at all, one side or one
+lane empty" names three shapes; for a limit only the first two apply, and the branch has the
+first in three forms (one zero-row batch, one inside a stream, nothing but zero-row batches) and
+the second not at all. The shape is `Script::Accumulate(vec![])` — `mark_done_and_fetch` over
+nothing, both `LimitStream`s answering an empty vector and the comparator calling the empty
+slot equal. `harness_cases.rs:242`'s `limit_over` cannot build it: it reads the schema off
+`stream[0]`. One case, built the way `empty_plan()` gets its schema
+(`Schema::new(synthetic(0, 0).schema())`), registered under `GpuLimit` with `operator_case!`;
+the guard's counts do not move. Task 9 will construct the same script shape for coalesce, the
+accumulating sort and the state merge ("no batch at all", "no arrival"), so a helper that takes
+a schema rather than a first batch is what it will need anyway.
+
+#### What the branch was asked for and has — checked item by item
+
+- *Cases in this task.* Round trip: whole, a row range, past the end, zero rows — all four,
+  plus the clamp. `GpuUnload`: whole, ranged, clamped, zero-row batch, range over a zero-row
+  batch — all five, plus past-the-end. `GpuLimit`: the eight named shapes, plus one zero-row
+  batch alone. Every operator case is `run_both(...).same(Order::AsEmitted)` on both backends
+  through `executors_for`; none became a cpu-only assertion. The round trip's zero-row case
+  is a comparison, not an early return: the C++ takes the whole-table arm at `num_rows == 0`
+  (`gpu_executor.cpp:306`, `begin == end && num_rows > 0` is false), so the stream ships with
+  its schema and one zero-row batch, `fetch` returns `Some`, and `assert_same` compares it;
+  `None` is reachable only for a non-empty table under an empty range, which
+  `a_range_past_the_end_ships_nothing` pins.
+- *Verification bar.* Comparator red cases (9, each by its reason); shad-gpu green at
+  `bd2758a4` (80 under `gpu_tests::`, 8 corpus, 53 C++); the guard red five ways and green;
+  rust-only `--lib` 530 + 2 ignored with no device type in the rust rung (compiles under
+  `rust-only`); `test_ci_coverage` 8 with no workflow edit; `build-test.md` rows. Nothing on the
+  bar is unproven.
+- *"No new CI line" proof.* `test_ci_coverage` asserts the workflow hands
+  `peacockdb_core_gpu_lib` the `gpu_tests::` filter and knows no module; `test_module_layout`
+  asserts every `mod gpu_tests` carries the gpu gate. The two together, plus cargo's substring
+  filter, are why `tests::gpu_tests::…` is reached; the shad-gpu listing (80) is the direct
+  evidence. Proven, by the pair rather than by one guard seeing the module.
+- *The kind guard.* 18 `NodeRef` variants (`plan/mod.rs:1086-1108`); `EXCLUDED` 3, covered 2,
+  `PENDING` 13 — the lists agree with `every_kind` minus the exclusions minus the two, and every
+  one of the 18 kinds is a *root* of some `every_kind` fixture, which is what the guard reads.
+- *Reusable by `operator-cases.md`.* All seven `Script` arms are present and type-checked
+  against the trait signatures in `executor/mod.rs` (`drive` is monomorphized for both backends
+  by `run_both`, so `Lanes`, `Emit`, `Join`, `Source` compile; none has run on a device).
+  `decimals` and `prefixed` are `pub(crate)`; `Order::AsEmitted` exists and is the only order
+  any device case has used — `Order::Any`'s sort path is unit-tested only. `operator_case!`
+  is reachable from any module declared after `#[macro_use] mod coverage;`, which is first in
+  `gpu_tests/mod.rs`. `Given::with_layout` takes any `PartitionLayout` (lanes, sort, hash), so a
+  merge's N-lane sorted child and a co-partitioned join side are expressible. Two stub leaves
+  under a join both `leaf()` into the writer's pool and the join `take`s them (`writer.rs:73`);
+  the root's post-order is `size - 1`, which is the recipes index. `Device::open`'s budget is
+  `GPU_BUDGET`, which `peacock_executor_create` does not enforce and no GPU executor reads;
+  the compaction thresholds task 9 must size for live in the executors, not the context.
+- *`build-test.md`'s two rows.* Counts reconcile: `--lib` 516→532 (+14 helpers, +2 wire), gpu
+  55→80 (+25: 22 in `harness_cases`, 2 in `script`, 1 guard), C++ 66→67, total 1578→1620.
+  The "Operator harness" prose matches the cases. The `test-support` paragraph is still true:
+  it describes `src/test_support/`, which the feature gates; the new harness code is under
+  `src/tests/`, gated by `lib.rs`'s `#[cfg(test)]`, and reaches `test_support` only for
+  `GPU_BUDGET`, the way the paragraph says.
+- *Coverage regression.* The `Given` lift changed no assertion: the eight cpu backend test files
+  hold the same `#[test]` counts before and after (65 cases).
+
+#### `architecture.md` — sentences checked, none falsified
+
+- "Interfaces": "The ABI is seventeen symbols in five groups: lifecycle (…); the node-by-node
+  session (…); the three per-call entry points (…); instrumentation (…); and two test hooks:
+  `peacock_spark_partition_ids`, … and `peacock_handle_from_arrow`, which adopts one such batch
+  into the live session as a handle so the operator harness can hand an executor a table it
+  wrote." True: 17 declarations in `peacock_gpu.h`, 17 externs in `peacockdb-ffi`, 5+4+3+3+2.
+- "The wire format" and "From node to seqs": no sentence says every node has a recipe or that
+  the writer refuses a node outside the registry. "the recipe writer (`wire/`) emits one node
+  per call a driver will make" was already loose for stubs and structural unions, and a `Given`
+  leaf is the same stub the forwarder's parent slot already took. Not newly falsified.
+- "The handle registry has no type": "two fields inside the private `NodeSession::Impl` … with
+  allocation, lookup, consume-on-read and erase written inline at every site that touches them."
+  `adopt` (`node_session.cpp:544`) is one more inline `next_handle++` / `registry.emplace` site,
+  so the sentence and its point stand; "Nothing needs it yet" still holds.
+- "What the frozen surface costs": "**Three refusals are a different kind of cost**: nothing on
+  the surface makes a table out of nothing." Not falsified — the new symbol makes a table out of
+  an Arrow batch a caller supplies, no recipe can name it, and the three refusals are about what
+  an operator can do mid-plan — but it is the one sentence the branch comes nearest to, and the
+  coordinator may want a clause saying the test hook is outside it.
+- "Traits" (`GpuBatch` wraps a handle; a consumed handle skips `Drop`) and "From node to seqs"
+  ("`execute_node` is stateless per seq — the only state is the handle registry") are unchanged
+  in truth.
+
+#### Notes for the signoff and for task 9 — not findings
+
+- Deviations from the spec's letter the signoff should name: `Writer::leaf` is `pub(crate)`, not
+  `pub(super)` (the layout test refuses `pub(super)`); the kind registry and guard live in
+  `src/tests/gpu_tests/coverage.rs`, not `src/tests/`, because `inventory` collects per binary
+  and a rust-rung guard would see an empty registry — so the guard runs on shad-gpu only;
+  `Script` carries `#[allow(dead_code)]` until task 9 constructs the other four variants.
+- The guard's universe is the root names of `every_kind()`, and nothing in the gpu rung pins
+  that to 18; the rust-rung count the file's comment cites is a *tree-reach* count. Today the
+  two coincide. A 19th kind added to `every_kind` only as a child would satisfy the rust-rung
+  pin and never be asked for a case here. One `assert_eq!(kinds.len(), 18)` closes it; cheap,
+  and not a defect today.
+- The lifted `Given` does not override `GpuNode::name()`, so `name()` on it panics through the
+  registry ("a plan node outside the registry reached a consumer of it") — the wire tests'
+  `Given` says `"GpuGiven"`. No harness path calls it today (`recipes.rs:109`'s render does);
+  a task 9 error path that names a child will hit it.
+- `build-test.md`: the "Operator harness" row sits in the gpu block's *subcomponent* group,
+  while `src/tests/gpu_tests/` is *crate integration, internal* by the page's own tiering; the
+  "Harness helpers" row says "null in every column" (every column but `id`) and "dyadic in
+  every float" (a property of the generator, asserted by no test). Wiki-only; fixable in the
+  signoff commit.
+- No decimal, no `Order::Any`, and no `Exec`/`Lanes`/`Emit`/`Join`/`Source` script has reached
+  a device. All are task 9's by the spec's split; the handoff entry above says so.
+
+### 2026-09-12 — completeness pass, the reviewer's reading: 0 blocking, 1 important
+
+Read on `1c27cec6` without the analyst's list. Held to the spec and confirmed: two production
+edits only; `stub()` is the same builder sequence so the payload bytes cannot move, and
+`testdata/`/`.github/` are untouched; the new arm is unreachable from a planned tree (every
+one of the 18 kinds downcasts through `try_node_ref_of`); the harness never names `run` or a
+forwarder, and a forwarder handed to it is refused before either backend runs; exact comparison
+through `ArrayData` equality; no divergence is credible for the seqless three and no route was
+dodged — #187, #183 and #173 are each unreachable for a stated reason; the kind guard red five
+ways with `3 + 13 + 2 = 18`; rung discipline; no test deleted or weakened (the cpu backend
+tests keep 21/6/1/4/16/12/0/5); counts reconcile; caps counted; `clang-format` and `rustfmt`
+clean. The one important: `build-test.md` filed the harness row under the gpu block's
+*subcomponent* heading, and the helpers row said "null in every column" where the fixture's own
+test says all but the id — both fixed by the coordinator. Deviations for the signoff confirmed
+and extended (the guard lives in `gpu_tests/`, two rows not one, `leaf`'s unread return). A
+note for task 9: the lifted `Given` does not override `GpuNode::name()`, so the first error
+message or render over one shows the registry panic instead of a name.
