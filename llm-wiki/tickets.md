@@ -41,8 +41,7 @@ batch are different arrivals downstream, as #205 says. Pinned by
 ### #207 — both backends drop a cross join's projection
 
 A `GpuCrossJoin` carrying a projection emits every column of the crossed table on both engines:
-the cpu refuses at `declared_as` and the device hands the wider table up under the narrower
-declaration.
+the cpu refuses at `declared_as`, the device hands the wider table up under the narrower one.
 
 The planner writes one: a predicate-free `NestedLoopJoinExec` with a projection becomes a
 `GpuCrossJoin` with it (`translator/nodes.rs`), and `check_projection` validates it. Then nobody
@@ -296,12 +295,13 @@ refusal. Any `GROUP BY` or join key of either type at more than one lane reaches
 <a id="t203"></a>
 ### #203 — the device cannot cast a number to text
 
-`build_column`'s cast arm (`expr.cpp`) refuses every cast whose target is `STRING` unless the
-input is already a string: "cast to STRING from a non-string type not supported in column path".
-`CAST(key AS VARCHAR)` in a select list answers on the cpu and is refused on the device.
+`CAST(key AS VARCHAR)` in a select list answers on the cpu and is refused on the device:
+"cast to STRING from a non-string type not supported in column path".
 
-`cudf::cast` has no string target, so the arm needs `cudf::strings::from_integers`,
-`from_floats`, `from_booleans` and the datetime converters, chosen by the input's type.
+`build_column`'s cast arm (`expr.cpp`) refuses every cast whose target is `STRING` unless the
+input is already a string. `cudf::cast` has no string target, so the arm needs
+`cudf::strings::from_integers`, `from_floats`, `from_booleans` and the datetime converters,
+chosen by the input's type.
 Neighbour of #45, where a join key's cast to string is the same refusal on the join path; a fix
 here answers a projection and does not by itself answer #45, whose fix hashes rather than casts.
 Pinned by `bug_a_cast_to_text_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).

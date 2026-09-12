@@ -713,3 +713,30 @@ added by this task (#202–#208), 22 tickets named by a `bug_` test.
 ### 2026-09-12 — reviewing: PR #150 against `ENS-operator-harness`
 
 Eight plan tasks committed; the last entry is the whole proof on `84ee8085`. Reviewer round 1 next.
+
+### 2026-09-12 — review round 1: 0 blocking, 3 important, 6 nits
+
+The reviewer mapped every row of both tables to a case, checked all 74 `bug_` tests carry an
+existing ticket and spot-checked that each goes red on its fix, verified the seven new tickets'
+root causes in the code and that #184 is #95, modelled the kind guard red both ways, recomputed
+the pages. Findings:
+
+- **important** — the two Welford `bug_` pins cast the device's count to Int64 before comparing,
+  so they would stay green if #163's export were fixed. Fix: cast the cpu expectation only and
+  compare the device's raw column, so the name-and-type check is what pins Int64. → developer.
+- **important** — the 1e-11 comparison of Welford's moments, local to the same two cases, is a
+  tolerance the spec does not admit. Decision: drop the moments from the two pins — keys and
+  counts exact is the ticket's claim — and keep the non-dyadic state as the recorded harness
+  finding. → developer.
+- **important** — `null_equals_null=true` has no case for Right and RightAnti (Left and Full
+  refuse before the flag matters). Fix: two green cases, and a sentence on Left/Full. → developer.
+- nit, taken — Left and Full × two probes folded into the one-probe refusal by comment; a `bug_`
+  each named for the shape. nit, taken — no global Welford init: state the omission at the
+  family's head. nit, taken — the single-node shortcut declares the count Int64 where the planner
+  writes UInt64, against the file's own header claim: one clause saying why. nit, taken —
+  `null_keys_land_in_the_same_lane` is byte-identical to the int-key case: give it nulls that are
+  the point, or delete it. → developer.
+- nit — #207's and #203's problem statements ran to three lines: rewrapped by the coordinator.
+  #163 at 18 lines carries a `Fix:` line; #187 was over before this task. Left.
+- nit, dropped — the eight `bug_` helpers duplicated across the seven files are assertion sugar,
+  not mechanism; the signoff carries them as the harness finding they are.
