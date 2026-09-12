@@ -702,3 +702,56 @@ test says all but the id — both fixed by the coordinator. Deviations for the s
 and extended (the guard lives in `gpu_tests/`, two rows not one, `leaf`'s unread return). A
 note for task 9: the lifted `Given` does not override `GpuNode::name()`, so the first error
 message or render over one shows the registry panic instead of a name.
+
+### 2026-09-12 — completeness finding addressed: a limit over a stream of no batches
+
+The spec's "no batch at all" shape for `GpuLimit`, which the branch lacked. One `operator_case!`
+under `GpuLimit` in `harness_cases.rs`:
+`tests::gpu_tests::harness_cases::a_stream_of_no_batches_answers_nothing_on_both` —
+`limit_over(0, Some(4), 8, 0)` run as `Script::Accumulate(vec![])`, so the only call on either side
+is `mark_done_and_fetch`. `limit_over` now takes its schema from `synthetic(0, 0).schema()` as
+`empty_plan` does — the fixture's schema is one whatever the rows or seed, so the nine existing
+cases build the same node and a stream of no batches is legal. Its doc says so.
+
+Red first on this box: with `limit_over` reading `stream[0].schema()`, the case panicked
+`index out of bounds: the len is 0 but the index is 0` at `harness_cases.rs:242`. Green after the
+helper change — and green *here*, with no device: `Device::open` (`executor_create`, `begin_plan`)
+and a limit's `mark_done_and_fetch` make no CUDA call, so the whole case runs on a box without one.
+
+**What both sides answered:** one slot, empty — `[[]]`. `CpuAccumulator`'s and `GpuAccumulator`'s
+`LimitStream::mark_done_and_fetch` both return `Vec::new()` unconditionally, the comparator reads a
+slot both sides left empty as equal, and `Outcome::same(Order::AsEmitted)` passed. No table was made
+from nothing on either side, so #173's shape is not reached by this route either; no ticket, no
+`bug_` test. The guard's counts do not move (`GpuLimit` was covered).
+
+shad-gpu (neighbour at 37 GiB; no `rmm` line in either gate log):
+
+    run 20260912T055813-263009  PCK_RUN_CPP=0 PCK_TEST_FILTER=tests::gpu_tests  rc 0
+      peacockdb_core_gpu_lib   26 passed; 0 failed; 590 filtered out   (25 + 1)
+      test_gpu_corpus          0 passed; 8 filtered out
+    run 20260912T055822-263053  PCK_RUN_CPP=0, no filter (the rung whole)      rc 0
+      peacockdb_core_gpu_lib   81 passed; 0 failed; 535 filtered out   (80 + 1)
+      test_gpu_corpus          8 passed; 0 failed
+
+Results here:
+
+    CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run   exit 0, 0 warnings
+    <staged lib> --list gpu_tests::                                                          81 cases
+    scripts/build-test-shadgpu.sh --build; --push-binaries --patch                            exit 0, 0 warnings
+    cargo test --features rust-only -p peacockdb-core --lib                                   530 passed, 2 ignored (unchanged)
+    rustfmt --check --edition 2024 src/tests/gpu_tests/harness_cases.rs                      clean
+
+**Pages move by one**, for the coordinator: `build-test.md`'s gpu header `--lib -- gpu_tests::` 80 →
+81 (block 88 → 89), the "Operator harness" row 25 → 26, Rust 1184 → 1185, grand total 1620 → 1621.
+
+### 2026-09-12 — completeness approved
+
+The analyst's reading: 0 blocking, 1 important — the spec's "no batch at all" shape had no
+`GpuLimit` case; added, green on both backends, one empty slot each, not a route to #173 either.
+`architecture.md`: no sentence falsified (seventeen in five groups counted; the registry section
+still true of `adopt`; "nothing on the surface makes a table out of nothing" untouched by a
+hook no recipe can name). Pages moved by one for the case: gpu 81 / 89, harness row 26, Rust
+1185, total 1621. Signoff appended to the spec. `done` waits on CI for the head that carries
+the new case. Two notes for task 9's developer are in the two readings above: the lifted
+`Given` does not override `GpuNode::name()`, and the guard's universe is pinned to 18 only in
+the rust rung.

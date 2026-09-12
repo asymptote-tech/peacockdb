@@ -227,7 +227,8 @@ operator_case! {
 // one slot per batch and an empty one at done — a batch outside the interval is a slot
 // both sides leave empty, which is not a zero-row batch.
 
-/// A limit over a stream of `batches` batches of `rows` rows each.
+/// A limit over a stream of `batches` batches of `rows` rows each. The schema is the
+/// fixture's, which every `synthetic` shares, so a stream of no batches is a legal one.
 fn limit_over(
     skip: u64,
     fetch: Option<u64>,
@@ -239,7 +240,7 @@ fn limit_over(
         .collect();
     let node = GpuLimit::new(
         Given::of(
-            Schema::new(stream[0].schema()),
+            Schema::new(synthetic(0, 0).schema()),
             BatchLayout::MultipleBatches,
         ),
         RowInterval { skip, fetch },
@@ -288,6 +289,14 @@ operator_case! {
 }
 
 // Empty inputs, each its own case.
+operator_case! {
+    GpuLimit,
+    fn a_stream_of_no_batches_answers_nothing_on_both() {
+        let (node, stream) = limit_over(0, Some(4), 8, 0);
+        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+    }
+}
+
 operator_case! {
     GpuLimit,
     fn a_stream_of_one_zero_row_batch_answers_nothing_on_both() {
