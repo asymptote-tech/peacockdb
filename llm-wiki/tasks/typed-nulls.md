@@ -189,3 +189,16 @@ how a refusal is scored, and a wrong answer is not a refusal.
 `build-test-shadgpu.sh`. The gtests are the gate and need one cycle each for red and green.
 Then the enabled device cells, because a wrong answer that nothing refused could be sitting in one:
 a result that moves is the finding, not a golden to accept.
+
+## Completeness signoff
+
+Solved under its constraints: one scalar builder and one reader of `is_null`, the decimal arm
+converted before it, the LIKE guard decided in code, the gtest helpers built field by field with
+`FilterNation`'s one moved assertion explained and tightened; the seven `Literals` gtests, every
+wire type walked (twelve literals, ten named refusals); `is_ast_able`, the wire, the ABI and every
+header untouched; no golden moved; #198 archived. Deviations, none a shortcut: task 9's two `bug_`
+pins deleted in the fixing change and their green forms restored — "no Rust changes" read as
+production code; `expr.h` declared two functions for one round, restored, the walk driven through
+whole plans; the spec's bare-literal premise was false (#198) and test 3 exercises `build_expr`;
+the `Literals` suite left in `test_plan_executor.cpp` past the sibling threshold; decimal-as-double
+carried through by the spec's instruction, ticketed #210 with its `bug_` pin; #211 filed for substr.

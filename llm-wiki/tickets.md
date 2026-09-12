@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 210), which is also the counter for
+New tickets take the next free number (currently 212), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,39 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 23 | #209 #208 #207 #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Critical correctness](#critical-correctness) | 24 | #211 #210 #209 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
+
+<a id="t211"></a>
+### #211 — a typed null argument to substr or round is read as 0 on the device
+
+`build_column_scalar_fn` (`expr.cpp`) reads a literal argument's `int_val()` for `substr`'s
+start and `round`'s places without asking `is_null`, so `substr(s, NULL)` runs as `substr(s, 0)`
+and `round(x, NULL)` as `round(x, 0)` where SQL answers NULL. The literal arms of `build_expr`
+and `build_scalar` were made to share one reader of the flag by `tasks/typed-nulls.md`; these
+two positional reads are outside them and were found on the way. Reachability through the
+planner is unconfirmed — DataFusion may fold a null argument before serialization — so this has
+no `bug_` pin yet; the C++ side is unguarded whatever the planner does. `date_part`'s field
+argument refuses an empty string, so it is a refusal there, not a wrong answer.
+
+<a id="t210"></a>
+### #210 — a bare decimal literal on the AST path comes back as a Float64 column
+
+cuDF's AST has no fixed-point literal, so `ast_scalar` (`expr.cpp`) rewrites a `Decimal128`
+literal as a scaled double before the one scalar builder; under a `CAST(… AS Float64)` that is
+the type the plan asked for, but a bare or unary-wrapped decimal literal is AST-able too, and
+`SELECT 1.5 FROM t` then answers a `FLOAT64` column on the device where the plan declares
+`Decimal128(2, 1)`. Same class as [#183](tasks/active-tickets.md#t183) and
+[#191](tasks/active-tickets.md#t191): a declared type exported as another. Pre-existing, carried
+through `typed-nulls.md` by that spec's own instruction, and pinned by
+`bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` (`gpu_tests/exec_cases.rs`);
+the walk `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` names it on its
+`Decimal128` row. The likely fix is `is_ast_able` refusing a bare decimal literal as it already
+refuses a decimal operand, so the column path builds a real `fixed_point_scalar`.
 
 <a id="t209"></a>
 ### #209 — a predicate that prunes every row group refuses the query instead of answering it
@@ -144,26 +171,6 @@ Shown on a device by `bug_a_global_merge_over_no_arrival_answers_nothing_on_the_
 a count merges by sum, so a merged count over nothing is NULL there where SQL says 0. The init over
 a zero-row batch keeps its row on both, so the merge is the one site. No corpus query is known to
 reach it.
-
-<a id="t198"></a>
-### #198 — a typed NULL inside an AST expression is a typed zero on the device
-
-`ScalarValue.is_null` is read in `build_scalar` (`expr.cpp:456`) and assumed `true` in
-`build_expr`'s ten literal arms (`:158`), so which answer a literal gives depends on which
-path evaluated it.
-
-`CASE` and `LIKE`, which `is_ast_able` refuses, reach `build_scalar` and are null. A bare
-literal is null only where `build_column` sees it first: a project asks `is_ast_able` before
-`build_column`, so `NULL::BIGINT` in a select list is a column of zeros. `col <op> NULL::T` for
-a numeric `T` matching the column reaches the bug too. In arithmetic that is a wrong value; in a
-comparison it is a wrong **row count**, since `col = NULL` is true wherever `col` is 0 and SQL
-says the row does not survive.
-
-No cell is disabled against this — it is a wrong answer inside cells that pass. Fixed by
-`tasks/typed-nulls.md`, which removes the second scalar builder rather than correcting it;
-that spec's premise that a bare literal short-circuits to null is false, as the second pin
-shows. Pinned by `bug_a_typed_null_in_arithmetic_is_the_column_on_the_device` and
-`bug_a_typed_null_literal_is_a_column_of_zeros_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t166"></a>
 ### #166 — physical planning drops a LIMIT interval, and the answer changes

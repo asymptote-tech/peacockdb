@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::{ArrayRef, Int64Array};
+use datafusion::arrow::array::ArrayRef;
 use datafusion::arrow::compute::{
     SortColumn, SortOptions, cast, lexsort_to_indices, take_record_batch,
 };
@@ -366,11 +366,11 @@ operator_case! {
     }
 }
 
-// #198 — a typed NULL inside an AST expression is a typed zero on the device: `i32 + NULL`
-// is NULL on the cpu and `i32` on the device, null only where `i32` was.
+// A typed NULL crosses the wire as `is_null` with no value, and the AST path builds it
+// invalid: `i32 + NULL` is NULL on both engines, and a bare NULL is a null column of its type.
 operator_case! {
     GpuProject,
-    fn bug_a_typed_null_in_arithmetic_is_the_column_on_the_device() {
+    fn a_typed_null_in_arithmetic_is_null() {
         let plus_null = Expr::binary(
             Expr::column(2, "i32"),
             BinaryOp::Plus,
@@ -378,26 +378,36 @@ operator_case! {
             DataType::Int32,
         );
         let node = project(vec![keep_id(), (plus_null, "plus_null", DataType::Int32)]);
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
-        let unchanged = batch_of(vec![
-            ("id", input().column(0).clone()),
-            ("plus_null", input().column(2).clone()),
-        ]);
-        gpu_answered(&outcome, unchanged, Order::AsEmitted);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
     }
 }
 
-// #198 — a project asks `is_ast_able` before `build_column`, so a bare numeric NULL in a
-// select list takes the AST path and is a column of zeros rather than of nulls.
 operator_case! {
     GpuProject,
-    fn bug_a_typed_null_literal_is_a_column_of_zeros_on_the_device() {
+    fn a_typed_null_literal_is_a_null_column() {
         let nothing = Expr::Literal(ScalarValue::Int64(None));
         let node = project(vec![keep_id(), (nothing, "nothing", DataType::Int64)]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+// #210 — a bare decimal literal is AST-able and cuDF's AST has no fixed-point literal, so
+// the device answers a Float64 column where the plan declares the decimal. The value holds.
+operator_case! {
+    GpuProject,
+    fn bug_a_bare_decimal_literal_is_a_float64_column_on_the_device() {
+        let one_and_a_half = Expr::Literal(ScalarValue::Decimal128(Some(15), 3, 1));
+        let node = project(vec![
+            keep_id(),
+            (one_and_a_half, "one_and_a_half", DataType::Decimal128(3, 1)),
+        ]);
         let outcome = run_both(&node, Script::Exec(vec![input()]));
-        let zeros: ArrayRef = Arc::new(Int64Array::from(vec![0; input().num_rows()]));
-        let zeroed = batch_of(vec![("id", input().column(0).clone()), ("nothing", zeros)]);
-        gpu_answered(&outcome, zeroed, Order::AsEmitted);
+        let cpu = &outcome.cpu.as_ref().expect("the cpu answers")[0][0];
+        let as_float = batch_of(vec![
+            ("id", cpu.column(0).clone()),
+            ("one_and_a_half", cast(cpu.column(1), &DataType::Float64).unwrap()),
+        ]);
+        gpu_answered(&outcome, as_float, Order::AsEmitted);
     }
 }
 
