@@ -281,3 +281,50 @@ only `peacock/` includes are `rmm_pool.hpp` and `partitioning.hpp`, both under `
 
 Round 2 on `65790689`: 0 blocking, 0 important, 0 nits. Completeness pass dispatched — a reviewer
 for what is wrong and a fresh analyst for what is missing, neither seeing the other's list.
+
+### 2026-09-12 — completeness pass: the harness's typed-null shape restored, #210 pinned
+
+**1. The two green forms** are back in `gpu_tests/exec_cases.rs` where the pins were, as
+`operator-cases-impl.md:258-269` first wrote them: `a_typed_null_in_arithmetic_is_null`
+(`i32 + NULL::Int32`, `.same(Order::AsEmitted)`) and `a_typed_null_literal_is_a_null_column`
+(a bare `NULL::Int64` beside `id`). Both green on the device — the two engines agree on the
+shape that #198 was about, which is the spec's coverage criterion.
+
+**2. #210.** `bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` beside them: a
+`GpuProject` of `Decimal128(Some(15), 3, 1)` declared `Decimal128(3, 1)` beside `id`, asserting
+the device's column is the cpu's cast to `Float64`, in the form of
+`bug_decimal_arithmetic_is_exported_at_precision_38`. The device answered `Float64` with the
+value intact, as the ticket states; no other finding. The walk's `Decimal128` row in
+`test_plan_executor.cpp` carries `// #210` above it so `id::FLOAT64` reads as known-wrong.
+
+**Proof.** `scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run`: 0
+warnings; the binary's `--list gpu_tests::` (with `cpp/install/lib` and the rapids env on
+`LD_LIBRARY_PATH`, or it lists nothing) is 305, 79 of them `bug_`; `exec_cases::` 33.
+`rustfmt --check` clean on `exec_cases.rs`. Device: `--build` 0 warnings, push and patch rc 0.
+Run `20260912T130448-389653`, `PCK_TEST_FILTER=tests::gpu_tests::exec_cases`, exit 0: the C++
+five green (12 / 6 / 34 / 4 / 4); `peacockdb_core_gpu_lib` 33 passed with the three new cases
+`ok`; `test_gpu_corpus` 0 run. Run `20260912T130552-389766`, filter empty, exit 0: the C++ five
+as above; `peacockdb_core_gpu_lib` 304 passed 0 failed 1 ignored (305 listed);
+`test_gpu_corpus` 8 passed.
+
+**`build-test.md`.** Operator harness 154 → 156 (the two green cases; the `bug_` case counts
+in the other table); the gpu block header 310 → 313 with `gpu_tests::` 302 → 305 (the header
+counts `--list`, which includes the `bug_` names; the N column does not); Rust 1342 → 1344 and
+the grand total 1785 → 1787; the known-wrong table gains the #210 row after
+`bug_a_cast_to_text_is_refused_on_the_device`, 78 → 79 in the header and the section. The 68 N
+cells re-added by script: 1787. Comment caps: the two rust comments are 2 lines each, the C++
+row comment 1.
+
+**Correction to the task-9 entry above.** It records `tasks/operator-cases.md:29` and `:72` as
+repointed to the archive anchor; that file is a done task's frozen spec and `5660dcb0` restored
+it, so those two links read `tickets.md#t198` again and resolve through the archive as
+`test-layout.md`'s #49 link does. `tasks/tasks.md`'s task 11 line is the one repointed link
+that stands.
+
+### 2026-09-12 — completeness approved
+
+Reviewer (what is wrong): 0 blocking, 2 important — the harness lost its typed-null shape when the
+pins went; the walk's `Decimal128` row pinned a wrong declared type as the answer with no ticket.
+Analyst (what is missing): 0 blocking, 3 important — the same two, and `substr`/`round` reading a
+null argument's `int_val()` as 0; no sentence of architecture.md falsified. Green forms restored,
+#210 filed and pinned, #211 filed unpinned. The signoff is on the spec. Awaiting CI.
