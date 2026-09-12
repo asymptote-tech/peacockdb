@@ -15,9 +15,15 @@ mod forwarder;
 mod row_range;
 
 mod cpu_backend;
+// The device backend's callers are the device test rung and the corpus harness behind
+// `test-support`; the CLI runs the CPU backend (`peacockdb/src/main.rs` says why). So a plain
+// build sees it as dead, and this attribute leaves with the first production device caller.
+// The same attribute sits on `GpuBatch`, `GpuBackend` and `GpuContext` below.
 #[cfg(not(feature = "rust-only"))]
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
 mod gpu_backend;
 #[cfg(not(feature = "rust-only"))]
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
 mod gpu_batch;
 
 #[cfg(test)]
@@ -54,7 +60,7 @@ pub struct CpuBatch {
 }
 
 impl CpuBatch {
-    pub fn new(batch: RecordBatch) -> Self {
+    pub(crate) fn new(batch: RecordBatch) -> Self {
         Self { batch }
     }
 
@@ -62,7 +68,7 @@ impl CpuBatch {
         &self.batch
     }
 
-    pub fn into_record_batch(self) -> RecordBatch {
+    pub(crate) fn into_record_batch(self) -> RecordBatch {
         self.batch
     }
 }
@@ -76,7 +82,8 @@ impl CpuBatch {
 /// is skipped. The executor pointer is BORROWED, as everywhere else on this path: the
 /// session outlives every batch drawn from it.
 #[cfg(not(feature = "rust-only"))]
-pub struct GpuBatch {
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
+pub(crate) struct GpuBatch {
     executor: *mut PeacockExecutor,
     handle: u64,
     num_rows: usize,
@@ -85,7 +92,7 @@ pub struct GpuBatch {
 
 #[cfg(not(feature = "rust-only"))]
 impl GpuBatch {
-    pub fn new(
+    pub(crate) fn new(
         executor: *mut PeacockExecutor,
         handle: u64,
         num_rows: usize,
@@ -99,19 +106,15 @@ impl GpuBatch {
         }
     }
 
-    pub fn handle(&self) -> u64 {
+    pub(crate) fn handle(&self) -> u64 {
         self.handle
-    }
-
-    pub fn executor(&self) -> *mut PeacockExecutor {
-        self.executor
     }
 
     /// Hand the handle to an FFI call that consumes it — a slice, or an executor call
     /// taking it as an input. The batch is gone by move, and its release is skipped
     /// because C++ has erased the registry entry: releasing again would be a use of a
     /// dead handle. Every other way out of a `GpuBatch` runs `Drop`.
-    pub fn consume(self) -> (*mut PeacockExecutor, u64) {
+    pub(crate) fn consume(self) -> (*mut PeacockExecutor, u64) {
         gpu_batch::consume(self)
     }
 }
@@ -121,11 +124,11 @@ impl GpuBatch {
 /// is #142's adaptive future and not this design.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendError {
-    pub message: String,
+    pub(crate) message: String,
 }
 
 impl BackendError {
-    pub fn new(message: impl Into<String>) -> Self {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
         }
@@ -134,12 +137,12 @@ impl BackendError {
 
 /// What a call gives back. Every one can fail, and a failure ends the query: the C++ side
 /// resets the session and every resident table with it, so there is nothing to resume from.
-pub type CallResult<T> = Result<(T, CallStats), BackendError>;
+pub(crate) type CallResult<T> = Result<(T, CallStats), BackendError>;
 
 /// `scratch_bytes` is the measured transient; `None` when the run is not instrumented.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CallStats {
-    pub scratch_bytes: Option<usize>,
+    pub(crate) scratch_bytes: Option<usize>,
 }
 
 // The executor contracts, one per node category.
@@ -230,20 +233,20 @@ pub trait SourceExecutor<B: Backend>: Executor {
 /// `length: u64::MAX` means to the end. Straight through to the fetch's row range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RowRange {
-    pub offset: u64,
-    pub length: u64,
+    pub(crate) offset: u64,
+    pub(crate) length: u64,
 }
 
 impl RowRange {
     /// Every row, which is what a node with no interval above it asks for.
-    pub const WHOLE: Self = Self {
+    pub(crate) const WHOLE: Self = Self {
         offset: 0,
         length: u64::MAX,
     };
 
     /// Whether this names the whole of a batch that size — in which case the call needs no
     /// range at all, and the trace should not read as a trimmed one.
-    pub fn covers(&self, n_rows: u64) -> bool {
+    pub(crate) fn covers(&self, n_rows: u64) -> bool {
         self.offset == 0 && self.length >= n_rows
     }
 
@@ -304,7 +307,8 @@ pub struct CpuBackend;
 
 /// The GPU backend: every call crosses the ABI.
 #[cfg(not(feature = "rust-only"))]
-pub struct GpuBackend;
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
+pub(crate) struct GpuBackend;
 
 /// What an executor on the GPU backend is built from: the open session, and the recipes whose
 /// seqs address the plan that session was given.
@@ -312,9 +316,10 @@ pub struct GpuBackend;
 /// The pointer is BORROWED, as everywhere on this path — the session outlives every
 /// executor drawn from it, and the handles they hand each other.
 #[cfg(not(feature = "rust-only"))]
-pub struct GpuContext {
-    pub executor: *mut PeacockExecutor,
-    pub recipes: crate::wire::RecipePlan,
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
+pub(crate) struct GpuContext {
+    pub(crate) executor: *mut PeacockExecutor,
+    pub(crate) recipes: crate::wire::RecipePlan,
 }
 
 /// Which trait drives a node, with the executor stored inline — the match compiles to a
@@ -335,7 +340,7 @@ impl<B: Backend> NodeExecutors<B> {
     /// What the returned set drives. The driver checks it against the node's own
     /// category, so a backend wiring a node to the wrong trait fails where it was built
     /// rather than at the first call that finds the wrong method.
-    pub fn category(&self) -> ExecutorCategory {
+    pub(crate) fn category(&self) -> ExecutorCategory {
         match self {
             Self::Source(_) => ExecutorCategory::Source,
             Self::Exec(_) => ExecutorCategory::Exec,
@@ -352,7 +357,7 @@ impl<B: Backend> NodeExecutors<B> {
 /// Routes whole batches into a new lane numbering; never touches rows, never buffers.
 /// No backends and no `CallStats` — routing is driver work, and a batch's bytes are
 /// already accounted as driver-held in flight.
-pub trait BatchForwarder {
+pub(crate) trait BatchForwarder {
     /// The (child index, child lane) pairs feeding output lane p, in service order.
     fn sources_of(&self, out_lane: usize) -> Vec<(usize, usize)>;
 }
@@ -400,7 +405,7 @@ pub(crate) fn has_finish_pass(
 
 /// The routing a node declares, which is a property of the node rather than of a backend —
 /// every backend would compute the same thing, so it is read off the node by whoever routes.
-pub fn forwarder_for(node: &dyn GpuNode) -> Forwarder {
+pub(crate) fn forwarder_for(node: &dyn GpuNode) -> Forwarder {
     forwarder::forwarder_for(node)
 }
 
@@ -417,7 +422,7 @@ impl When {
     /// The words the message uses. Kept beside the variant so the field and the sentence
     /// cannot drift: the field is for code and the sentence is for a person, and neither
     /// replaces the other.
-    pub fn describe(&self) -> &'static str {
+    pub(crate) fn describe(&self) -> &'static str {
         match self {
             Self::PreCall => "before the call",
             Self::PostCall => "after it",
@@ -449,7 +454,7 @@ pub enum RunError {
 /// What an executor was asked to do. An enum rather than a label: this is written once per
 /// call, and a per-call format is a cost the trace does not need to impose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CallKind {
+pub(crate) enum CallKind {
     NextBatch,
     SourceExhausted,
     Exec,
@@ -480,11 +485,11 @@ pub enum CallKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TraceEvent {
-    pub step: u32,
-    pub node: u32,
-    pub lane: u32,
-    pub call: CallKind,
-    pub outputs: u32,
+    pub(crate) step: u32,
+    pub(crate) node: u32,
+    pub(crate) lane: u32,
+    pub(crate) call: CallKind,
+    pub(crate) outputs: u32,
 }
 
 /// A call whose modelled scratch came in under what it measured. Expected — a join's model
@@ -492,21 +497,10 @@ pub struct TraceEvent {
 /// asserted away.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Underestimate {
-    pub node: u32,
-    pub lane: u32,
-    pub modelled: usize,
-    pub measured: usize,
-}
-
-impl Underestimate {
-    /// How far under: 2.0 means the call used twice what was modelled.
-    pub fn ratio(&self) -> f64 {
-        if self.modelled == 0 {
-            f64::INFINITY
-        } else {
-            self.measured as f64 / self.modelled as f64
-        }
-    }
+    pub(crate) node: u32,
+    pub(crate) lane: u32,
+    pub(crate) modelled: usize,
+    pub(crate) measured: usize,
 }
 
 /// One batch a node emitted. The driver reads both figures already — the rows for a limit
@@ -514,8 +508,8 @@ impl Underestimate {
 /// needed the sizes themselves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EmittedBatch {
-    pub rows: u64,
-    pub bytes: usize,
+    pub(crate) rows: u64,
+    pub(crate) bytes: usize,
 }
 
 #[derive(Debug)]
@@ -565,20 +559,20 @@ pub struct RunReport {
 /// have yet to leave their build phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct JoinShape {
-    pub node: usize,
+    pub(crate) node: usize,
     /// `[start, end)` of the probe child's subtree in pre-order.
-    pub probe: (usize, usize),
-    pub lanes: usize,
+    pub(crate) probe: (usize, usize),
+    pub(crate) lanes: usize,
 }
 
 /// The tree as plain numbers. Node indices are pre-order, so a subtree is a contiguous
 /// range and "order" — the leftmost tie-break — is the index itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlanShape {
-    pub heights: Vec<u32>,
-    pub lanes: Vec<usize>,
-    pub subtree: Vec<(usize, usize)>,
-    pub joins: Vec<JoinShape>,
+    pub(crate) heights: Vec<u32>,
+    pub(crate) lanes: Vec<usize>,
+    pub(crate) subtree: Vec<(usize, usize)>,
+    pub(crate) joins: Vec<JoinShape>,
 }
 
 impl PlanShape {
@@ -588,33 +582,33 @@ impl PlanShape {
 }
 
 pub(crate) struct IndexedNode<'a> {
-    pub node: &'a dyn GpuNode,
-    pub category: ExecutorCategory,
-    pub children: Vec<usize>,
-    pub parent: Option<usize>,
-    pub lanes: usize,
+    pub(crate) node: &'a dyn GpuNode,
+    pub(crate) category: ExecutorCategory,
+    pub(crate) children: Vec<usize>,
+    pub(crate) parent: Option<usize>,
+    pub(crate) lanes: usize,
     /// This node's position in a children-first walk, which is what `RecipePlan` indexes
     /// by and what a backend hands to `executors_for`. Pre-order is what the schedule
     /// needs and post-order is what the recipes are addressed by; the two are computed
     /// here together so nothing has to reconcile them later.
-    pub post_order: usize,
+    pub(crate) post_order: usize,
     /// The child's lane count, which is how many `Done` events a partition accumulator
     /// owes. Zero for every other category.
-    pub input_lanes: usize,
-    pub interval: Option<RowInterval>,
+    pub(crate) input_lanes: usize,
+    pub(crate) interval: Option<RowInterval>,
     /// How many independently-ready units the schedule tracks for this node. Output lanes
     /// for most, but a cross-lane accumulator becomes ready one input lane at a time and
     /// an emitter reads a single one.
-    pub ready_lanes: usize,
+    pub(crate) ready_lanes: usize,
     /// Where this node's accounting slots start: one per lane when it is lane-scoped,
     /// one for the node otherwise.
-    pub slot_base: usize,
+    pub(crate) slot_base: usize,
 }
 
 pub(crate) struct PlanIndex<'a> {
-    pub nodes: Vec<IndexedNode<'a>>,
-    pub shape: PlanShape,
-    pub slots: usize,
+    pub(crate) nodes: Vec<IndexedNode<'a>>,
+    pub(crate) shape: PlanShape,
+    pub(crate) slots: usize,
 }
 
 impl<'a> PlanIndex<'a> {
@@ -644,6 +638,11 @@ pub fn run<B: Backend>(
 
 /// Every node's post-order address, indexed by its pre-order one — the numbering the
 /// recipes and the FFI share.
-pub fn post_order_of_every_node(root: &dyn GpuNode) -> Result<Vec<usize>, PlanError> {
+///
+/// `#[cfg(test)]` because its only caller is `planner/tests/plan_goldens.rs`, which checks
+/// the driver's numbering against the one `attach_recipes` gave; `driver` is this
+/// component's own, so the test cannot name the walk itself.
+#[cfg(test)]
+pub(crate) fn post_order_of_every_node(root: &dyn GpuNode) -> Result<Vec<usize>, PlanError> {
     driver::post_order_of_every_node(root)
 }

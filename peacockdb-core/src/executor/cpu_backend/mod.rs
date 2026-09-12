@@ -131,7 +131,7 @@ pub struct CpuExec {
 }
 
 impl CpuExec {
-    pub fn filter(
+    pub(crate) fn filter(
         node: &GpuFilter,
         input: &ArrowSchema,
         ctx: Arc<TaskContext>,
@@ -149,7 +149,7 @@ impl CpuExec {
         Ok(Self::of(vec![Arc::new(filter)], ctx))
     }
 
-    pub fn project(
+    pub(crate) fn project(
         node: &GpuProject,
         input: &ArrowSchema,
         ctx: Arc<TaskContext>,
@@ -167,7 +167,7 @@ impl CpuExec {
     /// The fetch is a slice of the ordered batch rather than `SortExec::with_fetch`, for
     /// the reason the accumulating sort gives: a top-N keeps a bounded heap, so which of
     /// two rows tied on the keys it kept depends on the heap rather than on the plan.
-    pub fn sort(
+    pub(crate) fn sort(
         node: &GpuSort,
         input: &ArrowSchema,
         ctx: Arc<TaskContext>,
@@ -188,7 +188,7 @@ impl CpuExec {
     /// as the recipe is two calls. The split is not DataFusion's `Single` mode: this mode
     /// finalizes in a project so that both engines evaluate the one finalize expression,
     /// and a `Single` here would be a second implementation of it.
-    pub fn aggregate(
+    pub(crate) fn aggregate(
         node: &GpuAggregate,
         input: &ArrowSchema,
         ctx: Arc<TaskContext>,
@@ -235,7 +235,7 @@ impl CpuExec {
     /// answer a batch with several or with none (a filter that kept nothing emits
     /// nothing), so the pieces are concatenated and an empty answer becomes an empty batch
     /// of the node's schema rather than a missing one.
-    pub fn exec(&mut self, batch: CpuBatch) -> CallResult<CpuBatch> {
+    pub(crate) fn exec(&mut self, batch: CpuBatch) -> CallResult<CpuBatch> {
         let mut batches = vec![batch.into_record_batch()];
         // The largest a stage's ANSWER got — not the largest allocation the call made, so
         // a sort's working buffers are outside it. What it buys is a measured figure to
@@ -280,7 +280,7 @@ impl CpuExec {
 pub struct CpuUnload;
 
 impl CpuUnload {
-    pub fn unload(&mut self, batch: CpuBatch, rows: RowRange) -> CallResult<CpuBatch> {
+    pub(crate) fn unload(&mut self, batch: CpuBatch, rows: RowRange) -> CallResult<CpuBatch> {
         let batch = batch.into_record_batch();
         let n_rows = batch.num_rows() as u64;
         if rows.covers(n_rows) {

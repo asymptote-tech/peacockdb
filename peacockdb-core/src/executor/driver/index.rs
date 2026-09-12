@@ -136,7 +136,9 @@ fn subtree_ranges(nodes: &[IndexedNode<'_>]) -> Vec<(usize, usize)> {
 /// Exposed for one guard: that these are the positions `attach_recipes` gave the same
 /// nodes. Two numberings computed by two walks in two files — one at plan time, one at run
 /// time — agree by construction only until someone changes a walk, and nothing else
-/// compares them.
+/// compares them. `#[cfg(test)]`, called by `executor/driver/mod.rs` on the guard's behalf;
+/// the driver itself reads `post_order` off the index it builds.
+#[cfg(test)]
 pub(crate) fn post_order_of_every_node(root: &dyn GpuNode) -> Result<Vec<usize>, PlanError> {
     Ok(build(root)?
         .nodes

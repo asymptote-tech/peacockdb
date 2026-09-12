@@ -39,6 +39,21 @@ struct TestOnlyItem {
 
 const TEST_ONLY_ITEMS: &[TestOnlyItem] = &[
     TestOnlyItem {
+        file: "executor/driver/index.rs",
+        item: "post_order_of_every_node",
+        called_by: &["executor/driver/mod.rs"],
+    },
+    TestOnlyItem {
+        file: "executor/driver/mod.rs",
+        item: "post_order_of_every_node",
+        called_by: &["executor/mod.rs"],
+    },
+    TestOnlyItem {
+        file: "executor/mod.rs",
+        item: "post_order_of_every_node",
+        called_by: &["planner/tests/plan_goldens.rs"],
+    },
+    TestOnlyItem {
         file: "executor/cpu_backend/mod.rs",
         item: "has_finish_pass",
         called_by: &["executor/mod.rs"],

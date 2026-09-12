@@ -43,7 +43,7 @@ use crate::wire::{CallPattern, FbKind, Input, Recipe, Seq};
 /// A `BatchAccumulator` node's executor. What it holds between calls is one of four
 /// things, and `accumulate` owns them: a public variant would hand a caller the state a
 /// private module keeps.
-pub struct GpuAccumulator {
+pub(crate) struct GpuAccumulator {
     state: accumulate::State,
 }
 
@@ -54,7 +54,7 @@ pub struct GpuAccumulator {
 /// One call per lane event, since that is what round-robin driving produces, and the call
 /// carrying the last `Done` is the emitting one. The handles go into the merge in lane
 /// order, which is what makes a tie partition-major rather than arrival-ordered.
-pub struct GpuPartitionAccumulator {
+pub(crate) struct GpuPartitionAccumulator {
     executor: *mut PeacockExecutor,
     merge: (Seq, FbKind),
     per_lane: Vec<Vec<GpuBatch>>,
@@ -63,7 +63,7 @@ pub struct GpuPartitionAccumulator {
 }
 
 /// The scatter's executor: one call per batch, and the node's lane count of handles out.
-pub struct GpuEmitter {
+pub(crate) struct GpuEmitter {
     executor: *mut PeacockExecutor,
     seq: Seq,
     kind: FbKind,
@@ -72,7 +72,7 @@ pub struct GpuEmitter {
 }
 
 /// A join before its build side arrives.
-pub struct GpuJoin {
+pub(crate) struct GpuJoin {
     executor: *mut PeacockExecutor,
     /// The node's own type, and `None` for the two joins that have none — cross and
     /// nested-loop. What a finish over no keys owes is decided by this rather than read
@@ -86,7 +86,7 @@ pub struct GpuJoin {
 }
 
 /// A join with its build side set, taking probe batches.
-pub struct GpuProbingJoin {
+pub(crate) struct GpuProbingJoin {
     join: GpuJoin,
     /// `None` once a call has consumed it, which is the last probe call for a join that
     /// hands it over and the finish call for one that does not.
@@ -100,7 +100,7 @@ pub struct GpuProbingJoin {
 ///
 /// `pub` because `Backend::Source` names it, so a caller holding a `GpuBackend` reaches it
 /// without any file importing the type.
-pub struct GpuSource {
+pub(crate) struct GpuSource {
     pub(crate) executor: *mut PeacockExecutor,
     pub(crate) seq: Seq,
     /// The row groups per batch this lane still owes, front first.
@@ -112,7 +112,7 @@ pub struct GpuSource {
 ///
 /// The session pointer is BORROWED, as everywhere on the GPU path: the session outlives
 /// every executor drawn from it, and the handles it hands back.
-pub struct GpuExec {
+pub(crate) struct GpuExec {
     executor: *mut PeacockExecutor,
     calls: Vec<(Seq, FbKind)>,
     schema: SchemaRef,
@@ -122,7 +122,7 @@ impl GpuExec {
     /// `schema` is what the node declares it produces, which is what prices the batch —
     /// the ABI reports rows and varlen content, and the fixed width per row is the
     /// schema's.
-    pub fn new(
+    pub(crate) fn new(
         executor: *mut PeacockExecutor,
         recipe: &Recipe,
         schema: &ArrowSchema,
@@ -166,7 +166,7 @@ impl GpuExec {
     /// One batch in, one batch out. The input handle is consumed by the first call and
     /// every intermediate by the call after it, so what is released here is nothing: a
     /// failed call ends the query, and the session it belonged to is torn down with it.
-    pub fn exec(&mut self, batch: GpuBatch) -> CallResult<GpuBatch> {
+    pub(crate) fn exec(&mut self, batch: GpuBatch) -> CallResult<GpuBatch> {
         // The session is this executor's, not the batch's: a batch carries the pointer so
         // that dropping it can release its handle, and every batch reaching a node was
         // drawn from the session the node was built against.
@@ -186,7 +186,7 @@ impl GpuExec {
 
 /// Where the data leaves the device: one export per handle, over the row range the driver
 /// supplies. Named for the call rather than for the node, since `GpuUnload` is the node.
-pub struct GpuExport {
+pub(crate) struct GpuExport {
     executor: *mut PeacockExecutor,
     schema: SchemaRef,
 }
@@ -194,7 +194,7 @@ pub struct GpuExport {
 impl GpuExport {
     /// A sink declares no schema of its own, so this is its input's — the columns that
     /// cross the boundary.
-    pub fn new(executor: *mut PeacockExecutor, schema: &ArrowSchema) -> Self {
+    pub(crate) fn new(executor: *mut PeacockExecutor, schema: &ArrowSchema) -> Self {
         Self {
             executor,
             schema: Arc::new(schema.clone()),
@@ -204,7 +204,7 @@ impl GpuExport {
     /// The export does not consume the handle, so the batch is released here by going out
     /// of scope — which is the whole of what the row range buys: the rows wanted cross
     /// PCIe rather than the batch they sit in.
-    pub fn unload(&mut self, batch: GpuBatch, rows: RowRange) -> CallResult<CpuBatch> {
+    pub(crate) fn unload(&mut self, batch: GpuBatch, rows: RowRange) -> CallResult<CpuBatch> {
         let mut ipc: *mut u8 = std::ptr::null_mut();
         let mut len = 0u64;
         let rc = unsafe {

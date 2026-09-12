@@ -214,3 +214,119 @@ of the three shapes. `--test test_module_layout` 17; `--lib` 514 + 2 ignored; go
 
 Files: `plan/mod.rs`, `plan/tests/mod.rs`, `plan/tests/aggregate.rs`, `planner/mod.rs`,
 `planner/tests/null_analysis.rs`.
+
+### 2026-09-12 — plan task 5 stopped for a decision: the executor closure is 33 items, and the GPU backend has no production caller
+
+On `c2baf00b`. All 128 bare `pub` lines in `executor/mod.rs`, `cpu_backend/mod.rs` and
+`gpu_backend/mod.rs` were demoted, `run` and `CpuBackend` kept, and the compiler asked what they
+force. Three hops, every item restored with its reason:
+
+1. From `run`'s signature: `Backend` (the bound), `RunReport`, `RunError`.
+2. From `Backend`, a `pub` trait whose associated types are as public as it is: `Batch`,
+   `SourceExecutor`, `ExecExecutor`, `BatchAccumulatorExecutor`, `PartitionAccumulatorExecutor`,
+   `PartitionEmitterExecutor`, `JoinExecutor`, `UnloadExecutor` (the bounds on its associated
+   types), `NodeExecutors` (what `executors_for` returns); `When` (a field of
+   `RunError::BudgetExceeded`); and — as `E0446` hard errors, not warnings — `CpuBatch` and the
+   eight `Cpu*` types in `cpu_backend/mod.rs` that `impl Backend for CpuBackend` binds to the
+   associated types. A `pub` type's trait impl cannot bind a private type there.
+3. From the seven category traits' method signatures: `Executor` (their supertrait),
+   `ProbingJoin` (`JoinExecutor::Probing`'s bound, which drags `CpuProbingJoin` the same
+   `E0446` way), `SourceStep`, `LaneEvent`, `Forwarder` (a `NodeExecutors` payload), `RowRange`,
+   `CallStats`, `BackendError`.
+
+Then the CLI: `E0616: field batches of struct RunReport is private` and `E0624: method
+record_batch is private` (`peacockdb/src/main.rs:57-59`), so `RunReport.batches` and
+`CpuBatch::record_batch` are `pub`. Receipt: `CpuBackend` demoted gives `error[E0603]: struct
+CpuBackend is private --> peacockdb/src/main.rs:12:31`; restored, the CLI builds.
+
+**The surface this leaves: `executor/mod.rs` 48 → 25, `cpu_backend/mod.rs` 14 → 8,
+`gpu_backend/mod.rs` 12 → 0; dump 175 → 134, 112 → 71.** The 33 are the honest size of the
+CLI's API through `run<B: Backend>`: a generic entry point makes the whole trait family and one
+concrete backend's associated types public. The spec's table predicted five. `has_finish_pass`
+stays `pub(crate)`. All three shapes build; the CLI builds; layout 17; `--lib` 514 + 2 ignored;
+rustfmt unchanged on the three files. Nothing committed to the closure beyond what the compiler
+named.
+
+**What the demotion uncovers, and why it stops here.** `dead_code` was silent on every `pub`
+item inside a `pub mod`; now it speaks, and what it names is production code whose only
+readers are tests:
+
+- **The GPU backend, whole.** `GpuBackend` is not in the surface table, so it is `pub(crate)`,
+  and nothing in a non-test build names it: the CLI runs `run::<CpuBackend>` only. Under `cudf`
+  and `gpu` the compiler then reports `gpu_backend/` entire — 52 warnings, every struct "never
+  constructed", `GpuBatch`, `GpuContext`, `GpuBackend` among them. That is a statement about the
+  CLI (no `--gpu` yet), not the engine, and it is the decision to weigh: keep `GpuBackend` `pub`
+  as the engine's second entry, which the `E0446` rule then extends to `GpuBatch`, `GpuContext`
+  and the eight `Gpu*` types (about 11 more items, the table grows to ~44); or hold the letter of
+  the table and carry 52 warnings on the device shapes until the CLI grows the flag; or
+  `#[allow(dead_code)]` at the subcomponent root with that reason.
+- **`post_order_of_every_node`**, a chain of three delegates (`executor/mod.rs` → `driver/mod.rs`
+  → `driver/index.rs`), called only by `planner/tests/plan_goldens.rs:899`. Slice 4's fix — the
+  test imports the owner — is refused here: the owner is inside `executor::driver`, a
+  subcomponent of another component, `E0603` from `planner`. It is the `TEST_ONLY_ITEMS` shape
+  exactly (`has_finish_pass` is the precedent, two entries), but the innermost copy in `index.rs`
+  is not a `mod.rs` and is itself unused in production, so the register alone does not close it.
+- **`RunReport`'s fields** other than `batches` — `peak_bytes`, `in_flight_bytes`, `steps`,
+  `calls`, `holds`, and the rest — are read only by `test_support` and the driver tests: the
+  report is written for the goldens. `MemoryModel` got the same treatment in slice 4 and its
+  readers were all inside the planner, so it was silent; here the readers are behind the feature.
+  Either the fields stay `pub` (the report is surface; the CLI may read it) or they carry an
+  `allow` naming the harness.
+- **`Underestimate::ratio`**, read by `driver/accounting/tests.rs:182` alone — the slice-4 move
+  into a child `tests` inherent impl closes it; not done, to keep the stop clean.
+
+Warnings per shape as the tree stands: rust-only 7 (2 lint, 3 `post_order_of_every_node`,
+`ratio`, `RunReport` fields); cudf and gpu 52. The five `private_interfaces` from slice 3 are
+gone. Files: `executor/mod.rs`, `executor/cpu_backend/mod.rs`, `executor/gpu_backend/mod.rs`.
+
+### 2026-09-12 — plan task 5 done: the executor surface is 36 items in two files, and the device backend has no production entry point
+
+Closing the stop above with the four decisions. **Dump 175 → 137, 112 → 74; `executor/mod.rs`
+48 → 28, `cpu_backend/mod.rs` 14 → 8, `gpu_backend/mod.rs` 12 → 0.** Lint 2 on every shape,
+and 2 is the whole warning count on every shape.
+
+**The closure, by file and hop.** `executor/mod.rs` (28): `run`, `CpuBackend` — the CLI's;
+`Backend`, `RunReport`, `RunError` — `run`'s bound and return; from `Backend` being a `pub`
+trait, its associated types' bounds `Batch`, `SourceExecutor`, `ExecExecutor`,
+`BatchAccumulatorExecutor`, `PartitionAccumulatorExecutor`, `PartitionEmitterExecutor`,
+`JoinExecutor`, `UnloadExecutor`, and `NodeExecutors` (what `executors_for` returns); `When`
+(a `RunError` variant field); `CpuBatch` (`Backend::Batch` for `CpuBackend`, an `E0446` error
+otherwise); from the category traits' methods, `Executor` (supertrait), `ProbingJoin`
+(`JoinExecutor::Probing`'s bound), `SourceStep`, `LaneEvent`, `Forwarder`, `RowRange`,
+`CallStats`, `BackendError`; from the report's fields, `Underestimate`, `TraceEvent`,
+`EmittedBatch`; and `CpuBatch::record_batch`, which the CLI calls. `cpu_backend/mod.rs` (8):
+`CpuSource`, `CpuExec`, `CpuAccumulator`, `CpuPartitionAccumulator`, `CpuEmitter`, `CpuJoin`,
+`CpuProbingJoin`, `CpuUnload` — the associated types `impl Backend for CpuBackend` binds,
+each an `E0446` hard error at `pub(crate)`. `has_finish_pass` stays `pub(crate)`. Receipt:
+`CpuBackend` demoted gives `error[E0603]: struct CpuBackend is private -->
+peacockdb/src/main.rs:12:31`.
+
+**The four decisions as applied.**
+1. `GpuBackend` stays `pub(crate)`. **The device backend has no production entry point, by the
+   CLI's own account**: `peacockdb/src/main.rs` runs `run::<CpuBackend>` and its header says a
+   `--gpu` flag would fail on nearly every input today. `#[cfg_attr(not(feature =
+   "test-support"), allow(dead_code))]` sits on `mod gpu_backend;`, `mod gpu_batch;`, `GpuBatch`,
+   `GpuBackend` and `GpuContext` in `executor/mod.rs`, with the reason once at the module
+   declaration; the lint stays live in every `cargo test` shape. Confirmed: `cargo-cudf.sh build`
+   and `… --features gpu` at 2 warnings, and `cargo-cudf.sh test --lib --no-run` in both shapes
+   (harness on) clean of `dead_code`. One accessor the attribute did not cover, `GpuBatch::executor`,
+   was read by `executor/ffi_tests/mod.rs` alone and moved there as an inherent impl;
+   `--lib -- ffi_tests::` 3 passed under cudf.
+2. `post_order_of_every_node` is a three-link `TEST_ONLY_ITEMS` chain: `#[cfg(test)]` on
+   `executor/mod.rs` (called by `planner/tests/plan_goldens.rs`), `executor/driver/mod.rs`
+   (called by `executor/mod.rs`) and `executor/driver/index.rs` (called by `driver/mod.rs`) —
+   the driver does not use the walk itself; it reads `post_order` off the index it builds. The
+   register accepts a non-`mod.rs` file. Both directions proven: 17 green, and with the innermost
+   gate removed the check says `executor/driver/index.rs: post_order_of_every_node is registered
+   as test-only and no longer carries a #[cfg(test)]; drop the entry`.
+3. `RunReport`'s 18 fields are `pub`; the three types they name joined the table above.
+4. `Underestimate::ratio` moved into `executor/driver/accounting/tests.rs` as an inherent impl.
+
+**Proof.** rust-only, cudf, gpu builds and `cargo build --features rust-only -p peacockdb`:
+`Finished`, 2 warnings each (the lint). `--test test_module_layout` 17; `--lib` 514 + 2 ignored;
+`--lib -- executor::` 217; goldens identical; `case-inventory.sh rust-only` 1038, identical.
+rustfmt clean on every touched file, each alone.
+
+Files: `executor/mod.rs`, `executor/cpu_backend/mod.rs`, `executor/gpu_backend/mod.rs`,
+`executor/driver/mod.rs`, `executor/driver/index.rs`, `executor/driver/accounting/tests.rs`,
+`executor/ffi_tests/mod.rs`, `tests/test_module_layout/test_code.rs`.

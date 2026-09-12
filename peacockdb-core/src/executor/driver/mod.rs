@@ -40,6 +40,10 @@ pub(crate) fn slot_of(index: &PlanIndex<'_>, node: usize, lane: usize) -> usize 
 }
 
 /// Every node's post-order address, indexed by its pre-order one.
+///
+/// `#[cfg(test)]`, and called by `executor/mod.rs`, which carries it to the planner's plan
+/// goldens; `index` is this subcomponent's own, so the walk is reached through here.
+#[cfg(test)]
 pub(crate) fn post_order_of_every_node(root: &dyn GpuNode) -> Result<Vec<usize>, PlanError> {
     index::post_order_of_every_node(root)
 }
