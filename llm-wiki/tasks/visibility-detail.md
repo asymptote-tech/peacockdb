@@ -338,3 +338,56 @@ what it established for the slices ahead: the closure is what the compiler names
 the reason per hop goes in the entry; a facade delegate whose only reader is a test moves to the
 test module that reads it, or is registered in `TEST_ONLY_ITEMS` when the walls refuse the move;
 the lint's two warnings are `Translator::new`/`translate` and clear in the translator slice.
+
+### 2026-09-12 — plan task 6 done: `wire/mod.rs` 20 → 0, and the wire has no production caller on any shape
+
+On `8de8a893`. Every bare `pub` in `wire/mod.rs` — 20 items and the five fields of `Call` and
+`Recipe` — became `pub(crate)`, 25 one-word lines; the dump shows 25 `pub(crate)` in the file
+(the 20 plus the five it already had), so demoted, not deleted. **Numbers: 137 → 117, 74 → 54;
+`wire/mod.rs` 20 → 0. Lint 2 on every shape, and 2 is the whole warning count** on rust-only,
+cudf, gpu, `cargo build --features rust-only -p peacockdb`, and — this is the new check — the
+`--lib --no-run` test shapes on all three, both halves. The closure kept nothing: no shape and
+not the CLI named a `wire` item, so `RecipePlan` and `attach_recipes` went with the rest.
+
+**What the demotion uncovers.** With the 20 checked at last, `dead_code` reports the whole
+component: 104 warnings on a plain rust-only build, 98 on cudf and gpu. Three groups, by caller:
+the vocabulary (`Seq`, `AbiSymbol`, `Call`, `Recipe`, `Input`, `FbKind`, `CallPattern`,
+`ProjectRole`) is read by `gpu_backend/*`, which slice 5 already marked dead until the CLI grows a
+device path; the writers (`attach_recipes` and `attach`, `serialize`, `writer`, `node_writer`,
+`expr_writer`, `aggregate_writer`, `join` behind it) are driven by `test_support/corpus_gpu.rs`
+alone; and the reader and renderers (`check_seq_kinds`, `depth`, `render_plan_recipes`, `Payloads`,
+with `read.rs`, `recipes.rs`, `fb_text.rs` behind them) by `planner/tests/plan_goldens.rs` and
+`wire/tests.rs` alone. Handled as slice 5 handled `gpu_backend`: one attribute at the component with
+the reason once, `#![cfg_attr(not(test), allow(dead_code))]` at the top of `wire/mod.rs`, the
+declaration site being `lib.rs` and the fact being about `wire`. The code stays in every build and
+is type-checked there; only the lint moves to where the callers are.
+
+**Why `not(test)` and not slice 5's `not(feature = "test-support")`.** `cargo test` compiles the
+lib twice — `(lib)` with the harness on and `cfg(test)` off, for the self dev-dependency, and
+`(lib test)` — and measured with slice 5's key the `(lib)` half still reported 104 on rust-only
+(`corpus_gpu.rs` is device-only and the goldens are `cfg(test)`, so nothing there calls the wire)
+and 26 on cudf (the reader and renderers, golden-only). `gpu_backend` never showed this because
+rust-only does not compile it. Red then green on both keys is in the run: 104 → 0 on `(lib)`.
+One item stayed red under `cfg(test)` on rust-only: `RecipePlan::wire_nodes`, field and method,
+whose readers (`corpus_gpu.rs:53`, `gpu_tests/mod.rs:175`) compare it with `begin_plan`'s C++
+count; `#[cfg_attr(feature = "rust-only", allow(dead_code))]` on the method, one line of reason,
+and the allowed method is a live root so the field's read counts.
+
+**One guard re-pinned.** `a_private_module_is_unreachable_from_outside_the_crate`'s control probe
+named `peacockdb_core::wire::Recipe` as its public path, so it went red for the right reason
+(`E0603: struct Recipe is private`). The control now names `executor::CpuBackend`, in the surface
+table; the negative probe (`wire::generated::…::PlanNodeKind`) and its `E0603`/`generated` check
+are unchanged.
+
+**A finding, not done.** The reader and renderers are test code by `coding-style.md`'s definition —
+they exist to serve the goldens — in the `TEST_ONLY_ITEMS` shape (the caller is another component,
+so the walls refuse a move). But three implementation modules sit behind the four delegates, so a
+register entry alone does not close it and `#[cfg(test)]` on the modules has no sanctioned form;
+left under the component attribute for the coordinator to route.
+
+**Proof.** `--test test_module_layout` 17; `--lib` 514 + 2 ignored; `--lib -- wire::` 37; goldens
+identical; `case-inventory.sh rust-only` identical to the baseline. rustfmt clean on `wire/mod.rs`
+alone (`skip_children`; one hunk, `pub(crate)` pushing `render_plan_recipes` past the width) and on
+`privacy.rs`.
+
+Files: `peacockdb-core/src/wire/mod.rs`, `peacockdb-core/tests/test_module_layout/privacy.rs`.

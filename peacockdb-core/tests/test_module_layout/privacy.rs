@@ -394,7 +394,7 @@ pub(crate) fn private_modules(text: &str) -> Vec<String> {
 #[test]
 fn a_private_module_is_unreachable_from_outside_the_crate() {
     let (control, err) = (
-        "pub fn control() { let _ = std::any::type_name::<peacockdb_core::wire::Recipe>(); }",
+        "pub fn control() { let _ = std::any::type_name::<peacockdb_core::executor::CpuBackend>(); }",
         "pub fn probe() { let _ = std::any::type_name::\
          <peacockdb_core::wire::generated::peacock::plan::PlanNodeKind>(); }",
     );

@@ -9,6 +9,13 @@
 //! `generated` is private here, and that is why the wall is drawn where it is: eleven files
 //! name flatc's output, so it is private only if all eleven are inside with it.
 
+// Nothing in a production build calls the wire yet: the device backend that reads its
+// vocabulary is itself dead until the CLI grows a device path (`executor/mod.rs`, `mod
+// gpu_backend`), the corpus harness drives its writers, and the plan goldens its reader and
+// renderers. So the lint is read where the callers are, and only there; the code stays in
+// every build. The attribute leaves with the first production device caller.
+#![cfg_attr(not(test), allow(dead_code))]
+
 mod aggregate_writer;
 mod attach;
 mod expr_writer;
@@ -39,13 +46,13 @@ use generated::peacock::plan as fb;
 
 /// A node of the recipe plan, addressed by its position in it. The number is the whole
 /// content of an address, which is why a call carries nothing else about the node it runs.
-pub type Seq = u32;
+pub(crate) type Seq = u32;
 
 /// The frozen entry points. Two of them take runtime bounds instead of a seq, which is
 /// the reason they exist: a frozen node cannot carry a number that is known only once the
 /// rows have been counted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AbiSymbol {
+pub(crate) enum AbiSymbol {
     ExecuteNode,
     ExecuteScanRowGroups,
     SliceHandle,
@@ -53,7 +60,7 @@ pub enum AbiSymbol {
 }
 
 impl AbiSymbol {
-    pub fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::ExecuteNode => "execute_node",
             Self::ExecuteScanRowGroups => "execute_scan_rowgroups",
@@ -66,7 +73,7 @@ impl AbiSymbol {
 /// Which of a join's two projects a seq is. Both are `CudfProject`, and telling them
 /// apart in a recipe of five calls is the difference between reading it and decoding it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectRole {
+pub(crate) enum ProjectRole {
     /// The probe keys this batch contributes to the accumulation (#136).
     ProbeKeys,
     /// An aggregate's finalize, which is ours rather than the executor's: both engines
@@ -85,7 +92,7 @@ pub enum ProjectRole {
 /// from the plan line above: a per-call join type is not the node's own, and a
 /// repartition's lane count is the one number a recipe repeats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FbKind {
+pub(crate) enum FbKind {
     Scan,
     Filter,
     Project(ProjectRole),
@@ -132,7 +139,7 @@ impl FbKind {
 /// Where a call's input comes from. The driver owns every one; naming them is what makes
 /// a recipe checkable against consume-on-use (#152), since a copy appears here as a copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Input {
+pub(crate) enum Input {
     /// The batch the call was scheduled for.
     Batch,
     /// A copy of it, because the call below consumes it and something else needs it too.
@@ -187,7 +194,7 @@ impl Input {
 /// When the driver makes a call. Two nodes emitting the same seq set differ by this and
 /// nothing else — a sort per batch and a sort at done are different plans.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CallPattern {
+pub(crate) enum CallPattern {
     PerBatch,
     PerProbeBatch,
     /// Once, when the node's input is complete.
@@ -216,12 +223,12 @@ impl CallPattern {
 
 /// One ABI call: the symbol, the seq it addresses where it takes one, and what it passes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Call {
-    pub symbol: AbiSymbol,
+pub(crate) struct Call {
+    pub(crate) symbol: AbiSymbol,
     /// `None` for the two symbols whose arguments are runtime row counts.
-    pub target: Option<(Seq, FbKind)>,
-    pub inputs: Vec<Input>,
-    pub when: CallPattern,
+    pub(crate) target: Option<(Seq, FbKind)>,
+    pub(crate) inputs: Vec<Input>,
+    pub(crate) when: CallPattern,
 }
 
 impl Call {
@@ -251,8 +258,8 @@ impl Call {
 
 /// What one node does to the device, in call order.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Recipe {
-    pub calls: Vec<Call>,
+pub(crate) struct Recipe {
+    pub(crate) calls: Vec<Call>,
 }
 
 impl Recipe {
@@ -261,7 +268,7 @@ impl Recipe {
     }
 
     /// The seqs this node addresses, in the order it emits them.
-    pub fn seqs(&self) -> Vec<Seq> {
+    pub(crate) fn seqs(&self) -> Vec<Seq> {
         self.calls
             .iter()
             .filter_map(|call| call.target.map(|(seq, _)| seq))
@@ -273,7 +280,7 @@ impl Recipe {
 /// kernel it addresses. One renderer either way: two would drift, and the ten mode goldens
 /// and the payload golden would then disagree about a plan neither of them changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Payloads {
+pub(crate) enum Payloads {
     Omitted,
     Shown,
 }
@@ -285,7 +292,7 @@ pub enum Payloads {
 /// they part company at the first node with two calls, and a driver holding both at once
 /// has to keep them apart.
 #[derive(Debug, Default)]
-pub struct RecipePlan {
+pub(crate) struct RecipePlan {
     recipes: Vec<Option<Recipe>>,
     bytes: Vec<u8>,
     wire_nodes: Seq,
@@ -294,14 +301,14 @@ pub struct RecipePlan {
 impl RecipePlan {
     /// By post-order position in the tree, not by seq. `None` where that node makes no ABI
     /// call at all, which is what a forwarder does.
-    pub fn get(&self, node: usize) -> Option<&Recipe> {
+    pub(crate) fn get(&self, node: usize) -> Option<&Recipe> {
         self.recipes.get(node).and_then(|recipe| recipe.as_ref())
     }
 
     /// Nodes in the PLAN TREE — this mode's own, the length the memory model's per-node
     /// vector has, and what a consumer checks its own tree against before reading a `None`
     /// as an answer.
-    pub fn nodes(&self) -> usize {
+    pub(crate) fn nodes(&self) -> usize {
         self.recipes.len()
     }
 
@@ -312,7 +319,9 @@ impl RecipePlan {
     /// different trees and mostly disagree — a node with several calls, a stub, a union
     /// each separate them — so a driver that checked the wrong one against the C++ would
     /// be comparing two true numbers about two different things.
-    pub fn wire_nodes(&self) -> usize {
+    // Its readers compare it with the C++ count, which `rust-only` does not link.
+    #[cfg_attr(feature = "rust-only", allow(dead_code))]
+    pub(crate) fn wire_nodes(&self) -> usize {
         self.wire_nodes as usize
     }
 
@@ -322,7 +331,7 @@ impl RecipePlan {
     /// A plan that exists is one every seq of which holds the kind its recipe claims —
     /// [`attach_recipes`] fails rather than substituting anything for a payload it cannot
     /// write, so there is no second accessor and no caveat to remember.
-    pub fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
     }
 }
@@ -334,22 +343,26 @@ impl RecipePlan {
 /// for (#168) — because a plan missing one node's arguments is not a plan the C++ can be
 /// handed, and the alternative is a buffer whose every later seq has to be checked against
 /// a list to be trusted.
-pub fn attach_recipes(root: &dyn GpuNode) -> Result<RecipePlan, PlanError> {
+pub(crate) fn attach_recipes(root: &dyn GpuNode) -> Result<RecipePlan, PlanError> {
     attach::attach_recipes(root)
 }
 
 /// Every published seq holds a node of the kind its recipe claims.
-pub fn check_seq_kinds(plan: &RecipePlan) -> Result<(), PlanError> {
+pub(crate) fn check_seq_kinds(plan: &RecipePlan) -> Result<(), PlanError> {
     read::check_seq_kinds(plan)
 }
 
 /// How deep the serialized plan is, which the C++ verifier bounds.
-pub fn depth(plan: &RecipePlan) -> Result<usize, PlanError> {
+pub(crate) fn depth(plan: &RecipePlan) -> Result<usize, PlanError> {
     read::depth(plan)
 }
 
 /// The `--- recipes ---` section: what each node asks of the device, under the same tree
 /// the plan renders, so a line reads against the node above it.
-pub fn render_plan_recipes(root: &dyn GpuNode, plan: &RecipePlan, payloads: Payloads) -> String {
+pub(crate) fn render_plan_recipes(
+    root: &dyn GpuNode,
+    plan: &RecipePlan,
+    payloads: Payloads,
+) -> String {
     recipes::render_plan_recipes(root, plan, payloads)
 }
