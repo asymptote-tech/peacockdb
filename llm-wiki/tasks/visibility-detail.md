@@ -505,3 +505,63 @@ paragraph on why the backend types were not hoisted. `build-test.md`: the layout
 fix needs (plan task 11 step 4, taken here since it is prose). `architecture.md` states nothing
 about visibility or the files this task changed; the analyst's reading will say whether any
 sentence is falsified.
+
+### 2026-09-12 — plan task 11 done: the residues, #201, and the final proof
+
+On `c82897bc`. Nothing red.
+
+**rustfmt residues.** `executor/cpu_backend/expr_physical.rs` (two hunks) and `lib.rs` (six, all
+predating this task; the lint attribute sat among them) formatted alone with `skip_children`,
+both `--check` clean; whitespace and wrapping only. Two files the "mode" sweep touched are not
+rustfmt-clean and were left so — `expr_physical/tests.rs` (5 hunks) and `translator/expr.rs`
+(1), the same counts on HEAD's copies — since they are outside the spec's residue list and the
+rule is the files themselves, never the crate.
+
+**The "mode" comments: 66 lines fixed, 101 judged legitimate** (167 comment lines carried the
+word; one fixed line, `cpu_backend/mod.rs:188`, keeps a legitimate second use). Criterion: task 1
+retired "batch partitioned" as the name of an execution regime with no alternative left, so a
+comment saying *this mode* or *the mode's* for the engine is the retired sense, rewritten as
+*the engine*; a mode as one of the five `tp<N>-<sizing>` planning shapes, DataFusion's aggregate
+`Partial`/`Single` mode, a join mode of the capability matrix, or a "failure mode" is a live
+noun and stays. Fixed, for example: `planner/translator/mod.rs:1` "DataFusion physical plan →
+the mode's node tree" → "the engine's node tree"; `wire/aggregate_writer.rs:151` "this mode never
+sends an `avg` to a device" → "the engine never sends"; `plan_text/run_text.rs:4` "the two totals
+both mode families carry" → "every run carries"; `plan/mod.rs:1219` "which mode produced it" →
+"which of the two produced it" (DataFusion or the engine). Left, for example:
+`test_support/corpus.rs:1` "One corpus query at one mode"; `cpu_backend/mod.rs:357` "DataFusion's
+`AggregateExec` in Partial mode"; `plan/mod.rs:756` "What the capability matrix says about one
+join mode"; `test_support/registry.rs:262` "the exact failure mode this registry replaces";
+`registry.rs:267` "after the split by execution mode", which names the binary split, not the
+engine. Comment-only: every changed line outside the two formatted files carries `//`; 28 files.
+
+**#201 filed**, Infrastructure / process, newest-first, 12 lines with two stating the problem:
+`gpu_tests/murmur_conformance.rs`'s `cpu_partition_ids` re-derives the lane rule that
+`cpu_backend/spark_partitioning.rs`'s `rows_per_lane` runs in production, so only the copy is held
+against the device. Counter in the header now 202; Contents row 22 → 23. Not fixed.
+
+**The contradiction.** `module-layout.md:164` says `test-layout.md` creates `src/test_support/`;
+task 4 (`test-layout.md`) did, so the sentence is true, and nothing in `src/test_support/` or
+`tests/common/` says otherwise. Unchanged.
+
+**Final proof.**
+- `cargo test --features rust-only -p peacockdb-core -- --test-threads=2`: **1036 passed, 0
+  failed, 2 ignored**, 0 warnings, exit 0, nine result lines — `--lib` 514 + 2i, ci_coverage 8,
+  corpus_goldens 20, cost_model 3, cpu_corpus 448, golden_format 26, gpu_corpus 0,
+  module_layout 17, doc 0. Monitored every 2 minutes; no failure signature.
+- rust-only, cudf, gpu builds and `cargo build --features rust-only -p peacockdb`: 0 warnings
+  each, `unreachable_pub` 0. Dump 112 / 49; the 49 match `SURFACE` (the layout target is the
+  check, and it is green).
+- Goldens digest: empty diff. Inventories: rust-only 1038 and cudf 1049 each differ from their
+  baselines by the one leaf-name swap from plan task 9 and nothing else; gpu 574 identical.
+- `cargo-cudf.sh test -p peacockdb-core --no-run` and `… --lib --features gpu --no-run`: 0
+  warnings, `Finished`.
+- shad-gpu, run `20260912T025930-206003`: `--build` 0 warnings, both binaries staged;
+  `--push-binaries`, `--patch --run-detached`, `--run-status` polled at 2 minutes, `FINISHED,
+  exit code 0`. C++ 11 + 6 + 27 + 4 + 4 = **52 passed**; `peacockdb_core_gpu_lib` **55 passed,
+  519 filtered out** (14.89 s); `test_gpu_corpus` **8 passed**; `GPU test run OK`. Every pool
+  built against 103 GiB free (the neighbour at 37 GiB); no #178 entry needed.
+- `grep -rn 'test-support' .github scripts`: no hits.
+
+Files: `llm-wiki/tickets.md`, `peacockdb-core/src/lib.rs`,
+`peacockdb-core/src/executor/cpu_backend/expr_physical.rs`, and 28 files with comment-only edits
+under `peacockdb-core/src/` (`git status --short`: 31 files, this one excluded).

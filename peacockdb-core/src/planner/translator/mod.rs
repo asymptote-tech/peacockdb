@@ -1,4 +1,4 @@
-//! DataFusion physical plan → the mode's node tree.
+//! DataFusion physical plan → the engine's node tree.
 //!
 //! A conscious decision per DataFusion node kind: nothing is carried over implicitly and
 //! an unrecognized node is a plan-time error naming it. What is reused is DataFusion's

@@ -16,7 +16,7 @@ use crate::plan::{GpuNode, RowInterval};
 use crate::plan::{NestedLoopJoinType, capability};
 use crate::plan::{NodeRef, as_node_ref};
 
-/// Plain DataFusion planning at tp1 over the committed minimal dataset — this mode
+/// Plain DataFusion planning at tp1 over the committed minimal dataset — the engine
 /// translates the physical plan rather than annotating it, so no GPU rule runs.
 async fn plan_at(sql: &str, target_partitions: usize) -> Arc<dyn ExecutionPlan> {
     let data = crate::test_support::testdata_minimal_dir();
@@ -146,7 +146,7 @@ async fn a_scan_becomes_a_loader_carrying_the_partitioners_mapping() {
 async fn a_filter_becomes_one_node_and_keeps_its_predicate() {
     let tree = translated("SELECT * FROM nation WHERE n_regionkey > 1").await;
     // The CoalesceBatchesExec DataFusion puts above the filter leaves no node: its
-    // target says nothing about the batches a lane will hold in this mode.
+    // target says nothing about the batches a lane will hold in the engine.
     assert_eq!(shape(tree.as_ref()), "Unload(Filter(LoadParquet))");
 
     let NodeRef::Filter(filter) = as_node_ref(descend(tree.as_ref(), 1)) else {
@@ -457,7 +457,7 @@ async fn a_hash_repartition_becomes_a_merge_and_a_scatter() {
 
 #[tokio::test]
 async fn a_round_robin_repartition_leaves_no_node() {
-    // It carries no key, so it says nothing this mode acts on: lanes come from the
+    // It carries no key, so it says nothing the engine acts on: lanes come from the
     // partitioner's mapping instead.
     let tree = translated_at_tp4("SELECT * FROM customer WHERE c_nationkey > 1", 0).await;
     assert_eq!(shape(tree.as_ref()), "Unload(Filter(LoadParquet))");
@@ -524,7 +524,7 @@ async fn an_equi_join_is_co_partitioned_by_a_scatter_on_each_side() {
 #[tokio::test]
 async fn a_broadcast_shaped_join_runs_in_one_lane_until_140() {
     // Both tables are tiny, so DataFusion collects the left rather than hashing both
-    // sides. Nothing co-locates them, and this mode has no broadcast to do it with.
+    // sides. Nothing co-locates them, and the engine has no broadcast to do it with.
     let tree = translated_at_tp4(
         "SELECT n.n_name, r.r_name FROM nation n JOIN region r ON n.n_regionkey = r.r_regionkey",
         0,
@@ -540,7 +540,7 @@ async fn a_broadcast_shaped_join_runs_in_one_lane_until_140() {
 
 #[tokio::test]
 async fn an_outer_join_with_a_residual_filter_is_refused() {
-    // Not a limitation of this mode: the shipping executor applies the filter after
+    // Not a limitation of the engine: the shipping executor applies the filter after
     // the outer gather, so a padded row's NULLs drop it (#153).
     let err = capability(datafusion::common::JoinType::Left, true).unwrap_err();
     assert!(

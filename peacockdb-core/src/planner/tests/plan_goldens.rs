@@ -3,8 +3,8 @@
 //! A section per query — the tree, then `--- recipes ---` and what each node asks of the
 //! device, then `--- memory ---` and the estimator's figures. The legacy `.plan.txt`
 //! goldens carry the first and the last of those. Refusals are content: a query
-//! this mode declines renders its reason where its tree would be, so the file says what
-//! the mode does and does not run.
+//! the engine declines renders its reason where its tree would be, so the file says what
+//! the engine does and does not run.
 
 use std::path::{Path, PathBuf};
 
@@ -62,7 +62,7 @@ async fn render_query(
     };
     let plan = match planned {
         Ok(plan) => plan,
-        // A query DataFusion itself declines never reaches this mode's planner.
+        // A query DataFusion itself declines never reaches the engine's planner.
         Err(e) => {
             return format!(
                 "refused by datafusion: {}\n",
@@ -384,7 +384,7 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
             let Ok(plan) = frame.create_physical_plan().await else {
                 continue;
             };
-            // A query this mode refuses has no recipes to check; a query it plans has to
+            // A query the engine refuses has no recipes to check; a query it plans has to
             // publish seqs that resolve.
             let Ok((tree, _)) = planner::plan(&plan, mode.knobs()) else {
                 continue;
@@ -400,7 +400,7 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
                 }
                 // A plan the wire cannot carry has no recipe plan to check. Named rather
                 // than counted: the day a second query joins mixed-join here, that is a
-                // fact about the mode worth a red test rather than a smaller number.
+                // fact about the engine worth a red test rather than a smaller number.
                 Err(_) => uncrossable.push(format!("{dataset} {name}")),
             }
         }
@@ -428,7 +428,7 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
     );
 }
 
-/// The queries this mode PLANS but cannot cross to the device, and the ticket for each.
+/// The queries the engine PLANS but cannot cross to the device, and the ticket for each.
 ///
 /// A `not runnable` line means the plan validates and runs on the CPU while one node's
 /// payload has no shape on the wire — so the registry stays out of it: its cell answers
@@ -683,7 +683,7 @@ fn the_registry_matches_the_goldens_in_both_directions() {
                     panic!("{column}: {} has a registry row and no section", row.query)
                 });
                 let declared = if body.starts_with("refused by datafusion") {
-                    // Not this mode declining: the query never reaches its planner.
+                    // Not the engine declining: the query never reaches its planner.
                     "na"
                 } else if body.starts_with("refused") {
                     "disabled"

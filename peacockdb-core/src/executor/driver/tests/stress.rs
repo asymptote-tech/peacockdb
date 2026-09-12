@@ -114,7 +114,7 @@ fn every_shape_holds_the_queue_bound() {
 
 /// A node the plan did not ask for, in two kinds. The pass-through moves every height and
 /// every rank without touching a batch; the rebatcher also changes the shape batches arrive
-/// in, which is the property the prototype injects #139's node for — and this mode has one
+/// in, which is the property the prototype injects #139's node for — and the engine has one
 /// today, since a coalesce is N-to-1.
 fn pass_through(input: Box<dyn GpuNode>) -> Box<dyn GpuNode> {
     // A pure offset of zero forwards every batch and never satisfies, by the lowering rule.

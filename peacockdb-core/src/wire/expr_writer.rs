@@ -1,4 +1,4 @@
-//! This mode's [`Expr`] into the wire's `fb::Expr`.
+//! The engine's [`Expr`] into the wire's `fb::Expr`.
 //!
 //! Every variant writes, `Sqrt` included: the schema gained it so that a finalizing
 //! aggregate carries its own finalize rather than leaving the arithmetic to the C++.

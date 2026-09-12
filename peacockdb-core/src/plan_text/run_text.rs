@@ -1,7 +1,7 @@
 //! The execution golden's text: the plan tree, and what the run produced at each node.
 //!
 //! The node line is the plan golden's minus the declared schema — a plan fact, recorded
-//! once beside the plan — plus the two totals both mode families carry. Under it goes one
+//! once beside the plan — plus the two totals every run carries. Under it goes one
 //! line holding what the node consumed and the size of every batch it emitted.
 //!
 //! Its tests are the driver's, in `driver/tests/render.rs`: rendering a report takes a run,

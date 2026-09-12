@@ -574,7 +574,7 @@ async fn a_join_key_that_is_not_a_bare_column_is_refused_and_no_query_makes_one(
 async fn a_final_aggregate_over_something_other_than_a_partial_is_refused_and_no_query_makes_one() {
     let fixture = Fixture::new("refuse-final-alone").await;
     // DataFusion emits Final only as the upper half of a pair it built itself, so this is
-    // an internal-consistency refusal: it catches this mode assembling a sequence wrongly,
+    // an internal-consistency refusal: it catches the engine assembling a sequence wrongly,
     // never a query.
     use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
     let scan = fixture.scan("tiny").await;

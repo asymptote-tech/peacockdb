@@ -88,7 +88,7 @@ pub(crate) enum ProjectRole {
     Narrow,
 }
 
-/// The legacy node kinds this mode addresses, carrying the fields a reader cannot get
+/// The legacy node kinds the engine addresses, carrying the fields a reader cannot get
 /// from the plan line above: a per-call join type is not the node's own, and a
 /// repartition's lane count is the one number a recipe repeats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -305,7 +305,7 @@ impl RecipePlan {
         self.recipes.get(node).and_then(|recipe| recipe.as_ref())
     }
 
-    /// Nodes in the PLAN TREE — this mode's own, the length the memory model's per-node
+    /// Nodes in the PLAN TREE — the engine's own, the length the memory model's per-node
     /// vector has, and what a consumer checks its own tree against before reading a `None`
     /// as an answer.
     pub(crate) fn nodes(&self) -> usize {

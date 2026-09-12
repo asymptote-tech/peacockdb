@@ -51,14 +51,14 @@ use crate::plan::{AggregateBody, Phase, finalize_columns, state_funcs};
 use crate::plan::{GpuAggregate, GpuFilter, GpuProject, GpuSort};
 use expr_physical::physical_projection;
 
-/// One DataFusion node with its child left as a placeholder, and the columns this mode
+/// One DataFusion node with its child left as a placeholder, and the columns the engine
 /// says it produces. [`execute_single_node`] replaces the children with the batches it is
 /// handed, so what is stored is the operator and its expressions, never a source.
 struct Stage {
     node: Arc<dyn ExecutionPlan>,
     /// The node's own schema, which is not always the one DataFusion answers with: a
     /// partial aggregate names its state columns after the accumulators it ran, and this
-    /// mode names them in the schema every reference above resolves against.
+    /// engine names them in the schema every reference above resolves against.
     declared: SchemaRef,
 }
 
@@ -185,7 +185,7 @@ impl CpuExec {
     }
 
     /// State from raw values, and the finalize where the node carries one — two operators,
-    /// as the recipe is two calls. The split is not DataFusion's `Single` mode: this mode
+    /// as the recipe is two calls. The split is not DataFusion's `Single` mode: the engine
     /// finalizes in a project so that both engines evaluate the one finalize expression,
     /// and a `Single` here would be a second implementation of it.
     pub(crate) fn aggregate(
@@ -295,7 +295,7 @@ impl CpuUnload {
 }
 
 /// The same columns under the names the node declares. Positional, and checked by arrow:
-/// a column whose type is not the declared one is a state layout this mode and DataFusion
+/// a column whose type is not the declared one is a state layout the engine and DataFusion
 /// disagree about, which is a wrong answer everywhere above rather than an error.
 fn declared_as(batch: RecordBatch, declared: &SchemaRef) -> Result<RecordBatch, BackendError> {
     if batch.schema() == *declared {
@@ -357,7 +357,7 @@ fn placeholder(schema: &ArrowSchema) -> Arc<dyn ExecutionPlan> {
 /// DataFusion's `AggregateExec` in Partial mode probes its own aggregation ratio after
 /// 100,000 rows and, where the groups are nearly as many as the rows, stops grouping and
 /// passes its input through as state — which is sound only because a Final stage regroups
-/// downstream. In this mode nothing does: the init emits state and the merge is a Partial
+/// downstream. In the engine nothing does: the init emits state and the merge is a Partial
 /// too, so a skipped grouping reaches the finalize as duplicate keys and comes out as
 /// extra rows. A device never skips, so this is also what keeps the two engines' answers
 /// the same.
@@ -428,7 +428,7 @@ fn aggregate_exec(
     }
 
     let filters = vec![None; aggregates.len()];
-    // Partial in both phases, because in this mode an aggregate always emits state: a
+    // Partial in both phases, because in the engine an aggregate always emits state: a
     // merge is a partial over state columns, and finalizing is a project above it.
     let aggregate = AggregateExec::try_new(
         AggregateMode::Partial,
@@ -468,7 +468,7 @@ fn init_aggregates<'a>(
 
 /// The merge's aggregates, which the wire and this side spell differently. There a merge is
 /// the SQL aggregate plus a mode; here DataFusion has no mode that reads state and emits
-/// state, so each of this mode's own merge aggregators is resolved on its own — and the one
+/// state, so each of the engine's own merge aggregators is resolved on its own — and the one
 /// with no DataFusion aggregate behind it, the Welford triple, gets [`merge_m2`].
 fn merge_aggregates(
     body: &AggregateBody,

@@ -534,7 +534,7 @@ impl GpuLimit {
 
 /// Which side of the decomposition a node runs: state built from raw values, or state
 /// merged from state. `Partial` and `Merge` on the wire — never `Final`, which also
-/// finalizes, and in this mode a finalize is a project of its own.
+/// finalizes, and in the engine a finalize is a project of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Phase {
     Init,
@@ -895,7 +895,7 @@ pub(crate) struct GpuLoadParquet {
     /// Per projected column: whether the surviving row groups hold a NULL in it. The leaf
     /// of the null analysis, and a statistic rather than a declaration.
     pub(crate) can_be_null: Vec<bool>,
-    /// A limit pushed into the scan by DataFusion, not one this mode derived.
+    /// A limit pushed into the scan by DataFusion, not one the engine derived.
     pub(crate) limit: Option<usize>,
 }
 
@@ -1216,7 +1216,7 @@ pub(crate) fn category_of(node: &dyn GpuNode) -> ExecutorCategory {
 
 /// What a node is called, in a plan line and in the validation message that names it.
 /// No `Exec` suffix: these are not DataFusion nodes, and after the wire-format rename a
-/// line from either family says which mode produced it without a caption.
+/// line from either family says which of the two produced it without a caption.
 pub(crate) fn node_name(any: &dyn std::any::Any) -> &'static str {
     match node_ref_of(any) {
         NodeRef::LoadParquet(_) => "GpuLoadParquet",
@@ -1273,7 +1273,7 @@ pub(crate) fn emits_both_sides(join_type: JoinType) -> bool {
 }
 
 /// The three refused shapes are refusals of a defect or a missing cuDF variant, not of
-/// this mode: an outer join's residual filter is applied after the outer gather and drops
+/// the engine: an outer join's residual filter is applied after the outer gather and drops
 /// the padded rows (#153), and no swapped `mixed_*` variant exists for the right-handed
 /// semi family.
 pub(crate) fn capability(
