@@ -417,3 +417,35 @@ rebased clean onto `1bcf4e97`: 10 commits, non-documentation differences from `3
 master's three files alone. `rebase needed(reviewing)` until the developer re-runs this task's
 proof — the rust-only package, the layout test, the device cycle — and the cudf `--no-run` shape
 plan task 3 left to CI, now that `target-cudf-rapids-cuda-12.2` is warm.
+
+### 2026-09-12 — re-proven after the rebase: the package, the goldens, the cudf shape, the device
+
+Re-proof of `50654da1` from dev (Ubuntu 24.04, glibc 2.39), right after task 4's cycle on the same
+worktree, so every target dir was warm and each build was incremental. No code file changed; this
+entry is the only edit. No `PEACOCK_TESTDATA_DIR`, `UPDATE_CANONICAL` or `PCK_*` variable set.
+Nothing heavy ran concurrently.
+
+| Command | rc | Result |
+|---|---|---|
+| `cargo test --features rust-only -p peacockdb-core --test test_module_layout` | 0 | **17 passed**, 0 warnings |
+| `--test test_ci_coverage` | 0 | 8 passed, 0 warnings |
+| `cargo test --features rust-only -p peacockdb-core -- --test-threads=2`, background under `timeout 3600`, 2-minute monitor | 0 | **1036 passed, 0 failed, 2 ignored**, `warning` 0 times, 9 result lines: `--lib` 514 + 2 ignored (89 s), ci_coverage 8, corpus_goldens 20, cost_model 3, cpu_corpus 448 (188 s), golden_format 26, gpu_corpus 0, module_layout **17**, doc-tests 0; 365 s wall |
+| `find testdata/goldens -type f -print0 \| LC_ALL=C sort -z \| xargs -0 sha256sum \| diff - …/goldens.sha256`, after the suite | 0 | empty |
+| `CUDF_ROOT=…/rapids-cuda-12.2 scripts/cargo-cudf.sh test -p peacockdb-core --no-run` | 0 | 0 warnings, 50 s; eight executables listed (`lib`, `test_ci_coverage`, `test_corpus_goldens`, `test_cost_model`, `test_cpu_corpus`, `test_golden_format`, `test_gpu_corpus`, `test_module_layout`) — the shape plan task 3 left to CI |
+| `scripts/build-test-shadgpu.sh --build` | 0 | 37 s, 0 warnings; `test_gpu_corpus` and `peacockdb_core_gpu_lib` staged |
+| `--push-binaries` | 0 | 11 s; both rust binaries shipped |
+| `--patch` | 0 | 10 s; `glibc 2.39 already installed in /home/info/glibc-2.39; skipping the build`; `Verified: every shipped executable uses /home/info/glibc-2.39/lib/ld-linux-x86-64.so.2` |
+| `nvidia-smi` before the run | — | 37043 MiB used of 143771, 106041 free |
+| `--run-detached` | 0 | pid 1916198 |
+| `--run-status`, run `20260912T005457-135989` | 0 | `FINISHED, exit code 0` at the first 2-minute poll; `GPU test run OK` |
+
+On the host: `peacock_cpu_tests` 11, `peacock_gpu_tests` 6, `peacock_plan_tests` 27,
+`peacock_tpch_tests` 4, `peacock_tpchv_tests` 4 — 52, `ran 5 C++ test binaries`. Pool lines
+`1.0`, `1.0`, `69.0 GiB reserved of 103.0 GiB free` and `30.0 GiB reserved of 100.6 GiB free`; no
+`could not be built`, no `Maximum pool size exceeded`, so #178 gets no line. **`peacockdb_core_gpu_lib`
+55 passed, 519 filtered out, 21.36 s**, all 55 `test` lines under `gpu_tests::`.
+**`test_gpu_corpus` 8 passed, 10.14 s** — the binary this task rewired through `gpu_case`:
+`a_device_run_under_a_regeneration_writes_no_golden`, `gpu_tpch_q19_tp1_single`,
+`gpu_tpch_q6_tp1_{single,rowgroup}`, `gpu_tpch_q6_tp4_{single,rowgroup,sized}`,
+`the_registry_matches_the_gpu_corpus_in_both_directions`. `GLIBC_2` appears nowhere in the
+345-line gate log. Scratch under `/tmp/t5-*` only; `git status --short` shows this file alone.
