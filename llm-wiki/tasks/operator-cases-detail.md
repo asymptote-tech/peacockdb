@@ -803,3 +803,162 @@ and Full; the null-key scatter case asserts what the all-null case cannot. One n
 Welford expectation's column name also pins the device's alias-naming of struct children, so a
 C++ change naming them properly would turn the pins red on a non-fix — the comment documents
 the choice. Board to `completing`; the completeness pass is two readings dispatched together.
+
+### 2026-09-12 — completeness pass, the analyst's reading
+
+Branch `ENS-operator-cases` at `ab1b34e9` against `ENS-operator-harness` at `35694e6a`, read as one
+diff: 204 operator cases in seven files (128 green, 76 `bug_` under 22 tickets, every `bug_` with
+a ticket in the comment block above it — counted, not eyeballed), `PENDING` gone, the `allow` off
+`Script`, six pages. Nothing under `cpp/`, `peacockdb-ffi/` or `src/` outside `tests/gpu_tests/`.
+
+**0 blocking, 3 important, all three against the record rather than the cases.** Every row of the
+matrix and of the empty-input table has a case named for its shape; no row is folded into a loop.
+The not-reached list is complete (#153, #159, #160 plan-time; #173's accumulator sites; #175 over a
+zero-row build batch; #190's device half; #187 from the emit family). `build-test.md`'s harness row
+describes the 230; its gpu header, the Rust figure and the grand total each move by 204 and add up.
+The `test-support` paragraph and the rung ladder are untouched and still true. Nothing in
+`coding-style.md` or `build-test.md` is false for `PENDING` being gone; the old guard name survives
+only in `operator-harness.md`'s signoff, which describes task 8's state and is frozen. `join_cases.rs`
+is 902 lines, under the rule.
+
+**Important 1 — the handoff to `typed-nulls` (#198) is not written anywhere.** The two pins are
+`bug_a_typed_null_in_arithmetic_is_the_column_on_the_device` and
+`bug_a_typed_null_literal_is_a_column_of_zeros_on_the_device` (`exec_cases.rs`); both go red on the
+one-builder fix. But ticket #198 does not name them (it names only `tasks/typed-nulls.md`), and
+`typed-nulls.md`'s Scope says "No Rust changes at all" — deleting them is a Rust change its spec
+excludes. Worse, that spec's "Why it happens" and its step-4 test "a bare typed null is still null —
+the `build_column` short-circuit, which was always correct" rest on the sentence this branch
+corrected in #198: a bare `NULL::Int64` in a select list takes the AST path and is zeros. The spec is
+frozen, so the human has to hear it before task 11 is dispatched. Fix: the two pin names on #198, and
+a line here and in the signoff saying task 11 deletes two Rust tests and its third test is red today.
+
+**Important 2 — the #175 pins may not turn red on `empty-build`'s fix, and the record does not say
+so.** `bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti siblings pin
+`JoinExecutor::without_build` — the harness's only route, since it has no driver. `empty-build.md`
+keeps the scatter's zero-row batch in the driver and routes the lane to `SetBuild`, and its own
+table says `without_build`'s `Err` arm then "becomes unreachable" from the driver — while staying
+reachable from the harness. So the fix as specced leaves the three green, asserting a message that
+names a closed ticket; task 12 has to delete or re-target them by hand, which neither spec says.
+The harness's evidence for empty-build's premise ("the C++ already computes the answer over a
+zero-row build") is `right_over_a_zero_row_build_pads_every_probe_row` and
+`right_anti_over_a_zero_row_build_keeps_every_probe_row`, both green; Full's zero-row-build case is
+a #152 refusal, so Full's pad has no device evidence. None of this is in the file above this
+heading; it belongs here and in the signoff's handoff.
+
+**Important 3 — two rows landed on #163 with no value asserted on the device.**
+`GpuAggregateBatches`'s "an average's digits" is `bug_a_decimal_average_is_refused_on_the_cpu`,
+which reads nothing past the cpu's refusal — the nested family's pattern (cpu refuses, device pinned
+against a hand-computed answer) was available and `gpu_answered` exists for it, so the device's
+digits for a decimal average through the merge and its finalize are unknown. And "`merge_m2`" is
+the two Welford pins, which after round 1 compare keys and counts only: the merged mean and m2 are
+asserted on neither engine, so the one combine the architecture page says "carries the weight" has
+no cross-engine reading here. The corpus covers stddev at 1e-11, so nothing is unguarded; the
+harness's exact rule could still be met with a fixture whose per-key counts are powers of two and
+whose values are small dyadics, under which Welford's update is exact in either order. Record it as
+a known fold at least; a fixture change if the coordinator wants the rows answered.
+
+**Tickets that do not name their pin.** #57, #152, #190, #198. The spec's rule points test → ticket,
+not the reverse, so only #198 matters (above). #184 names the file and not the pin, which is #95's.
+
+**Recorded and not taken, one more for the list.** `Script::Lanes` drives lanes in order, so "lane 0
+`Done` before lane 1's rows" is the only arrival order it can script; the driver's round-robin
+interleaving, and with it the "`cudf::merge` tie order … regardless of arrival order" rule, is out of
+the harness's reach. The accumulate entry says so; the summary's harness-findings paragraph does not.
+
+**`architecture.md` — sentences this branch falsified**, quoted with their heading. The page states
+these as fact and the cases show them false; no ticket qualifies the sentence where it stands.
+
+- *What the frozen surface costs*: "A collapse of no handles, a merge of no runs and a finish whose
+  probe produced no keys refuse by name (#173)". The first two do not refuse on either backend —
+  `no_batch_coalesces_to_nothing_on_both`, `no_sorted_batch_is_nothing_on_both`,
+  `every_lane_done_with_nothing_is_nothing_on_both`: both emit nothing before any call, and the C++
+  throw is unreachable. Only the join's finish refuses, and only for Left, Full, LeftSemi and
+  LeftMark; LeftAnti answers. Ticket #173 was corrected on this branch; the page was not.
+- *What the frozen surface costs*: "the CPU answers all three". For #175 the CPU refuses with the
+  device's own message — `bug_right_with_no_build_batch_is_refused_on_both` pins both sides — as
+  the ticket has always said; for #173's accumulator shapes it emits nothing like the device. It
+  answers the join finish over no keys and #158.
+- *What a streamed probe costs*: "LeftAnti over an empty key table is every build row, which is what
+  the CPU does and what a device must be made to do". The device does it:
+  `left_anti_finishing_with_no_probe_batch_answers_every_build_row` is green
+  (`finish_without_keys` hands the build side up). The types still refused are Left, Full, LeftSemi
+  and LeftMark, each with its owed phrase.
+- *What a streamed probe costs*: "`null_equals_null` rides on the node and reaches the finish join
+  too, hardcoded `EQUAL` for anti and mark included". True of the device only. The CPU's per-call
+  join and its finish both take the node's flag for every type (`cpu_backend/join.rs`,
+  `HashJoinExec::try_new(.., node.null_equals_null)`), so the two backends disagree on every anti and
+  mark join with a null key — nine pins, a finish pass, a `mixed_*` form and a streamed probe
+  among them. #59 now says "today, not latently"; the page still reads as one engine.
+- *Grouping sets*: "the expansion materializes an INT32 constant per set". The plan declares
+  `UInt8` (DataFusion's `grouping_id_type`, up to eight keys) and the CPU emits it so; only the
+  device makes an `Int32` — `bug_grouping_sets_carry_the_devices_own_id_and_type`, #65's type half,
+  new on this branch. The example two lines down, "a two-key rollup gives 0, 2, 3", is the device's
+  bit order; the CPU's is 0, 1, 3, which #65 now records too.
+- *From node to seqs*: "`GpuCrossJoin`, `GpuNestedLoopJoin` | the same-kind node | one map-arm
+  call". One per probe batch: the cross join's and the Inner nested loop's recipes are
+  `[BuildSideCopy, Batch]`, and the planner admits a multi-batch probe on both (only the Left form
+  requires one batch), so the second batch is the #152 refusal —
+  `bug_a_cross_join_refuses_its_second_probe_batch_on_the_device` and its Inner sibling. The
+  "streamed probe costs" paragraph lists the probe-local hash-join types and never these two.
+
+**Stated as fact, false today, ticketed — the coordinator's call whether the sentence gets its
+ticket.** The page describes intended behaviour and a ticket names the violation, which the
+completeness rule keeps out of the list above; each is quoted because the coordinator asked.
+
+- *The node set*: `GpuLoadParquet` "honours a pushed-down limit", and *The limit lowering rule*:
+  "One lane and one batch make the loader's own limit the whole answer". Neither backend does: the
+  CPU never reads the limit (#186), the device refuses any row-group read with one (#188) — and
+  every batch is a row-group read, so a scan with a limit never runs on a device at all. Both
+  tickets predate the branch (T19); the five source `bug_` cases pin them.
+- *The node set*: `GpuAccumulateBatchesAndSort` and `GpuMergeSortedPartitions`, "`fetch` applied".
+  Not on the device when the merge is handed one input — one batch, or one populated lane — since
+  the k=1 path is the concat fallback the *From flat buffer to cuDF call* row already names (#118)
+  and that fallback applies no slice. #204, new on this branch. *Determinism rules*' "The
+  accumulating sort still orders and slices rather than taking a top-N" is the same exception.
+- *cuDF options*, the `cudf::order`, `cudf::null_order` row: "per key from the flat buffers's `asc`
+  / `nulls_first`". The values are set from them; cuDF applies `null_order` before it flips a
+  descending key, so the effective placement is inverted on every `DESC` key. #202, new.
+- *Join types and NULL key equality*: "Semi honours the flag and anti does not, deliberately" and
+  "so anti and mark stay `EQUAL` until the planner distinguishes `NOT IN` from `NOT EXISTS`". True
+  of `join.cpp`, which is what the section describes; the "deliberate" choice is the device's alone,
+  and the section nowhere says the CPU backend takes the flag for anti and mark. One clause.
+
+**Not falsified.** *Determinism rules*' `cudf::merge` tie order and "No sort here preserves tie
+order": the sorted fixtures carry no ties by construction (`runs` deals one batch round-robin), so
+the branch neither confirms nor contradicts them. *The aggregate sequence*: the split, the state
+schemas and "`count` merges by `sum`" hold on both engines; the Welford and decimal findings are
+type declarations the page already routes to #163 and #187. *Every cast is explicit* states the
+rule the device breaks (#163, #187, #65), which is what a rule with tickets looks like. *Capability
+matrix* and the streamed-probe copy count predict the join refusals exactly as the 28 #152 pins
+found them. The cross join's dropped projection (#207) contradicts no sentence: the page never
+says the cross join carries one, and its `CudfCrossJoin` row says the node is its two inputs.
+
+### 2026-09-12 — completeness pass, the reviewer's reading: 0 blocking, 0 important
+
+Read on `ab1b34e9` without the analyst's list: only the case files and the wiki move; every row
+of both tables maps to a named case (59 hash-join empty cases = 6 × 4 + 7 × 5, plus 30); 230 in
+the module, 285 on the rung, the pages recomputed; the rust-only lib untouched; all 76 `bug_`
+tests carry an open ticket directly above; the seven new tickets' cited sites exist; declared
+decimal types match arrow-arith's rules; no tolerance, `run`, forwarder, `pub`, `allow`,
+`unsafe` or wall-clock in the seven files; caps counted; `rustfmt` clean; the guard modelled red
+on each of its four assertions; red-on-fix reasoned across every family. The deviation list
+confirmed and extended (the `avg` shortcut's Int64 count leaves #163's signed arm unpinned in
+the module; #202's merge site has no pin; Welford's moments cannot be compared exactly by any
+dyadic fixture). Two stale sentences named for the analyst's list.
+
+### 2026-09-12 — completeness approved
+
+The analyst's reading: 0 blocking, 3 important, all against the record — #198 named neither of
+its two pins and `typed-nulls.md`'s premise (a bare typed null short-circuits to null) is what
+the second pin shows false; the three #175 pins go through `without_build`, which
+`empty-build.md`'s driver fix does not reach, so task 12 retargets or deletes them by hand; two
+#163 rows read no device value ("an average's digits" is the cpu's refusal alone; `merge_m2`'s
+moments are compared on neither engine). The first two are written on the tickets by the
+coordinator and carried in the signoff; the third is recorded. `architecture.md`: six sentences
+falsified and corrected — the three refusals (a collapse of no handles and a merge of no runs
+never reach the C++, and the cpu refuses #175's shape too), LeftAnti's finish (the device does
+it), the finish's `EQUAL` (the device's alone; the cpu honours the flag, #59), the gid's type and
+bit order (#65), the cross and nested-loop call count (#152); and four statements of intended
+behaviour now carry their ticket (the scan's limit #186/#188, the accumulators' `fetch` #204,
+the null-order row #202, semi-versus-anti #59). Signoff appended to the spec. `done` waits on
+CI for `4ced579d`, the head that carries code; the commits above it are documentation.

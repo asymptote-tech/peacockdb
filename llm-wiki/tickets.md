@@ -144,7 +144,10 @@ comparison it is a wrong **row count**, since `col = NULL` is true wherever `col
 says the row does not survive.
 
 No cell is disabled against this — it is a wrong answer inside cells that pass. Fixed by
-`tasks/typed-nulls.md`, which removes the second scalar builder rather than correcting it.
+`tasks/typed-nulls.md`, which removes the second scalar builder rather than correcting it;
+that spec's premise that a bare literal short-circuits to null is false, as the second pin
+shows. Pinned by `bug_a_typed_null_in_arithmetic_is_the_column_on_the_device` and
+`bug_a_typed_null_literal_is_a_column_of_zeros_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t166"></a>
 ### #166 — physical planning drops a LIMIT interval, and the answer changes
@@ -371,7 +374,8 @@ end-to-end list, with q2 carrying the union-that-cannot-interleave claim in its 
 the CPU pad alone would make the oracle answer a query the device refuses.
 Unfreezing buys a pass-through of the probe side and the refusal goes. Pinned, both sides
 refusing, by `bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti
-siblings (`gpu_tests/join_cases.rs`); a zero-row build *batch* is not this — the device pads over it.
+siblings (`gpu_tests/join_cases.rs`) through `without_build`, which `empty-build.md`'s driver
+fix does not reach: retarget or delete them by hand. A zero-row build *batch* is not this.
 
 <a id="t173"></a>
 ### #173 — the frozen surface cannot build a table out of nothing
