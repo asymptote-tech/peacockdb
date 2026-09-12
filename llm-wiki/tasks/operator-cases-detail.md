@@ -740,3 +740,56 @@ the pages. Findings:
   #163 at 18 lines carries a `Fix:` line; #187 was over before this task. Left.
 - nit, dropped — the eight `bug_` helpers duplicated across the seven files are assertion sugar,
   not mechanism; the signoff carries them as the harness finding they are.
+
+### 2026-09-12 — round 1 addressed: the Welford pins go red on the type, four join cases, one emit case with nulls
+
+Seven items, three files, no production file and no wiki page but this one.
+
+**The Welford pins (important ×2).** `welford_answered` (`aggregate_cases.rs`) now casts and
+renames the cpu's count alone — `stddev(f64)` Int64 — and compares it against the device's raw
+`[key, count]` (`gpu.project(&[0, 1])`, name and type untouched), so `names_and_types` is what
+pins the Int64 export. The moments comparison and its 1e-11 `close` are gone with
+`welford_moments_by_key`; the module has no tolerance anywhere, and the non-dyadic Welford state
+stays the harness finding recorded above. Red shown by simulating #163's fix — the expectation's
+count cast to the declared UInt64 — on shad-gpu `20260912T082832-308302`, 18 passed 2 failed,
+both pins on the same line:
+
+    cpu and gpu differ: slot 0: schema differs
+      cpu: … Field { name: "stddev(f64)", data_type: UInt64, … }
+      gpu: … Field { name: "stddev(f64)", data_type: Int64, … }
+
+then restored (`diff` identical) and green.
+
+**`null_equals_null=true` for Right and RightAnti (important).** `null_equals_null_is_honoured_by_a_right_join`
+and `a_right_anti_join_under_null_equals_null_agrees`, both green — the second closes #59's
+RightAnti pin from the other side (the device under `false` is the cpu under `true`, and the
+`true` case agrees on both). The section's comment says Left and Full have no case there because
+the device refuses their first probe batch before the flag matters.
+
+**Nits.** `bug_a_left_join_over_two_probe_batches_refuses_the_first_on_the_device` and
+`bug_a_full_join_over_two_probe_batches_refuses_the_first_on_the_device`, `PROBE_COPY`, the
+streamed-probe comment reworded. The aggregate family's head states the Welford init is grouped
+only and why. The shortcut case's comment says its count is Int64 rather than the planner's
+UInt64 because a UInt64 count is #163's signed-arm refusal on the cpu and the case is about the
+finalize. `null_keys_land_in_the_same_lane` (`emit_cases.rs`) now scatters a key column whose
+even rows are null and whose odd rows spread over the lanes, and asserts on the slots: exactly
+one lane's `key` carries nulls and it carries all thirty-two — kept rather than deleted, because
+the all-null case shows one lane and this one shows the null rows not following their neighbours.
+
+**Runs on shad-gpu** (neighbour at 37 GiB; every pool built):
+- `20260912T082832-308302` the simulated fix, `PCK_TEST_FILTER=tests::gpu_tests::aggregate_cases`:
+  18 passed 2 failed (the two Welford pins, above).
+- `20260912T082900-309141` aggregate: `peacockdb_core_gpu_lib` **20 passed**.
+- `20260912T082905-309176` join: **89 passed** (85 + 4).
+- `20260912T082910-309211` emit: **15 passed**.
+- `20260912T082923-309250` guard: `every_kind_has_a_case_or_is_a_forwarder` passed.
+- `20260912T082928-309282` rung whole, `PCK_RUN_CPP=0`, empty filter: `peacockdb_core_gpu_lib`
+  **285 passed** (281 + 4), `test_gpu_corpus` 8 passed.
+- Local: `cargo test --features rust-only -p peacockdb-core --lib` 530 passed, 2 ignored; gpu
+  `--no-run` 0 warnings; `rustfmt --check` clean on the three files; caps counted (longest: the
+  7-line doc above `welford_answered`).
+
+**Counts after the round.** The module is 230 (`crate::tests::gpu_tests`), the rung **285**;
+operator cases 204: **128 green, 76 `bug_`** — join 47/42, the rest as before. #152 now has 28
+`bug_` tests, #59 still 9. The page's gpu figures move by +4: `--lib -- gpu_tests::` 281 → 285,
+the gpu row 289 → 293, Rust 1385 → 1389, the grand total 1821 → 1825.

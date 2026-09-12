@@ -6,11 +6,9 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Array, ArrayRef, AsArray, Int32Array, Int64Array, UInt64Array};
+use datafusion::arrow::array::{ArrayRef, AsArray, Int32Array, Int64Array, UInt64Array};
 use datafusion::arrow::compute::cast;
-use datafusion::arrow::datatypes::{
-    DataType, Field, Float64Type, Int32Type, Schema as ArrowSchema, UInt8Type,
-};
+use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema, UInt8Type};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::ScalarValue;
 
@@ -105,65 +103,25 @@ fn batch_of(columns: Vec<(&str, ArrayRef)>) -> RecordBatch {
     RecordBatch::try_from_iter(columns).expect("columns of one length")
 }
 
-/// A Welford state's `[key, count]` as the device answers it: the count exported Int64
-/// (#163), both under the aggregate's alias, since `aggregate.cpp` names a struct's children
-/// by it — unobservable past the sink, which relabels by the declared schema, so no ticket
-/// carries the names.
-fn welford_keys_and_counts_as_exported(batch: &RecordBatch, count_type: &DataType) -> RecordBatch {
-    batch_of(vec![
-        ("key", batch.column(0).clone()),
-        ("stddev(f64)", cast(batch.column(1), count_type).unwrap()),
-    ])
-}
-
-/// The mean and m2 by key. Welford's update is order-dependent and the mean is not
-/// dyadic, so the two engines agree to the last few digits and no further — the corpus
-/// compares a stddev under `golden_approx_std` at this same relative 1e-11
-/// (`test_support/corpus_gpu.rs`), and the harness's exact compare has no such mode.
-fn welford_moments_by_key(batch: &RecordBatch) -> Vec<(Option<i32>, f64, f64)> {
-    let keys = batch.column(0).as_primitive::<Int32Type>();
-    let means = batch.column(2).as_primitive::<Float64Type>();
-    let m2s = batch.column(3).as_primitive::<Float64Type>();
-    let mut rows: Vec<(Option<i32>, f64, f64)> = (0..batch.num_rows())
-        .map(|row| {
-            (
-                keys.is_valid(row).then(|| keys.value(row)),
-                means.value(row),
-                m2s.value(row),
-            )
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
-}
-
-/// The device's Welford state against the cpu's at slot `at`: keys and counts exactly, the
-/// count in the device's type, and the moments to a relative 1e-11.
+/// The device's Welford state against the cpu's at slot `at`: the keys and the counts, the
+/// device's columns raw and the cpu's under the device's own name and type — the count
+/// exported Int64 (#163), both under the aggregate's alias, since `aggregate.cpp` names a
+/// struct's children by it. The relabelling is unobservable past the sink and carries no
+/// ticket; the type is what `names_and_types` pins. The mean and m2 are not compared: a
+/// Welford update is order-dependent and a mean is not dyadic, so the two engines agree to
+/// the last few digits and no further, and the harness has no tolerance (see the detail file).
 fn welford_answered(outcome: &Outcome, at: usize) {
     let cpu = cpu_slot(outcome, at);
     let gpu = &outcome.gpu.as_ref().expect("the device answers")[at][0];
-    assert_same(
-        &[vec![welford_keys_and_counts_as_exported(
-            cpu,
-            &DataType::Int64,
-        )]],
-        &[vec![welford_keys_and_counts_as_exported(
-            gpu,
-            &DataType::Int64,
-        )]],
-        Order::Any,
-    );
-    for ((key, c_mean, c_m2), (_, g_mean, g_m2)) in welford_moments_by_key(cpu)
-        .into_iter()
-        .zip(welford_moments_by_key(gpu))
-    {
-        let close = |a: f64, b: f64| (a - b).abs() <= 1e-11 * a.abs().max(b.abs()).max(1.0);
-        assert!(
-            close(c_mean, g_mean),
-            "key {key:?}: mean {c_mean} vs {g_mean}"
-        );
-        assert!(close(c_m2, g_m2), "key {key:?}: m2 {c_m2} vs {g_m2}");
-    }
+    let expected = batch_of(vec![
+        ("key", cpu.column(0).clone()),
+        (
+            "stddev(f64)",
+            cast(cpu.column(1), &DataType::Int64).unwrap(),
+        ),
+    ]);
+    let raw = gpu.project(&[0, 1]).expect("a key and a count");
+    assert_same(&[vec![expected]], &[vec![raw]], Order::Any);
 }
 
 /// The cpu's grouping-set state as the device answers it: `__grouping_id` Int32 with the
@@ -185,7 +143,8 @@ fn grouping_sets_as_exported(cpu: &RecordBatch) -> RecordBatch {
 }
 
 // `GpuAggregate`: aggregators over raw rows, state out — or, with a finalize, the
-// single-node shortcut.
+// single-node shortcut. The Welford init is grouped only: a global one adds nothing the
+// grouped case and the global sum/min/max/count do not already show.
 
 /// `aggs` over `synthetic`, grouped by `key` where `grouped`, nothing finalized.
 fn init(grouped: bool, aggs: Vec<AggCall>) -> GpuAggregate {
@@ -306,7 +265,9 @@ operator_case! {
 }
 
 // The single-node shortcut: init aggregators and finalize expressions on one node. The
-// finalize indexes `[keys…, state…]`; `avg` is `sum / count` over the state.
+// finalize indexes `[keys…, state…]`; `avg` is `sum / count` over the state. The count is
+// declared Int64, not the planner's UInt64, because a UInt64 count is #163's signed-arm
+// refusal on the cpu and this case is about the finalize.
 operator_case! {
     GpuAggregate,
     fn the_single_node_shortcut_finalizes_an_average() {

@@ -60,13 +60,30 @@ operator_case! {
     }
 }
 
-// `key` is null on every eleventh row of `input()`; a null key hashes to the seed's lane on
-// both. `same` proves the null rows share one lane on both sides, not which lane that is —
-// the murmur conformance gate does that.
+// Every other row's key null, the rest spread over the lanes: a null key hashes to the
+// seed's lane, so one slot holds all thirty-two null rows and no other slot holds one —
+// which lane it is, the murmur conformance gate says.
 operator_case! {
     GpuEmitPartitions,
     fn null_keys_land_in_the_same_lane() {
-        run_both(&emit(vec![1], 4), Script::Emit(vec![input()])).same(Order::Any);
+        let half_null: ArrayRef = Arc::new(Int32Array::from_iter(
+            (0..64).map(|row| (row % 2 == 1).then_some(row)),
+        ));
+        let outcome = run_both(&emit(vec![1], 4), Script::Emit(vec![with_key(half_null)]));
+        outcome.same(Order::Any);
+        let null_rows_per_lane: Vec<usize> = outcome
+            .cpu
+            .as_ref()
+            .expect("the cpu answers")
+            .iter()
+            .map(|lane| lane[0].column(1).null_count())
+            .collect();
+        assert_eq!(null_rows_per_lane.iter().sum::<usize>(), 32);
+        assert_eq!(
+            null_rows_per_lane.iter().filter(|n| **n > 0).count(),
+            1,
+            "{null_rows_per_lane:?}"
+        );
     }
 }
 

@@ -281,8 +281,8 @@ operator_case! {
     }
 }
 
-// A streamed probe: two batches, every type that streams. Left and Full refuse their first
-// batch already, so their streamed form has no separate case.
+// A streamed probe: two batches, every type. Left and Full refuse their first batch
+// already, so the shape is named and the refusal is the same one.
 
 // #152 — the first call erased the build side and nothing copies it.
 operator_case! {
@@ -292,11 +292,27 @@ operator_case! {
     }
 }
 
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
+operator_case! {
+    GpuHashJoin,
+    fn bug_a_left_join_over_two_probe_batches_refuses_the_first_on_the_device() {
+        gpu_refuses_with(&run_both(&join(JoinType::Left), two_probes()), PROBE_COPY);
+    }
+}
+
 // #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_a_right_join_refuses_its_second_probe_batch_on_the_device() {
         gpu_refuses_with(&run_both(&join(JoinType::Right), two_probes()), BUILD_COPY);
+    }
+}
+
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
+operator_case! {
+    GpuHashJoin,
+    fn bug_a_full_join_over_two_probe_batches_refuses_the_first_on_the_device() {
+        gpu_refuses_with(&run_both(&join(JoinType::Full), two_probes()), PROBE_COPY);
     }
 }
 
@@ -340,12 +356,20 @@ operator_case! {
 }
 
 // `key` is null on every eleventh row of both sides. `true` matches them to each other on
-// both engines; the SQL default is where anti and mark part company (#59, above).
+// both engines; the SQL default is where anti and mark part company (#59, above). Left and
+// Full have no case here: the device refuses their first probe batch before the flag matters.
 
 operator_case! {
     GpuHashJoin,
     fn null_equals_null_matches_null_keys_on_an_inner_join() {
         run_both(&hash_join(JoinType::Inner, true, false, None), one_probe()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn null_equals_null_is_honoured_by_a_right_join() {
+        run_both(&hash_join(JoinType::Right, true, false, None), one_probe()).same(Order::Any);
     }
 }
 
@@ -374,6 +398,14 @@ operator_case! {
     GpuHashJoin,
     fn a_mark_join_under_null_equals_null_agrees() {
         run_both(&hash_join(JoinType::LeftMark, true, false, None), one_probe()).same(Order::Any);
+    }
+}
+
+// The other half of #59's RightAnti pin: under `true` the two engines agree outright.
+operator_case! {
+    GpuHashJoin,
+    fn a_right_anti_join_under_null_equals_null_agrees() {
+        run_both(&hash_join(JoinType::RightAnti, true, false, None), one_probe()).same(Order::Any);
     }
 }
 
