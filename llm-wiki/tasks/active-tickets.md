@@ -135,7 +135,7 @@ scale and `declared_as` casts it back, so the cpu tier is green on the same quer
 cells: `tpch/filter-project` at all five modes and `hash-join`'s `(25,2)` sum. Recorded, not fixed,
 by `bug_a_decimal_column_is_exported_at_precision_38`, `bug_a_decimal_sum_is_exported_at_precision_38`
 and `bug_decimal_arithmetic_is_exported_at_precision_38` (`src/tests/gpu_tests/`), and per call at
-every node by `a_narrow_decimal_exports_at_the_exporters_default_precision` (`wire/gpu_tests/declared.rs`).
+every node by `bug_a_narrow_decimal_is_exported_at_precision_38` (`wire/gpu_tests/declared.rs`).
 
 <a id="t188"></a>
 ### #188 — the device refuses a read with row groups and a limit together
@@ -174,10 +174,11 @@ of that tier — 13 GB SIGKILLs a runner as an infrastructure failure, not a tes
 Int16 at column index 0`. That column is `o_year`, an `extract(year from o_orderdate)` — DataFusion
 types it `Int32` and the device answers `Int16`.
 
-**Not [#187](active-tickets.md#t187), and merging them would lose the distinction.** That one is the
-device *widening* a decimal, to 38 whatever the declaration says. This is the device *narrowing* an
-integer, to the natural width for a year rather than to a maximum. Opposite direction, different
-type family, and a fix for either says nothing about the other.
+**Not [#187](active-tickets.md#t187), and merging them would lose the distinction.** That one is our
+exporter writing 38 for a precision it was never passed. This is the device *narrowing* an integer,
+to the natural width for a year: cuDF's `extract` answers `INT16` and the exporter reports it. A
+different site and a different type family, and a fix for either says nothing about the other.
+Entered at the project: `bug_an_extracted_year_declared_int32_is_exported_as_int16` (`wire/gpu_tests/declared.rs`).
 
 Not new behaviour either, only newly reached: `extract_year -> INT16` was already on record as a
 place where the DataFusion type is an imperfect proxy for the cuDF one. What is new is a corpus

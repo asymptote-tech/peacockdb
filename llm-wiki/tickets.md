@@ -126,8 +126,10 @@ No corpus column declares a `Date64`, so no cell is disabled against this and it
 rollout over sixty queries. A user reaching one gets the failure with no ticket to read.
 
 The same gap seen from the other side: a query *producing* a `Timestamp` cannot be serialized, since
-`convert_data_type` has no arm for it. That refusal has never been exercised, and whether it is clean
-or a panic is unverified.
+`convert_data_type` has no arm for it. The cast arm refuses cleanly (`a_cast_to_timestamp_is_refused_naming_the_type`,
+`wire/tests/refusals.rs`), but `serialize_schema` (`wire/serialize.rs`) maps a field type with no arm to
+`DataType::Null` silently, so a `Timestamp` column reaching a schema without a cast — a parquet column,
+say — would cross the wire declared `Null`. Device: `bug_a_date64_is_exported_as_a_millisecond_timestamp`.
 
 <a id="t199"></a>
 ### #199 — a global aggregate on an empty lane drops its identity row on the device

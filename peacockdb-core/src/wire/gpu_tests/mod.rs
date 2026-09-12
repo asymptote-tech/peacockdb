@@ -239,8 +239,8 @@ async fn a_rollup_answers_with_every_grouping_set() {
     );
 }
 
-/// Which fb kinds a device has now run, and which this walk refuses — the set T15 and T16
-/// inherit as already proven, and the one they inherit as still open.
+/// Which fb kinds a device has now run — through this file's queries or the catalog's — and
+/// which the walk refuses: the set later tasks inherit as proven, and what is still open.
 #[derive(Debug, PartialEq, Eq)]
 enum Driven {
     Handled,
@@ -259,7 +259,9 @@ fn driven(kind: FbKind) -> Driven {
         | FbKind::CoalescePartitions
         | FbKind::Repartition { .. }
         | FbKind::Aggregate { .. }
-        | FbKind::Project(ProjectRole::Finalize) => Driven::Handled,
+        | FbKind::Project(ProjectRole::Finalize)
+        | FbKind::Sort
+        | FbKind::SortPreservingMerge => Driven::Handled,
         FbKind::HashJoin { join_type } => match join_type {
             JoinType::Inner | JoinType::LeftSemi => Driven::Handled,
             _ => Driven::Refused("a join type no shape here plans"),
@@ -269,17 +271,16 @@ fn driven(kind: FbKind) -> Driven {
         | FbKind::Project(ProjectRole::Narrow) => {
             Driven::Refused("the finish pass accumulates probe keys across batches (#136)")
         }
-        FbKind::Sort | FbKind::SortPreservingMerge => Driven::Refused("no shape here plans a sort"),
         FbKind::CrossJoin | FbKind::NestedLoopJoin => {
             Driven::Refused("both copy their build side, and the ABI has no copy (#152)")
         }
     }
 }
 
-/// The kinds the queries above put on a device. Checked against the walk both ways: a kind
-/// here that no query produces is a claim on paper, and a kind produced that is not here is
-/// an arm that quietly gained a shape.
-const PROVEN: [FbKind; 10] = [
+/// The kinds the queries above and the catalog's sort shape put on a device. Checked against
+/// the walk both ways: a kind here that no query produces is a claim on paper, and a kind
+/// produced that is not here is an arm that quietly gained a shape.
+const PROVEN: [FbKind; 12] = [
     FbKind::Scan,
     FbKind::Filter,
     FbKind::PlainProject,
@@ -288,6 +289,8 @@ const PROVEN: [FbKind; 10] = [
     FbKind::Aggregate { merge: false },
     FbKind::Aggregate { merge: true },
     FbKind::Project(ProjectRole::Finalize),
+    FbKind::Sort,
+    FbKind::SortPreservingMerge,
     FbKind::HashJoin {
         join_type: JoinType::Inner,
     },
@@ -309,6 +312,7 @@ async fn the_kinds_a_device_has_run_are_the_kinds_this_file_claims() {
         (ROLLUP, ONE_LANE),
         (SUM_BY_FLAG, TWO_LANES),
         (AVG_BY_FLAG, TWO_LANES),
+        (declared::SORTED_KEYS, ONE_LANE),
     ] {
         for (_, kind) in walk(sql, knobs).await.calls {
             if !made.contains(&kind) {

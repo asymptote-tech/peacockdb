@@ -28,6 +28,9 @@ const ROWGROUP: PlanKnobs = PlanKnobs {
     small_table_bytes: SMALL_TABLE_BYTES,
 };
 
+/// The sort arm's shape, shared with `mod.rs`'s guard over the kinds a device has run.
+pub(crate) const SORTED_KEYS: &str = "SELECT n_nationkey FROM nation ORDER BY n_nationkey";
+
 async fn firings(sql: &str) -> Vec<Firing> {
     walk(sql, ONE_LANE).await.firings
 }
@@ -163,12 +166,12 @@ async fn bug_a_declared_utf8view_is_exported_as_utf8() {
 }
 
 // Query 2. [#187](../../../../llm-wiki/tasks/active-tickets.md#t187): a `Decimal128(15,2)`
-// exports as `(38,2)`. Not a divergence the device produced: cuDF's decimal carries a scale
-// and no precision, and the exporter's `column_metadata` has nowhere to put one, so
-// `to_arrow_schema` writes `max_precision` for every decimal. The 38 is our default; what
-// precision cuDF holds has no answer through this export.
+// exports as `(38,2)`. The cause is our exporter's, not cuDF's: a cuDF decimal carries a scale
+// and no precision, the exporter's `column_metadata` has nowhere to put one, so
+// `to_arrow_schema` writes `max_precision` for every decimal. What precision cuDF holds has
+// no answer through this export. Delete this test in the change that fixes #187.
 #[tokio::test]
-async fn a_narrow_decimal_exports_at_the_exporters_default_precision() {
+async fn bug_a_narrow_decimal_is_exported_at_precision_38() {
     let firings = firings("SELECT l_extendedprice FROM lineitem WHERE l_orderkey = 1").await;
     crosses_as(
         &firings,
@@ -307,7 +310,7 @@ async fn fixed_width_cast_targets_survive_the_crossing() {
 // the identity is measured outside #183's class.
 #[tokio::test]
 async fn a_sort_survives_the_crossing() {
-    let firings = firings("SELECT n_nationkey FROM nation ORDER BY n_nationkey").await;
+    let firings = firings(SORTED_KEYS).await;
     the_one_firing_of(&firings, FbKind::Sort);
     crosses_as(&firings, &DataType::Int32, &DataType::Int32);
 }

@@ -678,3 +678,58 @@ before, `--lib` 544 passed + 2 ignored (546 listed) as before; `build-test.md` u
 - rustfmt-check clean on the four files; surface 46; caps: the one new comment is 2 lines in a body, headers at 10.
 
 No git mutation.
+
+### 2026-09-12 — completeness pass: the sort arm proven, the decimal case a `bug_`, and a comment
+
+1. **`driven()` no longer refuses a sort.** `FbKind::Sort | FbKind::SortPreservingMerge` are
+   `Driven::Handled` and in `PROVEN` (10 → 12); the guard
+   `the_kinds_a_device_has_run_are_the_kinds_this_file_claims` re-walks the catalog's sort
+   shape too — `declared::SORTED_KEYS` (`SELECT n_nationkey FROM nation ORDER BY n_nationkey`,
+   `pub(crate)`, the same const `a_sort_survives_the_crossing` drives) — so `PROVEN` is
+   checked both ways over the nine walk queries and that shape. The `Driven` doc says the set
+   covers this file's queries and the catalog's; `PROVEN`'s says the same. **Shown red once**:
+   with `Sort` removed from `PROVEN` (11 entries), shipped and run alone — run
+   `20260912T111155-363466`, exit 1, `CudfSort reached a device and is not in PROVEN` at
+   `mod.rs:328`; restored to 12 and green below. One detour: the const was first `pub(super)`,
+   which `visibility::nothing_is_pub_super` refuses (`pub(crate)` is the level); fixed and the
+   device cycle repeated on the corrected binary.
+2. **`bug_a_narrow_decimal_is_exported_at_precision_38`** (was
+   `a_narrow_decimal_exports_at_the_exporters_default_precision`): every property of a `bug_`
+   test, so it is one; the comment keeps the cause — the 38 is our exporter's `max_precision`
+   default, not a width cuDF holds — and says to delete it with #187's fix. `build-test.md`:
+   its row in the known-wrong table (#187), `bug_` total 79 → 80, Schema catalog 13 → 12 with
+   the prose saying three `bug_` classes plus this one, Rust 1343 → 1342, grand total 1779 →
+   1778. **Re-added by hand:** the 68 N cells sum to 1778 (the round 1 addition with `3 + 13`
+   becoming `3 + 12`); 1778 − 67 − 369 = 1342. No other file names the old test name; #187's
+   mention is the coordinator's.
+3. **`fb_text::schema_text` carries the dependency**: a three-line doc comment — it prints the
+   fb enum with `{:?}` so a decimal has no digits, section B (`plan_text/declared.rs`) is the
+   renderer that prints them, and before section A can check section B this one has to print
+   them too. Comment only; `fb_text.rs` is otherwise byte-identical to HEAD (rustfmt's own
+   pre-existing diffs in that file are HEAD's, not applied).
+
+**Results, all fresh after the last code edit:**
+
+- gpu `--no-run` 0 warnings; `--list gpu_tests::` 304 (no test added or removed; one renamed).
+- shad-gpu, `--build`/`--push-binaries`/`--patch` rc 0 on the corrected binary:
+  `PCK_TEST_FILTER=wire::gpu_tests` → run `20260912T111526-368005`, `peacockdb_core_gpu_lib`
+  28 passed 0 failed 1 ignored (14.30 s). Empty filter → run `20260912T111552-368057`, exit 0:
+  `peacockdb_core_gpu_lib` 303 passed 0 failed 1 ignored (31.03 s); `test_gpu_corpus` 8 passed
+  (8.00 s). (The `pub(super)` binary's runs, `…T111307-365769` and `…T111333-365880`, were the
+  same numbers.)
+- `cargo test --features rust-only -p peacockdb-core --lib` 544 passed, 0 failed, 2 ignored;
+  `--test test_module_layout` 17.
+- rustfmt-check clean on `gpu_tests/mod.rs` and `declared.rs`; surface 46; caps: new
+  comments ≤ 3 lines above a declaration, headers at 10.
+
+No git mutation. `tickets.md` and `active-tickets.md` carry the coordinator's uncommitted
+edits in this worktree; not touched by this round.
+
+### 2026-09-12 — completeness approved
+
+Reviewer (what is wrong): 0 blocking, 3 important — the walk's `driven()` still refusing the sort
+kinds, the narrow-decimal case a `bug_` test in all but name, #191 and #200 carrying sentences the
+catalog falsified. Analyst (what is missing): 0 blocking, 3 important — the same `driven()` arm,
+#200's stale sentence plus the `serialize_schema` `Null` observation with no durable home, §4's
+renderer ticket declined with its dependency sentence only in this file; no sentence of
+architecture.md left falsified. All six closed above; the signoff is on the spec. Awaiting CI.
