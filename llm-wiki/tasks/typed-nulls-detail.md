@@ -189,3 +189,39 @@ static builders, `get_scalar_value` and `WholePlan` hoisted into a test header p
 source on the `peacock_plan_tests` target, which no task lists, so it is left for the
 coordinator to call. Comment caps: `ast_scalar`'s doc 6 lines, the `expr.h` block 3, the LIKE
 line 2, the longest test comment 4.
+
+### 2026-09-12 — plan task 9 done: the catalog check, the recount, #198 closed, architecture read
+
+**1. The catalog.** `grep -rn 'bug_' peacockdb-core/src/wire/gpu_tests/` finds four `bug_` tests
+in `declared.rs` (#183 Utf8View→Utf8, #187 the narrow decimal, #191 the extracted year, #200
+Date64), none about nullability; nothing to delete. The catalog had no query reaching the AST
+literal path: its one nullability finding is query 8, `SELECT n_nationkey, CASE WHEN
+n_nationkey > 10 THEN n_name END AS maybe FROM nation`, whose CASE has no ELSE, and
+`expr_writer.rs:136-139` writes no `else_expr` for that — so no null literal is on the wire at
+all, and a CASE is refused by `is_ast_able` besides. Task 10 recorded that query's flag as the
+exporter's `has_nulls()` limitation (`n_nationkey` has no null), which is unrelated to #198.
+
+**2. The recount.** `grep -c '^TEST(' cpp/tests/gpu/test_plan_executor.cpp` = 34, the
+Plan-executor row's N. The ten C++ rows: 12 + 6 + 34 + 4 + 4 + 4 + 1 + 4 + 4 + 1 = 74. The 68 N
+cells of the two tables re-added by script: 1785, the grand total; Rust 1342 + C++ 74 + Python
+369 = 1785. `bug_` rows in the Known-wrong table: 78, its total. Nothing on the page moved in
+this step; the numbers were already right after tasks 4 and 5–8.
+
+**3. #198 closed.** Its text moved from `tickets.md` to `archive/archived-tickets.md` under
+Done, placed after #49 as #194 was, in the archive's form: the description as written, then a
+`**Done 2026-09-12, by task 11 …**` paragraph naming the branch, the two commits, the shape of
+the fix and the seven `Literals.*` gtests; the third paragraph's "is disabled / removes / is
+false / shows" became past tense. `tickets.md`: the Critical correctness index row 23 → 22
+without #198; the counter (210) untouched. Links repointed to
+`archive/archived-tickets.md#t198`: `tasks/tasks.md` task 11's line (state word untouched),
+`tasks/operator-cases.md:29` and `:72` (the latter now says the pins went red and were
+deleted). `build-test.md` had no #198 link left after task 4. The one remaining
+`tickets.md#t198` link is the frozen spec's own first line (`typed-nulls.md:5`), which only the
+signoff may touch. The reports under `reports/` and other tasks' detail files keep their `#198`
+text as records.
+
+**4. `architecture.md`.** Read the node table's `CudfFilter`/`CudfProject` rows (`:820-821`),
+the `ExprContext` paragraph (`:943-946`), the `cpp/src/` layout line (`:987`) and a sweep for
+"literal", "valid", "twice", "fixed_point", "ScalarValue", "is_null". None of its sentences
+describes the literal arm, the two builders, assumed validity or the decimal-as-double
+conversion, so nothing was falsified and nothing changed.
