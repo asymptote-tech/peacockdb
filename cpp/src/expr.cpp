@@ -166,8 +166,33 @@ struct AstLiteralFor {
   }
 };
 
-static std::unique_ptr<cudf::ast::literal> ast_literal_for(cudf::scalar& s) {
+std::unique_ptr<cudf::ast::literal> ast_literal_for(cudf::scalar& s) {
   return cudf::type_dispatcher(s.type(), AstLiteralFor{}, s);
+}
+
+/// The scalar the AST can hold for this literal: `build_scalar`'s, except for
+/// `Decimal128`, which cuDF's AST has no literal for and which crosses as a scaled
+/// double — the behaviour that predates the one-builder change, kept. The wire value is
+/// rewritten as a Float64 `ScalarValue` and handed to `build_scalar`, rather than a
+/// scalar built here or a flag on `build_scalar`: one scalar builder, and the validity
+/// flag copied through `literal_is_valid` so the wire flag keeps its one reader.
+std::unique_ptr<cudf::scalar> ast_scalar(const fb::ScalarValue* sv) {
+  if (sv->type() != fb::DataType_Decimal128) return build_scalar(sv);
+
+  __int128 val = (static_cast<__int128>(sv->decimal_hi()) << 64) |
+                 static_cast<unsigned __int128>(sv->decimal_lo());
+  int8_t scale = sv->decimal_scale();
+  double dval = static_cast<double>(val);
+  for (int8_t i = 0; i < scale; ++i) dval /= 10.0;
+  for (int8_t i = 0; i > scale; --i) dval *= 10.0;
+
+  flatbuffers::FlatBufferBuilder fbb;
+  fb::ScalarValueBuilder sb(fbb);
+  sb.add_type(fb::DataType_Float64);
+  sb.add_is_null(!literal_is_valid(sv));
+  sb.add_float_val(dval);
+  fbb.Finish(sb.Finish());
+  return build_scalar(flatbuffers::GetRoot<fb::ScalarValue>(fbb.GetBufferPointer()));
 }
 
 cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
@@ -200,7 +225,7 @@ cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
       auto* sv = lit->value();
       if (!sv) throw std::runtime_error("LiteralExpr has no value");
 
-      auto scalar = build_scalar(sv);
+      auto scalar = ast_scalar(sv);
       auto& ref = *scalar;
       ctx.scalars.push_back(std::move(scalar));
       return ctx.keep(ast_literal_for(ref));
@@ -446,7 +471,7 @@ static std::unique_ptr<cudf::scalar> build_scalar(const fb::ScalarValue* sv) {
     }
     default:
       throw std::runtime_error(
-          "unsupported scalar type: " + std::to_string(sv->type()));
+          std::string("unsupported scalar type: ") + fb::EnumNameDataType(sv->type()));
   }
 }
 
@@ -849,6 +874,8 @@ std::unique_ptr<cudf::column> build_column(
                       : nullptr;
       if (!psv || !psv->string_val())
         throw std::runtime_error("LIKE pattern must be a string literal");
+      // Valid by the guard above: a typed null carries no string_val, so it never gets
+      // here (Literals.ALikeWithANullPatternIsRefusedByTheGuard is the check).
       cudf::string_scalar pattern(psv->string_val()->str(), true);
       auto mask = cudf::strings::like(
           cudf::strings_column_view{strcol->view()}, pattern);

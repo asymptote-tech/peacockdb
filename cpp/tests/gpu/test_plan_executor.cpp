@@ -4,6 +4,7 @@
 #include "peacock_gpu.h"
 #include "plan_executor.h"
 #include "plan_executor_internal.h"
+#include "peacock/expr.h"
 #include "generated/gpu_plan_generated.h"
 
 #include <cudf/column/column_view.hpp>
@@ -17,6 +18,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <map>
 #include <filesystem>
 #include <string>
@@ -80,6 +82,36 @@ static flatbuffers::Offset<fb::Expr> make_null_literal(
   fb::ScalarValueBuilder sb(fbb);
   sb.add_type(type);
   sb.add_is_null(true);
+  auto sv = sb.Finish();
+  auto lit = fb::CreateLiteralExpr(fbb, sv);
+  return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
+}
+
+/// A Decimal128 literal. `hi`/`lo` form the 128-bit signed value; Arrow scale is the
+/// count of fractional digits, so 250 at scale 2 is 2.50.
+static flatbuffers::Offset<fb::Expr> make_decimal_literal(
+    flatbuffers::FlatBufferBuilder& fbb, int64_t hi, uint64_t lo,
+    uint8_t precision, int8_t scale) {
+  fb::ScalarValueBuilder sb(fbb);
+  sb.add_type(fb::DataType_Decimal128);
+  sb.add_decimal_hi(hi);
+  sb.add_decimal_lo(lo);
+  sb.add_decimal_precision(precision);
+  sb.add_decimal_scale(scale);
+  auto sv = sb.Finish();
+  auto lit = fb::CreateLiteralExpr(fbb, sv);
+  return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
+}
+
+/// The same as a typed NULL: `is_null` set, precision and scale carried as the Rust
+/// serializer carries them for a null decimal, and no value.
+static flatbuffers::Offset<fb::Expr> make_null_decimal_literal(
+    flatbuffers::FlatBufferBuilder& fbb, uint8_t precision, int8_t scale) {
+  fb::ScalarValueBuilder sb(fbb);
+  sb.add_type(fb::DataType_Decimal128);
+  sb.add_is_null(true);
+  sb.add_decimal_precision(precision);
+  sb.add_decimal_scale(scale);
   auto sv = sb.Finish();
   auto lit = fb::CreateLiteralExpr(fbb, sv);
   return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
@@ -1442,6 +1474,166 @@ TEST(Literals, AComparisonAgainstATypedNullKeepsNoRows) {
   // key of 0, so a literal built as a zero keeps that one row, and "fewer than 25"
   // would pass on it.
   EXPECT_EQ(result.table->num_rows(), 0);
+}
+
+/// A one-column project of `expr` over nation, aliased `name`.
+static std::vector<uint8_t> nation_project(flatbuffers::FlatBufferBuilder& fbb,
+                                           flatbuffers::Offset<fb::Expr> expr,
+                                           const char* name) {
+  auto scan_node = nation_scan_node(fbb);
+  auto exprs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{expr});
+  auto alias = fbb.CreateString(name);
+  auto aliases = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<flatbuffers::String>>{alias});
+  auto proj = fb::CreateCudfProject(fbb, exprs, aliases, scan_node);
+  return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfProject, proj.Union()));
+}
+
+TEST(Literals, ANullDecimalLiteralInAnAstExpressionIsNull) {
+  flatbuffers::FlatBufferBuilder fbb;
+
+  // A Decimal128 reaches the AST as a scaled double, the one conversion the delegation
+  // does not cover, so this is the arm that breaks if the refactor breaks. Both operands
+  // sit under a cast to Float64: is_ast_able types a bare decimal literal from the wire
+  // and refuses it, but a cast to Float64 is AST-able and carries the literal in.
+  auto as_double = make_cast_expr(fbb, make_col_ref(fbb, 0, "n_nationkey"),
+                                  fb::DataType_Float64);
+  auto null_dec = make_cast_expr(
+      fbb, make_null_decimal_literal(fbb, /*precision=*/15, /*scale=*/2),
+      fb::DataType_Float64);
+  auto sum = make_binary_expr(fbb, as_double, fb::BinaryOp_Plus, null_dec);
+  auto buf = nation_project(fbb, sum, "keyplusnull");
+
+  WholePlan plan(buf);
+  const auto& result = plan.result();
+
+  ASSERT_EQ(result.table->num_columns(), 1);
+  auto view = result.table->view().column(0);
+  ASSERT_EQ(view.size(), 25);
+  EXPECT_EQ(view.null_count(), view.size());
+}
+
+TEST(Literals, ADecimalLiteralStillCarriesItsScaledValue) {
+  flatbuffers::FlatBufferBuilder fbb;
+
+  // The non-null half of the same conversion, routed the same way. 250 at scale 2 is
+  // 2.50, so every row is its key plus 2.5; a test asserting only "not null" would pass
+  // with the scaling lost.
+  auto as_double = make_cast_expr(fbb, make_col_ref(fbb, 0, "n_nationkey"),
+                                  fb::DataType_Float64);
+  auto dec = make_cast_expr(
+      fbb, make_decimal_literal(fbb, /*hi=*/0, /*lo=*/250, /*precision=*/15, /*scale=*/2),
+      fb::DataType_Float64);
+  auto sum = make_binary_expr(fbb, as_double, fb::BinaryOp_Plus, dec);
+  auto buf = nation_project(fbb, sum, "keyplustwofifty");
+
+  WholePlan plan(buf);
+  const auto& result = plan.result();
+
+  ASSERT_EQ(result.table->num_columns(), 1);
+  auto view = result.table->view().column(0);
+  ASSERT_EQ(view.type().id(), cudf::type_id::FLOAT64);
+  ASSERT_EQ(view.size(), 25);
+  EXPECT_EQ(view.null_count(), 0);
+  // nation.parquet holds keys 0..24 in file order, and a project keeps that order.
+  for (cudf::size_type row = 0; row < 25; ++row) {
+    EXPECT_DOUBLE_EQ(get_scalar_value<double>(view, row), double(row) + 2.5)
+        << "row " << row;
+  }
+}
+
+TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
+  // One row per fb::DataType. `literal` is false where build_scalar has no arm; the
+  // refusal must then name the type, or a type added to the wire later lands in a
+  // dispatch with no arm and the failure says nothing about which.
+  struct Case {
+    fb::DataType type;
+    bool literal;
+  };
+  const std::vector<Case> cases = {
+      {fb::DataType_Null, false},      {fb::DataType_Boolean, true},
+      {fb::DataType_Int8, true},       {fb::DataType_Int16, true},
+      {fb::DataType_Int32, true},      {fb::DataType_Int64, true},
+      {fb::DataType_UInt8, false},     {fb::DataType_UInt16, false},
+      {fb::DataType_UInt32, false},    {fb::DataType_UInt64, false},
+      {fb::DataType_Float16, false},   {fb::DataType_Float32, true},
+      {fb::DataType_Float64, true},    {fb::DataType_Utf8, true},
+      {fb::DataType_LargeUtf8, true},  {fb::DataType_Binary, false},
+      {fb::DataType_LargeBinary, false}, {fb::DataType_Date32, true},
+      {fb::DataType_Date64, false},    {fb::DataType_Decimal128, true},
+      {fb::DataType_Utf8View, true},   {fb::DataType_BinaryView, false},
+  };
+  // The list is a copy of the enum; this is what makes it fail by count when the enum
+  // grows, which is enough to send the next reader here.
+  ASSERT_EQ(cases.size(), std::size(fb::EnumValuesDataType()));
+
+  for (const auto& c : cases) {
+    const char* name = fb::EnumNameDataType(c.type);
+    flatbuffers::FlatBufferBuilder fbb;
+    fb::ScalarValueBuilder sb(fbb);
+    sb.add_type(c.type);
+    sb.add_is_null(true);  // a typed null needs no value fields for any type
+    fbb.Finish(sb.Finish());
+    const auto* sv = flatbuffers::GetRoot<fb::ScalarValue>(fbb.GetBufferPointer());
+
+    if (c.literal) {
+      std::unique_ptr<cudf::scalar> s;
+      ASSERT_NO_THROW(s = peacock::ast_scalar(sv)) << "ast_scalar refused " << name;
+      EXPECT_NO_THROW(peacock::ast_literal_for(*s)) << "no ast::literal arm for " << name;
+      continue;
+    }
+    try {
+      auto s = peacock::ast_scalar(sv);
+      peacock::ast_literal_for(*s);
+      ADD_FAILURE() << "expected a refusal for " << name;
+    } catch (const std::exception& e) {
+      EXPECT_NE(std::string(e.what()).find(name), std::string::npos)
+          << "the refusal for " << name << " does not name it: " << e.what();
+    }
+  }
+}
+
+TEST(Literals, ALikeWithANullPatternIsRefusedByTheGuard) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto scan_node = nation_scan_node(fbb);
+
+  // The pattern keeps its own valid string_scalar rather than going through
+  // build_scalar, on the strength of the guard above it: a typed null serializes with
+  // no string_val, and the guard refuses that. This is the check that it does.
+  auto null_pattern = make_null_literal(fbb, fb::DataType_Utf8);
+  auto like = fb::CreateLikeExprNode(fbb, make_col_ref(fbb, 1, "n_name"), null_pattern);
+  auto predicate = fb::CreateExpr(fbb, fb::ExprNode_LikeExprNode, like.Union());
+  auto filter = fb::CreateCudfFilter(fbb, predicate, scan_node);
+  auto buf = finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfFilter, filter.Union()));
+
+  try {
+    WholePlan plan(buf);
+    ADD_FAILURE() << "a LIKE with a null pattern was accepted";
+  } catch (const std::exception& e) {
+    EXPECT_NE(std::string(e.what()).find("LIKE pattern must be a string literal"),
+              std::string::npos)
+        << e.what();
+  }
+}
+
+TEST(Literals, ABareTypedNullIsStillNull) {
+  flatbuffers::FlatBufferBuilder fbb;
+
+  // No binary op. A project asks is_ast_able before build_column, and a numeric literal
+  // is AST-able, so this takes build_expr and compute_column, not build_column's
+  // literal short-circuit; the fix is what made this path answer null.
+  auto buf = nation_project(fbb, make_null_literal(fbb, fb::DataType_Int64), "justnull");
+
+  WholePlan plan(buf);
+  const auto& result = plan.result();
+
+  ASSERT_EQ(result.table->num_columns(), 1);
+  auto view = result.table->view().column(0);
+  // The type matters as much as the nulls: a typed null that comes back as some other
+  // type is still wrong, and nothing downstream would notice on an all-null column.
+  EXPECT_EQ(view.type().id(), cudf::type_id::INT64);
+  ASSERT_EQ(view.size(), 25);
+  EXPECT_EQ(view.null_count(), view.size());
 }
 
 // Hand-built plans over tpch.minimal, 19 MB of parquet; measured peak 2.9 MiB

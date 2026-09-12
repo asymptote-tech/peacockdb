@@ -112,3 +112,80 @@ converting the `ScalarValue` before the call, and its test is what pins that.
 `gpu_tests` is `#[cfg(all(test, feature = "gpu"))]`, so the rust-only rung cannot see the
 deletion and was not run. `rustfmt --check` clean on `exec_cases.rs`. Comment caps: the two
 new doc blocks are 4 and 3 lines; the one body comment 2.
+
+### 2026-09-12 — plan tasks 5–8 done: the decimal arm, the wire-type walk, the LIKE line, the bare null
+
+**Task 5, `ast_scalar`** (`expr.cpp`, below `ast_literal_for`). Shaped as the spec's §1 says
+rather than as the plan's draft: the `Decimal128` wire value is rewritten as a Float64
+`ScalarValue` (a local `FlatBufferBuilder`, `float_val` = the scaled double, `is_null` copied
+through `!literal_is_valid(sv)`) and handed to `build_scalar`, so cuDF scalars are still built in
+one function and the wire flag still has one reader. The plan's draft built a
+`numeric_scalar<double>` in `ast_scalar` itself, a second scalar construction. The reassembly and
+scaling lines are the deleted arm's, copied from `git show HEAD~1:cpp/src/expr.cpp`. The literal
+arm calls `ast_scalar`; `build_scalar`'s refusal now names the type
+(`fb::EnumNameDataType`) instead of its number, which is what task 6's test reads.
+
+**The plan's decimal tests were the wrong shape, and passed for the wrong reason.** Run
+`20260912T120625-376772` (helpers + tests 5a, 5b, 7, 8, no code change): `ANullDecimalLiteral…`
+passed and `ADecimalLiteralStillCarriesItsScaledValue` failed with the output typed
+`DECIMAL128` (id 27), not the plan's predicted throw. Cause: `is_ast_able` types operands from
+the wire, `infer_expr_type` of a `Decimal128` literal is `DECIMAL128`, and the binary arm refuses
+it before any conversion exists — so `CAST(col AS Float64) + <decimal literal>` takes the column
+path, where `build_scalar` already honours the flag. The plan's own paragraph says so and then
+prescribes that shape. What carries a decimal literal into `build_expr` is a bare literal, a
+unary over it, or a cast to Int64/Float64 over it (`infer_expr_type` of a cast is its target,
+and the cast arm recurses). Both tests now wrap the literal in `CAST(… AS Float64)`. Run
+`20260912T120915-378573`: both red with `[in CudfProject] no cudf::ast::literal constructor for
+cudf type id 27`, the plan's predicted failure; 7 and 8 green by design; `peacock_plan_tests`
+31 passed 2 failed, the other four binaries green.
+
+**Task 6, the header.** `ast_scalar` and `ast_literal_for` lost `static` and are declared in
+`cpp/src/peacock/expr.h` under a three-line comment naming the test. The spec's only "no header
+change" is the middle of "No ABI symbol, no header change, no `TableResult` change" — the ABI
+triple, so the ABI header `cpp/include/peacock_gpu.h` — and its Restriction paragraph names no
+header; `expr.h`'s own head says it is the private header that carries test-facing declarations
+(`is_ast_able`, `binop_output_type` by the same route). The plan's file table said "unchanged —
+no signature moves"; a new declaration moves none. `test_plan_executor.cpp` includes
+`peacock/expr.h` (its include path already has `cpp/src`).
+
+**Task 6, the walk** (`Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot`): all 22
+`fb::DataType` enumerators as typed nulls, the list's length pinned to
+`std::size(fb::EnumValuesDataType())`, and a refusal must contain the type's enum name. Outcome
+per type on the device:
+- literal (12): Boolean, Int8, Int16, Int32, Int64, Float32, Float64, Utf8, LargeUtf8,
+  Utf8View, Date32, Decimal128 (as a Float64 through `ast_scalar`).
+- refused by `build_scalar`, naming the type (10): Null, UInt8, UInt16, UInt32, UInt64, Float16,
+  Binary, LargeBinary, Date64, BinaryView. `convert_data_type` can emit every one of these, so a
+  planner that puts one in an AST expression is refused with its name; none reaches
+  `ast_literal_for`, whose own throw (a scalar with no `ast::literal` constructor) nothing
+  reaches today.
+
+**Task 7.** The LIKE pattern keeps its own valid `string_scalar`; the line above it names the
+guard (`!psv->string_val()` refuses a typed null, which serializes with no `string_val` —
+`serialize.rs:92`) and the test. `Literals.ALikeWithANullPatternIsRefusedByTheGuard` runs a
+filter `n_name LIKE NULL::Utf8` and asserts the refusal text `LIKE pattern must be a string
+literal`. Green from the start: the guard predates this task.
+
+**Task 8.** `Literals.ABareTypedNullIsStillNull`: a project of `NULL::Int64` alone comes back
+`INT64` with 25 nulls. The path, read from `project.cpp:36-52` and `is_ast_able`: not a
+`ColumnRef`, so `is_ast_able` is asked first; a numeric `LiteralExpr` is AST-able; so
+`build_expr` + `compute_column`, never `build_column`'s literal short-circuit. The comment says
+so. Green from the start now that task 4 landed, red before it (the deleted rust pin showed the
+zeros).
+
+**Runs**: `20260912T121217-380575`, narrow, exit 0 — `peacock_cpu_tests` 12, `peacock_gpu_tests`
+6, `peacock_plan_tests` 34 passed (all seven `Literals.*` `OK`), `peacock_tpch_tests` 4,
+`peacock_tpchv_tests` 4; `peacockdb_core_gpu_lib` 15 passed 1 ignored; `test_gpu_corpus` 0 run.
+`20260912T121414-382391`, filter empty, exit 0 — the C++ five as above (the LIKE line and the
+wiki counts went in between the two runs, so this run carries the final `expr.cpp`);
+`peacockdb_core_gpu_lib` 301 passed 0 failed 1 ignored; `test_gpu_corpus` 8 passed. No golden
+moved. Every `--build` rc 0 with 0 warnings; every rmm pool built.
+
+`build-test.md`: Plan-executor 29 → 34 (five tests: two decimal, the walk, the LIKE guard, the
+bare null), C++ 69 → 74, grand total 1780 → 1785; the row's text and its second example moved
+with it. `test_plan_executor.cpp` is now 1648 lines with about 340 of them the `Literals` suite,
+past the plan's ~150-line mark for a sibling `test_literals.cpp`; a sibling needs the nine
+static builders, `get_scalar_value` and `WholePlan` hoisted into a test header plus a second
+source on the `peacock_plan_tests` target, which no task lists, so it is left for the
+coordinator to call. Comment caps: `ast_scalar`'s doc 6 lines, the `expr.h` block 3, the LIKE
+line 2, the longest test comment 4.
