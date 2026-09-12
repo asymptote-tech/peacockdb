@@ -817,3 +817,10 @@ two bullets now say so, by the coordinator; no code change, since `SURFACE` alre
 what a `deny` would. `architecture.md`: no sentence falsified; one pre-existing wrong path
 (`plan::SMALL_TABLE_BYTES` → `planner::`) fixed in passing. Signoff appended to the spec. `done`
 waits on CI for the head that carries code, `4bcd9bac`; the commits above it are documentation.
+
+### 2026-09-12 — done
+
+CI run `34670818551` on `4bcd9bac`, the head that carries code, green on every job: both cuDF
+legs, the 25.02 GPU build, the remote device tier, cost report (which runs the layout test and
+`SURFACE`), changed paths, S3 metadata. Task 6 is `done`; PR #148 awaits the human's merge, after
+task 5's #147.
