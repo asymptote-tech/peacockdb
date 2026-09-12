@@ -512,8 +512,8 @@ pub(crate) struct EmittedBatch {
     pub(crate) bytes: usize,
 }
 
-// Written for the goldens and the driver tests; the CLI reads `batches` and nothing else
-// reads the rest outside a test build, so the lint is read there, not in a plain build.
+// Written for the goldens and the driver tests; the CLI reads `batches`, the harness and the
+// renderer some of the rest, and eight fields only a test module, so the lint is read there.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 pub struct RunReport {

@@ -615,7 +615,7 @@ On `1e4ac7ac`. All four findings taken; layout stays at 17 cases.
    `planner/tests/plan_goldens.rs` reads the index the driver schedules from —
    `PlanIndex::build(tree.as_ref())`, then `index.nodes.iter().map(|node| node.post_order)`.
    `--lib -- planner::tests::plan_goldens` 19 passed; the register's both-way check green with
-   `has_finish_pass` as its one row.
+   its eight pre-task rows (the three this task had added are what left).
 2. **`RunReport`'s 16 non-`batches` fields are `pub(crate)`** (17 counted `batches`), and
    `TraceEvent`, `Underestimate`, `EmittedBatch` with them. The key measured: with none, a
    plain build warns on 8 fields and the `(lib)` half of `cargo test` — harness on, `cfg(test)`
@@ -675,3 +675,14 @@ nothing, not even a test — it keeps an `#[allow(dead_code)]` saying so rather 
 in a review round; and about sixty `pub` fields sit on `pub(crate)` structs in `wire/writer.rs`,
 `driver/accounting.rs`, `driver/single_partition.rs` and the driver's test mocks — unreachable
 already, so the lint is silent, and a sweep of them is a separate cosmetic pass. Round 2 next.
+
+### 2026-09-12 — review round 2: 0 blocking, 0 important, 2 nits — the round closes; completing
+
+Every round-1 item verified closed on `239e807f`: the reviewer modelled all five readers over
+the tree (46 items, 5 fields, no visible `mod`), tried eleven spellings against them, checked
+that reading `PlanIndex` directly asserts the same property, that `not(test)` is the right key
+for `RunReport` (eight fields only tests read), and that the field pin's scope covers every
+reachable `pub` field (the 65 elsewhere sit on `pub(crate)` or private types). Two prose nits
+fixed by the coordinator: the `RunReport` comment named who reads what loosely, and the detail
+entry said the register had one row. Board to `completing`; the completeness pass is two
+readings dispatched together, a fresh reviewer and a fresh analyst.
