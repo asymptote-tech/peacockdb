@@ -201,3 +201,61 @@ Results:
     cargo build --features rust-only -p peacockdb-core            0 warnings
     CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run   exit 0, 0 warnings
     rustfmt --check wire/{attach,writer,tests}.rs                 clean
+
+### 2026-09-12 — plan task 4 done: `Device`, and the round trip
+
+New: `peacockdb-core/src/tests/gpu_tests/{mod,device,harness_cases}.rs`. `src/tests/mod.rs`
+declares it `#[cfg(all(test, feature = "gpu"))] mod gpu_tests;` — not the plan's
+`#[cfg(feature = "gpu")]`: `a_test_module_is_named_for_its_rung` requires that literal gate on any
+`mod gpu_tests`, whatever its parent's gate, so the `test` in it is redundant under `lib.rs`'s
+`#[cfg(test)] mod tests;` and mandatory to the layout test. Everything inside is `pub(crate)` or
+private; the facade items come from `crate::executor::{Batch, CpuBatch, GpuBatch, GpuContext,
+RowRange}`, never `executor::gpu_backend::…`.
+
+- `device.rs` — `Device { ctx: GpuContext }`: `open(node)` is `attach_recipes` → `executor_create`
+  at `GPU_BUDGET` (the constant `gpu_backend/gpu_tests`' `Session::open` uses) → `begin_plan` on
+  the bytes, asserting the node count the device reports equals `wire_nodes()`; `ctx()`;
+  `upload(&RecordBatch) -> GpuBatch` through `to_ffi` of a `StructArray` and
+  `peacock_handle_from_arrow`, priced as `CpuBatch::byte_size`; `fetch(GpuBatch, RowRange) ->
+  Option<RecordBatch>` through `peacock_result_from_handle`, `None` at `len == 0`, the schema read
+  off the `StreamReader` rather than the first batch (the plan's first check); `Drop` ends the plan
+  and destroys the executor. `error_of` reads `peacock_last_error`.
+- `harness_cases.rs` — the plan's five cases plus `the_session_holds_the_plan_of_one_stub_it_loaded`
+  (`ctx().recipes` is one wire node, `get(0)` None, `get(1)` Some): `ctx()` has no caller until task
+  5 and warned `never used`, and a case that reads what `open` loaded is the honest answer.
+
+Red first: with the cases and the module declaration in place and no `device.rs`, the gpu-rung
+compile fails `error[E0432]: unresolved import super::device` (and `E0583: file not found for
+module device` with the declaration) — `Device` does not exist. There is no device on this box, so
+the case-level red the coordinator asked for (a fetch before an upload; the clamp) cannot be run
+here; the cases' first execution was the device run below, and every one passed on it.
+
+Cases (6): `tests::gpu_tests::harness_cases::{the_session_holds_the_plan_of_one_stub_it_loaded,
+an_uploaded_batch_comes_back_as_itself, a_row_range_ships_those_rows_in_order,
+a_range_past_the_end_ships_nothing, a_range_over_the_end_is_clamped,
+zero_rows_round_trip_as_zero_rows_under_the_schema}`. `Date32`, `Boolean`, `Utf8`, `Float64`,
+`Int32`/`Int64` all round-trip through `cudf::from_arrow` and the IPC export exactly; the zero-row
+export carries one zero-row batch under the schema.
+
+shad-gpu (neighbour at 37 GiB of 143.7; no pool warning in either log):
+
+    run 20260912T045412-244057  PCK_RUN_CPP=0 PCK_TEST_FILTER=tests::gpu_tests::harness_cases  rc 0
+      peacockdb_core_gpu_lib   6 passed; 0 failed; 590 filtered out
+      test_gpu_corpus          0 passed; 8 filtered out
+    run 20260912T045433-244101  PCK_RUN_CPP=0, no filter (the rung whole)                       rc 0
+      peacockdb_core_gpu_lib   61 passed; 0 failed; 535 filtered out   (55 + 6)
+      test_gpu_corpus          8 passed; 0 failed
+
+Results here:
+
+    CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run   exit 0, 0 warnings
+    <staged lib> --list gpu_tests:: (LD_LIBRARY_PATH per build-test.md)                      61 cases, the six above by name
+    scripts/build-test-shadgpu.sh --build; --push-binaries --patch                            exit 0, 0 warnings
+    cargo test --features rust-only -p peacockdb-core --lib                                   530 passed, 2 ignored (unchanged: the rust rung sees no device type)
+    cargo test … --test test_module_layout / --test test_ci_coverage                          17 / 8
+    rustfmt --check src/tests/mod.rs src/tests/gpu_tests/{mod,device,harness_cases}.rs        clean
+
+`test_ci_coverage`'s guard is `each_rung_has_its_ci_line_and_the_cli_is_built`: it asserts the
+staged lib binary is the one the run loop hands `rung=gpu_tests::`, and says nothing per module —
+cargo's filter is a substring, so `tests::gpu_tests::harness_cases::…` is reached by that line as
+it stands, and the guard stays green.
