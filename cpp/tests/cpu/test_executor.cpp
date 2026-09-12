@@ -127,6 +127,19 @@ TEST(PeacockGpu, ExecutorNullOut) {
   EXPECT_NE(peacock_executor_create(0, nullptr), 0);
 }
 
+// The harness's upload refuses before it reads either Arrow struct: a null output, and
+// an executor with no plan loaded, since the registry it adopts into is the session's.
+TEST(PeacockGpu, HandleFromArrowNeedsASession) {
+  peacock_executor_t* ex = nullptr;
+  ASSERT_EQ(peacock_executor_create(0, &ex), 0);
+  int schema = 0, array = 0;
+  uint64_t handle = 0;
+  EXPECT_NE(peacock_handle_from_arrow(ex, &schema, &array, nullptr), 0);
+  EXPECT_NE(peacock_handle_from_arrow(ex, &schema, &array, &handle), 0);
+  EXPECT_STREQ(peacock_last_error(ex), "no plan loaded (call peacock_executor_begin_plan first)");
+  peacock_executor_destroy(ex);
+}
+
 // The timing switch, on the tier that has no GPU because it needs none: it is a
 // process-global bool, and the whole safety argument for the benchmark work is that
 // the correctness suite never turns it on. A switch stuck on would put a

@@ -54,3 +54,46 @@ this tree, and the sanctioned form exists for each:
 ### 2026-09-12 — plan task 1 dispatched: the device adopts an Arrow batch
 
 Board set to `building`.
+
+### 2026-09-12 — plan task 1 done: the device adopts an Arrow batch
+
+Both facts the plan rests on held: `cudf::from_arrow` at `gpu_executor.cpp:340` inside
+`peacock_spark_partition_ids`; handles allocated inline as `impl_->next_handle++` then
+`impl_->registry.emplace` (`node_session.cpp:244,335,423,466,507,540`); the session owned by
+`struct peacock_executor` (`gpu_executor.cpp:35`). No `HandleRegistry` type has appeared, so
+`adopt` went on `NodeSession`. `TableResult` still carries only `table` and `column_names` — no
+per-column precision to fill from the decimal format string, so that plan clause did not apply.
+
+- `int peacock_handle_from_arrow(peacock_executor_t* executor, const void* schema, const void*
+  array, uint64_t* out_handle)` — declared after the conformance hook in
+  `cpp/include/peacock_gpu.h`, defined at the end of `cpp/src/gpu_executor.cpp`. Null argument
+  → 1 with no message; no session → 1 with `no plan loaded (call peacock_executor_begin_plan
+  first)` in `peacock_last_error`; a failed import → 1 with the exception's message and the
+  session left standing. Success → 0 and the handle.
+- `uint64_t NodeSession::adopt(TableResult result)` — declared after `slice_handle` in
+  `cpp/src/plan_executor.h`, defined after `slice_handle`'s definition in `cpp/src/node_session.cpp`.
+- The extern in `peacockdb-ffi/src/lib.rs`, directly after `peacock_spark_partition_ids` inside
+  `unsafe extern "C"`. It is gated by the enclosing `pub mod raw`'s
+  `#[cfg(not(feature = "rust-only"))]`; no per-item gate.
+- No `AbiSymbol` names it; `peacockdb-core/src/` is untouched.
+- One test beyond the plan's five files: `PeacockGpu.HandleFromArrowNeedsASession` in
+  `cpp/tests/cpu/test_executor.cpp`, beside `ExecutorNullOut` — the null-output and no-session
+  refusals, which run under `ctest -L cpu` with no device. Red first (`'peacock_handle_from_arrow'
+  was not declared in this scope`), green after. The adoption itself needs a live session and a
+  cuDF table, so its proof is plan task 4's round trip on shad-gpu.
+- `git clang-format` refuses an unstaged tree, so `clang-format --lines=<range>` was run over
+  exactly the changed ranges of the five C++ files; the two signatures took the 100-column wrap.
+
+Results:
+
+    ctest --test-dir cpp/build -L cpu            100% tests passed, 0 tests failed out of 1 (12 gtests, was 11)
+    scripts/build-test-shadgpu.sh --build        exit 0, 0 warnings; staged test_gpu_corpus and peacockdb_core_gpu_lib
+    nm -D target-cudf-rapids-cuda-12.2/debug/build/peacockdb-ffi-c2ff8be8e892f44d/out/lib/libpeacock_gpu.so | grep handle_from_arrow
+                                                 0000000000052ab0 T peacock_handle_from_arrow
+    nm -D cpp/install/lib/libpeacock_gpu.so      0000000000046af0 T peacock_handle_from_arrow
+    cargo build --features rust-only -p peacockdb-core                        exit 0, 0 warnings
+    CUDF_ROOT=… scripts/cargo-cudf.sh build -p peacockdb-core --features gpu  exit 0, 0 warnings
+    rustfmt --check --edition 2024 peacockdb-ffi/src/lib.rs                   clean
+
+For plan task 8: `cpp/tests/cpu/test_executor.cpp` gained one gtest, so `build-test.md`'s "C++
+CPU/FFI unit" row is 12 and the header's C++ figure moves by one.
