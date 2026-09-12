@@ -93,6 +93,11 @@ One lane in and four out is the shape — a shuffle above a single-lane source. 
 refuses the 1-to-N case or the input carries something it will not take is the first thing to
 establish.
 
+2026-09-12: the input carries something it will not take. Line 179 is the kernel's key-type
+switch, and q15's `#11 CudfRepartition{Hash, 1→4}` hashes `total_revenue@4`, a decimal
+(`recipe-payloads.txt`). `gpu_tests/emit_cases.rs` runs 1→4 and 1→64 green on int, string, date
+and composite keys and reaches this line only on a decimal, float or boolean: this is [#95](../tickets.md#t95).
+
 <a id="t185"></a>
 ### #185 — `GpuAggregateBatches` reports its own output as `in_rows`
 

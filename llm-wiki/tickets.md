@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 206), which is also the counter for
+New tickets take the next free number (currently 207), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -16,7 +16,7 @@ reference still resolves there.
 | Section | Open | Tickets |
 |---|--:|---|
 | [Critical correctness](#critical-correctness) | 20 | #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
-| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 15 | #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
+| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
@@ -241,6 +241,20 @@ a data dir panics instead of being skipped. Found during the comment audit.
 
 ## Blockers for disabled coverage
 
+<a id="t206"></a>
+### #206 — a float or boolean partition key is refused on the device
+
+A `GpuEmitPartitions` hashing a `Float64` or a `Boolean` column is refused by the device's kernel,
+where comet's hasher answers it on the cpu.
+
+`spark_hash_partition.cu`'s type switch takes STRING, INT8-64 and DATE32 and fails on everything
+else: `unsupported key column cuDF type_id=10` for a double, `11` for a boolean, `27` for a decimal
+(that one is #95). Spark hashes a double as its long bits and a boolean as an int, and comet's
+`create_murmur3_hashes` does both, so the cpu lane assignment is defined and the device's is a
+refusal. Any `GROUP BY` or join key of either type at more than one lane reaches it. Pinned by
+`bug_a_float_key_is_refused_on_the_device` and `bug_a_boolean_key_is_refused_on_the_device`
+(`gpu_tests/emit_cases.rs`).
+
 <a id="t203"></a>
 ### #203 — the device cannot cast a number to text
 
@@ -363,7 +377,10 @@ murmur3 covers int/date/timestamp/composite/null; decimal deferred (float indefi
 Needed by the first shuffle on a decimal key (tpch q18 `o_totalprice`, q22 `c_acctbal`,
 tpcds `i_current_price`). Dispatch by *logical* precision (≤18 → low 8 LE bytes of int128;
 >18 → raw 16B LE) and thread precision through the partition FFI. Until then
-`spark_hash_partition.cu` throws a loud "decimal partition key unsupported".
+`spark_hash_partition.cu`'s type switch fails with `unsupported key column cuDF type_id=27`,
+which is what [#184](tasks/active-tickets.md#t184)'s q15 hits on `total_revenue`. The cpu's comet
+hasher takes the decimal, so the shape is a refusal on one side. Pinned by
+`bug_a_decimal_key_is_refused_on_the_device` (`gpu_tests/emit_cases.rs`).
 
 <a id="t57"></a>
 ### #57 — Value-form CASE produces wrong results on the GPU column path

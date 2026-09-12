@@ -6,6 +6,7 @@ mod coverage;
 mod accumulate_cases;
 mod aggregate_cases;
 mod device;
+mod emit_cases;
 mod exec_cases;
 mod harness_cases;
 mod script;

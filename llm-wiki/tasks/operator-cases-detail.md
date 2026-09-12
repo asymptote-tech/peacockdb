@@ -298,3 +298,62 @@ lane order as `drive` writes it, the merge's answer at the last `Done`'s slot.
 
 **For plan task 8's tidy.** A third `bug_` assertion helper, `each_answers` (both sides against
 hand-written slots), joins `gpu_answered` and `batch_of` as candidates for `Outcome`.
+
+### 2026-09-12 — plan task 4 done: `GpuEmitPartitions`
+
+`src/tests/gpu_tests/emit_cases.rs`, 15 cases; `mod emit_cases;` after `coverage`;
+`GpuEmitPartitions` out of `PENDING`. No production file touched; `Given::name()` never reached.
+Every case is one lane in and N out, each lane a slot: `Script::Emit` pushes one slot per output
+lane per call, so a row in the wrong lane is a wrong slot.
+
+**Four cases beyond the spec's rows**, one per remaining arm of the kernel's key-type switch
+(`spark_hash_partition.cu`, which takes STRING, INT8-64 and DATE32): an `i64` key and a date key
+(green), a float key and a boolean key (both `bug_`). The switch is the one thing about the scatter
+a synthetic key can probe that the conformance gate does not.
+
+**Green (12).** `four_lanes_on_an_int_key_place_every_row_the_same`,
+`sixty_four_lanes_leave_most_empty_and_agree_on_all`, `null_keys_land_in_the_same_lane`,
+`two_keys_combine_the_same_way`, `a_string_key_places_every_row_the_same`,
+`an_int64_key_places_every_row_the_same`, `a_date_key_places_every_row_the_same`,
+`each_batch_is_scattered_on_its_own`, `a_zero_row_batch_scatters_into_n_zero_row_lanes` (and
+asserts the four slots), `a_batch_of_one_key_leaves_n_minus_one_lanes_empty`,
+`a_batch_of_all_null_keys_lands_in_one_lane`, `a_stream_of_zero_row_rows_zero_row_is_scattered_per_batch`.
+So the 1→4 and 1→64 shapes are fine on every supported key type, with nulls, with two keys, and
+over zero rows: a zero-row batch comes back as four zero-row lanes on both sides.
+
+**`bug_` (3)**, all one refusal site — `spark_hash_partition.cu:179`, the `CUDF_FAIL` in the type
+switch — with the cpu answering through comet's hasher each time:
+- `bug_a_decimal_key_is_refused_on_the_device` — #95. Verbatim: `gpu refused: execute_node(#1
+  CudfRepartition{Hash, 1→8}): CUDF failure at:…/cpp/src/spark_hash_partition.cu:179: peacock
+  spark_partition_ids: unsupported key column cuDF type_id=27 (supported: STRING, dict-encoded
+  string, INT8/16/32/64, DATE32; timestamp/decimal/float partition keys pending — extend the kernel
+  + re-prove comet conformance, see #18/Inc7)`. The refusal comes before any export, so #187 is not
+  reached from here.
+- `bug_a_float_key_is_refused_on_the_device` — **#206, new**. Verbatim: the same message with
+  `CudfRepartition{Hash, 1→4}` and `type_id=10`.
+- `bug_a_boolean_key_is_refused_on_the_device` — #206. The same with `type_id=11`.
+
+**#184 is #95.** Line 179 is the type switch, and `recipe-payloads.txt`'s q15 block shows its
+`#11 CudfRepartition{Hash, 1→4}` hashing `total_revenue@4`, a decimal. The harness runs 1→N green
+on every supported type, so the 1-to-N shape itself is not the failure. Written onto #184 as a
+dated paragraph (`active-tickets.md`); it closes with #95.
+
+**Tickets.** #206 (Blockers for disabled coverage), text in `tickets.md`; counter now 207, Contents
+count 16. #95 gains the actual message (its text claimed "decimal partition key unsupported"), the
+#184 link and the pin. #187 does not reproduce from this family — the refusal is earlier — and stays
+reproduced by the exec and aggregate families.
+
+**The `Emit` arm** ran on a device for the first time and needed nothing: fifteen cases through it,
+N slots per call in lane order, empty lanes exported as zero-row batches.
+
+**Runs on shad-gpu** (neighbour at 37 GiB; every pool built):
+- `20260912T072411-286609` green-form, `PCK_RUN_CPP=0 PCK_TEST_FILTER=tests::gpu_tests::emit_cases`:
+  `peacockdb_core_gpu_lib` 12 passed 3 failed (the three above); `test_gpu_corpus` 0 of 8.
+- `20260912T072608-287568` after the rewrite: `peacockdb_core_gpu_lib` **15 passed 0 failed**.
+- `20260912T072623-287604` guard: `every_kind_has_a_case_or_is_named_as_pending_or_excluded` passed.
+- `20260912T072638-287640` rung whole, `PCK_RUN_CPP=0`, empty filter: `peacockdb_core_gpu_lib`
+  **171 passed** (156 + 15), `test_gpu_corpus` 8 passed.
+- Local: `cargo test --features rust-only -p peacockdb-core --lib` 530 passed, 2 ignored; the gpu
+  `--no-run` build 0 warnings; `rustfmt --check` clean on `emit_cases.rs` and `coverage.rs`.
+
+`PENDING` now holds `GpuLoadParquet`, `GpuHashJoin`, `GpuCrossJoin`, `GpuNestedLoopJoin`.

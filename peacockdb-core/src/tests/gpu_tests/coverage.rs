@@ -43,7 +43,6 @@ const PENDING: &[&str] = &[
     "GpuHashJoin",
     "GpuCrossJoin",
     "GpuNestedLoopJoin",
-    "GpuEmitPartitions",
 ];
 
 #[test]
