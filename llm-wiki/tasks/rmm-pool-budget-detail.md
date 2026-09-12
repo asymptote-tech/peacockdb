@@ -503,3 +503,36 @@ clean, 12 commits, no conflict. Not documentation alone, so the task is `rebase 
 until a developer re-runs the shad-gpu cycle from this box — now Ubuntu 24.04 / glibc 2.39, the
 host class `02069415` exists for — and CI is green on the rebased PR #144. The worktree has no
 `cpp/build26` or `target-cudf-*` yet, so this cycle's builds are cold.
+
+### 2026-09-11 — re-proven after the rebase: the same 52 + 63, at 2.39, in 12 minutes
+
+The proving cycle from `d41f223a` on the reprovisioned dev box (Ubuntu 24.04, glibc 2.39, 8 cores,
+31 GiB), four phases as four calls, every one exit 0. Timestamps are UTC and cross midnight.
+
+| phase | exit | elapsed | note |
+|---|--:|--:|---|
+| `--build` (cold: no `cpp/build26`, no `target-cudf-*`, ccache 0 hits) | 0 | 9m55s (23:58:37 → 00:08:32) | configure found `cuvs 25.02.01` and `Arrow 19.0.1` under `cudf_ROOT` — `62335cff` holds; 81 ninja steps, 5 gtest binaries, 5 rust binaries staged, no warnings |
+| `--push-binaries` | 0 | 9s | 0 rsync retries; `sha256sum` of all 11 shipped files agrees on both hosts |
+| `--patch` | 0 | 3s | `glibc 2.39 already installed in /home/info/glibc-2.39; skipping the build`; every shipped executable verified against `/home/info/glibc-2.39/lib/ld-linux-x86-64.so.2` — `02069415` holds, no `version GLIBC_2.3x not found` anywhere |
+| `--run-detached` + `--run-status` | 0 | 73s (run `20260912T001212-111418`, 00:12:12 → 00:13:25) | `GPU test run OK` |
+
+Pool lines, in run order: `1.0`, `1.0`, `69.0`, `30.0 GiB reserved of 103.0 GiB free`. C++
+11 + 6 + 27 + 4 + 4 = 52. Rust `test_gpu_abi` 4, `test_gpu_corpus` 8, `test_gpu_executors` 31,
+`test_gpu_recipe_walk` 10, `test_inc2_conformance` 10 = 63. No skips, no failures, no golden
+written. Counts identical to the green cycle before the rebase.
+
+Cheap guards first, on the rebased tree in `./target`: `test_ci_coverage` 7 passed,
+`test_module_layout` 11 passed, both `--features rust-only`, both exit 0.
+
+What differed from the previous cycle, none of it a finding: the free figure is 103.0 GiB rather
+than 87.4 because the neighbour (pid 1814433) held 37 GiB instead of 53; the binaries are patched to
+2.39 rather than 2.35 because this is a 24.04 host, which is the point of the rebase; the cold build
+took ten minutes rather than the hour budgeted, since this box has 8 cores and 31 GiB. A CI job
+(`peacockdb-ci/run-34659402333-1`, its own tree) was running `test_gpu_corpus` when the build
+started and had finished before the gate launched, so no collision and no #178 line. The host's
+stale `/home/info/peacockdb/cpp/build/` still holds three old gtest binaries that `--patch` also
+rewrites; the gate globs `cpp/install/bin` and never sees them.
+
+Host left as found: 37 GiB neighbour, 106 GiB free, nothing of ours running. Local tree clean but
+for this entry; `cpp/build26`, `cpp/install`, `target-cudf-rapids-cuda-12.2` are gitignored build
+products and stay warm for the next cycle.
