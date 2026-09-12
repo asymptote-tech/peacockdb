@@ -493,3 +493,74 @@ groups), fixed before the final cycle.
   and "Schema catalog" (14).
 
 No git mutation: `declared.rs` and `refusals.rs` are new and unstaged.
+
+### 2026-09-12 — plan task 7 done: the statement of what was measured
+
+Docs only; `git diff --stat` touches `llm-wiki/` alone. No build, no device run.
+
+**The measurement table**, one row per (node kind, call), complete over `attach.rs`'s
+eighteen `NodeRef` arms. "Measured" means a catalog case (`wire/gpu_tests/declared.rs`) compared
+the firing's exported schema with its declaration; "exported" means the driver's own case
+(`wire/gpu_tests/walk.rs`) read the export and asserted only that it answered.
+
+| node kind | call (pattern) | declared | measured by | verdict |
+|---|---|---|---|---|
+| `GpuLoadParquet` | `CudfScan` (per batch) | yes | queries 1–13, 15 | agrees on `Date32`, `Int32`, `Int64`, names, order, arity; **`bug_a_declared_utf8view_is_exported_as_utf8` (#183)** enters here; decimals at 38 (#187, the exporter's) |
+| `GpuFilter` | `CudfFilter` (per batch) | yes | queries 2–6, 13, 15 | agrees; inherits #183 (query 6) and the precision default |
+| `GpuProject` | `CudfProject` (per batch) | yes | queries 3, 7–10, 12, 13 | agrees on casts to `Int64`/`Float64`, `Decimal128(38,4)`, names, order; **`bug_an_extracted_year_declared_int32_is_exported_as_int16` (#191)** and **`bug_a_date64_is_exported_as_a_millisecond_timestamp` (#200)** enter here; nullability read off the data (query 8, the exporter's) |
+| `GpuSort` | `CudfSort` (per batch) | yes | **nobody** | **declared and never measured**: every `ORDER BY` plans `GpuAccumulateBatchesAndSort` (task 2's arm) and no shape reaches a bare `GpuSort` |
+| `GpuCoalesceAllBatches` | `CudfCoalescePartitions` (at done) | yes | exported only — `every_firing_of_a_declared_call_is_measured_and_no_undeclared_one_is` | **declared, exported, held to no claim**: at `tp1-rowgroup` the coalesce-all shapes (anti/semi/cross join) put the several batches on the probe side, which the walk refuses (#152) |
+| `GpuUnload` | `result_from_handle` (per handle) | yes | every query | carries what entered below it: #183, #191, #200; precision and nullability the exporter's |
+| `GpuAggregate` | `CudfAggregate{Partial}` (per batch), `CudfProject{finalize}` (per batch, self-finalizing) | no | — | `declared-schemas-derived.md` |
+| `GpuAccumulateBatchesAndSort` | `CudfSort` (per batch), `CudfSortPreservingMerge` (at done) | no | — | derived task |
+| `GpuAggregateBatches` | `CudfCoalescePartitions`, `CudfAggregate{Merge}` (per compaction), `CudfProject{finalize}` (at done) | no | — | derived task |
+| `GpuMergeSortedPartitions` | `CudfSortPreservingMerge` (at done) | no | — | derived task |
+| `GpuEmitPartitions` | `CudfRepartition` (per batch) | no | — | derived task |
+| `GpuHashJoin` | `CudfHashJoin` (per probe batch); with a finish pass `CudfProject{probe keys}`, `CudfCoalescePartitions`, `CudfHashJoin`, `CudfProject{null pad}`/`{narrow}` (at done) | no | — | derived task |
+| `GpuCrossJoin` | `CudfCrossJoin` (per probe batch) | no | — | derived task |
+| `GpuNestedLoopJoin` | `CudfNestedLoopJoin` (per probe batch) | no | — | derived task |
+| `GpuLimit` | `slice_handle` (per straddling batch) | no | — | derived task |
+| `GpuMergePartitions`, `GpuUnion`, `GpuInterleave` | none | — | — | no recipe; nothing to declare |
+
+Two rows matter: `CudfSort`, declared by task 3 and checked by nothing on a device, and the
+coalesce-all, exported but never compared. Both are claims the catalog does not back, and this
+table is the only place that says so.
+
+**`build-test.md`.** New `### Known-wrong behaviour` under Test categories, below the second
+table: the why sentence, the runtime, `**Total: 79.**`, one row per `bug_` test — test (linked),
+asserts (read off each test's comment and assertion), ticket (anchor form the page uses), runs
+(shad-gpu, all of them). **79 confirmed by grep** over the whole repo: `fn bug_` under
+`peacockdb-core/src` — accumulate 5, aggregate 7, emit 3, exec 7, join 42, nested 7, source 5,
+`wire/gpu_tests/declared.rs` 3; nothing under `peacockdb-core/tests`, `cpp/` (the only `bug_`
+hits there are `debug_`), or the Python. Arithmetic as decided: Operator harness 230 → 154,
+Schema catalog 14 → 11, grand total 1856 → 1777, Rust 1420 → 1341; block headers keep their
+`--list` figures (cpu `--lib` 545, gpu `gpu_tests::` 303) and the header paragraph gains the
+second reason a `--list` total exceeds the rows, plus the `bug_` total beside the grand total
+with the one sentence. **Checked by hand:** the 67 N cells of the two tables sum to 1777 —
+447 + 1 + 20 + 3 + 26 + 14 + 32 + 23 + 5 + 4 + 13 + 8 + 10 + 2 + 2 + 2 + 2 + 2 + 4 + 4 + 1 + 30 +
+2 + 16 + 1 + 90 + 64 + 1 + 29 + 9 + 43 + 5 + 13 + 31 + 11 + 27 + 3 + 16 + 2 + 3 + 7 + 1 + 154 +
+10 + 4 + 11 + 10 + 31 + 4 + 26 + 8 + 17 + 37 + 41 + 216 + 19 + 93 + 12 + 6 + 27 + 4 + 4 + 4 + 1 +
+4 + 4 + 1 = 1777 — and 1777 − 67 (C++) − 369 (Python) = 1341 Rust.
+
+**The runtime.** `$CUDF_ROOT/include/cudf/version_config.hpp` on the build host: `25.2.2`
+(`CUDF_VERSION_MAJOR 25`, `MINOR 2`, `PATCH 2`). `cpp/install/lib` ships no `libcudf`;
+`build-test-shadgpu.sh` puts `$HOME/miniforge3/envs/rapids-cuda-12.2/lib` on the run's
+`LD_LIBRARY_PATH`, and that env on shad-gpu carries the same `version_config.hpp`, `25.2.2`.
+So the device binary links shad-gpu's own libcudf 25.02.02 — the plan's 25.02, at patch 2.
+Named in the `bug_` section's preamble.
+
+**`architecture.md`.** The "Types are a plan fact" paragraph (Node display) said the declared
+schema "checks nothing"; corrected to "the golden checks nothing", and one paragraph added
+beneath it: six calls declare, the payload golden prints them, the catalog holds scan, filter,
+project and unload to the declaration, `CudfSort` is declared and unreached, the coalesce-all
+exported and unclaimed, the three `bug_` classes named. Nothing else on the page spoke of
+per-call declarations.
+
+**Tickets.** None new; no finding required one. **Nullability, for the record** (the plan's
+self-review item): arrow 54's `RecordBatch::try_new` refuses null values under a non-nullable
+field, so the direction the engine could get wrong is caught; the direction it cannot report —
+a nullable declaration over a batch with no null — is the exporter's `has_nulls()` flag, and
+query 8 records it as a limitation rather than a ticket.
+
+Pages touched: `build-test.md`, `architecture.md`, this file. The completeness signoff in the
+spec is not written; it follows review.
