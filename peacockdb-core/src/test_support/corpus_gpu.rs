@@ -5,25 +5,27 @@
 //! names a golden. It ignores the regeneration variables rather than honouring them — a
 //! device that can author its own golden proves nothing against it.
 //!
-//! What the tree assertion is worth is worth stating: `run` is generic
-//! over the backend, so both engines walk one driver over one plan and produce the same
-//! shape by construction. The evidence is the rows and the bytes under it. The shape check
-//! stays because it costs nothing and goes red on the day that construction stops holding.
+//! `run` is generic over the backend, so both engines walk one driver over one plan and
+//! produce the same shape by construction; the evidence is the rows and the bytes under it.
+//! The shape check stays because it costs nothing and goes red the day that stops holding.
+
+use std::collections::HashMap;
 
 use datafusion::arrow::array::RecordBatch;
-use peacockdb_core::executor::run;
-use peacockdb_core::executor::{GpuBackend, GpuContext};
-use peacockdb_core::plan_text::render_run;
-use peacockdb_core::wire::{RecipePlan, attach_recipes};
 use peacockdb_ffi::raw::{
     PeacockExecutor, peacock_executor_begin_plan, peacock_executor_create,
     peacock_executor_destroy, peacock_executor_end_plan, peacock_last_error,
 };
 
+use crate::executor::{GpuBackend, GpuContext, run};
+use crate::plan::GpuNode;
+use crate::plan_text::render_run;
+use crate::wire::{RecipePlan, attach_recipes};
+
 use super::corpus::{plan_at, run_cpu};
-use super::corpus_golden;
-use super::mode::{BUDGET, Mode, mode_named};
-use super::{GpuResultMode, assert_results_match, batches_to_sorted_str, gpu_result_mode};
+use super::{
+    BUDGET, Mode, SKIPPED, assert_results_match, batches_to_sorted_str, corpus_golden, mode_named,
+};
 
 /// A device session over one plan: the recipes attached and the buffer handed across, which
 /// is the whole of what a `GpuContext` needs. Owns the executor and ends the plan on drop,
@@ -34,7 +36,7 @@ struct Session {
 }
 
 impl Session {
-    fn open(tree: &dyn peacockdb_core::plan::GpuNode, what: &str) -> Self {
+    fn open(tree: &dyn GpuNode, what: &str) -> Self {
         let recipes = attach_recipes(tree).unwrap_or_else(|e| panic!("{what}: no recipes: {e}"));
         let mut executor: *mut PeacockExecutor = std::ptr::null_mut();
         assert_eq!(
@@ -84,7 +86,7 @@ fn error_of(executor: *mut PeacockExecutor) -> String {
 
 /// The whole of a device corpus case: plan, run on the device, then the two read-only
 /// assertions — the mode's `.cpu.txt` section, and the result the declaration names.
-pub async fn gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, gpu_oracle: &str) {
+pub(crate) async fn gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, gpu_oracle: &str) {
     let mode = mode_named(mode);
     let what = format!("{dataset}/{query} at {} on a device", mode.name);
     let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
@@ -124,7 +126,7 @@ fn assert_oracle_suits_the_golden(
     what: &str,
 ) {
     let section = corpus_golden::section_of(&corpus_golden::result_golden(dataset, sf), query);
-    let frozen = !section.starts_with(corpus_golden::SKIPPED);
+    let frozen = !section.starts_with(SKIPPED);
     match gpu_result_mode(gpu_oracle) {
         GpuResultMode::LiveCpu => assert!(
             !frozen,
@@ -184,7 +186,138 @@ async fn assert_result(
             "{what}: the device's answer differs from the result golden, written at {author}"
         ),
         Some(tolerance) => {
-            super::assert_sorted_str_approx(rows.trim_end(), actual.trim_end(), tolerance, &what)
+            assert_sorted_str_approx(rows.trim_end(), actual.trim_end(), tolerance, &what)
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum GpuResultMode {
+    GoldenExact,
+    GoldenApprox,
+    GoldenApproxStddev,
+    LiveCpu,
+    Skip,
+}
+
+/// Map a `corpus_query!` `gpu_oracle` keyword to its [`GpuResultMode`].
+fn gpu_result_mode(s: &str) -> GpuResultMode {
+    match s {
+        "golden_exact" => GpuResultMode::GoldenExact,
+        "golden_approx" => GpuResultMode::GoldenApprox,
+        "golden_approx_std" => GpuResultMode::GoldenApproxStddev,
+        "live_cpu" => GpuResultMode::LiveCpu,
+        "skip" => GpuResultMode::Skip,
+        other => panic!(
+            "corpus_query!: unknown gpu_oracle '{other}' \
+             (expected golden_exact|golden_approx|golden_approx_std|live_cpu|skip)"
+        ),
+    }
+}
+
+/// Float-tolerant comparison of two `batches_to_sorted_str` renderings. The data
+/// rows are grouped by their NON-numeric cells (so a ULP difference in a numeric
+/// cell can't reorder the sorted lines and break pairing — same idea as
+/// `assert_results_match`'s float path), and every numeric cell must agree within
+/// `tol` relative error. Used for the result-golden approx path (q14/q39).
+fn assert_sorted_str_approx(golden: &str, actual: &str, tol: f64, query: &str) {
+    fn split_cells(line: &str) -> Vec<String> {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() < 2 {
+            return vec![line.trim().to_string()];
+        }
+        parts[1..parts.len() - 1]
+            .iter()
+            .map(|c| c.trim().to_string())
+            .collect()
+    }
+    // Column NAMES and the data rows as cells — never the borders. Arrow sizes each column
+    // to its widest printed cell, so the ascii art encodes the values this comparator exists
+    // not to compare bit-for-bit: one digit more in a float moved a border by a dash and
+    // failed the test a line before the tolerance that allows it was reached.
+    fn parse(s: &str) -> (Vec<String>, Vec<Vec<String>>) {
+        let lines: Vec<&str> = s.lines().collect();
+        if lines.len() <= 4 {
+            return (
+                lines.get(1).map(|l| split_cells(l)).unwrap_or_default(),
+                vec![],
+            );
+        }
+        let header = split_cells(lines[1]);
+        let data = lines[3..lines.len() - 1]
+            .iter()
+            .map(|l| split_cells(l))
+            .collect();
+        (header, data)
+    }
+    // key = non-numeric cells joined; vals = the numeric cells (as f64) per row.
+    fn index(rows: &[Vec<String>]) -> HashMap<String, Vec<Vec<f64>>> {
+        let mut m: HashMap<String, Vec<Vec<f64>>> = HashMap::new();
+        for row in rows {
+            let mut key = String::new();
+            let mut nums = Vec::new();
+            for cell in row {
+                match cell.parse::<f64>() {
+                    Ok(v) => nums.push(v),
+                    Err(_) => {
+                        key.push_str(cell);
+                        key.push('\u{1}');
+                    }
+                }
+            }
+            m.entry(key).or_default().push(nums);
+        }
+        m
+    }
+    fn tuple_cmp(a: &[f64], b: &[f64]) -> std::cmp::Ordering {
+        for (p, q) in a.iter().zip(b) {
+            match p.partial_cmp(q) {
+                Some(std::cmp::Ordering::Equal) | None => continue,
+                Some(o) => return o,
+            }
+        }
+        std::cmp::Ordering::Equal
+    }
+
+    let (gh, gd) = parse(golden);
+    let (ah, ad) = parse(actual);
+    assert_eq!(
+        gh, ah,
+        "result header/schema for {query} differs from golden"
+    );
+    let (mut gm, am) = (index(&gd), index(&ad));
+    assert_eq!(
+        gm.len(),
+        am.len(),
+        "approx result: distinct non-numeric row keys differ for {query} (golden {}, actual {})",
+        gm.len(),
+        am.len()
+    );
+    for (key, mut avs) in am {
+        let mut evs = gm.remove(&key).unwrap_or_else(|| {
+            panic!("approx result: actual row key absent from golden for {query}")
+        });
+        assert_eq!(
+            evs.len(),
+            avs.len(),
+            "approx result: row multiplicity differs for a key in {query}"
+        );
+        evs.sort_by(|a, b| tuple_cmp(a, b));
+        avs.sort_by(|a, b| tuple_cmp(a, b));
+        for (ev, av) in evs.iter().zip(&avs) {
+            assert_eq!(
+                ev.len(),
+                av.len(),
+                "approx result: numeric-cell count differs for {query}"
+            );
+            for (e, a) in ev.iter().zip(av) {
+                let d = (e - a).abs();
+                let rel = if *e != 0.0 { d / e.abs() } else { d };
+                assert!(
+                    rel <= tol,
+                    "approx result: cell rel diff {rel:.3e} > tol {tol:.0e} for {query} (golden={e}, actual={a})"
+                );
+            }
         }
     }
 }

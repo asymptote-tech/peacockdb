@@ -2,12 +2,12 @@
 //! every mode its `gpu_modes` declares.
 //!
 //! The same declaration list the cpu binary reads, so the two engines' coverage is one line
-//! per query. This binary never writes a golden — see `common::corpus_gpu`.
+//! per query. This binary never writes a golden — see `test_support`'s `corpus_gpu.rs`.
 #![cfg(not(feature = "rust-only"))]
-#[macro_use]
-mod common;
 
-use common::registry::RegistryEntry;
+use peacockdb_core::test_support::{
+    RegistryEntry, assert_registry_matches_csv, cost_golden, cpu_golden, gpu_case, result_golden,
+};
 
 /// The device's reading of a declaration: one test and one registration per enabled gpu
 /// mode, and nothing at all for `none`. The cpu arguments are consumed and dropped, which
@@ -19,7 +19,7 @@ macro_rules! corpus_query {
             paste::paste! {
                 #[tokio::test]
                 async fn [<gpu_ $dataset _ $query _ $gpu>]() {
-                    common::corpus_gpu::gpu_case(
+                    gpu_case(
                         stringify!($dataset),
                         stringify!($sf),
                         &stringify!($query).replace('_', "-"),
@@ -48,7 +48,7 @@ include!("common/corpus_cases.inc");
 /// The device does not write a golden, asserted on the real path rather than left to the
 /// fact that nothing on it happens to call the write.
 ///
-/// This binary links the write path through `mod common` exactly like the cpu one, and the
+/// This binary links the write path through `test_support` exactly like the cpu one, and the
 /// whole tier rests on the device being held to what the cpu wrote: a device that can author
 /// its own golden proves nothing against it. So both regeneration variables are set, one
 /// real device case runs, and the three files it could have touched must come back byte for
@@ -60,9 +60,9 @@ include!("common/corpus_cases.inc");
 fn a_device_run_under_a_regeneration_writes_no_golden() {
     let (dataset, sf, query, mode) = ("tpch", "1", "q6", "tp1_single");
     let files = [
-        common::corpus_golden::cpu_golden(dataset, sf, "tp1-single"),
-        common::corpus_golden::cost_golden(dataset, sf, "tp1-single"),
-        common::corpus_golden::result_golden(dataset, sf),
+        cpu_golden(dataset, sf, "tp1-single"),
+        cost_golden(dataset, sf, "tp1-single"),
+        result_golden(dataset, sf),
     ];
     let before: Vec<Vec<u8>> = files
         .iter()
@@ -77,7 +77,7 @@ fn a_device_run_under_a_regeneration_writes_no_golden() {
     let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         tokio::runtime::Runtime::new()
             .expect("a runtime")
-            .block_on(common::corpus_gpu::gpu_case(dataset, sf, query, mode, "golden_exact"));
+            .block_on(gpu_case(dataset, sf, query, mode, "golden_exact"));
     }));
     unsafe {
         std::env::remove_var("UPDATE_CANONICAL");
@@ -100,7 +100,7 @@ fn a_device_run_under_a_regeneration_writes_no_golden() {
 /// than a gap to close: `inventory` collects per linked binary.
 #[test]
 fn the_registry_matches_the_gpu_corpus_in_both_directions() {
-    common::registry::assert_registry_matches_csv(
+    assert_registry_matches_csv(
         &[
             "gpu_tp1_single",
             "gpu_tp1_rowgroup",

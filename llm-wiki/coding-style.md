@@ -153,12 +153,20 @@ Kernighan's rules, written down after the fact rather than followed from the sta
   `scripts/visibility-dump.py`. `PUB_MODULES` and `CROSS_COMPONENT_REACHES` in
   `test_module_layout/{visibility,walls}.rs` are the registers for a `pub mod` or a cross-component reach a test crate
   forces; both are empty, and a `pub mod` outside the register is a violation, not a precedent.
-- **Eight items are `pub` because a test crate forces them**: `GpuNode` and `validate`
-  (`plan/mod.rs`), `RecipePlan` and `attach_recipes` (`wire/mod.rs`), `RunReport`, `GpuBackend`
-  and `GpuContext` (`executor/mod.rs`), `render_run` (`plan_text/mod.rs`) — all named by
-  `tests/common/corpus.rs` and `corpus_gpu.rs`. [`test-support.md`](tasks/test-support.md) unforces
-  them and [`visibility.md`](tasks/visibility.md) removes them with the rest of the raw bare-`pub`
-  count, which is 200 outside `test_support`.
+- **Eight items are `pub` that nothing outside the crate names any more**: `GpuNode` and
+  `validate` (`plan/mod.rs`), `RecipePlan` and `attach_recipes` (`wire/mod.rs`), `RunReport`,
+  `GpuBackend` and `GpuContext` (`executor/mod.rs`), `render_run` (`plan_text/mod.rs`). A test
+  crate forced them until [`test-support.md`](tasks/test-support.md) moved their only readers,
+  `corpus.rs` and `corpus_gpu.rs`, into `src/test_support/`; [`visibility.md`](tasks/visibility.md)
+  removes them with the rest of the raw bare-`pub` count, which is 200 outside `test_support`.
+- **No `pub` in `test_support` names a type from another component.** The harness is what the
+  corpus binaries reach the engine through, and it is a facade only while no parameter, return
+  or `pub` field there names a component's type — std, arrow and the harness's own types are
+  what remain: `pub fn tree() -> Box<dyn GpuNode>` puts `GpuNode` on the surface under another
+  name, and it compiles. The engine type stays behind a `pub(crate)` body. The components are
+  whatever `lib.rs` declares, and `no_test_support_signature_names_a_component_type` scans
+  `test_support/mod.rs`, the one file `a_components_api_is_declared_in_its_mod_rs` lets a `pub`
+  appear in.
 - **Nesting may go three deep** where the innermost earns it — `planner/translator/scan_mapping/`
   is 720 lines behind three entry points — under the same `mod` rule at each level. A directory
   with a one-item facade and a hundred lines behind it is an implementation module wearing one.

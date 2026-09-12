@@ -43,7 +43,7 @@ paste = "1"   # derive test fn idents from the unified (dataset, sf, query, devi
 # Link-time test registry. Each test macro submits a RegistryEntry at its invocation site,
 # so testdata/cost-registry.csv can be checked against what the suite ACTUALLY declares
 # instead of scraping the suite files as text. Note inventory collects PER BINARY, so each
-# test binary verifies the columns it owns — see common::assert_registry_matches_csv.
+# test binary verifies the columns it owns — see test_support::assert_registry_matches_csv.
 inventory = "0.3"
 
 # No [patch] section needed
