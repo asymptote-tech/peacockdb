@@ -330,3 +330,11 @@ rustfmt clean on every touched file, each alone.
 Files: `executor/mod.rs`, `executor/cpu_backend/mod.rs`, `executor/gpu_backend/mod.rs`,
 `executor/driver/mod.rs`, `executor/driver/index.rs`, `executor/driver/accounting/tests.rs`,
 `executor/ffi_tests/mod.rs`, `tests/test_module_layout/test_code.rs`.
+
+### 2026-09-12 — plan task 6 dispatched: `wire/mod.rs`, 20 items, in a fresh window
+
+Plan task 5 committed as the head above. The developer that carried slices 1-5 hands over here;
+what it established for the slices ahead: the closure is what the compiler names, hop by hop, and
+the reason per hop goes in the entry; a facade delegate whose only reader is a test moves to the
+test module that reads it, or is registered in `TEST_ONLY_ITEMS` when the walls refuse the move;
+the lint's two warnings are `Translator::new`/`translate` and clear in the translator slice.
