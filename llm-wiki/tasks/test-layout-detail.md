@@ -2590,3 +2590,8 @@ binaries`. `GLIBC_2` appears nowhere in the 345-line gate log. #178 gets no line
 
 The package suite and the cudf build did not overlap. Scratch under `/tmp/t4-*` only;
 `git status --short` shows this file alone.
+
+### 2026-09-12 — done again: green on the rebased code head `df56c6fc`
+
+CI run `34661455191` on `df56c6fc` green on every job, first attempt; the developer's cycle above
+ran the merged script end to end. The commit above `df56c6fc` is documentation. `done` restored.
