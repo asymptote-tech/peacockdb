@@ -64,7 +64,7 @@ registers are deleted and `coding-style.md`'s Visibility section stops carrying 
 all. It is also the sweep: the formatting hunks, comment wording and guard fixes that tasks 1-3
 deferred without naming a task.
 
-### 7. [`sink-divergence-survey.md`](sink-divergence-survey.md) — state: approved to build
+### 7. [`sink-divergence-survey.md`](sink-divergence-survey.md) — state: done — prototype, branch `ENS-sink-divergence-survey` at `cebe1ead`, no PR
 
 **Prototype — no PR, branch never merged; the product is
 [`reports/sink-divergence.md`](../reports/sink-divergence.md).** Sixty-odd disabled cells already fail
