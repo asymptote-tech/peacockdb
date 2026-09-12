@@ -13,7 +13,6 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::ScalarValue;
 
-use super::super::can_be_null;
 use crate::plan::RowGroupMeta;
 use crate::plan::ScanMetadata;
 use crate::plan::Schema;
@@ -23,6 +22,7 @@ use crate::plan::{
 };
 use crate::plan::{BinaryOp, Expr, NamedExpr};
 use crate::plan::{GpuNode, RowInterval};
+use crate::planner::nulls::can_be_null;
 
 /// A source declaring exactly the nullability asked for. The leaf reads this off parquet
 /// statistics; here it is stated, which is the only way to get a NOT-nullable column at all.

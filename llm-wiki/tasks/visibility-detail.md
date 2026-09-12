@@ -167,3 +167,50 @@ child `tests` module. Both warn on every shape; the coordinator decides.
 pushing a signature past the width and one that predated the slice).
 
 Files: `peacockdb-core/src/plan/mod.rs` only.
+
+### 2026-09-12 — the two `dead_code` findings closed, and a third of the same shape
+
+On `1cdd74a2`. The `key_width` finding was mis-stated: the caller grep ran through `head -3`
+and stopped at `aggregate.rs`'s own lines, so `plan/tests/aggregate.rs`'s call was never seen.
+Both findings are the same shape — a facade item whose only caller is a test — and so is
+`planner::can_be_null`, which the planner slice uncovered the same way.
+
+- `plan::key_width` and `planner::can_be_null` were delegates to `aggregate::key_width` and
+  `nulls::can_be_null`, called only from `plan/tests/aggregate.rs` and
+  `planner/tests/null_analysis.rs`. The implementation module owns each rule — `aggregate.rs`
+  uses `key_width` itself twice, `nulls.rs` is the null analysis — and a component's tests reach
+  their own implementation modules already (`wire/tests.rs` imports `super::attach::…`,
+  `cpu_backend/tests/accumulate.rs` imports `cpu_backend::accumulate::State`). So the delegates
+  are gone and the tests import the owner: one definition each, used.
+- `PartitionLayout::new` is the private-field-reader case `coding-style.md` names: an inherent
+  `impl PartitionLayout { pub(crate) fn new }` now sits in `plan/tests/mod.rs`, the way
+  `cpu_backend/join/tests.rs` carries `CpuJoin::has_finish_pass`. A method resolves through the
+  type, so `wire/tests.rs` keeps calling `PartitionLayout::new(1)` with no cross-component path and
+  no `TEST_ONLY_ITEMS` entry; the register's both-way check is unchanged and green.
+
+Warnings 9 → 7 on every shape (2 lint, 5 `private_interfaces`); dump 177 / 114 unchanged, since
+none of the three was a bare `pub`. `--test test_module_layout` 17, `--lib` 514 + 2 ignored.
+
+### 2026-09-12 — plan task 4 done: `planner/mod.rs` 7 → 5, the fifth being `MemoryModel`
+
+Everything demoted first, which made the whole planner dead code in a plain build (158
+warnings) — the crate's only entry into it is `plan`. Restored what the compiler named: `plan`,
+`PlanKnobs`, `BatchSizing`, `SMALL_TABLE_BYTES` for the CLI, then **`MemoryModel`** as
+`private_interfaces` on `planner::plan` (its return), and **`PlanKnobs`'s four fields** as
+`E0451: fields target_partitions, sizing, budget and small_table_bytes of struct PlanKnobs are
+private` from `peacockdb/src/main.rs:46`, where the CLI writes the struct literal. `MemoryModel`'s
+fields and `SourceEstimate` stay `pub(crate)`: the CLI discards the model, and the closure walks
+types, not the fields a pub struct keeps to itself. `can_be_null` went as above.
+
+**Receipt.** `SMALL_TABLE_BYTES` demoted: `error[E0603]: constant SMALL_TABLE_BYTES is private
+--> peacockdb/src/main.rs:15:55`; restored, the CLI builds (`cargo build --features rust-only
+-p peacockdb`).
+
+**Numbers: 177 → 175, 114 → 112; `planner/mod.rs` 7 → 5. Lint 2 on every shape**, unchanged
+until the translator slice; `private_interfaces` 5, `private_bounds` 0, 7 warnings total on each
+of the three shapes. `--test test_module_layout` 17; `--lib` 514 + 2 ignored; goldens identical;
+`case-inventory.sh rust-only` 1038, identical. rustfmt clean on `planner/mod.rs` alone
+(`skip_children`), `plan/tests/{mod,aggregate}.rs` and `planner/tests/null_analysis.rs`.
+
+Files: `plan/mod.rs`, `plan/tests/mod.rs`, `plan/tests/aggregate.rs`, `planner/mod.rs`,
+`planner/tests/null_analysis.rs`.

@@ -338,16 +338,6 @@ pub struct PartitionLayout {
 }
 
 impl PartitionLayout {
-    /// N lanes, nothing else declared — what a scan or a shuffle-free chain emits.
-    pub(crate) fn new(n: usize) -> Self {
-        Self {
-            n,
-            key_distribution: KeyDistribution::NotSpecified,
-            sort_order: SortOrder::NotSpecified,
-            batch_layout: BatchLayout::MultipleBatches,
-        }
-    }
-
     /// Whole stream ordered, not merely each batch — what a top-N after a sort needs.
     pub(crate) fn is_stream_sorted(&self) -> bool {
         self.sort_order.is_batch_sorted() && self.batch_layout == BatchLayout::SingleBatch
@@ -1258,14 +1248,6 @@ pub(crate) fn state_funcs<'a>(
     state: &'a Schema,
 ) -> Result<Vec<StateFunc<'a>>, PlanError> {
     aggregate::state_funcs(body, state)
-}
-
-/// The columns a state leads with before the first aggregate's: the group list, plus the
-/// `__grouping_id` an init expanding grouping sets emits beside the keys and every node
-/// above it groups on. The group list alone is one short of the state exactly there, and
-/// a state position read one column early names the aggregator before the right one.
-pub(crate) fn key_width(body: &AggregateBody) -> usize {
-    aggregate::key_width(body)
 }
 
 /// The finalize as the project it becomes: the group keys straight through, then one
