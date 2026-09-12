@@ -9,8 +9,7 @@ use super::*;
 use crate::executor::Backend;
 use crate::executor::CpuBackend;
 use crate::executor::Executor;
-use crate::executor::cpu_backend::accumulate::CpuAccumulator;
-use crate::executor::cpu_backend::join::CpuJoin;
+use crate::executor::cpu_backend::CpuJoin;
 use crate::plan::RowInterval;
 use crate::plan::{ColumnOrder, PartitionLayout};
 use crate::plan::{

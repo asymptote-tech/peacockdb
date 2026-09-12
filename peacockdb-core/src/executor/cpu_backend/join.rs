@@ -24,7 +24,7 @@ use datafusion::physical_plan::joins::{
 use datafusion::physical_plan::projection::ProjectionExec;
 
 use super::expr_physical::physical_expr;
-use super::{declared_as, placeholder, run_node};
+use super::{CpuJoin, CpuProbingJoin, declared_as, placeholder, run_node};
 use crate::executor::CpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats};
 use crate::plan::GpuNode;
@@ -37,7 +37,7 @@ use crate::plan::{
 
 /// What a join does per call, built once. The `Option`s are the capability matrix in the
 /// only form an executor needs it: a call it does not make is a call it does not have.
-struct Calls {
+pub(crate) struct Calls {
     /// Whether a lane whose build side produced no batch owes no rows — the join type's
     /// own answer, read once where the node is in hand.
     empty_build_answers_nothing: bool,
@@ -54,13 +54,8 @@ struct Calls {
     ctx: Arc<TaskContext>,
 }
 
-/// A join before its build side arrives.
-pub struct CpuJoin {
-    calls: Calls,
-}
-
 impl CpuJoin {
-    pub fn hash(
+    pub(crate) fn hash(
         node: &GpuHashJoin,
         build: &ArrowSchema,
         probe: &ArrowSchema,
@@ -108,7 +103,7 @@ impl CpuJoin {
         })
     }
 
-    pub fn cross(
+    pub(crate) fn cross(
         node: &GpuCrossJoin,
         build: &ArrowSchema,
         probe: &ArrowSchema,
@@ -120,7 +115,7 @@ impl CpuJoin {
         })
     }
 
-    pub fn nested_loop(
+    pub(crate) fn nested_loop(
         node: &GpuNestedLoopJoin,
         build: &ArrowSchema,
         probe: &ArrowSchema,
@@ -171,17 +166,9 @@ impl CpuJoin {
         }
     }
 
-    /// Whether this join keeps probe keys and answers at done, rather than being one call
-    /// and nothing else. Read by the test that holds the two readers of that rule to one
-    /// answer; the rule itself is `JoinCapability::answers_in_one_call`.
-    #[cfg(test)]
-    pub(crate) fn makes_a_finish_pass(&self) -> bool {
-        self.calls.finish.is_some()
-    }
-
     /// This lane's build side finished with no batch, which a small table scattered over
     /// many lanes produces routinely. What it owes is the join type's answer.
-    pub fn without_build(self) -> Result<(), BackendError> {
+    pub(crate) fn without_build(self) -> Result<(), BackendError> {
         if self.calls.empty_build_answers_nothing {
             return Ok(());
         }
@@ -193,7 +180,7 @@ impl CpuJoin {
 
     /// The build side, which is one batch per lane: the planner puts a
     /// `GpuCoalesceAllBatches` under it, so this is every row it will ever hold.
-    pub fn set_build(self, batch: CpuBatch) -> CallResult<CpuProbingJoin> {
+    pub(crate) fn set_build(self, batch: CpuBatch) -> CallResult<CpuProbingJoin> {
         Ok((
             CpuProbingJoin {
                 build: batch.into_record_batch(),
@@ -203,13 +190,6 @@ impl CpuJoin {
             CallStats::default(),
         ))
     }
-}
-
-/// A join with its build side set, taking probe batches.
-pub struct CpuProbingJoin {
-    build: RecordBatch,
-    calls: Calls,
-    accumulated: Vec<RecordBatch>,
 }
 
 impl CpuProbingJoin {
@@ -233,7 +213,7 @@ impl CpuProbingJoin {
         self.calls.per_call.is_some()
     }
 
-    pub fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
+    pub(crate) fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
         let batch = batch.into_record_batch();
         if let Some(keys) = &self.calls.keys {
             let kept = run_node(keys, vec![vec![batch.clone()]], &self.calls.ctx)?;
@@ -251,7 +231,7 @@ impl CpuProbingJoin {
     }
 
     /// The question a streamed probe could not answer: which build rows nothing matched.
-    pub fn finish_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
+    pub(crate) fn finish_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
         let Some(finish) = &self.calls.finish else {
             return Ok((Vec::new(), CallStats::default()));
         };
@@ -471,3 +451,6 @@ fn field_at(schema: &ArrowSchema, ordinal: u32) -> Result<&Arc<Field>, PlanError
         ))
     })
 }
+
+#[cfg(test)]
+mod tests;

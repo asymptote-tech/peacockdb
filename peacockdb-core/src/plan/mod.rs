@@ -227,6 +227,9 @@ impl Schema {
         }
     }
 
+    /// The state columns an aggregate output carries, or `None` once the schema is
+    /// finalized. `#[cfg(test)]` for `planner/translator/schema_tests.rs`, whose component
+    /// cannot see `agg_state`.
     #[cfg(test)]
     pub(crate) fn state_for(&self, output: &str) -> Option<&AggStateColumns> {
         self.agg_state.iter().find(|s| s.output == output)

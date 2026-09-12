@@ -32,9 +32,19 @@ set -euo pipefail
 BUILD_GLIBC=$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)
 [ -n "$BUILD_GLIBC" ] || { echo "cannot read this host's glibc version from getconf" >&2; exit 1; }
 
-# Rust integration tests that link libpeacock_gpu.so and must run on the GPU host.
-RUST_TESTS=(test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_corpus)
+# The device rung, built with --features gpu: the one integration target that needs a
+# device, and the crate's own unit tests, whose `gpu_tests` modules exist only under that
+# feature. The lib binary holds every rung — a gpu build compiles the CPU and FFI test
+# modules too — so the run loop hands it RUST_LIB_RUNG, a path filter that selects the
+# device rung and nothing beneath it. That argument is part of what the binary is, not a
+# developer's PCK_TEST_FILTER: the zero-test guard stays armed for it.
+RUST_TESTS=(test_gpu_corpus)
+RUST_LIB_STAGED=peacockdb_core_gpu_lib
+RUST_LIB_RUNG=gpu_tests::
 RUST_TESTS_STAGING=cpp/install/rust-tests
+# rung_args, the one rule for what each staged binary is run with, sent to the host
+# inside the gate script below.
+RUNG_ARGS_FN=$(cat "$(dirname "${BASH_SOURCE[0]}")/lib/rung-args.sh")
 
 # Runner, log, exit code and run id of a detached run, per phase. Outside
 # cpp/install/, which --push-binaries mirrors with --delete.
@@ -132,8 +142,9 @@ if [ "$BUILD" -eq 1 ]; then
   rm -rf "$RUST_TESTS_STAGING"
   mkdir -p "$RUST_TESTS_STAGING"
   for t in "${RUST_TESTS[@]}"; do
-    stage_cargo_test_binary "$t" "$RUST_TESTS_STAGING"
+    stage_cargo_test_binary "$t" "$RUST_TESTS_STAGING" --features gpu
   done
+  stage_cargo_lib_binary "$RUST_LIB_STAGED" "$RUST_TESTS_STAGING" --features gpu
 fi
 
 # --- push ---------------------------------------------------------------------
@@ -141,7 +152,7 @@ if [ "$RSYNC" -eq 1 ]; then
   # Unstripped binaries are ~565MB each against ~155MB stripped, and the link to the
   # host is slow and bursty. --strip-debug keeps the dynamic symbol table patchelf
   # needs.
-  for t in "${RUST_TESTS[@]}"; do
+  for t in "${RUST_TESTS[@]}" "$RUST_LIB_STAGED"; do
     [ -f "$RUST_TESTS_STAGING/$t" ] && strip --strip-debug "$RUST_TESTS_STAGING/$t"
   done
 
@@ -322,6 +333,7 @@ remote_gate_script() {
     PATCHED_LD=$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat:/home/info/glibc-$BUILD_GLIBC/lib:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\$LD_LIBRARY_PATH
 
     rc=0
+$RUNG_ARGS_FN
 
     # Glob peacock_*_tests, matching CI: a hardcoded name meant three of the four
     # binaries never ran locally, so a "C++ green" sign-off covered one of them. The
@@ -366,8 +378,16 @@ remote_gate_script() {
       tname=\${t##*/}
       echo "--- \$tname"
       rlog=/tmp/\$tname.rustlog
+      # A checked assignment, so a listing that fails is the binary not running rather
+      # than an empty intersection — which with a filter set the guard below excuses.
+      if ! args_text=\$(rung_args "\$t" $RUST_LIB_STAGED $RUST_LIB_RUNG $filter_q env LD_LIBRARY_PATH="\$PATCHED_LD"); then
+        echo "!!! \$tname could not list its cases — it was not run"
+        rc=1
+        continue
+      fi
+      mapfile -t args <<< "\$args_text"
       # --test-threads=1: the GPU/RMM context is process-wide, parallel tests OOM.
-      env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 $filter_q > "\$rlog" 2>&1
+      env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 "\${args[@]}" > "\$rlog" 2>&1
       status=\$?
       # Zero tests is a fault only when nothing was filtered out: with a filter set,
       # every other binary legitimately matches nothing, and a red banner for a run
@@ -383,7 +403,7 @@ remote_gate_script() {
         echo "!!! \$tname FAILED (exit \$status)"
         rc=1
       elif [ "\$rzero" -eq 1 ] && [ -z $filter_q ]; then
-        echo "!!! \$tname ran 0 tests (filter $filter_q matched nothing?) — nothing was verified"
+        echo "!!! \$tname ran 0 tests (its arguments \${args[*]} matched nothing?) — nothing was verified"
         rc=1
       fi
       rust_ran=\$((rust_ran + 1))

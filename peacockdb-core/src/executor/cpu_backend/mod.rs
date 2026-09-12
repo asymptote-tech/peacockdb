@@ -7,16 +7,17 @@
 //! thread on one node's stream. A sort past its in-place threshold spawns onto the runtime
 //! from under that block, which is what a driver has to leave room for (T17).
 
-pub mod accumulate;
+mod accumulate;
 mod backend;
-pub mod emit;
+mod emit;
 mod expr_physical;
-pub mod join;
+mod join;
 mod merge_m2;
 mod single_node;
-pub mod source;
+mod source;
 mod spark_partitioning;
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
@@ -26,8 +27,10 @@ use datafusion::arrow::util::display::FormatOptions;
 use datafusion::execution::context::SessionContext;
 use datafusion::execution::{FunctionRegistry, TaskContext};
 use datafusion::logical_expr::AggregateUDF;
+use datafusion::parquet::arrow::ProjectionMask;
+use datafusion::parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use datafusion::physical_expr::aggregate::AggregateExprBuilder;
-use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
+use datafusion::physical_expr::{LexOrdering, PhysicalExpr, PhysicalSortExpr};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
 use datafusion::physical_plan::empty::EmptyExec;
@@ -57,6 +60,64 @@ struct Stage {
     /// partial aggregate names its state columns after the accumulators it ran, and this
     /// mode names them in the schema every reference above resolves against.
     declared: SchemaRef,
+}
+
+/// A lane's reads, in the order the mapping named them.
+///
+/// Declared here rather than in `source` for the reason every executor type below is: the
+/// `Backend` impl names it and `src/tests/injection.rs` builds one, so it is this
+/// subcomponent's API and `source` is its implementation.
+pub struct CpuSource {
+    file: String,
+    /// The footer, parsed once: a lane reads the same file once per batch, and re-parsing
+    /// it per call is the whole of what a scan does besides decoding.
+    metadata: ArrowReaderMetadata,
+    projection: ProjectionMask,
+    /// The row groups per batch this lane still owes, front first.
+    batches: VecDeque<Vec<usize>>,
+    schema: SchemaRef,
+}
+
+/// A join before its build side arrives.
+pub struct CpuJoin {
+    calls: join::Calls,
+}
+
+/// A join with its build side set, taking probe batches.
+pub struct CpuProbingJoin {
+    build: RecordBatch,
+    calls: join::Calls,
+    accumulated: Vec<RecordBatch>,
+}
+
+/// A `BatchAccumulator` node's executor. What it holds between calls is one of four
+/// things, and `accumulate` owns them: a public variant would hand a caller the state a
+/// private module keeps.
+pub struct CpuAccumulator {
+    state: accumulate::State,
+}
+
+/// The one node of the partition-accumulator category: every lane's sorted stream merged
+/// into one at the last lane's done.
+///
+/// It takes one call per lane event because that is what round-robin driving produces, and
+/// the call carrying the last `Done` is the emitting one. Ties are broken partition-major
+/// — lane order, then arrival order inside a lane — which is what concatenating in lane
+/// order and sorting stably gives, and what a k-way merge over the same runs gives.
+pub struct CpuPartitionAccumulator {
+    per_lane: Vec<Vec<RecordBatch>>,
+    live: usize,
+    sort: Arc<dyn ExecutionPlan>,
+    fetch: Option<usize>,
+    schema: SchemaRef,
+    ctx: Arc<TaskContext>,
+}
+
+/// The scatter: one batch in, N out, some of them empty.
+pub struct CpuEmitter {
+    hash_keys: Vec<Arc<dyn PhysicalExpr>>,
+    lanes: usize,
+    schema: SchemaRef,
 }
 
 /// A node's operators in call order, each one's output the next one's input — one for a
@@ -530,8 +591,8 @@ fn lex_ordering(keys: &[ColumnOrder], input: &ArrowSchema) -> Result<LexOrdering
 }
 
 /// One of this engine's expressions in DataFusion's vocabulary. `#[cfg(test)]`: the only
-/// caller outside this subcomponent is a test in `plan`, which reaches it through
-/// `executor`'s own entry point.
+/// caller outside this subcomponent is a test in `plan`, and it arrives through
+/// `executor/mod.rs`, which cannot name `expr_physical` either.
 #[cfg(test)]
 pub(crate) fn physical_expr(
     expr: &crate::plan::Expr,
@@ -541,5 +602,23 @@ pub(crate) fn physical_expr(
     expr_physical::physical_expr(expr, input, registry)
 }
 
+/// Whether the CPU executor for this join keeps probe keys and answers at done.
+///
+/// `#[cfg(test)]`, and called by `executor/mod.rs`, which carries it to `wire/tests.rs` —
+/// the test compares the answer against the recipe's `AtDone` call. The question crosses
+/// the wall and the type does not: `join` is this subcomponent's own.
+#[cfg(test)]
+pub(crate) fn has_finish_pass(
+    node: &crate::plan::GpuHashJoin,
+    build: &ArrowSchema,
+    probe: &ArrowSchema,
+    ctx: Arc<TaskContext>,
+) -> Result<bool, PlanError> {
+    CpuJoin::hash(node, build, probe, ctx).map(|executor| executor.has_finish_pass())
+}
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_tests;

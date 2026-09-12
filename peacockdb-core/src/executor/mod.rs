@@ -14,20 +14,17 @@ mod errors;
 mod forwarder;
 mod row_range;
 
-// `pub mod`, which no other subcomponent in the crate is, and it is temporary. Two
-// integration targets construct backend executors directly — `test_cpu_executors` and
-// `test_gpu_executors` — and a separate crate cannot reach a private subcomponent. They are
-// two of the eleven `test-layout.md` moves into `src/`, and this goes with them. The layout
-// test lists both by name so the exception cannot spread quietly.
-pub mod cpu_backend;
-
+mod cpu_backend;
 #[cfg(not(feature = "rust-only"))]
-pub mod gpu_backend;
+mod gpu_backend;
 #[cfg(not(feature = "rust-only"))]
 mod gpu_batch;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, not(feature = "rust-only")))]
+mod ffi_tests;
 
 use datafusion::arrow::array::RecordBatch;
 
@@ -374,9 +371,9 @@ pub enum Forwarder {
 /// One of this engine's expressions back in DataFusion's own vocabulary, which is what the
 /// CPU backend hands its operators.
 ///
-/// `#[cfg(test)]` because its only caller outside `cpu_backend` is a test in `plan`, and a
-/// test in another component cannot reach an implementation module. Without the cfg a plain
-/// build reports it dead.
+/// `#[cfg(test)]` because its only caller is `plan/tests/aggregate.rs`, and a test in
+/// another component cannot reach an implementation module. Without the cfg a plain build
+/// reports it dead.
 #[cfg(test)]
 pub(crate) fn physical_expr(
     expr: &crate::plan::Expr,
@@ -384,6 +381,21 @@ pub(crate) fn physical_expr(
     registry: &dyn datafusion::execution::FunctionRegistry,
 ) -> Result<std::sync::Arc<dyn datafusion::physical_plan::PhysicalExpr>, PlanError> {
     cpu_backend::physical_expr(expr, input, registry)
+}
+
+/// Whether the CPU executor for this join keeps probe keys and answers at done.
+///
+/// `#[cfg(test)]` because its only caller is `wire/tests.rs`, which checks that answer
+/// against the recipe's `AtDone` call. Two hops rather than one: `cpu_backend` declares
+/// `mod join;` privately, so this module cannot name `CpuJoin` either.
+#[cfg(test)]
+pub(crate) fn has_finish_pass(
+    node: &crate::plan::GpuHashJoin,
+    build: &datafusion::arrow::datatypes::Schema,
+    probe: &datafusion::arrow::datatypes::Schema,
+    ctx: std::sync::Arc<datafusion::execution::TaskContext>,
+) -> Result<bool, PlanError> {
+    cpu_backend::has_finish_pass(node, build, probe, ctx)
 }
 
 /// The routing a node declares, which is a property of the node rather than of a backend —

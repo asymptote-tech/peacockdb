@@ -5,7 +5,7 @@
 //! `slot_base` decides whose residency a call is charged to — so a wrong one shows as a
 //! deadlock or a mis-billed byte rather than as a wrong index.
 
-use super::super::plans::*;
+use super::super::tests::plans::*;
 use super::*;
 
 /// unload <- join <- [coalesce <- merge_sorted <- source(build, 2),

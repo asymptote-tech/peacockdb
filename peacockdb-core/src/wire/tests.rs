@@ -826,9 +826,6 @@ fn the_finish_join_reads_the_accumulated_keys_under_the_names_they_carry() {
 /// wrong rather than for the ones we thought to write down.
 #[test]
 fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
-    // The one place a component names another's subcomponent, registered in
-    // `test_module_layout.rs` and dying with the `cpu_backend` exemption that permits it.
-    use crate::executor::cpu_backend::join::CpuJoin;
     use datafusion::execution::context::SessionContext;
 
     let types = [
@@ -848,7 +845,7 @@ fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
     for join_type in types {
         for residual in [false, true] {
             let node = join(join_type, residual, None);
-            let executor = CpuJoin::hash(
+            let executor_finishes = crate::executor::has_finish_pass(
                 &node,
                 &build.fields,
                 &probe.fields,
@@ -856,7 +853,7 @@ fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
             );
             if node.capability().is_err() {
                 assert!(
-                    executor.is_err(),
+                    executor_finishes.is_err(),
                     "{join_type:?} with residual={residual} is refused by the matrix and \
                      the executor built it anyway"
                 );
@@ -868,17 +865,18 @@ fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
                 .calls
                 .iter()
                 .any(|call| call.when == CallPattern::AtDone);
-            let executor = executor.expect("a cell the matrix allows is one the executor builds");
+            let executor_finishes =
+                executor_finishes.expect("a cell the matrix allows is one the executor builds");
             assert_eq!(
                 recipe_finishes,
-                executor.makes_a_finish_pass(),
+                executor_finishes,
                 "{join_type:?} with residual={residual}: the recipe {} and the executor {}",
                 if recipe_finishes {
                     "finishes"
                 } else {
                     "does not"
                 },
-                if executor.makes_a_finish_pass() {
+                if executor_finishes {
                     "does"
                 } else {
                     "does not"

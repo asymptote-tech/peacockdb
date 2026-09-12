@@ -2,7 +2,7 @@
 //!
 //! Strings in, strings out — no dataset, no executor — because what is under test is the
 //! reader every tier shares. The comparator's cases came from
-//! `test_plan_goldens.rs` with the code they cover; the node-line cases are new
+//! `planner/tests/plan_goldens.rs` with the code they cover; the node-line cases are new
 //! with the fields the corpus tiers put on that line.
 #[macro_use]
 mod common;

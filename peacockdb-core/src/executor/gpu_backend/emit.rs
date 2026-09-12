@@ -6,26 +6,18 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
+use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
 use peacockdb_ffi::raw::PeacockExecutor;
 
-use super::{execute_node_many, produced};
+use super::{GpuEmitter, execute_node_many, produced};
 use crate::executor::GpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats};
 use crate::plan::PlanError;
-use crate::wire::{CallPattern, FbKind, Input, Recipe, Seq};
-
-pub struct GpuEmitter {
-    executor: *mut PeacockExecutor,
-    seq: Seq,
-    kind: FbKind,
-    lanes: usize,
-    schema: SchemaRef,
-}
+use crate::wire::{CallPattern, FbKind, Input, Recipe};
 
 impl GpuEmitter {
-    pub fn new(
+    pub(crate) fn new(
         executor: *mut PeacockExecutor,
         recipe: &Recipe,
         schema: &ArrowSchema,
@@ -59,10 +51,15 @@ impl GpuEmitter {
         })
     }
 
-    pub fn emit(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
+    pub(crate) fn emit(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
         let (_, handle) = batch.consume();
-        let produced_lanes =
-            execute_node_many(self.executor, self.seq, self.kind, &[vec![handle]], self.lanes)?;
+        let produced_lanes = execute_node_many(
+            self.executor,
+            self.seq,
+            self.kind,
+            &[vec![handle]],
+            self.lanes,
+        )?;
         if produced_lanes.len() != self.lanes {
             return Err(BackendError::new(format!(
                 "the scatter answered with {} handles where the plan declares {} lanes — a \

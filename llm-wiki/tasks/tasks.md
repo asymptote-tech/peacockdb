@@ -41,7 +41,7 @@ all, so an ordinary CI run puts four such processes on a shared card. Each decla
 byte budget measured from the pool's own statistics adaptor instead. Touches `cpp/` and one wiki
 page, so it is independent of the three layout tasks around it.
 
-### 4. [`test-layout.md`](test-layout.md) — state: approved to build
+### 4. [`test-layout.md`](test-layout.md) — state: done — PR #145
 
 Items in `peacockdb-core/src` are public partly because `tests/*.rs` are separate crates that see
 the library the way crates.io would. Moving the eleven targets that force them, plus the murmur

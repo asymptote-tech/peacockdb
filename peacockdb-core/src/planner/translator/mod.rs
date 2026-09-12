@@ -100,17 +100,11 @@ struct PerBatchSort {
     fetch: Option<usize>,
 }
 
-/// A DataFusion physical plan as a node tree, at one lane count and one batching rule.
-#[cfg(test)]
-pub(crate) fn translate(
-    target_partitions: usize,
-    batching: Batching,
-    plan: &Arc<dyn ExecutionPlan>,
-) -> Result<Box<dyn GpuNode>, PlanError> {
-    Translator::new(target_partitions, batching).translate(plan)
-}
-
 /// One DataFusion physical expression in this engine's own vocabulary.
+///
+/// `#[cfg(test)]` and here rather than in `expr`, because `expr` is this subcomponent's own
+/// and only this file may be named from outside it. The caller is `planner/mod.rs`, which
+/// relays it to a test in another component.
 #[cfg(test)]
 pub(crate) fn translate_expr(
     expr: &Arc<dyn PhysicalExpr>,

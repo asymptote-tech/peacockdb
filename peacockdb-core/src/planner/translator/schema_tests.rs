@@ -6,7 +6,6 @@
 //! costs the same on either and no golden byte moves — `avg`'s two state columns were
 //! once typed backwards, and only a real divide would have diverged.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use datafusion::arrow::datatypes::DataType;
@@ -26,7 +25,7 @@ async fn physical_plan_for(
     sql: &str,
     target_partitions: usize,
 ) -> Arc<dyn datafusion::physical_plan::ExecutionPlan> {
-    let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.minimal");
+    let data = crate::test_support::testdata_minimal_dir();
     let ctx = crate::register_tables_for(crate::build_session_state(target_partitions), &data)
         .await
         .expect("register the minimal tables");

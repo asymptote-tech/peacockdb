@@ -4,8 +4,8 @@
 //! number reaches it as another node's recipe rather than as an error — so the claim is
 //! checked against a walk written in this file, not against the one under test.
 
-use super::super::mock::{Script, address_of, spec};
-use super::super::plans::*;
+use super::mock::{Script, address_of, spec};
+use super::plans::*;
 use super::*;
 
 /// The tree children-first, which is what `attach_recipes` numbers by.
