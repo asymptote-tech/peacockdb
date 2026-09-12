@@ -225,3 +225,7 @@ the `ExprContext` paragraph (`:943-946`), the `cpp/src/` layout line (`:987`) an
 "literal", "valid", "twice", "fixed_point", "ScalarValue", "is_null". None of its sentences
 describes the literal arm, the two builders, assumed validity or the decimal-as-double
 conversion, so nothing was falsified and nothing changed.
+
+### 2026-09-12 — reviewing: PR #152 opened against `ENS-declared-schemas`
+
+Five commits, `13d07639` at the head. Reviewer round 1 dispatched.
