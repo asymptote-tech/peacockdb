@@ -15,8 +15,8 @@ use crate::plan::{ExecutorCategory, GpuNode, category_of};
 use crate::tests::compare::{Order, Slot, same};
 
 /// One variant per executor category, so `drive` is the whole call protocol in one match.
-/// The cases that construct the variants beyond `Accumulate` and `Unload` are
-/// `operator-cases.md`'s; the attribute leaves with them.
+/// Only `Accumulate`, `Unload` and the refused `Exec` are constructed here; the cases that
+/// drive the other arms are `operator-cases.md`'s, and the attribute leaves with them.
 #[allow(dead_code)]
 pub(crate) enum Script {
     /// One `exec` per batch; one slot each.

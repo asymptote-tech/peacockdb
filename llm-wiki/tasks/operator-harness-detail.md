@@ -554,3 +554,16 @@ the "Operator harness" row at 25, cpu `--lib` 532, gpu `gpu_tests::` 80, C++ 67,
 ### 2026-09-12 — reviewing: PR #149 against `ENS-visibility`
 
 Eight slices committed; the last entry is the whole proof on `bd2758a4`. Reviewer round 1 next.
+
+### 2026-09-12 — review round 1: 0 blocking, 0 important, 2 nits — completing
+
+The reviewer read the diff as one change: both production edits are the sanctioned pair and
+nothing else moved; the symbol is test-only by contract and its failure paths leave the session
+standing; the new arm is unreachable from a production plan (every registry kind resolves
+through `try_as_node_ref`); the harness's red cases fail by name; `Device::Drop` leaks no session
+or handle on a failed case; the kind guard modelled red all five ways with no bypass constructed
+(`3 excluded + 13 pending + 2 covered = 18`, the oracle pinned elsewhere); counts reconcile to the
+pages; comment caps counted. Nits: the `Script` attribute's comment said `Exec` was not
+constructed here (it is, by the refusal) — fixed by the coordinator; `Writer::leaf` returns a
+seq nobody reads — kept, the plan's signature. Board to `completing`; the completeness pass is
+two readings dispatched together.
