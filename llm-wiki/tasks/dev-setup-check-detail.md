@@ -37,6 +37,10 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   `~/peacockdb`, `~/miniforge3/envs/rapids-26.02`, `/media/data/peacockdb`,
   `~/data/miniforge3`, gcc-12, gcc-14, nvcc, cmake, ninja, python 3.12.3, cargo. No GPU driver
   (`nvidia-smi` fails). `testdata/tpch.sf1` and `tpcds.sf1` are symlinks into `~/peacockdb`.
+- Host shape, recorded on the reopen from the gitignored ensemble log: the `superpowers:*` skills the
+  prompts mandate were not installed when the chain started at 22:33Z — the plugin cache is dated
+  22:35:15Z, the same minute as the `Host dev` ssh entry — so every agent of the first run worked
+  without them and said so. Present for the reopened step.
 - 2026-09-11 23:57Z — reopened by the human from `done` to `building` (commit `2e98d11b`) for plan
   Task 5 alone: the branch was rebased across master `02069415`, where the patch step follows the
   build host's glibc, so the shad-gpu cycle runs once more. Origin and PR #146 already hold the
@@ -79,6 +83,13 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   are). The reviewer agrees with the cache clear as not the repair the spec forbids. Board moved to
   `completing`; completeness pass dispatched: a fresh reviewer and a fresh analyst, neither seeing
   the other's list.
+- 2026-09-12 00:32Z — completeness pass closed. Reviewer: 0 blocking, 1 important (the `## Not driven`
+  line on `docker-build.sh` still pointed a master task at the `GLIBC_2.38` red). Analyst: 0
+  blocking, 4 important, all record lines — the same stale sentence plus its twin at the end of
+  `## 25.02: patch+run`, a verdict for master on the cache red, the CI half read to its end, and the
+  skills-plugin host-shape fact; `architecture.md` falsified sentences: none, and the `build-test.md`
+  glibc paragraph confirmed sentence by sentence bar the first-patch prefix build, which was not
+  exercised. All applied above. Signoff appended to the spec; board moved to `completeness approved`.
 
 ## Workflows
 
@@ -231,7 +242,8 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   Ubuntu 24.04 with glibc 2.39: `objdump -T` shows the C++ binaries and `libpeacock_gpu.so` need
   `GLIBC_2.38` and the Rust binaries `GLIBC_2.39`, and shad-gpu's patch target is glibc 2.35 — older
   than what a dev-built binary needs, which a 22.04-class builder never hit. Not a `bad_alloc`, so
-  not re-run. Not a bug in this branch; a host-shape finding for a task on master.
+  not re-run. Not a bug in this branch; a host-shape finding for a task on master — closed by master
+  `02069415`, which the second attempt below proves from dev.
 
 ## 25.02 again: build
 
@@ -258,6 +270,10 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   matters for the next step: the script clears `cpp/install/rust-tests/` before staging (line 132), so
   that directory is now empty. Not a bug in this branch; host state from a build run against this
   worktree's target dir by something outside the run.
+  Coordinator's verdict for master: leave it. The scripts default `CARGO_TARGET_DIR` to `$PWD`, so only
+  a checkout pointed at another's target dir meets this — by an explicit `CARGO_TARGET_DIR=` or a
+  symlink; which, and by whom, the tree does not say. If it ever matters, `build.rs` reading
+  `CARGO_MANIFEST_DIR` at run time instead of `env!` is the fix. Not production behaviour, so no ticket.
 
 ## 25.02 again: push-binaries
 
@@ -346,8 +362,9 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
 Rows of the two `build-test.md` tables the spec's four workflows do not reach, and why:
 
 - `scripts/docker-build.sh` (containerized): not in the spec's list; Docker 29.2.1 is on dev, so it
-  was reachable and simply not asked for. It is also the 22.04-class builder that would sidestep the
-  `GLIBC_2.38` red below — a master task deciding that fix should drive it.
+  was reachable and simply not asked for. It is also the 22.04-class builder that would have sidestepped
+  the first cycle's `GLIBC_2.38` red, which master `02069415` closed another way; nothing on master
+  needs it now.
 - `scripts/cost-report-preview.sh` (same row as cost-report): not asked for.
 - `scripts/build.sh` (C++ only, 25.02): driven indirectly — `build-test-shadgpu.sh --build` calls it
   three times (`--configure`, `--build`, `--install`), so the `25.02: build` section covers it.
@@ -459,3 +476,168 @@ None. The branch changes no engine code, plan shape, wire format, tier placement
 The one adjacent section, "Node display", describes the execution line's `output_rows` /
 `output_bytes` fields; the new case feeds `GpuFilter: output_rows=many` to the reader and pins a
 panic, which the page's format implies rather than contradicts.
+
+## Analyst: completeness, reopened step
+
+Read as one change: `git diff master...ENS-dev-setup-check` at `205c4130` over `02069415`, plus
+this file, against the spec's reopened "Done when", its Constraints and Scope, plan Task 5, and
+`build-test.md`'s shad-gpu path. Nothing blocking. Four important items, all about the record,
+each a line or two the coordinator writes. The `## Analyst: completeness` section above is the
+first pass and is not re-derived here.
+
+| item | where | what is missing |
+|---|---|---|
+| 1 | `## 25.02 again: build`, log 00:02Z | a verdict for master on the third red; the log's "not the script's" and the section's `build.rs` `env!` bake pull apart, and how the outside build reached this target dir is not stated |
+| 2 | `## Not driven`, `## 25.02: patch+run` | two sentences written before the rebase read as if the `GLIBC_2.38` fix were still undecided |
+| 3 | coordinator log | the CI entry is a mid-run reading; the gate's reason for running a doc-only commit in full, and what CI's own GPU job proved about the 2.35 half, are absent |
+| 4 | coordinator log | a first-run host-shape fact lives only in the gitignored ensemble log: the mandated `superpowers` skills were absent at chain start |
+
+### Important 1 — the third red: say what master should do with it
+
+The section has the cause and the clear: the verbatim cmake and flatc lines, `strings` on the
+build scripts naming `peacockdb-glibc-check`, the 23:41Z stamps, the deterministic re-run, the
+exact `cargo-cudf.sh clean` and its before/after `find` diff. What it lacks is the verdict the
+two earlier reds carry ("no fix task needed"; "a host-shape finding for a task on master"). The
+log's "not the host's shape nor the script's" and the section's "both `build.rs` bake
+`env!("CARGO_MANIFEST_DIR")` at compile time" pull in opposite directions: the second is a
+property of two files on master — their `rerun-if-changed` paths are baked the same way, which
+is why a deleted checkout makes cargo re-run the script and the script then fails — and a
+run-time `std::env::var("CARGO_MANIFEST_DIR")` would make a reused build script compute the
+running checkout's paths. Not production behaviour, so no ticket; but a master task deciding
+whether to touch `build.rs` needs one line here: either "leave it — the scripts default
+`CARGO_TARGET_DIR` to `$PWD`, so only a checkout pointed at another's target dir meets this" or
+"worth a task". One more clause: the record never says how the outside build landed here. With
+the `$PWD` default it can only have been pointed here explicitly (`CARGO_TARGET_DIR=` or a
+symlinked target dir), and the tree does not say which. Say it is unknown rather than leave it
+implied.
+
+### Important 2 — two pre-rebase sentences now read as open
+
+`## Not driven`, the `docker-build.sh` line: "It is also the 22.04-class builder that would
+sidestep the `GLIBC_2.38` red below — a master task deciding that fix should drive it." Master
+`02069415` decided that fix, the branch sits on it, and the second cycle is its evidence, so
+there is no fix left to decide and "below" points the wrong way. The rows of the section are
+still true after the second cycle — three foreground calls again, so `--all`, `--run-detached`
+and `--run-status` remain unproven; verda still does not resolve; `docker-build.sh` and
+`cost-report-preview.sh` still unasked. `## 25.02: patch+run` ends "a host-shape finding for a
+task on master"; one clause pointing at `02069415` and the second-attempt section closes it.
+The first signoff carries the same finding as open; the new signoff answers it (below).
+
+### Important 3 — the CI half of the reopened step
+
+The 00:11Z entry names run 34659758921 as the run `done` is judged on and reads two legs in
+progress. Read at 00:30Z: the run concluded `success` at 00:15:29Z — Changed paths, build 25.02
+for GPU, Cost report, S3 datasets, GPU Tests (remote) as recorded; CI Pipeline (cudf 26.02)
+`success` 00:15:11Z; CI Pipeline (cudf 25.02) `success` 00:15:28Z; Deploy to Pages skipped. Two
+things the record does not say and the `done` entry must:
+
+- Why a doc-only commit ran in full. `2e98d11b` touches only `llm-wiki/`; the gate's own line is
+  `running in full: the new head is 'diverged' of the old one, not a clean append`. A force-push
+  is never classified, so a rebase always buys a full run — the rule a later reader needs, and
+  the mirror of the head-rollup trap the first pass named. The skipped runs are 34659596918 on
+  `b62488d4` (the pre-rebase `done` head), 34660734480 on `70ad00d8` and 34661332537 on
+  `205c4130`, each `documentation only — skipping the pipeline for this push`.
+- What CI's GPU job proved about the glibc change. Its step `Patch binaries for glibc 2.35`
+  calls `setup-glibc.sh --repo-dir … --patch` with `GLIBC_VERSION` unset, so it exercised
+  master's default path: `Verified: every shipped executable uses
+  /home/info/glibc-2.35/lib/ld-linux-x86-64.so.2`, `ran 5 C++ test binaries`, rust 4 / 8 / 31 /
+  10 / 10 passed, 00:01:45Z–00:05:23Z. With the dev cycle's 2.39 that is both halves of the
+  `build-test.md` paragraph from one branch; the record should say so in a line.
+
+### Important 4 — a host-shape fact only the ensemble log holds
+
+`.claude/ensemble/ENS-dev-setup-check.log` (gitignored) ends the first run with: "the
+`superpowers:*` skills the prompts mandate are not installed here, so every agent worked by
+hand and said so". The plugin cache
+`~/.claude/plugins/cache/claude-plugins-official/superpowers/6.3.0` is dated 22:35:15Z — ninety
+seconds after the chain started, the same minute the `Host dev` ssh entry appeared — so the
+first coordinator process predates it and its log says every agent of that run worked without
+them. The record, which is the spec's product, does not carry this. It is the class of failure
+the spec's "Why this shape" hunts — an agent that cannot follow its own instruction set — and
+it belongs beside the `Host dev` note in the coordinator log: absent at 22:33Z, installed by
+hand at 22:35Z, present for the reopened step (this pass loaded one as its first call).
+
+### Checked and found complete
+
+- Task 5's four steps, each expectation: build — minutes not an hour (3m55s), five binaries
+  staged, the first attempt red with its signature; push — `cpp/install/` mirrored, 177 files;
+  patch+run — both glibc lines verbatim, five `peacock_*_tests` with counts, `test_gpu_corpus`
+  five `q6` cells named, four binaries `0 passed` under the filter and not called a fault, `GPU
+  test run OK`, no `bad_alloc`; the two not-run steps recorded as not run, with reasons. Nothing
+  unmet and unrecorded.
+- The sf40 suites ran on data, not skipped: the gate exports
+  `PEACOCK_TPCH_SF40_DIR=/home/info/peacock-datasets/testdata/tpch.sf40` and fails any binary
+  printing `PASSED 0 tests`; `peacock_tpch_tests PASSED 4 tests` (19.6s) and `peacock_tpchv_tests
+  PASSED 4 tests` (27.4s) therefore read it.
+- Constraints for the reopen: `70ad00d8` and `205c4130` touch only the detail file and the
+  board; no script, code, golden or `Cargo.lock` moved; the scripts ran as committed. The diff
+  over master is the first pass's three files plus the four task files.
+- The cache clear: scoped to `target-cudf-rapids-cuda-12.2/debug/`, gitignored, the two crates
+  only; the DataFusion tree stayed warm; `peacockdb-core-d4ec233a71967c0e` and
+  `peacockdb-ffi-b8ec94c7bcaa4c75` now dated 00:03Z. Reviewer round 2 concurred it is not the
+  repair the spec forbids.
+- "A fresh task in a fresh worktree never meets this" holds for the containerized path too:
+  `docker-build.sh` mounts whichever checkout at `/work`, so the baked `CARGO_MANIFEST_DIR` is
+  the same string for every worktree sharing `<cache-dir>/cargo-target`.
+- Not driven rows: still true after the second cycle (item 2 is one rationale sentence, not a
+  row).
+- Worktree: `git status` clean; `git worktree list` matches the record; no GPU contention with
+  CI's job — CI's GPU run ended 00:05:23Z, dev's patch+run began 00:07:23Z.
+
+### What the second signoff must name
+
+Appended below the first, headed for the reopened step, at most ten lines:
+
+1. Solved under its constraints: nothing but the record and the board changed; scripts as
+   committed on the branch.
+2. The one shortcut: `cargo-cudf.sh clean -p peacockdb-core -p peacockdb-ffi` on this worktree's
+   gitignored target dir, on the coordinator's decision, after the first attempt went red in 2 s
+   on build scripts an outside session left there at 23:41Z; the reviewer concurred it is not a
+   repair.
+3. The green cycle: 3m55s / 0m11s / 1m09s, patched to `/home/info/glibc-2.39`, five C++
+   binaries, `test_gpu_corpus` five `q6` cells, `GPU test run OK`.
+4. CI: run 34659758921 on `2e98d11b`, full because the rebase push was `diverged`, every job
+   `success`, the GPU job patched to 2.35 from CI's container; `70ad00d8`, `205c4130` and the
+   board commits after them doc-only and skipped by design.
+5. The first signoff's `GLIBC_2.38` finding is answered by master `02069415`; the exec-model
+   finding stands as written.
+6. Still not driven: `--all`, `--run-detached` / `--run-status`, verda, `docker-build.sh`,
+   `cost-report-preview.sh`; and `setup-glibc.sh`'s first-patch prefix build, since
+   `/home/info/glibc-2.39` already existed.
+7. `architecture.md`: none falsified.
+
+### `architecture.md` sentences this branch falsified
+
+None. The reopened step changed no code; the diff over master is the same two lines the first
+pass read. Checked again against the two sections that own the touched facts. "Node display":
+"An execution line drops the schema, adds `output_rows` and `output_bytes`" — the new case hands
+the reader `GpuFilter: output_rows=many` and pins the panic, which that sentence implies rather
+than contradicts. "C++ executor layout" names `cpp/src/` files and says nothing about
+`cpp/tests/gpu/test_cudf.cpp`, where the comment sits.
+
+### `build-test.md`: the glibc paragraph and the shad-gpu row, sentence by sentence
+
+Under "Remote hosts", the paragraph "The shad-gpu patch step uses the build host's glibc
+version":
+
+- "The shad-gpu patch step uses the build host's glibc version." — confirmed by the second
+  cycle: dev 2.39, patched to `/home/info/glibc-2.39`.
+- "shad-gpu runs glibc 2.31" — confirmed by the coordinator's pre-dispatch read.
+- "2.35 for a 22.04 build host and CI's container, 2.39 for a 24.04 host such as dev" — the CI
+  half confirmed by run 34659758921's GPU job, the dev half by the cycle; a 22.04 host was not
+  used and is unevidenced here.
+- "The version is read from `getconf` where the binaries are built" — confirmed: the script
+  reads it, and the patch log says 2.39.
+- "the prefix is built once on the first patch from that host class" — not exercised: the patch
+  log says `already installed … skipping the build`, the prefix having been built by whoever
+  verified `02069415` (its message: "Verified with a whole cycle from dev"). Not falsified; not
+  evidenced by this branch.
+- "A binary patched to a glibc older than its own dies at load with `version GLIBC_2.38 not
+  found`" — confirmed by the first cycle's signature.
+
+The shad-gpu row: "GPU test suite (cudf 25.02, H200-class; old glibc → patch step)" confirmed
+(cuDF 25.02.02, an H200, the patch step ran); of "`--build --push-binaries --patch
+--run[-detached]` / `--all`, `--run-status`" the three foreground flags confirmed, the rest not
+driven; "Resilient rsync + retries — the link is flaky" — no retry fired in either cycle, so the
+retry path is unevidenced. The CI section's "patch the binaries for glibc 2.35" for gpu-tests:
+confirmed by the same CI run. Nothing falsified on either page.

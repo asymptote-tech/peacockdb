@@ -95,3 +95,14 @@ not go green and are left as findings for master: the exec-model pytest timed ou
 because the spec's `--ignore` is one file short, and every shad-gpu binary built on dev wants
 `GLIBC_2.38` where the patch target is 2.35. Shortcuts or bandaids: none. Not driven, by the
 spec's own list: `docker-build.sh`, `cost-report-preview.sh`, the shad-gpu detached path, verda.
+
+Reopened for step 5 on the rebased branch: solved under its constraints — only the record and the
+board changed. The shad-gpu cycle went green on the second attempt (3m55s / 0m11s / 1m09s, patched
+to `/home/info/glibc-2.39`, five C++ binaries, `test_gpu_corpus`'s five `q6` cells, `GPU test run
+OK`), so the first signoff's `GLIBC_2.38` finding is answered by master `02069415`; the exec-model
+finding stands; `architecture.md`: none falsified. One shortcut: `cargo-cudf.sh clean -p
+peacockdb-core -p peacockdb-ffi` on the gitignored target dir, after a 2 s red on build scripts an
+outside session left there; the reviewer concurred it is not the repair the spec forbids. CI: run
+34659758921 on `2e98d11b`, in full because the rebase push was `diverged`, every job green, its GPU
+job patched to 2.35 from CI's container; later pushes doc-only, skipped by design. Not driven still:
+`--all`, the detached path, verda, `docker-build.sh`, `cost-report-preview.sh`, the first-patch build.
