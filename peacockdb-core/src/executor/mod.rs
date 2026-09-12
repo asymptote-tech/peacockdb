@@ -201,10 +201,10 @@ pub trait JoinExecutor<B: Backend>: Executor {
     type Probing: ProbingJoin<B>;
     fn set_build(self, batch: B::Batch) -> CallResult<Self::Probing>;
 
-    /// The build side finished without a batch — this lane's scatter gave it no build
-    /// rows, which a small table over many lanes produces routinely. `Ok` means the lane
-    /// owes nothing and ends here; an `Err` names a type whose answer is its probe side,
-    /// which needs a call over a build table that does not exist.
+    /// The build side finished without a batch: a scatter that gave a lane no rows, for
+    /// the types that owe nothing, or an upstream that emitted nothing at all (#212).
+    /// `Ok` means the lane owes nothing and ends here; an `Err` names a type whose answer
+    /// is its probe side, which needs a call over a build table that does not exist.
     ///
     /// The driver asks rather than deciding, because what a lane owes is a property of
     /// the join type and the executor is where that lives.

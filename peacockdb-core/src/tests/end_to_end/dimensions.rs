@@ -193,7 +193,7 @@ async fn an_empty_build_lane_answers_like_the_oracle(dataset: &str, query: &str)
         .map(|node| {
             report.emitted[node]
                 .iter()
-                .filter(|lane| lane.iter().all(|batch| batch.rows == 0))
+                .filter(|lane| !lane.is_empty() && lane.iter().all(|batch| batch.rows == 0))
                 .count()
         })
         .sum();

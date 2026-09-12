@@ -90,8 +90,7 @@ corpus_query!(tpch, 1, nested_limits, tp1_single | tp1_rowgroup | tp4_single | t
 // showed. Three of the five are cut before a device ever sees them: q22 carries an `avg` and is
 // out at every mode on #163; rollup-over-join runs at the two tp1 modes and not at the three
 // tp4 ones, which is the shuffle rather than the query — #189, whose grouping-set id is UInt8
-// and whose hasher has no arm for it. q16 ran at the two tp1 modes alone until #175's empty
-// build side was answered, and now runs at all five.
+// and whose hasher has no arm for it.
 // The fourteen cells that did reach a device split evenly, seven and seven, between #152's
 // build-side copy and #183 — every query here aggregates over a join, so which of the two it
 // meets is decided by whether the plan reaches the join before the unload refuses the export.
