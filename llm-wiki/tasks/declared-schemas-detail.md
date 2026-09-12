@@ -564,3 +564,7 @@ query 8 records it as a limitation rather than a ticket.
 
 Pages touched: `build-test.md`, `architecture.md`, this file. The completeness signoff in the
 spec is not written; it follows review.
+
+### 2026-09-12 — reviewing: PR #151 opened against `ENS-operator-cases`
+
+Seven plan tasks committed, `51a743be` at the head. Reviewer round 1 dispatched.
