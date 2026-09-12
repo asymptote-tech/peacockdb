@@ -6,10 +6,10 @@ use super::*;
 #[test]
 fn a_filter_answers_with_the_rows_its_predicate_keeps() {
     let node = GpuFilter::new(
-        Given::of(&COLUMNS),
+        Given::of_columns(&COLUMNS),
         greater_than(2),
         None,
-        schema_of(&COLUMNS),
+        columns(&COLUMNS),
     );
     let mut exec = CpuExec::filter(&node, &input(), ctx()).expect("the filter builds");
     let (out, _) = exec
@@ -33,10 +33,10 @@ fn a_filter_answers_with_the_rows_its_predicate_keeps() {
 #[test]
 fn a_filter_that_keeps_nothing_still_answers_with_a_batch() {
     let node = GpuFilter::new(
-        Given::of(&COLUMNS),
+        Given::of_columns(&COLUMNS),
         greater_than(100),
         None,
-        schema_of(&COLUMNS),
+        columns(&COLUMNS),
     );
     let mut exec = CpuExec::filter(&node, &input(), ctx()).expect("the filter builds");
     let (out, _) = exec
@@ -54,8 +54,13 @@ fn a_filter_that_keeps_nothing_still_answers_with_a_batch() {
 /// node declaring its child's columns while emitting fewer.
 #[test]
 fn a_filter_that_projects_emits_the_columns_it_named() {
-    let kept = schema_of(&[("s", DataType::Utf8)]);
-    let node = GpuFilter::new(Given::of(&COLUMNS), greater_than(1), Some(vec![1]), kept);
+    let kept = columns(&[("s", DataType::Utf8)]);
+    let node = GpuFilter::new(
+        Given::of_columns(&COLUMNS),
+        greater_than(1),
+        Some(vec![1]),
+        kept,
+    );
     let mut exec = CpuExec::filter(&node, &input(), ctx()).expect("the filter builds");
     let (out, _) = exec
         .exec(batch(
@@ -71,9 +76,9 @@ fn a_filter_that_projects_emits_the_columns_it_named() {
 
 #[test]
 fn a_project_evaluates_its_expressions_under_the_names_it_declares() {
-    let out_schema = schema_of(&[("twice", DataType::Int32), ("s", DataType::Utf8)]);
+    let out_schema = columns(&[("twice", DataType::Int32), ("s", DataType::Utf8)]);
     let node = GpuProject::new(
-        Given::of(&COLUMNS),
+        Given::of_columns(&COLUMNS),
         vec![
             NamedExpr::new(
                 Expr::binary(
@@ -110,7 +115,7 @@ fn a_project_evaluates_its_expressions_under_the_names_it_declares() {
 #[test]
 fn a_sort_orders_the_batch_it_was_given() {
     let node = GpuSort::new(
-        Given::of(&COLUMNS),
+        Given::of_columns(&COLUMNS),
         vec![ColumnOrder {
             column: 0,
             ascending: true,
@@ -135,7 +140,7 @@ fn a_sort_orders_the_batch_it_was_given() {
 #[test]
 fn a_sort_with_a_fetch_keeps_the_top_of_its_own_batch() {
     let node = GpuSort::new(
-        Given::of(&COLUMNS),
+        Given::of_columns(&COLUMNS),
         vec![ColumnOrder {
             column: 0,
             ascending: false,
@@ -224,7 +229,7 @@ fn a_partial_aggregate_emits_its_state_under_the_names_the_node_declared() {
         None,
     );
     let node = GpuAggregate::new(
-        Given::of(&GROUPED),
+        Given::of_columns(&GROUPED),
         AggregateBody {
             group_by: vec![Expr::column(0, "k")],
             grouping_sets: Vec::new(),
@@ -235,8 +240,8 @@ fn a_partial_aggregate_emits_its_state_under_the_names_the_node_declared() {
         state.clone(),
         state,
     );
-    let mut exec = CpuExec::aggregate(&node, &schema_of(&GROUPED).fields, ctx())
-        .expect("the aggregate builds");
+    let mut exec =
+        CpuExec::aggregate(&node, &columns(&GROUPED).fields, ctx()).expect("the aggregate builds");
     let (out, _) = exec
         .exec(grouped(
             vec![Some("a"), Some("b"), Some("a")],
@@ -291,7 +296,7 @@ fn an_aggregate_that_finalizes_divides_the_state_it_just_built() {
         DataType::Float64,
     );
     let node = GpuAggregate::new(
-        Given::of(&GROUPED),
+        Given::of_columns(&GROUPED),
         AggregateBody {
             group_by: vec![Expr::column(0, "k")],
             grouping_sets: Vec::new(),
@@ -305,8 +310,8 @@ fn an_aggregate_that_finalizes_divides_the_state_it_just_built() {
         state,
         output,
     );
-    let mut exec = CpuExec::aggregate(&node, &schema_of(&GROUPED).fields, ctx())
-        .expect("the aggregate builds");
+    let mut exec =
+        CpuExec::aggregate(&node, &columns(&GROUPED).fields, ctx()).expect("the aggregate builds");
     let (out, _) = exec
         .exec(grouped(
             vec![Some("a"), Some("b"), Some("a"), Some("b")],
@@ -344,7 +349,7 @@ fn a_welford_triple_is_one_aggregate_filling_three_declared_columns() {
         Some("stddev(v)"),
     );
     let node = GpuAggregate::new(
-        Given::of(&GROUPED),
+        Given::of_columns(&GROUPED),
         AggregateBody {
             group_by: vec![Expr::column(0, "k")],
             grouping_sets: Vec::new(),
@@ -359,8 +364,8 @@ fn a_welford_triple_is_one_aggregate_filling_three_declared_columns() {
         state.clone(),
         state,
     );
-    let mut exec = CpuExec::aggregate(&node, &schema_of(&GROUPED).fields, ctx())
-        .expect("the aggregate builds");
+    let mut exec =
+        CpuExec::aggregate(&node, &columns(&GROUPED).fields, ctx()).expect("the aggregate builds");
     let (out, _) = exec
         .exec(grouped(
             vec![Some("a"), Some("a"), Some("a"), Some("b")],
@@ -412,7 +417,7 @@ fn a_declared_state_of_another_type_than_the_accumulators_produce_is_refused() {
         None,
     );
     let node = GpuAggregate::new(
-        Given::of(&GROUPED),
+        Given::of_columns(&GROUPED),
         AggregateBody {
             group_by: vec![Expr::column(0, "k")],
             grouping_sets: Vec::new(),
@@ -423,7 +428,7 @@ fn a_declared_state_of_another_type_than_the_accumulators_produce_is_refused() {
         state.clone(),
         state,
     );
-    let refused = match CpuExec::aggregate(&node, &schema_of(&GROUPED).fields, ctx()) {
+    let refused = match CpuExec::aggregate(&node, &columns(&GROUPED).fields, ctx()) {
         Err(refused) => refused,
         Ok(_) => panic!("a sum does not produce a string"),
     };
@@ -450,7 +455,7 @@ fn a_grouping_set_aggregate_emits_the_id_beside_its_keys() {
         None,
     );
     let node = GpuAggregate::new(
-        Given::of(&GROUPED),
+        Given::of_columns(&GROUPED),
         AggregateBody {
             group_by: vec![Expr::column(0, "k")],
             grouping_sets: vec![vec![false], vec![true]],
@@ -461,8 +466,8 @@ fn a_grouping_set_aggregate_emits_the_id_beside_its_keys() {
         state.clone(),
         state,
     );
-    let mut exec = CpuExec::aggregate(&node, &schema_of(&GROUPED).fields, ctx())
-        .expect("the aggregate builds");
+    let mut exec =
+        CpuExec::aggregate(&node, &columns(&GROUPED).fields, ctx()).expect("the aggregate builds");
     let (out, _) = exec
         .exec(grouped(
             vec![
@@ -502,7 +507,7 @@ fn a_grouping_set_aggregate_emits_the_id_beside_its_keys() {
 fn a_per_batch_fetch_keeps_the_rows_whose_keys_win_and_keeps_the_same_ones() {
     const ROWS: i32 = 40;
     let node = GpuSort::new(
-        Given::of(&COLUMNS),
+        Given::of_columns(&COLUMNS),
         vec![ColumnOrder {
             column: 0,
             ascending: true,

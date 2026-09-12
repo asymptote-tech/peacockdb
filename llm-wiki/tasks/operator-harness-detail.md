@@ -97,3 +97,64 @@ Results:
 
 For plan task 8: `cpp/tests/cpu/test_executor.cpp` gained one gtest, so `build-test.md`'s "C++
 CPU/FFI unit" row is 12 and the header's C++ figure moves by one.
+
+### 2026-09-12 — plan task 2 done: `Given`, `synthetic`, the comparator
+
+Three new leaves under `peacockdb-core/src/tests/` — `given.rs`, `synthetic.rs`, `compare.rs` —
+declared in `src/tests/mod.rs` as `pub(crate) mod` beside `injection` and `executor_cases`, and
+named by path (`crate::tests::given::Given`, `crate::tests::synthetic::synthetic`, …). Not the
+plan's `pub(crate) use` re-exports: `nothing_re_exports_with_pub_use` refuses the literal `pub use`
+and its reason — the item declared in one place and named from another — covers the crate-wide
+form too. `lib.rs` gates `mod tests` on `#[cfg(test)]`, so none of the three carries a gate of
+its own, and every item is `pub(crate)` or private.
+
+- **The lift.** `Given` (private `kind`; `of(schema, batches)`, `of_columns(fields)`,
+  `with_layout(schema, layout)`) and `columns(fields) -> Schema` are the cpu executor tests'
+  `Given`/`schema_of`, moved. In `executor/cpu_backend/tests/` the copies are gone: `Given::of(&X)`
+  → `Given::of_columns(&X)`, `Given::of_schema(s)` → `Given::of(s, BatchLayout::MultipleBatches)`,
+  `schema_of(` → `columns(`; the three local helpers that built `Given { kind: … }` by struct
+  literal (`backend.rs` `given`/`given_schema`, `join.rs` `side`) now delegate to `Given::of`. Four
+  bindings named `columns` would have shadowed the function and were renamed (`fields` in
+  `state_of`, `given`, `side`, `source.rs`; `filter_columns` at `join.rs`'s three
+  `let (filter, …)` sites). The `Given`s in `wire/tests.rs` and `plan/tests/mod.rs` are untouched:
+  neither has the three-method shape. `executor::cpu_backend::tests::` is 65 passed before and 65
+  after, 0 warnings.
+- **`synthetic.rs`**: `schema()`, `synthetic(rows, seed)`, `decimals(rows, seed)`, `prefixed`, as
+  the plan wrote them (`from_iter` over `Option` builds every array type on the pinned arrow).
+  Red first — `cannot find function synthetic/decimals/prefixed` — then 5 green.
+- **`compare.rs`**: `Slot`, `Order`, `same`, `assert_same`, as the plan wrote them plus a
+  `names_and_types` free function. Red first — `cannot find function same`, `undeclared type
+  Order` (22 errors) — then green. `the_asserting_form_panics_with_the_reason` (`should_panic`)
+  is beyond the plan's list: `assert_same` has no caller until task 4 and warned `never used`;
+  this test was written after the wrapper, since the wrapper is three lines around `same`.
+
+New cases (14): `tests::synthetic::{a_synthetic_batch_is_the_same_batch_twice,
+every_column_but_id_carries_a_null_and_id_carries_none,
+zero_rows_is_a_batch_with_the_schema_and_nothing_else, decimals_carry_an_id_and_a_decimal_with_nulls,
+prefixing_renames_every_column_and_touches_no_value}`; `tests::compare::{
+a_slot_whose_value_differs_is_named_with_the_slot,
+a_slot_both_sides_left_empty_is_equal_and_one_side_empty_is_named, nullability_alone_is_not_a_difference,
+a_slot_whose_type_differs_fails_before_any_row_is_read, a_differing_row_count_is_named_as_a_count,
+a_differing_slot_count_is_named_before_any_slot_is_compared, any_order_sorts_and_as_emitted_does_not,
+a_slot_of_several_batches_is_one_table, the_asserting_form_panics_with_the_reason}`.
+
+The comparator's messages, as `same` produces them (read once with a throwaway printing test,
+removed):
+
+    value    slot 0: rows differ\n  cpu:\n<pretty table>\n  gpu:\n<pretty table>
+    type     slot 0: schema differs\n  cpu: Field { name: "i32", data_type: Int32, … }\n  gpu: … data_type: Int64 …
+    rows     slot 0: cpu has 8 rows, gpu 9 rows
+    slots    cpu produced 2 slots, gpu 1 slot
+    gpu none slot 0: gpu produced no batch, cpu 4 rows
+    cpu none slot 0: cpu produced no batch, gpu 0 rows
+    assert   panic: cpu and gpu differ: slot 0: cpu has 8 rows, gpu 9 rows
+
+Results:
+
+    cargo test --features rust-only -p peacockdb-core --lib                          528 passed, 2 ignored (514 + 14), 0 warnings
+    cargo test --features rust-only -p peacockdb-core --lib -- executor::cpu_backend::tests   65 before, 65 after
+    cargo test --features rust-only -p peacockdb-core --test test_module_layout      17 passed
+    cargo test --features rust-only -p peacockdb-core --test test_ci_coverage        8 passed
+    cargo build --features rust-only -p peacockdb-core                               0 warnings (a non-test build never sees src/tests/)
+    CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run   exit 0, 0 warnings
+    rustfmt --check on src/tests/{given,synthetic,compare,mod}.rs and cpu_backend/tests/*.rs  clean

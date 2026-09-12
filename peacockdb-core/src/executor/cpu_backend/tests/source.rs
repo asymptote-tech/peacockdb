@@ -63,7 +63,7 @@ fn loader(projection: Vec<u32>, partition_groups: Vec<Vec<Vec<u32>>>) -> GpuLoad
             .collect(),
         can_be_null: vec![false, false],
     };
-    let columns: Vec<(&str, DataType)> = projection
+    let fields: Vec<(&str, DataType)> = projection
         .iter()
         .map(|column| GROUPED[*column as usize].clone())
         .collect();
@@ -73,7 +73,7 @@ fn loader(projection: Vec<u32>, partition_groups: Vec<Vec<Vec<u32>>>) -> GpuLoad
         partition_groups,
         &scan,
         None,
-        schema_of(&columns),
+        columns(&fields),
     )
 }
 
