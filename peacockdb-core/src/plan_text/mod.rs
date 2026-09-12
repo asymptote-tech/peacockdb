@@ -13,6 +13,7 @@
 // there; the code stays in every build. The attribute leaves with the first CLI renderer.
 #![cfg_attr(not(test), allow(dead_code))]
 
+mod declared;
 mod expr_text;
 mod memory;
 mod node_text;
@@ -24,6 +25,7 @@ mod tests;
 use crate::executor::RunReport;
 use crate::plan::GpuNode;
 use crate::planner::MemoryModel;
+use crate::wire::RecipePlan;
 
 /// The plan under `root`, one line per node. The plan golden carries the declared schema
 /// per node; an execution golden does not, since what it records is what ran.
@@ -39,4 +41,12 @@ pub(crate) fn render_plan_memory(root: &dyn GpuNode, model: &MemoryModel) -> Str
 /// The execution golden: the plan with what each node actually ran under it.
 pub(crate) fn render_run(root: &dyn GpuNode, report: &RunReport) -> String {
     run_text::render_run(root, report)
+}
+
+/// The payload golden's second section: the schema each call declares, read off the
+/// `Call` data before `Writer` serializes anything. A different source from the payload
+/// section, which is read back out of the finished buffer — which is the point: when a
+/// later task puts schemas on the wire, the two sections become each other's check.
+pub(crate) fn render_declared_schemas(root: &dyn GpuNode, plan: &RecipePlan) -> String {
+    declared::render_declared_schemas(root, plan)
 }

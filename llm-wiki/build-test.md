@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1833 test cases — Rust 1397, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1836 test cases — Rust 1400, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1011 cases: `--lib` 540, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1014 cases: `--lib` 543, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -196,13 +196,15 @@ recipe with no plan. The trivial kinds are not here — the plan goldens run the
 corpus query; and what each call declares its firing produces — the six arms whose schema is in
 hand declare their node's own, every other arm answers `None`
 
-| Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 13 |
+| Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 16 |
 |---|---|--:|
 
 the renderer against what the planner emits from real SQL: every column reference prints name
 at ordinal, every node carrying a fetch prints it, a join prints its keys and projection by
 name, a source prints its mapping verbatim, a name that is not a token is backquoted, and no
-node name carries an exec suffix
+node name carries an exec suffix; and the payload golden's declared section: one line per call
+under its node, `undeclared` and `no calls` spelled out, a decimal with its digits, and both
+sections numbering the same nodes
 
 | One driver, two backends | [one_generic_driver_serves_two_backends_with_different_batch_types](../peacockdb-core/src/executor/tests.rs) | 1 |
 |---|---|--:|

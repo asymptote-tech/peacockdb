@@ -196,3 +196,100 @@ clause for the declarations.
 
 No C++, no wire change, no cast or refusal; no git mutation — `wire/tests.rs` → `wire/tests/mod.rs`
 is a working-tree move for the coordinator to stage (git will read it as a rename).
+
+### 2026-09-12 — plan task 4 done: section B of the payload golden
+
+**The renderer**: `plan_text/declared.rs`, `pub(crate) fn render_declared_schemas(root, plan)`
+through `plan_text/mod.rs`'s facade. Post-order numbering with the node's own line printed
+before its children, the order `wire::recipes::render_recipe_node` prints in, so the two
+sections of one query read side by side. It reaches `node_text::schema_text` (now `pub(crate)`
+inside the component, still unreachable from outside `plan_text`) — the one that prints
+`Decimal128(15,2)` — and `wire::RecipePlan`, a sibling's `pub(crate)` item. Nothing in `wire`
+changed; `Writer` is untouched.
+
+**The section's shape**, per query, after section A and under a header naming its source:
+
+```
+-- declared (rust, pre-serialization) --
+GpuUnload:
+  result_from_handle: schema=[l_returnflag:Utf8View, l_linestatus:Utf8View, std_samp_qty:Float64, …]
+  GpuProject:
+    #9 CudfProject: schema=[l_returnflag:Utf8View, …]
+    GpuAggregateBatches:
+      #6 CudfCoalescePartitions: undeclared
+      #7 CudfAggregate{Merge}: undeclared
+      #8 CudfProject{finalize}: undeclared
+      GpuEmitPartitions:
+        #5 CudfRepartition{Hash, 1→4}: undeclared
+        GpuCoalesceAllBatches:
+          #4 CudfCoalescePartitions: schema=[…, stddev(lineitem.l_quantity)$count:UInt64, …]
+          GpuMergePartitions: no calls
+            …
+                GpuLoadParquet:
+                  #0 CudfScan: schema=[l_quantity:Decimal128(15,2), l_returnflag:Utf8View, l_linestatus:Utf8View]
+```
+
+(`tpch shuffle-stddev`.) One line per call under its node: `#seq Kind` for a call with a seq,
+the ABI symbol for a bare one; `schema=[…]` where an arm declared, `undeclared` where none has
+(spelled out so an absent line cannot pass for a declaration, and greppable: 696 `undeclared`,
+534 declared, 154 `no calls` across the twenty queries), `no calls` on a node with no recipe.
+Every `Decimal128` in section B carries its digits (147 lines); section A's 37 bare
+`Decimal128` are `fb_text::schema_text`'s and did not move.
+
+**How the golden test holds it.** `the_payload_golden_carries_what_each_call_hands_the_executor`
+appends section B to the same `text` after `render_plan_recipes`, so a stale B is a section
+difference under no variable, exactly as a stale A is (seen red: "20 of 20 queries differ"
+before the regen). Under `UPDATE_CANONICAL=1` alone the gate now compares `declared_of(canonical)`
+against `declared_of(text)` beside `digests_of` and refuses — seen red with "a declared schema
+moved" before the regen and the golden untouched on disk. Only `UPDATE_CANONICAL=1` **and**
+`PEACOCK_REWRITE_RECIPE_BYTES=1` rewrite it. `declared_of` reads every line from the header to
+the next `== `, keyed by query, so a B section can never be taken for A's (`digests_of` keys on
+`sha256=`, which B never emits).
+
+**Regeneration command**, exactly:
+`UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_goldens`.
+Nothing set for the symlink: the test itself re-points `/tmp/peacock-plan-bytes-root` at this
+worktree's `testdata` by atomic rename each run (`point_canonical_root`), and the added lines
+carry no host path (`grep /home/` over the `+` lines: 0). The ten `.plans.txt` were regenerated
+in the same run and did not move.
+
+**Tests** (`plan_text/tests.rs`, 13 → 16): `the_declared_section_prints_one_line_per_call_under_its_node`
+pins the exact text of unload → limit → merge-partitions → source (declared, `undeclared`, `no
+calls`, `#0 CudfScan` all in one tree); `the_declared_section_keeps_a_decimals_precision_and_scale`
+plans `SELECT c_acctbal FROM customer` over the minimal testdata and finds
+`Decimal128(15,2)` on the exporter's line; `the_two_payload_sections_number_the_same_nodes`
+renders both sections for a sort+limit, a group-by and a join and asserts the node lines, with
+their indentation, are identical — the plan's 1b. All three red on an empty renderer first.
+`rendered` in that file was split into `planned` + `render_plan` so the new cases share the
+planning helper; `translate`'s registered caller stays `plan_text/tests.rs`.
+
+**Ticket decision on `fb_text::schema_text`'s bare `Decimal128`: no ticket.** The rule in
+`prompts.md` gives a ticket to production behaviour only, and this is a golden renderer's text
+in a test artefact. It is also not a coverage hole: the `sha256=` digest pins the bytes, so a
+precision that moved on the wire goes red through the digest even though the text would not
+show it. That makes it cosmetic — fix it when in that code — and fixing it here would move 37
+section-A lines the coordinator ruled out of scope. Recorded here for the task that puts schemas
+on the wire: before section A can check section B, `fb_text::schema_text` has to print the
+digits, or the comparison is blind to precision.
+
+**Page**: `build-test.md` describes the golden's two sections, the gate on B, the plan-text row
+(16, with the declared cases named), and the counts: `--lib` 543, cpu 1014, Rust 1400, grand
+total 1836.
+
+**Results, all fresh after the last edit:**
+
+- `git diff testdata/goldens/recipe-payloads.txt`: 2465 insertions, 0 deletions, 0 `sha256=`
+  moved, 20 headers added, no other golden moved; `PEACOCK_REWRITE_RECIPE_BYTES` unset in the
+  proving runs.
+- `cargo test --features rust-only -p peacockdb-core --lib` — 541 passed, 0 failed, 2 ignored
+  (538 + 3); `planner::tests::plan_goldens` 19; `wire::` 30; `plan_text::` 19 (16 in `tests`, 3
+  in `expr_text`).
+- `--test test_corpus_goldens` 20; `--test test_module_layout` 17.
+- `cargo build --features rust-only -p peacockdb-core` and `-p peacockdb` — 0 warnings (forced
+  recompile); gpu `--no-run` — recompiled core, 0 warnings.
+- Surface 46; the renderer and `schema_text` are `pub(crate)`.
+- rustfmt-check clean on `declared.rs`, `node_text.rs`, `plan_text/tests.rs`, `plan_goldens.rs`;
+  `plan_text/mod.rs` masked shows only HEAD's diff. Caps: file header 7, above-declaration 4,
+  in-body 4.
+
+No C++, no wire change, no fix. No git mutation; `plan_text/declared.rs` is new and unstaged.
