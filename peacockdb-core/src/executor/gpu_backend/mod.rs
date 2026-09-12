@@ -98,8 +98,8 @@ pub(crate) struct GpuProbingJoin {
 
 /// A lane's reads, in the order the mapping named them.
 ///
-/// `pub` because `Backend::Source` names it, so a caller holding a `GpuBackend` reaches it
-/// without any file importing the type.
+/// Declared here because `Backend::Source` names it, so a caller holding a `GpuBackend`
+/// reaches it without any file importing the type.
 pub(crate) struct GpuSource {
     pub(crate) executor: *mut PeacockExecutor,
     pub(crate) seq: Seq,
