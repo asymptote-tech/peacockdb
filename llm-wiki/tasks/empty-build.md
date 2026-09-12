@@ -239,3 +239,16 @@ identity row on the CPU, because `gpu_backend/accumulate.rs:307` lacks the CPU's
 clause. A wrong answer, found by reading rather than by a run, and deliberately **not** fixed here:
 it is a different bug on the same page, and the parked spec's habit of bundling the two is what this
 task exists to undo.
+
+## Completeness signoff
+
+Solved under its constraints: one derived index field and one conditional drop, the drop still
+the default everywhere else; no marker on the plan, no wire, ABI, `ProjectRole` or
+`without_build` signature change; `operators/join.cpp`, `finish_without_keys` and
+`empty_build_answers_nothing` untouched; the six tests of §6 green on the cpu against DataFusion
+and the pad proved on the device; the goldens read — six kept batches against the spike's 244,
+q16's tp4 cells enabled; #175 archived with its cells gone. Deviations, none a shortcut: q77 did
+not go green — its Right outer's build side emits no batch at all, the Inner join's empty lane
+dropping as §2 requires — and is #212 with the three `without_build` pins retargeted to it rather
+than deleted; `.result.txt` moved one `mode=` line by the harness's authoring rule; a third lying
+comment in `gpu_backend/mod.rs`; the regeneration's lost update ticketed as #213 rather than fixed.

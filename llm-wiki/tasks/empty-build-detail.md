@@ -232,3 +232,17 @@ regeneration consequences, and the doc corrected by the developer); and task 13'
 no-batch-at-all route refuses (#212) — the spec is frozen, task 13's first step stops for the
 human, and this line is the record they read first. architecture.md: "an empty lane emits no
 batch at all" gained its exception; "needs no mechanism" now says one decision and no mechanism.
+
+### 2026-09-12 — completeness pass: `merge_section`'s doc says what holds and what does not
+
+`test_support/corpus_golden.rs`: the paragraph claiming the in-lock read was "the whole point"
+now says what holds (writers on one inode are serialized and see each other's sections) and
+what does not (the lock is on the opened inode, the rename replaces it, so a writer that
+opened before another's rename publishes without that section — #213). Ten doc lines, no
+behaviour change. `--lib` 551 passed / 2 ignored, `test_corpus_goldens` 20, rustfmt clean.
+
+### 2026-09-12 — completeness approved
+
+Both readings closed: #158 corrected, #213 filed with its bullet and `merge_section`'s doc made
+true, task 13's inherited #175 premise recorded above, architecture.md's two sentences fixed.
+The signoff is on the spec. Awaiting CI.
