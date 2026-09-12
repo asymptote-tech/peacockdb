@@ -49,3 +49,35 @@ at 37 GiB of 143.7; `cpp/build`, `cpp/install` and `target-cudf-rapids-cuda-12.2
 ### 2026-09-12 — plan task 1 dispatched: the message names every diverging column
 
 Board set to `building`.
+
+### 2026-09-12 — plan task 1 done: the message names every diverging column
+
+**Shape.** `try_new`'s sentence stays as the prefix; the appendix is ` (declared vs exported:
+{index} {name}: {declared} vs {exported}; …)`, types only, and it is omitted when no zipped
+column differs by type (a count-only refusal keeps the bare prefix). From the test:
+`0 l_comment: Utf8View vs Utf8; 2 l_extendedprice: Decimal128(15, 2) vs Decimal128(38, 2)` —
+a matching column between two diverging ones is skipped, its index is not renumbered. A
+nullability-only difference yields the empty string.
+
+**Where.** The comparison is `schema_divergence(&Schema, &Schema) -> String`, `pub(crate)` in
+`peacockdb-core/src/executor/errors.rs`, with `#[cfg_attr(feature = "rust-only", allow(dead_code))]`
+on the `wire_nodes` precedent: its one production caller is the sink in `gpu_backend/mod.rs`,
+which `rust-only` compiles out. It sits there rather than beside the site because
+`gpu_backend` is `cfg(not(feature = "rust-only"))`: a `tests` module inside it would be named
+for the floor rung and never run on it, and would only ever run under `--lib` of an FFI-linked
+build, which the rung path filters do not select. The tests are
+`peacockdb-core/src/executor/errors/tests.rs` (`#[cfg(test)] mod tests;`, three cases: one
+column with both types, two clauses across a matching column, nullability alone is none), red
+first against a stub returning `""` (two assertion failures, the nullability case vacuously
+green), then green. The sink's wrapping — prefix, conditional parenthetical — is three lines
+without a unit test; the rollout is what exercises it.
+
+**Results.** `cargo build --features rust-only -p peacockdb-core` 0 warnings;
+`cargo-cudf.sh build -p peacockdb-core --features gpu` 0 warnings;
+`--test test_module_layout` 17 passed; `--features rust-only --lib` 517 passed, 2 ignored
+(514 + 3); `cargo-cudf.sh test --lib --features gpu --no-run` 0 warnings. Running the three
+cases from that gpu-shape binary needs `LD_LIBRARY_PATH=$CUDF_ROOT/lib` locally (it fails at
+load on `libcudf.so` otherwise — the loader path `build-test-shadgpu.sh` supplies as
+`PATCHED_LD`); with it, 3 passed. rustfmt-check clean on the three touched files with
+`--edition 2024 --style-edition 2024` (the crate's; the default 2021 sort reorders every
+import in the tree). Not committed.
