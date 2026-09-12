@@ -1164,18 +1164,15 @@ declaration is exactly what a wrong type would move. Comparing a declared type a
 expression that produces it is [#163](tickets.md#t163), and the C++ half is
 [#164](tickets.md#t164).
 
-**Six calls declare what their firing produces, and a device test holds four of them to it.**
-`Call::output_schema` (`wire/mod.rs`) is set by the scan, filter, project, sort, coalesce-all and
-unload arms of `attach.rs`; the nine other recipe-bearing arms answer `None`, and the payload
-golden prints each call's declaration in a section of its own, rendered before serialization.
-`wire/gpu_tests/declared.rs` exports each firing of a planned query and compares, by name and
-type, with precision and nullability set aside — the exporter writes 38 on every decimal and
-reads the flag off the data. Scan, filter, project and unload are measured; `CudfSort` is
-declared and no query reaches it bare, and the coalesce-all is exported by the walk's driver
-but held to no claim. What disagreed is a `bug_` test each: `Utf8View` exported `Utf8`
-([#183](tasks/active-tickets.md#t183)), an extracted year `Int16` for `Int32`
-([#191](tasks/active-tickets.md#t191)), `Date64` as a millisecond timestamp
-([#200](tickets.md#t200)).
+**Six arms declare what their call produces, and a device test holds them to it.**
+`Call::output_schema` (`wire/mod.rs`) is the schema one firing of the call yields — the node's
+own, set by the scan, filter, project, sort, coalesce-all and unload arms of `attach.rs`. `None`
+means undeclared, never "produces nothing"; the other nine recipe-bearing arms answer it.
+Section B of `recipe-payloads.txt` renders each declaration before serialization and is a gate:
+a moved declaration is red there under no variable. `wire/gpu_tests/declared.rs` exports each
+firing of a planned query and compares it with the declaration by name and type, precision and
+nullability set aside because the exporter rewrites both. What disagrees is a `bug_` test with
+its ticket, listed in `build-test.md`'s known-wrong table.
 
 **Estimates go in a `--- memory ---` section per query, not on the node line.** They churn where
 plan shapes do not — an estimator change, then #19's statistics, then #147's refinement — so on

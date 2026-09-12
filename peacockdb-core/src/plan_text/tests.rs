@@ -285,8 +285,9 @@ async fn the_declared_section_keeps_a_decimals_precision_and_scale() {
 
 /// Both payload sections walk the tree post-order and index the recipe plan by position.
 /// Nothing in the types ties the two walks together, so a kind whose `children()` order
-/// moved would give the two sections different plans; the node lines, with their
-/// indentation, must read the same in both.
+/// moved would give the two sections different plans. Compared per node: its line, with its
+/// indentation, and the `#seq Kind` labels under it — the seqs are what would move if
+/// section B took a node's position before or after recursing where section A does not.
 #[tokio::test]
 async fn the_two_payload_sections_number_the_same_nodes() {
     for sql in [
@@ -298,13 +299,48 @@ async fn the_two_payload_sections_number_the_same_nodes() {
         let plan = attach_recipes(tree.as_ref()).expect("writable");
         let recipes = render_plan_recipes(tree.as_ref(), &plan, Payloads::Omitted);
         let declared = render_declared_schemas(tree.as_ref(), &plan);
-        assert_eq!(node_lines(&recipes), node_lines(&declared), "{sql}");
+        assert_eq!(
+            nodes_with_seqs(&recipes),
+            nodes_with_seqs(&declared),
+            "{sql}"
+        );
+        assert!(
+            nodes_with_seqs(&recipes)
+                .iter()
+                .any(|(_, seqs)| !seqs.is_empty()),
+            "{sql}: no seq label was read, so nothing was compared"
+        );
     }
 
-    fn node_lines(text: &str) -> Vec<String> {
-        text.lines()
-            .filter(|line| line.trim_start().starts_with("Gpu"))
-            .map(|line| line.split(':').next().expect("a node line").to_string())
-            .collect()
+    /// Each node line cut at its `:`, with every `#seq Kind` label that follows it before
+    /// the next node line — section A has them inside `execute_node(…)`, section B one per
+    /// line beneath the node.
+    fn nodes_with_seqs(text: &str) -> Vec<(String, Vec<String>)> {
+        let mut nodes: Vec<(String, Vec<String>)> = Vec::new();
+        for line in text.lines() {
+            if line.trim_start().starts_with("Gpu") {
+                let node = line.split(':').next().expect("a node line").to_string();
+                nodes.push((node, Vec::new()));
+            }
+            let Some((_, seqs)) = nodes.last_mut() else {
+                continue;
+            };
+            let mut rest = line;
+            while let Some(at) = rest.find('#') {
+                let label = &rest[at..];
+                let end = label
+                    .find(|c: char| c == ',' || c == ')' || c == ':')
+                    .map_or(label.len(), |end| {
+                        // A brace holds its own commas: `CudfRepartition{Hash, 1→4}`.
+                        match label.find('{') {
+                            Some(open) if open < end => label.find('}').map_or(end, |c| c + 1),
+                            _ => end,
+                        }
+                    });
+                seqs.push(label[..end].to_string());
+                rest = &label[end..];
+            }
+        }
+        nodes
     }
 }

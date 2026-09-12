@@ -508,8 +508,8 @@ the firing's exported schema with its declaration; "exported" means the driver's
 | `GpuLoadParquet` | `CudfScan` (per batch) | yes | queries 1–13, 15 | agrees on `Date32`, `Int32`, `Int64`, names, order, arity; **`bug_a_declared_utf8view_is_exported_as_utf8` (#183)** enters here; decimals at 38 (#187, the exporter's) |
 | `GpuFilter` | `CudfFilter` (per batch) | yes | queries 2–6, 13, 15 | agrees; inherits #183 (query 6) and the precision default |
 | `GpuProject` | `CudfProject` (per batch) | yes | queries 3, 7–10, 12, 13 | agrees on casts to `Int64`/`Float64`, `Decimal128(38,4)`, names, order; **`bug_an_extracted_year_declared_int32_is_exported_as_int16` (#191)** and **`bug_a_date64_is_exported_as_a_millisecond_timestamp` (#200)** enter here; nullability read off the data (query 8, the exporter's) |
-| `GpuSort` | `CudfSort` (per batch) | yes | **nobody** | **declared and never measured**: every `ORDER BY` plans `GpuAccumulateBatchesAndSort` (task 2's arm) and no shape reaches a bare `GpuSort` |
-| `GpuCoalesceAllBatches` | `CudfCoalescePartitions` (at done) | yes | exported only — `every_firing_of_a_declared_call_is_measured_and_no_undeclared_one_is` | **declared, exported, held to no claim**: at `tp1-rowgroup` the coalesce-all shapes (anti/semi/cross join) put the several batches on the probe side, which the walk refuses (#152) |
+| `GpuSort` | `CudfSort` (per batch) | yes | `a_sort_survives_the_crossing`; the #183 class test | agrees on `Int32`; inherits #183. Every `ORDER BY` plans it under `GpuAccumulateBatchesAndSort`, and its own `CudfSort` fires per batch there (review round 1 corrected the premise that it was unreached) |
+| `GpuCoalesceAllBatches` | `CudfCoalescePartitions` (at done) | yes | `a_coalesce_all_survives_the_crossing` (two lanes, below the shuffle); the #183 class test | agrees on `Int64` and the sum's decimal (at 38); inherits #183 |
 | `GpuUnload` | `result_from_handle` (per handle) | yes | every query | carries what entered below it: #183, #191, #200; precision and nullability the exporter's |
 | `GpuAggregate` | `CudfAggregate{Partial}` (per batch), `CudfProject{finalize}` (per batch, self-finalizing) | no | — | `declared-schemas-derived.md` |
 | `GpuAccumulateBatchesAndSort` | `CudfSort` (per batch), `CudfSortPreservingMerge` (at done) | no | — | derived task |
@@ -522,9 +522,9 @@ the firing's exported schema with its declaration; "exported" means the driver's
 | `GpuLimit` | `slice_handle` (per straddling batch) | no | — | derived task |
 | `GpuMergePartitions`, `GpuUnion`, `GpuInterleave` | none | — | — | no recipe; nothing to declare |
 
-Two rows matter: `CudfSort`, declared by task 3 and checked by nothing on a device, and the
-coalesce-all, exported but never compared. Both are claims the catalog does not back, and this
-table is the only place that says so.
+Every declared call is measured (after review round 1 — the table first said `CudfSort` was
+unreached and the coalesce-all uncompared; both were wrong, see the round 1 entry). No row is
+declared and unmeasured.
 
 **`build-test.md`.** New `### Known-wrong behaviour` under Test categories, below the second
 table: the why sentence, the runtime, `**Total: 79.**`, one row per `bug_` test — test (linked),
@@ -568,3 +568,72 @@ spec is not written; it follows review.
 ### 2026-09-12 — reviewing: PR #151 opened against `ENS-operator-cases`
 
 Seven plan tasks committed, `51a743be` at the head. Reviewer round 1 dispatched.
+
+### 2026-09-12 — review round 1: sort and coalesce-all measured, and seven nits
+
+1. **Important — the sort arm was unmeasured on a false premise.** The reviewer is right:
+   every `ORDER BY` at tp1-single plans `GpuAccumulateBatchesAndSort → GpuSort`, `GpuSort`'s
+   own `CudfSort` fires per batch, is declared, and the driver measures it. Two cases in
+   `declared.rs`: `a_sort_survives_the_crossing` (`SELECT n_nationkey FROM nation ORDER BY
+   n_nationkey`, `ONE_LANE`; the one declared `CudfSort` firing agrees by name and type,
+   `Int32 → Int32`) and `a_coalesce_all_survives_the_crossing` (`SELECT l_linenumber,
+   sum(l_quantity) FROM lineitem GROUP BY l_linenumber`, `TWO_LANES` — the mode that plans a
+   shuffle, stated; the one declared `CudfCoalescePartitions` firing agrees: `[l_linenumber:Int64,
+   sum(lineitem.l_quantity):Decimal128(25,2)] → [Int64, Decimal128(38,2)]`, precision aside).
+   Both through a new helper `the_one_firing_of(firings, kind)`, which insists on exactly one
+   firing of the kind. The #183 class at those node kinds is not a new `bug_` row: the spec's
+   row 1 says one test for the class, so `bug_a_declared_utf8view_is_exported_as_utf8` now
+   drives three shapes — `SELECT n_name FROM nation`, `SELECT n_name AS label FROM nation WHERE
+   n_nationkey > 3 ORDER BY n_name`, and `SELECT l_returnflag, sum(l_quantity) FROM lineitem
+   GROUP BY l_returnflag` at `TWO_LANES` — and asserts `Utf8View → Utf8` at every one of the six
+   declared node kinds, naming any kind that declared no `Utf8View`. The device answered all
+   three green on the first run: the class holds at `CudfSort` and `CudfCoalescePartitions` too.
+   The walk.rs driver case keeps its `is_ok()` — its claim is bookkeeping, and the comparison
+   now lives where schema claims live. Wiki: `architecture.md`'s "no query reaches it bare"
+   and the measurement table's two rows corrected above (no row is declared and unmeasured);
+   the spec's §6 "no sort query here" is the spec's own mistake, left for the signoff.
+   `build-test.md`: Schema catalog 11 → 13 with the two arms named.
+2. **Nit — query 15 through `columns`.** `the_firings_of_one_call_export_one_schema` compares
+   `declared_vs_exported()` halves (name and type) and collects labels into a `BTreeSet`; a row
+   group holding a null no longer reads as a disagreement, and the order of firings is not
+   relied on.
+3. **Nit — the numbering guard can go red now.** `the_two_payload_sections_number_the_same_nodes`
+   compares, per node line, the `#seq Kind` labels under it in both sections (`nodes_with_seqs`),
+   and asserts at least one label was read. Chosen over a rename because the exact-text case
+   pins one tree's text and this one is about the two walks agreeing over three shapes, which
+   is a different claim. Proved live: with `render_declared_node` taking its position before
+   recursing, the test fails (`GpuUnload` gets `#0 CudfScan`, the scan gets nothing); restored.
+4. **Nit — no export for an undeclared call.** `Walk::measure` takes the export as a closure
+   and calls it only under `Some(output_schema)`; aggregate, repartition and join handles are
+   no longer copied to the host. `make` and `source` copy `self.session` into a local so the
+   closure does not borrow `self`.
+5. **Nit — headers.** `walk.rs` and `gpu_tests/mod.rs` now say "a lane holds one batch, or one
+   per row group at `tp1-rowgroup`, and a join's probe is always one batch"; both within ten.
+6. **Nit — `build-test.md` preamble**: "one per divergence class in the schema catalog, asserted
+   at every node kind its queries reach"; the #183 row's clause says the same.
+7. **Nit — `architecture.md`**: the paragraph is the invariant only — six arms declare the node's
+   own schema, `None` is undeclared and never "produces nothing", section B renders before
+   serialization and is a gate, the catalog holds the calls to it, disagreements are `bug_`
+   tests in the known-wrong table. No ticket list.
+8. **Nit — `columns` at the rust rung.** Clean move: `Column`/`columns` and
+   `columns_set_precision_and_nullability_aside` are `wire/tests/columns.rs`, declared
+   `pub(crate) mod columns;` in `wire/tests/mod.rs` (the precedent is `src/tests/mod.rs`'s
+   `pub(crate) mod compare;`), reached from the walk as `super::super::tests::columns`.
+   `--lib` 545 → 546, `gpu_tests::` 303 → 302 + 2 = 304, grand total 1777 → 1779, Rust 1341
+   → 1343 (driver row 4 → 3, new "Schema columns" row 1, catalog 11 → 13). **Re-added by hand:**
+   the 68 N cells sum to 1779 — the task 7 addition with `2 + 16` becoming `2 + 1 + 16`, `4 +
+   11` becoming `3 + 13` — and 1779 − 67 − 369 = 1343.
+
+**Results, fresh after the last code edit** (the last edit after the device runs is a `//!`
+header trim in `gpu_tests/mod.rs`; gpu `--no-run` after it: 0 warnings):
+
+- gpu `--no-run` 0 warnings; `--list gpu_tests::` 304 (`declared::` 16, one ignored).
+- shad-gpu, `--build`/`--push-binaries`/`--patch` rc 0: `PCK_TEST_FILTER=wire::gpu_tests` →
+  run `20260912T103604-354563`, `peacockdb_core_gpu_lib` 28 passed 0 failed 1 ignored (14.64 s).
+  Empty filter → run `20260912T103635-355624`, exit 0: `peacockdb_core_gpu_lib` 303 passed
+  0 failed 1 ignored (31.49 s); `test_gpu_corpus` 8 passed (8.10 s).
+- `cargo test --features rust-only -p peacockdb-core --lib` 544 passed, 0 failed, 2 ignored
+  (546 listed); `--test test_module_layout` 17.
+- rustfmt-check clean on the six files; surface 46; caps: body ≤ 4, header ≤ 10.
+
+No git mutation; `wire/tests/columns.rs` is new and unstaged.

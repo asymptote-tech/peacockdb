@@ -9,10 +9,13 @@
 //!
 //! The two shapes that never reach a device are `wire/tests/refusals.rs`.
 
+use std::collections::BTreeSet;
+
 use datafusion::arrow::datatypes::{DECIMAL128_MAX_PRECISION, DataType, TimeUnit};
 
-use super::ONE_LANE;
+use super::super::FbKind;
 use super::walk::{Firing, walk};
+use super::{ONE_LANE, TWO_LANES};
 use crate::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};
 use crate::test_support::{GPU_BUDGET, total_rows};
 
@@ -73,6 +76,24 @@ fn crosses_as(firings: &[Firing], declared: &DataType, exported: &DataType) {
     }
 }
 
+/// The one declared firing of `kind` — the arm under test — with its declaration and the
+/// export agreeing by name and type. Exactly one, so a shape that fired the kind twice or
+/// not at all fails here rather than passing on the wrong firing.
+fn the_one_firing_of(firings: &[Firing], kind: FbKind) -> &Firing {
+    let of_kind: Vec<&Firing> = firings
+        .iter()
+        .filter(|firing| firing.target.is_some_and(|(_, made)| made == kind))
+        .collect();
+    let [firing] = of_kind.as_slice() else {
+        panic!("{} declared firings of {kind}, expected one", of_kind.len())
+    };
+    let (declared, exported) = firing
+        .declared_vs_exported()
+        .unwrap_or_else(|| panic!("{} refused the export", firing.label()));
+    assert_eq!(declared, exported, "{}", firing.label());
+    firing
+}
+
 /// Every firing's names, in order, are the declared ones.
 fn names_cross(firings: &[Firing]) {
     for firing in firings {
@@ -94,17 +115,51 @@ fn names_cross(firings: &[Firing]) {
 
 // Query 1. [#183](../../../../llm-wiki/tasks/active-tickets.md#t183): cuDF has one string
 // type, so a declared `Utf8View` comes back `Utf8`. It enters at the scan and every node
-// above inherits it, which is why this is one test for the class and not one per node.
-// Delete this test in the change that fixes #183.
+// above inherits it, so this is one test for the class, asserted at every one of the six
+// declared node kinds — three shapes reach all of them. Delete this test in the change
+// that fixes #183.
 #[tokio::test]
 async fn bug_a_declared_utf8view_is_exported_as_utf8() {
-    let firings = firings("SELECT n_name FROM nation").await;
-    crosses_as(&firings, &DataType::Utf8View, &DataType::Utf8);
+    let mut seen = firings("SELECT n_name FROM nation").await;
     assert!(
-        firings[0].label().ends_with("CudfScan"),
+        seen[0].label().ends_with("CudfScan"),
         "the class is expected to enter at the scan: {}",
-        firings[0].label()
+        seen[0].label()
     );
+    seen.extend(
+        firings("SELECT n_name AS label FROM nation WHERE n_nationkey > 3 ORDER BY n_name").await,
+    );
+    seen.extend(
+        walk(
+            "SELECT l_returnflag, sum(l_quantity) FROM lineitem GROUP BY l_returnflag",
+            TWO_LANES,
+        )
+        .await
+        .firings,
+    );
+    crosses_as(&seen, &DataType::Utf8View, &DataType::Utf8);
+    let kinds: BTreeSet<String> = exported_for(&seen, &DataType::Utf8View)
+        .into_iter()
+        .map(|(label, _)| {
+            label
+                .split_once(' ')
+                .map_or(label.clone(), |(_, kind)| kind.into())
+        })
+        .collect();
+    let every_declared_kind = [
+        "CudfScan",
+        "CudfFilter",
+        "CudfProject",
+        "CudfSort",
+        "CudfCoalescePartitions",
+        "result_from_handle",
+    ];
+    for kind in every_declared_kind {
+        assert!(
+            kinds.contains(kind),
+            "no {kind} firing declared a Utf8View: {kinds:?}"
+        );
+    }
 }
 
 // Query 2. [#187](../../../../llm-wiki/tasks/active-tickets.md#t187): a `Decimal128(15,2)`
@@ -247,6 +302,38 @@ async fn fixed_width_cast_targets_survive_the_crossing() {
     crosses_as(&firings, &DataType::Int32, &DataType::Int32);
 }
 
+// The sort arm, under the accumulator every `ORDER BY` plans above it: `GpuSort`'s own
+// `CudfSort` fires per batch and is declared; the accumulator's is not. An integer key, so
+// the identity is measured outside #183's class.
+#[tokio::test]
+async fn a_sort_survives_the_crossing() {
+    let firings = firings("SELECT n_nationkey FROM nation ORDER BY n_nationkey").await;
+    the_one_firing_of(&firings, FbKind::Sort);
+    crosses_as(&firings, &DataType::Int32, &DataType::Int32);
+}
+
+// The coalesce-all arm, at the two lanes a shuffle needs: the collapse below the
+// repartition is declared, the aggregate's own concats are not. An integer key for the
+// same reason; the sum's `Decimal128(25,2)` crosses at 38, which `columns` sets aside.
+#[tokio::test]
+async fn a_coalesce_all_survives_the_crossing() {
+    let walked = walk(
+        "SELECT l_linenumber, sum(l_quantity) FROM lineitem GROUP BY l_linenumber",
+        TWO_LANES,
+    )
+    .await;
+    let firing = the_one_firing_of(&walked.firings, FbKind::CoalescePartitions);
+    assert!(
+        firing
+            .declared
+            .fields()
+            .iter()
+            .any(|f| f.data_type() == &DataType::Int64),
+        "the key crosses the collapse: {:?}",
+        firing.declared
+    );
+}
+
 // Query 11. [#203](../../../../llm-wiki/tickets.md#t203): the device refuses the cast to
 // text at the project, so no handle ever reaches the export and the class cannot be
 // measured. A capability gap, not a divergence — ignored rather than `bug_`.
@@ -293,30 +380,31 @@ async fn the_firings_of_one_call_export_one_schema() {
         ROWGROUP,
     )
     .await;
-    let mut labels: Vec<String> = walked.firings.iter().map(Firing::label).collect();
-    labels.dedup();
+    let labels: BTreeSet<String> = walked.firings.iter().map(Firing::label).collect();
     assert_eq!(
         labels.len(),
         3,
         "a scan, a filter and the export: {labels:?}"
     );
     for label in labels {
-        let of_call: Vec<&Firing> = walked
+        let of_call: Vec<_> = walked
             .firings
             .iter()
             .filter(|f| f.label() == label)
+            .map(|f| {
+                f.declared_vs_exported()
+                    .unwrap_or_else(|| panic!("{label} refused the export"))
+            })
             .collect();
         assert!(
             of_call.len() > 1,
             "{label} fired once; the mode should give it a batch per row group"
         );
-        let first = of_call[0].exported.as_ref().expect("exported");
-        for firing in &of_call[1..] {
-            assert_eq!(
-                firing.exported.as_ref().expect("exported"),
-                first,
-                "{label}"
-            );
+        // By name and type, so a row group that happens to hold a null does not read as a
+        // firing disagreeing with its call: the flag is the exporter's, not the device's.
+        for (declared, exported) in &of_call {
+            assert_eq!(declared, exported, "{label}");
+            assert_eq!(declared, &of_call[0].0, "{label}");
         }
     }
 }
