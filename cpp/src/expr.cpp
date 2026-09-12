@@ -134,8 +134,8 @@ static cudf::ast::ast_operator fb_to_ast_op(fb::BinaryOp op) {
 
 /// The one place `ScalarValue.is_null` is read. A typed NULL literal is encoded with the
 /// flag set and its value fields unused, and the scalar is built invalid so cuDF treats it
-/// as a null of `type`. Two readers is what #198 was: the AST path built its own scalars
-/// and assumed validity.
+/// as a null of `type`. One reader, so a null cannot be a zero on one path and a null on
+/// the other.
 static bool literal_is_valid(const fb::ScalarValue* sv) { return !sv->is_null(); }
 
 /// `cudf::ast::literal` has four constructors and none of them takes a `cudf::scalar&`, so
@@ -159,24 +159,23 @@ struct AstLiteralFor {
     } else {
       // Named rather than defaulted: a type cuDF gains a scalar for lands here
       // instead of silently producing no literal.
-      throw std::runtime_error(
-          "no cudf::ast::literal constructor for cudf type id " +
-          std::to_string(static_cast<int>(s.type().id())));
+      throw std::runtime_error("no cudf::ast::literal constructor for cudf type " +
+                               cudf::type_to_name(s.type()));
     }
   }
 };
 
-std::unique_ptr<cudf::ast::literal> ast_literal_for(cudf::scalar& s) {
+static std::unique_ptr<cudf::ast::literal> ast_literal_for(cudf::scalar& s) {
   return cudf::type_dispatcher(s.type(), AstLiteralFor{}, s);
 }
 
 /// The scalar the AST can hold for this literal: `build_scalar`'s, except for
-/// `Decimal128`, which cuDF's AST has no literal for and which crosses as a scaled
-/// double — the behaviour that predates the one-builder change, kept. The wire value is
-/// rewritten as a Float64 `ScalarValue` and handed to `build_scalar`, rather than a
-/// scalar built here or a flag on `build_scalar`: one scalar builder, and the validity
-/// flag copied through `literal_is_valid` so the wire flag keeps its one reader.
-std::unique_ptr<cudf::scalar> ast_scalar(const fb::ScalarValue* sv) {
+/// `Decimal128`, which cuDF's AST has no fixed-point literal for and which crosses as a
+/// scaled double. The wire value is rewritten as a Float64 `ScalarValue` and handed to
+/// `build_scalar`, rather than a scalar built here or a flag on `build_scalar`: one
+/// scalar builder, and the validity flag copied through `literal_is_valid` so the wire
+/// flag keeps its one reader.
+static std::unique_ptr<cudf::scalar> ast_scalar(const fb::ScalarValue* sv) {
   if (sv->type() != fb::DataType_Decimal128) return build_scalar(sv);
 
   __int128 val = (static_cast<__int128>(sv->decimal_hi()) << 64) |

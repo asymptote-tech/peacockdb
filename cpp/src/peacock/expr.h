@@ -48,12 +48,6 @@ std::unique_ptr<cudf::column> build_column(const fb::Expr* expr,
 
 cudf::type_id fb_to_type_id(fb::DataType dt);
 
-// The two halves of build_expr's literal arm, declared for
-// Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot: the dispatch in the second
-// resolves at run time, so a missing arm is only found by reaching it.
-std::unique_ptr<cudf::scalar> ast_scalar(const fb::ScalarValue* sv);
-std::unique_ptr<cudf::ast::literal> ast_literal_for(cudf::scalar& s);
-
 // binop_output_type and is_ast_able come from plan_executor_internal.h, above.
 
 }  // namespace peacock

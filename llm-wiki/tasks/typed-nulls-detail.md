@@ -229,3 +229,50 @@ conversion, so nothing was falsified and nothing changed.
 ### 2026-09-12 — reviewing: PR #152 opened against `ENS-declared-schemas`
 
 Five commits, `13d07639` at the head. Reviewer round 1 dispatched.
+
+### 2026-09-12 — review round 1: the private header left alone, the walk driven through the session
+
+**Two claims in the tasks 5–8 entry were wrong, and the review caught them.** The spec's "no
+header change" is not part of an ABI triple: `TableResult` is in the private
+`cpp/src/plan_executor.h`, and `architecture.md:853` calls a `TableResult` change "no ABI
+change", so the sentence forbids any header. And `is_ast_able`/`binop_output_type` are not a
+precedent for `expr.h` — they are declared in `plan_executor_internal.h`, which `expr.h`'s own
+head says is deliberately "NOT folded in", and `architecture.md:884-887` names that file as the
+one thing tests reach into under `cpp/src/`. The `#include "peacock/expr.h"` in the test
+falsified that sentence. Also corrected: "a numeric literal is AST-able and reaches
+`build_expr`" holds, but the earlier entry's route for strings was not spelled out —
+`is_string_like_literal` (`expr.cpp:308`) sends Utf8, LargeUtf8, Utf8View, Binary, LargeBinary
+and BinaryView to `build_column`, whose literal arm (`:812`) is `build_scalar` +
+`make_column_from_scalar`.
+
+**What changed.** `ast_scalar` and `ast_literal_for` are `static` again; the two declarations
+are gone from `cpp/src/peacock/expr.h`, which is byte-identical to the base branch; the test no
+longer includes it. `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` now runs a bare
+`NULL::T` project through `WholePlan` per type: `answer` is the cuDF type of the null column
+expected back, or empty for a refusal whose message must contain the enum name; the
+`EnumValuesDataType()` length pin stays. `AstLiteralFor`'s throw names the type through
+`cudf::type_to_name` rather than a number (the build links it). The two history comments
+(`literal_is_valid`'s "Two readers is what #198 was", `ast_scalar`'s "predates the one-builder
+change, kept") are trimmed to the reason. The section comment says "The first two tests".
+
+**Per-type outcome on the device, from the result** (run `20260912T123622-385841`):
+- through `build_expr` and `compute_column`, a null column of the type named: Boolean →
+  `BOOL8`, Int8/16/32/64 → `INT8`/`INT16`/`INT32`/`INT64`, Float32/64 → `FLOAT32`/`FLOAT64`,
+  Date32 → `TIMESTAMP_DAYS` (a literal-only date through `compute_column` was untested ground;
+  it answers 25 nulls of that type), Decimal128 → `FLOAT64` (the scaled-double arm).
+- through `build_column`, a null `STRING` column: Utf8, LargeUtf8, Utf8View.
+- refused by `build_scalar`'s named message, through the session as `[in CudfProject]
+  unsupported scalar type: <name>`: Null, UInt8, UInt16, UInt32, UInt64, Float16, Date64 (via
+  `build_expr`), Binary, LargeBinary, BinaryView (via `build_column`). Nothing reaches
+  `ast_literal_for`'s own throw.
+
+**Runs.** `--build` rc 0, 0 warnings. `20260912T123622-385841`, narrow, exit 0:
+`peacock_cpu_tests` 12, `peacock_gpu_tests` 6, `peacock_plan_tests` 34 (all seven `Literals.*`
+`OK`, the walk in 1196 ms), `peacock_tpch_tests` 4, `peacock_tpchv_tests` 4;
+`peacockdb_core_gpu_lib` 15 passed 1 ignored; `test_gpu_corpus` 0 run. `20260912T123739-385965`,
+filter empty, exit 0: the C++ five as above; `peacockdb_core_gpu_lib` 301 passed 0 failed 1
+ignored; `test_gpu_corpus` 8 passed.
+
+`build-test.md` unchanged: `TEST(` in `test_plan_executor.cpp` is still 34, so Plan-executor 34,
+C++ 74, grand 1785, `bug_` 78 stand. `architecture.md:884-887` is true again: the tests'
+only `peacock/` includes are `rmm_pool.hpp` and `partitioning.hpp`, both under `cpp/include/`.
