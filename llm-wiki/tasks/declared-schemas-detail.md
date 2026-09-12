@@ -733,3 +733,8 @@ catalog falsified. Analyst (what is missing): 0 blocking, 3 important — the sa
 #200's stale sentence plus the `serialize_schema` `Null` observation with no durable home, §4's
 renderer ticket declined with its dependency sentence only in this file; no sentence of
 architecture.md left falsified. All six closed above; the signoff is on the spec. Awaiting CI.
+
+### 2026-09-12 — done
+
+CI green on `3e9aee93` (run 34690716996: both cudf legs, the GPU build, the remote GPU tests, the
+cost report). PR #151 awaits the human's merge.
