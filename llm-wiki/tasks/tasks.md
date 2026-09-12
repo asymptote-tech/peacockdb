@@ -82,7 +82,7 @@ A test-only upload symbol puts an Arrow batch on the device; `Given` leaves plus
 `Backend`, runs the same calls on each side. Proven here on the seqless three — unload, limit and
 the round trip — and a guard that names every kind without a case.
 
-### 9. [`operator-cases.md`](operator-cases.md) — state: reviewing — PR #150
+### 9. [`operator-cases.md`](operator-cases.md) — state: completing — PR #150
 
 Cases only, no mechanism: every seq-bearing operator through the harness — filter, project, the
 sorts, the accumulators, both aggregates, the scatter, nine hash-join types, cross, nested-loop

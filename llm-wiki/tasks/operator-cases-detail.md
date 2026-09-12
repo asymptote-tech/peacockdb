@@ -793,3 +793,13 @@ the all-null case shows one lane and this one shows the null rows not following 
 operator cases 204: **128 green, 76 `bug_`** — join 47/42, the rest as before. #152 now has 28
 `bug_` tests, #59 still 9. The page's gpu figures move by +4: `--lib -- gpu_tests::` 281 → 285,
 the gpu row 289 → 293, Rust 1385 → 1389, the grand total 1821 → 1825.
+
+### 2026-09-12 — review round 2: 0 blocking, 0 important, 1 nit — the round closes; completing
+
+Every round-1 item verified closed on `4ced579d`: the Welford pins assert the exported name and
+type and go red on the simulated fix; no tolerance anywhere under `gpu_tests/`; every join type
+has its `null_equals_null=true` row or a sentence saying why not; the two-probe pins for Left
+and Full; the null-key scatter case asserts what the all-null case cannot. One nit dropped: the
+Welford expectation's column name also pins the device's alias-naming of struct children, so a
+C++ change naming them properly would turn the pins red on a non-fix — the comment documents
+the choice. Board to `completing`; the completeness pass is two readings dispatched together.
