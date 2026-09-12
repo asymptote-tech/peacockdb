@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 207), which is also the counter for
+New tickets take the next free number (currently 209), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,43 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 20 | #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Critical correctness](#critical-correctness) | 22 | #208 #207 #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
+
+<a id="t208"></a>
+### #208 — the cpu's cross join answers nothing over a zero-row build side
+
+A `GpuCrossJoin` whose build batch has zero rows emits no batch on the cpu, where the device
+emits one of zero rows; a zero-row probe batch is zero rows on both.
+
+DataFusion's `CrossJoinExec` ends its stream without a batch when its left side is empty
+(`cross_join.rs`, `left_data.num_rows() == 0`), and `CpuProbingJoin::probe_and_fetch` hands that
+empty answer up as the call producing nothing; `cudf::cross_join` over a zero-row left is a
+zero-row table. `NestedLoopJoinExec` over the same shape emits a zero-row batch, so the cpu's two
+predicate-free joins disagree with each other as well as with the device. Nothing and a zero-row
+batch are different arrivals downstream, as #205 says. Pinned by
+`bug_a_cross_join_over_a_zero_row_build_is_nothing_on_the_cpu` and its both-sides-empty neighbour
+(`gpu_tests/nested_cases.rs`).
+
+<a id="t207"></a>
+### #207 — both backends drop a cross join's projection
+
+A `GpuCrossJoin` carrying a projection emits every column of the crossed table on both engines:
+the cpu refuses at `declared_as` and the device hands the wider table up under the narrower
+declaration.
+
+The planner writes one: a predicate-free `NestedLoopJoinExec` with a projection becomes a
+`GpuCrossJoin` with it (`translator/nodes.rs`), and `check_projection` validates it. Then nobody
+applies it — `CrossJoinExec::new` takes none (`cpu_backend/join.rs`), `CudfCrossJoin` has no
+projection field (`gpu_plan.fbs`) so `cross_join_payload` writes none and `execute_cross_join`
+applies none. #190 is the cpu half of the same defect for the nested-loop join, where the device
+does apply it. On the device every ordinal above the join then reads one column of some other
+(#135's shape). Pinned by `bug_a_cross_join_projection_is_dropped_on_both`
+(`gpu_tests/nested_cases.rs`).
 
 <a id="t205"></a>
 ### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches

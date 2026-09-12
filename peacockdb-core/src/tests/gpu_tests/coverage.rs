@@ -38,7 +38,7 @@ const EXCLUDED: &[&str] = &["GpuMergePartitions", "GpuUnion", "GpuInterleave"];
 
 /// Kinds with no case yet. `operator-cases.md` empties this list and deletes it; until
 /// then a kind that gains a case must leave it, or the reverse check goes red.
-const PENDING: &[&str] = &["GpuLoadParquet", "GpuCrossJoin", "GpuNestedLoopJoin"];
+const PENDING: &[&str] = &[];
 
 #[test]
 fn every_kind_has_a_case_or_is_named_as_pending_or_excluded() {

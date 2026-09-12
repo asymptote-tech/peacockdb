@@ -462,3 +462,124 @@ the join fixture declares the padded side nullable, as the planner does; the sev
 shape for the finishing types (build set, finish called, no probe call) is the only route to
 #173; five `bug_` helpers now sit across the case files and belong to `Outcome` — plan task 8's
 tidy. `PENDING` holds `GpuLoadParquet`, `GpuCrossJoin`, `GpuNestedLoopJoin`; the rung whole is 256.
+
+### 2026-09-12 — plan task 6 done: `GpuCrossJoin`, `GpuNestedLoopJoin`
+
+`src/tests/gpu_tests/nested_cases.rs`, 18 cases (372 lines; `join_cases.rs` untouched at 846);
+`mod nested_cases;` after `coverage`; the two kinds out of `PENDING`. The fixture is the hash
+join's, duplicated as the handoff said: `build_batch`/`probe_batch`, `side`, the residual
+`b_i64 < p_i64`, and a `joined(pads_probe)` that declares the probe side nullable for the Left
+form. No production file touched; `Given::name()` never reached.
+
+**Green (11).** Cross: `a_cross_join_is_the_product_on_both`, `a_cross_join_over_a_zero_row_probe_is_zero_rows`,
+`a_cross_join_with_no_build_batch_is_never_probed`. Inner: `an_inner_nested_loop_join_agrees`,
+`…_over_a_zero_row_build_is_zero_rows`, `…_over_a_zero_row_probe_is_zero_rows`,
+`…_with_no_build_batch_is_never_probed`. Left: `a_left_nested_loop_join_pads_the_unmatched`,
+`…_over_a_zero_row_build_is_zero_rows`, `…_over_a_zero_row_probe_pads_every_build_row`,
+`…_with_no_build_batch_is_never_probed`. So the Left form over an empty probe pads on the device
+(`conditional_left_join` then `gather` with `NULLIFY` over a zero-row right), and the `build: None`
+route owes nothing on both for all three, as `without_build` says.
+
+**#173 and #175 are unreachable here.** Neither node publishes a finish (`at_done` is empty, so
+`finish_and_fetch` answers nothing without a call), and `without_build` owes nothing for a join
+whose every row is built from a build row. Cases beyond the spec's rows: the three `no_build`
+shapes, and a two-probe-batch script for the two joins that stream.
+
+**`bug_` (7).**
+- `bug_a_cross_join_refuses_its_second_probe_batch_on_the_device` — #152, build copy. Verbatim:
+  `gpu refused: this join's recipe copies its build side per probe batch and the ABI has no copy:
+  probe batch 2 has no build side left, since the call for batch 1 erased it (#152)`. The cross
+  join's recipe is `[BuildSideCopy, Batch]` (`wire/attach.rs`), so it is the probe-local shape.
+- `bug_an_inner_nested_loop_join_refuses_its_second_probe_batch_on_the_device` — #152, the same
+  message; the Inner recipe is `[BuildSideCopy, Batch]` too (`wire/join.rs`). The Left form takes
+  `BuildSide` outright and a single-batch probe, so no case of it can reach either #152 shape;
+  the probe-copy shape is a Left/Full hash join's alone and has no site in this family.
+- `bug_a_cross_join_projection_is_dropped_on_both` — **#207, new**. Verbatim: `cpu refused: the
+  node declares Schema { … b_id … p_id … } and DataFusion answered with Schema { … 16 fields … }:
+  Invalid argument error: number of columns(16) must match number of fields(2) in schema`. Pinned
+  both ways: the cpu's message, and the device's answer equal to the unprojected cross join's —
+  `CudfCrossJoin` has no projection field (`flatbuffers/gpu_plan.fbs`), `cross_join_payload`
+  writes none, `execute_cross_join` applies none, and `CrossJoinExec::new` takes none. Reachable:
+  `translator/nodes.rs` builds a `GpuCrossJoin` with `projected(join.projection())` from a
+  predicate-free `NestedLoopJoinExec`.
+- `bug_an_inner_nested_loop_join_projection_is_dropped_on_the_cpu` and
+  `bug_a_left_nested_loop_join_projection_is_dropped_on_the_cpu` — #190, as its text says
+  (`NestedLoopJoinExec::try_new(…, None)`). Same verbatim refusal. Pinned as the cpu's message and
+  the device's answer equal to the cpu's unprojected answer projected to `[0, 8]` — so the device
+  half #190 called untested applies the projection correctly.
+- `bug_a_cross_join_over_a_zero_row_build_is_nothing_on_the_cpu` and
+  `bug_a_cross_join_over_both_sides_empty_is_nothing_on_the_cpu` — **#208, new**. Verbatim: `cpu
+  and gpu differ: slot 0: cpu produced no batch, gpu 0 rows`. DataFusion's `CrossJoinExec` ends
+  its stream without a batch when `left_data.num_rows() == 0` (`cross_join.rs`); the device's
+  `cudf::cross_join` is a zero-row table. The Inner and Left nested loops over the same shape emit
+  zero rows on both, so it is the cross join alone. Pinned: cpu `[[], []]`, device `[[0 rows], []]`.
+
+**Tickets.** #207 and #208, both Critical correctness; counter now 209, Contents count 22. #152
+stays at its cap and unchanged; #190 gains nothing in text (the pins are the record). Every ticket
+the rows name reproduces: #152 (build copy), #190; #160 has no case, being a plan-time refusal
+of the types the C++ rejects, and the two admitted types are green.
+
+**Runs on shad-gpu** (neighbour at 37 GiB; every pool built):
+- `20260912T074702-294708` green-form, `PCK_RUN_CPP=0 PCK_TEST_FILTER=tests::gpu_tests::nested_cases`:
+  `peacockdb_core_gpu_lib` 11 passed 7 failed (the seven above); `test_gpu_corpus` 0 of 8.
+- `20260912T074937-295687` after the rewrite: `peacockdb_core_gpu_lib` **18 passed 0 failed**.
+- The guard and the rung whole ran once after plan task 7, below.
+
+### 2026-09-12 — plan task 7 done: `GpuLoadParquet`
+
+`src/tests/gpu_tests/source_cases.rs`, 7 cases (188 lines); `mod source_cases;` after `script`;
+`GpuLoadParquet` out of `PENDING`, which is now `&[]` for plan task 8 to delete. `write_parquet`
+takes the batch rather than `(rows, seed)` so the decimal fixture can go through it; `scan` reads
+the row groups off the file as `mapped()` does and declares the batch's own schema; `read_both`
+writes, runs, removes — the file is gone before any assertion runs, and the host had no
+`operator-cases-*` file after any run. No production file touched.
+
+**The `Source` arm ran on a device for the first time and needed nothing**: `next_batch` until
+`Exhausted`, one slot per row group, on both. A zero-row batch through `ArrowWriter` writes no
+row group (`arrow_writer/mod.rs`, `num_rows() == 0` returns early), so the zero-rows case is one
+lane of no batches and both sources are exhausted at the first call — green, and it reads
+nothing on either side. `Script`'s `#[allow(dead_code)]` left with this family, as the header
+said it would; the gpu build is at 0 warnings without it.
+
+**Green (2).** `both_backends_read_the_same_batches_per_row_group` (64 rows, 16 per group, four
+slots, strings and dates included), `a_parquet_of_zero_rows_reads_as_nothing_on_both`.
+
+**`bug_` (5).**
+- `bug_a_limit_over_one_row_group_is_refused_on_the_device` and
+  `bug_row_groups_and_a_limit_together_are_refused_on_the_device` — #188. Verbatim: `gpu refused:
+  execute_scan_rowgroups(#0, [0]): NodeSession::execute_scan_rowgroups: seq 0 reading row groups
+  [0]: CUDF failure at:/opt/conda/conda-bld/work/cpp/src/io/functions.cpp:731: row_groups can't be
+  set along with skip_rows and num_rows`. One row group is enough: every harness batch — and every
+  driver batch — is a row-group read, so a scan with a limit never runs on a device at all.
+- `bug_a_limit_over_one_row_group_is_ignored_on_the_cpu` and
+  `bug_row_groups_and_a_limit_together_are_read_whole_on_the_cpu` — #186. The cpu answered all 64
+  rows under `limit: Some(10)`, as one batch and as four of sixteen; pinned against `synthetic(64, 1)`
+  and its four slices. The plan's two rows each split into a device `bug_` and a cpu `bug_`, since
+  both engines are wrong and differently.
+- `bug_a_decimal_column_is_exported_at_precision_38` — #187, from a bare scan. Verbatim: `schema
+  differs / cpu: … dec Decimal128(18, 2) … / gpu: … dec Decimal128(38, 2) …`. Pinned both ways:
+  cpu the file's batches, device the same with `dec` cast to `(38, 2)` — the values agree, and the
+  export alone moves the precision, which is what #187 suspected. A case beyond the spec's row.
+
+**Tickets.** No new number. #186 and #188 each gain a pin line; #187 a sentence naming the scan as
+a site (it was 23 non-blank lines before this task, over the cap already; now 24). Every ticket
+the row names reproduces: #186, #188, and #187 with it.
+
+**Runs on shad-gpu** (neighbour at 37 GiB; every pool built):
+- `20260912T075047-296599` green-form, `PCK_RUN_CPP=0 PCK_TEST_FILTER=tests::gpu_tests::source_cases`:
+  `peacockdb_core_gpu_lib` 2 passed 3 failed (the three shapes above, in green form).
+- `20260912T075214-297766` after the rewrite: `peacockdb_core_gpu_lib` **7 passed 0 failed**.
+- `20260912T075224-297807` guard, `PCK_TEST_FILTER=tests::gpu_tests::coverage`:
+  `every_kind_has_a_case_or_is_named_as_pending_or_excluded` passed with `PENDING` empty — nothing
+  is left in it, and `EXCLUDED` is the three forwarders.
+- `20260912T075235-297841` rung whole, `PCK_RUN_CPP=0`, empty filter: `peacockdb_core_gpu_lib`
+  **281 passed** (256 + 18 + 7), `test_gpu_corpus` 8 passed.
+- Local: `cargo test --features rust-only -p peacockdb-core --lib` 530 passed, 2 ignored; the gpu
+  `--no-run` build 0 warnings; `rustfmt --check` clean on `nested_cases.rs`, `source_cases.rs`,
+  `coverage.rs`, `script.rs`.
+
+**For plan task 8.** `PENDING` is `&[]` and goes with its two uses. The `--list` total for the
+row is 281 on the lib binary. Two more `bug_` helpers are duplicated here (`cpu_refuses_with`,
+`cpu_answered`/`gpu_answered` in the source file, `cpu_projected` in the nested one) — the
+`Outcome` tidy's list grows by them. Observed and not filed: `executor/gpu_backend/gpu_tests`'s
+own fixture leaves `/tmp/peacock-gpu-executors-<pid>.parquet` on the host after every run.

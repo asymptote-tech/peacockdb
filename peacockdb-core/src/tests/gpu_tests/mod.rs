@@ -10,4 +10,6 @@ mod emit_cases;
 mod exec_cases;
 mod harness_cases;
 mod join_cases;
+mod nested_cases;
 mod script;
+mod source_cases;

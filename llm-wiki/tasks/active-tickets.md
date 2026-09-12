@@ -149,7 +149,8 @@ Two sightings, and the pair narrows it: `filter-project`'s projected column decl
 `hash-join`'s sum declares `(25,2)`, and both are found as `(38,2)`. Same scale, same 38, two
 different declarations — so the export appears to produce one width rather than widening each
 value by a step, which is a different fix from a scale rule and points at the export rather than at
-anything upstream of it. Six device cells across T19's first two batches.
+anything upstream of it. Six device cells across T19's first two batches. A bare scan of an `(18, 2)`
+column exports `(38, 2)` too: `bug_a_decimal_column_is_exported_at_precision_38` (`gpu_tests/source_cases.rs`).
 
 <a id="t188"></a>
 ### #188 — the device refuses a read with row groups and a limit together
@@ -162,7 +163,8 @@ The same plan shape as [#186](active-tickets.md#t186) from the other side: where
 the scan, the CPU ignores it and answers six million rows and the device refuses the read outright.
 Neither engine runs it and they fail differently, so a fix for either has to decide what that shape
 means — push the limit into the reader, or keep the interval on the unload at every mode as the
-three tp4 ones already do.
+three tp4 ones already do. Even one row group and a limit is refused, since every batch is a
+row-group read: pinned by the two `bug_…_refused_on_the_device` cases in `gpu_tests/source_cases.rs`.
 
 <a id="t192"></a>
 ### #192 — tpcds/q64 needs 13 GB of host memory and no budget stops it
@@ -262,7 +264,8 @@ and only on the plans where the interval sits in the scan.
 
 Found by T19's first batch, and only because `scan-limit` declares `data_fusion_subset` — the
 count rule is what caught it, where an exact compare against a frozen golden would have frozen the
-wrong answer. `tpch/scan-limit` is disabled at the two tp1 modes on this.
+wrong answer. `tpch/scan-limit` is disabled at the two tp1 modes on this. Pinned by the two
+`bug_…_on_the_cpu` cases in `gpu_tests/source_cases.rs`: ten asked, sixty-four answered.
 
 <a id="t180"></a>
 ### #180 — a shuffled count(\*) merges to nullable against a non-nullable declaration
