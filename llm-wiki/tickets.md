@@ -799,6 +799,10 @@ the run and the binary, re-run once, and do not debug it. A pool that *was* buil
 then dies with `Maximum pool size exceeded` is ours: the budget is too small, it reproduces every
 time, and a re-run buys nothing.
 
+- 2026-09-12: CI run `34659896447` on PR #144 (`d41f223a`), `peacock_tpch_tests`: `pool of 69.0
+  GiB could not be built with 14.9 GiB free` at 00:08 UTC; `peacock_tpchv_tests` four binaries
+  later saw 103.0 GiB free, so a stranger held ~129 GiB for those minutes. Re-run once.
+
 <a id="t176"></a>
 ### #176 — the CI coverage guard checks one direction only
 `every_rust_test_target_is_named_by_ci` fails when a target exists that no workflow runs. Nothing
