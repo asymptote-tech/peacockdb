@@ -210,3 +210,14 @@ type, and names the pins. Counter stays 204. Every ticket the rows name reproduc
 
 **For plan task 8's tidy.** `gpu_answered` and `batch_of` are now in two case files; a home in
 `script.rs` (an `Outcome` method) would be the harness's, which this task may not grow.
+
+### 2026-09-12 — plan task 3 dispatched: the accumulators, in a fresh window
+
+Plan tasks 1-2 committed (`abd2b7d4`, and the head above). The developer that carried them hands
+over here. What it settled: the rhythm is green-form, family run, verbatim failures here,
+ticket, `bug_`, green, guard, rung whole with an empty filter (133 on `peacockdb_core_gpu_lib`
+now); state fixtures for the aggregates live in `aggregate_cases.rs`; the planner's declared
+types are read off a scratch planning run, not the plan text; two helpers (`gpu_answered`,
+`batch_of`) are duplicated across the two case files and belong to `Outcome` — plan task 8's
+tidy or a finding against the harness task; Welford's moments are not dyadic and compare to
+1e-11 in their two cases, the corpus's own figure.
