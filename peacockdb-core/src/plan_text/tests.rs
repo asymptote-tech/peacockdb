@@ -1,9 +1,16 @@
 use super::node_text::quoted;
 use super::*;
 use crate::plan::Batching;
+use crate::plan::RowInterval;
+use crate::plan::{GpuLimit, GpuMergePartitions, GpuUnload};
 use crate::planner::translate;
+use crate::wire::{Payloads, attach_recipes, render_plan_recipes};
 
 async fn rendered(sql: &str, target_partitions: usize) -> String {
+    render_plan(planned(sql, target_partitions).await.as_ref())
+}
+
+async fn planned(sql: &str, target_partitions: usize) -> Box<dyn GpuNode> {
     let data = crate::test_support::testdata_minimal_dir();
     let ctx = crate::register_tables_for(crate::build_session_state(target_partitions), &data)
         .await
@@ -15,15 +22,14 @@ async fn rendered(sql: &str, target_partitions: usize) -> String {
         .create_physical_plan()
         .await
         .expect("physical plan");
-    let tree = translate(
+    translate(
         target_partitions,
         Batching::Sized {
             target_batch_bytes: 1 << 20,
         },
         &plan,
     )
-    .expect("translate the plan");
-    render_plan(tree.as_ref())
+    .expect("translate the plan")
 }
 
 fn line_with<'a>(text: &'a str, node: &str) -> &'a str {
@@ -232,4 +238,109 @@ async fn a_join_filter_resolves_each_reference_onto_the_side_it_came_from() {
         join.contains("filter=r_regionkey@build:0 > n_nationkey@probe:0"),
         "{text}"
     );
+}
+
+// ── the declared section of the payload golden ──────────────────────────────
+
+/// One line per call under its node, in the recipe section's order. Three shapes a reader
+/// must tell apart: a declared schema, a call no arm has declared (`undeclared`, spelled
+/// out so an absent line cannot pass for one), and a node that makes no call at all.
+#[test]
+fn the_declared_section_prints_one_line_per_call_under_its_node() {
+    let tree = GpuUnload::new(
+        Box::new(GpuLimit::new(
+            Box::new(GpuMergePartitions::new(crate::tests::rebuild::source(None))),
+            RowInterval {
+                skip: 1,
+                fetch: Some(2),
+            },
+        )),
+        None,
+    );
+    let plan = attach_recipes(&tree).expect("writable");
+    assert_eq!(
+        render_declared_schemas(&tree, &plan),
+        "GpuUnload:\n\
+         \x20 result_from_handle: schema=[k:Int64, v:Int64]\n\
+         \x20 GpuLimit:\n\
+         \x20   slice_handle: undeclared\n\
+         \x20   GpuMergePartitions: no calls\n\
+         \x20     GpuLoadParquet:\n\
+         \x20       #0 CudfScan: schema=[k:Int64, v:Int64]\n"
+    );
+}
+
+/// Through `plan_text`'s renderer and not the wire's: the same name in `wire/fb_text.rs`
+/// prints a bare `Decimal128`, and the digits are what a declaration is for.
+#[tokio::test]
+async fn the_declared_section_keeps_a_decimals_precision_and_scale() {
+    let tree = planned("SELECT c_acctbal FROM customer", 1).await;
+    let plan = attach_recipes(tree.as_ref()).expect("writable");
+    let text = render_declared_schemas(tree.as_ref(), &plan);
+    assert!(
+        text.contains("result_from_handle: schema=[c_acctbal:Decimal128(15,2)]"),
+        "{text}"
+    );
+}
+
+/// Both payload sections walk the tree post-order and index the recipe plan by position.
+/// Nothing in the types ties the two walks together, so a kind whose `children()` order
+/// moved would give the two sections different plans. Compared per node: its line, with its
+/// indentation, and the `#seq Kind` labels under it — the seqs are what would move if
+/// section B took a node's position before or after recursing where section A does not.
+#[tokio::test]
+async fn the_two_payload_sections_number_the_same_nodes() {
+    for sql in [
+        "SELECT c_acctbal FROM customer ORDER BY c_acctbal LIMIT 3",
+        "SELECT n_name, count(*) FROM nation GROUP BY n_name",
+        "SELECT n_name FROM nation JOIN region ON n_regionkey = r_regionkey",
+    ] {
+        let tree = planned(sql, 4).await;
+        let plan = attach_recipes(tree.as_ref()).expect("writable");
+        let recipes = render_plan_recipes(tree.as_ref(), &plan, Payloads::Omitted);
+        let declared = render_declared_schemas(tree.as_ref(), &plan);
+        assert_eq!(
+            nodes_with_seqs(&recipes),
+            nodes_with_seqs(&declared),
+            "{sql}"
+        );
+        assert!(
+            nodes_with_seqs(&recipes)
+                .iter()
+                .any(|(_, seqs)| !seqs.is_empty()),
+            "{sql}: no seq label was read, so nothing was compared"
+        );
+    }
+
+    /// Each node line cut at its `:`, with every `#seq Kind` label that follows it before
+    /// the next node line — section A has them inside `execute_node(…)`, section B one per
+    /// line beneath the node.
+    fn nodes_with_seqs(text: &str) -> Vec<(String, Vec<String>)> {
+        let mut nodes: Vec<(String, Vec<String>)> = Vec::new();
+        for line in text.lines() {
+            if line.trim_start().starts_with("Gpu") {
+                let node = line.split(':').next().expect("a node line").to_string();
+                nodes.push((node, Vec::new()));
+            }
+            let Some((_, seqs)) = nodes.last_mut() else {
+                continue;
+            };
+            let mut rest = line;
+            while let Some(at) = rest.find('#') {
+                let label = &rest[at..];
+                let end = label
+                    .find(|c: char| c == ',' || c == ')' || c == ':')
+                    .map_or(label.len(), |end| {
+                        // A brace holds its own commas: `CudfRepartition{Hash, 1→4}`.
+                        match label.find('{') {
+                            Some(open) if open < end => label.find('}').map_or(end, |c| c + 1),
+                            _ => end,
+                        }
+                    });
+                seqs.push(label[..end].to_string());
+                rest = &label[end..];
+            }
+        }
+        nodes
+    }
 }

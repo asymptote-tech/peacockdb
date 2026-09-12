@@ -508,10 +508,12 @@ The types are declared in `plan/mod.rs` and `executor/mod.rs` — the node vocab
 first, the batch and executor traits in the second — and the code is what they are; what follows
 is why they have the shape they do.
 
-**Layout and schema live inside `NodeKind`** rather than as two `Option`s that must be `None`
-together: a sink structurally has neither, everything else always has both, and there is nothing
-left for a caller to get wrong. `PartitionLayout` carries the lane count, the key distribution
-(Spark murmur3, seed 42, or not specified), the sort order and the batch layout. `SortOrder` is
+**Layout and schema live inside `NodeKind`** rather than beside it as two `Option`s: every kind
+declares a schema, the exporter alone has no layout, and there is nothing left for a caller to
+get wrong. The exporter is the boundary node, `GpuUnload`; its schema is its input's, taken at
+construction, so the columns that cross to the host are declared like every other node's.
+`PartitionLayout` carries the lane count, the key distribution (Spark murmur3, seed 42, or not
+specified), the sort order and the batch layout. `SortOrder` is
 two-valued on purpose — a whole-stream order is `BatchSorted` meeting `SingleBatch`, derived by
 `is_stream_sorted()`, so nothing can disagree about it. `Schema` carries column types plus the
 annotations a consumer can check: sort column, group key, aggregator, two-phase state.
@@ -1157,10 +1159,20 @@ lane is the property worth reading and a lane count beside a batch count does no
 
 **Types are a plan fact.** The declared schema per node is what makes the explicit casts
 legible: a `Decimal128(38, 6)` in a finalize means nothing without the state column's declared
-scale beside it. It checks nothing — a golden records what the planner declared, and the
+scale beside it. The golden checks nothing — it records what the planner declared, and the
 declaration is exactly what a wrong type would move. Comparing a declared type against the
 expression that produces it is [#163](tickets.md#t163), and the C++ half is
 [#164](tickets.md#t164).
+
+**Six arms declare what their call produces, and a device test holds them to it.**
+`Call::output_schema` (`wire/mod.rs`) is the schema one firing of the call yields — the node's
+own, set by the scan, filter, project, sort, coalesce-all and unload arms of `attach.rs`. `None`
+means undeclared, never "produces nothing"; the other nine recipe-bearing arms answer it.
+Section B of `recipe-payloads.txt` renders each declaration before serialization and is a gate:
+a moved declaration is red there under no variable. `wire/gpu_tests/declared.rs` exports each
+firing of a planned query and compares it with the declaration by name and type, precision and
+nullability set aside because the exporter rewrites both. What disagrees is a `bug_` test with
+its ticket, listed in `build-test.md`'s known-wrong table.
 
 **Estimates go in a `--- memory ---` section per query, not on the node line.** They churn where
 plan shapes do not — an estimator change, then #19's statistics, then #147's refinement — so on

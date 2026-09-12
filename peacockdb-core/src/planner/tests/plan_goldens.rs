@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::plan::GpuNode;
 use crate::plan::{ExecutorCategory, category_of};
-use crate::plan_text::{render_plan, render_plan_memory};
+use crate::plan_text::{render_declared_schemas, render_plan, render_plan_memory};
 use crate::planner;
 use crate::planner::PlanKnobs;
 use crate::test_support::{
@@ -308,21 +308,27 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
                 &recipes,
                 Payloads::Shown,
             ));
+            // Section B, from the `Call` data and not the buffer: what each call declares
+            // it produces. The header names the source so the two are never confused.
+            text.push_str(DECLARED_HEADER);
+            text.push('\n');
+            text.push_str(&render_declared_schemas(tree.as_ref(), &recipes));
         }
     }
     let path = testdata_root().join("goldens").join("recipe-payloads.txt");
-    // Three states, because the digests here are the only byte-level pin on what the C++ is
-    // handed, and the documented way to refresh goldens is a bulk --update-canonical on
-    // verda. Without the second variable that run would rewrite the evidence and the diff
-    // would come home among the others. With it, a moved payload goes red DURING the regen.
+    // Three states, because the digests and the declared sections are evidence — what the
+    // C++ is handed, and what the device is measured against — and the documented refresh is
+    // a bulk --update-canonical on verda. Without the second variable that run would rewrite
+    // the evidence and the diff would come home among the others; with it, red DURING the regen.
     let update = std::env::var("UPDATE_CANONICAL").is_ok();
     let rewrite = std::env::var("PEACOCK_REWRITE_RECIPE_BYTES").is_ok();
     if update && !rewrite {
         let canonical = std::fs::read_to_string(&path).expect("the payload golden");
         eprintln!(
-            "NOT regenerating {} — verifying instead. The `sha256=` lines are a fixed \
-             expectation from before a change, and the C++ reads these bytes. If the move is \
-             intended, set PEACOCK_REWRITE_RECIPE_BYTES=1 alongside UPDATE_CANONICAL.",
+            "NOT regenerating {} — verifying instead. The `sha256=` lines and the declared \
+             sections are a fixed expectation from before a change: the C++ reads these \
+             bytes, and the declarations are what the device is measured against. If the \
+             move is intended, set PEACOCK_REWRITE_RECIPE_BYTES=1 alongside UPDATE_CANONICAL.",
             path.display()
         );
         assert_eq!(
@@ -332,12 +338,21 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
              message above.",
             path.display()
         );
-        // The text may still be regenerated: it describes the same bytes.
+        assert_eq!(
+            declared_of(&canonical),
+            declared_of(&text),
+            "{}: a declared schema moved. Regenerating cannot make this green — see the \
+             message above.",
+            path.display()
+        );
+        // The text may still be regenerated: it describes the same bytes and declarations.
         assert_or_update(&path, &text);
         return;
     }
     assert_or_update(&path, &text);
 }
+
+const DECLARED_HEADER: &str = "-- declared (rust, pre-serialization) --";
 
 /// The `sha256=` line per query, which is the half a bulk regen may not rewrite.
 fn digests_of(text: &str) -> std::collections::BTreeMap<String, String> {
@@ -351,6 +366,27 @@ fn digests_of(text: &str) -> std::collections::BTreeMap<String, String> {
         }
     }
     digests
+}
+
+/// The declared section per query — every line from its header to the next `== ` — which
+/// a bulk regen may not rewrite either.
+fn declared_of(text: &str) -> std::collections::BTreeMap<String, String> {
+    let mut declared = std::collections::BTreeMap::new();
+    let mut query = String::new();
+    let mut in_section = false;
+    for line in text.lines() {
+        if let Some(header) = line.strip_prefix("== ") {
+            query = header.to_string();
+            in_section = false;
+        } else if line == DECLARED_HEADER {
+            in_section = true;
+        } else if in_section {
+            let section = declared.entry(query.clone()).or_insert_with(String::new);
+            section.push_str(line);
+            section.push('\n');
+        }
+    }
+    declared
 }
 
 /// Every seq every recipe publishes addresses a node of the kind it claims — over every

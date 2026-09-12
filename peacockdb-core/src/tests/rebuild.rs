@@ -570,9 +570,9 @@ pub(crate) fn fields_with_one_value(fixtures: &[Box<dyn GpuNode>]) -> Vec<String
         .collect()
 }
 
-/// What no fixture can vary. A sink's kind is `NodeKind::Sink`, which carries neither a
-/// layout nor a schema — there is nothing in it for a rebuild to drop.
-const BY_CONSTRUCTION: [&str; 1] = ["GpuUnload.kind"];
+/// What no fixture can vary, named `Node.field`. Empty today: an unload's kind carries
+/// the schema its input hands it, so the two unload fixtures vary it like any other field.
+const BY_CONSTRUCTION: [&str; 0] = [];
 
 fn every_node<'a>(node: &'a dyn GpuNode) -> Vec<&'a dyn GpuNode> {
     let mut all = vec![node];
