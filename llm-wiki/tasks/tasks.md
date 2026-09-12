@@ -34,14 +34,14 @@ becomes `planner::plan` and `batch_partitioned_driver` becomes `executor::run` a
 acquire those names; `peacockdb/src/main.rs` moves with them. The 170 public items stay public here
 — what changes is where they are declared and what may reach past them.
 
-### 3. [`rmm-pool-budget.md`](rmm-pool-budget.md) — closes [#178](../tickets.md#t178) — state: rebase needed(done) — PR #144
+### 3. [`rmm-pool-budget.md`](rmm-pool-budget.md) — closes [#178](../tickets.md#t178) — state: done — PR #144
 
 Six gtest binaries reserve 85% of free VRAM from `main()`, and two of them are not sf40 tests at
 all, so an ordinary CI run puts four such processes on a shared card. Each declares an explicit
 byte budget measured from the pool's own statistics adaptor instead. Touches `cpp/` and one wiki
 page, so it is independent of the three layout tasks around it.
 
-### 4. [`test-layout.md`](test-layout.md) — state: rebase needed(done) — PR #145
+### 4. [`test-layout.md`](test-layout.md) — state: done — PR #145
 
 Items in `peacockdb-core/src` are public partly because `tests/*.rs` are separate crates that see
 the library the way crates.io would. Moving the eleven targets that force them, plus the murmur

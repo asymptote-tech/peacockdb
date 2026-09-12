@@ -404,3 +404,16 @@ only in the states and PR numbers of tasks 3-5, so every board conflict resolves
 Order: task 3 rebased and carried back to `done` (developer re-runs its shad-gpu cycle — which is
 also the first device cycle from this host — then CI green on the rebased PR), then task 4 onto
 it, then task 5. Marks written on this board before anything moves.
+
+### 2026-09-12 — tasks 3 and 4 are done again; task 5 rebased onto task 4's new tip `1bcf4e97`
+
+Task 3: rebased clean, the developer's shad-gpu cycle from this box green (52 + 63, patched to
+2.39), CI attempt 1 lost the GPU job to a neighbour at 14.9 GiB free (#178 dated), attempt 2
+green on `d41f223a`. Task 4: one conflict in `build-test-shadgpu.sh`, resolved additively by the
+coordinator (master's `BUILD_GLIBC` block above slice 9's `RUST_TESTS` block; `bash -n` clean,
+the developer read the composition and called it right), then 1035 on the package and
+52 + 55 + 8 through the merged script; CI green on `df56c6fc` first attempt. This branch then
+rebased clean onto `1bcf4e97`: 10 commits, non-documentation differences from `3e211d10` are
+master's three files alone. `rebase needed(reviewing)` until the developer re-runs this task's
+proof — the rust-only package, the layout test, the device cycle — and the cudf `--no-run` shape
+plan task 3 left to CI, now that `target-cudf-rapids-cuda-12.2` is warm.
