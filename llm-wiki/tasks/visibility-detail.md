@@ -426,3 +426,69 @@ the baseline. rustfmt clean on each file alone (`skip_children`; one hunk in `tr
 `pub(crate)` pushing `translate` past the width; `plan_text/mod.rs` clean as written).
 
 Files: `peacockdb-core/src/plan_text/mod.rs`, `peacockdb-core/src/planner/translator/mod.rs`.
+
+### 2026-09-12 — plan tasks 8-9 done: the surface is 49 rows in five files, pinned by name, and both registers are gone
+
+On `18d2dc2e`. **Plan task 8 was a check, not a change**: `common.rs` at zero bare `pub`; `lib.rs`
+keeps `build_session_state` and `register_tables_for` and, past those, only `pub mod`. The dump
+outside `test_support` is **49**: `lib.rs` 2, `plan/mod.rs` 6, `planner/mod.rs` 5,
+`executor/mod.rs` 28, `executor/cpu_backend/mod.rs` 8 — the CLI's six plus the closures slices 3-5
+named. By file:
+
+- `lib.rs`: `build_session_state`, `register_tables_for`.
+- `plan/mod.rs`: `GpuNode`, `NodeKind`, `PartitionLayout`, `PlanError`, `RowInterval`, `Schema`.
+- `planner/mod.rs`: `BatchSizing`, `MemoryModel`, `PlanKnobs`, `SMALL_TABLE_BYTES`, `plan`.
+- `executor/mod.rs`: `Backend`, `BackendError`, `Batch`, `BatchAccumulatorExecutor`, `CallStats`,
+  `CpuBackend`, `CpuBatch`, `EmittedBatch`, `ExecExecutor`, `Executor`, `Forwarder`,
+  `JoinExecutor`, `LaneEvent`, `NodeExecutors`, `PartitionAccumulatorExecutor`,
+  `PartitionEmitterExecutor`, `ProbingJoin`, `RowRange`, `RunError`, `RunReport`,
+  `SourceExecutor`, `SourceStep`, `TraceEvent`, `Underestimate`, `UnloadExecutor`, `When`,
+  `record_batch` (`CpuBatch`'s, the CLI's), `run`.
+- `executor/cpu_backend/mod.rs`: `CpuAccumulator`, `CpuEmitter`, `CpuExec`, `CpuJoin`,
+  `CpuPartitionAccumulator`, `CpuProbingJoin`, `CpuSource`, `CpuUnload`.
+
+**Demoted, not deleted.** `--items` against the baseline's `(scope, kind, name)` multiset differs
+by exactly two rows, both gone: `top fn key_width` and `top fn can_be_null`, the delegates slice 4
+deleted so their tests import the owner. `PartitionLayout::new`, `Underestimate::ratio` and
+`GpuBatch::executor` are still in the multiset from their test modules (`plan/tests/mod.rs`,
+`driver/accounting/tests.rs`, `executor/ffi_tests/mod.rs`); `post_order_of_every_node` stays
+behind `#[cfg(test)]`. Nothing else moved.
+
+**The lint, zero and armed.** 0 warnings on rust-only, cudf and gpu. `wire/node_writer.rs:80`
+spelled `pub fn scan` gives `warning: unreachable `pub` item --> peacockdb-core/src/wire/
+node_writer.rs:80:1 … help: consider restricting its visibility: `pub(super)``; reverted, the
+file's diff is empty and the build is back at 0.
+
+**Plan task 9.** `visibility.rs` loses `PubModule`, `PUB_MODULES`, `is_an_exempt_module`,
+`every_pub_mod_exemption_is_still_forced_by_what_it_names` and its `forced_by` machinery
+(`files_naming`, `walk_naming`, `workspace_members`, `names_the_module`); `walls.rs` loses
+`CrossComponentReach`, `CROSS_COMPONENT_REACHES` and the register loop, so
+`only_the_parent_component_names_a_subcomponent` now says every cross-component reach is a
+violation. `PUB_OUTSIDE_A_MOD_RS` is `["lib.rs"]`. `near_miss.rs` drops the pins on the two
+deleted readers and gains pins on the two new ones; `test_code.rs`'s comment no longer cites
+`PubModule::forced_by`. Two assertions arrive in `visibility.rs`:
+
+- `pub_mod_declares_a_component_and_nothing_else` keeps its name and its half about the rest of
+  the tree (no exempt set now), and pins `lib.rs`: the unconditional `pub mod` are exactly
+  `COMPONENTS` — `common`, `executor`, `plan`, `plan_text`, `planner`, `wire` — and the gated
+  set is exactly `test_support` under `feature = "test-support"`, read by `gated_pub_mods` from
+  the line above each declaration. Red with `mod translator;` → `pub mod translator;` in
+  `planner/mod.rs`: `planner/mod.rs declares `pub mod translator;` … There is no sanctioned form.`
+- `bare_pub_is_the_surface_and_nothing_else`, new: `SURFACE` is the 49 by file and name, its doc
+  saying what the table is and what a new row needs; checked both ways over every file outside
+  `test_support/`, test modules included. Red with `CallStats` demoted: `executor/mod.rs: the
+  surface lists `CallStats` and it is not pub there`; red with `wire/mod.rs`'s `seqs` spelled
+  `pub`: `wire/mod.rs: `seqs` is pub and the surface does not list it`. `bare_pub_name` reads the
+  name past every keyword a declaration carries (`async`, `unsafe`, `extern "C"`, `const`, …).
+
+**The one inventory difference, named.** The layout target stays at 17 cases; the leaf-name set
+swaps `visibility::every_pub_mod_exemption_is_still_forced_by_what_it_names` for
+`visibility::bare_pub_is_the_surface_and_nothing_else`. Not replaced in place: a surface check
+under a name about `pub mod` exemptions would be the register's kind of lie, and the deleted case
+had no reason left to exist. `compare-inventory.sh` reports exactly that hunk and nothing else.
+
+**Proof.** `--test test_module_layout` 17, no warnings; `--lib` 514 + 2 ignored; goldens identical;
+inventory as above. rustfmt clean on `visibility.rs`, `walls.rs`, `near_miss.rs`, `test_code.rs`,
+each alone. `src/` untouched (`git status` shows the four test files only).
+
+Files: `peacockdb-core/tests/test_module_layout/{visibility,walls,near_miss,test_code}.rs`.

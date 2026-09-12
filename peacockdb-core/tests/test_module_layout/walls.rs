@@ -12,20 +12,6 @@ use crate::tree::{code_only, component_of, read, sources};
 /// directory they were never about.
 const TEST_DIRS: &[&str] = &["tests", "ffi_tests", "gpu_tests"];
 
-/// A file that names a subcomponent of a component that is not its own.
-///
-/// The layout forbids it and rustc refuses it wherever the subcomponent is declared `mod`, so
-/// this can only happen behind a `PUB_MODULES` exemption. Verified in both directions like
-/// `forced_by`: an entry whose line is gone is reported, and so is a reach nothing here names.
-/// Without the first the register outlives its line; without the second it is decoration.
-struct CrossComponentReach {
-    file: &'static str,
-    path: &'static str,
-    why: &'static str,
-}
-
-const CROSS_COMPONENT_REACHES: &[CrossComponentReach] = &[];
-
 /// **The one rule rustc explicitly cannot enforce.** A subcomponent is meant to be its
 /// parent's alone, and Rust's visibility is "the module and its descendants" — so
 /// `pub(super)`, `pub(crate)` and `pub(in path)` all give a subcomponent's *siblings* the
@@ -222,48 +208,20 @@ fn cross_component_reaches() -> Vec<(String, String)> {
 }
 
 /// **Only the parent component's own code may use a subcomponent.** rustc enforces it wherever
-/// the subcomponent is `mod`, and stops the moment one is `pub mod` — so the `PUB_MODULES`
-/// entries are exactly where the claim needs a test rather than a compiler.
-///
-/// The register is the point, not the count. A reach that is merely tolerated has no expiry, so
-/// the day `forced_by` says the `cpu_backend` wall can go up, taking it up is an `E0603` on a
-/// line nobody wrote down.
+/// the subcomponent is `mod`, and every subcomponent is `mod` now — so this holds the claim
+/// where a `pub mod` would open it, and says where, rather than leaving an `E0603` on a line
+/// nobody wrote down for the day a wall goes up.
 #[test]
 fn only_the_parent_component_names_a_subcomponent() {
-    let found = cross_component_reaches();
-    let mut stale = Vec::new();
-    for entry in CROSS_COMPONENT_REACHES {
-        assert!(
-            !entry.why.is_empty(),
-            "{} reaches {} for no stated reason",
-            entry.file,
-            entry.path
-        );
-        if !found
-            .iter()
-            .any(|(f, p)| f == entry.file && p == entry.path)
-        {
-            stale.push(format!(
-                "  {} no longer names {}, so the entry can go",
-                entry.file, entry.path
-            ));
-        }
-    }
-    for (file, path) in &found {
-        if !CROSS_COMPONENT_REACHES
-            .iter()
-            .any(|e| e.file == file && e.path == path)
-        {
-            stale.push(format!(
-                "  {file} names {path}, which belongs to another component"
-            ));
-        }
-    }
+    let found: Vec<String> = cross_component_reaches()
+        .iter()
+        .map(|(file, path)| format!("  {file} names {path}, which belongs to another component"))
+        .collect();
     assert!(
-        stale.is_empty(),
-        "the subcomponent wall is not where the register says it is:\n{}\n\nWhat another \
-         component needs is declared in the component's own mod.rs.",
-        stale.join("\n")
+        found.is_empty(),
+        "a subcomponent is its parent's alone:\n{}\n\nWhat another component needs is \
+         declared in the component's own mod.rs.",
+        found.join("\n")
     );
 }
 

@@ -27,7 +27,7 @@ const RUNGS: &[(&str, &str)] = &[
 /// component owns for a test in another. A reader of a private field is not one — it goes
 /// into a child `tests` module of the declaring file as an inherent `impl` (`join/tests.rs`).
 ///
-/// `called_by` is verified both ways, like `PubModule::forced_by`: every file named must
+/// `called_by` is verified both ways: every file named must
 /// exist and must still call the item, and the doc comment must name every one of them. A
 /// comment naming a caller that is gone is how this set grows unnoticed — `planner::translate`
 /// claimed "three of them, in two other components" and had one.

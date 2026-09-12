@@ -1,75 +1,115 @@
-//! Where `pub` may appear, and the register of what forces one.
+//! Where `pub` may appear, and the surface the crate keeps.
 
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::repo_root;
-use crate::tree::{code_only, read, sources};
+use crate::tree::{read, sources};
 
-/// A module inside a subcomponent that is `pub` because something outside the crate names it.
+/// The one file that legitimately carries `pub` outside a `mod.rs`: the crate root, whose
+/// two entry points are the CLI's.
 ///
-/// One entry per **module path**, not per subtree. A subtree exemption is the shape that
-/// grows: exempting `executor/cpu_backend` wholesale put 91 `pub` items across 13 files — over
-/// half the crate's remaining `pub` surface — behind an exception granted for fourteen types,
-/// and two of the eleven inner `pub mod` were forced by nothing at all.
-///
-/// `forced_by` names the files that force it, verified rather than trusted: each must exist
-/// and must still name the path. That is the expiry — `test-layout.md` moves these targets
-/// into `src/`, and on that day this goes red and says the wall can go up.
-struct PubModule {
-    path: &'static str,
-    forced_by: &'static [&'static str],
-}
-
-const PUB_MODULES: &[PubModule] = &[];
-
-/// Files that legitimately carry `pub` outside a `mod.rs`: the crate root, and the shared
-/// formula module the rules name alongside `mod.rs`.
-///
-/// Relative paths, not file names. `plan/common.rs` and `planner/translator/common.rs` are
+/// A relative path, not a file name. `plan/common.rs` and `planner/translator/common.rs` are
 /// ordinary implementation modules that happen to share a name with the crate-level one, and
 /// a `file_name()` match exempted both.
-const PUB_OUTSIDE_A_MOD_RS: &[&str] = &["lib.rs", "common.rs"];
+const PUB_OUTSIDE_A_MOD_RS: &[&str] = &["lib.rs"];
 
-/// Is this file the `mod.rs` or the module file of an exempt module path?
-///
-/// The module itself, not what is under it: an entry for `executor/gpu_backend/accumulate`
-/// would exempt `accumulate.rs` and not `backend.rs` beside it.
-fn is_an_exempt_module(rel: &Path) -> bool {
-    let s = rel.to_string_lossy().replace('\\', "/");
-    PUB_MODULES
-        .iter()
-        .any(|e| s == format!("{}.rs", e.path) || s == format!("{}/mod.rs", e.path))
-}
+/// The six components, `pub mod` in `lib.rs` unconditionally. Named rather than counted: a
+/// count passes when one is dropped and another added.
+const COMPONENTS: &[&str] = &["common", "executor", "plan", "plan_text", "planner", "wire"];
+
+/// The crate's API, by file and name: what the CLI calls — `build_session_state`,
+/// `register_tables_for`, `plan` and its knobs, `run` and `CpuBackend` — and the closure their
+/// signatures force, hop by hop. `plan` returns `GpuNode`, `MemoryModel` and `PlanError`, and
+/// a trait's methods are as public as the trait. `run<B: Backend>` makes the trait family, the
+/// category traits' method types, `NodeExecutors`' payloads and the CPU backend's associated
+/// types as public as `Backend`, and `RunReport`'s field types as public as the report. A new
+/// row needs the receipt: `cargo build -p peacockdb` failing without it, or
+/// `private_interfaces` firing on a row already here.
+const SURFACE: &[(&str, &[&str])] = &[
+    ("lib.rs", &["build_session_state", "register_tables_for"]),
+    (
+        "plan/mod.rs",
+        &[
+            "GpuNode",
+            "NodeKind",
+            "PartitionLayout",
+            "PlanError",
+            "RowInterval",
+            "Schema",
+        ],
+    ),
+    (
+        "planner/mod.rs",
+        &[
+            "BatchSizing",
+            "MemoryModel",
+            "PlanKnobs",
+            "SMALL_TABLE_BYTES",
+            "plan",
+        ],
+    ),
+    (
+        "executor/mod.rs",
+        &[
+            "Backend",
+            "BackendError",
+            "Batch",
+            "BatchAccumulatorExecutor",
+            "CallStats",
+            "CpuBackend",
+            "CpuBatch",
+            "EmittedBatch",
+            "ExecExecutor",
+            "Executor",
+            "Forwarder",
+            "JoinExecutor",
+            "LaneEvent",
+            "NodeExecutors",
+            "PartitionAccumulatorExecutor",
+            "PartitionEmitterExecutor",
+            "ProbingJoin",
+            "RowRange",
+            "RunError",
+            "RunReport",
+            "SourceExecutor",
+            "SourceStep",
+            "TraceEvent",
+            "Underestimate",
+            "UnloadExecutor",
+            "When",
+            "record_batch",
+            "run",
+        ],
+    ),
+    (
+        "executor/cpu_backend/mod.rs",
+        &[
+            "CpuAccumulator",
+            "CpuEmitter",
+            "CpuExec",
+            "CpuJoin",
+            "CpuPartitionAccumulator",
+            "CpuProbingJoin",
+            "CpuSource",
+            "CpuUnload",
+        ],
+    ),
+];
 
 /// A `pub mod` declares a component. Anything else is a subcomponent, and a subcomponent
 /// declared `pub mod` has a wall that exists only on paper — `planner::translator::Translator`
 /// becomes nameable crate-wide and every rule below it stops meaning anything.
 ///
 /// rustc cannot ask this: `pub mod` is legal everywhere, and the module it exposes is used, so
-/// no lint fires. The only reader is this test.
+/// no lint fires. The only reader is this test. `lib.rs` is pinned by name: the six
+/// components unconditionally, and `test_support` behind its feature and nothing else.
 #[test]
 fn pub_mod_declares_a_component_and_nothing_else() {
-    let exempt: BTreeSet<&str> = PUB_MODULES.iter().map(|e| e.path).collect();
     let mut found = Vec::new();
     for rel in sources() {
-        let text = read(&rel);
-        let dir = rel
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        for name in pub_mod_declarations(&text) {
-            if rel == Path::new("lib.rs") {
-                continue;
-            }
-            let declared = if dir.is_empty() {
-                name.clone()
-            } else {
-                format!("{dir}/{name}")
-            };
-            if exempt.contains(declared.as_str()) {
-                continue;
-            }
+        if rel == Path::new("lib.rs") {
+            continue;
+        }
+        for name in pub_mod_declarations(&read(&rel)) {
             found.push(format!("  {} declares `pub mod {name};`", rel.display()));
         }
     }
@@ -77,10 +117,43 @@ fn pub_mod_declares_a_component_and_nothing_else() {
         found.is_empty(),
         "`pub mod` outside lib.rs makes a subcomponent nameable crate-wide, and the wall it \
          was given then exists only on paper:\n{}\n\nDeclare it `mod`, and put what a sibling \
-         needs in the parent's own mod.rs. If a target outside the crate genuinely forces it, \
-         add it to PUB_MODULES with the file that does.",
+         needs in the parent's own mod.rs. There is no sanctioned form.",
         found.join("\n")
     );
+    let (unconditional, gated) = gated_pub_mods(&read(Path::new("lib.rs")));
+    assert_eq!(
+        unconditional, COMPONENTS,
+        "lib.rs declares these components `pub mod` unconditionally, and the rules name six"
+    );
+    assert_eq!(
+        gated,
+        vec![(
+            "test_support".to_string(),
+            "feature = \"test-support\"".to_string()
+        )],
+        "the harness is the one `pub mod` behind a feature, and it is behind its own"
+    );
+}
+
+/// `lib.rs`'s `pub mod` declarations, split by whether the line above gates them: the
+/// unconditional names, and each gated name with the `cfg` predicate over it.
+pub(crate) fn gated_pub_mods(text: &str) -> (Vec<String>, Vec<(String, String)>) {
+    let (mut plain, mut gated) = (Vec::new(), Vec::new());
+    let mut above = "";
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let [name] = pub_mod_declarations(line).as_slice() {
+            match above
+                .strip_prefix("#[cfg(")
+                .and_then(|r| r.strip_suffix(")]"))
+            {
+                Some(pred) => gated.push((name.clone(), pred.to_string())),
+                None => plain.push(name.clone()),
+            }
+        }
+        above = trimmed;
+    }
+    (plain, gated)
 }
 
 /// Every `pub mod <name>;` a file declares.
@@ -123,9 +196,6 @@ fn a_components_api_is_declared_in_its_mod_rs() {
         if name == "mod.rs" || PUB_OUTSIDE_A_MOD_RS.contains(&path.as_str()) {
             continue;
         }
-        if is_an_exempt_module(&rel) {
-            continue;
-        }
         for (n, line) in read(&rel).lines().enumerate() {
             if is_bare_pub_item(line) {
                 found.push(format!("  {}:{}: {}", rel.display(), n + 1, line.trim()));
@@ -138,6 +208,86 @@ fn a_components_api_is_declared_in_its_mod_rs() {
          \n{}\n\nDeclare them in the component's mod.rs, or make them pub(crate).",
         found.join("\n")
     );
+}
+
+/// Bare `pub` in `src/` means "the binary calls this", and the claim is checked both ways: a
+/// `pub` item outside the table is a missed demotion or a claim without a receipt, and a
+/// table row that is not `pub` in its file is a deletion or a demotion the table did not
+/// follow. Names per file rather than a count, so a dropped-and-added pair cannot pass.
+/// `test_support/` is the feature-gated exception, checked by signature elsewhere.
+#[test]
+fn bare_pub_is_the_surface_and_nothing_else() {
+    let mut found: Vec<(String, Vec<String>)> = Vec::new();
+    for rel in sources() {
+        let path = rel.to_string_lossy().replace('\\', "/");
+        if path.starts_with("test_support/") {
+            continue;
+        }
+        let names: Vec<String> = read(&rel)
+            .lines()
+            .filter(|l| is_bare_pub_item(l))
+            .filter_map(bare_pub_name)
+            .filter(|n| !n.starts_with("mod "))
+            .collect();
+        if !names.is_empty() {
+            found.push((path, names));
+        }
+    }
+    let mut stale = Vec::new();
+    for (file, names) in &found {
+        let table = SURFACE.iter().find(|(f, _)| f == file).map(|(_, n)| *n);
+        for name in names {
+            if !table.is_some_and(|t| t.contains(&name.as_str())) {
+                stale.push(format!(
+                    "  {file}: `{name}` is pub and the surface does not list it"
+                ));
+            }
+        }
+    }
+    for (file, names) in SURFACE {
+        let present = found.iter().find(|(f, _)| f == file).map(|(_, n)| n);
+        for name in *names {
+            if !present.is_some_and(|p| p.iter().any(|n| n == name)) {
+                stale.push(format!(
+                    "  {file}: the surface lists `{name}` and it is not pub there"
+                ));
+            }
+        }
+    }
+    assert!(
+        stale.is_empty(),
+        "the crate's surface is not the table in SURFACE:\n{}\n\nA bare `pub` claims the CLI \
+         calls it; the receipt is `cargo build -p peacockdb` failing without it, or \
+         `private_interfaces` on a row already listed. Otherwise it is `pub(crate)`.",
+        stale.join("\n")
+    );
+}
+
+/// The name a bare `pub` item line declares: the identifier after the kind keywords.
+pub(crate) fn bare_pub_name(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix("pub ")?;
+    if rest.starts_with("mod ") {
+        return Some(rest.to_string());
+    }
+    let mut words = rest.split(|c: char| !c.is_alphanumeric() && c != '_');
+    let name = words.find(|w| {
+        !matches!(
+            *w,
+            "" | "fn"
+                | "struct"
+                | "enum"
+                | "trait"
+                | "union"
+                | "type"
+                | "const"
+                | "static"
+                | "unsafe"
+                | "async"
+                | "extern"
+                | "C"
+        )
+    })?;
+    Some(name.to_string())
 }
 
 /// A `pub` item declaration, at any indent — `pub(crate)`, `pub(super)` and `pub(in …)` are
@@ -193,178 +343,4 @@ fn lines_matching(pred: impl Fn(&str) -> bool) -> Vec<String> {
         }
     }
     out
-}
-
-/// A `pub mod` exemption claims a file outside the crate forces it. Verify the claim rather
-/// than trusting it — that is the difference between an exemption and a hole.
-///
-/// Both halves are checked, because half a claim expires wrong: a `forced_by` that lists one
-/// of four forcing files goes green the day that one is fixed and announces the wall can go
-/// up while three files still need it.
-#[test]
-fn every_pub_mod_exemption_is_still_forced_by_what_it_names() {
-    let root = repo_root();
-    let mut stale = Vec::new();
-    for entry in PUB_MODULES {
-        assert!(
-            !entry.forced_by.is_empty(),
-            "{} is exempt for no stated reason",
-            entry.path
-        );
-        let module = entry.path.replace('/', "::");
-        for forcing in entry.forced_by {
-            let path = root.join(forcing);
-            if !path.exists() {
-                stale.push(format!(
-                    "  {} names {forcing}, which no longer exists",
-                    entry.path
-                ));
-                continue;
-            }
-            let text = std::fs::read_to_string(&path).expect("read a forcing file");
-            if !names_the_module(&text, &format!("peacockdb_core::{module}::")) {
-                stale.push(format!(
-                    "  {} names {forcing}, which no longer reaches `peacockdb_core::{module}`",
-                    entry.path
-                ));
-            }
-        }
-        // The other direction: a file that forces it and is not listed would keep the
-        // exemption alive after every listed file was fixed.
-        for rel in files_naming(&module) {
-            if !entry.forced_by.contains(&rel.as_str()) {
-                stale.push(format!(
-                    "  {} is forced by {rel}, which forced_by does not name",
-                    entry.path
-                ));
-            }
-        }
-    }
-    assert!(
-        stale.is_empty(),
-        "these `pub mod` exemptions no longer say who forces them:\n{}\n\nWhen nothing \
-         outside the crate names the path, take the entry out of PUB_MODULES and watch the \
-         wall go up.",
-        stale.join("\n")
-    );
-}
-
-/// Every file outside `peacockdb-core/src` that names this module path, repo-root relative.
-///
-/// The path exactly, not as a prefix. `gpu_backend::accumulate::GpuAccumulator` does traverse
-/// `gpu_backend`, so it forces that wall down too, but it counts only for the child: letting a
-/// child's callers justify the parent would let one file justify an entry it never names. The
-/// cost is a stuck red — when the one file naming `executor/gpu_backend` stops, the forward
-/// half goes red and no child-naming file can re-justify the entry.
-///
-/// Every workspace member's `src` and `tests`: what forces an exemption is any code outside the
-/// crate that names the module. Members come from `Cargo.toml`, as `test_ci_coverage.rs` reads.
-pub(crate) fn files_naming(module: &str) -> Vec<String> {
-    let root = repo_root();
-    let needle = format!("peacockdb_core::{module}::");
-    let mut out = Vec::new();
-    for member in workspace_members() {
-        for sub in ["src", "tests"] {
-            // `peacockdb-core/src` is the crate itself: it reaches its own modules by
-            // `crate::`, and nothing there is a reason to keep a wall down.
-            if member == "peacockdb-core" && sub == "src" {
-                continue;
-            }
-            walk_naming(&root.join(&member).join(sub), &root, &needle, &mut out);
-        }
-    }
-    // This target spells whole module paths as string literals (`near_miss.rs`), so the sweep
-    // matches it: without the exclusion the guard reports itself as forcing the exemption it
-    // polices. Its own directory and root file, from `file!()` rather than a written path, so
-    // a rename cannot leave the exclusion pointing at nothing; asserted, not assumed.
-    let own_dir = Path::new(file!())
-        .parent()
-        .expect("file!() names a file in a directory")
-        .to_string_lossy()
-        .replace('\\', "/");
-    let own_root = format!("{own_dir}.rs");
-    assert!(
-        root.join(&own_dir).is_dir() && root.join(&own_root).is_file(),
-        "file!() does not resolve from the repo root: {own_dir}"
-    );
-    out.retain(|p| *p != own_root && !p.starts_with(&format!("{own_dir}/")));
-    out.sort();
-    out
-}
-
-fn walk_naming(dir: &Path, root: &Path, needle: &str, out: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut paths: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
-    paths.sort();
-    for path in paths {
-        if path.is_dir() {
-            walk_naming(&path, root, needle, out);
-        } else if path.extension().is_some_and(|e| e == "rs")
-            && std::fs::read_to_string(&path).is_ok_and(|t| names_the_module(&t, needle))
-        {
-            out.push(
-                path.strip_prefix(root)
-                    .expect("under the repo root")
-                    .to_string_lossy()
-                    .replace('\\', "/"),
-            );
-        }
-    }
-}
-
-/// The `[workspace]` members, in manifest order.
-fn workspace_members() -> Vec<String> {
-    let manifest = std::fs::read_to_string(repo_root().join("Cargo.toml"))
-        .expect("read the workspace Cargo.toml");
-    let members: Vec<String> = manifest
-        .lines()
-        .skip_while(|l| !l.starts_with("[workspace]"))
-        .skip(1)
-        .take_while(|l| !l.starts_with('['))
-        .filter_map(|l| {
-            l.trim()
-                .trim_end_matches(',')
-                .strip_prefix('"')?
-                .strip_suffix('"')
-                .map(str::to_string)
-        })
-        .collect();
-    assert!(
-        !members.is_empty(),
-        "no [workspace] members parsed from Cargo.toml"
-    );
-    members
-}
-
-/// Does this text name the module — imported plain or under an alias — or something in it,
-/// rather than a module below it?
-///
-/// The test is "not another `::`", not "starts with a capital". A free function or a `pub
-/// const` is lowercase, and a reader that wanted an uppercase letter drops a file that forces
-/// the exemption. Nothing outside the crate names a lowercase item in the registered modules
-/// today, so the fixtures in `each_reader_sees_the_violation_and_not_its_near_miss` are what
-/// keeps this half honest. `{` is a brace group of several names, `*` a glob. The attribution
-/// differs from `uses_module`, which a deeper path satisfies too, so the two stay separate.
-pub(crate) fn names_the_module(text: &str, needle: &str) -> bool {
-    let text = &code_only(text);
-    let module = needle.trim_end_matches("::");
-    text.match_indices(module).any(|(i, _)| {
-        let tail = &text[i + module.len()..];
-        let Some(tail) = tail.strip_prefix("::") else {
-            return tail.starts_with(';') || tail.trim_start().starts_with("as ");
-        };
-        let mut chars = tail.chars();
-        match chars.next() {
-            Some('{') | Some('*') => true,
-            Some(c) if c.is_alphabetic() || c == '_' => {
-                let len = tail
-                    .find(|c: char| !c.is_alphanumeric() && c != '_')
-                    .unwrap_or(tail.len());
-                !tail[len..].starts_with("::")
-            }
-            _ => false,
-        }
-    })
 }
