@@ -259,3 +259,13 @@ Results here:
 staged lib binary is the one the run loop hands `rung=gpu_tests::`, and says nothing per module —
 cargo's filter is a substring, so `tests::gpu_tests::harness_cases::…` is reached by that line as
 it stands, and the guard stays green.
+
+### 2026-09-12 — plan task 5 dispatched: `run_both`, and `GpuUnload` through `executors_for`
+
+Plan tasks 1-4 are committed; the developer that carried them hands over here. What it settled
+for the slices ahead: `src/tests/mod.rs` declares `#[cfg(all(test, feature = "gpu"))] mod gpu_tests;`
+because `a_test_module_is_named_for_its_rung` wants the literal; facade items are named through
+`crate::executor::{…}` and `crate::tests::{given,synthetic,compare}::…`, no `pub use`; every item
+`pub(crate)` or private; the device proof runs as `PCK_RUN_CPP=0 PCK_TEST_FILTER=<module path>
+scripts/build-test-shadgpu.sh --run-detached` then `--run-status`, after `--build --push-binaries
+--patch`; the rung whole is 61 on `peacockdb_core_gpu_lib` and 8 on `test_gpu_corpus`.
