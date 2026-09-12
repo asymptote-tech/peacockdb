@@ -293,3 +293,13 @@ total 1836.
   in-body 4.
 
 No C++, no wire change, no fix. No git mutation; `plan_text/declared.rs` is new and unstaged.
+
+### 2026-09-12 — plan task 5 dispatched: the harness, shared with the walk, in a fresh window
+
+Plan tasks 1-4 committed (`685f3da0`, `c5629cd9`, and the head above); the developer that carried
+them hands over here. What it settled: every item `pub(crate)`; `wire/tests/` is a directory now
+(`mod.rs` plus `declarations.rs`); section B is `render_declared_schemas` in `plan_text/declared.rs`,
+appended per query under `-- declared (rust, pre-serialization) --` with `undeclared` spelled out
+for the nine arms this task does not declare; regeneration is `UPDATE_CANONICAL=1
+PEACOCK_REWRITE_RECIPE_BYTES=1 … -- planner::tests::plan_goldens` and the test re-points the
+`/tmp` root itself; the device rung is 285 at the fork.
