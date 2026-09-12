@@ -391,3 +391,38 @@ alone (`skip_children`; one hunk, `pub(crate)` pushing `render_plan_recipes` pas
 `privacy.rs`.
 
 Files: `peacockdb-core/src/wire/mod.rs`, `peacockdb-core/tests/test_module_layout/privacy.rs`.
+
+### 2026-09-12 — plan task 7 done: `plan_text/mod.rs` 3 → 0, `translator/mod.rs` 2 → 0, and the lint reports zero
+
+On `225386be`. All five became `pub(crate)`, and with them `Translator`'s three bare `pub` fields
+(`target_partitions`, `batching`, `small_table_bytes`) on the `pub(crate)` struct; the dump shows
+10 `pub(crate)` across the two files, the five plus the five they had. **Numbers: 117 → 112,
+74 → 49 outside `test_support`. `unreachable_pub`: 0 on every shape, for the first time** —
+`Translator::new` and `translate` were its last two — **and 0 is the whole warning count** on
+rust-only, cudf, gpu, `cargo build --features rust-only -p peacockdb`, and both halves of the
+`--lib --no-run` test shapes on all three. The closure kept nothing: the CLI names no `plan_text`
+item (`peacockdb/src/main.rs` prints results, not plans), so `render_run` went with the rest and
+the spec's table stands.
+
+**What the demotion uncovers.** `plan_text` entire, 40 `dead_code` on a plain build — the `wire`
+shape again, by caller: `render_run` and `run_text.rs` are the harness's (`test_support/corpus.rs`
+on every shape, `corpus_gpu.rs` on the device ones) and the driver tests'; `render_plan`,
+`render_plan_memory`, `memory.rs` and the rest of `node_text.rs`/`expr_text.rs` are the goldens
+tests' (`planner/tests/plan_goldens.rs`, `plan/tests/layout_injection.rs`,
+`executor/driver/tests/render.rs`) alone. Handled as slice 6 handled `wire`:
+`#![cfg_attr(not(test), allow(dead_code))]` at the top of `plan_text/mod.rs` with the reason once,
+keyed on `not(test)` for the same measured reason — the `(lib)` half of `cargo test` has the harness
+on and `cfg(test)` off, and there only `render_run`'s path is live. The translator uncovered nothing:
+`planner::plan` calls `new` and `translate`. Red then green: 40 → 0.
+
+**Routed the same way as `wire`'s reader, not restructured.** `render_plan` and `render_plan_memory`
+are golden-only, the `TEST_ONLY_ITEMS` shape with callers in three other components, and `memory.rs`
+plus most of `node_text.rs` behind them; `render_run` is not — the harness is production-shaped code
+behind a feature. Recorded for the signoff with the `wire` finding.
+
+**Proof.** `--test test_module_layout` 17; `--lib` 514 + 2 ignored; `--lib -- plan_text::` 16;
+`--lib -- planner::translator::` 65; goldens identical; `case-inventory.sh rust-only` identical to
+the baseline. rustfmt clean on each file alone (`skip_children`; one hunk in `translator/mod.rs`,
+`pub(crate)` pushing `translate` past the width; `plan_text/mod.rs` clean as written).
+
+Files: `peacockdb-core/src/plan_text/mod.rs`, `peacockdb-core/src/planner/translator/mod.rs`.
