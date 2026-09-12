@@ -47,10 +47,17 @@ static flatbuffers::Offset<fb::Expr> make_col_ref(
 }
 
 /// Build an Expr wrapping an Int64 literal.
+///
+/// Built field by field rather than positionally: `ScalarValue`'s value fields are all
+/// implicitly convertible to each other, so a positional `CreateScalarValue` call lets a
+/// field inserted ahead of them (as `is_null` was) take an argument meant for its
+/// neighbour without a compiler word.
 static flatbuffers::Offset<fb::Expr> make_int64_literal(
     flatbuffers::FlatBufferBuilder& fbb, int64_t val) {
-  auto sv = fb::CreateScalarValue(fbb, fb::DataType_Int64,
-                                  /*bool_val=*/false, /*int_val=*/val);
+  fb::ScalarValueBuilder sb(fbb);
+  sb.add_type(fb::DataType_Int64);
+  sb.add_int_val(val);
+  auto sv = sb.Finish();
   auto lit = fb::CreateLiteralExpr(fbb, sv);
   return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
 }
@@ -58,9 +65,22 @@ static flatbuffers::Offset<fb::Expr> make_int64_literal(
 /// Build an Expr wrapping a Float64 literal.
 static flatbuffers::Offset<fb::Expr> make_float64_literal(
     flatbuffers::FlatBufferBuilder& fbb, double val) {
-  auto sv = fb::CreateScalarValue(fbb, fb::DataType_Float64,
-                                  /*bool_val=*/false, /*int_val=*/0,
-                                  /*uint_val=*/0, /*float_val=*/val);
+  fb::ScalarValueBuilder sb(fbb);
+  sb.add_type(fb::DataType_Float64);
+  sb.add_float_val(val);
+  auto sv = sb.Finish();
+  auto lit = fb::CreateLiteralExpr(fbb, sv);
+  return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
+}
+
+/// A typed NULL literal: `is_null` set and no value, which is how the Rust serializer
+/// writes one.
+static flatbuffers::Offset<fb::Expr> make_null_literal(
+    flatbuffers::FlatBufferBuilder& fbb, fb::DataType type) {
+  fb::ScalarValueBuilder sb(fbb);
+  sb.add_type(type);
+  sb.add_is_null(true);
+  auto sv = sb.Finish();
   auto lit = fb::CreateLiteralExpr(fbb, sv);
   return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
 }
@@ -305,9 +325,9 @@ TEST(PlanExecutor, FilterNation) {
   const auto& result = plan.result();
 
   ASSERT_EQ(result.table->num_columns(), 4);
-  // Regions 3 and 4 (0-indexed) have nations. Exact count depends on data.
-  EXPECT_GT(result.table->num_rows(), 0);
-  EXPECT_LT(result.table->num_rows(), 25);
+  // Regions 3 and 4 hold five nations each. An exact count: a range that a wrong
+  // literal also satisfies says nothing about the predicate.
+  EXPECT_EQ(result.table->num_rows(), 10);
 }
 
 TEST(PlanExecutor, HashJoinNationRegion) {
@@ -781,7 +801,7 @@ TEST(PlanExecutor, ProjectSqrtThroughTheColumnPath) {
 // that needs no knowledge of the data — the counts and the sums double, the mean does
 // not move — so the assertions are about the merge rather than about nation.parquet.
 
-/// The nation scan every case below aggregates.
+/// The nation scan the merge cases aggregate and the literal cases at the end read.
 static flatbuffers::Offset<fb::PlanNode> nation_scan_node(
     flatbuffers::FlatBufferBuilder& fbb) {
   auto path = fbb.CreateString(parquet_path("nation"));
@@ -1363,6 +1383,65 @@ TEST(SliceHandle, AnUnknownHandleFails) {
                                                     &handle, nullptr),
             0);
   EXPECT_NE(plan.last_error().find("no plan loaded"), std::string::npos) << plan.last_error();
+}
+
+// --- Literals: a typed NULL on the AST path -----------------------------------
+//
+// A literal reaches the device as a ScalarValue whose is_null flag is what separates a
+// null from a zero. Both tests cast the Int32 column to Int64 so both operands infer to
+// the same type: is_ast_able's binary arm routes a mismatch to build_column, which
+// reads the flag and would answer correctly for the wrong reason.
+
+TEST(Literals, ATypedNullInsideAnAstExpressionIsNullAndNotZero) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto scan_node = nation_scan_node(fbb);
+
+  auto col0 = make_col_ref(fbb, 0, "n_nationkey");
+  auto cast0 = make_cast_expr(fbb, col0, fb::DataType_Int64);
+  auto null_lit = make_null_literal(fbb, fb::DataType_Int64);
+  auto sum = make_binary_expr(fbb, cast0, fb::BinaryOp_Plus, null_lit);
+
+  auto exprs = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<fb::Expr>>{sum});
+  auto alias = fbb.CreateString("keyplusnull");
+  auto aliases = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<flatbuffers::String>>{alias});
+  auto proj = fb::CreateCudfProject(fbb, exprs, aliases, scan_node);
+  auto proj_node =
+      make_plan_node(fbb, fb::PlanNodeKind_CudfProject, proj.Union());
+  auto buf = finish_plan(fbb, proj_node);
+
+  WholePlan plan(buf);
+  const auto& result = plan.result();
+
+  ASSERT_EQ(result.table->num_columns(), 1);
+  auto view = result.table->view().column(0);
+  ASSERT_EQ(view.size(), 25);
+  // x + NULL is NULL for every x.
+  EXPECT_EQ(view.null_count(), view.size());
+}
+
+TEST(Literals, AComparisonAgainstATypedNullKeepsNoRows) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto scan_node = nation_scan_node(fbb);
+
+  auto col0 = make_col_ref(fbb, 0, "n_nationkey");
+  auto cast0 = make_cast_expr(fbb, col0, fb::DataType_Int64);
+  auto null_lit = make_null_literal(fbb, fb::DataType_Int64);
+  auto predicate = make_binary_expr(fbb, cast0, fb::BinaryOp_Eq, null_lit);
+
+  auto filter = fb::CreateCudfFilter(fbb, predicate, scan_node);
+  auto filter_node =
+      make_plan_node(fbb, fb::PlanNodeKind_CudfFilter, filter.Union());
+  auto buf = finish_plan(fbb, filter_node);
+
+  WholePlan plan(buf);
+  const auto& result = plan.result();
+
+  // x = NULL is unknown for every x, so no row survives. Exactly zero: nation has a
+  // key of 0, so a literal built as a zero keeps that one row, and "fewer than 25"
+  // would pass on it.
+  EXPECT_EQ(result.table->num_rows(), 0);
 }
 
 // Hand-built plans over tpch.minimal, 19 MB of parquet; measured peak 2.9 MiB
