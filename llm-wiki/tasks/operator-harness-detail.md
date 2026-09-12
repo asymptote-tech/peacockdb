@@ -463,3 +463,90 @@ Results here:
 
 For plan task 8: the gpu block's `--lib -- gpu_tests::` figure is 80 after this task; the
 harness's cases are 15 operator cases + 6 device/harness cases + 2 `Outcome` tests + the guard.
+
+### 2026-09-12 — plan task 8 done: the whole proof, and what operator-cases inherits
+
+HEAD `bd2758a4`; the pages are the coordinator's (`build-test.md`: the "Harness helpers" row at 14 and
+the "Operator harness" row at 25, cpu `--lib` 532, gpu `gpu_tests::` 80, C++ 67, grand total 1620;
+`architecture.md`: seventeen symbols). Every line below is from a run at that HEAD.
+
+    cargo test --features rust-only -p peacockdb-core --test test_ci_coverage           8 passed — the guard without a workflow edit
+    cargo test --features rust-only -p peacockdb-core --test test_module_layout         17 passed
+    rustfmt --check --edition 2024 <the 21 files under src/tests/, src/wire/, cpu_backend/tests/ and peacockdb-ffi/src/lib.rs the branch touched since 2cb92f63>
+                                                                                        clean; none needed a format
+    cargo test --features rust-only -p peacockdb-core -- --test-threads=2               1052 passed, 0 failed, 2 ignored; 9 result lines; 0 warnings; exit 0
+      --lib 530 + 2i · test_ci_coverage 8 · test_corpus_goldens 20 · test_cost_model 3 · test_cpu_corpus 448
+      · test_golden_format 26 · test_gpu_corpus 0 · test_module_layout 17 · doc 0
+    sha256sum -c llm-wiki/tasks/visibility-baselines/goldens.sha256                     170 OK, 0 otherwise; `git status testdata/` clean (recipe-payloads.txt 61301d49…4b4e)
+    CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --no-run                    exit 0, 0 warnings
+    CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run  exit 0, 0 warnings
+    ctest --test-dir cpp/build -L cpu                                                   100% passed, 1 of 1; 12 gtests from 5 suites (HandleFromArrowNeedsASession among them)
+    scripts/build-test-shadgpu.sh --build; --push-binaries; --patch                     exit 0 each, 0 warnings
+    scripts/build-test-shadgpu.sh --run-detached (no filter, PCK_RUN_CPP unset); --run-status
+      run 20260912T052510-260094  rc 0  "GPU test run OK"; neighbour at 37 GiB of 143.7
+        peacock_cpu_tests 12 · peacock_gpu_tests 6 · peacock_plan_tests 27 · peacock_tpch_tests 4 · peacock_tpchv_tests 4  = 53 C++
+          (the dispatch's 52 predates plan task 1's twelfth cpu gtest; the page's C++ row says 12)
+        four `[rmm] pool on a discrete device` lines: 1.0, 1.0, 69.0, 30.0 GiB reserved of 103.0 free; no "could not be built"
+        peacockdb_core_gpu_lib   80 passed; 0 failed; 535 filtered out
+        test_gpu_corpus          8 passed; 0 failed
+
+#### For `operator-cases.md`'s developer
+
+- **No decimal reached the device in this task.** `decimals(rows, seed)` exists (`Decimal128(18, 2)`
+  with nulls, beside an `id`) and its only caller is `synthetic.rs`'s own
+  `decimals_carry_an_id_and_a_decimal_with_nulls`. Every device case here ran `synthetic`, whose
+  schema is Int32, Int64, Float64, Utf8, Date32, Boolean, `key`, `id` — all of which round-trip
+  through `cudf::from_arrow` and the IPC export exactly, at zero rows too. The first decimal case
+  is expected to be #187's `bug_` test (the device exports every decimal at precision 38), pinned
+  through `Outcome::same` failing on `schema differs` — not a cast in the comparator.
+- **Arrow constructors on the pinned version** (`arrow 54.2.1` via `datafusion 45`):
+  `Int64Array::from_iter_values`, `Int32Array/Int64Array/Float64Array/StringArray/Date32Array/
+  BooleanArray::from_iter` over `Option<T>` (nulls in every column but `id`),
+  `Decimal128Array::from_iter(...).with_precision_and_scale(18, 2)`; `RecordBatch::try_new`,
+  `RecordBatch::new_empty`; `concat_batches`, `lexsort_to_indices`, `take_record_batch`, `cast`;
+  `StructArray::from(Vec<(Arc<Field>, ArrayRef)>)` + `to_ffi` for the upload, `StreamReader` for
+  the fetch.
+- **No case became a `bug_` test.** Every unload and limit case agreed on its first device run. Had
+  one diverged: the same defect → the existing ticket (#187 for a decimal's precision, #173 for a
+  table from nothing, #183/#191 for the other known type divergences); a new defect → a new
+  ticket, at most fifteen lines in `tickets.md`; and a `bug_<what it does wrong>` test asserting the
+  wrong slot (or `outcome.gpu_refuses()`'s message) with the ticket number in a comment above it.
+- **The guard was shown red five ways** (task 7's entry quotes each): the empty registry before any
+  conversion; a kind removed from `PENDING`; a covered kind added to `PENDING`; a forwarder removed
+  from `EXCLUDED`; a non-kind on `PENDING`; a case declaring a non-kind. All on this box against the
+  staged gpu binary — the guard touches no device.
+- **The thirteen pending kinds:** `GpuLoadParquet`, `GpuFilter`, `GpuProject`, `GpuSort`,
+  `GpuCoalesceAllBatches`, `GpuAccumulateBatchesAndSort`, `GpuAggregate`, `GpuAggregateBatches`,
+  `GpuHashJoin`, `GpuCrossJoin`, `GpuNestedLoopJoin`, `GpuEmitPartitions`,
+  `GpuMergeSortedPartitions`. A case for one of them is written as `operator_case! { Kind, fn … }`
+  and the kind leaves `PENDING` in the same change, or the guard's `stale` check goes red; when the
+  list is empty, delete it and the check that reads it.
+- **`Script` variants still unconstructed:** `Lanes`, `Emit`, `Join`, `Source` (`Exec` is constructed
+  only by the refusal case, so its arm has not run on a device either). The `#[allow(dead_code)]`
+  on `Script` leaves with them. A `Source` script needs a `GpuLoadParquet` over a parquet the test
+  writes — the cpu executor tests' `source.rs` is the pattern — and is the one case shape whose
+  "synthetic data only" is a file rather than a `RecordBatch`.
+- **Why a limit cannot reach #173, and which shapes can.** `RowInterval::range_of` answers `None` at
+  `n_rows == 0` and never a zero-length range, so a zero-row batch is released uncalled on both
+  sides and the device is never asked to slice or ship an empty table; a zero-row route through a
+  limit ends in an empty slot, which the comparator calls equal. #173's shape is an operator that
+  *calls* the device on nothing: an accumulator's `mark_done_and_fetch` over no arrivals (coalesce,
+  the accumulating sort, the state merge), a merge lane that saw only `Done`, a join whose build or
+  probe side is a zero-row batch, an exec handed a zero-row batch. Each is its own case, and a
+  one-sided `Err` there is `outcome.gpu_refuses()` pinned by message under #173.
+- **The device-run recipe**, each a foreground call under `timeout`, with `CUDF_ROOT` exported:
+  1. `scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run` — 0 warnings.
+  2. `--list gpu_tests::` on `target-cudf-rapids-cuda-12.2/debug/deps/peacockdb_core-<hash>` with
+     `LD_LIBRARY_PATH=<target-cudf-…/debug/build/peacockdb-ffi-*/out/lib>:$CUDF_ROOT/lib` — the
+     new names; the same binary runs any `gpu_tests::` case that touches no device (the guard, the
+     refusal, the `Outcome` tests) right here.
+  3. `scripts/build-test-shadgpu.sh --build`, then `--push-binaries --patch`.
+  4. `PCK_RUN_CPP=0 PCK_TEST_FILTER=tests::gpu_tests scripts/build-test-shadgpu.sh --run-detached`,
+     then `--run-status` polled every 20–30 s until `FINISHED`; the per-case lines are in
+     `shad-gpu:/home/info/peacockdb/.run-state/gate.log`.
+  5. Once more with no filter for the rung whole (`PCK_RUN_CPP=0`), and at a handoff with
+     `PCK_RUN_CPP` unset for the C++ too. Check `nvidia-smi` on the host first; a
+     `[rmm] pool of N GiB could not be built` line at the top of a C++ binary's log is #178, not a
+     bug in the binary.
+
+`git status --short`: only this file.
