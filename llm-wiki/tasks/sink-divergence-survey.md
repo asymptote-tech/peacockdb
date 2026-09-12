@@ -99,3 +99,14 @@ planned against evidence instead of a sighting.
   divergences that do not surface at the sink. If everything surfaces here, that task shrinks.
 - The rewrite of `casts` and `wire-schema`, both of which are waiting to know whether their ticket's
   account of itself is still true.
+
+## Completeness signoff
+
+Solved under its constraints, 2026-09-12: one site's message changed, 94 cells run at one mode,
+the report at `llm-wiki/reports/sink-divergence.md`. Shortcuts, all on this throw-away branch:
+the comparison lives in `executor/errors.rs` with a `tests` module rather than at the site, so
+it runs under `rust-only`; 94 `gpu_modes` arguments in `corpus_cases.inc` were set to
+`tp1_single` in a commit of their own, since a disabled cell is no test; one mode only, on the
+reasoning that a divergence class is a property of types, not lanes. Nothing else changed: no
+registry, ticket, golden or cell edit. The message is what the report is made of; the report
+is what the next four tasks plan against.
