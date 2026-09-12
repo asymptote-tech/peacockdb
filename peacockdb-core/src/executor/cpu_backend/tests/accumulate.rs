@@ -50,8 +50,8 @@ fn values_of(batch: &CpuBatch) -> Vec<i64> {
 }
 
 fn coalesce() -> CpuAccumulator {
-    let node = GpuCoalesceAllBatches::new(Given::of(&GROUPED));
-    CpuAccumulator::coalesce(&node, &schema_of(&GROUPED).fields)
+    let node = GpuCoalesceAllBatches::new(Given::of_columns(&GROUPED));
+    CpuAccumulator::coalesce(&node, &columns(&GROUPED).fields)
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn accumulating_sort(ascending: bool, fetch: Option<usize>) -> CpuAccumulator {
 
 fn sort_with(ascending: bool, fetch: Option<usize>, ctx: Arc<TaskContext>) -> CpuAccumulator {
     let node = GpuAccumulateBatchesAndSort::new(
-        Given::of(&GROUPED),
+        Given::of_columns(&GROUPED),
         vec![ColumnOrder {
             column: 1,
             ascending,
@@ -100,7 +100,7 @@ fn sort_with(ascending: bool, fetch: Option<usize>, ctx: Arc<TaskContext>) -> Cp
         }],
         fetch,
     );
-    CpuAccumulator::sorted(&node, &schema_of(&GROUPED).fields, ctx).expect("the sort builds")
+    CpuAccumulator::sorted(&node, &columns(&GROUPED).fields, ctx).expect("the sort builds")
 }
 
 /// The whole stream, not each batch: batches that are each sorted and not sorted against
@@ -242,8 +242,12 @@ fn merging_under(
     ctx: Arc<TaskContext>,
 ) -> CpuAccumulator {
     let state = avg_state();
-    let node =
-        GpuAggregateBatches::new(Given::of_schema(state.clone()), body, state.clone(), output);
+    let node = GpuAggregateBatches::new(
+        Given::of(state.clone(), BatchLayout::MultipleBatches),
+        body,
+        state.clone(),
+        output,
+    );
     CpuAccumulator::aggregate(&node, &state.fields, ctx, compact_bytes).expect("the merge builds")
 }
 
@@ -432,7 +436,7 @@ fn a_welford_triple_merges_as_one_aggregate() {
     };
     let state = welford_state();
     let node = GpuAggregateBatches::new(
-        Given::of_schema(state.clone()),
+        Given::of(state.clone(), BatchLayout::MultipleBatches),
         body,
         state.clone(),
         state.clone(),
@@ -541,7 +545,7 @@ fn disjoint_keys_raise_the_threshold_where_a_repeating_key_does_not() {
 }
 
 fn limiting(skip: u64, fetch: Option<u64>) -> CpuAccumulator {
-    let node = GpuLimit::new(Given::of(&GROUPED), RowInterval { skip, fetch });
+    let node = GpuLimit::new(Given::of_columns(&GROUPED), RowInterval { skip, fetch });
     CpuAccumulator::limit(&node)
 }
 
@@ -592,7 +596,7 @@ fn a_limit_emits_nothing_at_done_because_it_held_nothing() {
 
 fn merge_sorted(lanes: usize, fetch: Option<usize>) -> CpuPartitionAccumulator {
     let node = GpuMergeSortedPartitions::new(
-        Given::of(&GROUPED),
+        Given::of_columns(&GROUPED),
         vec![ColumnOrder {
             column: 1,
             ascending: true,
@@ -600,7 +604,7 @@ fn merge_sorted(lanes: usize, fetch: Option<usize>) -> CpuPartitionAccumulator {
         }],
         fetch,
     );
-    CpuPartitionAccumulator::merge_sorted(&node, lanes, &schema_of(&GROUPED).fields, ctx())
+    CpuPartitionAccumulator::merge_sorted(&node, lanes, &columns(&GROUPED).fields, ctx())
         .expect("the merge builds")
 }
 
@@ -704,7 +708,7 @@ fn a_fetch_over_the_merge_keeps_the_top_of_every_lane_together() {
 #[test]
 fn a_global_aggregate_that_received_nothing_still_owes_its_identity_row() {
     let counted = Schema::new(Arc::new(
-        schema_of(&[("count(v)", DataType::Int64)])
+        columns(&[("count(v)", DataType::Int64)])
             .fields
             .as_ref()
             .clone(),
@@ -721,7 +725,7 @@ fn a_global_aggregate_that_received_nothing_still_owes_its_identity_row() {
         finalize: None,
     };
     let node = GpuAggregateBatches::new(
-        Given::of_schema(counted.clone()),
+        Given::of(counted.clone(), BatchLayout::MultipleBatches),
         body,
         counted.clone(),
         counted.clone(),

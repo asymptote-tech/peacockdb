@@ -120,6 +120,10 @@ class NodeSession {
   /// operation on a resident table is.
   uint64_t slice_handle(uint64_t handle, uint64_t offset, uint64_t length);
 
+  /// Register a table the caller built and return its handle — the operator harness's
+  /// upload, and nothing on the production path. Test-only by contract, not by build.
+  uint64_t adopt(TableResult result);
+
   /// Borrow the resident table behind `handle` (for materialization at root).
   const TableResult& table_for(uint64_t handle) const;
 

@@ -5,72 +5,21 @@
 
 use super::*;
 use crate::plan::AggregateBody;
+use crate::plan::BatchLayout;
 use crate::plan::GpuNode;
 use crate::plan::{AggCall, AggFunc, PlanAgg};
 use crate::plan::{AggStateColumns, Schema};
-use crate::plan::{BatchLayout, NodeKind, PartitionLayout};
 use crate::plan::{BinaryOp, Expr, NamedExpr};
+use crate::tests::given::{Given, columns};
 use datafusion::arrow::array::{Array, ArrayRef, Int32Array, Int64Array, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field};
 use datafusion::common::ScalarValue;
 use datafusion::execution::context::SessionContext;
-use std::any::Any;
-
-/// A child that declares a schema and nothing else: an executor is handed its node and its
-/// input batches, so a stub is what keeps a case about the operator.
-#[derive(Debug)]
-struct Given {
-    kind: NodeKind,
-}
-
-impl Given {
-    fn of(columns: &[(&str, DataType)]) -> Box<dyn GpuNode> {
-        Self::of_schema(schema_of(columns))
-    }
-
-    /// The same stub over a schema already built — a merge's input is the state its child
-    /// emitted, which is a `Schema` with annotations rather than a column list.
-    fn of_schema(schema: Schema) -> Box<dyn GpuNode> {
-        Box::new(Given {
-            kind: NodeKind::Intermediate {
-                layout: PartitionLayout {
-                    batch_layout: BatchLayout::MultipleBatches,
-                    ..PartitionLayout::new(1)
-                },
-                schema,
-            },
-        })
-    }
-}
-
-impl GpuNode for Given {
-    fn kind(&self) -> &NodeKind {
-        &self.kind
-    }
-    fn children(&self) -> Vec<&dyn GpuNode> {
-        Vec::new()
-    }
-    fn validate_schemas_and_partitions(&self) -> Result<(), crate::plan::PlanError> {
-        Ok(())
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-fn schema_of(columns: &[(&str, DataType)]) -> Schema {
-    Schema::new(Arc::new(ArrowSchema::new(
-        columns
-            .iter()
-            .map(|(name, kind)| Field::new(*name, kind.clone(), true))
-            .collect::<Vec<_>>(),
-    )))
-}
 
 const COLUMNS: [(&str, DataType); 2] = [("n", DataType::Int32), ("s", DataType::Utf8)];
 
 fn input() -> ArrowSchema {
-    schema_of(&COLUMNS).fields.as_ref().clone()
+    columns(&COLUMNS).fields.as_ref().clone()
 }
 
 fn batch(numbers: Vec<Option<i32>>, strings: Vec<Option<&str>>) -> CpuBatch {
@@ -125,7 +74,7 @@ fn grouped(keys: Vec<Option<&str>>, values: Vec<Option<i64>>) -> CpuBatch {
     let v: ArrayRef = Arc::new(Int64Array::from(values));
     CpuBatch::new(
         RecordBatch::try_new(
-            Arc::new(schema_of(&GROUPED).fields.as_ref().clone()),
+            Arc::new(columns(&GROUPED).fields.as_ref().clone()),
             vec![k, v],
         )
         .expect("the columns fit the schema"),
@@ -134,9 +83,9 @@ fn grouped(keys: Vec<Option<&str>>, values: Vec<Option<i64>>) -> CpuBatch {
 
 /// A state schema in the shape an aggregate declares one: the keys lead it, and the
 /// annotation says which columns a Welford triple owns.
-fn state_of(columns: &[(&str, DataType)], keys: usize, welford: Option<&str>) -> Schema {
+fn state_of(fields: &[(&str, DataType)], keys: usize, welford: Option<&str>) -> Schema {
     Schema {
-        fields: Arc::new(schema_of(columns).fields.as_ref().clone()),
+        fields: Arc::new(columns(fields).fields.as_ref().clone()),
         group_keys: (0..keys as u32).collect(),
         agg_state: welford
             .map(|output| {

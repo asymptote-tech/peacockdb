@@ -9,8 +9,13 @@
 //! attribute of its own and production code that names anything here is `E0433` in a
 //! release build.
 
+pub(crate) mod compare;
 mod end_to_end;
 pub(crate) mod executor_cases;
+pub(crate) mod given;
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_tests;
 pub(crate) mod injection;
 pub(crate) mod join_fixture;
 pub(crate) mod rebuild;
+pub(crate) mod synthetic;
