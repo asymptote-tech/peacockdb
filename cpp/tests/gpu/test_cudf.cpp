@@ -34,6 +34,8 @@ rmm::cuda_stream_view const get_default_stream() { return cudf::get_default_stre
 #include "plan_executor.h"
 #include "peacock/rmm_pool.hpp"
 
+// dev-setup-check: a changed line, so the GPU job compiles a file this branch touched.
+
 // measure_timing_floor_us turns the global timing switch on for its own samples, so
 // it has to hand back what it found. It is called mid-benchmark, between a warm-up
 // and the measured runs, and a leak in either direction changes what every later node
