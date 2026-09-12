@@ -84,8 +84,10 @@ impl GpuJoin {
         })
     }
 
-    /// This lane's build side finished with no batch — its scatter gave it no build rows.
-    /// The type decides what it owes, and the rule is the one the CPU reads too.
+    /// This lane's build side finished with no batch. The type decides what it owes, and
+    /// the rule is the one the CPU reads too. A scatter no longer brings an owing type
+    /// here — the driver keeps its zero-row table and `set_build` takes it (#175) — so
+    /// what reaches the refusal is an upstream that emitted nothing at all (#212).
     pub(crate) fn without_build(self) -> Result<(), BackendError> {
         // Cross and nested-loop joins carry no type here and owe nothing either: every row
         // they emit is built from a build row, the Left form's padding included.
@@ -95,7 +97,7 @@ impl GpuJoin {
         }
         Err(BackendError::new(
             "this lane's build side is empty, and what this join owes is its probe side — \
-             which takes a call over a build table that does not exist (#175)",
+             which takes a call over a build table that does not exist (#212)",
         ))
     }
 
