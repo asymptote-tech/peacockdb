@@ -398,3 +398,68 @@ Results here:
     rustfmt --check --edition 2024 src/tests/gpu_tests/{script,harness_cases}.rs              clean
 
 For plan task 8: the gpu block's `--lib -- gpu_tests::` figure is 79 after this task.
+
+### 2026-09-12 — plan task 7 done: the kind registry and its guard
+
+New: `peacockdb-core/src/tests/gpu_tests/coverage.rs`, declared `#[macro_use] mod coverage;` first in
+`gpu_tests/mod.rs` so `operator_case!` reaches `harness_cases`. `Covers { kind, case }` under
+`inventory::collect!`; `operator_case! { Kind, fn name() { … } }` submits the entry and defines the
+`#[test]` from one declaration; `EXCLUDED` (the three forwarders, permanent); `PENDING`; and the
+guard `every_kind_has_a_case_or_is_named_as_pending_or_excluded`. All as the plan wrote them, with
+one addition: the `unknown` check reads `Covers::case` and reports `(kind, case)`, so a mistyped
+kind is found by the case that wrote it (and the field has a reader).
+
+**Where it runs.** `inventory` collects per binary and the entries are submitted by gpu-rung
+cases, so the guard is gpu-rung too: in a rust-only binary the registry would be empty and every
+kind "missing". No rust-rung half exists. The guard itself touches no device, so it runs on this
+box against the staged binary — which is how the reds below were taken. Its oracle for "every
+kind" is `crate::tests::rebuild::every_kind` (hand-built nodes over fake parquet paths, nothing
+read), which `a_node_rebuilt_over_its_own_children_is_the_node_it_was` holds to eighteen in the
+rust rung — so a nineteenth `NodeRef` kind reaches this guard through that fixture.
+
+**Converted:** the six `GpuUnload` and nine `GpuLimit` cases. **Plain `#[test]` and why:** the
+five round-trip cases and `the_session_holds_the_plan_of_one_stub_it_loaded` exercise `Device`,
+not a node kind; `a_script_of_another_shape_is_refused_before_either_backend_runs` exercises the
+harness's refusal (and is `should_panic`, which the macro does not take). A comment at the unload
+block says so.
+
+**PENDING as it stands** (18 kinds − 3 excluded − `GpuUnload`, `GpuLimit` = 13): `GpuLoadParquet`,
+`GpuFilter`, `GpuProject`, `GpuSort`, `GpuCoalesceAllBatches`, `GpuAccumulateBatchesAndSort`,
+`GpuAggregate`, `GpuAggregateBatches`, `GpuHashJoin`, `GpuCrossJoin`, `GpuNestedLoopJoin`,
+`GpuEmitPartitions`, `GpuMergeSortedPartitions`.
+
+Red first, on this box with the staged gpu binary. The guard was written before any case was
+converted, so the registry was empty:
+
+    kinds with no case and not pending: ["GpuLimit", "GpuUnload"]
+
+then green after the conversion. Then each check shown red by one edit, quoted, and the file
+restored (`diff` identical) and re-run green:
+
+    (a) "GpuLoadParquet" removed from PENDING     kinds with no case and not pending: ["GpuLoadParquet"]
+    (b) "GpuLimit" added to PENDING               listed as pending or excluded, but has a case: ["GpuLimit"]
+    (c) "GpuUnion" removed from EXCLUDED          kinds with no case and not pending: ["GpuUnion"]
+    (d) "GpuWindow" added to PENDING              listed, but not a kind: ["GpuWindow"]
+    (e) one limit case declared as GpuWindow      cases naming a kind that is not one, as (kind, case):
+                                                  [("GpuWindow", "an_interval_no_batch_reaches_answers_nothing_on_both")]
+
+shad-gpu (neighbour at 37 GiB of 143.7; no `rmm` line in either gate log):
+
+    run 20260912T051321-252945  PCK_RUN_CPP=0 PCK_TEST_FILTER=tests::gpu_tests  rc 0
+      peacockdb_core_gpu_lib   25 passed; 0 failed; 590 filtered out   (24 + the guard)
+      test_gpu_corpus          0 passed; 8 filtered out
+    run 20260912T051332-252989  PCK_RUN_CPP=0, no filter (the rung whole)      rc 0
+      peacockdb_core_gpu_lib   80 passed; 0 failed; 535 filtered out   (79 + 1)
+      test_gpu_corpus          8 passed; 0 failed
+
+Results here:
+
+    CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run   exit 0, 0 warnings
+    <staged lib> --list gpu_tests::                                                          80 cases, tests::gpu_tests::coverage::every_kind_has_a_case_or_is_named_as_pending_or_excluded among them
+    scripts/build-test-shadgpu.sh --build; --push-binaries --patch                            exit 0, 0 warnings
+    cargo test --features rust-only -p peacockdb-core --lib                                   530 passed, 2 ignored (unchanged)
+    cargo test … --test test_module_layout / --test test_ci_coverage                          17 / 8
+    rustfmt --check --edition 2024 src/tests/gpu_tests/{mod,coverage,harness_cases}.rs        clean
+
+For plan task 8: the gpu block's `--lib -- gpu_tests::` figure is 80 after this task; the
+harness's cases are 15 operator cases + 6 device/harness cases + 2 `Outcome` tests + the guard.

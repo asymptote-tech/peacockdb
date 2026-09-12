@@ -101,7 +101,8 @@ fn zero_rows_round_trip_as_zero_rows_under_the_schema() {
 }
 
 // `GpuUnload` through `executors_for` on both backends: `CpuUnload`'s slice against
-// `GpuExport`'s row range, the first operator through `run_both`.
+// `GpuExport`'s row range, the first operator through `run_both`. The round trip above
+// and the refusal below are about the harness, not a node kind, and stay plain tests.
 
 fn unload_over(rows: usize) -> (GpuUnload, RecordBatch) {
     let batch = synthetic(rows, 2);
@@ -119,95 +120,107 @@ fn a_script_of_another_shape_is_refused_before_either_backend_runs() {
     run_both(&node, Script::Exec(vec![batch]));
 }
 
-#[test]
-fn an_unload_hands_the_whole_batch_over_on_both_backends() {
-    let (node, batch) = unload_over(64);
-    run_both(
-        &node,
-        Script::Unload {
-            batch,
-            rows: RowRange::WHOLE,
-        },
-    )
-    .same(Order::AsEmitted);
+operator_case! {
+    GpuUnload,
+    fn an_unload_hands_the_whole_batch_over_on_both_backends() {
+        let (node, batch) = unload_over(64);
+        run_both(
+            &node,
+            Script::Unload {
+                batch,
+                rows: RowRange::WHOLE,
+            },
+        )
+        .same(Order::AsEmitted);
+    }
 }
 
-#[test]
-fn an_unload_over_a_range_hands_those_rows_over() {
-    let (node, batch) = unload_over(64);
-    run_both(
-        &node,
-        Script::Unload {
-            batch,
-            rows: RowRange {
-                offset: 20,
-                length: 7,
+operator_case! {
+    GpuUnload,
+    fn an_unload_over_a_range_hands_those_rows_over() {
+        let (node, batch) = unload_over(64);
+        run_both(
+            &node,
+            Script::Unload {
+                batch,
+                rows: RowRange {
+                    offset: 20,
+                    length: 7,
+                },
             },
-        },
-    )
-    .same(Order::AsEmitted);
+        )
+        .same(Order::AsEmitted);
+    }
 }
 
-#[test]
-fn an_unload_clamps_a_range_over_the_end_the_same_way() {
-    let (node, batch) = unload_over(64);
-    run_both(
-        &node,
-        Script::Unload {
-            batch,
-            rows: RowRange {
-                offset: 60,
-                length: 100,
+operator_case! {
+    GpuUnload,
+    fn an_unload_clamps_a_range_over_the_end_the_same_way() {
+        let (node, batch) = unload_over(64);
+        run_both(
+            &node,
+            Script::Unload {
+                batch,
+                rows: RowRange {
+                    offset: 60,
+                    length: 100,
+                },
             },
-        },
-    )
-    .same(Order::AsEmitted);
+        )
+        .same(Order::AsEmitted);
+    }
 }
 
-#[test]
-fn an_unload_of_a_range_past_the_end_is_zero_rows_on_both() {
-    let (node, batch) = unload_over(8);
-    run_both(
-        &node,
-        Script::Unload {
-            batch,
-            rows: RowRange {
-                offset: 8,
-                length: 4,
+operator_case! {
+    GpuUnload,
+    fn an_unload_of_a_range_past_the_end_is_zero_rows_on_both() {
+        let (node, batch) = unload_over(8);
+        run_both(
+            &node,
+            Script::Unload {
+                batch,
+                rows: RowRange {
+                    offset: 8,
+                    length: 4,
+                },
             },
-        },
-    )
-    .same(Order::AsEmitted);
+        )
+        .same(Order::AsEmitted);
+    }
 }
 
 // Empty inputs, each its own case.
-#[test]
-fn an_unload_of_a_zero_row_batch_is_zero_rows_under_the_schema_on_both() {
-    let (node, batch) = unload_over(0);
-    run_both(
-        &node,
-        Script::Unload {
-            batch,
-            rows: RowRange::WHOLE,
-        },
-    )
-    .same(Order::AsEmitted);
+operator_case! {
+    GpuUnload,
+    fn an_unload_of_a_zero_row_batch_is_zero_rows_under_the_schema_on_both() {
+        let (node, batch) = unload_over(0);
+        run_both(
+            &node,
+            Script::Unload {
+                batch,
+                rows: RowRange::WHOLE,
+            },
+        )
+        .same(Order::AsEmitted);
+    }
 }
 
-#[test]
-fn a_range_over_a_zero_row_batch_is_zero_rows_on_both() {
-    let (node, batch) = unload_over(0);
-    run_both(
-        &node,
-        Script::Unload {
-            batch,
-            rows: RowRange {
-                offset: 0,
-                length: 5,
+operator_case! {
+    GpuUnload,
+    fn a_range_over_a_zero_row_batch_is_zero_rows_on_both() {
+        let (node, batch) = unload_over(0);
+        run_both(
+            &node,
+            Script::Unload {
+                batch,
+                rows: RowRange {
+                    offset: 0,
+                    length: 5,
+                },
             },
-        },
-    )
-    .same(Order::AsEmitted);
+        )
+        .same(Order::AsEmitted);
+    }
 }
 
 // `GpuLimit` through `executors_for`: the mid-plan limit streams and holds nothing, so
@@ -234,58 +247,76 @@ fn limit_over(
     (node, stream)
 }
 
-#[test]
-fn an_interval_inside_one_batch_slices_that_batch() {
-    let (node, stream) = limit_over(3, Some(4), 16, 1);
-    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+operator_case! {
+    GpuLimit,
+    fn an_interval_inside_one_batch_slices_that_batch() {
+        let (node, stream) = limit_over(3, Some(4), 16, 1);
+        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+    }
 }
 
-#[test]
-fn an_interval_straddling_two_batches_slices_both() {
-    let (node, stream) = limit_over(12, Some(8), 16, 2);
-    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+operator_case! {
+    GpuLimit,
+    fn an_interval_straddling_two_batches_slices_both() {
+        let (node, stream) = limit_over(12, Some(8), 16, 2);
+        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+    }
 }
 
-#[test]
-fn batches_entirely_outside_the_interval_produce_nothing() {
-    let (node, stream) = limit_over(40, Some(4), 16, 4);
-    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+operator_case! {
+    GpuLimit,
+    fn batches_entirely_outside_the_interval_produce_nothing() {
+        let (node, stream) = limit_over(40, Some(4), 16, 4);
+        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+    }
 }
 
-#[test]
-fn a_skip_alone_drops_the_prefix_and_keeps_the_rest() {
-    let (node, stream) = limit_over(20, None, 16, 3);
-    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+operator_case! {
+    GpuLimit,
+    fn a_skip_alone_drops_the_prefix_and_keeps_the_rest() {
+        let (node, stream) = limit_over(20, None, 16, 3);
+        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+    }
 }
 
-#[test]
-fn a_stream_of_several_batches_is_cut_at_the_same_two_edges() {
-    let (node, stream) = limit_over(5, Some(30), 8, 6);
-    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+operator_case! {
+    GpuLimit,
+    fn a_stream_of_several_batches_is_cut_at_the_same_two_edges() {
+        let (node, stream) = limit_over(5, Some(30), 8, 6);
+        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+    }
 }
 
 // Empty inputs, each its own case.
-#[test]
-fn a_stream_of_one_zero_row_batch_answers_nothing_on_both() {
-    let (node, stream) = limit_over(0, Some(4), 0, 1);
-    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+operator_case! {
+    GpuLimit,
+    fn a_stream_of_one_zero_row_batch_answers_nothing_on_both() {
+        let (node, stream) = limit_over(0, Some(4), 0, 1);
+        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+    }
 }
 
-#[test]
-fn a_zero_row_batch_inside_a_stream_counts_no_rows_on_both() {
-    let (node, mut stream) = limit_over(10, Some(10), 8, 3);
-    stream.insert(1, synthetic(0, 99));
-    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+operator_case! {
+    GpuLimit,
+    fn a_zero_row_batch_inside_a_stream_counts_no_rows_on_both() {
+        let (node, mut stream) = limit_over(10, Some(10), 8, 3);
+        stream.insert(1, synthetic(0, 99));
+        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+    }
 }
 
-#[test]
-fn a_stream_of_nothing_but_zero_row_batches_answers_nothing_on_both() {
-    let (node, stream) = limit_over(2, Some(4), 0, 3);
-    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+operator_case! {
+    GpuLimit,
+    fn a_stream_of_nothing_but_zero_row_batches_answers_nothing_on_both() {
+        let (node, stream) = limit_over(2, Some(4), 0, 3);
+        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+    }
 }
 
-#[test]
-fn an_interval_no_batch_reaches_answers_nothing_on_both() {
-    let (node, stream) = limit_over(1000, Some(4), 8, 3);
-    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+operator_case! {
+    GpuLimit,
+    fn an_interval_no_batch_reaches_answers_nothing_on_both() {
+        let (node, stream) = limit_over(1000, Some(4), 8, 3);
+        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+    }
 }
