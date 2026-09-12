@@ -38,6 +38,7 @@ use datafusion::common::JoinType;
 
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
+use crate::plan::Schema;
 
 use generated::peacock::plan as fb;
 
@@ -222,13 +223,21 @@ impl CallPattern {
 }
 
 /// One ABI call: the symbol, the seq it addresses where it takes one, and what it passes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `PartialEq` only, because `Schema` is: nothing collects calls into a set, and a derive
+/// nothing consumes is a promise nobody checks.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Call {
     pub(crate) symbol: AbiSymbol,
     /// `None` for the two symbols whose arguments are runtime row counts.
     pub(crate) target: Option<(Seq, FbKind)>,
     pub(crate) inputs: Vec<Input>,
     pub(crate) when: CallPattern,
+    /// The schema of the table one firing of this call produces. `None` means no arm has
+    /// declared it yet — the join and aggregate families, which
+    /// `declared-schemas-derived.md` takes. It never means "this call produces nothing":
+    /// a call producing no table declares an empty schema and says so.
+    pub(crate) output_schema: Option<Schema>,
 }
 
 impl Call {
@@ -243,6 +252,7 @@ impl Call {
             target: Some((seq, kind)),
             inputs,
             when,
+            output_schema: None,
         }
     }
 
@@ -252,12 +262,21 @@ impl Call {
             target: None,
             inputs,
             when,
+            output_schema: None,
         }
+    }
+
+    /// The schema this call's firing produces. Separate from the constructors so that an
+    /// arm which has not worked out its declaration reads as undeclared rather than as
+    /// having passed something.
+    pub(crate) fn declaring(mut self, schema: &Schema) -> Self {
+        self.output_schema = Some(schema.clone());
+        self
     }
 }
 
 /// What one node does to the device, in call order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Recipe {
     pub(crate) calls: Vec<Call>,
 }

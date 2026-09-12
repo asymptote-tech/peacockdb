@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1825 test cases — Rust 1389, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1833 test cases — Rust 1397, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1003 cases: `--lib` 532, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1011 cases: `--lib` 540, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -89,7 +89,7 @@ harness rests on, each shown for the reason it names
 
 *component*
 
-| Plan rules, hand-built | [a_limit_over_several_lanes_names_the_node_that_fixes_it](../peacockdb-core/src/plan/tests/mod.rs) | 31 |
+| Plan rules, hand-built | [a_limit_over_several_lanes_names_the_node_that_fixes_it](../peacockdb-core/src/plan/tests/mod.rs) | 32 |
 |---|---|--:|
 
 one input per rule, each built to break the rule it is aimed at: a plan that violates one is
@@ -185,7 +185,7 @@ the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and 
 mode goldens hold, and asserted to be one, so the membership grows when the mapping does — with
 every payload rendered and a sha256 over the bytes beside it
 
-| Recipes per join type | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests.rs) | 23 |
+| Recipes per join type | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests/mod.rs) | 30 |
 |---|---|--:|
 
 the kinds whose recipe is more than one call, `GpuHashJoin` first: per join type, the seq set
@@ -193,7 +193,8 @@ it emits and when each call is made, against the capability matrix, and whether 
 executor makes the finish pass the recipe's `AtDone` says it does; plus a leaf outside the
 registry emitting the writer's stub and no recipe, which is how a hand-built node gets its
 recipe with no plan. The trivial kinds are not here — the plan goldens run them over every
-corpus query
+corpus query; and what each call declares its firing produces — the six arms whose schema is in
+hand declare their node's own, every other arm answers `None`
 
 | Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 13 |
 |---|---|--:|

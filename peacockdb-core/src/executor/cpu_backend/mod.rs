@@ -604,7 +604,7 @@ pub(crate) fn physical_expr(
 
 /// Whether the CPU executor for this join keeps probe keys and answers at done.
 ///
-/// `#[cfg(test)]`, and called by `executor/mod.rs`, which carries it to `wire/tests.rs` —
+/// `#[cfg(test)]`, and called by `executor/mod.rs`, which carries it to `wire/tests/mod.rs` —
 /// the test compares the answer against the recipe's `AtDone` call. The question crosses
 /// the wall and the type does not: `join` is this subcomponent's own.
 #[cfg(test)]
