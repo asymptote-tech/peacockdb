@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1833 test cases — Rust 1397, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1836 test cases — Rust 1400, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ unit (`foo.rs` beside `foo/tests.rs`).
 
 | Category | Why | Examples | N |
 |---|---|---|--:|
-| **cpu — `--features rust-only`: no FFI, no device. 1011 cases: `--lib` 540, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_cost_model` 3** | | | |
+| **cpu — `--features rust-only`: no FFI, no device. 1014 cases: `--lib` 543, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_cost_model` 3** | | | |
 | *crate integration, external* | | | |
 | Corpus, cpu | one `corpus_query!` line per query declaring its cpu and gpu modes and its two oracles, expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer checked against plain DataFusion at `target_partitions = 1`. 37 queries at the modes each is correct at — `tpcds/q96` carries three disabled by [#180](tasks/active-tickets.md#t180), `tpcds/q77` three by [#175](tickets.md#t175) and `tpcds/q80` three by [#189](tasks/active-tickets.md#t189), `tpcds/q88` three by [#180](tasks/active-tickets.md#t180), and thirteen queries are out entirely on [#163](tickets.md#t163). 444 cells, plus three checks that every declaration's two oracles suit each other and every device cell has a cpu cell | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 447 |
 | Registry ↔ CSV, cpu | the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions; one binary per engine, since `inventory` collects per linked binary | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
@@ -50,7 +50,7 @@ unit (`foo.rs` beside `foo/tests.rs`).
 | Recipe plan structure | the claims the payload golden cannot make: every published seq resolves to the kind its recipe names, over every corpus query rather than only the payload subset; the payload set covers every fb kind and call shape the ten goldens hold; the queries that cannot cross the wire are declared; no plan approaches the verifier's depth cap ([#169](tickets.md#t169)); and the index's post-order agrees with the numbering `attach_recipes` gave, over the corpus, since the two are separate walks in separate files and [#134](tickets.md#t134) is the same pair one boundary over | [every_published_seq_addresses_the_kind_its_recipe_claims](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 4 |
 | Recipe payloads golden | the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and call shape the mode goldens hold, and asserted to be one, so the membership grows when the mapping does — with every payload rendered and a sha256 over the bytes beside it | [the_payload_golden_carries_what_each_call_hands_the_executor](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 1 |
 | Recipes per join type | the kinds whose recipe is more than one call, `GpuHashJoin` first: per join type, the seq set it emits and when each call is made, against the capability matrix, and whether the CPU executor makes the finish pass the recipe's `AtDone` says it does; plus a leaf outside the registry emitting the writer's stub and no recipe, which is how a hand-built node gets its recipe with no plan. The trivial kinds are not here — the plan goldens run them over every corpus query; and what each call declares its firing produces — the six arms whose schema is in hand declare their node's own, every other arm answers `None` | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests/mod.rs) | 30 |
-| Plan text | the renderer against what the planner emits from real SQL: every column reference prints name at ordinal, every node carrying a fetch prints it, a join prints its keys and projection by name, a source prints its mapping verbatim, a name that is not a token is backquoted, and no node name carries an exec suffix | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 13 |
+| Plan text | the renderer against what the planner emits from real SQL: every column reference prints name at ordinal, every node carrying a fetch prints it, a join prints its keys and projection by name, a source prints its mapping verbatim, a name that is not a token is backquoted, and no node name carries an exec suffix; and the payload golden's declared section: one line per call under its node, `undeclared` and `no calls` spelled out, a decimal with its digits, and both sections numbering the same nodes | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 16 |
 | One driver, two backends | one source step written once over `Backend` and driven against two backends with different batch types, so the trait's associated types are exercised the way both engines use them | [one_generic_driver_serves_two_backends_with_different_batch_types](../peacockdb-core/src/executor/tests.rs) | 1 |
 | *subcomponent* | | | |
 | Drivers over a mock backend | flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts, queue bounds, batch release, the trace: the schedule and the two holds, both limit lowerings by the calls not made, what each node emitted and consumed (the two records the corpus goldens read), the accountant through the drivers, a backend failure stopping the query with the accounting still reconciling, the execution golden's text with every number chosen by the script, and the mock against its own script | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 90 |
@@ -174,9 +174,11 @@ sha256 matches local). Notes on the rows above:
 ## Golden files
 
 All goldens are committed, under `testdata/goldens/`: `tpch.sf1` (38 files), `tpcds.sf1`
-(115), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top, the recipe payloads with
-a digest each. Most of each sf1 count is the per-query DuckDB cost oracle (22 + 99); the
-engine's own are 16 apiece, one plan and one execution set per mode. The committed DuckDB
+(115), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top: per query, the recipe
+payloads with a digest, then a `-- declared (rust, pre-serialization) --` section with the
+schema each call declares, rendered from the `Call` data before anything is serialized.
+Most of each sf1 count is the per-query DuckDB cost oracle (22 + 99); the engine's own are
+16 apiece, one plan and one execution set per mode. The committed DuckDB
 profile inputs live beside them in `testdata/duckdb-profiles/{tpch,tpcds}` (22 + 99) and
 `testdata/duckdb-dynfilters/{tpch,tpcds}` (22 + 99).
 
@@ -237,7 +239,8 @@ Consequences worth knowing before you regenerate:
   instead of rewriting, and says so — a bulk regen that moved the wire format goes red
   during the regen, before the goldens are pulled home. It pins what the C++ is handed, and
   it is the file a bulk regen must not quietly rewrite: the diff would come home among the
-  others.
+  others. The declared section is held the same way: a declaration that moved is red under
+  the first variable alone, since it is what the device is measured against.
 - **The `.duckdb_cost.txt` path is re-runnable without DuckDB**: `--extract-only` rebuilds
   the goldens from the committed profiles plus the parquet, so only a genuine oracle change
   needs the 1.5.4 pin.

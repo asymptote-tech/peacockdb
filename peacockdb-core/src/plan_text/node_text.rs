@@ -314,7 +314,7 @@ fn layout_text(layout: &PartitionLayout, schema: Option<&Schema>) -> String {
     text
 }
 
-fn schema_text(schema: &Schema) -> String {
+pub(crate) fn schema_text(schema: &Schema) -> String {
     let columns: Vec<String> = schema
         .fields
         .fields()
