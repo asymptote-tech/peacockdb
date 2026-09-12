@@ -16,7 +16,7 @@ reference still resolves there.
 | Section | Open | Tickets |
 |---|--:|---|
 | [Critical correctness](#critical-correctness) | 25 | #212 #211 #210 #209 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
-| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
+| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 15 | #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
@@ -28,7 +28,7 @@ A Right, Full or RightAnti join whose build side hands the lane no batch is refu
 in `without_build`, where the answer owed is every probe row, padded or not.
 
 The scatter route to this is gone: `driver/partitioned.rs` keeps a zero-row scatter output
-where the join above owes rows ([#175](#t175)), and the join then computes the answer. What
+where the join above owes rows ([#175](archive/archived-tickets.md#t175)), and the join then computes the answer. What
 remains is an upstream that emits nothing at all. Two shapes reach it. A limit that skips
 everything: `(SELECT ... FROM nation OFFSET 100) n RIGHT JOIN region r` plans
 `GpuCoalesceAllBatches <- GpuLimit skip=100` under the build side, at every mode. And tpcds
@@ -395,23 +395,9 @@ since all 31 using `count(*)` carry a WHERE, GROUP BY or JOIN and the rule canno
 
 The fix is small on the CPU and unavailable on a device: the node is a source of constant rows,
 and a table of literals made from no input is what the frozen surface has no call for — the same
-wall as [#173](#t173) and [#175](#t175). T17 was to have discharged it and did not: writing the
+wall as [#173](#t173) and [#175](archive/archived-tickets.md#t175). T17 was to have discharged it and did not: writing the
 CPU half alone makes the oracle answer a query the device refuses, and the oracle is what the
 device is checked against. Waits on the make-a-table-of-literals call all three want.
-
-<a id="t175"></a>
-### #175 — an empty build side leaves three join types owing rows they cannot make
-`empty_build_answers_nothing` decides what a lane answers when its build side produced no batch.
-Six types owe nothing and end the lane; Right, Full and RightAnti owe their probe side.
-
-The route the corpus took here was the scatter: `driver/partitioned.rs` dropped every empty
-scatter output, and one lane later the join was told its build side did not exist. Answered on
-`ENS-empty-build` — the index marks the lanes that feed the build child of a join whose type
-owes rows, the scatter keeps their typed zero-row table, and the join computes the pad or the
-probe rows over it (`join.cpp` on the device, DataFusion's join on the cpu). Corpus reach was
-tpch q16 and tpcds q77, never q21: q16's three tp4 cells are enabled, and q77's stay disabled on
-[#212](#t212), because its Right outer's build side emits no batch at all rather than an empty
-one. No registry cell names this ticket now. The three `without_build` pins moved to #212.
 
 <a id="t173"></a>
 ### #173 — a finish whose probe produced no keys cannot make the table it owes
@@ -522,7 +508,7 @@ node carries a projection the resident model sees a narrower row than the device
 
 It under-prices, which is the direction that matters: a budget that should refuse the call instead
 lets it run, and the failure arrives from the allocator rather than as the named refusal the
-accounting exists to produce. Pre-dates the narrowing project ([#175](#t175)'s neighbour work),
+accounting exists to produce. Pre-dates the narrowing project ([#175](archive/archived-tickets.md#t175)'s neighbour work),
 which only makes it legible — before it, the finish emitted every build column and the node
 declared fewer, silently.
 
