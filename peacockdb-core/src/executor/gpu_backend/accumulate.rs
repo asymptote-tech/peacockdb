@@ -225,8 +225,9 @@ impl Collapse {
 }
 
 /// Each batch sorted as it arrives, the runs merged into one at done — and nothing at all
-/// where none arrived, since a merge of no runs is the collapse of nothing by another name
-/// and the device refuses that (#173).
+/// where none arrived, answered here before any call: a merge of no runs would be a collapse
+/// of nothing, which the C++ guards against and this side never asks for. A single zero-row
+/// arrival is a run, and is sorted, merged and emitted like any other.
 pub(crate) struct SortedRuns {
     executor: *mut PeacockExecutor,
     sort: (Seq, FbKind),

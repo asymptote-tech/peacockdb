@@ -136,11 +136,12 @@ impl CpuAccumulator {
 /// What an accumulator answers with at done: one batch of everything it held, and nothing
 /// at all where nothing arrived.
 ///
-/// Both backends emit nothing for an empty lane, which is what makes them one engine here:
-/// the device's collapse of no handles is a refusal ([#173](../../../llm-wiki/tickets.md)),
-/// so a batch invented on this side would be a row the other cannot produce. A grouped
-/// merge over no arrivals owes no groups, so nothing is also its answer. The exception is
-/// a global aggregate, which owes its identity row whatever arrived — see
+/// Both backends emit nothing where no batch arrived, before any call is made, which is
+/// what makes them one engine here; the device's collapse answers the same way and the C++
+/// guard behind it is never reached. A lane whose one arrival was a zero-row batch holds a
+/// batch and emits it, which is how a scatter's kept empty reaches a join that owes rows
+/// (#175). A grouped merge over no arrivals owes no groups, so nothing is also its answer.
+/// The exception is a global aggregate, which owes its identity row whatever arrived — see
 /// [`AggregateBatches::mark_done_and_fetch`].
 fn one_batch(schema: &SchemaRef, held: &[RecordBatch]) -> CallResult<Vec<CpuBatch>> {
     if held.is_empty() {
