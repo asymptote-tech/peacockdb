@@ -328,3 +328,8 @@ pins went; the walk's `Decimal128` row pinned a wrong declared type as the answe
 Analyst (what is missing): 0 blocking, 3 important — the same two, and `substr`/`round` reading a
 null argument's `int_val()` as 0; no sentence of architecture.md falsified. Green forms restored,
 #210 filed and pinned, #211 filed unpinned. The signoff is on the spec. Awaiting CI.
+
+### 2026-09-12 — done
+
+CI green on `c6e0a5b5` (run 34695609910: both cudf legs, the GPU build, the remote GPU tests, the
+cost report). PR #152 awaits the human's merge.
