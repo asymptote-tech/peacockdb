@@ -2547,3 +2547,46 @@ scripts/build-test-shadgpu.sh` is exactly master's thirteen lines. `build-test.m
 with both sides present. 31 commits above task 3, as before. The developer's re-proof runs this
 script end to end, which is what proves the resolution; the task stays `rebase needed(done)`
 until that cycle and CI on the rebased PR #145 are green.
+
+### 2026-09-12 — re-proven after the rebase: the resolved script is right, both tiers green
+
+Re-proof of `df56c6fc` from dev (Ubuntu 24.04, glibc 2.39), the worktree's `cpp/build`,
+`cpp/install` and `target-cudf-rapids-cuda-12.2` warm from task 3's cycle, `target/` from task 5.
+
+**The resolved `scripts/build-test-shadgpu.sh`, read before anything ran.** The composition is
+right. Master's `BUILD_GLIBC` block (lines 29-33) sits between the `shadgpu-env.sh` source line and
+slice 9's comment block over `RUST_TESTS`/`RUST_LIB_STAGED`/`RUST_LIB_RUNG`/`RUNG_ARGS_FN`; the two
+blocks share no variable. `BUILD_GLIBC` is read at the top level once and used in two places, both
+of which task 4 left alone: the `--patch` ssh line (`GLIBC_VERSION=$BUILD_GLIBC … --install --patch`)
+and `PATCHED_LD` inside `remote_gate_script`, where `$BUILD_GLIBC` is unescaped in the unquoted
+heredoc and so expands on the build host, which is the host whose glibc it names. `rung_args`'s env
+prefix is that same `PATCHED_LD`, applied per command, so the lib's `--list` and its run resolve
+the same loader. `bash -n` clean; `git diff 2a3245df HEAD -- scripts/build-test-shadgpu.sh` is
+master's thirteen lines and nothing else. No change made.
+
+One drift in the dispatch, not in the tree: the shad-gpu cycle builds in `cpp/build` (25.02, via
+`scripts/build.sh`), not `cpp/build26`; the worktree has no `build26`, and the table in
+`build-test.md` says so.
+
+| Command | Result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core --test test_ci_coverage` | 8 passed, rc 0 |
+| `--test test_module_layout` | 16 passed, rc 0, 0 warnings |
+| `cargo test --features rust-only -p peacockdb-core -- --test-threads=2` (no `PEACOCK_TESTDATA_DIR`; `testdata/{tpch,tpcds}.sf1` symlinks) | **1035 passed, 0 failed, 2 ignored**, rc 0, `warning` 0 times, 9 result lines: lib 514 + 2 ignored (78.7 s), ci_coverage 8, corpus_goldens 20, cost_model 3, cpu_corpus 448 (188.8 s), golden_format 26, gpu_corpus 0, module_layout 16, doc-tests 0; 366 s wall |
+| `scripts/build-test-shadgpu.sh --build` | rc 0, 53 s, `warning` 0 times; C++ incremental; `test_gpu_corpus` and `peacockdb_core_gpu_lib` staged |
+| `--push-binaries` | rc 0, 11 s; the mirror deleted task 3's `test_gpu_abi`, `test_gpu_executors`, `test_gpu_recipe_walk`, `test_inc2_conformance` from the host's `rust-tests/` and shipped the two |
+| `--patch` | rc 0, 2 s; `glibc 2.39 already installed in /home/info/glibc-2.39; skipping the build`; `Verified: every shipped executable uses /home/info/glibc-2.39/lib/ld-linux-x86-64.so.2` (5 C++ + `libpeacock_gpu.so` rpath + 2 rust) |
+| `nvidia-smi` before the run | 37043 MiB used of 143771, 106041 free — the neighbour |
+| `--run-detached` | `detached gate run going on shad-gpu (pid 1912938)`, rc 0 |
+| `--run-status`, run `20260912T003245-124299` | `FINISHED, exit code 0` at the first 2-minute poll; `GPU test run OK` |
+
+Per binary on the host: `peacock_cpu_tests` 11, `peacock_gpu_tests` 6, `peacock_plan_tests` 27,
+`peacock_tpch_tests` 4, `peacock_tpchv_tests` 4 — 52, `ran 5 C++ test binaries`. Pool lines:
+`1.0`, `1.0`, `69.0`, `30.0 GiB reserved of 103.0 GiB free`; no `could not be built`, no `Maximum
+pool size exceeded`. **`peacockdb_core_gpu_lib` 55 passed, 519 filtered out, 18.10 s** under
+`gpu_tests::` — all 55 `test` lines carry `gpu_tests::` (46 plain, 9 murmur cases whose
+`--nocapture` output splits the line); `test_gpu_corpus` 8 passed, 10.12 s; `ran 2 rust test
+binaries`. `GLIBC_2` appears nowhere in the 345-line gate log. #178 gets no line: no pool failed.
+
+The package suite and the cudf build did not overlap. Scratch under `/tmp/t4-*` only;
+`git status --short` shows this file alone.
