@@ -508,10 +508,12 @@ The types are declared in `plan/mod.rs` and `executor/mod.rs` — the node vocab
 first, the batch and executor traits in the second — and the code is what they are; what follows
 is why they have the shape they do.
 
-**Layout and schema live inside `NodeKind`** rather than as two `Option`s that must be `None`
-together: a sink structurally has neither, everything else always has both, and there is nothing
-left for a caller to get wrong. `PartitionLayout` carries the lane count, the key distribution
-(Spark murmur3, seed 42, or not specified), the sort order and the batch layout. `SortOrder` is
+**Layout and schema live inside `NodeKind`** rather than beside it as two `Option`s: every kind
+declares a schema, the exporter alone has no layout, and there is nothing left for a caller to
+get wrong. The exporter is the boundary node, `GpuUnload`; its schema is its input's, taken at
+construction, so the columns that cross to the host are declared like every other node's.
+`PartitionLayout` carries the lane count, the key distribution (Spark murmur3, seed 42, or not
+specified), the sort order and the batch layout. `SortOrder` is
 two-valued on purpose — a whole-stream order is `BatchSorted` meeting `SingleBatch`, derived by
 `is_stream_sorted()`, so nothing can disagree about it. `Schema` carries column types plus the
 annotations a consumer can check: sort column, group key, aggregator, two-phase state.

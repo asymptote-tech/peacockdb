@@ -349,6 +349,15 @@ fn an_unload_carrying_an_interval_owes_the_same_ordered_prefix() {
     assert_eq!(none.validate_schemas_and_partitions(), Ok(()));
 }
 
+/// The boundary declares like every other node: the columns that cross are its input's,
+/// and it still has no partition layout because nothing downstream is partitioned.
+#[test]
+fn an_unload_declares_the_columns_its_input_hands_it() {
+    let unload = GpuUnload::new(Given::input(batch_sorted_lane(), &["a", "b"]), None);
+    assert_eq!(unload.kind().schema(), Some(&columns(&["a", "b"])));
+    assert_eq!(unload.kind().layout(), None);
+}
+
 fn summing(
     group_by: Vec<Expr>,
     args: Vec<Expr>,
