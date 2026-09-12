@@ -140,8 +140,9 @@ Kernighan's rules, written down after the fact rather than followed from the sta
 
 ## Visibility
 
-Four boundaries, each one thing. **The crate** exposes what the CLI calls: 49 bare `pub` items in
-five files, listed by file and name in `SURFACE` (`test_module_layout/visibility.rs`). **A
+Four boundaries, each one thing. **The crate** exposes what the CLI calls: 46 bare `pub` items in
+five files, listed by file and name — fields included — in `SURFACE`
+(`test_module_layout/visibility.rs`). **A
 component** — `plan`, `planner`, `executor`, `wire`, `plan_text` — is a directory whose `mod.rs`
 declares its whole API `pub(crate)`, reachable by sibling components and by nothing outside the
 crate; `common.rs` is a file rather than a directory, what the components share, declared in one
@@ -156,8 +157,9 @@ feature, with signatures free of engine types.
   and `register_tables_for`, plus what their signatures close over — a `pub` trait makes its
   associated-type bounds and its methods' types as public as itself, an enum variant's fields
   are always public, and the `impl Backend for CpuBackend` makes the eight `Cpu*` executor types
-  a hard error at anything less — so `run<B: Backend>` alone accounts for 36 of the 49. A new
-  row in `SURFACE` needs the receipt: `cargo build -p peacockdb` failing without it.
+  a hard error at anything less — so `run<B: Backend>` closes over 30 of the 46 and `plan` over
+  seven, beside the nine the CLI names. A new row in `SURFACE` needs the receipt: `cargo build
+  -p peacockdb` failing without it, or `private_interfaces` on a row already listed.
 - **`#![warn(unreachable_pub)]` keeps that true afterwards.** With the components' items
   `pub(crate)`, a `pub` written inside a private module is unreachable and the lint says so.
   Inside a private module `pub` and `pub(crate)` are identical to rustc — the module's privacy
@@ -200,9 +202,9 @@ feature, with signatures free of engine types.
   `pub` passes it silently.
 - **Two components and a subcomponent have no production caller.** The CLI runs
   `run::<CpuBackend>` and prints results, so `wire`, `plan_text` and `executor/gpu_backend` are
-  reached only by the device test rung, the corpus harness and the goldens; each says so at its
-  declaration with a `cfg_attr` that allows `dead_code` where those callers are absent, and the
-  attribute leaves with the first production device caller.
+  reached only by the device test rung, the corpus harness and the goldens; each says so with a
+  `cfg_attr` on its `mod.rs` or its declaration that allows `dead_code` where those callers are
+  absent, and the attribute leaves with the first production caller.
 - **Why the backend types were not hoisted into `executor/mod.rs`.** Task 2 of the layout chain
   could not put them behind a `mod` wall while `test_gpu_executors` was a separate crate, and
   listed three answers to how a separate crate reaches them. Task 4 answered it a fourth way by
