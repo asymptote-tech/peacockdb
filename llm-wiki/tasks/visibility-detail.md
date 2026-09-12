@@ -571,3 +571,37 @@ under `peacockdb-core/src/` (`git status --short`: 31 files, this one excluded).
 Twelve commits, 57 files. Every slice's proof is in the entries above; the final one ran the
 whole package, every build shape, the CLI and the device cycle on `d82a87ee`. Reviewer round 1
 dispatched next.
+
+### 2026-09-12 — review round 1: 0 blocking, 1 important, 5 nits
+
+The reviewer modelled every guard and the dump in Python over the tree: the 49 match `SURFACE`
+both ways, the item multiset differs from the baseline by the two deleted delegates alone,
+goldens identical, layout 17 with the one swap, invariants hold, every `allow` the branch adds
+enumerated and justified, the sweep's criterion confirmed on every changed line.
+
+- **important** — the `post_order_of_every_node` three-link `TEST_ONLY_ITEMS` chain: the
+  innermost entry (`driver/index.rs`, called from its own subcomponent's `mod.rs`) is outside the
+  register's one sanctioned shape (a cross-component entry point in a `mod.rs`), and the chain is
+  unnecessary — `PlanIndex` is `pub(crate)` with `pub(crate) nodes` and `IndexedNode.post_order`,
+  and `PlanIndex::build` is production, so `planner/tests/plan_goldens.rs` can read the index
+  directly. Fix: delete all three links and rows. → developer.
+- nit — `gpu_backend/mod.rs:101`: `GpuSource`'s doc said "`pub` because" on a `pub(crate)`
+  struct. Fixed by the coordinator.
+- nit — `coding-style.md`: "36 of the 49" counts the three CLI-named items as forced by `run`
+  (the closure is 33); "each says so at its declaration" is true of `mod gpu_backend;` but
+  `wire` and `plan_text` say so at the top of their `mod.rs`; `plan_text`'s expiry is "the
+  first CLI renderer", not a device caller. Coordinator's, after the numbers settle.
+- nit, **taken** — `RunReport`'s 17 non-`batches` fields `pub` by decision drag `TraceEvent`,
+  `Underestimate` and `EmittedBatch` onto the surface with no receipt from the CLI or the
+  compiler — the only such rows, against the branch's own rule and its `MemoryModel` precedent.
+  Fix: `pub(crate)` on the 17 fields with the `dead_code` attribute on the struct and the reason
+  (written for the goldens and the driver tests; the CLI reads `batches`), the three types
+  `pub(crate)`, `SURFACE` 49 → 46. → developer.
+- nit, **taken** — `pub_mod_declarations` and `is_bare_pub_item` require a line to start with
+  `pub `, so `#[attr] pub mod x;` on one line is invisible to both new assertions, and
+  `pub(crate) mod translator;` opens a wall crate-wide while matching neither reader. Fix: route
+  both readers through `test_code::split_attributes`; add an assertion that a `mod` declaration
+  outside `lib.rs` and the test directories carries no visibility. → developer.
+- nit, **taken** — `SURFACE` pins items, not fields: a `pub` field added to a surface struct
+  passes every guard and the lint. Fix: count `privacy::pub_fields()` per surface file into the
+  same both-way check. → developer.
