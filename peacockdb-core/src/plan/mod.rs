@@ -66,13 +66,13 @@ pub enum PlanError {
 /// The name rides beside the ordinal so a plan can be checked against the schema at that
 /// position rather than trusting it — #135's class, caught at plan time here.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ColumnRef {
-    pub index: u32,
-    pub name: String,
+pub(crate) struct ColumnRef {
+    pub(crate) index: u32,
+    pub(crate) name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinaryOp {
+pub(crate) enum BinaryOp {
     Eq,
     NotEq,
     Lt,
@@ -99,7 +99,7 @@ pub enum BinaryOp {
 /// `Sqrt` is not a DataFusion unary: it is what a stddev's finalize expression needs, and
 /// cuDF's `unary_operator::SQRT` is what the hardwired finalize already calls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnaryOp {
+pub(crate) enum UnaryOp {
     Not,
     IsNull,
     IsNotNull,
@@ -108,7 +108,7 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expr {
+pub(crate) enum Expr {
     Column(ColumnRef),
     Literal(ScalarValue),
     /// `out_type` is DataFusion's declared output type. cuDF derives its own fixed-point
@@ -148,14 +148,14 @@ pub enum Expr {
 }
 
 impl Expr {
-    pub fn column(index: u32, name: &str) -> Self {
+    pub(crate) fn column(index: u32, name: &str) -> Self {
         Self::Column(ColumnRef {
             index,
             name: name.to_string(),
         })
     }
 
-    pub fn binary(left: Expr, op: BinaryOp, right: Expr, out_type: DataType) -> Self {
+    pub(crate) fn binary(left: Expr, op: BinaryOp, right: Expr, out_type: DataType) -> Self {
         Self::Binary {
             left: Box::new(left),
             op,
@@ -175,13 +175,13 @@ impl Expr {
 /// An expression with the name its column takes in the node's output — a project list
 /// entry, or one column of an aggregate's `final` list.
 #[derive(Debug, Clone, PartialEq)]
-pub struct NamedExpr {
-    pub expr: Expr,
-    pub name: String,
+pub(crate) struct NamedExpr {
+    pub(crate) expr: Expr,
+    pub(crate) name: String,
 }
 
 impl NamedExpr {
-    pub fn new(expr: Expr, name: &str) -> Self {
+    pub(crate) fn new(expr: Expr, name: &str) -> Self {
         Self {
             expr,
             name: name.to_string(),
@@ -199,27 +199,27 @@ impl NamedExpr {
 /// node's fields; `func` and `ddof` are carried so a merge can confirm it is merging the
 /// aggregate it thinks it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AggStateColumns {
-    pub output: String,
-    pub func: AggFunc,
-    pub ddof: u32,
-    pub positions: Vec<u32>,
+pub(crate) struct AggStateColumns {
+    pub(crate) output: String,
+    pub(crate) func: AggFunc,
+    pub(crate) ddof: u32,
+    pub(crate) positions: Vec<u32>,
 }
 
 /// Column types in order — the index *is* the ordinal every plan reference uses — plus
 /// what those columns mean.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Schema {
-    pub fields: Arc<ArrowSchema>,
+    pub(crate) fields: Arc<ArrowSchema>,
     /// ordinals of the group-by keys, including a synthesized `__grouping_id`
-    pub group_keys: Vec<u32>,
+    pub(crate) group_keys: Vec<u32>,
     /// one entry per aggregate whose state this output carries
-    pub agg_state: Vec<AggStateColumns>,
+    pub(crate) agg_state: Vec<AggStateColumns>,
 }
 
 impl Schema {
     /// Columns with no group keys and no aggregate state — a scan, a filter, a project.
-    pub fn new(fields: Arc<ArrowSchema>) -> Self {
+    pub(crate) fn new(fields: Arc<ArrowSchema>) -> Self {
         Self {
             fields,
             group_keys: Vec::new(),
@@ -254,14 +254,14 @@ pub enum NodeKind {
 
 impl NodeKind {
     /// `None` for a sink, which structurally has neither.
-    pub fn layout(&self) -> Option<&PartitionLayout> {
+    pub(crate) fn layout(&self) -> Option<&PartitionLayout> {
         match self {
             Self::Source { layout, .. } | Self::Intermediate { layout, .. } => Some(layout),
             Self::Sink => None,
         }
     }
 
-    pub fn schema(&self) -> Option<&Schema> {
+    pub(crate) fn schema(&self) -> Option<&Schema> {
         match self {
             Self::Source { schema, .. } | Self::Intermediate { schema, .. } => Some(schema),
             Self::Sink => None,
@@ -271,16 +271,16 @@ impl NodeKind {
 
 /// One sort key: a column ordinal into the declaring node's schema, and its direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ColumnOrder {
-    pub column: u32,
-    pub ascending: bool,
-    pub nulls_first: bool,
+pub(crate) struct ColumnOrder {
+    pub(crate) column: u32,
+    pub(crate) ascending: bool,
+    pub(crate) nulls_first: bool,
 }
 
 /// How rows were routed into lanes. `ByHash` is Spark murmur3 seed 42 — the only
 /// routing `GpuEmitPartitions` has.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum KeyDistribution {
+pub(crate) enum KeyDistribution {
     NotSpecified,
     ByHash { hash_keys: Vec<u32> },
 }
@@ -302,7 +302,7 @@ impl KeyDistribution {
 /// second way to say it. It becomes a real third state only under #138's ranged merge
 /// emission, which orders a stream across several batches.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SortOrder {
+pub(crate) enum SortOrder {
     NotSpecified,
     BatchSorted { columns: Vec<ColumnOrder> },
 }
@@ -318,28 +318,28 @@ impl SortOrder {
         }
     }
 
-    pub fn is_batch_sorted(&self) -> bool {
+    pub(crate) fn is_batch_sorted(&self) -> bool {
         matches!(self, Self::BatchSorted { .. })
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BatchLayout {
+pub(crate) enum BatchLayout {
     SingleBatch,
     MultipleBatches,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionLayout {
-    pub n: usize,
-    pub key_distribution: KeyDistribution,
-    pub sort_order: SortOrder,
-    pub batch_layout: BatchLayout,
+    pub(crate) n: usize,
+    pub(crate) key_distribution: KeyDistribution,
+    pub(crate) sort_order: SortOrder,
+    pub(crate) batch_layout: BatchLayout,
 }
 
 impl PartitionLayout {
     /// N lanes, nothing else declared — what a scan or a shuffle-free chain emits.
-    pub fn new(n: usize) -> Self {
+    pub(crate) fn new(n: usize) -> Self {
         Self {
             n,
             key_distribution: KeyDistribution::NotSpecified,
@@ -356,7 +356,7 @@ impl PartitionLayout {
 
 /// What sql asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AggFunc {
+pub(crate) enum AggFunc {
     Sum,
     Min,
     Max,
@@ -369,7 +369,7 @@ pub enum AggFunc {
 /// What a node runs. `Avg` is never one — decomposing it is the point — and `MergeM2`
 /// is never an `AggFunc`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlanAgg {
+pub(crate) enum PlanAgg {
     Sum,
     Min,
     Max,
@@ -382,7 +382,7 @@ pub enum PlanAgg {
 /// How a state merges. `Combined` exists only because `merge_m2` is not a per-column
 /// reduction: it needs the count-weighted mean and the cross term.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Merge {
+pub(crate) enum Merge {
     PerColumn(&'static [PlanAgg]),
     Combined(PlanAgg),
 }
@@ -392,17 +392,17 @@ pub enum Merge {
 /// would be "the same aggregator, except count merges by sum", and that exception is the
 /// whole content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Decomposition {
-    pub state: &'static [(&'static str, PlanAgg)],
-    pub merge: Merge,
+pub(crate) struct Decomposition {
+    pub(crate) state: &'static [(&'static str, PlanAgg)],
+    pub(crate) merge: Merge,
 }
 
 /// One aggregate as sql wrote it: the function, and the `ddof` that separates the sample
 /// forms from the population ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AggSpec {
-    pub func: AggFunc,
-    pub ddof: u32,
+pub(crate) struct AggSpec {
+    pub(crate) func: AggFunc,
+    pub(crate) ddof: u32,
 }
 
 impl PlanAgg {
@@ -425,28 +425,28 @@ impl PlanAgg {
 /// produces. `merge_m2` is the reason `outputs` is a list — it returns its three state
 /// columns together.
 #[derive(Debug, Clone, PartialEq)]
-pub struct AggCall {
-    pub func: PlanAgg,
-    pub args: Vec<Expr>,
-    pub outputs: Vec<Field>,
+pub(crate) struct AggCall {
+    pub(crate) func: PlanAgg,
+    pub(crate) args: Vec<Expr>,
+    pub(crate) outputs: Vec<Field>,
 }
 
 // The plan nodes, grouped by family; the downcast registry over them is at the end of this
 // file.
 
 #[derive(Debug)]
-pub struct GpuFilter {
+pub(crate) struct GpuFilter {
     kind: NodeKind,
-    pub predicate: Expr,
+    pub(crate) predicate: Expr,
     /// DataFusion's filter projects as well as filtering, and the wire format carries the
     /// same pair. Dropping it would leave this node declaring its child's columns while
     /// emitting fewer, and every ordinal above it reading the wrong one.
-    pub projection: Option<Vec<u32>>,
+    pub(crate) projection: Option<Vec<u32>>,
     input: Box<dyn GpuNode>,
 }
 
 impl GpuFilter {
-    pub fn new(
+    pub(crate) fn new(
         input: Box<dyn GpuNode>,
         predicate: Expr,
         projection: Option<Vec<u32>>,
@@ -457,16 +457,16 @@ impl GpuFilter {
 }
 
 #[derive(Debug)]
-pub struct GpuProject {
+pub(crate) struct GpuProject {
     kind: NodeKind,
-    pub exprs: Vec<NamedExpr>,
+    pub(crate) exprs: Vec<NamedExpr>,
     input: Box<dyn GpuNode>,
 }
 
 impl GpuProject {
     /// `schema` is DataFusion's own for this projection — the types it coerced to, not a
     /// second derivation of them.
-    pub fn new(input: Box<dyn GpuNode>, exprs: Vec<NamedExpr>, schema: Schema) -> Self {
+    pub(crate) fn new(input: Box<dyn GpuNode>, exprs: Vec<NamedExpr>, schema: Schema) -> Self {
         new_project(input, exprs, schema)
     }
 }
@@ -476,28 +476,32 @@ impl GpuProject {
 /// DataFusion's, replicated onto every stage of the decomposition, which is sound
 /// because the top n of a union is the top n of each part's top n.
 #[derive(Debug)]
-pub struct GpuSort {
+pub(crate) struct GpuSort {
     kind: NodeKind,
-    pub keys: Vec<ColumnOrder>,
-    pub fetch: Option<usize>,
+    pub(crate) keys: Vec<ColumnOrder>,
+    pub(crate) fetch: Option<usize>,
     input: Box<dyn GpuNode>,
 }
 
 impl GpuSort {
-    pub fn new(input: Box<dyn GpuNode>, keys: Vec<ColumnOrder>, fetch: Option<usize>) -> Self {
+    pub(crate) fn new(
+        input: Box<dyn GpuNode>,
+        keys: Vec<ColumnOrder>,
+        fetch: Option<usize>,
+    ) -> Self {
         new_sort(input, keys, fetch)
     }
 }
 
 /// Concatenates a lane's batches into one at done.
 #[derive(Debug)]
-pub struct GpuCoalesceAllBatches {
+pub(crate) struct GpuCoalesceAllBatches {
     kind: NodeKind,
     input: Box<dyn GpuNode>,
 }
 
 impl GpuCoalesceAllBatches {
-    pub fn new(input: Box<dyn GpuNode>) -> Self {
+    pub(crate) fn new(input: Box<dyn GpuNode>) -> Self {
         new_coalesce_all_batches(input)
     }
 }
@@ -505,15 +509,19 @@ impl GpuCoalesceAllBatches {
 /// Accumulates a lane's sorted batches and merges them into one at done, so its output
 /// is stream-sorted rather than batch-sorted. Streaming emission is #138.
 #[derive(Debug)]
-pub struct GpuAccumulateBatchesAndSort {
+pub(crate) struct GpuAccumulateBatchesAndSort {
     kind: NodeKind,
-    pub keys: Vec<ColumnOrder>,
-    pub fetch: Option<usize>,
+    pub(crate) keys: Vec<ColumnOrder>,
+    pub(crate) fetch: Option<usize>,
     input: Box<dyn GpuNode>,
 }
 
 impl GpuAccumulateBatchesAndSort {
-    pub fn new(input: Box<dyn GpuNode>, keys: Vec<ColumnOrder>, fetch: Option<usize>) -> Self {
+    pub(crate) fn new(
+        input: Box<dyn GpuNode>,
+        keys: Vec<ColumnOrder>,
+        fetch: Option<usize>,
+    ) -> Self {
         new_accumulate_batches_and_sort(input, keys, fetch)
     }
 }
@@ -522,14 +530,14 @@ impl GpuAccumulateBatchesAndSort {
 /// It streams and holds nothing — a batch outside the interval is released uncalled, one
 /// inside is forwarded untouched, and only the two straddling its ends are sliced.
 #[derive(Debug)]
-pub struct GpuLimit {
+pub(crate) struct GpuLimit {
     kind: NodeKind,
-    pub interval: RowInterval,
+    pub(crate) interval: RowInterval,
     input: Box<dyn GpuNode>,
 }
 
 impl GpuLimit {
-    pub fn new(input: Box<dyn GpuNode>, interval: RowInterval) -> Self {
+    pub(crate) fn new(input: Box<dyn GpuNode>, interval: RowInterval) -> Self {
         new_limit(input, interval)
     }
 }
@@ -552,12 +560,12 @@ pub(crate) enum Phase {
 /// the triple folds into the `stddev`/`var` it decomposes, at the position of the first of
 /// its three, because neither engine has an `m2` of its own.
 pub(crate) struct StateFunc<'a> {
-    pub name: &'static str,
-    pub call: &'a AggCall,
-    pub alias: String,
+    pub(crate) name: &'static str,
+    pub(crate) call: &'a AggCall,
+    pub(crate) alias: String,
     /// Whether this one is a folded triple, which is what makes its state three columns
     /// wide rather than one.
-    pub welford: bool,
+    pub(crate) welford: bool,
 }
 
 /// The aggregators and the optional `final` list every aggregate node carries. A node
@@ -565,21 +573,21 @@ pub(crate) struct StateFunc<'a> {
 /// that is the only thing distinguishing the positions — the single-node shortcut is
 /// init aggregators and finalize expressions on the same node.
 #[derive(Debug)]
-pub struct AggregateBody {
-    pub group_by: Vec<Expr>,
+pub(crate) struct AggregateBody {
+    pub(crate) group_by: Vec<Expr>,
     /// One mask per grouping set, in key order — true where that key is NULL in that set.
     /// Empty unless this node expands grouping sets, which only an init node does: it
     /// emits `__grouping_id` as an ordinary column and every node above groups on the
     /// keys plus that column.
-    pub grouping_sets: Vec<Vec<bool>>,
+    pub(crate) grouping_sets: Vec<Vec<bool>>,
     /// The NULL substituted for each key a set excludes, in key order.
-    pub null_exprs: Vec<Expr>,
-    pub aggs: Vec<AggCall>,
+    pub(crate) null_exprs: Vec<Expr>,
+    pub(crate) aggs: Vec<AggCall>,
     /// One expression per aggregate output column, and not per output column: a group key is
     /// not finalized and is not here, so this list is shorter than the node's output
     /// schema by the number of keys. The project that carries it emits the keys first, and
     /// `recipe::aggregate_writer::finalize_project` is the one place that rule lives.
-    pub finalize: Option<Vec<NamedExpr>>,
+    pub(crate) finalize: Option<Vec<NamedExpr>>,
 }
 
 impl AggregateBody {
@@ -602,9 +610,9 @@ impl AggregateBody {
 }
 
 #[derive(Debug)]
-pub struct GpuAggregate {
+pub(crate) struct GpuAggregate {
     kind: NodeKind,
-    pub body: AggregateBody,
+    pub(crate) body: AggregateBody,
     intermediate: Schema,
     input: Box<dyn GpuNode>,
 }
@@ -613,7 +621,7 @@ impl GpuAggregate {
     /// `intermediate` is `[group keys…, state columns…]` — what the aggregators produce,
     /// and what a finalize expression reads. It is also the output schema where there is
     /// no finalize.
-    pub fn new(
+    pub(crate) fn new(
         input: Box<dyn GpuNode>,
         body: AggregateBody,
         intermediate: Schema,
@@ -627,21 +635,21 @@ impl GpuAggregate {
     /// `[group keys…, state columns…]` — what the aggregators produce, and where the
     /// state annotations live. The output schema is the finalized one where this node
     /// finalizes, so a consumer of the state reads this instead.
-    pub fn intermediate(&self) -> &Schema {
+    pub(crate) fn intermediate(&self) -> &Schema {
         &self.intermediate
     }
 }
 
 #[derive(Debug)]
-pub struct GpuAggregateBatches {
+pub(crate) struct GpuAggregateBatches {
     kind: NodeKind,
-    pub body: AggregateBody,
+    pub(crate) body: AggregateBody,
     intermediate: Schema,
     input: Box<dyn GpuNode>,
 }
 
 impl GpuAggregateBatches {
-    pub fn new(
+    pub(crate) fn new(
         input: Box<dyn GpuNode>,
         body: AggregateBody,
         intermediate: Schema,
@@ -654,7 +662,7 @@ impl GpuAggregateBatches {
 impl GpuAggregateBatches {
     /// The state this node merges into, before any finalize of its own — see
     /// [`GpuAggregate::intermediate`].
-    pub fn intermediate(&self) -> &Schema {
+    pub(crate) fn intermediate(&self) -> &Schema {
         &self.intermediate
     }
 }
@@ -662,13 +670,13 @@ impl GpuAggregateBatches {
 /// DataFusion's join type, restricted to what a nested-loop join can run: the C++ rejects
 /// anything else outright.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NestedLoopJoinType {
+pub(crate) enum NestedLoopJoinType {
     Inner,
     Left,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JoinSide {
+pub(crate) enum JoinSide {
     Build,
     Probe,
 }
@@ -677,24 +685,24 @@ pub enum JoinSide {
 /// against a schema of its own — neither side's, and not the joined one — so its
 /// ordinals mean nothing without this map.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct JoinFilterColumn {
-    pub side: JoinSide,
-    pub index: u32,
+pub(crate) struct JoinFilterColumn {
+    pub(crate) side: JoinSide,
+    pub(crate) index: u32,
 }
 
 #[derive(Debug)]
-pub struct GpuCrossJoin {
+pub(crate) struct GpuCrossJoin {
     kind: NodeKind,
     /// Ordinals into the crossed table, `[build columns…, probe columns…]`. `None` is
     /// every column of it — a `CrossJoinExec` has no projection, and a predicate-free
     /// nested-loop join that lands here may.
-    pub projection: Option<Vec<u32>>,
+    pub(crate) projection: Option<Vec<u32>>,
     build: Box<dyn GpuNode>,
     probe: Box<dyn GpuNode>,
 }
 
 impl GpuCrossJoin {
-    pub fn new(
+    pub(crate) fn new(
         build: Box<dyn GpuNode>,
         probe: Box<dyn GpuNode>,
         projection: Option<Vec<u32>>,
@@ -715,23 +723,23 @@ impl GpuCrossJoin {
 /// The predicate is the join: `conditional_inner_join` evaluates it per pair, or a cross
 /// join and a mask where it is not AST-able.
 #[derive(Debug)]
-pub struct GpuNestedLoopJoin {
+pub(crate) struct GpuNestedLoopJoin {
     kind: NodeKind,
-    pub join_type: NestedLoopJoinType,
-    pub filter: Expr,
+    pub(crate) join_type: NestedLoopJoinType,
+    pub(crate) filter: Expr,
     /// One entry per column the filter's own schema has, in its order.
-    pub filter_columns: Vec<JoinFilterColumn>,
+    pub(crate) filter_columns: Vec<JoinFilterColumn>,
     /// Ordinals into the crossed table, as DataFusion computed them. Dropping it leaves
     /// the node declaring the projected columns and emitting all of them, so every
     /// ordinal above it reads one column of some other one (#135).
-    pub projection: Option<Vec<u32>>,
+    pub(crate) projection: Option<Vec<u32>>,
     build: Box<dyn GpuNode>,
     probe: Box<dyn GpuNode>,
 }
 
 impl GpuNestedLoopJoin {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         build: Box<dyn GpuNode>,
         probe: Box<dyn GpuNode>,
         join_type: NestedLoopJoinType,
@@ -759,9 +767,9 @@ impl GpuNestedLoopJoin {
 /// batch by batch, and whether the lane owes a pass at done for what a streamed probe
 /// cannot know — which build rows matched at least once (#136).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct JoinCapability {
-    pub probe_streams: bool,
-    pub needs_finish: bool,
+pub(crate) struct JoinCapability {
+    pub(crate) probe_streams: bool,
+    pub(crate) needs_finish: bool,
 }
 
 impl JoinCapability {
@@ -781,24 +789,24 @@ impl JoinCapability {
 /// capability matrix says otherwise, and lane p of each side holds exactly the rows that
 /// can match lane p of the other.
 #[derive(Debug)]
-pub struct GpuHashJoin {
+pub(crate) struct GpuHashJoin {
     kind: NodeKind,
-    pub join_type: JoinType,
+    pub(crate) join_type: JoinType,
     /// (build ordinal, probe ordinal) per key, in the order the join hashes them.
-    pub keys: Vec<(u32, u32)>,
-    pub filter: Option<Expr>,
-    pub filter_columns: Vec<JoinFilterColumn>,
+    pub(crate) keys: Vec<(u32, u32)>,
+    pub(crate) filter: Option<Expr>,
+    pub(crate) filter_columns: Vec<JoinFilterColumn>,
     /// From DataFusion, per join: `false` — the SQL default — means a NULL key matches
     /// nothing, `true` is what a set operation lowered to a join needs.
-    pub null_equals_null: bool,
-    pub projection: Option<Vec<u32>>,
+    pub(crate) null_equals_null: bool,
+    pub(crate) projection: Option<Vec<u32>>,
     build: Box<dyn GpuNode>,
     probe: Box<dyn GpuNode>,
 }
 
 impl GpuHashJoin {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         build: Box<dyn GpuNode>,
         probe: Box<dyn GpuNode>,
         join_type: JoinType,
@@ -822,7 +830,7 @@ impl GpuHashJoin {
         )
     }
 
-    pub fn capability(&self) -> Result<JoinCapability, PlanError> {
+    pub(crate) fn capability(&self) -> Result<JoinCapability, PlanError> {
         capability(self.join_type, self.filter.is_some())
     }
 }
@@ -830,13 +838,13 @@ impl GpuHashJoin {
 /// N lanes into 1, forwarding each batch as it is visited, round-robin. It accumulates
 /// nothing and makes no backend call — the driver owns the rotation.
 #[derive(Debug)]
-pub struct GpuMergePartitions {
+pub(crate) struct GpuMergePartitions {
     kind: NodeKind,
     input: Box<dyn GpuNode>,
 }
 
 impl GpuMergePartitions {
-    pub fn new(input: Box<dyn GpuNode>) -> Self {
+    pub(crate) fn new(input: Box<dyn GpuNode>) -> Self {
         new_merge_partitions(input)
     }
 }
@@ -845,14 +853,14 @@ impl GpuMergePartitions {
 /// the same one both engines use, so a row lands in the same lane on either.
 /// Streaming: one scatter call per input batch, N outputs, some of them empty.
 #[derive(Debug)]
-pub struct GpuEmitPartitions {
+pub(crate) struct GpuEmitPartitions {
     kind: NodeKind,
-    pub hash_keys: Vec<u32>,
+    pub(crate) hash_keys: Vec<u32>,
     input: Box<dyn GpuNode>,
 }
 
 impl GpuEmitPartitions {
-    pub fn new(input: Box<dyn GpuNode>, hash_keys: Vec<u32>, n: usize) -> Self {
+    pub(crate) fn new(input: Box<dyn GpuNode>, hash_keys: Vec<u32>, n: usize) -> Self {
         new_emit_partitions(input, hash_keys, n)
     }
 }
@@ -860,15 +868,19 @@ impl GpuEmitPartitions {
 /// N lanes of sorted batches into one sorted batch: every k·m batch goes into one merge
 /// at done, and the `fetch` is applied to the result.
 #[derive(Debug)]
-pub struct GpuMergeSortedPartitions {
+pub(crate) struct GpuMergeSortedPartitions {
     kind: NodeKind,
-    pub keys: Vec<ColumnOrder>,
-    pub fetch: Option<usize>,
+    pub(crate) keys: Vec<ColumnOrder>,
+    pub(crate) fetch: Option<usize>,
     input: Box<dyn GpuNode>,
 }
 
 impl GpuMergeSortedPartitions {
-    pub fn new(input: Box<dyn GpuNode>, keys: Vec<ColumnOrder>, fetch: Option<usize>) -> Self {
+    pub(crate) fn new(
+        input: Box<dyn GpuNode>,
+        keys: Vec<ColumnOrder>,
+        fetch: Option<usize>,
+    ) -> Self {
         new_merge_sorted_partitions(input, keys, fetch)
     }
 }
@@ -877,28 +889,28 @@ impl GpuMergeSortedPartitions {
 /// verbatim — partitions outermost, batches within, row groups innermost — because the
 /// loader executes it, the golden prints it and validation counts lanes off it.
 #[derive(Debug)]
-pub struct GpuLoadParquet {
+pub(crate) struct GpuLoadParquet {
     kind: NodeKind,
-    pub table: String,
+    pub(crate) table: String,
     /// The one file the row-group indices below are numbered in — taken from the metadata
     /// read that produced them, never assembled beside it.
-    pub file: String,
-    pub projection: Vec<u32>,
-    pub partition_groups: Vec<Vec<Vec<u32>>>,
+    pub(crate) file: String,
+    pub(crate) projection: Vec<u32>,
+    pub(crate) partition_groups: Vec<Vec<Vec<u32>>>,
     /// The row groups the mapping addresses, with their rows and their parquet bytes over
     /// the projected columns — the only real numbers a plan-time model has, and what lets
     /// the estimator price the batches this mapping actually produces rather than the ones
     /// a budget would have afforded.
-    pub survivors: Vec<RowGroupMeta>,
+    pub(crate) survivors: Vec<RowGroupMeta>,
     /// Per projected column: whether the surviving row groups hold a NULL in it. The leaf
     /// of the null analysis, and a statistic rather than a declaration.
-    pub can_be_null: Vec<bool>,
+    pub(crate) can_be_null: Vec<bool>,
     /// A limit pushed into the scan by DataFusion, not one this mode derived.
-    pub limit: Option<usize>,
+    pub(crate) limit: Option<usize>,
 }
 
 impl GpuLoadParquet {
-    pub fn new(
+    pub(crate) fn new(
         table: String,
         projection: Vec<u32>,
         partition_groups: Vec<Vec<Vec<u32>>>,
@@ -911,11 +923,11 @@ impl GpuLoadParquet {
 }
 
 impl GpuLoadParquet {
-    pub fn rows(&self) -> u64 {
+    pub(crate) fn rows(&self) -> u64 {
         self.survivors.iter().map(|group| group.rows).sum()
     }
 
-    pub fn bytes(&self) -> u64 {
+    pub(crate) fn bytes(&self) -> u64 {
         self.survivors.iter().map(|group| group.bytes).sum()
     }
 
@@ -931,13 +943,13 @@ impl GpuLoadParquet {
 /// of them, so no row changes lane and no lane waits on another. The hash a branch
 /// carried says nothing about the union's numbering, so it goes.
 #[derive(Debug)]
-pub struct GpuUnion {
+pub(crate) struct GpuUnion {
     kind: NodeKind,
     branches: Vec<Box<dyn GpuNode>>,
 }
 
 impl GpuUnion {
-    pub fn new(branches: Vec<Box<dyn GpuNode>>, schema: Schema) -> Self {
+    pub(crate) fn new(branches: Vec<Box<dyn GpuNode>>, schema: Schema) -> Self {
         new_union(branches, schema)
     }
 }
@@ -946,13 +958,13 @@ impl GpuUnion {
 /// hash: the distribution is what makes lane p of one branch belong beside lane p of the
 /// next, and it survives because no row changes lane.
 #[derive(Debug)]
-pub struct GpuInterleave {
+pub(crate) struct GpuInterleave {
     kind: NodeKind,
     branches: Vec<Box<dyn GpuNode>>,
 }
 
 impl GpuInterleave {
-    pub fn new(branches: Vec<Box<dyn GpuNode>>, schema: Schema) -> Self {
+    pub(crate) fn new(branches: Vec<Box<dyn GpuNode>>, schema: Schema) -> Self {
         new_interleave(branches, schema)
     }
 }
@@ -961,14 +973,14 @@ impl GpuInterleave {
 /// crossing: it is a statement about which rows are worth moving over PCIe, and trimming
 /// after the transfer ships an unbounded prefix to drop it.
 #[derive(Debug)]
-pub struct GpuUnload {
+pub(crate) struct GpuUnload {
     kind: NodeKind,
-    pub interval: Option<RowInterval>,
+    pub(crate) interval: Option<RowInterval>,
     input: Box<dyn GpuNode>,
 }
 
 impl GpuUnload {
-    pub fn new(input: Box<dyn GpuNode>, interval: Option<RowInterval>) -> Self {
+    pub(crate) fn new(input: Box<dyn GpuNode>, interval: Option<RowInterval>) -> Self {
         Self {
             kind: NodeKind::Sink,
             interval,
@@ -981,17 +993,17 @@ impl GpuUnload {
 /// what the scan passes to `set_row_groups` — survivors are post-pruning, so it is not
 /// the position in this slice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RowGroupMeta {
-    pub index: u32,
-    pub rows: u64,
-    pub bytes: u64,
+pub(crate) struct RowGroupMeta {
+    pub(crate) index: u32,
+    pub(crate) rows: u64,
+    pub(crate) bytes: u64,
 }
 
 /// How a lane's row groups are cut into batches. Three named forms rather than one number
 /// with special values: which one a mode uses is a statement about the mode, and a target
 /// of one byte reaching the same place would hide it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Batching {
+pub(crate) enum Batching {
     /// One batch per lane — the whole chunk arrives at once.
     Off,
     /// One batch per row group: the finest the mapping can express, since a row group is
@@ -1004,16 +1016,16 @@ pub enum Batching {
 /// What one read of a scan's metadata tells the planner: the row groups it will read, and
 /// whether each projected column has a NULL in any of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScanMetadata {
+pub(crate) struct ScanMetadata {
     /// The one file the groups below are numbered in. DataFusion's file groups are byte
     /// ranges rather than files, so several of them carry one path; a row-group index means
     /// nothing without the file it indexes, and the node reads its own from here.
-    pub file: String,
-    pub groups: Vec<RowGroupMeta>,
+    pub(crate) file: String,
+    pub(crate) groups: Vec<RowGroupMeta>,
     /// Per projected column, in projection order. Declared nullability says nothing — every
     /// column in both benchmarks is declared nullable, primary keys included — so this is
     /// the statistic instead, and an absent count reads as "yes" rather than "no".
-    pub can_be_null: Vec<bool>,
+    pub(crate) can_be_null: Vec<bool>,
 }
 
 /// A limit's `skip`/`fetch`, carried by whichever node owns the interval: a mid-plan
@@ -1022,14 +1034,14 @@ pub struct ScanMetadata {
 /// only the non-adjacent form ever arrives that way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RowInterval {
-    pub skip: u64,
-    pub fetch: Option<u64>,
+    pub(crate) skip: u64,
+    pub(crate) fetch: Option<u64>,
 }
 
 impl RowInterval {
     /// The row after the last one wanted, counting from the start of this node's stream.
     /// `None` is a pure offset: no prefix determines the answer, so it never satisfies.
-    pub fn stop(&self) -> Option<u64> {
+    pub(crate) fn stop(&self) -> Option<u64> {
         self.fetch.map(|fetch| self.skip + fetch)
     }
 
@@ -1080,7 +1092,7 @@ pub trait GpuNode: std::fmt::Debug {
 /// Every node kind, as a borrow of the concrete node. Adding a node is one line here and
 /// an exhaustive match everywhere it is consumed — the renderer, a backend's executor
 /// match, the serializer — rather than a downcast chain per consumer.
-pub enum NodeRef<'a> {
+pub(crate) enum NodeRef<'a> {
     LoadParquet(&'a GpuLoadParquet),
     Filter(&'a GpuFilter),
     Project(&'a GpuProject),
@@ -1093,15 +1105,20 @@ pub enum NodeRef<'a> {
     Join(&'a GpuHashJoin),
     CrossJoin(&'a GpuCrossJoin),
     NestedLoopJoin(&'a GpuNestedLoopJoin),
+    // These three nodes are nothing but their children, so no consumer reads the borrow;
+    // it stays so the enum is one line per node kind, matched exhaustively.
+    #[allow(dead_code)]
     MergePartitions(&'a GpuMergePartitions),
     EmitPartitions(&'a GpuEmitPartitions),
     MergeSortedPartitions(&'a GpuMergeSortedPartitions),
+    #[allow(dead_code)]
     Union(&'a GpuUnion),
+    #[allow(dead_code)]
     Interleave(&'a GpuInterleave),
     Unload(&'a GpuUnload),
 }
 
-pub fn as_node_ref(node: &dyn GpuNode) -> NodeRef<'_> {
+pub(crate) fn as_node_ref(node: &dyn GpuNode) -> NodeRef<'_> {
     node_ref_of(node.as_any())
 }
 
@@ -1161,7 +1178,7 @@ fn try_node_ref_of(any: &dyn std::any::Any) -> Option<NodeRef<'_>> {
 /// Which executor trait drives a node. Read before an executor exists, since runnability
 /// asks for it, so it is derived from the node rather than from what a backend returned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExecutorCategory {
+pub(crate) enum ExecutorCategory {
     Source,
     Exec,
     BatchAccumulator,
@@ -1185,7 +1202,7 @@ impl ExecutorCategory {
 
 /// Off the registry rather than beside it: the node set and the category set are one
 /// mapping, and a second source of truth for it is a second thing to keep true.
-pub fn category_of(node: &dyn GpuNode) -> ExecutorCategory {
+pub(crate) fn category_of(node: &dyn GpuNode) -> ExecutorCategory {
     match as_node_ref(node) {
         NodeRef::LoadParquet(_) => ExecutorCategory::Source,
         NodeRef::Filter(_) | NodeRef::Project(_) | NodeRef::Sort(_) | NodeRef::Aggregate(_) => {
@@ -1247,7 +1264,7 @@ pub(crate) fn state_funcs<'a>(
 /// `__grouping_id` an init expanding grouping sets emits beside the keys and every node
 /// above it groups on. The group list alone is one short of the state exactly there, and
 /// a state position read one column early names the aggregator before the right one.
-pub fn key_width(body: &AggregateBody) -> usize {
+pub(crate) fn key_width(body: &AggregateBody) -> usize {
     aggregate::key_width(body)
 }
 
@@ -1277,7 +1294,10 @@ pub(crate) fn emits_both_sides(join_type: JoinType) -> bool {
 /// this mode: an outer join's residual filter is applied after the outer gather and drops
 /// the padded rows (#153), and no swapped `mixed_*` variant exists for the right-handed
 /// semi family.
-pub fn capability(join_type: JoinType, has_filter: bool) -> Result<JoinCapability, PlanError> {
+pub(crate) fn capability(
+    join_type: JoinType,
+    has_filter: bool,
+) -> Result<JoinCapability, PlanError> {
     join::capability(join_type, has_filter)
 }
 
@@ -1287,7 +1307,7 @@ pub fn capability(join_type: JoinType, has_filter: bool) -> Result<JoinCapabilit
 /// empty answer and the lane can end without a call. False for the three types that
 /// preserve unmatched PROBE rows: what they owe is the probe side, padded or not, and
 /// making it takes a call over a build table that does not exist.
-pub fn empty_build_answers_nothing(join_type: JoinType) -> bool {
+pub(crate) fn empty_build_answers_nothing(join_type: JoinType) -> bool {
     join::empty_build_answers_nothing(join_type)
 }
 
@@ -1297,7 +1317,7 @@ pub fn empty_build_answers_nothing(join_type: JoinType) -> bool {
 /// first call.
 ///
 /// `None` is the build-side semi family, whose probe call is only the key project.
-pub fn per_call_join_type(join_type: JoinType) -> Option<JoinType> {
+pub(crate) fn per_call_join_type(join_type: JoinType) -> Option<JoinType> {
     join::per_call_join_type(join_type)
 }
 
@@ -1315,11 +1335,11 @@ pub(crate) fn emitted_columns(join_type: JoinType, build: usize, probe: usize) -
     join::emitted_columns(join_type, build, probe)
 }
 
-pub fn resolve(name: &str) -> Result<AggSpec, PlanError> {
+pub(crate) fn resolve(name: &str) -> Result<AggSpec, PlanError> {
     aggregates::resolve(name)
 }
 
-pub fn decomposition(func: AggFunc) -> Decomposition {
+pub(crate) fn decomposition(func: AggFunc) -> Decomposition {
     aggregates::decomposition(func)
 }
 
@@ -1327,7 +1347,7 @@ pub fn decomposition(func: AggFunc) -> Decomposition {
 /// for the five simple aggregates, a divide for `avg`, and a `CASE` over a `sqrt` for
 /// the Welford pair — all of them ordinary IR, which is what replaces the hardwired
 /// `avg_div` and `std_finalize` arms.
-pub fn finalize(spec: AggSpec, state: &[Field], state_at: u32, out_type: &DataType) -> Expr {
+pub(crate) fn finalize(spec: AggSpec, state: &[Field], state_at: u32, out_type: &DataType) -> Expr {
     aggregates::finalize(spec, state, state_at, out_type)
 }
 
@@ -1336,7 +1356,7 @@ pub fn finalize(spec: AggSpec, state: &[Field], state_at: u32, out_type: &DataTy
 /// Public because the planner is not the only thing that builds a tree: a test that
 /// rewrites a planned one into a shape no planner emits needs the same check the planner
 /// ran, and the driver does not make it — [`check_canonical_form`] is all it asks for.
-pub fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
+pub(crate) fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
     validate::validate(root)
 }
 
@@ -1350,6 +1370,9 @@ pub(crate) fn check_canonical_form(root: &dyn GpuNode) -> Result<(), PlanError> 
 /// are the ones DataFusion planned, and nothing else states it: every node below is
 /// checked against its own children, so a whole tree can be internally consistent and
 /// answer a different query.
-pub(crate) fn check_output_schema(root: &dyn GpuNode, planned: &ArrowSchema) -> Result<(), PlanError> {
+pub(crate) fn check_output_schema(
+    root: &dyn GpuNode,
+    planned: &ArrowSchema,
+) -> Result<(), PlanError> {
     validate::check_output_schema(root, planned)
 }

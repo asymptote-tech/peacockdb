@@ -131,3 +131,39 @@ done and nothing mechanical; and `wire/generated.rs` allows `unreachable_pub` be
 already allows for flatc's output. The 26 items in the two backend facades are `impl Backend`
 associated types, reachable through the trait, so the lint never names them; the dump does, and
 the executor slice demotes them.
+
+### 2026-09-12 — plan task 3 done: `plan/mod.rs` 92 → 6, the six being `plan`'s closure
+
+On `d8ad93b8`. Every bare `pub` in `plan/mod.rs` — items, fields, inherent methods, 170 lines —
+became `pub(crate)`; then the compiler was asked what `planner::plan`'s signature forces back. It
+named six, one hop at a time, each restored to `pub`: `GpuNode` and `PlanError` (`plan`'s return);
+`NodeKind` and `RowInterval` (methods of the trait); `Schema` and `PartitionLayout` (fields of
+`NodeKind`'s variants — an enum's variant fields are always public, so `private_interfaces` walks
+them, where a struct's `pub(crate)` fields stop it). That closure is final: nothing later can narrow
+a trait's methods below the trait. **Numbers: 263 → 177 bare `pub`, 200 → 114 outside
+`test_support`; `plan/mod.rs` 92 → 6, 108 `pub(crate)`. Lint 2 → 2** on every shape, still
+`Translator::new`/`translate`: the lint cannot fire inside a `pub mod`, so no component slice moves
+it, only the translator's. Nothing outside `plan/` needed a change; the CLI builds
+(`cargo build --features rust-only -p peacockdb`, into `target/`).
+
+**Warnings the slice leaves, all named.** `private_interfaces`: 5 on every shape, none on the
+surface table — `CpuExec::{sort,project,filter,aggregate}` name `GpuSort`/`GpuProject`/`GpuFilter`/
+`GpuAggregate`, and `NodeExecutors::<B>::category` names `ExecutorCategory`. They clear when the
+executor slice demotes those methods (`CpuExec` is in `cpu_backend/mod.rs`, a file no slice lists);
+restoring the five types to `pub` instead would be a five-line edit, not taken because they are not
+in the surface's closure. `private_bounds`: 0. `dead_code`, hidden until now because a `pub` item in a
+`pub mod` is never checked: three `NodeRef` payloads (`MergePartitions`, `Union`, `Interleave`) that
+every consumer matches with `_`, since those nodes are nothing but their children — `#[allow(dead_code)]`
+with the reason at the site, keeping the enum one line per kind. Two left as findings, since a
+demotion is never a deletion: **`plan::key_width` in `mod.rs` has no caller** (`aggregate.rs` calls
+its own copy), and **`PartitionLayout::new` is called only from `wire/tests.rs` and
+`plan/tests/joins.rs`** — test code in a production impl, which `coding-style.md` says belongs in a
+child `tests` module. Both warn on every shape; the coordinator decides.
+
+**Proof.** `cargo test --features rust-only -p peacockdb-core --test test_module_layout`: 17 passed.
+`--lib`: 514 passed, 2 ignored. Goldens identical to the baseline; `case-inventory.sh rust-only`
+1038 cases, `compare-inventory.sh` identical. rustfmt clean on `plan/mod.rs` (formatted with
+`skip_children=true`, so the component's files did not move; five hunks, four from `pub(crate)`
+pushing a signature past the width and one that predated the slice).
+
+Files: `peacockdb-core/src/plan/mod.rs` only.
