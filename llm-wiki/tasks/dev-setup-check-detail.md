@@ -90,6 +90,16 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   skills-plugin host-shape fact; `architecture.md` falsified sentences: none, and the `build-test.md`
   glibc paragraph confirmed sentence by sentence bar the first-patch prefix build, which was not
   exercised. All applied above. Signoff appended to the spec; board moved to `completeness approved`.
+- 2026-09-12 00:34Z — CI green, board `done` again. Judged on run 34659758921 (`2e98d11b`, the human's
+  force-push of the rebase; run in full because the gate saw the new head as `diverged`, not a clean
+  append — a rebase push always buys a full run): Changed paths, build 25.02 for GPU, Cost report,
+  cudf 25.02, cudf 26.02, S3 datasets, GPU Tests (remote) all `success`, concluded 00:15:29Z; Deploy
+  to Pages skipped as on every PR. Its GPU job patched to `/home/info/glibc-2.35` from CI's
+  container with `GLIBC_VERSION` unset, so with dev's 2.39 cycle both halves of the `build-test.md`
+  glibc paragraph are evidenced from this branch. The pushes after it — `70ad00d8`, `205c4130`,
+  `2314a41f` and this one — are doc-only and the gate skips them wholesale, so `gh pr checks 146` at
+  head reads all-skipped, as before. PR #146 open against master, 11 commits before this one, never
+  to be merged: the human closes it and deletes the branch.
 
 ## Workflows
 
