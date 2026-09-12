@@ -57,7 +57,7 @@ what stops the last eight items needing `pub`. Small and semantic on purpose: it
 reviewer reads line by line, so it does not share a branch with task 6's three hundred one-word
 demotions.
 
-### 6. [`visibility.md`](visibility.md) — state: reviewing
+### 6. [`visibility.md`](visibility.md) — state: reviewing — PR #148
 
 174 bare `pub` items become eight, `unreachable_pub` goes on to keep them there, both exemption
 registers are deleted and `coding-style.md`'s Visibility section stops carrying an exemption at
