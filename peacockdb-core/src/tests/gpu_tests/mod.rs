@@ -9,4 +9,5 @@ mod device;
 mod emit_cases;
 mod exec_cases;
 mod harness_cases;
+mod join_cases;
 mod script;

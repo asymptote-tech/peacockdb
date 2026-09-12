@@ -357,3 +357,98 @@ N slots per call in lane order, empty lanes exported as zero-row batches.
   `--no-run` build 0 warnings; `rustfmt --check` clean on `emit_cases.rs` and `coverage.rs`.
 
 `PENDING` now holds `GpuLoadParquet`, `GpuHashJoin`, `GpuCrossJoin`, `GpuNestedLoopJoin`.
+
+### 2026-09-12 — plan task 5 done: `GpuHashJoin`
+
+`src/tests/gpu_tests/join_cases.rs`, 85 cases (846 lines — plan task 6's cross and nested-loop
+cases may need a file of their own under the 1000-line rule); `mod join_cases;` after `coverage`;
+`GpuHashJoin` out of `PENDING`, `GpuCrossJoin` and `GpuNestedLoopJoin` still in it. No production
+file touched; `Given::name()` never reached.
+
+**The admitted matrix**, read off `capability()` (`plan/join.rs`): a residual filter exists for
+Inner (streaming) and for LeftSemi, LeftAnti and LeftMark (single-batch probe); Left, Right and
+Full with one are `Err` (#153) and RightSemi/RightAnti with one are `Err` (#159), and the recipe
+writer `expect`s the capability — so those five have no row and no case. Nine types × one probe;
+seven × two probes (Left and Full refuse their first batch already); `null_equals_null=true` on
+Inner, LeftSemi, RightSemi, LeftAnti, LeftMark (the `false` side is every other case); the four
+filtered forms; one projection; six empty shapes × nine types; and a seventh shape for the five
+finishing types — the build set and the finish called with no probe call at all, which is the only
+route to `finish_without_keys`: a zero-row probe still accumulates a zero-row key handle, so
+"only zero-row probes then the finish" never reaches #173's site. That shape was added.
+
+**One fixture correction, read as an engine finding first and then not.** The first green-form
+run (`20260912T073155-290024`, 43/42) had every Left, Right and Full case refused on the cpu:
+`the node declares Schema { … b_id: Int64, nullable: false … } and DataFusion answered with … b_id
+nullable: true …: Invalid argument error: Column 'b_id' is declared as non-nullable but contains
+null values`. `declared_as` builds the answer under the declared schema, and the plan's `output_of`
+copied `id`'s `nullable: false` onto a side the outer join pads. The planner declares DataFusion's
+join schema, which marks the padded side nullable, so the fixture now does the same (`padded`).
+Not a ticket: the harness declared what no planner would.
+
+**Green (45).** Inner: one probe, `null_equals_null`, residual, projection, zero-row build, zero-row
+probe, both empty, no build. Left: no build. Right: one probe, zero-row build (**the device pads
+over a zero-row build table**), zero-row probe, both empty. Full: none. LeftSemi: one probe, two
+probes, `null_equals_null`, residual, all six empties, and `finishing_after_only_zero_row_probes`.
+RightSemi: one probe, `null_equals_null`, zero-row build, zero-row probe, both empty, no build.
+LeftAnti: `null_equals_null=true`, all six empties, and `finishing_with_no_probe_batch_answers_every_build_row`
+(the device hands its build side up, as `finish_without_keys` says). RightAnti: zero-row build
+(keeps every probe row), zero-row probe, both empty. LeftMark: `null_equals_null=true`, all six
+empties except `empty_between`.
+
+**`bug_` (40), by ticket.**
+- **#152, build-side copy (12)** — Inner, Right, RightSemi, RightAnti × two probes, a zero-row probe
+  between two, only zero-row probes. Verbatim: `gpu refused: this join's recipe copies its build
+  side per probe batch and the ABI has no copy: probe batch 2 has no build side left, since the
+  call for batch 1 erased it (#152)`. A zero-row second batch is refused the same way.
+- **#152, probe copy (12)** — Left and Full × one probe, zero-row build, zero-row probe, both empty,
+  a zero-row probe between two, only zero-row probes. Verbatim: `gpu refused: this join's recipe
+  copies its probe batch — the key project keeps the keys and the join below it reads the same
+  batch — and the ABI has no copy, so neither call can run without erasing the other's input
+  (#152)`. So Left and Full have no device path at all, as the ticket says.
+- **#173 (4)** — Left, Full, LeftSemi, LeftMark finishing with no probe batch. Verbatim (Left): `gpu
+  refused: this lane's probe was empty, so its finish has no keys to join against — and what it
+  owes is every build row padded with a typed NULL per probe column, which is a table of literals,
+  which the frozen surface cannot make without one (#173)`; LeftSemi `… owes is no rows, which is a
+  table of no rows …`; LeftMark `… every build row with a false mark, which is a table of literals
+  …`. Each pin quotes both the common part and its type's owed phrase.
+- **#175 (3)** — Right, Full, RightAnti with `build: None`. Both sides refuse with one message:
+  `this lane's build side is empty, and what this join owes is its probe side — which takes a call
+  over a build table that does not exist (#175)`; pinned on both.
+- **#59 (9)** — LeftAnti × one probe, two probes, residual, a zero-row probe between two; LeftMark ×
+  the same four; RightAnti × one probe. Verbatim: `cpu and gpu differ: slot 1: cpu has 2 rows, gpu
+  0 rows` (LeftAnti; the two build rows with a null `key`), `slot 0: cpu has 4 rows, gpu 0 rows`
+  (RightAnti; the four null-key probe rows), `slot 0: cpu has 11 rows, gpu 10 rows` (the filtered
+  anti), `rows differ` for the marks — build rows 10 and 21 `false` on the cpu, `true` on the
+  device. Root cause: the cpu's `HashJoinExec::try_new` takes `node.null_equals_null` for every
+  type; `join.cpp` hardcodes `EQUAL` for anti and mark. Pinned as "the device's answer under
+  `false` is the cpu's answer under `true`" (`device_answers_as_if_null_equals_null`), which is
+  exact and covers the finish pass, the `mixed_*` filtered forms and the streamed probe alike. #59
+  said this was latent; it is not.
+
+**Tickets.** No new number; counter stays 207. #59 gains the shown divergence and the pin; #175 the
+pin and the zero-row-build observation; #173 the join finish as its only reached site. #152 is at
+its line cap and unchanged — its two halves reproduce exactly as its text predicts. #153 and #159
+are the two unreachable rows (plan-time refusals) and stay as they are.
+
+**The `Join` arm** ran on a device for the first time and needed nothing: `set_build`,
+`probe_and_fetch` per batch, `finish_and_fetch`, and the `without_build` route with `build: None`,
+each producing the slots `drive` documents.
+
+**Runs on shad-gpu** (neighbour at 37 GiB; every pool built):
+- `20260912T073155-290024` green-form: 43 passed 42 failed (the fixture's nullability plus the
+  engine findings).
+- `20260912T073359-290956` green-form with the fixture corrected: **45 passed 40 failed**, the
+  forty above.
+- `20260912T073629-292171` after the rewrite: `peacockdb_core_gpu_lib` **85 passed 0 failed**.
+- `20260912T073652-292210` guard: `every_kind_has_a_case_or_is_named_as_pending_or_excluded` passed.
+- `20260912T073707-292246` rung whole, `PCK_RUN_CPP=0`, empty filter: `peacockdb_core_gpu_lib`
+  **256 passed** (171 + 85), `test_gpu_corpus` 8 passed.
+- Local: `cargo test --features rust-only -p peacockdb-core --lib` 530 passed, 2 ignored; the gpu
+  `--no-run` build 0 warnings; `rustfmt --check` clean on `join_cases.rs` and `coverage.rs`.
+
+**For plan task 6.** `join_cases.rs` is at 846 lines with the hash join alone; cross and
+nested-loop over the same `build_batch`/`probe_batch` fixture fit in ~150 lines, which is under
+the cap but tight — a `nested_cases.rs` beside it is the safer split, with the fixture's two
+one-liners duplicated rather than a shared module added. `gpu_refuses_with` and
+`both_refuse_with` here are the fourth and fifth `bug_` helpers that belong to `Outcome`
+(plan task 8's tidy).

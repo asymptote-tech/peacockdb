@@ -161,9 +161,16 @@ vs CPU). Semi half done (q33; semi honors per-join `null_equals_null`).
 <a id="t59"></a>
 ### #59 — Nullable-key semantics for semi/anti/mark joins
 Anti/mark keep `null_equality::EQUAL` deliberately; a blind UNEQUAL flip is wrong for
-`NOT IN`. Latent — no enabled query has a nullable anti/mark key. Wants a dedicated
-analysis plus expr/join goldens covering nullable IN / NOT IN / EXISTS before defaults
-change. Anti remainder overlaps #80.
+`NOT IN`. No enabled query has a nullable anti/mark key. Wants a dedicated analysis plus
+expr/join goldens covering nullable IN / NOT IN / EXISTS before defaults change. Anti
+remainder overlaps #80.
+
+The two engines disagree today, not latently: the cpu's `HashJoinExec` takes the node's
+`null_equals_null` for every type, so under the SQL default a LeftAnti keeps its null-key build
+rows, a RightAnti its null-key probe rows, and a LeftMark marks them `false`, while the device
+drops or marks them `true`. The device's answer under `false` is exactly the cpu's under `true`,
+which is how the nine `bug_…null_key…` cases in `gpu_tests/join_cases.rs` pin it — a finish pass,
+a residual filter and a streamed probe all included.
 
 <a id="t46"></a>
 ### #46 — q61 GPU: 'promotions' sum subtree returns the wrong value
@@ -331,7 +338,9 @@ The corpus reaches it twice: q21 at tp4-single, and tpcds q77, whose Right outer
 gets no build side and owes its probe rows padded with NULLs. q77 is therefore out of the
 end-to-end list, with q2 carrying the union-that-cannot-interleave claim in its place — writing
 the CPU pad alone would make the oracle answer a query the device refuses.
-Unfreezing buys a pass-through of the probe side and the refusal goes.
+Unfreezing buys a pass-through of the probe side and the refusal goes. Pinned, both sides
+refusing, by `bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti
+siblings (`gpu_tests/join_cases.rs`); a zero-row build *batch* is not this — the device pads over it.
 
 <a id="t173"></a>
 ### #173 — the frozen surface cannot build a table out of nothing
@@ -344,7 +353,10 @@ places so the two stay one engine. The exception is a global aggregate, which ow
 row whatever arrived.
 
 Unfreezing buys a make-empty-of-schema call and the refusals go. Until then the refusal is the
-contract, and the shapes that reach it are the ones a lane can be empty in.
+contract, and the shapes that reach it are the ones a lane can be empty in. The accumulators never
+reach it (both emit nothing before any call); the join's finish over no probe call at all does, for
+Left, Full, LeftSemi and LeftMark — `bug_…_finishing_with_no_probe_batch_is_refused_on_the_device`
+(`gpu_tests/join_cases.rs`); LeftAnti hands its build side up and agrees with the cpu.
 
 <a id="t23"></a>
 ### #23 — Upgrade DataFusion 45→46+ to unblock q27/q70/q72/q86
