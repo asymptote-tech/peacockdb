@@ -65,30 +65,30 @@ pub enum BatchSizing {
 /// post-order, and the batch size each source was given.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemoryModel {
-    pub budget: u64,
+    pub(crate) budget: u64,
     /// Σ over the accumulators — held whatever the batch size, so it is spent first.
-    pub accumulator_bytes: u64,
+    pub(crate) accumulator_bytes: u64,
     /// The part of it that cannot be an overestimate — a build side is its input's rows,
     /// where an aggregate's state rests on a cardinality estimate. Only this part can
     /// refuse a plan.
-    pub certain_accumulator_bytes: u64,
+    pub(crate) certain_accumulator_bytes: u64,
     /// What each source may spend, before its own amplification and size narrow it.
-    pub share_per_source: u64,
+    pub(crate) share_per_source: u64,
     /// `estimated_max_resident_size` per node, indexed by post-order sequence.
-    pub resident: Vec<u64>,
+    pub(crate) resident: Vec<u64>,
     /// One per source, in post-order sequence — which is the order translation reaches
     /// them, so the second pass consumes them in this order.
-    pub sources: Vec<SourceEstimate>,
+    pub(crate) sources: Vec<SourceEstimate>,
 }
 
 /// What the walk from one source found, and what it was given for it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SourceEstimate {
-    pub seq: usize,
+pub(crate) struct SourceEstimate {
+    pub(crate) seq: usize,
     /// The largest a batch from this source gets on its way to the accumulator that ends
     /// the walk, counting the lanes live at that point.
-    pub amplification: f64,
-    pub target_batch_bytes: u64,
+    pub(crate) amplification: f64,
+    pub(crate) target_batch_bytes: u64,
 }
 
 /// A batch size below this is not worth deriving: the mapping is quantized to whole row
@@ -111,11 +111,6 @@ pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, P
 /// executor hardcodes.
 pub(crate) fn refuse_null_unsafe_joins(root: &dyn GpuNode) -> Result<(), PlanError> {
     nulls::refuse_null_unsafe_joins(root)
-}
-
-/// Per output column of this node, whether it can be NULL.
-pub fn can_be_null(node: &dyn GpuNode) -> Vec<bool> {
-    nulls::can_be_null(node)
 }
 
 /// A DataFusion physical plan as a node tree, without the pipeline around it: no

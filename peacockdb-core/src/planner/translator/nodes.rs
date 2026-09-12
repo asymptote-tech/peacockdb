@@ -83,7 +83,7 @@ pub(crate) fn node(
         return self::sort(t, sort);
     }
     if let Some(coalesce) = any.downcast_ref::<CoalesceBatchesExec>() {
-        // The target batch size goes; batching is this mode's own concern (#139).
+        // The target batch size goes; batching is the engine's own concern (#139).
         // A fetch does not: DataFusion's limit pushdown parks a limit here, and
         // dropping the node with it would answer a count over three rows with the
         // count of all of them.
@@ -141,7 +141,7 @@ pub(crate) fn node(
     if let Some(interleave) = any.downcast_ref::<InterleaveExec>() {
         let branches = branches(t, interleave.inputs().iter(), &interleave.schema())?;
         // DataFusion interleaves where its branches share a hash, so lane p of one
-        // belongs beside lane p of the next. This mode decides its own lane counts —
+        // belongs beside lane p of the next. The engine decides its own lane counts —
         // a cross join or a small source can put one branch on a single lane — and
         // branches that no longer agree have no shared distribution to interleave on.
         let first = branches[0].kind().layout().expect("a branch is not a sink");
@@ -176,7 +176,7 @@ pub(crate) fn node(
 
 /// A hash repartition is the shuffle: merge the lanes into one, then scatter that one
 /// into N by the same murmur3 both engines use. Round-robin carries no key, so it says
-/// nothing this mode acts on and leaves no node.
+/// nothing the engine acts on and leaves no node.
 pub(crate) fn repartition(
     t: &Translator,
     repartition: &RepartitionExec,
@@ -187,7 +187,7 @@ pub(crate) fn repartition(
             let keys = hash_key_ordinals(exprs, &repartition.input().schema())?;
             Ok(shuffled(input, keys, *n))
         }
-        // Round-robin carries no key, so it says nothing this mode acts on; an unknown
+        // Round-robin carries no key, so it says nothing the engine acts on; an unknown
         // partitioning is a claim we cannot read, and guessing at it would be a lane
         // assignment nobody chose.
         Partitioning::RoundRobinBatch(_) => Ok(input),
@@ -266,7 +266,7 @@ pub(crate) fn hash_join(
     let mut probe = node(t, join.right())?;
     if !co_partitioned(build.as_ref(), probe.as_ref(), &keys) {
         // DataFusion broadcasts a small build side rather than hashing both, so the
-        // sides are not co-located and this mode has no broadcast to do it with
+        // sides are not co-located and the engine has no broadcast to do it with
         // (#140). One lane is what is left.
         build = merged(build);
         probe = merged(probe);

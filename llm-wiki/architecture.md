@@ -95,7 +95,7 @@ one batch per lane. The count is known at plan time, so saying so is available a
 [#170](tickets.md#t170).
 
 **The small-table rule is per region, and a region ends at the nearest shuffle.** A source
-reading fewer than `plan::SMALL_TABLE_BYTES` drops to one lane even at tp4, measured in bytes
+reading fewer than `planner::SMALL_TABLE_BYTES` drops to one lane even at tp4, measured in bytes
 actually read — the parquet column-chunk total over the projected columns of the surviving row
 groups. Rows would misjudge it both ways: a narrow table of many rows reads less than a wide
 table of few, so the threshold is a property of the scan and the same table can be above it in

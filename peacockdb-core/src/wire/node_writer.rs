@@ -166,7 +166,7 @@ pub(crate) fn project_payload<'a>(
 }
 
 /// Per batch, so partitions are preserved: the collapse to one stream is a node of its
-/// own in this mode, never a side effect of a sort.
+/// own in the engine, never a side effect of a sort.
 pub(crate) fn sort<'a>(
     b: &mut FlatBufferBuilder<'a>,
     node: &GpuSort,

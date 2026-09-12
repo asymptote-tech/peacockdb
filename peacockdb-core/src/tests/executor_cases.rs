@@ -1,7 +1,7 @@
 //! The contract the two backends answer to, as data.
 //!
 //! Each backend is proved against its own oracle over its own fixture, which says nothing
-//! about the two agreeing — and a mode whose whole claim is that one plan runs on either
+//! about the two agreeing — and an engine whose whole claim is that one plan runs on either
 //! engine needs that said somewhere. The instrument is `corpus_cases.inc`'s: one table read
 //! by both engines' tests, so a case added here reaches every engine claiming the shape.
 //! `INPUT` is the fixture for both, and the device writes its parquet from it — a table one

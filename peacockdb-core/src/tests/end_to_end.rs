@@ -32,7 +32,7 @@ mod accounting;
 mod dimensions;
 mod limits;
 
-/// Where a Welford merge is the only divergence: this mode decomposes the aggregate into
+/// Where a Welford merge is the only divergence: the engine decomposes the aggregate into
 /// an init, two merges and a finalize, and DataFusion computes it in one pass, so the last
 /// digits differ by reassociation. The legacy GPU tier uses the same figure for the same
 /// reason (`golden_approx_std`).
@@ -173,7 +173,7 @@ struct Oracle<'a> {
 
 /// The columns an answer declares. Names are not an input to the row encoding, and the
 /// rendered comparison it replaced carried them in its header — so they are asserted here
-/// rather than dropped. This mode's own defect class is what makes it worth an assert: a
+/// rather than dropped. The engine's own defect class is what makes it worth an assert: a
 /// finalize project emitting the right values under the wrong names ([#163]), which the
 /// oracle cannot get wrong the same way.
 ///
@@ -324,7 +324,7 @@ macro_rules! injected_queries {
 
 // ── the join capability matrix ──────────────────────────────────────────────
 // Chosen by cover over the matrix rather than by taste, off the mode goldens: every join
-// type this mode claims, crossed with a residual filter, null_equals_null and multi-key.
+// type the engine claims, crossed with a residual filter, null_equals_null and multi-key.
 // Eleven of the seventeen carry a cell no other query here does.
 //
 // nested-loop Inner, and the smallest plan in the corpus that carries a join at all.

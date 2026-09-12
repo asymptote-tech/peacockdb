@@ -567,7 +567,7 @@ fn the_filtered_column_answers_in_one_call_and_never_at_done() {
 }
 
 /// The five cells the matrix refuses — the three outer forms and the two right-handed semi
-/// ones — each for a defect or a missing cuDF variant rather than for anything this mode
+/// ones — each for a defect or a missing cuDF variant rather than for anything the engine
 /// decided, so each names the ticket a reader would follow.
 #[test]
 fn the_filtered_column_refuses_five_cells_by_ticket() {

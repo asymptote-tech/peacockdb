@@ -1,4 +1,4 @@
-//! A recipe plan on a live GPU, driven by hand: the first time anything this mode plans
+//! A recipe plan on a live GPU, driven by hand: the first time anything the engine plans
 //! meets a device.
 //!
 //! One helper walks the tree making exactly the calls each recipe names, threading every
@@ -45,7 +45,7 @@ const ONE_LANE: PlanKnobs = PlanKnobs {
     small_table_bytes: SMALL_TABLE_BYTES,
 };
 
-/// The aggregates, at one batch and two lanes: a merge is the operator this mode adds and
+/// The aggregates, at one batch and two lanes: a merge is the operator the engine adds and
 /// one lane never performs one.
 const TWO_LANES: PlanKnobs = PlanKnobs {
     target_partitions: 2,
@@ -539,7 +539,7 @@ async fn context(target_partitions: usize) -> datafusion::execution::context::Se
     .expect("register the tpch sf1 tables")
 }
 
-/// Plan the query in this mode, hand the recipe plan to a device, and make the calls.
+/// Plan the query in the engine, hand the recipe plan to a device, and make the calls.
 async fn walk(sql: &str, knobs: PlanKnobs) -> Walked {
     let ctx = context(knobs.target_partitions).await;
     let plan = ctx
