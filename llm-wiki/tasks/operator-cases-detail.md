@@ -130,3 +130,83 @@ not reproduce: #57, #187 and #198 all reproduce.
 `rung-args.sh` intersects the developer's filter with the rung's `--list gpu_tests::`, and only
 `crate::tests::gpu_tests::*` contains that substring — 26 at the fork plus the family — while the
 rung's 81 also holds `executor::…::gpu_tests::*`. The rung whole is an empty `PCK_TEST_FILTER`.
+
+### 2026-09-12 — plan task 2 done: `GpuAggregate`, `GpuAggregateBatches`
+
+`src/tests/gpu_tests/aggregate_cases.rs`, 20 cases; `mod aggregate_cases;` after `coverage`;
+`GpuAggregate` and `GpuAggregateBatches` out of `PENDING`. No production file touched. Every
+declared type was read off DataFusion 45 rather than the plan: a scratch planning run (kept out of
+the tree) over `dec DECIMAL(18, 2)` gave `sum` (28,2); `avg` **state `[count UInt64, sum (18,2)]`
+and output (22,6)** — the plan's "(28,2)" for the avg sum is wrong, the planner's `decompose`
+copies DataFusion's `avg[sum]`, which is the input's type; `stddev` `[count UInt64, mean, m2]`;
+`__grouping_id` UInt8 up to eight keys (`Aggregate::grouping_id_type`).
+
+**Green (13).** Init: `a_grouped_sum_min_max_count_agree`, `a_global_sum_min_max_count_agree`,
+`the_single_node_shortcut_finalizes_an_average` (Int64 counts, as the plan wrote it),
+`a_grouped_aggregate_over_zero_rows_is_zero_rows_on_both`,
+`a_global_aggregate_over_zero_rows_keeps_its_identity_row` — the exec-level init over a zero-row
+batch keeps its row on both, so #199 is not here. Merge: `a_merge_emits_state_at_done`,
+`a_merge_with_a_finalize_emits_the_projected_columns`,
+`arrivals_crossing_the_compaction_threshold_fold_the_same`, `a_count_merges_by_sum`,
+`a_merge_over_no_arrival_answers_nothing_on_both`,
+`a_merge_over_one_zero_row_arrival_is_zero_rows_on_both`,
+`a_zero_row_arrival_among_others_changes_nothing`, `a_finalize_over_no_arrival_answers_nothing_on_both`.
+
+**The compaction case** is five `sum_state(1_500_000, seed)` arrivals of `[key Int32, sum Int64]`,
+about 18 MiB each by the shared formula: the device folds at the fourth (64 MiB crossed) and
+again at done, the cpu at every arrival (1 MiB). 7.5M state rows, ~92 MB uploaded; the whole
+family runs in 1.6–1.8 s on shad-gpu, so its cost is not separable and not a concern.
+
+**`bug_` (7).**
+- `bug_a_welford_init_exports_its_count_as_int64` — #163. Verbatim, schema line: cpu
+  `stddev(f64)$count: UInt64`, gpu `stddev(f64): Int64`, and the device names all three state
+  columns by the alias (`aggregate.cpp` names a struct's children by it). The names are not
+  ticketed: the sink relabels by the declared schema, so nothing a user sees carries them.
+  **Second finding, against the harness:** once the type is cast, the mean and m2 differ in the
+  last digits — `128185.06597222222` vs `128185.06597222219`, `0.462499999999995` vs `0.4625` —
+  Welford's update is order-dependent and a mean is not dyadic, so "floats dyadic so sums compare
+  exactly" does not reach a Welford state. The corpus compares stddev under `golden_approx_std`
+  at relative 1e-11; the harness has no such mode, and the case compares keys and counts exactly
+  and the moments to that same 1e-11, locally. Not a ticket: no engine is wrong.
+- `bug_a_welford_merge_exports_its_count_as_int64` — #163, the same at the merge's done slot
+  (slot 3); the merged moments differ in the last digits the same way.
+- `bug_a_decimal_sum_is_exported_at_precision_38` — #187. Verbatim: `schema differs / cpu:
+  sum(dec) Decimal128(28, 2) / gpu: sum(dec) Decimal128(38, 2)`; values agree once widened.
+- `bug_grouping_sets_carry_the_devices_own_id_and_type` — #65. Verbatim: `schema differs …
+  __grouping_id UInt8 … / gpu … __grouping_id Int32`. Pinned as the cpu's rows with the id
+  Int32 and DataFusion's `[false, true]` = 1 mapped to the device's 2 (`aggregate.cpp` sets bit
+  `i` for masked key `i`; DataFusion's `group_id_array` puts the first key highest); the rows and
+  sums agree, so the value divergence predicted from the C++ is confirmed by the pin passing.
+- `bug_grouping_sets_over_zero_rows_are_zero_rows_under_the_devices_id_type` — #65, zero rows.
+- `bug_a_decimal_average_is_refused_on_the_cpu` — #163. Verbatim: `cpu refused: the node declares
+  Schema { … avg(dec) Decimal128(22, 6) … } and DataFusion answered with Schema { … avg(dec)
+  Decimal128(26, 10) … }: Invalid argument error: column types must match schema types, expected
+  Decimal128(22, 6) but found Decimal128(26, 10) at column index 0`. The planner's finalize —
+  `Cast(sum → (22,6)) / Cast(count → (22,0))` — is typed by arrow at (26,10), and `declared_as`
+  refuses. The device's answer is not read past `cpu_refuses()`; a device-side pin waits on the
+  cpu accepting the shape.
+- `bug_a_global_merge_over_no_arrival_answers_nothing_on_the_device` — #199, the ticket's exact
+  site. Verbatim: `gpu produced no batch, cpu 1 rows`. And the cpu's one row is `count(i32) =
+  NULL`, not 0: a count merges by sum, and sum over nothing is NULL — so SQL's 0 is on neither
+  engine. Pinned both ways: cpu `[NULL]`, device one empty slot.
+
+**Tickets.** No new number. #199 gains the shown site and the NULL-not-0 observation; #163 gains
+the finalize's (26,10)-vs-(22,6) refusal as a second facet; #65 gains the bit order and the Int32
+type, and names the pins. Counter stays 204. Every ticket the rows name reproduces (#65, #163,
+#187, #199); none left unreproducible.
+
+**Runs on shad-gpu** (neighbour at 37 GiB, every pool built):
+- `20260912T065031-277431` green-form, `PCK_RUN_CPP=0 PCK_TEST_FILTER=tests::gpu_tests::aggregate_cases`:
+  13 passed 7 failed (the seven above, in green form).
+- `20260912T065322-278379` after the first rewrite: 17 passed 3 failed — the Welford pair on the
+  moments' last digits, and #199's on the cpu's NULL where the pin said 0; both read above.
+- `20260912T065636-279494` and, after dropping an unused argument, `20260912T065721-280361`:
+  `peacockdb_core_gpu_lib` **20 passed 0 failed**.
+- `20260912T065726-280393` guard: `every_kind_has_a_case_or_is_named_as_pending_or_excluded` passed.
+- `20260912T065738-280429` rung whole, `PCK_RUN_CPP=0`, no filter: `peacockdb_core_gpu_lib`
+  **133 passed** (113 + 20), `test_gpu_corpus` 8 passed.
+- Local: rust-only lib 530 passed, 2 ignored; gpu `--no-run` at 0 warnings; `rustfmt --check`
+  clean on `aggregate_cases.rs` and `coverage.rs`.
+
+**For plan task 8's tidy.** `gpu_answered` and `batch_of` are now in two case files; a home in
+`script.rs` (an `Outcome` method) would be the harness's, which this task may not grow.

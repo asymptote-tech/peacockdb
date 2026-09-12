@@ -3,6 +3,7 @@
 
 #[macro_use]
 mod coverage;
+mod aggregate_cases;
 mod device;
 mod exec_cases;
 mod harness_cases;

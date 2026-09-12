@@ -42,8 +42,6 @@ const PENDING: &[&str] = &[
     "GpuLoadParquet",
     "GpuCoalesceAllBatches",
     "GpuAccumulateBatchesAndSort",
-    "GpuAggregate",
-    "GpuAggregateBatches",
     "GpuHashJoin",
     "GpuCrossJoin",
     "GpuNestedLoopJoin",

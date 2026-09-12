@@ -63,8 +63,11 @@ or a panic is unverified.
 
 So a global aggregate whose lane received no rows disagrees between the engines: the CPU emits one
 row and the device emits none. A wrong answer rather than a refusal, and nothing refuses it.
-Reachability is unverified — found by reading, not by a run — so the first thing it needs is a
-query that reaches an empty lane under a global aggregate.
+Shown on a device by `bug_a_global_merge_over_no_arrival_answers_nothing_on_the_device`
+(`gpu_tests/aggregate_cases.rs`), which also shows the CPU's row is sum's identity, not count's:
+a count merges by sum, so a merged count over nothing is NULL there where SQL says 0. The init over
+a zero-row batch keeps its row on both, so the merge is the one site. No corpus query is known to
+reach it.
 
 <a id="t198"></a>
 ### #198 — a typed NULL inside an AST expression is a typed zero on the device
@@ -308,9 +311,12 @@ not planned; q72 `Date32 + Int64` coercion. Whole rows dead until the upgrade. S
 <a id="t65"></a>
 ### #65 — __grouping_id encoding doesn't match DataFusion's GROUPING()
 Grouping-set expansion (`cpp/src/operators/aggregate.cpp`) emits a gid that is
-distinct-per-set but not DataFusion's positional bitmask. Safe while no enabled query
+distinct-per-set but not DataFusion's positional bitmask: the device sets bit `i` for masked key
+`i`, DataFusion sets the first key highest, so a two-key rollup is 0, 2, 3 there and 0, 1, 3 here;
+and the device's column is Int32 where DataFusion declares UInt8. Safe while no enabled query
 projects or sorts `GROUPING()`; must be fixed before one does (q70/q86 after #23).
-9 rollup rows carry this ticket.
+9 rollup rows carry this ticket; pinned by the `bug_grouping_sets_…` cases in
+`gpu_tests/aggregate_cases.rs`.
 
 <a id="t62"></a>
 ### #62 — count(DISTINCT) ignores the DISTINCT flag in GpuAggregate
@@ -913,6 +919,10 @@ the producing expression's.
 
 Both engines price a node from the declared schema, so a wrong type moves no golden byte. T16
 confirmed it on a device: cuDF's Welford count exports Int64 where every plan declares UInt64.
+
+The finalize has the same gap from the other side: `avg`'s divide over a decimal state is typed by
+arrow at (26,10) where the output declares (22,6), and `declared_as` refuses it
+(`bug_a_decimal_average_is_refused_on_the_cpu`, `gpu_tests/aggregate_cases.rs`).
 
 T17 closed the widening arm only (`widened_decimal`, `executor/cpu_backend/`). The signed arm remains:
 `avg` declares its count state UInt64 and DataFusion's accumulator produces Int64 — no widening, and
