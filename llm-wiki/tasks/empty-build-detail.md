@@ -219,3 +219,16 @@ Rung: `--lib` 551 passed, 0 failed, 2 ignored; `test_cpu_corpus` 451; `test_modu
 
 Round 2 on `20296f75`: 0 blocking, 0 important, 0 nits; no new device run owed, the round-1
 fixes touching no production statement and no device test. Completeness pass dispatched.
+
+### 2026-09-12 — completeness pass, the coordinator's half
+
+Reviewer (what is wrong): 0 blocking, 1 important — #158 still named #175 as the third ticket
+behind the frozen-surface wall where architecture.md names #212; corrected. Analyst (what is
+missing): 0 blocking, 2 important — the golden writer's lost update had no durable home and
+`merge_section`'s doc claimed the opposite (now #213, a bullet under build-test.md's
+regeneration consequences, and the doc corrected by the developer); and task 13's frozen spec
+(`walk-drives-every-plan.md:82`) and its board line still cite #175 as a live engine limit for
+`driven()`'s Left/Full refusals, where the empty-build pad is answered and only the
+no-batch-at-all route refuses (#212) — the spec is frozen, task 13's first step stops for the
+human, and this line is the record they read first. architecture.md: "an empty lane emits no
+batch at all" gained its exception; "needs no mechanism" now says one decision and no mechanism.
