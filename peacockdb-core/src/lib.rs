@@ -7,6 +7,10 @@
 //! by. `test_support` is the harness's and exists only behind its feature. The reasons
 //! behind each shape are in `llm-wiki/architecture.md`.
 
+// Bare `pub` claims the CLI calls the item; the lint holds the claim once the components'
+// items are `pub(crate)` (`coding-style.md`, Visibility).
+#![warn(unreachable_pub)]
+
 #[cfg(all(feature = "gpu", feature = "rust-only"))]
 compile_error!("gpu needs the FFI linked; rust-only removes it. Pass one or neither.");
 

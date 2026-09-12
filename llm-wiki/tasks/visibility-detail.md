@@ -59,3 +59,65 @@ resequenced, so "task 3" in the plan is `test-layout.md` (chain task 4) and its 
 ### 2026-09-12 — plan tasks 1-2 dispatched: baselines, the lint, the three guards
 
 Board set to `building`.
+
+### 2026-09-12 — plan tasks 1-2 done: baselines taken, the lint is on at 2, the three guards see their shapes
+
+**Baselines** in `visibility-baselines/`, taken on `a6ad4db9` before the lint went on. Bare `pub`
+excluding `mod`: 263, and 200 outside `test_support` — `plan/mod.rs` 92, `executor/mod.rs` 48,
+`wire/mod.rs` 20, `cpu_backend/mod.rs` 14, `gpu_backend/mod.rs` 12, `planner/mod.rs` 7,
+`plan_text/mod.rs` 3, `translator/mod.rs` 2, `lib.rs` 2. `pub mod` 7. Goldens 170 files, byte-identical
+to task 5's. Inventories rust-only 1038 / cudf 1049 / gpu 574 cases, non-empty on all three;
+`compare-inventory.sh` against task 5's says gpu identical and the other two off by exactly
+`no_test_support_signature_names_a_component_type` (16 → 17 layout cases), which task 5 added after
+taking its baseline — so identical to task 5's end state. The raw files also differ from task 5's in
+sort order alone: `case-inventory.sh` sorts under the caller's locale. `visibility.txt` differs from
+task 5's for the same reason, its dump predating the corpus move. Registers: `PUB_MODULES` 0,
+`PUB_OUTSIDE_A_MOD_RS` 2, `CROSS_COMPONENT_REACHES` 0, `TEST_ONLY_ITEMS` 8.
+
+**The lint.** `#![warn(unreachable_pub)]` sits under `lib.rs`'s doc block. Zero warnings on all three
+shapes before it. With it, rust-only reported 910: 908 in flatc's `gpu_plan_generated.rs` — every
+item there is `pub` and `wire::generated` is `mod` — and 2 in `planner/translator/mod.rs`. The
+generated module already allows `unused_imports, dead_code, clippy::all` for code nobody wrote, so
+`unreachable_pub` joined that list; the alternative was a work list no slice could lower. **Count now:
+2 on rust-only, 2 on cudf, 2 on gpu, the same two on each** — `Translator::new` and
+`Translator::translate`, `pub fn` on a `pub(crate) struct` inside `mod translator` (plan task 7's
+slice). The 26 backend-facade items this file predicted are *not* reported: they are the associated
+types of `impl Backend for CpuBackend` / `GpuBackend`, so rustc's effective visibility counts them
+reachable through `<CpuBackend as Backend>::Source` and the lint stays quiet on them. They still count
+in the dump and are demoted in the executor slice. The test profile (`cargo test`, which adds
+`test-support` and `cfg(test)`) reports the same 2.
+
+**What guards "no new warnings".** Nothing mechanical: no `-D warnings`, no `[lints]` table, no
+`.cargo/config.toml`, no clippy or fmt step, no script that counts. The spec's "the crate's warning
+count is already a checked baseline" is not true of the tree. The only check is the developer's
+definition of done in `prompts.md` ("clean build with no new warnings"), which a reviewer reads. So the
+lint's 2 would not fail CI; the coordinator decides whether a non-zero count between slices is
+acceptable against that prose. Not worked around.
+
+**The three guards**, each red on the planted shape, tree clean after (`git diff --stat` empty on the
+planted file):
+- `no_public_signature_names_a_type_from_a_private_module` now resolves imports through
+  `private_modules` and `private_module_imports` — the latter is task 5's `component_imports` reader,
+  generalised to `bound_from(text, prefixes, roots)` and shared by both — and matches a name as a
+  path or, when capitalised, as a whole identifier (`private_name_in`; a lowercase name matches only
+  as a path, since `layout` is a parameter as often as the module). Planted
+  `pub fn layout_probe(trip: Trip) -> Trip` under `use accounting::Trip;` in `executor/driver/mod.rs`:
+  green on the old reader, red on the new — `executor/driver/mod.rs:23: pub fn layout_probe(trip: Trip)
+  -> Trip { names `Trip``. Nothing in the tree trips it today.
+- `names_the_module` matches the module imported plain or under an alias as well as an item path.
+  Pins red then green; then a temporary `PUB_MODULES` entry naming `test_cost_model.rs` with
+  `use peacockdb_core::executor::cpu_backend;` planted in `test_golden_format.rs` made both halves
+  red — `… is forced by peacockdb-core/tests/test_golden_format.rs, which forced_by does not name`.
+- The super-climb loop is `super_chains(line) -> Vec<usize>` in `walls.rs`, pinned: it read
+  `use super::super::x;` as `[2, 1]`, now `[2]`. Planted in `plan/error.rs`, the guard reports the line
+  once: `plan/error.rs:17: use super::super::common; climbs 2 from depth 1`.
+
+**Proof.** `cargo test --features rust-only -p peacockdb-core --test test_module_layout`: 17 passed,
+same count as before. `--lib`: 514 passed, 2 ignored. Dump and goldens unchanged by the edits. rustfmt
+clean on the four layout files and `generated.rs`; `lib.rs` carries six rustfmt hunks that predate
+this task (`--config skip_children=true` on HEAD's copy shows the same six) and are not in the
+spec's residue list.
+
+Files: `peacockdb-core/src/lib.rs`, `peacockdb-core/src/wire/generated.rs`,
+`peacockdb-core/tests/test_module_layout/{privacy,visibility,walls,near_miss}.rs`,
+`llm-wiki/tasks/visibility-baselines/` (new, five files).

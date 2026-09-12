@@ -286,6 +286,23 @@ pub(crate) fn supers_that_stay_inside(rel: &Path) -> usize {
     }
 }
 
+/// How far each `super::` chain on this line climbs, one entry per chain.
+pub(crate) fn super_chains(line: &str) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut rest = line;
+    while let Some(i) = rest.find("super::") {
+        let tail = &rest[i..];
+        let climbs = tail
+            .as_bytes()
+            .chunks(7)
+            .take_while(|c| *c == b"super::")
+            .count();
+        out.push(climbs);
+        rest = &rest[i + 7 * climbs..];
+    }
+    out
+}
+
 /// `super::` is for inside a component; crossing one takes an absolute `crate::` path. A
 /// `super::` chain that climbs past its component's root has crossed a boundary while looking
 /// like it did not, which is how a component quietly acquires a dependency nobody declared.
@@ -299,23 +316,13 @@ fn no_super_path_climbs_out_of_its_component() {
         let depth = supers_that_stay_inside(&rel);
         let text = read(&rel);
         for (n, line) in text.lines().enumerate() {
-            let mut rest = line;
-            while let Some(i) = rest.find("super::") {
-                let tail = &rest[i..];
-                let climbs = tail
-                    .as_bytes()
-                    .chunks(7)
-                    .take_while(|c| *c == b"super::")
-                    .count();
-                if climbs > depth {
-                    found.push(format!(
-                        "  {}:{}: {} climbs {climbs} from depth {depth}",
-                        rel.display(),
-                        n + 1,
-                        line.trim()
-                    ));
-                }
-                rest = &rest[i + 7..];
+            for climbs in super_chains(line).into_iter().filter(|c| *c > depth) {
+                found.push(format!(
+                    "  {}:{}: {} climbs {climbs} from depth {depth}",
+                    rel.display(),
+                    n + 1,
+                    line.trim()
+                ));
             }
         }
     }

@@ -338,21 +338,23 @@ fn workspace_members() -> Vec<String> {
     members
 }
 
-/// Does this text name the module and then something in it, rather than a module below it?
+/// Does this text name the module — imported plain or under an alias — or something in it,
+/// rather than a module below it?
 ///
 /// The test is "not another `::`", not "starts with a capital". A free function or a `pub
 /// const` is lowercase, and a reader that wanted an uppercase letter drops a file that forces
 /// the exemption. Nothing outside the crate names a lowercase item in the registered modules
 /// today, so the fixtures in `each_reader_sees_the_violation_and_not_its_near_miss` are what
-/// keeps this half honest. `{` is a brace group of several names, `*` a glob.
-// The mirror of `uses_module`'s widening, not taken here: a plain
-// `use peacockdb_core::executor::cpu_backend;` forces the wall and has no `::` after the path,
-// so the reverse half of `forced_by` would miss it. Nothing outside the crate spells it that
-// way today, and the attribution rule above differs, so the two readers stay separate.
+/// keeps this half honest. `{` is a brace group of several names, `*` a glob. The attribution
+/// differs from `uses_module`, which a deeper path satisfies too, so the two stay separate.
 pub(crate) fn names_the_module(text: &str, needle: &str) -> bool {
     let text = &code_only(text);
-    text.match_indices(needle).any(|(i, _)| {
-        let tail = &text[i + needle.len()..];
+    let module = needle.trim_end_matches("::");
+    text.match_indices(module).any(|(i, _)| {
+        let tail = &text[i + module.len()..];
+        let Some(tail) = tail.strip_prefix("::") else {
+            return tail.starts_with(';') || tail.trim_start().starts_with("as ");
+        };
         let mut chars = tail.chars();
         match chars.next() {
             Some('{') | Some('*') => true,
