@@ -122,42 +122,20 @@ group count. Eight device cells: `tpcds` q96 q48 q93 q38, `tpch` q3 q14.
 golden caught the disagreement — every other device failure so far has been a refusal.
 
 <a id="t187"></a>
-### #187 — the device widens a decimal the plan declared narrow
+### #187 — a decimal exports at precision 38 because the exporter passes none
 
-`tpch/filter-project` at all five modes: `expected Decimal128(15, 2) but found Decimal128(38, 2)`
-at the unload. The query is `SELECT l_orderkey, l_quantity FROM lineitem WHERE l_quantity > 30` —
-no arithmetic anywhere, so this is the export or the filter widening the column rather than a scale
-rule at a binop.
-
-The CPU has a rule for this: `widened_decimal` (`cpu_backend.rs:499`) accepts a produced decimal
-wider than the declared one at equal scale, and `declared_as` casts it back — over every exec
-stage's output, not only a merged state, though its doc argues the merge that motivated it. The
-device's unload has no such rule: `gpu_backend.rs:166` concats against the sink schema and arrow
-refuses the type outright.
-
-The value in question is the device's own export; DataFusion produces `(15,2)` throughout and the
-CPU tier is green. So this is two rules for produced-against-declared, one per engine, disagreeing
-on the same bytes — one tolerating and casting back, the other refusing. Whichever is right, one of
-them is wrong. Neighbour of [#163](../tickets.md#t163) for that reason, where
-[#183](active-tickets.md#t183) is two representations of one value rather than two verdicts on it.
-
-First plain decimal projection to reach a device in the corpus: q6's decimals are sums, whose
-declared type is already wide, which is why twenty queries went past this and the twenty-first did
-not.
-
-Two sightings, and the pair narrows it: `filter-project`'s projected column declares `(15,2)` and
-`hash-join`'s sum declares `(25,2)`, and both are found as `(38,2)`. Same scale, same 38, two
-different declarations — so the export appears to produce one width rather than widening each
-value by a step, which is a different fix from a scale rule and points at the export rather than at
-anything upstream of it. Six device cells across T19's first two batches. A bare scan of an `(18, 2)`
-column exports `(38, 2)` too: `bug_a_decimal_column_is_exported_at_precision_38` (`gpu_tests/source_cases.rs`).
-
-**Corrected by the catalog (`declared-schemas.md`): not two verdicts on one value, a missing
-argument.** cuDF's decimal carries a scale and no precision, so the device widened nothing it could
-have kept; `export_table_to_ipc` (`gpu_executor.cpp`) builds `column_metadata` from names alone and
-`to_arrow_schema` fills the precision it was not given with `max_precision`. The 38 is our exporter's
-default, and no precision cuDF holds can be read through it. `a_narrow_decimal_exports_at_the_exporters_default_precision`
-(`wire/gpu_tests/declared.rs`) records it as the instrument's limitation, per call, at every node.
+Every decimal the device exports arrives as `Decimal128(38, s)`, whatever the plan declared, and
+the sink's `concat_batches` refuses it: `expected Decimal128(15, 2) but found Decimal128(38, 2)`.
+The cause is on our side of the boundary, not cuDF's. cuDF's decimal carries a scale and no
+precision; `export_table_to_ipc` (`gpu_executor.cpp`) builds `column_metadata` from the names alone,
+and `to_arrow_schema` fills the precision it was not given with `max_precision`. So the 38 is the
+exporter's default, and no precision cuDF holds can be read back through it. The cpu side has no
+counterpart: `widened_decimal` (`cpu_backend/mod.rs`) accepts a wider produced decimal at equal
+scale and `declared_as` casts it back, so the cpu tier is green on the same queries. Six device
+cells: `tpch/filter-project` at all five modes and `hash-join`'s `(25,2)` sum. Recorded, not fixed,
+by `bug_a_decimal_column_is_exported_at_precision_38`, `bug_a_decimal_sum_is_exported_at_precision_38`
+and `bug_decimal_arithmetic_is_exported_at_precision_38` (`src/tests/gpu_tests/`), and per call at
+every node by `a_narrow_decimal_exports_at_the_exporters_default_precision` (`wire/gpu_tests/declared.rs`).
 
 <a id="t188"></a>
 ### #188 — the device refuses a read with row groups and a limit together
