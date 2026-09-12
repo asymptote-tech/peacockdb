@@ -561,3 +561,9 @@ Both readings closed with nothing to apply; `architecture.md` has no falsified s
 comment-only residues the analyst named below the bar are fixed by the coordinator:
 `testdata/cost_model.conf:2` and `peacockdb-core/Cargo.toml:46` now point at `test_support`.
 Signoff appended to the spec. `done` waits on CI for the head that carries these two lines.
+
+### 2026-09-12 — done
+
+CI run `34664010380` on `60b4844a`, the head that carries code, green on every job: both cuDF
+legs, the 25.02 GPU build, the remote device tier, cost report, changed paths, S3 metadata.
+Task 5 is `done`; PR #147 awaits the human's merge, after task 4's #145.
