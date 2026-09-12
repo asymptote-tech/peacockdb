@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 202), which is also the counter for
+New tickets take the next free number (currently 204), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,27 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 17 | #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
-| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
+| [Critical correctness](#critical-correctness) | 18 | #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 15 | #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
+
+<a id="t202"></a>
+### #202 — a descending sort key puts its nulls on the wrong end on the device
+
+On a descending key the device places nulls at the end the plan did not declare: `i32 DESC
+NULLS LAST` comes back nulls first, and `DESC NULLS FIRST` comes back nulls last.
+
+`sort.cpp` and the merge in `node_session.cpp` map `nulls_first` to `cudf::null_order::BEFORE`
+and its absence to `AFTER`, and cuDF applies that before it flips a `DESCENDING` key. Ascending
+keys are right, which is why every corpus ORDER BY has agreed: no cell's descending key carries
+a null. DataFusion's default for `DESC` is nulls first, so a query sorting a nullable column
+descending gets its null rows first on the cpu and last on the device. The mapping has to be
+relative to the direction — `BEFORE` when `nulls_first == asc` — at both sites, since a merge
+over sorted runs must order as the sort did. Pinned by
+`bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t200"></a>
 ### #200 — a Date64 comes back as a type the wire cannot name
@@ -58,10 +73,12 @@ query that reaches an empty lane under a global aggregate.
 `build_expr`'s ten literal arms (`:158`), so which answer a literal gives depends on which
 path evaluated it.
 
-A bare literal short-circuits to `build_scalar` and is null, as do `CASE` and `LIKE`, which
-`is_ast_able` refuses. What reaches the bug is `col <op> NULL::T` for a numeric `T` matching the
-column. In arithmetic that is a wrong value; in a comparison it is a wrong **row count**, since
-`col = NULL` is true wherever `col` is 0 and SQL says the row does not survive.
+`CASE` and `LIKE`, which `is_ast_able` refuses, reach `build_scalar` and are null. A bare
+literal is null only where `build_column` sees it first: a project asks `is_ast_able` before
+`build_column`, so `NULL::BIGINT` in a select list is a column of zeros. `col <op> NULL::T` for
+a numeric `T` matching the column reaches the bug too. In arithmetic that is a wrong value; in a
+comparison it is a wrong **row count**, since `col = NULL` is true wherever `col` is 0 and SQL
+says the row does not survive.
 
 No cell is disabled against this — it is a wrong answer inside cells that pass. Fixed by
 `tasks/typed-nulls.md`, which removes the second scalar builder rather than correcting it.
@@ -190,6 +207,19 @@ a data dir panics instead of being skipped. Found during the comment audit.
 
 
 ## Blockers for disabled coverage
+
+<a id="t203"></a>
+### #203 — the device cannot cast a number to text
+
+`build_column`'s cast arm (`expr.cpp`) refuses every cast whose target is `STRING` unless the
+input is already a string: "cast to STRING from a non-string type not supported in column path".
+`CAST(key AS VARCHAR)` in a select list answers on the cpu and is refused on the device.
+
+`cudf::cast` has no string target, so the arm needs `cudf::strings::from_integers`,
+`from_floats`, `from_booleans` and the datetime converters, chosen by the input's type.
+Neighbour of #45, where a join key's cast to string is the same refusal on the join path; a fix
+here answers a projection and does not by itself answer #45, whose fix hashes rather than casts.
+Pinned by `bug_a_cast_to_text_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t169"></a>
 ### #169 — a recipe plan is a chain, so its depth is its length, and the verifier caps depth

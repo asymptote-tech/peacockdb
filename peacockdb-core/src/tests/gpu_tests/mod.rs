@@ -4,5 +4,6 @@
 #[macro_use]
 mod coverage;
 mod device;
+mod exec_cases;
 mod harness_cases;
 mod script;
