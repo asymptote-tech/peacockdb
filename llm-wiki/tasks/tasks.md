@@ -114,7 +114,7 @@ A lane whose build side got no rows keeps its typed zero-row table where the joi
 never written, and the table it needs is one the scatter builds and the driver drops. One derived
 index field, one conditional drop. Replaces the parked `empty-answers.md`.
 
-### 13. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: approved to build
+### 13. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: building
 
 **Conditional: its first task reads the survey's report, argues what is still worth teaching, and
 stops for the human.** The walk is the only instrument that can ask what one call produced, and it
