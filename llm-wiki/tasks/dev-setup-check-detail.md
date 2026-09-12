@@ -21,7 +21,7 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   one sentence on what the exec-model timeout left unrun, and the CI evidence line below at
   `done`. Waiting on run 34658235414 (the code commit `e68f82cc`); the head rollup shows every
   job skipped because the later commits are doc-only.
-- 2026-09-12 00:04Z — CI green, board `done`. Judged on run 34658235414 (`e68f82cc`, the one
+- 2026-09-11 23:51Z — CI green, board `done`. Judged on run 34658235414 (`e68f82cc`, the one
   commit that carries code): Changed paths, S3 datasets, Cost report, cudf 25.02, cudf 26.02,
   build 25.02 for GPU, GPU Tests (remote) all `success`; Deploy to Pages `skipped` as on every
   PR. The later runs on `526f47d9`, `ee479740` and `2b0bab28` are doc-only pushes the `changes`
@@ -37,7 +37,7 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   `~/peacockdb`, `~/miniforge3/envs/rapids-26.02`, `/media/data/peacockdb`,
   `~/data/miniforge3`, gcc-12, gcc-14, nvcc, cmake, ninja, python 3.12.3, cargo. No GPU driver
   (`nvidia-smi` fails). `testdata/tpch.sf1` and `tpcds.sf1` are symlinks into `~/peacockdb`.
-- 2026-09-12 00:00Z — reopened by the human from `done` to `building` (commit `2e98d11b`) for plan
+- 2026-09-11 23:57Z — reopened by the human from `done` to `building` (commit `2e98d11b`) for plan
   Task 5 alone: the branch was rebased across master `02069415`, where the patch step follows the
   build host's glibc, so the shad-gpu cycle runs once more. Origin and PR #146 already hold the
   rebased head (8 commits, base master). Nothing else in the chain, so no `rebase needed(...)`
@@ -45,23 +45,40 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   `ssh shad-gpu` answers, host glibc 2.31, `/home/info/glibc-2.35` and `/home/info/glibc-2.39`
   both present, dev's `getconf` says 2.39; the H200 shows 37 GiB already in use by a neighbour.
   Developer dispatched with Task 5 and nothing else.
-- 2026-09-12 00:05Z — developer returned: `--build` red in 2 s, before any binary reached shad-gpu.
+- 2026-09-12 00:02Z — developer returned: `--build` red in 2 s, before any binary reached shad-gpu.
   The compiled build scripts in this worktree's `target-cudf-rapids-cuda-12.2/` carry the paths of a
   worktree `peacockdb-glibc-check` that no longer exists; they date from 23:41Z, between this task's
-  first `done` and its reopen, so an outside session built into this cache and then deleted its
-  worktree. Coordinator's decision: clear it and run the cycle again, recorded as a second attempt.
-  Reasoning: `scripts/cargo-cudf.sh` defaults `CARGO_TARGET_DIR` to `$PWD/target-cudf-*`, so the
-  workflow as written is worktree-local and a fresh task in a fresh worktree never meets this; the
+  `completing` (23:34Z) and `completeness approved` (23:42Z) — while the chain was live and in its
+  completeness pass — so an outside session built into this cache and later deleted its worktree. Coordinator's decision: clear it and run the cycle again, recorded as a second attempt.
+  Reasoning: `scripts/lib/shadgpu-env.sh` (and `cargo-cudf.sh` alike) default `CARGO_TARGET_DIR` to
+  `$PWD/target-cudf-*`, so the workflow as written is worktree-local and a fresh task in a fresh worktree never meets this; the
   failure is not the host's shape nor the script's, which is what "recorded, not repaired" protects.
   Nothing on the branch or the host changes — only gitignored artifacts an outsider left here — the
   red attempt stays in the record, and the spec's done-when for step 5 asks for a green cycle, which
   is unreachable otherwise. This is the one shortcut the signoff will name. Same developer resumed.
-- 2026-09-12 00:12Z — developer returned green on the second attempt: `cargo-cudf.sh clean -p
+- 2026-09-12 00:10Z — developer returned green on the second attempt: `cargo-cudf.sh clean -p
   peacockdb-core -p peacockdb-ffi` removed 7.0 GiB of the two crates' artifacts and left the DataFusion
   tree warm; `--build` 3m55s, `--push-binaries` 0m11s, `--patch --run` 1m09s, patched to
   `/home/info/glibc-2.39`, every C++ binary passed, `test_gpu_corpus` ran its five `q6` cells,
   `GPU test run OK`. Six sections added (first attempt red/not run/not run, second attempt green ×3).
   Committed and pushed; PR #146 already open against master. Board moved to `reviewing`.
+- 2026-09-12 00:11Z — CI on the rebased branch: run 34659758921 on `2e98d11b` (the human's
+  force-push of the rebase plus the reopen commit) was not skipped by the `changes` gate, and is the
+  run `done` will be judged on — it builds the rebased code commit `633318e5` and CI's own shad-gpu
+  job runs with master's `setup-glibc.sh`. At this reading: Changed paths, build 25.02 for GPU, Cost
+  report, S3 datasets, GPU Tests (remote) all `success`; the cudf 25.02 and 26.02 legs in progress;
+  Deploy to Pages skipped as on every PR. Run 34660734480 on `70ad00d8` is the doc-only push and
+  reads all-skipped. Reviewer dispatched for a findings round on the record.
+- 2026-09-12 00:20Z — review round 2 (the reopened step): 0 blocking, 1 important, 2 nits. The important
+  one was the coordinator's: the log stamps for `done`, the reopen, the decision, the green return
+  and the CI note were guesses that `git log` refutes, and the sentence placing the outside build
+  "between `done` and the reopen" was wrong — it landed at 23:41Z, inside the completeness pass.
+  Restamped from commit and command times, sentence rewritten; stamps are `date -u` reads from here
+  on. One nit taken (the `CARGO_TARGET_DIR` default lives in `scripts/lib/shadgpu-env.sh`, cited
+  now), one dropped (which of the two build-script panics printed first is not recorded; both lines
+  are). The reviewer agrees with the cache clear as not the repair the spec forbids. Board moved to
+  `completing`; completeness pass dispatched: a fresh reviewer and a fresh analyst, neither seeing
+  the other's list.
 
 ## Workflows
 
