@@ -39,21 +39,6 @@ struct TestOnlyItem {
 
 const TEST_ONLY_ITEMS: &[TestOnlyItem] = &[
     TestOnlyItem {
-        file: "executor/driver/index.rs",
-        item: "post_order_of_every_node",
-        called_by: &["executor/driver/mod.rs"],
-    },
-    TestOnlyItem {
-        file: "executor/driver/mod.rs",
-        item: "post_order_of_every_node",
-        called_by: &["executor/mod.rs"],
-    },
-    TestOnlyItem {
-        file: "executor/mod.rs",
-        item: "post_order_of_every_node",
-        called_by: &["planner/tests/plan_goldens.rs"],
-    },
-    TestOnlyItem {
         file: "executor/cpu_backend/mod.rs",
         item: "has_finish_pass",
         called_by: &["executor/mod.rs"],
@@ -179,7 +164,7 @@ pub(crate) fn declares_mod(line: &str) -> Option<(String, bool)> {
 ///
 /// rustfmt leaves `#[cfg(test)] mod tests;` on one line, so a reader that takes a line as
 /// either an attribute or a declaration sees neither half of it.
-fn split_attributes(line: &str) -> (Vec<&str>, &str) {
+pub(crate) fn split_attributes(line: &str) -> (Vec<&str>, &str) {
     let mut rest = line.trim_start();
     let mut attrs = Vec::new();
     while rest.starts_with("#[") {

@@ -10,7 +10,9 @@ use crate::test_code::{
     declared_item, declares_mod, doc_above, mod_declarations, names_cfg_feature, names_cfg_test,
     test_gates,
 };
-use crate::visibility::{bare_pub_name, gated_pub_mods, is_bare_pub_item, pub_mod_declarations};
+use crate::visibility::{
+    bare_pub_name, gated_pub_mods, is_bare_pub_item, pub_mod_declarations, visible_mod_declarations,
+};
 use crate::walls::{super_chains, supers_that_stay_inside, uses_module};
 
 /// Each reader in the sibling modules, over the shape that would make it read nothing.
@@ -29,6 +31,38 @@ fn each_reader_sees_the_violation_and_not_its_near_miss() {
     assert!(
         pub_mod_declarations("// pub mod driver;").is_empty(),
         "a comment is not a declaration"
+    );
+
+    // rustfmt keeps a short attribute on the declaration's own line, so a reader that wants
+    // the line to start with `pub` sees neither `#[cfg(feature = "gpu")] pub mod x;` nor
+    // `#[allow(dead_code)] pub fn x()`; and a `pub(crate) mod` opens a wall while matching
+    // neither reader, so the visibility reader sees every spelling.
+    assert_eq!(
+        pub_mod_declarations("#[cfg(feature = \"gpu\")] pub mod gpu_backend;"),
+        ["gpu_backend"]
+    );
+    assert!(is_bare_pub_item("#[allow(dead_code)] pub fn x() {}"));
+    assert_eq!(
+        bare_pub_name("#[allow(dead_code)] pub fn x() {}").as_deref(),
+        Some("x")
+    );
+    assert_eq!(
+        visible_mod_declarations(
+            "mod a;\npub mod b;\npub(crate) mod c;\n#[cfg(test)] pub(in crate::x) mod d;\n"
+        ),
+        [
+            ("pub".to_string(), "b".to_string()),
+            ("pub(crate)".to_string(), "c".to_string()),
+            ("pub(in crate::x)".to_string(), "d".to_string()),
+        ]
+    );
+    assert_eq!(
+        pub_fields("#[serde(skip)] pub rows: u64,\npub(crate) bytes: u64,\n"),
+        [(0, "#[serde(skip)] pub rows: u64,".to_string())]
+    );
+    assert_eq!(
+        bare_pub_name("    pub batches: Vec<CpuBatch>,").as_deref(),
+        Some("batches")
     );
 
     // `pub(crate)` and a `pub` field are not items the facade has to declare.
@@ -61,19 +95,22 @@ fn each_reader_sees_the_violation_and_not_its_near_miss() {
     );
     assert_eq!(bare_pub_name("pub(crate) fn run() {}"), None);
 
-    // A gate is the line above, and only a `cfg` there is one: a doc comment or an attribute
-    // that is not `cfg` leaves the declaration unconditional.
+    // A gate is the line above or the same line, and only a `cfg` is one: a doc comment or
+    // an attribute that is not `cfg` leaves the declaration unconditional.
     let (plain, gated) = gated_pub_mods(
         "pub mod plan;\n#[cfg(feature = \"test-support\")]\npub mod test_support;\n\
-         /// docs\npub mod wire;\n#[allow(dead_code)]\npub mod x;\n",
+         /// docs\npub mod wire;\n#[allow(dead_code)]\npub mod x;\n#[cfg(test)] pub mod y;\n",
     );
     assert_eq!(plain, ["plan", "wire", "x"]);
     assert_eq!(
         gated,
-        [(
-            "test_support".to_string(),
-            "feature = \"test-support\"".to_string()
-        )]
+        [
+            (
+                "test_support".to_string(),
+                "feature = \"test-support\"".to_string()
+            ),
+            ("y".to_string(), "test".to_string()),
+        ]
     );
 
     // A private module's types reach a signature three ways: the module's path, an alias out

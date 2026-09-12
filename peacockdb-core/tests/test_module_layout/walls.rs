@@ -10,7 +10,7 @@ use crate::tree::{code_only, component_of, read, sources};
 /// All three rung names, before the first module moves. With only `tests` here the first
 /// `executor/ffi_tests/` reads as a subcomponent of `executor`, and the wall rules fire on a
 /// directory they were never about.
-const TEST_DIRS: &[&str] = &["tests", "ffi_tests", "gpu_tests"];
+pub(crate) const TEST_DIRS: &[&str] = &["tests", "ffi_tests", "gpu_tests"];
 
 /// **The one rule rustc explicitly cannot enforce.** A subcomponent is meant to be its
 /// parent's alone, and Rust's visibility is "the module and its descendants" — so

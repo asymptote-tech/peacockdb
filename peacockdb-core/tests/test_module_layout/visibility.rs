@@ -2,7 +2,10 @@
 
 use std::path::Path;
 
+use crate::privacy::pub_fields;
+use crate::test_code::{declares_mod, split_attributes};
 use crate::tree::{read, sources};
+use crate::walls::TEST_DIRS;
 
 /// The one file that legitimately carries `pub` outside a `mod.rs`: the crate root, whose
 /// two entry points are the CLI's.
@@ -16,19 +19,30 @@ const PUB_OUTSIDE_A_MOD_RS: &[&str] = &["lib.rs"];
 /// count passes when one is dropped and another added.
 const COMPONENTS: &[&str] = &["common", "executor", "plan", "plan_text", "planner", "wire"];
 
+/// One surface file: its bare `pub` items and its `pub` fields, by name.
+struct Surface {
+    file: &'static str,
+    items: &'static [&'static str],
+    fields: &'static [&'static str],
+}
+
 /// The crate's API, by file and name: what the CLI calls — `build_session_state`,
 /// `register_tables_for`, `plan` and its knobs, `run` and `CpuBackend` — and the closure their
 /// signatures force, hop by hop. `plan` returns `GpuNode`, `MemoryModel` and `PlanError`, and
 /// a trait's methods are as public as the trait. `run<B: Backend>` makes the trait family, the
 /// category traits' method types, `NodeExecutors`' payloads and the CPU backend's associated
-/// types as public as `Backend`, and `RunReport`'s field types as public as the report. A new
-/// row needs the receipt: `cargo build -p peacockdb` failing without it, or
-/// `private_interfaces` firing on a row already here.
-const SURFACE: &[(&str, &[&str])] = &[
-    ("lib.rs", &["build_session_state", "register_tables_for"]),
-    (
-        "plan/mod.rs",
-        &[
+/// types as public as `Backend`. Fields are surface too: the CLI writes `PlanKnobs` as a literal
+/// and reads `RunReport.batches`. A new row needs the receipt: `cargo build -p peacockdb`
+/// failing without it, or `private_interfaces` firing on a row already here.
+const SURFACE: &[Surface] = &[
+    Surface {
+        file: "lib.rs",
+        items: &["build_session_state", "register_tables_for"],
+        fields: &[],
+    },
+    Surface {
+        file: "plan/mod.rs",
+        items: &[
             "GpuNode",
             "NodeKind",
             "PartitionLayout",
@@ -36,20 +50,22 @@ const SURFACE: &[(&str, &[&str])] = &[
             "RowInterval",
             "Schema",
         ],
-    ),
-    (
-        "planner/mod.rs",
-        &[
+        fields: &[],
+    },
+    Surface {
+        file: "planner/mod.rs",
+        items: &[
             "BatchSizing",
             "MemoryModel",
             "PlanKnobs",
             "SMALL_TABLE_BYTES",
             "plan",
         ],
-    ),
-    (
-        "executor/mod.rs",
-        &[
+        fields: &["target_partitions", "sizing", "budget", "small_table_bytes"],
+    },
+    Surface {
+        file: "executor/mod.rs",
+        items: &[
             "Backend",
             "BackendError",
             "Batch",
@@ -57,7 +73,6 @@ const SURFACE: &[(&str, &[&str])] = &[
             "CallStats",
             "CpuBackend",
             "CpuBatch",
-            "EmittedBatch",
             "ExecExecutor",
             "Executor",
             "Forwarder",
@@ -72,17 +87,16 @@ const SURFACE: &[(&str, &[&str])] = &[
             "RunReport",
             "SourceExecutor",
             "SourceStep",
-            "TraceEvent",
-            "Underestimate",
             "UnloadExecutor",
             "When",
             "record_batch",
             "run",
         ],
-    ),
-    (
-        "executor/cpu_backend/mod.rs",
-        &[
+        fields: &["batches"],
+    },
+    Surface {
+        file: "executor/cpu_backend/mod.rs",
+        items: &[
             "CpuAccumulator",
             "CpuEmitter",
             "CpuExec",
@@ -92,7 +106,8 @@ const SURFACE: &[(&str, &[&str])] = &[
             "CpuSource",
             "CpuUnload",
         ],
-    ),
+        fields: &[],
+    },
 ];
 
 /// A `pub mod` declares a component. Anything else is a subcomponent, and a subcomponent
@@ -109,15 +124,22 @@ fn pub_mod_declares_a_component_and_nothing_else() {
         if rel == Path::new("lib.rs") {
             continue;
         }
-        for name in pub_mod_declarations(&read(&rel)) {
-            found.push(format!("  {} declares `pub mod {name};`", rel.display()));
+        // A test module's `pub(crate) mod` is a test crate's own business (`src/tests/`,
+        // `driver/tests/`); anywhere else any visibility on a `mod` opens the wall.
+        let in_a_test_dir = rel
+            .iter()
+            .any(|part| TEST_DIRS.contains(&part.to_string_lossy().as_ref()));
+        for (vis, name) in visible_mod_declarations(&read(&rel)) {
+            if vis == "pub" || !in_a_test_dir {
+                found.push(format!("  {} declares `{vis} mod {name};`", rel.display()));
+            }
         }
     }
     assert!(
         found.is_empty(),
-        "`pub mod` outside lib.rs makes a subcomponent nameable crate-wide, and the wall it \
-         was given then exists only on paper:\n{}\n\nDeclare it `mod`, and put what a sibling \
-         needs in the parent's own mod.rs. There is no sanctioned form.",
+        "a visible `mod` outside lib.rs makes a subcomponent nameable beyond its parent, and \
+         the wall it was given then exists only on paper:\n{}\n\nDeclare it `mod`, and put \
+         what a sibling needs in the parent's own mod.rs. There is no sanctioned form.",
         found.join("\n")
     );
     let (unconditional, gated) = gated_pub_mods(&read(Path::new("lib.rs")));
@@ -143,10 +165,13 @@ pub(crate) fn gated_pub_mods(text: &str) -> (Vec<String>, Vec<(String, String)>)
     for line in text.lines() {
         let trimmed = line.trim();
         if let [name] = pub_mod_declarations(line).as_slice() {
-            match above
-                .strip_prefix("#[cfg(")
-                .and_then(|r| r.strip_suffix(")]"))
-            {
+            let same_line = split_attributes(line).0;
+            let cfg = same_line
+                .iter()
+                .copied()
+                .chain(std::iter::once(above))
+                .find_map(|a| a.strip_prefix("#[cfg(").and_then(|r| r.strip_suffix(")]")));
+            match cfg {
                 Some(pred) => gated.push((name.clone(), pred.to_string())),
                 None => plain.push(name.clone()),
             }
@@ -164,8 +189,7 @@ pub(crate) fn gated_pub_mods(text: &str) -> (Vec<String>, Vec<(String, String)>)
 pub(crate) fn pub_mod_declarations(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in text.lines() {
-        let line = line.trim_start();
-        let Some(rest) = line.strip_prefix("pub mod ") else {
+        let Some(rest) = split_attributes(line).1.strip_prefix("pub mod ") else {
             continue;
         };
         let name: String = rest
@@ -177,6 +201,20 @@ pub(crate) fn pub_mod_declarations(text: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// Every `mod` declaration carrying a visibility, as (visibility, name): `pub mod x;`,
+/// `pub(crate) mod x;`, `pub(in …) mod x;`. Attributes on the line are skipped first.
+pub(crate) fn visible_mod_declarations(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let code = split_attributes(line).1;
+            let (name, _) = declares_mod(code)?;
+            let after_pub = code.strip_prefix("pub")?;
+            let i = after_pub.find("mod ")?;
+            Some((format!("pub{}", after_pub[..i].trim_end()), name))
+        })
+        .collect()
 }
 
 /// A component's API is declared in its `mod.rs`. A `pub` item anywhere else is API the
@@ -211,45 +249,68 @@ fn a_components_api_is_declared_in_its_mod_rs() {
 }
 
 /// Bare `pub` in `src/` means "the binary calls this", and the claim is checked both ways: a
-/// `pub` item outside the table is a missed demotion or a claim without a receipt, and a
-/// table row that is not `pub` in its file is a deletion or a demotion the table did not
+/// `pub` item or field outside the table is a missed demotion or a claim without a receipt,
+/// and a table row that is not `pub` in its file is a deletion or a demotion the table did not
 /// follow. Names per file rather than a count, so a dropped-and-added pair cannot pass.
 /// `test_support/` is the feature-gated exception, checked by signature elsewhere.
 #[test]
 fn bare_pub_is_the_surface_and_nothing_else() {
-    let mut found: Vec<(String, Vec<String>)> = Vec::new();
+    let mut found: Vec<(String, Vec<String>, Vec<String>)> = Vec::new();
     for rel in sources() {
         let path = rel.to_string_lossy().replace('\\', "/");
         if path.starts_with("test_support/") {
             continue;
         }
-        let names: Vec<String> = read(&rel)
+        let text = read(&rel);
+        let items: Vec<String> = text
             .lines()
             .filter(|l| is_bare_pub_item(l))
             .filter_map(bare_pub_name)
             .filter(|n| !n.starts_with("mod "))
             .collect();
-        if !names.is_empty() {
-            found.push((path, names));
+        let fields: Vec<String> = pub_fields(&text)
+            .iter()
+            .filter_map(|(_, line)| bare_pub_name(line))
+            .collect();
+        if !items.is_empty() || !fields.is_empty() {
+            found.push((path, items, fields));
         }
     }
     let mut stale = Vec::new();
-    for (file, names) in &found {
-        let table = SURFACE.iter().find(|(f, _)| f == file).map(|(_, n)| *n);
-        for name in names {
-            if !table.is_some_and(|t| t.contains(&name.as_str())) {
+    for (file, items, fields) in &found {
+        let table = SURFACE.iter().find(|s| s.file == file);
+        for name in items {
+            if !table.is_some_and(|t| t.items.contains(&name.as_str())) {
                 stale.push(format!(
                     "  {file}: `{name}` is pub and the surface does not list it"
                 ));
             }
         }
-    }
-    for (file, names) in SURFACE {
-        let present = found.iter().find(|(f, _)| f == file).map(|(_, n)| n);
-        for name in *names {
-            if !present.is_some_and(|p| p.iter().any(|n| n == name)) {
+        // A field is reachable only through a reachable type, and `pub` types exist only in
+        // the surface files — so a `pub` field elsewhere is a reader's convention, not surface.
+        for name in fields {
+            if table.is_some_and(|t| !t.fields.contains(&name.as_str())) {
                 stale.push(format!(
-                    "  {file}: the surface lists `{name}` and it is not pub there"
+                    "  {file}: field `{name}` is pub and the surface does not list it"
+                ));
+            }
+        }
+    }
+    for entry in SURFACE {
+        let present = found.iter().find(|(f, _, _)| f == entry.file);
+        for name in entry.items {
+            if !present.is_some_and(|(_, items, _)| items.iter().any(|n| n == name)) {
+                stale.push(format!(
+                    "  {}: the surface lists `{name}` and it is not pub there",
+                    entry.file
+                ));
+            }
+        }
+        for name in entry.fields {
+            if !present.is_some_and(|(_, _, fields)| fields.iter().any(|n| n == name)) {
+                stale.push(format!(
+                    "  {}: the surface lists field `{name}` and it is not pub there",
+                    entry.file
                 ));
             }
         }
@@ -263,9 +324,10 @@ fn bare_pub_is_the_surface_and_nothing_else() {
     );
 }
 
-/// The name a bare `pub` item line declares: the identifier after the kind keywords.
+/// The name a bare `pub` line declares: an item's identifier after its kind keywords, or a
+/// field's before its colon.
 pub(crate) fn bare_pub_name(line: &str) -> Option<String> {
-    let rest = line.trim_start().strip_prefix("pub ")?;
+    let rest = split_attributes(line).1.strip_prefix("pub ")?;
     if rest.starts_with("mod ") {
         return Some(rest.to_string());
     }
@@ -294,8 +356,7 @@ pub(crate) fn bare_pub_name(line: &str) -> Option<String> {
 /// not this, and neither is a `pub` field, which is a property of a declaration made
 /// elsewhere.
 pub(crate) fn is_bare_pub_item(line: &str) -> bool {
-    let t = line.trim_start();
-    let Some(rest) = t.strip_prefix("pub ") else {
+    let Some(rest) = split_attributes(line).1.strip_prefix("pub ") else {
         return false;
     };
     const KINDS: &[&str] = &[

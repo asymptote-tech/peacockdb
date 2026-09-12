@@ -895,8 +895,8 @@ async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
             let Ok(recipes) = attach_recipes(tree.as_ref()) else {
                 continue;
             };
-            let positions =
-                crate::executor::post_order_of_every_node(tree.as_ref()).expect("the plan indexes");
+            let index = crate::executor::PlanIndex::build(tree.as_ref()).expect("the plan indexes");
+            let positions: Vec<usize> = index.nodes.iter().map(|node| node.post_order).collect();
             let mut nodes = Vec::new();
             collect(tree.as_ref(), &mut nodes);
             let mut children_first = Vec::new();

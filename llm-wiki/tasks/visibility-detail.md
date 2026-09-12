@@ -605,3 +605,63 @@ enumerated and justified, the sweep's criterion confirmed on every changed line.
 - nit, **taken** — `SURFACE` pins items, not fields: a `pub` field added to a surface struct
   passes every guard and the lint. Fix: count `privacy::pub_fields()` per surface file into the
   same both-way check. → developer.
+
+### 2026-09-12 — round 1 addressed: `SURFACE` is 46 items and 5 fields, the chain is gone, the readers see attributes and `pub(crate) mod`
+
+On `1e4ac7ac`. All four findings taken; layout stays at 17 cases.
+
+1. **The `post_order_of_every_node` chain is gone**: the three `#[cfg(test)]` delegates
+   (`executor/mod.rs`, `driver/mod.rs`, `driver/index.rs`) and the three `TEST_ONLY_ITEMS` rows.
+   `planner/tests/plan_goldens.rs` reads the index the driver schedules from —
+   `PlanIndex::build(tree.as_ref())`, then `index.nodes.iter().map(|node| node.post_order)`.
+   `--lib -- planner::tests::plan_goldens` 19 passed; the register's both-way check green with
+   `has_finish_pass` as its one row.
+2. **`RunReport`'s 16 non-`batches` fields are `pub(crate)`** (17 counted `batches`), and
+   `TraceEvent`, `Underestimate`, `EmittedBatch` with them. The key measured: with none, a
+   plain build warns on 8 fields and the `(lib)` half of `cargo test` — harness on, `cfg(test)`
+   off — on 8 others (`peak_bytes`, `steps`, `calls`, `trace`, `underestimates`,
+   `measured_calls`, `peak_queued`, `lanes_of`), so `not(feature = "test-support")` is not
+   clean; `#[cfg_attr(not(test), allow(dead_code))]` on the struct is the weakest that clears
+   every non-test compile, the same reason as `wire` and `plan_text`, two lines of reason.
+   **One field is read by nothing at all, not even a test: `calls`** — the driver counts it and
+   no golden or test consumes it. `#[allow(dead_code)]` on the field with that as its one-line
+   reason; a deletion is the coordinator's call, not a demotion's. 0 warnings on rust-only,
+   cudf, gpu, the CLI, and the three `--lib --no-run` shapes. `SURFACE` 49 → 46.
+3. **The readers see attributes.** `split_attributes` is `pub(crate)` in `test_code.rs`;
+   `pub_mod_declarations`, `is_bare_pub_item`, `bare_pub_name` and `privacy::pub_fields` read
+   the code after a line's `#[…]`s, and `gated_pub_mods` takes a `cfg` on the same line as well
+   as the line above. Pinned in `near_miss.rs`: `#[cfg(feature = "gpu")] pub mod gpu_backend;`,
+   `#[allow(dead_code)] pub fn x()`, `#[serde(skip)] pub rows: u64,`, `#[cfg(test)] pub mod y;`.
+   **The visibility assertion is inside `pub_mod_declares_a_component_and_nothing_else`**, not
+   a new case: a `pub(crate) mod` is the same violation the test already names — a subcomponent
+   nameable beyond its parent — so it is one rule, one case, and the inventory keeps its one
+   swap. `visible_mod_declarations` reads every spelling (`pub`, `pub(crate)`, `pub(in …)`);
+   outside `lib.rs` a bare `pub mod` is reported anywhere, and any visibility outside the test
+   directories (`TEST_DIRS`, now `pub(crate)` in `walls.rs`). Green today. Red with
+   `pub(crate) mod translator;` in `planner/mod.rs`: `planner/mod.rs declares `pub(crate) mod
+   translator;` … There is no sanctioned form.`
+4. **`SURFACE` pins fields.** Each entry is a `Surface { file, items, fields }`; `pub_fields`
+   per surface file is checked both ways beside the items. **The pinned fields: `planner/mod.rs`
+   `target_partitions`, `sizing`, `budget`, `small_table_bytes` (`PlanKnobs`, the CLI's literal);
+   `executor/mod.rs` `batches` (`RunReport`, the CLI's read).** Nothing else is `pub` in the
+   five files. The field direction is scoped to files with a table entry, since a field is
+   reachable only through a reachable type and `pub` types exist only there; the first sweep
+   over every file listed some 60 `pub` fields on `pub(crate)` structs in `wire/writer.rs`,
+   `driver/accounting.rs`, `driver/single_partition.rs` and the test mocks — unreachable,
+   identical to `pub(crate)` for rustc, and left as a finding rather than a sweep in a review
+   round. Red with `batches` demoted: `executor/mod.rs: the surface lists field `batches` and
+   it is not pub there`; red with `peak_bytes` spelled `pub`: `executor/mod.rs: field
+   `peak_bytes` is pub and the surface does not list it`.
+
+**`SURFACE` by file (46):** `lib.rs` 2, `plan/mod.rs` 6, `planner/mod.rs` 5, `executor/mod.rs`
+25 (the 28 less `TraceEvent`, `Underestimate`, `EmittedBatch`), `executor/cpu_backend/mod.rs` 8.
+Dump 109 / 46, matching.
+
+**Proof.** `--test test_module_layout` 17; `--lib` 514 + 2 ignored; rust-only, cudf, gpu builds
+and `cargo build --features rust-only -p peacockdb` 0 warnings; goldens identical;
+`case-inventory.sh rust-only` differs from the baseline by the plan-task-9 swap alone. rustfmt
+clean on every touched file alone; comment caps held (longest new in-body comment four lines,
+`SURFACE`'s doc eight).
+
+Files: `executor/{mod.rs,driver/mod.rs,driver/index.rs}`, `planner/tests/plan_goldens.rs`,
+`tests/test_module_layout/{test_code,visibility,near_miss,privacy,walls}.rs`.

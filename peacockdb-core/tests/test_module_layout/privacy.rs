@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use crate::test_code::split_attributes;
 use crate::tree::{code_only, components, read, sources};
 use crate::visibility::is_bare_pub_item;
 
@@ -281,7 +282,7 @@ fn names_identifier(signature: &str, name: &str) -> bool {
 pub(crate) fn pub_fields(text: &str) -> Vec<(usize, String)> {
     text.lines()
         .enumerate()
-        .filter(|(_, line)| line.trim_start().starts_with("pub ") && !is_bare_pub_item(line))
+        .filter(|(_, line)| split_attributes(line).1.starts_with("pub ") && !is_bare_pub_item(line))
         .map(|(n, line)| (n, line.to_string()))
         .collect()
 }

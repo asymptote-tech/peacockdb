@@ -484,7 +484,7 @@ pub(crate) enum CallKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TraceEvent {
+pub(crate) struct TraceEvent {
     pub(crate) step: u32,
     pub(crate) node: u32,
     pub(crate) lane: u32,
@@ -496,7 +496,7 @@ pub struct TraceEvent {
 /// rests on a cardinality estimate — so it is recorded with its magnitude rather than
 /// asserted away.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Underestimate {
+pub(crate) struct Underestimate {
     pub(crate) node: u32,
     pub(crate) lane: u32,
     pub(crate) modelled: usize,
@@ -507,52 +507,57 @@ pub struct Underestimate {
 /// interval, the bytes for the accountant — and kept only totals until the corpus goldens
 /// needed the sizes themselves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EmittedBatch {
+pub(crate) struct EmittedBatch {
     pub(crate) rows: u64,
     pub(crate) bytes: usize,
 }
 
+// Written for the goldens and the driver tests; the CLI reads `batches` and nothing else
+// reads the rest outside a test build, so the lint is read there, not in a plain build.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 pub struct RunReport {
     pub batches: Vec<CpuBatch>,
-    pub peak_bytes: usize,
+    pub(crate) peak_bytes: usize,
     /// Zero at the end of any correct run: a batch was held and never released otherwise.
-    pub in_flight_bytes: usize,
-    pub steps: usize,
-    pub calls: usize,
+    pub(crate) in_flight_bytes: usize,
+    pub(crate) steps: usize,
+    // Counted by the driver and read by nothing yet, not even a test.
+    #[allow(dead_code)]
+    pub(crate) calls: usize,
     /// Batches held and batches released. Equal at the end of every run, on both the
     /// drained path and the early-exit one.
-    pub holds: usize,
-    pub releases: usize,
-    pub trace: Vec<TraceEvent>,
-    pub underestimates: Vec<Underestimate>,
+    pub(crate) holds: usize,
+    pub(crate) releases: usize,
+    pub(crate) trace: Vec<TraceEvent>,
+    pub(crate) underestimates: Vec<Underestimate>,
     /// How many calls reported a measured transient rather than `None`. What makes an
     /// empty `underestimates` mean the model held: a backend measuring nothing produces
     /// the same empty list, and the two are indistinguishable without this.
-    pub measured_calls: usize,
+    pub(crate) measured_calls: usize,
     /// Per node, rows released without an unload call — the saving a limit buys, made
     /// visible, since the rows returned look the same either way.
-    pub rows_skipped: Vec<u64>,
+    pub(crate) rows_skipped: Vec<u64>,
     /// Per node, the most batches its queues held at once.
-    pub peak_queued: Vec<usize>,
+    pub(crate) peak_queued: Vec<usize>,
     /// Per node, its output lane count — what `peak_queued` is bounded by.
-    pub lanes_of: Vec<usize>,
+    pub(crate) lanes_of: Vec<usize>,
     /// Per node, per output lane, the batches it emitted in order.
-    pub emitted: Vec<Vec<Vec<EmittedBatch>>>,
+    pub(crate) emitted: Vec<Vec<Vec<EmittedBatch>>>,
     /// Per node, per output lane, rows it emitted that nobody consumed — the queues an early
     /// exit left standing. Zero everywhere on a run that drained, and what closes
     /// `consumed + abandoned == the child's emitted` into an equality on every run.
-    pub abandoned: Vec<Vec<u64>>,
+    pub(crate) abandoned: Vec<Vec<u64>>,
     /// Per node, per child, per that child's lane, the rows this node consumed from it.
     /// Indexed by the child's lane rather than the consumer's, so it lines up with that
     /// child's own [`emitted`](RunReport::emitted) where the two differ — an emitter
     /// redistributes, so nothing else would sum.
-    pub consumed: Vec<Vec<Vec<u64>>>,
+    pub(crate) consumed: Vec<Vec<Vec<u64>>>,
     /// The nodes whose row interval was satisfied, in index order — empty on a run that
     /// drained. What the golden's `early_exit=` marker names, and the reason a lane can be
     /// short of what its plan called for: not a bool, because a reader of a smaller number
     /// needs to know which limit produced it.
-    pub satisfied: Vec<usize>,
+    pub(crate) satisfied: Vec<usize>,
 }
 
 /// A join, as the schedule sees one: the range of its probe subtree, and how many lanes
@@ -634,15 +639,4 @@ pub fn run<B: Backend>(
     budget: Option<usize>,
 ) -> Result<RunReport, RunError> {
     driver::run::<B>(root, ctx, budget)
-}
-
-/// Every node's post-order address, indexed by its pre-order one — the numbering the
-/// recipes and the FFI share.
-///
-/// `#[cfg(test)]` because its only caller is `planner/tests/plan_goldens.rs`, which checks
-/// the driver's numbering against the one `attach_recipes` gave; `driver` is this
-/// component's own, so the test cannot name the walk itself.
-#[cfg(test)]
-pub(crate) fn post_order_of_every_node(root: &dyn GpuNode) -> Result<Vec<usize>, PlanError> {
-    driver::post_order_of_every_node(root)
 }
