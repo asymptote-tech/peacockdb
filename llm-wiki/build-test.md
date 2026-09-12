@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1840 test cases — Rust 1404, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1856 test cases — Rust 1420, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1014 cases: `--lib` 543, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1016 cases: `--lib` 545, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -196,6 +196,14 @@ recipe with no plan. The trivial kinds are not here — the plan goldens run the
 corpus query; and what each call declares its firing produces — the six arms whose schema is in
 hand declare their node's own, every other arm answers `None`
 
+| Wire refusals at plan time | [wire::tests::refusals](../peacockdb-core/src/wire/tests/refusals.rs) | 2 |
+|---|---|--:|
+
+the two shapes `attach_recipes` refuses before any device, planned from sql over tpch sf1 at
+tp1-single: a cast to `Timestamp`, which the fbs `DataType` cannot name (#200's other half),
+and an interval literal, which its `ScalarValue` cannot (#168) — each a `PlanError` naming the
+type, never a panic
+
 | Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 16 |
 |---|---|--:|
 
@@ -328,7 +336,7 @@ the crate links; executor lifecycle
 what the batch reports, and that `consume` hands the handle over without releasing it. Needs no
 device: the release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 297 cases: `--lib -- gpu_tests::` 289, `test_gpu_corpus` 8
+#### gpu — `--features gpu`: shad-gpu only. 311 cases: `--lib -- gpu_tests::` 303, `test_gpu_corpus` 8
 
 *crate integration, external*
 
@@ -386,6 +394,19 @@ beside the exported one; a call with no declaration fires and is not measured; a
 is returned as the firing's finding rather than a panic; a zero-row query is walked like any
 other, under a predicate row-group pruning cannot see through (#209); and the comparison it
 offers sets decimal precision and nullability aside, the two things the exporter rewrites
+
+| Schema catalog | [bug_a_declared_utf8view_is_exported_as_utf8](../peacockdb-core/src/wire/gpu_tests/declared.rs) | 14 |
+|---|---|--:|
+
+`declared-schemas.md`'s queries, one named test each at the mode the spec names, every declared
+call of the planned query against what the device exported for its firing: `Utf8View → Utf8`
+from the scan up (#183, `bug_`), `extract(year)` `Int32 → Int16` from the project up (#191,
+`bug_`), `Date64 → Timestamp(ms)` (#200, `bug_`), and the identities — `Date32`, `Int64`,
+`Int32`, fixed-width cast targets, names, order and arity, a zero-row string column typed as a
+populated one (#209 chose its predicate). A narrow decimal at 38 and a decimal already at 38
+record the exporter's default rather than a divergence (#187), and nullability read off
+`has_nulls()` records the flag's limitation. One ignored: the cast to text the device refuses
+at `execute_node` (#203). At `tp1-rowgroup`, every firing of one call exports one schema
 
 *subcomponent*
 

@@ -3,12 +3,13 @@
 //!
 //! `walk.rs` walks the tree making exactly the calls each recipe names, threading every
 //! output handle into the next call's input and exporting at the root; one test per query
-//! here, so a failure names the query rather than a stage. No driver and no scheduling —
-//! every shape here plans one batch per lane, so a recipe's own call order is the schedule.
-//!
-//! The oracle is DataFusion on the same SQL: a golden would pin a wrong finalize on its
-//! first run, and our CPU executor evaluates the very finalize the device is sent.
+//! here, so a failure names the query rather than a stage, and `declared.rs` drives the
+//! same walk for the schema catalog. No driver and no scheduling — every shape here plans
+//! one batch per lane, so a recipe's own call order is the schedule. The oracle is
+//! DataFusion on the same SQL: a golden would pin a wrong finalize on its first run, and
+//! our CPU executor evaluates the very finalize the device is sent.
 
+mod declared;
 mod walk;
 
 use datafusion::common::JoinType;
