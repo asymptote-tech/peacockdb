@@ -49,7 +49,7 @@ gate, down into `src/` ends that reason for all but eight. The move, the visibil
 sweep and the separation of test code from production code happen together, because none is worth
 its own pass over the same files.
 
-### 5. [`test-support.md`](test-support.md) — state: completing — PR #147
+### 5. [`test-support.md`](test-support.md) — state: completeness approved — PR #147
 
 The corpus harness — 698 lines — joins the helpers task 4 put in `src/test_support/`, and the two
 corpus binaries reach it through three functions whose signatures carry no engine type. That is

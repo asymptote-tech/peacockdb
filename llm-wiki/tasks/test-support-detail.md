@@ -472,3 +472,92 @@ Round 2 closed on `95a9ff31`; the rebase re-proof is green on `50654da1`; the br
 closed with a pin. Board to `completing`. The completeness pass is two readings dispatched
 together: the reviewer (what is wrong) and a fresh analyst (what is missing, and which
 `architecture.md` sentences the branch falsified), neither seeing the other's list.
+
+### 2026-09-12 — completeness pass, the analyst's reading
+
+Read on `a3cf60ad` against `ENS-test-layout` at `1bcf4e97`: the 21-file diff as one change, the
+spec's Validation and Done-when, `architecture.md` entire, `build-test.md`, `coding-style.md`,
+`visibility.md`, the board. Read-only; nothing built. The reviewer's list was not seen.
+
+**0 blocking, 0 important. `architecture.md`: none falsified.**
+
+What was checked, and how:
+
+- **Consumers.** `mod common` is declared by `test_golden_format` and `test_cost_model` alone,
+  and the shim's six re-exports are exactly the names those two use. No moved item survives in
+  two places: `assert_sorted_str_approx`, `GpuResultMode`, `gpu_result_mode`,
+  `RESULT_GOLDEN_MAX_BYTES`, `Regeneration`, `SKIPPED`, `CostModel` and `Category` are each
+  declared once in the crate. `read_back` is deleted and had no caller.
+- **Reachability.** Every path a case, an oracle or a golden takes is intact: `cpu_case` →
+  `assert_answer` (three oracle keywords, exhaustive match) → `assert_or_merge` →
+  `regeneration()` / `merge_section`; `gpu_case` → `assert_section` (never writes) →
+  `assert_result` (five keywords, exhaustive). `corpus_gpu` keeps the `not(rust-only)` gate it
+  had; the lock in `merge_section` is std's `File::lock`, so no dev-only crate rode into the
+  library. The 8 device cases and the 448 cpu cases ran on this code (entries above).
+- **The facade.** Nothing under `test_support/` outside `mod.rs` is bare `pub`; no `pub use`,
+  no macro. Every bare `pub` in `mod.rs` is over std, arrow, `RecordBatch` or a harness type;
+  `Mode::sizing` and `Mode::knobs` are `pub(crate)`, so `BatchSizing`/`PlanKnobs` cannot be
+  reached through `Mode`. The guard reads `components()` off `lib.rs`, which includes `common`,
+  so it is stricter than the spec's five. The eight and `RecipePlan`'s two methods: zero code
+  hits under `tests/`, zero hits in `peacockdb`, `peacockdb-ffi` and `cost-report` — the
+  `coding-style.md` sentence "nothing outside the crate names them any more" is true. The one
+  road left from a binary to an engine type is the crate's own `pub mod` facades, where the
+  eight are still `pub`; `visibility.md` claims that demotion as its own.
+- **Done-when.** Each item has evidence in this file — the E0433 probe, the workflow grep,
+  both registry assertions, 1037 → 1038 by the one rule, 170 goldens identical, the guard red
+  on the spec's probe and on the three further spellings — except CI, in progress on
+  `a3cf60ad` at the time of reading (cost-report, which carries the layout rule, green).
+- **`build-test.md`.** The header's 1578/1143 is the +1 the rule adds; the `test-support`
+  paragraph and the layout-rule row cover what the branch added. No wiki page names a moved
+  file by its old path except the dated reports, which pin line numbers at a master SHA.
+- **`architecture.md`.** The paths it names and the thirteen code files the branch changed do
+  not intersect. Every sentence about tests describes content the branch did not touch:
+  "Targeted unit tests are the coverage; the plan goldens are not" (Planning); "A naive rescan
+  survives as a test-only oracle" (The scheduling rule); `plan_executor_internal.h` and
+  `GpuWorker` / `WorkerPool` (Interfaces); "the divergence surfaces only at the root, for a
+  query whose corpus line names a result golden or an oracle" (What guards it, and what does
+  not); `cpp/tests/gpu/test_multi_gpu_*` (Multi-GPU notes); "Peacock cost is a re-reading of
+  the execution golden" and `testdata/cost_model.conf` (Cost model and the DuckDB oracle). "The
+  Rust side's own traits — `Backend`, the executor families, `GpuNode` — are in Execution above"
+  (Interfaces) says where they are declared, not that they are `pub`.
+
+For the signoff, two spec sentences the branch does not satisfy, both by design and both
+already in this file:
+
+- "`corpus_golden.rs`, `result_text.rs` and `cost_model.rs` … stay in `tests/common/`
+  untouched" — `corpus.rs` calls both and `src/` cannot see `tests/`, so 1097 lines moved, not
+  698.
+- "the eight items stop being `pub` as a result" (twice in the spec) — they stay `pub`. The
+  branch keeps the 200 invariant and leaves the demotion to task 6, whose spec claims it; the
+  board prose says the eight stop *needing* `pub`, which is what the branch does.
+
+One residue with no owner: `tests/common/mod.rs` is now a 31-line `pub use` shim for two
+suites. Retiring it is six `use` lines in `test_golden_format.rs` and `test_cost_model.rs`;
+neither this spec nor `visibility.md`'s carry-over list names it.
+
+Below the bar, comment-only, the coordinator's to apply if it wishes: `testdata/cost_model.conf:2`
+still says "Parsed by tests/common/cost_model.rs" (the class round 1's `test_cost_model.rs:4`
+nit fixed), and `peacockdb-core/Cargo.toml`'s `inventory` comment says "see
+`common::assert_registry_matches_csv`", a name that resolves in no spelling now that the
+`common::registry` re-export is gone.
+
+### 2026-09-12 — completeness pass, the reviewer's reading: 0 blocking, 0 important
+
+Read on `a3cf60ad` without the analyst's list. Every spec claim re-checked against the tree: the
+facade (whole-word grep for the eight, `wire_nodes`, `bytes` — only the rule's doc comment and
+fixtures), all 63 `pub` declarations and 34 `pub` fields in `mod.rs` over std/arrow/harness types,
+a Python port of the rule red on both probe spellings and on the pre-narrowing tree, the feature
+gate and the self dev-dependency, no workflow flag, both registry assertions, the 170-file
+goldens digest, static `#[test]` counts per binary against the inventory baseline (layout 17 vs
+16, the one rule), the visibility dump (263 / 200 / 7, records outside `test_support`
+byte-identical), token-normalised bodies of every moved helper against the parent, comment caps
+counted, both wiki pages' sentences true. Round-2 closures re-checked and the dropped shapes
+agreed with. The deviation list for the signoff confirmed and extended (the 22 facade items, the
+`knobs`/`sizing` narrowing, the shim).
+
+### 2026-09-12 — completeness approved
+
+Both readings closed with nothing to apply; `architecture.md` has no falsified sentence. Two
+comment-only residues the analyst named below the bar are fixed by the coordinator:
+`testdata/cost_model.conf:2` and `peacockdb-core/Cargo.toml:46` now point at `test_support`.
+Signoff appended to the spec. `done` waits on CI for the head that carries these two lines.
