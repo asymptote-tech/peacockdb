@@ -22,7 +22,7 @@ use super::{KeyDistribution, NodeKind, SortOrder};
 /// rewrites a planned one into a shape no planner emits needs the same check the planner
 /// ran, and the driver does not make it — [`check_canonical_form`] is all it asks for.
 pub(crate) fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
-    if !matches!(root.kind(), NodeKind::Sink) {
+    if !matches!(root.kind(), NodeKind::Exporter { .. }) {
         return Err(PlanError::Invalid(format!(
             "{}: a plan ends at the crossing back to the host — the planner roots it in \
              GpuUnload",
@@ -45,7 +45,7 @@ fn limit_positions(node: &dyn GpuNode, parent_is_sink: bool) -> Result<(), PlanE
             node.name()
         )));
     }
-    let is_sink = matches!(node.kind(), NodeKind::Sink);
+    let is_sink = matches!(node.kind(), NodeKind::Exporter { .. });
     for child in node.children() {
         limit_positions(child, is_sink)?;
     }
@@ -129,7 +129,7 @@ pub(crate) fn check_output_schema(
         .children()
         .first()
         .and_then(|input| input.kind().schema())
-        .expect("a sink has an input");
+        .expect("an unload has an input");
     if emitted.fields.fields().len() != planned.fields().len() {
         return Err(PlanError::Invalid(format!(
             "the plan emits {} columns and the query asked for {}",
@@ -170,7 +170,7 @@ fn declared_width(node: &dyn GpuNode) -> Result<(), PlanError> {
         input
             .kind()
             .schema()
-            .expect("a sink cannot be an input")
+            .expect("every kind declares a schema")
             .fields
             .fields()
             .len()
@@ -269,8 +269,11 @@ fn types_across_the_edge(node: &dyn GpuNode) -> Result<(), PlanError> {
         _ => return Ok(()),
     };
     let (ours, theirs) = (
-        node.kind().schema().expect("not a sink"),
-        carried.kind().schema().expect("a sink cannot be an input"),
+        node.kind().schema().expect("every kind declares a schema"),
+        carried
+            .kind()
+            .schema()
+            .expect("every kind declares a schema"),
     );
     if let Some((ours, theirs)) = ours
         .fields
@@ -298,7 +301,7 @@ fn structural(node: &dyn GpuNode) -> Result<(), PlanError> {
     let name = node.name();
     let children = node.children();
     for child in &children {
-        if matches!(child.kind(), NodeKind::Sink) {
+        if matches!(child.kind(), NodeKind::Exporter { .. }) {
             return Err(PlanError::Invalid(format!(
                 "{name}: its input is a {}, whose output has already crossed to the host",
                 child.name()

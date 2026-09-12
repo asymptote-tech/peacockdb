@@ -236,9 +236,9 @@ impl Schema {
     }
 }
 
-/// A sink structurally has no layout and no schema; everything else always has both,
-/// which is why they live inside the kind rather than beside it as two `Option`s that
-/// have to be `None` together.
+/// Layout and schema live inside the kind rather than beside it as two `Option`s: the
+/// exporter structurally has no layout, everything else always has both, and there is
+/// nothing left for a caller to get wrong.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeKind {
     Source {
@@ -249,22 +249,25 @@ pub enum NodeKind {
         layout: PartitionLayout,
         schema: Schema,
     },
-    Sink,
+    /// The boundary: rows leave the device here. It declares the columns that cross, and
+    /// has no partition layout because nothing downstream is partitioned.
+    Exporter { schema: Schema },
 }
 
 impl NodeKind {
-    /// `None` for a sink, which structurally has neither.
+    /// `None` for the exporter, which structurally has none.
     pub(crate) fn layout(&self) -> Option<&PartitionLayout> {
         match self {
             Self::Source { layout, .. } | Self::Intermediate { layout, .. } => Some(layout),
-            Self::Sink => None,
+            Self::Exporter { .. } => None,
         }
     }
 
     pub(crate) fn schema(&self) -> Option<&Schema> {
         match self {
-            Self::Source { schema, .. } | Self::Intermediate { schema, .. } => Some(schema),
-            Self::Sink => None,
+            Self::Source { schema, .. }
+            | Self::Intermediate { schema, .. }
+            | Self::Exporter { schema } => Some(schema),
         }
     }
 }
@@ -971,8 +974,13 @@ pub(crate) struct GpuUnload {
 
 impl GpuUnload {
     pub(crate) fn new(input: Box<dyn GpuNode>, interval: Option<RowInterval>) -> Self {
+        let schema = input
+            .kind()
+            .schema()
+            .expect("an unload's input declares the columns that cross")
+            .clone();
         Self {
-            kind: NodeKind::Sink,
+            kind: NodeKind::Exporter { schema },
             interval,
             input,
         }

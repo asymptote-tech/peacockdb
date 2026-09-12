@@ -132,7 +132,7 @@ macro_rules! stub_backend {
                 match node.kind() {
                     NodeKind::Source { .. } => Ok(NodeExecutors::Source($ops)),
                     NodeKind::Intermediate { .. } => Ok(NodeExecutors::Exec($ops)),
-                    NodeKind::Sink => Ok(NodeExecutors::Unload($ops)),
+                    NodeKind::Exporter { .. } => Ok(NodeExecutors::Unload($ops)),
                 }
             }
         }
