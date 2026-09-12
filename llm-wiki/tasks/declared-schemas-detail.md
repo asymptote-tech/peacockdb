@@ -396,3 +396,100 @@ session → `Err` naming `unknown handle`).
 
 Nothing under `cpp/`, no fix, no wire change. No git mutation: `walk.rs` is new and unstaged,
 `mod.rs`, `tickets.md`, `build-test.md` and this file modified.
+
+### 2026-09-12 — plan task 6 done: the queries, one named test each
+
+**Files.** `wire/gpu_tests/declared.rs` (new; 14 cases, one ignored) declared in
+`gpu_tests/mod.rs`; `wire/tests/refusals.rs` (new; 2 cases at the rust rung) declared in
+`wire/tests/mod.rs`; `#187` corrected in `active-tickets.md`; `build-test.md` rows and counts;
+`-impl.md` names row 15's query. Nothing under `cpp/`, no fix, no wire change, no new `pub`.
+
+**The list against the survey.** Rows 1, 2 and 12 kept as the three classes the survey saw at the
+sink; row 3 kept as the survey's evidence; 7 and 9 kept because the sink is blind to names and
+order; 8's note says the flag is the limitation; no row dropped. Query 6 takes `#209`'s open form
+(`n_nationkey + 100 < 0`), the test says why. Query 10 needs aliases — DataFusion refuses two
+casts of one column under one generated name. This parquet's `l_linenumber` is `Int64`, so
+query 5 pins `Int64` only and `Int32` identity comes from `n_nationkey` in 7, 9 and 10. Rows
+13/14 need no parquet: `arrow_cast(l_shipdate, 'Date64')` gives the planner a `Date64` at a
+project and `CAST(l_shipdate AS TIMESTAMP)` a `Timestamp(Nanosecond, None)` — both plan on the
+CPU (CLI) and the wire decides.
+
+**Where the plan-time refusals live and why.** Row 14 and the interval are `attach_recipes`
+refusals with no device: the rung rule says a module declares the lowest rung it needs, so they
+are `wire/tests/refusals.rs`, planned over tpch sf1 at the catalog's knobs (`--lib` 541 → 543
+passed). Both refuse cleanly, `PlanError::Unsupported`, verbatim: `unsupported: unsupported Arrow
+data type: Timestamp(Nanosecond, None) at #2` and `unsupported: unsupported scalar value:
+IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 1, nanoseconds: 0 }") (#168) at
+#2`. One thing seen on the way, not measured: `serialize_schema` maps an unsupported field type
+to `fb::DataType::Null` (`unwrap_or`), so a `Timestamp` that reached a schema without passing
+through a cast expression would cross as `Null` silently; no query here does, and the cast arm
+refuses first. Recorded for #200.
+
+**Row 15's query** (named in `-impl.md`): `SELECT o_orderkey, o_totalprice FROM orders WHERE
+o_totalprice > 500000` at `tp1-rowgroup` — eleven of thirteen row groups survive, three calls
+fire eleven times each, every firing's exported schema equals its call's first. The mode's
+coalesce-all shapes (anti/semi join, cross join — rendered on the CPU) put the several batches on
+the probe side, which the walk refuses (#152), so the claim is on the per-batch calls.
+
+**The catalog, per query** (`walk.rs` firings; `?` marks a nullable field; every declared field
+is nullable because the parquet columns are `optional`; the device lines are the dump of run
+`…T095817` reproduced by hand on the host):
+
+| # | query (tp1-single unless said) | test | verdict | declared → exported, verbatim |
+|---|---|---|---|---|
+| 1 | `SELECT n_name FROM nation` | `bug_a_declared_utf8view_is_exported_as_utf8` | `bug_` #183 | `#0 CudfScan: [n_name:Utf8View?] → [n_name:Utf8]`; `result_from_handle` the same — enters at the scan |
+| 2 | `SELECT l_extendedprice FROM lineitem WHERE l_orderkey = 1` | `a_narrow_decimal_exports_at_the_exporters_default_precision` | limitation, #187 corrected | `#0 CudfScan: [l_orderkey:Int64?, l_extendedprice:Decimal128(15, 2)?] → [l_orderkey:Int64, l_extendedprice:Decimal128(38, 2)]`; `#1 CudfFilter` and the export `(15, 2)? → (38, 2)` |
+| 3 | `… CAST(l_extendedprice AS DECIMAL(38,4)) …` | `a_decimal_declared_at_max_precision_agrees_for_the_exporters_reason` | green, for the wrong reason | `#2 CudfProject: [lineitem.l_extendedprice:Decimal128(38, 4)?] → [… Decimal128(38, 4)]` |
+| 4 | `SELECT l_shipdate FROM lineitem WHERE l_orderkey = 1` | `a_date32_survives_the_crossing` | green | `[l_shipdate:Date32?] → [l_shipdate:Date32]` at all three |
+| 5 | `SELECT l_orderkey, l_linenumber FROM lineitem WHERE l_orderkey = 1` | `an_int64_survives_the_crossing` | green | `[l_orderkey:Int64?, l_linenumber:Int64?] → [l_orderkey:Int64, l_linenumber:Int64]` |
+| 6 | `SELECT n_name FROM nation WHERE n_nationkey + 100 < 0` | `a_zero_row_batch_types_its_string_column_as_a_populated_one` | green | `#1 CudfFilter: [n_name:Utf8View?] → [n_name:Utf8]`, zero rows; the sink's exported schema equals query 1's |
+| 7 | `SELECT n_name AS label, n_nationkey AS id FROM nation` | `column_names_survive_the_crossing` | green | `#1 CudfProject: [label:Utf8View?, id:Int32?] → [label:Utf8, id:Int32]` |
+| 8 | `SELECT n_nationkey, CASE WHEN n_nationkey > 10 THEN n_name END AS maybe FROM nation` | `nullability_is_read_off_the_data_rather_than_the_declaration` | limitation | `#1 CudfProject: [n_nationkey:Int32?, maybe:Utf8View?] → [n_nationkey:Int32, maybe:Utf8?]` — the key's flag is off because no key is null |
+| 9 | `SELECT n_regionkey, n_nationkey FROM nation` | `column_order_and_arity_survive_the_crossing` | green | `#0 CudfScan: [n_nationkey:Int32?, n_regionkey:Int32?] → same order`; `#1 CudfProject: [n_regionkey:Int32?, n_nationkey:Int32?] → [n_regionkey:Int32, n_nationkey:Int32]` |
+| 10 | `SELECT CAST(n_nationkey AS BIGINT) AS wide, CAST(n_nationkey AS DOUBLE) AS real FROM nation` | `fixed_width_cast_targets_survive_the_crossing` | green | `#1 CudfProject: [wide:Int64?, real:Float64?] → [wide:Int64, real:Float64]` |
+| 11 | `SELECT CAST(n_nationkey AS VARCHAR) FROM nation` | `a_cast_to_text_cannot_be_measured_until_the_device_answers_it` | **ignored**, #203 | run by hand with `--ignored`: `execute_node(#1, [1] handles) failed: [in CudfProject] cast to STRING from a non-string type not supported in column path` — no handle reaches the export |
+| 12 | `SELECT extract(year FROM o_orderdate) FROM orders` | `bug_an_extracted_year_declared_int32_is_exported_as_int16` | `bug_` #191 | `#0 CudfScan: [o_orderdate:Date32?] → [o_orderdate:Date32]`; `#1 CudfProject: [date_part(Utf8("YEAR"),orders.o_orderdate):Int32?] → [… :Int16]`; the export the same — enters at the project |
+| 13 | `SELECT arrow_cast(l_shipdate, 'Date64') FROM lineitem WHERE l_orderkey = 1` | `bug_a_date64_is_exported_as_a_millisecond_timestamp` | `bug_` #200 | `#2 CudfProject: [arrow_cast(lineitem.l_shipdate,Utf8("Date64")):Date64?] → [… :Timestamp(Millisecond, None)]`; the export the same |
+| 14 | `SELECT CAST(l_shipdate AS TIMESTAMP) FROM lineitem WHERE l_orderkey = 1` | `wire::tests::refusals::a_cast_to_timestamp_is_refused_naming_the_type` | green, rust rung | `Unsupported("unsupported Arrow data type: Timestamp(Nanosecond, None) at #2")` |
+| 15 | `SELECT o_orderkey, o_totalprice FROM orders WHERE o_totalprice > 500000`, tp1-rowgroup | `the_firings_of_one_call_export_one_schema` | green | `#0 CudfScan` ×11, `#1 CudfFilter` ×11, `result_from_handle` ×11, each `[o_orderkey:Int64?, o_totalprice:Decimal128(15, 2)?] → [o_orderkey:Int64, o_totalprice:Decimal128(38, 2)]` |
+| — | `SELECT l_shipdate + interval '1 day' FROM lineitem WHERE l_orderkey = 1` | `wire::tests::refusals::an_interval_literal_is_refused_naming_168` | green, rust rung | `Unsupported("unsupported scalar value: IntervalMonthDayNano(…) (#168) at #2")` |
+
+**Which exporter.** Every line above is the production `peacock_result_from_handle` — the only
+exporter this task uses; the thin one was cut by the spec.
+
+**Untested by construction.** A sink column of `Binary`, `Null` or `Float16`: cuDF maps the class
+to `EMPTY`, no corpus column declares one and nothing refuses them at planning time. Named, not
+measured. `UInt8`/`UInt64`, `ORDER BY`'s sort, `Dictionary`, `Int8`, `Float32` and list types
+are out of this task's six arms or have no source, as the spec says.
+
+**Tickets.** No new ticket: every divergence had one (#183, #191, #200), the gap had one (#203),
+the zero-row refusal is #209 from task 5. #187's text corrected in place (a missing argument,
+not two verdicts) with the catalog's test named. The `bug_` tests here are three; the
+coordinator's `bug_` table (plan task 7) takes them out of the coverage counts — for now they sit
+inside the "Schema catalog" row (14) as task 9's do in the harness row.
+
+**On TDD.** Every case was red first at compile (`declared.rs` did not exist); the device then
+answered all thirteen green on the first run — the tickets' predictions held, including the two
+the spec called unexercised (#200's cast and the CASE's nullability). The one thing the device
+corrected was the count in row 15's comment (eleven, not thirteen — the predicate prunes two row
+groups), fixed before the final cycle.
+
+**Results, all fresh after the last code edit** (the last edit after the device runs is a
+`//!` header trim in `gpu_tests/mod.rs`; gpu `--no-run` after it: 0 warnings):
+
+- `scripts/cargo-cudf.sh test … --features gpu --no-run` 0 warnings; `--list gpu_tests::` 303
+  (289 + 14).
+- shad-gpu: `--build`/`--push-binaries`/`--patch` rc 0. `PCK_TEST_FILTER=wire::gpu_tests::declared`
+  → run `20260912T100132-348891`: `peacockdb_core_gpu_lib` 13 passed 0 failed 1 ignored (3.22 s).
+  Empty filter → run `20260912T100141-348929`, exit 0: `peacockdb_core_gpu_lib` 302 passed
+  0 failed 1 ignored (30.27 s); `test_gpu_corpus` 8 passed (8.07 s). First catalog run
+  `20260912T095817-345847` was the same 13/0/1; the dump binary (scratch, removed) ran by hand.
+- `cargo test --features rust-only -p peacockdb-core --lib` 543 passed, 0 failed, 2 ignored
+  (541 + the two refusals); `--test test_module_layout` 17.
+- rustfmt-check clean on `declared.rs`, `refusals.rs`, `walk.rs`, `gpu_tests/mod.rs`; surface 46;
+  caps: in-body ≤ 2, declaration/header ≤ 10.
+- `build-test.md`: cpu `--lib` 543 → 545, cpu block 1014 → 1016; gpu `gpu_tests::` 289 → 303,
+  block 297 → 311; Rust 1404 → 1420; grand total 1840 → 1856; rows "Wire refusals at plan time" (2)
+  and "Schema catalog" (14).
+
+No git mutation: `declared.rs` and `refusals.rs` are new and unstaged.

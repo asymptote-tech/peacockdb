@@ -657,6 +657,12 @@ Queries 2–13 of the spec. Each is its own `#[test]`, `bug_`-prefixed only wher
 something wrong. The mode is stated per query; query 13 is `tp1-rowgroup` because `tp1-single` is
 `OneBatchPerLane` and cannot produce two firings of one call.
 
+Row 15's query, at `tp1-rowgroup`: `SELECT o_orderkey, o_totalprice FROM orders WHERE o_totalprice
+> 500000` — orders is thirteen row groups, eleven survive the predicate, and the scan, the filter and
+the export each fire once per batch. The coalesce-all shapes that mode plans (the anti and semi joins,
+the cross join) put the several batches on the probe side and the walk refuses a multi-batch probe
+(#152), so the claim is measured on the three per-batch calls instead.
+
 - [ ] **Step 3: Write the two that never reach a device**
 
 The interval query is a plan-time refusal — `attach_recipes` returns `Err`, so driving it would

@@ -152,6 +152,13 @@ value by a step, which is a different fix from a scale rule and points at the ex
 anything upstream of it. Six device cells across T19's first two batches. A bare scan of an `(18, 2)`
 column exports `(38, 2)` too: `bug_a_decimal_column_is_exported_at_precision_38` (`gpu_tests/source_cases.rs`).
 
+**Corrected by the catalog (`declared-schemas.md`): not two verdicts on one value, a missing
+argument.** cuDF's decimal carries a scale and no precision, so the device widened nothing it could
+have kept; `export_table_to_ipc` (`gpu_executor.cpp`) builds `column_metadata` from names alone and
+`to_arrow_schema` fills the precision it was not given with `max_precision`. The 38 is our exporter's
+default, and no precision cuDF holds can be read through it. `a_narrow_decimal_exports_at_the_exporters_default_precision`
+(`wire/gpu_tests/declared.rs`) records it as the instrument's limitation, per call, at every node.
+
 <a id="t188"></a>
 ### #188 — the device refuses a read with row groups and a limit together
 
