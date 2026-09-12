@@ -105,6 +105,11 @@ fn an_accumulator_emits_where_its_script_says() {
     let (per_batch, at_done) = drive_accumulator(&holding, node, arrivals());
     assert_eq!(per_batch, 0, "a coalesce emits nothing until done");
     assert_eq!(at_done, 1, "and one batch when it comes");
+    assert_eq!(
+        drive_accumulator(&holding, node, Vec::new()),
+        (0, 0),
+        "and nothing at all where no batch arrived, as the backends' coalesce answers"
+    );
 
     let streaming = Script::default().with_accumulator(AccRule::Streaming);
     let (per_batch, at_done) = drive_accumulator(&streaming, node, arrivals());
@@ -144,5 +149,3 @@ fn drive_accumulator(
     let (out, _) = accumulator.mark_done_and_fetch().expect("done is accepted");
     (per_batch, out.len())
 }
-
-

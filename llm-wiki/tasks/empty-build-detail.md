@@ -192,3 +192,25 @@ grand total; corrected here). The known-wrong table's three pins are on #212 sin
 ### 2026-09-12 — reviewing: PR #153 opened against `ENS-typed-nulls`
 
 Six plan tasks in three commits, #175 archived at `63ef4ae8`. Reviewer round 1 dispatched.
+
+### 2026-09-12 — review round 1: five items, rust rung
+
+1. `tests/end_to_end.rs` q77 comment: q77 stays out because its Right outer's build side
+   emits no batch at all — the Inner join under it drops its empty lane as it should — and
+   the link is `tickets.md#t212`; the dead `#t175` link is gone.
+2. `tests/end_to_end/dimensions.rs`: the zero-row-lane count reads
+   `!lane.is_empty() && lane.iter().all(|batch| batch.rows == 0)`, so a lane with no emitted
+   batch no longer counts as a kept empty. Both cases still green — q93 and anti-join each
+   emit a real zero-row batch on the owing scatter.
+3. `executor/mod.rs` `JoinExecutor::without_build` trait doc: names both routes here — a
+   scatter that gave a lane no rows, for the types that owe nothing, and an upstream that
+   emitted nothing at all (#212). Seven doc lines, within the cap.
+4. `tests/common/corpus_cases.inc`: the q16 sentence is dropped; the comment lists disabled
+   cells only.
+5. `driver/tests/instrument.rs` `an_accumulator_emits_where_its_script_says`: a fourth case
+   drives `CoalesceAll` with no arrivals and asserts `(0, 0)`. Watched red with the mock's
+   no-arrival arm disabled (`left: (0, 1)`), green with it. A case inside the existing test,
+   so no count moves; the file's two trailing blank lines (pre-existing) went with rustfmt.
+
+Rung: `--lib` 551 passed, 0 failed, 2 ignored; `test_cpu_corpus` 451; `test_module_layout`
+17; rustfmt `--check` (`skip_children=true`) clean on the four touched files.
