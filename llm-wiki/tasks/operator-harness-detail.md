@@ -269,3 +269,78 @@ because `a_test_module_is_named_for_its_rung` wants the literal; facade items ar
 `pub(crate)` or private; the device proof runs as `PCK_RUN_CPP=0 PCK_TEST_FILTER=<module path>
 scripts/build-test-shadgpu.sh --run-detached` then `--run-status`, after `--build --push-binaries
 --patch`; the rung whole is 61 on `peacockdb_core_gpu_lib` and 8 on `test_gpu_corpus`.
+
+### 2026-09-12 — plan task 5 done: `run_both`, and `GpuUnload` through `executors_for`
+
+New: `peacockdb-core/src/tests/gpu_tests/script.rs`, declared `mod script;` in `gpu_tests/mod.rs`.
+`Script` (the plan's seven variants), `Outcome { cpu, gpu }` with `same(Order)`, `gpu_refuses()`
+and `cpu_refuses()`, `run_both(node, Script) -> Outcome`, and the private generic `drive<B:
+Backend>` with one arm per category — as the plan wrote them, with three adjustments:
+
+- `GpuBackend` and `CpuBackend` come from `crate::executor::{…}` (the plan's
+  `executor::gpu_backend::GpuBackend` path is behind a `mod` wall); `Slot`, `Order`, `same` from
+  `crate::tests::compare`.
+- The root's post-order is counted by a local `size(node) - 1`, as the plan does. The comment cites
+  `PlanIndex::build` instead of the deleted `post_order_of_every_node`: `build` → `index::walk` asks
+  `category_of` of every node, and `category_of` → `as_node_ref` panics on a `Given` leaf, so the
+  index cannot be read for a tree with a stub in it.
+- `Script` carries one `#[allow(dead_code)]` with its reason above it: only `Exec` (the refusal
+  case) and `Unload` are constructed here; `GpuLimit` (plan task 6) constructs `Accumulate` and
+  `operator-cases.md` the rest, and the attribute leaves with them. Precedent: the per-variant
+  allows on `NodeRef` (`plan/mod.rs`). The alternative — five arms deleted and re-added by later
+  tasks — would have left `drive` a two-arm match named as the harness.
+
+The refusal: `run_both` opens with `assert_eq!(category_of(node), script.category(), "the script's
+shape is not the node's category")`, before the cpu drive and before `Device::open`, so the check
+runs with no device. Its message, as a wrong-shaped script over an unload produces it:
+
+    assertion `left == right` failed: the script's shape is not the node's category
+      left: Unload
+     right: Exec
+
+Red first, on this box with the staged gpu binary (`LD_LIBRARY_PATH` per build-test.md): with
+`run_both` written without the check, `a_script_of_another_shape_is_refused_before_either_backend_runs`
+failed on `drive`'s catch-all — `executors_for answered Unload for a script of another shape` —
+and went green with the assert added. The two `Outcome` tests in `script.rs`
+(`a_one_sided_refusal_is_read_by_its_message`, `same_names_the_side_that_refused`) were written
+in the same edit as the three-line accessors they exercise, on task 2's precedent for
+`the_asserting_form_panics_with_the_reason`; they build an `Outcome` by hand and need no device.
+
+Cases (9): `tests::gpu_tests::harness_cases::{a_script_of_another_shape_is_refused_before_either_backend_runs,
+an_unload_hands_the_whole_batch_over_on_both_backends, an_unload_over_a_range_hands_those_rows_over,
+an_unload_clamps_a_range_over_the_end_the_same_way, an_unload_of_a_range_past_the_end_is_zero_rows_on_both,
+an_unload_of_a_zero_row_batch_is_zero_rows_under_the_schema_on_both,
+a_range_over_a_zero_row_batch_is_zero_rows_on_both}` and `tests::gpu_tests::script::{
+a_one_sided_refusal_is_read_by_its_message, same_names_the_side_that_refused}`. Each unload case
+builds `GpuUnload::new(Given::of(synthetic schema, MultipleBatches), None)` over `synthetic(rows, 2)`
+and runs `Script::Unload { batch, rows }` through `executors_for` on both backends — `CpuUnload`'s
+`covers`/`clamp` slice against `GpuExport`'s `peacock_result_from_handle` range — then
+`Outcome::same(Order::AsEmitted)`.
+
+**No divergence and no one-sided failure.** Every unload case agreed on the first device run: the
+whole batch, a range inside it, a range clamped at the end, a range past the end (0 rows on both,
+under the declared schema — `GpuExport` builds `RecordBatch::new_empty` at `len == 0` and
+`CpuUnload` slices to nothing), a zero-row batch, and a range over a zero-row batch. So no ticket
+and no `bug_` test from this task; `gpu_refuses`/`cpu_refuses` have their hand-built test and no
+device caller yet.
+
+shad-gpu (neighbour at 37 GiB of 143.7; no `rmm` line in either gate log):
+
+    run 20260912T050223-246916  PCK_RUN_CPP=0 PCK_TEST_FILTER=tests::gpu_tests  rc 0
+      peacockdb_core_gpu_lib   15 passed; 0 failed; 590 filtered out   (task 4's 6 + these 9)
+      test_gpu_corpus          0 passed; 8 filtered out
+    run 20260912T050241-246978  PCK_RUN_CPP=0, no filter (the rung whole)      rc 0
+      peacockdb_core_gpu_lib   70 passed; 0 failed; 535 filtered out   (61 + 9)
+      test_gpu_corpus          8 passed; 0 failed
+
+Results here:
+
+    CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run   exit 0, 0 warnings
+    <staged lib> --list gpu_tests::                                                          70 cases, the nine above by name
+    <staged lib> gpu_tests::harness_cases::a_script_of_another_shape gpu_tests::script::     3 passed on this box (no device touched)
+    scripts/build-test-shadgpu.sh --build; --push-binaries --patch                            exit 0, 0 warnings
+    cargo test --features rust-only -p peacockdb-core --lib                                   530 passed, 2 ignored, 0 warnings (unchanged)
+    cargo test … --test test_module_layout / --test test_ci_coverage                          17 / 8
+    rustfmt --check --edition 2024 src/tests/gpu_tests/{mod,script,harness_cases}.rs          clean
+
+For plan task 8: the gpu block's `--lib -- gpu_tests::` figure is 70 after this task (55 + 6 + 9).

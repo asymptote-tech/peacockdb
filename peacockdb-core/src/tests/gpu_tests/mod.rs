@@ -3,3 +3,4 @@
 
 mod device;
 mod harness_cases;
+mod script;

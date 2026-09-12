@@ -1,7 +1,10 @@
 //! The seqless three, and the helper round trip — the cases whose recipe puts nothing on
 //! the wire, so a wrong helper has nowhere to hide.
 
+use datafusion::arrow::record_batch::RecordBatch;
+
 use super::device::Device;
+use super::script::{Script, run_both};
 use crate::executor::RowRange;
 use crate::plan::{BatchLayout, GpuUnload, Schema};
 use crate::tests::compare::{Order, assert_same};
@@ -95,4 +98,114 @@ fn zero_rows_round_trip_as_zero_rows_under_the_schema() {
         .fetch(device.upload(&batch), RowRange::WHOLE)
         .expect("the schema ships");
     assert_same(&[vec![batch]], &[vec![back]], Order::AsEmitted);
+}
+
+// `GpuUnload` through `executors_for` on both backends: `CpuUnload`'s slice against
+// `GpuExport`'s row range, the first operator through `run_both`.
+
+fn unload_over(rows: usize) -> (GpuUnload, RecordBatch) {
+    let batch = synthetic(rows, 2);
+    let node = GpuUnload::new(
+        Given::of(Schema::new(batch.schema()), BatchLayout::MultipleBatches),
+        None,
+    );
+    (node, batch)
+}
+
+#[test]
+#[should_panic(expected = "the script's shape is not the node's category")]
+fn a_script_of_another_shape_is_refused_before_either_backend_runs() {
+    let (node, batch) = unload_over(4);
+    run_both(&node, Script::Exec(vec![batch]));
+}
+
+#[test]
+fn an_unload_hands_the_whole_batch_over_on_both_backends() {
+    let (node, batch) = unload_over(64);
+    run_both(
+        &node,
+        Script::Unload {
+            batch,
+            rows: RowRange::WHOLE,
+        },
+    )
+    .same(Order::AsEmitted);
+}
+
+#[test]
+fn an_unload_over_a_range_hands_those_rows_over() {
+    let (node, batch) = unload_over(64);
+    run_both(
+        &node,
+        Script::Unload {
+            batch,
+            rows: RowRange {
+                offset: 20,
+                length: 7,
+            },
+        },
+    )
+    .same(Order::AsEmitted);
+}
+
+#[test]
+fn an_unload_clamps_a_range_over_the_end_the_same_way() {
+    let (node, batch) = unload_over(64);
+    run_both(
+        &node,
+        Script::Unload {
+            batch,
+            rows: RowRange {
+                offset: 60,
+                length: 100,
+            },
+        },
+    )
+    .same(Order::AsEmitted);
+}
+
+#[test]
+fn an_unload_of_a_range_past_the_end_is_zero_rows_on_both() {
+    let (node, batch) = unload_over(8);
+    run_both(
+        &node,
+        Script::Unload {
+            batch,
+            rows: RowRange {
+                offset: 8,
+                length: 4,
+            },
+        },
+    )
+    .same(Order::AsEmitted);
+}
+
+// Empty inputs, each its own case.
+#[test]
+fn an_unload_of_a_zero_row_batch_is_zero_rows_under_the_schema_on_both() {
+    let (node, batch) = unload_over(0);
+    run_both(
+        &node,
+        Script::Unload {
+            batch,
+            rows: RowRange::WHOLE,
+        },
+    )
+    .same(Order::AsEmitted);
+}
+
+#[test]
+fn a_range_over_a_zero_row_batch_is_zero_rows_on_both() {
+    let (node, batch) = unload_over(0);
+    run_both(
+        &node,
+        Script::Unload {
+            batch,
+            rows: RowRange {
+                offset: 0,
+                length: 5,
+            },
+        },
+    )
+    .same(Order::AsEmitted);
 }
