@@ -2,17 +2,15 @@
 //! plan, and a walk of the tree making exactly the calls each recipe names, threading every
 //! output handle into the next call's input and exporting at the root.
 //!
-//! No scheduling — every shape driven here plans one batch per lane, so a recipe's own
-//! call order is the schedule. The walk's own assertions stay in `mod.rs`; a firing's
-//! declared and exported schemas are recorded here for whichever test reads them.
-
+//! No scheduling — a lane holds one batch, or one per row group at `tp1-rowgroup`, and a
+//! join's probe is always one batch, so a recipe's own call order is the schedule. The walk's
+//! own assertions stay in `mod.rs`; a firing's declared and exported schemas are recorded
+//! here for whichever test reads them.
 use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::datatypes::{
-    DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION, DataType, Field, Schema as ArrowSchema,
-    SchemaRef,
-};
+use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::ipc::reader::StreamReader;
 
+use super::super::tests::columns::{Column, columns};
 use super::super::{
     AbiSymbol, Call, CallPattern, FbKind, Input, Recipe, RecipePlan, Seq, attach_recipes,
 };
@@ -305,17 +303,18 @@ impl Walk<'_> {
             _ => 1,
         };
         self.made.push((seq, kind));
-        let handles = self.session.execute(seq, &inputs, out_cap);
+        let session = self.session;
+        let handles = session.execute(seq, &inputs, out_cap);
         for handle in &handles {
-            self.measure(call, self.session.exported_schema(*handle));
+            self.measure(call, || session.exported_schema(*handle));
         }
         handles
     }
 
     /// What this firing declared beside what the device handed back for it. A call with no
-    /// declaration is one of the arms `declared-schemas-derived.md` takes; it fires and is
-    /// not measured, and that is the one skip, here rather than in each case.
-    fn measure(&mut self, call: &Call, exported: Result<SchemaRef, String>) {
+    /// declaration is one of the arms `declared-schemas-derived.md` takes; it fires, nothing
+    /// is exported for it, and that is the one skip, here rather than in each case.
+    fn measure(&mut self, call: &Call, export: impl FnOnce() -> Result<SchemaRef, String>) {
         let Some(declared) = &call.output_schema else {
             return;
         };
@@ -323,7 +322,7 @@ impl Walk<'_> {
             symbol: call.symbol,
             target: call.target,
             declared: declared.fields.clone(),
-            exported,
+            exported: export(),
         });
     }
 
@@ -341,8 +340,9 @@ impl Walk<'_> {
             let mut batches = Vec::with_capacity(lane.len());
             for row_groups in lane {
                 self.made.push((seq, kind));
-                let handle = self.session.scan(seq, row_groups);
-                self.measure(call, self.session.exported_schema(handle));
+                let session = self.session;
+                let handle = session.scan(seq, row_groups);
+                self.measure(call, || session.exported_schema(handle));
                 batches.push(handle);
             }
             lanes.push(batches);
@@ -500,7 +500,7 @@ impl Walk<'_> {
                     self.exported.extend(batches);
                     schema
                 });
-                self.measure(call, exported);
+                self.measure(call, || exported);
             }
         }
         Vec::new()
@@ -583,35 +583,6 @@ impl Firing {
     }
 }
 
-/// A column as the comparison sees it: name and type, with the two things the exporter
-/// rewrites set aside. Nullability is not carried, and a decimal reads at its maximum
-/// precision on both sides — the value the exporter writes whatever cuDF held — so only
-/// its scale can differ.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Column {
-    pub(crate) name: String,
-    pub(crate) data_type: DataType,
-}
-
-pub(crate) fn columns(schema: &ArrowSchema) -> Vec<Column> {
-    schema
-        .fields()
-        .iter()
-        .map(|field| Column {
-            name: field.name().clone(),
-            data_type: match field.data_type() {
-                DataType::Decimal128(_, scale) => {
-                    DataType::Decimal128(DECIMAL128_MAX_PRECISION, *scale)
-                }
-                DataType::Decimal256(_, scale) => {
-                    DataType::Decimal256(DECIMAL256_MAX_PRECISION, *scale)
-                }
-                other => other.clone(),
-            },
-        })
-        .collect()
-}
-
 pub(crate) async fn context(
     target_partitions: usize,
 ) -> datafusion::execution::context::SessionContext {
@@ -664,32 +635,6 @@ pub(crate) async fn walk(sql: &str, knobs: PlanKnobs) -> Walked {
         calls: walk.made,
         firings: walk.firings,
     }
-}
-
-/// Two schemas that differ only in what the exporter rewrites — decimal precision, which
-/// it writes as 38 whatever cuDF held, and nullability, which it derives from the data —
-/// compare equal; a scale, a type or a name that differs still shows.
-#[test]
-fn columns_set_precision_and_nullability_aside() {
-    let declared = ArrowSchema::new(vec![
-        Field::new("a", DataType::Decimal128(15, 2), false),
-        Field::new("b", DataType::Utf8, true),
-    ]);
-    let exported = ArrowSchema::new(vec![
-        Field::new("a", DataType::Decimal128(38, 2), true),
-        Field::new("b", DataType::Utf8, false),
-    ]);
-    assert_eq!(columns(&declared), columns(&exported));
-
-    let one = |name: &str, data_type: DataType| {
-        columns(&ArrowSchema::new(vec![Field::new(name, data_type, true)]))
-    };
-    assert_ne!(
-        one("a", DataType::Decimal128(15, 2)),
-        one("a", DataType::Decimal128(38, 3))
-    );
-    assert_ne!(one("b", DataType::Utf8View), one("b", DataType::Utf8));
-    assert_ne!(one("b", DataType::Utf8), one("c", DataType::Utf8));
 }
 
 /// The aggregate shape fires calls of both kinds: the scan, the coalesce-all and the export

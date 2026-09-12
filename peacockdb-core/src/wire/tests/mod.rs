@@ -2,7 +2,8 @@
 //! set it emits and when each call is made, against the capability matrix. The trivial
 //! kinds are not tested here — the plan goldens run them over every corpus query, which is
 //! more coverage than a hand-built node would be. What each call declares its firing
-//! produces is `declarations`; what the wire refuses at plan time is `refusals`.
+//! produces is `declarations`; what the wire refuses at plan time is `refusals`; `columns` is
+//! the comparison the device catalog reads a schema through.
 
 use super::attach::{accumulate_and_sort, aggregate, aggregate_batches};
 use super::generated::peacock::plan as fb;
@@ -26,6 +27,7 @@ use datafusion::common::ScalarValue;
 use std::any::Any;
 use std::sync::Arc;
 
+pub(crate) mod columns;
 mod declarations;
 mod refusals;
 
