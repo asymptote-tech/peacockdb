@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 204), which is also the counter for
+New tickets take the next free number (currently 206), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,42 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 18 | #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Critical correctness](#critical-correctness) | 20 | #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 15 | #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
+
+<a id="t205"></a>
+### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
+
+A `GpuAccumulateBatchesAndSort` or `GpuMergeSortedPartitions` whose only batches have zero rows
+emits no batch on the cpu, where the device emits one of zero rows.
+
+DataFusion's `SortExec` over zero rows yields no batch at all, and `SortedRuns::mark_done_and_fetch`
+and `CpuPartitionAccumulator::accumulate_and_fetch` (`cpu_backend/accumulate.rs`) hand that empty
+answer to `one_batch`, which reads it as the lane that received nothing. `CpuExec::exec` concatenates
+the same empty answer under the declared schema and gets zero rows, and the cpu coalesce does too, so
+the two cpu paths disagree with each other as well as with the device. Downstream, nothing and a
+zero-row batch are different arrivals: a global merge over nothing is #199's site. Pinned by
+`bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu` and its two neighbours
+(`gpu_tests/accumulate_cases.rs`).
+
+<a id="t204"></a>
+### #204 — the device's sorted merge drops its fetch when it is handed one input
+
+`CudfSortPreservingMerge` with a `fetch` over a single input table answers every row: 16 where the
+plan asked for 5.
+
+`node_session.cpp`'s collapse arm merges and slices only under `views.size() > 1`; one view falls
+to the plain `cudf::concatenate`, which applies no fetch. Both accumulating sorts reach it — an
+`AccumulateBatchesAndSort` lane that received one batch, and a `MergeSortedPartitions` with one
+populated lane — and the wire puts the fetch on the merge alone (`accumulating_sort` writes
+`fetch: -1` per batch). From SQL the per-batch `GpuSort` carries the same fetch, so one batch
+already holds at most n rows and the loss is masked; the operator's contract is still broken.
+Pinned by `bug_a_fetch_over_one_sorted_batch_is_not_applied_on_the_device` and
+`bug_a_fetch_over_one_populated_lane_is_not_applied_on_the_device` (`gpu_tests/accumulate_cases.rs`).
 
 <a id="t202"></a>
 ### #202 — a descending sort key puts its nulls on the wrong end on the device

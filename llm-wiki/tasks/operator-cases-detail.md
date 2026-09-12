@@ -221,3 +221,80 @@ types are read off a scratch planning run, not the plan text; two helpers (`gpu_
 `batch_of`) are duplicated across the two case files and belong to `Outcome` — plan task 8's
 tidy or a finding against the harness task; Welford's moments are not dyadic and compare to
 1e-11 in their two cases, the corpus's own figure.
+
+### 2026-09-12 — plan task 3 done: `GpuCoalesceAllBatches`, `GpuAccumulateBatchesAndSort`, `GpuMergeSortedPartitions`
+
+`src/tests/gpu_tests/accumulate_cases.rs`, 23 cases; `mod accumulate_cases;` after `coverage`;
+the three kinds out of `PENDING`. No production file touched; `Given::name()` never reached.
+
+**Two departures from the plan's text, both in the fixture.** `synthetic` numbers `id` from 0 in
+every batch, so the plan's `synthetic(16, 1), synthetic(24, 2)` runs tie on the merge key and
+`Order::AsEmitted` would compare tie order, which neither engine contracts. The sorted runs are
+instead `runs(rows, seed, n)`: one synthetic batch dealt round-robin, each run sorted by `id`, no
+`id` in two, every run interleaved by the merge — local to the file, arrow's `take_record_batch`,
+no harness change. And the sorted `Given` keeps `MultipleBatches` rather than the plan's
+`SingleBatch`, since a lane may carry two batches (`two_batches_per_lane_all_go_into_one_merge`).
+
+**Cases beyond the spec's rows**, added after reading `node_session.cpp`'s SPM arm, which merges
+and slices only under `views.size() > 1`: `a_fetch_over_one_sorted_batch` and
+`a_fetch_over_one_populated_lane` (both now `bug_`, #204), and `two_batches_per_lane…` (green).
+The matrix's "`Done` before any batch" and the empty table's "lane 0 `Done` before lane 1's rows"
+are one shape under `Script::Lanes` (lane order is fixed); both exist, at three lanes and two.
+
+**Green (18).** Coalesce: `several_batches_coalesce_to_one`, `one_batch_coalesces_to_itself`,
+`no_batch_coalesces_to_nothing_on_both`, `one_zero_row_batch_coalesces_to_zero_rows`,
+`a_zero_row_batch_among_others_adds_nothing`. Sorted: `sorted_batches_merge_into_one_sorted_stream`,
+`a_fetch_cuts_the_merged_stream`, `one_sorted_batch_is_itself`, `no_sorted_batch_is_nothing_on_both`,
+`a_zero_row_batch_among_sorted_others_adds_nothing`. Merge: `three_sorted_lanes_merge_into_one`,
+`two_batches_per_lane_all_go_into_one_merge`, `a_fetch_cuts_the_merged_lanes`,
+`an_empty_lane_is_skipped_by_both`, `a_lane_done_before_any_batch_is_skipped_by_the_merge`,
+`every_lane_done_with_nothing_is_nothing_on_both`, `a_zero_row_lane_beside_lanes_with_rows_is_skipped`,
+`lane_zero_done_before_lane_one_arrives`.
+
+**#173 has no `bug_` test here.** Every "nothing arrived" shape — no batch, every lane `Done` with
+nothing — answers nothing on both: `gpu_backend/accumulate.rs` short-circuits `held.is_empty()` to
+`Ok(empty)` before any call, so the C++ refusal ("a collapse with no input handles has no columns to
+answer with") is never reached, and the cpu's `one_batch` does the same. The empty slot on both is
+the contract the ticket states; a zero-row batch in (one, or among others) is a table on both.
+
+**`bug_` (5).**
+- `bug_a_fetch_over_one_sorted_batch_is_not_applied_on_the_device` — **#204, new**. Verbatim:
+  `cpu and gpu differ: slot 1: cpu has 5 rows, gpu 16 rows`. Pinned both ways: cpu the first 5
+  rows of `synthetic(16, 1)`, device the whole batch.
+- `bug_a_fetch_over_one_populated_lane_is_not_applied_on_the_device` — #204. Verbatim: `cpu and
+  gpu differ: slot 2: cpu has 5 rows, gpu 16 rows`. Same pin at the last `Done`'s slot.
+- `bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu` — **#205, new**. Verbatim: `cpu and gpu
+  differ: slot 1: cpu produced no batch, gpu 0 rows`. Pinned: cpu `[[], []]`, device
+  `[[], [synthetic(0, 1)]]`.
+- `bug_a_fetch_over_zero_rows_is_nothing_on_the_cpu` — #205. Verbatim: `slot 1: cpu produced no
+  batch, gpu 0 rows`.
+- `bug_every_lane_a_zero_row_batch_is_nothing_on_the_cpu` — #205. Verbatim: `slot 3: cpu produced
+  no batch, gpu 0 rows`. Pinned: cpu four empty slots, device the zero-row batch at slot 3.
+
+**Root causes, read before ticketing.** #204: `node_session.cpp` ~293, the `views.size() > 1`
+guard on `cudf::merge` + slice; one view goes to `cudf::concatenate` with no slice, and the wire
+puts the fetch on the merge alone (`accumulating_sort` writes `fetch: -1`). Masked from SQL by the
+per-batch `GpuSort`'s own fetch. #205: DataFusion's `SortExec` over zero rows yields no batch;
+`SortedRuns::mark_done_and_fetch` and `CpuPartitionAccumulator::accumulate_and_fetch` hand the
+empty `Vec` to `one_batch`, which reads it as "nothing arrived". `CpuExec::exec` concatenates the
+same empty answer under the schema, which is why task 1's exec sort over zero rows was green, and
+the cpu coalesce (`concat_batches` over the held zero-row batch) is green here too.
+
+**Tickets.** #204 and #205, both Critical correctness, text in `tickets.md`; counter now 206,
+Contents count 20. #173 reproduces as stated (nothing on both); nothing left unreproducible.
+
+**The `Lanes` arm** ran on a device for the first time and needed nothing: ten cases through it,
+lane order as `drive` writes it, the merge's answer at the last `Done`'s slot.
+
+**Runs on shad-gpu** (neighbour at 37 GiB; every pool built):
+- `20260912T070607-282688` green-form, `PCK_RUN_CPP=0 PCK_TEST_FILTER=tests::gpu_tests::accumulate_cases`:
+  `peacockdb_core_gpu_lib` 18 passed 5 failed (the five above); `test_gpu_corpus` 0 of 8.
+- `20260912T071844-284406` after the rewrite: `peacockdb_core_gpu_lib` **23 passed 0 failed**.
+- `20260912T071900-284449` guard: `every_kind_has_a_case_or_is_named_as_pending_or_excluded` passed.
+- `20260912T071920-284491` rung whole, `PCK_RUN_CPP=0`, empty filter: `peacockdb_core_gpu_lib`
+  **156 passed** (133 + 23), `test_gpu_corpus` 8 passed.
+- Local: `cargo test --features rust-only -p peacockdb-core --lib` 530 passed, 2 ignored; the gpu
+  `--no-run` build 0 warnings; `rustfmt --check` clean on `accumulate_cases.rs` and `coverage.rs`.
+
+**For plan task 8's tidy.** A third `bug_` assertion helper, `each_answers` (both sides against
+hand-written slots), joins `gpu_answered` and `batch_of` as candidates for `Outcome`.

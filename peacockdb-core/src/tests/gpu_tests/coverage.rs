@@ -40,13 +40,10 @@ const EXCLUDED: &[&str] = &["GpuMergePartitions", "GpuUnion", "GpuInterleave"];
 /// then a kind that gains a case must leave it, or the reverse check goes red.
 const PENDING: &[&str] = &[
     "GpuLoadParquet",
-    "GpuCoalesceAllBatches",
-    "GpuAccumulateBatchesAndSort",
     "GpuHashJoin",
     "GpuCrossJoin",
     "GpuNestedLoopJoin",
     "GpuEmitPartitions",
-    "GpuMergeSortedPartitions",
 ];
 
 #[test]
