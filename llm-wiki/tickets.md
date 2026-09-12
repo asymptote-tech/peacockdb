@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 209), which is also the counter for
+New tickets take the next free number (currently 210), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,26 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 22 | #208 #207 #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Critical correctness](#critical-correctness) | 23 | #209 #208 #207 #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
+
+<a id="t209"></a>
+### #209 — a predicate that prunes every row group refuses the query instead of answering it
+
+`SELECT n_name FROM nation WHERE n_nationkey < 0` fails to plan: `invalid plan: no surviving
+row groups: what an empty scan means is the caller's decision, not an empty map`. DataFusion
+answers it with zero rows, and so does the same query under a predicate the statistics cannot
+see through (`n_nationkey + 100 < 0`), so which of two equivalent queries is refused depends on
+what the parquet min/max happen to prove.
+
+`scan_mapping/partition.rs` refuses an empty survivor set because the wire reads an empty map
+as one unmapped partition, and no caller above it decides what an empty scan means. Seen on
+the CPU through the CLI. It also blocks `declared-schemas.md`'s query 6 as written, which the
+device catalog rewrote to the arithmetic form.
 
 <a id="t208"></a>
 ### #208 — the cpu's cross join answers nothing over a zero-row build side
