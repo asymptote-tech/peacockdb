@@ -36,12 +36,11 @@ macro_rules! operator_case {
 /// elsewhere. Permanent.
 const EXCLUDED: &[&str] = &["GpuMergePartitions", "GpuUnion", "GpuInterleave"];
 
-/// Kinds with no case yet. `operator-cases.md` empties this list and deletes it; until
-/// then a kind that gains a case must leave it, or the reverse check goes red.
-const PENDING: &[&str] = &[];
-
+/// Every kind but a forwarder has a case, every case names a kind, and the exclusions are
+/// kinds with no case — so a new node kind, a misspelt one, or a forwarder that gains an
+/// executor each turns this red.
 #[test]
-fn every_kind_has_a_case_or_is_named_as_pending_or_excluded() {
+fn every_kind_has_a_case_or_is_a_forwarder() {
     let fixtures = every_kind();
     let kinds: BTreeSet<&str> = fixtures
         .iter()
@@ -53,12 +52,9 @@ fn every_kind_has_a_case_or_is_named_as_pending_or_excluded() {
         .collect();
     let missing: Vec<&&str> = kinds
         .iter()
-        .filter(|k| !covered.contains(*k) && !PENDING.contains(k) && !EXCLUDED.contains(k))
+        .filter(|k| !covered.contains(*k) && !EXCLUDED.contains(k))
         .collect();
-    assert!(
-        missing.is_empty(),
-        "kinds with no case and not pending: {missing:?}"
-    );
+    assert!(missing.is_empty(), "kinds with no case: {missing:?}");
     let unknown: Vec<(&str, &str)> = inventory::iter::<Covers>
         .into_iter()
         .filter(|c| !kinds.contains(c.kind))
@@ -68,22 +64,11 @@ fn every_kind_has_a_case_or_is_named_as_pending_or_excluded() {
         unknown.is_empty(),
         "cases naming a kind that is not one, as (kind, case): {unknown:?}"
     );
-    let stale: Vec<&&str> = PENDING
-        .iter()
-        .chain(EXCLUDED)
-        .filter(|k| covered.contains(*k))
-        .collect();
-    assert!(
-        stale.is_empty(),
-        "listed as pending or excluded, but has a case: {stale:?}"
-    );
-    let not_kinds: Vec<&&str> = PENDING
-        .iter()
-        .chain(EXCLUDED)
-        .filter(|k| !kinds.contains(*k))
-        .collect();
+    let stale: Vec<&&str> = EXCLUDED.iter().filter(|k| covered.contains(*k)).collect();
+    assert!(stale.is_empty(), "excluded, but has a case: {stale:?}");
+    let not_kinds: Vec<&&str> = EXCLUDED.iter().filter(|k| !kinds.contains(*k)).collect();
     assert!(
         not_kinds.is_empty(),
-        "listed, but not a kind: {not_kinds:?}"
+        "excluded, but not a kind: {not_kinds:?}"
     );
 }

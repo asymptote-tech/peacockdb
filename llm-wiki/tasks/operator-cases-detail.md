@@ -583,3 +583,129 @@ row is 281 on the lib binary. Two more `bug_` helpers are duplicated here (`cpu_
 `cpu_answered`/`gpu_answered` in the source file, `cpu_projected` in the nested one) — the
 `Outcome` tidy's list grows by them. Observed and not filed: `executor/gpu_backend/gpu_tests`'s
 own fixture leaves `/tmp/peacock-gpu-executors-<pid>.parquet` on the host after every run.
+
+### 2026-09-12 — plan task 8 done: the whole proof, and what the engine does wrong
+
+`PENDING` is gone from `coverage.rs` — the constant and its two uses — and the guard is
+`every_kind_has_a_case_or_is_a_forwarder`: every kind but the three in `EXCLUDED` has a case,
+every case names a kind, and `EXCLUDED` holds only kinds with no case. Shown red both ways on
+this box against the staged gpu binary (`LD_LIBRARY_PATH=cpp/install/lib:$CUDF_ROOT/lib`), the
+files restored (`diff` identical) and re-run green:
+
+    (a) "GpuUnion" removed from EXCLUDED           kinds with no case: ["GpuUnion"]
+    (b) a nested case declared as GpuWindow        cases naming a kind that is not one, as (kind, case):
+                                                   [("GpuWindow", "a_cross_join_is_the_product_on_both")]
+
+One comment-only edit outside the two new files: `join_cases.rs` had 24 `bug_` cases whose ticket
+sat several cases above them or only in the constant they use; each now carries its one-line
+ticket comment (#152 × 16, #59 × 3, #175 × 3, and the two `bug_…_between_two…` under #59 and
+#152), so the spec's "its ticket in the comment above it" holds for every `bug_` in the module.
+
+**Ticket check.** The plan's grep loop prints nothing. The reverse: every ticket this task added
+is named — #202 ×2, #203 ×1, #204 ×2, #205 ×3, #206 ×2, #207 ×1, #208 ×2. `bug_` per ticket over
+the whole module (a test naming two tickets counts under both): #57 1, #59 9, #65 2, #95 1, #152
+26, #163 3, #173 4, #175 3, #184 1, #186 2, #187 4, #188 2, #190 2, #198 2, #199 1, #202 2, #203 1,
+#204 2, #205 3, #206 2, #207 1, #208 2 — 74 `bug_` tests.
+
+**The whole proof.**
+- gpu `--no-run` 0 warnings; `--list gpu_tests::` **281** on the lib binary, of which
+  `crate::tests::gpu_tests` is 226: harness_cases 23, script 2, coverage 1, exec 32, aggregate 20,
+  accumulate 23, emit 15, join 85, nested 18, source 7.
+- shad-gpu `20260912T080032-301448`, no filter, `PCK_RUN_CPP` unset (neighbour at 37 GiB):
+  C++ 12 / 6 / 27 / 4 / 4 = **53** with the four `[rmm] pool … reserved of 103.0 GiB free` lines
+  (1.0, 1.0, 69.0, 30.0); `peacockdb_core_gpu_lib` **281 passed**; `test_gpu_corpus` 8 passed;
+  `GPU test run OK`.
+- `cargo test --features rust-only -p peacockdb-core -- --test-threads=2`: **1052 passed, 0
+  failed, 2 ignored** (lib 530, ci_coverage 8, corpus_goldens 20, cost_model 3, cpu_corpus 448,
+  golden_format 26, module_layout 17), 0 warnings, monitored at 2 minutes.
+- `sha256sum -c llm-wiki/tasks/visibility-baselines/goldens.sha256`: 170 OK, 0 otherwise;
+  `git status testdata/` clean. `--test test_module_layout` 17, `--test test_ci_coverage` 8.
+- `/tmp` on shad-gpu holds no `operator-cases-*` parquet; the `peacock-gpu-executors-<pid>.parquet`
+  files there (one per run since Aug 25) are `executor/gpu_backend/gpu_tests`'s fixture, which
+  writes once per process and never removes — pre-existing, not this task's.
+
+**What the engine does wrong, by family** (each `bug_` in one line; verbatim text is in the
+family's own entry above).
+
+*Exec (32: 25 green, 7 `bug_`).* #203 a cast to text refused on the device (`cast to STRING from
+a non-string type not supported`); #57 a value-form CASE refused on the device; #198 `i32 + NULL`
+is `i32` on the device and a bare `NULL::Int64` is a column of zeros; #187 decimal arithmetic
+exported at precision 38; #202 a descending key with `NULLS LAST` puts the nulls first on the
+device, and `NULLS FIRST` puts them last (cuDF applies `null_order` before flipping for DESC).
+
+*Aggregate (20: 13 green, 7 `bug_`).* #163 a Welford init and merge export `count` as Int64 where
+the cpu declares UInt64, and a decimal average is refused on the cpu (the finalize types at (26,10)
+against a declared (22,6)); #187 a decimal sum exported at precision 38; #65 grouping sets carry
+the device's own id (Int32, bit `i` per masked key) where DataFusion declares UInt8 with the first
+key highest, over rows and over zero rows; #199 a global merge over no arrival answers nothing
+on the device where the cpu answers one row — and that row is `count = NULL`, not 0.
+
+*Accumulate (23: 18 green, 5 `bug_`).* #204 the device's sorted merge drops its fetch when handed
+one input (16 rows where the cpu answers 5), at one sorted batch and at one populated lane; #205
+the cpu's accumulating sort and merge answer nothing over zero-row batches where the device
+answers zero rows, at one batch, under a fetch, and with every lane a zero-row batch.
+
+*Emit (15: 12 green, 3 `bug_`).* #95 a decimal key refused on the device (`type_id=27`) — and #184
+is this, q15's shuffle hashing a decimal; #206 a float key (`type_id=10`) and a boolean key
+(`type_id=11`) refused the same way, where comet's hasher answers both on the cpu.
+
+*Hash join (85: 45 green, 40 `bug_`).* #152 the probe-local types (Inner, Right, RightSemi,
+RightAnti) refuse their second probe batch on the device (12 cases: two probes, a zero-row batch
+between two, only zero-row probes); Left and Full refuse their first (12 cases, every shape) —
+no device path at all; #173 Left, Full, LeftSemi and LeftMark finishing with no probe call at
+all are refused on the device, each with its owed phrase; #175 Right, Full and RightAnti with
+`build: None` are refused on both; #59 anti and mark joins answer on the device as if
+`null_equals_null` were `true` (9 cases: LeftAnti drops its null-key build rows, RightAnti its
+null-key probe rows, LeftMark marks them `true`) — #59 said latent; it is not.
+
+*Cross and nested loop (18: 11 green, 7 `bug_`).* #152 the cross join and the Inner nested loop
+refuse their second probe batch on the device (build copy); #207 a cross join's projection is
+dropped on both (cpu refuses sixteen columns against two, device hands sixteen up); #190 a
+nested-loop join's projection is dropped on the cpu, Inner and Left, and applied on the device;
+#208 the cpu's cross join answers nothing over a zero-row build side where the device answers
+zero rows, with and without probe rows.
+
+*Source (7: 2 green, 5 `bug_`).* #188 a scan with a limit is refused on the device at its first
+batch — every batch is a row-group read, so one row group is enough (`row_groups can't be set
+along with skip_rows and num_rows`); #186 the cpu ignores the limit (ten asked, sixty-four
+answered, as one batch and as four); #187 a bare scan of a `Decimal128(18, 2)` column exports
+`(38, 2)`.
+
+**Tickets a case could not reproduce.** None outright: every ticket a matrix row names
+reproduces on the shape the row describes. Three ticket sites are not reached, and the human's
+corpus cells are the only thing that would say more: #173's accumulator and merge sites, because
+`gpu_backend/accumulate.rs` short-circuits `held.is_empty()` before any call and the cpu's
+`one_batch` does the same, so both emit nothing and never reach the C++ refusal — only the join's
+finish reaches #173; #175 over a zero-row build *batch* (the device pads it; only `build: None`
+refuses); and #190's device half, which the ticket called untested and which is correct. Two
+rows have no case by construction: #153 and #159 are plan-time refusals the recipe writer
+`expect`s away, and #160 is the same for the nested-loop types the C++ rejects. Not reproduced
+from the emit family: #187, because the kernel refuses a decimal key before any export.
+
+**Declared types read off the planner rather than the plan.** Decimal arithmetic: add (19,2),
+divide by `2.00` (24,6) — arrow-arith 54.2.1's `decimal_op`, confirmed by running it. Aggregates:
+`sum(dec)` (28,2); `avg(dec)` state `[count UInt64, sum (18,2)]` and output (22,6) — the plan
+said (28,2) for the state sum and was wrong; `stddev` state `[count UInt64, mean, m2]`;
+`__grouping_id` UInt8 up to eight keys.
+
+**Two fixture corrections, neither a ticket.** A side an outer join pads is declared nullable
+(`padded`), as DataFusion's join schema and so the planner declare it — the first green-form
+hash-join run refused every Left, Right and Full on the cpu for a `b_id … declared as
+non-nullable but contains null values`. And the sorted runs for the merge family deal one
+synthetic batch round-robin (`runs`) rather than using two seeds, because `id` starts at 0 in
+every batch and `Order::AsEmitted` would compare a tie order neither engine contracts.
+
+**Harness findings recorded and not taken.** Five `bug_` helpers (and their kin) are duplicated
+across the case files and belong to `Outcome`: `gpu_answered`/`batch_of` (exec, aggregate),
+`each_answers` (accumulate, nested), `gpu_refuses_with`/`both_refuse_with` (join, nested,
+source), `cpu_refuses_with`, `cpu_answered`, `cpu_projected`. Welford's moments are not dyadic:
+"floats dyadic so sums compare exactly" does not reach a stddev state, and the two Welford cases
+compare the mean and m2 to the corpus's 1e-11 locally. The gpu_backend fixture's parquet is left
+on the host per run, above. `Script`'s `#[allow(dead_code)]` is gone — every arm is constructed
+— and each of `Lanes`, `Emit`, `Join` and `Source` ran on a device for the first time and needed
+nothing.
+
+**Totals.** 200 operator cases across seven files: **126 green, 74 `bug_`** — exec 25/7,
+aggregate 13/7, accumulate 18/5, emit 12/3, hash join 45/40, cross and nested loop 11/7, source
+2/5. With the harness's own 26 (23 + 2 + 1) the module is 226; the rung is 281. Seven tickets
+added by this task (#202–#208), 22 tickets named by a `bug_` test.

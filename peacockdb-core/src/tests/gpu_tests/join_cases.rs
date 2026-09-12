@@ -403,6 +403,7 @@ operator_case! {
     }
 }
 
+// #59 — the device hardcodes EQUAL for the null keys of an anti or mark join.
 operator_case! {
     GpuHashJoin,
     fn bug_a_left_mark_join_with_a_residual_filter_marks_null_key_build_rows_true_on_the_device() {
@@ -448,6 +449,7 @@ operator_case! {
     }
 }
 
+// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_inner_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device() {
@@ -455,6 +457,7 @@ operator_case! {
     }
 }
 
+// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_inner_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device() {
@@ -462,6 +465,7 @@ operator_case! {
     }
 }
 
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_left_over_a_zero_row_build_refuses_the_probe_on_the_device() {
@@ -469,6 +473,7 @@ operator_case! {
     }
 }
 
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_left_over_a_zero_row_probe_refuses_it_on_the_device() {
@@ -476,6 +481,7 @@ operator_case! {
     }
 }
 
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_left_over_both_sides_empty_refuses_the_probe_on_the_device() {
@@ -490,6 +496,7 @@ operator_case! {
     }
 }
 
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_left_with_a_zero_row_probe_between_two_with_rows_refuses_the_first_on_the_device() {
@@ -497,6 +504,7 @@ operator_case! {
     }
 }
 
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_left_finishing_after_only_zero_row_probes_refuses_the_first_on_the_device() {
@@ -535,6 +543,7 @@ operator_case! {
     }
 }
 
+// #175 — with no build side the join owes its probe rows, over a table that does not exist.
 operator_case! {
     GpuHashJoin,
     fn bug_right_with_no_build_batch_is_refused_on_both() {
@@ -542,6 +551,7 @@ operator_case! {
     }
 }
 
+// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_right_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device() {
@@ -549,6 +559,7 @@ operator_case! {
     }
 }
 
+// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_right_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device() {
@@ -556,6 +567,7 @@ operator_case! {
     }
 }
 
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_full_over_a_zero_row_build_refuses_the_probe_on_the_device() {
@@ -563,6 +575,7 @@ operator_case! {
     }
 }
 
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_full_over_a_zero_row_probe_refuses_it_on_the_device() {
@@ -570,6 +583,7 @@ operator_case! {
     }
 }
 
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_full_over_both_sides_empty_refuses_the_probe_on_the_device() {
@@ -577,6 +591,7 @@ operator_case! {
     }
 }
 
+// #175 — with no build side the join owes its probe rows, over a table that does not exist.
 operator_case! {
     GpuHashJoin,
     fn bug_full_with_no_build_batch_is_refused_on_both() {
@@ -584,6 +599,7 @@ operator_case! {
     }
 }
 
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_full_with_a_zero_row_probe_between_two_with_rows_refuses_the_first_on_the_device() {
@@ -591,6 +607,7 @@ operator_case! {
     }
 }
 
+// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_full_finishing_after_only_zero_row_probes_refuses_the_first_on_the_device() {
@@ -688,6 +705,7 @@ operator_case! {
     }
 }
 
+// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_right_semi_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device() {
@@ -695,6 +713,7 @@ operator_case! {
     }
 }
 
+// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_right_semi_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device() {
@@ -730,6 +749,7 @@ operator_case! {
     }
 }
 
+// #59 — the device hardcodes EQUAL for the null keys of an anti or mark join.
 operator_case! {
     GpuHashJoin,
     fn bug_left_anti_with_a_zero_row_probe_between_two_with_rows_drops_null_key_build_rows_on_the_device() {
@@ -772,6 +792,7 @@ operator_case! {
     }
 }
 
+// #175 — with no build side the join owes its probe rows, over a table that does not exist.
 operator_case! {
     GpuHashJoin,
     fn bug_right_anti_with_no_build_batch_is_refused_on_both() {
@@ -779,6 +800,7 @@ operator_case! {
     }
 }
 
+// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_right_anti_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device() {
@@ -786,6 +808,7 @@ operator_case! {
     }
 }
 
+// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
     fn bug_right_anti_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device() {
@@ -821,6 +844,7 @@ operator_case! {
     }
 }
 
+// #59 — the device hardcodes EQUAL for the null keys of an anti or mark join.
 operator_case! {
     GpuHashJoin,
     fn bug_left_mark_with_a_zero_row_probe_between_two_with_rows_marks_null_key_build_rows_true_on_the_device() {
