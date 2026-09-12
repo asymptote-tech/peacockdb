@@ -239,6 +239,18 @@ fn each_reader_sees_the_violation_and_not_its_near_miss() {
         vec![],
         "std, arrow and the harness's own types are what a signature may carry"
     );
+    // A brace in a doc comment is prose. Counted, a `}` there closed the body early and the
+    // variants below it went unread — silently, since a short capture reports nothing.
+    let prose =
+        "pub enum E {\n    /// like `}` in prose\n    A(Box<dyn crate::plan::GpuNode>),\n}\n";
+    assert_eq!(
+        component_types_on_the_surface(prose, &comps)
+            .into_iter()
+            .map(|(n, _, name)| (n, name))
+            .collect::<Vec<_>>(),
+        vec![(0, "crate::plan::GpuNode".to_string())],
+        "the body runs to the brace that is code"
+    );
 
     // A `mod.rs` is its own directory, so it gets one fewer climb than a file beside it — and
     // at depth 0 the subtraction must not wrap a `usize` into an unlimited budget.

@@ -318,7 +318,7 @@ fn declarations(text: &str, starts: impl Fn(&str) -> bool) -> Vec<(usize, String
             acc.push_str(lines[i]);
             acc.push('\n');
             let mut done = false;
-            for c in lines[i].chars() {
+            for c in code_only(lines[i]).chars() {
                 match c {
                     '(' | '[' => depth += 1,
                     ')' | ']' => depth -= 1,

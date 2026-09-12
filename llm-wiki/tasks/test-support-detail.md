@@ -449,3 +449,26 @@ On the host: `peacock_cpu_tests` 11, `peacock_gpu_tests` 6, `peacock_plan_tests`
 `gpu_tpch_q6_tp1_{single,rowgroup}`, `gpu_tpch_q6_tp4_{single,rowgroup,sized}`,
 `the_registry_matches_the_gpu_corpus_in_both_directions`. `GLIBC_2` appears nowhere in the
 345-line gate log. Scratch under `/tmp/t5-*` only; `git status --short` shows this file alone.
+
+### 2026-09-12 — round 2 nit: brackets are counted over code, not prose
+
+On `951d907a`, after the rebase. `declarations` in `privacy.rs` counted `{`/`}` over the raw
+line and applied `code_only` only to the captured text, so a `}` in a variant's doc comment
+closed a `pub enum`/`pub trait` body early and every variant below it went unread — silent,
+since a short capture reports nothing. One line: the bracket loop now runs over
+`code_only(lines[i])`. Pinned in `near_miss.rs` beside the four-spelling fixture, on the
+reviewer's probe `pub enum E {\n    /// like `}` in prose\n    A(Box<dyn crate::plan::GpuNode>),\n}`.
+
+| Run | Result |
+|---|---|
+| Pin added, reader unchanged | red: ``assertion `left == right` failed: the body runs to the brace that is code / left: [] / right: [(0, "crate::plan::GpuNode")]`` |
+| `code_only` inside the loop | `cargo test --features rust-only -p peacockdb-core --test test_module_layout` → **17 passed**, 0 failed, 0 warnings; no new case |
+| `rustfmt --edition 2024 --check` on both files | clean (one re-wrap of the fixture's `let`) |
+| `git status --short` | `privacy.rs`, `near_miss.rs`, this file |
+
+### 2026-09-12 — completing: no blocking or important finding outstanding
+
+Round 2 closed on `95a9ff31`; the rebase re-proof is green on `50654da1`; the brace nit is
+closed with a pin. Board to `completing`. The completeness pass is two readings dispatched
+together: the reviewer (what is wrong) and a fresh analyst (what is missing, and which
+`architecture.md` sentences the branch falsified), neither seeing the other's list.
