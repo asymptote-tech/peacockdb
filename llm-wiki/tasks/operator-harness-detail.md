@@ -158,3 +158,46 @@ Results:
     cargo build --features rust-only -p peacockdb-core                               0 warnings (a non-test build never sees src/tests/)
     CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run   exit 0, 0 warnings
     rustfmt --check on src/tests/{given,synthetic,compare,mod}.rs and cpu_backend/tests/*.rs  clean
+
+### 2026-09-12 — plan task 3 done: a leaf outside the registry emits no seq
+
+Red first. With the arm absent, `attach_recipes` over a `GpuFilter` (and a `GpuLimit`) whose child
+is `crate::tests::given::Given` panics in `emit`'s `as_node_ref`:
+
+    panicked at peacockdb-core/src/plan/mod.rs:1125:26:
+    a plan node outside the registry reached a consumer of it
+
+Green with two edits, both in `peacockdb-core/src/wire/`:
+
+- `attach.rs` — `emit` opens with `let Some(node_ref) = try_as_node_ref(node) else { writer.leaf();
+  return Ok(None); };` and matches `node_ref`; the import swaps `as_node_ref` for
+  `try_as_node_ref`. Every other arm is untouched, `attach_recipes`' signature and every other
+  `wire/mod.rs` item unchanged.
+- `writer.rs` — `pub(crate) fn leaf(&mut self) -> Seq` (the plan's `pub(super)`, which
+  `nothing_is_pub_super` refuses): the stub, numbered by `push` and left in the pool for the parent
+  to `take`. The `CudfScan`-of-nothing that `stub` built inline now comes from a private
+  `scan_of_nothing() -> (Seq, offset)` shared by both, so `leaf` reads the seq from `push`'s return
+  rather than `next_seq - 1`. `leaf` has a production caller (`emit`), so `wire/mod.rs`'s
+  `cfg_attr(not(test), allow(dead_code))` is not what keeps it quiet. Nothing reads the returned
+  seq yet; the signature is the plan's.
+
+The two tests are at the end of `wire/tests.rs`, the `wire` component's rust-rung unit module
+(`#[cfg(test)] mod tests;` — `attach_recipes` needs no FFI). They name
+`crate::tests::given::{Given, columns}` by path because this file's own `Given` (a join side over
+Int64 columns, with `name() = "GpuGiven"`) is a different shape and stays:
+`wire::tests::a_leaf_outside_the_registry_emits_no_seq_and_its_parent_takes_a_stub` (filter over
+a given leaf: `get(0)` is `None`, `get(1)` is one call targeting seq 1, `wire_nodes() == 2`) and
+`wire::tests::a_seqless_operator_over_a_given_leaf_is_a_plan_of_one_stub` (limit over a given
+leaf: `get(0)` is `None`, `get(1)` is the bare `SliceHandle` call, `wire_nodes() == 1`).
+
+Results:
+
+    cargo test … --lib -- outside_the_registry seqless_operator   2 failed (the panic above) → 2 passed
+    cargo test … --lib -- wire::                                  39 passed (37 + 2)
+    cargo test … --lib -- planner::tests::plan_goldens            19 passed, incl. the_payload_golden_carries_what_each_call_hands_the_executor
+    testdata/goldens/recipe-payloads.txt                          sha256 61301d49…4b4e, identical to HEAD; `git status testdata/` clean; PEACOCK_REWRITE_RECIPE_BYTES unset
+    cargo test --features rust-only -p peacockdb-core --lib       530 passed, 2 ignored (528 + 2), 0 warnings
+    cargo test … --test test_module_layout                        17 passed
+    cargo build --features rust-only -p peacockdb-core            0 warnings
+    CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run   exit 0, 0 warnings
+    rustfmt --check wire/{attach,writer,tests}.rs                 clean

@@ -13,7 +13,7 @@ use crate::plan::Schema;
 use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuCoalesceAllBatches,
     GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuLimit, GpuLoadParquet, GpuMergeSortedPartitions,
-    GpuProject, GpuSort, GpuUnload, NodeRef, as_node_ref,
+    GpuProject, GpuSort, GpuUnload, NodeRef, try_as_node_ref,
 };
 
 /// Build the recipe plan for a finished tree. It runs after planning because a recipe is
@@ -72,7 +72,14 @@ fn emit(
     inputs: &[&Schema],
     writer: &mut Writer,
 ) -> Result<Option<Recipe>, PlanError> {
-    match as_node_ref(node) {
+    // A node the registry does not know is a hand-built leaf under test, which declares a
+    // schema and nothing to call: a stub on the wire, so the plan keeps a root under a
+    // seqless parent, and no recipe.
+    let Some(node_ref) = try_as_node_ref(node) else {
+        writer.leaf();
+        return Ok(None);
+    };
+    match node_ref {
         NodeRef::LoadParquet(load) => scan(load, node, writer),
         NodeRef::Filter(filter_node) => filter(filter_node, inputs, writer),
         NodeRef::Project(project_node) => project(project_node, inputs, writer),
