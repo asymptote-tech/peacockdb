@@ -1562,7 +1562,9 @@ TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
       {fb::DataType_Float64, id::FLOAT64}, {fb::DataType_Utf8, id::STRING},
       {fb::DataType_LargeUtf8, id::STRING}, {fb::DataType_Binary, {}},
       {fb::DataType_LargeBinary, {}},    {fb::DataType_Date32, id::TIMESTAMP_DAYS},
-      {fb::DataType_Date64, {}},         {fb::DataType_Decimal128, id::FLOAT64},
+      {fb::DataType_Date64, {}},
+      // #210: the declared decimal comes back as a double on this path.
+      {fb::DataType_Decimal128, id::FLOAT64},
       {fb::DataType_Utf8View, id::STRING}, {fb::DataType_BinaryView, {}},
   };
   // The list is a copy of the enum; this is what makes it fail by count when the enum

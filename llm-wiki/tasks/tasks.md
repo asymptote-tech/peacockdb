@@ -98,7 +98,7 @@ every stage back to the declaration, and the device path has no equivalent. Decl
 through an exporter that casts to the declared type instead of relabelling. Fixes nothing: every
 disagreement is a `bug_` test. Last in the chain because it needs `wire/gpu_tests/`.
 
-### 11. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../archive/archived-tickets.md#t198) — state: completing — PR #152
+### 11. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../archive/archived-tickets.md#t198) — state: completeness approved — PR #152
 
 `build_expr` builds ten literal scalars a second time and assumes validity, so a typed NULL inside an
 AST expression is a typed zero — a wrong value in arithmetic and a wrong row count in a comparison.
