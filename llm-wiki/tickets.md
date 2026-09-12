@@ -404,34 +404,27 @@ device is checked against. Waits on the make-a-table-of-literals call all three 
 `empty_build_answers_nothing` decides what a lane answers when its build side produced no batch.
 Six types owe nothing and end the lane; Right, Full and RightAnti owe their probe side.
 
-Owing the probe side means a call over a build table that does not exist, which the frozen surface
-has no way to express — the same wall as [#173](#t173), reached from the join instead of the
-accumulator. Both backends refuse by name rather than inventing an answer.
-
-The corpus reaches it twice: q21 at tp4-single, and tpcds q77, whose Right outer at four lanes
-gets no build side and owes its probe rows padded with NULLs. q77 is therefore out of the
-end-to-end list, with q2 carrying the union-that-cannot-interleave claim in its place — writing
-the CPU pad alone would make the oracle answer a query the device refuses.
-Unfreezing buys a pass-through of the probe side and the refusal goes. Pinned, both sides
-refusing, by `bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti
-siblings (`gpu_tests/join_cases.rs`) through `without_build`, which `empty-build.md`'s driver
-fix does not reach: retarget or delete them by hand. A zero-row build *batch* is not this.
+The route the corpus took here was the scatter: `driver/partitioned.rs` dropped every empty
+scatter output, and one lane later the join was told its build side did not exist. Answered on
+`ENS-empty-build` — the index marks the lanes that feed the build child of a join whose type
+owes rows, the scatter keeps their typed zero-row table, and the join computes the pad or the
+probe rows over it (`join.cpp` on the device, DataFusion's join on the cpu). Corpus reach was
+tpch q16 and tpcds q77, never q21: q16's three tp4 cells are enabled, and q77's stay disabled on
+[#212](#t212), because its Right outer's build side emits no batch at all rather than an empty
+one. No registry cell names this ticket now. The three `without_build` pins moved to #212.
 
 <a id="t173"></a>
-### #173 — the frozen surface cannot build a table out of nothing
-Every entry point loads a table by reading one, so a node owing rows it did not receive has no
-call to make. Three places hit it: a collapse of no handles, a merge of no runs, and a finish
-whose probe produced no keys and which owes an empty table or one of literals.
+### #173 — a finish whose probe produced no keys cannot make the table it owes
+`finish_without_keys` (`gpu_backend/join.rs`) refuses Left, Full, LeftSemi and LeftMark on the
+device when a lane's probe side accumulated no keys: what each owes is an empty table or one
+of literals, and every entry point on the frozen surface loads a table by reading one.
 
-Each refuses by name rather than inventing rows, and the CPU backend emits nothing in the same
-places so the two stay one engine. The exception is a global aggregate, which owes its identity
-row whatever arrived.
-
-Unfreezing buys a make-empty-of-schema call and the refusals go. Until then the refusal is the
-contract, and the shapes that reach it are the ones a lane can be empty in. The accumulators never
-reach it (both emit nothing before any call); the join's finish over no probe call at all does, for
-Left, Full, LeftSemi and LeftMark — `bug_…_finishing_with_no_probe_batch_is_refused_on_the_device`
-(`gpu_tests/join_cases.rs`); LeftAnti hands its build side up and agrees with the cpu.
+One site, on the probe side. LeftAnti hands its build side up and agrees with the cpu, which
+answers all five. The accumulators are not here: a collapse of no handles and a merge of no
+runs answer nothing on the Rust side before any call, on both engines, and the C++ guard in
+`node_session.cpp` behind them is unreachable. Unfreezing buys a make-empty-of-schema call and
+the refusal goes; until then it is the contract. Blocks no registry cell. Pinned by
+`bug_…_finishing_with_no_probe_batch_is_refused_on_the_device` (`gpu_tests/join_cases.rs`).
 
 <a id="t23"></a>
 ### #23 — Upgrade DataFusion 45→46+ to unblock q27/q70/q72/q86

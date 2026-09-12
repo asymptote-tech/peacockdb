@@ -48,8 +48,8 @@ pub(crate) struct GpuAccumulator {
 }
 
 /// The one node of the partition-accumulator category: every lane's sorted run merged into
-/// one at the last lane's done, and nothing where no lane sent anything — a merge of no
-/// runs is the collapse of nothing under another name, and the device refuses that (#173).
+/// one at the last lane's done, and nothing where no lane sent anything — answered here
+/// before any call, since a merge of no runs would be a collapse of nothing.
 ///
 /// One call per lane event, since that is what round-robin driving produces, and the call
 /// carrying the last `Done` is the emitting one. The handles go into the merge in lane

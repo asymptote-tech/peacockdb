@@ -450,7 +450,7 @@ mode=tp4-sized
 +-----------+--------------------+-------------------+-----------------+---------------+
 == q16
 skipped: the result is at or above the 262144-byte cap
-mode=tp1-rowgroup
+mode=tp4-sized
 == q17
 skipped: not enabled at any mode
 == q18
