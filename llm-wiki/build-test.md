@@ -340,6 +340,10 @@ Consequences worth knowing before you regenerate:
   it is the file a bulk regen must not quietly rewrite: the diff would come home among the
   others. The declared section is held the same way: a declaration that moved is red under
   the first variable alone, since it is what the device is measured against.
+- **Two writers can lose a section** ([#213](tickets.md#t213)): the merge locks the inode
+  it opened and the publish renames over it, so a whole-corpus regeneration can drop one
+  query's section from a `.cpu.txt`. Read the regeneration's `git diff --stat` for a section
+  that vanished, and refill it with `PCK_UPDATE_SECTIONS=1` and `--exact <case>`.
 - **The `.duckdb_cost.txt` path is re-runnable without DuckDB**: `--extract-only` rebuilds
   the goldens from the committed profiles plus the parquet, so only a genuine oracle change
   needs the 1.5.4 pin.

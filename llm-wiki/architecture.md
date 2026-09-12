@@ -608,11 +608,11 @@ Livelock has the same answer: the one thing that can block a batch is a join wai
 other side, and orienting the tree so the build side is the left child removes the wait, because
 at equal heights the leftmost node wins and the build subtree drains first.
 
-Hash skew needs no mechanism. A lane that receives nothing is never runnable, and empty scatter
-outputs are dropped at the emitter, so nothing empty traverses a chain. One exception: a
-scatter feeding the build side of a Right, Full or RightAnti join keeps its zero-row table,
-because that join owes its probe rows and needs a build table to make them ([#175](archive/archived-tickets.md#t175)).
-The index decides it once per node, from the tree.
+Hash skew needs one decision and no mechanism. A lane that receives nothing is never runnable,
+and empty scatter outputs are dropped at the emitter, so nothing empty traverses a chain. One
+exception: a scatter feeding the build side of a Right, Full or RightAnti join keeps its
+zero-row table, because that join owes its probe rows and needs a build table to make them
+([#175](archive/archived-tickets.md#t175)). The index decides it once per node, from the tree.
 
 The schedule is maintained incrementally: a rank order from (height, order) computed once, a
 ready bitset over it, per-node ready-lane counters, and hold counters — counters rather than
@@ -705,7 +705,8 @@ the cases are in [`archive/designs.md`](archive/designs.md).
 - **A memory bound asserted at one partitioning asserts about one shape of arrival**: only a
   streamed probe accumulates, and two corpus queries passed at one layout and failed at two.
 - **Zero rows is not zero bytes, and a zero peak is a defect.** A batch of no rows still costs
-  its schema; an empty lane emits no batch at all, which is a different thing.
+  its schema; an empty lane emits no batch at all, which is a different thing — except the
+  scatter lane under a join that owes its probe rows, which keeps its zero-row table.
 
 ### Determinism rules
 

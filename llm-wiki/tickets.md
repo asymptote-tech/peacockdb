@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 213), which is also the counter for
+New tickets take the next free number (currently 214), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -18,7 +18,7 @@ reference still resolves there.
 | [Critical correctness](#critical-correctness) | 24 | #211 #210 #209 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #212 #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
+| [Infrastructure / process](#infrastructure--process) | 24 | #213 #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
 
@@ -395,7 +395,7 @@ since all 31 using `count(*)` carry a WHERE, GROUP BY or JOIN and the rule canno
 
 The fix is small on the CPU and unavailable on a device: the node is a source of constant rows,
 and a table of literals made from no input is what the frozen surface has no call for — the same
-wall as [#173](#t173) and [#175](archive/archived-tickets.md#t175). T17 was to have discharged it and did not: writing the
+wall as [#173](#t173) and [#212](#t212). T17 was to have discharged it and did not: writing the
 CPU half alone makes the oracle answer a query the device refuses, and the oracle is what the
 device is checked against. Waits on the make-a-table-of-literals call all three want.
 
@@ -888,6 +888,20 @@ tripped, so something can branch on it, but there is nowhere to record into — 
 trip log, and `Underestimate` is the precedent for what one would look like. Related: #91.
 
 ## Infrastructure / process
+
+<a id="t213"></a>
+### #213 — a golden regeneration can publish a file missing another writer's section
+`corpus_golden::merge_section` locks the inode it opened and `publish` renames a staged sibling
+onto the path, so a writer that opened before another's rename holds a lock on the old inode,
+reads stale text, and publishes without the other's section.
+
+Seen once on `ENS-empty-build`: a whole-corpus `UPDATE_CANONICAL=1` run published
+`tp4-single-mini.cpu.txt` without q16's section while its `.cost.txt` kept it; refilled with
+`PCK_UPDATE_SECTIONS=1 … --exact cpu_tpch_q16_tp4_single`. The doc on `merge_section` says the
+read inside the critical section prevents exactly this, which holds only while the path keeps
+one inode. A fix is a lock on a sibling lock file rather than on the file the rename replaces,
+or an open-after-lock. Test infrastructure, not the engine: no cell, no golden's content is
+wrong once the regeneration is re-read, which is why the rule to read a regeneration's diff exists.
 
 <a id="t201"></a>
 ### #201 — the murmur gate proves a copy of the lane rule, not the rule
