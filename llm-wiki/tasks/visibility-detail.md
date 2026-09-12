@@ -686,3 +686,134 @@ reachable `pub` field (the 65 elsewhere sit on `pub(crate)` or private types). T
 fixed by the coordinator: the `RunReport` comment named who reads what loosely, and the detail
 entry said the register had one row. Board to `completing`; the completeness pass is two
 readings dispatched together, a fresh reviewer and a fresh analyst.
+
+### 2026-09-12 — completeness pass, the analyst's reading
+
+Read as one change against `ENS-test-support` at `5596e4a3`, anchored on the spec's carry-over
+list, "Done when" and Validation, `architecture.md`, and `build-test.md`. No build; the checks
+below are greps, the dump script, digests and `rustfmt --check` on leaf files.
+
+**0 blocking, 1 important.** Every carry-over item is closed by a change or by a finding that
+the item did not exist; every `SURFACE` row has a receipt; nothing task 7 onward needs is behind
+a visibility this branch took away.
+
+**`architecture.md`: no sentence falsified by this branch.** It states nothing about `pub`, the
+crate boundary or the CLI's entry beyond "backend choice is a turbofish at the entry point", and
+none of the moved or deleted items — `key_width`, `can_be_null`, `PartitionLayout::new`,
+`post_order_of_every_node`, `RunReport`'s fields, `Underestimate::ratio`, `GpuBatch::executor` —
+is named on the page. Every file path it names still exists. One sentence is wrong and was wrong
+before this branch, under "### Modes and knobs": "A source reading fewer than
+`plan::SMALL_TABLE_BYTES` drops to one lane even at tp4" — the constant is
+`planner::SMALL_TABLE_BYTES` on the parent and on master, so it is task 2's drift, not this
+task's; the same markdown pass can correct the path.
+
+**important — `coding-style.md` says the compiler enforces what only the layout test does.**
+Two sentences in Visibility: "`#![warn(unreachable_pub)]` keeps that true afterwards … The lint
+is what makes the first of those self-enforcing", and "What the compiler enforces: … and, through
+`unreachable_pub`, that a `pub` sits only where something outside can reach it." The lint is at
+`warn`. Measured on the branch: `pipeline.yml` has no fmt, clippy or `-D warnings` step; no
+`[lints]` table, no `.cargo/config.toml`; and no layout case pins the attribute in `lib.rs`, so a
+`pub` the lint reports fails nothing and the attribute can be dropped with nothing going red. The
+spec's Validation rests on "the crate's warning count is already a checked baseline, so a new one
+fails that check without a second mechanism" — the detail entry for plan tasks 1-2 found that
+false and nothing after it resolves the consequence. What does gate a stray `pub` is
+`bare_pub_is_the_surface_and_nothing_else`, red on any bare `pub` outside `SURFACE` in any file
+outside `test_support/`, a superset of what the lint reports for items. Anchor: the shared rule
+that wiki and code agree, and the coordinator's standing duty to keep the pages true — a reader
+who believes "the compiler enforces" does not look for the test. Fix, either form: one sentence
+in coding-style saying the gate is `SURFACE` and the lint is the developer's signal because CI
+reads no warning (markdown, the coordinator's); or `deny(unreachable_pub)` in `lib.rs`, one word,
+the developer's since it changes what compiles — `wire/generated.rs` already allows the lint, so
+nothing else moves. The signoff names the false premise either way.
+
+**For the signoff — deviations from the spec's letter, each already recorded above, none a
+finding.**
+
+1. The surface is 46 items and 5 fields in five files, not eight in three. The spec's closure
+   clause allows it: `run<B: Backend>` closes over 30, `plan` over seven, the CLI names nine.
+2. Five former `pub` items were deleted rather than demoted, three moved into test modules.
+   Deleted: `plan::key_width` and `planner::can_be_null` (delegates; the tests import
+   `plan::aggregate::key_width` and `planner::nulls::can_be_null`) and the three-link
+   `post_order_of_every_node` (`plan_goldens.rs` reads `PlanIndex` directly). Moved as inherent
+   impls: `PartitionLayout::new` (`plan/tests/mod.rs`), `Underestimate::ratio`
+   (`driver/accounting/tests.rs`), `GpuBatch::executor` (`executor/ffi_tests/mod.rs`). Checked:
+   the `--items` multiset of the committed baseline against the tree differs by exactly those
+   five rows.
+3. Leaf-name sets differ from task 5's by one swap in the layout target,
+   `every_pub_mod_exemption_is_still_forced_by_what_it_names` →
+   `bare_pub_is_the_surface_and_nothing_else`; counts unchanged at 17.
+4. One ticket, #201, not two: the formatting gap is a paragraph in `build-test.md`, as the
+   spec's own carry-over paragraph says.
+5. The `module-layout.md` contradiction did not exist: `f4907bef` on `ENS-test-layout` (task 4)
+   created `src/test_support/`, so the sentence at `module-layout.md:164` is true and
+   `tests/common/memory_limit.rs` is gone. Closed by finding, no change.
+6. `names_the_module`'s reverse-half fix landed in plan tasks 1-2 and left with `PUB_MODULES` in
+   plan task 9 — closed by deletion.
+7. Residues carried with an `allow` and a reason: `RunReport.calls` (written, read by nothing);
+   `RecipePlan::wire_nodes` under `rust-only`; some sixty `pub` fields on `pub(crate)` structs in
+   `wire/writer.rs`, `driver/accounting.rs`, `driver/single_partition.rs` and the driver's test
+   mocks, which the field pin does not see because they are outside the surface files. Two files
+   the "mode" sweep touched, `expr_physical/tests.rs` and `translator/expr.rs`, were left
+   rustfmt-unclean.
+
+**Checks run, and what each showed.**
+
+- `scripts/visibility-dump.py`: 46 bare `pub` items outside `test_support` — `lib.rs` 2,
+  `plan/mod.rs` 6, `planner/mod.rs` 5, `executor/mod.rs` 25, `cpu_backend/mod.rs` 8 — the names
+  matching `SURFACE`; `test_support`'s 63 all in its `mod.rs`.
+- Every `SURFACE` row traced to its receipt: `main.rs` names nine (`build_session_state`,
+  `register_tables_for`, `plan`, `PlanKnobs` and its four fields, `BatchSizing`,
+  `SMALL_TABLE_BYTES`, `run`, `CpuBackend`, `RunReport.batches`, `record_batch`); `plan`'s
+  signature forces `GpuNode`, `MemoryModel`, `PlanError`; `GpuNode`'s methods `NodeKind` and
+  `RowInterval`; `NodeKind`'s variant fields `PartitionLayout` and `Schema`; `run`'s `Backend`,
+  `RunReport`, `RunError`; `Backend`'s bounds the seven category traits, `Batch`, `Executor`,
+  `NodeExecutors`; their methods `ProbingJoin`, `LaneEvent`, `SourceStep`, `CallStats`,
+  `BackendError`, `RowRange`, `CpuBatch`; `NodeExecutors::BatchForwarder` carries `Forwarder`;
+  `RunError::BudgetExceeded` carries `When`; `impl Backend for CpuBackend` binds the eight `Cpu*`.
+  No row without one.
+- `pub mod`: `lib.rs` only, six unconditional plus `test_support` under its feature. The only
+  visible `mod` elsewhere are six `pub(crate) mod` in `src/tests/mod.rs` and `driver/tests/mod.rs`,
+  the test-directory case the layout test allows.
+- Goldens: sha256 over the 170 files in the committed baseline, identical.
+- `rustfmt --check --config skip_children=true` on `scan_mapping/parquet_meta.rs`,
+  `tests/end_to_end.rs`, `cpu_backend/expr_physical.rs`, `test_support/corpus_gpu.rs`: clean.
+- Comments carrying "the mode" or "this mode" in production files: one, `plan/mod.rs:993`, a
+  planning mode. The rest are planning modes, DataFusion aggregate modes or join modes.
+- Outside the crate only `peacockdb` depends on `peacockdb-core` (`cost-report` does not); the
+  `tests/*.rs` binaries name `test_support` and the layout probe's `executor::CpuBackend` and
+  nothing else. `test-support` appears in no workflow or script.
+- `build-test.md`: the header, the layout row, the `test-support` paragraph and the new CI
+  paragraph are true of the tree.
+
+**Downstream, not findings — nothing this branch removed is needed, and each has a sanctioned
+form.** `operator-harness.md`'s Scope and its plan (`operator-harness-impl.md:705,774`) give
+`Writer` a `pub(super)` method; `nothing_is_pub_super` (task 2) and the Visibility rule refuse
+that, and the form is `pub(crate)` on the implementation module's item. The plan's line 1163
+imports `crate::executor::gpu_backend::GpuBackend` — `gpu_backend` has been `mod` since task 4
+and the type is declared in `executor/mod.rs`, so the path is `crate::executor::GpuBackend`,
+`pub(crate)` and reachable from `src/tests/gpu_tests/`. Its comment at line 1274 cites
+`post_order_of_every_node`, which this branch deleted. `declared-schemas.md` already writes
+against this branch's shape.
+
+### 2026-09-12 — completeness pass, the reviewer's reading: 0 blocking, 0 important
+
+Read on `4bcd9bac` without the analyst's list: the dump and a Python port of the three readers
+reproduce the 46 items and five fields; `lib.rs` declares six components and `test_support`
+gated; the goldens digest identical; one `#[test]` leaves and one arrives across the whole diff;
+the `--items` multiset differs from the baseline by five rows (two delegates and the three-link
+chain, all recorded); the eight remaining register rows are each gated, present and called by the
+file they name; the private-type guard and the super-climb reader modelled red and green; the CLI
+fact behind the `dead_code` allows true, and every `cargo test` shape CI runs switches all three
+allows off. Comment caps counted. The deviation list confirmed and extended (three moved, five
+deleted — the dispatch text had it transposed). One note for the helper: four `*-baselines/`
+directories under `llm-wiki/tasks/` are not named by the archive protocol.
+
+### 2026-09-12 — completeness approved
+
+The analyst's reading: 0 blocking, 1 important — `coding-style.md` credited `unreachable_pub`
+with enforcement it does not have; the lint is `warn` and nothing counts warnings, so the gate is
+`bare_pub_is_the_surface_and_nothing_else`, which refuses any bare `pub` outside the table. The
+two bullets now say so, by the coordinator; no code change, since `SURFACE` already enforces
+what a `deny` would. `architecture.md`: no sentence falsified; one pre-existing wrong path
+(`plan::SMALL_TABLE_BYTES` → `planner::`) fixed in passing. Signoff appended to the spec. `done`
+waits on CI for the head that carries code, `4bcd9bac`; the commits above it are documentation.

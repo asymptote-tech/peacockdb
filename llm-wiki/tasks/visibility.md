@@ -253,3 +253,16 @@ registers are deleted and the reaches they sanctioned are gone; case counts, lea
 goldens are unchanged; `coding-style.md`'s Visibility section carries rules and no register; the
 carry-over list above is closed item by item, with the two tickets filed rather than fixed; and CI
 is green.
+
+## Completeness signoff
+
+Solved under its constraints, with the surface at its honest size: 46 bare `pub` items and five
+fields in five files — nine the CLI names, seven `plan` closes over, thirty `run<B: Backend>`
+does, each hop named by the compiler — asserted by file and name both ways; every other former
+`pub` is `pub(crate)`; `pub mod` is pinned to `lib.rs`; both registers are gone; the lint is on
+and at zero; goldens, counts and leaf names hold but for one layout case renamed for its new
+subject. Deviations, none a shortcut: five facade delegates only tests called were deleted and
+three moved into test modules; `wire`, `plan_text` and `executor/gpu_backend` have no production
+caller and say so with `cfg_attr` allows; the spec's checked-warning-count premise was false, so
+`SURFACE` is the gate and the lint the signal; `RunReport.calls` is read by nothing and ~65
+`pub` fields on `pub(crate)` structs stay, both under `allow` or unreachable; 66 comments, not twenty.

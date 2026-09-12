@@ -160,12 +160,14 @@ feature, with signatures free of engine types.
   a hard error at anything less — so `run<B: Backend>` closes over 30 of the 46 and `plan` over
   seven, beside the nine the CLI names. A new row in `SURFACE` needs the receipt: `cargo build
   -p peacockdb` failing without it, or `private_interfaces` on a row already listed.
-- **`#![warn(unreachable_pub)]` keeps that true afterwards.** With the components' items
-  `pub(crate)`, a `pub` written inside a private module is unreachable and the lint says so.
-  Inside a private module `pub` and `pub(crate)` are identical to rustc — the module's privacy
-  is the wall — so the distinction is for the reader, for the blast radius when a module is ever
-  opened, and for `private_interfaces`, which passes silently over a `pub` type nothing can name
-  and fires on the `pub(crate)` one. The lint is what makes the first of those self-enforcing.
+- **`SURFACE` is the gate; `#![warn(unreachable_pub)]` is the signal.** A `pub` written
+  anywhere in `src/` outside `test_support` and the table fails
+  `bare_pub_is_the_surface_and_nothing_else` in the layout test, which CI runs. The lint says so first, at the compile the developer is already
+  watching — but it is `warn`, and nothing in CI counts warnings, so it fails nothing on its
+  own. Inside a private module `pub` and `pub(crate)` are identical to rustc — the module's
+  privacy is the wall — so the distinction is for the reader, for the blast radius when a
+  module is ever opened, and for `private_interfaces`, which passes silently over a `pub` type
+  nothing can name and fires on the `pub(crate)` one.
 - **`pub mod` appears in `lib.rs` and nowhere else**: six components unconditionally, and
   `test_support` behind its feature. No exemption, no register; a `pub mod` below `lib.rs` is a
   violation with no sanctioned form.
@@ -194,12 +196,11 @@ feature, with signatures free of engine types.
 - Absolute `crate::` paths across a component boundary, `super::` only within one. `mod.rs` and
   `common.rs` have no length limit; every other file keeps the 1000-line one.
 - **What the compiler enforces**: a component is reachable only through its `mod.rs`, and a
-  subcomponent only from inside its parent, both by module privacy; and, through
-  `unreachable_pub`, that a `pub` sits only where something outside can reach it. **What
+  subcomponent only from inside its parent, both by module privacy. **What
   `test_module_layout` must**: sibling reach between implementation modules, where a `pub`
-  appears at all and that it is in `SURFACE`, and a type from a private module in a public
-  signature — `private_interfaces` reads nominal visibility, so an unreachable type spelled
-  `pub` passes it silently.
+  appears at all and that it is in `SURFACE`, that `pub mod` sits in `lib.rs` alone, and a type
+  from a private module in a public signature — `private_interfaces` reads nominal visibility,
+  so an unreachable type spelled `pub` passes it silently.
 - **Two components and a subcomponent have no production caller.** The CLI runs
   `run::<CpuBackend>` and prints results, so `wire`, `plan_text` and `executor/gpu_backend` are
   reached only by the device test rung, the corpus harness and the goldens; each says so with a
