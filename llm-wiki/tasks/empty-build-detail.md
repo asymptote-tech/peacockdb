@@ -214,3 +214,8 @@ Six plan tasks in three commits, #175 archived at `63ef4ae8`. Reviewer round 1 d
 
 Rung: `--lib` 551 passed, 0 failed, 2 ignored; `test_cpu_corpus` 451; `test_module_layout`
 17; rustfmt `--check` (`skip_children=true`) clean on the four touched files.
+
+### 2026-09-12 — completing: round 2 clean
+
+Round 2 on `20296f75`: 0 blocking, 0 important, 0 nits; no new device run owed, the round-1
+fixes touching no production statement and no device test. Completeness pass dispatched.

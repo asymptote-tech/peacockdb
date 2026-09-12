@@ -106,7 +106,7 @@ One scalar builder, not a corrected copy. C++ only. Carries a test-helper repair
 `CreateScalarValue` gained `is_null` as field 2 and the gtest call sites kept their old positions, so
 every `make_int64_literal` builds the literal 0. Claims no cells.
 
-### 12. [`empty-build.md`](empty-build.md) — closes [#175](../archive/archived-tickets.md#t175) — state: reviewing — PR #153
+### 12. [`empty-build.md`](empty-build.md) — closes [#175](../archive/archived-tickets.md#t175) — state: completing — PR #153
 
 A lane whose build side got no rows keeps its typed zero-row table where the join above owes rows, so
 `Right`, `Full` and `RightAnti` answer instead of refusing. No new marker — the driver routes
