@@ -492,3 +492,16 @@ inventory as above. rustfmt clean on `visibility.rs`, `walls.rs`, `near_miss.rs`
 each alone. `src/` untouched (`git status` shows the four test files only).
 
 Files: `peacockdb-core/tests/test_module_layout/{visibility,walls,near_miss,test_code}.rs`.
+
+### 2026-09-12 — plan task 10 done by the coordinator: the wiki
+
+`coding-style.md`'s Visibility section rewritten: the four boundaries first, then the rules —
+the crate's API is the CLI's and `SURFACE` is the receipt, `unreachable_pub` keeps it true,
+`pub mod` in `lib.rs` only, the `test_support` signature rule unchanged — with the exemption
+paragraph, both registers and the "eight items" bullet gone, the compiler/layout-test split kept,
+a bullet for the two components and the subcomponent that have no production caller, and the
+paragraph on why the backend types were not hoisted. `build-test.md`: the layout-rules row names
+`SURFACE` and the one remaining register; the CI section records the formatting gap and what a
+fix needs (plan task 11 step 4, taken here since it is prose). `architecture.md` states nothing
+about visibility or the files this task changed; the analyst's reading will say whether any
+sentence is falsified.

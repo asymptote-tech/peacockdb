@@ -140,25 +140,39 @@ Kernighan's rules, written down after the fact rather than followed from the sta
 
 ## Visibility
 
-- A component or subcomponent is a directory with `mod.rs`, and its whole API is declared
-  there. Implementation modules are declared `mod x;` with `pub(crate)` items: the module's own
-  privacy is the boundary, so a path through it is refused whatever the item says and
-  `pub(super)` is never needed.
+Four boundaries, each one thing. **The crate** exposes what the CLI calls: 49 bare `pub` items in
+five files, listed by file and name in `SURFACE` (`test_module_layout/visibility.rs`). **A
+component** — `plan`, `planner`, `executor`, `wire`, `plan_text` — is a directory whose `mod.rs`
+declares its whole API `pub(crate)`, reachable by sibling components and by nothing outside the
+crate; `common.rs` is a file rather than a directory, what the components share, declared in one
+place. **A subcomponent** — `executor/cpu_backend`, `executor/driver`, `planner/translator` and
+the rest — is declared `mod`, reachable only from inside its parent, its API its own `mod.rs`.
+**`test_support`** is a component-shaped child of the crate root whose API is bare `pub` behind a
+feature, with signatures free of engine types.
+
+- **The crate's API is the CLI's.** Bare `pub` in `src/` means "the binary calls this", and
+  everything a component exposes to its siblings is `pub(crate)`. The surface is `run`,
+  `CpuBackend`, `plan`, `PlanKnobs`, `BatchSizing`, `SMALL_TABLE_BYTES`, `build_session_state`
+  and `register_tables_for`, plus what their signatures close over — a `pub` trait makes its
+  associated-type bounds and its methods' types as public as itself, an enum variant's fields
+  are always public, and the `impl Backend for CpuBackend` makes the eight `Cpu*` executor types
+  a hard error at anything less — so `run<B: Backend>` alone accounts for 36 of the 49. A new
+  row in `SURFACE` needs the receipt: `cargo build -p peacockdb` failing without it.
+- **`#![warn(unreachable_pub)]` keeps that true afterwards.** With the components' items
+  `pub(crate)`, a `pub` written inside a private module is unreachable and the lint says so.
+  Inside a private module `pub` and `pub(crate)` are identical to rustc — the module's privacy
+  is the wall — so the distinction is for the reader, for the blast radius when a module is ever
+  opened, and for `private_interfaces`, which passes silently over a `pub` type nothing can name
+  and fires on the `pub(crate)` one. The lint is what makes the first of those self-enforcing.
+- **`pub mod` appears in `lib.rs` and nowhere else**: six components unconditionally, and
+  `test_support` behind its feature. No exemption, no register; a `pub mod` below `lib.rs` is a
+  violation with no sanctioned form.
 - **A subcomponent is declared `mod`, not `pub mod`** — `mod scan_mapping;`, never
   `pub mod scan_mapping;`, which would make `planner::translator::scan_mapping::Mapping`
   nameable crate-wide and leave the wall on paper. What a sibling component needs is declared in
-  the component's own `mod.rs`.
-- `lib.rs` declares the components `pub mod`, and those seven — `common`, `executor`, `plan`,
-  `plan_text`, `planner`, `wire`, `test_support` — are the only `pub mod` in the crate, counted by
-  `scripts/visibility-dump.py`. `PUB_MODULES` and `CROSS_COMPONENT_REACHES` in
-  `test_module_layout/{visibility,walls}.rs` are the registers for a `pub mod` or a cross-component reach a test crate
-  forces; both are empty, and a `pub mod` outside the register is a violation, not a precedent.
-- **Eight items are `pub` that nothing outside the crate names any more**: `GpuNode` and
-  `validate` (`plan/mod.rs`), `RecipePlan` and `attach_recipes` (`wire/mod.rs`), `RunReport`,
-  `GpuBackend` and `GpuContext` (`executor/mod.rs`), `render_run` (`plan_text/mod.rs`). A test
-  crate forced them until [`test-support.md`](tasks/test-support.md) moved their only readers,
-  `corpus.rs` and `corpus_gpu.rs`, into `src/test_support/`; [`visibility.md`](tasks/visibility.md)
-  removes them with the rest of the raw bare-`pub` count, which is 200 outside `test_support`.
+  the component's own `mod.rs`. Implementation modules are declared `mod x;` with `pub(crate)`
+  items: the module's own privacy is the boundary, so a path through it is refused whatever the
+  item says and `pub(super)` is never needed.
 - **No `pub` in `test_support` names a type from another component.** The harness is what the
   corpus binaries reach the engine through, and it is a facade only while no parameter, return
   or `pub` field there names a component's type — std, arrow and the harness's own types are
@@ -178,10 +192,26 @@ Kernighan's rules, written down after the fact rather than followed from the sta
 - Absolute `crate::` paths across a component boundary, `super::` only within one. `mod.rs` and
   `common.rs` have no length limit; every other file keeps the 1000-line one.
 - **What the compiler enforces**: a component is reachable only through its `mod.rs`, and a
-  subcomponent only from inside its parent, both by module privacy. **What
+  subcomponent only from inside its parent, both by module privacy; and, through
+  `unreachable_pub`, that a `pub` sits only where something outside can reach it. **What
   `test_module_layout` must**: sibling reach between implementation modules, where a `pub`
-  appears at all, and a type from a private module in a public signature — `private_interfaces`
-  reads nominal visibility, so an unreachable type spelled `pub` passes it silently.
+  appears at all and that it is in `SURFACE`, and a type from a private module in a public
+  signature — `private_interfaces` reads nominal visibility, so an unreachable type spelled
+  `pub` passes it silently.
+- **Two components and a subcomponent have no production caller.** The CLI runs
+  `run::<CpuBackend>` and prints results, so `wire`, `plan_text` and `executor/gpu_backend` are
+  reached only by the device test rung, the corpus harness and the goldens; each says so at its
+  declaration with a `cfg_attr` that allows `dead_code` where those callers are absent, and the
+  attribute leaves with the first production device caller.
+- **Why the backend types were not hoisted into `executor/mod.rs`.** Task 2 of the layout chain
+  could not put them behind a `mod` wall while `test_gpu_executors` was a separate crate, and
+  listed three answers to how a separate crate reaches them. Task 4 answered it a fourth way by
+  ending the separation. Measured then, exactly one reach into the backend children came from
+  outside their directory — `wire/tests.rs`'s `CpuJoin`, replaced by the `has_finish_pass`
+  delegation — and `executor/driver` names none of them, going through `Backend`. Types hoisted
+  into `executor/mod.rs` would land as `pub(crate)` and be no more reachable than they are in
+  `accumulate.rs`, so the hoist has no consumer and no ticket: a rearrangement nothing calls for
+  is the cosmetic case.
 
 ## Antipatterns
 
