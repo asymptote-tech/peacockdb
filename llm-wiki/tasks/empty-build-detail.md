@@ -188,3 +188,7 @@ enable was reverted and the branch's binaries rebuilt and pushed back to the hos
 the registry test), cpu header 1024 → 1027, Rust 1344 → 1354 and the grand total 1787 → 1797
 (the +7 of tasks 1–3 had been written into the rows and the cpu header but not into the
 grand total; corrected here). The known-wrong table's three pins are on #212 since tasks 1–3.
+
+### 2026-09-12 — reviewing: PR #153 opened against `ENS-typed-nulls`
+
+Six plan tasks in three commits, #175 archived at `63ef4ae8`. Reviewer round 1 dispatched.
