@@ -755,3 +755,10 @@ hook no recipe can name). Pages moved by one for the case: gpu 81 / 89, harness 
 the new case. Two notes for task 9's developer are in the two readings above: the lifted
 `Given` does not override `GpuNode::name()`, and the guard's universe is pinned to 18 only in
 the rust rung.
+
+### 2026-09-12 — done
+
+CI run `34677043740` on `7c399914`, the head that carries code, green on every job: both cuDF
+legs, the 25.02 GPU build, the remote device tier (the lib binary under `gpu_tests::` with the
+harness's 26 among its 81, plus the corpus binary), cost report, changed paths, S3 metadata.
+Task 8 is `done`; PR #149 awaits the human's merge, after task 6's #148.
