@@ -37,6 +37,31 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   `~/peacockdb`, `~/miniforge3/envs/rapids-26.02`, `/media/data/peacockdb`,
   `~/data/miniforge3`, gcc-12, gcc-14, nvcc, cmake, ninja, python 3.12.3, cargo. No GPU driver
   (`nvidia-smi` fails). `testdata/tpch.sf1` and `tpcds.sf1` are symlinks into `~/peacockdb`.
+- 2026-09-12 00:00Z — reopened by the human from `done` to `building` (commit `2e98d11b`) for plan
+  Task 5 alone: the branch was rebased across master `02069415`, where the patch step follows the
+  build host's glibc, so the shad-gpu cycle runs once more. Origin and PR #146 already hold the
+  rebased head (8 commits, base master). Nothing else in the chain, so no `rebase needed(...)`
+  to write. Pre-dispatch: `ssh verda` still does not resolve (down; not needed by this step);
+  `ssh shad-gpu` answers, host glibc 2.31, `/home/info/glibc-2.35` and `/home/info/glibc-2.39`
+  both present, dev's `getconf` says 2.39; the H200 shows 37 GiB already in use by a neighbour.
+  Developer dispatched with Task 5 and nothing else.
+- 2026-09-12 00:05Z — developer returned: `--build` red in 2 s, before any binary reached shad-gpu.
+  The compiled build scripts in this worktree's `target-cudf-rapids-cuda-12.2/` carry the paths of a
+  worktree `peacockdb-glibc-check` that no longer exists; they date from 23:41Z, between this task's
+  first `done` and its reopen, so an outside session built into this cache and then deleted its
+  worktree. Coordinator's decision: clear it and run the cycle again, recorded as a second attempt.
+  Reasoning: `scripts/cargo-cudf.sh` defaults `CARGO_TARGET_DIR` to `$PWD/target-cudf-*`, so the
+  workflow as written is worktree-local and a fresh task in a fresh worktree never meets this; the
+  failure is not the host's shape nor the script's, which is what "recorded, not repaired" protects.
+  Nothing on the branch or the host changes — only gitignored artifacts an outsider left here — the
+  red attempt stays in the record, and the spec's done-when for step 5 asks for a green cycle, which
+  is unreachable otherwise. This is the one shortcut the signoff will name. Same developer resumed.
+- 2026-09-12 00:12Z — developer returned green on the second attempt: `cargo-cudf.sh clean -p
+  peacockdb-core -p peacockdb-ffi` removed 7.0 GiB of the two crates' artifacts and left the DataFusion
+  tree warm; `--build` 3m55s, `--push-binaries` 0m11s, `--patch --run` 1m09s, patched to
+  `/home/info/glibc-2.39`, every C++ binary passed, `test_gpu_corpus` ran its five `q6` cells,
+  `GPU test run OK`. Six sections added (first attempt red/not run/not run, second attempt green ×3).
+  Committed and pushed; PR #146 already open against master. Board moved to `reviewing`.
 
 ## Workflows
 
@@ -190,6 +215,114 @@ Spec: [`dev-setup-check.md`](dev-setup-check.md). Plan: [`dev-setup-check-impl.m
   `GLIBC_2.38` and the Rust binaries `GLIBC_2.39`, and shad-gpu's patch target is glibc 2.35 — older
   than what a dev-built binary needs, which a 22.04-class builder never hit. Not a `bad_alloc`, so
   not re-run. Not a bug in this branch; a host-shape finding for a task on master.
+
+## 25.02 again: build
+
+- command: `PCK_TEST_FILTER=q6 timeout 5400 scripts/build-test-shadgpu.sh --build`
+- host: dev
+- wall time: 0m02s (23:57:56Z to 23:57:58Z)
+- outcome: red
+- signature: `CMake Error: The source directory "/home/dmitry/workspace/peacockdb-glibc-check/cpp" does not exist.`
+- notes: the C++ half is fine — cmake reconfigured (`Using host cudf: 25.02.02`, `Using cuVS: 25.02.01`),
+  `ninja: no work to do`, the five binaries in `cpp/install/bin/` up to date from 23:16Z. The rust half
+  fails on the first staged binary (`ERROR: building test_inc2_conformance failed`): both
+  `peacockdb-core` and `peacockdb-ffi` build scripts panic, the first with flatc `unable to load
+  file: /home/dmitry/workspace/peacockdb-glibc-check/flatbuffers/gpu_plan.fbs`, the second with the
+  cmake line above. Cause, from the tree and not repaired: the compiled build scripts in this worktree's
+  `target-cudf-rapids-cuda-12.2/debug/build/peacockdb-{core,ffi}-*/build-script-build` date from
+  23:41:07Z — after the first cycle here (ended 23:26Z), before the reopen — and `strings` on them shows
+  `/home/dmitry/workspace/peacockdb-glibc-check/peacockdb-core` and `.../peacockdb-ffi`, a worktree that
+  no longer exists (`git worktree list` shows master, this one, `peacockdb-ENS-drop-mode-name`). Both
+  `build.rs` bake `env!("CARGO_MANIFEST_DIR")` at compile time, and cargo's fingerprint does not cover the
+  manifest path, so a build script compiled from another checkout into this target dir is reused here
+  with the other checkout's paths; the cmake crate's own `detected home dir change, cleaning out entire
+  build directory` says the same. The `deps/` test binaries were also rewritten at 23:42–23:43Z.
+  Re-run once to confirm it is deterministic: identical, rc 1, 23:59:25Z to 23:59:27Z. Side effect that
+  matters for the next step: the script clears `cpp/install/rust-tests/` before staging (line 132), so
+  that directory is now empty. Not a bug in this branch; host state from a build run against this
+  worktree's target dir by something outside the run.
+
+## 25.02 again: push-binaries
+
+- command: `timeout 1800 scripts/build-test-shadgpu.sh --push-binaries`
+- host: shad-gpu (via dev)
+- wall time: not run
+- outcome: not run
+- signature: none
+- notes: the build above went red, so there was nothing to push — `cpp/install/rust-tests/` is empty
+  after the failed staging, and a push would mirror that emptiness onto shad-gpu with `--delete`,
+  removing the rust binaries from the earlier cycle without shipping anything to run.
+
+## 25.02 again: patch+run
+
+- command: `PCK_TEST_FILTER=q6 timeout 5400 scripts/build-test-shadgpu.sh --patch --run`
+- host: shad-gpu (via dev)
+- wall time: not run
+- outcome: not run
+- signature: none
+- notes: nothing was pushed, so a patch and run would have exercised the binaries the earlier cycle left on
+  shad-gpu, which are the same ones that went red on `GLIBC_2.38` and would prove nothing about the
+  rebased script's glibc-2.39 patching against a build made by this step. The glibc lines the spec
+  expects (`glibc 2.39 already installed in /home/info/glibc-2.39; skipping the build`, `Verified: every
+  shipped executable uses /home/info/glibc-2.39/lib/ld-linux-x86-64.so.2`) and the per-binary counts are
+  therefore unrecorded. To get there, the build script binaries in `target-cudf-rapids-cuda-12.2` need
+  recompiling from this worktree (a `cargo clean -p peacockdb-core -p peacockdb-ffi` against that
+  target dir, or removing `debug/build/peacockdb-{core,ffi}-*`); that is a repair and was not done here.
+
+## 25.02 again, second attempt: build
+
+- command: `PCK_TEST_FILTER=q6 timeout 5400 scripts/build-test-shadgpu.sh --build`
+- host: dev
+- wall time: 3m55s (00:03:03Z to 00:06:58Z)
+- outcome: green
+- signature: none
+- notes: first, on the coordinator's decision, the stale artifacts were removed with
+  `CUDF_ROOT=/home/dmitry/data/miniforge3/envs/rapids-cuda-12.2 timeout 600 scripts/cargo-cudf.sh clean -p peacockdb-core -p peacockdb-ffi -v`
+  (00:02:53Z to 00:02:54Z; the wrapper sets the same `CARGO_TARGET_DIR`, `CC=/usr/bin/gcc-12`,
+  `CXX=/usr/bin/g++-12` as the build script). It reported `Removed 4139 files, 7.0GiB total`, all under
+  `target-cudf-rapids-cuda-12.2/debug/`: the four `build/peacockdb-{core,ffi}-*` dirs, eleven
+  `.fingerprint/peacockdb-{core,ffi}-*` entries, the `libpeacockdb_{core,ffi}-*` rlib/rmeta/.d, the five
+  `deps/test_gpu_*`/`test_inc2_conformance-*` binaries with their `.d`, and seven `incremental/` dirs
+  for the same crates — the full list is in a before/after `find` diff and nothing else moved
+  (368 of 379 fingerprints and 854 of 870 `deps/` entries remain, every `datafusion-*`/`arrow-*` among
+  them). Nothing outside that target dir was touched. The build then compiled only `peacockdb-ffi` and
+  `peacockdb-core` (`Finished` in 2m35s for the first binary, 14–21s for each of the other four —
+  the DataFusion tree stayed warm), zero warnings, C++ half `ninja: no work to do`, and staged
+  `test_inc2_conformance`, `test_gpu_abi`, `test_gpu_recipe_walk`, `test_gpu_executors`,
+  `test_gpu_corpus` in `cpp/install/rust-tests/`. `strings` on the new build scripts is not needed:
+  the cargo `Compiling` lines name this worktree's paths.
+
+## 25.02 again, second attempt: push-binaries
+
+- command: `timeout 1800 scripts/build-test-shadgpu.sh --push-binaries`
+- host: shad-gpu (via dev)
+- wall time: 0m11s (00:07:04Z to 00:07:15Z)
+- outcome: green
+- signature: none
+- notes: no retry fired. Five rsync passes as before: `cpp/install/` (177 files, the five stripped rust
+  binaries at ~9 MB transferred each and the five C++ binaries), goldens (174), the registry, 142
+  fixtures, `setup-glibc.sh`.
+
+## 25.02 again, second attempt: patch+run
+
+- command: `PCK_TEST_FILTER=q6 timeout 5400 scripts/build-test-shadgpu.sh --patch --run`
+- host: shad-gpu (via dev)
+- wall time: 1m09s (00:07:23Z to 00:08:32Z)
+- outcome: green
+- signature: none
+- notes: patch step, verbatim: `==> glibc 2.39 already installed in /home/info/glibc-2.39; skipping the
+  build`, then `--- patchelf not found, installing locally...` (the script's own step, on the host), the
+  three `cpp/build` binaries, the five `cpp/install/bin` binaries and `libpeacock_gpu.so`, the five
+  rust binaries, and `==> Verified: every shipped executable uses
+  /home/info/glibc-2.39/lib/ld-linux-x86-64.so.2`. Every binary loaded and ran: C++ `peacock_cpu_tests`
+  `PASSED 11 tests`, `peacock_gpu_tests` `PASSED 5 tests`, `peacock_plan_tests` `PASSED 27 tests`,
+  `peacock_tpch_tests` `PASSED 4 tests` (19.6s), `peacock_tpchv_tests` `PASSED 4 tests` (27.4s), `ran 5
+  C++ test binaries`; rust under `filter=q6`: `test_gpu_corpus` `5 passed; 3 filtered out` (7.78s —
+  `gpu_tpch_q6_tp1_rowgroup`, `tp1_single`, `tp4_rowgroup`, `tp4_single`, `tp4_sized`), `test_gpu_abi`
+  `0 passed; 4 filtered out`, `test_gpu_executors` `0 passed; 31 filtered out`, `test_gpu_recipe_walk`
+  `0 passed; 10 filtered out`, `test_inc2_conformance` `0 passed; 10 filtered out` — four binaries ran
+  zero tests, as the filter intends, and the script did not call that a fault. `==> GPU test run OK`,
+  rc 0. No `bad_alloc`; the neighbour's 37 GiB did not get in the way, so no third attempt.
 
 ## Not driven
 
