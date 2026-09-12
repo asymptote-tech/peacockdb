@@ -218,6 +218,9 @@ fn sort_keys(
         .join(", ")
 }
 
+/// Prints the fb enum with `{:?}`, so a decimal is a bare `Decimal128` with no digits; section B
+/// of the payload golden (`plan_text/declared.rs`) is the renderer that prints them. Before
+/// section A can check section B, this one has to print the digits too.
 fn schema_text(schema: &fb::Schema<'_>) -> String {
     let fields = schema
         .fields()

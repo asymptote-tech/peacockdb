@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1779 test cases — Rust 1343, C++ 67, Python 369.** Beside it, **79 `bug_` tests**, in their own table under [Known-wrong behaviour](#known-wrong-behaviour): the grand total counts coverage and that table counts defects, and the two measure opposite things, so they are never added. The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, for two reasons — its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to, and its `bug_` tests are counted in their own table rather than in the row that holds them. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1778 test cases — Rust 1342, C++ 67, Python 369.** Beside it, **80 `bug_` tests**, in their own table under [Known-wrong behaviour](#known-wrong-behaviour): the grand total counts coverage and that table counts defects, and the two measure opposite things, so they are never added. The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, for two reasons — its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to, and its `bug_` tests are counted in their own table rather than in the row that holds them. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -402,7 +402,7 @@ is returned as the firing's finding rather than a panic; a zero-row query is wal
 other, under a predicate row-group pruning cannot see through (#209); and nothing is exported
 for an undeclared call
 
-| Schema catalog | [bug_a_declared_utf8view_is_exported_as_utf8](../peacockdb-core/src/wire/gpu_tests/declared.rs) | 13 |
+| Schema catalog | [bug_a_declared_utf8view_is_exported_as_utf8](../peacockdb-core/src/wire/gpu_tests/declared.rs) | 12 |
 |---|---|--:|
 
 `declared-schemas.md`'s queries, one named test each at the mode the spec names, every declared
@@ -411,11 +411,12 @@ from the scan up (#183, `bug_`), `extract(year)` `Int32 → Int16` from the proj
 `bug_`), `Date64 → Timestamp(ms)` (#200, `bug_`), and the identities — `Date32`, `Int64`,
 `Int32`, fixed-width cast targets, names, order and arity, the sort arm's own `CudfSort` under
 the accumulator every `ORDER BY` plans, the coalesce-all below a shuffle at two lanes, a
-zero-row string column typed as a populated one (#209 chose its predicate). A narrow decimal at
-38 and a decimal already at 38 record the exporter's default rather than a divergence (#187),
-and nullability read off `has_nulls()` records the flag's limitation. One ignored: the cast to
-text the device refuses at `execute_node` (#203). At `tp1-rowgroup`, every firing of one call
-exports one schema, compared by name and type
+zero-row string column typed as a populated one (#209 chose its predicate). A narrow decimal
+exported at 38 is the fourth `bug_` (#187, the exporter's own default, not cuDF's), a decimal
+already at 38 records that it agrees for that same reason, and nullability read off
+`has_nulls()` records the flag's limitation. One ignored: the cast to text the device refuses
+at `execute_node` (#203). At `tp1-rowgroup`, every firing of one call exports one schema,
+compared by name and type
 
 *subcomponent*
 
@@ -842,6 +843,12 @@ four row groups under a limit of ten are all answered whole on the cpu
 
 a bare scan of a `Decimal128(18, 2)` column exports it at precision 38
 
+| [`bug_a_narrow_decimal_is_exported_at_precision_38`](../peacockdb-core/src/wire/gpu_tests/declared.rs) | [#187](tasks/active-tickets.md#t187) | shad-gpu |
+|---|---|--:|
+
+a `Decimal128(15, 2)` is exported `(38, 2)` at every node; the 38 is the exporter's
+`max_precision` default, not a width cuDF holds
+
 | [`bug_a_declared_utf8view_is_exported_as_utf8`](../peacockdb-core/src/wire/gpu_tests/declared.rs) | [#183](tasks/active-tickets.md#t183) | shad-gpu |
 |---|---|--:|
 
@@ -901,7 +908,7 @@ rise when a bug is found. The runtime every row was measured on is cuDF 25.02.02
 `rapids-cuda-12.2` env: a row that goes green after a version bump may mean the runtime moved
 rather than the fix landed.
 
-**Total: 79.**
+**Total: 80.**
 
 | Test | Asserts | Ticket | Runs |
 |---|---|---|---|
@@ -981,6 +988,7 @@ rather than the fix landed.
 | [`bug_row_groups_and_a_limit_together_are_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/source_cases.rs) | row groups and a limit together are refused at the first batch's read | [#188](tasks/active-tickets.md#t188) | shad-gpu |
 | [`bug_row_groups_and_a_limit_together_are_read_whole_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/source_cases.rs) | four row groups under a limit of ten are all answered whole on the cpu | [#186](tasks/active-tickets.md#t186) | shad-gpu |
 | [`bug_a_decimal_column_is_exported_at_precision_38`](../peacockdb-core/src/tests/gpu_tests/source_cases.rs) | a bare scan of a `Decimal128(18, 2)` column exports it at precision 38 | [#187](tasks/active-tickets.md#t187) | shad-gpu |
+| [`bug_a_narrow_decimal_is_exported_at_precision_38`](../peacockdb-core/src/wire/gpu_tests/declared.rs) | a `Decimal128(15, 2)` is exported `(38, 2)` at every node; the 38 is the exporter's `max_precision` default, not a width cuDF holds | [#187](tasks/active-tickets.md#t187) | shad-gpu |
 | [`bug_a_declared_utf8view_is_exported_as_utf8`](../peacockdb-core/src/wire/gpu_tests/declared.rs) | a declared `Utf8View` is exported `Utf8` at every one of the six declared node kinds, from the scan up | [#183](tasks/active-tickets.md#t183) | shad-gpu |
 | [`bug_an_extracted_year_declared_int32_is_exported_as_int16`](../peacockdb-core/src/wire/gpu_tests/declared.rs) | `extract(year)` declared `Int32` is exported `Int16`, from the project up | [#191](tasks/active-tickets.md#t191) | shad-gpu |
 | [`bug_a_date64_is_exported_as_a_millisecond_timestamp`](../peacockdb-core/src/wire/gpu_tests/declared.rs) | a `Date64` is exported `Timestamp(Millisecond, None)`, a type the wire cannot name | [#200](tickets.md#t200) | shad-gpu |

@@ -317,3 +317,16 @@ the fourth.
 Section B's golden is CPU-generated and lands first, so the device run checks a declaration that is
 already reviewable. Expect the divergences the tickets predict; record whatever else turns up, which
 is the point.
+
+## Completeness signoff
+
+Solved under its constraints: fixes nothing — no cast, no refusal, no declaration corrected, the
+production exporter, `cpp/` and the wire untouched, every section-A digest unmoved; the boundary
+node declares, six arms declare per call, section B is a Rust-side gate, and every declared call is
+measured on a device: sixteen catalog cases, four `bug_` (#183 at every declared kind, #187, #191,
+#200), one ignored on #203, two refusals at the rust rung; #209 filed; #187, #191, #200 corrected;
+the known-wrong table opened, 80 rows apart from the grand total. Deviations, none a shortcut: the
+thin exporter cut by §3's own rule, so precision and nullability are the production export's
+recorded limitations; §6's "no sort query" was wrong, sort and coalesce-all are measured; row 11's
+refusal is #203's; query 6 in #209's form; rows 14 and the interval at the rust rung; task 9 wrote
+the first `bug_` tests; §4's renderer ticket not filed (test-only code), noted beside `schema_text`.
