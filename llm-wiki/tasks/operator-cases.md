@@ -26,7 +26,7 @@ The right column names the tickets a row may land on; a row with none may still 
 | Operator | Cases | May land on |
 |---|---|---|
 | `GpuFilter` | predicate on an int, on a string, on a null-yielding column; with its projection; every row passes; no row passes | |
-| `GpuProject` | column copy; int, float and decimal arithmetic; a cast; CASE in both forms; LIKE; a scalar function; a typed NULL literal | [#57](../tickets.md#t57), [#198](../archive/archived-tickets.md#t198), [#187](active-tickets.md#t187) |
+| `GpuProject` | column copy; int, float and decimal arithmetic; a cast; CASE in both forms; LIKE; a scalar function; a typed NULL literal | [#57](../tickets.md#t57), [#198](../tickets.md#t198), [#187](active-tickets.md#t187) |
 | `GpuSort` | asc and desc; nulls first and last; two keys; `fetch` | |
 | `GpuAccumulateBatchesAndSort` | several batches; one; none; `fetch` | [#173](../tickets.md#t173) |
 | `GpuMergeSortedPartitions` | N lanes each sorted; `fetch`; one lane empty; `Done` before any batch | [#173](../tickets.md#t173) |
@@ -69,10 +69,10 @@ The source row is the one that needs a file rather than an upload: a scan's inpu
 The parquet writer is the test's, over `synthetic`, with the row-group size chosen so several
 row groups exist.
 
-Two of those tickets are closed by tasks below this one — [#198](../archive/archived-tickets.md#t198)
-by `typed-nulls` (done: its two pins went red and were deleted there), [#175](../tickets.md#t175)
-by `empty-build`. Their `bug_` tests here are the record those tasks turn red and delete, which
-is the regression test each would otherwise have to write.
+Two of those tickets are closed by tasks below this one — [#198](../tickets.md#t198) by
+`typed-nulls`, [#175](../tickets.md#t175) by `empty-build`. Their `bug_` tests here are the
+record those tasks turn red and delete, which is the regression test each would otherwise
+have to write.
 
 ## Scope
 
