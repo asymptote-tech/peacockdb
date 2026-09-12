@@ -665,3 +665,13 @@ clean on every touched file alone; comment caps held (longest new in-body commen
 
 Files: `executor/{mod.rs,driver/mod.rs,driver/index.rs}`, `planner/tests/plan_goldens.rs`,
 `tests/test_module_layout/{test_code,visibility,near_miss,privacy,walls}.rs`.
+
+### 2026-09-12 — round 1 committed; two residues recorded, not taken
+
+`852a69f8` carries the developer's four items, `5079b2ed` the wiki's numbers (46; `run` closes
+over 30 and `plan` over seven beside the nine the CLI names). Two things the round surfaced and
+this task leaves alone, for the signoff: `RunReport.calls` is written by the driver and read by
+nothing, not even a test — it keeps an `#[allow(dead_code)]` saying so rather than being deleted
+in a review round; and about sixty `pub` fields sit on `pub(crate)` structs in `wire/writer.rs`,
+`driver/accounting.rs`, `driver/single_partition.rs` and the driver's test mocks — unreachable
+already, so the lint is silent, and a sweep of them is a separate cosmetic pass. Round 2 next.
