@@ -2534,3 +2534,16 @@ legs, the 25.02 GPU build, the remote device tier (the staged lib binary under `
 the corpus binary), cost report, changed paths, S3 metadata. The docs-only head above it
 (`b19536b8`) took a changed-paths skip. Task 4 is `done`; PR #145 awaits the human's merge, after
 task 3's #144.
+
+### 2026-09-12 — rebased onto task 3's new tip `d4b93a4c` (master `02069415`); `rebase needed(done)`
+
+The control file said `rebase`; task 3 went first and is `done` again. Master carried
+`62335cff` (`cpp/CMakeLists.txt`) and `02069415` (`build-test-shadgpu.sh`, `setup-glibc.sh`: the
+patch step follows the build host's glibc) past the old base. One conflict, in
+`scripts/build-test-shadgpu.sh` at slice 9's first commit: master inserted the `BUILD_GLIBC`
+block above the `RUST_TESTS` line slice 9 rewrote. Resolved by the coordinator as both blocks,
+master's first — additive, no logic choice — `bash -n` clean, and `git diff 2a3245df HEAD --
+scripts/build-test-shadgpu.sh` is exactly master's thirteen lines. `build-test.md` auto-merged
+with both sides present. 31 commits above task 3, as before. The developer's re-proof runs this
+script end to end, which is what proves the resolution; the task stays `rebase needed(done)`
+until that cycle and CI on the rebased PR #145 are green.
