@@ -637,3 +637,10 @@ header trim in `gpu_tests/mod.rs`; gpu `--no-run` after it: 0 warnings):
 - rustfmt-check clean on the six files; surface 46; caps: body ≤ 4, header ≤ 10.
 
 No git mutation; `wire/tests/columns.rs` is new and unstaged.
+
+### 2026-09-12 — completing: round 2 found 0 blocking, 0 important, 4 nits
+
+Round 2 verified every round-1 item on `4bd9d8c2`. The four nits — `declared_of` joining
+section lines with no separator, one assertion in query 15 that cannot fail, the ten oracle
+cases losing the device's `last_error` on a sink refusal, two dropped blank lines — go to the
+developer before the completeness pass, since two of them are in device tests.

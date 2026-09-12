@@ -89,7 +89,7 @@ sorts, the accumulators, both aggregates, the scatter, nine hash-join types, cro
 and the scan. Each row is green or a `bug_` test with a ticket, and only a device run says which;
 #198 and #175 are expected to land as `bug_` tests that `typed-nulls` and `empty-build` then delete.
 
-### 10. [`declared-schemas.md`](declared-schemas.md) — state: reviewing — PR #151
+### 10. [`declared-schemas.md`](declared-schemas.md) — state: completing — PR #151
 
 The engine declares a schema per node and only the CPU backend is held to it — `declared_as` pulls
 every stage back to the declaration, and the device path has no equivalent. Declares a schema per
