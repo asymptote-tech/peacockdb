@@ -101,11 +101,12 @@ tpch q16 and tpcds q77, never q21: q16's three tp4 cells are enabled, and q77's 
 one. No registry cell names this ticket now. The three `without_build` pins moved to #212.
 
 **Done 2026-09-12, by task 12 `empty-build` on branch `ENS-empty-build`** (commits `943eb21e`
-and `04688b03`). `IndexedNode::feeds_owing_build` marks, at index time, the lanes that feed the
-build child of a join whose type owes rows; `driver/partitioned.rs` keeps their zero-row scatter
-output and drops every other empty one. Green on both engines through
+and `04688b03`). Proved on the cpu against DataFusion by
 `a_right_join_with_an_empty_build_pads_every_probe_row` and its RightAnti sibling
-(`tests/end_to_end/dimensions.rs`); tpch q16 enabled at its three tp4 cpu cells.
+(`tests/end_to_end/dimensions.rs`), and on the device by
+`right_over_a_zero_row_build_pads_every_probe_row` and
+`right_anti_over_a_zero_row_build_keeps_every_probe_row` (`gpu_tests/join_cases.rs`, run
+`20260912T140917-414448`); tpch q16 enabled at its three tp4 cpu cells.
 
 <a id="t194"></a>
 ### #194 — the cost gate's git baseline ignores which section it was asked for
