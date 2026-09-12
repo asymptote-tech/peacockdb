@@ -565,3 +565,9 @@ task 4 (`test-layout.md`) did, so the sentence is true, and nothing in `src/test
 Files: `llm-wiki/tickets.md`, `peacockdb-core/src/lib.rs`,
 `peacockdb-core/src/executor/cpu_backend/expr_physical.rs`, and 28 files with comment-only edits
 under `peacockdb-core/src/` (`git status --short`: 31 files, this one excluded).
+
+### 2026-09-12 — reviewing: PR against `ENS-test-support`
+
+Twelve commits, 57 files. Every slice's proof is in the entries above; the final one ran the
+whole package, every build shape, the CLI and the device cycle on `d82a87ee`. Reviewer round 1
+dispatched next.
