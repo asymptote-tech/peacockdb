@@ -551,6 +551,6 @@ the "Operator harness" row at 25, cpu `--lib` 532, gpu `gpu_tests::` 80, C++ 67,
 
 `git status --short`: only this file.
 
-### 2026-09-12 — reviewing: PR against `ENS-visibility`
+### 2026-09-12 — reviewing: PR #149 against `ENS-visibility`
 
 Eight slices committed; the last entry is the whole proof on `bd2758a4`. Reviewer round 1 next.
