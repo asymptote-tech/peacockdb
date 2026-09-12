@@ -404,3 +404,10 @@ five modes, so "#152" on a row says nothing about `tp1_single`, where it fired o
 (and that row does not name it). And #180's message — null values under a non-nullable
 declaration — is a `try_new` check the spec's premise says does not exist; it is a different
 sentence from the type check and the survey's appendix does not cover it.
+
+### 2026-09-12 — done: the branch is pushed
+
+Prototype: no PR, no reviewer, no CI. The coordinator read the report against the spec's four
+questions and the section per waiting task before committing: `563cf005` is the survey's
+enablement alone, `f4990e3f` the report, the detail and the signoff. `done` is this push. The
+branch is never merged; the report is the product, and the tasks after it plan against it.
