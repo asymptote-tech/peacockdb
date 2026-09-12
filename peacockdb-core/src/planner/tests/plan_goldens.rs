@@ -381,10 +381,9 @@ fn declared_of(text: &str) -> std::collections::BTreeMap<String, String> {
         } else if line == DECLARED_HEADER {
             in_section = true;
         } else if in_section {
-            declared
-                .entry(query.clone())
-                .or_insert_with(String::new)
-                .push_str(line);
+            let section = declared.entry(query.clone()).or_insert_with(String::new);
+            section.push_str(line);
+            section.push('\n');
         }
     }
     declared

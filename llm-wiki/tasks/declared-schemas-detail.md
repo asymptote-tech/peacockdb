@@ -644,3 +644,37 @@ Round 2 verified every round-1 item on `4bd9d8c2`. The four nits — `declared_o
 section lines with no separator, one assertion in query 15 that cannot fail, the ten oracle
 cases losing the device's `last_error` on a sink refusal, two dropped blank lines — go to the
 developer before the completeness pass, since two of them are in device tests.
+
+### 2026-09-12 — review round 2: four nits
+
+1. `plan_goldens.rs` `declared_of` joins a section's lines with `'\n'` after each `push_str`,
+   as `sections_of` does, so the "declaration moved" gate sees line boundaries. Checked: the
+   golden gate passes with and without `UPDATE_CANONICAL=1` (19 `plan_goldens` cases each way,
+   `PEACOCK_REWRITE_RECIPE_BYTES` unset), `git status testdata/` clean after both, and
+   `recipe-payloads.txt`'s sha256 equals HEAD's (`de53ced56c311340…`) — the join is on the read
+   side, both the canonical and the rendered text pass through it, and the bytes on disk are
+   untouched.
+2. `the_firings_of_one_call_export_one_schema` compares each firing's exported half against
+   the first firing's exported half (`&of_call[0].1`); the declared-vs-declared line, which
+   could not fail, is gone.
+3. `assert_walk_matches_datafusion` panics on any firing whose `exported` is `Err`, naming the
+   firing and the device's message, before the row-count and oracle assertions — a sink
+   refusal in the ten walk cases reads as the device's `last_error` again.
+4. The blank line between the `//!` header and the first item restored in `walk.rs` and
+   `gpu_tests/mod.rs`.
+
+**Counts on the page do not move**: no test added or removed — `--list gpu_tests::` 304 as
+before, `--lib` 544 passed + 2 ignored (546 listed) as before; `build-test.md` untouched.
+
+**Results, all fresh after the last edit:**
+
+- gpu `--no-run` 0 warnings; `--list gpu_tests::` 304.
+- shad-gpu, `--build`/`--push-binaries`/`--patch` rc 0: `PCK_TEST_FILTER=wire::gpu_tests` →
+  run `20260912T105455-360568`, `peacockdb_core_gpu_lib` 28 passed 0 failed 1 ignored (13.98 s).
+  Empty filter → run `20260912T105520-360623`, exit 0: `peacockdb_core_gpu_lib` 303 passed
+  0 failed 1 ignored (30.88 s); `test_gpu_corpus` 8 passed (7.92 s).
+- `cargo test --features rust-only -p peacockdb-core --lib` 544 passed, 0 failed, 2 ignored;
+  `--test test_module_layout` 17; `planner::tests::plan_goldens` 19.
+- rustfmt-check clean on the four files; surface 46; caps: the one new comment is 2 lines in a body, headers at 10.
+
+No git mutation.
