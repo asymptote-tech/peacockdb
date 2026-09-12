@@ -15,29 +15,12 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 25 | #212 #211 #210 #209 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
-| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 15 | #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
+| [Critical correctness](#critical-correctness) | 24 | #211 #210 #209 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #212 #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
-
-<a id="t212"></a>
-### #212 — a build side that emits no batch at all still refuses Right, Full and RightAnti
-A Right, Full or RightAnti join whose build side hands the lane no batch is refused by name
-in `without_build`, where the answer owed is every probe row, padded or not.
-
-The scatter route to this is gone: `driver/partitioned.rs` keeps a zero-row scatter output
-where the join above owes rows ([#175](archive/archived-tickets.md#t175)), and the join then computes the answer. What
-remains is an upstream that emits nothing at all. Two shapes reach it. A limit that skips
-everything: `(SELECT ... FROM nation OFFSET 100) n RIGHT JOIN region r` plans
-`GpuCoalesceAllBatches <- GpuLimit skip=100` under the build side, at every mode. And tpcds
-q77 at the three tp4 modes: its Right outer's build side is a grouped aggregate over an Inner
-join, the Inner join's empty scatter lane drops as it should, its lane emits nothing, and the
-aggregate emits nothing where nothing arrived. Pinned by
-`bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti siblings
-(`gpu_tests/join_cases.rs`), and on the driver by
-`a_join_that_owes_its_probe_side_without_a_build_side_is_refused` (`driver/tests/flow.rs`).
 
 <a id="t211"></a>
 ### #211 — a typed null argument to substr or round is read as 0 on the device
@@ -321,6 +304,23 @@ a data dir panics instead of being skipped. Found during the comment audit.
 
 ## Blockers for disabled coverage
 
+<a id="t212"></a>
+### #212 — a build side that emits no batch at all still refuses Right, Full and RightAnti
+A Right, Full or RightAnti join whose build side hands the lane no batch is refused by name
+in `without_build`, where the answer owed is every probe row, padded or not.
+
+The scatter route to this is gone: `driver/partitioned.rs` keeps a zero-row scatter output
+where the join above owes rows ([#175](archive/archived-tickets.md#t175)), and the join then computes the answer. What
+remains is an upstream that emits nothing at all. Two shapes reach it. A limit that skips
+everything: `(SELECT ... FROM nation OFFSET 100) n RIGHT JOIN region r` plans
+`GpuCoalesceAllBatches <- GpuLimit skip=100` under the build side, at every mode. And tpcds
+q77 at the three tp4 modes: its Right outer's build side is a grouped aggregate over an Inner
+join, the Inner join's empty scatter lane drops as it should, its lane emits nothing, and the
+aggregate emits nothing where nothing arrived. Pinned by
+`bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti siblings
+(`gpu_tests/join_cases.rs`), and on the driver by
+`a_join_that_owes_its_probe_side_without_a_build_side_is_refused` (`driver/tests/flow.rs`).
+
 <a id="t206"></a>
 ### #206 — a float or boolean partition key is refused on the device
 
@@ -402,8 +402,7 @@ device is checked against. Waits on the make-a-table-of-literals call all three 
 <a id="t173"></a>
 ### #173 — a finish whose probe produced no keys cannot make the table it owes
 `finish_without_keys` (`gpu_backend/join.rs`) refuses Left, Full, LeftSemi and LeftMark on the
-device when a lane's probe side accumulated no keys: what each owes is an empty table or one
-of literals, and every entry point on the frozen surface loads a table by reading one.
+device when a lane's probe side accumulated no keys: what each owes cannot be loaded from nothing.
 
 One site, on the probe side. LeftAnti hands its build side up and agrees with the cpu, which
 answers all five. The accumulators are not here: a collapse of no handles and a merge of no
