@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 202), which is also the counter for
+New tickets take the next free number (currently 209), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,87 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 17 | #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
-| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
+| [Critical correctness](#critical-correctness) | 22 | #208 #207 #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
+
+<a id="t208"></a>
+### #208 — the cpu's cross join answers nothing over a zero-row build side
+
+A `GpuCrossJoin` whose build batch has zero rows emits no batch on the cpu, where the device
+emits one of zero rows; a zero-row probe batch is zero rows on both.
+
+DataFusion's `CrossJoinExec` ends its stream without a batch when its left side is empty
+(`cross_join.rs`, `left_data.num_rows() == 0`), and `CpuProbingJoin::probe_and_fetch` hands that
+empty answer up as the call producing nothing; `cudf::cross_join` over a zero-row left is a
+zero-row table. `NestedLoopJoinExec` over the same shape emits a zero-row batch, so the cpu's two
+predicate-free joins disagree with each other as well as with the device. Nothing and a zero-row
+batch are different arrivals downstream, as #205 says. Pinned by
+`bug_a_cross_join_over_a_zero_row_build_is_nothing_on_the_cpu` and its both-sides-empty neighbour
+(`gpu_tests/nested_cases.rs`).
+
+<a id="t207"></a>
+### #207 — both backends drop a cross join's projection
+
+A `GpuCrossJoin` carrying a projection emits every column of the crossed table on both engines:
+the cpu refuses at `declared_as`, the device hands the wider table up under the narrower one.
+
+The planner writes one: a predicate-free `NestedLoopJoinExec` with a projection becomes a
+`GpuCrossJoin` with it (`translator/nodes.rs`), and `check_projection` validates it. Then nobody
+applies it — `CrossJoinExec::new` takes none (`cpu_backend/join.rs`), `CudfCrossJoin` has no
+projection field (`gpu_plan.fbs`) so `cross_join_payload` writes none and `execute_cross_join`
+applies none. #190 is the cpu half of the same defect for the nested-loop join, where the device
+does apply it. On the device every ordinal above the join then reads one column of some other
+(#135's shape). Pinned by `bug_a_cross_join_projection_is_dropped_on_both`
+(`gpu_tests/nested_cases.rs`).
+
+<a id="t205"></a>
+### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
+
+A `GpuAccumulateBatchesAndSort` or `GpuMergeSortedPartitions` whose only batches have zero rows
+emits no batch on the cpu, where the device emits one of zero rows.
+
+DataFusion's `SortExec` over zero rows yields no batch at all, and `SortedRuns::mark_done_and_fetch`
+and `CpuPartitionAccumulator::accumulate_and_fetch` (`cpu_backend/accumulate.rs`) hand that empty
+answer to `one_batch`, which reads it as the lane that received nothing. `CpuExec::exec` concatenates
+the same empty answer under the declared schema and gets zero rows, and the cpu coalesce does too, so
+the two cpu paths disagree with each other as well as with the device. Downstream, nothing and a
+zero-row batch are different arrivals: a global merge over nothing is #199's site. Pinned by
+`bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu` and its two neighbours
+(`gpu_tests/accumulate_cases.rs`).
+
+<a id="t204"></a>
+### #204 — the device's sorted merge drops its fetch when it is handed one input
+
+`CudfSortPreservingMerge` with a `fetch` over a single input table answers every row: 16 where the
+plan asked for 5.
+
+`node_session.cpp`'s collapse arm merges and slices only under `views.size() > 1`; one view falls
+to the plain `cudf::concatenate`, which applies no fetch. Both accumulating sorts reach it — an
+`AccumulateBatchesAndSort` lane that received one batch, and a `MergeSortedPartitions` with one
+populated lane — and the wire puts the fetch on the merge alone (`accumulating_sort` writes
+`fetch: -1` per batch). From SQL the per-batch `GpuSort` carries the same fetch, so one batch
+already holds at most n rows and the loss is masked; the operator's contract is still broken.
+Pinned by `bug_a_fetch_over_one_sorted_batch_is_not_applied_on_the_device` and
+`bug_a_fetch_over_one_populated_lane_is_not_applied_on_the_device` (`gpu_tests/accumulate_cases.rs`).
+
+<a id="t202"></a>
+### #202 — a descending sort key puts its nulls on the wrong end on the device
+
+On a descending key the device places nulls at the end the plan did not declare: `i32 DESC
+NULLS LAST` comes back nulls first, and `DESC NULLS FIRST` comes back nulls last.
+
+`sort.cpp` and the merge in `node_session.cpp` map `nulls_first` to `cudf::null_order::BEFORE`
+and its absence to `AFTER`, and cuDF applies that before it flips a `DESCENDING` key. Ascending
+keys are right, which is why every corpus ORDER BY has agreed: no cell's descending key carries
+a null. DataFusion's default for `DESC` is nulls first, so a query sorting a nullable column
+descending gets its null rows first on the cpu and last on the device. The mapping has to be
+relative to the direction — `BEFORE` when `nulls_first == asc` — at both sites, since a merge
+over sorted runs must order as the sort did. Pinned by
+`bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t200"></a>
 ### #200 — a Date64 comes back as a type the wire cannot name
@@ -48,8 +123,11 @@ or a panic is unverified.
 
 So a global aggregate whose lane received no rows disagrees between the engines: the CPU emits one
 row and the device emits none. A wrong answer rather than a refusal, and nothing refuses it.
-Reachability is unverified — found by reading, not by a run — so the first thing it needs is a
-query that reaches an empty lane under a global aggregate.
+Shown on a device by `bug_a_global_merge_over_no_arrival_answers_nothing_on_the_device`
+(`gpu_tests/aggregate_cases.rs`), which also shows the CPU's row is sum's identity, not count's:
+a count merges by sum, so a merged count over nothing is NULL there where SQL says 0. The init over
+a zero-row batch keeps its row on both, so the merge is the one site. No corpus query is known to
+reach it.
 
 <a id="t198"></a>
 ### #198 — a typed NULL inside an AST expression is a typed zero on the device
@@ -58,13 +136,18 @@ query that reaches an empty lane under a global aggregate.
 `build_expr`'s ten literal arms (`:158`), so which answer a literal gives depends on which
 path evaluated it.
 
-A bare literal short-circuits to `build_scalar` and is null, as do `CASE` and `LIKE`, which
-`is_ast_able` refuses. What reaches the bug is `col <op> NULL::T` for a numeric `T` matching the
-column. In arithmetic that is a wrong value; in a comparison it is a wrong **row count**, since
-`col = NULL` is true wherever `col` is 0 and SQL says the row does not survive.
+`CASE` and `LIKE`, which `is_ast_able` refuses, reach `build_scalar` and are null. A bare
+literal is null only where `build_column` sees it first: a project asks `is_ast_able` before
+`build_column`, so `NULL::BIGINT` in a select list is a column of zeros. `col <op> NULL::T` for
+a numeric `T` matching the column reaches the bug too. In arithmetic that is a wrong value; in a
+comparison it is a wrong **row count**, since `col = NULL` is true wherever `col` is 0 and SQL
+says the row does not survive.
 
 No cell is disabled against this — it is a wrong answer inside cells that pass. Fixed by
-`tasks/typed-nulls.md`, which removes the second scalar builder rather than correcting it.
+`tasks/typed-nulls.md`, which removes the second scalar builder rather than correcting it;
+that spec's premise that a bare literal short-circuits to null is false, as the second pin
+shows. Pinned by `bug_a_typed_null_in_arithmetic_is_the_column_on_the_device` and
+`bug_a_typed_null_literal_is_a_column_of_zeros_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t166"></a>
 ### #166 — physical planning drops a LIMIT interval, and the answer changes
@@ -111,9 +194,16 @@ vs CPU). Semi half done (q33; semi honors per-join `null_equals_null`).
 <a id="t59"></a>
 ### #59 — Nullable-key semantics for semi/anti/mark joins
 Anti/mark keep `null_equality::EQUAL` deliberately; a blind UNEQUAL flip is wrong for
-`NOT IN`. Latent — no enabled query has a nullable anti/mark key. Wants a dedicated
-analysis plus expr/join goldens covering nullable IN / NOT IN / EXISTS before defaults
-change. Anti remainder overlaps #80.
+`NOT IN`. No enabled query has a nullable anti/mark key. Wants a dedicated analysis plus
+expr/join goldens covering nullable IN / NOT IN / EXISTS before defaults change. Anti
+remainder overlaps #80.
+
+The two engines disagree today, not latently: the cpu's `HashJoinExec` takes the node's
+`null_equals_null` for every type, so under the SQL default a LeftAnti keeps its null-key build
+rows, a RightAnti its null-key probe rows, and a LeftMark marks them `false`, while the device
+drops or marks them `true`. The device's answer under `false` is exactly the cpu's under `true`,
+which is how the nine `bug_…null_key…` cases in `gpu_tests/join_cases.rs` pin it — a finish pass,
+a residual filter and a streamed probe all included.
 
 <a id="t46"></a>
 ### #46 — q61 GPU: 'promotions' sum subtree returns the wrong value
@@ -191,6 +281,34 @@ a data dir panics instead of being skipped. Found during the comment audit.
 
 ## Blockers for disabled coverage
 
+<a id="t206"></a>
+### #206 — a float or boolean partition key is refused on the device
+
+A `GpuEmitPartitions` hashing a `Float64` or a `Boolean` column is refused by the device's kernel,
+where comet's hasher answers it on the cpu.
+
+`spark_hash_partition.cu`'s type switch takes STRING, INT8-64 and DATE32 and fails on everything
+else: `unsupported key column cuDF type_id=10` for a double, `11` for a boolean, `27` for a decimal
+(that one is #95). Spark hashes a double as its long bits and a boolean as an int, and comet's
+`create_murmur3_hashes` does both, so the cpu lane assignment is defined and the device's is a
+refusal. Any `GROUP BY` or join key of either type at more than one lane reaches it. Pinned by
+`bug_a_float_key_is_refused_on_the_device` and `bug_a_boolean_key_is_refused_on_the_device`
+(`gpu_tests/emit_cases.rs`).
+
+<a id="t203"></a>
+### #203 — the device cannot cast a number to text
+
+`CAST(key AS VARCHAR)` in a select list answers on the cpu and is refused on the device:
+"cast to STRING from a non-string type not supported in column path".
+
+`build_column`'s cast arm (`expr.cpp`) refuses every cast whose target is `STRING` unless the
+input is already a string. `cudf::cast` has no string target, so the arm needs
+`cudf::strings::from_integers`, `from_floats`, `from_booleans` and the datetime converters,
+chosen by the input's type.
+Neighbour of #45, where a join key's cast to string is the same refusal on the join path; a fix
+here answers a projection and does not by itself answer #45, whose fix hashes rather than casts.
+Pinned by `bug_a_cast_to_text_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
+
 <a id="t169"></a>
 ### #169 — a recipe plan is a chain, so its depth is its length, and the verifier caps depth
 
@@ -254,7 +372,10 @@ The corpus reaches it twice: q21 at tp4-single, and tpcds q77, whose Right outer
 gets no build side and owes its probe rows padded with NULLs. q77 is therefore out of the
 end-to-end list, with q2 carrying the union-that-cannot-interleave claim in its place — writing
 the CPU pad alone would make the oracle answer a query the device refuses.
-Unfreezing buys a pass-through of the probe side and the refusal goes.
+Unfreezing buys a pass-through of the probe side and the refusal goes. Pinned, both sides
+refusing, by `bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti
+siblings (`gpu_tests/join_cases.rs`) through `without_build`, which `empty-build.md`'s driver
+fix does not reach: retarget or delete them by hand. A zero-row build *batch* is not this.
 
 <a id="t173"></a>
 ### #173 — the frozen surface cannot build a table out of nothing
@@ -267,7 +388,10 @@ places so the two stay one engine. The exception is a global aggregate, which ow
 row whatever arrived.
 
 Unfreezing buys a make-empty-of-schema call and the refusals go. Until then the refusal is the
-contract, and the shapes that reach it are the ones a lane can be empty in.
+contract, and the shapes that reach it are the ones a lane can be empty in. The accumulators never
+reach it (both emit nothing before any call); the join's finish over no probe call at all does, for
+Left, Full, LeftSemi and LeftMark — `bug_…_finishing_with_no_probe_batch_is_refused_on_the_device`
+(`gpu_tests/join_cases.rs`); LeftAnti hands its build side up and agrees with the cpu.
 
 <a id="t23"></a>
 ### #23 — Upgrade DataFusion 45→46+ to unblock q27/q70/q72/q86
@@ -278,9 +402,12 @@ not planned; q72 `Date32 + Int64` coercion. Whole rows dead until the upgrade. S
 <a id="t65"></a>
 ### #65 — __grouping_id encoding doesn't match DataFusion's GROUPING()
 Grouping-set expansion (`cpp/src/operators/aggregate.cpp`) emits a gid that is
-distinct-per-set but not DataFusion's positional bitmask. Safe while no enabled query
+distinct-per-set but not DataFusion's positional bitmask: the device sets bit `i` for masked key
+`i`, DataFusion sets the first key highest, so a two-key rollup is 0, 2, 3 there and 0, 1, 3 here;
+and the device's column is Int32 where DataFusion declares UInt8. Safe while no enabled query
 projects or sorts `GROUPING()`; must be fixed before one does (q70/q86 after #23).
-9 rollup rows carry this ticket.
+9 rollup rows carry this ticket; pinned by the `bug_grouping_sets_…` cases in
+`gpu_tests/aggregate_cases.rs`.
 
 <a id="t62"></a>
 ### #62 — count(DISTINCT) ignores the DISTINCT flag in GpuAggregate
@@ -297,7 +424,10 @@ murmur3 covers int/date/timestamp/composite/null; decimal deferred (float indefi
 Needed by the first shuffle on a decimal key (tpch q18 `o_totalprice`, q22 `c_acctbal`,
 tpcds `i_current_price`). Dispatch by *logical* precision (≤18 → low 8 LE bytes of int128;
 >18 → raw 16B LE) and thread precision through the partition FFI. Until then
-`spark_hash_partition.cu` throws a loud "decimal partition key unsupported".
+`spark_hash_partition.cu`'s type switch fails with `unsupported key column cuDF type_id=27`,
+which is what [#184](tasks/active-tickets.md#t184)'s q15 hits on `total_revenue`. The cpu's comet
+hasher takes the decimal, so the shape is a refusal on one side. Pinned by
+`bug_a_decimal_key_is_refused_on_the_device` (`gpu_tests/emit_cases.rs`).
 
 <a id="t57"></a>
 ### #57 — Value-form CASE produces wrong results on the GPU column path
@@ -883,6 +1013,10 @@ the producing expression's.
 
 Both engines price a node from the declared schema, so a wrong type moves no golden byte. T16
 confirmed it on a device: cuDF's Welford count exports Int64 where every plan declares UInt64.
+
+The finalize has the same gap from the other side: `avg`'s divide over a decimal state is typed by
+arrow at (26,10) where the output declares (22,6), and `declared_as` refuses it
+(`bug_a_decimal_average_is_refused_on_the_cpu`, `gpu_tests/aggregate_cases.rs`).
 
 T17 closed the widening arm only (`widened_decimal`, `executor/cpu_backend/`). The signed arm remains:
 `avg` declares its count state UInt64 and DataFusion's accumulator produces Int64 — no widening, and

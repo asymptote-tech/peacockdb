@@ -111,3 +111,20 @@ Those of the harness task, and:
 - New tickets in `tickets.md`, within the fifteen-line cap, one per distinct defect.
 - `build-test.md`'s row for the harness carries the new count; the grand total moves with it.
 - Green on shad-gpu; the rust-only lib unchanged.
+
+## Completeness signoff
+
+Solved under its constraints: cases only, nothing outside `src/tests/gpu_tests/` and the wiki,
+no mechanism beyond the parquet writer, no fix; every row of the matrix and the empty-input
+table a case named for its shape; 204 operator cases, 128 green and 76 `bug_` asserting the
+wrong answer or the refusal exactly, each with its ticket above it, going red on the fix; seven
+new tickets and fifteen amended by what the device showed; the kind guard with only the three
+forwarders excluded; exact comparison with no tolerance anywhere. Deviations, none a shortcut:
+two fixture corrections (a padded side declared nullable, as the planner does; sorted runs
+dealt round-robin so the merge key carries no ties); a seventh empty shape for the finishing
+joins, the only route to #173; `nested_cases.rs` beside the spec's six files; cases beyond the
+spec's rows; Welford's moments not compared, a mean not being dyadic — a harness finding; the
+`avg` shortcut's count declared Int64 so its finalize can be the subject; eight `bug_` helpers
+duplicated across files that belong to the harness; two handoffs written on #198 and #175 for
+`typed-nulls` (whose premise the second pin shows false) and `empty-build` (whose driver fix
+does not reach the harness's `without_build` route).
