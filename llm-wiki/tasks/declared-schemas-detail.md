@@ -303,3 +303,96 @@ appended per query under `-- declared (rust, pre-serialization) --` with `undecl
 for the nine arms this task does not declare; regeneration is `UPDATE_CANONICAL=1
 PEACOCK_REWRITE_RECIPE_BYTES=1 … -- planner::tests::plan_goldens` and the test re-points the
 `/tmp` root itself; the device rung is 285 at the fork.
+
+### 2026-09-12 — plan task 5 done: the harness, shared with the walk
+
+**Layout.** The driver moved out of `wire/gpu_tests/mod.rs` into `wire/gpu_tests/walk.rs`
+(`mod walk;` in the test module's facade); `mod.rs` keeps the walk's own assertions — the
+knobs, `trail`, `assert_walk_matches_datafusion`, the nine queries, ten cases, `Driven`/`PROVEN`
+— and nothing in what they assert moved. `walk.rs` holds `Session`, `At`, `Walk`, `route`,
+`phases`, `context`, `plan_recipes`, `walk`, and the four cases of the driver's own. Everything
+shared is `pub(crate)`: `ONE_LANE`/`TWO_LANES` in `mod.rs`; in `walk.rs` `context`,
+`plan_recipes(sql, knobs) -> (Box<dyn GpuNode>, RecipePlan)`, `walk(sql, knobs) -> Walked`,
+`Walked { batches, calls, firings }`, `Firing`, `Column`, `columns`.
+
+**The harness's signature**, for plan task 6:
+
+```rust
+pub(crate) struct Firing {
+    pub(crate) symbol: AbiSymbol,
+    pub(crate) target: Option<(Seq, FbKind)>,   // None for the bare result_from_handle
+    pub(crate) declared: SchemaRef,             // Call::output_schema's fields
+    pub(crate) exported: Result<SchemaRef, String>, // raw, or why the export refused
+}
+impl Firing {
+    pub(crate) fn label(&self) -> String;       // "#3 CudfScan" / "result_from_handle"
+    pub(crate) fn declared_vs_exported(&self) -> Option<(Vec<Column>, Vec<Column>)>;
+}
+pub(crate) struct Column { pub(crate) name: String, pub(crate) data_type: DataType }
+pub(crate) fn columns(schema: &ArrowSchema) -> Vec<Column>;
+```
+
+One `Firing` per handle a declared call produced (a repartition would give one per output
+lane), in the order made, plus one per handle the sink exported. `Walk::measure` is the one
+skip: a call whose `output_schema` is `None` fires and is not measured — the arms
+`declared-schemas-derived.md` takes — so no case needs a guard. `columns` is the comparison by
+name and type: nullability is not carried, and a decimal reads at `DECIMAL128_MAX_PRECISION`
+(or 256's) on both sides, so only its scale can differ; `Firing::declared` and `::exported`
+are the raw schemas for a test that wants the exporter's 38 or its `has_nulls()` flag. The
+export is the production `peacock_result_from_handle` over `0..u64::MAX`, schema read off
+`StreamReader::try_new` before any batch (`Session::exported_schema`); the sink's export reads
+the batches too (`Session::export`). No C++ change, no new symbol.
+
+**What the walk needed.** `Session::export` became `Result` and the sink records a `Firing`
+from it; `Session::scan`/`execute` are unchanged and still assert `rc == 0` — a call the
+device refuses (query 11's cast to text, #45, will be one) panics at `execute`, which is the
+spec's "ignored test naming the gap", not a `Firing`. A refused *export* at any node is the
+`Firing`'s `Err`; at the sink it also leaves `batches` short, which the walk's oracle compare
+reports as "exported no rows". Every declared intermediate is exported on every walk — no mode
+switch: the wire rung went from 10 to 14 cases in 9.95 s, so the extra host copies (the
+lineitem scans at two lanes are the largest) did not earn a flag.
+
+**The zero-row question.** `assert!(total_rows > 0)` lives in `assert_walk_matches_datafusion`
+(`mod.rs`), the walk's oracle helper, not in the driver — its comment says why (two empty
+results compare equal having compared nothing), and it stays. Task 6's cases call `walk`
+directly and never go through it. **But the spec's query 6 does not plan**:
+`SELECT n_name FROM nation WHERE n_nationkey < 0` is refused at
+`scan_mapping/partition.rs` — row-group pruning leaves no survivor and the planner returns
+`Invalid("no surviving row groups: …")`. Seen on the device first, then on the CPU through
+the CLI at `testdata/tpch.sf1` (`n_nationkey + 100 < 0`, `n_name = 'NOWHERE'` and
+`n_nationkey % 7 = 9` all plan and answer zero rows; `< 0` alone refuses). **Ticket #209**
+filed (Critical correctness; counter → 210). Task 6's query 6 should take the arithmetic
+form; `a_query_selecting_no_rows_is_walked_and_measured` drives it and shows three firings
+(`#0 CudfScan`, the filter, `result_from_handle`) each exporting a schema of the declared
+arity over zero rows.
+
+**Driver cases** (`walk.rs`, all red first — the API did not exist, then the two device ones
+red on wrong expectations of mine: `SUM_BY_FLAG` at two lanes has no plain project above the
+aggregate, and the first zero-row SQL was the refused one): `columns_set_precision_and_nullability_aside`
+(pure; runs on the device rung because the module is gpu-gated),
+`every_firing_of_a_declared_call_is_measured_and_no_undeclared_one_is` (`SUM_BY_FLAG`,
+`TWO_LANES`: 2 scans + 1 coalesce-all + 2 exports = 5 firings, the aggregates/repartition/
+finalize fired and are absent), `a_query_selecting_no_rows_is_walked_and_measured`,
+`a_refused_export_is_returned_rather_than_panicking` (`exported_schema(u64::MAX)` on an open
+session → `Err` naming `unknown handle`).
+
+**Results, all fresh after the last edit:**
+
+- `CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run` —
+  0 warnings; `--list gpu_tests::` 289 (285 at the fork + 4, `wire::gpu_tests::walk::*`).
+- shad-gpu (neighbour at 37 GiB, pool built): `--build`, `--push-binaries`, `--patch` rc 0;
+  `PCK_RUN_CPP=0 PCK_TEST_FILTER=wire::gpu_tests --run-detached` → run
+  `20260912T094522-341316`, `peacockdb_core_gpu_lib` 14 passed 0 failed (the walk's ten
+  and the driver's four), `test_gpu_corpus` 0 run (filtered). Empty filter → run
+  `20260912T094558-341378`, exit 0: `peacockdb_core_gpu_lib` 289 passed 0 failed 26.96 s;
+  `test_gpu_corpus` 8 passed 7.94 s. (Earlier runs `…T093954-338627` and `…T094257-339819`
+  were the two red rounds above.)
+- `cargo test --features rust-only -p peacockdb-core --lib` — 541 passed, 0 failed, 2 ignored;
+  `--test test_module_layout` 17.
+- rustfmt-check clean on `walk.rs` and `gpu_tests/mod.rs`; surface 46; comment caps: longest
+  in-body 2, above a declaration 7.
+- `build-test.md`: gpu block 293 → 297, `gpu_tests::` 285 → 289, Rust 1400 → 1404, grand total
+  1836 → 1840; a "Recipe walk driver" row (4) under the walk's.
+
+Nothing under `cpp/`, no fix, no wire change. No git mutation: `walk.rs` is new and unstaged,
+`mod.rs`, `tickets.md`, `build-test.md` and this file modified.

@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1836 test cases — Rust 1400, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1840 test cases — Rust 1404, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -328,7 +328,7 @@ the crate links; executor lifecycle
 what the batch reports, and that `consume` hands the handle over without releasing it. Needs no
 device: the release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 293 cases: `--lib -- gpu_tests::` 285, `test_gpu_corpus` 8
+#### gpu — `--features gpu`: shad-gpu only. 297 cases: `--lib -- gpu_tests::` 289, `test_gpu_corpus` 8
 
 *crate integration, external*
 
@@ -376,6 +376,16 @@ divide's scale from its operands where arrow takes it from the declared type. A 
 because its masks and NULL placeholders are the one payload the plan line does not imply, and
 one read re-walks every query to check the kinds a device has run against the kinds the file
 claims, in both directions
+
+| Recipe walk driver | [every_firing_of_a_declared_call_is_measured_and_no_undeclared_one_is](../peacockdb-core/src/wire/gpu_tests/walk.rs) | 4 |
+|---|---|--:|
+
+the driver the walk and the schema catalog share: after every firing of a call that declares an
+output schema it exports the handle through `result_from_handle` and keeps the declared schema
+beside the exported one; a call with no declaration fires and is not measured; a refused export
+is returned as the firing's finding rather than a panic; a zero-row query is walked like any
+other, under a predicate row-group pruning cannot see through (#209); and the comparison it
+offers sets decimal precision and nullability aside, the two things the exporter rewrites
 
 *subcomponent*
 
