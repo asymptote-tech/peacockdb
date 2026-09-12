@@ -344,3 +344,57 @@ Results here:
     rustfmt --check --edition 2024 src/tests/gpu_tests/{mod,script,harness_cases}.rs          clean
 
 For plan task 8: the gpu block's `--lib -- gpu_tests::` figure is 70 after this task (55 + 6 + 9).
+
+### 2026-09-12 — plan task 6 done: `GpuLimit`
+
+`harness_cases.rs` gains `limit_over(skip, fetch, rows, batches)` and the plan's nine cases as
+written, each a `GpuLimit::new(Given::of(synthetic schema, MultipleBatches), RowInterval { skip,
+fetch })` over a stream of `synthetic(rows, 10 + i)` batches, run as `Script::Accumulate(stream)`
+through `executors_for` on both backends — one slot per `accumulate_and_fetch` and one for
+`mark_done_and_fetch` — then `Outcome::same(Order::AsEmitted)`. `Script::Accumulate` has its first
+constructor; the `#[allow(dead_code)]` on `Script` is on the enum, not per variant, so it stays for
+`Lanes`, `Emit`, `Join` and `Source`, and its reason now names `operator-cases.md` alone.
+
+Cases (9): `tests::gpu_tests::harness_cases::{an_interval_inside_one_batch_slices_that_batch,
+an_interval_straddling_two_batches_slices_both, batches_entirely_outside_the_interval_produce_nothing,
+a_skip_alone_drops_the_prefix_and_keeps_the_rest, a_stream_of_several_batches_is_cut_at_the_same_two_edges,
+a_stream_of_one_zero_row_batch_answers_nothing_on_both, a_zero_row_batch_inside_a_stream_counts_no_rows_on_both,
+a_stream_of_nothing_but_zero_row_batches_answers_nothing_on_both,
+an_interval_no_batch_reaches_answers_nothing_on_both}`.
+
+**No divergence and no one-sided failure**; every case agreed on its first device run, so no ticket
+and no `bug_` test. Two things worth knowing for the operators ahead:
+
+- Both `LimitStream`s (`cpu_backend/accumulate.rs`, `gpu_backend/accumulate.rs`) take their range
+  from the one `RowInterval::range_of`, so the two edges cannot disagree by construction; what the
+  device side proves is `slice_handle` over the range and the release of an uncalled batch, and
+  that a slot both sides leave empty compares equal.
+- **#173's shape is not reachable through a limit.** `range_of` answers `None` for a zero-row batch
+  (`start < stop` is false at `n_rows == 0`) and never a zero-length range, so a zero-row input is
+  released uncalled on both sides and the device is never asked to slice or ship an empty table.
+  Every zero-row route here — one zero-row batch, one inside a stream, nothing but zero-row batches
+  — ends in an empty slot on both, not a zero-row batch. The route to #173 is an operator that
+  *calls* the device on nothing: an accumulator's done over no arrivals, a join side with no rows.
+
+No red reachable on this box beyond the compile of the new names: the cpu drive of every case
+passes here (it runs before `Device::open`), and the device is where the comparison happens.
+
+shad-gpu (neighbour at 37 GiB of 143.7; no `rmm` line in either gate log):
+
+    run 20260912T050618-248271  PCK_RUN_CPP=0 PCK_TEST_FILTER=tests::gpu_tests  rc 0
+      peacockdb_core_gpu_lib   24 passed; 0 failed; 590 filtered out   (15 + these 9)
+      test_gpu_corpus          0 passed; 8 filtered out
+    run 20260912T050631-248316  PCK_RUN_CPP=0, no filter (the rung whole)      rc 0
+      peacockdb_core_gpu_lib   79 passed; 0 failed; 535 filtered out   (70 + 9)
+      test_gpu_corpus          8 passed; 0 failed
+
+Results here:
+
+    CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run   exit 0, 0 warnings
+    <staged lib> --list gpu_tests::                                                          79 cases, the nine above by name
+    scripts/build-test-shadgpu.sh --build; --push-binaries --patch                            exit 0, 0 warnings
+    cargo test --features rust-only -p peacockdb-core --lib                                   530 passed, 2 ignored (unchanged)
+    cargo test … --test test_module_layout / --test test_ci_coverage                          17 / 8
+    rustfmt --check --edition 2024 src/tests/gpu_tests/{script,harness_cases}.rs              clean
+
+For plan task 8: the gpu block's `--lib -- gpu_tests::` figure is 79 after this task.

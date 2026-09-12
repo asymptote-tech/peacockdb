@@ -6,7 +6,7 @@ use datafusion::arrow::record_batch::RecordBatch;
 use super::device::Device;
 use super::script::{Script, run_both};
 use crate::executor::RowRange;
-use crate::plan::{BatchLayout, GpuUnload, Schema};
+use crate::plan::{BatchLayout, GpuLimit, GpuUnload, RowInterval, Schema};
 use crate::tests::compare::{Order, assert_same};
 use crate::tests::given::Given;
 use crate::tests::synthetic::synthetic;
@@ -208,4 +208,84 @@ fn a_range_over_a_zero_row_batch_is_zero_rows_on_both() {
         },
     )
     .same(Order::AsEmitted);
+}
+
+// `GpuLimit` through `executors_for`: the mid-plan limit streams and holds nothing, so
+// one slot per batch and an empty one at done — a batch outside the interval is a slot
+// both sides leave empty, which is not a zero-row batch.
+
+/// A limit over a stream of `batches` batches of `rows` rows each.
+fn limit_over(
+    skip: u64,
+    fetch: Option<u64>,
+    rows: usize,
+    batches: usize,
+) -> (GpuLimit, Vec<RecordBatch>) {
+    let stream: Vec<RecordBatch> = (0..batches)
+        .map(|i| synthetic(rows, 10 + i as u64))
+        .collect();
+    let node = GpuLimit::new(
+        Given::of(
+            Schema::new(stream[0].schema()),
+            BatchLayout::MultipleBatches,
+        ),
+        RowInterval { skip, fetch },
+    );
+    (node, stream)
+}
+
+#[test]
+fn an_interval_inside_one_batch_slices_that_batch() {
+    let (node, stream) = limit_over(3, Some(4), 16, 1);
+    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+}
+
+#[test]
+fn an_interval_straddling_two_batches_slices_both() {
+    let (node, stream) = limit_over(12, Some(8), 16, 2);
+    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+}
+
+#[test]
+fn batches_entirely_outside_the_interval_produce_nothing() {
+    let (node, stream) = limit_over(40, Some(4), 16, 4);
+    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+}
+
+#[test]
+fn a_skip_alone_drops_the_prefix_and_keeps_the_rest() {
+    let (node, stream) = limit_over(20, None, 16, 3);
+    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+}
+
+#[test]
+fn a_stream_of_several_batches_is_cut_at_the_same_two_edges() {
+    let (node, stream) = limit_over(5, Some(30), 8, 6);
+    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+}
+
+// Empty inputs, each its own case.
+#[test]
+fn a_stream_of_one_zero_row_batch_answers_nothing_on_both() {
+    let (node, stream) = limit_over(0, Some(4), 0, 1);
+    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+}
+
+#[test]
+fn a_zero_row_batch_inside_a_stream_counts_no_rows_on_both() {
+    let (node, mut stream) = limit_over(10, Some(10), 8, 3);
+    stream.insert(1, synthetic(0, 99));
+    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+}
+
+#[test]
+fn a_stream_of_nothing_but_zero_row_batches_answers_nothing_on_both() {
+    let (node, stream) = limit_over(2, Some(4), 0, 3);
+    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+}
+
+#[test]
+fn an_interval_no_batch_reaches_answers_nothing_on_both() {
+    let (node, stream) = limit_over(1000, Some(4), 8, 3);
+    run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
 }
