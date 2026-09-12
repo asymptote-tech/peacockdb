@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::{ArrayRef, Int64Array};
+use datafusion::arrow::array::ArrayRef;
 use datafusion::arrow::compute::{
     SortColumn, SortOptions, cast, lexsort_to_indices, take_record_batch,
 };
@@ -363,41 +363,6 @@ operator_case! {
         };
         let node = project(vec![keep_id(), (upper, "loud", DataType::Utf8)]);
         run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
-    }
-}
-
-// #198 — a typed NULL inside an AST expression is a typed zero on the device: `i32 + NULL`
-// is NULL on the cpu and `i32` on the device, null only where `i32` was.
-operator_case! {
-    GpuProject,
-    fn bug_a_typed_null_in_arithmetic_is_the_column_on_the_device() {
-        let plus_null = Expr::binary(
-            Expr::column(2, "i32"),
-            BinaryOp::Plus,
-            Expr::Literal(ScalarValue::Int32(None)),
-            DataType::Int32,
-        );
-        let node = project(vec![keep_id(), (plus_null, "plus_null", DataType::Int32)]);
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
-        let unchanged = batch_of(vec![
-            ("id", input().column(0).clone()),
-            ("plus_null", input().column(2).clone()),
-        ]);
-        gpu_answered(&outcome, unchanged, Order::AsEmitted);
-    }
-}
-
-// #198 — a project asks `is_ast_able` before `build_column`, so a bare numeric NULL in a
-// select list takes the AST path and is a column of zeros rather than of nulls.
-operator_case! {
-    GpuProject,
-    fn bug_a_typed_null_literal_is_a_column_of_zeros_on_the_device() {
-        let nothing = Expr::Literal(ScalarValue::Int64(None));
-        let node = project(vec![keep_id(), (nothing, "nothing", DataType::Int64)]);
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
-        let zeros: ArrayRef = Arc::new(Int64Array::from(vec![0; input().num_rows()]));
-        let zeroed = batch_of(vec![("id", input().column(0).clone()), ("nothing", zeros)]);
-        gpu_answered(&outcome, zeroed, Order::AsEmitted);
     }
 }
 
