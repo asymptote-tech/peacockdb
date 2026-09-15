@@ -120,3 +120,14 @@ messages corrected to what the operator harness proved — and drop tasks 1, 3, 
 the spec predates are recorded above: the `rc == 0` site is now in the walk file, and
 `declared-schemas-derived.md`'s "undrivable" note is stale after task 10. Nothing else in the
 chain can progress: tasks 1–12 are done and await the human's merges.
+
+### 2026-09-15 — building again: §2 dispatched
+
+The human took the gate (spec, "Decision, 2026-09-15"): only §2 is built. Sites at HEAD
+`591b45d8`: `walk.rs:61` (`begin_plan`), `:98` (`execute_scan_rowgroups`), `:127`
+(`execute_node`) assert `rc == 0`; `read_export` at `:172` already returns `Err`. `driven()`'s
+three `Refused` messages are `mod.rs:267`, `:272`, `:275`. The proving refusal for the new test:
+#203 is the cheapest — `declared.rs` query 11 already plans it and is `#[ignore]` only because
+the walk aborts. The developer picks among #45, #55, #189 (device half) and #203. Device cycle on
+shad-gpu through `build-test-shadgpu.sh`; nothing here compiles under `rust-only`, so the CPU
+side is a `cargo check` of the gpu-feature lib at most.
