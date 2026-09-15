@@ -3,11 +3,12 @@
 //!
 //! This file holds the macro and nothing else — the declarations are the include, shared
 //! with the device binary so one line carries a query's coverage on both engines. What a
-//! case does lives in `common::corpus`.
-#[macro_use]
-mod common;
+//! case does lives in `peacockdb_core::test_support`, reached through `cpu_case` alone.
 
-use common::registry::RegistryEntry;
+use peacockdb_core::test_support::{
+    CorpusDeclaration, MODES, RegistryEntry, SKIPPED, assert_registry_matches_csv,
+    authoritative_mode, cpu_case, load_csv, result_golden, section_of, stem,
+};
 
 /// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, cpu_oracle, gpu_oracle)` — one
 /// test and one registration per enabled cpu mode. The mode arguments read as a bitwise or
@@ -27,7 +28,7 @@ macro_rules! corpus_query {
             paste::paste! {
                 #[tokio::test]
                 async fn [<cpu_ $dataset _ $query _ $cpu>]() {
-                    common::corpus::cpu_case(
+                    cpu_case(
                         stringify!($dataset),
                         stringify!($sf),
                         &stringify!($query).replace('_', "-"),
@@ -56,7 +57,7 @@ macro_rules! corpus_query {
 macro_rules! declare_corpus_query {
     ($dataset:ident, $sf:expr, $query:ident, $cpu_oracle:ident, $gpu_oracle:ident) => {
         inventory::submit! {
-            common::registry::CorpusDeclaration {
+            CorpusDeclaration {
                 dataset: stringify!($dataset),
                 sf: stringify!($sf),
                 query: stringify!($query),
@@ -93,8 +94,8 @@ include!("common/corpus_cases.inc");
 fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
     let mut wrong: Vec<String> = Vec::new();
     let mut checked = 0;
-    for row in common::registry::load_csv() {
-        for mode in &common::mode::MODES {
+    for row in load_csv() {
+        for mode in &MODES {
             let suffix = mode.ident();
             let live = |prefix: &str| {
                 row.states
@@ -112,7 +113,7 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
         "these device cells have no cpu cell at the same mode, so each compares against a \
          marker and passes having checked nothing: {wrong:?}"
     );
-    assert_eq!(checked, common::registry::load_csv().len() * common::mode::MODES.len());
+    assert_eq!(checked, load_csv().len() * MODES.len());
 }
 
 /// what makes it catch the first `live_cpu` query BEFORE the rollout that needs it, rather
@@ -120,20 +121,17 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
 #[test]
 fn each_declarations_two_oracles_suit_each_other() {
     let mut wrong: Vec<String> = Vec::new();
-    for declared in inventory::iter::<common::registry::CorpusDeclaration> {
-        let query = common::registry::stem(declared.query);
-        let authority = common::corpus::authoritative_mode(declared.dataset, declared.sf, &query);
+    for declared in inventory::iter::<CorpusDeclaration> {
+        let query = stem(declared.query);
+        let authority = authoritative_mode(declared.dataset, declared.sf, &query);
         // A query with no enabled mode has no result section to reason about, and its
         // oracles are inert until one is enabled.
         if authority.is_none() {
             continue;
         }
-        let section = common::corpus_golden::section_of(
-            &common::corpus_golden::result_golden(declared.dataset, declared.sf),
-            &query,
-        );
+        let section = section_of(&result_golden(declared.dataset, declared.sf), &query);
         // The two conditions the entry names, read off what is committed and off the line.
-        let over_cap = section.starts_with(common::corpus_golden::SKIPPED);
+        let over_cap = section.starts_with(SKIPPED);
         let undetermined = declared.cpu_oracle == "data_fusion_subset";
         let needs_live = over_cap || undetermined;
         let says_live = declared.gpu_oracle == "live_cpu";
@@ -171,10 +169,10 @@ fn each_declarations_two_oracles_suit_each_other() {
 /// can, `scan-limit` among them — which is the query that test was written for.
 #[test]
 fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
-    let rows = common::registry::load_csv();
+    let rows = load_csv();
     let mut checked = 0;
-    for declared in inventory::iter::<common::registry::CorpusDeclaration> {
-        let query = common::registry::stem(declared.query);
+    for declared in inventory::iter::<CorpusDeclaration> {
+        let query = stem(declared.query);
         if query == declared.query {
             continue;
         }
@@ -187,7 +185,7 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
         if !row.states.iter().any(|(col, state)| col.starts_with("cpu_") && state == "enabled") {
             continue;
         }
-        let authority = common::corpus::authoritative_mode(declared.dataset, declared.sf, &query);
+        let authority = authoritative_mode(declared.dataset, declared.sf, &query);
         assert!(
             authority.is_some(),
             "{}/{query} is enabled and resolves no authoritative mode. The registry spells it \
@@ -196,18 +194,15 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
             declared.dataset,
             declared.query
         );
-        common::corpus_golden::section_of(
-            &common::corpus_golden::result_golden(declared.dataset, declared.sf),
-            &query,
-        );
+        section_of(&result_golden(declared.dataset, declared.sf), &query);
         checked += 1;
     }
     // The exact count rather than a floor: a floor of one passes on the day all but one
     // hyphenated query stops being checked, and the set is derivable from the same two
     // sources the loop reads.
-    let expected = inventory::iter::<common::registry::CorpusDeclaration>
+    let expected = inventory::iter::<CorpusDeclaration>
         .into_iter()
-        .filter(|d| common::registry::stem(d.query) != d.query)
+        .filter(|d| stem(d.query) != d.query)
         .filter(|d| {
             rows.iter()
                 .find(|r| r.dataset == d.dataset && r.sf == d.sf && r.query == d.query)
@@ -224,7 +219,7 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
 /// half is checked in the device binary, because `inventory` collects per linked binary.
 #[test]
 fn the_registry_matches_the_cpu_corpus_in_both_directions() {
-    common::registry::assert_registry_matches_csv(
+    assert_registry_matches_csv(
         &[
             "cpu_tp1_single",
             "cpu_tp1_rowgroup",

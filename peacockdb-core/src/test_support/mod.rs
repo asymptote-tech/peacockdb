@@ -1,21 +1,26 @@
 //! The shared test harness: the testdata root, the planning modes, the golden-text reader,
-//! the link-time registry and the result comparators.
+//! the link-time registry, the result comparators, the corpus goldens and the corpus case.
 //!
 //! Behind the `test-support` feature, which the crate's dev-dependency on itself turns on —
 //! so `cargo test` sees this module and `cargo build` cannot name it. Two audiences are what
 //! make it a component rather than a file under `tests/`: the crate's unit tests say
 //! `crate::test_support::…`, the binaries `peacockdb_core::test_support::…`, and a copy on
 //! each side of that boundary is the drift #49 is about. Its API is declared here like any
-//! component's, so everything below is private with `pub(crate)` items and a type that
-//! crosses out is declared in this file.
+//! component's, so everything below is private with `pub(crate)` items, a type that crosses
+//! out is declared in this file, and no `pub` signature here names an engine type.
 
+mod corpus;
+mod corpus_golden;
+#[cfg(not(feature = "rust-only"))]
+mod corpus_gpu;
+mod cost_model;
 mod golden_text;
 mod registry;
 mod result_text;
 mod testdata;
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use datafusion::arrow::array::RecordBatch;
 
@@ -119,7 +124,7 @@ pub struct Mode {
     /// The golden's spelling, `tp4-sized`.
     pub name: &'static str,
     pub target_partitions: usize,
-    pub sizing: BatchSizing,
+    pub(crate) sizing: BatchSizing,
 }
 
 impl Mode {
@@ -129,7 +134,7 @@ impl Mode {
         self.name.replace('-', "_")
     }
 
-    pub fn knobs(&self) -> PlanKnobs {
+    pub(crate) fn knobs(&self) -> PlanKnobs {
         PlanKnobs {
             target_partitions: self.target_partitions,
             sizing: self.sizing,
@@ -397,4 +402,161 @@ pub fn assert_results_match(
     query: &str,
 ) {
     result_text::assert_results_match(expected, actual, rel_tol, query)
+}
+
+// --- the corpus goldens ---------------------------------------------------------
+
+/// What a section says when it holds no content. One prefix for every such reason, so a
+/// reader scanning a file sees the same word wherever a section is not a run.
+pub const SKIPPED: &str = "skipped: ";
+
+/// Whether this run writes goldens, and how much of the file it owns when it does.
+///
+/// `UPDATE_CANONICAL`'s contract is a whole file, which a corpus file cannot honour from
+/// one case: the sections belong to different cases and a filtered run has only some of
+/// them. So the whole-file form is what a full run means, and `PCK_UPDATE_SECTIONS` is the
+/// filtered one — the same merge, without the pruning that a whole-file rewrite implies.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Regeneration {
+    /// Verify. The default, and what CI always does.
+    No,
+    /// Merge this section and prune sections no declaration accounts for.
+    Whole,
+    /// Merge this section and leave every other byte of the file alone.
+    Sections,
+}
+
+/// `<mode>-<tier>.cpu.txt` — the per-node tree of every query that ran at this mode.
+pub fn cpu_golden(dataset: &str, sf: &str, mode: &str) -> PathBuf {
+    corpus_golden::cpu_golden(dataset, sf, mode)
+}
+
+/// `<mode>-<tier>.cost.txt`, derived per section from the `.cpu.txt` beside it.
+pub fn cost_golden(dataset: &str, sf: &str, mode: &str) -> PathBuf {
+    corpus_golden::cost_golden(dataset, sf, mode)
+}
+
+/// `<tier>.result.txt` — one entry per query, keyed by the query alone.
+pub fn result_golden(dataset: &str, sf: &str) -> PathBuf {
+    corpus_golden::result_golden(dataset, sf)
+}
+
+/// Read this query's section, or panic naming what a reader has to do next.
+pub fn section_of(path: &Path, query: &str) -> String {
+    corpus_golden::section_of(path, query)
+}
+
+/// Verify one section and never write, whatever the run was asked to regenerate.
+pub fn assert_section(path: &Path, query: &str, body: &str) {
+    corpus_golden::assert_section(path, query, body)
+}
+
+/// Merge one section into the file under an advisory lock, and publish by rename.
+pub fn merge_section(
+    path: &Path,
+    declared: &[(String, Option<String>)],
+    query: &str,
+    body: &str,
+    mode: Regeneration,
+) {
+    corpus_golden::merge_section(path, declared, query, body, mode)
+}
+
+/// The file as it will be written: every declared query in declaration order, this one's
+/// section replaced, and each of the others kept as it stands.
+pub fn merged_text(
+    text: &str,
+    declared: &[(String, Option<String>)],
+    query: &str,
+    body: &str,
+    mode: Regeneration,
+) -> String {
+    corpus_golden::merged_text(text, declared, query, body, mode)
+}
+
+// --- the cost model -------------------------------------------------------------
+
+/// One cost category: where its bytes come from and how they are weighted.
+pub struct Category {
+    pub name: String,
+    pub multiplier: f64,
+    /// Gpu node types binned into this category (empty = placeholder category).
+    pub nodes: Vec<String>,
+}
+
+/// The parsed `cost_model.conf`, in file (= `.cost.txt` line) order.
+pub struct CostModel {
+    pub categories: Vec<Category>,
+}
+
+impl CostModel {
+    /// Load + parse `cost_model.conf` from under the testdata root.
+    pub fn load() -> CostModel {
+        cost_model::load()
+    }
+
+    /// Derive the `.cost.txt` body from a `.cpu.txt` body; `ctx` names the case in a panic.
+    pub fn cost_text_from_cpu(&self, cpu_text: &str, ctx: &str) -> String {
+        cost_model::cost_text_from_cpu(self, cpu_text, ctx)
+    }
+
+    /// The same derivation over a `.cpu.txt` holding every query in `== <query>` sections.
+    pub fn cost_text_from_sections(&self, cpu_text: &str, ctx: &str) -> String {
+        cost_model::cost_text_from_sections(self, cpu_text, ctx)
+    }
+}
+
+// --- a corpus case ----------------------------------------------------------------
+// What the two corpus binaries call, and all they call: dataset, scale factor, query, the
+// mode's macro spelling and the oracle keyword, as strings. The plan, the run report and
+// the backend stay behind these bodies, which is what keeps the harness a facade and not a
+// rename — `no_test_support_signature_names_a_component_type` holds it there.
+
+/// The whole of a cpu corpus case: plan, run, answer, and the three goldens. `mode` is the
+/// macro's ident spelling, decoded here rather than at the call site.
+pub async fn cpu_case(dataset: &str, sf: &str, query: &str, mode: &str, cpu_oracle: &str) {
+    corpus::cpu_case(dataset, sf, query, mode, cpu_oracle).await
+}
+
+/// The whole of a device corpus case: plan, run on the device, then the two read-only
+/// assertions — the mode's `.cpu.txt` section, and the result the declaration names.
+#[cfg(not(feature = "rust-only"))]
+pub async fn gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, gpu_oracle: &str) {
+    corpus_gpu::gpu_case(dataset, sf, query, mode, gpu_oracle).await
+}
+
+/// Which mode authors `.result.txt`: the last mode the query declares, in the fixed
+/// sequence of five.
+pub fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'static Mode> {
+    corpus::authoritative_mode(dataset, sf, query)
+}
+
+/// Why a result has no section, and which mode decided it.
+pub fn over_cap(bytes: Option<usize>, mode: &Mode) -> String {
+    corpus::over_cap(bytes, mode)
+}
+
+/// `max(0, min(n, |unlimited| - m))` for `LIMIT n OFFSET m`.
+pub fn wanted_rows(available: u64, skip: u64, fetch: Option<u64>) -> u64 {
+    corpus::wanted_rows(available, skip, fetch)
+}
+
+/// The rows a run returned, counted — what the containment check owes the oracle.
+pub fn owed_rows(batches: &[RecordBatch]) -> HashMap<String, usize> {
+    corpus::owed_rows(batches)
+}
+
+/// Strike off what this slice of the unlimited answer accounts for, and record which owed
+/// rows it holds at all.
+pub fn take_rows(
+    owed: &mut HashMap<String, usize>,
+    batches: &[RecordBatch],
+    held_at_all: &mut HashSet<String>,
+) {
+    corpus::take_rows(owed, batches, held_at_all)
+}
+
+/// The query without its trailing `LIMIT n [OFFSET m]`, and the interval it carried.
+pub fn without_its_limit(sql: &str, what: &str) -> (String, u64, Option<u64>) {
+    corpus::without_its_limit(sql, what)
 }
