@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1621 test cases — Rust 1185, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1825 test cases — Rust 1389, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -325,7 +325,7 @@ the crate links; executor lifecycle
 what the batch reports, and that `consume` hands the handle over without releasing it. Needs no
 device: the release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 89 cases: `--lib -- gpu_tests::` 81, `test_gpu_corpus` 8
+#### gpu — `--features gpu`: shad-gpu only. 293 cases: `--lib -- gpu_tests::` 285, `test_gpu_corpus` 8
 
 *crate integration, external*
 
@@ -348,15 +348,18 @@ the gpu column of the registry, the other half of the pair
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [every_kind_has_a_case_or_is_named_as_pending_or_excluded](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 26 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 230 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
 `executors_for`, the outputs compared slot by slot and exactly — schema included, so a type the
 device changes is red here rather than at a query's root. The upload round trip, `GpuUnload`
-and `GpuLimit` are the cases here, the operators whose recipe carries no seq; a guard reads the
-kind each case declares and names every kind with none, thirteen pending for
-[`operator-cases.md`](tasks/operator-cases.md)
+and `GpuLimit` proved the harness on the operators whose recipe carries no seq; then every
+seq-bearing operator — the exec three, both aggregates, the three accumulators, the scatter,
+nine hash-join types, cross, nested-loop and the scan — each case green or a `bug_` case
+asserting the wrong answer or the refusal with its ticket above it, every empty shape its own
+case; a guard reads the kind each case declares and names every kind with none, the three
+forwarders excluded
 
 *component*
 
