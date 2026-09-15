@@ -82,10 +82,10 @@ tests is the joins between them
 |---|---|--:|
 
 the synthetic batch and the comparator against themselves, with no engine: `synthetic(rows,
-seed)` deterministic from its seed, null in every column but the id, dyadic in every float, legal at zero
-rows; `assert_same` red on a differing value, a differing type, a differing row count, and a
-slot one side left empty against a zero-row batch on the other — the failures the operator
-harness rests on, each shown for the reason it names
+seed)` deterministic from its seed, null in every column but the id, dyadic in every float,
+legal at zero rows; `assert_same` red on a differing value, a differing type, a differing row
+count, and a slot one side left empty against a zero-row batch on the other — the failures the
+operator harness rests on, each shown for the reason it names
 
 *component*
 
@@ -450,421 +450,6 @@ half is the one case in `contract.rs`
 the three per-call symbols on a live GPU — a scan's row groups, an export range, a slice — and
 the release skipped exactly where a call consumed the handle
 
-| Test | Ticket | Runs |
-|---|---|--:|
-
-Asserts
-
-| [`bug_a_fetch_over_one_sorted_batch_is_not_applied_on_the_device`](../peacockdb-core/src/tests/gpu_tests/accumulate_cases.rs) | [#204](tickets.md#t204) | shad-gpu |
-|---|---|--:|
-
-the device answers all 16 rows where the cpu answers the top 5: a fetch over one sorted batch
-is not applied
-
-| [`bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/accumulate_cases.rs) | [#205](tickets.md#t205) | shad-gpu |
-|---|---|--:|
-
-the cpu answers nothing for a lane that received one zero-row batch; the device answers the
-zero-row batch
-
-| [`bug_a_fetch_over_zero_rows_is_nothing_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/accumulate_cases.rs) | [#205](tickets.md#t205) | shad-gpu |
-|---|---|--:|
-
-the same with a fetch: nothing on the cpu, zero rows on the device
-
-| [`bug_a_fetch_over_one_populated_lane_is_not_applied_on_the_device`](../peacockdb-core/src/tests/gpu_tests/accumulate_cases.rs) | [#204](tickets.md#t204) | shad-gpu |
-|---|---|--:|
-
-one populated lane's fetch goes unapplied on the device: all 16 rows at `Done`, the cpu's top 5
-
-| [`bug_every_lane_a_zero_row_batch_is_nothing_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/accumulate_cases.rs) | [#205](tickets.md#t205) | shad-gpu |
-|---|---|--:|
-
-the merge over lanes of zero rows answers nothing on the cpu and zero rows on the device
-
-| [`bug_a_welford_init_exports_its_count_as_int64`](../peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs) | [#163](tickets.md#t163) | shad-gpu |
-|---|---|--:|
-
-a Welford init's count is exported `Int64` where the plan declares `UInt64`
-
-| [`bug_a_decimal_sum_is_exported_at_precision_38`](../peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs) | [#187](tasks/active-tickets.md#t187) | shad-gpu |
-|---|---|--:|
-
-a decimal sum is exported at precision 38 whatever was declared; the values are the cpu's
-
-| [`bug_grouping_sets_carry_the_devices_own_id_and_type`](../peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs) | [#65](tickets.md#t65) | shad-gpu |
-|---|---|--:|
-
-grouping sets come back under the device's own `__grouping_id` encoding and type, rows agreeing
-
-| [`bug_grouping_sets_over_zero_rows_are_zero_rows_under_the_devices_id_type`](../peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs) | [#65](tickets.md#t65) | shad-gpu |
-|---|---|--:|
-
-the same over zero rows, under the device's `Int32` id
-
-| [`bug_a_welford_merge_exports_its_count_as_int64`](../peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs) | [#163](tickets.md#t163) | shad-gpu |
-|---|---|--:|
-
-a Welford merge's count comes back `Int64`, never the declared `UInt64`
-
-| [`bug_a_decimal_average_is_refused_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs) | [#163](tickets.md#t163) | shad-gpu |
-|---|---|--:|
-
-the cpu refuses a decimal average at `declared_as`: the finalize's divide types at (26,10)
-where the planner declares (22,6)
-
-| [`bug_a_global_merge_over_no_arrival_answers_nothing_on_the_device`](../peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs) | [#199](tickets.md#t199) | shad-gpu |
-|---|---|--:|
-
-a global merge over no arrival answers nothing on the device and a NULL row on the cpu; SQL's
-count 0 is on neither
-
-| [`bug_a_float_key_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/emit_cases.rs) | [#206](tickets.md#t206) | shad-gpu |
-|---|---|--:|
-
-a `Float64` hash key is refused by the scatter's type switch
-
-| [`bug_a_boolean_key_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/emit_cases.rs) | [#206](tickets.md#t206) | shad-gpu |
-|---|---|--:|
-
-a boolean hash key is refused by the same switch
-
-| [`bug_a_decimal_key_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/emit_cases.rs) | [#95](tickets.md#t95) | shad-gpu |
-|---|---|--:|
-
-a `Decimal128` hash key is refused before any export
-
-| [`bug_decimal_arithmetic_is_exported_at_precision_38`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | [#187](tasks/active-tickets.md#t187) | shad-gpu |
-|---|---|--:|
-
-computed decimal columns are exported at precision 38; scale and values hold
-
-| [`bug_a_cast_to_text_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | [#203](tickets.md#t203) | shad-gpu |
-|---|---|--:|
-
-a cast of a number to text is refused on the column path
-
-| [`bug_a_value_case_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | [#57](tickets.md#t57) | shad-gpu |
-|---|---|--:|
-
-a value-form CASE is refused on the device where the cpu answers
-
-| [`bug_a_typed_null_in_arithmetic_is_the_column_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | [#198](tickets.md#t198) | shad-gpu |
-|---|---|--:|
-
-`i32 + NULL` is the column on the device, null only where the column was
-
-| [`bug_a_typed_null_literal_is_a_column_of_zeros_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | [#198](tickets.md#t198) | shad-gpu |
-|---|---|--:|
-
-a bare numeric NULL in a select list is a column of zeros on the device
-
-| [`bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | [#202](tickets.md#t202) | shad-gpu |
-|---|---|--:|
-
-descending with nulls last puts them first on the device
-
-| [`bug_a_descending_key_with_nulls_first_puts_them_last_on_the_device`](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs) | [#202](tickets.md#t202) | shad-gpu |
-|---|---|--:|
-
-descending with nulls first puts them last on the device
-
-| [`bug_a_left_join_refuses_its_first_probe_batch_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a left join's first probe batch is refused: the key project and the join both consume it
-
-| [`bug_a_full_join_refuses_its_first_probe_batch_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a full join's first probe batch is refused the same way
-
-| [`bug_a_left_anti_join_drops_null_key_build_rows_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#59](tickets.md#t59) | shad-gpu |
-|---|---|--:|
-
-a left anti join drops build rows whose key is NULL: the device hardcodes EQUAL
-
-| [`bug_a_right_anti_join_drops_null_key_probe_rows_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#59](tickets.md#t59) | shad-gpu |
-|---|---|--:|
-
-a right anti join drops probe rows whose key is NULL
-
-| [`bug_a_left_mark_join_marks_null_key_build_rows_true_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#59](tickets.md#t59) | shad-gpu |
-|---|---|--:|
-
-a left mark join marks NULL-key build rows true
-
-| [`bug_an_inner_join_refuses_its_second_probe_batch_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-an inner join's second probe batch is refused: the first call consumed the build side
-
-| [`bug_a_left_join_over_two_probe_batches_refuses_the_first_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a left join over two probe batches refuses the first
-
-| [`bug_a_right_join_refuses_its_second_probe_batch_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a right join's second probe batch is refused
-
-| [`bug_a_full_join_over_two_probe_batches_refuses_the_first_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a full join over two probe batches refuses the first
-
-| [`bug_a_right_semi_join_refuses_its_second_probe_batch_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a right semi join's second probe batch is refused
-
-| [`bug_a_left_anti_join_over_two_probe_batches_drops_null_key_build_rows_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#59](tickets.md#t59) | shad-gpu |
-|---|---|--:|
-
-a left anti join over a streamed probe drops NULL-key build rows
-
-| [`bug_a_right_anti_join_refuses_its_second_probe_batch_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a right anti join's second probe batch is refused
-
-| [`bug_a_left_mark_join_over_two_probe_batches_marks_null_key_build_rows_true_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#59](tickets.md#t59) | shad-gpu |
-|---|---|--:|
-
-a left mark join over a streamed probe marks NULL-key build rows true
-
-| [`bug_a_left_anti_join_with_a_residual_filter_drops_null_key_build_rows_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#59](tickets.md#t59) | shad-gpu |
-|---|---|--:|
-
-the `mixed_*` left anti join drops NULL-key build rows too
-
-| [`bug_a_left_mark_join_with_a_residual_filter_marks_null_key_build_rows_true_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#59](tickets.md#t59) | shad-gpu |
-|---|---|--:|
-
-the `mixed_*` left mark join marks NULL-key build rows true too
-
-| [`bug_inner_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-an inner join with a zero-row probe between two populated ones refuses the second
-
-| [`bug_inner_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-an inner join fed only zero-row probes refuses the second
-
-| [`bug_left_over_a_zero_row_build_refuses_the_probe_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a left join over a zero-row build refuses its probe
-
-| [`bug_left_over_a_zero_row_probe_refuses_it_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a left join refuses a zero-row probe
-
-| [`bug_left_over_both_sides_empty_refuses_the_probe_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a left join with both sides empty refuses the probe
-
-| [`bug_left_with_a_zero_row_probe_between_two_with_rows_refuses_the_first_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a left join with a zero-row probe between two populated ones refuses the first
-
-| [`bug_left_finishing_after_only_zero_row_probes_refuses_the_first_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a left join fed only zero-row probes refuses the first
-
-| [`bug_left_finishing_with_no_probe_batch_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#173](tickets.md#t173) | shad-gpu |
-|---|---|--:|
-
-a left join finishing with no probe batch is refused; it owes every build row padded
-
-| [`bug_right_with_no_build_batch_is_refused_on_both`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#175](tickets.md#t175) | shad-gpu |
-|---|---|--:|
-
-a right join with no build batch is refused on both backends; it owes its probe rows
-
-| [`bug_right_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a right join with a zero-row probe between two populated ones refuses the second
-
-| [`bug_right_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a right join fed only zero-row probes refuses the second
-
-| [`bug_full_over_a_zero_row_build_refuses_the_probe_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a full join over a zero-row build refuses its probe
-
-| [`bug_full_over_a_zero_row_probe_refuses_it_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a full join refuses a zero-row probe
-
-| [`bug_full_over_both_sides_empty_refuses_the_probe_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a full join with both sides empty refuses the probe
-
-| [`bug_full_with_no_build_batch_is_refused_on_both`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#175](tickets.md#t175) | shad-gpu |
-|---|---|--:|
-
-a full join with no build batch is refused on both backends
-
-| [`bug_full_with_a_zero_row_probe_between_two_with_rows_refuses_the_first_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a full join with a zero-row probe between two populated ones refuses the first
-
-| [`bug_full_finishing_after_only_zero_row_probes_refuses_the_first_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a full join fed only zero-row probes refuses the first
-
-| [`bug_full_finishing_with_no_probe_batch_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#173](tickets.md#t173) | shad-gpu |
-|---|---|--:|
-
-a full join finishing with no probe batch is refused; it owes every build row padded
-
-| [`bug_left_semi_finishing_with_no_probe_batch_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#173](tickets.md#t173) | shad-gpu |
-|---|---|--:|
-
-a left semi join finishing with no probe batch is refused; it owes a table of no rows
-
-| [`bug_right_semi_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a right semi join with a zero-row probe between two populated ones refuses the second
-
-| [`bug_right_semi_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a right semi join fed only zero-row probes refuses the second
-
-| [`bug_left_anti_with_a_zero_row_probe_between_two_with_rows_drops_null_key_build_rows_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#59](tickets.md#t59) | shad-gpu |
-|---|---|--:|
-
-a left anti join with a zero-row probe between two populated ones drops NULL-key build rows
-
-| [`bug_right_anti_with_no_build_batch_is_refused_on_both`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#175](tickets.md#t175) | shad-gpu |
-|---|---|--:|
-
-a right anti join with no build batch is refused on both backends
-
-| [`bug_right_anti_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a right anti join with a zero-row probe between two populated ones refuses the second
-
-| [`bug_right_anti_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a right anti join fed only zero-row probes refuses the second
-
-| [`bug_left_mark_with_a_zero_row_probe_between_two_with_rows_marks_null_key_build_rows_true_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#59](tickets.md#t59) | shad-gpu |
-|---|---|--:|
-
-a left mark join with a zero-row probe between two populated ones marks NULL-key build rows
-true
-
-| [`bug_left_mark_finishing_with_no_probe_batch_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/join_cases.rs) | [#173](tickets.md#t173) | shad-gpu |
-|---|---|--:|
-
-a left mark join finishing with no probe batch is refused; it owes every build row marked false
-
-| [`bug_a_cross_join_refuses_its_second_probe_batch_on_the_device`](../peacockdb-core/src/tests/gpu_tests/nested_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-a cross join's second probe batch is refused: the first call consumed the build side
-
-| [`bug_a_cross_join_projection_is_dropped_on_both`](../peacockdb-core/src/tests/gpu_tests/nested_cases.rs) | [#207](tickets.md#t207) | shad-gpu |
-|---|---|--:|
-
-a cross join's projection is applied by neither backend: the cpu refuses the sixteen columns,
-the device hands them all up
-
-| [`bug_a_cross_join_over_a_zero_row_build_is_nothing_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/nested_cases.rs) | [#208](tickets.md#t208) | shad-gpu |
-|---|---|--:|
-
-a cross join over a zero-row build answers nothing on the cpu and a zero-row table on the
-device
-
-| [`bug_a_cross_join_over_both_sides_empty_is_nothing_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/nested_cases.rs) | [#208](tickets.md#t208) | shad-gpu |
-|---|---|--:|
-
-the same with the probe side empty too
-
-| [`bug_an_inner_nested_loop_join_refuses_its_second_probe_batch_on_the_device`](../peacockdb-core/src/tests/gpu_tests/nested_cases.rs) | [#152](tickets.md#t152) | shad-gpu |
-|---|---|--:|
-
-an inner nested-loop join's second probe batch is refused
-
-| [`bug_an_inner_nested_loop_join_projection_is_dropped_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/nested_cases.rs) | [#190](tasks/active-tickets.md#t190) | shad-gpu |
-|---|---|--:|
-
-the cpu drops an inner nested-loop join's projection and refuses its own sixteen columns; the
-device applies it
-
-| [`bug_a_left_nested_loop_join_projection_is_dropped_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/nested_cases.rs) | [#190](tasks/active-tickets.md#t190) | shad-gpu |
-|---|---|--:|
-
-the same for the left form
-
-| [`bug_a_limit_over_one_row_group_is_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/source_cases.rs) | [#188](tasks/active-tickets.md#t188) | shad-gpu |
-|---|---|--:|
-
-a scan with one row group and a limit is refused: a row-group list beside `num_rows`
-
-| [`bug_a_limit_over_one_row_group_is_ignored_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/source_cases.rs) | [#186](tasks/active-tickets.md#t186) | shad-gpu |
-|---|---|--:|
-
-the cpu ignores a scan's limit: ten rows asked, sixty-four answered
-
-| [`bug_row_groups_and_a_limit_together_are_refused_on_the_device`](../peacockdb-core/src/tests/gpu_tests/source_cases.rs) | [#188](tasks/active-tickets.md#t188) | shad-gpu |
-|---|---|--:|
-
-row groups and a limit together are refused at the first batch's read
-
-| [`bug_row_groups_and_a_limit_together_are_read_whole_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/source_cases.rs) | [#186](tasks/active-tickets.md#t186) | shad-gpu |
-|---|---|--:|
-
-four row groups under a limit of ten are all answered whole on the cpu
-
-| [`bug_a_decimal_column_is_exported_at_precision_38`](../peacockdb-core/src/tests/gpu_tests/source_cases.rs) | [#187](tasks/active-tickets.md#t187) | shad-gpu |
-|---|---|--:|
-
-a bare scan of a `Decimal128(18, 2)` column exports it at precision 38
-
-| [`bug_a_narrow_decimal_is_exported_at_precision_38`](../peacockdb-core/src/wire/gpu_tests/declared.rs) | [#187](tasks/active-tickets.md#t187) | shad-gpu |
-|---|---|--:|
-
-a `Decimal128(15, 2)` is exported `(38, 2)` at every node; the 38 is the exporter's
-`max_precision` default, not a width cuDF holds
-
-| [`bug_a_declared_utf8view_is_exported_as_utf8`](../peacockdb-core/src/wire/gpu_tests/declared.rs) | [#183](tasks/active-tickets.md#t183) | shad-gpu |
-|---|---|--:|
-
-a declared `Utf8View` is exported `Utf8` at every one of the six declared node kinds, from the
-scan up
-
-| [`bug_an_extracted_year_declared_int32_is_exported_as_int16`](../peacockdb-core/src/wire/gpu_tests/declared.rs) | [#191](tasks/active-tickets.md#t191) | shad-gpu |
-|---|---|--:|
-
-`extract(year)` declared `Int32` is exported `Int16`, from the project up
-
-| [`bug_a_date64_is_exported_as_a_millisecond_timestamp`](../peacockdb-core/src/wire/gpu_tests/declared.rs) | [#200](tickets.md#t200) | shad-gpu |
-|---|---|--:|
-
-a `Date64` is exported `Timestamp(Millisecond, None)`, a type the wire cannot name
-
 
 ### Everything else
 
@@ -882,7 +467,7 @@ the harness's own format reader — none of which runs engine code.
 | Exec-model prototype (Python) | the scheduler over mock traits, plus pandas-backed operators checked against a single-shot oracle at five partitioning configs, both limit lowerings, the scalar expressions pinned to what `expr.cpp` does rather than what pandas defaults to, and every join mode run on two backends — one pandas, one emitting FlatBuffers nodes and interpreting them as the C++ does — no project code | [test_a_join_in_its_build_phase_holds_back_its_probe_subtree](../scripts/exec_model/tests/test_scheduling.py), [test_every_join_type_matches_the_oracle_on_both_backends](../scripts/exec_model/tests/test_join_capability.py) | cost-report | 216 |
 | Exec-model prototype, TPC-H plan shapes (Python) | the same drivers over real sf1 tables under a live resident budget, each plan re-run at every layout `LayoutInjector` can produce; needs the generated dataset, so it rides dataset-matrix rather than cost-report | [test_the_accumulator_is_what_makes_the_budget_bind](../scripts/exec_model/tests/test_tpch.py), [test_every_layout_gives_the_same_shuffled_join](../scripts/exec_model/tests/test_tpch.py) | dataset-matrix (25.02 leg) | 19 |
 | Exec-model corpus (Python) | every TPC-H query and every TPC-DS query the engine runs that needs no window function, lowered by hand and run over whole sf1 tables at three layouts each — TPC-H against a pandas oracle per query, TPC-DS against DuckDB running the query's own text. Minutes, not seconds, so manual dispatch; `PCK_BACKEND=recipe` re-runs the whole set with every join going through the FlatBuffers emulation | [test_corpus_q21_suppliers_who_kept_orders_waiting](../scripts/exec_model/tests/test_tpch_corpus.py), [plans_tpcds.py](../scripts/exec_model/tests/plans_tpcds.py) | manual — exec-model-corpus.yml, 3 shards | 93 |
-| C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule, and the two refusals of the test-only upload symbol; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.IsAstAble](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 11 |
+| C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule, and the two refusals of the test-only upload symbol; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.IsAstAble](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 12 |
 | cuDF GPU smoke (C++) | the GPU is alive; the Spark-murmur3 kernel matches comet in C++; the timing floor leaves the global switch as it found it; the RMM pool reserves the budget the binary declared | [CudfGpu.SparkPartitionIdsMatchComet2ColWithNulls](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 6 |
 | Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node, plus the per-call entry points at their contract edges (row-group override, export range, slice), the sqrt arm on both evaluators, and a merge that emits state rather than a value | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [AggregateMerge.WelfordStateComesBackAsStateAndNotAsAValue](../cpp/tests/gpu/test_plan_executor.cpp) | shad-gpu | 27 |
 | TPC-H sf40 bare-cuDF (C++) | hand-written cuDF pipelines vs DuckDB sf40; the benchmark vehicle | [TpchSf40.Q1GroupByAggregates](../cpp/tests/gpu/test_tpch.cpp), [Q3JoinsGroupByTopN](../cpp/tests/gpu/test_tpch.cpp) | shad-gpu (sf40 is a hard precondition) | 4 |
@@ -908,10 +493,13 @@ rise when a bug is found. The runtime every row was measured on is cuDF 25.02.02
 `rapids-cuda-12.2` env: a row that goes green after a version bump may mean the runtime moved
 rather than the fix landed.
 
-**Total: 80.**
+**Total: 83.**
 
 | Test | Asserts | Ticket | Runs |
 |---|---|---|---|
+| [`bug_a_stream_of_one_zero_row_batch_is_dropped_on_both`](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs) | a limit handed one zero-row batch emits nothing for it on both backends, where the zero-row batch under the schema is owed | [#214](tickets.md#t214) | shad-gpu |
+| [`bug_a_zero_row_batch_inside_a_stream_is_dropped_on_both`](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs) | the same drop mid-stream: the two cut batches come through, the zero-row one between them does not | [#214](tickets.md#t214) | shad-gpu |
+| [`bug_a_stream_of_nothing_but_zero_row_batches_is_dropped_on_both`](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs) | three zero-row batches, none emitted on either side | [#214](tickets.md#t214) | shad-gpu |
 | [`bug_a_fetch_over_one_sorted_batch_is_not_applied_on_the_device`](../peacockdb-core/src/tests/gpu_tests/accumulate_cases.rs) | the device answers all 16 rows where the cpu answers the top 5: a fetch over one sorted batch is not applied | [#204](tickets.md#t204) | shad-gpu |
 | [`bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/accumulate_cases.rs) | the cpu answers nothing for a lane that received one zero-row batch; the device answers the zero-row batch | [#205](tickets.md#t205) | shad-gpu |
 | [`bug_a_fetch_over_zero_rows_is_nothing_on_the_cpu`](../peacockdb-core/src/tests/gpu_tests/accumulate_cases.rs) | the same with a fetch: nothing on the cpu, zero rows on the device | [#205](tickets.md#t205) | shad-gpu |
@@ -1051,9 +639,11 @@ sha256 matches local). Notes on the rows above:
 ## Golden files
 
 All goldens are committed, under `testdata/goldens/`: `tpch.sf1` (38 files), `tpcds.sf1`
-(115), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top, the recipe payloads with
-a digest each. Most of each sf1 count is the per-query DuckDB cost oracle (22 + 99); the
-engine's own are 16 apiece, one plan and one execution set per mode. The committed DuckDB
+(115), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top: per query, the recipe
+payloads with a digest, then a `-- declared (rust, pre-serialization) --` section with the
+schema each call declares, rendered from the `Call` data before anything is serialized.
+Most of each sf1 count is the per-query DuckDB cost oracle (22 + 99); the engine's own are
+16 apiece, one plan and one execution set per mode. The committed DuckDB
 profile inputs live beside them in `testdata/duckdb-profiles/{tpch,tpcds}` (22 + 99) and
 `testdata/duckdb-dynfilters/{tpch,tpcds}` (22 + 99).
 
@@ -1114,7 +704,8 @@ Consequences worth knowing before you regenerate:
   instead of rewriting, and says so — a bulk regen that moved the wire format goes red
   during the regen, before the goldens are pulled home. It pins what the C++ is handed, and
   it is the file a bulk regen must not quietly rewrite: the diff would come home among the
-  others.
+  others. The declared section is held the same way: a declaration that moved is red under
+  the first variable alone, since it is what the device is measured against.
 - **The `.duckdb_cost.txt` path is re-runnable without DuckDB**: `--extract-only` rebuilds
   the goldens from the committed profiles plus the parquet, so only a genuine oracle change
   needs the 1.5.4 pin.
