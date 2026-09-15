@@ -781,23 +781,16 @@ tables, no new dataset, plus the engine work it needs.
 - a wide `SELECT DISTINCT`: dedup whose state is the whole row, the compaction worst case.
 
 <a id="t178"></a>
-### #178 — two runs share the GPU host, and the pool was sized for one
-Every gtest main reserved 85% of *free* VRAM, so a second process on the card got what the first
-left and died in `pool_memory_resource` with `std::bad_alloc`, always in whichever started second.
+### #178 — shad-gpu is shared, and a pool that cannot be built is a neighbour's fault
+Each gtest main reserves a fixed byte budget (`kPoolBytes` beside its `main()`, listed in
+`build-test.md`). Our own runs queue on the `shad-gpu` concurrency group. Work outside this repo
+does not, so a stranger holding part of the card still fails us. **Tentatively closed**: it cannot
+be proven closed from here.
 
-**Tentatively closed**, by two changes. `15209636` gave `gpu-tests` `concurrency: {group:
-shad-gpu, cancel-in-progress: false}`, so our own runs queue rather than overlap. Then each binary
-took a measured byte budget beside its `main()` — 69 GiB for `peacock_tpch_tests`, 30 for
-`peacock_tpchv_tests`, 1 GiB each for the other two. Two `peacock_tpchv_tests` at once: both
-pooled, both green. The tpch pair is arithmetic and not yet a run: 69+69 leaves 1.2 GiB of a
-139.7 GiB card, and no idle card has been free since.
-
-It cannot be proven closed from here: the host is shared with work outside this repo, and a
-stranger holding a third of the card still fails us (2026-09-10). **The pool line says whose
-failure it is.** `[rmm] pool of N GiB could not be built` is a neighbour — date a line here naming
-the run and the binary, re-run once, and do not debug it. A pool that *was* built and a test that
-then dies with `Maximum pool size exceeded` is ours: the budget is too small, it reproduces every
-time, and a re-run buys nothing.
+The pool line says whose failure it is. `[rmm] pool of N GiB could not be built with M GiB free`
+at the top of the log is a neighbour: date a line below naming the run and the binary, re-run the
+job once, and do not debug it. A pool that *was* built and a test that then dies with `Maximum
+pool size exceeded` is ours: the budget is too small, and a re-run buys nothing.
 
 - 2026-09-12: CI run `34659896447` on PR #144 (`d41f223a`), `peacock_tpch_tests`: `pool of 69.0
   GiB could not be built with 14.9 GiB free` at 00:08 UTC; `peacock_tpchv_tests` four binaries
