@@ -389,6 +389,30 @@ def main():
             )
         executions[ident] = times // per_run
 
+    runs_seen = set(executions.values())
+    if args.plans_dir:
+        # One goldens file per mode, found rather than listed: the capture says which modes
+        # are in it, and a caller retyping that list is the mistake naming the query on the
+        # command line was. A mode with no golden is a refusal — this is the only thing
+        # that says the regions are the plan's, and a check covering less is not one.
+        for mode in sorted({case[3] for case, *_ in regs}):
+            path = pathlib.Path(args.plans_dir) / f"{mode}.plans.txt"
+            if not path.exists():
+                sys.exit(f"{path} does not exist, so the {mode} cases in this capture "
+                         "would go unchecked against the plan they claim to be.")
+            check_against_recipes(regs, str(path))
+
+    calls_per_exec = {len(v) for v in by_call.values()}
+    print(f"call indices per region: {sorted(calls_per_exec)} "
+          f"(1 means every execution drove each seq once)")
+    print(f"{len(regs)} region ranges, {len(seen)} distinct regions, "
+          f"{sorted(runs_seen)} executions each")
+    if len(runs_seen) != 1:
+        sys.exit(f"the capture's regions disagree about how many times they ran: "
+                 f"{sorted(runs_seen)}. Every region of a case runs once per execution, so "
+                 "an execution died partway — and the medians below would report the "
+                 "short-changed regions at a fraction of their cost with nothing saying so.")
+
     # Median over occurrences, per (region, call, depth). Median rather than the mean: the
     # warm-up execution is in here, and on a first touch of a column the parquet reader
     # does work no later execution repeats.
@@ -414,30 +438,6 @@ def main():
             "regions", "calls_per_region", "host_us", "device_us", "region_us"]
     record.write_tsv(args.out, NOTES, cols, [[r[c] for c in cols] for r in rows])
 
-    runs_seen = set(executions.values())
-    if args.plans_dir:
-        # One goldens file per mode, found rather than listed: the capture already says
-        # which modes are in it, and a caller retyping that list is the same class of
-        # mistake naming the query on the command line was. A mode with no golden is a
-        # refusal — a check that silently covers less than the capture has stopped being
-        # one, and this is the only thing that says the regions are the plan's.
-        for mode in sorted({case[3] for case, *_ in regs}):
-            path = pathlib.Path(args.plans_dir) / f"{mode}.plans.txt"
-            if not path.exists():
-                sys.exit(f"{path} does not exist, so the {mode} cases in this capture "
-                         "would go unchecked against the plan they claim to be.")
-            check_against_recipes(regs, str(path))
-
-    calls_per_exec = {len(v) for v in by_call.values()}
-    print(f"call indices per region: {sorted(calls_per_exec)} "
-          f"(1 means every execution drove each seq once)")
-    print(f"{len(regs)} region ranges, {len(seen)} distinct regions, "
-          f"{sorted(runs_seen)} executions each")
-    if len(runs_seen) != 1:
-        sys.exit(f"regions of one case disagree about how many times they ran: {sorted(runs_seen)}. "
-                 "Every region of a case runs once per execution, so an execution died "
-                 "partway — and the medians below would report the short-changed regions "
-                 "at a fraction of their cost with nothing saying so.")
     print(f"{(device.total - in_regions_ns) / 1e6:.1f} ms of {device.total / 1e6:.1f} ms "
           "of device work was launched outside every region "
           "(reader threads, allocator warm-up, teardown)")

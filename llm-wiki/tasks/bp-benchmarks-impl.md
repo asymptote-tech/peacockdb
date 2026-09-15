@@ -177,7 +177,7 @@ int peacock_executor_collect_node_regions(peacock_executor_t*, PeacockNodeRegion
 pub enum NodeTiming { Off, Events }
 pub enum RmmPool { Pool { integrated: bool, free_bytes: u64, initial_bytes: u64, maximum_bytes: u64 }, Unavailable }
 impl std::fmt::Display for RmmPool { /* the allocator= line, as the reference */ }
-pub fn install_rmm_pool() -> RmmPool;
+pub fn install_rmm_pool(bytes: u64) -> RmmPool;   // the budget is the caller's, as kPoolBytes is
 pub fn set_node_timing(mode: NodeTiming);      // panics if the C side refuses the mode
 pub fn node_timing_on() -> bool;
 pub fn set_nvtx_ranges(on: bool);

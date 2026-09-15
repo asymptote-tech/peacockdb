@@ -95,13 +95,18 @@ def test_a_bare_call_is_not_checked_against_the_kind_of_the_seq_it_was_handed():
 
 
 def test_a_mode_with_no_golden_is_refused():
-    """A check that silently covers less than the capture has stopped being a check."""
+    """A check that silently covers less than the capture has stopped being a check.
+
+    And a refusal leaves no file: a `calls.tsv` written before the check is a table of the
+    capture the check was about to reject, carrying the name of one it accepted.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
         (tmp / "goldens").mkdir()
         with raises(SystemExit, match="tp1-single"):
             calls_of(two_case_capture(tmp), tmp / "calls.tsv",
                      "--plans-dir", str(tmp / "goldens"))
+        assert not (tmp / "calls.tsv").exists(), "the refused capture left a calls.tsv"
 
 
 def test_a_region_driven_several_times_an_execution_is_not_a_disagreement():
@@ -142,6 +147,7 @@ def test_regions_that_ran_different_numbers_of_times_are_refused():
         cap.close()
         with raises(SystemExit, match="disagree"):
             calls_of(path, tmp / "calls.tsv")
+        assert not (tmp / "calls.tsv").exists(), "the refused capture left a calls.tsv"
 
 
 if __name__ == "__main__":

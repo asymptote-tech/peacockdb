@@ -225,8 +225,9 @@ impl GpuExport {
                 last_error(self.site.executor)
             )));
         }
-        // A range naming no rows exports nothing at all, and there is nothing to free. The
-        // call was still made, so it still opened a region and still has to be journalled.
+        // A range naming no rows exports nothing at all, and there is nothing to free — an
+        // empty batch of the sink's schema, not a missing one. The call was still made, so
+        // C++ opened a region for it and the journal entry below has to claim that region.
         let exported = match len {
             0 => CpuBatch::new(RecordBatch::new_empty(self.schema.clone())),
             _ => {

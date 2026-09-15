@@ -18,9 +18,11 @@ use crate::plan::GpuNode;
 
 /// One call's device microseconds, as this file reports them.
 ///
-/// `0` where the device recorded no region: a call that opened none did no device work,
-/// and that is its time. `1` where a region exists but its microseconds truncated to zero
-/// — something ran on the device, and writing 0 would claim more than the clock can say.
+/// `0` where no region answered for it: an entry nothing measured, or one the backend
+/// served without crossing the ABI. (A journalled call with no region is not among them —
+/// `join_regions` refuses that.) `1` where a region exists but its microseconds truncated
+/// to zero: something ran on the device, and writing 0 would claim more than the clock can
+/// say.
 ///
 /// The one place the rule lives, so a node's total is the sum of the entries beside it by
 /// construction rather than by two functions agreeing.

@@ -634,13 +634,17 @@ EOF
       die "the last benchmark run on $REMOTE left no exit code — it died partway, so what
      is on the host is part of a measurement under a completed one's names. Re-run it." ;;
   esac
+  # Asked of the host, and before the transfer: the local tree always holds the committed
+  # records, so counting it after an rsync answers "is there a benchmark tree here" — a
+  # question whose answer is yes whatever the pull did. Same reason pull_one asks.
+  trees=$(ssh "$REMOTE" \
+    "find $REMOTE_REPO/testdata/benchmark-results -name '*.benchmark.txt' 2>/dev/null | wc -l")
   mkdir -p testdata/benchmark-results
   # No --delete, unlike every push: a filtered run rewrites only the cases it ran,
   # and mirroring would wipe every record of the others. Nothing prunes the host
   # tree either, so a renamed case's record lives there until someone removes it and
   # rides home on every later pull.
   resilient_rsync -r "$REMOTE:$REMOTE_REPO/testdata/benchmark-results/" testdata/benchmark-results/
-  trees=$(find testdata/benchmark-results -name '*.benchmark.txt' | wc -l)
   echo "==> fetched $trees benchmark records"
   # The record beside the tree; the captures are create_nsys_profile.sh's.
   record_home=1

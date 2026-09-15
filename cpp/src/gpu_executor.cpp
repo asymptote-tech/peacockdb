@@ -349,12 +349,15 @@ int peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle, ui
     const auto& result = executor->session->table_for(handle);
     auto view = result.table->view();
     auto [begin, end] = peacock::clamp_row_range(offset, length, view.num_rows());
-    // A range naming no rows of a non-empty table ships nothing. An empty table takes
-    // the whole-table arm instead, so a caller asking for all of one keeps getting the
-    // schema-only stream it has always had.
+    // A range naming no rows of a non-empty table ships nothing — through time_export like
+    // the arm below, since the driver journals the call either way and join_regions refuses
+    // a journalled call no region answered. An empty table takes the whole-table arm
+    // instead, so a caller asking for all of one still gets its schema-only stream.
     if (begin == end && view.num_rows() > 0) {
-      *out_ipc = nullptr;  // so "nothing to free" is a pointer the caller can act on
-      *out_ipc_len = 0;
+      executor->session->time_export(handle, [&] {
+        *out_ipc = nullptr;  // so "nothing to free" is a pointer the caller can act on
+        *out_ipc_len = 0;
+      });
       return 0;
     }
     if (begin != 0 || end != view.num_rows()) view = cudf::slice(view, {begin, end}).front();

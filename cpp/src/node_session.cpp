@@ -211,6 +211,8 @@ void push_harness_range(const char* name) {
 
 void pop_harness_range() { harness_range().reset(); }
 
+bool harness_range_is_open() { return harness_range().has_value(); }
+
 bool nvtx_ranges() { return g_nvtx.load(std::memory_order_relaxed); }
 
 uint64_t varlen_content_bytes(const cudf::table_view& table) {

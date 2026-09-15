@@ -79,6 +79,11 @@ bool nvtx_ranges();
 void push_harness_range(const char* name);
 void pop_harness_range();
 
+/// Whether a harness range is open. Observable only so that the one-level rule above can
+/// be tested — `NvtxRanges.ASecondPushReplacesTheFirstRatherThanNesting` is the only
+/// caller, since NVTX itself reports nothing back.
+bool harness_range_is_open();
+
 /// One timed region: which call it was, and what it cost.
 ///
 /// Separate from `NodeStats` because the two have different consumers. The driver reads

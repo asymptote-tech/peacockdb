@@ -844,3 +844,139 @@ Mine: the Corpus benchmarks section at 83 lines against 50–80; the `thread_loc
 in master's own `operators.h` comment, to be named in the signoff.
 
 - Dispatch 6: the rebase fallout and findings 1–5, one developer, gate re-proven on shad-gpu.
+
+## Dispatch 6 — the rebase fallout and review round 1's findings 1–5
+
+### The pool budget the harness now declares
+
+Master's `peacock_install_rmm_pool(bytes, out_info)` takes the budget first, so the Rust
+facade does too: `executor::install_rmm_pool(bytes)`, and each binary declares its own
+constant beside the rest of its knobs, the way each gtest `main` declares `kPoolBytes`.
+Two binaries install one.
+
+- **`test_node_timing`: 2 GiB** (`POOL_BYTES`), and this one is measured. Swept on shad-gpu
+  with `PEACOCK_RMM_POOL_BYTES` over the staged binary: 0.25 and 0.5 GiB die in the
+  lineitem scan with `Maximum pool size exceeded` at `pool_memory_resource.hpp:276`, 0.75,
+  1 and 2 GiB pass. Declared at 2 rather than at 0.75, because the pool cannot grow and a
+  budget at the floor is one fragmentation away from that failure.
+- **`peacock_gpu_benchmarks`: 69 GiB** (`BENCH_POOL_BYTES`), and this one is **taken, not
+  measured** — it is `test_tpch.cpp`'s number for the same sf40 dataset read in the same
+  place (measured peak 67.42 GiB there), and also the most that lets two processes share
+  the 139.7 GiB H200 (#178), which matters because a gate job can land beside a
+  measurement. Its own peak cannot be read from here: `peak_allocated_bytes()` is not in
+  the ABI's nineteen symbols, so the only way to size it is to bisect a run — and a
+  bisection step is an sf40 case, which this dispatch was told not to run. **Task 11 owes
+  the real figure**: run the measurement, and if it survives 69 GiB sweep downward with
+  `PEACOCK_RMM_POOL_BYTES` until it dies, then declare the floor rounded up.
+
+Nothing else about the pool reaches this branch: `RmmPool`, the `allocator=` line and the
+harness's "would measure over rmm's default resource" assert are unchanged, and a run that
+cannot get its budget still fails loudly rather than quietly.
+
+### The rest of the rebase, checked rather than assumed
+
+`git diff pre-rebase-bp-benchmarks HEAD -- cpp peacockdb-ffi peacockdb-core scripts` is
+thirteen files, all master's own. Only one caller was stale, and `cargo check -p
+peacockdb-core --tests` in the container found exactly it (`instrument.rs:32`, E0061) and
+nothing else after the fix. Two of master's files also gained a test, which is a
+`build-test.md` correction the coordinator owns: **cuDF GPU smoke (C++) 3 → 4** and **FFI
+smoke (Rust) 2 → 3**. This dispatch adds three more: **Plan-executor (C++) 35 → 38**.
+
+### The five findings
+
+1. **`--pull-benchmarks` counted the local tree.** `trees=` now asks the host before the
+   rsync — `ssh find … | wc -l` — which is what `pull_one` already does and what the
+   refusal's own message claims ("no .benchmark.txt on $REMOTE"). Counting after a pull
+   answers "is there a tree here", and the committed records make that yes forever. No
+   committed test: nothing runs a remote-touching script in any tier. Proven by simulating
+   the two forms over one world (host empty, local tree holding the two committed files,
+   record not home): the old form accepts, the new one refuses; and the new command was
+   run against the real host, which answers 2 for the tree and 0 for a missing directory.
+2. **The empty-range export opened no region.** `peacock_result_from_handle`'s early return
+   now runs its two stores inside `session->time_export`, so the journalled call has a
+   region to claim whatever the range was. Red first:
+   `NodeRegions.AnExportOfNoRowsOpensOneToo` (new, through the C entry point because the
+   empty range is decided there) failed with `count` 1 against 2, and passes with the fix.
+   The Rust comment in `GpuExport::unload` that asserted the region said what was not yet
+   true and now says what is.
+3. **The three NVTX symbols had no test.** `NvtxRanges.RangesWithoutTimingRecordNoRegion`
+   and `NvtxRanges.ASecondPushReplacesTheFirstRatherThanNesting`, beside the `NodeRegions`
+   suite, with a `RangesOn` guard so a failed assertion cannot leave the switch on for the
+   rest of the binary. Balance is not observable through NVTX, so `plan_executor.h` gained
+   `harness_range_is_open()`, whose doc names the test that needs it. Both tests pass on
+   write, so they were reddened by mutation instead — three mutations in one build, each
+   reddening exactly its own assertion: the sink following the nvtx switch (recorded 2
+   regions, line 1373), `push_harness_range` ignoring the switch (line 1385), and
+   `pop_harness_range` as a no-op (line 1392). The other nine `NodeRegions` cases stayed
+   green throughout.
+4. **`nsys_calls.py` wrote before two refusals.** The `--plans-dir` check and the
+   "regions disagree about how many times they ran" check both moved above
+   `record.write_tsv`. Red first: `assert not (tmp / "calls.tsv").exists()` in
+   `test_a_mode_with_no_golden_is_refused` and
+   `test_regions_that_ran_different_numbers_of_times_are_refused` — 3 passed, 2 failed
+   before, 5 passed after.
+5. **The dead doc link.** `executor/mod.rs`'s `NodeTiming::Events` pointed at
+   `PartitionStat::device_us`, a type that exists nowhere; it is `Region::device_us`.
+
+### The optional nits, taken
+
+All four: `rows_match_the_recipes`'s doc trimmed from 11 lines to 10; `call_us`'s doc no
+longer explains `0` as a state `join_regions` refuses; `nsys_calls.py`'s refusal says the
+capture's regions rather than "one case"'s; and `BENCH_MEASURED_RUNS` moved to
+`common/record.rs` as `MEASURED_RUNS`, which is where `BUILD` and `TIMING_MODE` already
+live for the same reason — `test_corpus_goldens.rs` now reads it instead of restating it.
+The two marked dropped were left alone.
+
+### What was proven, and how
+
+- **rust-only, whole package** (`CARGO_TARGET_DIR=/build/peacock/rust-only-target cargo
+  test -p peacockdb-core --features rust-only`, both datasets present): exit 0, no
+  warnings — `--lib` 444, `test_cpu_corpus` 448, `test_cpu_end_to_end` 24 + 2 ignored,
+  `test_corpus_goldens` 24 + 2 ignored, `test_golden_format` 26, `test_plan_goldens` 20,
+  `test_planner_join_capability` 13, `test_module_layout` 11, `test_planner_join_refusals`
+  10, `test_ci_coverage` 8, `test_null_analysis` 8, `test_layout_injection` 4,
+  `test_cost_model` 3, `test_inc2_conformance` 3, `test_cpu_executors` 1. 1047 passed, 0
+  failed, 4 ignored over the package.
+- **cuDF-shape build**: `docker-build.sh --no-image --cache-dir /build/peacock --
+  build-test-shadgpu.sh --build --build-benchmarks`, exit 0, zero warnings, eight staged
+  binaries (seven in `rust-tests/`, the release `peacock_gpu_benchmarks` in
+  `rust-benchmarks/`).
+- **C++ CPU tier**: `ctest --test-dir cpp/build -L cpu` — 1/1, 12 cases.
+- **shad-gpu gate**: `./scripts/build-test-shadgpu.sh --push-binaries --patch --run`, exit
+  0, "GPU test run OK". C++ 12 / 4 / 38 / 4 / 4; rust `peacock_gpu_benchmarks` 6 (3
+  filtered), `test_gpu_abi` 4, `test_gpu_corpus` 8, `test_gpu_executors` 32,
+  `test_gpu_recipe_walk` 10, `test_inc2_conformance` 10, `test_node_timing` 1. Pools
+  reserved, all of 78.4 GiB free beside the neighbour's 62 GB: 1.0 (gpu), 1.0 (plan), 69.0
+  (tpch), 30.0 (tpchv), 2.0 (node_timing). `test_node_timing` at sf1 q19 tp1-single: off
+  wall 447213us, events wall 446709us (-0.1%), 12 regions — the instrument inside the
+  run-to-run spread, as the two earlier runs of this dispatch also read (+0.0%, +0.4%).
+- **Python**: `test_calls.py` 5, `test_hbm.py` 3, `test_plot.py` 3, all passed.
+- **`residue-gate.sh`**: exit 0, both `== bp gates` sections empty, the first section still
+  the same twelve lines. `git diff origin/master` over the byte-identical set is empty.
+
+### For the next developer
+
+- The sf40 measurement now also has to confirm `BENCH_POOL_BYTES`. A pool that fails to
+  build says so at the top of the log and the harness's own assert refuses the run; a pool
+  that builds and then dies with `Maximum pool size exceeded` means 69 GiB was too small.
+- The gate was run beside the same neighbour as dispatch 5 (pid 2074022, 62 GB, 92–95 %).
+  Green, and no number in it is a measurement.
+- `/build/peacock/cargo-target/debug/build/peacockdb-ffi-e640617edfd80d57` was poisoned
+  again (`CMAKE_INSTALL_PREFIX=/usr/local`, every build dying on `file INSTALL cannot copy
+  … Permission denied`). Deleting that one unit directory fixes it; grep the caches for
+  `/usr/local` to find which one.
+- Running a gtest binary by hand needs `PEACOCK_TESTDATA_DIR=$REMOTE_REPO/testdata` as well
+  as the library path — without it every fixture-reading case dies with "Cannot open file;
+  it does not exist", which looks exactly like a broken binary.
+- `build-test.md`'s test table is three rows short of the tree and both halves are the
+  coordinator's to apply: cuDF GPU smoke (C++) 3 → 4 and FFI smoke (Rust) 2 → 3 arrived with
+  the rebase, Plan-executor (C++) 35 → 38 with this dispatch. C++ total 72 → 76, Rust
+  1164 → 1165.
+
+### Round 1 closed; the board says reviewing
+
+Dispatch 6 landed as two commits. `build-test.md` corrected for what master's pool change
+and this round added: FFI smoke 3, cuDF GPU smoke 4, Plan-executor 38, so 1621 in all. The
+board moves to `reviewing` with one thing still owed: the sf40 data (plan Task 11), which
+waits for an empty card and carries the harness's real pool figure — `BENCH_POOL_BYTES` is
+`test_tpch.cpp`'s 69 GiB, taken and not measured. Round 2 reads the rebased head.

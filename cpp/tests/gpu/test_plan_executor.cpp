@@ -1173,6 +1173,13 @@ struct TimingOn {
   ~TimingOn() { peacock::set_node_timing(peacock::NodeTiming::Off); }
 };
 
+/// The other switch, restored the same way: an assertion that fails mid-test would
+/// otherwise leave every later test in this binary emitting ranges.
+struct RangesOn {
+  RangesOn() { peacock::set_nvtx_ranges(true); }
+  ~RangesOn() { peacock::set_nvtx_ranges(false); }
+};
+
 /// A customer scan under a hash repartition into `lanes` — the one arm that answers a
 /// single call with several output partitions.
 static std::vector<uint8_t> scatter_plan(flatbuffers::FlatBufferBuilder& fbb, uint32_t lanes) {
@@ -1327,6 +1334,35 @@ TEST(NodeRegions, TheSliceAndTheExportOpenRegionsToo) {
   EXPECT_EQ(regions[2].call_index, 2u);
 }
 
+TEST(NodeRegions, AnExportOfNoRowsOpensOneToo) {
+  TimingOn timing;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  // Through the C entry point, because the empty range is decided there: the session's
+  // time_export is handed a body, and whether there is one to hand it is the caller's.
+  CApiPlan plan(buf);
+
+  std::vector<uint32_t> groups{0};
+  uint64_t handle = 0;
+  ASSERT_EQ(peacock_executor_execute_scan_rowgroups(plan.get(), 0, groups.data(), groups.size(),
+                                                    &handle, nullptr),
+            0);
+
+  // A range naming no rows of a non-empty table ships nothing, and the call was still made:
+  // the driver journals it, and join_regions refuses a call no region answered.
+  uint8_t* ipc = nullptr;
+  uint64_t len = 0;
+  ASSERT_EQ(peacock_result_from_handle(plan.get(), handle, 0, 0, &ipc, &len), 0);
+  EXPECT_EQ(len, 0u);
+
+  uint64_t count = 0;
+  std::vector<PeacockNodeRegion> got(4);
+  ASSERT_EQ(peacock_executor_collect_node_regions(plan.get(), got.data(), got.size(), &count), 0);
+  ASSERT_EQ(count, 2u);
+  EXPECT_EQ(got[1].seq, 0u);
+  EXPECT_EQ(got[1].call_index, 1u);
+}
+
 TEST(NodeRegions, AskingTheCountDrainsNothing) {
   TimingOn timing;
   flatbuffers::FlatBufferBuilder fbb;
@@ -1356,6 +1392,40 @@ TEST(NodeRegions, AskingTheCountDrainsNothing) {
   ASSERT_EQ(peacock_executor_collect_node_regions(plan.get(), got.data(), count, &reported), 0);
   EXPECT_EQ(reported, 1u);
   EXPECT_GT(got[0].host_us, 0u);
+}
+
+/// Ranges on, timing off. The two switches are separate so a capture can have the node
+/// boundaries without the event pairs, which are device work of their own — and until this
+/// test the only thing saying so was the comment.
+TEST(NvtxRanges, RangesWithoutTimingRecordNoRegion) {
+  RangesOn ranges;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  peacock::NodeSession session(buf.data(), buf.size());
+
+  std::vector<uint32_t> groups{0};
+  peacock::NodeStats stats{};
+  uint64_t handle = session.execute_scan_rowgroups(0, groups, &stats);
+  session.time_export(handle, [] {});
+  EXPECT_GT(stats.rows, 0u);
+  EXPECT_EQ(session.recorded_regions(), 0u);
+}
+
+/// The harness range is one level: a case does not nest inside a case, so a second push
+/// replaces the first. A stack instead would leave the outer one open after this pop, and
+/// every later case would be captured inside a query it did not belong to.
+TEST(NvtxRanges, ASecondPushReplacesTheFirstRatherThanNesting) {
+  // No guard yet: the switch is off by default, and a push while it is off is a no-op —
+  // which is what lets the harness call this unconditionally.
+  peacock::push_harness_range("tpch.sf40 q6 tp1-single");
+  EXPECT_FALSE(peacock::harness_range_is_open());
+
+  RangesOn ranges;
+  peacock::push_harness_range("tpch.sf40 q6 tp1-single");
+  EXPECT_TRUE(peacock::harness_range_is_open());
+  peacock::push_harness_range("tpch.sf40 q19 tp1-single");
+  peacock::pop_harness_range();
+  EXPECT_FALSE(peacock::harness_range_is_open());
 }
 
 TEST(ScanRowGroups, ACallOnAnotherKindOfNodeSaysWhichKind) {
