@@ -10,4 +10,4 @@ if [ "$branch" != master ] || [ "$(git rev-parse --git-dir)" != "$(git rev-parse
   echo "warning: the helper belongs in the primary checkout on master; this is $PWD on $branch" >&2
 fi
 
-exec claude --agent peacockdb-helper --effort xhigh --dangerously-skip-permissions "$@"
+exec claude --agent peacockdb-helper --effort high --dangerously-skip-permissions "$@"
