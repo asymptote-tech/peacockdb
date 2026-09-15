@@ -2,11 +2,11 @@
 //! [`corpus_benchmark_cases.inc`](common/corpus_benchmark_cases.inc) names, at the modes
 //! it names. Asserts nothing about an answer — correctness is `test_gpu_corpus`.
 //!
-//! NOT run by CI (`INTENTIONALLY_NOT_IN_CI` says why): it needs a GPU, takes tens of
-//! minutes, and measures rather than gates. `build-test-shadgpu.sh --build-benchmarks`
-//! and `--run-benchmarks` build it under `[profile.benchmarks]` and run it; on the host
-//! directly it is `--nocapture --test-threads=1`, and the threads are not optional —
-//! cuDF/RMM share one process-wide pool.
+//! The `bench_` cases need a GPU and the sf40 dataset and take tens of minutes, so CI runs
+//! the binary with `--skip bench_` and gets the assertions below; a measuring run is
+//! `build-test-shadgpu.sh --build-benchmarks --run-benchmarks`, which builds it at
+//! `--release`. On the host directly it is `--nocapture --test-threads=1`, and the threads
+//! are not optional — cuDF and rmm share one process-wide pool.
 #![cfg(not(feature = "rust-only"))]
 mod common;
 
@@ -155,18 +155,19 @@ fn a_filtered_run_keeps_the_sections_it_did_not_produce() {
 /// setting it here safe.
 #[test]
 fn the_record_is_written_only_when_a_path_is_named() {
-    use common::record::{RECORD_PATH_ENV, RunMeta, append_records};
+    use common::record::{COLUMNS, Capture, RECORD_PATH_ENV, RunMeta, append_records};
 
     let meta = RunMeta {
         dataset: "tpch",
         sf: "40",
         query: "q6",
         mode: "tp1-single",
-        timing_mode: "events",
-        build: "test",
         allocator: "none",
+        capture: Capture::None,
     };
-    let row = "one\ttwo\tthree".to_string();
+    // A row of the width the file actually holds, so what reaches the file is a record
+    // line and not a fixture the reader would have to know to allow for.
+    let row = vec!["0"; COLUMNS.len()].join("\t");
     let dir = std::env::temp_dir().join(format!("peacock-record-{}", std::process::id()));
     let path = dir.join("records.tsv");
     let restore = std::env::var_os(RECORD_PATH_ENV);

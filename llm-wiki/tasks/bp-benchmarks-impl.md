@@ -326,15 +326,18 @@ pub fn results_file(dataset: &str, sf: &str, mode: &str) -> PathBuf;   // <mode>
 pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str);
 ```
 
-- [ ] **Step 1: `record.rs`** — port; 17 columns; no `Option` in a row: `in_bytes` of a
+- [x] **Step 1: `record.rs`** — port; 17 columns; no `Option` in a row: `in_bytes` of a
   middle call is the call before it, taken from the journal; `capture=` in the heading;
   `rows_match_the_recipes` first checks `row.split('\t').count() == COLUMNS.len()`. Rewrite
   `HEADER_NOTES` for the new columns, no capitals.
   Partly landed in dispatch 2, because the file had to compile: the 17 columns are there
   (`host_us` replaces the two host ones), `recipe_kind` prints `AbiCall::target`, `in_bytes`
   is a `u64` the backend fills from the call before it, and `HEADER_NOTES` describes those.
-  Still owed: `capture=` in the heading and the field-count check.
-- [ ] **Step 2: `corpus_benchmark.rs`** — port; `mode_named` from `common/mode.rs`; no
+  Finished in dispatch 3: `Capture` and `CAPTURE_ENV` live here, `RunMeta` traded
+  `timing_mode`/`build` for `capture` (the two are `TIMING_MODE`/`BUILD` constants now), the
+  row carries no `Option`, `rows_match_the_recipes` checks the field count first, and the
+  notes were rewritten without capitals.
+- [x] **Step 2: `corpus_benchmark.rs`** — port; `mode_named` from `common/mode.rs`; no
   `file_stem_of`; `Capture::from_env()` decides `set_nvtx_ranges(true)` and skipping
   `write_section`; the trailer is `run_us`, `device_us`, `runs=[…]`, `build=release`,
   `allocator=`; `assert!(!cfg!(debug_assertions))` and the pool assert stay in `run_once`;
@@ -342,16 +345,22 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str);
   `bench_<dataset>_sf<sf>_<query>_<mode>`.
   Partly landed in dispatch 2: `BUILD_PROFILE` and its two `env!`s are gone (the Cargo
   profile they read no longer exists), the trailer says `build=release` from a literal the
-  debug-assertions refusal guards, and `measured_of` panics on the `Err`.
-- [ ] **Step 3: cases** — `corpus_query_benchmark!(tpch, 40, q6, tp1_single | tp4_sized);`
+  debug-assertions refusal guards, and `measured_of` panics on the `Err`. Finished in
+  dispatch 3: `Capture::from_env()` is read once at the top of `benchmark_case` and decides
+  both `set_nvtx_ranges` and whether `write_section` is called; `PEACOCK_NVTX` and
+  `RESULTS_READ_ONLY_ENV` are gone, and `BUILD` moved to `record.rs`, which a rust-only
+  build can see.
+- [x] **Step 3: cases** — `corpus_query_benchmark!(tpch, 40, q6, tp1_single | tp4_sized);`
   and `corpus_query_benchmark!(tpch, 40, q19, tp1_single);` with a ≤ 10-line file comment.
-- [ ] **Step 4: `peacock_gpu_benchmarks.rs`** — port the macro and the six assertions
+  Landed in the squash and left as it stands; `every_timed_case_is_enabled_on_a_device` of
+  step 5 is what now holds it to the device column.
+- [x] **Step 4: `peacock_gpu_benchmarks.rs`** — port the macro and the six assertions
   (`every_declared_mode_names_the_queries_its_file_will_hold`,
   `the_sections_of_a_file_are_ordered_numerically`, `a_modes_results_go_to_one_file_per_dataset_and_mode`,
   `a_filtered_run_keeps_the_sections_it_did_not_produce`, `the_record_is_written_only_when_a_path_is_named`
   — its fake row has 17 fields — and `the_record_is_checked_against_what_the_plan_declares`);
   every `bp_` in a name or a label goes.
-- [ ] **Step 5: rust-only tests.** In `test_corpus_goldens.rs`: port
+- [x] **Step 5: rust-only tests.** In `test_corpus_goldens.rs`: port
   `every_total_us_is_the_sum_of_the_time_us_beside_it` without the empty-tree escape and
   extend it to the trailer (`device_us == Σ total_us`, `runs` has ten entries, `build=release`);
   add `the_records_preamble_is_what_record_header_writes` (the committed `records.tsv`'s `#`
@@ -361,23 +370,32 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str);
   In `test_plan_goldens.rs`: port `a_rows_node_seq_names_the_steps_its_recipes_line_prints`.
   These skip when `testdata/benchmark-results/` or `records.tsv` is absent only until Task 11
   commits them; after that the absence is a failure — write it that way now with a comment.
-- [ ] **Step 6: prove.** rust-only `--test test_corpus_goldens --test test_plan_goldens`
+  Done in dispatch 3, with one change of shape: the trailer's `build=release` is its own
+  test, `every_committed_tree_reports_a_release_build`, because the committed tree is the
+  first version's and says `build_profile=`. So there are **two** `#[ignore]`s for Task 11
+  to remove, not one; the rest of the trailer (`device_us`, ten runs, `run_us` is their
+  second-smallest) is checked unignored. The field-count test is
+  `a_row_that_lost_a_cell_is_refused`, here rather than in the GPU binary because the spec
+  lists it among what a rust-only build can reach.
+- [x] **Step 6: prove.** rust-only `--test test_corpus_goldens --test test_plan_goldens`
   (the preamble test red until Task 11 — mark it `#[ignore]` with the Task 11 note, remove
   the ignore there); cuDF build of `peacock_gpu_benchmarks`; on shad-gpu run it with
   `--skip bench_` by hand (the script flag comes in Task 8): six green.
+  The binary also has to be glibc-patched by hand — `setup-glibc.sh` walks `rust-tests/`
+  only, which is a finding step 1 of Task 8 should close; the detail file has it.
 - [ ] **Step 7: commit** — `harness: the corpus timed at sf40, one file per mode`.
 
 ### Task 7: `test_node_timing`
 
 **Files:** Create `tests/test_node_timing.rs`.
 
-- [ ] **Step 1** port the reference; delete `EVENTS_GROSS_LIMIT`, check 2 and check 3c; the
+- [x] **Step 1** port the reference; delete `EVENTS_GROSS_LIMIT`, check 2 and check 3c; the
   region count check compares `regions.len()` against Σ over the journal of (calls × their
   partitions) — at `tp1_single` that is `report.abi_calls` flattened. Keep `eprintln!` of
   both walls. Runs q19 at sf1, `tp1_single`, `ROUNDS = 7`.
   Landed in dispatch 2 — the file had to compile against the new `Region`. Re-read it before
   redoing anything: the cuts are applied and the count check reads the journal.
-- [ ] **Step 2** shad-gpu `PCK_TEST_FILTER=events_are` green; **commit** —
+- [x] **Step 2** shad-gpu `PCK_TEST_FILTER=events_are` green; **commit** —
   `node timing: the instrument's structural test`.
 
 ### Task 8: scripts and CI
@@ -418,7 +436,7 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str);
   `PUB_MODULES` whatever the new test crates force (`executor/gpu_backend` is already
   there; the harness reaches only the `executor` facade and `plan_text` otherwise — if a run
   of `--test test_module_layout` names more, register it with `forced_by`).
-- [ ] **Step 6: prove.** rust-only `--test test_ci_coverage --test test_module_layout`;
+- [x] **Step 6: prove.** rust-only `--test test_ci_coverage --test test_module_layout`;
   `bash -n` both scripts; a full `./scripts/build-test-shadgpu.sh --push-binaries --patch --run`
   green with the two new binaries in its output; then `--build-benchmarks --push-binaries
   --patch --run-benchmarks --pull-benchmarks` producing two trees and a record locally

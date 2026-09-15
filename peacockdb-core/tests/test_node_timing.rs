@@ -24,7 +24,7 @@ use common::mode::mode_named;
 use common::corpus::plan_at;
 use common::gpu_session::Session;
 
-/// q19 for its SHAPE, not its answer (`test_gpu_corpus` owns that): scan → filter →
+/// q19 for its shape, not its answer (`test_gpu_corpus` owns that): scan → filter →
 /// join → aggregate covers enough operator families that a region left unopened shows up
 /// as a too-small Σ device_us. The richest device-enabled query at sf1 — q3 has more node
 /// kinds but does not run on the device, and this needs regions, not a plan.
@@ -169,7 +169,7 @@ async fn events_are_free_and_land_where_they_claim() {
     // 3. Placement. Regions record on cuDF's single default stream in host program
     // order, so their intervals are disjoint and must fit inside the wall clock.
     // Exceeding it means a pair spans work that is not its region's — what a mark left
-    // at region ENTRY produces, since the pair then swallows the next call's launches.
+    // at region entry produces, since the pair then swallows the next call's launches.
     assert!(
         ev_device <= events_us,
         "Σ device_us = {ev_device}us exceeds the {events_us}us wall clock: the event \

@@ -1,10 +1,10 @@
 //! The cost-model calibration record: one line per cuDF call.
 //!
 //! Built from the two halves of a measurement: the driver's call log says where a call was
-//! and what went into it, the device's regions say what it cost and what came back. Neither
-//! half is a row on its own.
+//! and what went into it, the device's regions say what it cost. Neither half is a row on
+//! its own.
 //!
-//! TSV, with the run's conditions — timing mode, build profile, allocator — in the `#`
+//! TSV, with the run's conditions — timing mode, build, allocator, capture — in the `#`
 //! heading rather than in every row. `hbm_bytes` is deliberately absent: it comes from
 //! Nsight and is joined in later on the same tuple.
 
@@ -16,18 +16,63 @@ use peacockdb_core::executor::{Measured, Measurements, RunReport};
 use peacockdb_core::executor::AbiCall;
 use peacockdb_core::wire::{RecipePlan, Seq};
 
-/// Env var naming the file rows are APPENDED to. Unset ⇒ no record is written, which
+/// Env var naming the file rows are appended to. Unset ⇒ no record is written, which
 /// is why every caller can emit unconditionally.
 pub const RECORD_PATH_ENV: &str = "PEACOCK_RECORD_PATH";
+
+/// Env var naming the Nsight pass a run is under. Unset ⇒ [`Capture::None`].
+pub const CAPTURE_ENV: &str = "PEACOCK_BENCHMARK_CAPTURE";
+
+/// Which Nsight pass this run is under — and therefore whether its microseconds may be
+/// published.
+///
+/// A captured run is never the reported one: tracing and the memory counters each cost the
+/// query several percent, so a capture writes the record and the nvtx ranges the capture
+/// joins on, and leaves the `.benchmark.txt` tree alone. It is a property of how the run
+/// was launched, and the case cannot see the nsys command line, so it is named here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Capture {
+    None,
+    Trace,
+    Metrics,
+}
+
+impl Capture {
+    /// Exhaustive on purpose: an unnamed value panics naming the two rather than falling
+    /// back to `None`, which would publish a captured run's times into the committed tree
+    /// with nothing saying they were measured under counters.
+    pub fn from_env() -> Self {
+        let Some(value) = std::env::var_os(CAPTURE_ENV) else {
+            return Capture::None;
+        };
+        match value.to_str() {
+            Some("trace") => Capture::Trace,
+            Some("metrics") => Capture::Metrics,
+            other => panic!(
+                "{CAPTURE_ENV}={other:?} names no Nsight pass — it is `trace` or `metrics`, \
+                 and unset for a run that publishes its times"
+            ),
+        }
+    }
+
+    /// As the heading spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Capture::None => "none",
+            Capture::Trace => "trace",
+            Capture::Metrics => "metrics",
+        }
+    }
+}
 
 /// One row per cuDF call, keyed by `(dataset, sf, query, plan node, recipe step, call)`.
 ///
 /// Six coordinates because that is what identifies a call: one plan node publishes several
 /// recipe steps, and a batched run drives each once per batch per lane.
 ///
-/// `node_seq` is the POST-order position, the space recipes are addressed in; the driver
+/// `node_seq` is the post-order position, the space recipes are addressed in; the driver
 /// numbers pre-order, so a writer that forgets to translate produces a plausible number
-/// from the wrong order. `lane` is the DRIVING lane. `run_index` is the seventh: derivable
+/// from the wrong order. `lane` is the driving lane. `run_index` is the seventh: derivable
 /// from where `call_index` restarts, written anyway, since two counting rules can disagree.
 pub const COLUMNS: &[&str] = &[
     "dataset",
@@ -52,9 +97,10 @@ pub const COLUMNS: &[&str] = &[
 /// What a row cannot be recovered from: which engine produced it, over what data, and
 /// under what conditions.
 ///
-/// The last three are constant across a run and go into the file's `#` heading rather
-/// than into every row — see [`record_header`]. They are still part of this struct
-/// because the heading is written from it.
+/// The last two are constant across a run and go into the file's `#` heading rather than
+/// into every row — see [`record_header`]. They are still part of this struct because the
+/// heading is written from it. The other two conditions, [`TIMING_MODE`] and [`BUILD`],
+/// are not fields at all: the harness refuses to measure under anything else.
 pub struct RunMeta<'a> {
     pub dataset: &'a str,
     pub sf: &'a str,
@@ -62,20 +108,15 @@ pub struct RunMeta<'a> {
     /// The batch-partitioned planning mode, `tp4-sized` and the like. The same query
     /// at two modes is a different plan and a different set of calls.
     pub mode: &'a str,
-    pub timing_mode: &'a str,
-    pub build: &'a str,
     pub allocator: &'a str,
+    pub capture: Capture,
 }
 /// One row per call the run made, in the order the driver made them.
 ///
 /// `nodes` is [`nodes_as_recorded`](peacockdb_core::executor::nodes_as_recorded):
-/// each node's type and POST-order position, in the driver's pre-order — the order the
+/// each node's type and post-order position, in the driver's pre-order — the order the
 /// report is indexed by. The translation is the whole reason it is taken rather than
 /// derived here; see the note on [`COLUMNS`].
-///
-/// A call the device did not measure still gets a row, with its measured fields empty. The
-/// alternative is dropping it, and a record silently missing the calls nobody measured is a
-/// record whose totals cannot be checked against the plan.
 pub fn record_rows(
     nodes: &[(&str, usize)],
     report: &RunReport,
@@ -88,7 +129,9 @@ pub fn record_rows(
         for (lane, calls) in report.abi_calls[node].iter().enumerate() {
             for made in calls.iter().filter_map(|made| made.recorded()) {
                 for call in made {
-                    let cost = measured.call(call.seq, call.call_index);
+                    let cost = measured
+                        .call(call.seq, call.call_index)
+                        .expect("join_regions answered for every journalled call");
                     rows.push(row(meta, node_type, *post_order, lane, run_index, call, cost));
                 }
             }
@@ -97,7 +140,7 @@ pub fn record_rows(
     rows
 }
 
-/// Each row carries ITS call's measurement, looked up by `(seq, call_index)`.
+/// Each row carries its own call's measurement, looked up by `(seq, call_index)`.
 ///
 /// Not the driver call's total. A driver call can address several seqs — an aggregate
 /// concatenates and then merges — and the device measured each of them separately. Handing
@@ -110,11 +153,8 @@ fn row(
     lane: usize,
     run_index: usize,
     call: &AbiCall,
-    cost: Option<Measured>,
+    cost: Measured,
 ) -> String {
-    let empty = String::new();
-    let or_empty = |value: Option<u64>| value.map_or(empty.clone(), |v| v.to_string());
-    let measured = cost.filter(|cost| cost.regions > 0);
     [
         meta.dataset.to_string(),
         meta.sf.to_string(),
@@ -129,22 +169,21 @@ fn row(
         run_index.to_string(),
         call.in_rows.to_string(),
         call.in_bytes.to_string(),
-        or_empty(measured.map(|m| m.out_rows)),
-        or_empty(measured.map(|m| m.out_bytes)),
-        or_empty(measured.map(|m| m.host_us)),
-        or_empty(measured.map(|m| m.device_us)),
+        cost.out_rows.to_string(),
+        cost.out_bytes.to_string(),
+        cost.host_us.to_string(),
+        cost.device_us.to_string(),
     ]
     .join("\t")
 }
 
 /// What the plan declares, in the record's own coordinates: the seqs each node's recipe
-/// publishes, indexed by the POST-order position rows carry in `node_seq`.
+/// publishes, indexed by the post-order position rows carry in `node_seq`.
 ///
 /// Read through the same two steps `--- recipes ---` renders from — `RecipePlan::get` at a
 /// post-order position, then each call's target — so rows checked against this are rows
 /// checked against that section. That the two readings really do line up is asserted on a
-/// planned query in `test_plan_goldens`, where a plan can be built without a
-/// device.
+/// planned query in `test_plan_goldens`, where a plan can be built without a device.
 pub fn declared_steps(recipes: &RecipePlan) -> BTreeMap<usize, BTreeSet<Seq>> {
     (0..recipes.nodes())
         .map(|node| {
@@ -156,14 +195,15 @@ pub fn declared_steps(recipes: &RecipePlan) -> BTreeMap<usize, BTreeSet<Seq>> {
 
 /// One execution's rows against what its plan declares.
 ///
-/// Two statements, and the row count follows rather than being counted: every row names a
-/// step its own node publishes, and a step's calls are numbered `0..n` with no gap. The
-/// total is then what the PLAN predicts, not what the producer reports about itself.
+/// Three statements, and the row count follows rather than being counted: every row has a
+/// cell per column, every row names a step its own node publishes, and a step's calls are
+/// numbered `0..n` with no gap. The total is then what the plan predicts.
 ///
-/// It exists for the two ways this record is wrong while looking right: a `node_seq` from
-/// the pre-order walk names a node that exists and pairs with a seq that exists — only the
-/// PAIR is wrong — and a dropped call leaves every remaining row well formed. Rows of ONE
-/// execution, checked too, since `call_index` restarts at each.
+/// It exists for the three ways this record is wrong while looking right. A row that lost a
+/// cell still parses: every column is a number or a name, so the cells after the gap each
+/// move one left. A `node_seq` from the pre-order walk names a node that exists and pairs
+/// with a seq that exists, so only the pair is wrong. And a dropped call leaves every
+/// remaining row well formed. Rows of one execution, since `call_index` restarts at each.
 pub fn rows_match_the_recipes(
     rows: &[String],
     declared: &BTreeMap<usize, BTreeSet<Seq>>,
@@ -173,6 +213,14 @@ pub fn rows_match_the_recipes(
     let mut calls: BTreeMap<Seq, BTreeSet<u64>> = BTreeMap::new();
     let mut run: Option<u64> = None;
     for row in rows {
+        let cells = row.split('\t').count();
+        if cells != COLUMNS.len() {
+            return Err(format!(
+                "a row has {cells} cells and the record has {} columns — every later cell \
+                 then names the column to its left, and each one still parses — {row:?}",
+                COLUMNS.len()
+            ));
+        }
         let node = field(row, "node_seq")? as usize;
         let seq = field(row, "recipe_seq")? as Seq;
         let call = field(row, "call_index")?;
@@ -234,15 +282,26 @@ fn field(row: &str, column: &str) -> Result<u64, String> {
 
 const RUN_PREFIX: &str = "# run: ";
 
+/// The only timing mode a record is written under: the harness sets `NodeTiming::Events`
+/// before it plans. A literal because a reader cannot tell events from a host clock by
+/// looking at the microseconds, and a run under anything else writes no record at all.
+pub const TIMING_MODE: &str = "events";
+
+/// How the harness that writes this was compiled, as the record and the tree both state
+/// it. A literal for the same reason: the harness refuses a build with debug assertions
+/// before it measures anything, so no other value can reach a written file.
+pub const BUILD: &str = "release";
+
 /// The conditions this run measured under, as heading lines. Constant across a run —
-/// which is why they are here and not columns — but each one changes what the
-/// microseconds MEAN, so a file mixing two of them is a file whose rows cannot be
-/// compared. [`append_records`] refuses to write one.
+/// which is why they are here and not columns — but each one changes what the microseconds
+/// mean, so a file mixing two of them is a file whose rows cannot be compared.
+/// [`append_records`] refuses to write one.
 fn run_conditions(meta: &RunMeta<'_>) -> Vec<String> {
     vec![
-        format!("{RUN_PREFIX}timing_mode={}", meta.timing_mode),
-        format!("{RUN_PREFIX}build={}", meta.build),
+        format!("{RUN_PREFIX}timing_mode={TIMING_MODE}"),
+        format!("{RUN_PREFIX}build={BUILD}"),
         format!("{RUN_PREFIX}allocator={}", meta.allocator),
+        format!("{RUN_PREFIX}capture={}", meta.capture.name()),
     ]
 }
 
@@ -253,48 +312,52 @@ pub fn record_header(meta: &RunMeta<'_>) -> String {
 }
 
 const HEADER_NOTES: &str = "\
-# peacockdb cost-model calibration record. One row per CALL — per
+# peacockdb cost-model calibration record. One row per call — per
 # (plan node, recipe step, call index), not per node and not per output partition: one
 #   plan node publishes several recipe steps, and a batched run drives each of them once
-#   per batch per lane. A call answering with several output partitions is still ONE row;
-#   its cost is the sum over its regions, because the shared prologue is charged to p0.
-# A benchmark executes its plan several times and writes EVERY measured execution, in
+#   per batch per lane. A call answering with several output partitions is still one row,
+#   its cost summed over the regions it opened.
+# A benchmark executes its plan several times and writes every measured execution, in
 #   the order they ran; the .benchmark.txt beside it reports one chosen run instead. So
 #   the same (query, mode, node_seq, recipe_seq, call_index) recurs once per execution,
 #   told apart by run_index. Spread across executions is data.
-# ONE FILE IS ONE RUN. The `# run:` lines below hold what is constant across it, and
-#   each of them changes what the microseconds MEAN — so appending a run that disagrees
-#   with them is refused rather than merged.
+# One file is one run. The `# run:` lines below hold what is constant across it, and each
+#   of them changes what the microseconds mean — so appending a run that disagrees with
+#   them is refused rather than merged.
+# capture = which Nsight pass measured this, `none` for a plain run. Tracing and the
+#   memory counters each cost the query several percent, so a captured run writes this
+#   file and never the .benchmark.txt tree.
 # mode = the batch-partitioned planning mode, `tp4-sized` and the like. The same query
 #   at two modes is a different plan and a different set of calls.
-# node_seq = the node's position in the TREE, post-order — the same space recipe_seq is
+# node_seq = the node's position in the tree, post-order — the same space recipe_seq is
 #   in. The driver numbers nodes pre-order, so this is a translation and not the index a
 #   report is walked by.
-# lane = the lane the node was DRIVEN on. A scatter is driven on one and emits into four,
+# lane = the lane the node was driven on. A scatter is driven on one and emits into four,
 #   a cross-lane accumulator the other way round; a call belongs to the driving one.
 # recipe_seq = the seq the call addressed in the FlatBuffers plan. Deliberately a different
 #   index from node_seq: one plan node with two calls is one tree position and two fb ones.
-# recipe_kind = the fb node kind the call addressed, `CudfAggregate{Partial}` and the
-#   like. Redundant with recipe_seq given the plan, and written anyway so a row is
-#   readable without one.
+# recipe_kind = what the call addressed: the fb node kind, `CudfAggregate{Partial}` and
+#   the like, or the ABI symbol for the two calls that address no wire node — a slice and
+#   an export. Redundant given the plan, and written so a row is readable without one.
 # call_index = which call of this recipe_seq the session had reached, 0 for the first.
 #   The number C++ counts to independently, and the key the two halves of a measurement
 #   meet on.
-# run_index = which execution of the case, 0 for the first MEASURED one — the warm-up is
+# run_index = which execution of the case, 0 for the first measured one — the warm-up is
 #   not written. Derivable from a repeat of call_index 0 and written anyway, so that a
 #   file joined against this one (hbm.tsv) names the same execution by the same number
 #   rather than by its own count of the same boundary.
+# in_rows/in_bytes = what the caller handed over, summed over the call's input slots. For
+#   a call in the middle of a node's chain, what the call before it answered with — which
+#   is the only side that ever priced that handle.
 # out_rows/out_bytes = what the call answered with, summed over its output partitions.
-#   Priced by the caller from the rows the ABI reported and the schema that output belongs
-#   to; C++ prices nothing.
-# in_rows/in_bytes = what the CALLER handed over, summed over the call's input slots. For
-#   a call in the middle of a node's chain, the call before it — which is the only side
-#   that priced that handle.
-# host_us = the steady clock across the whole call, summed over its regions. NOT launch
+#   Priced on this side from the rows the ABI reported and the schema that output belongs
+#   to; C++ prices nothing. The two calls no batch is built from — an aggregate before its
+#   finalize, the concat before a merge — are priced with the node's intermediate schema.
+# host_us = the steady clock across the whole call, summed over its regions. Not launch
 #   cost: cuDF and rmm synchronize internally, so it follows device_us closely.
 # device_us = between the region's CUDA events, on the one stream everything is issued
 #   to. An interval of that stream, not a figure for the device as a whole.
-# hbm_bytes is NOT here: it comes from Nsight and joins on the same tuple.";
+# hbm_bytes is not here: it comes from Nsight and joins on the same tuple.";
 
 /// Append this run's rows to `$PEACOCK_RECORD_PATH`, or do nothing if it is unset.
 ///

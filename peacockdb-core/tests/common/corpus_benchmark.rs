@@ -23,7 +23,9 @@ use peacockdb_core::wire::attach_recipes;
 use super::mode::mode_named;
 use super::corpus::plan_at;
 use super::corpus_golden::{Regeneration, SKIPPED, merge_section};
-use super::record::{RunMeta, append_records, declared_steps, record_rows, rows_match_the_recipes};
+use super::record::{
+    BUILD, Capture, RunMeta, append_records, declared_steps, record_rows, rows_match_the_recipes,
+};
 use super::gpu_session::Session;
 use super::registry::stem;
 use super::testdata_root;
@@ -77,13 +79,6 @@ pub fn declared_for(dataset: &str, sf: &str, mode: &str) -> Vec<(String, Option<
 ///
 /// One file rather than one per query because a mode's queries are read together, and a
 /// directory of one-query files makes that a listing rather than a diff.
-/// Set ⇒ a case measures and records but leaves the `.benchmark.txt` tree alone.
-///
-/// For the HBM pass, whose times are distorted by the counters it exists to read. Named
-/// on the harness rather than decided by it: a run that must not publish its times is a
-/// property of how it was launched, and the case cannot see the nsys command line.
-pub const RESULTS_READ_ONLY_ENV: &str = "PEACOCK_BENCHMARK_RESULTS_RO";
-
 pub fn results_file(dataset: &str, sf: &str, mode: &str) -> PathBuf {
     testdata_root()
         .join(format!("benchmark-results/{dataset}.sf{sf}"))
@@ -100,13 +95,6 @@ pub fn results_file(dataset: &str, sf: &str, mode: &str) -> PathBuf {
 /// moment with nothing in the run to say so, and pruning what this run did not produce
 /// would delete a measurement nobody asked to lose.
 pub fn write_section(dataset: &str, sf: &str, mode: &str, query: &str, body: &str) {
-    // The one run whose tree is knowingly wrong: an HBM pass measures under GPU memory
-    // counters, which cost the query ~7% and a heavy scan ~11%. It wants the traffic and
-    // the record's coordinates, and it must not leave those times behind in the committed
-    // tree. Refusing to write is the whole guard — its record goes to its own file.
-    if std::env::var_os(RESULTS_READ_ONLY_ENV).is_some() {
-        return;
-    }
     merge_section(
         &results_file(dataset, sf, mode),
         &declared_for(dataset, sf, mode),
@@ -129,19 +117,13 @@ fn query_order(query: &str) -> (String, u32, String) {
     )
 }
 
-/// How this harness was compiled, as the record and the tree both state it.
-///
-/// A literal because it is the only value a written record can carry: `run_once` refuses a
-/// build with debug assertions, so a debug build never reaches the line that writes this.
-pub const BUILD: &str = "release";
-
 /// The extra-data section: what the whole run cost, and under what conditions.
 ///
 /// Named `--- run ---` after the `--- recipes ---` and `--- memory ---` the plan goldens
 /// carry, so a reader who has seen one file knows where a section ends in the other.
 ///
 /// **Two totals, deliberately named apart.** `run_us` is the whole execution end to end;
-/// `device_us` is the sum of the tree's `total_us`. They do NOT agree, and the difference
+/// `device_us` is the sum of the tree's `total_us`. They do not agree, and the difference
 /// is the point: it is what the run spent outside the calls — the driver's own scheduling
 /// and the host prologue between them. One name for both would read as a discrepancy.
 fn run_section(chosen: &Run, times: &Measurements, spread: &[u64]) -> String {
@@ -190,12 +172,15 @@ struct Run {
 ///
 /// Planning happens once, outside the runs: `plan_at` reads every file's parquet
 /// metadata, and repeating that would time the catalog rather than the query. So
-/// `total_us` here is EXECUTION only.
+/// `total_us` here is execution only.
 pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
     const _: () = assert!(BENCH_MEASURED_RUNS >= 2, "a second minimum needs >= 2 runs");
 
     let mode = mode_named(mode);
     let what = format!("{dataset}/{query} at {} on a device", mode.name);
+    // Read before anything runs, so a misspelled value fails the case rather than the
+    // publish at the end of it.
+    let capture = Capture::from_env();
 
     // Conditions of a benchmark run, not choices: rmm's default makes every cuDF
     // intermediate a cudaMalloc/cudaFree round trip charged to the node that allocated it,
@@ -206,7 +191,7 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
 
     let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
 
-    // OFF across the warm-up, and SET rather than assumed: the switch is process-global
+    // Off across the warm-up, and set rather than assumed: the switch is process-global
     // and this binary runs every case in one process, so a case that only turned it on
     // would leave later warm-ups ranging with no case range open — calls belonging to no
     // query. The capture's containment check catches exactly that, and did.
@@ -217,9 +202,7 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
     // After the warm-up, not before: the warm-up is not written to the record, so ranging
     // it would leave the capture one execution longer than the file it joins against —
     // and the reader would have to know a Rust constant to allow for it.
-    if std::env::var_os("PEACOCK_NVTX").is_some() {
-        set_nvtx_ranges(true);
-    }
+    set_nvtx_ranges(capture != Capture::None);
     // Around the measured runs, naming the case. A node range carries `seq`, and seq
     // numbering restarts per plan — q6 and q19 both open with `0.0 CudfScan` — so only
     // containment says which query a call was in. Held to the end of the function:
@@ -253,9 +236,8 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
         sf,
         query,
         mode: mode.name,
-        timing_mode: "events",
-        build: BUILD,
         allocator: &allocator,
+        capture,
     };
     // Attached once more here rather than reached for through the session: `Session::open`
     // hands its plan to the driver and the driver consumes it. `attach_recipes` reads the
@@ -280,14 +262,17 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
 
     let chosen = second_smallest(runs);
     let costed = measured_of(&chosen, &what);
-    // Three terms, never their sum: under events the host submission and the device
-    // execution overlap, so adding them describes no interval.
     let body = format!(
         "{}{}",
         render_timings(tree.as_ref(), &costed),
         run_section(&chosen, &costed, &times)
     );
-    write_section(dataset, sf, mode.ident().as_str(), query, &body);
+    // A captured run measures under nsys, which costs the query several percent, so its
+    // times must not reach the committed tree. It still wrote the record above — the
+    // capture exists to be joined against exactly those rows.
+    if capture == Capture::None {
+        write_section(dataset, sf, mode.ident().as_str(), query, &body);
+    }
 
     let per_node: Vec<String> = (0..costed.nodes())
         .map(|node| match node_measured(&costed, node) {
@@ -345,7 +330,7 @@ fn run_once(tree: &dyn GpuNode, what: &str) -> (RunReport, Vec<Region>) {
     // In the measured path rather than beside the install, which is the whole point: the
     // install was once lost with the file that held it, and a check standing next to what
     // it guards goes the same way. `install_rmm_pool` is idempotent, so asking here is
-    // asking what the resource IS.
+    // asking what the resource is.
     assert!(
         matches!(install_rmm_pool(), RmmPool::Pool { .. }),
         "{what} would measure over rmm's default resource, where every cuDF intermediate is \

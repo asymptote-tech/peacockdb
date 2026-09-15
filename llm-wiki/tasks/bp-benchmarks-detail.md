@@ -57,6 +57,10 @@ Facts the coordinator established before the first dispatch:
 - Dispatch 1: plan Tasks 1 and 2 (the C++ instrument, the ABI and FFI declarations).
 - Dispatch 2: plan Tasks 3, 4 and 5 (instrument facade, the ABI-call journal, measurements
   and the tree), after Tasks 1–2 landed as `7dad6a7` and `69b3051`. verda still down.
+- Dispatch 3: plan Tasks 6 and 7 (the harness, the record, the case list; `test_node_timing`),
+  after Tasks 3–5 landed as one commit. Dispatch 2 already adapted `record.rs`,
+  `corpus_benchmark.rs`, `peacock_gpu_benchmarks.rs` and `test_node_timing.rs` to the reshaped
+  types (noted inline in the plan); Task 7 step 1 is already done in full.
 
 ## Dispatch 1 — plan Tasks 1 and 2 (the C++ instrument, the ABI and the FFI)
 
@@ -267,3 +271,126 @@ that with `--release`. `--build-benchmarks` is broken until it does; `--build` i
   test against both a broken producer propagation and a slice that journals nothing.
 - `git diff origin/master --stat` over the byte-identical set is empty; `residue-gate.sh`
   prints nothing under `== bp gates`.
+
+## Dispatch 3 — plan Tasks 6 and 7 (the harness, the record, the case list, `test_node_timing`)
+
+### What was still owed after dispatch 2, and what it became
+
+Task 7 was already done in full and needed no code change; only two words of emphasis
+were lower-cased in it. Task 6's four files existed, so the work was the difference between
+them and the spec.
+
+- **`Capture` lives in `record.rs`**, beside `CAPTURE_ENV`, with `from_env()` exhaustive —
+  an unnamed value panics naming `trace` and `metrics` rather than reading as `none`, which
+  would publish a captured run's times. `corpus_benchmark::benchmark_case` reads it once at
+  the top, before it plans, so a misspelling fails the case rather than the publish at the
+  end of it. It decides two things and nothing else: `set_nvtx_ranges(capture != None)` after
+  the warm-up, and whether `write_section` is called at all.
+- **`PEACOCK_NVTX` and `PEACOCK_BENCHMARK_RESULTS_RO` are gone from the harness.** The
+  read-only guard moved out of `write_section` and became an `if` at the one call site: a
+  reader of the publish now sees the condition instead of finding it three functions away.
+- **`RunMeta` lost `timing_mode` and `build` and gained `capture`.** Those two are constants
+  in `record.rs` now (`TIMING_MODE`, `BUILD`), because the harness refuses to measure under
+  anything else — `run_once`'s two asserts are what make the literals true. `BUILD` moved out
+  of `corpus_benchmark.rs` for a second reason: `corpus_benchmark` is `cfg(not(rust-only))`,
+  and the rust-only trailer test has to name the same string.
+- **No cell in a row is empty.** `record_rows` now `expect`s the measurement instead of
+  passing an `Option` down: `join_regions` refuses a call no region answered, so an absent
+  one is a join that was never checked rather than a call the device missed.
+- **`rows_match_the_recipes` checks the field count first.** Every column is a number or a
+  name, so a row that lost a cell still parses — the cells after the gap each move one column
+  left and `device_us` reads whatever `host_us` measured.
+- `HEADER_NOTES` was rewritten for the 17 columns and carries no capitals for emphasis; the
+  same sweep went over the four files' own comments.
+
+### The rust-only tests, and the two that are `#[ignore]`d
+
+`test_corpus_goldens.rs` gained `a_row_that_lost_a_cell_is_refused`,
+`every_timed_case_is_enabled_on_a_device` and the trailer half of
+`every_total_us_is_the_sum_of_the_time_us_beside_it`, and lost
+`the_benchmark_path_reads_no_cpu_side_golden`. `test_plan_goldens.rs` needed nothing — its
+port landed in the squash.
+
+**Two `#[ignore]`s, not one.** The plan's Task 11 step 4 says "remove the `#[ignore]` Task 6
+left"; there are two, and both go at the same moment for the same reason. The committed sf40
+tree and `records.tsv` are the *first version's* — they came across in the squash — so they
+describe a harness that no longer exists: the trailer says `build_profile=benchmarks
+opt-level=3` where this one writes `build=release`, and the record's preamble has eighteen
+columns with `peacock_host_us`/`cudf_host_us` where this one has seventeen with `host_us`.
+The two tests are `every_committed_tree_reports_a_release_build` and
+`the_records_preamble_is_what_record_header_writes`. Both were run with `--ignored` and fail
+exactly there, which is their red; Task 11's re-measurement is their green. Neither `#[ignore]`
+reason names the task file by name — `bp-` in a string outside `llm-wiki/` trips
+`residue-gate.sh`.
+
+The rest of the trailer is checked unignored, because the v1 data satisfies it: `device_us`
+is the sum of the tree's `total_us`, `runs` holds ten entries, and `run_us` is the
+second-smallest of them. That last one is beyond what the plan asked for and is the
+cheapest statement of the selection rule the spec fixes.
+
+`every_timed_case_is_enabled_on_a_device` reads both `.inc` files as text rather than through
+the inventories, because `corpus_cases.inc` is expanded only by the two corpus binaries and a
+rust-only build links neither. `read_cases` takes the *last* `)` on a line and asserts the
+tail is `;` — the argument lists carry no parentheses of their own, and the assert is what
+says so.
+
+### Red-green
+
+Each new assertion was reddened on its own before being believed:
+
+- the field-count check deleted from `record.rs` → only `a_row_that_lost_a_cell_is_refused`
+  failed, and on the `expect_err`.
+- `q19` given `tp4_sized` in `corpus_benchmark_cases.inc` → only
+  `every_timed_case_is_enabled_on_a_device` failed, naming the mode and the device column.
+- `device_us` off by one, then the spread cut to nine, then `run_us` set to the minimum, each
+  in the committed tree → `every_total_us_is_the_sum_of_the_time_us_beside_it` failed on
+  exactly the matching assert. The file was restored from a copy each time.
+
+### Findings for Task 8, from trying to run the binary by hand
+
+- **`setup-glibc.sh` patches `rust-tests/` only.** `patch_rust_dir` is called once, and
+  `verify_patched` walks `bin/*` and `rust-tests/*`. So `cpp/install/rust-benchmarks/` ships
+  unpatched, the verifier passes, and the binary dies at load with a bare failure. The comment
+  at `build-test-shadgpu.sh`'s `BENCH_STAGING` ("setup-glibc.sh patches both") is false today.
+  This dispatch patched the one binary by hand with `patchelf` on the host to get its six
+  assertions run; Task 8 owns the fix, and `verify_patched` is where it will be noticed if it
+  is not made.
+- `patchelf` is not on shad-gpu's `PATH`; it is at `/home/info/.local/bin/patchelf`.
+- `create_nsys_profile.sh` still exports `PEACOCK_NVTX` and `PEACOCK_BENCHMARK_RESULTS_RO`,
+  and `nsys_calls.py` still names the first in a message. Nothing reads either after this
+  dispatch. Task 9 replaces both with `PEACOCK_BENCHMARK_CAPTURE=trace|metrics`.
+- `--build-benchmarks` is still broken (`BENCH_PROFILE=benchmarks`). The binary was built and
+  staged by hand instead: in the container, `. scripts/lib/shadgpu-env.sh` then
+  `stage_cargo_test_binary peacock_gpu_benchmarks cpp/install/rust-benchmarks`, at the default
+  test profile. The six assertions do not reach `run_once`, so they do not need `--release`;
+  Task 8 step 6 is where the release build gets proved.
+
+### What was proven, and how
+
+- rust-only, whole package with both datasets present: 0 failures — `--lib` 444,
+  `test_cpu_corpus` 448, `test_cpu_end_to_end` 24, `test_corpus_goldens` 23 + 2 ignored,
+  `test_plan_goldens` 20, `test_module_layout` 11, `test_ci_coverage` 7,
+  `test_golden_format` 26, `test_cost_model` 3, `test_null_analysis` 8,
+  `test_layout_injection` 4, `test_inc2_conformance` 3, `test_cpu_executors` 1.
+- shad-gpu, `--push-binaries --patch --run`: C++ 12/3/35/4/4, rust `test_gpu_abi` 4,
+  `test_gpu_corpus` 8, `test_gpu_executors` 32, `test_gpu_recipe_walk` 10,
+  `test_inc2_conformance` 10, `test_node_timing` 1. "GPU test run OK".
+- `peacock_gpu_benchmarks --skip bench_ --test-threads=1` on shad-gpu: 6 passed, 3 filtered.
+- The cuDF-shape build is warning-free, and so is the rust-only one.
+- `test_node_timing` reports, at sf1 q19 tp1-single on shad-gpu: off wall 449908us, events
+  wall 452298us (+0.5%) on one run and 449302us (+0.3%) on the next, 12 regions. Not the
+  figure Task 10's sentence wants — that one is sf40 and Task 11 step 3 measures it — but it
+  is what the instrument costs where the test runs.
+- Everything above was re-run after the last edit, because a doc-comment change moves the
+  compiled artifact's bytes and the shipped binaries would otherwise be one edit behind.
+
+### Environment, on top of the earlier traps
+
+- **The `testdata/tpch.sf1` symlink breaks `--push-binaries`, not just the working tree.**
+  The fixture sweep is `git ls-files --cached --others --exclude-standard testdata`, and
+  `testdata/.gitignore` matches `/tpch.sf*/` with a trailing slash, so the symlink is an
+  "other" and goes into the file list. rsync then reports `cannot delete non-empty directory:
+  testdata/tpch.sf1` and exits 23, and `set -e` kills the run before `--patch`. Remove the
+  symlink before any push. The rust-only tiers need it, so the order is: symlink, run the CPU
+  tiers, remove it, push.
+- `cargo` is not on the default `PATH` in this environment; it is `~/.cargo/bin/cargo`.
