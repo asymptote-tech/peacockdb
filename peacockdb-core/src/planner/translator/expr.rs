@@ -1,4 +1,4 @@
-//! DataFusion `PhysicalExpr` → the mode's [`Expr`].
+//! DataFusion `PhysicalExpr` → the engine's [`Expr`].
 //!
 //! One conscious decision per expression kind; an unrecognized kind is a plan-time error
 //! naming it, never a silent pass-through. Types are read back off DataFusion — a binary
@@ -125,7 +125,7 @@ pub(crate) fn translate_expr(
 }
 
 /// `x IN (a, b)` becomes `(x = a) OR (x = b)`, and `NOT IN` its negation: cuDF's AST has
-/// no IN opcode, so the lowering has to happen somewhere and the IR is where this mode
+/// no IN opcode, so the lowering has to happen somewhere and the IR is where the engine
 /// can state it. Legacy lowers the same shape in its wrapper rule.
 fn expand_in_list(in_list: &InListExpr, input_schema: &Schema) -> Result<Expr, PlanError> {
     if in_list.list().is_empty() {

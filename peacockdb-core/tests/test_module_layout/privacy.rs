@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use crate::test_code::split_attributes;
 use crate::tree::{code_only, components, read, sources};
 use crate::visibility::is_bare_pub_item;
 
@@ -25,16 +26,21 @@ fn no_public_signature_names_a_type_from_a_private_module() {
             continue;
         }
         let text = read(&rel);
-        let private = private_module_aliases(&text);
-        if private.is_empty() {
+        let modules = private_modules(&text);
+        if modules.is_empty() {
             continue;
         }
+        let mut names = private_module_imports(&text, &modules);
+        names.extend(modules);
         for (n, declaration) in pub_declarations(&text) {
-            for alias in &private {
-                if declaration.contains(&format!("{alias}::")) {
-                    let head = declaration.lines().next().unwrap_or("").trim();
-                    found.push(format!("  {}:{}: {head}", rel.display(), n + 1));
-                }
+            let signature = signature_only(&code_only(&declaration));
+            if let Some(name) = private_name_in(&signature, &names) {
+                let head = declaration.lines().next().unwrap_or("").trim();
+                found.push(format!(
+                    "  {}:{}: {head} names `{name}`",
+                    rel.display(),
+                    n + 1
+                ));
             }
         }
     }
@@ -45,6 +51,19 @@ fn no_public_signature_names_a_type_from_a_private_module() {
          declare the type in the mod.rs.",
         found.join("\n")
     );
+}
+
+/// The first of `names` this signature reaches: as a path (`fb::PlanNodeKind`), or as a
+/// whole identifier where the name is capitalised, which a type, trait or const is. A
+/// lowercase name matches only as a path: `layout` is a parameter as often as the module.
+pub(crate) fn private_name_in(signature: &str, names: &[String]) -> Option<String> {
+    names
+        .iter()
+        .find(|name| {
+            signature.contains(&format!("{name}::"))
+                || (name.starts_with(char::is_uppercase) && names_identifier(signature, name))
+        })
+        .cloned()
 }
 
 /// A `pub` in `test_support/mod.rs` whose signature names a type from a component.
@@ -112,12 +131,23 @@ pub(crate) fn component_types_on_the_surface(
 /// The names a `use crate::<component>…;` binds in this file: each member of a brace group
 /// or the single item, under its `as` alias where it has one, the module itself for a bare
 /// module import, and `*` for a glob. A crate-root group (`use crate::{plan::A, planner::B}`)
-/// is read member by member. Statements are joined across lines first, since rustfmt wraps a
-/// long group.
+/// is read member by member.
 pub(crate) fn component_imports(text: &str, components: &[String]) -> Vec<String> {
+    bound_from(text, &["crate::"], components)
+}
+
+/// The names a `use <module>…;` binds in this file out of one of its own private modules,
+/// spelled bare or as `self::`, read the same way.
+pub(crate) fn private_module_imports(text: &str, modules: &[String]) -> Vec<String> {
+    bound_from(text, &["self::", ""], modules)
+}
+
+/// What every `use` under one of `prefixes` binds out of one of `roots`. Statements are
+/// joined across lines first, since rustfmt wraps a long group.
+fn bound_from(text: &str, prefixes: &[&str], roots: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for statement in use_statements(text) {
-        let Some(path) = statement.strip_prefix("crate::") else {
+        let Some(path) = prefixes.iter().find_map(|p| statement.strip_prefix(p)) else {
             continue;
         };
         let members = match path.strip_prefix('{') {
@@ -131,15 +161,15 @@ pub(crate) fn component_imports(text: &str, components: &[String]) -> Vec<String
                 Some((head, alias)) if !member.contains('{') => (head.trim(), Some(alias.trim())),
                 _ => (member.trim(), None),
             };
-            let Some(component) = components
+            let Some(root) = roots
                 .iter()
-                .find(|c| head == c.as_str() || head.starts_with(&format!("{c}::")))
+                .find(|r| head == r.as_str() || head.starts_with(&format!("{r}::")))
             else {
                 continue;
             };
-            let tail = &head[component.len()..];
+            let tail = &head[root.len()..];
             if tail.is_empty() {
-                out.push(alias.unwrap_or(component).to_string());
+                out.push(alias.unwrap_or(root).to_string());
                 continue;
             }
             match tail[2..].strip_prefix('{') {
@@ -147,11 +177,7 @@ pub(crate) fn component_imports(text: &str, components: &[String]) -> Vec<String
                     // `{self, …}` binds the module the group sits under, not the word.
                     for member in split_members(group.trim_end_matches('}')) {
                         let name = bound_name(&member);
-                        out.push(if name == "self" {
-                            component.clone()
-                        } else {
-                            name
-                        });
+                        out.push(if name == "self" { root.clone() } else { name });
                     }
                 }
                 None => out.push(match alias {
@@ -238,22 +264,25 @@ pub(crate) fn component_type_in(
     }
     imported
         .iter()
-        .find(|name| {
-            signature.match_indices(name.as_str()).any(|(i, _)| {
-                let before = signature[..i].chars().next_back();
-                let after = signature[i + name.len()..].chars().next();
-                !before.is_some_and(|c| c.is_alphanumeric() || c == '_')
-                    && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
-            })
-        })
+        .find(|name| names_identifier(signature, name))
         .cloned()
+}
+
+/// Does the signature use `name` as a whole identifier, so a longer name is not it?
+fn names_identifier(signature: &str, name: &str) -> bool {
+    signature.match_indices(name).any(|(i, _)| {
+        let before = signature[..i].chars().next_back();
+        let after = signature[i + name.len()..].chars().next();
+        !before.is_some_and(|c| c.is_alphanumeric() || c == '_')
+            && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+    })
 }
 
 /// Every `pub` field, with its line: a `pub` line that is not an item declaration.
 pub(crate) fn pub_fields(text: &str) -> Vec<(usize, String)> {
     text.lines()
         .enumerate()
-        .filter(|(_, line)| line.trim_start().starts_with("pub ") && !is_bare_pub_item(line))
+        .filter(|(_, line)| split_attributes(line).1.starts_with("pub ") && !is_bare_pub_item(line))
         .map(|(n, line)| (n, line.to_string()))
         .collect()
 }
@@ -342,30 +371,15 @@ fn declarations(text: &str, starts: impl Fn(&str) -> bool) -> Vec<(usize, String
     out
 }
 
-/// The names a `mod.rs` can reach a privately-declared module's types by: the module itself,
-/// and any alias it imports out of it (`use generated::peacock::plan as fb;`).
-pub(crate) fn private_module_aliases(text: &str) -> Vec<String> {
+/// The modules a `mod.rs` declares privately: every `mod x;`.
+pub(crate) fn private_modules(text: &str) -> Vec<String> {
     let declared: BTreeSet<String> = text
         .lines()
         .filter_map(|l| l.trim_start().strip_prefix("mod "))
         .map(|r| r.trim_end_matches(';').trim().to_string())
         .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_'))
         .collect();
-    let mut out: Vec<String> = declared.iter().cloned().collect();
-    for line in text.lines() {
-        let t = line.trim_start();
-        let Some(rest) = t.strip_prefix("use ") else {
-            continue;
-        };
-        let Some((path, alias)) = rest.trim_end_matches(';').split_once(" as ") else {
-            continue;
-        };
-        let head = path.split("::").next().unwrap_or("").trim();
-        if declared.contains(head) {
-            out.push(alias.trim().to_string());
-        }
-    }
-    out
+    declared.into_iter().collect()
 }
 
 /// A component's implementation module is unreachable from outside the crate, proved by
@@ -381,7 +395,7 @@ pub(crate) fn private_module_aliases(text: &str) -> Vec<String> {
 #[test]
 fn a_private_module_is_unreachable_from_outside_the_crate() {
     let (control, err) = (
-        "pub fn control() { let _ = std::any::type_name::<peacockdb_core::wire::Recipe>(); }",
+        "pub fn control() { let _ = std::any::type_name::<peacockdb_core::executor::CpuBackend>(); }",
         "pub fn probe() { let _ = std::any::type_name::\
          <peacockdb_core::wire::generated::peacock::plan::PlanNodeKind>(); }",
     );

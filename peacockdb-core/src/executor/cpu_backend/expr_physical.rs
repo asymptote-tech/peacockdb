@@ -1,8 +1,8 @@
-//! The mode's [`Expr`] → DataFusion `PhysicalExpr`, the inverse of [`expr_translate`].
+//! The engine's [`Expr`] → DataFusion `PhysicalExpr`, the inverse of [`expr_translate`].
 //!
 //! The CPU backend relays to DataFusion, so it needs the expressions back in DataFusion's
 //! own vocabulary. Going back is not free: a column reference is an ordinal into a child
-//! whose column order this mode decided, so the name that rides beside it is checked
+//! whose column order the engine decided, so the name that rides beside it is checked
 //! against the schema at that position rather than trusted — the mismatch this catches is
 //! the one a rebase gets wrong, and it is silent on the device.
 //!
@@ -52,7 +52,9 @@ pub(crate) fn physical_expr(
             Ok(Arc::new(Column::new(&column.name, index)))
         }
         Expr::Literal(value) => Ok(Arc::new(Literal::new(value.clone()))),
-        Expr::Binary { left, op, right, .. } => Ok(Arc::new(BinaryExpr::new(
+        Expr::Binary {
+            left, op, right, ..
+        } => Ok(Arc::new(BinaryExpr::new(
             physical_expr(left, input, registry)?,
             operator(*op),
             physical_expr(right, input, registry)?,
@@ -146,7 +148,9 @@ fn scalar_function(
     registry: &dyn FunctionRegistry,
 ) -> Result<Arc<dyn PhysicalExpr>, PlanError> {
     let udf = registry.udf(name).map_err(|error| {
-        PlanError::Unsupported(format!("`{name}` is not in this session's functions: {error}"))
+        PlanError::Unsupported(format!(
+            "`{name}` is not in this session's functions: {error}"
+        ))
     })?;
     Ok(Arc::new(ScalarFunctionExpr::new(
         name,

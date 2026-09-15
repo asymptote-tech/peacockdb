@@ -1,7 +1,7 @@
 //! `merge_m2`: state into state, which none of DataFusion's aggregate modes does.
 //!
 //! Partial takes values and emits state, Final takes state and emits a value, Single does
-//! both at once. This mode stacks two merges — per lane, then across lanes — so the lower
+//! both at once. The engine stacks two merges — per lane, then across lanes — so the lower
 //! one must emit the state the upper one reads. It is the gap `AggregateMode::Merge` was
 //! added to the wire to fill.
 //!
@@ -62,7 +62,7 @@ impl AggregateUDFImpl for MergeM2 {
         &self.signature
     }
 
-    /// What a finalize would produce. Nothing reaches it: this mode finalizes in a
+    /// What a finalize would produce. Nothing reaches it: the engine finalizes in a
     /// project, so the aggregate is only ever asked for its state.
     fn return_type(&self, _args: &[DataType]) -> DfResult<DataType> {
         Ok(DataType::Float64)

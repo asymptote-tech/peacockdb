@@ -22,65 +22,364 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-| Category | Why | Examples | N |
-|---|---|---|--:|
-| **cpu — `--features rust-only`: no FFI, no device. 987 cases: `--lib` 516, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_cost_model` 3** | | | |
-| *crate integration, external* | | | |
-| Corpus, cpu | one `corpus_query!` line per query declaring its cpu and gpu modes and its two oracles, expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer checked against plain DataFusion at `target_partitions = 1`. 37 queries at the modes each is correct at — `tpcds/q96` carries three disabled by [#180](tasks/active-tickets.md#t180), `tpcds/q77` three by [#175](tickets.md#t175) and `tpcds/q80` three by [#189](tasks/active-tickets.md#t189), `tpcds/q88` three by [#180](tasks/active-tickets.md#t180), and thirteen queries are out entirely on [#163](tickets.md#t163). 444 cells, plus three checks that every declaration's two oracles suit each other and every device cell has a cpu cell | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 447 |
-| Registry ↔ CSV, cpu | the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions; one binary per engine, since `inventory` collects per linked binary | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
-| Corpus goldens, self-consistency | the committed sections against their own arithmetic, with no dataset and no run: `consumed + abandoned == emitted` at every node, lane counts against `lanes=N`, the loader's `batch_rows` a prefix of its own lane's `partition_groups`, the root's `out_rows` against `.result.txt`, and the tree the indentation draws. The golden is written by the run it will later check, so a file that contradicts itself is the only witness to a renderer that is wrong | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs) | 20 |
-| Cost-model goldens | `.cost.txt` derivation from `.cpu.txt` × `cost_model.conf` | [cost_goldens_match_and_total_is_byte_identical](../peacockdb-core/tests/test_cost_model.rs) | 3 |
-| *crate integration, internal* | | | |
-| End to end | SQL in, rows out: 17 queries planned and run at all five modes against DataFusion on the same SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back to zero and holds equal releases at the end of every run — and seven cases no query list can carry: that DataFusion's partial aggregate does not skip grouping here, the call and pull counts a limit makes, the smallest budget a query fits in completing where the byte below it trips, and that boundary under a drained lane, the model compared against what the calls measured, an answer under the wrong column names not being the same answer, the injected set keeping the shapes only one query has, and a degenerate hash under a right outer refused by name. Two of the 26 are `#[ignore]`d against [#182](tasks/active-tickets.md#t182) — the budget boundary and the rebatcher's peak, both properties that pricing a batch from the plan's schema took away — so 24 run. The first tier where the planner, the recipes, the executors and both drivers run together rather than each against a fixture of the last one's shape — so what it tests is the joins between them | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions` and `accounting` beneath it | 26 |
-| *component* | | | |
-| Plan rules, hand-built | one input per rule, each built to break the rule it is aimed at: a plan that violates one is unreachable from SQL because translation inserts the fix, so a hand-built input is the only thing that shows the guard going red | [a_limit_over_several_lanes_names_the_node_that_fixes_it](../peacockdb-core/src/plan/tests/mod.rs) | 31 |
-| Join declarations | what each of the three join kinds requires of its inputs, and the distribution a join declares about its own output — the claim nothing downstream re-checks | [a_join_whose_sides_carry_different_lane_counts_is_refused](../peacockdb-core/src/plan/tests/joins.rs) | 23 |
-| Aggregate state columns | which aggregator owns which state column and what the finalize project emits — read twice, by the recipe writer and by the CPU backend, so one wrong answer here is wrong on both engines | [plan::tests::aggregate](../peacockdb-core/src/plan/tests/aggregate.rs) | 5 |
-| Layout injection mechanism | the rewrite against itself, with no dataset: a plan rebuilt from its own children is identical in debug — the renderer prints neither a loader's survivors nor `can_be_null`, so the fields a corpus plan never varies are the ones it cannot check — every field name a node's debug prints takes two distinct values across the fixtures, and the selector's output is a cover rather than a prefix | [plan::tests::layout_injection](../peacockdb-core/src/plan/tests/layout_injection.rs) | 4 |
-| Planner join capability | every hash join type crossed with a residual filter, the co-partitioning and lane rules, and the null analysis both ways; writes its own parquet, so no dataset | [planner::tests::join_capability](../peacockdb-core/src/planner/tests/join_capability.rs) | 13 |
-| Null analysis rules | every rule in the can-this-column-be-NULL pass, on hand-built nodes — a source declares a not-nullable column here, which no corpus fixture can | [a_scalar_function_can_be_null_even_over_operands_that_cannot](../peacockdb-core/src/planner/tests/null_analysis.rs) | 8 |
-| Planner join refusals | every shape the planner refuses, from the SQL that provokes it; each asserts its ticket is in the message a user sees | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 10 |
-| Plan goldens, tp1-single | 1 lane, one batch per chunk — the mode every other is read against; plan tree + `--- recipes ---` + `--- memory ---` per query, one file per bench | [tpch_tp1_single](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
-| Plan goldens, tp1-rowgroup | 1 lane, one batch per row group: the finest the mapping expresses, and no budget | [tpch_tp1_rowgroup](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
-| Plan goldens, tp4-single | 4 lanes, one batch per chunk — the shuffle shapes with batching inert | [tpch_tp4_single](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
-| Plan goldens, tp4-rowgroup | 4 lanes at row-group granularity: lanes and many batches at once | [tpch_tp4_rowgroup](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
-| Plan goldens, tp4-sized | 4 lanes, the estimator's target — **the only mode a budget tier moves**, recorded in-band | [tpch_tp4_sized](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
-| Plan goldens, meta | the registry and the goldens agree both ways; every mode has a golden and every golden a mode; every refusal in a golden names a ticket that exists and carries no host path | [the_registry_matches_the_goldens_in_both_directions](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 4 |
-| Recipe plan structure | the claims the payload golden cannot make: every published seq resolves to the kind its recipe names, over every corpus query rather than only the payload subset; the payload set covers every fb kind and call shape the ten goldens hold; the queries that cannot cross the wire are declared; no plan approaches the verifier's depth cap ([#169](tickets.md#t169)); and the index's post-order agrees with the numbering `attach_recipes` gave, over the corpus, since the two are separate walks in separate files and [#134](tickets.md#t134) is the same pair one boundary over | [every_published_seq_addresses_the_kind_its_recipe_claims](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 4 |
-| Recipe payloads golden | the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and call shape the mode goldens hold, and asserted to be one, so the membership grows when the mapping does — with every payload rendered and a sha256 over the bytes beside it | [the_payload_golden_carries_what_each_call_hands_the_executor](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 1 |
-| Recipes per join type | the kinds whose recipe is more than one call, `GpuHashJoin` first: per join type, the seq set it emits and when each call is made, against the capability matrix, and whether the CPU executor makes the finish pass the recipe's `AtDone` says it does. The trivial kinds are not here — the plan goldens run them over every corpus query | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests.rs) | 21 |
-| Plan text | the renderer against what the planner emits from real SQL: every column reference prints name at ordinal, every node carrying a fetch prints it, a join prints its keys and projection by name, a source prints its mapping verbatim, a name that is not a token is backquoted, and no node name carries an exec suffix | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 13 |
-| One driver, two backends | one source step written once over `Backend` and driven against two backends with different batch types, so the trait's associated types are exercised the way both engines use them | [one_generic_driver_serves_two_backends_with_different_batch_types](../peacockdb-core/src/executor/tests.rs) | 1 |
-| *subcomponent* | | | |
-| Drivers over a mock backend | flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts, queue bounds, batch release, the trace: the schedule and the two holds, both limit lowerings by the calls not made, what each node emitted and consumed (the two records the corpus goldens read), the accountant through the drivers, a backend failure stopping the query with the accounting still reconciling, the execution golden's text with every number chosen by the script, and the mock against its own script | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 90 |
-| CPU backend executors | one hand-built node per executor, one hand-written expected result: the exec executors, the accumulators over state batches written down rather than produced, the loader over parquet the test writes, the scatter, the join capability matrix run per mode, and what `executors_for` builds and reports holding | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 64 |
-| Executor contract, both engines | one table of input, calls and expected answer ([`executor_cases.rs`](../peacockdb-core/src/tests/executor_cases.rs)) run by the CPU backend here and by the device in `gpu_backend::gpu_tests::contract`, because a table one side does not read proves that side twice. Eleven rows: filter, project, the lane sorted with and without a fetch, coalesce, a merge with and without its finalize, a merge over state whose keys carry a grouping id, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden, since co-partitioning is what every partitioned join rests on | [executor::cpu_backend::tests::contract](../peacockdb-core/src/executor/cpu_backend/tests/contract.rs) | 1 |
-| Translator, one rule at a time | one test per node kind, per expression kind and per planner rule, each from the smallest plan that shows it — the corpus goldens are a regression net over whole plans and a different question from whether a rule is right | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 29 |
-| Schema annotations | what every node declares about its columns: the arrow types, and the annotations a merging or finalizing node reads | [planner::translator::schema_tests](../peacockdb-core/src/planner/translator/schema_tests.rs) | 9 |
-| *module unit* | | | |
-| Driver internals | the accountant's formula, cache and two checks on plain figures; the plan index's numbering and per-lane slots; the scheduler's corners enumerated and then a differential test against a naive rescan on randomized shapes; the lane state machine one call at a time with no tree around it | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 43 |
-| Forwarders and row ranges | which lanes a merge, a union and an interleave serve from which child; a range clamped to what is there | [interleave_serves_lane_p_from_lane_p_of_every_child](../peacockdb-core/src/executor/forwarder/tests.rs) | 5 |
-| Expression round trip | DataFusion's expression, this engine's, and DataFusion's again must all read the same column out of the same rows — asserted on the array each produces, not on shape | [executor::cpu_backend::expr_physical::tests](../peacockdb-core/src/executor/cpu_backend/expr_physical/tests.rs) | 13 |
-| Plan types | validation's shape rules — a plan ends in a crossing, a sink sits at the root, a limit has a real consumer; layout canonical forms and equality; whether a hash survives a regrouping | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 31 |
-| Memory estimation | the model's rules from SQL over the minimal dataset: an accumulator ends the walk and what it holds comes off the budget first, a batch is charged once per lane in force, a loader is priced by the batches its mapping makes, amplification is the widest point on the path, a target lands on the coarse grid, and constants that cannot be less and exceed the budget are a plan-time error | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 11 |
-| Translator expressions and scan mapping | a column keeps its ordinal and name, a literal DataFusion's scalar, a binary op its declared type, the four unaries one for one; from parquet metadata, rows and bytes are the surviving row groups' own totals over the projected columns, a scan over several files is refused, and the lanes deal the survivors as the mapping says | [planner::translator::expr::tests](../peacockdb-core/src/planner/translator/expr/tests.rs), [scan_mapping::partition::tests](../peacockdb-core/src/planner/translator/scan_mapping/partition/tests.rs) | 27 |
-| Expression text | an interval prints the parts that are not zero, a decimal as a value, every form readably | [plan_text::expr_text::tests](../peacockdb-core/src/plan_text/expr_text/tests.rs) | 3 |
-| Expression writer | every variant, every operator, and the literals the corpus actually produces — a wrong scalar is invisible in plan text and wrong on a device | [wire::expr_writer::tests](../peacockdb-core/src/wire/expr_writer/tests.rs) | 16 |
-| **ffi — default features: FFI linked, no device. 5 cases: `--lib -- ffi_tests::` 3, `peacockdb-ffi --test test_ffi` 2** | | | |
-| *crate integration, external* | | | |
-| FFI smoke | the crate links; executor lifecycle | [test_executor_lifecycle](../peacockdb-ffi/tests/test_ffi.rs) | 2 |
-| *component* | | | |
-| GpuBatch surface | what the batch reports, and that `consume` hands the handle over without releasing it. Needs no device: the release is null-guarded on the executor | [executor::ffi_tests](../peacockdb-core/src/executor/ffi_tests/mod.rs) | 3 |
-| **gpu — `--features gpu`: shad-gpu only. 63 cases: `--lib -- gpu_tests::` 55, `test_gpu_corpus` 8** | | | |
-| *crate integration, external* | | | |
-| Corpus, device | the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a device and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden. Six cells today, `q6` at every mode and `q19` at `tp1-single`; the rest are off against [#152](tickets.md#t152), [#183](tasks/active-tickets.md#t183), [#184](tasks/active-tickets.md#t184), [#185](tasks/active-tickets.md#t185) and [#187](tasks/active-tickets.md#t187). The seventh case is that a device run under a regeneration writes no golden | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 7 |
-| Registry ↔ CSV, device | the gpu column of the registry, the other half of the pair | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
-| *component* | | | |
-| Recipe walk on a device | the recipe plan driven by hand — begin_plan, the calls each recipe names, handles threaded between them, DataFusion on the same SQL as the oracle. One partition and one batch except the aggregates, which take two so a merge happens; `avg` asserts digits, since cuDF takes a divide's scale from its operands where arrow takes it from the declared type. A ROLLUP is here because its masks and NULL placeholders are the one payload the plan line does not imply, and one read re-walks every query to check the kinds a device has run against the kinds the file claims, in both directions | [an_average_finalizes_to_the_digits_the_oracle_computes](../peacockdb-core/src/wire/gpu_tests/mod.rs) | 10 |
-| *subcomponent* | | | |
-| GPU↔comet murmur3 | the linchpin gate: both sides place every row in the same partition, bit-exact. Three of the ten need no device — the comet call, `pmod` on a negative hash, the two-column CPU reference — and ride here anyway, because the module is the gate and splits nowhere | [gpu_spark_partition_ids_match_comet_live](../peacockdb-core/src/executor/cpu_backend/gpu_tests/murmur_conformance.rs) | 10 |
-| Executors on a device | each one handed its node's recipe — the exec nodes one batch at a time (filter, project, per-batch sort, aggregate with and without its finalize, the export with a row range, and an accumulator's recipe refused), the accumulators a stream of them (coalesce, the accumulating sort, the state merge, the Welford merge whose count exports Int64 against a UInt64 declaration ([#163](tickets.md#t163)), the mid-plan limit), and the joins what the matrix says a device runs: Inner at one probe batch, LeftAnti streamed through its finish pass, the scatter's N handles, and the refusals — Left and Full outright, a second probe batch, a zero-input collapse — each naming its ticket; plans hand-built over six rows the test writes itself, since the ABI loads a table only by reading one. `backend.rs` is the caller `executors_for` otherwise has none of: six of the seven categories built from a live session's recipes, and a node asked for at the wrong post-order refused, so the number is an address. The partition accumulator is the seventh and has no caller; its arm reads the child's lane count. The contract table's device half is the one case in `contract.rs` | [an_aggregate_that_finalizes_runs_both_of_its_calls](../peacockdb-core/src/executor/gpu_backend/gpu_tests/exec.rs) | 31 |
-| Per-call ABI | the three per-call symbols on a live GPU — a scan's row groups, an export range, a slice — and the release skipped exactly where a call consumed the handle | [executor::gpu_backend::gpu_tests::abi](../peacockdb-core/src/executor/gpu_backend/gpu_tests/abi.rs) | 4 |
+#### cpu — `--features rust-only`: no FFI, no device. 987 cases: `--lib` 516, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_cost_model` 3
+
+*crate integration, external*
+
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 447 |
+|---|---|--:|
+
+one `corpus_query!` line per query declaring its cpu and gpu modes and its two oracles,
+expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
+checked against plain DataFusion at `target_partitions = 1`. 37 queries at the modes each is
+correct at — `tpcds/q96` carries three disabled by [#180](tasks/active-tickets.md#t180),
+`tpcds/q77` three by [#175](tickets.md#t175) and `tpcds/q80` three by
+[#189](tasks/active-tickets.md#t189), `tpcds/q88` three by
+[#180](tasks/active-tickets.md#t180), and thirteen queries are out entirely on
+[#163](tickets.md#t163). 444 cells, plus three checks that every declaration's two oracles suit
+each other and every device cell has a cpu cell
+
+| Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
+|---|---|--:|
+
+the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
+one binary per engine, since `inventory` collects per linked binary
+
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs) | 20 |
+|---|---|--:|
+
+the committed sections against their own arithmetic, with no dataset and no run: `consumed +
+abandoned == emitted` at every node, lane counts against `lanes=N`, the loader's `batch_rows` a
+prefix of its own lane's `partition_groups`, the root's `out_rows` against `.result.txt`, and
+the tree the indentation draws. The golden is written by the run it will later check, so a file
+that contradicts itself is the only witness to a renderer that is wrong
+
+| Cost-model goldens | [cost_goldens_match_and_total_is_byte_identical](../peacockdb-core/tests/test_cost_model.rs) | 3 |
+|---|---|--:|
+
+`.cost.txt` derivation from `.cpu.txt` × `cost_model.conf`
+
+*crate integration, internal*
+
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions` and `accounting` beneath it | 26 |
+|---|---|--:|
+
+SQL in, rows out: 17 queries planned and run at all five modes against DataFusion on the same
+SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back
+to zero and holds equal releases at the end of every run — and seven cases no query list can
+carry: that DataFusion's partial aggregate does not skip grouping here, the call and pull
+counts a limit makes, the smallest budget a query fits in completing where the byte below it
+trips, and that boundary under a drained lane, the model compared against what the calls
+measured, an answer under the wrong column names not being the same answer, the injected set
+keeping the shapes only one query has, and a degenerate hash under a right outer refused by
+name. Two of the 26 are `#[ignore]`d against [#182](tasks/active-tickets.md#t182) — the budget
+boundary and the rebatcher's peak, both properties that pricing a batch from the plan's schema
+took away — so 24 run. The first tier where the planner, the recipes, the executors and both
+drivers run together rather than each against a fixture of the last one's shape — so what it
+tests is the joins between them
+
+*component*
+
+| Plan rules, hand-built | [a_limit_over_several_lanes_names_the_node_that_fixes_it](../peacockdb-core/src/plan/tests/mod.rs) | 31 |
+|---|---|--:|
+
+one input per rule, each built to break the rule it is aimed at: a plan that violates one is
+unreachable from SQL because translation inserts the fix, so a hand-built input is the only
+thing that shows the guard going red
+
+| Join declarations | [a_join_whose_sides_carry_different_lane_counts_is_refused](../peacockdb-core/src/plan/tests/joins.rs) | 23 |
+|---|---|--:|
+
+what each of the three join kinds requires of its inputs, and the distribution a join declares
+about its own output — the claim nothing downstream re-checks
+
+| Aggregate state columns | [plan::tests::aggregate](../peacockdb-core/src/plan/tests/aggregate.rs) | 5 |
+|---|---|--:|
+
+which aggregator owns which state column and what the finalize project emits — read twice, by
+the recipe writer and by the CPU backend, so one wrong answer here is wrong on both engines
+
+| Layout injection mechanism | [plan::tests::layout_injection](../peacockdb-core/src/plan/tests/layout_injection.rs) | 4 |
+|---|---|--:|
+
+the rewrite against itself, with no dataset: a plan rebuilt from its own children is identical
+in debug — the renderer prints neither a loader's survivors nor `can_be_null`, so the fields a
+corpus plan never varies are the ones it cannot check — every field name a node's debug prints
+takes two distinct values across the fixtures, and the selector's output is a cover rather than
+a prefix
+
+| Planner join capability | [planner::tests::join_capability](../peacockdb-core/src/planner/tests/join_capability.rs) | 13 |
+|---|---|--:|
+
+every hash join type crossed with a residual filter, the co-partitioning and lane rules, and
+the null analysis both ways; writes its own parquet, so no dataset
+
+| Null analysis rules | [a_scalar_function_can_be_null_even_over_operands_that_cannot](../peacockdb-core/src/planner/tests/null_analysis.rs) | 8 |
+|---|---|--:|
+
+every rule in the can-this-column-be-NULL pass, on hand-built nodes — a source declares a
+not-nullable column here, which no corpus fixture can
+
+| Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 10 |
+|---|---|--:|
+
+every shape the planner refuses, from the SQL that provokes it; each asserts its ticket is in
+the message a user sees
+
+| Plan goldens, tp1-single | [tpch_tp1_single](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
+|---|---|--:|
+
+1 lane, one batch per chunk — the mode every other is read against; plan tree + `--- recipes
+---` + `--- memory ---` per query, one file per bench
+
+| Plan goldens, tp1-rowgroup | [tpch_tp1_rowgroup](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
+|---|---|--:|
+
+1 lane, one batch per row group: the finest the mapping expresses, and no budget
+
+| Plan goldens, tp4-single | [tpch_tp4_single](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
+|---|---|--:|
+
+4 lanes, one batch per chunk — the shuffle shapes with batching inert
+
+| Plan goldens, tp4-rowgroup | [tpch_tp4_rowgroup](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
+|---|---|--:|
+
+4 lanes at row-group granularity: lanes and many batches at once
+
+| Plan goldens, tp4-sized | [tpch_tp4_sized](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
+|---|---|--:|
+
+4 lanes, the estimator's target — **the only mode a budget tier moves**, recorded in-band
+
+| Plan goldens, meta | [the_registry_matches_the_goldens_in_both_directions](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 4 |
+|---|---|--:|
+
+the registry and the goldens agree both ways; every mode has a golden and every golden a mode;
+every refusal in a golden names a ticket that exists and carries no host path
+
+| Recipe plan structure | [every_published_seq_addresses_the_kind_its_recipe_claims](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 4 |
+|---|---|--:|
+
+the claims the payload golden cannot make: every published seq resolves to the kind its recipe
+names, over every corpus query rather than only the payload subset; the payload set covers
+every fb kind and call shape the ten goldens hold; the queries that cannot cross the wire are
+declared; no plan approaches the verifier's depth cap ([#169](tickets.md#t169)); and the
+index's post-order agrees with the numbering `attach_recipes` gave, over the corpus, since the
+two are separate walks in separate files and [#134](tickets.md#t134) is the same pair one
+boundary over
+
+| Recipe payloads golden | [the_payload_golden_carries_what_each_call_hands_the_executor](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 1 |
+|---|---|--:|
+
+the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and call shape the
+mode goldens hold, and asserted to be one, so the membership grows when the mapping does — with
+every payload rendered and a sha256 over the bytes beside it
+
+| Recipes per join type | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests.rs) | 21 |
+|---|---|--:|
+
+the kinds whose recipe is more than one call, `GpuHashJoin` first: per join type, the seq set
+it emits and when each call is made, against the capability matrix, and whether the CPU
+executor makes the finish pass the recipe's `AtDone` says it does. The trivial kinds are not
+here — the plan goldens run them over every corpus query
+
+| Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 13 |
+|---|---|--:|
+
+the renderer against what the planner emits from real SQL: every column reference prints name
+at ordinal, every node carrying a fetch prints it, a join prints its keys and projection by
+name, a source prints its mapping verbatim, a name that is not a token is backquoted, and no
+node name carries an exec suffix
+
+| One driver, two backends | [one_generic_driver_serves_two_backends_with_different_batch_types](../peacockdb-core/src/executor/tests.rs) | 1 |
+|---|---|--:|
+
+one source step written once over `Backend` and driven against two backends with different
+batch types, so the trait's associated types are exercised the way both engines use them
+
+*subcomponent*
+
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 90 |
+|---|---|--:|
+
+flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
+queue bounds, batch release, the trace: the schedule and the two holds, both limit lowerings by
+the calls not made, what each node emitted and consumed (the two records the corpus goldens
+read), the accountant through the drivers, a backend failure stopping the query with the
+accounting still reconciling, the execution golden's text with every number chosen by the
+script, and the mock against its own script
+
+| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 64 |
+|---|---|--:|
+
+one hand-built node per executor, one hand-written expected result: the exec executors, the
+accumulators over state batches written down rather than produced, the loader over parquet the
+test writes, the scatter, the join capability matrix run per mode, and what `executors_for`
+builds and reports holding
+
+| Executor contract, both engines | [executor::cpu_backend::tests::contract](../peacockdb-core/src/executor/cpu_backend/tests/contract.rs) | 1 |
+|---|---|--:|
+
+one table of input, calls and expected answer
+([`executor_cases.rs`](../peacockdb-core/src/tests/executor_cases.rs)) run by the CPU backend
+here and by the device in `gpu_backend::gpu_tests::contract`, because a table one side does not
+read proves that side twice. Eleven rows: filter, project, the lane sorted with and without a
+fetch, coalesce, a merge with and without its finalize, a merge over state whose keys carry a
+grouping id, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden,
+since co-partitioning is what every partitioned join rests on
+
+| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 29 |
+|---|---|--:|
+
+one test per node kind, per expression kind and per planner rule, each from the smallest plan
+that shows it — the corpus goldens are a regression net over whole plans and a different
+question from whether a rule is right
+
+| Schema annotations | [planner::translator::schema_tests](../peacockdb-core/src/planner/translator/schema_tests.rs) | 9 |
+|---|---|--:|
+
+what every node declares about its columns: the arrow types, and the annotations a merging or
+finalizing node reads
+
+*module unit*
+
+| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 43 |
+|---|---|--:|
+
+the accountant's formula, cache and two checks on plain figures; the plan index's numbering and
+per-lane slots; the scheduler's corners enumerated and then a differential test against a naive
+rescan on randomized shapes; the lane state machine one call at a time with no tree around it
+
+| Forwarders and row ranges | [interleave_serves_lane_p_from_lane_p_of_every_child](../peacockdb-core/src/executor/forwarder/tests.rs) | 5 |
+|---|---|--:|
+
+which lanes a merge, a union and an interleave serve from which child; a range clamped to what
+is there
+
+| Expression round trip | [executor::cpu_backend::expr_physical::tests](../peacockdb-core/src/executor/cpu_backend/expr_physical/tests.rs) | 13 |
+|---|---|--:|
+
+DataFusion's expression, this engine's, and DataFusion's again must all read the same column
+out of the same rows — asserted on the array each produces, not on shape
+
+| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 31 |
+|---|---|--:|
+
+validation's shape rules — a plan ends in a crossing, a sink sits at the root, a limit has a
+real consumer; layout canonical forms and equality; whether a hash survives a regrouping
+
+| Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 11 |
+|---|---|--:|
+
+the model's rules from SQL over the minimal dataset: an accumulator ends the walk and what it
+holds comes off the budget first, a batch is charged once per lane in force, a loader is priced
+by the batches its mapping makes, amplification is the widest point on the path, a target lands
+on the coarse grid, and constants that cannot be less and exceed the budget are a plan-time
+error
+
+| Translator expressions and scan mapping | [planner::translator::expr::tests](../peacockdb-core/src/planner/translator/expr/tests.rs), [scan_mapping::partition::tests](../peacockdb-core/src/planner/translator/scan_mapping/partition/tests.rs) | 27 |
+|---|---|--:|
+
+a column keeps its ordinal and name, a literal DataFusion's scalar, a binary op its declared
+type, the four unaries one for one; from parquet metadata, rows and bytes are the surviving row
+groups' own totals over the projected columns, a scan over several files is refused, and the
+lanes deal the survivors as the mapping says
+
+| Expression text | [plan_text::expr_text::tests](../peacockdb-core/src/plan_text/expr_text/tests.rs) | 3 |
+|---|---|--:|
+
+an interval prints the parts that are not zero, a decimal as a value, every form readably
+
+| Expression writer | [wire::expr_writer::tests](../peacockdb-core/src/wire/expr_writer/tests.rs) | 16 |
+|---|---|--:|
+
+every variant, every operator, and the literals the corpus actually produces — a wrong scalar
+is invisible in plan text and wrong on a device
+
+#### ffi — default features: FFI linked, no device. 5 cases: `--lib -- ffi_tests::` 3, `peacockdb-ffi --test test_ffi` 2
+
+*crate integration, external*
+
+| FFI smoke | [test_executor_lifecycle](../peacockdb-ffi/tests/test_ffi.rs) | 2 |
+|---|---|--:|
+
+the crate links; executor lifecycle
+
+*component*
+
+| GpuBatch surface | [executor::ffi_tests](../peacockdb-core/src/executor/ffi_tests/mod.rs) | 3 |
+|---|---|--:|
+
+what the batch reports, and that `consume` hands the handle over without releasing it. Needs no
+device: the release is null-guarded on the executor
+
+#### gpu — `--features gpu`: shad-gpu only. 63 cases: `--lib -- gpu_tests::` 55, `test_gpu_corpus` 8
+
+*crate integration, external*
+
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 7 |
+|---|---|--:|
+
+the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
+device and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`,
+the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden. Six
+cells today, `q6` at every mode and `q19` at `tp1-single`; the rest are off against
+[#152](tickets.md#t152), [#183](tasks/active-tickets.md#t183),
+[#184](tasks/active-tickets.md#t184), [#185](tasks/active-tickets.md#t185) and
+[#187](tasks/active-tickets.md#t187). The seventh case is that a device run under a
+regeneration writes no golden
+
+| Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
+|---|---|--:|
+
+the gpu column of the registry, the other half of the pair
+
+*component*
+
+| Recipe walk on a device | [an_average_finalizes_to_the_digits_the_oracle_computes](../peacockdb-core/src/wire/gpu_tests/mod.rs) | 10 |
+|---|---|--:|
+
+the recipe plan driven by hand — begin_plan, the calls each recipe names, handles threaded
+between them, DataFusion on the same SQL as the oracle. One partition and one batch except the
+aggregates, which take two so a merge happens; `avg` asserts digits, since cuDF takes a
+divide's scale from its operands where arrow takes it from the declared type. A ROLLUP is here
+because its masks and NULL placeholders are the one payload the plan line does not imply, and
+one read re-walks every query to check the kinds a device has run against the kinds the file
+claims, in both directions
+
+*subcomponent*
+
+| GPU↔comet murmur3 | [gpu_spark_partition_ids_match_comet_live](../peacockdb-core/src/executor/cpu_backend/gpu_tests/murmur_conformance.rs) | 10 |
+|---|---|--:|
+
+the linchpin gate: both sides place every row in the same partition, bit-exact. Three of the
+ten need no device — the comet call, `pmod` on a negative hash, the two-column CPU reference —
+and ride here anyway, because the module is the gate and splits nowhere
+
+| Executors on a device | [an_aggregate_that_finalizes_runs_both_of_its_calls](../peacockdb-core/src/executor/gpu_backend/gpu_tests/exec.rs) | 31 |
+|---|---|--:|
+
+each one handed its node's recipe — the exec nodes one batch at a time (filter, project,
+per-batch sort, aggregate with and without its finalize, the export with a row range, and an
+accumulator's recipe refused), the accumulators a stream of them (coalesce, the accumulating
+sort, the state merge, the Welford merge whose count exports Int64 against a UInt64 declaration
+([#163](tickets.md#t163)), the mid-plan limit), and the joins what the matrix says a device
+runs: Inner at one probe batch, LeftAnti streamed through its finish pass, the scatter's N
+handles, and the refusals — Left and Full outright, a second probe batch, a zero-input collapse
+— each naming its ticket; plans hand-built over six rows the test writes itself, since the ABI
+loads a table only by reading one. `backend.rs` is the caller `executors_for` otherwise has
+none of: six of the seven categories built from a live session's recipes, and a node asked for
+at the wrong post-order refused, so the number is an address. The partition accumulator is the
+seventh and has no caller; its arm reads the child's lane count. The contract table's device
+half is the one case in `contract.rs`
+
+| Per-call ABI | [executor::gpu_backend::gpu_tests::abi](../peacockdb-core/src/executor/gpu_backend/gpu_tests/abi.rs) | 4 |
+|---|---|--:|
+
+the three per-call symbols on a live GPU — a scan's row groups, an export range, a slice — and
+the release skipped exactly where a call consumed the handle
+
 
 ### Everything else
 
@@ -92,7 +391,7 @@ the harness's own format reader — none of which runs engine code.
 |---|---|---|---|--:|
 | Golden text format (Rust) | the one reader of the format, over strings: the differ must name what moved, what is missing and what is out of order, and a node line must yield its name, depth and fields — every golden assertion in the tree is a comparison through it. The comma traps are cases, since `on=[(a@0, b@1)]` and `Decimal128(38, 15)` each carry one inside brackets | [a_section_that_moved_is_named_with_the_column_that_moved](../peacockdb-core/tests/test_golden_format.rs) | dataset-matrix (25.02 leg) | 26 |
 | CI wiring guard (Rust) | every Rust target must be named by a CI step — CI does not glob, the three lists that decide where a GPU target runs must agree, and both GPU runners must pass `--test-threads=1`, which is the whole of the single-tenant invariant inside a process and is what a device test's `unsafe { set_var }` rests on. The rungs the `--test` sweep cannot see get one assertion each: cpu (`--lib` under `rust-only`), ffi (`--lib -- ffi_tests::`), device (the staged lib binary and the loop line handing it `gpu_tests::` — shad-gpu runs prebuilt binaries, so there is no command line), plus the CLI build, which has no test target. The three runners must agree on the lib's staged name and rung too, and the rung must reach the binary through `rung_args`. The reader is scoped to the rust loop: a file-wide search passes on the comment above the command, and the C++ loop above it shares the loop variable and rightly carries no flag | [every_rust_test_target_is_named_by_ci](../peacockdb-core/tests/test_ci_coverage.rs), [each_rung_has_its_ci_line_and_the_cli_is_built](../peacockdb-core/tests/test_ci_coverage.rs), [the_three_gpu_target_lists_agree](../peacockdb-core/tests/test_ci_coverage/runners.rs) | cost-report | 8 |
-| Module layout rules (Rust) | the component walls, which the compiler mostly cannot check: where a `pub` may appear, that a subcomponent is declared `mod`, that no `super::` chain climbs out of its component, that no public signature names a type from a private module — `private_interfaces` reads a type's nominal visibility, so an unreachable type spelled `pub` passes it silently — and that no `pub` in `test_support/mod.rs` names a type from a component, which is what keeps the harness a facade and not a rename. Sibling reach is the case rustc refuses to have an opinion on at all: no visibility level means "my parent but not my siblings". One case compiles a probe crate against the built library to prove `wire::generated` is unreachable from outside, with a positive control so a probe that fails for the wrong reason cannot pass as proof. Five more rules say where test code may live: a test module is named for the build rung it needs and gated for it, in both directions; its body is a file of its own; a `#[cfg(test)]` sits on nothing but a test-module declaration; and a path compiled only under a test gate says `test` in its name. Three registers carry the exceptions the rules allow — the `pub mod` a test crate forces (none today), any cross-component reach into a subcomponent (none today), and the items that keep a `#[cfg(test)]` because no test module can hold them — and all three are checked in the reverse direction too, so an entry outliving its reason goes red. Needs no dataset and no device | [no_public_signature_names_a_type_from_a_private_module](../peacockdb-core/tests/test_module_layout/privacy.rs) | cost-report | 17 |
+| Module layout rules (Rust) | the component walls, which the compiler mostly cannot check: where a `pub` may appear, that a subcomponent is declared `mod`, that no `super::` chain climbs out of its component, that no public signature names a type from a private module — `private_interfaces` reads a type's nominal visibility, so an unreachable type spelled `pub` passes it silently — and that no `pub` in `test_support/mod.rs` names a type from a component, which is what keeps the harness a facade and not a rename. Sibling reach is the case rustc refuses to have an opinion on at all: no visibility level means "my parent but not my siblings". One case compiles a probe crate against the built library to prove `wire::generated` is unreachable from outside, with a positive control so a probe that fails for the wrong reason cannot pass as proof. Five more rules say where test code may live: a test module is named for the build rung it needs and gated for it, in both directions; its body is a file of its own; a `#[cfg(test)]` sits on nothing but a test-module declaration; and a path compiled only under a test gate says `test` in its name. Bare `pub` is checked against `SURFACE`, the CLI's API by file and name, in both directions, so a dropped-and-added pair cannot pass a count; `pub mod` is pinned to `lib.rs`. One register remains, the items that keep a `#[cfg(test)]` because no test module can hold them, checked in the reverse direction too, so an entry outliving its reason goes red. Needs no dataset and no device | [no_public_signature_names_a_type_from_a_private_module](../peacockdb-core/tests/test_module_layout/privacy.rs) | cost-report | 17 |
 | Cost-report renderer (Rust) | glyphs, links and the anchors they resolve to, ratio bucket, regression gate, history | [bucket_threshold_is_1_4](../cost-report/src/main.rs), [regression_count_drives_exit_decision](../cost-report/src/main.rs) | cost-report | 37 |
 | DuckDB cost extraction (Python) | classifier / pruning / dynamic-filter logic — fails CI before generation | [scan_count_mismatch_fails_loud](../testdata/test_duckdb_cost.py), [compute_pruning_from_rowgroups](../testdata/test_duckdb_cost.py) | cost-report | 41 |
 | Exec-model prototype (Python) | the scheduler over mock traits, plus pandas-backed operators checked against a single-shot oracle at five partitioning configs, both limit lowerings, the scalar expressions pinned to what `expr.cpp` does rather than what pandas defaults to, and every join mode run on two backends — one pandas, one emitting FlatBuffers nodes and interpreting them as the C++ does — no project code | [test_a_join_in_its_build_phase_holds_back_its_probe_subtree](../scripts/exec_model/tests/test_scheduling.py), [test_every_join_type_matches_the_oracle_on_both_backends](../scripts/exec_model/tests/test_join_capability.py) | cost-report | 216 |
@@ -311,6 +610,12 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   named datasets in place on shad-gpu with the scale-safe validators, then runs the S3
   metadata check. The `datasets` input defaults to `tpch.sf40 tpcds.sf200`; `tpch.sf200` is
   allow-listed but deliberately not defaulted, because it does not exist yet.
+
+The pipeline runs neither a `rustfmt --check` nor a clippy step, the repo has no `rustfmt.toml`,
+and the tree is not rustfmt-clean — files are formatted one at a time as a task touches them.
+Closing that takes three things together: a config, a one-time sweep of the whole tree, and a
+step; the sweep rides in a commit of its own, never in a behaviour change, so a diff stays
+readable. Not a ticket, since nothing behaves wrongly.
 
 Two traps before adding a step: a container job defaults `run:` to `sh`, not bash, so the
 two of them declare `defaults.run.shell: bash` to get `-o pipefail` at all; and the python

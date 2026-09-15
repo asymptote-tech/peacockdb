@@ -399,7 +399,7 @@ fn collect_column_refs<'a>(expr: &'a Expr, into: &mut Vec<&'a ColumnRef>) {
 }
 
 /// The three refused shapes are refusals of a defect or a missing cuDF variant, not of
-/// this mode: an outer join's residual filter is applied after the outer gather and drops
+/// the engine: an outer join's residual filter is applied after the outer gather and drops
 /// the padded rows (#153), and no swapped `mixed_*` variant exists for the right-handed
 /// semi family.
 pub(crate) fn capability(

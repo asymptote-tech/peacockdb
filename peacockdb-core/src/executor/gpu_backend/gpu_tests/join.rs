@@ -1,7 +1,7 @@
 //! The joins and the scatter on a device, and the one call the frozen surface cannot make.
 //!
 //! The finish pass is the reason this file exists: probe keys per batch, the concat at
-//! done, the anti join and the pad project. T21 left it as the one shape this mode invented
+//! done, the anti join and the pad project. T21 left it as the one shape the engine invented
 //! with no device behind it, and two of its defects were found by reading rather than by
 //! running — so a run is what settles it.
 

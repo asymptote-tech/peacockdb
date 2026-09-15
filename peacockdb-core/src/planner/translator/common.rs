@@ -41,7 +41,7 @@ pub(crate) fn co_partitioned(
         && scattered_on(probe, keys.iter().map(|(_, p)| *p).collect())
 }
 
-/// Hash keys are ordinals into the node's input, so anything else is a shape this mode
+/// Hash keys are ordinals into the node's input, so anything else is a shape the engine
 /// does not plan rather than something to evaluate on the way to the hash.
 pub(crate) fn hash_key_ordinals(
     exprs: &[Arc<dyn PhysicalExpr>],

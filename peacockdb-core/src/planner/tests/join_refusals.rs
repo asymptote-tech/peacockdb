@@ -159,7 +159,7 @@ async fn unsupported_expression_forms_are_refused_naming_the_form_and_162() {
 #[tokio::test]
 async fn an_aggregate_with_no_decomposition_is_refused_naming_161() {
     let fixture = Fixture::new("refuse-agg-shape").await;
-    // The registry in aggregates.rs is what this mode can split into init, merge and
+    // The registry in aggregates.rs is what the engine can split into init, merge and
     // finish; a function outside it is refused by name rather than run in one lane.
     let err = fixture.refused("SELECT median(v) FROM tiny").await;
     assert!(

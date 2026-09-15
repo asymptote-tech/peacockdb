@@ -6,6 +6,14 @@
 use std::ptr;
 
 use super::{Batch, GpuBatch};
+use peacockdb_ffi::raw::PeacockExecutor;
+
+impl GpuBatch {
+    /// The executor pointer, which only these cases read: a detached batch must show null.
+    pub(crate) fn executor(&self) -> *mut PeacockExecutor {
+        self.executor
+    }
+}
 
 fn detached(handle: u64, num_rows: usize, byte_size: usize) -> GpuBatch {
     GpuBatch::new(ptr::null_mut(), handle, num_rows, byte_size)

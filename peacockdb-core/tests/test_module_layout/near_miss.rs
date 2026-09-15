@@ -3,16 +3,17 @@
 use std::path::Path;
 
 use crate::privacy::{
-    component_imports, component_type_in, component_types_on_the_surface, private_module_aliases,
-    pub_declarations, pub_fields, signature_only, type_aliases,
+    component_imports, component_type_in, component_types_on_the_surface, private_module_imports,
+    private_modules, private_name_in, pub_declarations, pub_fields, signature_only, type_aliases,
 };
-use crate::repo_root;
 use crate::test_code::{
     declared_item, declares_mod, doc_above, mod_declarations, names_cfg_feature, names_cfg_test,
     test_gates,
 };
-use crate::visibility::{files_naming, is_bare_pub_item, names_the_module, pub_mod_declarations};
-use crate::walls::{supers_that_stay_inside, uses_module};
+use crate::visibility::{
+    bare_pub_name, gated_pub_mods, is_bare_pub_item, pub_mod_declarations, visible_mod_declarations,
+};
+use crate::walls::{super_chains, supers_that_stay_inside, uses_module};
 
 /// Each reader in the sibling modules, over the shape that would make it read nothing.
 ///
@@ -32,24 +33,135 @@ fn each_reader_sees_the_violation_and_not_its_near_miss() {
         "a comment is not a declaration"
     );
 
+    // rustfmt keeps a short attribute on the declaration's own line, so a reader that wants
+    // the line to start with `pub` sees neither `#[cfg(feature = "gpu")] pub mod x;` nor
+    // `#[allow(dead_code)] pub fn x()`; and a `pub(crate) mod` opens a wall while matching
+    // neither reader, so the visibility reader sees every spelling.
+    assert_eq!(
+        pub_mod_declarations("#[cfg(feature = \"gpu\")] pub mod gpu_backend;"),
+        ["gpu_backend"]
+    );
+    assert!(is_bare_pub_item("#[allow(dead_code)] pub fn x() {}"));
+    assert_eq!(
+        bare_pub_name("#[allow(dead_code)] pub fn x() {}").as_deref(),
+        Some("x")
+    );
+    assert_eq!(
+        visible_mod_declarations(
+            "mod a;\npub mod b;\npub(crate) mod c;\n#[cfg(test)] pub(in crate::x) mod d;\n"
+        ),
+        [
+            ("pub".to_string(), "b".to_string()),
+            ("pub(crate)".to_string(), "c".to_string()),
+            ("pub(in crate::x)".to_string(), "d".to_string()),
+        ]
+    );
+    assert_eq!(
+        pub_fields("#[serde(skip)] pub rows: u64,\npub(crate) bytes: u64,\n"),
+        [(0, "#[serde(skip)] pub rows: u64,".to_string())]
+    );
+    assert_eq!(
+        bare_pub_name("    pub batches: Vec<CpuBatch>,").as_deref(),
+        Some("batches")
+    );
+
     // `pub(crate)` and a `pub` field are not items the facade has to declare.
     assert!(is_bare_pub_item("pub fn run() {}"));
     assert!(is_bare_pub_item("    pub struct Held<T> {"));
     assert!(!is_bare_pub_item("pub(crate) fn run() {}"));
     assert!(!is_bare_pub_item("    pub batches: Vec<CpuBatch>,"));
 
-    // The alias is the form that matters: `fb::PlanNodeKind` carries no hint of `generated`.
-    let m = "mod generated;\nmod read;\nuse generated::peacock::plan as fb;\n";
-    let aliases = private_module_aliases(m);
-    assert!(
-        aliases.contains(&"fb".to_string()),
-        "the alias is what a signature names"
+    // The surface matches by name, so the name has to be the one after every keyword a
+    // declaration can carry, and a method's name, not `self`.
+    assert_eq!(
+        bare_pub_name("pub async fn register_tables_for(").as_deref(),
+        Some("register_tables_for")
     );
-    assert!(aliases.contains(&"generated".to_string()));
-    assert!(
-        !private_module_aliases("pub mod generated;\nuse generated::peacock::plan as fb;")
-            .contains(&"fb".to_string()),
-        "a `pub mod` is not private, so an alias out of it is not this rule's business"
+    assert_eq!(
+        bare_pub_name("    pub fn record_batch(&self) -> &RecordBatch {").as_deref(),
+        Some("record_batch")
+    );
+    assert_eq!(
+        bare_pub_name("pub const SMALL_TABLE_BYTES: u64 = 1;").as_deref(),
+        Some("SMALL_TABLE_BYTES")
+    );
+    assert_eq!(
+        bare_pub_name("pub unsafe extern \"C\" fn abi() {}").as_deref(),
+        Some("abi")
+    );
+    assert_eq!(
+        bare_pub_name("pub trait Backend: Sized {").as_deref(),
+        Some("Backend")
+    );
+    assert_eq!(bare_pub_name("pub(crate) fn run() {}"), None);
+
+    // A gate is the line above or the same line, and only a `cfg` is one: a doc comment or
+    // an attribute that is not `cfg` leaves the declaration unconditional.
+    let (plain, gated) = gated_pub_mods(
+        "pub mod plan;\n#[cfg(feature = \"test-support\")]\npub mod test_support;\n\
+         /// docs\npub mod wire;\n#[allow(dead_code)]\npub mod x;\n#[cfg(test)] pub mod y;\n",
+    );
+    assert_eq!(plain, ["plan", "wire", "x"]);
+    assert_eq!(
+        gated,
+        [
+            (
+                "test_support".to_string(),
+                "feature = \"test-support\"".to_string()
+            ),
+            ("y".to_string(), "test".to_string()),
+        ]
+    );
+
+    // A private module's types reach a signature three ways: the module's path, an alias out
+    // of it (`fb::PlanNodeKind` carries no hint of `generated`), and a bare name a `use`
+    // bound — which is the spelling every `mod.rs` in the crate actually writes.
+    let m = "mod generated;\nmod read;\nmod accounting;\npub mod driver;\n\
+             use generated::peacock::plan as fb;\nuse self::accounting::{Trip, trip_of};\n\
+             use read::Reader as R;\nuse driver::Step;\nuse std::fmt::Debug;\n";
+    let modules = private_modules(m);
+    assert_eq!(
+        modules,
+        ["accounting", "generated", "read"]
+            .map(String::from)
+            .to_vec(),
+        "a `pub mod` is not private, so what comes out of it is not this rule's business"
+    );
+    let mut names = private_module_imports(m, &modules);
+    names.extend(modules);
+    assert_eq!(
+        names,
+        [
+            "fb",
+            "Trip",
+            "trip_of",
+            "R",
+            "accounting",
+            "generated",
+            "read"
+        ]
+        .map(String::from)
+        .to_vec(),
+        "an alias, a group member and a `self::` path each bind a name; `driver` and std do not"
+    );
+    assert_eq!(
+        private_name_in("pub fn kind(&self) -> fb::PlanNodeKind {", &names),
+        Some("fb".to_string())
+    );
+    assert_eq!(
+        private_name_in("pub fn step(trip: Trip) -> Trip {", &names),
+        Some("Trip".to_string()),
+        "the bare imported type is the spelling that passed before"
+    );
+    assert_eq!(
+        private_name_in("pub fn step(trip: Tripwire) -> Tripwire {", &names),
+        None,
+        "a longer identifier is a different name"
+    );
+    assert_eq!(
+        private_name_in("pub fn read(read: usize, accounting: u8) -> Step {", &names),
+        None,
+        "a parameter named like a module is not a path into it"
     );
 
     // A shift is not an unclosed generic. Counting `<` as an open left the terminating `;` at
@@ -266,38 +378,15 @@ fn each_reader_sees_the_violation_and_not_its_near_miss() {
         0,
         "must not underflow"
     );
-
-    // A free function is lowercase. A reader that wanted a capital called the one file that
-    // forces an exemption a near-miss, which is how a bidirectional check goes green in one
-    // direction for a reason that has nothing to do with the tree.
-    let n = "peacockdb_core::executor::cpu_backend::";
-    assert!(names_the_module(
-        "use peacockdb_core::executor::cpu_backend::physical_expr;",
-        n
-    ));
-    assert!(names_the_module(
-        "use peacockdb_core::executor::cpu_backend::CpuExec;",
-        n
-    ));
-    assert!(names_the_module(
-        "use peacockdb_core::executor::cpu_backend::{a, B};",
-        n
-    ));
-    assert!(
-        !names_the_module(
-            "use peacockdb_core::executor::cpu_backend::join::CpuJoin;",
-            n
-        ),
-        "a deeper module segment forces the child, not this one"
+    // One chain is one climb, however long: resuming the scan one `super::` in reported
+    // `super::super::x` twice, once at two and once at one.
+    assert_eq!(super_chains("use super::super::x;"), vec![2]);
+    assert_eq!(
+        super_chains("super::a::f(super::b)"),
+        vec![1, 1],
+        "two chains on a line are two"
     );
-    assert!(
-        !names_the_module("// use peacockdb_core::executor::cpu_backend::CpuExec;", n),
-        "a commented-out use holds no wall down, so it must not hold an exemption open"
-    );
-    assert!(names_the_module(
-        "use peacockdb_core::executor::cpu_backend::CpuExec; // why",
-        n
-    ));
+    assert!(super_chains("use crate::plan::GpuNode;").is_empty());
 
     // Every spelling of a reach, not just the fully-qualified one. A module import and an
     // alias have no `::` after the path, and those were green on the two subcomponents where
@@ -441,24 +530,5 @@ fn each_reader_sees_the_violation_and_not_its_near_miss() {
         ),
         "",
         "only a doc comment documents the carve-out"
-    );
-
-    // Those fixtures make this file itself a match, which is what makes the `file!()`
-    // exclusion in `files_naming` load-bearing rather than decorative. Matched on the file
-    // name, so a `file!()` whose form drifts away from what the walk yields fails here too.
-    let own = Path::new(file!())
-        .file_name()
-        .expect("file!() names a file")
-        .to_owned();
-    let text = std::fs::read_to_string(repo_root().join(file!())).expect("read this file");
-    assert!(
-        names_the_module(&text, n),
-        "the fixtures above must make this file a match"
-    );
-    assert!(
-        !files_naming("executor::cpu_backend")
-            .iter()
-            .any(|p| Path::new(p).file_name() == Some(own.as_os_str())),
-        "the guard states the rule and must not report itself as forcing the exemption"
     );
 }

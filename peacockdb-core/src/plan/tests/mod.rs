@@ -8,6 +8,19 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use std::any::Any;
 use std::sync::Arc;
 
+impl PartitionLayout {
+    /// N lanes, nothing else declared — what a scan or a shuffle-free chain emits. Only a
+    /// test builds one this way; the planner always declares what it knows.
+    pub(crate) fn new(n: usize) -> Self {
+        Self {
+            n,
+            key_distribution: KeyDistribution::NotSpecified,
+            sort_order: SortOrder::NotSpecified,
+            batch_layout: BatchLayout::MultipleBatches,
+        }
+    }
+}
+
 /// An input with a layout and schema chosen by the test: the guards below are about
 /// what a node requires of its input, and a plan that violates one is unreachable
 /// from sql precisely because the translation layer is what inserts the fix.

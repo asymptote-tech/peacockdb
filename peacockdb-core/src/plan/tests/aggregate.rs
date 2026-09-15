@@ -6,8 +6,9 @@
 use super::*;
 use crate::executor::physical_expr;
 use crate::plan::AggStateColumns;
+use crate::plan::aggregate::key_width;
 use crate::plan::{AggSpec, decomposition, finalize};
-use crate::plan::{finalize_columns, key_width, state_funcs};
+use crate::plan::{finalize_columns, state_funcs};
 use datafusion::arrow::array::{Array, Float64Array, RecordBatch, UInt64Array};
 use datafusion::common::ScalarValue;
 use datafusion::execution::context::SessionContext;

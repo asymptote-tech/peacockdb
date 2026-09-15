@@ -140,7 +140,7 @@ fn a_partial_aggregate_emits_the_state_its_node_declared() {
 }
 
 /// The single-node shortcut: state and finalize on one node, which is two calls on one
-/// executor. The finalize is this mode's own expression — the same one the CPU backend
+/// executor. The finalize is the engine's own expression — the same one the CPU backend
 /// hands DataFusion — rather than an aggregate mode that also finalizes.
 #[test]
 fn an_aggregate_that_finalizes_runs_both_of_its_calls() {
