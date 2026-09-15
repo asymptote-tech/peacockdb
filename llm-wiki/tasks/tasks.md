@@ -91,7 +91,7 @@ A lane whose build side got no rows keeps its typed zero-row table where the joi
 never written, and the table it needs is one the scatter builds and the driver drops. One derived
 index field, one conditional drop. Replaces the parked `empty-answers.md`.
 
-### 13. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: reviewing — shrunk to its §2 by the spec's "Decision" section
+### 13. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: reviewing — PR #154 — shrunk to its §2 by the spec's "Decision" section
 
 The gate was taken: no shape is taught and no reach table is written. What remains is §2 — the
 three `rc == 0` sites in `wire/gpu_tests/walk.rs` return the code and the call so a device refusal
