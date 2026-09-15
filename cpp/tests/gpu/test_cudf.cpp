@@ -34,7 +34,6 @@ rmm::cuda_stream_view const get_default_stream() { return cudf::get_default_stre
 #include "plan_executor.h"
 #include "peacock/rmm_pool.hpp"
 
-
 TEST(CudfGpu, SequenceSum) {
   // Generate [1, 2, 3, ..., 100] on the GPU.
   constexpr cudf::size_type N = 100;

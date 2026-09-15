@@ -2,9 +2,6 @@
 // path (build_column), plus the shared debug/trace definitions.
 
 #include "peacock/expr.h"
-// For `mark_device_start` — expr.h deliberately does not pull this in, since the
-// host-only CPU tests compile against its narrow contract.
-#include "plan_executor.h"
 
 #include <cudf/ast/expressions.hpp>
 #include <cudf/binaryop.hpp>
@@ -660,12 +657,7 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
     else if (field == "SECOND")  comp = cudf::datetime::datetime_component::SECOND;
     else throw std::runtime_error("date_part: unsupported field " + field);
     auto ts = build_column(args->Get(1), table);
-    // #197: cuDF extracts components as INT16, DataFusion types date_part as Int32.
-    // Cast so the materialized column matches the plan's declared output_schema —
-    // values fit either way, but a batch whose schema disagrees with
-    // ExecutionPlan::schema() breaks the contract the moment it reaches a CPU operator.
-    return cudf::cast(cudf::datetime::extract_datetime_component(ts->view(), comp)->view(),
-                      cudf::data_type{cudf::type_id::INT32});
+    return cudf::datetime::extract_datetime_component(ts->view(), comp);
   }
 
   // substr(s, start, length) — SQL semantics: 1-based start.
@@ -827,10 +819,6 @@ static const char* expr_kind_name(fb::ExprNode k) {
 
 std::unique_ptr<cudf::column> build_column(
     const fb::Expr* expr, cudf::table_view const& table) {
-  // Every arm below materializes on the device, and sort and aggregate reach it HERE —
-  // several frames below their own first cuDF call, inside their decode loop. Idempotent,
-  // so the recursive descent marks once for the tree.
-  mark_device_start();
   if (debug_enabled()) {
     PCK_TRACE("  build_column kind=%s rows=%d cols=%d",
               expr_kind_name(expr->node_type()),

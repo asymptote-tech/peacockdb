@@ -32,86 +32,6 @@
 
 namespace peacock {
 
-// What a call produced, priced. Here because this is the only caller: the
-// node-at-a-time entry point these lived beside is gone.
-uint64_t logical_size_from_table(const cudf::table_view& table, uint64_t varlen_content) {
-  const uint64_t rows = static_cast<uint64_t>(table.num_rows());
-  // Charged per column, nullable or not — mirroring the Rust formula, which adds it
-  // from the row count alone and never looks at the null mask.
-  const uint64_t bitmap = (rows + 7) / 8;
-  uint64_t total = varlen_content;
-  for (cudf::size_type i = 0; i < table.num_columns(); ++i) {
-    const auto id = table.column(i).type().id();
-    uint64_t data = 0;
-    switch (id) {
-      // A bit per row, NOT cuDF's byte per row: this models the Rust number.
-      case cudf::type_id::BOOL8: data = (rows + 7) / 8; break;
-      case cudf::type_id::INT8:
-      case cudf::type_id::UINT8: data = rows; break;
-      case cudf::type_id::INT16:
-      case cudf::type_id::UINT16: data = rows * 2; break;
-      // TIMESTAMP_DAYS is Arrow Date32. Arrow Timestamp, which Rust widths at 8,
-      // cannot reach the GPU at all — `convert_data_type` has no arm for it — so
-      // the 4-byte reading is the only one available here.
-      case cudf::type_id::INT32:
-      case cudf::type_id::UINT32:
-      case cudf::type_id::FLOAT32:
-      case cudf::type_id::TIMESTAMP_DAYS: data = rows * 4; break;
-      case cudf::type_id::INT64:
-      case cudf::type_id::UINT64:
-      case cudf::type_id::FLOAT64:
-      case cudf::type_id::TIMESTAMP_MILLISECONDS: data = rows * 8; break;
-      // Only the offset buffer is structural; the content arrived as varlen_content.
-      // See the header on why 4-byte offsets are assumed.
-      case cudf::type_id::STRING: data = (rows + 1) * 4; break;
-      case cudf::type_id::DECIMAL128: data = rows * 16; break;
-      default:
-        throw std::runtime_error(
-            "logical_size_from_table: unhandled cudf type id " +
-            std::to_string(static_cast<int>(id)) +
-            " — add a deterministic arm here AND in type_structural_size (Rust)");
-    }
-    // Diagnostic, off unless asked for. What this function returns is a total, and a
-    // suspected schema divergence is a question about one column: printing the device
-    // side turns "the bytes look wrong" into "column i came back as type T". The tool
-    // the open divergences are chased with (#198, #41).
-    static const bool log_cols = std::getenv("PEACOCK_LOG_LOGICAL_BYTES") != nullptr;
-    if (log_cols) {
-      std::fprintf(stderr,
-                   "[logical_bytes] col=%d type_id=%d scale=%d rows=%llu bytes=%llu\n", i,
-                   static_cast<int>(id), table.column(i).type().scale(),
-                   static_cast<unsigned long long>(rows),
-                   static_cast<unsigned long long>(bitmap + data));
-    }
-    total += bitmap + data;
-  }
-  return total;
-}
-
-CallOutcome call_outcome(const TableResult& result) {
-  const auto full = result.table->view();
-
-  // Drop `__rowcount__` before costing: `execute_project` synthesizes it for an empty
-  // projection because cuDF cannot hold a 0-column table with rows, while DataFusion's
-  // `output_schema` there genuinely has no fields. An artifact of the device
-  // representation; charging it puts this end a whole column high (tpcds q88/q90/q96).
-  std::vector<cudf::column_view> logical_cols;
-  logical_cols.reserve(full.num_columns());
-  for (cudf::size_type i = 0; i < full.num_columns(); ++i) {
-    if (i < static_cast<cudf::size_type>(result.column_names.size()) &&
-        result.column_names[i] == "__rowcount__")
-      continue;
-    logical_cols.push_back(full.column(i));
-  }
-  const cudf::table_view logical{logical_cols};
-
-  // Rows come from `full`: dropping the placeholder must not change the row count,
-  // and an all-placeholder table's `logical` view reports 0 rows.
-  const uint64_t varlen = varlen_content_bytes(logical);
-  return CallOutcome{static_cast<uint64_t>(full.num_rows()), varlen,
-                     logical_size_from_table(logical, varlen)};
-}
-
 // ============================================================================
 // Per-node timing (measurement mode)
 // ============================================================================
@@ -126,7 +46,7 @@ std::atomic<NodeTiming> g_node_timing{NodeTiming::Off};
 // ----------------------------------------------------------------------------
 // Our own domain, so a capture can separate our node boundaries from the ranges
 // libcudf pushes from inside the calls those boundaries contain. Same reason the two
-// are not one switch: a profiled run wants the boundaries WITHOUT the event pairs,
+// are not one switch: a profiled run wants the boundaries without the event pairs,
 // whose recording is itself device work nsys would attribute to the node.
 struct peacock_domain {
   static constexpr char const* name{"peacockdb"};
@@ -135,16 +55,15 @@ using scoped_range = ::nvtx3::scoped_range_in<peacock_domain>;
 
 std::atomic<bool> g_nvtx{false};
 
-/// The range the HARNESS opens, one per benchmark case, holding every node range inside.
+/// The range the harness opens, one per benchmark case, holding every node range inside.
 ///
 /// A node range is named `<seq>.<call_index> <kind>` and seq numbering restarts per plan,
 /// so q6 and q19 both open with `0.0 CudfScan`. Nesting is what tells a capture which
 /// query a call belonged to, without anyone naming it on a command line.
 ///
-/// ONE LEVEL: cases do not nest, so a stack would be machinery for a shape nothing
-/// produces. THE ENGINE NEVER CALLS THIS — only the two ABI entry points reach it, and
-/// only the harness calls those. The `g_nvtx` check below is therefore not what keeps a
-/// shipping query from paying; not being called is.
+/// One level: cases do not nest, so a stack would be machinery for a shape nothing
+/// produces. The engine never calls this — only the two ABI entry points reach it, and
+/// only the harness calls those.
 std::optional<scoped_range>& harness_range() {
   static std::optional<scoped_range> range;
   return range;
@@ -174,19 +93,16 @@ inline uint64_t us_since(std::chrono::steady_clock::time_point t0,
       std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count());
 }
 
-/// A region's device event pair, owned by the session until collected.
-/// One region's slot: the CUDA events while they are in flight, and everything measured
-/// about the call, filled in as it becomes known.
+[[noreturn]] void throw_cuda(const char* what, cudaError_t err) {
+  throw std::runtime_error(std::string("node timing: ") + what + ": " + cudaGetErrorString(err));
+}
+
+/// One region's slot: the CUDA events while they are in flight, and what has been
+/// measured about the call so far.
 struct RegionSlot {
   NodeRegion out;
   cudaEvent_t start = nullptr;
   cudaEvent_t stop = nullptr;
-  /// Both flags, not one: the failure they guard against is a HALF-recorded pair.
-  /// A node that throws between the two leaves a start with no stop, and
-  /// `cudaEventElapsedTime` on that pair returns cudaErrorInvalidResourceHandle —
-  /// which, without this, takes down the collection of every OTHER region with it.
-  bool start_recorded = false;
-  bool stop_recorded = false;
 };
 
 /// All the state a measurement needs and execution does not.
@@ -195,14 +111,13 @@ struct RegionSlot {
 /// allocates this nor writes to it. The line matters more than the bytes: a measurement
 /// field added to the session or to `NodeStats` is paid on every call of every query,
 /// and there is nothing to stop the next one but where the first one went.
-///
-/// A deque, not a vector: `mark_device_start` holds a pointer INTO this container for
-/// the length of a region, and a later push_back would move a vector's storage out from
-/// under it.
 struct RegionSink {
   /// Calls made against each seq so far, indexed by it. Sized on first use, so the count
   /// is a coordinate within one measured run rather than a process-wide tally.
   std::vector<uint64_t> calls_made;
+  /// Which node produced each live handle. The slice and the export are given a handle
+  /// and no seq, and this is the only thing that can name one for them.
+  std::unordered_map<uint64_t, uint64_t> produced_by;
   std::deque<RegionSlot> slots;
 
   /// The next call's index for `seq`, consuming it.
@@ -210,125 +125,71 @@ struct RegionSink {
     if (calls_made.size() != node_count) calls_made.assign(node_count, 0);
     return calls_made[seq]++;
   }
+
+  /// The seq behind a handle, 0 for one this sink never saw — a handle from before the
+  /// mode was turned on.
+  uint64_t producer_of(uint64_t handle) const {
+    auto it = produced_by.find(handle);
+    return it == produced_by.end() ? 0 : it->second;
+  }
 };
-
-// How `mark_device_start` reaches the open region from several frames below
-// `execute_node`: threading a timer argument through would put a benchmark concern in
-// the signature of the whole operator layer. thread_local so a future executor thread
-// gets its own region instead of racing for this one.
-class ScopedNodeTimer;
-thread_local RegionSlot* t_open_region = nullptr;
-thread_local ScopedNodeTimer* t_open_timer = nullptr;
-
-/// The measured half of a finished call, into the region the timer opened for it.
-///
-/// Written here rather than returned because nothing on the execution path wants it: the
-/// caller keeps `rows` and `varlen_content_bytes` and hands the rest over.
-inline void record_outcome(RegionSink& sink, const CallOutcome& outcome) {
-  if (sink.slots.empty()) return;
-  auto& out = sink.slots.back().out;
-  out.rows = outcome.rows;
-  out.logical_bytes = outcome.logical_bytes;
-}
 
 /// Stopwatch over one output partition's work. When timing is off it touches neither
 /// the clock nor the driver, so the disabled path is one relaxed load.
 ///
-/// Splits the region at the first device touch: `[ctor, mark_device_start)` is
-/// peacockdb's host prologue, `[mark_device_start, stop)` the cuDF call. A region that
-/// never marks reports everything as setup — nothing was submitted.
-///
 /// Nothing inside the region drains the stream, so a node's reported time is the time it
 /// would have taken unobserved — which is the property every benchmark record rests on.
+/// A CUDA failure here throws rather than degrading to host-only: a region reported with
+/// a device time it never measured is indistinguishable from a fast node.
 class ScopedNodeTimer {
  public:
-  ScopedNodeTimer(RegionSink* sink, uint64_t seq, uint64_t partition, uint64_t call_index)
-      : mode_(g_node_timing.load(std::memory_order_relaxed)) {
+  ScopedNodeTimer(RegionSink* sink, uint64_t seq, uint64_t partition, uint64_t call_index) {
     // Before the early return, and closed by `stop`: the range has to span the same
-    // interval the host/device numbers do, or a capture and a record disagree about
-    // what "this region" was. Independent of mode_ so a profiled run can leave timing
-    // off -- recording an event pair is device work of its own.
-    if (sink && g_nvtx.load(std::memory_order_relaxed))
+    // interval the host and device numbers do, or a capture and a record disagree about
+    // what "this region" was. On the nvtx switch alone, so a profiled run can leave
+    // timing off — recording an event pair is device work of its own.
+    if (g_nvtx.load(std::memory_order_relaxed))
       range_.emplace(("p" + std::to_string(partition)).c_str());
-    if (mode_ == NodeTiming::Off) return;
-    if (sink) {
-      sink->slots.push_back(RegionSlot{});
-      slot_ = &sink->slots.back();
-      slot_->out.seq = seq;
-      slot_->out.partition = partition;
-      slot_->out.call_index = call_index;
-      // cudaEventDefault, NOT cudaEventDisableTiming: the flag that makes an event
-      // cheap is exactly the flag that makes cudaEventElapsedTime refuse it.
-      if (cudaEventCreateWithFlags(&slot_->start, cudaEventDefault) != cudaSuccess ||
-          cudaEventCreateWithFlags(&slot_->stop, cudaEventDefault) != cudaSuccess) {
-        // Degrade to host-only rather than failing the query: the pair stays unrecorded,
-        // collection drops the device half, and the host halves survive.
-        slot_->start = slot_->stop = nullptr;
-      }
-      prev_region_ = t_open_region;
-      t_open_region = slot_;
-    }
-    prev_timer_ = t_open_timer;
-    t_open_timer = this;
+    if (!sink) return;
+    sink->slots.push_back(RegionSlot{});
+    slot_ = &sink->slots.back();
+    slot_->out.seq = seq;
+    slot_->out.partition = partition;
+    slot_->out.call_index = call_index;
+    // cudaEventDefault, not cudaEventDisableTiming: the flag that makes an event cheap
+    // is exactly the flag that makes cudaEventElapsedTime refuse it.
+    if (auto err = cudaEventCreateWithFlags(&slot_->start, cudaEventDefault); err != cudaSuccess)
+      throw_cuda("cudaEventCreateWithFlags", err);
+    if (auto err = cudaEventCreateWithFlags(&slot_->stop, cudaEventDefault); err != cudaSuccess)
+      throw_cuda("cudaEventCreateWithFlags", err);
     t0_ = std::chrono::steady_clock::now();
-    t1_ = t0_;  // a region that never touches the device is all setup
-  }
-
-  ~ScopedNodeTimer() {
-    // Restores on the throwing path, where `stop` never ran. Left dangling, the next
-    // region's operators would mark into a destroyed timer — a use-after-free, not
-    // merely mis-attributed time.
-    if (mode_ == NodeTiming::Off || stopped_) return;
-    t_open_timer = prev_timer_;
-    t_open_region = prev_region_;
+    if (auto err = cudaEventRecord(slot_->start, cudf::get_default_stream().value());
+        err != cudaSuccess)
+      throw_cuda("cudaEventRecord", err);
   }
 
   ScopedNodeTimer(const ScopedNodeTimer&) = delete;
   ScopedNodeTimer& operator=(const ScopedNodeTimer&) = delete;
 
-  /// Close the region and return `{host_setup_us, host_submit_us}`. Idempotent: a
-  /// second call returns zeros, so a region can be stopped early without
-  /// double-counting.
-  std::pair<uint64_t, uint64_t> stop() {
-    // First, and outside the mode check: the range is on its own switch, and the
-    // work after this call belongs to the next node, not to this region.
+  /// Close the region. Idempotent: a second call does nothing, so a region can be
+  /// stopped early without double-counting.
+  void stop() {
+    // First, and outside the slot check: the range is on its own switch, and the work
+    // after this call belongs to the next node, not to this region.
     range_.reset();
-    if (mode_ == NodeTiming::Off || stopped_) return {0, 0};
+    if (!slot_ || stopped_) return;
     stopped_ = true;
-    // Closed here rather than in the destructor: handle bookkeeping and moving the
-    // table into the registry belong to the next thing, not to this node.
-    t_open_timer = prev_timer_;
-    if (slot_ && slot_->start_recorded) {
-      if (cudaEventRecord(slot_->stop, cudf::get_default_stream().value()) == cudaSuccess)
-        slot_->stop_recorded = true;
-    }
-    t_open_region = prev_region_;
-    const auto t2 = std::chrono::steady_clock::now();
-    const auto halves = std::make_pair(us_since(t0_, t1_), us_since(t1_, t2));
-    if (slot_) {
-      slot_->out.host_setup_us = halves.first;
-      slot_->out.host_submit_us = halves.second;
-    }
-    return halves;
-  }
-
-  /// Called (indirectly) by `mark_device_start`. First call wins.
-  void mark_device() {
-    if (marked_) return;
-    marked_ = true;
-    t1_ = std::chrono::steady_clock::now();
+    if (auto err = cudaEventRecord(slot_->stop, cudf::get_default_stream().value());
+        err != cudaSuccess)
+      throw_cuda("cudaEventRecord", err);
+    slot_->out.host_us = us_since(t0_, std::chrono::steady_clock::now());
   }
 
  private:
-  NodeTiming mode_;
   bool stopped_ = false;
-  bool marked_ = false;
   RegionSlot* slot_ = nullptr;
-  RegionSlot* prev_region_ = nullptr;
-  ScopedNodeTimer* prev_timer_ = nullptr;
   std::optional<scoped_range> range_;
   std::chrono::steady_clock::time_point t0_{};
-  std::chrono::steady_clock::time_point t1_{};
 };
 }  // namespace
 
@@ -351,16 +212,6 @@ void push_harness_range(const char* name) {
 void pop_harness_range() { harness_range().reset(); }
 
 bool nvtx_ranges() { return g_nvtx.load(std::memory_order_relaxed); }
-
-void mark_device_start() {
-  auto* timer = t_open_timer;
-  if (!timer) return;  // timing off, or the recursive execute_plan path
-  timer->mark_device();
-  auto* pair = t_open_region;
-  if (!pair || pair->start_recorded) return;
-  if (cudaEventRecord(pair->start, cudf::get_default_stream().value()) == cudaSuccess)
-    pair->start_recorded = true;
-}
 
 uint64_t varlen_content_bytes(const cudf::table_view& table) {
   uint64_t total = 0;
@@ -447,6 +298,12 @@ struct NodeSession::Impl {
     return sink.get();
   }
 
+  /// Remember which node a handle came out of, for the two entry points that are handed
+  /// one and no seq. Measurement-only: `sink` is null on a shipping query.
+  void note_producer(RegionSink* measuring_sink, uint64_t handle, uint64_t seq) {
+    if (measuring_sink) measuring_sink->produced_by[handle] = seq;
+  }
+
   ~Impl() {
     // Events outlive their regions by design, so the session is the only thing that can
     // free them — a plan ending without a collection must not leak them.
@@ -485,8 +342,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
   // Once per call: every output partition this call emits carries the same index,
   // because what is counted is the ABI call and not what it produced.
   RegionSink* sink = impl_->measuring();
-  const uint64_t call_index =
-      sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
+  const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
   // One per call, so the per-partition ranges below nest inside it. `<seq>.<call>`
   // because seq alone does not identify a range — a batched run drives one seq many
   // times, and every repeat would carry the same name. Address first, kind after: the
@@ -526,12 +382,11 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
                       ? cudf::host_span<const uint32_t>{map_groups->data(), map_groups->size()}
                       : cudf::host_span<const uint32_t>{});
         timer.stop();
-        {
-          const auto outcome = call_outcome(result);
-          if (out_stats) out_stats[p] = NodeStats{outcome.rows, outcome.varlen_content_bytes};
-          if (sink) record_outcome(*sink, outcome);
-        }
+        auto tv = result.table->view();
+        if (out_stats)
+          out_stats[p] = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
         uint64_t handle = impl_->next_handle++;
+        impl_->note_producer(sink, handle, seq);
         impl_->registry.emplace(handle, std::move(result));
         out_handles[p] = handle;  // map entries are stored in partition order 0..n-1
       }
@@ -604,7 +459,6 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
         null_orders.push_back(se->nulls_first() ? cudf::null_order::BEFORE
                                                 : cudf::null_order::AFTER);
       }
-      mark_device_start();  // the loop above is flatbuffer decode, not device work
       result.table = cudf::merge(views, key_cols, orders, null_orders);
       // Apply the SPM's own fetch (top-N) AFTER the global merge (-1 = unlimited).
       if (spm->fetch() >= 0) {
@@ -617,16 +471,14 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     } else {
       // CudfCoalescePartitions, or an SPM with no sort keys / a single partition:
       // a plain in-order concat is the correct collapse.
-      mark_device_start();
       result.table = cudf::concatenate(views);
     }
     timer.stop();
-    {
-      const auto outcome = call_outcome(result);
-      if (out_stats) out_stats[0] = NodeStats{outcome.rows, outcome.varlen_content_bytes};
-      if (sink) record_outcome(*sink, outcome);
-    }
+    auto tv = result.table->view();
+    if (out_stats)
+      out_stats[0] = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
     uint64_t handle = impl_->next_handle++;
+    impl_->note_producer(sink, handle, seq);
     impl_->registry.emplace(handle, std::move(result));
     out_handles[0] = handle;
     *out_count = 1;
@@ -670,8 +522,6 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     // separable. p0's region stays open across both rather than closing and reopening,
     // because N output partitions must cost exactly N timed regions.
     ScopedNodeTimer shared_timer(sink, seq, 0, call_index);
-    // Only the multi-partition arm touches the device; a single input is a move.
-    if (owned.size() != 1) mark_device_start();
     std::unique_ptr<cudf::table> combined =
         (owned.size() == 1) ? std::move(owned[0].table) : cudf::concatenate(views);
 
@@ -688,7 +538,6 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     }
 
     auto tv = combined->view();
-    mark_device_start();  // the hash-key decode above is host work
     auto [parted, offsets] = peacock::partitioning::spark_hash_partition(
         tv, key_cols, static_cast<cudf::size_type>(n));
     const cudf::size_type total = parted->num_rows();
@@ -696,25 +545,23 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     for (size_t p = 0; p < n; ++p) {
       cudf::size_type start = offsets[p];
       cudf::size_type end = (p + 1 < n) ? offsets[p + 1] : total;
-      // p0 finishes the shared region opened above; p1..N-1 open their own, each on a
-      // stream the previous stop drained — the timer's precondition.
+      // p0 finishes the shared region opened above; p1..N-1 open their own.
       std::optional<ScopedNodeTimer> own;
       if (p > 0) own.emplace(sink, seq, p, call_index);
       // One owning table per partition (slice → deep copy so each handle owns memory).
-      mark_device_start();
       cudf::table_view slice = cudf::slice(pv, {start, end}).front();
       TableResult part;
       part.column_names = column_names;
       part.table = std::make_unique<cudf::table>(slice);
-      // Closed either way: the region's own halves go into it, and nothing here reads
-      // the pair back.
-      if (p == 0) shared_timer.stop(); else own->stop();
-      {
-        const auto outcome = call_outcome(part);
-        if (out_stats) out_stats[p] = NodeStats{outcome.rows, outcome.varlen_content_bytes};
-        if (sink) record_outcome(*sink, outcome);
-      }
+      if (p == 0)
+        shared_timer.stop();
+      else
+        own->stop();
+      auto ptv = part.table->view();
+      if (out_stats)
+        out_stats[p] = NodeStats{static_cast<uint64_t>(ptv.num_rows()), varlen_content_bytes(ptv)};
       uint64_t handle = impl_->next_handle++;
+      impl_->note_producer(sink, handle, seq);
       impl_->registry.emplace(handle, std::move(part));
       out_handles[p] = handle;
     }
@@ -753,12 +600,11 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     ScopedNodeTimer timer(sink, seq, p, call_index);
     TableResult result = execute_one(node, std::move(inputs));
     timer.stop();
-    {
-      const auto outcome = call_outcome(result);
-      if (out_stats) out_stats[p] = NodeStats{outcome.rows, outcome.varlen_content_bytes};
-      if (sink) record_outcome(*sink, outcome);
-    }
+    auto tv = result.table->view();
+    if (out_stats)
+      out_stats[p] = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
     uint64_t handle = impl_->next_handle++;
+    impl_->note_producer(sink, handle, seq);
     impl_->registry.emplace(handle, std::move(result));
     out_handles[p] = handle;
   }
@@ -780,8 +626,7 @@ uint64_t NodeSession::execute_scan_rowgroups(uint64_t seq,
   // Once per call: every output partition this call emits carries the same index,
   // because what is counted is the ABI call and not what it produced.
   RegionSink* sink = impl_->measuring();
-  const uint64_t call_index =
-      sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
+  const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
   // The same range `execute_node` opens, because this is the same thing from a capture's
   // side: one call against one seq. Without it a batched scan -- most of a query at sf40 --
   // is the one region a capture cannot see.
@@ -808,12 +653,11 @@ uint64_t NodeSession::execute_scan_rowgroups(uint64_t seq,
                              " reading row groups [" + groups + "]: " + e.what());
   }
   timer.stop();
-  {
-    const auto outcome = call_outcome(result);
-    if (out_stats) *out_stats = NodeStats{outcome.rows, outcome.varlen_content_bytes};
-    if (sink) record_outcome(*sink, outcome);
-  }
+  auto tv = result.table->view();
+  if (out_stats)
+    *out_stats = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
   uint64_t handle = impl_->next_handle++;
+  impl_->note_producer(sink, handle, seq);
   impl_->registry.emplace(handle, std::move(result));
   return handle;
 }
@@ -839,45 +683,72 @@ uint64_t NodeSession::slice_handle(uint64_t handle, uint64_t offset, uint64_t le
   TableResult input = std::move(it->second);
   impl_->registry.erase(it);
 
+  // A limit carries no seq of its own, so the region is the sliced node's: what the call
+  // costs belongs beside the work that produced the rows it trims.
+  RegionSink* sink = impl_->measuring();
+  const uint64_t seq = sink ? sink->producer_of(handle) : 0;
+  const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
+  OptionalRange node_range(
+      [&] { return std::to_string(seq) + "." + std::to_string(call_index) + " slice_handle"; });
+
   auto [begin, end] = clamp_row_range(offset, length, input.table->view().num_rows());
   TableResult result;
   result.column_names = input.column_names;
+  ScopedNodeTimer timer(sink, seq, 0, call_index);
   // An owning copy of the kept rows, so the input table can go: a view would keep the
   // whole batch resident, which is the cost the mid-plan limit exists to avoid.
   result.table =
       std::make_unique<cudf::table>(cudf::slice(input.table->view(), {begin, end}).front());
+  timer.stop();
   uint64_t out = impl_->next_handle++;
+  // The trimmed rows are still that node's output, so the export downstream of a limit
+  // names the same seq the slice did.
+  impl_->note_producer(sink, out, seq);
   impl_->registry.emplace(out, std::move(result));
   return out;
+}
+
+void NodeSession::time_export(uint64_t handle, const std::function<void()>& body) {
+  RegionSink* sink = impl_->measuring();
+  const uint64_t seq = sink ? sink->producer_of(handle) : 0;
+  const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
+  OptionalRange node_range([&] {
+    return std::to_string(seq) + "." + std::to_string(call_index) + " result_from_handle";
+  });
+  ScopedNodeTimer timer(sink, seq, 0, call_index);
+  body();
+  timer.stop();
 }
 
 std::vector<NodeRegion> NodeSession::collect_node_regions() {
   std::vector<NodeRegion> out;
   if (!impl_->sink) return out;
   out.reserve(impl_->sink->slots.size());
+  std::optional<std::pair<const char*, cudaError_t>> failure;
   for (auto& slot : impl_->sink->slots) {
-    // Every region is reported; only its DEVICE half needs a complete pair. A region
-    // that never touched the device, or whose events failed to create, still carries
-    // host times and its byte total, both worth having.
-    if (slot.start_recorded && slot.stop_recorded) {
-      // Synchronize on the stop event, not the stream: the stream may have moved on
-      // to work that belongs to nobody's region (the root materialize), and draining
-      // that would bill this collection for it.
-      if (cudaEventSynchronize(slot.stop) == cudaSuccess) {
-        float ms = 0.0f;
-        if (cudaEventElapsedTime(&ms, slot.start, slot.stop) == cudaSuccess)
-          slot.out.device_us = static_cast<uint64_t>(ms * 1000.0f);
-      }
-    }
+    // Synchronize on the stop event, not the stream: the stream may have moved on to
+    // work that belongs to nobody's region, and draining that would bill this
+    // collection for it.
+    if (auto err = cudaEventSynchronize(slot.stop); err != cudaSuccess && !failure)
+      failure = {"cudaEventSynchronize", err};
+    float ms = 0.0f;
+    if (auto err = cudaEventElapsedTime(&ms, slot.start, slot.stop); err != cudaSuccess && !failure)
+      failure = {"cudaEventElapsedTime", err};
+    slot.out.device_us = static_cast<uint64_t>(ms * 1000.0f);
     out.push_back(slot.out);
-    if (slot.start) cudaEventDestroy(slot.start);
-    if (slot.stop) cudaEventDestroy(slot.stop);
+    // Destroyed on the failing path too, and that is why the throw waits for the end of
+    // the loop: a partial drain would leave the rest of the events owned by nobody.
+    cudaEventDestroy(slot.start);
+    cudaEventDestroy(slot.stop);
   }
   // A second call reports nothing rather than everything twice, and a session driven
   // across many plans does not accumulate events without bound.
   impl_->sink->slots.clear();
+  if (failure) throw_cuda(failure->first, failure->second);
   return out;
 }
+
+size_t NodeSession::recorded_regions() const { return impl_->sink ? impl_->sink->slots.size() : 0; }
 
 const TableResult& NodeSession::table_for(uint64_t handle) const {
   auto it = impl_->registry.find(handle);

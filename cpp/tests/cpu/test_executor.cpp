@@ -145,6 +145,17 @@ TEST(NodeTiming, SwitchRoundTrips) {
   EXPECT_FALSE(peacock::node_timing_enabled());
 }
 
+// The ABI takes an int, so a caller can name a mode this build does not have. Refusing
+// it is what makes that visible: read as off, the caller measures nothing and the run
+// reports zeros it has no reason to doubt.
+TEST(NodeTiming, TheAbiRefusesAModeItDoesNotName) {
+  EXPECT_EQ(peacock_set_node_timing(PEACOCK_NODE_TIMING_EVENTS), 0);
+  EXPECT_NE(peacock_set_node_timing(7), 0);
+  EXPECT_EQ(peacock::node_timing(), peacock::NodeTiming::Events) << "a refused mode changed it";
+  EXPECT_EQ(peacock_set_node_timing(PEACOCK_NODE_TIMING_OFF), 0);
+  EXPECT_FALSE(peacock::node_timing_enabled());
+}
+
 // The row range every per-batch caller's bounds go through, on the tier that needs no
 // device: it is arithmetic, and reaching it through a scan on the GPU host is the long
 // way round to a case that cannot fail there for a reason worth knowing.
