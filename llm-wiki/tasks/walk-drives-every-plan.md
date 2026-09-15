@@ -207,3 +207,16 @@ Tests: of §4, only "a refused plan reports its code and its call", proved on on
 refusals. Restriction, Goldens and Coverage stand as written. Scope shrinks to `walk.rs`,
 `mod.rs`'s `driven()` comments, and `build-test.md`'s walk row if its text no longer holds. One
 device cycle.
+
+## Completeness signoff
+
+Solved under its constraints, as shrunk by the Decision: the three `rc == 0` sites in
+`wire/gpu_tests/walk.rs` return a `Refusal` — code, call, the device's message — `try_walk` stops
+at the first one and `walk` panics naming both, so every existing caller is unchanged; one test
+proves it on #203; `driven()`'s three messages say what the operator harness proved; no production
+code, no schema, no kind became `Handled`, no golden, no cell. Reviewer and analyst closed at 0
+blocking, 0 important on code; the one important finding was the `declared-schemas-derived.md`
+blocker note, corrected. Shortcuts or bandaids: none. Left as found and recorded in the detail
+file: `join()`'s all-`PerProbeBatch` message still cites #136; the `begin_plan` and scan refusal
+arms have no run of their own; the ABI's code is 1 for every failure, so the test pins #203 by
+its message.

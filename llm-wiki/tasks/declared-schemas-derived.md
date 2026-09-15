@@ -9,6 +9,10 @@ Kind: production
 > are undrivable by the walk as it stands — which is why
 > [`walk-drives-every-plan.md`](walk-drives-every-plan.md) now sits between this and task 1. It is
 > committed as a record of the scope, not as a spec, and is rewritten before it reaches the board.
+> That task shrank to its §2 on 2026-09-15 and taught no shape: six of the eleven query rows here
+> drive today, the #45, #55 and #189 rows come back as a `Refusal` rather than an abort, and the
+> rest need `AccumulatedKeys` or a Right join taught — the per-row standing is
+> [`walk-drives-every-plan-detail.md`](walk-drives-every-plan-detail.md), 2026-09-12.
 
 The second half of the catalog. [`declared-schemas.md`](declared-schemas.md) declared the calls whose
 schema was already in hand and left every other call at `None`, skipped by one guard. This task

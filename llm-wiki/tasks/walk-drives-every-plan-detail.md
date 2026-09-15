@@ -189,3 +189,18 @@ message names the semi family only, where `ProbeKeys` is also Left's and Full's 
 rows + 82 `bug_` = 309 against the 306 measured — pre-existing and not this task's. The
 in-body comment says why `rc == 1` is a pin and not a guard: every `catch` in
 `gpu_executor.cpp` returns 1. Completeness pass dispatched.
+
+### 2026-09-15 — completeness pass, both readings closed
+
+Reviewer (what is wrong), on `f1bc1983`: 0 blocking, 0 important. Confirmed against
+`gpu_executor.cpp` that every failure returns 1 and `execute_node`/`execute_scan_rowgroups`
+reset the session, so `Drop for Session` after a refusal is sound; no `should_panic` depended on
+the old assertion text. Analyst (what is missing): 0 blocking, 1 important —
+`declared-schemas-derived.md`'s blocker note said the walk task "now sits between this and task
+1", which resolved to nothing once task 13 taught no shape; one sentence added there naming the
+shrink and pointing at the 2026-09-12 per-row standing. `architecture.md`: no sentence falsified
+(the three candidate sections read and held). Seen by both and not raised: `join()`'s #136
+message; `refcounted-tables.md`'s expectation of a panic from the walk, stale since tasks 4 and
+10 and the human's when that chain starts. The signoff is on the spec. Awaiting CI on run
+`35032672205` (the code push `74672b43`; the later doc-only pushes are skipped by the changes
+gate and prove nothing).
