@@ -510,3 +510,270 @@ and `calls_per_exec` becomes `calls_per_region`, both of which now say what they
 - **`--pull-benchmarks` now refuses a died run** as well as a running one, and refuses a pull
   that brought neither a tree nor a record home. The recovery path for a partial run is to
   re-run it; the host keeps what it wrote either way.
+
+### Test table recount
+
+Recount of `build-test.md`'s "Test categories" table against the branch's sources, anchored
+on real runs of the branch's binaries. Every per-target run total agrees with the source
+count; no disagreement to explain.
+
+**Rust rows whose N changed**
+
+| Row | old N | new N | why |
+|---|---|---|---|
+| Executors on a device (Rust) | 31 | 32 | `a_slice_and_an_export_are_charged_to_the_node_that_produced_the_handle` added to `test_gpu_executors/accumulate.rs` (10 → 11 there) |
+| Recipe plan structure (Rust) | 4 | 5 | `a_rows_node_seq_names_the_steps_its_recipes_line_prints` added to `test_plan_goldens.rs` (19 → 20 in the target) |
+| Corpus goldens, self-consistency (Rust) | 20 | 26 | six benchmark/record cases added: `every_total_us_is_the_sum_of_the_time_us_beside_it`, `every_committed_tree_reports_a_release_build` (`#[ignore]`), `the_records_preamble_is_what_record_header_writes` (`#[ignore]`), `a_row_that_lost_a_cell_is_refused`, `a_bare_calls_row_names_the_seq_it_was_handed`, `every_timed_case_is_enabled_on_a_device` |
+| CI wiring guard (Rust) | 6 | 8 | `the_benchmark_binary_runs_without_its_cases_on_ci` added (+1); the other +1 is pre-existing drift — master's `test_ci_coverage.rs` already held 7 cases against a printed 6 |
+| Lib unit (Rust) | 435 | 444 | `driver/tests/counts.rs` 10 → 13 (the call record's lane indexing, a lane's own calls, an unmeasured entry) and `driver/tests/render.rs` 8 → 14 (the timing tree, a zero-rounding region, post-order indexing, per-seq measurements, and the two refusals) |
+
+Two Rust rows are new on this branch and are already correct: **GPU timing method** 1
+(`test_node_timing`, run 1) and **Corpus benchmarks** 9 (`peacock_gpu_benchmarks`: 6 `#[test]`
+assertions + 3 `bench_` cases the `corpus_query_benchmark!`/`paste` expansion of
+`corpus_benchmark_cases.inc` produces — q6 at `tp1_single` and `tp4_sized`, q19 at
+`tp1_single`; the `none` arm generates no case).
+
+Rust rows verified unchanged against their runs: `test_cpu_corpus` 448 = 447 + the registry
+case, `test_gpu_corpus` 8 = 7 + the registry case, `test_gpu_abi` 4, `test_cpu_end_to_end`
+24 run + 2 `#[ignore]`d = 26, `test_golden_format` 26, `test_module_layout` 11,
+`test_cost_model` 3, `test_null_analysis` 8, `test_layout_injection` 4,
+`test_planner_join_capability` 13, `test_planner_join_refusals` 10, `test_cpu_executors` 1,
+`test_gpu_recipe_walk` 10, `test_inc2_conformance` 10, `test_gpu_batch` 3, FFI smoke 2.
+
+**C++ rows whose N changed**
+
+| Row | old N | new N | why |
+|---|---|---|---|
+| C++ CPU/FFI unit | 11 | 12 | `NodeTiming.TheAbiRefusesAModeItDoesNotName` added to `tests/cpu/test_executor.cpp` |
+| cuDF GPU smoke (C++) | 5 | 3 | `NodeTiming.FloorRestoresTheSwitch` and `NodeTiming.FloorClampsSampleCount` deleted with the sampling floor |
+| Plan-executor (C++) | 27 | 35 | eight `NodeRegions.*` cases on the timing regions: one region per output partition, `call_index` per seq, a fresh session's count, what a region carries, a second collect, timing off, the slice and the export, and that asking the count drains nothing |
+
+`peacock_tpch_tests` 4 and `peacock_tpchv_tests` 4 confirmed unchanged; the manual C++ rows
+(streamed 4, per-operator timings 1, multi-GPU 4/4/1) are untouched by the branch.
+
+**Python — a row the branch did not add**
+
+`scripts/calibration/tests/test_calls.py` (5 `def test_`), `test_hbm.py` (3) and
+`test_plot.py` (3) are 11 new cases, run by the new "Calibration script tests (Python)"
+step in the `cost-report` job. No row in the table names them, so the Python subtotal is
+short by 11 until one is added (`capture.py` and `harness.py` are helpers and hold none).
+
+**Arithmetic**
+
+- Rust: 1135 + 1 (timing method) + 9 (corpus benchmarks) + 1 (executors) + 1 (recipe
+  structure) + 6 (corpus goldens) + 2 (CI guard) + 9 (lib unit) = **1164**. Cross-checked by
+  summing every Rust row of the corrected table: 10+10+1+32+4+3+1+9+3+13+8+10+20+26+2+8+11
+  +444+26+447+26+7+4+2+37 = 1164.
+- C++: 65 + 1 − 2 + 8 = **72**, i.e. 12+3+35+4+4+4+1+4+4+1.
+- Python: 369 + 11 = **380**, i.e. 41+216+19+93+11.
+- Grand total: 1164 + 72 + 380 = **1616**.
+
+Header line becomes: **Grand total: 1616 test cases — Rust 1164, C++ 72, Python 380.**
+
+**Descriptions the branch falsified**
+
+- **cuDF GPU smoke (C++)** — "the timing floor leaves the global switch as it found it" is
+  gone with the floor, and the example link `NodeTiming.FloorRestoresTheSwitch`
+  (`test_cudf.cpp#L41`) names a deleted test. The row is now the GPU liveness check and the
+  Spark-murmur3 kernel, nothing else.
+- **C++ CPU/FFI unit** — "decimal binop typing, AST routability, lifecycle, and the
+  row-range clamp rule" no longer covers the row: it also holds the ABI's refusal of a
+  timing mode it does not name.
+- **Plan-executor (C++)** — the sentence lists plan IR, the per-call entry points, the sqrt
+  arm and a state-emitting merge; eight of its 35 cases are now about timing regions, which
+  the sentence does not mention.
+- **Corpus goldens, self-consistency (Rust)** — "the committed sections against their own
+  arithmetic, with no dataset and no run" describes 20 of the 26: the other six read the
+  committed benchmark trees and `calibration/records.tsv`, and two of those are `#[ignore]`d
+  against the tree being re-measured, so N no longer equals what runs (24 do).
+- **CI wiring guard (Rust)** — "Two classes the `--test` sweep cannot see are asserted line
+  by line" is now three: the benchmark target's `--skip bench_` is asserted in both runner
+  loops.
+- **Lib unit (Rust)** — the enumeration stops before the per-node measurement record and the
+  benchmark tree renderer, which is where nine of its 444 cases now are.
+- **GPU timing method (Rust)**, the branch's own new row — its anchor
+  `test_node_timing.rs#L83` lands on the `journalled_calls` helper; the test it names is at
+  line 100.
+
+Stale anchors that predate the branch and are not its doing: `test_plan_goldens.rs#L427`
+(the test is at 672 on master too), `test_executor.cpp#L26`/`#L81` (27/82 on master),
+`test_plan_executor.cpp#L255` (313 on master), `test_cudf.cpp#L84` (107 on master, 87 here).
+
+### Review round 1, before the data
+
+The branch was pushed at `83479e6` (PR #139 now shows the squashed branch, base `master`) while
+Task 11 waits for a free device — another user's process has held the H200 since dispatch 4.
+The reviewer reads `origin/master..83479e6`; the committed data files are still the first
+version's and are out of that round's scope, since the data commit replaces them. The board
+stays at `building` until the data lands.
+
+## Dispatch 5 — plan Task 11 (the data): not measured, the device never freed
+
+### What the device did
+
+Polled `shad-gpu` every five minutes from 17:48 to 20:37 local (+03:00), then one last read
+at 20:41:49 local. The neighbour never left:
+
+```
+2026-09-15T17:41:49+00:00                      # host clock is UTC; 20:41:49 local
+--- compute-apps:
+2074022, 62276 MiB, /home/kirill/sdg-moe-transfer-20260909/project/SDG-MoE/.venv/bin/python
+--- gpu:
+94 %, 62285 MiB, 143771 MiB
+```
+
+Utilization stayed 90–98 % for the whole window with one dip to 29 % at 18:49 and no
+release of memory. A CI job of ours (`peacock_tpchv_tests`, pid 2092999, 31 GB) joined at
+20:11 and was gone by 20:16 — worth knowing, because the gate can land beside a
+measurement even when the human neighbour is absent: check for both.
+
+Nothing was measured, so every committed data file is still v1's and the two `#[ignore]`s
+in `test_corpus_goldens.rs` stay on. No file under `testdata/` was touched.
+
+The poll loop, which does not match itself (it greps no process list; the antipattern in
+build-test.md is about `pgrep -f`):
+
+```bash
+while true; do
+  APPS=$(timeout 60 ssh shad-gpu 'nvidia-smi --query-compute-apps=pid,used_memory,process_name --format=csv,noheader')
+  UTIL=$(timeout 60 ssh shad-gpu 'nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader')
+  echo "$(date -Iseconds) apps=[$APPS] gpu=[$UTIL]" >> "$LOG"
+  [ -z "$APPS" ] && [ "$(echo "$UTIL" | awk -F'[ ,]' '{print $1}')" -le 5 ] && { echo FREE >> "$LOG"; exit 0; }
+  sleep 300
+done
+```
+
+### What is already built, and what that saves
+
+`--build-benchmarks` ran green at fc6a0de with no warnings, so
+`cpp/install/rust-benchmarks/peacock_gpu_benchmarks` (release) and the seven binaries in
+`cpp/install/rust-tests/` are staged and current for that commit. If nothing under
+`peacockdb-core/`, `peacockdb-ffi/` or `cpp/` has moved since, step 1's build is already
+done and the next dispatch starts at `--push-binaries`. Both stagings are in
+`cpp/install/`, which the root `.gitignore` excludes.
+
+### The command sequence Task 11 wants, in order
+
+Re-check `nvidia-smi --query-compute-apps` immediately before and after each of the four
+measured runs; a neighbour appearing mid-run voids that run's data.
+
+```bash
+# 0. the build, only if the tree moved since fc6a0de
+scripts/docker-build.sh --no-image --cache-dir /build/peacock -- ./scripts/build-test-shadgpu.sh --build-benchmarks
+
+# 1. the timed run (tens of minutes) — detached, then polled, then pulled
+./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks-detached
+./scripts/build-test-shadgpu.sh --benchmark-status     # exits 0 only when this run finished with 0
+./scripts/build-test-shadgpu.sh --pull-benchmarks
+
+# 2. the two captures, as two invocations so the device can be re-checked between them
+./scripts/create_nsys_profile.sh --trace
+./scripts/create_nsys_profile.sh --metrics
+
+# 3. the panels
+/usr/bin/python3 scripts/calibration/plot.py \
+    --record testdata/calibration/records.tsv --hbm testdata/calibration/hbm.tsv \
+    --out-dir testdata/calibration/plots
+
+# 4. the proving commands
+CARGO_TARGET_DIR=/build/peacock/rust-only-target cargo test -p peacockdb-core \
+    --features rust-only --test test_corpus_goldens --test test_plan_goldens
+scripts/residue-gate.sh
+```
+
+There is no `testdata/tpch.sf1` symlink in this worktree, so the `--push-binaries` hazard
+dispatch 3 hit does not apply — but check before pushing, since it is untracked and can
+reappear.
+
+### The events figure for the wiki (step 3)
+
+Not committed. What was prepared here and deleted again at the end of this dispatch:
+
+```bash
+sed -e 's|^const SF: &str = "1";|const SF: \&str = "40";|' \
+    -e 's|^const ROUNDS: usize = 7;|const ROUNDS: usize = 10;|' \
+    peacockdb-core/tests/test_node_timing.rs > peacockdb-core/tests/test_node_timing_sf40.rs
+scripts/docker-build.sh --no-image --cache-dir /build/peacock -- \
+    bash -c '. scripts/lib/shadgpu-env.sh && stage_cargo_test_binary test_node_timing_sf40 cpp/install/rust-benchmarks --release'
+```
+
+Three decisions behind those two commands.
+
+- **`ROUNDS = 10`, not the committed 7.** The sentence Task 10 left says "the events mode's
+  second-smallest of ten", so the procedure has to run ten.
+- **`--release` and `rust-benchmarks/`.** Release because the figure describes the build the
+  tree was taken under; `rust-benchmarks/` because the remote gate loop globs
+  `rust-tests/` and would run an extra binary there on every later gate, while the
+  benchmark script runs `$BENCH_TARGET` by name and ignores its neighbours.
+  `setup-glibc.sh --patch` walks both directories, so the copy is patched by the ordinary
+  `--push-binaries --patch`.
+- **Run it after the timed run, not before.** `plan_at` resolves sf40 through
+  `testdata/tpch.sf40`, and that symlink is created on the host by `remote_bench_script`.
+  Run by hand over ssh, since no flag knows this target:
+
+```bash
+ssh shad-gpu 'export PEACOCK_TESTDATA_DIR=/home/info/peacockdb/testdata
+  export PEACOCK_TPCH_SF40_DIR=/home/info/peacock-datasets/testdata/tpch.sf40
+  LD_LIBRARY_PATH=/home/info/peacockdb/cpp/install/lib:/usr/local/cuda-12.5/compat:$HOME/glibc-2.39/lib:$HOME/miniforge3/envs/rapids-cuda-12.2/lib \
+  /home/info/peacockdb/cpp/install/rust-benchmarks/test_node_timing_sf40 --nocapture --test-threads=1'
+```
+
+The glibc directory is the *build* host's version (`getconf GNU_LIBC_VERSION` here — 2.39
+from this 24.04 box, 2.35 from a 22.04 one), which is what `PATCHED_LD` in
+`lib/shadgpu-env.sh` composes; take it from there rather than retyping it. Read
+`off wall=` and `events wall=` off the `eprintln!` and put N into Task 10's sentence.
+Delete `peacockdb-core/tests/test_node_timing_sf40.rs` afterwards: it is untracked and
+unregistered, so `test_ci_coverage.rs` and `test_module_layout.rs` would both have an
+opinion about it if it were left behind.
+
+### The baseline the new data is compared against
+
+v1's committed numbers, at `fc6a0de`, for the comparison table Task 11 owes. The
+neighbour-inflated figures beside them are dispatch 4's, measured under this same
+neighbour — the row to check a fresh run against is "committed", not "with a neighbour".
+
+| case | committed `run_us` | committed `device_us` | with a neighbour |
+|---|---|---|---|
+| q6 tp1_single | 88 366 | 88 158 | ~553 000 |
+| q6 tp4_sized | 217 758 | 217 283 | — |
+| q19 tp1_single | 728 263 | 727 664 | ~1 326 000 |
+
+`hbm.tsv` totals, Σ `hbm_bytes` per case: q6 tp1-single 1.78e11, q6 tp4-sized 2.60e11,
+q19 tp1-single 1.98e12 — 2.42 TB over the three, against the 37.7 TB the counters pass read
+beside the neighbour. `records.tsv` at HEAD: 70 rows for q6 tp1-single, 240 for q6
+tp4-sized, 110 for q19 tp1-single.
+
+Two shape changes to expect, neither of them a defect:
+
+- **`calls.tsv` gains columns.** The committed file is v1's —
+  `node_seq node_type partition call depth executions calls_per_exec …`, no case key. The
+  new one carries `(dataset, sf, query, mode)` and `regions`/`calls_per_region`, so the
+  diff is the whole file.
+- **`build_profile=` disappears.** It is what the two `#[ignore]`d tests fail on today, and
+  it is one of the spec's grep needles. Its four occurrences at HEAD are three lines in
+  `testdata/benchmark-results/tpch.sf40/*.benchmark.txt` and one `# run:` line in
+  `records.tsv`; the new harness writes `build=release` instead.
+
+### The grep list, run at fc6a0de
+
+Eight of the nine needles are already clean outside `llm-wiki/`. Two findings:
+
+- `build_profile` — four hits, all in the committed data above, and all of them go when the
+  data is re-measured.
+- `thread_local` — one hit, `cpp/src/peacock/operators.h:17`, inside a comment about why
+  ambient state must not be a thread-local. It is **master's own text**, byte-identical
+  (`git diff master -- cpp/src/peacock/operators.h` is empty), so it is not this branch's
+  residue and nothing here should remove it. Whoever reads the spec's "Done when" list
+  should know that this needle can never reach zero while master carries that comment.
+
+### `residue-gate.sh` at fc6a0de: the bp gates are empty, the first section is not
+
+Run here, exit 0. The two `== bp gates` sections — the ones the spec requires empty — are
+empty. The first section, `batch.?partition` outside `llm-wiki/`, prints twelve lines, and
+that is not a regression: five of them are master's (`node_session.cpp`'s scan comment,
+two in `flatbuffers/gpu_plan.fbs`, two under `scripts/exec_model/`), and the seven this
+branch adds are prose in its own new files — "the batch-partitioned planning mode" in
+`record.rs` and the record's preamble, "at one batch-partitioned mode" in
+`corpus_benchmark.rs`, and the like. None is one of the six survivor spellings the gate
+exists to catch. A reader who expects the whole script to print nothing will read these as
+a finding; it prints them on master too.
