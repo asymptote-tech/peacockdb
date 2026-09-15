@@ -98,3 +98,17 @@ stops for the human.** The walk is the only instrument that can ask what one cal
 panics on ten shapes — eight never taught, two the engine truly cannot run. Teaches the eight, makes
 a device refusal an outcome rather than an abort, and records the real limits as `bug_` tests naming
 #136, #152 and #175. No production code. Deliverable: a checked table of what it can drive.
+
+### 14. [`join-cases.md`](join-cases.md) — state: new
+
+Cases only, along the three dimensions task 9 held constant and the corpus does not: a
+projection on every reachable join type, composite and `Int64`/`Utf8View`/`Date32` keys on the
+three join code paths, and the non-AST nested-loop path. One fixture form, `synthetic_extended`,
+and a deliberate handful of #183 pins. Roughly 37 cases, one device cycle, no production code.
+
+### 15. [`aggregate-cases.md`](aggregate-cases.md) — state: new
+
+Cases only, after task 14: group keys the corpus uses (`Utf8View`, `Date32`, `Int64`, two
+columns), `count(*)` and expression arguments, every merge arm with rows, the stddev finalize,
+the project expressions and casts with no case, and sorted merges on `desc`, nullable and
+composite keys — #202's second site. No fixture change, no production code. Roughly 45 cases.
