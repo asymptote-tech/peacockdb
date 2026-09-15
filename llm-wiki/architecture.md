@@ -897,8 +897,8 @@ Three conventions the signatures do not carry:
   past the end empty, an overrun clamped. It is the same convention on `slice_handle` and
   `result_from_handle`, which are otherwise the two halves of the limit rule — one produces
   a handle, the other a result.
-- **Instrumentation is process-global and off by default; `peacock_gpu_benchmarks` and
-  `test_node_timing` are what turn it on.** Without the pool every cuDF intermediate is a
+- **Instrumentation is process-global and off by default; `peacock_gpu_benchmarks`,
+  `test_node_timing` and the plan-executor gtests' fixtures are what turn it on.** Without the pool every cuDF intermediate is a
   `cudaMalloc`/`cudaFree` round trip ([#148](tickets.md#t148)); the gtest binaries install it
   from their own `main()`, and this symbol exists for a Rust caller that cannot include the
   C++ header. Under `set_node_timing` every per-call entry point opens one region per output

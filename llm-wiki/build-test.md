@@ -463,9 +463,11 @@ Rules that keep this healthy:
   tests and passes, so say which binaries actually executed; and a filter naming a query
   matches no test whose name is a property rather than a query, so exercising those takes a
   filter that matches them or a separate run.
-- **A GPU binary needs a fixed amount of free VRAM.** Each gtest main reserves a measured
+- **A GPU binary needs a fixed amount of free VRAM.** Each measuring binary reserves a
   byte budget: `peacock_tpch_tests` 69 GiB, `peacock_tpchv_tests` 30, `peacock_cudf_node_tests`
-  10, `peacock_gpu_tests` and `peacock_plan_tests` 1 each. Below its budget a binary does not
+  10, `peacock_gpu_tests` and `peacock_plan_tests` 1 each, `test_node_timing` 2, and
+  `peacock_gpu_benchmarks` 69 — the tpch figure taken for the same sf40 data, not yet measured
+  for the engine's own run. Below its budget a binary does not
   shrink: the pool is not built, and the sf40 pair goes red on rmm's default resource. Read
   `[rmm] pool of N GiB could not be built` at the top of the log first; the
   `cudaErrorMemoryAllocation` failures under it are its consequence. shad-gpu is a shared H200,

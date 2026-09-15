@@ -980,3 +980,19 @@ and this round added: FFI smoke 3, cuDF GPU smoke 4, Plan-executor 38, so 1621 i
 board moves to `reviewing` with one thing still owed: the sf40 data (plan Task 11), which
 waits for an empty card and carries the harness's real pool figure — `BENCH_POOL_BYTES` is
 `test_tpch.cpp`'s 69 GiB, taken and not measured. Round 2 reads the rebased head.
+
+### Review round 2 on 2414a92: 0 blocking, 1 important, 4 nits
+
+All five of round 1's findings confirmed closed with a reachable red each. The important
+one was wiki drift master's pool change left: the VRAM-budget bullet in `build-test.md` now
+names `test_node_timing` and `peacock_gpu_benchmarks`. Nit 3 taken too (`architecture.md`'s
+instrumentation sentence names the gtest fixtures). Nits 1 and 2 go to the data dispatch as
+optional: `harness_range_is_open()` belongs in `plan_executor_internal.h`, and
+`NvtxRanges.ASecondPushReplacesTheFirstRatherThanNesting` touches no device and could sit in
+the cpu tier (which moves two table counts). Nit 4, the shell header length, matches the
+tree's idiom and is dropped. The board stays `reviewing`: the data commit is still ahead and
+gets its own reading before the completeness pass.
+
+Seen on shad-gpu while checking who held the card: dozens of `/tmp/peacock-gpu-executors-*.parquet`
+left by `test_gpu_executors`, which writes its fixture and never removes it. Master's
+behaviour, not this branch's; noted for the signoff, no ticket (nothing a user sees).
