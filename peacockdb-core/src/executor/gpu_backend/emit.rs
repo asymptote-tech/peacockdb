@@ -8,16 +8,16 @@ use std::sync::Arc;
 
 use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
 
-use peacockdb_ffi::raw::PeacockExecutor;
 
-use super::{execute_node_many, produced};
+use super::{CallSite, Consumed, execute_node_many, produced};
 use crate::executor::GpuBatch;
-use crate::executor::{BackendError, CallResult, CallStats};
+use crate::executor::node_timing_on;
+use crate::executor::{AbiCalls, BackendError, CallResult, CallStats};
 use crate::plan::PlanError;
 use crate::wire::{CallPattern, FbKind, Input, Recipe, Seq};
 
 pub struct GpuEmitter {
-    executor: *mut PeacockExecutor,
+    site: CallSite,
     seq: Seq,
     kind: FbKind,
     lanes: usize,
@@ -25,11 +25,7 @@ pub struct GpuEmitter {
 }
 
 impl GpuEmitter {
-    pub fn new(
-        executor: *mut PeacockExecutor,
-        recipe: &Recipe,
-        schema: &ArrowSchema,
-    ) -> Result<Self, PlanError> {
+    pub fn new(site: CallSite, recipe: &Recipe, schema: &ArrowSchema) -> Result<Self, PlanError> {
         let [call] = recipe.calls.as_slice() else {
             return Err(PlanError::Invalid(format!(
                 "a scatter makes one call per batch, and this recipe is `{recipe}`"
@@ -51,7 +47,7 @@ impl GpuEmitter {
             )));
         };
         Ok(Self {
-            executor,
+            site,
             seq,
             kind,
             lanes: lanes as usize,
@@ -60,9 +56,15 @@ impl GpuEmitter {
     }
 
     pub fn emit(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
+        let mut calls = AbiCalls::armed(node_timing_on());
+        let taken = calls
+            .is_armed()
+            .then(|| Consumed::of(&batch))
+            .unwrap_or_default();
         let (_, handle) = batch.consume();
         let produced_lanes =
-            execute_node_many(self.executor, self.seq, self.kind, &[vec![handle]], self.lanes)?;
+            execute_node_many(self.site, self.seq, self.kind, &[vec![handle]], self.lanes)?;
+        calls.record(self.seq, self.kind, taken.rows, Some(taken.bytes));
         if produced_lanes.len() != self.lanes {
             return Err(BackendError::new(format!(
                 "the scatter answered with {} handles where the plan declares {} lanes — a \
@@ -75,9 +77,12 @@ impl GpuEmitter {
         Ok((
             produced_lanes
                 .into_iter()
-                .map(|(handle, stats)| produced(self.executor, handle, stats, &self.schema))
+                .map(|(handle, stats)| produced(self.site.executor, handle, stats, &self.schema))
                 .collect(),
-            CallStats::default(),
+            CallStats {
+                scratch_bytes: None,
+                calls,
+            },
         ))
     }
 }

@@ -9,24 +9,23 @@ use std::sync::Arc;
 
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
-use peacockdb_ffi::raw::{
-    PeacockExecutor, PeacockNodeStats, peacock_executor_execute_scan_rowgroups,
-};
+use peacockdb_ffi::raw::{PeacockNodeStats, peacock_executor_execute_scan_rowgroups};
+
+use crate::executor::node_timing_on;
 
 use super::GpuSource;
-use super::{last_error, produced};
+use super::{CallSite, last_error, produced};
 use crate::executor::GpuBatch;
-use crate::executor::{BackendError, CallStats};
+use crate::executor::{AbiCalls, BackendError, CallStats};
 use crate::plan::GpuLoadParquet;
 use crate::plan::PlanError;
 use crate::wire::{AbiSymbol, CallPattern, Input, Recipe};
 
 impl GpuSource {
     pub(crate) fn new(
-        executor: *mut PeacockExecutor,
+        site: CallSite,
         recipe: &Recipe,
         node: &GpuLoadParquet,
-        lane: usize,
         schema: &ArrowSchema,
     ) -> Result<Self, PlanError> {
         let [call] = recipe.calls.as_slice() else {
@@ -42,9 +41,10 @@ impl GpuSource {
                 "a source reads the row groups of one batch per call, and this one is {call:?}"
             )));
         }
-        let (seq, _) = call
+        let (seq, kind) = call
             .target
             .ok_or_else(|| PlanError::Invalid(format!("{call:?} addresses no seq")))?;
+        let lane = site.lane;
         let batches = node.partition_groups.get(lane).ok_or_else(|| {
             PlanError::Invalid(format!(
                 "lane {lane} of a scan the partitioner mapped into {} lanes",
@@ -52,8 +52,9 @@ impl GpuSource {
             ))
         })?;
         Ok(Self {
-            executor,
+            site,
             seq,
+            kind,
             batches: batches.iter().cloned().collect(),
             schema: Arc::new(schema.clone()),
         })
@@ -68,7 +69,7 @@ impl GpuSource {
         let mut stats = PeacockNodeStats::default();
         let rc = unsafe {
             peacock_executor_execute_scan_rowgroups(
-                self.executor,
+                self.site.executor,
                 self.seq as u64,
                 groups.as_ptr(),
                 groups.len() as u64,
@@ -80,12 +81,19 @@ impl GpuSource {
             return Err(BackendError::new(format!(
                 "execute_scan_rowgroups(#{}, {groups:?}): {}",
                 self.seq,
-                last_error(self.executor)
+                last_error(self.site.executor)
             )));
         }
+        // A scan takes no batch, so its input is nothing rather than unknown — the same
+        // zero the driver models it with.
+        let mut calls = AbiCalls::armed(node_timing_on());
+        calls.record(self.seq, self.kind, 0, Some(0));
         Ok(Some((
-            produced(self.executor, handle, stats, &self.schema),
-            CallStats::default(),
+            produced(self.site.executor, handle, stats, &self.schema),
+            CallStats {
+                scratch_bytes: None,
+                calls,
+            },
         )))
     }
 }

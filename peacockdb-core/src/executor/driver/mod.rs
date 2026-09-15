@@ -8,6 +8,7 @@
 
 mod accounting;
 mod index;
+mod measurements;
 mod partitioned;
 mod scheduler;
 mod single_partition;
@@ -19,7 +20,7 @@ mod plans;
 #[cfg(test)]
 mod tests;
 
-use crate::executor::{Backend, PlanIndex, RunError, RunReport};
+use crate::executor::{Backend, Measured, Measurements, PlanIndex, Region, RunError, RunReport};
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use accounting::Trip;
@@ -46,6 +47,21 @@ pub(crate) fn slot_of(index: &PlanIndex<'_>, node: usize, lane: usize) -> usize 
 /// Every node's post-order address, indexed by its pre-order one.
 pub(crate) fn post_order_of_every_node(root: &dyn GpuNode) -> Result<Vec<usize>, PlanError> {
     index::post_order_of_every_node(root)
+}
+
+/// Each node's type and post-order position, in the driver's pre-order.
+pub(crate) fn nodes_as_recorded(root: &dyn GpuNode) -> Result<Vec<(&'static str, usize)>, PlanError> {
+    index::nodes_as_recorded(root)
+}
+
+/// The two halves of a measurement joined on `(seq, call_index)`.
+pub(crate) fn join_regions(report: &RunReport, regions: &[Region]) -> (Measurements, Vec<Region>) {
+    measurements::join_regions(report, regions)
+}
+
+/// One node's whole cost over every lane and call, or `None` where it was not measured.
+pub(crate) fn node_measured(times: &Measurements, node: usize) -> Option<Measured> {
+    measurements::node_measured(times, node)
 }
 
 /// A trip carries no name, and the driver is what can supply one — so every step returns

@@ -145,5 +145,16 @@ pub(crate) fn post_order_of_every_node(root: &dyn GpuNode) -> Result<Vec<usize>,
         .collect())
 }
 
+/// Each node as a record names it — its type and its children-first position — in the
+/// driver's own pre-order, which is the order `RunReport` is indexed by. From here rather
+/// than from a caller's own walk, so the two orders cannot disagree.
+pub(crate) fn nodes_as_recorded(root: &dyn GpuNode) -> Result<Vec<(&'static str, usize)>, PlanError> {
+    Ok(build(root)?
+        .nodes
+        .iter()
+        .map(|node| (node.node.name(), node.post_order))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests;

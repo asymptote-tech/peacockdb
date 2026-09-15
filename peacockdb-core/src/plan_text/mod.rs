@@ -7,6 +7,7 @@
 //! that trims rows, the loader's mapping verbatim, and the declared schema, without which
 //! an explicit cast's target means nothing.
 
+mod bench_text;
 mod expr_text;
 mod memory;
 mod node_text;
@@ -15,7 +16,7 @@ mod run_text;
 #[cfg(test)]
 mod tests;
 
-use crate::executor::RunReport;
+use crate::executor::{Measurements, RunReport};
 use crate::plan::GpuNode;
 use crate::planner::MemoryModel;
 
@@ -33,4 +34,9 @@ pub fn render_plan_memory(root: &dyn GpuNode, model: &MemoryModel) -> String {
 /// The execution golden: the plan with what each node actually ran under it.
 pub fn render_run(root: &dyn GpuNode, report: &RunReport) -> String {
     run_text::render_run(root, report)
+}
+
+/// The benchmark tree: the plan with the device microseconds each node's calls spent.
+pub fn render_timings(root: &dyn GpuNode, times: &Measurements) -> String {
+    bench_text::render_timings(root, times)
 }
