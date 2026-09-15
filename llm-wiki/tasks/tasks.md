@@ -104,7 +104,7 @@ a device refusal an outcome rather than an abort, and records the real limits as
 ### 1. [`bp-benchmarks.md`](bp-benchmarks.md) — state: building — PR #139
 
 The corpus benchmark at sf40: one timing tree per (dataset, mode), one record row per cuDF
-call, two Nsight captures and the panels. The branch and PR predate the spec — built on
-`c42b601`, before the layout chain landed — so the coordinator picks the branch up as
-unfinished work rather than branching afresh; `bp-benchmarks-detail.md` says what is there
-and what the spec removes. Rebased onto master before anything else, by the human's protocol.
+call, two Nsight captures and the panels. The branch and PR predate the spec, so the
+coordinator picks the branch up as unfinished work rather than branching afresh: it is one
+squashed commit on master, re-homed into the component layout and never built there;
+`bp-benchmarks-detail.md` says what it holds and what the spec removes.

@@ -2,13 +2,17 @@
 
 ## Where the task starts
 
-`origin/ENS-bp-benchmarks` exists with PR #139 open against master: 26 commits over
-`c42b601`, 98 files. It is a complete first version of the four products, written before
-`drop-mode-name` (#141) and `module-layout` (#143) were merged, so it names
-`src/batch_partitioned/**`, `bp_*` modes and `test_gpu_bp_corpus`, and a merge with master
-conflicts in 25 files. The spec was written after the branch, from a whole-branch reading;
-every decision in it removes something the branch carries. The plan is written from the
-final state, layer by layer, and does not depend on how the branch reaches master's layout.
+`ENS-bp-benchmarks` is one commit on master: PR #139's 26 commits over `c42b601`, squashed
+and re-homed into the component layout by the helper, with no build run on the result. The
+old head is kept as `bp-benchmarks-v1` locally. What the re-homing did: `instrument.rs`,
+`driver/measurements.rs` and `plan_text/bench_text.rs` sit under `executor/` and `plan_text/`
+as private modules, with `Measured`, `Region`, `Measurements`, `AbiCall`, `AbiCalls`,
+`RmmPool`, `NodeTiming`, `NvtxRange` and the free functions declared on the `executor`
+facade; the harness uses master's mode names (`tp1_single`, `bench_…`); the tickets the spec
+drops were left at master's copy. Expect the first build to fail on imports and on
+`test_module_layout` — that is Task 3 and Task 5 of the plan, not a regression to bisect.
+The spec was written from a whole-branch reading of the first version; every decision in
+it removes something the branch carries. The plan is written from the final state.
 
 ## What the branch has that the spec keeps
 
