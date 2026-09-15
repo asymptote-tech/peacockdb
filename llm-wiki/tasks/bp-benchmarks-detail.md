@@ -799,3 +799,48 @@ wiki and the board its own); one developer takes the code conflicts and the roun
 and important findings together, and re-proves the gate on shad-gpu; the sf40 measurement
 comes after, on the rebased base. The human reads the review findings before they go to
 the developer.
+
+### Rebased onto master at 159ebfd
+
+Thirteen commits replayed; the only conflicts were one doc comment in `peacock_gpu.h`
+(master's wording kept, its emphasis lower-cased). The byte-identity set is still clean
+against master. What the rebase breaks: `executor/instrument.rs` calls
+`peacock_install_rmm_pool` with one argument where master's takes a byte budget first, so the
+harness's `install_rmm_pool()` now owes a figure — master's gtests pass `kPoolBytes`, the
+number a binary measured it needs. The pre-rebase head is tagged `pre-rebase-bp-benchmarks`.
+
+### Review round 1 on 83479e6: 0 blocking, 7 important, 8 nits
+
+To the developer (dispatch 6), with the rebase fallout:
+
+1. `build-test-shadgpu.sh` `--pull-benchmarks`: the "nothing came home" refusal counts the
+   local tree, which always holds the two committed files, so it cannot go red. Count what
+   the rsync moved (a stamp before it, `-newer`) or ask the host.
+2. `gpu_executor.cpp` `result_from_handle`: the empty-range early return opens no region while
+   Rust journals the call; unreachable today only because the driver rejects the range
+   elsewhere. Wrap the early return in `time_export` too; fix the Rust comment; cover the
+   empty range in `TheSliceAndTheExportOpenRegionsToo`.
+3. The three NVTX symbols have no test at any gate. One gtest beside `NodeRegions`: ranges on
+   with timing off records no region, and a double push with one pop stays balanced.
+4. `nsys_calls.py` writes `calls.tsv` before two of its refusals; move the checks above the
+   write and assert in the two refusal tests that no file was left.
+5. `executor/mod.rs:822` links `PartitionStat::device_us`, a type that does not exist; it is
+   `Region::device_us`.
+
+Recorded here for the signoff, no code change (items 6 and 7):
+
+- Scope overruns beyond `GpuBatch::producer`: `driver/index.rs` gained `nodes_as_recorded`;
+  `driver/accounting/tests.rs` followed `end_call(&CallStats)`; `scripts/setup-glibc.sh`
+  patches both staging dirs. All three necessary, none listed in the spec's Scope.
+- The spec says the two targets are not in `INTENTIONALLY_NOT_IN_CI`; they are, as
+  `Exemption::GpuJob`, which is how every GPU-job target is modelled and is machine-checked
+  against the staging array. The code is right and the spec's sentence is not.
+
+Nits passed on as optional: `rows_match_the_recipes`'s doc at 11 lines; `call_us`'s doc
+explaining `0` as a state `join_regions` refuses; "one case" in `nsys_calls.py`'s message
+while the union spans every case; `MEASURED_RUNS` restated in `test_corpus_goldens.rs`.
+Dropped: the RAII name of `ScopedNodeTimer`; the pre-existing `[ -f ] && strip` loop body.
+Mine: the Corpus benchmarks section at 83 lines against 50–80; the `thread_local` grep hit
+in master's own `operators.h` comment, to be named in the signoff.
+
+- Dispatch 6: the rebase fallout and findings 1–5, one developer, gate re-proven on shad-gpu.

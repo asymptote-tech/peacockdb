@@ -801,6 +801,9 @@ pool size exceeded` is ours: the budget is too small, and a re-run buys nothing.
 - 2026-09-12: CI run `34659896447` on PR #144 (`d41f223a`), `peacock_tpch_tests`: `pool of 69.0
   GiB could not be built with 14.9 GiB free` at 00:08 UTC; `peacock_tpchv_tests` four binaries
   later saw 103.0 GiB free, so a stranger held ~129 GiB for those minutes. Re-run once.
+- bp-benchmarks, dispatch 5: not CI — a non-CI process held 62 GiB and 90–98 % of the card
+  for six hours, and `peacock_gpu_benchmarks` measured q6 at six times its committed time
+  beside it. The measurement waits for an empty card; the gate ran green meanwhile.
 
 <a id="t176"></a>
 ### #176 — the CI coverage guard checks one direction only
