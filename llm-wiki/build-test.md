@@ -531,8 +531,7 @@ rust-only test in `test_corpus_goldens` reads both files and says so. Today: tpc
 `tp1_single` and `tp4_sized`, q19 at `tp1_single`.
 
 It asserts nothing about an answer, so it can never gate a merge. Its six harness assertions
-— the section order, one file per (dataset, mode), the record checked against what the plan
-declares — run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here.
+run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here.
 
 Six steps, three scripts:
 
@@ -557,10 +556,9 @@ python3 scripts/calibration/plot.py \
 Steps 5 and 6 are separate scripts because they are separate measurements: a capture
 serializes what it traces and the counters pass costs several percent, so neither may write
 the tree step 3 produced. What each writes is the diagram under *Benchmark data flow*.
-`--benchmark-status` exits 0 only when the latest run finished with 0, for the reasons the
-correctness gate's `--run-status` gives above. Check `nvidia-smi` for a neighbour before
-step 3: shad-gpu is shared, and a process holding the card inflates every number here without
-failing anything.
+`--benchmark-status` exits 0 only when the latest run finished with 0, as `--run-status` does.
+Check `nvidia-smi` for a neighbour before step 3: a process holding the card inflates every
+number here without failing anything.
 
 **The tree**: one file per (dataset, mode) at
 `testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt`, a `== <query>` section
@@ -573,15 +571,14 @@ summed over its output partitions; `1` where the clock rounded a region to zero,
 call opens one. A lane the node was never driven on is `[]`. Then a `--- run ---` trailer:
 `run_us` (the chosen execution end to end, after planning), `device_us` (Σ of the tree's
 `total_us`; the gap to `run_us` is the host), `runs=[…]` (every measured execution, in order),
-`build=release`, `allocator=` (what `install_rmm_pool` reported, since with rmm's default every
-cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip billed to whichever node allocated
-it, which moves the profile and not just the scale). The reported execution is the
-second-smallest by `run_us` of ten, after one discarded warm-up: the fastest run is the one
-most likely to have caught a favourable scheduling accident, and a whole run is reported
-rather than a per-node minimum, which would produce a tree belonging to no execution. Both
-counts are constants in `tests/common/corpus_benchmark.rs`; no variable moves them, so every
-file in the tree was taken at the same counts. `--pull-benchmarks` is additive and no push
-`--delete`s the directory.
+`build=release`, `allocator=` (what `install_rmm_pool` reported: with rmm's default every cuDF
+intermediate is a `cudaMalloc`/`cudaFree` round trip billed to the node that allocated it,
+which moves the profile and not just the scale). The reported execution is the second-smallest
+by `run_us` of ten, after one discarded warm-up: the fastest run is the one most likely to
+have caught a scheduling accident, and a whole run is reported rather than a per-node minimum,
+which would be a tree belonging to no execution. Both counts are constants in
+`tests/common/corpus_benchmark.rs`, so every file in the tree was taken at the same counts.
+`--pull-benchmarks` is additive and no push `--delete`s the directory.
 
 **The record**, `testdata/calibration/records.tsv`: one row per cuDF call — one (plan node,
 recipe step, call index), not one node and not one output partition — for every measured
@@ -596,12 +593,11 @@ the call before it. The `#` heading carries what is constant across a run — `t
 refused. The harness checks each execution's rows against the plan before it writes them;
 the rest of the format is in the heading itself and in `tests/common/record.rs`.
 
-Two variables. `PEACOCK_RECORD_PATH` names the record; unset, no record is written, so the
-tree and the record never depend on each other. `PEACOCK_BENCHMARK_CAPTURE=trace|metrics`
-turns NVTX on, writes `capture=` into the heading and leaves the tree alone — a captured run
-is never the published one; unset means `capture=none`, any other value fails naming the two.
-`PEACOCK_GPU_DEBUG` is deliberately not forwarded: it adds a `cudaStreamSynchronize` after
-every operator, which changes exactly the thing being measured.
+Two variables. `PEACOCK_RECORD_PATH` names the record; unset, none is written, so the tree
+and the record never depend on each other. `PEACOCK_BENCHMARK_CAPTURE=trace|metrics` turns
+NVTX on, writes `capture=` into the heading and leaves the tree alone — a captured run is
+never the published one; unset means `capture=none`, any other value fails naming the two.
+`PEACOCK_GPU_DEBUG` is not forwarded: its per-operator sync is the thing being measured.
 
 ### Wall-time C++ suites (currently unscripted)
 
