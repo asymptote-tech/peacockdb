@@ -9,13 +9,14 @@ use super::read::node_at;
 use super::writer::Writer;
 use super::*;
 use crate::plan::AggregateBody;
+use crate::plan::RowInterval;
 use crate::plan::Schema;
 use crate::plan::{AggCall, PlanAgg};
 use crate::plan::{BatchLayout, ColumnOrder, NodeKind, PartitionLayout};
 use crate::plan::{BinaryOp, Expr, NamedExpr};
 use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuFilter, GpuHashJoin,
-    GpuNestedLoopJoin,
+    GpuLimit, GpuNestedLoopJoin,
 };
 use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
@@ -889,4 +890,53 @@ fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
         cells, 18,
         "nine types by two residuals, and every cell answered"
     );
+}
+
+/// A leaf the registry does not know — the operator harness's stub — emits no seq, so the
+/// operator above it is the only wire node and the recipe index is the operator's
+/// post-order. A filter takes one child, so the writer stubs the slot: two wire nodes,
+/// one recipe. `crate::tests::given::Given` by path: this file's `Given` is a join
+/// side over Int64 columns, a different shape.
+#[test]
+fn a_leaf_outside_the_registry_emits_no_seq_and_its_parent_takes_a_stub() {
+    let input = crate::tests::given::columns(&[("k", DataType::Utf8), ("v", DataType::Int64)]);
+    let filter = GpuFilter::new(
+        crate::tests::given::Given::of(input.clone(), BatchLayout::MultipleBatches),
+        Expr::binary(
+            Expr::column(1, "v"),
+            BinaryOp::Gt,
+            Expr::Literal(ScalarValue::Int64(Some(1))),
+            DataType::Boolean,
+        ),
+        None,
+        input,
+    );
+    let plan = attach_recipes(&filter).expect("a filter over a given leaf is writable");
+    assert!(plan.get(0).is_none(), "the leaf has no recipe");
+    let recipe = plan.get(1).expect("the filter has one");
+    assert_eq!(recipe.calls.len(), 1);
+    assert_eq!(recipe.calls[0].target.map(|(seq, _)| seq), Some(1));
+    assert_eq!(plan.wire_nodes(), 2, "the stub and the filter");
+}
+
+/// The seqless three put nothing on the wire themselves, so the leaf's stub is the whole
+/// plan: the writer refuses a plan with no root, and so does the C++. A limit over a given
+/// leaf is one stub node with one bare-call recipe.
+#[test]
+fn a_seqless_operator_over_a_given_leaf_is_a_plan_of_one_stub() {
+    let input = crate::tests::given::columns(&[("k", DataType::Utf8)]);
+    let limit = GpuLimit::new(
+        crate::tests::given::Given::of(input, BatchLayout::MultipleBatches),
+        RowInterval {
+            skip: 1,
+            fetch: Some(2),
+        },
+    );
+    let plan = attach_recipes(&limit).expect("writable");
+    assert!(plan.get(0).is_none());
+    assert_eq!(
+        plan.get(1).expect("the limit's").calls[0].symbol,
+        AbiSymbol::SliceHandle
+    );
+    assert_eq!(plan.wire_nodes(), 1, "the stub, and nothing else");
 }

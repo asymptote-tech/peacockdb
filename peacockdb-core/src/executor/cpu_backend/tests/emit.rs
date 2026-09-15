@@ -11,8 +11,8 @@ use crate::plan::GpuEmitPartitions;
 const LANES: usize = 4;
 
 fn emitter() -> CpuEmitter {
-    let node = GpuEmitPartitions::new(Given::of(&GROUPED), vec![0], LANES);
-    CpuEmitter::new(&node, LANES, &schema_of(&GROUPED).fields).expect("the emitter builds")
+    let node = GpuEmitPartitions::new(Given::of_columns(&GROUPED), vec![0], LANES);
+    CpuEmitter::new(&node, LANES, &columns(&GROUPED).fields).expect("the emitter builds")
 }
 
 fn keyed(keys: &[&str]) -> CpuBatch {
@@ -106,8 +106,8 @@ fn the_same_key_lands_in_the_same_lane_whatever_it_arrived_with() {
 
 #[test]
 fn a_hash_key_past_the_inputs_columns_is_refused() {
-    let node = GpuEmitPartitions::new(Given::of(&GROUPED), vec![7], LANES);
-    let refused = match CpuEmitter::new(&node, LANES, &schema_of(&GROUPED).fields) {
+    let node = GpuEmitPartitions::new(Given::of_columns(&GROUPED), vec![7], LANES);
+    let refused = match CpuEmitter::new(&node, LANES, &columns(&GROUPED).fields) {
         Err(refused) => refused,
         Ok(_) => panic!("there is no column 7"),
     };

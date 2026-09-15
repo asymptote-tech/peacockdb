@@ -541,6 +541,12 @@ uint64_t NodeSession::slice_handle(uint64_t handle, uint64_t offset, uint64_t le
   return out;
 }
 
+uint64_t NodeSession::adopt(TableResult result) {
+  uint64_t handle = impl_->next_handle++;
+  impl_->registry.emplace(handle, std::move(result));
+  return handle;
+}
+
 const TableResult& NodeSession::table_for(uint64_t handle) const {
   auto it = impl_->registry.find(handle);
   if (it == impl_->registry.end())

@@ -222,6 +222,16 @@ int peacock_spark_partition_ids(const void* schema, const void* array,
                                 uint32_t num_partitions, uint32_t seed,
                                 int32_t* out_pids, uint64_t out_cap, uint64_t* out_n);
 
+// ---------------------------------------------------------------------------
+// Test-only: adopt the Arrow C-Data struct array (`schema`/`array` as above; a
+// struct array = one table) into the live session and return its handle, so a
+// test can hand an executor a batch it wrote rather than one a scan read. Needs
+// peacock_executor_begin_plan first: the handle registry is the session's. No
+// recipe names this symbol and no production path calls it.
+/// @return 0 on success; non-zero with the message in peacock_last_error.
+int peacock_handle_from_arrow(peacock_executor_t* executor, const void* schema, const void* array,
+                              uint64_t* out_handle);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
