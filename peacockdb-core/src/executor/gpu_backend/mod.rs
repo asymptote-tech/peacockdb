@@ -9,11 +9,14 @@
 //! So an executor holds a borrowed session pointer, its recipe's calls, and the schema its
 //! output is priced by. Handles thread from one call to the next.
 
-pub mod accumulate;
+mod accumulate;
 mod backend;
-pub mod emit;
-pub mod join;
+mod emit;
+mod join;
 mod source;
+
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_tests;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -22,6 +25,7 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
 use datafusion::arrow::ipc::reader::StreamReader;
+use datafusion::common::JoinType;
 
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_execute_node, peacock_last_error,
@@ -35,6 +39,62 @@ use crate::executor::GpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats, RowRange};
 use crate::plan::PlanError;
 use crate::wire::{CallPattern, FbKind, Input, Recipe, Seq};
+
+/// A `BatchAccumulator` node's executor. What it holds between calls is one of four
+/// things, and `accumulate` owns them: a public variant would hand a caller the state a
+/// private module keeps.
+pub struct GpuAccumulator {
+    state: accumulate::State,
+}
+
+/// The one node of the partition-accumulator category: every lane's sorted run merged into
+/// one at the last lane's done, and nothing where no lane sent anything — a merge of no
+/// runs is the collapse of nothing under another name, and the device refuses that (#173).
+///
+/// One call per lane event, since that is what round-robin driving produces, and the call
+/// carrying the last `Done` is the emitting one. The handles go into the merge in lane
+/// order, which is what makes a tie partition-major rather than arrival-ordered.
+pub struct GpuPartitionAccumulator {
+    executor: *mut PeacockExecutor,
+    merge: (Seq, FbKind),
+    per_lane: Vec<Vec<GpuBatch>>,
+    live: usize,
+    schema: SchemaRef,
+}
+
+/// The scatter's executor: one call per batch, and the node's lane count of handles out.
+pub struct GpuEmitter {
+    executor: *mut PeacockExecutor,
+    seq: Seq,
+    kind: FbKind,
+    lanes: usize,
+    schema: SchemaRef,
+}
+
+/// A join before its build side arrives.
+pub struct GpuJoin {
+    executor: *mut PeacockExecutor,
+    /// The node's own type, and `None` for the two joins that have none — cross and
+    /// nested-loop. What a finish over no keys owes is decided by this rather than read
+    /// back off the call list: two different nodes publish a LeftAnti at done, and one of
+    /// them owes padded rows.
+    join_type: Option<JoinType>,
+    per_probe: Vec<join::JoinCall>,
+    at_done: Vec<join::JoinCall>,
+    keys_schema: Option<SchemaRef>,
+    output: SchemaRef,
+}
+
+/// A join with its build side set, taking probe batches.
+pub struct GpuProbingJoin {
+    join: GpuJoin,
+    /// `None` once a call has consumed it, which is the last probe call for a join that
+    /// hands it over and the finish call for one that does not.
+    build: Option<GpuBatch>,
+    /// The probe keys each batch contributed, held until the finish concatenates them.
+    accumulated: Vec<GpuBatch>,
+    probes: u64,
+}
 
 /// A lane's reads, in the order the mapping named them.
 ///

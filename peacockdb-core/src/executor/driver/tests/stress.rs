@@ -5,8 +5,8 @@
 //! delivered", which is still worth asserting — a routing bug breaks it. The oracle
 //! comparison the injector exists for needs real operators and belongs to T14.
 
-use super::super::mock::{EmitRule, Script, spec};
-use super::super::plans::*;
+use super::mock::{EmitRule, Script, spec};
+use super::plans::*;
 use super::*;
 
 /// One shape of the same query: how many lanes the scan has, how many batches each holds,

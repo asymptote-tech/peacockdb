@@ -6,7 +6,6 @@
 //! depend on the batch it arrived in.
 
 use super::*;
-use crate::executor::cpu_backend::emit::CpuEmitter;
 use crate::plan::GpuEmitPartitions;
 
 const LANES: usize = 4;

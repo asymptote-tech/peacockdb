@@ -2,7 +2,6 @@
 //! smallest plan that shows it. The corpus goldens are a regression net over whole plans
 //! and a different question from whether a rule is right.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use datafusion::physical_plan::ExecutionPlan;
@@ -20,7 +19,7 @@ use crate::plan::{NodeRef, as_node_ref};
 /// Plain DataFusion planning at tp1 over the committed minimal dataset — this mode
 /// translates the physical plan rather than annotating it, so no GPU rule runs.
 async fn plan_at(sql: &str, target_partitions: usize) -> Arc<dyn ExecutionPlan> {
-    let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.minimal");
+    let data = crate::test_support::testdata_minimal_dir();
     let ctx = crate::register_tables_for(crate::build_session_state(target_partitions), &data)
         .await
         .expect("register the minimal tables");

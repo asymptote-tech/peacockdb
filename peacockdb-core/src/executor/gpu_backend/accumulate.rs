@@ -15,7 +15,7 @@ use peacockdb_ffi::raw::{PeacockExecutor, peacock_executor_slice_handle};
 
 use crate::common::logical_size_from_schema;
 
-use super::{execute_node, last_error, produced};
+use super::{GpuAccumulator, GpuPartitionAccumulator, execute_node, last_error, produced};
 use crate::executor::Batch;
 use crate::executor::GpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats, LaneEvent};
@@ -23,8 +23,8 @@ use crate::plan::PlanError;
 use crate::plan::RowInterval;
 use crate::wire::{AbiSymbol, Call, CallPattern, FbKind, Input, Recipe, Seq};
 
-/// A `BatchAccumulator` node's executor, one variant per node.
-pub enum GpuAccumulator {
+/// What a `GpuAccumulator` holds between calls, one variant per node.
+pub(crate) enum State {
     Coalesce(Collapse),
     Sorted(SortedRuns),
     Aggregate(AggregateBatches),
@@ -32,8 +32,12 @@ pub enum GpuAccumulator {
 }
 
 impl GpuAccumulator {
+    fn of(state: State) -> Self {
+        Self { state }
+    }
+
     /// One call at done, over everything the lane accumulated.
-    pub fn coalesce(
+    pub(crate) fn coalesce(
         executor: *mut PeacockExecutor,
         recipe: &Recipe,
         schema: &ArrowSchema,
@@ -41,16 +45,16 @@ impl GpuAccumulator {
         let [call] = recipe.calls.as_slice() else {
             return Err(shape("a coalesce makes one call, at done", recipe));
         };
-        Ok(Self::Coalesce(Collapse {
+        Ok(Self::of(State::Coalesce(Collapse {
             executor,
             collapse: addressed(call, CallPattern::AtDone, Input::LaneBatches)?,
             held: Vec::new(),
             schema: Arc::new(schema.clone()),
-        }))
+        })))
     }
 
     /// A sort per batch, then one merge over the runs at done.
-    pub fn sorted(
+    pub(crate) fn sorted(
         executor: *mut PeacockExecutor,
         recipe: &Recipe,
         schema: &ArrowSchema,
@@ -61,19 +65,19 @@ impl GpuAccumulator {
                 recipe,
             ));
         };
-        Ok(Self::Sorted(SortedRuns {
+        Ok(Self::of(State::Sorted(SortedRuns {
             executor,
             sort: addressed(per_batch, CallPattern::PerBatch, Input::Batch)?,
             merge: addressed(at_done, CallPattern::AtDone, Input::LaneBatches)?,
             held: Vec::new(),
             schema: Arc::new(schema.clone()),
-        }))
+        })))
     }
 
     /// A concat and a merge per compaction and again at done, plus the finalize project
     /// where this node finishes the aggregate. `compact_bytes` is the held size that
     /// triggers a compaction; it comes from the budget rule, which is the driver's.
-    pub fn aggregate(
+    pub(crate) fn aggregate(
         executor: *mut PeacockExecutor,
         recipe: &Recipe,
         state: &ArrowSchema,
@@ -99,7 +103,7 @@ impl GpuAccumulator {
                 ));
             }
         };
-        Ok(Self::Aggregate(AggregateBatches {
+        Ok(Self::of(State::Aggregate(AggregateBatches {
             executor,
             concat: addressed(concat, CallPattern::PerCompaction, Input::LaneBatches)?,
             merge: addressed(merge, CallPattern::PerCompaction, Input::PriorOutput)?,
@@ -110,12 +114,12 @@ impl GpuAccumulator {
             compactions: 0,
             held: Arc::new(state.clone()),
             output: Arc::new(output.clone()),
-        }))
+        })))
     }
 
     /// No seq at all: a limit's bounds are runtime values, so it addresses the slice
     /// symbol rather than a node.
-    pub fn limit(
+    pub(crate) fn limit(
         executor: *mut PeacockExecutor,
         recipe: &Recipe,
         interval: RowInterval,
@@ -133,29 +137,29 @@ impl GpuAccumulator {
                 recipe,
             ));
         }
-        Ok(Self::Limit(LimitStream {
+        Ok(Self::of(State::Limit(LimitStream {
             executor,
             interval,
             seen: 0,
             schema: Arc::new(schema.clone()),
-        }))
+        })))
     }
 
-    pub fn accumulate_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
-        match self {
-            Self::Coalesce(state) => state.accumulate_and_fetch(batch),
-            Self::Sorted(state) => state.accumulate_and_fetch(batch),
-            Self::Aggregate(state) => state.accumulate_and_fetch(batch),
-            Self::Limit(state) => state.accumulate_and_fetch(batch),
+    pub(crate) fn accumulate_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
+        match &mut self.state {
+            State::Coalesce(state) => state.accumulate_and_fetch(batch),
+            State::Sorted(state) => state.accumulate_and_fetch(batch),
+            State::Aggregate(state) => state.accumulate_and_fetch(batch),
+            State::Limit(state) => state.accumulate_and_fetch(batch),
         }
     }
 
-    pub fn mark_done_and_fetch(self) -> CallResult<Vec<GpuBatch>> {
-        match self {
-            Self::Coalesce(state) => state.mark_done_and_fetch(),
-            Self::Sorted(state) => state.mark_done_and_fetch(),
-            Self::Aggregate(state) => state.mark_done_and_fetch(),
-            Self::Limit(state) => state.mark_done_and_fetch(),
+    pub(crate) fn mark_done_and_fetch(self) -> CallResult<Vec<GpuBatch>> {
+        match self.state {
+            State::Coalesce(state) => state.mark_done_and_fetch(),
+            State::Sorted(state) => state.mark_done_and_fetch(),
+            State::Aggregate(state) => state.mark_done_and_fetch(),
+            State::Limit(state) => state.mark_done_and_fetch(),
         }
     }
 }
@@ -189,7 +193,7 @@ fn hand_over(batches: Vec<GpuBatch>) -> Vec<u64> {
 /// which is not the batch of the node's schema a SingleBatch output owes downstream. So
 /// this backend emits nothing and the empty batch is the driver's to supply, which is the
 /// one place that knows the schema without asking the device.
-pub struct Collapse {
+pub(crate) struct Collapse {
     executor: *mut PeacockExecutor,
     collapse: (Seq, FbKind),
     held: Vec<GpuBatch>,
@@ -197,7 +201,7 @@ pub struct Collapse {
 }
 
 impl Collapse {
-    pub fn held(&self) -> &[GpuBatch] {
+    pub(crate) fn held(&self) -> &[GpuBatch] {
         &self.held
     }
 
@@ -223,7 +227,7 @@ impl Collapse {
 /// Each batch sorted as it arrives, the runs merged into one at done — and nothing at all
 /// where none arrived, since a merge of no runs is the collapse of nothing by another name
 /// and the device refuses that (#173).
-pub struct SortedRuns {
+pub(crate) struct SortedRuns {
     executor: *mut PeacockExecutor,
     sort: (Seq, FbKind),
     merge: (Seq, FbKind),
@@ -232,7 +236,7 @@ pub struct SortedRuns {
 }
 
 impl SortedRuns {
-    pub fn held(&self) -> &[GpuBatch] {
+    pub(crate) fn held(&self) -> &[GpuBatch] {
         &self.held
     }
 
@@ -262,7 +266,7 @@ impl SortedRuns {
 ///
 /// The threshold doubles when a compaction fails to shrink what it folded — see the CPU
 /// backend's copy of this rule, which is the same rule and the same reason.
-pub struct AggregateBatches {
+pub(crate) struct AggregateBatches {
     executor: *mut PeacockExecutor,
     concat: (Seq, FbKind),
     merge: (Seq, FbKind),
@@ -322,28 +326,13 @@ impl AggregateBatches {
     }
 }
 
-/// The one node of the partition-accumulator category: every lane's sorted run merged into
-/// one at the last lane's done, and nothing where no lane sent anything — a merge of no
-/// runs is the collapse of nothing under another name, and the device refuses that (#173).
-///
-/// One call per lane event, since that is what round-robin driving produces, and the call
-/// carrying the last `Done` is the emitting one. The handles go into the merge in lane
-/// order, which is what makes a tie partition-major rather than arrival-ordered.
-pub struct GpuPartitionAccumulator {
-    executor: *mut PeacockExecutor,
-    merge: (Seq, FbKind),
-    per_lane: Vec<Vec<GpuBatch>>,
-    live: usize,
-    schema: SchemaRef,
-}
-
 impl GpuPartitionAccumulator {
     /// What each lane is holding, for the accounting the driver sums.
-    pub fn per_lane(&self) -> impl Iterator<Item = &[GpuBatch]> {
+    pub(crate) fn per_lane(&self) -> impl Iterator<Item = &[GpuBatch]> {
         self.per_lane.iter().map(|lane| lane.as_slice())
     }
 
-    pub fn merge_sorted(
+    pub(crate) fn merge_sorted(
         executor: *mut PeacockExecutor,
         recipe: &Recipe,
         lanes: usize,
@@ -364,7 +353,7 @@ impl GpuPartitionAccumulator {
         })
     }
 
-    pub fn accumulate_and_fetch(
+    pub(crate) fn accumulate_and_fetch(
         &mut self,
         partition: usize,
         event: LaneEvent<GpuBatch>,
@@ -401,7 +390,7 @@ impl GpuPartitionAccumulator {
 /// A batch entirely outside the interval is released where it stands, one entirely inside
 /// is forwarded untouched, and only the two that straddle its ends are sliced. Its input
 /// is one lane — the node checks that — so the count it keeps is the stream's.
-pub struct LimitStream {
+pub(crate) struct LimitStream {
     executor: *mut PeacockExecutor,
     interval: RowInterval,
     seen: u64,
@@ -409,10 +398,6 @@ pub struct LimitStream {
 }
 
 impl LimitStream {
-    pub fn seen(&self) -> u64 {
-        self.seen
-    }
-
     fn accumulate_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
         let n_rows = batch.num_rows() as u64;
         let rows = self.interval.range_of(self.seen, n_rows);

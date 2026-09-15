@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::executor::LaneEvent;
-use crate::executor::cpu_backend::accumulate::{CpuAccumulator, CpuPartitionAccumulator};
+use crate::executor::cpu_backend::accumulate::State;
 use crate::plan::RowInterval;
 use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregateBatches, GpuCoalesceAllBatches, GpuLimit,
@@ -506,8 +506,8 @@ fn compactions_over(arrivals: Vec<CpuBatch>, compact_bytes: usize) -> usize {
             .accumulate_and_fetch(batch)
             .expect("the arrival is accepted");
     }
-    match &accumulator {
-        CpuAccumulator::Aggregate(state) => state.compactions(),
+    match &accumulator.state {
+        State::Aggregate(state) => state.compactions(),
         _ => panic!("a merge is an Aggregate accumulator"),
     }
 }

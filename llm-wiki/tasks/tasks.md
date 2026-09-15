@@ -18,7 +18,7 @@ shared. 75 queries carry #152. Memory accounting is deliberately out of scope an
 The layout refactor. It may not run beside the ENS-refcounted-tables chain: both rewrite the same tree, so
 rebasing one across the other is a whole-tree conflict.
 
-### 4. [`test-layout.md`](test-layout.md) — state: approved to build
+### 4. [`test-layout.md`](test-layout.md) — state: done — PR #145
 
 Items in `peacockdb-core/src` are public partly because `tests/*.rs` are separate crates that see
 the library the way crates.io would. Moving the eleven targets that force them, plus the murmur

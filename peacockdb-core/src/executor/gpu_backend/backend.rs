@@ -6,11 +6,11 @@
 
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
-use super::GpuSource;
-use super::accumulate::{GpuAccumulator, GpuPartitionAccumulator};
-use super::emit::GpuEmitter;
-use super::join::{GpuJoin, GpuProbingJoin};
-use super::{GpuExec, GpuExport};
+use super::accumulate::State;
+use super::{
+    GpuAccumulator, GpuEmitter, GpuExec, GpuExport, GpuJoin, GpuPartitionAccumulator,
+    GpuProbingJoin, GpuSource,
+};
 use crate::executor::Batch;
 use crate::executor::CpuBatch;
 use crate::executor::GpuBatch;
@@ -326,12 +326,12 @@ trait HeldBytes {
 
 impl HeldBytes for GpuAccumulator {
     fn held_bytes(&self) -> usize {
-        match self {
-            Self::Coalesce(state) => bytes_of(state.held()),
-            Self::Sorted(state) => bytes_of(state.held()),
-            Self::Aggregate(state) => state.held_bytes(),
+        match &self.state {
+            State::Coalesce(state) => bytes_of(state.held()),
+            State::Sorted(state) => bytes_of(state.held()),
+            State::Aggregate(state) => state.held_bytes(),
             // A limit holds nothing, which is the whole point of the slice symbol.
-            Self::Limit(_) => 0,
+            State::Limit(_) => 0,
         }
     }
 }
