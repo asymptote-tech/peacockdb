@@ -24,6 +24,9 @@ naming their ticket. Nothing in production changes.
 
 ---
 
+**Decision taken 2026-09-15 (spec, "Decision"): Task 0 is done, Task 2 is the whole task; Tasks
+1, 3, 4 and 5 are dropped and stay below as the record of what was not built.**
+
 ### Task 0: Decide whether this task should happen at all
 
 The spec makes this conditional and the decision is a deliverable, not a formality.
@@ -51,7 +54,7 @@ spec was written.
 
 ---
 
-### Task 1: Build the refusal table by grep, not by reading
+### Task 1: Build the refusal table by grep, not by reading — DROPPED
 
 **Files:**
 - Modify: `llm-wiki/tasks/walk-drives-every-plan-detail.md`
@@ -129,7 +132,7 @@ them. It returns the code and the call now."
 
 ---
 
-### Task 3: The engine limits, as `bug_` tests
+### Task 3: The engine limits, as `bug_` tests — DROPPED
 
 **Files:**
 - Modify: the walk file; `llm-wiki/build-test.md`
@@ -178,7 +181,7 @@ fix: refcounted-tables deletes two by closing #152."
 
 ---
 
-### Task 4: The shapes, one at a time
+### Task 4: The shapes, one at a time — DROPPED
 
 Only those Task 0's paragraph kept. One commit and one device cycle per shape, or per pair where the
 spec says they share one.
@@ -215,7 +218,7 @@ why.
 
 ---
 
-### Task 5: The statement of reach
+### Task 5: The statement of reach — DROPPED
 
 The deliverable neither earlier spec produced.
 

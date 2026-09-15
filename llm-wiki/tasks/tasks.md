@@ -91,13 +91,12 @@ A lane whose build side got no rows keeps its typed zero-row table where the joi
 never written, and the table it needs is one the scatter builds and the driver drops. One derived
 index field, one conditional drop. Replaces the parked `empty-answers.md`.
 
-### 13. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: blocked(building) — the spec's own gate: plan task 0's paragraph is in the detail file and the human decides whether the task proceeds, shrinks to task 2, or stops
+### 13. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: approved to build — shrunk to its §2 by the spec's "Decision" section
 
-**Conditional: its first task reads the survey's report, argues what is still worth teaching, and
-stops for the human.** The walk is the only instrument that can ask what one call produced, and it
-panics on ten shapes — eight never taught, two the engine truly cannot run. Teaches the eight, makes
-a device refusal an outcome rather than an abort, and records the real limits as `bug_` tests naming
-#136, #152 and #175. No production code. Deliverable: a checked table of what it can drive.
+The gate was taken: no shape is taught and no reach table is written. What remains is §2 — the
+three `rc == 0` sites in `wire/gpu_tests/walk.rs` return the code and the call so a device refusal
+is an outcome a test can assert rather than an abort, plus `driven()`'s three messages corrected.
+One test, one device cycle, no production code.
 
 ### 14. [`join-cases.md`](join-cases.md) — state: new
 

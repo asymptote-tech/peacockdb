@@ -185,3 +185,25 @@ be verified at all — which is the thing the last three did not have.
 
 `build-test-shadgpu.sh`. Each taught shape needs a device cycle to prove, so order the work by what
 can share one: the join family together, the row range and bare call together.
+
+## Decision, 2026-09-15: shrunk to §2
+
+The gate in "This task is conditional" was taken on plan task 0's paragraph
+(`walk-drives-every-plan-detail.md`, 2026-09-12). **Only §2 is built.** Everything else above
+is not: no shape is taught (§1), no reach table is written (§3), no engine limit becomes a `bug_`
+test here — every #152 refusal the walk could pin is already pinned in `join_cases.rs` and
+`nested_cases.rs`, and a second register is what §3 itself forbids.
+
+What §2 means against the tree as it stands: `wire/gpu_tests/walk.rs` asserts `rc == 0` at three
+sites — `begin_plan` (`:61`), the scan and `execute_node` — so #45, #55, #189's device half and
+#203 abort the walk instead of being observed. `Session::execute` and the two others return the
+code and the call; a test asserting a refusal asserts both, a test not expecting one fails naming
+both. The export side already returns `Err`. Riding with it: `driven()`'s three `Refused` messages
+in `wire/gpu_tests/mod.rs` say what the operator harness has since proved (the cross and
+nested-loop arm cites #152 for a shape the device runs at one probe batch; the Left/Full arm says
+"no shape here plans" for one it cannot run).
+
+Tests: of §4, only "a refused plan reports its code and its call", proved on one of the known
+refusals. Restriction, Goldens and Coverage stand as written. Scope shrinks to `walk.rs`,
+`mod.rs`'s `driven()` comments, and `build-test.md`'s walk row if its text no longer holds. One
+device cycle.
