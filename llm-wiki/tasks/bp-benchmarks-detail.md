@@ -996,3 +996,36 @@ gets its own reading before the completeness pass.
 Seen on shad-gpu while checking who held the card: dozens of `/tmp/peacock-gpu-executors-*.parquet`
 left by `test_gpu_executors`, which writes its fixture and never removes it. Master's
 behaviour, not this branch's; noted for the signoff, no ticket (nothing a user sees).
+
+### Two independent readings of the whole diff, triaged
+
+Two agents wrote a per-file account of `origin/master...2fbdbf2` for the human (kept outside
+the repo) and listed what looked wrong. Triage:
+
+For the data dispatch, beside Task 11, in this order:
+1. `peacock_executor_collect_node_regions` with `out == NULL` and `cap > 0` reaches `memcpy`
+   into null when `recorded <= cap`. Refuse it: non-zero, `last_error`, nothing drained; a
+   gtest for the shape.
+2. `RegionSink::producer_of` answers 0 for a handle the sink never saw, so a slice or export
+   of one is silently charged to seq 0. Throw naming the handle instead; unreachable from the
+   harness, which arms timing before `begin_plan`, but C++ should not guess.
+3. Capitals for emphasis in new doc comments, against the plan's global constraint: "as its
+   CALLER saw it" and "what a measurement IS" in `executor/mod.rs`, "lanes that DRIVE the
+   node" in `driver/partitioned.rs`, "the SEQ SET" in `test_plan_goldens.rs`.
+4. Two doc strings still describe the first version's host-only fallback:
+   `Measured::device_us` ("Zero where a region recorded no complete pair") and
+   `NodeTiming::Off` ("Every timing field stays 0"). A CUDA failure is an error now and a
+   call without a region is refused.
+5. `nvtx_range` with a NUL in the name pushes nothing but returns a guard that pops.
+   Either refuse the name or return a guard that does not pop.
+6. `create_nsys_profile.sh`: `nsys export … || true` hides an export failure behind a later
+   "the trace pass left no capture". Let the export's own failure be the message.
+Plus round 2's two optional nits (`harness_range_is_open()` to the internal header; the
+push-replaces test to the cpu tier).
+
+Not routed: `plot.py` states the matplotlib version in its docstring and matplotlib writes it
+into every PNG's metadata, which is what the spec's sentence rests on; the release copy of
+the harness is not stripped (release carries no debuginfo); `install_rmm_pool` is called four
+times per case (idempotent by the C++ latch); `LimitStream` prices a slice with varlen 0, as
+master does, so a string slice's `out_bytes` in the record is low — for the signoff and a
+follow-up, not this task; the four spec-versus-tree deviations already listed above.

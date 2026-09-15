@@ -898,10 +898,10 @@ Three conventions the signatures do not carry:
   `result_from_handle`, which are otherwise the two halves of the limit rule — one produces
   a handle, the other a result.
 - **Instrumentation is process-global and off by default; `peacock_gpu_benchmarks`,
-  `test_node_timing` and the plan-executor gtests' fixtures are what turn it on.** Without the pool every cuDF intermediate is a
-  `cudaMalloc`/`cudaFree` round trip ([#148](tickets.md#t148)); the gtest binaries install it
-  from their own `main()`, and this symbol exists for a Rust caller that cannot include the
-  C++ header. Under `set_node_timing` every per-call entry point opens one region per output
+  `test_node_timing` and the plan-executor gtests' fixtures are what turn it on.** Without
+  the pool every cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip
+  ([#148](tickets.md#t148)); the gtest binaries install it from their own `main()`, and this
+  symbol exists for a Rust caller that cannot include the C++ header. Under `set_node_timing` every per-call entry point opens one region per output
   partition: a CUDA event recorded on the default stream at open and at close, the host clock
   around the whole call, and no sync inside — so a measured run is not a serialized one,
   which is what lets its numbers stand for the unmeasured run. The one sync a call pays in
