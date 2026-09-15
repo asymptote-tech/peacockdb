@@ -101,7 +101,7 @@ a device refusal an outcome rather than an abort, and records the real limits as
 
 ## Chain ENS-bp-benchmarks (base: master)
 
-### 1. [`bp-benchmarks.md`](bp-benchmarks.md) — state: building — PR #139
+### 1. [`bp-benchmarks.md`](bp-benchmarks.md) — state: reviewing — PR #139
 
 The corpus benchmark at sf40: one timing tree per (dataset, mode), one record row per cuDF
 call, two Nsight captures and the panels. The branch and PR predate the spec, so the
