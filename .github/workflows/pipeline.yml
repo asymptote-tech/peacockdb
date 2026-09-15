@@ -390,7 +390,7 @@ jobs:
       - name: Build and stage rust GPU test binaries
         run: |
           mkdir -p cpp/install/rust-tests
-          # The five GPU targets, one line each; build-test.md's test table is the detail.
+          # The seven GPU targets, one line each; build-test.md's test table is the detail.
           # test_gpu_corpus = the corpus on a device, read against the sections the cpu
           #   tier authored — plan shape, per-batch lists and bytes, and the result where
           #   the query's line names a golden.
@@ -399,9 +399,16 @@ jobs:
           #   its companion test_gpu_batch needs no device and runs in dataset-matrix instead.
           # test_gpu_recipe_walk = a recipe plan driven by hand, DataFusion as the oracle.
           # test_gpu_executors = the exec executors, each handed its recipe and one batch.
+          # test_node_timing = the per-node timing method itself: regions match the calls
+          #   the driver journalled, and the device time they bracket is inside the wall.
+          #   Every number under testdata/benchmark-results/ assumes both.
+          # peacock_gpu_benchmarks = the measurement harness, run below with --skip bench_:
+          #   its own assertions about where a section goes and what a record row must hold.
+          #   The timed cases are tens of minutes of device time and are not a merge gate;
+          #   scripts/build-test-shadgpu.sh --run-benchmarks is what runs those.
           # One line on purpose: the coverage guard reads the array below with a single
           # `lines().find`, so a continuation hides every target after the backslash.
-          for t in test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_corpus; do
+          for t in test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_corpus test_node_timing peacock_gpu_benchmarks; do
             exec_path=$(cargo test --no-run -p peacockdb-core --test "$t" \
                 --message-format=json \
               | python3 -c '
@@ -661,12 +668,17 @@ jobs:
               [ -x "\$t" ] || continue
               tname=\${t##*/}
               echo "--- \$tname"
+              # The measurement binary is staged here for its own assertions. Its bench_
+              # cases are the measurement, tens of minutes on a device, and they write a
+              # benchmark tree — neither belongs in a correctness job.
+              skip=""
+              case "\$tname" in peacock_gpu_benchmarks) skip="--skip bench_" ;; esac
               # --test-threads=1: cuDF/RMM share one process-wide pool; running
               # several GPU tests concurrently OOMs the device and poisons the
               # CUDA context, cascading into bad_alloc/cudaErrorIllegalAddress
               # for every later test. Sequential is mandatory.
               tlog=$REMOTE_DIR/\$tname.rust.log
-              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 > "\$tlog" 2>&1 || rc=1
+              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 \$skip > "\$tlog" 2>&1 || rc=1
               rzero=0
               while IFS= read -r line; do
                 printf '%s\n' "\$line"
@@ -768,6 +780,27 @@ jobs:
           done
           # A vanished glob makes the loop body disappear and the step pass green.
           [ ${#files[@]} -gt 0 ] || { echo "no exec-model test files matched"; exit 1; }
+          status=0
+          for f in "${files[@]}"; do
+            echo "== $f"
+            # Run every file before reporting, so one failure does not hide the rest.
+            python3 "$f" || status=1
+          done
+          exit "$status"
+
+      # The calibration scripts' own tests: a synthetic capture and a synthetic record, so
+      # no device, no nsys and no measurement. Beside the exec-model set because they are
+      # the same kind of thing — python over text, cheap, and nothing else in CI runs them.
+      # matplotlib is self-healed the way pandas is above; plot.py is a hard import of it,
+      # and a test that skipped for want of it would read exactly like a passing one.
+      - name: Calibration script tests (Python)
+        run: |
+          set -euo pipefail
+          python3 -c "import matplotlib" 2>/dev/null || pip install --quiet matplotlib
+          shopt -s nullglob
+          files=(scripts/calibration/tests/test_*.py)
+          # A vanished glob makes the loop body disappear and the step pass green.
+          [ ${#files[@]} -gt 0 ] || { echo "no calibration test files matched"; exit 1; }
           status=0
           for f in "${files[@]}"; do
             echo "== $f"

@@ -12,6 +12,8 @@ mod cpu_batch;
 mod driver;
 mod errors;
 mod forwarder;
+#[cfg(not(feature = "rust-only"))]
+mod instrument;
 mod row_range;
 
 // `pub mod`, which no other subcomponent in the crate is, and it is temporary. Two
@@ -29,11 +31,14 @@ mod gpu_batch;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
+
 use datafusion::arrow::array::RecordBatch;
 
 use crate::plan::ExecutorCategory;
 use crate::plan::PlanError;
 use crate::plan::{GpuNode, RowInterval};
+use crate::wire::{AbiSymbol, FbKind, Seq};
 
 #[cfg(not(feature = "rust-only"))]
 use peacockdb_ffi::raw::PeacockExecutor;
@@ -82,21 +87,27 @@ impl CpuBatch {
 pub struct GpuBatch {
     executor: *mut PeacockExecutor,
     handle: u64,
+    producer: Seq,
     num_rows: usize,
     byte_size: usize,
 }
 
 #[cfg(not(feature = "rust-only"))]
 impl GpuBatch {
+    /// `producer` is the seq of the call this handle came out of — the same thing C++
+    /// records at every registry insert, and the only way a slice or an export can name
+    /// the node whose output it handled.
     pub fn new(
         executor: *mut PeacockExecutor,
         handle: u64,
+        producer: Seq,
         num_rows: usize,
         byte_size: usize,
     ) -> Self {
         Self {
             executor,
             handle,
+            producer,
             num_rows,
             byte_size,
         }
@@ -104,6 +115,12 @@ impl GpuBatch {
 
     pub fn handle(&self) -> u64 {
         self.handle
+    }
+
+    /// The seq of the call that produced this handle. A slice propagates it: the trimmed
+    /// rows are still that node's output, which is what C++ charges the region to.
+    pub fn producer(&self) -> Seq {
+        self.producer
     }
 
     pub fn executor(&self) -> *mut PeacockExecutor {
@@ -139,10 +156,94 @@ impl BackendError {
 /// resets the session and every resident table with it, so there is nothing to resume from.
 pub type CallResult<T> = Result<(T, CallStats), BackendError>;
 
+/// What an ABI call addressed: a plan node by its kind, or one of the two symbols whose
+/// arguments are runtime row counts and that name no node at all.
+///
+/// The same split [`Call::target`](crate::wire::Call) makes on the wire, and for the same
+/// reason: a slice and an export are handed a handle, so the plan has no seq for them and
+/// [`FbKind`] has no member either. A record still has to print something for them, and
+/// the symbol is what they are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbiTarget {
+    Node(FbKind),
+    Bare(AbiSymbol),
+}
+
+impl std::fmt::Display for AbiTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Node(kind) => write!(f, "{kind}"),
+            Self::Bare(symbol) => write!(f, "{}", symbol.name()),
+        }
+    }
+}
+
+/// One ABI call an executor made, as its CALLER saw it.
+///
+/// C++ measures what a call cost. What it was handed and what it produced are priced here:
+/// the call consumes its handles, so by the time the far side could measure the input the
+/// registry entries are gone (#152), and C++ prices nothing. The two halves meet on
+/// `(seq, call_index)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AbiCall {
+    /// The node whose output this call handled. Its own for the two symbols that name a
+    /// seq; for a slice and an export, the node that produced the handle — which is what
+    /// C++ charges the region to, and the two must agree or the join cannot close.
+    pub seq: Seq,
+    pub target: AbiTarget,
+    /// Which call of this seq the session had reached — the number C++ answers with, and
+    /// the other half of the key the two records meet on.
+    ///
+    /// Zero as the backend records it and stamped by the driver, which is the one place
+    /// that sees every call in the order they were made. An executor sees only its own.
+    pub call_index: u64,
+    pub in_rows: u64,
+    pub in_bytes: u64,
+    pub out_rows: u64,
+    pub out_bytes: u64,
+}
+
+/// The ABI calls one executor call made, collected only while measuring.
+///
+/// `None` is not "made no calls" — it is "nobody was measuring", and a reader that cannot
+/// tell those apart reports a silent backend as a fast one. Boxed so an unmeasured run
+/// carries one null pointer rather than a vector's three words, which is the shape the C++
+/// side uses for the same reason.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AbiCalls(Option<Box<Vec<AbiCall>>>);
+
+impl AbiCalls {
+    /// Armed only for a measured run: unarmed, `record` is a branch and nothing else.
+    pub fn armed(measuring: bool) -> Self {
+        Self(measuring.then(Box::default))
+    }
+
+    pub fn record(&mut self, call: AbiCall) {
+        if let Some(calls) = &mut self.0 {
+            calls.push(call);
+        }
+    }
+
+    /// `None` where the run was not measured, which is what keeps an unmeasured node from
+    /// rendering as one that made no calls.
+    pub fn recorded(&self) -> Option<&[AbiCall]> {
+        self.0.as_deref().map(Vec::as_slice)
+    }
+
+    /// For the driver alone, to stamp `call_index` — see the field.
+    pub fn recorded_mut(&mut self) -> Option<&mut [AbiCall]> {
+        self.0.as_deref_mut().map(Vec::as_mut_slice)
+    }
+}
+
 /// `scratch_bytes` is the measured transient; `None` when the run is not instrumented.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CallStats {
     pub scratch_bytes: Option<usize>,
+    /// The calls this one made, for a measured run only. The driver holds the coordinates
+    /// — which node, which lane, which batch — so a backend reports only what it alone
+    /// knows: the seq it addressed and what it handed over.
+    pub calls: AbiCalls,
 }
 
 // The executor contracts, one per node category.
@@ -533,6 +634,11 @@ pub struct RunReport {
     pub lanes_of: Vec<usize>,
     /// Per node, per output lane, the batches it emitted in order.
     pub emitted: Vec<Vec<Vec<EmittedBatch>>>,
+    /// Per node, per driving lane, the ABI calls each of that lane's backend calls made,
+    /// in order: one entry per call that reached an executor and none for a step the
+    /// driver answered itself. A backend that reports nothing leaves every entry
+    /// unmeasured rather than empty — the distinction `AbiCalls` carries.
+    pub abi_calls: Vec<Vec<Vec<AbiCalls>>>,
     /// Per node, per output lane, rows it emitted that nobody consumed — the queues an early
     /// exit left standing. Zero everywhere on a run that drained, and what closes
     /// `consumed + abandoned == the child's emitted` into an equality on every run.
@@ -547,6 +653,227 @@ pub struct RunReport {
     /// short of what its plan called for: not a bool, because a reader of a smaller number
     /// needs to know which limit produced it.
     pub satisfied: Vec<usize>,
+}
+
+/// One measured region, as C++ reports it: which call it belonged to and what that call
+/// cost on the host and on the device. Its key is `(seq, call_index)`, which is what an
+/// [`AbiCall`] carries — the two records are halves of one row and meet there.
+///
+/// Here rather than in `gpu_backend` for the reason [`AbiCalls`] lives in `executor`: this
+/// is what a measurement IS, and the backend fills one in. Not the ABI struct, so a
+/// `rust-only` build with no backend still has a driver that compiles.
+///
+/// One call can answer with several, one per output partition, and a call's cost is their
+/// sum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Region {
+    pub seq: Seq,
+    pub partition: usize,
+    pub call_index: u64,
+    pub host_us: u64,
+    pub device_us: u64,
+}
+
+/// What one call cost and produced: the device's half summed over the call's regions, the
+/// price of its output taken from the [`AbiCall`] beside them.
+///
+/// Summed rather than picked because a call answering with several output partitions
+/// spreads itself across them, so any single region is a fraction of the call.
+///
+/// Named for the measurement rather than for the time because it carries both: the output
+/// of a call in the middle of a node's chain exists on this side nowhere else.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Measured {
+    /// Steady clock across the whole call, this call's regions added.
+    pub host_us: u64,
+    /// Between each region's two CUDA events. Zero where a region recorded no complete
+    /// pair — it touched no device.
+    pub device_us: u64,
+    /// Rows this answered with, as the caller priced them. The only place a middle call's
+    /// output exists: a node driving several hands its caller the last one's and drops
+    /// the rest.
+    pub out_rows: u64,
+    pub out_bytes: u64,
+    /// Regions that answered. One on a [`Region`], where it is what makes the count fall
+    /// out of the sum; zero on a call means the device recorded none, which is not the
+    /// same as a call that cost nothing.
+    pub regions: usize,
+}
+
+impl std::ops::AddAssign for Measured {
+    /// Field for field, because every field of this is additive over calls — including
+    /// `regions` itself. The one operation the summations in `driver::measurements` need,
+    /// so that a field added above is summed everywhere without visiting them.
+    fn add_assign(&mut self, other: Self) {
+        self.host_us += other.host_us;
+        self.device_us += other.device_us;
+        self.out_rows += other.out_rows;
+        self.out_bytes += other.out_bytes;
+        self.regions += other.regions;
+    }
+}
+
+/// Every call of a run, measured — at both granularities a reader needs.
+///
+/// The device answers per `(seq, call_index)`, so **the split between the seqs of one
+/// driver call is measured**: a per-entry total alone would attribute the whole to each
+/// seq. The two consumers want different units, and both are honest:
+///
+/// | | unit | why |
+/// |---|---|---|
+/// | `.benchmark.txt` | a driver call | its axis is lanes × batches, and a batch is a driver call |
+/// | `records.tsv` | one cuDF call | its row is one call, and the device measured each |
+#[derive(Debug)]
+pub struct Measurements {
+    /// Node → driving lane → the calls that lane made, each the sum over the seqs it
+    /// addressed. `None` for a call the run did not measure, so an unmeasured backend
+    /// reads as absent rather than as free.
+    per_entry: Vec<Vec<Vec<Option<Measured>>>>,
+    per_call: HashMap<(Seq, u64), Measured>,
+}
+
+impl Measurements {
+    /// Lanes of a node, each with one entry per call it made. For walking the shape without
+    /// knowing its lengths.
+    pub fn lanes(&self, node: usize) -> &[Vec<Option<Measured>>] {
+        &self.per_entry[node]
+    }
+
+    pub fn nodes(&self) -> usize {
+        self.per_entry.len()
+    }
+
+    /// What one cuDF call cost, as the device reported it — the unit a record row is in.
+    pub fn call(&self, seq: Seq, call_index: u64) -> Option<Measured> {
+        self.per_call.get(&(seq, call_index)).copied()
+    }
+}
+
+/// Cost every journalled call from the regions the device answered with, refusing a
+/// mismatch in either direction — see `driver::measurements`.
+pub fn join_regions(report: &RunReport, regions: &[Region]) -> Result<Measurements, String> {
+    driver::join_regions(report, regions)
+}
+
+/// One node's whole cost, summed over every lane and every call it made; `None` where
+/// the node was not measured at all.
+pub fn node_measured(times: &Measurements, node: usize) -> Option<Measured> {
+    driver::node_measured(times, node)
+}
+
+/// Each node as a record names it — its type and its post-order position — in the
+/// driver's own pre-order, the order [`RunReport`] is indexed by.
+pub fn nodes_as_recorded(root: &dyn GpuNode) -> Result<Vec<(&'static str, usize)>, PlanError> {
+    driver::nodes_as_recorded(root)
+}
+
+/// Which device allocator a measurement was taken under — the outcome of
+/// [`install_rmm_pool`], not the request.
+///
+/// cuDF routes every intermediate through rmm's current device resource, and the
+/// difference between a pool and rmm's default (a `cudaMalloc`/`cudaFree` per
+/// allocation) is far larger than run-to-run noise — worst on exactly the nodes with
+/// the largest outputs. So `Unavailable` does not describe a slower run to be recorded
+/// and compared; it describes a run whose times mean nothing, and the benchmark harness
+/// refuses it.
+#[cfg(not(feature = "rust-only"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RmmPool {
+    /// A pooled resource is installed. Sizes are what it was actually built with.
+    Pool { integrated: bool, free_bytes: u64, initial_bytes: u64, maximum_bytes: u64 },
+    /// The pool could not be built — typically a neighbour holding the device when the
+    /// reservation was computed — so rmm's default resource is in place and nobody
+    /// chose that.
+    Unavailable,
+}
+
+#[cfg(not(feature = "rust-only"))]
+impl std::fmt::Display for RmmPool {
+    /// The `allocator=` line of a benchmark record. One line, no spaces around `=`,
+    /// sizes in GiB because that is the unit the sizing rule is written in.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const GIB: f64 = 1073741824.0;
+        match *self {
+            RmmPool::Pool { integrated, free_bytes, initial_bytes, maximum_bytes } => write!(
+                f,
+                "rmm-pool initial={:.1}GiB max={:.1}GiB of {:.1}GiB free on {} device",
+                initial_bytes as f64 / GIB,
+                maximum_bytes as f64 / GIB,
+                free_bytes as f64 / GIB,
+                if integrated { "an integrated" } else { "a discrete" },
+            ),
+            RmmPool::Unavailable => {
+                write!(f, "rmm-default (pool unavailable), cudaMalloc per allocation")
+            }
+        }
+    }
+}
+
+/// How per-node GPU regions are measured. `Off` by default, because measuring is not
+/// free.
+#[cfg(not(feature = "rust-only"))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum NodeTiming {
+    /// No measurement. Every timing field stays 0.
+    #[default]
+    Off,
+    /// CUDA events around the device work, host clock around the host work, no sync
+    /// inside the region. Device numbers arrive via `collect_regions` after the
+    /// root materialize, into [`Region::device_us`].
+    Events,
+}
+
+/// Closes the range [`nvtx_range`] opened.
+#[cfg(not(feature = "rust-only"))]
+pub struct NvtxRange(());
+
+#[cfg(not(feature = "rust-only"))]
+impl Drop for NvtxRange {
+    fn drop(&mut self) {
+        instrument::nvtx_pop()
+    }
+}
+
+/// Install the pooled device allocator of `bytes` and report what happened. The budget is
+/// the caller's, as `kPoolBytes` is for the gtest binaries; a host that cannot meet it keeps
+/// rmm's default resource rather than a smaller pool. Idempotent; the guard lives in C++ so
+/// the process has one pool whichever side asks first.
+#[cfg(not(feature = "rust-only"))]
+pub fn install_rmm_pool(bytes: u64) -> RmmPool {
+    instrument::install_rmm_pool(bytes)
+}
+
+/// Select the per-node timing mode (process-global, `Off` by default).
+#[cfg(not(feature = "rust-only"))]
+pub fn set_node_timing(mode: NodeTiming) {
+    instrument::set_node_timing(mode)
+}
+
+/// Whether the run is measured — what arms the per-call journal.
+#[cfg(not(feature = "rust-only"))]
+pub fn node_timing_on() -> bool {
+    instrument::node_timing_on()
+}
+
+/// Emit NVTX ranges around plan nodes and their output partitions (process-global, off
+/// by default).
+#[cfg(not(feature = "rust-only"))]
+pub fn set_nvtx_ranges(on: bool) {
+    instrument::set_nvtx_ranges(on)
+}
+
+/// A named NVTX range around whatever the caller is about to do, closed on drop.
+#[cfg(not(feature = "rust-only"))]
+#[must_use = "the range closes when this is dropped, so dropping it at once ranges nothing"]
+pub fn nvtx_range(name: &str) -> NvtxRange {
+    instrument::nvtx_range(name)
+}
+
+/// Drain what the session recorded, after the root export and before the plan ends — the
+/// events die with the plan, and the device times do not exist until then.
+#[cfg(not(feature = "rust-only"))]
+pub fn collect_regions(executor: *mut PeacockExecutor) -> Result<Vec<Region>, BackendError> {
+    gpu_backend::collect_regions(executor)
 }
 
 /// A join, as the schedule sees one: the range of its probe subtree, and how many lanes

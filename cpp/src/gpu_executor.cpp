@@ -35,15 +35,24 @@ struct peacock_executor {
   std::unique_ptr<peacock::NodeSession> session;
 };
 
-// The stats entry points hand C++'s NodeStats back as the C struct by cast, which is
-// sound only while the two are laid out identically. Adding a member to one and not
-// the other, or reordering either, fails here rather than silently handing Rust fields
-// from the wrong offsets.
+// The stats and region entry points hand C++'s structs back as the C ones by cast,
+// which is sound only while each pair is laid out identically. Adding a member to one
+// and not the other, or reordering either, fails here rather than silently handing Rust
+// fields from the wrong offsets.
+#define PCK_SAME_OFFSET(a, b, field)                      \
+  static_assert(offsetof(a, field) == offsetof(b, field), \
+                "the two definitions of " #field " must sit at the same offset")
+
 static_assert(sizeof(PeacockNodeStats) == sizeof(peacock::NodeStats));
-static_assert(offsetof(PeacockNodeStats, rows) == offsetof(peacock::NodeStats, rows));
-static_assert(offsetof(PeacockNodeStats, varlen_content_bytes) ==
-              offsetof(peacock::NodeStats, varlen_content_bytes));
-static_assert(offsetof(PeacockNodeStats, time_us) == offsetof(peacock::NodeStats, time_us));
+PCK_SAME_OFFSET(PeacockNodeStats, peacock::NodeStats, rows);
+PCK_SAME_OFFSET(PeacockNodeStats, peacock::NodeStats, varlen_content_bytes);
+
+static_assert(sizeof(PeacockNodeRegion) == sizeof(peacock::NodeRegion));
+PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, seq);
+PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, partition);
+PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, call_index);
+PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, host_us);
+PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, device_us);
 
 // Export a cuDF table to an Arrow IPC stream buffer (malloc'd; free with
 // peacock_result_free), for peacock_result_from_handle. Widens DECIMAL32/64→128 since
@@ -135,23 +144,26 @@ int peacock_install_rmm_pool(uint64_t bytes, PeacockRmmPoolInfo* out_info) {
   return 0;
 }
 
-void peacock_set_node_timing(int enable) { peacock::set_node_timing(enable != 0); }
-
-uint64_t peacock_measure_timing_floor_us(unsigned samples) {
-  // No executor handle here, so no `last_error` to park a message in — print and
-  // return 0. A 0 floor is self-announcing in the output file (a floor of zero
-  // claims the instrumentation is free, which nothing believes), so it degrades
-  // to "unknown" rather than to a plausible lie.
-  try {
-    return peacock::measure_timing_floor_us(samples);
-  } catch (const std::exception& e) {
-    std::fprintf(stderr, "[peacock_measure_timing_floor_us] error: %s\n", e.what());
-    return 0;
-  } catch (...) {
-    std::fprintf(stderr, "[peacock_measure_timing_floor_us] unknown exception\n");
-    return 0;
+int peacock_set_node_timing(int mode) {
+  // A value this build does not name is refused rather than read as off: a caller that
+  // asked for a mode and got silence measures nothing and has no way to find out.
+  switch (mode) {
+    case PEACOCK_NODE_TIMING_OFF:
+      peacock::set_node_timing(peacock::NodeTiming::Off);
+      return 0;
+    case PEACOCK_NODE_TIMING_EVENTS:
+      peacock::set_node_timing(peacock::NodeTiming::Events);
+      return 0;
+    default:
+      return 1;
   }
 }
+
+void peacock_set_nvtx_ranges(int on) { peacock::set_nvtx_ranges(on != 0); }
+
+void peacock_nvtx_push_range(const char* name) { peacock::push_harness_range(name); }
+
+void peacock_nvtx_pop_range() { peacock::pop_harness_range(); }
 
 // ---------------------------------------------------------------------------
 // Executor lifecycle
@@ -289,6 +301,43 @@ int peacock_executor_slice_handle(peacock_executor_t* executor, uint64_t handle,
   }
 }
 
+int peacock_executor_collect_node_regions(peacock_executor_t* executor, PeacockNodeRegion* out,
+                                          uint64_t cap, uint64_t* out_count) {
+  if (!executor || !out_count) return 1;
+  if (!executor->session) {
+    executor->last_error = "no plan loaded";
+    return 1;
+  }
+  try {
+    const uint64_t recorded = static_cast<uint64_t>(executor->session->recorded_regions());
+    *out_count = recorded;
+    // Neither of these drains: asking the count is the first half of one call, and a
+    // buffer too small is a caller's mistake rather than a reason to lose the regions it
+    // asked for.
+    if (!out && cap == 0) return 0;
+    if (recorded > cap) {
+      executor->last_error = "collect_node_regions: buffer holds " + std::to_string(cap) + " of " +
+                             std::to_string(recorded) + " recorded regions";
+      return 1;
+    }
+    auto regions = executor->session->collect_node_regions();
+    *out_count = static_cast<uint64_t>(regions.size());
+    // Copied whole, because a field-by-field copy has a line to forget and a size assert
+    // cannot see that: a field added to both structs keeps the sizes equal, and the copy
+    // that skipped it reports zeros. The per-field offsets above are what make the
+    // whole-struct copy safe.
+    if (!regions.empty())
+      std::memcpy(out, regions.data(), regions.size() * sizeof(PeacockNodeRegion));
+    return 0;
+  } catch (const std::exception& e) {
+    executor->last_error = e.what();
+    return 1;
+  } catch (...) {
+    executor->last_error = "unknown exception";
+    return 1;
+  }
+}
+
 int peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle, uint64_t offset,
                                uint64_t length, uint8_t** out_ipc, uint64_t* out_ipc_len) {
   if (!executor || !out_ipc || !out_ipc_len) return 1;
@@ -300,16 +349,20 @@ int peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle, ui
     const auto& result = executor->session->table_for(handle);
     auto view = result.table->view();
     auto [begin, end] = peacock::clamp_row_range(offset, length, view.num_rows());
-    // A range naming no rows of a non-empty table ships nothing. An empty table takes
-    // the whole-table arm instead, so a caller asking for all of one keeps getting the
-    // schema-only stream it has always had.
+    // A range naming no rows of a non-empty table ships nothing — through time_export like
+    // the arm below, since the driver journals the call either way and join_regions refuses
+    // a journalled call no region answered. An empty table takes the whole-table arm
+    // instead, so a caller asking for all of one still gets its schema-only stream.
     if (begin == end && view.num_rows() > 0) {
-      *out_ipc = nullptr;  // so "nothing to free" is a pointer the caller can act on
-      *out_ipc_len = 0;
+      executor->session->time_export(handle, [&] {
+        *out_ipc = nullptr;  // so "nothing to free" is a pointer the caller can act on
+        *out_ipc_len = 0;
+      });
       return 0;
     }
     if (begin != 0 || end != view.num_rows()) view = cudf::slice(view, {begin, end}).front();
-    export_table_to_ipc(view, result.column_names, out_ipc, out_ipc_len);
+    executor->session->time_export(
+        handle, [&] { export_table_to_ipc(view, result.column_names, out_ipc, out_ipc_len); });
     return 0;
   } catch (const std::exception& e) {
     executor->last_error = e.what();

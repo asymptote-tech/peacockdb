@@ -128,18 +128,31 @@ TEST(PeacockGpu, ExecutorNullOut) {
 }
 
 // The timing switch, on the tier that has no GPU because it needs none: it is a
-// process-global bool, and the whole safety argument for the benchmark work is that
-// the correctness suite never turns it on. A switch stuck on would put a
-// cudaStreamSynchronize after every node of every GPU test and nothing would fail —
-// the runs would just serialize, which reads as a slow host.
+// process-global mode, and the whole safety argument for the benchmark work is that the
+// correctness suite never leaves it on. Stuck on, it would leak a CUDA event pair per
+// region until the session ends, and nothing would fail.
 TEST(NodeTiming, DefaultsOff) {
+  EXPECT_EQ(peacock::node_timing(), peacock::NodeTiming::Off);
   EXPECT_FALSE(peacock::node_timing_enabled());
 }
 
 TEST(NodeTiming, SwitchRoundTrips) {
-  peacock::set_node_timing(true);
+  peacock::set_node_timing(peacock::NodeTiming::Events);
+  EXPECT_EQ(peacock::node_timing(), peacock::NodeTiming::Events);
   EXPECT_TRUE(peacock::node_timing_enabled());
-  peacock::set_node_timing(false);
+  peacock::set_node_timing(peacock::NodeTiming::Off);
+  EXPECT_EQ(peacock::node_timing(), peacock::NodeTiming::Off);
+  EXPECT_FALSE(peacock::node_timing_enabled());
+}
+
+// The ABI takes an int, so a caller can name a mode this build does not have. Refusing
+// it is what makes that visible: read as off, the caller measures nothing and the run
+// reports zeros it has no reason to doubt.
+TEST(NodeTiming, TheAbiRefusesAModeItDoesNotName) {
+  EXPECT_EQ(peacock_set_node_timing(PEACOCK_NODE_TIMING_EVENTS), 0);
+  EXPECT_NE(peacock_set_node_timing(7), 0);
+  EXPECT_EQ(peacock::node_timing(), peacock::NodeTiming::Events) << "a refused mode changed it";
+  EXPECT_EQ(peacock_set_node_timing(PEACOCK_NODE_TIMING_OFF), 0);
   EXPECT_FALSE(peacock::node_timing_enabled());
 }
 

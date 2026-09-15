@@ -98,3 +98,13 @@ stops for the human.** The walk is the only instrument that can ask what one cal
 panics on ten shapes — eight never taught, two the engine truly cannot run. Teaches the eight, makes
 a device refusal an outcome rather than an abort, and records the real limits as `bug_` tests naming
 #136, #152 and #175. No production code. Deliverable: a checked table of what it can drive.
+
+## Chain ENS-bp-benchmarks (base: master)
+
+### 1. [`bp-benchmarks.md`](bp-benchmarks.md) — state: reviewing — PR #139
+
+The corpus benchmark at sf40: one timing tree per (dataset, mode), one record row per cuDF
+call, two Nsight captures and the panels. The branch and PR predate the spec, so the
+coordinator picks the branch up as unfinished work rather than branching afresh: it is one
+squashed commit on master, re-homed into the component layout and never built there;
+`bp-benchmarks-detail.md` says what it holds and what the spec removes.

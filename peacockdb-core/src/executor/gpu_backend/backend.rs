@@ -21,6 +21,7 @@ use crate::executor::{
     LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin, RowRange,
     SourceExecutor, SourceStep, UnloadExecutor,
 };
+use super::CallSite;
 use crate::executor::{GpuBackend, GpuContext};
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
@@ -62,7 +63,9 @@ impl Backend for GpuBackend {
                 node.name()
             ))
         })?;
-        let executor = ctx.executor;
+        // The lane belongs to the executor rather than to the call: C++ answers a call
+        // with the output slot inside it, which is 0 for every lane at four lanes.
+        let site = CallSite { executor: ctx.executor, node: post_order, lane };
         let out = |node: &dyn GpuNode| -> ArrowSchema {
             node.kind()
                 .schema()
@@ -74,20 +77,29 @@ impl Backend for GpuBackend {
         let input = |ordinal: usize| out(node.children()[ordinal]);
         Ok(match as_node_ref(node) {
             NodeRef::LoadParquet(load) => {
-                NodeExecutors::Source(GpuSource::new(executor, recipe, load, lane, &out(node))?)
+                NodeExecutors::Source(GpuSource::new(site, recipe, load, &out(node))?)
             }
-            NodeRef::Filter(_) | NodeRef::Project(_) | NodeRef::Sort(_) | NodeRef::Aggregate(_) => {
-                NodeExecutors::Exec(GpuExec::new(executor, recipe, &out(node))?)
+            NodeRef::Filter(_) | NodeRef::Project(_) | NodeRef::Sort(_) => {
+                NodeExecutors::Exec(GpuExec::new(site, recipe, None, &out(node))?)
             }
+            // The one exec node that chains: its first call answers with the state its
+            // finalize reads, and nothing builds a batch from that, so the state schema is
+            // the only thing that can price it.
+            NodeRef::Aggregate(aggregate) => NodeExecutors::Exec(GpuExec::new(
+                site,
+                recipe,
+                Some(&aggregate.intermediate().fields.as_ref().clone()),
+                &out(node),
+            )?),
             NodeRef::CoalesceAllBatches(_) => NodeExecutors::BatchAccumulator(
-                GpuAccumulator::coalesce(executor, recipe, &out(node))?,
+                GpuAccumulator::coalesce(site, recipe, &out(node))?,
             ),
             NodeRef::AccumulateBatchesAndSort(_) => NodeExecutors::BatchAccumulator(
-                GpuAccumulator::sorted(executor, recipe, &out(node))?,
+                GpuAccumulator::sorted(site, recipe, &out(node))?,
             ),
             NodeRef::AggregateBatches(merge) => {
                 NodeExecutors::BatchAccumulator(GpuAccumulator::aggregate(
-                    executor,
+                    site,
                     recipe,
                     &merge.intermediate().fields.as_ref().clone(),
                     &out(node),
@@ -95,7 +107,7 @@ impl Backend for GpuBackend {
                 )?)
             }
             NodeRef::Limit(limit) => NodeExecutors::BatchAccumulator(GpuAccumulator::limit(
-                executor,
+                site,
                 recipe,
                 limit.interval,
                 &out(node),
@@ -107,14 +119,14 @@ impl Backend for GpuBackend {
                     .expect("a merge's input is not a sink")
                     .n;
                 NodeExecutors::PartitionAccumulator(GpuPartitionAccumulator::merge_sorted(
-                    executor,
+                    site,
                     recipe,
                     lanes,
                     &out(node),
                 )?)
             }
             NodeRef::EmitPartitions(_) => {
-                NodeExecutors::PartitionEmitter(GpuEmitter::new(executor, recipe, &out(node))?)
+                NodeExecutors::PartitionEmitter(GpuEmitter::new(site, recipe, &out(node))?)
             }
             NodeRef::Join(join) => {
                 // A join that answers in one call has no finish pass, so what its per-call
@@ -128,7 +140,7 @@ impl Backend for GpuBackend {
                 let keys = (!one_call && per_call_join_type(join.join_type).is_none())
                     .then(|| key_schema(&input(1), &join.keys));
                 NodeExecutors::Join(GpuJoin::new(
-                    executor,
+                    site,
                     recipe,
                     Some(join.join_type),
                     keys.as_ref(),
@@ -138,9 +150,9 @@ impl Backend for GpuBackend {
             NodeRef::CrossJoin(_) | NodeRef::NestedLoopJoin(_) => {
                 // Neither has a join type of its own on the wire, and neither publishes a
                 // finish, so there is no answer for one over no keys to be wrong about.
-                NodeExecutors::Join(GpuJoin::new(executor, recipe, None, None, &out(node))?)
+                NodeExecutors::Join(GpuJoin::new(site, recipe, None, None, &out(node))?)
             }
-            NodeRef::Unload(_) => NodeExecutors::Unload(GpuExport::new(executor, &input(0))),
+            NodeRef::Unload(_) => NodeExecutors::Unload(GpuExport::new(site, &input(0))),
             NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) => {
                 unreachable!("routing nodes are answered above")
             }

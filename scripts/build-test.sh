@@ -308,6 +308,8 @@ peacockdb-core:test_gpu_recipe_walk
 peacockdb-core:test_gpu_executors
 peacockdb-core:test_inc2_conformance
 peacockdb-core:test_gpu_corpus
+peacockdb-core:test_node_timing
+peacockdb-core:peacock_gpu_benchmarks
 GPUSET
 }
 

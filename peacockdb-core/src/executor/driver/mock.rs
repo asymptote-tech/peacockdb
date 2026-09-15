@@ -17,9 +17,9 @@ use crate::executor::CpuBatch;
 use crate::executor::forwarder_for;
 use crate::executor::{Backend, NodeExecutors};
 use crate::executor::{
-    BackendError, BatchAccumulatorExecutor, CallResult, CallStats, ExecExecutor, Executor,
-    JoinExecutor, LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor, ProbingJoin,
-    RowRange, SourceExecutor, SourceStep, UnloadExecutor,
+    AbiCalls, BackendError, BatchAccumulatorExecutor, CallResult, CallStats, ExecExecutor,
+    Executor, JoinExecutor, LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor,
+    ProbingJoin, RowRange, SourceExecutor, SourceStep, UnloadExecutor,
 };
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
@@ -237,6 +237,8 @@ impl Script {
     fn stats(&self) -> CallStats {
         CallStats {
             scratch_bytes: self.measured_scratch,
+            // A mock addresses no seq: what it drives is a script, not a recipe.
+            calls: AbiCalls::default(),
         }
     }
 }

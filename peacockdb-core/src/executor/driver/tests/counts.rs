@@ -238,3 +238,66 @@ fn a_released_skip_prefix_counts_as_consumed_and_emits_nothing() {
     assert_eq!(report.rows_skipped.iter().sum::<u64>(), 20);
     assert_conserved(plan.as_ref(), &report);
 }
+
+/// The call record is indexed by the lanes a node is *driven on*, which is what the index
+/// calls `ready_lanes` — so a reader never has to guess whether a lane index means the
+/// input side or the output one.
+///
+/// Asserted where the two part company, which is the only place the distinction can be
+/// seen: a scatter is driven on one lane and emits into four, a cross-lane merge is driven
+/// on four and emits on one. Against the index rather than against a field of the report,
+/// because a field the driver fills from the index cannot disagree with it.
+#[test]
+fn the_call_record_is_indexed_by_the_lanes_a_node_is_driven_on() {
+    let script = Script::default()
+        .source("part", vec![vec![spec(12, 96)]])
+        .with_emit(EmitRule::RoundRobin);
+    let plan = unload(merge_sorted(emit(source("part", 1), 4)));
+    let report = run(plan.as_ref(), &script);
+    let index = PlanIndex::build(plan.as_ref()).expect("the plan indexes");
+    let differ: Vec<usize> = (0..report.abi_calls.len())
+        .filter(|node| index.nodes[*node].ready_lanes != report.lanes_of[*node])
+        .collect();
+    assert_eq!(differ.len(), 2, "the scatter and the merge, and nothing else");
+    for node in 0..report.abi_calls.len() {
+        assert_eq!(
+            report.abi_calls[node].len(),
+            index.nodes[node].ready_lanes,
+            "node {node} is recorded on the lanes it was driven on"
+        );
+    }
+}
+
+/// One entry per call that reached an executor, and none for a step the driver answered
+/// itself. Two batches through a filter is two calls plus the done, and the end-of-input
+/// that follows is the driver's own — a fourth entry would shift every batch after it.
+#[test]
+fn a_lane_records_its_backend_calls_and_not_the_drivers_own() {
+    let script = Script::default().source("part", vec![vec![spec(10, 80), spec(7, 56)]]);
+    let plan = unload(filter(source("part", 1)));
+    let report = run(plan.as_ref(), &script);
+    let filter_node = UNLOAD + 1;
+    assert_eq!(
+        report.abi_calls[filter_node][0].len(),
+        rows_of(&report, filter_node, 0).len(),
+        "a filter emits one batch per call and makes no call at done"
+    );
+}
+
+/// A backend that addresses no seq reports nothing, and that is not the same statement as
+/// a backend that made no calls — the mock is the first kind, and a reader that cannot
+/// tell them apart renders a silent backend as a fast one.
+#[test]
+fn a_backend_that_names_no_seq_leaves_every_entry_unmeasured() {
+    let script = Script::default().source("part", vec![vec![spec(10, 80), spec(7, 56)]]);
+    let plan = unload(filter(source("part", 1)));
+    let report = run(plan.as_ref(), &script);
+    let mut entries = 0;
+    for lanes in &report.abi_calls {
+        for calls in lanes.iter().flatten() {
+            assert!(calls.recorded().is_none(), "the mock measures nothing");
+            entries += 1;
+        }
+    }
+    assert!(entries > 0, "the run made calls to leave entries for");
+}

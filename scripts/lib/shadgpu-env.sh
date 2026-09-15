@@ -1,15 +1,14 @@
 # shellcheck shell=bash
 #
 # Shared build/deploy environment for the shad-gpu workflow: toolchain pinning, cargo
-# target dir, the remote, and the helpers the phases use. Sourced by the driver script
-# and by anything else that has to reach the host with the same settings.
+# target dir, the remote, and the helpers every phase uses. Sourced by the driver script,
+# by create_nsys_profile.sh, and by anything else reaching the host with these settings.
 #
-# Sourced, never executed: no `set -e` here, and nothing below has a side effect
-# beyond exporting variables and defining functions.
+# Sourced, never executed: no `set -e` here, and the only side effect below is a refusal
+# when this host's glibc version cannot be read, which every shipped binary needs.
 #
-# scripts/docker-build.sh greps `^CUDF_ROOT=` out of this file to derive the conda
-# prefix its container shims into place; moving or reformatting that assignment
-# breaks the container build.
+# scripts/docker-build.sh greps `^CUDF_ROOT=` out of this file for the conda prefix its
+# container shims into place; moving or reformatting that assignment breaks it.
 
 CUDF_ROOT=/home/dmitry/data/miniforge3/envs/rapids-cuda-12.2
 export CUDF_ROOT
@@ -42,6 +41,36 @@ fi
 
 REMOTE=shad-gpu
 REMOTE_REPO=/home/info/peacockdb
+
+# Validation belongs before a phase's first side effect: half a deploy followed by "you
+# cannot do that" is worse than either outcome alone.
+die() { echo "$*" >&2; exit 1; }
+
+# The glibc a shipped binary is patched to is the BUILD host's: 2.35 from a 22.04 box or
+# CI's container, 2.39 from a 24.04 one. Read here, where the binaries are built, and used
+# by the patch phase and by every remote command that loads one.
+BUILD_GLIBC=$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)
+[ -n "$BUILD_GLIBC" ] || die "cannot read this host's glibc version from getconf"
+
+# The library path a shipped binary needs on the host, as REMOTE shell text: `$HOME` and
+# `$LD_LIBRARY_PATH` are left for the remote to expand. Applied per command and never
+# exported — exported, the host's own coreutils load the patched glibc and segfault, so a
+# run reports a bogus code having actually succeeded.
+PATCHED_LD="$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat"
+PATCHED_LD="$PATCHED_LD:/home/info/glibc-$BUILD_GLIBC/lib"
+PATCHED_LD="$PATCHED_LD:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\${LD_LIBRARY_PATH:-}"
+
+# sf40 lives outside the repo on the host and is read in place; 40 GB is not copied per run.
+SF40_DIR=/home/info/peacock-datasets/testdata/tpch.sf40
+
+# The "N passed" libtest printed in a log, summed over its passes. That count is the only
+# honest answer to "did the filter match anything" — counting output files answers a
+# different question. Shipped into a remote script with `declare -f`, since the run it
+# counts happens there.
+passed_count() {
+  sed -n 's/^test result:.* \([0-9][0-9]*\) passed.*/\1/p' "$1" \
+    | awk '{n += $1} END {print n + 0}'
+}
 
 # rsync over the flaky, bursty shad-gpu link, made self-healing rather than
 # all-or-nothing: --partial --inplace so a retry resumes the same file instead of
@@ -96,4 +125,23 @@ for line in sys.stdin:
   mkdir -p "$staging"
   cp -f "$exec_path" "$staging/$target"
   echo "--- Staged: $staging/$target"
+}
+
+# pull_one <path under testdata/> <what it is>
+#
+# Fetch one file from the host into the same place here, and return 1 when there is none.
+# Tested over ssh rather than by letting the transfer fail: resilient_rsync retries a
+# missing source a hundred times, and eight minutes of backoff reads as a hang.
+pull_one() {
+  local rel=$1 what=$2
+  if ! ssh "$REMOTE" test -f "$REMOTE_REPO/testdata/$rel"; then
+    echo "==> $what: nothing on the host"
+    return 1
+  fi
+  mkdir -p "testdata/$(dirname "$rel")"
+  resilient_rsync "$REMOTE:$REMOTE_REPO/testdata/$rel" "testdata/$rel"
+  case "$rel" in
+    *.tsv) echo "==> $what: $(grep -vc '^#' "testdata/$rel") rows" ;;
+    *)     echo "==> $what: $(du -h "testdata/$rel" | cut -f1)" ;;
+  esac
 }

@@ -1160,6 +1160,274 @@ TEST(ScanRowGroups, SubsetsUnionToTheWholeScan) {
   EXPECT_EQ(keys, whole);
 }
 
+// ---------------------------------------------------------------------------
+// The measurement side: what a region records, and the coordinate that tells two
+// calls of one seq apart. Nothing on the execution path reads any of it, so these
+// are the only checks it has.
+// ---------------------------------------------------------------------------
+
+/// A timing loan, so a failing expectation cannot leave the process-global switch on for
+/// every later test in this binary.
+struct TimingOn {
+  TimingOn() { peacock::set_node_timing(peacock::NodeTiming::Events); }
+  ~TimingOn() { peacock::set_node_timing(peacock::NodeTiming::Off); }
+};
+
+/// The other switch, restored the same way: an assertion that fails mid-test would
+/// otherwise leave every later test in this binary emitting ranges.
+struct RangesOn {
+  RangesOn() { peacock::set_nvtx_ranges(true); }
+  ~RangesOn() { peacock::set_nvtx_ranges(false); }
+};
+
+/// A customer scan under a hash repartition into `lanes` — the one arm that answers a
+/// single call with several output partitions.
+static std::vector<uint8_t> scatter_plan(flatbuffers::FlatBufferBuilder& fbb, uint32_t lanes) {
+  auto path = fbb.CreateString(parquet_path("customer"));
+  auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
+  auto schema = make_schema(fbb, {{"c_custkey", fb::DataType_Int64}});
+  auto scan = fb::CreateCudfScan(fbb, paths, schema, fbb.CreateVector(std::vector<uint32_t>{0}));
+  auto scan_node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
+  auto keys = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 0, "c_custkey")});
+  auto rp = fb::CreateCudfRepartition(fbb, fb::PartitioningKind_Hash, lanes, keys, scan_node);
+  return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfRepartition, rp.Union()));
+}
+
+TEST(NodeRegions, EveryCallOpensOneRegionPerOutputPartition) {
+  TimingOn timing;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = scatter_plan(fbb, /*lanes=*/4);
+  peacock::NodeSession session(buf.data(), buf.size());
+
+  std::vector<uint32_t> groups{0};
+  uint64_t scanned = session.execute_scan_rowgroups(0, groups, nullptr);
+
+  uint64_t counts[1] = {1};
+  uint64_t out[4] = {};
+  size_t produced = 0;
+  peacock::NodeStats stats[4] = {};
+  session.execute_node(1, &scanned, counts, 1, out, 4, &produced, stats);
+  ASSERT_EQ(produced, 4u);
+
+  // One region for the scan and one per partition the scatter emitted: the shared
+  // concat charged to p0 must not cost a region of its own, since a call's regions are
+  // what the record sums to get its cost.
+  auto regions = session.collect_node_regions();
+  ASSERT_EQ(regions.size(), 1u + 4u);
+  EXPECT_EQ(regions[0].seq, 0u);
+  for (size_t p = 0; p < 4; ++p) {
+    EXPECT_EQ(regions[1 + p].seq, 1u);
+    EXPECT_EQ(regions[1 + p].partition, p);
+    EXPECT_EQ(regions[1 + p].call_index, 0u) << "partition " << p;
+  }
+}
+
+TEST(NodeRegions, CallIndexCountsCallsOfOneSeq) {
+  TimingOn timing;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  peacock::NodeSession session(buf.data(), buf.size());
+
+  std::vector<uint32_t> first{0}, second{1};
+  session.execute_scan_rowgroups(0, first, nullptr);
+  session.execute_scan_rowgroups(0, second, nullptr);
+
+  auto regions = session.collect_node_regions();
+  ASSERT_EQ(regions.size(), 2u);
+  EXPECT_EQ(regions[0].seq, 0u);
+  EXPECT_EQ(regions[1].seq, 0u);
+  // The whole point of the field: without it the two rows are indistinguishable, and a
+  // record row cannot be matched to the call it describes.
+  EXPECT_EQ(regions[0].call_index, 0u);
+  EXPECT_EQ(regions[1].call_index, 1u);
+}
+
+TEST(NodeRegions, ANewSessionStartsTheCountAgain) {
+  TimingOn timing;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  std::vector<uint32_t> groups{0};
+
+  // Two sessions over the same plan, as a benchmark's repeated runs are: the index is a
+  // coordinate within a run, so the second must not continue the first.
+  for (int run = 0; run < 2; ++run) {
+    peacock::NodeSession session(buf.data(), buf.size());
+    session.execute_scan_rowgroups(0, groups, nullptr);
+    auto regions = session.collect_node_regions();
+    ASSERT_EQ(regions.size(), 1u);
+    EXPECT_EQ(regions[0].call_index, 0u) << "run " << run;
+  }
+}
+
+TEST(NodeRegions, ARegionCarriesWhatOnlyAMeasurementReads) {
+  TimingOn timing;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0, 1});
+  peacock::NodeSession session(buf.data(), buf.size());
+
+  std::vector<uint32_t> groups{0};
+  peacock::NodeStats stats{};
+  session.execute_scan_rowgroups(0, groups, &stats);
+  auto regions = session.collect_node_regions();
+  ASSERT_EQ(regions.size(), 1u);
+
+  // `NodeStats` keeps what the driver reads and nothing else; the two clocks travel by
+  // collection instead, which is what keeps a shipping query from paying per call.
+  EXPECT_GT(stats.rows, 0u);
+  EXPECT_GT(regions[0].host_us, 0u);
+  EXPECT_GT(regions[0].device_us, 0u);
+}
+
+TEST(NodeRegions, CollectingTwiceReportsNothingTheSecondTime) {
+  TimingOn timing;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  peacock::NodeSession session(buf.data(), buf.size());
+
+  std::vector<uint32_t> groups{0};
+  session.execute_scan_rowgroups(0, groups, nullptr);
+  EXPECT_EQ(session.recorded_regions(), 1u);
+  EXPECT_EQ(session.collect_node_regions().size(), 1u);
+  // A second call must not report the same regions again, and a long session must not
+  // accumulate events without bound.
+  EXPECT_EQ(session.recorded_regions(), 0u);
+  EXPECT_TRUE(session.collect_node_regions().empty());
+}
+
+TEST(NodeRegions, TimingOffRecordsNothing) {
+  // No loan: the switch is already off, and this test is about it staying that way.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  peacock::NodeSession session(buf.data(), buf.size());
+
+  std::vector<uint32_t> groups{0};
+  peacock::NodeStats stats{};
+  uint64_t handle = session.execute_scan_rowgroups(0, groups, &stats);
+  session.time_export(handle, [] {});
+  // The driver's two numbers are always there; the measurement is not allocated at all.
+  EXPECT_GT(stats.rows, 0u);
+  EXPECT_EQ(session.recorded_regions(), 0u);
+  EXPECT_TRUE(session.collect_node_regions().empty());
+}
+
+TEST(NodeRegions, TheSliceAndTheExportOpenRegionsToo) {
+  TimingOn timing;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  peacock::NodeSession session(buf.data(), buf.size());
+
+  std::vector<uint32_t> groups{0};
+  uint64_t scanned = session.execute_scan_rowgroups(0, groups, nullptr);
+  uint64_t sliced = session.slice_handle(scanned, 0, 10);
+  bool exported = false;
+  session.time_export(sliced, [&] { exported = true; });
+  EXPECT_TRUE(exported);
+
+  // Neither entry point is given a seq — a limit and a sink carry none on the wire — so
+  // both are charged to the node that produced the rows, and the call index counts on
+  // from the call that produced them.
+  auto regions = session.collect_node_regions();
+  ASSERT_EQ(regions.size(), 3u);
+  for (const auto& r : regions) EXPECT_EQ(r.seq, 0u);
+  EXPECT_EQ(regions[1].call_index, 1u);
+  EXPECT_EQ(regions[2].call_index, 2u);
+}
+
+TEST(NodeRegions, AnExportOfNoRowsOpensOneToo) {
+  TimingOn timing;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  // Through the C entry point, because the empty range is decided there: the session's
+  // time_export is handed a body, and whether there is one to hand it is the caller's.
+  CApiPlan plan(buf);
+
+  std::vector<uint32_t> groups{0};
+  uint64_t handle = 0;
+  ASSERT_EQ(peacock_executor_execute_scan_rowgroups(plan.get(), 0, groups.data(), groups.size(),
+                                                    &handle, nullptr),
+            0);
+
+  // A range naming no rows of a non-empty table ships nothing, and the call was still made:
+  // the driver journals it, and join_regions refuses a call no region answered.
+  uint8_t* ipc = nullptr;
+  uint64_t len = 0;
+  ASSERT_EQ(peacock_result_from_handle(plan.get(), handle, 0, 0, &ipc, &len), 0);
+  EXPECT_EQ(len, 0u);
+
+  uint64_t count = 0;
+  std::vector<PeacockNodeRegion> got(4);
+  ASSERT_EQ(peacock_executor_collect_node_regions(plan.get(), got.data(), got.size(), &count), 0);
+  ASSERT_EQ(count, 2u);
+  EXPECT_EQ(got[1].seq, 0u);
+  EXPECT_EQ(got[1].call_index, 1u);
+}
+
+TEST(NodeRegions, AskingTheCountDrainsNothing) {
+  TimingOn timing;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  CApiPlan plan(buf);
+
+  std::vector<uint32_t> groups{0};
+  uint64_t handle = 0;
+  ASSERT_EQ(peacock_executor_execute_scan_rowgroups(plan.get(), 0, groups.data(), groups.size(),
+                                                    &handle, nullptr),
+            0);
+
+  // How a caller sizes its buffer: ask, allocate, drain. A count that drained would
+  // leave the second call with nothing to copy.
+  uint64_t count = 0;
+  ASSERT_EQ(peacock_executor_collect_node_regions(plan.get(), nullptr, 0, &count), 0);
+  EXPECT_EQ(count, 1u);
+
+  // A buffer below the count fails and drains nothing either, so the caller can retry
+  // with the size it was just told.
+  PeacockNodeRegion too_small[1] = {};
+  uint64_t reported = 0;
+  EXPECT_NE(peacock_executor_collect_node_regions(plan.get(), too_small, 0, &reported), 0);
+  EXPECT_EQ(reported, 1u);
+
+  std::vector<PeacockNodeRegion> got(count);
+  ASSERT_EQ(peacock_executor_collect_node_regions(plan.get(), got.data(), count, &reported), 0);
+  EXPECT_EQ(reported, 1u);
+  EXPECT_GT(got[0].host_us, 0u);
+}
+
+/// Ranges on, timing off. The two switches are separate so a capture can have the node
+/// boundaries without the event pairs, which are device work of their own — and until this
+/// test the only thing saying so was the comment.
+TEST(NvtxRanges, RangesWithoutTimingRecordNoRegion) {
+  RangesOn ranges;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  peacock::NodeSession session(buf.data(), buf.size());
+
+  std::vector<uint32_t> groups{0};
+  peacock::NodeStats stats{};
+  uint64_t handle = session.execute_scan_rowgroups(0, groups, &stats);
+  session.time_export(handle, [] {});
+  EXPECT_GT(stats.rows, 0u);
+  EXPECT_EQ(session.recorded_regions(), 0u);
+}
+
+/// The harness range is one level: a case does not nest inside a case, so a second push
+/// replaces the first. A stack instead would leave the outer one open after this pop, and
+/// every later case would be captured inside a query it did not belong to.
+TEST(NvtxRanges, ASecondPushReplacesTheFirstRatherThanNesting) {
+  // No guard yet: the switch is off by default, and a push while it is off is a no-op —
+  // which is what lets the harness call this unconditionally.
+  peacock::push_harness_range("tpch.sf40 q6 tp1-single");
+  EXPECT_FALSE(peacock::harness_range_is_open());
+
+  RangesOn ranges;
+  peacock::push_harness_range("tpch.sf40 q6 tp1-single");
+  EXPECT_TRUE(peacock::harness_range_is_open());
+  peacock::push_harness_range("tpch.sf40 q19 tp1-single");
+  peacock::pop_harness_range();
+  EXPECT_FALSE(peacock::harness_range_is_open());
+}
+
 TEST(ScanRowGroups, ACallOnAnotherKindOfNodeSaysWhichKind) {
   flatbuffers::FlatBufferBuilder fbb;
   auto path = fbb.CreateString(parquet_path("region"));

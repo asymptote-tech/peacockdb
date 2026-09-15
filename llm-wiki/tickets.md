@@ -282,6 +282,12 @@ distinct-per-set but not DataFusion's positional bitmask. Safe while no enabled 
 projects or sorts `GROUPING()`; must be fixed before one does (q70/q86 after #23).
 9 rollup rows carry this ticket.
 
+The width is wrong beside the encoding. The gid is built `INT32`
+(`cudf::numeric_scalar<int32_t>`), where DataFusion sizes the column to the group count:
+`UInt8` up to 8 grouping expressions, `UInt16` to 16, `UInt32` to 32, `UInt64` beyond. Too
+wide for every corpus query and too narrow past 32 groups. The fix reads the declared output
+schema rather than picking a type; nothing timed reaches a plan with grouping sets.
+
 <a id="t62"></a>
 ### #62 — count(DISTINCT) ignores the DISTINCT flag in GpuAggregate
 `cpp/src/operators/aggregate.cpp` ignores `AggregateFuncNode.distinct`; a guard now
@@ -795,6 +801,9 @@ pool size exceeded` is ours: the budget is too small, and a re-run buys nothing.
 - 2026-09-12: CI run `34659896447` on PR #144 (`d41f223a`), `peacock_tpch_tests`: `pool of 69.0
   GiB could not be built with 14.9 GiB free` at 00:08 UTC; `peacock_tpchv_tests` four binaries
   later saw 103.0 GiB free, so a stranger held ~129 GiB for those minutes. Re-run once.
+- bp-benchmarks, dispatch 5: not CI — a non-CI process held 62 GiB and 90–98 % of the card
+  for six hours, and `peacock_gpu_benchmarks` measured q6 at six times its committed time
+  beside it. Nothing measured beside a neighbour is published; the gate ran green meanwhile.
 
 <a id="t176"></a>
 ### #176 — the CI coverage guard checks one direction only
