@@ -101,7 +101,13 @@ Do this before teaching any shape: several shapes cannot be driven until a refus
 **Files:**
 - Modify: the session helper found in Task 1 step 3
 
-- [ ] **Step 1: Write the failing test**
+Built 2026-09-15, detail file "§2 built". The refusal is `Refusal` in `walk.rs` (rc, the call
+as `Option<(Seq, FbKind)>` with `None` for `begin_plan`, the device's message); `try_walk`
+returns it, `walk` panics on it naming both; the test is
+`a_refused_plan_reports_its_code_and_its_call` on #203. `driven()`'s three messages corrected
+beside it.
+
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// A plan the device declines aborts the walk today, so no test can say anything about
@@ -115,12 +121,12 @@ fn a_refused_plan_reports_its_code_and_the_call_that_produced_it() {
 }
 ```
 
-- [ ] **Step 2: Watch it fail, then return the code instead of asserting on it**
+- [x] **Step 2: Watch it fail, then return the code instead of asserting on it**
 
 `execute` returns the code and the call rather than asserting `rc == 0`. Callers that want the old
 behaviour say so at their own site.
 
-- [ ] **Step 3: Run green, commit**
+- [x] **Step 3: Run green, commit**
 
 ```bash
 git commit -m "a device refusal is an outcome, not an abort

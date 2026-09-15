@@ -244,7 +244,8 @@ async fn a_rollup_answers_with_every_grouping_set() {
 #[derive(Debug, PartialEq, Eq)]
 enum Driven {
     Handled,
-    /// Why the walk cannot make this call, in the words its panic uses.
+    /// Why the walk has not made this call: the refusal's own words, or that no query
+    /// here plans the shape.
     Refused(&'static str),
 }
 
@@ -264,15 +265,20 @@ fn driven(kind: FbKind) -> Driven {
         | FbKind::SortPreservingMerge => Driven::Handled,
         FbKind::HashJoin { join_type } => match join_type {
             JoinType::Inner | JoinType::LeftSemi => Driven::Handled,
+            JoinType::Left | JoinType::Full => Driven::Refused(
+                "refused at the first probe batch: the key project and the join both read \
+                 it, and the ABI has no copy (#152)",
+            ),
             _ => Driven::Refused("a join type no shape here plans"),
         },
-        FbKind::Project(ProjectRole::ProbeKeys)
-        | FbKind::Project(ProjectRole::NullPad { .. })
-        | FbKind::Project(ProjectRole::Narrow) => {
-            Driven::Refused("the finish pass accumulates probe keys across batches (#136)")
+        FbKind::Project(ProjectRole::ProbeKeys) | FbKind::Project(ProjectRole::Narrow) => {
+            Driven::Refused("the semi family's finish pass, which no shape here plans")
         }
+        FbKind::Project(ProjectRole::NullPad { .. }) => Driven::Refused(
+            "only Left and Full pad, and the device refuses both before the pad (#152)",
+        ),
         FbKind::CrossJoin | FbKind::NestedLoopJoin => {
-            Driven::Refused("both copy their build side, and the ABI has no copy (#152)")
+            Driven::Refused("a join at one probe batch, which no shape here plans")
         }
     }
 }

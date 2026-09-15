@@ -34,6 +34,29 @@ use crate::test_support::{GPU_BUDGET, data_dir_for, total_rows};
 /// arrival order.
 type Lanes = Vec<Vec<u64>>;
 
+/// A call the device declined: the code it answered, the call — `None` is `begin_plan`,
+/// the session's own call that no recipe names — and the device's message. The walk stops
+/// at the first one: `execute_node` resets the session on any failure, so no handle it
+/// held is usable afterwards.
+#[derive(Debug)]
+pub(crate) struct Refusal {
+    pub(crate) rc: i32,
+    pub(crate) call: Option<(Seq, FbKind)>,
+    pub(crate) message: String,
+}
+
+impl std::fmt::Display for Refusal {
+    /// `#3 CudfProject answered rc 1: <message>` — the call as section B of the payload
+    /// golden spells it, so a failure is looked up there.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.call {
+            Some((seq, kind)) => write!(f, "#{seq} {kind}")?,
+            None => f.write_str("begin_plan")?,
+        }
+        write!(f, " answered rc {}: {}", self.rc, self.message)
+    }
+}
+
 /// An executor with a recipe plan loaded, torn down in the order the header requires.
 struct Session {
     executor: *mut PeacockExecutor,
@@ -45,7 +68,7 @@ impl Session {
     /// device has parsed a buffer we wrote, our agreement with the C++ post-order rested on
     /// two child-order functions having been read side by side; this is the first place
     /// both numbers exist at once.
-    fn open(recipes: &RecipePlan) -> Self {
+    fn open(recipes: &RecipePlan) -> Result<Self, Refusal> {
         let mut executor: *mut PeacockExecutor = std::ptr::null_mut();
         assert_eq!(
             unsafe { peacock_executor_create(GPU_BUDGET as u64, &mut executor) },
@@ -58,7 +81,7 @@ impl Session {
         let rc = unsafe {
             peacock_executor_begin_plan(executor, bytes.as_ptr(), bytes.len() as u64, &mut nodes)
         };
-        assert_eq!(rc, 0, "begin_plan failed: {}", session.last_error());
+        session.answered(rc, None)?;
         assert_eq!(
             nodes as usize,
             recipes.wire_nodes(),
@@ -67,7 +90,20 @@ impl Session {
              tree is what makes a call address the node it names",
             recipes.wire_nodes()
         );
-        session
+        Ok(session)
+    }
+
+    /// A non-zero code is the device's refusal of `call`, with its message read off the
+    /// session before anything else can overwrite it.
+    fn answered(&self, rc: i32, call: Option<(Seq, FbKind)>) -> Result<(), Refusal> {
+        if rc == 0 {
+            return Ok(());
+        }
+        Err(Refusal {
+            rc,
+            call,
+            message: self.last_error(),
+        })
     }
 
     fn last_error(&self) -> String {
@@ -82,7 +118,7 @@ impl Session {
 
     /// One batch's worth of a scan: the row groups the mapping named for it, overriding
     /// the list the node carries.
-    fn scan(&self, seq: Seq, row_groups: &[u32]) -> u64 {
+    fn scan(&self, seq: Seq, row_groups: &[u32]) -> Result<u64, Refusal> {
         let mut handle = 0u64;
         let mut stats = PeacockNodeStats::default();
         let rc = unsafe {
@@ -95,17 +131,17 @@ impl Session {
                 &mut stats,
             )
         };
-        assert_eq!(
-            rc,
-            0,
-            "execute_scan_rowgroups(#{seq}, {row_groups:?}) failed: {}",
-            self.last_error()
-        );
-        handle
+        self.answered(rc, Some((seq, FbKind::Scan)))?;
+        Ok(handle)
     }
 
     /// One `execute_node`, its input handles grouped by the child slot each fills.
-    fn execute(&self, seq: Seq, inputs: &[Vec<u64>], out_cap: usize) -> Vec<u64> {
+    fn execute(
+        &self,
+        (seq, kind): (Seq, FbKind),
+        inputs: &[Vec<u64>],
+        out_cap: usize,
+    ) -> Result<Vec<u64>, Refusal> {
         let counts: Vec<u64> = inputs.iter().map(|group| group.len() as u64).collect();
         let flat: Vec<u64> = inputs.concat();
         let mut handles = vec![0u64; out_cap];
@@ -124,14 +160,9 @@ impl Session {
                 stats.as_mut_ptr(),
             )
         };
-        assert_eq!(
-            rc,
-            0,
-            "execute_node(#{seq}, {counts:?} handles) failed: {}",
-            self.last_error()
-        );
+        self.answered(rc, Some((seq, kind)))?;
         handles.truncate(produced as usize);
-        handles
+        Ok(handles)
     }
 
     /// The whole handle across the boundary, and the schema the stream was written under.
@@ -253,17 +284,17 @@ struct Walk<'a> {
 impl Walk<'_> {
     /// Children first, then this node: the same post-order `attach_recipes` indexed its
     /// recipes by, so the position it takes here is the position they are stored at.
-    fn node(&mut self, node: &dyn GpuNode) -> Lanes {
+    fn node(&mut self, node: &dyn GpuNode) -> Result<Lanes, Refusal> {
         let kids: Vec<Lanes> = node
             .children()
             .into_iter()
             .map(|child| self.node(child))
-            .collect();
+            .collect::<Result<_, _>>()?;
         let index = self.next_node;
         self.next_node += 1;
         let category = category_of(node);
         if category == ExecutorCategory::BatchForwarder {
-            return route(node, &kids);
+            return Ok(route(node, &kids));
         }
         let recipe = self
             .recipes
@@ -276,22 +307,22 @@ impl Walk<'_> {
             ExecutorCategory::BatchAccumulator => self.per_lane(node, recipe, &kids[0]),
             ExecutorCategory::PartitionAccumulator => self.over_all_lanes(recipe, &kids[0]),
             ExecutorCategory::Join => self.join(node, recipe, &kids[0], &kids[1]),
-            ExecutorCategory::Unload => self.unload(node, recipe, &kids[0]),
+            ExecutorCategory::Unload => Ok(self.unload(node, recipe, &kids[0])),
             ExecutorCategory::BatchForwarder => unreachable!("returned above"),
         }
     }
 
     /// The recipe's calls in order, each one's prior output being the last one's.
-    fn chain(&mut self, calls: &[&Call], at: &mut At) -> Vec<u64> {
+    fn chain(&mut self, calls: &[&Call], at: &mut At) -> Result<Vec<u64>, Refusal> {
         let mut produced = Vec::new();
         for call in calls {
-            produced = self.make(call, at);
+            produced = self.make(call, at)?;
             at.prior = produced.first().copied();
         }
-        produced
+        Ok(produced)
     }
 
-    fn make(&mut self, call: &Call, at: &At) -> Vec<u64> {
+    fn make(&mut self, call: &Call, at: &At) -> Result<Vec<u64>, Refusal> {
         let (seq, kind) = call.target.unwrap_or_else(|| {
             panic!(
                 "{} takes runtime bounds rather than a seq, and no shape here plans one",
@@ -305,11 +336,11 @@ impl Walk<'_> {
         };
         self.made.push((seq, kind));
         let session = self.session;
-        let handles = session.execute(seq, &inputs, out_cap);
+        let handles = session.execute((seq, kind), &inputs, out_cap)?;
         for handle in &handles {
             self.measure(call, || session.exported_schema(*handle));
         }
-        handles
+        Ok(handles)
     }
 
     /// What this firing declared beside what the device handed back for it. A call with no
@@ -327,7 +358,7 @@ impl Walk<'_> {
         });
     }
 
-    fn source(&mut self, node: &dyn GpuNode, recipe: &Recipe) -> Lanes {
+    fn source(&mut self, node: &dyn GpuNode, recipe: &Recipe) -> Result<Lanes, Refusal> {
         let NodeRef::LoadParquet(load) = as_node_ref(node) else {
             unreachable!("the source category holds one node kind")
         };
@@ -342,18 +373,23 @@ impl Walk<'_> {
             for row_groups in lane {
                 self.made.push((seq, kind));
                 let session = self.session;
-                let handle = session.scan(seq, row_groups);
+                let handle = session.scan(seq, row_groups)?;
                 self.measure(call, || session.exported_schema(handle));
                 batches.push(handle);
             }
             lanes.push(batches);
         }
-        lanes
+        Ok(lanes)
     }
 
     /// The map arms: one call chain per batch, output keeping its input's lane and batch
     /// structure.
-    fn per_batch(&mut self, node: &dyn GpuNode, recipe: &Recipe, input: &Lanes) -> Lanes {
+    fn per_batch(
+        &mut self,
+        node: &dyn GpuNode,
+        recipe: &Recipe,
+        input: &Lanes,
+    ) -> Result<Lanes, Refusal> {
         let calls: Vec<&Call> = recipe.calls.iter().collect();
         let mut lanes = Vec::with_capacity(input.len());
         for lane in input {
@@ -363,16 +399,21 @@ impl Walk<'_> {
                     batch: Some(*handle),
                     ..At::default()
                 };
-                batches.push(only(self.chain(&calls, &mut at), node.name()));
+                batches.push(only(self.chain(&calls, &mut at)?, node.name()));
             }
             lanes.push(batches);
         }
-        lanes
+        Ok(lanes)
     }
 
     /// The emitter's one call answers with a handle per output lane, so a batch of lane p
     /// is the p-th handle of every call its input made.
-    fn emit_partitions(&mut self, node: &dyn GpuNode, recipe: &Recipe, input: &Lanes) -> Lanes {
+    fn emit_partitions(
+        &mut self,
+        node: &dyn GpuNode,
+        recipe: &Recipe,
+        input: &Lanes,
+    ) -> Result<Lanes, Refusal> {
         let calls: Vec<&Call> = recipe.calls.iter().collect();
         let out_lanes = match recipe.calls.first().and_then(|call| call.target) {
             Some((_, FbKind::Repartition { lanes })) => lanes as usize,
@@ -385,7 +426,7 @@ impl Walk<'_> {
                     batch: Some(*handle),
                     ..At::default()
                 };
-                let scattered = self.chain(&calls, &mut at);
+                let scattered = self.chain(&calls, &mut at)?;
                 assert_eq!(
                     scattered.len(),
                     out_lanes,
@@ -398,12 +439,17 @@ impl Walk<'_> {
                 }
             }
         }
-        lanes
+        Ok(lanes)
     }
 
     /// An accumulator: whatever it does per batch, then its at-done calls once over the
     /// lane it accumulated. The two phases are the recipe's own grouping.
-    fn per_lane(&mut self, node: &dyn GpuNode, recipe: &Recipe, input: &Lanes) -> Lanes {
+    fn per_lane(
+        &mut self,
+        node: &dyn GpuNode,
+        recipe: &Recipe,
+        input: &Lanes,
+    ) -> Result<Lanes, Refusal> {
         let (streamed, at_done) = phases(recipe);
         assert!(
             !at_done.is_empty(),
@@ -423,31 +469,37 @@ impl Walk<'_> {
                     batch: Some(*handle),
                     ..At::default()
                 };
-                held.push(only(self.chain(&streamed, &mut at), node.name()));
+                held.push(only(self.chain(&streamed, &mut at)?, node.name()));
             }
             let mut at = At {
                 lane: held,
                 ..At::default()
             };
-            lanes.push(vec![only(self.chain(&at_done, &mut at), node.name())]);
+            lanes.push(vec![only(self.chain(&at_done, &mut at)?, node.name())]);
         }
-        lanes
+        Ok(lanes)
     }
 
     /// One call over every lane's handle, partition-major, answering with one lane.
-    fn over_all_lanes(&mut self, recipe: &Recipe, input: &Lanes) -> Lanes {
+    fn over_all_lanes(&mut self, recipe: &Recipe, input: &Lanes) -> Result<Lanes, Refusal> {
         let calls: Vec<&Call> = recipe.calls.iter().collect();
         let mut at = At {
             all_lanes: input.concat(),
             ..At::default()
         };
-        vec![vec![only(
-            self.chain(&calls, &mut at),
+        Ok(vec![vec![only(
+            self.chain(&calls, &mut at)?,
             "a partition accumulator",
-        )]]
+        )]])
     }
 
-    fn join(&mut self, node: &dyn GpuNode, recipe: &Recipe, build: &Lanes, probe: &Lanes) -> Lanes {
+    fn join(
+        &mut self,
+        node: &dyn GpuNode,
+        recipe: &Recipe,
+        build: &Lanes,
+        probe: &Lanes,
+    ) -> Result<Lanes, Refusal> {
         assert!(
             recipe
                 .calls
@@ -479,9 +531,9 @@ impl Walk<'_> {
                 build: Some(only(build_lane.clone(), "a join's build side")),
                 ..At::default()
             };
-            lanes.push(vec![only(self.chain(&calls, &mut at), node.name())]);
+            lanes.push(vec![only(self.chain(&calls, &mut at)?, node.name())]);
         }
-        lanes
+        Ok(lanes)
     }
 
     /// The sink produces results rather than handles, so it answers with no lanes.
@@ -610,10 +662,11 @@ pub(crate) async fn plan_recipes(sql: &str, knobs: PlanKnobs) -> (Box<dyn GpuNod
     (tree, recipes)
 }
 
-/// Plan the query in the engine, hand the recipe plan to a device, and make the calls.
-pub(crate) async fn walk(sql: &str, knobs: PlanKnobs) -> Walked {
+/// Plan the query in the engine, hand the recipe plan to a device, and make the calls,
+/// stopping at the first one the device declines.
+pub(crate) async fn try_walk(sql: &str, knobs: PlanKnobs) -> Result<Walked, Refusal> {
     let (tree, recipes) = plan_recipes(sql, knobs).await;
-    let session = Session::open(&recipes);
+    let session = Session::open(&recipes)?;
     let mut walk = Walk {
         session: &session,
         recipes: &recipes,
@@ -622,7 +675,7 @@ pub(crate) async fn walk(sql: &str, knobs: PlanKnobs) -> Walked {
         made: Vec::new(),
         firings: Vec::new(),
     };
-    let left = walk.node(tree.as_ref());
+    let left = walk.node(tree.as_ref())?;
     assert!(left.is_empty(), "the sink answered with resident handles");
     assert_eq!(
         walk.next_node,
@@ -631,11 +684,19 @@ pub(crate) async fn walk(sql: &str, knobs: PlanKnobs) -> Walked {
         walk.next_node,
         recipes.nodes()
     );
-    Walked {
+    Ok(Walked {
         batches: walk.exported,
         calls: walk.made,
         firings: walk.firings,
-    }
+    })
+}
+
+/// `try_walk` for a query no call of which is expected to be refused: one that is fails
+/// naming the code and the call.
+pub(crate) async fn walk(sql: &str, knobs: PlanKnobs) -> Walked {
+    try_walk(sql, knobs)
+        .await
+        .unwrap_or_else(|refusal| panic!("{sql}: {refusal}"))
 }
 
 /// The aggregate shape fires calls of both kinds: the scan, the coalesce-all and the export
@@ -709,9 +770,30 @@ async fn a_query_selecting_no_rows_is_walked_and_measured() {
 #[tokio::test]
 async fn a_refused_export_is_returned_rather_than_panicking() {
     let (_tree, recipes) = plan_recipes(super::BARE_SCAN, super::ONE_LANE).await;
-    let session = Session::open(&recipes);
+    let session = Session::open(&recipes).expect("a bare scan is not refused");
     let refused = session
         .exported_schema(u64::MAX)
         .expect_err("no handle was ever produced under this number");
     assert!(refused.contains("unknown handle"), "{refused}");
+}
+
+/// A call the device declines comes back with its code and the call that made it, so a
+/// test can say which call refused and why rather than only that the walk died. Proved on
+/// a refusal the device makes today rather than on a fixture: the cast to text of
+/// [#203](../../../../llm-wiki/tickets.md#t203), the query `declared.rs` ignores as query
+/// 11. When #203 closes, re-point this at another refusal — #45, #55, or #189's device half.
+#[tokio::test]
+async fn a_refused_plan_reports_its_code_and_its_call() {
+    let refusal = try_walk(
+        "SELECT CAST(n_nationkey AS VARCHAR) FROM nation",
+        super::ONE_LANE,
+    )
+    .await
+    .err()
+    .expect("#203: the device refuses a cast to text");
+    // Every failure the ABI reports is a 1, the cause being `last_error`.
+    assert_eq!(refusal.rc, 1, "{refusal}");
+    // The scan is #0 and the sink has no seq, so the cast's project is #1.
+    assert_eq!(refusal.call, Some((1, FbKind::PlainProject)), "{refusal}");
+    assert!(refusal.message.contains("cast to STRING"), "{refusal}");
 }

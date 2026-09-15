@@ -131,3 +131,46 @@ three `Refused` messages are `mod.rs:267`, `:272`, `:275`. The proving refusal f
 the walk aborts. The developer picks among #45, #55, #189 (device half) and #203. Device cycle on
 shad-gpu through `build-test-shadgpu.sh`; nothing here compiles under `rust-only`, so the CPU
 side is a `cargo check` of the gpu-feature lib at most.
+
+### 2026-09-15 — §2 built: the refusal is a value, the walk stops at it
+
+Shape: `walk.rs` gains `Refusal { rc, call: Option<(Seq, FbKind)>, message }` — `call` is
+`None` only for `begin_plan`, the session's own call that no recipe names and no `AbiSymbol`
+spells; its `Display` is `#1 CudfProject answered rc 1: <last_error>`. `Session::open`, `scan`
+and `execute` return `Result<_, Refusal>` through one `answered(rc, call)` that reads
+`last_error` at the site. Every walk arm returns `Result<Lanes, Refusal>` and `?` stops at the
+first refusal — no partial result is kept, because `execute_node` resets the session on any
+exception and nothing held afterwards is a handle. `try_walk` is the fallible entry;
+`walk` is `try_walk` panicking with `{sql}: {refusal}`, so every caller in `mod.rs` and
+`declared.rs` is unchanged and still fails loudly, now naming rc and the call.
+
+Subtleties for the next reader:
+
+- **The ABI's code is always 1.** Every `catch` in `gpu_executor.cpp` returns 1 with the cause
+  in `last_error`, so "the code" discriminates nothing on its own; the new test asserts `rc == 1`
+  and the call, and pins #203 by its message (`cast to STRING`), since any refusal at the
+  project would otherwise pass. Post-order for `SELECT CAST(n_nationkey AS VARCHAR) FROM
+  nation` at `ONE_LANE`: scan `#0`, project `#1`, the sink has no seq.
+- **Left and Full never reach the device in the walk.** Their recipe has `AtDone` calls, so
+  `join()`'s all-`PerProbeBatch` assertion (`walk.rs`, the `#136` message) fires before any
+  call; on the raw ABI they would fail at the join with `unknown input handle`, since
+  `execute_node` consumes its inputs and `resolve` hands `BatchCopy` the same handle. The
+  `driven()` message says "refused at the first probe batch … (#152)", which is what the
+  operator harness proved of the executor (`copy_of` in `gpu_backend/join.rs`). That `#136`
+  assertion message in `join()` still reads as if #136 refused something; the analyst's table
+  says it does not, and this task left the string alone (§2 scope).
+- **The submodule is empty in a fresh worktree.** `third_party/cudf` had no checkout here, and
+  `peacockdb-ffi`'s cmake then fails with `include could not find requested file: rapids-cmake`
+  (its `include(rapids_config.cmake)` error scrolls off the top). Populated with
+  `git submodule update --init --reference /media/data/peacockdb/.git/modules/third_party/cudf
+  third_party/cudf`; superproject status unchanged.
+- The `--run-status` poll must not match `running`: the gate log's `running N tests` line makes
+  "still running" true forever. Read `FINISHED, exit code` instead.
+
+Proof: `cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run` RED with `cannot
+find function try_walk` (the only error), then GREEN, 0 warnings; `build-test-shadgpu.sh
+--build` 0 warnings; run `20260915T151528-111106`, `PCK_RUN_CPP=0`, `peacockdb_core_gpu_lib`
+`gpu_tests::` `running 306 tests` → `test result: ok. 305 passed; 0 failed; 1 ignored`
+(query 11 stays ignored), `test_gpu_corpus` 8 passed, `--run-status` rc 0, no `[rmm] pool`
+line. `build-test.md`'s "Recipe walk driver" row is now 4 cases and the `gpu_tests::` line 306
+— the coordinator's edit.

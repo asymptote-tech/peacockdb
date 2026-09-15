@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1778 test cases — Rust 1342, C++ 67, Python 369.** Beside it, **80 `bug_` tests**, in their own table under [Known-wrong behaviour](#known-wrong-behaviour): the grand total counts coverage and that table counts defects, and the two measure opposite things, so they are never added. The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, for two reasons — its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to, and its `bug_` tests are counted in their own table rather than in the row that holds them. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1779 test cases — Rust 1343, C++ 67, Python 369.** Beside it, **80 `bug_` tests**, in their own table under [Known-wrong behaviour](#known-wrong-behaviour): the grand total counts coverage and that table counts defects, and the two measure opposite things, so they are never added. The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, for two reasons — its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to, and its `bug_` tests are counted in their own table rather than in the row that holds them. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -343,7 +343,7 @@ the crate links; executor lifecycle
 what the batch reports, and that `consume` hands the handle over without releasing it. Needs no
 device: the release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 312 cases: `--lib -- gpu_tests::` 304, `test_gpu_corpus` 8
+#### gpu — `--features gpu`: shad-gpu only. 313 cases: `--lib -- gpu_tests::` 305, `test_gpu_corpus` 8
 
 *crate integration, external*
 
@@ -392,15 +392,17 @@ because its masks and NULL placeholders are the one payload the plan line does n
 one read re-walks every query to check the kinds a device has run against the kinds the file
 claims, in both directions
 
-| Recipe walk driver | [every_firing_of_a_declared_call_is_measured_and_no_undeclared_one_is](../peacockdb-core/src/wire/gpu_tests/walk.rs) | 3 |
+| Recipe walk driver | [every_firing_of_a_declared_call_is_measured_and_no_undeclared_one_is](../peacockdb-core/src/wire/gpu_tests/walk.rs) | 4 |
 |---|---|--:|
 
 the driver the walk and the schema catalog share: after every firing of a call that declares an
 output schema it exports the handle through `result_from_handle` and keeps the declared schema
 beside the exported one; a call with no declaration fires and is not measured; a refused export
-is returned as the firing's finding rather than a panic; a zero-row query is walked like any
-other, under a predicate row-group pruning cannot see through (#209); and nothing is exported
-for an undeclared call
+is returned as the firing's finding rather than a panic; a call the device declines —
+`begin_plan`, the scan or `execute_node` — comes back as its code and its call and the walk
+stops there, proved on #203's cast to text; a zero-row query is walked like any other, under a
+predicate row-group pruning cannot see through (#209); and nothing is exported for an
+undeclared call
 
 | Schema catalog | [bug_a_declared_utf8view_is_exported_as_utf8](../peacockdb-core/src/wire/gpu_tests/declared.rs) | 12 |
 |---|---|--:|
