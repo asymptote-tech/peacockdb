@@ -54,7 +54,7 @@ spec was written.
 
 ---
 
-### Task 1: Build the refusal table by grep, not by reading — DROPPED
+### Task 1: Build the refusal table by grep, not by reading — dropped
 
 **Files:**
 - Modify: `llm-wiki/tasks/walk-drives-every-plan-detail.md`
@@ -138,7 +138,7 @@ them. It returns the code and the call now."
 
 ---
 
-### Task 3: The engine limits, as `bug_` tests — DROPPED
+### Task 3: The engine limits, as `bug_` tests — dropped
 
 **Files:**
 - Modify: the walk file; `llm-wiki/build-test.md`
@@ -187,7 +187,7 @@ fix: refcounted-tables deletes two by closing #152."
 
 ---
 
-### Task 4: The shapes, one at a time — DROPPED
+### Task 4: The shapes, one at a time — dropped
 
 Only those Task 0's paragraph kept. One commit and one device cycle per shape, or per pair where the
 spec says they share one.
@@ -224,7 +224,7 @@ why.
 
 ---
 
-### Task 5: The statement of reach — DROPPED
+### Task 5: The statement of reach — dropped
 
 The deliverable neither earlier spec produced.
 

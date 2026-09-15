@@ -167,10 +167,25 @@ Subtleties for the next reader:
 - The `--run-status` poll must not match `running`: the gate log's `running N tests` line makes
   "still running" true forever. Read `FINISHED, exit code` instead.
 
-Proof: `cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run` RED with `cannot
-find function try_walk` (the only error), then GREEN, 0 warnings; `build-test-shadgpu.sh
+Proof: `cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run` red with `cannot
+find function try_walk` (the only error), then green, 0 warnings; `build-test-shadgpu.sh
 --build` 0 warnings; run `20260915T151528-111106`, `PCK_RUN_CPP=0`, `peacockdb_core_gpu_lib`
 `gpu_tests::` `running 306 tests` → `test result: ok. 305 passed; 0 failed; 1 ignored`
 (query 11 stays ignored), `test_gpu_corpus` 8 passed, `--run-status` rc 0, no `[rmm] pool`
 line. `build-test.md`'s "Recipe walk driver" row is now 4 cases and the `gpu_tests::` line 306
 — the coordinator's edit.
+
+### 2026-09-15 — completing: round 1 clean
+
+Round 1 on `0681fa84` (PR #154 against `ENS-empty-build`): 0 blocking, 0 important, 5 nits.
+Two fixed here, both markdown: `build-test.md:7` said 79 `bug_` tests against the table's 82
+(pre-existing on the parent), and the run record's capitals. Three recorded, no code change:
+`Refusal::call` and `Firing::target` are both `Option<(Seq, FbKind)>` with `None` meaning
+`begin_plan` in one and a bare call in the other — an enum the day `slice_handle` reaches
+`answered`; the `begin_plan` arm of `Display` and the scan refusal path have no test, and the
+first plan the verifier rejects (#169) is the case for the `None` arm; the `ProbeKeys | Narrow`
+message names the semi family only, where `ProbeKeys` is also Left's and Full's first call
+(#152). The reviewer also noted the gpu block's two tables do not close — 227 lib coverage
+rows + 82 `bug_` = 309 against the 306 measured — pre-existing and not this task's. The
+in-body comment says why `rc == 1` is a pin and not a guard: every `catch` in
+`gpu_executor.cpp` returns 1. Completeness pass dispatched.
