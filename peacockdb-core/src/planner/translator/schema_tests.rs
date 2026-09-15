@@ -144,7 +144,7 @@ async fn one_aggregate_is_three_schemas_and_each_declares_what_it_holds() {
 
 #[tokio::test]
 async fn avgs_state_columns_are_typed_by_what_they_hold_and_not_by_position() {
-    // DataFusion declares avg's state as [count, sum] and this mode's decomposition reads
+    // DataFusion declares avg's state as [count, sum] and the engine's decomposition reads
     // [sum, count]. Pairing them by position types both backwards — a sum in a UInt64 and
     // a count in a decimal — which no per-node byte count can show, because both engines
     // read the same declared schema.
@@ -221,7 +221,7 @@ async fn the_divide_that_finishes_an_avg_hits_the_scale_datafusion_declared() {
 async fn a_union_branch_is_cast_to_the_declared_output_by_a_project() {
     // Two decimals of different scale meeting at a union: routing cannot retype, so the
     // planner owes each branch a project that lands on the declared type (#41), and the
-    // declared type is DataFusion's coercion rather than one this mode derived.
+    // declared type is DataFusion's coercion rather than one the engine derived.
     let tree = translated(
         "SELECT p_retailprice AS v FROM part \
          UNION ALL SELECT c_acctbal * 1.5 FROM customer",
@@ -389,7 +389,7 @@ async fn the_planner_refuses_a_tree_its_validation_rejects() {
 #[tokio::test]
 async fn the_planner_refuses_a_root_that_does_not_emit_what_the_query_asked_for() {
     // A bare Partial aggregate as the root. DataFusion declares `avg`'s state as
-    // [count, sum] and this mode's decomposition reads [sum, count] (see `decompose`), so
+    // [count, sum] and the engine's decomposition reads [sum, count] (see `decompose`), so
     // a root stopping at the partial emits its state columns the other way round from the
     // schema its own node declares — the one shape where the two differ legitimately.
     use datafusion::physical_plan::ExecutionPlan;

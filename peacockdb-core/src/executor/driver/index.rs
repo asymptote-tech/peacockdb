@@ -131,19 +131,5 @@ fn subtree_ranges(nodes: &[IndexedNode<'_>]) -> Vec<(usize, usize)> {
     (0..nodes.len()).map(|index| (index, end[index])).collect()
 }
 
-/// Each node's children-first position, in the driver's own pre-order.
-///
-/// Exposed for one guard: that these are the positions `attach_recipes` gave the same
-/// nodes. Two numberings computed by two walks in two files — one at plan time, one at run
-/// time — agree by construction only until someone changes a walk, and nothing else
-/// compares them.
-pub(crate) fn post_order_of_every_node(root: &dyn GpuNode) -> Result<Vec<usize>, PlanError> {
-    Ok(build(root)?
-        .nodes
-        .iter()
-        .map(|node| node.post_order)
-        .collect())
-}
-
 #[cfg(test)]
 mod tests;

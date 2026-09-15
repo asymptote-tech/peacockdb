@@ -259,7 +259,7 @@ fn a_partial_aggregate_emits_its_state_under_the_names_the_node_declared() {
 }
 
 /// The single-node shortcut: state and finalize on one node, which is two operators here
-/// and two calls on the device. The finalize is this mode's own expression, evaluated by
+/// and two calls on the device. The finalize is the engine's own expression, evaluated by
 /// DataFusion rather than by a `Single`-mode accumulator — the same expression the device
 /// is sent.
 #[test]
@@ -327,7 +327,7 @@ fn an_aggregate_that_finalizes_divides_the_state_it_just_built() {
     );
 }
 
-/// The Welford triple is three of this mode's aggregators and one of DataFusion's, so what
+/// The Welford triple is three of the engine's aggregators and one of DataFusion's, so what
 /// proves the fold is that one aggregate filled three declared columns — a triple sent as
 /// three separate aggregators would fill three columns of its own and disagree with the
 /// declared state's width.

@@ -1,4 +1,4 @@
-//! Planning a query in this mode: DataFusion's physical plan in, a node tree and its
+//! Planning a query in the engine: DataFusion's physical plan in, a node tree and its
 //! memory model out.
 //!
 //! Two passes, because the two halves define each other — a batch size needs the tree it

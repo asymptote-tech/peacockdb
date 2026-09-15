@@ -10,21 +10,7 @@ use crate::tree::{code_only, component_of, read, sources};
 /// All three rung names, before the first module moves. With only `tests` here the first
 /// `executor/ffi_tests/` reads as a subcomponent of `executor`, and the wall rules fire on a
 /// directory they were never about.
-const TEST_DIRS: &[&str] = &["tests", "ffi_tests", "gpu_tests"];
-
-/// A file that names a subcomponent of a component that is not its own.
-///
-/// The layout forbids it and rustc refuses it wherever the subcomponent is declared `mod`, so
-/// this can only happen behind a `PUB_MODULES` exemption. Verified in both directions like
-/// `forced_by`: an entry whose line is gone is reported, and so is a reach nothing here names.
-/// Without the first the register outlives its line; without the second it is decoration.
-struct CrossComponentReach {
-    file: &'static str,
-    path: &'static str,
-    why: &'static str,
-}
-
-const CROSS_COMPONENT_REACHES: &[CrossComponentReach] = &[];
+pub(crate) const TEST_DIRS: &[&str] = &["tests", "ffi_tests", "gpu_tests"];
 
 /// **The one rule rustc explicitly cannot enforce.** A subcomponent is meant to be its
 /// parent's alone, and Rust's visibility is "the module and its descendants" — so
@@ -222,48 +208,20 @@ fn cross_component_reaches() -> Vec<(String, String)> {
 }
 
 /// **Only the parent component's own code may use a subcomponent.** rustc enforces it wherever
-/// the subcomponent is `mod`, and stops the moment one is `pub mod` — so the `PUB_MODULES`
-/// entries are exactly where the claim needs a test rather than a compiler.
-///
-/// The register is the point, not the count. A reach that is merely tolerated has no expiry, so
-/// the day `forced_by` says the `cpu_backend` wall can go up, taking it up is an `E0603` on a
-/// line nobody wrote down.
+/// the subcomponent is `mod`, and every subcomponent is `mod` now — so this holds the claim
+/// where a `pub mod` would open it, and says where, rather than leaving an `E0603` on a line
+/// nobody wrote down for the day a wall goes up.
 #[test]
 fn only_the_parent_component_names_a_subcomponent() {
-    let found = cross_component_reaches();
-    let mut stale = Vec::new();
-    for entry in CROSS_COMPONENT_REACHES {
-        assert!(
-            !entry.why.is_empty(),
-            "{} reaches {} for no stated reason",
-            entry.file,
-            entry.path
-        );
-        if !found
-            .iter()
-            .any(|(f, p)| f == entry.file && p == entry.path)
-        {
-            stale.push(format!(
-                "  {} no longer names {}, so the entry can go",
-                entry.file, entry.path
-            ));
-        }
-    }
-    for (file, path) in &found {
-        if !CROSS_COMPONENT_REACHES
-            .iter()
-            .any(|e| e.file == file && e.path == path)
-        {
-            stale.push(format!(
-                "  {file} names {path}, which belongs to another component"
-            ));
-        }
-    }
+    let found: Vec<String> = cross_component_reaches()
+        .iter()
+        .map(|(file, path)| format!("  {file} names {path}, which belongs to another component"))
+        .collect();
     assert!(
-        stale.is_empty(),
-        "the subcomponent wall is not where the register says it is:\n{}\n\nWhat another \
-         component needs is declared in the component's own mod.rs.",
-        stale.join("\n")
+        found.is_empty(),
+        "a subcomponent is its parent's alone:\n{}\n\nWhat another component needs is \
+         declared in the component's own mod.rs.",
+        found.join("\n")
     );
 }
 
@@ -286,6 +244,23 @@ pub(crate) fn supers_that_stay_inside(rel: &Path) -> usize {
     }
 }
 
+/// How far each `super::` chain on this line climbs, one entry per chain.
+pub(crate) fn super_chains(line: &str) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut rest = line;
+    while let Some(i) = rest.find("super::") {
+        let tail = &rest[i..];
+        let climbs = tail
+            .as_bytes()
+            .chunks(7)
+            .take_while(|c| *c == b"super::")
+            .count();
+        out.push(climbs);
+        rest = &rest[i + 7 * climbs..];
+    }
+    out
+}
+
 /// `super::` is for inside a component; crossing one takes an absolute `crate::` path. A
 /// `super::` chain that climbs past its component's root has crossed a boundary while looking
 /// like it did not, which is how a component quietly acquires a dependency nobody declared.
@@ -299,23 +274,13 @@ fn no_super_path_climbs_out_of_its_component() {
         let depth = supers_that_stay_inside(&rel);
         let text = read(&rel);
         for (n, line) in text.lines().enumerate() {
-            let mut rest = line;
-            while let Some(i) = rest.find("super::") {
-                let tail = &rest[i..];
-                let climbs = tail
-                    .as_bytes()
-                    .chunks(7)
-                    .take_while(|c| *c == b"super::")
-                    .count();
-                if climbs > depth {
-                    found.push(format!(
-                        "  {}:{}: {} climbs {climbs} from depth {depth}",
-                        rel.display(),
-                        n + 1,
-                        line.trim()
-                    ));
-                }
-                rest = &rest[i + 7..];
+            for climbs in super_chains(line).into_iter().filter(|c| *c > depth) {
+                found.push(format!(
+                    "  {}:{}: {} climbs {climbs} from depth {depth}",
+                    rel.display(),
+                    n + 1,
+                    line.trim()
+                ));
             }
         }
     }

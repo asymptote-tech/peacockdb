@@ -3,6 +3,18 @@
 
 use super::*;
 
+impl Underestimate {
+    /// How far under: 2.0 means the call used twice what was modelled. Only a test asks; the
+    /// accountant records the pair and the goldens print them.
+    pub(crate) fn ratio(&self) -> f64 {
+        if self.modelled == 0 {
+            f64::INFINITY
+        } else {
+            self.measured as f64 / self.modelled as f64
+        }
+    }
+}
+
 /// State and model as two numbers the test sets, which is all the accountant reads.
 struct Held {
     resident: usize,

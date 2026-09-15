@@ -148,11 +148,11 @@ fn state_funcs<'a>(
 
 /// `out_decimal_precision`/`out_decimal_scale` stay at zero, and that is a decision. They
 /// are the wire's channel for `avg`'s declared decimal type (read by `aggregate.cpp` at
-/// :216 and :711), but this mode never sends an `avg` to a device:
+/// :216 and :711), but the engine never sends an `avg` to a device:
 /// decomposition splits it into sum and count, so the scale rides on the finalize divide's own
 /// `out_decimal_precision`, which `expr_writer` sets and
 /// `an_average_finalizes_to_the_digits_the_oracle_computes` proves against the oracle's digits.
-/// No shape this mode plans sends a name `is_avg` matches: inside the Welford triple the func is
+/// No shape the engine plans sends a name `is_avg` matches: inside the Welford triple the func is
 /// named by `sql_name`, and `wire_name`'s `"mean"` is reachable only from the arm below it, which
 /// decomposition leaves no `Mean` aggregator to enter. Written out rather than defaulted so a
 /// field added to the table has to be answered here.

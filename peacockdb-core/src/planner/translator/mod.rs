@@ -1,4 +1,4 @@
-//! DataFusion physical plan → the mode's node tree.
+//! DataFusion physical plan → the engine's node tree.
 //!
 //! A conscious decision per DataFusion node kind: nothing is carried over implicitly and
 //! an unrecognized node is a plan-time error naming it. What is reused is DataFusion's
@@ -36,8 +36,8 @@ mod tests;
 
 pub(crate) struct Translator {
     /// Lanes a source is partitioned into, before the small-table rule.
-    pub target_partitions: usize,
-    pub batching: Batching,
+    pub(crate) target_partitions: usize,
+    pub(crate) batching: Batching,
     /// Batch sizes the estimator derived, one per source in the order translation reaches
     /// them. Empty on the first pass, when there is nothing derived yet.
     source_targets: Vec<u64>,
@@ -47,11 +47,11 @@ pub(crate) struct Translator {
     /// than rows because a narrow table of many rows reads less than a wide table of few;
     /// measured on the columns this scan projects, of the row groups pruning left it, so
     /// it is a property of the scan and not of the table.
-    pub small_table_bytes: u64,
+    pub(crate) small_table_bytes: u64,
 }
 
 impl Translator {
-    pub fn new(target_partitions: usize, batching: Batching) -> Self {
+    pub(crate) fn new(target_partitions: usize, batching: Batching) -> Self {
         Self {
             target_partitions,
             batching,
@@ -82,7 +82,10 @@ impl Translator {
     /// The root, with the limit lowering rule applied: a root-adjacent limit is not a
     /// node at all — its interval becomes the unload's, because a limit over a stream
     /// about to leave the device is a statement about which rows are worth moving.
-    pub fn translate(&self, root: &Arc<dyn ExecutionPlan>) -> Result<Box<dyn GpuNode>, PlanError> {
+    pub(crate) fn translate(
+        &self,
+        root: &Arc<dyn ExecutionPlan>,
+    ) -> Result<Box<dyn GpuNode>, PlanError> {
         match limit_interval(root) {
             Some((input, interval)) => {
                 let input = node(self, &input)?;

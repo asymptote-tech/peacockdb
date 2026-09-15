@@ -1,4 +1,4 @@
-//! Both directions over one batch: DataFusion's expression, this mode's, and DataFusion's
+//! Both directions over one batch: DataFusion's expression, the engine's, and DataFusion's
 //! again must all read the same column out of the same rows.
 //!
 //! Comparing the lowered expression to the original by shape would pin the spelling rather
@@ -50,7 +50,7 @@ fn values(expr: &Arc<dyn PhysicalExpr>, batch: &RecordBatch) -> ArrayRef {
     }
 }
 
-/// The round trip a CPU executor makes: DataFusion's expression in, this mode's in the
+/// The round trip a CPU executor makes: DataFusion's expression in, the engine's in the
 /// middle, DataFusion's back out, and the same rows at both ends.
 fn agree(what: &str, original: Arc<dyn PhysicalExpr>) {
     let batch = batch();
@@ -237,7 +237,7 @@ fn a_function_the_session_does_not_have_is_refused_by_name() {
     );
 }
 
-/// One case per field of the mode's own list, so a variant added to `Expr` without a
+/// One case per field of the engine's own list, so a variant added to `Expr` without a
 /// lowering arm is a compile error here rather than a refusal at run time.
 #[test]
 fn every_expression_kind_has_a_lowering() {
