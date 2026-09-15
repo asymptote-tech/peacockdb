@@ -2,7 +2,10 @@
 
 use std::path::Path;
 
-use crate::privacy::{private_module_aliases, pub_declarations};
+use crate::privacy::{
+    component_imports, component_type_in, component_types_on_the_surface, private_module_aliases,
+    pub_declarations, pub_fields, signature_only, type_aliases,
+};
 use crate::repo_root;
 use crate::test_code::{
     declared_item, declares_mod, doc_above, mod_declarations, names_cfg_feature, names_cfg_test,
@@ -66,6 +69,188 @@ fn each_reader_sees_the_violation_and_not_its_near_miss() {
     let wrapped = pub_declarations("pub fn f(\n    a: fb::T,\n) -> u8 {\n    0\n}");
     assert_eq!(wrapped.len(), 1);
     assert!(wrapped[0].0 == 0 && wrapped[0].1.contains("fb::T"));
+
+    // The harness's signature rule reads the names a `use crate::<component>` binds — wrapped,
+    // aliased, grouped at the crate root — and a signature naming one of them or an inline path.
+    // A field counts and a `pub(crate)` does not; a const's initializer is not its signature.
+    let comps: Vec<String> = ["plan", "planner"].map(String::from).to_vec();
+    assert_eq!(
+        component_imports(
+            "use crate::planner::{\n    BatchSizing, PlanKnobs as Knobs,\n};\nuse crate::plan;\n\
+             use crate::{plan::Expr, wire::Recipe};\nuse crate::test_support::Mode;\n\
+             use std::path::PathBuf;\n",
+            &comps
+        ),
+        ["BatchSizing", "Knobs", "plan", "Expr"]
+            .map(String::from)
+            .to_vec(),
+        "an alias is the name a signature uses, and a crate-root group is read member by member"
+    );
+    assert_eq!(
+        component_imports("use crate::plan::*;\n", &comps),
+        vec!["*".to_string()],
+        "a glob binds names the reader cannot enumerate, and says so"
+    );
+    let knobs = vec!["PlanKnobs".to_string()];
+    assert_eq!(
+        component_type_in("pub fn tree() -> crate::plan::Expr {", &comps, &[]),
+        Some("crate::plan::Expr".to_string())
+    );
+    assert_eq!(
+        component_type_in("pub fn knobs(&self) -> PlanKnobs {", &comps, &knobs),
+        Some("PlanKnobs".to_string())
+    );
+    assert_eq!(
+        component_type_in("pub fn knobs(&self) -> PlanKnobsExt {", &comps, &knobs),
+        None,
+        "a longer identifier is a different name"
+    );
+    assert_eq!(
+        component_type_in("pub fn root() -> PathBuf {", &comps, &knobs),
+        None
+    );
+    assert_eq!(
+        pub_fields(
+            "pub struct Mode {\n    pub name: &'static str,\n    pub(crate) sizing: BatchSizing,\n}\n"
+        ),
+        vec![(1, "    pub name: &'static str,".to_string())],
+        "a `pub` field is a surface, a `pub(crate)` one is not, and the struct line is an item"
+    );
+    assert_eq!(
+        signature_only("pub const MODES: [Mode; 5] = [Mode { sizing: BatchSizing::Budgeted }];"),
+        "pub const MODES: [Mode; 5] "
+    );
+    assert_eq!(
+        signature_only("pub type Knobs = crate::planner::PlanKnobs;"),
+        "pub type Knobs = crate::planner::PlanKnobs;",
+        "an alias's right-hand side is exactly the type it puts on the surface"
+    );
+    assert_eq!(
+        signature_only("pub const fn bytes(self) -> usize {"),
+        "pub const fn bytes(self) -> usize {"
+    );
+    // `{self, …}` binds the module, not the word: read as `self`, a violation spelled
+    // `planner::PlanKnobs` was reported as "names `self`" against every `&self` receiver.
+    let module_and_member = ["planner", "BatchSizing"].map(String::from).to_vec();
+    assert_eq!(
+        component_imports("use crate::planner::{self, BatchSizing};\n", &comps),
+        module_and_member,
+        "`self` in a group is the module it sits under"
+    );
+    assert_eq!(
+        component_imports("use crate::planner::{self as p, BatchSizing};\n", &comps),
+        ["p", "BatchSizing"].map(String::from).to_vec()
+    );
+    assert_eq!(
+        component_type_in(
+            "pub fn knobs(&self) -> planner::PlanKnobs {",
+            &comps,
+            &module_and_member
+        ),
+        Some("planner".to_string()),
+        "the module-qualified spelling is attributed to the module"
+    );
+    assert_eq!(
+        component_type_in("pub fn knobs(&self) -> usize {", &comps, &module_and_member),
+        None,
+        "a receiver is not the module"
+    );
+
+    // A signature is not only what sits before the first `{`. A variant's payload and a trait's
+    // method signatures live inside the braces, and an alias moves the type out of the `pub`
+    // line altogether; each was green until the reader followed it.
+    let variants = pub_declarations(
+        "pub enum Outcome {\n    Planned(Box<dyn crate::plan::GpuNode>),\n    Skipped,\n}\n\
+         pub fn after() -> u8 {",
+    );
+    assert_eq!(
+        variants.len(),
+        2,
+        "the body ends at its own brace: {variants:?}"
+    );
+    assert!(
+        variants[0]
+            .1
+            .contains("Planned(Box<dyn crate::plan::GpuNode>)"),
+        "a variant's payload is part of the enum's surface"
+    );
+    let methods = pub_declarations(
+        "pub trait Probe {\n    fn tree(&self) -> Box<dyn crate::plan::GpuNode>;\n}\n\
+         pub fn after() -> u8 {",
+    );
+    assert_eq!(
+        methods.len(),
+        2,
+        "a `;` inside the body must not end it: {methods:?}"
+    );
+    assert!(
+        methods[0]
+            .1
+            .contains("fn tree(&self) -> Box<dyn crate::plan::GpuNode>;")
+    );
+    assert_eq!(
+        type_aliases(
+            "type Tree = Box<dyn crate::plan::GpuNode>;\npub(crate) type Rows =\n    Vec<u8>;\n\
+             pub type Knobs = usize;\nlet t: Tree = tree();\n"
+        ),
+        vec![
+            (
+                0,
+                "type Tree = Box<dyn crate::plan::GpuNode>;\n".to_string()
+            ),
+            (1, "pub(crate) type Rows =\n    Vec<u8>;\n".to_string()),
+        ],
+        "every alias below bare `pub`, wrapped or not; a `pub type` is already a declaration"
+    );
+
+    // The composition, over the spec's probe and the three spellings that passed it, and over
+    // the same shapes carrying only std and harness types.
+    let violations = "use crate::plan::GpuNode;\n\
+        pub fn tree() -> Box<dyn GpuNode> {\n    unimplemented!()\n}\n\
+        pub enum Outcome {\n    Planned(Box<dyn crate::plan::GpuNode>),\n}\n\
+        pub trait Probe {\n    fn tree(&self) -> Box<dyn crate::plan::GpuNode>;\n}\n\
+        type Tree = Box<dyn crate::plan::GpuNode>;\n\
+        pub fn laundered() -> Tree {\n    unimplemented!()\n}\n";
+    let found: Vec<(usize, String)> = component_types_on_the_surface(violations, &comps)
+        .into_iter()
+        .map(|(n, _, name)| (n, name))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (1, "GpuNode".to_string()),
+            (4, "crate::plan::GpuNode".to_string()),
+            (7, "crate::plan::GpuNode".to_string()),
+            (10, "crate::plan::GpuNode".to_string()),
+        ],
+        "each spelling is reported once, at the line that declares it"
+    );
+    let near_misses = "use std::collections::HashMap;\n\
+        use crate::planner::{self, BatchSizing};\n\
+        pub fn root() -> PathBuf {\n    unimplemented!()\n}\n\
+        pub enum Outcome {\n    Rows(Vec<RecordBatch>),\n}\n\
+        pub trait Probe {\n    fn mode(&self) -> Mode;\n}\n\
+        type Rows = HashMap<String, usize>;\n\
+        pub fn take(rows: &mut Rows) -> u64 {\n    unimplemented!()\n}\n\
+        pub struct Mode {\n    pub name: &'static str,\n    pub(crate) sizing: BatchSizing,\n}\n\
+        pub const MODES: [Mode; 1] = [Mode { sizing: BatchSizing::Budgeted }];\n";
+    assert_eq!(
+        component_types_on_the_surface(near_misses, &comps),
+        vec![],
+        "std, arrow and the harness's own types are what a signature may carry"
+    );
+    // A brace in a doc comment is prose. Counted, a `}` there closed the body early and the
+    // variants below it went unread — silently, since a short capture reports nothing.
+    let prose =
+        "pub enum E {\n    /// like `}` in prose\n    A(Box<dyn crate::plan::GpuNode>),\n}\n";
+    assert_eq!(
+        component_types_on_the_surface(prose, &comps)
+            .into_iter()
+            .map(|(n, _, name)| (n, name))
+            .collect::<Vec<_>>(),
+        vec![(0, "crate::plan::GpuNode".to_string())],
+        "the body runs to the brace that is code"
+    );
 
     // A `mod.rs` is its own directory, so it gets one fewer climb than a file beside it — and
     // at depth 0 the subtraction must not wrap a `usize` into an unlimited budget.

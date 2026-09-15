@@ -6,51 +6,30 @@
 //! green. So a write takes an advisory lock on the file, merges its own section into what
 //! is there, and publishes by renaming a sibling onto the name.
 
-use std::io::{Read, Seek, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use super::golden_text::{line_difference, ordered_sections};
-use super::mode::TIER;
-use super::{golden_dir_for, registry};
-
-/// What a section says when it holds no content. One prefix for every such reason, so a
-/// reader scanning a file sees the same word wherever a section is not a run.
-pub const SKIPPED: &str = "skipped: ";
+use super::{Regeneration, SKIPPED, TIER, golden_dir_for, registry};
 
 /// `<mode>-<tier>.cpu.txt` — the per-node tree of every query that ran at this mode.
-pub fn cpu_golden(dataset: &str, sf: &str, mode: &str) -> PathBuf {
+pub(crate) fn cpu_golden(dataset: &str, sf: &str, mode: &str) -> PathBuf {
     golden_dir_for(dataset, sf).join(format!("{mode}-{}.cpu.txt", TIER.label()))
 }
 
 /// `<mode>-<tier>.cost.txt`, derived per section from the `.cpu.txt` beside it.
-pub fn cost_golden(dataset: &str, sf: &str, mode: &str) -> PathBuf {
+pub(crate) fn cost_golden(dataset: &str, sf: &str, mode: &str) -> PathBuf {
     golden_dir_for(dataset, sf).join(format!("{mode}-{}.cost.txt", TIER.label()))
 }
 
 /// `<tier>.result.txt` — one entry per query, keyed by the query alone, because the
 /// modes are supposed to agree on results. The tier is in the name for the same reason it
 /// is in the others': a second tier would be a second file rather than a silent overwrite.
-pub fn result_golden(dataset: &str, sf: &str) -> PathBuf {
+pub(crate) fn result_golden(dataset: &str, sf: &str) -> PathBuf {
     golden_dir_for(dataset, sf).join(format!("{}.result.txt", TIER.label()))
 }
 
-/// Whether this run writes goldens, and how much of the file it owns when it does.
-///
-/// `UPDATE_CANONICAL`'s contract is a whole file, which a corpus file cannot honour from
-/// one case: the sections belong to different cases and a filtered run has only some of
-/// them. So the whole-file form is what a full run means, and `PCK_UPDATE_SECTIONS` is the
-/// filtered one — the same merge, without the pruning that a whole-file rewrite implies.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Regeneration {
-    /// Verify. The default, and what CI always does.
-    No,
-    /// Merge this section and prune sections no declaration accounts for.
-    Whole,
-    /// Merge this section and leave every other byte of the file alone.
-    Sections,
-}
-
-pub fn regeneration() -> Regeneration {
+pub(crate) fn regeneration() -> Regeneration {
     match (
         std::env::var("UPDATE_CANONICAL").is_ok(),
         std::env::var("PCK_UPDATE_SECTIONS").is_ok(),
@@ -64,7 +43,7 @@ pub fn regeneration() -> Regeneration {
 /// Read this query's section, or panic naming what a reader has to do next. A missing file
 /// and a missing section are different failures and say so: the first is a golden nobody
 /// has generated, the second is a query whose coverage is claimed and not recorded.
-pub fn section_of(path: &Path, query: &str) -> String {
+pub(crate) fn section_of(path: &Path, query: &str) -> String {
     let text = std::fs::read_to_string(path).unwrap_or_else(|_| {
         panic!(
             "golden not found: {}\nRun with UPDATE_CANONICAL=1 to generate it.",
@@ -86,7 +65,7 @@ pub fn section_of(path: &Path, query: &str) -> String {
 }
 
 /// Verify one section against `body`, or write it, depending on the run.
-pub fn assert_or_merge(
+pub(crate) fn assert_or_merge(
     path: &Path,
     dataset: &str,
     sf: &str,
@@ -108,7 +87,7 @@ pub fn assert_or_merge(
 
 /// Verify one section and never write, whatever the run was asked to regenerate. What the
 /// device side uses: a device that can author its own golden proves nothing against it.
-pub fn assert_section(path: &Path, query: &str, body: &str) {
+pub(crate) fn assert_section(path: &Path, query: &str, body: &str) {
     let canonical = section_of(path, query);
     assert!(
         canonical == body,
@@ -128,7 +107,7 @@ pub fn assert_section(path: &Path, query: &str, body: &str) {
 ///
 /// The read is inside the critical section, which is the whole point: a writer that read
 /// before another wrote would publish a file missing the other's section.
-pub fn merge_section(
+pub(crate) fn merge_section(
     path: &Path,
     declared: &[(String, Option<String>)],
     query: &str,
@@ -174,7 +153,7 @@ fn merge(
 /// rather than filled with a marker: a filtered run cannot produce it and has no standing
 /// to say it is skipped, and the read path names it as missing, which is what a golden is
 /// for. A disabled one always renders its marker, since that fact needs no run.
-pub fn merged_text(
+pub(crate) fn merged_text(
     text: &str,
     declared: &[(String, Option<String>)],
     query: &str,
@@ -221,7 +200,7 @@ fn push_section(out: &mut String, name: &str, body: &str) {
 ///
 /// `columns` is one column for a per-mode file and all five for the result golden, which
 /// holds one entry per query across the modes: enabled anywhere is enabled there.
-pub fn declared_sections(
+pub(crate) fn declared_sections(
     dataset: &str,
     sf: &str,
     columns: &[&str],
@@ -247,9 +226,12 @@ pub fn declared_sections(
                 1 => "at this mode",
                 _ => "at any mode",
             };
-            states
-                .contains(&"disabled")
-                .then(|| (registry::stem(&row.query), Some(format!("{SKIPPED}not enabled {where_}\n"))))
+            states.contains(&"disabled").then(|| {
+                (
+                    registry::stem(&row.query),
+                    Some(format!("{SKIPPED}not enabled {where_}\n")),
+                )
+            })
         })
         .collect()
 }
@@ -268,14 +250,4 @@ fn publish(path: &Path, text: &str) {
         .unwrap_or_else(|e| panic!("cannot flush {}: {e}", staged.display()));
     std::fs::rename(&staged, path)
         .unwrap_or_else(|e| panic!("cannot publish {}: {e}", path.display()));
-}
-
-/// Re-read a file after a merge. Only the tests of this module need it; a case reads its
-/// own section through [`section_of`].
-pub fn read_back(path: &Path) -> String {
-    let mut file = std::fs::File::open(path).expect("the golden");
-    let mut text = String::new();
-    file.rewind().expect("rewind");
-    file.read_to_string(&mut text).expect("read");
-    text
 }

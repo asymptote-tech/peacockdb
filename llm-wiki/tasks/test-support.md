@@ -103,3 +103,16 @@ through `cpu_case`, `gpu_case`, `authoritative_mode` and `over_cap` and name non
 every `pub` in `test_support` has a signature free of engine types and that guard has been seen
 red; a plain `cargo build` cannot name `test_support`; no workflow passes the feature; `inventory`
 still sees two binaries; case counts, leaf-name sets and goldens are unchanged; and CI is green.
+
+## Completeness signoff
+
+Solved under its constraints: the corpus harness is inside the crate behind the feature, the
+three binaries reach it through signatures free of engine types, nothing under `tests/` names
+the eight, the guard has been seen red on the spec's probe and on three further spellings, a
+plain build cannot name `test_support`, no workflow passes the feature, `inventory` rests on two
+`--test` targets, and goldens, leaf-name sets and the 200 bare `pub` outside `test_support` are
+byte-identical to the baselines. Deviations, none a shortcut: `corpus_golden.rs` and
+`cost_model.rs` moved too, since `corpus.rs` calls both and `src/` cannot see `tests/` — about
+1200 lines, not 698; the facade declares 22 items, not four, for the three other suites that read
+it; `Mode::knobs` and `Mode::sizing` narrowed to `pub(crate)`, the rule's first findings;
+`read_back` deleted with no caller; `tests/common/mod.rs` survives as a six-line re-export shim.
