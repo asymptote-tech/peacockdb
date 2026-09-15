@@ -18,29 +18,6 @@ shared. 75 queries carry #152. Memory accounting is deliberately out of scope an
 The layout refactor. It may not run beside the ENS-refcounted-tables chain: both rewrite the same tree, so
 rebasing one across the other is a whole-tree conflict.
 
-### 4. [`test-layout.md`](test-layout.md) — state: done — PR #145
-
-Items in `peacockdb-core/src` are public partly because `tests/*.rs` are separate crates that see
-the library the way crates.io would. Moving the eleven targets that force them, plus the murmur
-gate, down into `src/` ends that reason for all but eight. The move, the visibility
-sweep and the separation of test code from production code happen together, because none is worth
-its own pass over the same files.
-
-### 5. [`test-support.md`](test-support.md) — state: done — PR #147
-
-The corpus harness — 698 lines — joins the helpers task 4 put in `src/test_support/`, and the two
-corpus binaries reach it through three functions whose signatures carry no engine type. That is
-what stops the last eight items needing `pub`. Small and semantic on purpose: it is a diff a
-reviewer reads line by line, so it does not share a branch with task 6's three hundred one-word
-demotions.
-
-### 6. [`visibility.md`](visibility.md) — state: done — PR #148
-
-174 bare `pub` items become eight, `unreachable_pub` goes on to keep them there, both exemption
-registers are deleted and `coding-style.md`'s Visibility section stops carrying an exemption at
-all. It is also the sweep: the formatting hunks, comment wording and guard fixes that tasks 1-3
-deferred without naming a task.
-
 ### 7. [`sink-divergence-survey.md`](sink-divergence-survey.md) — state: approved to build
 
 **Prototype — no PR, branch never merged; the product is
@@ -50,21 +27,6 @@ produces sixty identical lines. One error site changes to name column, declared 
 the corpus rollout that was happening anyway then reports which divergence classes actually reach the
 boundary and how often. Fixes nothing and enables no cell. It is what tells `declared-schemas` which
 classes are worth a harness.
-
-### 8. [`operator-harness.md`](operator-harness.md) — state: done — PR #149
-
-One operator, one script of batches the test wrote, both backends, the outputs compared exactly.
-A test-only upload symbol puts an Arrow batch on the device; `Given` leaves plus one arm in
-`attach.rs` give a hand-built node its recipe with no plan; a driver per category, generic over
-`Backend`, runs the same calls on each side. Proven here on the seqless three — unload, limit and
-the round trip — and a guard that names every kind without a case.
-
-### 9. [`operator-cases.md`](operator-cases.md) — state: done — PR #150
-
-Cases only, no mechanism: every seq-bearing operator through the harness — filter, project, the
-sorts, the accumulators, both aggregates, the scatter, nine hash-join types, cross, nested-loop
-and the scan. Each row is green or a `bug_` test with a ticket, and only a device run says which;
-#198 and #175 are expected to land as `bug_` tests that `typed-nulls` and `empty-build` then delete.
 
 ### 10. [`declared-schemas.md`](declared-schemas.md) — state: approved to build
 

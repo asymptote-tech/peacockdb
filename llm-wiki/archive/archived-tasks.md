@@ -18,6 +18,1410 @@ retargeted to master when that base merged.
 
 ---
 
+<!-- archived from llm-wiki/tasks/operator-cases.md -->
+
+**Merged 2026-09-15 as PR #150, squashed to `12e2926a`.**
+
+# Every seq-bearing operator through the harness
+
+Kind: production
+
+**Closes no ticket and fixes nothing.** Cases only: every one is green or a `bug_` test with a
+ticket, and the production tree is not touched — not to make a case pass, not to close a ticket
+a case happens to reach. The findings are the deliverable; a later task fixes what they name.
+
+Ninth in the chain, after [`operator-harness.md`](operator-harness.md), which is the whole of
+its mechanism. This task adds cases and nothing else: no helper, no production change. Each
+row below is either a green comparison or a `bug_` test naming a ticket, and only running it
+says which.
+
+## Why two tasks
+
+The harness is proven on operators that cannot hide a wrong helper. Once it holds, every
+other operator is a script and a node, and a case that goes red is a fact about the engine
+rather than about the harness. Keeping the cases out of the harness task also keeps that diff
+reviewable: a reviewer reading the comparator should not be reading sixty cases beside it.
+
+## The matrix
+
+One synthetic batch or a few, a hand-built node over `Given` leaves, `run_both`, `assert_same`.
+The right column names the tickets a row may land on; a row with none may still find one.
+
+| Operator | Cases | May land on |
+|---|---|---|
+| `GpuFilter` | predicate on an int, on a string, on a null-yielding column; with its projection; every row passes; no row passes | |
+| `GpuProject` | column copy; int, float and decimal arithmetic; a cast; CASE in both forms; LIKE; a scalar function; a typed NULL literal | [#57](../tickets.md#t57), [#198](../tickets.md#t198), [#187](active-tickets.md#t187) |
+| `GpuSort` | asc and desc; nulls first and last; two keys; `fetch` | |
+| `GpuAccumulateBatchesAndSort` | several batches; one; none; `fetch` | [#173](../tickets.md#t173) |
+| `GpuMergeSortedPartitions` | N lanes each sorted; `fetch`; one lane empty; `Done` before any batch | [#173](../tickets.md#t173) |
+| `GpuCoalesceAllBatches` | several batches; one; none | [#173](../tickets.md#t173) |
+| `GpuAggregate` | each `PlanAgg`, grouped and global; the single-node shortcut carrying a finalize; grouping sets; a decimal sum's scale | [#187](active-tickets.md#t187) |
+| `GpuAggregateBatches` | merge with and without its finalize; arrivals sized to cross the compaction threshold — 1 MiB on the cpu, 64 MiB on the device, so the device's is the one to size for; `merge_m2`; a count merging by sum; an average's digits | [#163](../tickets.md#t163), [#187](active-tickets.md#t187) |
+| `GpuEmitPartitions` | 4 lanes and 64, each lane compared as a slot; null keys; two keys; a string key; a decimal key; one lane in and four out | [#184](active-tickets.md#t184), [#95](../tickets.md#t95), [#187](active-tickets.md#t187) |
+| `GpuHashJoin` | each of the nine types × one probe batch and two × `null_equals_null` both ways × a residual filter where the matrix allows one; with a projection | [#152](../tickets.md#t152), [#159](../tickets.md#t159) |
+| `GpuCrossJoin` | two batches; with a projection | |
+| `GpuNestedLoopJoin` | Inner and Left with a predicate; with a projection | [#190](active-tickets.md#t190), [#160](../tickets.md#t160) |
+| `GpuLoadParquet` | both backends read one parquet the test wrote from a synthetic batch: one batch per row group; a limit; row groups and a limit together | [#186](active-tickets.md#t186), [#188](active-tickets.md#t188) |
+
+### Empty inputs
+
+Every shape below is its own case, named for the shape, never folded into a loop over types:
+a red one must say which combination reached the limit. The frozen surface cannot make a table
+out of nothing ([#173](../tickets.md#t173)), an empty build side leaves three join types owing
+rows ([#175](../tickets.md#t175)), and a global aggregate over nothing owes its identity row
+([#199](../tickets.md#t199)) — so several of these are expected to land as `bug_` tests, and
+which ones is the finding.
+
+| Operator | Empty shapes |
+|---|---|
+| `GpuFilter`, `GpuProject`, `GpuSort` | a zero-row batch; a zero-row batch between two with rows |
+| `GpuCoalesceAllBatches`, `GpuAccumulateBatchesAndSort` | no batch at all; one zero-row batch; a zero-row batch among others; a `fetch` over zero rows |
+| `GpuMergeSortedPartitions` | every lane `Done` with nothing; one lane a zero-row batch beside lanes with rows; every lane a zero-row batch; lane 0 `Done` before lane 1's rows arrive |
+| `GpuAggregate` | a zero-row batch, grouped; global (#199); grouping sets over zero rows |
+| `GpuAggregateBatches` | no arrival; one zero-row arrival; a zero-row arrival among others; no arrival under a finalize |
+| `GpuEmitPartitions` | a zero-row batch in — N zero-row lanes out, and the lane count is the assertion; a batch whose every row carries one key, so N−1 lanes get nothing; a batch of all-null keys; a stream of zero-row, rows, zero-row |
+| `GpuHashJoin`, each of the nine types | a zero-row build batch with probe rows (#175 for Right, Full, RightAnti); build rows with one zero-row probe batch; both zero-row; `build: None`, never probed; a zero-row probe batch between two with rows; only zero-row probe batches then the finish — the finish whose probe produced no keys, #173's one refusing site |
+| `GpuCrossJoin` | build empty; probe empty; both |
+| `GpuNestedLoopJoin`, Inner and Left | build empty; probe empty |
+| `GpuLoadParquet` | a parquet of zero rows |
+
+The shapes the planner refuses are out of reach here too: the hash-join recipe arm asks the
+node's capability and panics without one, so an outer join with a residual filter ([#153](../tickets.md#t153))
+never reaches an executor and has no row.
+
+The source row is the one that needs a file rather than an upload: a scan's input is a path.
+The parquet writer is the test's, over `synthetic`, with the row-group size chosen so several
+row groups exist.
+
+Two of those tickets are closed by tasks below this one — [#198](../tickets.md#t198) by
+`typed-nulls`, [#175](../tickets.md#t175) by `empty-build`. Their `bug_` tests here are the
+record those tasks turn red and delete, which is the regression test each would otherwise
+have to write.
+
+## Scope
+
+Code expected to change:
+
+- `peacockdb-core/src/tests/gpu_tests/`: six case files — exec, aggregate, accumulate, emit,
+  join, source, the aggregate split from exec because it carries its own state fixtures — and
+  the kind registry entries. The source file carries the one helper this task adds, a parquet
+  writer over `synthetic`, local to it.
+- `llm-wiki/tickets.md`: a ticket per new defect; `llm-wiki/build-test.md`: the count.
+- Nothing under `cpp/`, `peacockdb-ffi/`, or `peacockdb-core/src/` outside `tests/gpu_tests/`.
+
+Component-level API expected to change: none. A case that would need a production change to
+pass is a ticket and a `bug_` test, never the change.
+
+## Constraints
+
+Those of the harness task, and:
+
+- No new mechanism beyond the parquet writer above. A case that needs a helper the harness
+  lacks is a finding against the harness task, not a helper added here.
+- Every row above exists as a case. The kind guard the harness carries extends to every
+  `NodeRef` kind but the three forwarders, and a kind with no case is red.
+- Every divergence gets a ticket before it gets a `bug_` test, and a `bug_` test asserts the
+  wrong behaviour precisely — the wrong value, the refusal's message — not merely that the two
+  sides differ. The ticket is where the fix is designed, later and by another task; nothing
+  here repairs, works around, or casts away what a case finds. A ticket a case cannot reproduce
+  stays open — it closes when its corpus cells run — and the detail file says which.
+- The join scripts follow the capability matrix: build side one batch and always first, probe
+  streamed, `without_build` where the build produced nothing.
+
+## Verification bar
+
+- Every row present; each case green or `bug_` with its ticket in the comment above it.
+- The kind guard green with only the forwarders excluded.
+- New tickets in `tickets.md`, within the fifteen-line cap, one per distinct defect.
+- `build-test.md`'s row for the harness carries the new count; the grand total moves with it.
+- Green on shad-gpu; the rust-only lib unchanged.
+
+## Completeness signoff
+
+Solved under its constraints: cases only, nothing outside `src/tests/gpu_tests/` and the wiki,
+no mechanism beyond the parquet writer, no fix; every row of the matrix and the empty-input
+table a case named for its shape; 204 operator cases, 128 green and 76 `bug_` asserting the
+wrong answer or the refusal exactly, each with its ticket above it, going red on the fix; seven
+new tickets and fifteen amended by what the device showed; the kind guard with only the three
+forwarders excluded; exact comparison with no tolerance anywhere. Deviations, none a shortcut:
+two fixture corrections (a padded side declared nullable, as the planner does; sorted runs
+dealt round-robin so the merge key carries no ties); a seventh empty shape for the finishing
+joins, the only route to #173; `nested_cases.rs` beside the spec's six files; cases beyond the
+spec's rows; Welford's moments not compared, a mean not being dyadic — a harness finding; the
+`avg` shortcut's count declared Int64 so its finalize can be the subject; eight `bug_` helpers
+duplicated across files that belong to the harness; two handoffs written on #198 and #175 for
+`typed-nulls` (whose premise the second pin shows false) and `empty-build` (whose driver fix
+does not reach the harness's `without_build` route).
+
+---
+
+<!-- archived from llm-wiki/tasks/operator-harness.md -->
+
+**Merged 2026-09-15 as PR #149, squashed to `3440aa05`.**
+
+# One call sequence, two backends: the operator harness
+
+Kind: production
+
+**Closes no ticket and fixes nothing.** The task is a harness and the cases that prove it; what
+it finds wrong it reports — a ticket and a `bug_` test — and leaves as it found it. Its two
+production edits are mechanism the harness needs, not repairs, and neither changes what any
+query answers.
+
+Eighth in the chain, after [`sink-divergence-survey.md`](sink-divergence-survey.md) — a prototype
+whose branch is never merged, so this one forks off `visibility`. It lands after
+[`test-layout.md`](test-layout.md) on purpose: the harness is crate-level, needing both backends
+and a device, and `src/tests/gpu_tests/` is the place that task creates for exactly that shape.
+Writing it against `tests/*.rs` first would mean writing it twice.
+
+## Why
+
+Nothing today runs one operator on both backends over the same input and compares the two.
+`executor_cases.inc` is eleven rows each side proves against a hand-written answer, and
+`test_gpu_executors` asserts the device against answers the test wrote. A per-node divergence
+therefore surfaces only at the root of a corpus query, where architecture.md's column-indexing
+section says the per-node numbers cannot see it. The corpus is also numeric-aggregate heavy
+([#195](../tickets.md#t195)), so most operator shapes have no query reaching them at all.
+
+The harness makes the comparison one call: a hand-built node, a script of batches the test
+wrote, both backends, the outputs compared exactly. This task builds it and proves it on the
+operators whose recipe has no seq, so nothing in the FlatBuffer can hide a wrong helper.
+[`operator-cases.md`](operator-cases.md) then runs everything else through it.
+
+## What it is
+
+**An upload.** `peacock_handle_from_arrow(executor, schema, array, out_handle)`: an Arrow C-data
+import through `cudf::from_arrow` — the murmur3 hook at `gpu_executor.cpp:340` already does this
+— adopted into the live session's registry as a handle, `NodeSession::adopt(TableResult)`. The
+registry lives in the session, so `begin_plan` comes first; the seqless three load a plan of one
+stub node, which is a shape the C++ already accepts under any forwarder's parent. The symbol is
+test-only and says so where it counts: the header comment, no `AbiSymbol` names it, no recipe
+can, and the extern sits in `peacockdb-ffi` beside `peacock_spark_partition_ids`, the test-only
+hook already there — architecture.md's count of the ABI becomes seventeen, the conformance
+group two. The `GpuBatch` a test wraps the handle in is the existing constructor. The fetch
+side exists — `GpuExport` is what `GpuUnload` runs.
+
+**A stub leaf, and the recipe code unchanged but for one arm.** `Given` — the leaf the cpu
+backend's tests already have, declaring a schema and a layout and nothing else — moves up to
+`src/tests/` and is shared. In `wire/attach.rs` a node outside the registry (`try_as_node_ref`
+answers `None`, the case that function exists for) emits the writer's stub — the empty
+`CudfScan` it already fills a forwarder's parent slot with, made reachable from `attach.rs` —
+and no recipe. The stub is what keeps the plan rooted: the writer refuses a plan with no node,
+and so does the C++, so a leaf that emitted nothing under an unload or a limit would leave
+nothing to load. `attach_recipes(operator over Given leaves)` is then the operator's recipe, at
+the last post-order, and its bytes are what `begin_plan` loads. No second recipe writer, no plan.
+
+**A synthetic batch.** `synthetic(rows, seed)`: one fixed schema — Int32, Int64, Float64, Utf8,
+Date32, Boolean, a key column with duplicates, a unique id — nulls in every column, floats
+dyadic so sums compare exactly, deterministic from the seed. Zero rows is a legal argument and
+a case in its own right. Decimals are a second fixture, `decimals(rows, seed)`, and not a column
+of the first: the device exports every decimal at precision 38 whatever was declared
+([#187](active-tickets.md#t187), open and owned by no task), so a decimal in every batch
+would make every case that ticket's `bug_` test instead of the decimal cases alone.
+
+**A comparator.** `assert_same(cpu, gpu, Order)`: slot by slot — one slot per call, and per
+lane for the emitter, since output timing is a function of the call sequence on both backends
+and a flattened multiset would pass a scatter that put a row in the wrong lane. A slot both
+sides left empty — a call that produced no batch, which a limit outside its interval and a
+one-call join's finish legitimately do — is equal; one side empty is a named difference, and it
+is not the same thing as a zero-row batch. Within a slot, column names and data types, then
+values, exact, after sorting by every column; `Order::AsEmitted` for the sorts, whose synthetic
+keys carry no ties because neither engine's sort is stable. Nullability is not compared: the
+device reports it from the data rather than the declaration, and the engine's own schema check
+(`plan/validate.rs`) ignores it for the same reason. `CallStats` are not compared: the byte
+formula is shared and scratch is measured. A type divergence fails — it is the
+#183/#187/#191 shape, and a `bug_` test is where it belongs, not a cast in the comparator. The
+comparator ships with its own red cases: a differing value, a differing type, a differing row
+count, each shown to fail.
+
+**One driver per category, generic over `B: Backend`.** `run_both(node, Script) -> Outcome`,
+where `Script` names the call sequence in RecordBatches — `Exec(batches)`,
+`Accumulate(batches)`, `Lanes(per-lane events)`, `Emit(batches)`, `Join { build, probe }`,
+`Unload { batch, range }`, `Source` — and the harness refuses a script whose shape is not the
+node's category. Executors come from `Backend::executors_for` with the post-order the tree
+gives, so what is exercised is the trait, not a constructor. `Outcome` carries each side's
+`Result`: a one-sided `Err` is the failure a `bug_` test then pins by message.
+
+## Cases in this task
+
+The three operators whose recipe carries no seq, plus the helper round trip:
+
+- upload then fetch: whole, a row range, a range past the end, zero rows;
+- `GpuUnload` through `executors_for`: whole, ranged, clamped, a zero-row batch, a range over a
+  zero-row batch;
+- `GpuLimit`: an interval inside one batch, one straddling two, batches entirely outside it,
+  skip only, a stream of several batches, a zero-row batch inside a stream, a stream of nothing
+  but zero-row batches, and an interval no batch reaches.
+
+Empty inputs are separate cases everywhere, here and in task 9, one per shape — a zero-row
+batch, no batch at all, one side or one lane empty — because the frozen surface cannot make a
+table out of nothing ([#173](../tickets.md#t173)) and each shape reaches that limit by a
+different route.
+
+And a guard: every `NodeRef` kind is named by at least one case, in both directions, with the
+three forwarders as the listed exclusions — they have no executor and belong to the driver,
+which is tested elsewhere. Each case declares its kind in a registry the guard reads; the guard
+never reads source text. Until task 9 fills the registry, the guard also carries the list of
+kinds still without a case, checked both ways like the exclusions, and task 9 empties and
+deletes it. It is what makes "comprehensive" a red test rather than a claim.
+
+## Scope
+
+Code expected to change:
+
+- `cpp/include/peacock_gpu.h`, `cpp/src/gpu_executor.cpp`: `peacock_handle_from_arrow`;
+  `cpp/src/plan_executor.h`, `cpp/src/node_session.cpp`: `NodeSession::adopt`.
+- `peacockdb-ffi/src/lib.rs`: the extern, one entry.
+- `peacockdb-core/src/wire/attach.rs`: the `try_as_node_ref` arm in `emit`;
+  `peacockdb-core/src/wire/writer.rs`: the stub made reachable from that arm.
+- `peacockdb-core/src/tests/`: `Given` lifted from `executor/cpu_backend/tests/` (whose own copy
+  goes and whose call sites rename), `synthetic` and `decimals`, the comparator with its red
+  cases, the kind registry and its guard.
+- `peacockdb-core/src/tests/gpu_tests/`: `Device`, `Script`, `Outcome`, `run_both`, and this
+  task's cases.
+- `llm-wiki/build-test.md`: one row; `llm-wiki/architecture.md`: the ABI count.
+- Nothing in `.github/workflows/`, `plan/`, `planner/`, `executor/`, or the wire format.
+
+Component-level API expected to change:
+
+- The C ABI: one additive symbol, test-only. `NodeSession`, the de facto C++ interface: `adopt`.
+- `wire::attach_recipes`: accepts a leaf outside the registry, which emits a stub node and no
+  recipe. Its signature and every other `wire/mod.rs` item are unchanged; `Writer` gains one
+  `pub(super)` method inside `wire/`.
+- `crate::tests` and `crate::tests::gpu_tests`, test modules rather than components: the items
+  above are new. No component facade gains or loses an item.
+
+## Constraints
+
+- **No fix, anywhere.** Not in an operator, not in the C++, and not in the harness by casting or
+  filtering a divergence away. A divergence or a one-sided failure is a ticket — an existing
+  one where the defect is the same, a new one otherwise — and a `bug_` test asserting the wrong
+  behaviour with the ticket above it. A ticket whose defect a case here no longer reproduces
+  stays open: a ticket closes when its corpus cells run, not when a fix is visible in the code
+  or a hand-built case passes. The detail file notes it, and nothing else moves.
+- Synthetic data only. No sf1, no `testdata/`; the GPU job needs no dataset for any of this.
+- Exact comparison. No tolerance argument exists.
+- No driver and no forwarder: the harness calls executors, never `run`.
+- Production code moves in two places only: the additive test-only symbol, and the one
+  `attach.rs` arm with the writer method it calls. No production behaviour changes.
+- Rung discipline as `test-layout.md` set it: the leaf, the batch and the comparator compile
+  under `rust-only` in `src/tests/`; everything touching a device sits under
+  `src/tests/gpu_tests/` behind `feature = "gpu"`. No new CI line — the lib binary's
+  `gpu_tests::` filter already reaches it, and `test_ci_coverage` says so or goes red.
+
+## Verification bar
+
+- The comparator's red cases fail for the reason each names.
+- Round trip, unload and limit green on shad-gpu; the kind guard green with the three
+  exclusions and the pending list, and shown red once with a kind removed from it.
+- `cargo test --features rust-only -p peacockdb-core --lib` still compiles and passes: the
+  rust-rung modules carry no device type.
+- `test_ci_coverage` green without a workflow edit.
+- `build-test.md` gains one row for the harness, in its table's terms.
+
+## Completeness signoff
+
+Solved under its constraints: two production edits, both mechanism — the test-only upload
+symbol with `adopt` behind it, and the one `attach.rs` arm — and no behaviour change, the recipe
+payloads byte-identical; the harness under `src/tests/` with a driver per category over
+`Backend`, exact comparison slot by slot with its red cases shown, and a kind guard red both
+ways with the three forwarders excluded and thirteen kinds pending for task 9; the round trip,
+seven `GpuUnload` and ten `GpuLimit` cases agreeing on both backends, so no ticket and no `bug_`
+test. Deviations, none a shortcut: `pub(crate)` for the spec's `pub(super)`, and
+`#[cfg(all(test, feature = "gpu"))]` for its `feature = "gpu"`, both the layout test's forms;
+the guard in `gpu_tests/`, since `inventory` collects per binary; one CPU gtest beyond the file
+list; `Script` allowing dead code for the four variants task 9 constructs; 26 device cases, not 21.
+
+---
+
+<!-- archived from llm-wiki/tasks/visibility.md -->
+
+**Merged 2026-09-15 as PR #148, squashed to `efb41c72`.**
+
+# 6 — the crate's API becomes the CLI's, and the walls go up
+
+Kind: production
+
+Last of six, after [`test-support.md`](test-support.md). That task put the corpus harness behind
+the feature, so nothing outside the crate needs an engine type any more. This one takes the
+surface down to what the CLI calls, deletes the registers task 2 had to build, and writes the
+rules that keep it there. It is also the sweep: three tasks deferred work to "later" without
+naming a task, and this is that task.
+
+The two halves are the same thing from two ends. The **surface**: 174 bare `pub` items become
+eight. The **walls**: `pub mod` survives only in `lib.rs`, and `coding-style.md`'s Visibility
+section stops carrying an exemption at all.
+
+## Where the surface stands entering this task
+
+Measured after task 2, to be re-measured after task 3:
+
+| | count |
+|---|--:|
+| bare `pub` items in `src/` | 249 |
+| of those, in a component or subcomponent `mod.rs` or `lib.rs` | 174 |
+| behind the nine exempt `pub mod` paths, which task 4 demotes | 75 (60 excluding the two subcomponent facades) |
+| `pub mod` declarations | 15 — six components in `lib.rs`, nine exemptions |
+
+The two rows are disjoint and sum to 249. Task 4 takes the 75, so this task starts from **174** and
+ends at **eight** bare `pub` items in three files, six `pub mod`, and no register — 166 demotions,
+every one checked by the compiler. Every other item becomes `pub(crate)`, which is all a sibling
+component ever needed: components live in one crate, so a component API is `pub(crate)` and only
+the CLI's entry points are `pub`. That is the whole of "the crate's API becomes the CLI's".
+
+## What tasks 1-3 leave here
+
+Each of these is stated somewhere as deferred, parked or open, and none has a task. Closing them
+is this task's work, not an appendix to it.
+
+**Formatting and wording residues.** The `parquet_meta.rs` rustfmt hunk task 1 deferred to task 2
+was never applied and still reports. Three files were left unformatted in task 2's second review
+round — `test_cpu_end_to_end.rs` (which task 4 moves to `src/tests/`), `cpu_backend/expr_physical.rs`, and `corpus_gpu.rs` (which task 5 moves to `src/test_support/`).
+About twenty comments still use "mode" as a common noun for the thing task 1 retired.
+
+**Guards that under-report.** `no_public_signature_names_a_type_from_a_private_module` matches only
+`alias::`/`module::` prefixes, so a bare type imported out of a private module and named in a `pub`
+signature passes; that becomes load-bearing here, where the private set grows by 166 items.
+`names_the_module`'s reverse half misses `use peacockdb_core::executor::cpu_backend;` because there
+is no `::` after the path. The super-climb reader reports one `super::super::x` at depth 0 twice.
+
+**Two tickets to file rather than fix**, because each is a different subject: the murmur gate
+re-derives `pmod` and the seed-42 pre-fill locally instead of calling `rows_per_lane`, so one rule
+has two copies; and the repo is not rustfmt-clean, has no `rustfmt.toml`, and `pipeline.yml` runs
+neither a fmt nor a clippy step. Only the first earns a ticket: `prompts.md` files tickets for
+production behaviour and names cosmetics as the case never filed, so the formatting gap is recorded
+in `build-test.md`, where CI shape lives, and not in `tickets.md`.
+
+**One contradiction to correct in writing.** `module-layout.md` and
+`peacockdb-core/tests/common/memory_limit.rs` both say `test-layout.md` creates `src/test_support/`.
+It does not — it hands the feature and the module here. Fix both call sites in the commit that
+moves the file, or the next reader trusts the comment over the spec.
+
+**Baseline tooling outlives its task.** `module-layout-baselines/` is described as scaffolding
+deleted when that task is archived, but `visibility-dump.py`, `case-inventory.sh` and
+`compare-inventory.sh` are checks in tasks 3 and 4. They already live in `scripts/`, moved there by task 2's
+completeness commit; `doc-attr-check.py`, `narrow.py` and `external-names.py` are task
+2's own and die with it. This task inherits them there and adds nothing.
+
+## The demotions
+
+Task 3 raises the nine subcomponent walls as it moves the tests that forced them, and demotes the
+75 items behind them. What is left here is the other 174: everything a component `mod.rs` declares
+for its siblings, which needs `pub(crate)` and has been spelled `pub` because components are
+`pub mod`.
+
+**`#![warn(unreachable_pub)]` goes on in the first slice, but it is a backstop, not the work
+list.** The lint fires on a `pub` item that is not reachable from outside the crate — and every one
+of the 174 sits in a component `lib.rs` declares `pub mod`, so it reports **zero today** and would
+report zero after a task that demoted nothing. It cannot measure this work.
+
+`scripts/visibility-dump.py` is the work list: `awk '$2=="pub" && $3!="mod"' | wc -l`, 174 falling
+to eight, one slice at a time. What the lint buys is the future — once a component's items are
+`pub(crate)`, a `pub` written inside a private module is unreachable and the lint says so, which is
+the rule enforcing itself after this task rather than during it. It stays at `warn`: the crate's
+warning count is already a checked baseline, so a new one fails that check without a second
+mechanism.
+
+Each component's `mod.rs` then keeps only what the CLI needs as bare `pub` and demotes the rest:
+`plan/mod.rs` (92 → 0), `executor/mod.rs` (48 → 2), `wire/mod.rs` (20 → 0), `planner/mod.rs`
+(7 → 4), `plan_text/mod.rs` (3 → 0), `planner/translator/mod.rs` (2 → 0), `lib.rs` (2 → 2). A
+component staying `pub mod` while every item in it is `pub(crate)` is the intended shape: the
+module is nameable, its contents are not.
+
+The eight the corpus harness forced go the same way once the harness is behind the feature — they
+are ordinary component items with an unusual reason for having been `pub`, and after the move
+their reason is gone.
+
+### The hoist is not here, and this is why
+
+Task 2 could not put the backend types behind a `mod` wall, because `test_cpu_executors` and
+`test_gpu_executors` were separate crates and a separate crate cannot reach a private subcomponent.
+It listed three answers — open the walls with `pub mod` (taken), declare the 14 types in
+`executor/mod.rs`, or the full hoist of 14 types and 55 inherent methods — and deferred the third
+as "the one the rules ask for", to be done "later at leisure".
+
+All three answer one question: how does a **separate crate** reach those types. Task 3 answers it a
+fourth way by ending the separation, so the question is gone rather than deferred.
+
+Two things confirm it rather than assume it. Measured on the post-task-2 tree, exactly one reach
+into the backend child modules comes from outside their own directory — `wire/tests.rs:831`'s
+`CpuJoin`, which task 4 replaces with a two-hop `has_finish_pass` delegation rather than a hoist. `executor/driver`, the consumer that would justify
+the other thirteen, names none of them: it goes through the `Backend` trait. And the hoist's
+destination works against this task — types declared in `executor/mod.rs` are there to be `pub`,
+while this task takes that file to two bare `pub` items, so hoisted types would land as
+`pub(crate)` and be no more reachable than they were in `accumulate.rs`.
+
+No ticket either. `coding-style.md` files tickets for production behaviour and never for
+cosmetics, and a rearrangement with no consumer is the cosmetic case exactly. This paragraph is the
+record, so the next reader meeting `pub(crate)` items in `accumulate.rs` does not re-derive it.
+
+## The facades, after
+
+Four kinds of boundary, and after this task each is exactly one thing.
+
+- **The crate** exposes eight items in three files. That is the CLI's API and the whole of it.
+- **A component** — `plan`, `planner`, `executor`, `wire`, `plan_text` — is a directory whose
+  `mod.rs` declares its whole API, `pub(crate)`, reachable by sibling components and by nothing
+  outside the crate. `common.rs` is a file rather than a directory: what the components share,
+  declared in one place, and already at zero bare `pub`.
+- **A subcomponent** — `executor/cpu_backend`, `executor/driver`, `planner/translator` and the rest
+  — is declared `mod`, so it is reachable only from inside its parent component, and its API is its
+  own `mod.rs`.
+- **`test_support`** is a component-shaped child of the crate root whose API is bare `pub` behind a
+  feature, with signatures free of engine types.
+
+No register, no exemption, no `CROSS_COMPONENT_REACHES`. A `pub mod` below `lib.rs` is a violation
+with no sanctioned form, which is what makes the rule readable at last.
+
+## coding-style.md's Visibility section is rewritten
+
+Task 2 wrote the rules and, honestly, the exemption beside them: nine sanctioned `pub mod`, 60
+items behind them, a register checked both ways, and a paragraph explaining why the register is a
+register rather than a habit. All of that was true of a tree with test crates reaching in. None of
+it is true after task 3.
+
+What goes: the exemption section entire, the `CROSS_COMPONENT_REACHES` paragraph, and the
+"nine more `pub mod` exist, every one forced by a test crate" clause.
+
+What stays, unchanged: the component and subcomponent rules, `mod` not `pub mod`, no `pub use`,
+`mod.rs` bodies of one expression, three-deep nesting where the innermost earns it, absolute
+`crate::` paths across a boundary, the length exemptions for `mod.rs` and `common.rs`.
+
+What arrives:
+
+- **The crate's API is the CLI's.** Bare `pub` in `src/` means "the binary calls this". Everything a
+  component exposes to its siblings is `pub(crate)`. A new bare `pub` is a claim that the CLI needs
+  it, and the layout test asks for the receipt.
+- **`#![warn(unreachable_pub)]` is what keeps that true afterwards**, once the components' items
+  are `pub(crate)` and a `pub` written inside a private module is genuinely unreachable. It cannot
+  measure the task itself — while a component is `pub mod`, every item in it is reachable and the
+  lint is silent. That is also why the rule is not merely a convention afterwards: Inside a private module `pub` and `pub(crate)` are identical to rustc —
+  the module's own privacy is the wall — so the distinction is for the reader, for the blast radius
+  when a module is ever opened, and for `private_interfaces`, which passes silently over a `pub`
+  type that nothing can name and fires on the `pub(crate)` one. The lint is what makes the first of
+  those three self-enforcing.
+- **`pub mod` appears in `lib.rs` and nowhere else.** Six components; no exemption, no register.
+- **A test-support signature is free of engine types.** The rule that keeps a facade from being a
+  rename.
+- **What the compiler enforces and what the layout test has to.** Task 2's honest three-way split
+  survives the rewrite — module privacy is rustc's, sibling reach and where a `pub` appears at all
+  are the layout test's, and a `pub` type that is unreachable but nominally public defeats
+  `private_interfaces`, so that is the layout test's too.
+
+## The surface, after
+
+Bare `pub` appears **eight times in `src/` outside the feature gate, in three files**.
+
+| Item | Declared in |
+|---|---|
+| `build_session_state`, `register_tables_for` | `lib.rs` |
+| `plan`, `PlanKnobs`, `BatchSizing`, `SMALL_TABLE_BYTES` | `planner/mod.rs` |
+| `run`, `CpuBackend` | `executor/mod.rs` |
+
+**The eight are not closed under their own signatures, and the table has to say so.** `plan`
+returns `Box<dyn GpuNode>` and `MemoryModel`; `run` takes `&dyn GpuNode` and a `B: Backend` and
+returns `RunReport` and `RunError`. A `pub` item whose signature names a `pub(crate)` type is a
+`private_interfaces` warning on the very item this table keeps — against a warning baseline this
+task checks. So the surface is these eight **plus the types they name**, and the first slice
+enumerates that closure from the signatures rather than guessing it: walk the eight, collect every
+type in their parameters and returns, and keep those `pub` too. If the closure comes out large,
+that is the honest size of the CLI's API and the table grows; what must not happen is eight `pub`
+items sitting on types nothing outside can name.
+
+`test_support/mod.rs` is a further file carrying bare `pub` and the only one behind a feature. The
+guard distinguishes them: eight unconditional items checked by file and name, a feature-gated set
+checked by signature.
+
+## Validation
+
+No test case moves in this task and no golden is touched, so both are pinned as invariants rather
+than checked as outcomes. What moves is visibility, and a visibility regression compiles.
+
+### Baselines
+
+1. The `pub`/`pub(crate)` item dump with declaring files, from the end of task 3, taken with
+   `scripts/visibility-dump.py`.
+2. `--list` for all three lib shapes and the remaining binaries, and their leaf-name sets.
+3. `sha256sum` over `testdata/goldens/`.
+4. The three registers in `test_module_layout.rs` — `PUB_MODULES`, `CROSS_COMPONENT_REACHES`,
+   `PUB_OUTSIDE_A_MOD_RS` — with their entry counts.
+
+### The checks
+
+- **The surface lands on exactly eight**, asserted as the table above — file and item, not a count.
+  A count passes when one item is dropped and another added. Every other item must appear in the
+  dump as `pub(crate)`, not merely as absent: an item deleted and an item demoted look the same to
+  a count and different to this.
+- **`pub mod` appears six times unconditionally, all in `lib.rs`**, plus `test_support` behind its
+  feature — the same unconditional-versus-gated split the surface table makes. `PUB_MODULES` is
+  deleted, not emptied: an empty register is an invitation.
+- **`unreachable_pub` reports zero, and is known to be armed.** Run the three build shapes and
+  confirm zero — which is weak evidence on its own, since it also reported zero before the task. So
+  construct the violation: spell one item in a now-private implementation module `pub`, watch it
+  warn, revert. That is the check; the count is not.
+- **`CROSS_COMPONENT_REACHES` is deleted**, and the reach it named is already gone — task 4
+  replaced it with the `has_finish_pass` delegation when it raised the `cpu_backend` wall.
+- **The private-type-in-a-public-signature guard is fixed first, then relied on.** It matches only
+  path-prefixed types today; with 166 newly private items it is the guard most likely to be needed
+  and most likely to miss. Fix it, prove it red on a bare imported type, then run it.
+- **Case counts and leaf-name sets identical to task 3's**, on all three shapes. Nothing moves
+  tiers here; a count that shifts means a test followed the harness by accident.
+- **Goldens byte-identical.** Nothing in this task can reach them; a diff means the harness changed
+  behaviour while moving 698 lines of test code.
+- **The residues are gone**: `rustfmt --check` is clean on the four files named above, and no
+  comment uses "mode" as a common noun for what task 1 retired.
+
+### Slices
+
+Six components, one slice each, every one compiler-checked: turn the lint on first so its warning
+count is the work list, then `plan`, `planner`, `executor`, `wire`, `plan_text`, `common`. After
+each, the lint's count and the dump's bare-`pub` count both fall; a slice that moves neither moved
+the wrong thing. Each slice ends by appending its state to `test-support-detail.md` and handing
+back.
+
+The corpus move is not here at all — [`test-support.md`](test-support.md) did it. That is the cut:
+698 lines of test code changing compilation unit is a diff a reviewer must read, and ~300 one-word
+demotions is a diff a reviewer can only skim, so they are judged separately or the first hides
+inside the second.
+
+## Done when
+
+`peacockdb-core` exposes exactly the eight items in the table, every other former `pub` demoted to
+`pub(crate)` rather than deleted; `pub mod` appears six times unconditionally and only in `lib.rs`,
+with `test_support` gated beside them; `#![warn(unreachable_pub)]` is on and reports zero; both
+registers are deleted and the reaches they sanctioned are gone; case counts, leaf-name sets and
+goldens are unchanged; `coding-style.md`'s Visibility section carries rules and no register; the
+carry-over list above is closed item by item, with the two tickets filed rather than fixed; and CI
+is green.
+
+## Completeness signoff
+
+Solved under its constraints, with the surface at its honest size: 46 bare `pub` items and five
+fields in five files — nine the CLI names, seven `plan` closes over, thirty `run<B: Backend>`
+does, each hop named by the compiler — asserted by file and name both ways; every other former
+`pub` is `pub(crate)`; `pub mod` is pinned to `lib.rs`; both registers are gone; the lint is on
+and at zero; goldens, counts and leaf names hold but for one layout case renamed for its new
+subject. Deviations, none a shortcut: five facade delegates only tests called were deleted and
+three moved into test modules; `wire`, `plan_text` and `executor/gpu_backend` have no production
+caller and say so with `cfg_attr` allows; the spec's checked-warning-count premise was false, so
+`SURFACE` is the gate and the lint the signal; `RunReport.calls` is read by nothing and ~65
+`pub` fields on `pub(crate)` structs stay, both under `allow` or unreachable; 66 comments, not twenty.
+
+---
+
+<!-- archived from llm-wiki/tasks/test-support.md -->
+
+**Merged 2026-09-15 as PR #147, squashed to `a76563f3`.**
+
+# 5 — the corpus harness moves behind the feature
+
+Kind: production
+
+Fifth of six, after [`test-layout.md`](test-layout.md) and before
+[`visibility.md`](visibility.md). Task 4 created `src/test_support/` for the helpers that had two
+audiences and moved most of them; this task moves the last two files, and with them the reason the
+final eight items are `pub`.
+
+Those eight are `GpuNode`, `validate`, `RunReport`, `render_run`, `GpuBackend`, `GpuContext`,
+`RecipePlan` and `attach_recipes`. They exist for `test_cpu_corpus` and `test_gpu_corpus`, which
+deliberately stay external. Once the harness they share is inside the crate, nothing outside names
+an engine type — and [`visibility.md`](visibility.md) can then take the whole surface down to what
+the CLI calls.
+
+It is a small task with one hard claim, and that is deliberate: 698 lines of test code changing
+compilation unit is a diff a reviewer has to read line by line, and it should not be sharing a
+branch with three hundred one-word demotions.
+
+## The corpus facade
+
+`corpus.rs` (508 lines) and `corpus_gpu.rs` (190) — 698 lines — join the helpers already in
+`src/test_support/`. `mode.rs` and `memory_limit.rs` moved with task 4, which needed them. Inside
+the crate these two reach `pub(crate)` items, so the eight stop being `pub`.
+
+The two corpus targets stay because they are the genuine end-to-end tier — SQL in, rows out, against committed
+goldens, 456 cases — and because keeping them as two binaries keeps `inventory`'s
+one-binary-per-engine property resting on two `--test` targets rather than on the `gpu` feature
+producing two compilations. The feature route would work and would make the registry guard depend
+on something that reads as unrelated to it.
+
+The two binaries name **none** of the eight. They call functions whose signatures name no component type: `cpu_case(dataset, sf, query, mode, oracle)`, `authoritative_mode`, `gpu_case`.
+That is what makes the facade real rather than a rename. `over_cap` travels with `corpus.rs` and
+`test_corpus_goldens` reaches it the same way. `golden_text.rs` and `registry.rs` are already in
+`test_support` — task 4 moved them, because targets it moved needed them too. `corpus_golden.rs`,
+`result_text.rs` and `cost_model.rs` name zero crate items and are read only by binaries that stay,
+so they stay in `tests/common/` untouched.
+
+## The mechanism is already here
+
+`test-layout.md` declared the `test-support` feature and the self dev-dependency, because the
+helpers it moved had two audiences — in-crate tests and the binaries that stayed — and duplicating
+one across the boundary guarantees drift. This task adds no mechanism; it adds the last two files
+to the module that mechanism created, and the eight items stop being `pub` as a result.
+
+What `#[cfg(test)]` still cannot do is unchanged: the library is compiled without `cfg(test)` when
+cargo builds an integration test, which is the whole reason these eight are `pub` today.
+
+## test_support is shaped like a component
+
+`src/test_support/mod.rs` declares the whole API the integration tests may reach. Task 4 put the
+harness half there — `Mode`, `MODES`, `MemoryLimit`, the golden-text reader, the registry loader
+and the testdata root — and this task adds `cpu_case`, `gpu_case`, `authoritative_mode` and
+`over_cap`. Every module below it is private with `pub(crate)` items. Same rules as a component, for a reason beyond symmetry: the signature
+check below is a scan of one file only if the API lives in one file.
+
+Being a child of the crate root it sees component facades and not their internals — the same level
+as `src/tests/`, and the reason it reaches `pub(crate)` items without any of them becoming `pub`.
+
+**No `pub` in `test_support` names a type from `plan`, `planner`, `executor`, `wire` or
+`plan_text`.** That is the rule, stated by what it forbids rather than by a list of what it
+allows — the module holds a `PathBuf` root, a golden-text reader and a registry loader, none of
+which a list of "strings, `Mode`, `MemoryLimit`" would have permitted. A
+signature mentioning `GpuNode` or `RunReport` puts the item straight back on the surface under
+another name, and it compiles. This goes in `coding-style.md` beside the visibility rules, and the
+layout test enforces it.
+
+## Validation
+
+No test case moves and no golden is touched. What moves is 698 lines between compilation units,
+and the failure mode is a harness that changed behaviour while moving.
+
+### Baselines
+
+1. `--list` for all three lib shapes and the seven binaries, and their leaf-name sets.
+2. `sha256sum` over `testdata/goldens/`.
+3. The `pub`/`pub(crate)` dump from the end of task 4, taken with `scripts/visibility-dump.py`.
+
+### The checks
+
+- **Nothing under `peacockdb-core/tests/` names any of the eight.** Grep the whole directory, not
+  the two binaries: the names live in `tests/common/corpus.rs` and `corpus_gpu.rs` today, so a grep
+  of the binaries alone is green before the task starts and proves nothing. A hit means
+  the facade is a rename, which is the one way this task can look done and not be.
+- **No engine type in a `test_support` signature.** Scan every `pub` in `test_support/mod.rs` and
+  assert no parameter or return type comes from a component. Then construct the violation, `pub fn tree() -> Box<dyn GpuNode>`, and watch the
+  layout test go red. This is the guard the whole facade rests on and the one that would otherwise
+  never be exercised.
+- **The feature is off in a plain build**, proven by construction: reference `crate::test_support`
+  from a non-test path in `lib.rs`, confirm `cargo build` fails with `E0433`, revert. A passing
+  build is not evidence — the module simply is not there to break anything.
+- **No CI step passes `--features test-support`.** Grep the workflows and assert absence; if one
+  does, the self dev-dependency is not doing its job.
+- **`inventory` still sees two binaries.** Both corpus targets keep their own registry assertion
+  and both must pass — the property the "keep them external" decision exists to protect.
+- **Case counts, leaf-name sets and goldens unchanged.** Nothing moves tiers here; a count that
+  shifts means a test followed the harness by accident.
+
+## Done when
+
+`corpus.rs` and `corpus_gpu.rs` are in `src/test_support/`; the two corpus binaries reach them
+through `cpu_case`, `gpu_case`, `authoritative_mode` and `over_cap` and name none of the eight;
+every `pub` in `test_support` has a signature free of engine types and that guard has been seen
+red; a plain `cargo build` cannot name `test_support`; no workflow passes the feature; `inventory`
+still sees two binaries; case counts, leaf-name sets and goldens are unchanged; and CI is green.
+
+## Completeness signoff
+
+Solved under its constraints: the corpus harness is inside the crate behind the feature, the
+three binaries reach it through signatures free of engine types, nothing under `tests/` names
+the eight, the guard has been seen red on the spec's probe and on three further spellings, a
+plain build cannot name `test_support`, no workflow passes the feature, `inventory` rests on two
+`--test` targets, and goldens, leaf-name sets and the 200 bare `pub` outside `test_support` are
+byte-identical to the baselines. Deviations, none a shortcut: `corpus_golden.rs` and
+`cost_model.rs` moved too, since `corpus.rs` calls both and `src/` cannot see `tests/` — about
+1200 lines, not 698; the facade declares 22 items, not four, for the three other suites that read
+it; `Mode::knobs` and `Mode::sizing` narrowed to `pub(crate)`, the rule's first findings;
+`read_back` deleted with no caller; `tests/common/mod.rs` survives as a six-line re-export shim.
+
+---
+
+<!-- archived from llm-wiki/tasks/test-layout.md -->
+
+**Merged 2026-09-15 as PR #145, squashed to `1a04f096`.**
+
+# 4 — tests down the source tree
+
+Kind: production
+
+Fourth of six, after [`module-layout.md`](module-layout.md) and
+[`rmm-pool-budget.md`](rmm-pool-budget.md), and before [`test-support.md`](test-support.md) and
+[`visibility.md`](visibility.md).
+
+249 items in `peacockdb-core/src` are bare `pub`, measured after task 2. Most are `pub` for no
+reason anyone can name — that is [`visibility.md`](visibility.md)'s subject. What this task ends is
+the subset that is `pub` **because `peacockdb-core/tests/*.rs` are separate crates** seeing the
+library the way crates.io would: 75 of them behind nine walls, and a hundred-odd more named
+directly. This task moves the eleven targets that force them, plus the murmur gate, down
+into `src/`, taking the surface from 108 test-driven items to **eight**. The last eight go in
+[`test-support.md`](test-support.md).
+
+Three things happen together, because none is worth a separate pass over the same files: the move,
+the visibility sweep, and the separation of test code from production code.
+
+## Why the demand is concentrated
+
+Two files in `tests/common/` force 73 of the 108. `injection.rs` (822 lines) and `rebuild.rs` (623)
+take a plan tree apart and put it back together, constructing every node kind and every backend
+executor on the way. `join_fixture.rs` adds two more.
+
+The other 2,488 lines of `tests/common/` — corpus, registry, golden text, result text, cost model,
+mode table — need nine, and no target that keeps them touches the injector. That is what makes the
+split clean rather than a judgement call.
+
+Partial moves do not pay: 108 goes to 79 if only `common/` moves, 50 with the two executor tiers,
+15 with three more, and 9 only when all eleven targets go. Do it once.
+
+### Where a feature-gated helper pays, and where it does not
+
+`#[cfg(test)]` cannot help an integration test at all: the library is compiled without `cfg(test)`
+when cargo builds one, so a `cfg(test) pub` item is unreachable from `tests/`. That is the whole
+reason these 108 exist. A **feature** can, and the mechanism costs nothing at the call site:
+
+```toml
+[features]
+rust-only = ["peacockdb-ffi/rust-only"]
+gpu = []                # device tests; not propagated to peacockdb-ffi, which has no device path
+```
+
+`gpu` and `rust-only` are mutually exclusive and a `compile_error!` says so. `gpu` does not
+propagate to `peacockdb-ffi`: that crate is a C ABI binding with no device-conditional code, and
+adding a feature there would be a knob nothing reads.
+
+**The `test-support` feature is declared here, because here is where a helper first has two
+audiences.** Nine of the eleven moving targets read `tests/common/` — `golden_text`, `registry`,
+`mode`, `memory_limit` and seven `mod.rs` helpers between them — and the seven binaries that stay
+read the same files from outside the crate. An in-crate `#[cfg(test)]` module cannot see
+`tests/common/`, and duplicating a helper on both sides of the boundary guarantees the drift.
+
+```toml
+[features]
+test-support = []
+[dev-dependencies]
+peacockdb-core = { path = ".", features = ["test-support"] }
+```
+
+The self dev-dependency turns the feature on for `cargo test` and leaves it off for `cargo build`,
+so no CI step passes a flag and a plain build cannot see the module. `src/test_support/` is then
+the one place a helper with two audiences lives: `crate::test_support::…` from inside,
+`peacockdb_core::test_support::…` from the binaries.
+
+**A helper moves when a moving target needs it, and not before.** `golden_text.rs`, `registry.rs`,
+`mode.rs`, `memory_limit.rs` and the shared `mod.rs` helpers move; `corpus_golden.rs`,
+`result_text.rs` and `cost_model.rs` are read only by binaries that stay, so they stay too, and
+`corpus.rs`/`corpus_gpu.rs` are [`test-support.md`](test-support.md)'s whole subject.
+
+**It does not pay for the injector.** `test_gpu_executors` (46 items) constructs `GpuAccumulator`,
+`GpuEmitter` and `GpuJoin` and calls their methods; `test_cpu_executors` (24) does the same on the
+other backend; `test_null_analysis` (18) hand-builds plan nodes. A facade over those re-exposes the
+same vocabulary under test-local names — indirection, not encapsulation. Those targets move
+in-crate instead, which is what takes 108 to single digits.
+
+**It does not pay for the corpus harness either, in this task.** `corpus.rs` and `corpus_gpu.rs`
+force the eight items that survive here, and moving them behind a feature is
+[`test-support.md`](test-support.md)'s whole subject. They stay in `tests/common/` until then.
+
+## Test code is never in a production file
+
+Added to `coding-style.md`.
+
+- No test code in a file that also carries production code. A module's unit tests are a child
+  module of their own in their own file: `validate.rs` with `validate/tests.rs`, which is already
+  the pattern in `expr_physical`, `accounting`, `index`, `scheduler`, `single_partition` and
+  `expr_writer`.
+- A test-only helper in `src/` lives in a file or directory whose name carries `test`, so a reader
+  can tell test-only code from production code by the path alone. `driver/mock.rs` and
+  `driver/plans.rs` are `#[cfg(test)]` today and do not say so in their names; they become
+  `driver/tests/mock.rs` and `driver/tests/plans.rs`.
+- Every test module declares the lowest rung it needs, per the ladder below, and its name carries
+  that rung — `tests`, `ffi_tests`, `gpu_tests` — so a CI line can select one rung by path.
+
+A dozen or so files hold inline `#[cfg(test)] mod tests { … }` and are split. **Do not work from
+a list written here**: task 2 renamed and moved most of them and deleted `config.rs` outright, so
+the count and the paths are both stale. Derive the set at the time of the move — the layout test's
+own rule names them — and record what you found.
+
+The mod.rs rule from `module-layout.md` applies to components and subcomponents, not to
+implementation modules — an implementation module with unit tests is `foo.rs` beside `foo/tests.rs`.
+Do not reach for `clippy::mod_module_files` to enforce the mod.rs rule: it cannot be scoped that
+way and would reject exactly this pairing. The layout test can scope it, and has to exist anyway.
+
+## The device guard becomes a feature
+
+Today no `cfg` says "needs a device". `rust-only` says "no FFI linked", and `test_gpu_batch` is
+`#![cfg(not(feature = "rust-only"))]` while running on a GPU-less runner. What actually keeps device
+tests off CPU hosts is which binary CI runs where — and that mechanism disappears the moment those
+tests are inside `--lib`.
+
+Add a `gpu` feature. The three build shapes are a **ladder**: each rung adds a capability and
+keeps everything below it.
+
+| Build | FFI linked | Device assumed | Runs |
+|---|:-:|:-:|---|
+| `--features rust-only` | no | no | dataset-matrix, CPU steps |
+| default | yes | no | dataset-matrix, FFI steps |
+| `--features gpu` | yes | yes | shad-gpu only |
+
+So a test declares the **lowest rung it needs**, and nothing declares what it excludes:
+
+```rust
+#[cfg(test)] mod tests;                                       // pure Rust
+#[cfg(all(test, not(feature = "rust-only")))] mod ffi_tests;  // needs the FFI linked
+#[cfg(all(test, feature = "gpu"))] mod gpu_tests;             // needs a device
+```
+
+Two conditions, both positive in meaning, and the sets nest rather than partition: the FFI set is
+a subset of what a default build compiles, and a `gpu` build compiles all three. A reader answers
+"which builds run this" from one attribute. `rust-only` is the only spelling available for the
+middle rung — cargo features are additive and `rust-only` is subtractive, so there is no positive
+`ffi` feature to write and inventing one would mean every ordinary build had to ask for the FFI
+by name. A `compile_error!` on `all(feature = "gpu", feature = "rust-only")` keeps the ends of
+the ladder exclusive.
+
+**A module's name carries its rung whenever the rung is above the floor**, and that is what makes
+a rung selectable. Cumulative shapes are the point of the ladder, but a CI line that runs a whole
+shape re-runs every rung beneath it: unfiltered, the device host would drag the CPU unit cases
+through `--test-threads=1` on the one serial resource in the suite, and the default-features line
+would re-run what the `rust-only` line just ran.
+
+| Rung | Module | Selected by |
+|---|---|---|
+| pure Rust | `tests` | nothing — it is the floor |
+| FFI linked | `ffi_tests` | `-- ffi_tests::` |
+| device | `gpu_tests` | `-- --test-threads=1 gpu_tests::` |
+
+Those are path filters, not name filters, so they cannot suffer the trap `build-test.md` records
+for filters that name a query. The layout test asserts name and gate imply each other in both
+directions at both rungs: an `ffi_tests` module carries the `not(rust-only)` gate and a `gpu_tests`
+module the `gpu` gate, and no module carries either gate without the matching name. Each CI line
+then lists exactly its own rung, which is what makes "one line per rung" an accounting rather than
+a slogan.
+
+Two alternatives were considered and are not open. A runtime device check that skips is the shape
+`build-test.md` already records shipping a hole — the binaries skip and exit 0, green having
+verified nothing, which is why CI asserts sf40's presence itself. And `#[ignore]` already means
+"disabled against a ticket" (#182), so reusing it for "needs a device" is one spelling for two
+things.
+
+## What moves into src/
+
+Target names are the ones tasks 1 and 2 left behind, not the ones this spec was first written
+against. The rung column is the ladder above: `rust` needs nothing, `ffi` needs the FFI linked,
+`gpu` needs a device and lands in a `gpu_tests` module.
+
+| Lands in | From | rung | N |
+|---|---|:-:|--:|
+| `plan/tests/` | `test_layout_injection` | rust | 4 |
+| `planner/tests/` | `test_planner_join_capability` | rust | 13 |
+| `planner/tests/` | `test_planner_join_refusals` | rust | 10 |
+| `planner/tests/` | `test_null_analysis` | rust | 8 |
+| `planner/tests/` | `test_plan_goldens` | rust | 19 |
+| `wire/gpu_tests/` | `test_gpu_recipe_walk` | **gpu** | 10 |
+| `executor/ffi_tests/` | `test_gpu_batch` | **ffi** | 3 |
+| `executor/cpu_backend/tests/` | `test_cpu_executors` | rust | 1 |
+| `executor/gpu_backend/gpu_tests/` | `test_gpu_executors` | **gpu** | 31 |
+| `executor/gpu_backend/gpu_tests/` | `test_gpu_abi` | **gpu** | 4 |
+| `executor/cpu_backend/gpu_tests/` | `test_murmur_conformance` | **gpu** | 10 |
+| `src/tests/` | `test_cpu_end_to_end` | rust | 26 |
+| `src/tests/` | `common/{injection,rebuild,join_fixture}.rs` | — | 0 |
+| `src/test_support/` | `common/{golden_text,registry,mode,memory_limit}.rs` and the shared `mod.rs` helpers | — | 0 |
+| | | | **139** |
+
+`test_gpu_executors` is already a directory of five modules — `accumulate`, `backend`, `contract`,
+`exec`, `join` — and moves as one, keeping that shape under `gpu_tests/`. `test_gpu_batch` is the
+only occupant of the middle rung, which is why it is the shape proof the slices start with.
+
+55 of the 139 are device cases. The injector and the rebuilder land at crate level rather than in
+`plan/` because they construct backend executors as well as plan nodes, so they sit above both.
+
+`src/tests/` is a crate-level `#[cfg(test)] mod tests;` declared in `lib.rs` — a peer of the
+components that can see all of them. It holds the end-to-end tier and the shared test support the
+component tests reach through `crate::tests::…`. The layout injector and the tree rebuilder live
+here, not in `plan/` or `wire/`: they construct plan nodes, wire recipes and backend executors
+alike, so they sit above every component rather than inside one.
+
+### What makes test-only actually test-only
+
+Three layers, and only the first is discipline.
+
+- **The path says so.** `src/tests/…`, `component/tests/…`, `module/tests.rs`. A reader can tell
+  test code from production code without opening the file.
+- **One `#[cfg(test)]` at the root of each test subtree, and the gate is transitive.** `src/tests/`
+  is excluded from a non-test build entirely — its files are never compiled, so `mod.rs` and the
+  files below it carry no attribute of their own. Production code that references anything inside
+  is a hard error in the release build (`E0433: failed to resolve`), not a warning and not a
+  lint. That is the guarantee: it is the compiler, not a convention.
+- **The layout test checks the shape**, because three things the compiler is happy with would
+  still be wrong: a `#[cfg(test)]` attribute anywhere other than on a test-module declaration —
+  which is how test code creeps back into a production file one item at a time — `coding-style.md`
+  now says why the attribute cannot double as a `dead_code` silencer, and roughly twenty item-level
+  uses across seven files answer to that, not the four this spec once named. `planner::translate`,
+  `planner::translate_expr`, `executor::physical_expr` and `plan::state_for` — whose caller is
+  `planner/translator/schema_tests.rs` — are the documented set, and they are
+  **test helpers, not production items**: each exists to hand one test in one other component a
+  fact it cannot reach itself. They keep `#[cfg(test)]` and stay in their component's `mod.rs`,
+  because visibility pins them there — a helper must name what its own component owns while its
+  caller is elsewhere, so the two can never sit together. That is the one carve-out to "a
+  test-only path carries `test` in its name", and `coding-style.md` now states it. Each has
+  exactly one caller today and each doc comment must name it; `translate`'s says "three of them,
+  in two other components" and is already wrong, which is why the layout test reads the comment
+  and the callers together rather than trusting either. **The chain still collapses**:
+  `planner::translate` calls `Translator::new(..).translate(plan)` directly and
+  `translator::translate` — `cfg(test)` too, and called only from here — is deleted, twelve lines
+  out. What those fifteen lines buy is `plan_text/tests.rs` entire: 236 lines checking the
+  renderer against what the planner emits from real SQL, which neither `plan()` nor a hand-built
+  tree can stand in for. A name and a
+  gate that disagree at either rung — `ffi_tests` without `not(rust-only)`, `gpu_tests` without `gpu`,
+  or either gate on a module named `tests` — since the runs select by path and a mismatch either
+  loses a case or drags it onto the wrong host; `driver/partitioned.rs` carries four
+  item-level `#[cfg(test)]` attributes today (lines 616, 621, 626, 631); they are the first
+  thing the first rule finds, and they move into the module with the tests that use them.
+
+### Testdata paths move with the tests, and #49 is in the way
+
+`tests/common/mod.rs` honours `PEACOCK_TESTDATA_DIR`, overriding the compile-time root "so a binary
+built on one host can run on another". Every target that says `mod common` inherits that, including
+the ones staged to shad-gpu. Nothing in `src/` does: seven sites bake the path instead —
+`env!("CARGO_MANIFEST_DIR").join("../testdata/tpch.minimal")` in `planner/memory_estimation.rs` (×3),
+`planner/translator/scan_mapping/parquet_meta.rs`, `plan_text/tests.rs` and
+`planner/translator/{tests,schema_tests}.rs` — the list `tickets.md` keeps under #49. That is
+the residual [#49](../tickets.md#t49) names.
+
+Moving eleven targets in-crate walks straight into it: they lose `testdata_root()` and land beside
+the seven that do it the unportable way, and the device ones then run on shad-gpu **from a binary
+built on another host**, which is the case the variable exists for.
+
+So this task closes that residual, and `test_support` is where the root belongs rather than
+`src/tests/` — the moved targets, the crate's own unit tests and the seven binaries that stay all
+need it, which is the same two-audience argument the feature exists for. `test_support/testdata.rs`, declared in `mod.rs`
+honours `PEACOCK_TESTDATA_DIR` with the same compile-time fallback; `tests/common/mod.rs`'s
+`testdata_root()` becomes a call to it rather than a second implementation, the seven `src` sites
+call it too, and #49 closes with the sweep. Two spellings of one rule is what that ticket is
+about, so any second copy re-files it one layer down.
+
+### The exemption expires here, one slice at a time
+
+`coding-style.md` says it outright: nine subcomponent paths under `executor/` are declared
+`pub mod` rather than `mod` because test crates reach them, 60 bare `pub` items sit behind those
+nine — 75 counting the two subcomponent facades the layout test skips — and "`test-layout.md` moves those test files into `src/`, and the whole exemption expires
+with them". This task is where that happens, and it is not a consequence — it is work.
+
+`PUB_MODULES` in `test_module_layout.rs` holds nine entries, each naming the test files that force
+it, and **it is checked both ways**: an entry whose named files no longer force it is reported, and
+a `pub mod` that is not in the register is a violation. The check is per **forcing file**, so a slice
+that moves one edits every `forced_by` list naming it — five entries name `injection.rs` — and
+demotes only the entries whose last forcer has now gone. Dropping an entry another target still
+forces breaks that target and trips the reverse half of the check. Editing the list and demoting
+what it empties are the same commit; leaving either for later is a red build, not a tidy-up.
+
+Which slice closes what follows from the register's own `forced_by` lists: the injector trio takes
+`cpu_backend/join` and `cpu_backend/source`, `test_cpu_executors` takes the rest of the
+`cpu_backend` group, and `test_gpu_executors` and its child files take all four `gpu_backend`
+entries. Task 2 recorded the trade this creates and left it deliberately: if
+`test_gpu_executors.rs` alone stops naming `executor/gpu_backend`, the forward half goes red and
+the three child-naming files cannot re-justify the entry. That is why the target moves whole.
+
+**The one reach that blocks a wall is answered without a hoist.** `wire/tests.rs` names
+`executor::cpu_backend::join::CpuJoin`, so raising the `cpu_backend` wall is an `E0603` on that
+line. The register concluded that no delegation could carry it — true of the *type*, and it
+stopped there. The test does not want the type: it builds a join per (join type, residual) cell
+and asks one question, whether the executor makes a finish pass, to compare against the recipe's
+`AtDone` call. So the components declare the question instead:
+
+    // cpu_backend/mod.rs
+    pub(crate) fn has_finish_pass(node: &GpuHashJoin, build: &ArrowSchema, probe: &ArrowSchema,
+        ctx: Arc<TaskContext>) -> Result<bool, PlanError>
+
+    // executor/mod.rs — the same signature, delegating to the above
+    pub(crate) fn has_finish_pass(...) -> Result<bool, PlanError>
+
+**Two delegations, not one**, because the wall this task raises is the reason: once
+`cpu_backend/mod.rs` declares `mod join;` privately, `executor/mod.rs` cannot name
+`cpu_backend::join::CpuJoin` either. That is the shape the tree already uses — `executor::physical_expr`
+delegates to `cpu_backend::physical_expr`, which reaches `expr_physical`. Each body is one line and
+drags nothing.
+
+Take it **in the slice that raises the `cpu_backend` wall, before the demotion**, or that slice's
+own `cargo test --lib` cannot pass: `wire/tests.rs` still reaches through the wall until the
+delegation exists. `CpuJoin::makes_a_finish_pass` is renamed `has_finish_pass` with it, per the
+predicate rule in `coding-style.md`. No hoist is needed here or in the tasks after.
+
+`CROSS_COMPONENT_REACHES`'s single entry is that same reach and dies with it. The register itself
+is deleted in task 4, not here: this task empties it, and an empty register is still a register.
+
+## What stays a separate binary
+
+| Target | Why it cannot fold in | rung | N |
+|---|---|:-:|--:|
+| `test_cpu_corpus` | `inventory` collects per linked binary; the registry needs two | rust | 448 |
+| `test_gpu_corpus` | the other half of that pair, and it writes env vars | **gpu** | 8 |
+| `test_golden_format` | the format reader, over strings | rust | 26 |
+| `test_corpus_goldens` | committed sections against their own arithmetic | rust | 20 |
+| `test_ci_coverage` | reads the workflow yaml | rust | 6 |
+| `test_cost_model` | `.cost.txt` re-derived from `.cpu.txt` | rust | 3 |
+| `test_module_layout` | reads the tree, as `test_ci_coverage` reads the yaml | rust | 11 |
+
+`test_module_layout` is task 2's, not this task's to write — **this task extends it** with the
+rules below rather than inventing a layout test. Where this spec says "the layout test", it means
+that target.
+
+None of the seven names an item that would otherwise have to stay `pub` beyond what `corpus.rs` and
+`corpus_gpu.rs` already force. The `inventory` constraint
+survives untouched, which is the one that looked fatal: it collects per linked binary and the two
+corpus binaries both stay.
+
+## test_ci_coverage shrinks to about 300 lines
+
+It keeps its job and loses most of its subject. From 720 lines:
+
+- The target sweep now covers seven targets, not nineteen, and `INTENTIONALLY_NOT_IN_CI` drops from
+  six entries to two.
+- The three GPU target lists become one staging list of one binary plus the `--lib --features gpu`
+  run.
+- Its own matcher unit tests stay whole. They are the reason this guard can go red at all.
+
+It gains assertions, and they are the most important ones in the file, because the ladder puts one
+CI line under each rung and nothing else says a rung stopped running. **Four things must exist**:
+a `--lib` step under `--features rust-only`, a `--lib -- ffi_tests::` step at default features,
+the staged lib binary in the GPU job's array **with `gpu_tests::` reaching it in the run loop**,
+and the CLI build. The third is the one that is not a command line — the guard reads the staging
+array and the loop, the way it already reads `for t in …` today. Each names its rung's filter, so each
+lists exactly its own rung: the device line carries the 55 cases that move into `--lib` in this
+task, and the default-features line the three of the middle rung, under `-- ffi_tests::`. Each gets the red-watch below — delete
+the line, confirm the guard fails — because each is the only thing standing between a rung and
+silence.
+
+## Renames
+
+**`test_inc2_conformance` becomes `test_murmur_conformance`**, and that closes a documented
+exception. `coding-style.md`'s Names section opens by admitting the name breaks its own rule —
+"named after an increment, which the second bullet forbids" — and justifies keeping it because
+renaming would move the staging array, the exemption list and two pages. This task moves all three
+anyway. Delete that paragraph; the rule no longer needs an apology beside it.
+
+Sixteen references in ten files: `scripts/build-test.sh` (5), `pipeline.yml` (2),
+`build-test.md` (2), and one each in `build-test-shadgpu.sh`, `test_cpu_executors.rs`,
+`test_ci_coverage.rs`, `executor_cases.inc`, `coding-style.md`, `architecture.md` and
+`cpp/tests/gpu/test_cudf.cpp`.
+
+It is also the lowest-level test in the suite and moves in-crate with the rest: it names nothing
+from `peacockdb_core`, driving comet's `create_murmur3_hashes` and one FFI symbol over raw arrays.
+It lands beside `spark_partitioning.rs`, the CPU half of the invariant it protects.
+
+That placement surfaces a gap worth a ticket, not a fix here: the test re-derives `pmod` and the
+seed-42 pre-fill locally rather than calling `rows_per_lane`, so it proves the kernel matches comet
+while the code that actually places rows is only transitively covered. One rule, two copies.
+
+One of the five references in `build-test.sh` is not a comment: line 309 is a literal
+`peacockdb-core:test_inc2_conformance` in a hand-maintained list, and the comments around it record
+that this is the one test file the suite derivation does not catch by pattern — it was silently
+skipped once. **Delete that literal rather than renaming it.** The target stops existing: it becomes
+an in-crate `gpu_tests` module, and this task's own list leaves `RUST_TESTS` with one entry. A
+renamed literal would name a `--test` target that is not there, which is the failure
+[#176](../tickets.md#t176) describes — cargo errors late, inside the cuDF leg. The ten lines of
+explanation go with it, as below. Re-count the sixteen references before editing: tasks 1 and 2
+moved several of these files.
+
+`driver/mock.rs` and `driver/plans.rs` become `driver/tests/mock.rs` and `driver/tests/plans.rs`.
+`translate/schema_tests.rs` already carries the word and stays.
+
+## build-test.md
+
+The test table is restructured in this task, not a later one, and the axis changes. Today one
+table carries every language and every kind of test; it becomes two.
+
+**The first table is the Rust tests against production code** — `peacockdb-core` and
+`peacockdb-ffi` — **blocked by rung**, because the rung is what decides where a case can run and
+each block's total is one CI line's case count. A bolded header row opens each block; within a
+block the rows are grouped by tier, then by category; and the Why, Examples and N columns survive
+as they are.
+
+    **cpu — `--features rust-only`: no FFI, no device**
+      crate integration, external
+      crate integration, internal
+      component · subcomponent · module unit
+    **ffi — default features: FFI linked, no device**
+      component
+    **gpu — `--features gpu`: shad-gpu only**
+      crate integration, external · component · subcomponent
+
+The `Runs` column goes. It said which CI job runs a row, and once the repo guards move to the
+second table there is no variation left inside a rung: cpu and ffi are dataset-matrix, gpu is
+shad-gpu, and the block header says so once instead of every row repeating it.
+
+**The ffi block has two rows and five cases** — `test_gpu_batch`'s three and `peacockdb-ffi`'s
+`test_ffi` — and the table should show that rather than pad it. A thin rung is a fact about this
+engine: almost nothing needs the FFI linked and no device.
+
+**The second table is everything else**: the C++ suites, the Python prototype and validators,
+`cost-report`, and the repo guards — `test_ci_coverage`, which reads the workflow yaml,
+`test_module_layout`, which reads the source tree, and `test_golden_format`, which tests the
+harness's own format reader. None of the three runs engine code, and grouping them by what they
+guard is more use than filing them by a rung they do not have.
+
+`test_corpus_goldens` stays in the *first* table, cpu rung, crate integration external. It runs no
+engine code either, but its subject is the engine's output and it goes red when the rendering
+drifts, which is the distinction that matters.
+
+Assign each file by where its test module is declared, not by eye: `driver/accounting/tests.rs` is
+a unit test of an implementation module, `driver/tests/` is the subcomponent's, and `nodes/tests/`
+is `plan`'s. The cross-checks are one per rung plus the binaries, and **every figure in this table
+is pre-task-2**: it predates `test_module_layout`'s cases and five target renames, so rebuild it
+from the baselines. The arithmetic that must hold is the page's, not this spec's — the two tables
+add to the headline figure.
+
+The two tables still have to add to the page's headline figure, which is how the page is checked.
+Task 2 reported a four-case discrepancy there and fixed it in its completeness commit, so the
+arithmetic is sound entering this task; keep it sound rather than re-deriving it.
+
+Two facts the new shape makes visible that the current table cannot. The gpu block is what
+shad-gpu runs, entire — **55** inside `--lib` selected by `gpu_tests::`, plus **8** in one binary —
+so the cost of the serial host is one number a reader can find. And the coverage distribution
+survives inside the cpu block, where `executor/driver` and `plan` are the heaviest subcomponent
+and component rows and the corpus's 448 is one target rather than a tier.
+
+## The three GPU target lists, and the two scripts
+
+Today five GPU targets are named in three places that `test_ci_coverage` asserts agree:
+`build-test.sh`'s `gpu_runtime_targets()`, `build-test-shadgpu.sh`'s `RUST_TESTS` at line 30, and
+`pipeline.yml`'s staging loop. After this task the list is **one target plus a lib build**, which is
+a bigger change to those scripts than to the lists.
+
+**`build-test-shadgpu.sh`**
+
+- `RUST_TESTS=(test_gpu_corpus)` — one entry.
+- `stage_cargo_test_binary` resolves a built binary by matching `target.name` against a `--test`
+  name in cargo's json. It needs a second form for the lib test target, whose json entry has
+  `kind: ["lib"]` and `test: true` and whose `target.name` is the crate name. Stage it under an
+  explicit filename — `peacockdb_core_gpu_lib` — because the run loop globs
+  `cpp/install/rust-tests/*` and a bare crate name reads as ambiguous beside the target binaries.
+- The build must pass `--features gpu`, and **the lib binary alone takes the `gpu_tests::`
+  argument**: under the ladder it holds every rung, so an unfiltered run would put the CPU unit
+  cases through `--test-threads=1` on the one serial host. The loop passes arguments to every
+  staged binary alike, so this is a per-binary argument the loop does not have today.
+- **The zero-test guard becomes load-bearing, and the two runners disagree about it.** A path
+  filter that matches nothing runs no cases and exits 0, so a rename of the `gpu_tests` convention
+  would be invisible without it. `pipeline.yml` arms it unconditionally — it reads `running 0
+  tests` from the log and fails. `build-test-shadgpu.sh` suppresses it exactly when a filter is
+  set (`elif [ "$rzero" -eq 1 ] && [ -z $filter_q ]`), on the reasonable ground that a
+  `PCK_TEST_FILTER` legitimately matches nothing. **The lib binary's `gpu_tests::` argument must
+  therefore not travel as `PCK_TEST_FILTER`**: it is part of what the binary is, not a
+  developer's selection, and the guard must stay armed for it. Keep the two distinct in the script
+  or the backstop is off in the one place a developer runs the suite by hand.
+
+**`build-test.sh`**
+
+- `gpu_runtime_targets()` shrinks to `test_gpu_corpus` plus the lib entry.
+- **Ten lines of comment above it become obsolete and should go.** They explain that
+  `test_inc2_conformance` is the only file gating per item rather than per file, which is why the
+  membership test could not see it and why the list is written out rather than derived. After the
+  move it is an in-crate `mod tests` gated on `feature = "gpu"` like every other device test, and
+  the special case it documents no longer exists. Delete the explanation with the exception.
+- `needs_cmake_targets()` derives from a file-level `#![cfg(not(feature = "rust-only"))]`, which
+  still works and now finds one target. `--lib` is not a `--test` target, so nothing derives it —
+  it must be named, in both the `--gpu` and the `--rust-only` paths, the way `pipeline.yml` names
+  it today.
+- The `--rust-only` path builds `--lib` without `gpu`; the `--gpu` path builds `--lib --features
+  gpu`. Under the ladder these are not disjoint — the second is a superset — and the filter is what
+  makes the runs disjoint. Say so where the lists are written, or the next reader reads the
+  supersetting as a bug.
+- The "derived suite must not be EMPTY" guard stays and gets closer to firing. With one derived
+  target left it is one move away from being the thing that catches a mistake, so leave it.
+
+**`pipeline.yml`** takes the same three-list change, plus one new step and one changed loop.
+**shad-gpu never runs cargo** — the job stages prebuilt binaries and the remote loop executes
+`$REMOTE_DIR/cpp/install/rust-tests/*` with `--nocapture --test-threads=1`. So the device rung is
+a staged binary, not a command line: the staging array gains the lib target and the run loop
+passes `gpu_tests::` to that one binary and to no other. The new step is the middle rung: `cargo test -p peacockdb-core --lib -- ffi_tests::` at default features on
+dataset-matrix, which
+**replaces the `--test test_gpu_batch` step it retires** — the job already compiles that feature
+shape for `test_gpu_batch` and `peacockdb-ffi --test test_ffi`, so this is a swap, not a second
+compile of the DataFusion stack, and the cache-thrash rule in `build-test.md` is not in play.
+**`test_ci_coverage`** then compares three one-entry lists and asserts the four lines above.
+
+## The surface, after this task
+
+**Two counts, and only one of them is this task's.** Bare `pub` in `src/` is a raw number in the
+hundreds — 249 measured after task 2. This task takes the 75 behind the nine walls, because a
+`pub` item in a module it has just made private is what `unreachable_pub` is for and what the
+demotion of that wall means; the other 174 are `pub` for no reason anyone can name and are
+[`visibility.md`](visibility.md)'s subject.
+What this task ends is `pub` **that an external consumer forces**, and that count reaches eight.
+
+Sixteen items are `pub` for a reason at the end of this task, in six files: the CLI's eight, plus `GpuNode` and `validate`
+(`plan/mod.rs`), `RecipePlan` and `attach_recipes` (`wire/mod.rs`), `RunReport`, `GpuBackend` and
+`GpuContext` (`executor/mod.rs`), and `render_run` (`plan_text/mod.rs`). All eight of those are
+forced by `tests/common/corpus.rs` and `corpus_gpu.rs`, and [`test-support.md`](test-support.md)
+removes them.
+
+Five of them were lifted out of a subcomponent by task 2 and must stay lifted: `run` and
+`RunReport` from `executor/driver`, `CpuBackend` from `executor/cpu_backend`, `GpuBackend` and
+`GpuContext` from `executor/gpu_backend`, all declared in `executor/mod.rs` today. That is the rule
+doing its work — the wall forces whatever must be public upward — and this task must not push any
+of them back down.
+
+## The wiki this moves
+
+- **`build-test.md`'s test table is restructured here**, per the section above: the Rust tests
+  against production code in one table blocked by rung — cpu, ffi, gpu — grouped by tier and then
+  category inside each block, with Why, Examples and N kept and `Runs` dropped; the C++ suites,
+  the Python sets, `cost-report` and the three repo guards in a second. The two must add to the
+  headline figure, and the four-case discrepancy that sum has today is closed here.
+- **`coding-style.md` gains the test-code rules** — no test code in a production file, a module's
+  unit tests in a child module of their own, `test` in every test-only path, and the rung ladder:
+  a test module declares the lowest build shape it needs and its name says which — `tests`,
+  `ffi_tests`, `gpu_tests` — with name and gate implying each other at both rungs above the floor. It also loses the `test_inc2_conformance` exception paragraph that opens its Names
+  section, since the rename closes it.
+- **`coding-style.md`'s visibility section is amended, not rewritten**: the previous task states
+  the rules, this one records what this task settled — the exemption register empty, `pub mod` down
+  to six, and eight items still `pub` because a test crate forces them, which
+  [`test-support.md`](test-support.md) unforces and [`visibility.md`](visibility.md) then removes
+  along with the rest of the raw count. The
+  `test_support` signature rule belongs to [`test-support.md`](test-support.md), which is where
+  the corpus facade makes it load-bearing; the feature itself arrives here.
+- **`architecture.md`** needs one line, not four: task 2 already corrected the driver and
+  accountant paths, the wire-format writer paths and the `spark_partitioning.rs` pointer. What is
+  left is the conformance gate's name at `architecture.md:971`, which this task's rename moves.
+
+## Validation
+
+This task moves 8,450 lines of test code between compilation units. Nothing it touches may change
+what the engine computes, and no case may be lost — the two risks are opposite in kind and are
+checked differently.
+
+### Baselines
+
+1. `--list` for `--lib` and every integration target, reduced to **leaf names** — strip module
+   paths, because that is the set the move must preserve while the paths necessarily change.
+2. `sha256sum` over `testdata/goldens/`. No golden may move at all in this task.
+3. The `pub`/`pub(crate)` item dump from the end of task 2 — **it is a script, not a memory**:
+   `visibility-dump.py`, whose output at the end of that task is `visibility-final.txt`.
+   Re-run it here rather than inventing a second count, and state which of its rows the ladder
+   below counts: bare `pub` only, test-gated items excluded. `case-inventory.sh` and
+   `compare-inventory.sh` beside it are the leaf-name tooling for (1). All three already live in
+   `scripts/`: task 2's completeness commit moved them there, because they are checks in this task
+   and the two after it.
+4. Warning counts from clean builds in all three feature shapes.
+
+**Every figure in this spec predates task 2** — which renamed five targets, added
+`test_module_layout` and its 35 cases, and moved the tree. Take the baselines first and work from
+them. Where a measured number and a number written here disagree, the measurement is right and the
+sentence is stale; say so in the detail file rather than bending the move to fit the page.
+
+### The invariant: the case set is preserved, the paths are not
+
+A case that disappears here is silent. Nothing goes red — a target runs 30 tests instead of 31, and
+no assertion knows it was meant to run 31.
+
+- **Leaf-name set equality.** The union across the three lib shapes and the seven binaries must
+  equal the baseline union exactly. Not the count — the set, so a case deleted and another
+  duplicated cannot cancel out. The lib shapes nest, so the union is taken after dedup; that is a
+  consequence of the ladder and not a smell.
+- **The rungs are what the counts must show**, each a separate assertion: `--lib` under
+  `rust-only` lists the pure-Rust set; `--lib` at default features filtered by `ffi_tests::` lists
+  **exactly the three** middle-rung cases; `--lib --features gpu` filtered by `gpu_tests::` lists
+  the device set **and nothing else**. If either filtered run selects a case from a lower rung, a
+  name and a gate disagree and the case is about to run on the wrong host.
+- **The total is unchanged.** This task moves tests; it deletes none. Take the figure from the
+  baseline rather than from this spec, which was written before task 2 added 35 cases.
+
+### Move in slices
+
+**A slice is a dispatch, not just a commit.** Each one ends by appending its state to
+`test-layout-detail.md` — what moved, what the ladder number is now, what is unproven — and handing
+back; the next slice starts in a fresh window from the baselines and that file. Task 2 was the
+lesson: the same shape, five components with a commit each, run as one dispatch that spent eight
+hours and died on a context limit with the work unreported.
+
+**Slice 0 comes before any move**, because nothing can move until it exists: the `gpu` feature with
+its `compile_error!`, the `test-support` feature with `test_support/testdata.rs`, declared in `mod.rs` and the seven
+existing sites converted to it, and
+`test_module_layout` extended with the rules above. It moves no test and its proof is that the
+three build shapes still compile and the suite is unchanged.
+
+Then one commit per target, ascending by how much it forces: `test_gpu_batch` (3 cases, 2 items)
+first as the shape proof — it is also the only middle-rung target, so it proves the rung and its CI
+swap together — then the four injector consumers with `injection`/`rebuild`/`join_fixture`, then the
+executor tiers, then the rest. After each, the leaf-name set for that target must have moved from
+its binary's list into the right module's list and nowhere else.
+
+**Two ladders, and every slice moves one of them.** The surface as it falls — the spec's figures
+were 108 → 79 → 50 → 15 → 8 and are re-derived from the baselines — and the register beside it,
+**9 entries → 0**, with the `pub mod` count falling 15 → 6 as each is demoted. A slice that moves
+neither moved the wrong thing.
+
+### The device gate
+
+- `cargo build --features gpu` and `--features rust-only` both succeed; the `compile_error!` fires
+  when both are passed together, and that is checked by trying it.
+- **Name and gate agree in both directions.** The layout test asserts it by reading the tree:
+  construct a `gpu_tests` module without the gate, and a `gpu`-gated module not called `gpu_tests`,
+  and watch each go red.
+- On shad-gpu the staged lib binary, run with `--test-threads=1 gpu_tests::`, covers the device set
+  in roughly what the five staged binaries took. Materially longer means the filter is selecting
+  more than it should; `running 0 tests` means it is selecting nothing, and the guard must say so.
+
+### Test code is separated
+
+- `git grep -n '#\[cfg(test)\]' -- peacockdb-core/src` returns only test-module declarations —
+  `mod tests`, `mod ffi_tests`, `mod gpu_tests` — and the cross-component entry points the
+  carve-out permits in a component's `mod.rs`, each with a doc naming its caller. The tree has 21
+  in eight files, including gated `use` lines above those entry points, which count as part of the
+  declaration they serve. Anything else is test code in a production file, which is what
+  this task exists to end, and `driver/partitioned.rs` lines 670-685 are where it starts.
+- `git grep -n '#\[test\]' -- peacockdb-core/src` returns only paths containing `test`.
+- The transitive gate is checked by construction: add a line in `src/tests/` referencing a private
+  item, confirm `cargo build --release` still succeeds; add a line in `plan/` referencing
+  `crate::tests::`, confirm it fails with `E0433`. Revert both.
+
+### CI
+
+`test_ci_coverage` shrinks here, so it is the one guard that must be shown red rather than merely
+green. Delete each of the four asserted lines from `pipeline.yml` in turn and confirm the guard
+fails on each: the device line, the default-features `--lib` line, the `rust-only` `--lib` line and
+the CLI build. One rung per line, and the assertion is all that stands between a rung and silently
+not running.
+
+The two scripts change with it, per the section above; verify `build-test.sh --gpu` and
+`--rust-only` both still produce a non-empty derived suite, since that guard is now one move from
+firing.
+
+### Then build-test.md
+
+Edited last, from the measured numbers rather than from this spec. Its two tables must add to the
+headline figure, and that arithmetic is how the page is checked. A spec number and a measured number
+that disagree mean the move is wrong, not the page.
+
+## Done when
+
+exactly eight items in `peacockdb-core` are `pub` because a test crate forces them — `GpuNode` and
+`validate` (`plan/mod.rs`), `RecipePlan` and `attach_recipes` (`wire/mod.rs`), `RunReport`,
+`GpuBackend` and `GpuContext` (`executor/mod.rs`) and `render_run` (`plan_text/mod.rs`), all eight
+forced by `corpus.rs` and `corpus_gpu.rs` and removed by [`test-support.md`](test-support.md);
+`PUB_MODULES` is empty and `pub mod` is down from 15 to six, counted by `visibility-dump.py`; the
+raw bare-`pub` count is whatever task 4 inherits and is not this task's claim. No
+production file contains a `#[test]`; no `#[cfg(test)]` sits anywhere but on a test-module declaration or a
+carve-out entry point in a component's `mod.rs`; every test module declares the lowest rung it needs and is named for it, with name
+and gate implying each other at both rungs above the floor; every test-only path in `src/` carries `test` in its name;
+`crate::test_support::testdata_root()` is the only testdata root anywhere, called by the crate's
+unit tests, the moved targets and `tests/common/mod.rs` alike, and [#49](../tickets.md#t49) closes
+with it; a plain `cargo build` cannot name `test_support`; `test_ci_coverage` is near 300 lines and asserts one CI
+line per rung plus the CLI build; `build-test.md`'s two tables add to the headline; and the leaf-name
+set is the one the baselines recorded — this task moves tests, it does not delete any.
+
+## Signoff
+
+Solved under its constraints: the twelve targets are in `src/` at the rung the table names, the
+seven binaries stay, every baseline leaf survives in all three shapes and no golden moved; the
+register is empty, `pub mod` is seven (`test_support` postdates the count of six), and the eight
+items a test crate still forces are the corpus harness's. Two readings closed with no blocking
+finding; the three important ones — the `test-support` feature undocumented, two private-field
+readers admitted by a second carve-out case, `end_to_end.rs` over the length rule — are fixed.
+Shortcuts: `build-test.sh`'s lib entry has run end to end only in `--rust-only` (verda was down;
+the `--gpu` and default modes are rendered, syntax-checked and their resolver run against real
+cargo json); the murmur gate's three CPU-runnable cases now run on shad-gpu only; the spec's
+`crate::tests::`-from-`plan/` E0433 probe was not run, every cold production build standing in.
+
+---
+
 <!-- archived from llm-wiki/tasks/rmm-pool-budget.md -->
 
 **Merged 2026-09-15 as PR #144 (merge commit `72fb23f8`).**
