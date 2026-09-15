@@ -522,9 +522,6 @@ pub struct RunReport {
     /// Zero at the end of any correct run: a batch was held and never released otherwise.
     pub(crate) in_flight_bytes: usize,
     pub(crate) steps: usize,
-    // Counted by the driver and read by nothing yet, not even a test.
-    #[allow(dead_code)]
-    pub(crate) calls: usize,
     /// Batches held and batches released. Equal at the end of every run, on both the
     /// drained path and the early-exit one.
     pub(crate) holds: usize,

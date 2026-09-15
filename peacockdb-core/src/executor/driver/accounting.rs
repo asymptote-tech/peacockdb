@@ -96,10 +96,6 @@ impl ResidentAccountant {
         self.peak
     }
 
-    pub(crate) fn calls(&self) -> usize {
-        self.calls
-    }
-
     /// Held and released, counted rather than netted: a total back at zero is also what a
     /// release of something never held would leave behind.
     pub(crate) fn hops(&self) -> (usize, usize) {

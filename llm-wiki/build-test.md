@@ -684,10 +684,9 @@ crate's unit tests reach as `crate::test_support::…` and the `tests/*.rs` bina
 test` in every shape sees the module and `cargo build` cannot name it; no CI step and no script
 passes the flag. The corpus binaries and `test_corpus_goldens` reach it directly through
 `cpu_case`, `gpu_case`, `authoritative_mode` and `over_cap`, whose signatures name no engine
-type, and `tests/common/mod.rs` is only re-exports, for the two suites written against its old
-module names. `corpus_cases.inc` stays
-beside it: each binary `include!`s it so `corpus_query!` expands, and `inventory::submit!` runs,
-in that binary alone.
+type; the other suites name `test_support` directly. `tests/common/` holds only
+`corpus_cases.inc`: each corpus binary `include!`s it so `corpus_query!` expands, and
+`inventory::submit!` runs, in that binary alone.
 
 ## Local build workflows and caches
 

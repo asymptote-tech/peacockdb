@@ -134,7 +134,7 @@ fn the_pre_check_trips_before_the_call_runs() {
         .begin_call(slot(0), &hungry, 0, 0)
         .expect_err("90 held plus 20 modelled is over 100");
     assert_eq!((trip.when, trip.bytes), (When::PreCall, 110));
-    assert_eq!(acct.calls(), 0, "a call the budget refused never ran");
+    assert_eq!(acct.calls, 0, "a call the budget refused never ran");
 }
 
 #[test]

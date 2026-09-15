@@ -64,17 +64,20 @@
   otherwise reach is test code; being compiled only in a test build is exactly right for it,
   since a test build is the only build that can matter to it.
 - **A `#[cfg(test)]` item outside a test module is allowed in one case: a cross-component
-  entry point.** The item reaches something private to its own module, and its only callers are
-  tests in another component. Neither side can host it — the callers cannot see the private
-  item, and the owning module's `tests` child is invisible to the other component — so it is
-  declared in the owning module's `mod.rs`, like any other item that crosses a boundary. Every
-  such item is registered in `TEST_ONLY_ITEMS` (`test_module_layout/test_code.rs`) with the file
-  and its callers; the layout test checks the item exists, the callers exist, and the doc comment
-  names them, in both directions. The register is the decision to grow the set — an unregistered
-  gate fails the test. Not a case: a helper that only reads a private field of its own module.
-  The field is visible to that file's child `tests` module, so the helper goes there as an
-  inherent `impl` with `pub(crate)` methods, which any test module can call
-  (`driver/partitioned/tests.rs`, `cpu_backend/join/tests.rs`).
+  entry point.** The item reaches something private to its own module, and its callers are
+  tests in another component — or the next hop of such a chain, since a subcomponent's item is
+  reached through its parent's `mod.rs`, which then carries a gated delegate of its own
+  (`has_finish_pass` is two rows: `cpu_backend/mod.rs`, then `executor/mod.rs`). Neither side
+  can host it — the callers cannot see the private item, and the owning module's `tests` child
+  is invisible to the other component — so it is declared in the owning module's `mod.rs`, like
+  any other item that crosses a boundary. Every such item is registered in `TEST_ONLY_ITEMS`
+  (`test_module_layout/test_code.rs`) with its file and callers; the layout test checks the
+  item exists, the callers exist, and the doc comment names them, in both directions, and
+  allows a `#[cfg(test)] use` only in a file that holds an entry. The register is the decision
+  to grow the set — an unregistered gate fails the test. Not a case: a helper that only reads a
+  private field of its own module. The field is visible to that file's child `tests` module, so
+  the helper goes there as an inherent `impl` with `pub(crate)` methods, which any test module
+  can call (`driver/partitioned/tests.rs`, `cpu_backend/join/tests.rs`).
 - **What `#[cfg(test)]` is not is a way to quiet `dead_code` on production code.** An item behind
   it is absent from a release build, so it is never type-checked against a change made for
   shipping code. A production item that nothing ships yet stays `pub(crate)` and keeps its
@@ -162,9 +165,10 @@ feature, with signatures free of engine types.
   a hard error at anything less — so `run<B: Backend>` closes over 30 of the 46 and `plan` over
   seven, beside the nine the CLI names. A new row in `SURFACE` needs the receipt: `cargo build
   -p peacockdb` failing without it, or `private_interfaces` on a row already listed.
-- **`SURFACE` is the gate; `#![warn(unreachable_pub)]` is the signal.** A `pub` written
+- **`SURFACE` is the gate; `#![warn(unreachable_pub)]` is the signal.** A `pub` item written
   anywhere in `src/` outside `test_support` and the table fails
-  `bare_pub_is_the_surface_and_nothing_else` in the layout test, which CI runs. The lint says so first, at the compile the developer is already
+  `bare_pub_is_the_surface_and_nothing_else` in the layout test, which CI runs; a `pub` field
+  on a `pub(crate)` struct is outside both the guard and the lint, and stays by convention. The lint says so first, at the compile the developer is already
   watching — but it is `warn`, and nothing in CI counts warnings, so it fails nothing on its
   own. Inside a private module `pub` and `pub(crate)` are identical to rustc — the module's
   privacy is the wall — so the distinction is for the reader, for the blast radius when a
@@ -192,15 +196,17 @@ feature, with signatures free of engine types.
   with a one-item facade and a hundred lines behind it is an implementation module wearing one.
 - `pub use` is not allowed: inline the declaration into `mod.rs`, or into `common.rs` for what
   the implementation modules share. A child reaches into its parent; a parent never re-exports a
-  child. A body in `mod.rs` is one expression, and a struct keeps its inherent `impl` there.
+  child. A body in `mod.rs` is one expression, and a struct keeps its production inherent
+  `impl` there; a test-only inherent `impl` is the carve-out above, in a `tests` module.
 - An implementation module may implement any trait for a type its component declares and define
   free functions the `mod.rs` delegates to. It may not declare the component's API.
 - Absolute `crate::` paths across a component boundary, `super::` only within one. `mod.rs` and
   `common.rs` have no length limit; every other file keeps the 1000-line one.
 - **What the compiler enforces**: a component is reachable only through its `mod.rs`, and a
   subcomponent only from inside its parent, both by module privacy. **What
-  `test_module_layout` must**: sibling reach between implementation modules, where a `pub`
-  appears at all and that it is in `SURFACE`, that `pub mod` sits in `lib.rs` alone, and a type
+  `test_module_layout` must**: sibling reach between subcomponents of one component, where a
+  `pub` appears at all and that it is in `SURFACE`, that `pub mod` sits in `lib.rs` alone and
+  `pub(crate) mod` only in a test directory, and a type
   from a private module in a public signature — `private_interfaces` reads nominal visibility,
   so an unreachable type spelled `pub` passes it silently.
 - **Two components and a subcomponent have no production caller.** The CLI runs

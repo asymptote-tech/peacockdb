@@ -833,7 +833,6 @@ impl<'a, B: Backend> Driver<'a, B> {
             peak_bytes: self.acct.peak(),
             in_flight_bytes: self.acct.in_flight(),
             steps: self.steps,
-            calls: self.acct.calls(),
             holds: self.acct.hops().0,
             releases: self.acct.hops().1,
             underestimates: self.acct.underestimates().to_vec(),

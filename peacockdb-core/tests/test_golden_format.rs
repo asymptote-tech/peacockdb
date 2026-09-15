@@ -4,11 +4,10 @@
 //! reader every tier shares. The comparator's cases came from
 //! `planner/tests/plan_goldens.rs` with the code they cover; the node-line cases are new
 //! with the fields the corpus tiers put on that line.
-#[macro_use]
-mod common;
 
-use common::golden_text::{ordered_sections, parse_node_line, section_differences};
-use common::memory_limit::MemoryLimit;
+use peacockdb_core::test_support::{
+    MemoryLimit, ordered_sections, parse_node_line, section_differences,
+};
 
 // --- the section comparator --------------------------------------------------
 
@@ -156,7 +155,7 @@ fn nothing_else_in_a_golden_reads_as_a_node_line() {
 // arrives with T19 — so its parts are exercised here rather than first running during a
 // rollout, where a bad tail parse fails on somebody else's change.
 
-use common::corpus::{owed_rows, take_rows, wanted_rows, without_its_limit};
+use peacockdb_core::test_support::{owed_rows, take_rows, wanted_rows, without_its_limit};
 
 fn tail_of(sql: &str) -> (String, u64, Option<u64>) {
     without_its_limit(sql, "a test")
@@ -273,7 +272,7 @@ fn a_separator_in_the_data_does_not_make_two_rows_one() {
     let left = two_columns(&[("a\tb", "c")]);
     let right = two_columns(&[("a", "b\tc")]);
     assert!(
-        !common::result_text::results_agree(&left, &right),
+        !peacockdb_core::test_support::results_agree(&left, &right),
         "two different answers came out equal"
     );
 }
@@ -443,8 +442,10 @@ fn the_split_guard_finds_the_shape_and_nothing_else() {
 /// what makes them.
 #[test]
 fn the_sectioned_cost_fixture_reads_the_same_from_this_side() {
-    let text = std::fs::read_to_string(common::testdata_root().join("fixtures/sectioned-cost.txt"))
-        .expect("the committed fixture");
+    let text = std::fs::read_to_string(
+        peacockdb_core::test_support::testdata_root().join("fixtures/sectioned-cost.txt"),
+    )
+    .expect("the committed fixture");
     let sections = ordered_sections(&text);
     assert_eq!(
         sections.iter().map(|(q, _)| q.as_str()).collect::<Vec<_>>(),
@@ -468,10 +469,9 @@ fn the_sectioned_cost_fixture_reads_the_same_from_this_side() {
 
 // --- the budget tier a mode name carries -------------------------------------
 
-// `MemoryLimit`'s two cases, which used to sit in the crate's `config.rs`. That file is
-// gone and the type moved to `tests/common/`; a `#[cfg(test)] mod tests` beside it would
-// compile into every integration target, so the cases live in one of them instead. Here
-// because a tier label is part of the mode name a golden filename is built from.
+// `MemoryLimit`'s two cases. The type lives in `test_support`, whose own `tests` would run
+// under every feature shape; the cases live in one integration target instead, here because
+// a tier label is part of the mode name a golden filename is built from.
 
 #[test]
 fn every_tier_label_round_trips() {

@@ -8,12 +8,10 @@
 //!
 //! `COST_FILTER=<substr>` restricts the run to `.cpu.txt` files whose name
 //! contains `<substr>` (regenerate a single golden).
-#[macro_use]
-mod common;
 
 use std::path::PathBuf;
 
-use common::cost_model::CostModel;
+use peacockdb_core::test_support::CostModel;
 
 /// Σ of every `output_bytes=` value in a `.cpu.txt` body.
 fn sum_output_bytes(cpu_text: &str) -> u64 {
@@ -51,8 +49,8 @@ fn cost_goldens_match_and_total_is_byte_identical() {
     let model = CostModel::load();
 
     let dirs = [
-        common::golden_dir_for("tpch", "1"),
-        common::golden_dir_for("tpcds", "1"),
+        peacockdb_core::test_support::golden_dir_for("tpch", "1"),
+        peacockdb_core::test_support::golden_dir_for("tpcds", "1"),
     ];
     let mut cpu_files: Vec<PathBuf> = dirs
         .iter()
