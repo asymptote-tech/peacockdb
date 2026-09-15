@@ -34,6 +34,10 @@ enum Exemption {
     NotRun(&'static str),
 }
 
+/// The measurement harness, which is a GPU-job target like the others and is additionally
+/// held to running none of its timed cases there.
+const BENCHMARK_TARGET: &str = "peacock_gpu_benchmarks";
+
 /// Targets deliberately absent from the CI tiers this guard sweeps.
 const INTENTIONALLY_NOT_IN_CI: &[(&str, Exemption)] = &[
     ("test_inc2_conformance", Exemption::GpuJob),
@@ -41,13 +45,7 @@ const INTENTIONALLY_NOT_IN_CI: &[(&str, Exemption)] = &[
     ("test_gpu_recipe_walk", Exemption::GpuJob),
     ("test_gpu_executors", Exemption::GpuJob),
     ("test_node_timing", Exemption::GpuJob),
-    ("peacock_gpu_benchmarks", Exemption::NotRun(
-        "GPU host only, tens of minutes, and it measures rather than asserts — there is \
-         nothing for a merge gate to go red on. Correctness for the queries it times is \
-         test_gpu_corpus's, which runs them at the sf a wrong answer is legible at. \
-         Not Exemption::GpuJob: that variant claims membership in the gpu-tests staging \
-         array and is verified against it — this target is deliberately not in it",
-    )),
+    ("peacock_gpu_benchmarks", Exemption::GpuJob),
     ("test_gpu_corpus", Exemption::GpuJob),
     ("test_ci_coverage", Exemption::NotRun("this test")),
 ];
@@ -622,6 +620,27 @@ fn qualified((krate, target): &(String, String)) -> String {
     format!("{krate}:{target}")
 }
 
+/// One committed runner's rust-tests loop, header excluded and `done` exclusive.
+///
+/// The block rather than the file: everything the loop does is per staged binary, and the
+/// C++ loop above it in each file uses the same `$t`, so a file-wide search answers about
+/// the wrong loop as readily as the right one.
+fn rust_gpu_runner_loop(rel: &str) -> String {
+    let text = std::fs::read_to_string(repo_root().join(rel))
+        .unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let mut after_header = text.lines().skip_while(|l| !is_rust_gpu_runner_loop_header(l));
+    after_header.next().unwrap_or_else(|| {
+        panic!(
+            "{rel} has no `for t in …rust-tests/*` loop — the runner was reshaped, and the \
+             single-tenant GPU invariant now rests on a loop this guard cannot find"
+        )
+    });
+    after_header
+        .take_while(|l| !l.trim_start().starts_with("done"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Every line that runs a staged rust GPU binary, out of a committed runner.
 ///
 /// All of them rather than the first, because a first-match reader is checking whichever
@@ -631,16 +650,8 @@ fn qualified((krate, target): &(String, String)) -> String {
 /// invocation carries a comment saying the flag is mandatory, so a file-wide `contains`
 /// survives the edit that matters — the flag dropped from the command, the comment left.
 fn rust_gpu_runner_invocations(rel: &str) -> Vec<String> {
-    let text = std::fs::read_to_string(repo_root().join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-    let mut after_header = text.lines().skip_while(|l| !is_rust_gpu_runner_loop_header(l));
-    after_header.next().unwrap_or_else(|| {
-        panic!(
-            "{rel} has no `for t in …rust-tests/*` loop — the runner was reshaped, and the \
-             single-tenant GPU invariant now rests on a loop this guard cannot find"
-        )
-    });
-    let found: Vec<String> = after_header
-        .take_while(|l| !l.trim_start().starts_with("done"))
+    let found: Vec<String> = rust_gpu_runner_loop(rel)
+        .lines()
         .filter(|l| is_rust_gpu_runner_invocation(l))
         .map(|l| l.trim().to_string())
         .collect();
@@ -681,6 +692,32 @@ fn both_gpu_runners_pass_test_threads_one() {
                 "{rel} runs a staged GPU binary without --test-threads=1:\n  {line}\n\
                  cuDF/RMM share one process-wide pool, so concurrent cases OOM the device, and \
                  the env-var writes in test_gpu_corpus.rs are sound only while this flag holds."
+            );
+        }
+    }
+}
+
+/// The measurement binary is staged with the GPU targets and runs on every job, but never
+/// its `bench_` cases: those are tens of minutes of device time and would write a benchmark
+/// tree from a correctness run. That is `--skip bench_` on two committed runner loops and
+/// nothing else, so a runner that lost it turns the gate into a measurement in silence.
+#[test]
+fn the_benchmark_binary_runs_without_its_cases_on_ci() {
+    for rel in [".github/workflows/pipeline.yml", "scripts/build-test-shadgpu.sh"] {
+        // The shell names the target through `$BENCH_TARGET`, the workflow spells it out.
+        // Resolved rather than matched two ways, so one needle reads both files.
+        let loop_body = rust_gpu_runner_loop(rel).replace("$BENCH_TARGET", BENCHMARK_TARGET);
+        assert!(
+            loop_body.contains(&format!("{BENCHMARK_TARGET}) skip=\"--skip bench_\"")),
+            "{rel}'s rust-tests loop does not skip {BENCHMARK_TARGET}'s bench_ cases. Every \
+             gate run would then spend the measurement's device time and overwrite the \
+             committed tree with times nobody asked for."
+        );
+        for line in rust_gpu_runner_invocations(rel) {
+            assert!(
+                line.contains("$skip"),
+                "{rel} runs a staged GPU binary without the per-binary skip:\n  {line}\n\
+                 The case above it sets it and this line is where it takes effect."
             );
         }
     }

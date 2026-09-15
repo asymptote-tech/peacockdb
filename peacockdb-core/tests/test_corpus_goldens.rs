@@ -951,6 +951,38 @@ fn a_row_that_lost_a_cell_is_refused() {
     );
 }
 
+/// A bare call's row names the seq it was handed, which is never its own node's.
+///
+/// `result_from_handle` and `slice_handle` publish no step: the plan's recipes line for a
+/// `GpuUnload` or a `GpuLimit` names no `#seq` at all. They are charged to the node that
+/// made the call and carry the seq of the node whose output they were handed — below them
+/// in the tree, since post-order is children first. So the pair a row of theirs carries is
+/// two nodes' and the check has to say so, which is what q6 found at sf40: every case
+/// panicked on the export row, one call before it could write anything.
+#[test]
+fn a_bare_calls_row_names_the_seq_it_was_handed() {
+    let at = |column: &str| COLUMNS.iter().position(|name| *name == column).unwrap();
+    let row = |node: usize, seq: usize| {
+        let mut fields = vec!["0".to_string(); COLUMNS.len()];
+        fields[at("node_seq")] = node.to_string();
+        fields[at("recipe_seq")] = seq.to_string();
+        [fields.join("\t")]
+    };
+    // q6's shape: a scan, a project, and an unload that publishes nothing above them.
+    let declared =
+        BTreeMap::from([(0, BTreeSet::from([0])), (1, BTreeSet::from([1])), (2, BTreeSet::new())]);
+
+    assert_eq!(rows_match_the_recipes(&row(2, 1), &declared), Ok(()));
+
+    let refused = rows_match_the_recipes(&row(2, 7), &declared)
+        .expect_err("no node publishes step #7, so no handle can have come from one");
+    assert!(refused.contains("#7"), "the refusal should name the step: {refused}");
+
+    let above = rows_match_the_recipes(&row(1, 0), &declared)
+        .expect_err("node 1 publishes step #1, and a row of its own may not name another");
+    assert!(above.contains("#0"), "the refusal should name the step: {above}");
+}
+
 /// Every (query, mode) the benchmark list times is one the corpus enables on a device.
 ///
 /// The two lists are separate on purpose — they disagree about sf — so nothing but this

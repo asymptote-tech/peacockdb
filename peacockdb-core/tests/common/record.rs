@@ -238,6 +238,20 @@ pub fn rows_match_the_recipes(
                     declared.len()
                 ));
             }
+            // A node that publishes no step of its own makes only bare calls — the export
+            // and the slice, which are handed a handle and charged to the node that made
+            // it. That node is below this one, post-order being children first, so what a
+            // row here is held to is that some node the walk reached earlier publishes it.
+            Some(seqs) if seqs.is_empty() => {
+                let mut below = declared.range(..node).flat_map(|(_, published)| published);
+                if !below.any(|published| *published == seq) {
+                    return Err(format!(
+                        "a row at node {node} publishes no step of its own and names #{seq}, \
+                         which no node below it publishes — a bare call carries the seq of \
+                         the node whose output it was handed, and that one is below"
+                    ));
+                }
+            }
             Some(seqs) if !seqs.contains(&seq) => {
                 return Err(format!(
                     "a row pairs node {node} with step #{seq}, whose recipe publishes {seqs:?} \

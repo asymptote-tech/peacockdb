@@ -1,15 +1,14 @@
 # shellcheck shell=bash
 #
 # Shared build/deploy environment for the shad-gpu workflow: toolchain pinning, cargo
-# target dir, the remote, and the helpers the phases use. Sourced by the driver script
-# and by anything else that has to reach the host with the same settings.
+# target dir, the remote, and the helpers every phase uses. Sourced by the driver script,
+# by create_nsys_profile.sh, and by anything else reaching the host with these settings.
 #
-# Sourced, never executed: no `set -e` here, and nothing below has a side effect
-# beyond exporting variables and defining functions.
+# Sourced, never executed: no `set -e` here, and the only side effect below is a refusal
+# when this host's glibc version cannot be read, which every shipped binary needs.
 #
-# scripts/docker-build.sh greps `^CUDF_ROOT=` out of this file to derive the conda
-# prefix its container shims into place; moving or reformatting that assignment
-# breaks the container build.
+# scripts/docker-build.sh greps `^CUDF_ROOT=` out of this file for the conda prefix its
+# container shims into place; moving or reformatting that assignment breaks it.
 
 CUDF_ROOT=/home/dmitry/data/miniforge3/envs/rapids-cuda-12.2
 export CUDF_ROOT
@@ -43,23 +42,35 @@ fi
 REMOTE=shad-gpu
 REMOTE_REPO=/home/info/peacockdb
 
-# One TCP connection for the whole invocation, shared by every ssh and rsync below.
-#
-# Not a speed-up. A phase opens a dozen connections and sshd caps how many may be
-# MID-HANDSHAKE at once (MaxStartups); past that it resets them before authentication —
-# "kex_exchange_identification: read: Connection reset by peer" — and the phase dies with
-# rc=255, losing a measurement to a limit we walked into ourselves. Roughly one connection
-# in two here. The socket lives in the run's own directory and dies with it; %C hashes
-# host/port/user, so two checkouts do not share one, and ControlPersist=60 keeps it just
-# past the gap between phases.
-SSH_CONTROL_DIR="${SSH_CONTROL_DIR:-${TMPDIR:-/tmp}/peacock-ssh-$(id -u)}"
-mkdir -p "$SSH_CONTROL_DIR"
-chmod 700 "$SSH_CONTROL_DIR"
-export SSH_OPTS="-o ControlMaster=auto -o ControlPath=$SSH_CONTROL_DIR/%C -o ControlPersist=60"
-# `ssh` and `rsync -e ssh` both go through this, so neither can be left behind when the
-# options change. Quoted expansion is deliberate: the options contain no spaces inside a
-# single argument, and word-splitting them is how they reach ssh as separate flags.
-ssh() { command ssh $SSH_OPTS "$@"; }
+# Validation belongs before a phase's first side effect: half a deploy followed by "you
+# cannot do that" is worse than either outcome alone.
+die() { echo "$*" >&2; exit 1; }
+
+# The glibc a shipped binary is patched to is the BUILD host's: 2.35 from a 22.04 box or
+# CI's container, 2.39 from a 24.04 one. Read here, where the binaries are built, and used
+# by the patch phase and by every remote command that loads one.
+BUILD_GLIBC=$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)
+[ -n "$BUILD_GLIBC" ] || die "cannot read this host's glibc version from getconf"
+
+# The library path a shipped binary needs on the host, as REMOTE shell text: `$HOME` and
+# `$LD_LIBRARY_PATH` are left for the remote to expand. Applied per command and never
+# exported — exported, the host's own coreutils load the patched glibc and segfault, so a
+# run reports a bogus code having actually succeeded.
+PATCHED_LD="$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat"
+PATCHED_LD="$PATCHED_LD:/home/info/glibc-$BUILD_GLIBC/lib"
+PATCHED_LD="$PATCHED_LD:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\${LD_LIBRARY_PATH:-}"
+
+# sf40 lives outside the repo on the host and is read in place; 40 GB is not copied per run.
+SF40_DIR=/home/info/peacock-datasets/testdata/tpch.sf40
+
+# The "N passed" libtest printed in a log, summed over its passes. That count is the only
+# honest answer to "did the filter match anything" — counting output files answers a
+# different question. Shipped into a remote script with `declare -f`, since the run it
+# counts happens there.
+passed_count() {
+  sed -n 's/^test result:.* \([0-9][0-9]*\) passed.*/\1/p' "$1" \
+    | awk '{n += $1} END {print n + 0}'
+}
 
 # rsync over the flaky, bursty shad-gpu link, made self-healing rather than
 # all-or-nothing: --partial --inplace so a retry resumes the same file instead of
@@ -69,19 +80,8 @@ ssh() { command ssh $SSH_OPTS "$@"; }
 resilient_rsync() {
   local attempt=1 max_attempts=100 rc=0
   while :; do
-    rsync -P --partial --inplace --timeout=90 -e "ssh $SSH_OPTS" "$@" && return 0
+    rsync -P --partial --inplace --timeout=90 "$@" && return 0
     rc=$?
-    # 23 is "some files were not transferred" — here almost always a tracked file deleted
-    # but not staged, which `git ls-files --cached` still lists. Retrying cannot help: it
-    # will not be there on the hundredth attempt either, and the loop spends eight minutes
-    # of backoff before saying so. Once, then out, naming the cause.
-    if [ "$rc" -eq 23 ]; then
-      echo "rsync: rc=23, some sources were not transferred — see the link_stat lines" >&2
-      echo "       above. A tracked file deleted but not staged is still in the file" >&2
-      echo "       list; 'git add -A <path>' or restore it. Not retrying: it is not a" >&2
-      echo "       stall." >&2
-      return "$rc"
-    fi
     if [ "$attempt" -ge "$max_attempts" ]; then
       echo "rsync: giving up after $attempt attempts (last rc=$rc)" >&2
       return "$rc"
@@ -102,34 +102,20 @@ stage_cargo_test_binary() {
   local target=$1 staging=$2
   shift 2
   local exec_path
-  # `set -o pipefail` in the caller is what makes a compile failure land here as a build
-  # failure rather than an empty result read as a missing binary. The filter forwards
-  # compiler messages to stderr as they stream: under --message-format=json cargo puts
-  # DIAGNOSTICS on stdout too, so keeping only the artifact line eats every error.
+  # `set -o pipefail` in the caller is what makes a compile failure land here as a
+  # build failure rather than as an empty result reported as a missing binary.
   if ! exec_path=$(cargo test --no-run -p peacockdb-core --test "$target" \
       --message-format=json "$@" \
     | python3 -c '
 import json, sys
 name = sys.argv[1]
-found = None
-# Read to the END rather than breaking at the artifact line. Breaking closes stdin while
-# cargo is still writing, and cargo then dies with `error: Broken pipe (os error 32)` --
-# which `set -o pipefail` reports as a build failure of a target that built fine.
 for line in sys.stdin:
     try: m = json.loads(line)
-    except ValueError:
-        sys.stderr.write(line); sys.stderr.flush(); continue
-    if m.get("reason") == "compiler-message":
-        text = (m.get("message") or {}).get("rendered")
-        if text:
-            sys.stderr.write(text); sys.stderr.flush()
-        continue
+    except ValueError: continue
     if m.get("executable") and (m.get("target") or {}).get("name") == name:
-        found = m["executable"]
-if found:
-    print(found)
+        print(m["executable"]); break
 ' "$target"); then
-    echo "ERROR: building $target failed (see the compiler messages above)" >&2
+    echo "ERROR: building $target failed (cargo output above)" >&2
     return 1
   fi
   if [ -z "$exec_path" ] || [ ! -f "$exec_path" ]; then
@@ -139,4 +125,23 @@ if found:
   mkdir -p "$staging"
   cp -f "$exec_path" "$staging/$target"
   echo "--- Staged: $staging/$target"
+}
+
+# pull_one <path under testdata/> <what it is>
+#
+# Fetch one file from the host into the same place here, and return 1 when there is none.
+# Tested over ssh rather than by letting the transfer fail: resilient_rsync retries a
+# missing source a hundred times, and eight minutes of backoff reads as a hang.
+pull_one() {
+  local rel=$1 what=$2
+  if ! ssh "$REMOTE" test -f "$REMOTE_REPO/testdata/$rel"; then
+    echo "==> $what: nothing on the host"
+    return 1
+  fi
+  mkdir -p "testdata/$(dirname "$rel")"
+  resilient_rsync "$REMOTE:$REMOTE_REPO/testdata/$rel" "testdata/$rel"
+  case "$rel" in
+    *.tsv) echo "==> $what: $(grep -vc '^#' "testdata/$rel") rows" ;;
+    *)     echo "==> $what: $(du -h "testdata/$rel" | cut -f1)" ;;
+  esac
 }
