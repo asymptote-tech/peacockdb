@@ -178,11 +178,11 @@ Four limits on the number it produces.
 
 | Node | Category | Semantics |
 |---|---|---|
-| `GpuLoadParquet` | Source | reads survivor row groups per the mapping; `next_batch()`; honours a pushed-down limit |
+| `GpuLoadParquet` | Source | reads survivor row groups per the mapping; `next_batch()`; declares a pushed-down limit, which the cpu ignores and the device refuses beside row groups ([#186](tickets.md#t186), [#188](tickets.md#t188)) |
 | `GpuFilter`, `GpuProject` | Exec | 1:1 per batch. A filter also projects, and carries that projection |
 | `GpuSort` | Exec | sorts each batch independently, optional per-batch `fetch`; output `BatchSorted` |
-| `GpuAccumulateBatchesAndSort` | BatchAccumulator | accumulates sorted batches, one `cudf::merge` at done, `fetch` applied; one batch out, stream-sorted. Ranged emission is [#138](tickets.md#t138) |
-| `GpuMergeSortedPartitions` | PartitionAccumulator | N sorted lanes → 1, all k·m batches into one `cudf::merge`, `fetch` applied |
+| `GpuAccumulateBatchesAndSort` | BatchAccumulator | accumulates sorted batches, one `cudf::merge` at done, `fetch` applied — except that the device's merge skips the slice when handed one batch ([#204](tickets.md#t204)); one batch out, stream-sorted. Ranged emission is [#138](tickets.md#t138) |
+| `GpuMergeSortedPartitions` | PartitionAccumulator | N sorted lanes → 1, all k·m batches into one `cudf::merge`, `fetch` applied — except over one input, where the device concatenates and does not slice ([#204](tickets.md#t204)) |
 | `GpuCoalesceAllBatches` | BatchAccumulator | concatenates a lane's batches into one at done |
 | `GpuMergePartitions` | BatchForwarder | N lane streams → 1, forwarding each batch as visited, round-robin; accumulates nothing, no backend calls |
 | `GpuEmitPartitions` | PartitionEmitter | 1 → N per batch by hash scatter; one call per input batch |
@@ -274,7 +274,8 @@ merge groups on keys + gid and the shuffle still hashes the keys alone. The rule
 that is `hashKeys ⊆ group columns` — subset, not equality — and equal group keys always carry
 equal user keys, so co-location holds.
 
-The gid is a real column: the expansion materializes an INT32 constant per set and appends it
+The gid is a real column: the expansion materializes a constant per set — the plan declares it
+`UInt8` and the cpu emits that; the device emits `Int32` ([#65](tickets.md#t65)) — and appends it
 after the group keys and before the aggregate outputs. Its rendering is asymmetric on purpose —
 the init's `group_by` does not list it, because there it is a tag being synthesized, while every
 node above lists it as an ordinary key. A projection over the final drops it again, without
@@ -282,8 +283,9 @@ which the query returns a column it never asked for.
 
 A masked column is a typed NULL rather than an absent one, so every set shares a schema and sits
 in one `cudf::table` distinguished by the gid. The ids are the bitmask of each set's **masked**
-positions — a two-key rollup gives 0, 2, 3 — which is distinct per set and not DataFusion's
-`GROUPING()` encoding ([#65](tickets.md#t65)).
+positions, distinct per set and not DataFusion's `GROUPING()` encoding — and the two engines
+number the bits from opposite ends, so a two-key rollup is 0, 1, 3 on the cpu and 0, 2, 3 on the
+device ([#65](tickets.md#t65)).
 
 Not a Spark-style expand: the C++ runs k groupbys over the same input and concatenates the k
 results, so the peak is the input plus the sum of the per-set outputs rather than k times the
@@ -470,14 +472,15 @@ that result is the biggest thing in the lane. Accumulating keys keeps the output
 at a time and holds only the key columns between calls.
 
 **The finish computes it with the same semantics as a single call**, not a variant:
-`null_equals_null` rides on the node and reaches the finish join too, hardcoded `EQUAL` for anti
-and mark included, three-valued `NOT IN` trap and all (#80, #59). A lowering that quietly fixed
-the null semantics would not be a substitute for the join it replaces.
+`null_equals_null` rides on the node and reaches the finish join too, three-valued `NOT IN` trap
+and all (#80). On the device that means the hardcoded `EQUAL` for anti and mark; the cpu's call
+and finish honour the flag for every type, which is the divergence #59 names. A lowering that
+quietly fixed the null semantics would not be a substitute for the join it replaces.
 
 **A lane whose probe produced no keys is the executor's problem, not the concat's.** A concat of
-nothing throws ([#173](tickets.md#t173)), so the finish has to answer from the build side alone
-— LeftAnti over an empty key table is every build row, which is what the CPU does and what a
-device must be made to do.
+nothing throws ([#173](tickets.md#t173)), so the finish has to answer from the build side alone.
+LeftAnti does: every build row, on both engines. Left, Full, LeftSemi and LeftMark owe a table
+the frozen surface cannot make and refuse by name on the device.
 
 ### Cross join vs nested-loop join
 
@@ -769,7 +772,7 @@ The mapping from a plan node to the seqs it addresses, and to the calls a driver
 | `GpuAggregateBatches` | `CudfCoalescePartitions` + `CudfAggregate{Merge}`, plus a `CudfProject` where it finalizes | one concat and one aggregate per compaction and again at done; the project runs once, at done |
 | `GpuEmitPartitions` | `CudfRepartition(Hash, 1→N)` | repartition arm, one call per batch → N handles |
 | `GpuHashJoin` | `CudfHashJoin`, plus the finish seqs — key project, concat, anti/semi join, pad project | map arm per (lane, probe batch); the build handle would need copying before each, since the call consumes it (#152) |
-| `GpuCrossJoin`, `GpuNestedLoopJoin` | the same-kind node | one map-arm call |
+| `GpuCrossJoin`, `GpuNestedLoopJoin` | the same-kind node | one map-arm call per probe batch, and the build side is consumed by the first ([#152](tickets.md#t152)) |
 | `GpuLimit` | none | `slice_handle` on the two straddling batches, nothing on the rest — the bounds are runtime values |
 | `GpuMergePartitions`, `GpuUnion`, `GpuInterleave` | none, beyond the union's cast projects | routing in the driver, zero FFI calls |
 | `GpuUnload` | none | `result_from_handle` per handle over the driver's row range; batches outside an interval are released without a call |
@@ -852,14 +855,16 @@ below has a smallest unfreeze that removes it; deciding them together is
 | **A new symbol per runtime-varying parameter** | an fb node's fields are plan constants, so anything decided per call cannot ride the node | per-call overrides: one `execute_node` variant taking an override struct | one symbol instead of three, and the next such field costs nothing |
 
 **Three refusals are a different kind of cost**: nothing on the surface makes a table out of
-nothing. A collapse of no handles, a merge of no runs and a finish whose probe produced no keys
-refuse by name ([#173](tickets.md#t173)); a Right, Full or RightAnti lane whose build side was
-empty owes its probe rows padded and cannot make them ([#175](tickets.md#t175)); and
-`PlaceholderRowExec` is a table of literals with no input at all ([#158](tickets.md#t158)).
+nothing. A finish whose probe produced no keys refuses by name for Left, Full, LeftSemi and
+LeftMark ([#173](tickets.md#t173)) — a collapse of no handles and a merge of no runs never reach
+the C++, since the Rust side answers nothing before asking; a Right, Full or RightAnti lane whose
+build side was empty owes its probe rows padded and cannot make them, and both engines refuse
+it ([#175](tickets.md#t175)); and `PlaceholderRowExec` is a table of literals with no input at
+all ([#158](tickets.md#t158)).
 
 The unfreeze is one call — a table of a schema and a literal row count. What makes it worth
-deciding rather than deferring is that the CPU answers all three, so each is a shape where the
-oracle disagrees with the engine it is checking.
+deciding rather than deferring is that the CPU answers the first and the third, so each is a
+shape where the oracle disagrees with the engine it is checking.
 
 **The ABI is already more general than the node semantics.** `execute_node` writes into
 `out_handles` with an `out_cap` and an `out_count`, so k outputs are expressible today and the
@@ -1043,7 +1048,7 @@ precisely so cuDF cannot infer something the CPU side did not.
 | Option | Set at | Value | What the default would do |
 |---|---|---|---|
 | `parquet_reader_options` | [`scan.cpp`](../cpp/src/operators/scan.cpp) | `.columns(projected)`, `set_row_groups(map ∥ pruned)`, `set_num_rows(limit)` | read every column and every row group; the row-group list is also how a partition reads only its own slice |
-| `cudf::order`, `cudf::null_order` | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp) | per key from the flat buffers's `asc` / `nulls_first` | cuDF has no notion of the query's ORDER BY; the two sites must agree or a k-way merge would order differently from a sort |
+| `cudf::order`, `cudf::null_order` | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp) | per key from the flat buffers's `asc` / `nulls_first` — both sites map `nulls_first` to `BEFORE` regardless of direction, and cuDF flips a descending key after applying it, so a descending key's nulls land on the wrong end ([#202](tickets.md#t202)) | cuDF has no notion of the query's ORDER BY; the two sites must agree or a k-way merge would order differently from a sort |
 | `cudf::null_equality` | [`join.cpp`](../cpp/src/operators/join.cpp) ×9 | see the table below | `EQUAL` — NULL keys match, inventing rows SQL excludes |
 | `cudf::out_of_bounds_policy` | [`join.cpp`](../cpp/src/operators/join.cpp) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
 | `cudf::null_policy` (groupby) | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [grouping sets](../cpp/src/operators/aggregate.cpp) | `INCLUDE` | `EXCLUDE` silently drops the NULL group — tpcds q15's NULL `ca_zip` row disappears |
@@ -1105,7 +1110,9 @@ lowered to a join needs. Whether a join type actually honours it is the interest
 
 Three things that table is worth reading for.
 
-**Semi honours the flag and anti does not**, deliberately. `x IN (…)` and `EXISTS` are ordinary
+**On the device, semi honours the flag and anti does not**, deliberately; the cpu honours it for
+both, so an anti or mark join with null keys answers differently per engine under the SQL
+default ([#59](tickets.md#t59)). `x IN (…)` and `EXISTS` are ordinary
 three-valued predicates, so `UNEQUAL` is right and tpcds q33 needs it; a set operation lowered
 to a semi join asks for `EQUAL` and gets it (q14). Anti is not symmetric: `x NOT IN (…, NULL)`
 is never true for any x, which is neither `EQUAL` nor `UNEQUAL` — no cuDF setting implements

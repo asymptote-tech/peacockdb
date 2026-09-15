@@ -4,7 +4,7 @@
 use datafusion::arrow::record_batch::RecordBatch;
 
 use super::device::Device;
-use super::script::{Script, run_both};
+use super::script::{Script, each_answers, run_both};
 use crate::executor::RowRange;
 use crate::plan::{BatchLayout, GpuLimit, GpuUnload, RowInterval, Schema};
 use crate::tests::compare::{Order, assert_same};
@@ -297,28 +297,45 @@ operator_case! {
     }
 }
 
+// #214 — `range_of` reads a zero-row batch as outside every interval, so both sides release
+// it instead of emitting it under the schema. Wanted: one zero-row batch each.
 operator_case! {
     GpuLimit,
-    fn a_stream_of_one_zero_row_batch_answers_nothing_on_both() {
+    fn bug_a_stream_of_one_zero_row_batch_is_dropped_on_both() {
         let (node, stream) = limit_over(0, Some(4), 0, 1);
-        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+        let outcome = run_both(&node, Script::Accumulate(stream));
+        // One slot per batch, one for the finish; wanted: `vec![synthetic(0, 10)]` in the first.
+        each_answers(&outcome, &[vec![], vec![]], &[vec![], vec![]]);
     }
 }
 
+// #214 — the same drop mid-stream: the batch counts no rows, which is right, and is not
+// emitted, which is not. Wanted: the zero-row batch in slot 1 on both sides.
 operator_case! {
     GpuLimit,
-    fn a_zero_row_batch_inside_a_stream_counts_no_rows_on_both() {
+    fn bug_a_zero_row_batch_inside_a_stream_is_dropped_on_both() {
         let (node, mut stream) = limit_over(10, Some(10), 8, 3);
         stream.insert(1, synthetic(0, 99));
-        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+        let expected = vec![
+            vec![],
+            vec![], // wanted: vec![synthetic(0, 99)]
+            vec![stream[2].slice(2, 6)],
+            vec![stream[3].slice(0, 4)],
+            vec![], // the finish
+        ];
+        let outcome = run_both(&node, Script::Accumulate(stream));
+        each_answers(&outcome, &expected, &expected);
     }
 }
 
+// #214 — three zero-row batches, none emitted. Wanted: three zero-row batches each.
 operator_case! {
     GpuLimit,
-    fn a_stream_of_nothing_but_zero_row_batches_answers_nothing_on_both() {
+    fn bug_a_stream_of_nothing_but_zero_row_batches_is_dropped_on_both() {
         let (node, stream) = limit_over(2, Some(4), 0, 3);
-        run_both(&node, Script::Accumulate(stream)).same(Order::AsEmitted);
+        let outcome = run_both(&node, Script::Accumulate(stream));
+        let expected = [vec![], vec![], vec![], vec![]]; // three batches and the finish
+        each_answers(&outcome, &expected, &expected);
     }
 }
 

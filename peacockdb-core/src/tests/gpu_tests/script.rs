@@ -12,12 +12,9 @@ use crate::executor::{
     PartitionEmitterExecutor, ProbingJoin, RowRange, SourceExecutor, SourceStep, UnloadExecutor,
 };
 use crate::plan::{ExecutorCategory, GpuNode, category_of};
-use crate::tests::compare::{Order, Slot, same};
+use crate::tests::compare::{Order, Slot, assert_same, same};
 
 /// One variant per executor category, so `drive` is the whole call protocol in one match.
-/// Only `Accumulate`, `Unload` and the refused `Exec` are constructed here; the cases that
-/// drive the other arms are `operator-cases.md`'s, and the attribute leaves with them.
-#[allow(dead_code)]
 pub(crate) enum Script {
     /// One `exec` per batch; one slot each.
     Exec(Vec<RecordBatch>),
@@ -100,6 +97,20 @@ impl Outcome {
             .expect_err("the cpu was expected to refuse")
             .message
     }
+}
+
+/// A `bug_` test's assertion: both answered, each with exactly these slots.
+pub(crate) fn each_answers(outcome: &Outcome, cpu: &[Vec<RecordBatch>], gpu: &[Vec<RecordBatch>]) {
+    assert_same(
+        cpu,
+        outcome.cpu.as_ref().expect("the cpu answers"),
+        Order::AsEmitted,
+    );
+    assert_same(
+        gpu,
+        outcome.gpu.as_ref().expect("the device answers"),
+        Order::AsEmitted,
+    );
 }
 
 pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
