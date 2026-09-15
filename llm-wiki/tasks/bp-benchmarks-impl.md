@@ -33,7 +33,10 @@ bash, Python 3 (`sqlite3`, `matplotlib`), GitHub Actions, shad-gpu.
 - Builds go to `/build/peacock`, never `./target`: cuDF shape through
   `scripts/docker-build.sh --no-image --cache-dir /build/peacock -- ./scripts/build-test-shadgpu.sh --build`;
   rust-only through `CARGO_TARGET_DIR=/build/peacock/rust-only-target cargo test -p peacockdb-core --features rust-only --test <target>`;
-  C++ CPU tier through `ctest --test-dir cpp/build26 -L cpu` after the build above.
+  C++ CPU tier through the same container: `scripts/docker-build.sh --no-image --cache-dir
+  /build/peacock -- ctest --test-dir cpp/build -L cpu`. The build dir inside the container is
+  `cpp/build` (bind-mounted from `/build/peacock/cpp-build`), not `cpp/build26`, and the
+  binaries do not run on the host: they resolve cuDF from the container's conda prefix.
 - Every foreground build/test/ssh command under `timeout`.
 - GPU targets run on shad-gpu only: `./scripts/build-test-shadgpu.sh --push-binaries --patch --run`,
   `PCK_TEST_FILTER=<substring>` to narrow.
@@ -76,7 +79,7 @@ std::vector<NodeRegion> collect_node_regions();   // drains; throws on any CUDA 
 size_t recorded_regions() const;                  // count without draining
 ```
 
-- [ ] **Step 1: port the timing section, then cut it.** Port `node_session.cpp`'s
+- [x] **Step 1: port the timing section, then cut it.** Port `node_session.cpp`'s
   `RegionSink`, `RegionSlot`, `ScopedNodeTimer`, `OptionalRange`, `harness_range` and the
   NVTX domain from the reference. Delete: `logical_size_from_table`, `call_outcome`,
   `record_outcome`, `CallOutcome`, `mark_device_start`, `t_open_region`, `t_open_timer`,
@@ -85,46 +88,37 @@ size_t recorded_regions() const;                  // count without draining
   right after `t0_`; `stop()` records the stop event and sets `out.host_us = us_since(t0_, now)`.
   A failed `cudaEventCreateWithFlags` or `cudaEventRecord` throws
   `std::runtime_error("node timing: " + cudaGetErrorString(err))` — no host-only fallback.
-- [ ] **Step 2: every entry point opens a region.** `execute_node` (all four arms, as the
+- [x] **Step 2: every entry point opens a region.** `execute_node` (all four arms, as the
   reference has them), `execute_scan_rowgroups`, `slice_handle`, and the export path behind
   `peacock_result_from_handle` (find the function `table_for`'s caller in `gpu_executor.cpp`
   exports through; open the region around the IPC export in `NodeSession`, partition 0,
   `call_index` from the sink like the others). Each site: `ScopedNodeTimer timer(sink, seq,
   p, call_index); … timer.stop();` and `out_stats[p] = NodeStats{rows, varlen}` from the
   table view as master does today.
-- [ ] **Step 3: collection.** `collect_node_regions()`: for every slot
+- [x] **Step 3: collection.** `collect_node_regions()`: for every slot
   `cudaEventSynchronize(stop)` then `cudaEventElapsedTime`; any failure throws with the CUDA
   string, after destroying every event; success destroys them and clears the deque.
   `recorded_regions()` returns `sink ? sink->slots.size() : 0`.
-- [ ] **Step 4: gtests, red first.** In `test_plan_executor.cpp`, a `NodeRegions` suite over
-  `tpch.minimal` using the existing hand-built plan helpers:
+- [x] **Step 4: gtests, red first.** In `test_plan_executor.cpp`, a `NodeRegions` suite over
+  `tpch.customer` using the existing hand-built plan helpers:
 
 ```cpp
-TEST(NodeRegions, OffRecordsNothing) {
-  peacock::set_node_timing(peacock::NodeTiming::Off);
-  /* begin plan, execute one node, materialize */
-  EXPECT_EQ(session.recorded_regions(), 0u);
-  EXPECT_TRUE(session.collect_node_regions().empty());
-}
-TEST(NodeRegions, EveryCallOpensOnePerPartition) {
-  peacock::set_node_timing(peacock::NodeTiming::Events);
-  /* execute a scan (1 partition) and a hash scatter to 4 */
-  auto regions = session.collect_node_regions();
-  ASSERT_EQ(regions.size(), 1u + 4u);
-  EXPECT_EQ(regions[0].call_index, 0u);
-  for (auto& r : regions) EXPECT_GT(r.host_us, 0u);
-  peacock::set_node_timing(peacock::NodeTiming::Off);
-}
-TEST(NodeRegions, ASecondCallOfTheSameSeqCountsUp) { /* two execute_node on one seq → call_index 0, 1 */ }
-TEST(NodeRegions, CollectingTwiceReportsNothingTheSecondTime) { /* collect, collect → empty */ }
-TEST(NodeRegions, TheExportOpensARegionToo) { /* result_from_handle at the root → one more region */ }
+// cpp/tests/gpu/test_plan_executor.cpp, suite NodeRegions, over tpch.customer
+EveryCallOpensOneRegionPerOutputPartition   // scan + hash scatter to 4 -> 1 + 4 regions
+CallIndexCountsCallsOfOneSeq                // two scans of one seq -> call_index 0, 1
+ANewSessionStartsTheCountAgain
+ARegionCarriesWhatOnlyAMeasurementReads     // host_us > 0, device_us > 0
+CollectingTwiceReportsNothingTheSecondTime  // recorded_regions() 1 -> 0
+TimingOffRecordsNothing
+TheSliceAndTheExportOpenRegionsToo          // both charged to the producing seq
+AskingTheCountDrainsNothing                 // the (NULL, 0) and cap-too-small contracts
 ```
 
   In `test_executor.cpp`, `NodeTiming.SwitchRoundTrips` uses the enum and `node_timing()`.
   Delete the two floor tests in `test_cudf.cpp`.
-- [ ] **Step 5: build and run.** `ctest --test-dir cpp/build26 -L cpu` locally; the GPU suite
-  on shad-gpu: `./scripts/build-test-shadgpu.sh --push-binaries --patch --run` with
-  `PCK_TEST_FILTER=NodeRegions` — expect the five green.
+- [x] **Step 5: build and run.** The CPU tier through the container as above; the GPU suite
+  on shad-gpu. `PCK_TEST_FILTER` reaches the rust binaries only, so the gtest filter is
+  `--gtest_filter=NodeRegions.*` on `peacock_plan_tests` — expect the eight green.
 - [ ] **Step 6: commit** — `regions: one per output partition at every entry point`.
 
 ### Task 2: the ABI and the FFI declarations
@@ -150,20 +144,21 @@ int peacock_executor_collect_node_regions(peacock_executor_t*, PeacockNodeRegion
                                           uint64_t cap, uint64_t* out_count);
 ```
 
-- [ ] **Step 1: header.** Port the reference's additions; delete `peacock_measure_timing_floor_us`
+- [x] **Step 1: header.** Port the reference's additions; delete `peacock_measure_timing_floor_us`
   and `PeacockNodeStats::time_us`; the region struct is the five fields above; one doc block
   per declaration, ≤ 10 lines, no capitals for emphasis.
-- [ ] **Step 2: `gpu_executor.cpp`.** `peacock_set_node_timing`: `switch` over the two named
+- [x] **Step 2: `gpu_executor.cpp`.** `peacock_set_node_timing`: `switch` over the two named
   values, `default: return 1`. `peacock_executor_collect_node_regions`: `if (!out && cap == 0)
   { *out_count = session->recorded_regions(); return 0; }`; `if (session->recorded_regions() >
   cap) { *out_count = …; last_error = "collect_node_regions: buffer holds N of M"; return 1; }`;
   else collect, `memcpy`, return 0, `catch` → `last_error`, return 1. Keep the `PCK_SAME_OFFSET`
   asserts for the five fields and `sizeof` equality.
-- [ ] **Step 3: `lib.rs`.** One doc block above `PeacockNodeRegion` (below the attributes);
+- [x] **Step 3: `lib.rs`.** One doc block above `PeacockNodeRegion` (below the attributes);
   the two constants; the four externs; delete `peacock_measure_timing_floor_us`; the
   `peacock_set_node_timing` extern returns `i32`.
-- [ ] **Step 4: prove.** The cuDF-shape build links (`--build`); `ctest -L cpu`; on shad-gpu
-  `PCK_TEST_FILTER=NodeRegions` still green.
+- [x] **Step 4: prove.** The cuDF-shape build links and `cargo build -p peacockdb-ffi`
+  succeeds (`--build` also stages the rust test binaries, which cannot compile until Task 5);
+  `ctest -L cpu`; on shad-gpu the eight `NodeRegions` cases still green.
 - [ ] **Step 5: commit** — `abi: regions come back through collect_node_regions`.
 
 ### Task 3: `executor::instrument`, `CallSite`, `collect_regions`, `Session`

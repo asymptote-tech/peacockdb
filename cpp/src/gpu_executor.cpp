@@ -15,7 +15,6 @@
 
 #include <cuda_runtime.h>
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -36,19 +35,24 @@ struct peacock_executor {
   std::unique_ptr<peacock::NodeSession> session;
 };
 
-// The stats entry points hand C++'s NodeStats back as the C struct by cast, which is
-// sound only while the two are laid out identically. Adding a member to one and not
-// the other, or reordering either, fails here rather than silently handing Rust fields
-// from the wrong offsets.
-#define PCK_SAME_OFFSET(a, b, field) \
+// The stats and region entry points hand C++'s structs back as the C ones by cast,
+// which is sound only while each pair is laid out identically. Adding a member to one
+// and not the other, or reordering either, fails here rather than silently handing Rust
+// fields from the wrong offsets.
+#define PCK_SAME_OFFSET(a, b, field)                      \
   static_assert(offsetof(a, field) == offsetof(b, field), \
                 "the two definitions of " #field " must sit at the same offset")
 
 static_assert(sizeof(PeacockNodeStats) == sizeof(peacock::NodeStats));
-static_assert(offsetof(PeacockNodeStats, rows) == offsetof(peacock::NodeStats, rows));
-static_assert(offsetof(PeacockNodeStats, varlen_content_bytes) ==
-              offsetof(peacock::NodeStats, varlen_content_bytes));
+PCK_SAME_OFFSET(PeacockNodeStats, peacock::NodeStats, rows);
+PCK_SAME_OFFSET(PeacockNodeStats, peacock::NodeStats, varlen_content_bytes);
+
 static_assert(sizeof(PeacockNodeRegion) == sizeof(peacock::NodeRegion));
+PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, seq);
+PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, partition);
+PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, call_index);
+PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, host_us);
+PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, device_us);
 
 // Export a cuDF table to an Arrow IPC stream buffer (malloc'd; free with
 // peacock_result_free), for peacock_result_from_handle. Widens DECIMAL32/64→128 since
@@ -140,17 +144,18 @@ int peacock_install_rmm_pool(uint64_t bytes, PeacockRmmPoolInfo* out_info) {
   return 0;
 }
 
-void peacock_set_node_timing(int mode) {
-  // Anything the C enum does not name is OFF, not "some timing": a caller that
-  // passed a value this build does not know about gets no measurement rather than
-  // an arbitrary one.
+int peacock_set_node_timing(int mode) {
+  // A value this build does not name is refused rather than read as off: a caller that
+  // asked for a mode and got silence measures nothing and has no way to find out.
   switch (mode) {
+    case PEACOCK_NODE_TIMING_OFF:
+      peacock::set_node_timing(peacock::NodeTiming::Off);
+      return 0;
     case PEACOCK_NODE_TIMING_EVENTS:
       peacock::set_node_timing(peacock::NodeTiming::Events);
-      break;
+      return 0;
     default:
-      peacock::set_node_timing(peacock::NodeTiming::Off);
-      break;
+      return 1;
   }
 }
 
@@ -296,38 +301,33 @@ int peacock_executor_slice_handle(peacock_executor_t* executor, uint64_t handle,
   }
 }
 
-int peacock_executor_collect_node_regions(peacock_executor_t* executor,
-                                        PeacockNodeRegion* out, uint64_t cap,
-                                        uint64_t* out_count) {
+int peacock_executor_collect_node_regions(peacock_executor_t* executor, PeacockNodeRegion* out,
+                                          uint64_t cap, uint64_t* out_count) {
   if (!executor || !out_count) return 1;
   if (!executor->session) {
     executor->last_error = "no plan loaded";
     return 1;
   }
   try {
-    // Copied whole, because a field-by-field copy has a line to forget and a size assert
-    // cannot see that: a field added to BOTH structs keeps the sizes equal, and the copy
-    // that skipped it reports zeros. The per-field offsets are what make the whole-struct
-    // copy safe — they hold the two definitions in one layout.
-    static_assert(sizeof(PeacockNodeRegion) == sizeof(peacock::NodeRegion));
-    PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, seq);
-    PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, partition);
-    PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, call_index);
-    PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, host_setup_us);
-    PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, host_submit_us);
-    PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, device_us);
-    PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, rows);
-    PCK_SAME_OFFSET(PeacockNodeRegion, peacock::NodeRegion, logical_bytes);
-    auto times = executor->session->collect_node_regions();
-    *out_count = static_cast<uint64_t>(times.size());
-    auto n = std::min<uint64_t>(times.size(), out ? cap : 0);
-    if (n > 0) std::memcpy(out, times.data(), n * sizeof(PeacockNodeRegion));
-    if (times.size() > n) {
-      executor->last_error = "collect_node_regions: buffer holds " +
-                             std::to_string(cap) + " of " +
-                             std::to_string(times.size()) + " recorded regions";
+    const uint64_t recorded = static_cast<uint64_t>(executor->session->recorded_regions());
+    *out_count = recorded;
+    // Neither of these drains: asking the count is the first half of one call, and a
+    // buffer too small is a caller's mistake rather than a reason to lose the regions it
+    // asked for.
+    if (!out && cap == 0) return 0;
+    if (recorded > cap) {
+      executor->last_error = "collect_node_regions: buffer holds " + std::to_string(cap) + " of " +
+                             std::to_string(recorded) + " recorded regions";
       return 1;
     }
+    auto regions = executor->session->collect_node_regions();
+    *out_count = static_cast<uint64_t>(regions.size());
+    // Copied whole, because a field-by-field copy has a line to forget and a size assert
+    // cannot see that: a field added to both structs keeps the sizes equal, and the copy
+    // that skipped it reports zeros. The per-field offsets above are what make the
+    // whole-struct copy safe.
+    if (!regions.empty())
+      std::memcpy(out, regions.data(), regions.size() * sizeof(PeacockNodeRegion));
     return 0;
   } catch (const std::exception& e) {
     executor->last_error = e.what();
@@ -358,7 +358,8 @@ int peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle, ui
       return 0;
     }
     if (begin != 0 || end != view.num_rows()) view = cudf::slice(view, {begin, end}).front();
-    export_table_to_ipc(view, result.column_names, out_ipc, out_ipc_len);
+    executor->session->time_export(
+        handle, [&] { export_table_to_ipc(view, result.column_names, out_ipc, out_ipc_len); });
     return 0;
   } catch (const std::exception& e) {
     executor->last_error = e.what();
