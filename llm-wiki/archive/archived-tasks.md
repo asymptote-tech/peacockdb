@@ -18,6 +18,812 @@ retargeted to master when that base merged.
 
 ---
 
+<!-- archived from llm-wiki/tasks/rmm-pool-budget.md -->
+
+**Merged 2026-09-15 as PR #144 (merge commit `72fb23f8`).**
+
+# 3 — the pool reserves what a binary needs
+
+Kind: production
+
+Inserted before [`test-layout.md`](test-layout.md), and independent of it: it touches `cpp/` and
+one wiki page, and nothing in the layout refactor reads either.
+
+Closes [#178](../tickets.md#t178) tentatively. Every gtest binary that installs a pool reserves 85%
+of free VRAM and caps at 95, so two processes on the card cannot both have what they asked for and
+the second dies in `pool_memory_resource` with `std::bad_alloc`. Measured once: two jobs
+overlapping by under two minutes, three sf40 tests down, at a 14.38 GiB peak on a 139.7 GiB device.
+Not a full device — two pools.
+
+**CI no longer collides with itself**: `gpu-tests` carries `concurrency: {group: shad-gpu,
+cancel-in-progress: false}`, which is the fix the ticket proposed and it has since landed, so runs
+queue rather than overlap. What remains is the card being shared with work outside this repo, which
+no group of ours can serialise — and a binary that asks for 85% of a device it does not own is the
+part we can fix.
+
+## The pool is not only in sf40 tests
+
+The premise this task started from was that only the sf40 suites take a pool. They do not. Six
+binaries call `peacock::install_rmm_pool()` from `main()`:
+
+| Binary | sf40 | Runs |
+|---|:-:|---|
+| `test_tpch.cpp`, `test_tpchv.cpp` | yes | every gpu-tests job |
+| `test_cudf_nodes.cpp`, `test_tpch_streamed.cpp` | yes | manual |
+| `test_cudf.cpp` — the GPU smoke and the murmur3 kernel | **no** | every gpu-tests job |
+| `test_plan_executor.cpp` — hand-built plans over `tpch.minimal`, 19 MB | **no** | every gpu-tests job |
+
+So an ordinary CI run puts four processes on the host, each asking for 85% of what it finds free,
+one of them for a dataset of nineteen megabytes. That is the shape of the collision, and sizing
+only the sf40 pair would leave it in place.
+
+`multi_gpu.cpp` is a seventh caller with its own per-device installation. It is manual, needs two
+GPUs, and never runs in CI, so it is not part of this and **keeps the percentage constants**, which
+stay in the header for it alone with a comment saying so.
+
+## The change
+
+`install_rmm_pool()` takes an explicit byte budget. No percentage, and **no clamp**: a binary asks
+for what it needs and a host that cannot supply it fails to build the pool, which is already
+`RmmPoolStatus::Unavailable` — the binary carries on with rmm's default resource, correct but
+unpooled, and a caller taking timings asserts as it does today. A clamp would silently hand back a
+smaller pool than was asked for, and the number a benchmark reports would stop meaning what it says.
+
+Each of the six declares its own budget as a named constant beside its `main()`, with the
+measurement that justifies it in the comment. **Take the numbers, do not choose them**: the pool
+already carries a `statistics_resource_adaptor`, so run each binary and read its peak. Round up to
+something a reader can defend, not to a percentage.
+
+The FFI's `peacock_install_rmm_pool` gains the same argument, because it exists so a Rust caller
+gets the allocator the gtest binaries have and that is no longer a fixed thing. What it must not do
+is start reading `gpu_memory_limit`, which is stored and ignored — that is [#148](../tickets.md#t148)
+and a decision about the product.
+
+## Validation
+
+- Every GPU tier stays byte-identical. This changes how much memory is reserved, never what is
+  computed.
+- **Two of each in parallel.** On shad-gpu, run `peacock_tpch_tests` twice at once and confirm both
+  pass; that is the failure this task exists to make unreachable, and it has never been run
+  deliberately.
+- Each binary's declared budget is at least its measured peak, and the four that share a CI job sum
+  to well under the device.
+
+## The ticket stays open, tentatively closed
+
+`#178` is not deleted and not archived. It is marked **tentatively closed** with the reasoning:
+the pool no longer sizes itself against the device, so two runs fit; but the host is shared with
+work outside this repo, so a third party can still exhaust it and this cannot be proven closed
+from here.
+
+The instruction that goes with it is for whoever meets it next, and it is deliberately narrow: **if
+a GPU tier fails with `std::bad_alloc` in `pool_memory_resource`, add a dated line to #178 saying
+which run and which binary, re-run the job once, and do not debug it.** The evidence accumulates on
+the ticket until there is enough of it to say whether the sizing was wrong or the neighbour was
+greedy. A coordinator that stops to diagnose this spends a dispatch on a machine it does not own.
+
+`llm-wiki/prompts.md` carries the same line in the Coordinator section, because a coordinator does
+not read `tickets.md` and would otherwise never see it.
+
+## Done when
+
+Six binaries declare explicit byte budgets with their measured peaks recorded; `install_rmm_pool`
+takes bytes and does not clamp; the percentage constants remain only for `multi_gpu.cpp` and say
+so; two `peacock_tpch_tests` run concurrently on shad-gpu and both pass; every GPU tier is
+byte-identical; #178 is marked tentatively closed carrying the retry-don't-debug instruction; and
+`prompts.md`'s Coordinator section carries it too.
+
+## Completeness signoff
+
+Solved under its constraints, with one Done-when item unmet and four things named rather than
+hidden. Unmet: two `peacock_tpch_tests` at once never ran — a tenant outside this repo held 53 GiB
+of the card for the whole task, and 69+69 needs an idle one. Two `peacock_tpchv_tests` did run
+concurrently and both took their declared budget from very different free-memory readings, which
+proves the rule and not the number. Shortcuts and deviations: the spec's premise for no-clamp is
+false — nothing acts on `Unavailable`, and an unpooled sf40 run loses tests rather than running
+slowly — and the carry-on behaviour was kept as specified, with the failure made legible instead;
+the integrated sizing regime was deleted rather than replaced, so every budget is an H200 number
+([#148](../tickets.md#t148) carries the open question); `PEACOCK_RMM_POOL_BYTES` was added past the
+spec to restore what the deleted override gave the swept binaries; and 24 GiB for the 100M-row node
+sweep is a first try, not a bisection.
+
+---
+
+<!-- archived from llm-wiki/tasks/module-layout.md -->
+
+**Merged 2026-09-10 as `beb7455e`, squashed onto master by hand; PR #143 closed unmerged as a result.**
+
+# 2 — a component's API is its mod.rs
+
+Kind: production
+
+Second of four, after [`drop-mode-name.md`](drop-mode-name.md) and before
+[`test-layout.md`](test-layout.md) and [`test-support.md`](test-support.md). None may run beside the
+four in [`tasks.md`](tasks.md) — rebasing across them is a whole-tree conflict.
+
+`peacockdb-core/src/batch_partitioned/**` moves to `peacockdb-core/src/`, laid out as components
+whose whole API is declared in `mod.rs` with implementation behind private modules. The previous
+task deliberately left this directory alone so that every file moves once, here, rather than twice.
+
+Today 170 top-level items are `pub` and eight of them are named by another crate. This task does not
+change that — it changes where they are declared and what may reach past them.
+`plan_batch_partitioned` becomes `planner::plan` and `batch_partitioned_driver` becomes
+`executor::run` as their modules acquire those names; `peacockdb/src/main.rs` moves with them.
+
+### Five components
+
+The IR is neither planner nor executor: it is what passes between them, and eleven non-test
+consumers span both halves. Giving it to either makes that half's internals a dependency of the
+other.
+
+```
+src/lib.rs
+src/common.rs              the row-byte formula, today memory.rs
+src/plan/                  what a plan is
+src/wire/                  what crosses the FFI
+src/planner/               making both
+src/executor/              running them
+src/plan_text/             rendering any of it
+```
+
+`wire/` is separate from `plan/` because they are two contracts, not one. A plan is the tree the
+planner builds and the driver walks; a recipe is the menu of parameterized kernels that crosses to
+the C++ side, and `architecture.md` already treats it as its own subject under that name.
+
+**It holds everything that knows what a flat buffer looks like** — the vocabulary (`Recipe`, `Seq`,
+`FbKind`, `Call`, `CallPattern`, `Input`, `ProjectRole`, `AbiSymbol`, `RecipePlan`), the writers
+that are `recipe/` today, the reader, the two renderers that are `plan_text/fb_text.rs` and
+`plan_text/recipes.rs` today, and the generated module.
+
+That last one forces the shape. Eleven files name `crate::generated` — nine in `recipe/`, plus both
+of those renderers — and they use **73 distinct generated types** between them, so flatc's output
+cannot be walled off unless its callers are inside the same wall. `plan_text/recipes.rs` belongs
+with them because it parses the buffer itself (`flatbuffers::root_with_opts::<fb::GpuPlan>`); it
+takes `render_plan_recipes` and `Payloads` with it, and `plan_text/mod.rs` asks `wire` for the
+`--- recipes ---` section. The memory section is not the same case: `MemoryModel` is a plain struct
+the renderer can walk without knowing the wire format.
+
+With all eleven inside, `wire/mod.rs` exposes `Recipe`, `Seq`, `attach_recipes`, `payload_text` and
+`render_plan_recipes`, and the 7,336 lines flatc emits are private to one component.
+
+**Keep the `#[allow(unused_imports, dead_code, clippy::all)]`** that sits on the module today, and
+say why in a comment. It is cosmetic while the module is `pub` — everything is externally reachable,
+so `dead_code` cannot fire. Private, every generated type the crate does not name becomes dead code,
+and there are hundreds.
+
+`planner` therefore has no `recipes` subcomponent: writing a recipe is a fact about the wire format,
+not about planning, and `attach_recipes` walks a finished tree.
+
+`plan_text` is a peer because it renders a plan tree, a run report, the memory model and the
+recipes, and because it holds the one real edge into the driver — `run_text.rs` reads `RunReport`
+and `PlanIndex`. It sits above both.
+
+### Where everything goes
+
+| Today | Goes to | Because |
+|---|---|---|
+| `nodes/` | `plan/` | eleven non-test consumers across both halves |
+| `node.rs` | `plan/mod.rs` | `GpuNode`, `RowInterval` — the trait the nodes implement |
+| `layout.rs`, `schema.rs`, `expr.rs`, `aggregates.rs` | `plan/`, as implementation modules | one vocabulary, not four. As subcomponents every other component would have to reach through their walls to name `Expr` or `Schema`; declared in `plan/mod.rs` they are one facade |
+| `validate.rs` | `plan/` | structural properties of a tree, not of planning; also removes the one executor-to-planner edge, `driver/partitioned.rs:28` |
+| `error.rs` | split | `PlanError` to `plan/mod.rs`, `RunError` and `When` to `executor/mod.rs` |
+| `RowGroupMeta`, `Batching`, `ScanMetadata` | `plan/` | `GpuLoadParquet` stores the mapping verbatim |
+| `recipe/` entire, `plan_text/{fb_text,recipes}.rs`, and `lib.rs`'s `generated` | `wire/` | the eleven files that name `crate::generated` use 73 of its types; it cannot be private unless they are inside with it |
+| `partitioner.rs`, `parquet_meta.rs`, `gpu_rowgroup_prune.rs` | `planner/translator/scan_mapping/` | all three entry points have one caller, and all three calls are inside `Translator::source`, a 20-line function (`translate/mod.rs:449,451,458`). As a peer of `translator` it would be the design's only sibling-subcomponent edge |
+| `MemoryModel` | `planner/mod.rs` | already half of what `plan()` returns |
+| `RunReport`, `PlanIndex`, `ROOT` | `executor/mod.rs` | what running a plan produces, plus the post-order addressing the recipes and the FFI share — not private driver bookkeeping |
+| `expr_translate.rs` | `planner/translator/` | sole consumer is `translate/` |
+| `nulls.rs` | `planner/` | a refusal the planner makes; sole caller `plan.rs` |
+| `estimator.rs` | `planner/memory_estimation/` | as proposed |
+| `executor.rs`, `backend.rs` | `executor/mod.rs` | the seven category traits and `Backend`; their cycle disappears when they share a file |
+| `batch.rs`, `cpu_batch.rs`, `gpu_batch.rs` | `executor/` | `Batch` and the two implementations |
+| the three `#[cfg(not(feature = "rust-only"))]` declarations in `batch_partitioned/mod.rs` | `executor/mod.rs` | `gpu_backend`, `gpu_batch` and `GpuBatch` — see below |
+| `forwarder.rs` | `executor/` | routing with no backend and no executor — the driver owns it |
+| `expr_physical.rs`, `spark_partitioning.rs` | `executor/cpu_backend/` | one consumer each |
+| `driver/accounting.rs` | stays under `executor/driver/` | see below |
+| `memory.rs` | `src/common.rs` | four consumers across planner, executor and both backends |
+| `config.rs` | deleted | see below |
+
+Result:
+
+```
+plan/mod.rs           GpuNode, RowInterval, PlanError, the eighteen nodes,
+                      Expr, Schema, NodeKind, PartitionLayout, AggFunc, PlanAgg,
+                      RowGroupMeta, Batching, ScanMetadata,
+                      NodeRef, ExecutorCategory, category_of, node_name
+plan/common.rs        check_column_refs, check_merge_keys, input_layout,
+                      input_schema, rebase_through_projection
+plan/{exec_ops,accumulators,aggregate,join,partition_ops,source,union,unload}.rs
+plan/{expr,layout,aggregates}.rs
+plan/validate.rs
+
+wire/mod.rs           Recipe, Seq, FbKind, Call, CallPattern, Input, ProjectRole,
+                      AbiSymbol, RecipePlan, Payloads, attach_recipes,
+                      render_plan_recipes, payload_text, node_at, depth,
+                      check_seq_kinds
+wire/generated.rs     private — the include!, 7,336 flatc lines, 73 named types
+wire/{node_writer,join,aggregate_writer,expr_writer,writer,read,
+      fb_text,recipes}.rs
+
+planner/mod.rs        plan(), PlanKnobs, BatchSizing, SMALL_TABLE_BYTES, MemoryModel
+planner/nulls.rs
+planner/{translator,memory_estimation}/
+planner/translator/scan_mapping/
+
+executor/mod.rs       Backend, the seven traits, Batch, CpuBatch, GpuBatch,
+                      RunError, When, CallStats, RowRange, BatchForwarder,
+                      RunReport, PlanIndex, ROOT
+executor/{cpu_batch,gpu_batch,forwarder}.rs
+executor/{driver,cpu_backend,gpu_backend}/
+
+plan_text/
+```
+
+`plan/mod.rs` lands near 980 lines, measured: 561 of declarations with their doc comments, 120 for
+the registry and its four exhaustive 18-arm matches, 272 of one-line delegations over 32 inherent
+blocks, and the module header. It is the crate's central index and the one file a newcomer should
+read, and it holds no logic — the one-expression rule is what keeps it a header rather than a
+module. `wire/mod.rs` is about 300 — the vocabulary plus five delegating entry points. Nothing else
+passes 400.
+
+### A component whose API is conditionally present
+
+`executor/` is the one component that does not have a fixed surface: `gpu_backend`, `gpu_batch` and
+`GpuBatch` are `#[cfg(not(feature = "rust-only"))]` today, and the declarations move with them. So
+`executor/mod.rs` carries the cfg on the declarations themselves, not only on the `mod` lines —
+`GpuBatch`, `GpuBackend` and `GpuContext` exist in two of the three feature shapes and not the
+third.
+
+Two consequences. The layout test must read the cfg rather than the item, or it will report a
+missing declaration under `rust-only` and a surplus one otherwise. And the `use common;` line at the
+end of `executor/mod.rs` must not pull in anything device-only, since `common.rs` is compiled in
+every shape — the rust-only tier boundary is exactly what a shared `common.rs` is able to breach.
+
+### Why accounting is not its own subcomponent
+
+`ResidentAccountant` is a field on the partitioned driver and is passed by mutable reference into
+the lane state machine at four sites in `single_partition.rs`. `Held<T>` is the driver's in-flight
+batch representation, `Slot` an index into its executor slots, `Trip` a `StepError` variant. Four of
+the five types are driver internals; only `Underestimate` faces outward, through `RunReport`.
+
+A sibling subcomponent would have to declare all four as API. As `executor/driver/accounting.rs`,
+a private implementation module, they stay `pub(crate)` behind the driver's wall and nothing outside
+`driver` can name them.
+
+`ResidentAccountant` is the name of the thing. Retire "the enforcer" and "resident enforcer" as
+second spellings for it, in the wiki and anywhere else — the type both accounts and enforces, and
+enforcement is the smaller half.
+
+### config.rs is dismantled
+
+`MemoryLimit` moves to `src/test_support/`, which [`test-layout.md`](test-layout.md) creates for the
+corpus harness that reads it; until that task lands it sits in `tests/common/` beside `bp_mode.rs`. `TargetPartitions`, `TARGET_PARTITIONS`
+and `BATCH_STRESS_BUDGET` are named by nothing outside the file's own unit test and go. The module
+doc describes `tp8-standard` device labels, which the legacy-mode drop retired.
+
+## The visibility rules
+
+For `coding-style.md`, replacing nothing that is there today.
+
+- A component or subcomponent is a directory with `mod.rs`. Its whole API — structs, enums, traits,
+  functions, constants — is declared there. Nowhere else in the component carries `pub` or
+  `pub mod`.
+- Implementation modules are declared `mod x;` and their items are `pub(crate)`. The module's own
+  privacy is the boundary: a path through a private module is refused whatever the item says, so
+  `plan::exec_ops` cannot be named from outside `plan` and `pub(super)` is not needed.
+- **A subcomponent is declared `mod`, not `pub mod`** — `mod recipes;` in `planner/mod.rs`, never
+  `pub mod recipes;`. `pub mod` would make `planner::recipes::Recipe` nameable crate-wide and the
+  subcomponent wall would exist only on paper. What a sibling component needs is declared in the
+  component's own `mod.rs`; that is what the four type moves in the table above are for.
+- `lib.rs` declares the components `pub mod`, and they are the only `pub mod` in the crate.
+- **Nesting may go three deep** where the innermost earns it: `planner/translator/scan_mapping/` is
+  720 lines behind three entry points. The same rule applies at each level — `mod`, not `pub mod`.
+  A directory with a one-item facade and a hundred lines behind it is an implementation module
+  wearing a directory; the test is whether the body justifies the wall.
+- `pub use` is not allowed. Inline the declaration into `mod.rs`, or into `common.rs` for what the
+  implementation modules share. A child reaches into its parent; a parent never re-exports a child.
+- A body in `mod.rs` is one expression. Declarations, and delegations of exactly one line.
+- A struct keeps its inherent `impl`, and that block lives in `mod.rs` with one-line bodies. A trait
+  is for two or more implementors. A trait per struct would also break every `const fn` and
+  associated const, which trait items cannot be.
+- An implementation module may implement any trait for a type declared in its own component's
+  `mod.rs`, and may define free functions the `mod.rs` delegates to. It may not declare types or
+  traits that form the component's API.
+- Absolute `crate::` paths across a component boundary, `super::` only within one.
+- `mod.rs` and `common.rs` have no length limit for this task. A limit is set afterwards from what
+  they weigh.
+
+### What that buys, exactly
+
+Three claims, and only the first two are the compiler's.
+
+- **A component is reachable only through its `mod.rs`.** Enforced: every implementation module is
+  private, so naming one from outside is `E0603: module is private`.
+- **A subcomponent is reachable only through its own `mod.rs`, and only from inside its parent
+  component.** Enforced by the same mechanism, once the declaration is `mod` rather than `pub mod`.
+- **Only the parent component's own code may use a subcomponent.** Enforced *across* components.
+  Not enforced *within* one: Rust's rule is "the module and its descendants", and sibling
+  subcomponents are descendants of the parent. There is no visibility level meaning "my parent but
+  not my siblings" — `pub(super)`, `pub(crate)` and `pub(in path)` all give the same set.
+
+**The layout as placed has no sibling-subcomponent edge left.** A sweep for calls from one
+subcomponent into another found exactly one, `translator` into `scan_mapping`, and the answer was
+that `scan_mapping` was misplaced rather than that the rule needed an exception. `driver` never
+calls a backend — it is generic over `Backend` — and `memory_estimation` takes only types.
+
+So two things fall to the layout test: sibling reach between implementation modules, which is the
+same gap one level down, and where a `pub` appears at all, which nothing in rustc checks. Both are
+readable from the tree, in the idiom `test_ci_coverage.rs` already uses. Without that test none of
+these rules can go red.
+
+## What the visibility sweep finds
+
+170 top-level `pub` items in `src`, plus 142 `pub` methods and associated consts.
+
+- **8** are named by another crate, and all eight by one file — `peacockdb/src/main.rs`, the CLI,
+  which is the only workspace member that depends on `peacockdb-core` at all. They are
+  `build_session_state`, `register_tables_for`, `plan_batch_partitioned`, `PlanKnobs`,
+  `BatchSizing`, `SMALL_TABLE_BYTES`, `CpuBackend` and `batch_partitioned_driver`. That is the
+  crate's real API: register tables, plan a query, run it on a backend.
+- **108** are `pub` only because `peacockdb-core/tests/*.rs` are separate crates.
+- **54** are named by nothing outside the crate and lose `pub` — among them `Batching`, `ColumnRef`,
+  `SortOrder`, `UnaryOp`, `Translator`, `MemoryModel`, `JoinCapability`, `Forwarder`,
+  `logical_size_from_schema`, `estimate`, `partition`, `translate_expr`. Eleven of the 54 are used
+  only inside their own file and lose `pub` entirely: `Decomposition`, `EmittedBatch`,
+  `SourceEstimate`, `StateFunc`, `all_row_groups`, `position_of`, `wire_nodes`, and the four
+  `config.rs` items that are being deleted.
+- 85 `pub(super)` become `pub(crate)` once the enclosing `pub mod` loses its `pub`.
+- 30 `pub use` are inlined.
+
+One leak the item count does not show, because it is a module rather than an item:
+`pub mod generated` in `lib.rs` exports the whole flatc surface — 7,336 lines, 73 types named
+internally and every other one reachable. It becomes `mod generated;` private to `wire/`.
+
+The 108 stay `pub` **in this task**, and [`test-layout.md`](test-layout.md) removes them by moving
+the eleven targets that force them down into `src/`. Doing that here would mean one diff in which a
+layout mistake and a coverage regression look alike, so it waits — and by then every one of those
+imports has already been rewritten, which is most of the work.
+
+## Renames that fall out
+
+- **The node `GpuJoin` becomes `GpuHashJoin`.** It is the equi-join, it serializes to
+  `CudfHashJoin`, and it sits beside `GpuCrossJoin` and `GpuNestedLoopJoin` — one of three
+  unqualified for no reason. The executors keep the category names `CpuJoin` and `GpuJoin`, which is
+  the scheme every sibling follows and is accurate: both run all three join nodes.
+  13,246 golden lines carry the old name. It is display text, so the recipe digests do not move;
+  sed, then regenerate to confirm the sed rather than to author it.
+- **`memory.rs` becomes `common.rs`.** It is a byte formula, not memory management, and it collides
+  with `plan_text/memory.rs`, which renders the `--- memory ---` section.
+- **`gpu_rowgroup_prune` loses its `gpu_`.** It runs on the CPU and serves both backends.
+
+**`CpuUnload` and `GpuExport` stay as they are.** They are one thing under two names, differing by
+backend, which the style guide's "the same thing carries the same name everywhere" reads against —
+but neither collides with anything, and any fix costs more than it buys: `GpuUnload` is taken by the
+plan node, and renaming `CpuUnload` to match `GpuExport` moves a name nobody is confused by. Noted
+as a considered keep so the next reader does not re-derive it.
+
+## Tests
+
+The four tiers already exist and none of them moves.
+
+- **Module unit** — `#[cfg(test)] mod tests { … }` inline in an implementation module. 13 sites,
+  unaffected.
+- **Component and subcomponent** — `#[cfg(test)] mod tests;` declared beside the implementation
+  modules, files under `component/tests/`. 11 sites. Being a descendant of the component they see
+  its private items but not an implementation module's, which is the boundary respected.
+  `nodes/tests/`, `cpu_backend/tests/`, `driver/tests/`, `translate/tests.rs` and `recipe/tests.rs`
+  are already this.
+- **Crate integration** — `tests/*.rs`, held to the component API. Eleven files name an
+  implementation module today: `cpu_backend::{accumulate,emit,join,source,backend}`,
+  `gpu_backend::{accumulate,emit,join,backend}`, `nodes::{aggregate,join}`. Every type they reach is
+  legitimately component API, so this is an import rewrite — `cpu_backend::CpuAccumulator` — and no
+  test relocates.
+
+`test_cpu_executors` and `test_gpu_executors` construct backend executors directly, so the executor
+constructors stay public for tests. That is the executor contract and is fine; list them in the
+component `mod.rs` deliberately rather than by accident.
+
+Eleven of the eighteen targets then move down into `src/` in [`test-layout.md`](test-layout.md),
+which is also where test code stops sharing a file with production code. Nothing here should be
+written to make that harder — in particular, do not fold a test helper into a production module to
+shorten an import.
+
+## The wiki this moves
+
+`architecture.md` is not prose about the code — it is prose *anchored to* the code, and the anchors
+move. 29 of its lines carry a Rust path or module name: 37 path references in total, some as
+markdown links to `../peacockdb-core/src/batch_partitioned/recipe/*.rs`, most as bare
+`node_writer.rs` / `join.rs` / `scheduler.rs` in running text. Seven are in the wire-format section
+alone, which is also where the largest move lands.
+
+Correcting them is this task's, not a later cleanup's — `prompts.md` makes keeping those two pages
+true the same commit's duty as the change. The work is four kinds, and only the first is mechanical.
+
+- **Paths in links and backticks**: rewrite to the new component. `batch_partitioned/recipe/` becomes
+  `wire/`, `batch_partitioned/translate/` becomes `planner/translator/`, `batch_partitioned/nodes/`
+  becomes `plan/`, and the crate-root files land where the placement table says.
+- **Directory names in prose**, which read as facts rather than links: "the recipe writer
+  (`batch_partitioned/recipe/`)", "the types are in `batch_partitioned/`", "`driver/`,
+  `partitioned.rs` owns the tree". These do not grep the same way as the links and have to be read
+  for.
+- **Sentences the reorganization falsifies**, which carry no path at all. "A `Gpu` name with no
+  `Cudf` is one of this mode's own plan nodes" survives; the Execution section's "the types are in
+  `batch_partitioned/` and the code is what they are" needs the new home; and the whole framing of
+  the mode as *a* mode rather than *the* engine is the phase-1 rewrite, 185 hits across `llm-wiki`.
+- **`coding-style.md` gains the visibility rules** — the section drafted above goes in whole, and
+  its Small-files bullet's examples (`batch_partitioned/nodes/`, `batch_partitioned/cpu_backend/`)
+  become the new paths. Its Names section loses the `test_inc2_conformance` exception paragraph in
+  the next task, not this one.
+
+`build-test.md` carries 19 such lines; correct the paths here and leave its test table alone —
+[`test-layout.md`](test-layout.md) restructures it, and doing it twice means doing it wrong once.
+
+## Validation
+
+Nothing here may change what the engine computes, so the bar is the opposite of the previous task's:
+**no golden may move at all**, and the one exception is quarantined in its own commit.
+
+### Baselines, before the first move
+
+1. `sha256sum` over `testdata/goldens/`.
+2. `cargo test -p peacockdb-core --lib -- --list` and one `--list` per integration target. Tests do
+   not move in this task, so every one of these must come back byte-identical at the end.
+3. A dump of every `pub` and `pub(crate)` item with its declaring file — the visibility baseline the
+   sweep is compared against.
+4. Warning counts from clean builds in all three feature shapes.
+
+### The `GpuHashJoin` commit is quarantined
+
+It goes first, alone, and it is the only commit in the task whose diff touches `testdata/goldens/`.
+Sed the 13,246 lines, then regenerate and require an empty diff — the regeneration confirms the sed
+rather than authoring it. **Plain `UPDATE_CANONICAL=1`, never with `PEACOCK_REWRITE_RECIPE_BYTES`:**
+without the second variable `test_plan_goldens` compares the committed payload digests against the
+bytes it just built and fails naming the file; with it, it rewrites them, and the digest agrees
+with itself having proved nothing. **Every later commit must show zero golden changes in `git diff --stat`,**
+and that is the single most valuable check in the task: a golden that moves after this point means
+the layout changed behaviour.
+
+### One commit per component
+
+In this order: `plan_text` and `executor/driver` first, because they are already close to the target
+shape and prove the pattern cheaply; then `wire`, which is the largest single move and the one that
+makes `generated` private; then `plan`; then `planner`; then the backends. After each, run the lib
+unit tests plus `test_plan_goldens` — the cheap tier — so a break is localized to the
+component that caused it rather than found at the end across a 138-file diff.
+
+### Per-commit checks
+
+- **The case inventory is byte-identical.** Tests do not move here, so any `--list` difference is a
+  test that stopped compiling into its target — the most likely silent failure in the whole task.
+- **Three builds, not one**: `--features rust-only`, default, and the C++-linked build. The
+  rust-only tier boundary is the invariant most easily broken by a move, because pulling one type
+  into a shared `mod.rs` or `common.rs` can drag an FFI type into a rust-only path, and it fails at
+  link rather than at review. `executor/` is the component to watch: its API is conditionally
+  present, so its `common.rs` compiles in every shape while `GpuBatch` does not.
+- **The visibility sweep is mechanical, not a reading.** A script enumerates every `pub` and
+  `pub(crate)` with its declaring file and asserts: no bare `pub` or `pub mod` outside a `mod.rs`;
+  no `pub use`; no `pub(super)`; subcomponents declared `mod`, not `pub mod`; and the item set
+  unchanged from the baseline, since this task moves declarations and does not remove any. Run it
+  at every component commit.
+- **Re-run task 1's strip-and-rematch after each slice.** Its residue gate excludes by line, not
+  by match, so a survivor spelling anywhere on a line hides real residue sharing it. That was
+  latent when task 1 closed; this task moves the files those 170 lines live in, which is exactly
+  the motion that turns it live.
+- **Drop the gate's `':!peacockdb-core/src'` exclusion once the directory is gone.** It exists only
+  to spare `src/batch_partitioned/`, and this task removes that name. Left in place it hides the
+  whole crate: task 1's completeness pass found four residues inside that tree precisely because
+  nothing read it, and after this move the exclusion would blind the gate to everything the task
+  touched. Run the gate without it, and expect the three mapping sites plus whatever `README.md`
+  and `source.py` still say about `ParquetBatchPartitioner`.
+- **Every grep in this task takes `--untracked`.** `git grep` does not see untracked files, so a
+  sweep run before staging is blind to exactly the files being moved — in task 1 a gate reported
+  clean while residue sat in four renamed files. This task moves every file in the crate, so the
+  blindness is total until each slice is staged. Run the sweeps after `git add`, or with
+  `--untracked`, and never before a move.
+- **`git diff -M --summary` reports renames**, not delete-plus-add. A file reported as both changed
+  more than half its content, which a path rewrite and an import fix should not do.
+
+### The layout test must be seen red
+
+For each rule it claims — a `pub` outside a `mod.rs`, a `pub mod` subcomponent, a `pub use`, a
+sibling implementation module reaching another, a `crate::`-less cross-component path — construct
+the violation, watch it fail, revert. A guard nobody has seen fail is a guard nobody knows is wired
+up, and `test_ci_coverage.rs` is the worked example of doing this properly in this repo.
+
+### Then the full suite, once
+
+Per `coding-style.md` a behaviour-preserving refactor is verified with a representative case per
+mode per binary plus the golden and meta tier; the full corpus runs once, at the end, on verda.
+Check what a package-wide command actually sweeps before running it — `--features rust-only` selects
+a build, not a tier.
+
+### If a golden moves
+
+It is not a golden to regenerate. It means the move changed behaviour, and the diff names where: a
+plan line is the planner, a `--- memory ---` figure is the estimator, a payload digest is the recipe
+writer. Bisect by component commit — that is what the one-commit-per-component rule buys.
+
+## Done when
+
+The crate builds clean under all three feature shapes with no new warnings against the recorded
+count; every golden after the `GpuHashJoin` commit is untouched; the case inventory is
+byte-identical; bare `pub` and `pub mod` appear only in `mod.rs` files, with no `pub use` and no
+`pub(super)` anywhere in `src`; the layout test exists and has been seen red on each rule; the
+visibility rules are in `coding-style.md` and `architecture.md`'s paths are correct; and CI is green.
+
+## Completeness signoff
+
+Solved under its constraints, with three named shortcuts and no bandaids.
+
+1. "bare `pub` and `pub mod` appear only in `mod.rs` files" is not met as written. Nine `pub mod`
+   sit outside `lib.rs` with 60 bare `pub` items behind them, every one forced by a separate test
+   crate. Each is registered in `test_module_layout.rs` with the files that force it, checked in
+   both directions so an entry outliving its reason goes red, and the whole exemption expires in
+   task 3. `pub use` and `pub(super)` are genuinely zero.
+2. The case inventory is not byte-identical. `config.rs`'s two unit tests moved to
+   `test_golden_format` at net zero, which dismantling `config.rs` authorizes, and the layout test
+   this task delivers gained an eleventh case. `TargetPartitions`' label round-trip is gone with
+   the type; `MemoryLimit` coverage is preserved. No golden moved after the quarantined rename.
+3. The device evidence transfers by argument, not by a run on the head: every `src/` change above
+   the GPU-green head is import order, a doc comment moved onto the right struct, and two comment
+   lines. The 170 goldens carry recipe payload digests and are byte-identical, so the wire format
+   the device consumes did not move.
+
+Two known blind spots are stated where a developer meets them rather than only here: the
+cross-component reader misses whitespace before `::`, and `forced_by`'s reverse half misses a
+plain module import. The spec's promised follow-up — a length limit for `mod.rs` set from what
+they weigh — is not set, and `coding-style.md` defers it with no owner.
+
+---
+
+<!-- archived from llm-wiki/tasks/drop-mode-name.md -->
+
+**Merged 2026-09-10 as PR #141.**
+
+# 1 — the mode has no name any more
+
+Kind: production
+
+First of four. The legacy modes are gone, so "batch partitioned" and its `bp` abbreviation
+distinguish nothing; every occurrence is a qualifier against an alternative that no longer exists.
+
+This task changes **names only**. It renames identifiers, mode labels, golden filenames, one Python
+module, one ticket page and the prose that carries them. It moves no Rust file and changes no
+behaviour, which is what makes its validation absolute: every derived artifact must reproduce byte
+for byte.
+
+**`peacockdb-core/src/batch_partitioned/` is the one name that survives**, deliberately.
+[`module-layout.md`](module-layout.md) places its contents into components, and doing the flattening
+here would move every file twice for one outcome. Task 2 is where the last path goes.
+
+The four tasks in order: this one, [`module-layout.md`](module-layout.md),
+[`test-layout.md`](test-layout.md), [`test-support.md`](test-support.md). None may run beside the
+four in [`tasks.md`](tasks.md) — rebasing across them is a whole-tree conflict.
+
+## What changes
+
+138 files carry the name in a path; 964 content lines outside the goldens and 169 inside. (The
+gate below also lands on 138 — a coincidence, not the same 138.)
+
+`BpMode`, `BP_MODES` and `bp_mode.rs` become `Mode`, `MODES` and `mode.rs`. The lowercase gate
+catches the filename but not the two identifiers, and a `BpMode` in a tree with no `bp` anywhere
+else is the qualifier-against-nothing this task exists to remove.
+
+**Mode labels lose the prefix**: `bp-tp4-sized` becomes `tp4-sized`. One table owns them, `MODES`
+in `tests/common/mode.rs` (`BP_MODES` in `bp_mode.rs` before the rename above), and `ident()` derives the macro spelling by replacing hyphens — so the
+table plus a sed over `corpus_cases.inc` covers the Rust side. Then `cost-registry.csv`'s fifteen
+`bp_*` column headers, `testdata/fixtures/two-row-registry.csv`'s identical headers, and the
+twenty-one sites in `cost-report/src/main.rs`.
+
+**Golden files move rather than regenerate.**
+
+- Only `bp-mini.result.txt` carries a mode inside it — the `mode=` line, 34 sections in tpch and 60
+  in tpcds. `.plans.txt`, `.cpu.txt` and `.cost.txt` carry none, so those are a `git mv` and nothing
+  else.
+- `bp-recipe-payloads.txt` keeps its digests. They are over the flat-buffer bytes and no mode label
+  crosses the wire, so a digest that moves here means something other than a rename happened. Do
+  not set `PEACOCK_REWRITE_RECIPE_BYTES`.
+
+**Entry points**: `plan_batch_partitioned` becomes `planner::plan` and `batch_partitioned_driver`
+becomes `executor::run` in task 2, when the modules they live in acquire those names. Here they
+keep their names; renaming a function whose module is about to move is one edit made twice.
+
+**`llm-wiki/tasks/bp-tickets.md` becomes `active-tickets.md`**, staying in `tasks/`. 34 references
+in eleven files — `archived-tasks.md` (11), `cost-report/src/main.rs` (6), `build-test.md` (3),
+`test_cpu_end_to_end.rs` (2), `tasks.md` (2), `casts.md` (2), and one each in
+`peacockdb/src/main.rs`, `tickets.md`, `wire-schema.md`, `refcounted-tables.md`. Its fourteen
+`<a id="tNN">` anchors keep their ids, so every `#tNN` link still resolves; only the filename moves.
+`cost-report`'s six are load-bearing — the widget resolves ticket links against that path.
+
+**In the archives, update the link paths and leave the prose.** `archived-tasks.md` and
+`archived-tickets.md` are a record of what happened; rewriting their sentences to say "the engine"
+would falsify the history they exist to hold. Paths must resolve; wording stays.
+
+**The Python prototype renames a module.** `scripts/exec_model/batch_partitioned_driver.py` becomes
+`partitioned_driver.py`, and ten files import it by name. Python has no compiler to catch a miss —
+the failure is an `ImportError` at collection time, so run the prototype suite before committing.
+
+**Test targets** rename, each to what `build-test.md` already calls its tier:
+
+| was | becomes | the tier it is |
+|---|---|---|
+| `test_batch_partitioned_injection` | `test_layout_injection` | Layout injection mechanism |
+| `test_batch_partitioned_plans` | `test_plan_goldens` | Plan goldens — and it sits beside `test_corpus_goldens` |
+| `test_cpu_batch_partitioned` | `test_cpu_end_to_end` | end to end: SQL in, rows out; its macro is already `end_to_end!` |
+| `test_cpu_bp_corpus` | `test_cpu_corpus` | |
+| `test_gpu_bp_corpus` | `test_gpu_corpus` | |
+
+`test_inc2_conformance` is not renamed here — [`test-layout.md`](test-layout.md) makes it
+`test_murmur_conformance` when it moves in-crate, and renaming it twice is one edit made twice.
+
+This reaches CI twice: `.github/workflows/pipeline.yml` and
+`test_ci_coverage.rs`, whose exemption table and three GPU target lists name the binaries. That
+guard fails on a miss, which is the check. `exec-model-corpus.yml` carries the phrase in a comment;
+`pipeline.yml` is not the only workflow to sweep.
+
+**Four traps.**
+
+- **`batch` alone is a domain word.** `BatchSizing`, `Batching`, `batch_rows`, `AggregateBatches`,
+  `CudfCoalesceBatches` all stay. Only the two-word phrase goes.
+- **The two words are not always adjacent.** `batch_single_partition_driver.py` carries the same
+  qualifier with `single_` between them, so a `batch.partition` regex misses it; it becomes
+  `single_partition_driver.py`, with its function and class. Left alone it would have been the only
+  `batch` qualifier surviving in `scripts/`.
+- **`batch→partition` is not the mode name.** Four sites — `gpu_plan.fbs:312` and `:346`,
+  `node_session.cpp:220`, `gpu_rowgroup_prune.rs:151` — describe the row-group→batch→partition
+  *mapping*, which is a real three-level structure and stays. A regex with `.` between the words
+  matches the arrow, so a careless sweep mangles them.
+- **In `llm-wiki` the phrase is the mode's name, not a qualifier** — 185 hits, plus roughly ten in
+  `cpp/` and `gpu_plan.fbs`. Those sentences want rewriting to say the engine; a mechanical strip
+  leaves them ungrammatical and, worse, still wrong.
+
+## Validation
+
+The rename is inert by construction, so the bar is that every derived artifact reproduces exactly.
+"It compiles and the tests pass" proves nothing here — the tests would pass over a golden that
+quietly changed.
+
+### Baselines, before the first edit
+
+1. `sha256sum` over every file under `testdata/goldens/`, saved outside the tree.
+2. `cargo test -p peacockdb-core --lib -- --list` plus one `--list` per integration target, as the
+   case-name inventory. 437 lib cases, eighteen targets.
+3. The warning count from a clean `cargo build` and `cargo build --features rust-only`.
+4. `git rev-parse HEAD`, so a bisect has a floor.
+
+### The checks
+
+- **The golden hashes move in exactly two files.** After the `git mv` and the two seds, the sha256
+  list must differ from the baseline only in the two `bp-mini.result.txt` files, and there only on
+  `mode=` lines. Any other hash change means the rename touched content it should not have.
+- **Then regenerate anyway, and require an empty diff.** `UPDATE_CANONICAL=1` over
+  `test_plan_goldens` and the corpus cpu tier rewrites every golden from a live run;
+  `git diff` after it must be empty. The hash check says the files did not move; this says the
+  engine still produces them.
+- **The refusal message is the one exception, and it is quarantined.** `error.rs:20` renders
+  `"unsupported in batch-partitioned mode: {what}"` and `translate/mod.rs:221` says "do not plan in
+  batch-partitioned mode (#143)" — and those strings land in **75 lines across the ten
+  `.plans.txt` goldens**. Reword them in their own commit, last: everything before it must
+  regenerate to an empty diff, and that commit's regeneration must produce a diff of exactly those
+  75 lines and nothing else. Same shape as task 2's `GpuHashJoin` quarantine, and the same reason —
+  it separates the strong check from the one known change. The wording is the developer's, under
+  two constraints: it must not say "mode", and the two sites must agree.
+- **The payload digests are the sharpest instrument, and the plain regen is what reads them.**
+  Under `UPDATE_CANONICAL=1` alone, `test_plan_goldens` compares the committed digests against the
+  bytes it just built and fails naming the file. Setting `PEACOCK_REWRITE_RECIPE_BYTES=1` makes it
+  rewrite instead of compare, which is the instrument switched off — so never set it here. A
+  digest that moves during a rename means the run stops, not that the new digest gets committed.
+  (`module-layout.md`'s quarantine reads this same paragraph.)
+- **The case inventory maps under one transformation.** Every `--list` name must map to a baseline
+  name by removing a `bp_` or `bp-` prefix, and per-target counts must match. A vanished case is a
+  `#[test]` lost to a bad sed; a new one is a duplicated module.
+- **`cost-report`'s own tests are the registry guard.** They read both `cost-registry.csv` and
+  `testdata/fixtures/two-row-registry.csv`, so a header renamed in one file and not the other fails
+  there rather than in a later task.
+- **The exec-model suite runs before the commit**, not after. Its 216 cases are the only check on
+  the Python module rename, and an `ImportError` there is silent until collection.
+- **The prose-and-labels gate.** The naive form cannot be empty, because this task deliberately
+  keeps `src/batch_partitioned/` and deliberately does not rename `plan_batch_partitioned` or
+  `batch_partitioned_driver` — 132 lines outside `peacockdb-core/src` name the module path (128 in
+  `peacockdb-core/tests/**`, 4 in `peacockdb/src/main.rs`) and 42 more name those two functions. All
+  of it is the residue task 2 removes. So the gate excludes the four spellings that survive:
+
+  ```
+  git grep -inE --untracked 'batch.?partition' -- ':!llm-wiki' ':!peacockdb-core/src' \
+    | grep -vE 'mod batch_partitioned|batch_partitioned/|batch_partitioned::|::batch_partitioned|plan_batch_partitioned|batch_partitioned_driver'
+  ```
+
+  **The pattern is `batch.?partition`, case-insensitive, and both halves of that are load-bearing.**
+  `.?` rather than `.` catches `BatchPartitionedDriver`, which a separator-requiring pattern cannot
+  see at all — that is how a class survived its own module's rename. And the exclusions are the
+  four surviving spellings written out rather than a bare `batch_partitioned`, which would swallow
+  every underscore residue including `--test test_batch_partitioned_plans` and
+  `mod test_batch_partitioned_injection` — the target-rename miss the gate exists to catch.
+
+  **Run it in a UTF-8 locale.** `→` is three bytes, and under `LC_ALL=C` a `.` matches one byte, so
+  the pattern cannot span the arrow and the three mapping sites drop out — the gate reports three
+  and reads as cleaner rather than as half-blind. The residue half is unaffected either way, since
+  CamelCase needs zero characters and every separator form is one byte, so a C-locale run is safe
+  but its count is not the documented one. `build-test.md` sends people to `LC_ALL=C` for
+  cross-host comparison, so this is a real way to meet it.
+
+  The goldens are deliberately **not** excluded. They carry no hits once the refusal is reworded,
+  so excluding them buys nothing today — and they are exactly where that wording lands, so a gate
+  blind to them could not catch it coming back.
+
+  **The exclusion is line-scoped, which is the one hole left in it.** `grep -vE` drops the whole
+  line, so a deliberate survivor anywhere on a line shields real residue sharing it —
+  `mod batch_partitioned; // renamed from test_batch_partitioned_plans` is invisible to the gate.
+  Latent rather than live in what the gate reads: stripping the six survivor spellings from every
+  excluded line and re-matching returns nothing there. But 170 lines carry a survivor spelling, and
+  the later tasks move the tree those lines live in, so re-run that strip-and-rematch after each
+  slice rather than assuming it still holds.
+
+  **The `peacockdb-core/src` exclusion is the larger hole, and it was live.** The pathspec drops the
+  mode's own module, so the gate never reads the tree this task is named after, and the completeness
+  pass found four hits inside it: `error.rs`'s two `RunError` display strings, `mod.rs`'s module doc,
+  and a temp-dir name in `parquet_meta.rs`. The same pattern scoped to `peacockdb-core/src`, with the
+  survivor spellings stripped per line, must land on one — `gpu_rowgroup_prune.rs:151`'s mapping
+  site. Task 2 removes the directory that forces the exclusion; until then that scoped form is the
+  only thing that reads inside it.
+
+  At the finish it lands on **six**, all deliberate: the three `batch→partition` mapping sites,
+  `README.md:371` and `source.py:3` naming `ParquetBatchPartitioner` (the same structure, not the
+  mode), and `test_ci_coverage.rs:431`, which is task 2 residue and goes when the module does.
+
+  Then `git grep -nE --untracked '\bbp[-_]' -- ':!peacockdb-core/src' ':!llm-wiki'` and
+  `git grep -n --untracked 'bp-tickets' -- ':!llm-wiki'`, both empty. `llm-wiki` is excluded whole
+  because it is rewritten by hand rather than swept, and two parts of it keep `bp` on purpose: the
+  archive's 21 mode labels, which record what the modes were called at the time and would be
+  falsified by an edit, and these four task specs, which have to quote both spellings to say what
+  becomes what.
+
+  **`--untracked` is not optional, and it is the trap that would have shipped residue.** `git grep`
+  does not see untracked files, so every gate is blind to exactly the 42 files this task renames —
+  they are `??` until staged. Run without it and the gate goes **green over the renamed files
+  themselves**: the first pass here left the phrase in `mode.rs`'s module doc and `mode_named`
+  panic, and in two renamed targets' module docs, with gate 1 reporting clean. The same shape bit a
+  `git grep -l` sed list, and that one at least went red in the Python suite. This one would not
+  have.
+- **`test_ci_coverage` passes**, so a missed target rename fails there rather than silently
+  un-gating a tier.
+
+### What a device run does and does not add
+
+A renamed golden that `mode.rs` computes a different path for fails **rust-only, before any
+device**: `test_corpus_goldens` opens `cpu_golden()`, `cost_golden()` and `result_golden()` by
+computed path with `.expect(...)`, and `test_cost_model` sweeps the same directory. So the device
+tier is not the first reader of those filenames, and a run that claims to be proving them is
+claiming the wrong thing.
+
+Nor is "the sections resolve" the whole of it: `test_corpus_goldens` already checks committed
+sections it did not write, against their own arithmetic, with no run at all. What the device run
+uniquely adds is those sections checked against **a second engine's actual run** — plan shape,
+`in_rows`, the per-batch lists, the bytes. That is the claim that stays true in tasks 2 and 3, and
+"only the device can see this" is an easy thing to say about a filename when it is true only of a
+comparison between engines.
+
+### Done when
+
+Every golden regenerates to an empty diff and the payload digests are byte-identical; the case
+inventory maps by prefix removal with no count changing; `cost-report` and the exec-model suite are
+green; the grep gates are empty; and CI is green with no new warnings against the recorded count.
+
+## Completeness signoff
+
+Solved under its constraints. Every derived artifact reproduces byte for byte: the 33 golden
+renames differ from their baselines only on the 94 `mode=` lines and the 75 quarantined refusal
+lines, the payload digests never moved, the case inventory maps 1:1 under prefix removal, and a
+final `UPDATE_CANONICAL=1` regen of the plan goldens and the cpu corpus left an empty diff.
+
+Two bandaids, both deliberate and both named above. The prose gate excludes `peacockdb-core/src`,
+which hid four residues until the completeness pass; the scoped form that finds them is written
+into the gate section, and task 2 removes the directory that forces the exclusion. And the spec
+was not frozen — six commits rewrote it, so "the gate lands where the spec says" is partly
+self-fulfilling; each of the six survivors was re-derived independently instead.
+
+---
+
 <!-- archived from llm-wiki/tasks/empty-answers.md -->
 
 **Obsolete — approach rejected, never merged; PR #138 closed 2026-09-10.** Superseded by `empty-build.md`, which showed the capability it proposed is one the engine does not need.
