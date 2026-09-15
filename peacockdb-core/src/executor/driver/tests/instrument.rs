@@ -5,11 +5,11 @@
 //! green. What is checked here is only that the instrument reads what it was set to —
 //! a few cases, not a suite.
 
-use super::super::mock::{AccRule, EmitRule, Mock, Script, spec};
-use super::super::plans::*;
+use super::mock::{AccRule, EmitRule, Mock, Script, spec};
+use super::plans::*;
 use super::*;
 
-use super::super::mock::MockBatch;
+use super::mock::MockBatch;
 use crate::executor::Batch;
 use crate::executor::{Backend, NodeExecutors};
 use crate::executor::{

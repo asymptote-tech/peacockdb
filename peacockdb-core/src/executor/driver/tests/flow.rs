@@ -1,7 +1,7 @@
 //! The schedule and the two holds, asserted on calls rather than on rows.
 
-use super::super::mock::{AccRule, EmitRule, ExecRule, JoinRule, Script, spec};
-use super::super::plans::*;
+use super::mock::{AccRule, EmitRule, ExecRule, JoinRule, Script, spec};
+use super::plans::*;
 use super::*;
 
 fn one_lane_chain() -> Box<dyn GpuNode> {

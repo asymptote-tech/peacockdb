@@ -198,32 +198,13 @@ jobs:
           python3 -c "import pandas, pyarrow" 2>/dev/null || pip install --quiet pandas pyarrow
           python3 scripts/exec_model/tests/test_tpch.py
 
-      # The rust tests that read committed artifacts rather than a device: the three
-      # planner targets write their own parquet, the rest read goldens. They ran in the
-      # cost-report tier until that tier was named for what it contains rather than for
-      # what decides placement — they are prod-code tests and this is where prod-code
-      # tests live. ONE matrix leg, for the reason the exec-model step above gives: a
-      # rust-only test cannot see cuDF, so a second leg would report the same failure twice.
-      # The three planner targets run first: each writes its own parquet, so none needs the
-      # generated dataset, and a break in the mode under development shows in under a second.
-      - name: Planner join capability (Rust)
-        if: matrix.cudf == '25.02'
-        run: cargo test --features rust-only -p peacockdb-core --test test_planner_join_capability
-
-      # Every shape the planner refuses, reached from the SQL that provokes it: each
-      # asserts its ticket number is in the message a user sees, so a refusal that stops
-      # naming its ticket fails. Same self-written parquet as the step above.
-      - name: Planner join refusals (Rust)
-        if: matrix.cudf == '25.02'
-        run: cargo test --features rust-only -p peacockdb-core --test test_planner_join_refusals
-
-      # Every rule in the null analysis, on hand-built nodes: a source can declare a
-      # NOT-nullable column here, which no corpus fixture can — every column in both
-      # benchmarks is declared nullable, primary keys included.
-      - name: Null analysis rules (Rust)
-        if: matrix.cudf == '25.02'
-        run: cargo test --features rust-only -p peacockdb-core --test test_null_analysis
-
+      # The rust tests that read committed goldens rather than a device or a dataset. They
+      # ran in the cost-report tier until that tier was named for what it contains rather
+      # than for what decides placement — they are prod-code tests and this is where
+      # prod-code tests live. ONE matrix leg, for the reason the exec-model step above
+      # gives: a rust-only test cannot see cuDF, so a second leg would report the same
+      # failure twice.
+      #
       # Verify every committed .cost.txt exactly matches regeneration from its
       # sibling .cpu.txt plan golden (full-file, not just the total), and the
       # cost-model unit test. Pure text over committed goldens — no executor, no
@@ -246,14 +227,6 @@ jobs:
         if: matrix.cudf == '25.02'
         run: cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens
 
-      # The injection mechanism against itself: the plan rebuild is identity per arm
-      # and per field, and the selector's output is a cover rather than a prefix.
-      # Reads no parquet — the plans are hand-built and the four cases are the ones
-      # that need no dataset.
-      - name: Layout injection mechanism (Rust)
-        if: matrix.cudf == '25.02'
-        run: cargo test --features rust-only -p peacockdb-core --test test_layout_injection
-
 
       - name: Validate sf1 datasets
         run: |
@@ -273,20 +246,19 @@ jobs:
           # EVERY target the run step invokes must be listed here, or its compile
           # failure surfaces as a run-step failure and the split stops meaning
           # anything.
-          cargo test --no-run -p peacockdb-core --test test_plan_goldens --test test_gpu_batch
+          cargo test --no-run -p peacockdb-core --lib
           cargo test --no-run -p peacockdb-ffi --test test_ffi
           # Separate line because of --features rust-only: cargo's fingerprint
           # includes the feature set, so this cannot share the invocation above.
           # The feature only reaches peacockdb-ffi/peacockdb-core, not the
           # DataFusion/Arrow graph, so the extra compile is small.
           #
-          # --lib rides HERE rather than on the default-feature line: the lib unit tests
-          # touch no FFI — config and the planner, which is nearly all of
-          # them — so under rust-only their binary does not link libpeacock_gpu, a smaller
-          # link in the tier that has already hit tmpfs/SIGBUS at link time. It shares this
-          # line's already-built rust-only fingerprint, so it costs no extra compile.
-          cargo test --no-run --features rust-only -p peacockdb-core --lib \
-            --test test_cpu_executors --test test_cpu_end_to_end
+          # --lib is built twice, once per rung, and the two are different binaries: the
+          # rust-only one here carries the cpu rung and does not link libpeacock_gpu, a
+          # smaller link in the tier that has already hit tmpfs/SIGBUS at link time, while
+          # the default-feature one above carries the ffi rung as well. Each shares its
+          # own line's already-built fingerprint, so neither costs an extra compile.
+          cargo test --no-run --features rust-only -p peacockdb-core --lib
           # The CLI, which has no test target of its own and so is named by nothing above.
           # It is the only caller of the planner and the driver from outside the crate, so a
           # signature change that the tests absorb still breaks it — and unbuilt, it breaks
@@ -304,32 +276,17 @@ jobs:
       # job's and identical by construction.
       - name: Run Rust tests
         run: |
-          # The plan tier first: it plans rather than executes, so its failures are the
-          # ones worth seeing soonest. It plans real sf1 tables, reading row-group metadata
-          # off the parquet, so it needs this tier's dataset.
-          cargo test -p peacockdb-core --test test_plan_goldens
-          # GpuBatch's own surface, and it belongs in a CPU tier deliberately: the batch
-          # is a handle plus a Drop, and the release it calls is null-guarded on the
-          # executor, so nothing here needs a device. The GPU half of the ABI is
-          # test_gpu_abi, staged for the gpu-tests job.
-          cargo test -p peacockdb-core --test test_gpu_batch
+          # The middle rung: every test module that needs the FFI linked and no device,
+          # selected by path. GpuBatch's surface is all of it today — a handle plus a Drop
+          # whose release is null-guarded, so nothing here reaches a card. The device half
+          # of that ABI is `gpu_backend::gpu_tests::abi`, which the gpu-tests job runs.
+          cargo test -p peacockdb-core --lib -- ffi_tests::
           cargo test -p peacockdb-ffi --test test_ffi
-          # The inline #[cfg(test)] modules: config and the planner,
-          # which is nearly all of them. Every other cargo invocation in this file passes
-          # --test, which selects integration targets ONLY — so before this line the lib
-          # unit tests ran locally and never in CI. test_ci_coverage asserts this line
-          # exists.
+          # The cpu rung, entire: every in-crate test module that needs neither the FFI
+          # nor a device. It needs the sf1 dataset generated above: the plan goldens read
+          # row-group metadata off the parquet, and the end-to-end tier runs against it.
+          # test_ci_coverage asserts this line exists.
           cargo test --features rust-only -p peacockdb-core --lib
-          # The executor contract both engines owe, from one table: this runs its rows on
-          # the CPU backend and the gpu-tests job runs the same rows on a device. Neither
-          # half proves the contract alone, which is why the table is shared rather than
-          # copied. Synthetic data written by the test, so no dataset and no device.
-          cargo test --features rust-only -p peacockdb-core --test test_cpu_executors
-          # SQL in, rows out: every query planned and run at all five modes against
-          # DataFusion on the same SQL, and eleven of them at injected layouts no
-          # planner would emit — a rebatcher at an interior edge, a drained lane,
-          # zero-row batches, a degenerate hash. Needs sf1, generated above; no device.
-          cargo test --features rust-only -p peacockdb-core --test test_cpu_end_to_end
           # The corpus on the same path: every enabled query at every mode its line
           # declares, answers against DataFusion. Needs sf1, so it lives here and not
           # in the golden-only tier.
@@ -378,8 +335,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       # Cache the Rust dep tree for the GPU test-binary build. Own shared-key: this
-      # job builds a different target set (test_gpu_executor/test_gpu_node) than
-      # dataset-matrix and runs in PARALLEL with it, so a shared key would only invite
+      # job builds a different feature shape (--features gpu) than dataset-matrix and
+      # runs in PARALLEL with it, so a shared key would only invite
       # same-run save contention for no same-run gain. It uses the same
       # RUSTFLAGS=-C debuginfo=0, so it warm-restores its own opt-3 deps.
       - name: Cache Rust build
@@ -390,35 +347,42 @@ jobs:
       - name: Build and stage rust GPU test binaries
         run: |
           mkdir -p cpp/install/rust-tests
-          # The five GPU targets, one line each; build-test.md's test table is the detail.
-          # test_gpu_corpus = the corpus on a device, read against the sections the cpu
-          #   tier authored — plan shape, per-batch lists and bytes, and the result where
-          #   the query's line names a golden.
-          # test_inc2_conformance = GPU vs comet Spark-murmur3 partition ids, bit-exact.
-          # test_gpu_abi = the ABI's three per-call symbols on a device;
-          #   its companion test_gpu_batch needs no device and runs in dataset-matrix instead.
-          # test_gpu_recipe_walk = a recipe plan driven by hand, DataFusion as the oracle.
-          # test_gpu_executors = the exec executors, each handed its recipe and one batch.
-          # One line on purpose: the coverage guard reads the array below with a single
-          # `lines().find`, so a continuation hides every target after the backslash.
-          for t in test_inc2_conformance test_gpu_abi test_gpu_recipe_walk test_gpu_executors test_gpu_corpus; do
-            exec_path=$(cargo test --no-run -p peacockdb-core --test "$t" \
-                --message-format=json \
-              | python3 -c '
+          # The device rung, built with --features gpu; build-test.md's test table is the
+          # detail. The built path carries a metadata hash, so it is read out of cargo's
+          # json artifact lines: the line whose target has this name and kind.
+          resolve() {
+            python3 -c '
           import json, sys
-          name = sys.argv[1]
+          name, kind = sys.argv[1], sys.argv[2]
           for line in sys.stdin:
               try: m = json.loads(line)
               except ValueError: continue
-              if m.get("executable") and (m.get("target") or {}).get("name") == name:
+              target = m.get("target") or {}
+              if m.get("executable") and target.get("name") == name and kind in target.get("kind", []):
                   print(m["executable"]); break
-          ' "$t")
-            if [ -z "$exec_path" ] || [ ! -f "$exec_path" ]; then
-              echo "ERROR: failed to locate built binary for $t"; exit 1
+          ' "$1" "$2"
+          }
+          stage() {
+            if [ -z "$2" ] || [ ! -f "$2" ]; then
+              echo "ERROR: failed to locate built binary for $1"; exit 1
             fi
-            cp -f "$exec_path" "cpp/install/rust-tests/$t"
-            echo "--- Staged: $(ls -lh cpp/install/rust-tests/$t)"
+            cp -f "$2" "cpp/install/rust-tests/$1"
+            echo "--- Staged: $(ls -lh cpp/install/rust-tests/$1)"
+          }
+          # test_gpu_corpus = the corpus on a device, against the sections the cpu tier
+          #   authored. A binary still: `inventory` collects per linked binary.
+          # One line on purpose: the coverage guard reads the array below with a single
+          # `lines().find`, so a continuation hides every target after the backslash.
+          for t in test_gpu_corpus; do
+            stage "$t" "$(cargo test --no-run -p peacockdb-core --test "$t" --features gpu \
+                --message-format=json | resolve "$t" test)"
           done
+          # The crate's own unit tests, whose `gpu_tests` modules exist only under the gpu
+          # feature. The lib holds every rung, so the run loop hands this one file
+          # `gpu_tests::`. Staged under an explicit name: the loop globs the directory, and
+          # a bare `peacockdb_core` beside the target binary would read as one.
+          stage peacockdb_core_gpu_lib "$(cargo test --no-run -p peacockdb-core --lib --features gpu \
+              --message-format=json | resolve peacockdb_core lib)"
         env:
           CMAKE_GENERATOR: Ninja
           LD_LIBRARY_PATH: /opt/conda/lib
@@ -666,7 +630,11 @@ jobs:
               # CUDA context, cascading into bad_alloc/cudaErrorIllegalAddress
               # for every later test. Sequential is mandatory.
               tlog=$REMOTE_DIR/\$tname.rust.log
-              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 > "\$tlog" 2>&1 || rc=1
+              # The lib binary holds every rung; the device one is selected by path, and
+              # the zero-test guard below is what notices if that path stops matching.
+              rung=
+              [ "\$tname" = peacockdb_core_gpu_lib ] && rung=gpu_tests::
+              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 \$rung > "\$tlog" 2>&1 || rc=1
               rzero=0
               while IFS= read -r line; do
                 printf '%s\n' "\$line"

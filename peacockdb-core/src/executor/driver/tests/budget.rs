@@ -4,8 +4,8 @@
 //! never written down: a byte count in a test is a magic number that rots the first time a
 //! mock's sizes move, and it can make a test pass for a reason nobody meant.
 
-use super::super::mock::{Script, spec};
-use super::super::plans::*;
+use super::mock::{Script, spec};
+use super::plans::*;
 use super::*;
 use crate::executor::When;
 

@@ -7,8 +7,8 @@
 //! comparator reads line for line, and a test that checks a line is there does not check
 //! that nothing else is.
 
-use super::super::mock::{EmitRule, Script, spec};
-use super::super::plans::*;
+use super::mock::{EmitRule, Script, spec};
+use super::plans::*;
 use super::*;
 use crate::plan_text::{render_plan, render_run};
 

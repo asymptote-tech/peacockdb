@@ -78,7 +78,7 @@ TEST(CudfGpu, SequenceSum) {
 // (peacock::partitioning::spark_partition_ids) must match comet's CPU twin
 // bit-exact. The reference values below come from the real comet helper
 // (create_murmur3_hashes seed=42 -> pmod) in
-// peacockdb-core/tests/test_inc2_conformance.rs.
+// peacockdb-core/src/executor/cpu_backend/gpu_tests/murmur_conformance.rs.
 namespace {
 std::vector<int32_t> gpu_partition_ids(cudf::table_view const& keys,
                                        std::vector<cudf::size_type> const& cols,

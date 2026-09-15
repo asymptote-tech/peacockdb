@@ -45,16 +45,34 @@
   script still exits non-zero.
 - **No defensive code for impossible scenarios**; trust internal invariants and framework
   guarantees. No fallbacks or feature flags the task didn't ask for.
+- **Test code is never in a production file.** A module's unit tests are a child module in a
+  file of their own — `validate.rs` beside `validate/tests.rs` — never an inline
+  `#[cfg(test)] mod tests { … }`. Every test-only path in `src/` carries `test` in its name
+  (`src/tests/`, `plan/tests/`, `driver/tests/mock.rs`), so a reader tells test code from
+  production code by the path alone. A `#[cfg(test)]` sits on a test-module declaration and
+  nowhere else, bar the register below. `test_module_layout` checks all three.
+- **A test module declares the lowest build rung it needs, and its name says which.** The three
+  shapes nest — `rust-only` ⊂ default ⊂ `gpu` — and a module says what it needs, never what it
+  excludes: `#[cfg(test)] mod tests;` for pure Rust, `#[cfg(all(test, not(feature = "rust-only")))]
+  mod ffi_tests;` for the FFI linked, `#[cfg(all(test, feature = "gpu"))] mod gpu_tests;` for a
+  device. Above the floor the name and the gate imply each other, in both directions, and the
+  layout test holds them to it: that is what lets one CI line select one rung by path filter,
+  `-- ffi_tests::` or `-- gpu_tests::`, without re-running the rungs beneath it. The two ends of
+  the ladder are exclusive by `compile_error!`.
 - **`#[cfg(test)]` marks test code, and test code is what exists to serve tests** — whether or
   not it contains an assertion. A one-line wrapper that hands a test an object it could not
   otherwise reach is test code; being compiled only in a test build is exactly right for it,
   since a test build is the only build that can matter to it.
-- **A test-only entry point may sit in a component's `mod.rs`, and nowhere else in `src/`.**
-  Test code otherwise lives in a path carrying `test`, but a cross-component helper cannot: it
-  must name what its own component owns, while its caller is in another component, so the two
-  can never sit together. Declare it in the facade like anything else that crosses a boundary,
-  and let its doc name the test that needs it — that comment is the only register there is, and
-  a stale one is how the set grows without anyone deciding to grow it.
+- **A test-only item may keep its `#[cfg(test)]` outside a test path in one case only.** A
+  cross-component entry point cannot live in one: it must name what its own module owns while its
+  caller is in another component, so the two can never sit together, and it is declared in that
+  module's `mod.rs` like anything else crossing a boundary. Each is registered in
+  `test_module_layout/test_code.rs`'s `TEST_ONLY_ITEMS`, which checks the item, its callers and the doc
+  comment naming them — a stale comment is how the set grows without anyone deciding to grow it.
+  A reader of a private field is not a case: only the module declaring the field and its children
+  can see it, so it goes into a child `tests` module of that file as an inherent `impl` whose
+  `pub(crate)` methods any test module can call (`driver/partitioned/tests.rs`,
+  `cpu_backend/join/tests.rs`).
 - **What `#[cfg(test)]` is not is a way to quiet `dead_code` on production code.** An item behind
   it is absent from a release build, so it is never type-checked against a change made for
   shipping code. A production item that nothing ships yet stays `pub(crate)` and keeps its
@@ -66,10 +84,7 @@
 
 ## Names
 
-Kernighan's rules, written down after the fact rather than followed from the start:
-`test_inc2_conformance` is named after an increment, which the second bullet forbids, and
-renaming it would move the staging array, the exemption list and two pages — so it stands as
-the exception rather than as the example.
+Kernighan's rules, written down after the fact rather than followed from the start.
 
 - **Length is proportional to scope** (K&R §2.1). A loop index is `i`; a name crossing a
   module, a trait or the FFI earns words. Both halves bite: a paragraph-long name in a
@@ -133,11 +148,17 @@ the exception rather than as the example.
   `pub mod scan_mapping;`, which would make `planner::translator::scan_mapping::Mapping`
   nameable crate-wide and leave the wall on paper. What a sibling component needs is declared in
   the component's own `mod.rs`.
-- `lib.rs` declares the components `pub mod`. Nine more exist under `executor/`, every one
-  forced by a test crate reaching a subcomponent, every one registered in `PUB_MODULES` with the
-  files that force it and checked both ways. They expire when `test-layout.md` moves those files
-  into `src/`; a `pub mod` outside the register is a violation, not a precedent.
-  `CROSS_COMPONENT_REACHES` is the same shape for the reach rustc cannot see behind a `pub mod`.
+- `lib.rs` declares the components `pub mod`, and those seven — `common`, `executor`, `plan`,
+  `plan_text`, `planner`, `wire`, `test_support` — are the only `pub mod` in the crate, counted by
+  `scripts/visibility-dump.py`. `PUB_MODULES` and `CROSS_COMPONENT_REACHES` in
+  `test_module_layout/{visibility,walls}.rs` are the registers for a `pub mod` or a cross-component reach a test crate
+  forces; both are empty, and a `pub mod` outside the register is a violation, not a precedent.
+- **Eight items are `pub` because a test crate forces them**: `GpuNode` and `validate`
+  (`plan/mod.rs`), `RecipePlan` and `attach_recipes` (`wire/mod.rs`), `RunReport`, `GpuBackend`
+  and `GpuContext` (`executor/mod.rs`), `render_run` (`plan_text/mod.rs`) — all named by
+  `tests/common/corpus.rs` and `corpus_gpu.rs`. [`test-support.md`](tasks/test-support.md) unforces
+  them and [`visibility.md`](tasks/visibility.md) removes them with the rest of the raw bare-`pub`
+  count, which is 200 outside `test_support`.
 - **Nesting may go three deep** where the innermost earns it — `planner/translator/scan_mapping/`
   is 720 lines behind three entry points — under the same `mod` rule at each level. A directory
   with a one-item facade and a hundred lines behind it is an implementation module wearing one.
@@ -150,7 +171,7 @@ the exception rather than as the example.
   `common.rs` have no length limit; every other file keeps the 1000-line one.
 - **What the compiler enforces**: a component is reachable only through its `mod.rs`, and a
   subcomponent only from inside its parent, both by module privacy. **What
-  `test_module_layout.rs` must**: sibling reach between implementation modules, where a `pub`
+  `test_module_layout` must**: sibling reach between implementation modules, where a `pub`
   appears at all, and a type from a private module in a public signature — `private_interfaces`
   reads nominal visibility, so an unreachable type spelled `pub` passes it silently.
 
@@ -225,7 +246,7 @@ The case that revealed it, in the test harness: `partition_mode("tp8-standard")`
 which executor a test ran was a side effect of how its golden file happened to be named.
 Adding a device — a memory-constrained genuine-8-way tier (#91) — would have routed it to
 the wrong executor with nothing failing. The mode is now a parameter stated at the call
-site. One lookup survives, `mode_named` in `tests/common/mode.rs`, which resolves the
+site. One lookup survives, `mode_named` in `src/test_support/mod.rs`, which resolves the
 mode ident a `corpus_query!` line writes: it is exhaustive, so an unknown one panics naming
 the five rather than planning some default nobody chose.
 

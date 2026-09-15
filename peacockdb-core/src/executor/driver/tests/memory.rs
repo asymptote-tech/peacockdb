@@ -1,8 +1,8 @@
 //! The accountant through the drivers: what trips, what is merely recorded, and that a
 //! finished run gave everything back.
 
-use super::super::mock::{JoinRule, Script, spec};
-use super::super::plans::*;
+use super::mock::{JoinRule, Script, spec};
+use super::plans::*;
 use super::*;
 use crate::executor::When;
 

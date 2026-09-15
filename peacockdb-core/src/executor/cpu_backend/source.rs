@@ -16,25 +16,14 @@ use datafusion::parquet::arrow::arrow_reader::{
     ArrowReaderMetadata, ArrowReaderOptions, ParquetRecordBatchReaderBuilder,
 };
 
+use super::CpuSource;
 use crate::executor::CpuBatch;
 use crate::executor::{BackendError, CallStats};
 use crate::plan::GpuLoadParquet;
 use crate::plan::PlanError;
 
-/// A lane's reads, in the order the mapping named them.
-pub struct CpuSource {
-    file: String,
-    /// The footer, parsed once: a lane reads the same file once per batch, and re-parsing
-    /// it per call is the whole of what a scan does besides decoding.
-    metadata: ArrowReaderMetadata,
-    projection: ProjectionMask,
-    /// The row groups per batch this lane still owes, front first.
-    batches: std::collections::VecDeque<Vec<usize>>,
-    schema: SchemaRef,
-}
-
 impl CpuSource {
-    pub fn new(
+    pub(crate) fn new(
         node: &GpuLoadParquet,
         lane: usize,
         schema: &ArrowSchema,

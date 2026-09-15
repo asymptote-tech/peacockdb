@@ -2,8 +2,8 @@
 //! stop — so what these assert is that it stops, that the message says where, and that the
 //! accounting still reconciles on the way out.
 
-use super::super::mock::{FailAt, JoinRule, Script, spec};
-use super::super::plans::*;
+use super::mock::{FailAt, JoinRule, Script, spec};
+use super::plans::*;
 use super::*;
 
 fn source_batches(lanes: usize) -> Script {

@@ -2,10 +2,9 @@ use super::node_text::quoted;
 use super::*;
 use crate::plan::Batching;
 use crate::planner::translate;
-use std::path::PathBuf;
 
 async fn rendered(sql: &str, target_partitions: usize) -> String {
-    let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/tpch.minimal");
+    let data = crate::test_support::testdata_minimal_dir();
     let ctx = crate::register_tables_for(crate::build_session_state(target_partitions), &data)
         .await
         .expect("register the minimal tables");

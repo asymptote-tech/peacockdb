@@ -666,3 +666,16 @@ unit tests, the moved targets and `tests/common/mod.rs` alike, and [#49](../tick
 with it; a plain `cargo build` cannot name `test_support`; `test_ci_coverage` is near 300 lines and asserts one CI
 line per rung plus the CLI build; `build-test.md`'s two tables add to the headline; and the leaf-name
 set is the one the baselines recorded — this task moves tests, it does not delete any.
+
+## Signoff
+
+Solved under its constraints: the twelve targets are in `src/` at the rung the table names, the
+seven binaries stay, every baseline leaf survives in all three shapes and no golden moved; the
+register is empty, `pub mod` is seven (`test_support` postdates the count of six), and the eight
+items a test crate still forces are the corpus harness's. Two readings closed with no blocking
+finding; the three important ones — the `test-support` feature undocumented, two private-field
+readers admitted by a second carve-out case, `end_to_end.rs` over the length rule — are fixed.
+Shortcuts: `build-test.sh`'s lib entry has run end to end only in `--rust-only` (verda was down;
+the `--gpu` and default modes are rendered, syntax-checked and their resolver run against real
+cargo json); the murmur gate's three CPU-runnable cases now run on shad-gpu only; the spec's
+`crate::tests::`-from-`plan/` E0433 probe was not run, every cold production build standing in.

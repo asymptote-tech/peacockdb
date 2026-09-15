@@ -25,12 +25,11 @@ set -euo pipefail
 # and run them against the remote's cuDF runtime. There is no --patch step
 # (the remote is a modern-glibc host, unlike the shad-gpu path).
 #
-# NOTE: the Rust CPU test crates bake their testdata path from CARGO_MANIFEST_DIR
-# (cargo canonicalizes symlinks), so a binary built here looks for testdata at
-# this box's absolute repo path (e.g. /media/data/peacockdb/testdata). Until they
-# honor PEACOCK_TESTDATA_DIR (issue #49), the remote must expose that same path —
-# e.g. a symlink /media/data/peacockdb -> <remote repo>. The GPU test crate DOES
-# honor PEACOCK_TESTDATA_DIR, which --gpu sets, so it needs no such symlink.
+# NOTE: every Rust test binary honors PEACOCK_TESTDATA_DIR now, unit tests included,
+# and falls back to the compile-time path (CARGO_MANIFEST_DIR, symlinks canonicalized)
+# only where it is unset. --gpu and --rust-only set it below; the plain cpu mode does
+# not, so that one still looks for testdata at this box's absolute repo path and the
+# remote must expose the same — e.g. a symlink /media/data/peacockdb -> <remote repo>.
 
 # ---- defaults (override via flags) -----------------------------------------
 HOST=""                                                       # ssh destination, e.g. dmitry@86.38.182.185 (required)
@@ -237,14 +236,16 @@ done
 # Targets are classified ONCE, by what they REQUIRE, and each mode takes everything it
 # can support. Three hand-written lists is what this replaces: they drifted apart, and
 # the drift was always in the direction of running less than the mode could (--gpu
-# silently skipped test_inc2_conformance, the murmur3 conformance gate; the default
-# branch omitted four targets that build fine with the full feature set).
+# silently skipped the murmur3 conformance gate; the default branch omitted four
+# targets that build fine with the full feature set).
 #
 # A mode that BUILDS more must not RUN less. So:
 #   needs_cmake   file-gated on not(rust-only): cannot compile without libpeacock_gpu.
 #   rust_only     everything else — no cmake, no CUDA, CPU by construction.
 #   default       rust_only + needs_cmake, minus GPU-runtime-only targets.
 #   gpu           the GPU-runtime set.
+# Every mode also runs the crate's own unit tests, the `--lib` entry below, which no
+# `--test` derivation can see: it is not a file under tests/.
 #
 # The rust-only membership test is the FEATURE'S OWN DEFINITION (see build-test.md's
 # "What rust-only means"): a file-level `#![cfg(not(feature = "rust-only"))]` is exactly
@@ -288,25 +289,36 @@ rust_only_targets() {
   done
 }
 
+# The crate's own unit-test binary, as a suite entry. `--lib` is not a `--test` target, so
+# nothing derives it and every mode names it. The three build shapes nest — a `--features
+# gpu` lib holds the rust-only and FFI test modules too — and the argument the gpu mode
+# hands the binary at run time (LIB_RUNG, see the run loop) is what keeps the runs
+# disjoint: `gpu_tests::` selects the device rung and nothing beneath it. The entry is
+# `<package>:<staged name>` like every other, and the staging loop is what knows the name
+# means `--lib`. Named for its shape: a `--run` after another mode's `--build` then finds
+# no binary rather than the wrong one, and a bare `peacockdb_core` beside the targets
+# reads as one of them.
+if [ "$MODE" = "gpu" ]; then
+  LIB_STAGED=peacockdb_core_gpu_lib
+  LIB_RUNG=gpu_tests::
+elif [ "$RUST_ONLY" -eq 1 ]; then
+  LIB_STAGED=peacockdb_core_rust_only_lib
+  LIB_RUNG=""
+else
+  LIB_STAGED=peacockdb_core_lib
+  LIB_RUNG=""
+fi
+lib_target() {
+  printf 'peacockdb-core:%s\n' "$LIB_STAGED"
+}
+
 # The GPU-RUNTIME set: targets that need a GPU when they RUN, whatever they need to
 # compile. Declared once here and subtracted wherever a mode cannot satisfy it, rather
 # than filtered by name — `grep -v ':test_gpu_'` was the last name-convention dependency
-# in this file, and it let test_inc2_conformance through because the name does not match
-# the prefix.
-#
-# test_inc2_conformance is the case that exposed it. It is the ONLY test file that gates
-# per ITEM (`#[cfg(...)]`, 7 of them) instead of per FILE (`#![cfg(...)]`), so the
-# file-level membership test below cannot see it: with the full feature set its seven
-# live-GPU tests are ACTIVE and call peacock_spark_partition_ids through the FFI, which
-# on a CPU-only remote fails for want of a device — a red run that says nothing about the
-# code. Under --rust-only those same seven compile out and 3 pure-CPU comet checks
-# remain, which is harmless but still not this suite's job.
+# in this file. The lib is not in it: every mode runs its own shape of the lib, and the
+# gpu mode's device rung is selected at run time, not by membership here.
 gpu_runtime_targets() {
   cat <<'GPUSET'
-peacockdb-core:test_gpu_abi
-peacockdb-core:test_gpu_recipe_walk
-peacockdb-core:test_gpu_executors
-peacockdb-core:test_inc2_conformance
 peacockdb-core:test_gpu_corpus
 GPUSET
 }
@@ -328,21 +340,24 @@ needs_cmake_targets() {
   printf '%s\n' "peacockdb-ffi:test_ffi"
 }
 
+# The derived `--test` targets alone, so the emptiness guard below reads the derivation
+# and not the lib entry every mode appends after it.
 if [ "$MODE" = "gpu" ]; then
   # GPU-runtime set. Kept in step with build-test-shadgpu.sh:RUST_TESTS and
-  # pipeline.yml's gpu-tests staging array — three runners had three lists and this
-  # one was short by test_inc2_conformance, the GPU<->comet bit-exact murmur3 gate.
-  mapfile -t RUST_TESTS < <(gpu_runtime_targets)
+  # pipeline.yml's gpu-tests staging array — three runners had three lists and they
+  # drifted. The lib binary is built --features gpu and run on `gpu_tests::` alone.
+  mapfile -t DERIVED < <(gpu_runtime_targets)
   CPP_TEST_BIN=peacock_plan_tests
 elif [ "$RUST_ONLY" -eq 1 ]; then
-  # Golden regen / cpu+plan verify: no C++, no FFI.
-  mapfile -t RUST_TESTS < <(rust_only_targets)
+  # Golden regen / cpu+plan verify: no C++, no FFI. The lib here is the rust-only
+  # shape, run whole: the plan goldens and the end-to-end tier ride in it.
+  mapfile -t DERIVED < <(rust_only_targets)
   CPP_TEST_BIN=""
 else
   # Superset: everything rust-only can run, plus what only cmake makes buildable.
   # test_gpu_* are excluded — they compile here but need a GPU at RUNTIME, which is
-  # what --gpu is for.
-  mapfile -t RUST_TESTS < <(
+  # what --gpu is for. The lib at default features holds the cpu and ffi rungs, run whole.
+  mapfile -t DERIVED < <(
     rust_only_targets
     needs_cmake_targets | grep -vxF -f <(gpu_runtime_targets)
   )
@@ -371,8 +386,9 @@ fi
 
 # A derived suite that comes back EMPTY must be an error. `mapfile` from a helper that
 # prints nothing yields a zero-length array, every `for` body over it vanishes, and the
-# script exits 0 having run no tests — a derivation typo would report success.
-if [ ${#RUST_TESTS[@]} -eq 0 ]; then
+# script exits 0 having run no tests — a derivation typo would report success. Checked
+# before the lib is appended: that entry is named, not derived, and would hide an empty one.
+if [ ${#DERIVED[@]} -eq 0 ]; then
   # Print the MODE, not a flag string: there is no --cpu flag, and naming one in an
   # error message sends a reader who is already stuck to "Unknown flag: --cpu".
   echo "error: the derived Rust suite is EMPTY for mode '${MODE_FLAG:-default (cpu)}'." >&2
@@ -381,6 +397,7 @@ if [ ${#RUST_TESTS[@]} -eq 0 ]; then
   echo "       verified nothing." >&2
   exit 1
 fi
+RUST_TESTS=("${DERIVED[@]}" "$(lib_target)")
 
 # Push named testdata kinds local -> remote (before any --run that consumes them).
 # --delete keeps the remote subtree exact (drops files removed locally).
@@ -401,6 +418,7 @@ fi
 
 if [ "$BUILD" -eq 1 ]; then
   CARGO_FEATURES=""
+  [ "$MODE" = "gpu" ] && CARGO_FEATURES="--features gpu"
   if [ "$RUST_ONLY" -eq 1 ]; then
     # No C++/FFI — build the test binaries with --features rust-only (the part that
     # compiles locally without the cuDF toolchain). Goldens are rust-only artifacts.
@@ -484,19 +502,27 @@ if [ "$BUILD" -eq 1 ]; then
   for spec in "${RUST_TESTS[@]}"; do
     pkg="${spec%%:*}"
     t="${spec##*:}"
-    # cargo test --no-run prints a json artifact line per built target; the
-    # integration test we want has .target.name == $t and a non-null .executable.
-    exec_path=$(cargo test --no-run $CARGO_FEATURES -p "$pkg" --test "$t" \
+    # cargo test --no-run prints a json artifact line per built target; the one we want
+    # has a non-null .executable and the target's name and kind. The lib's test binary
+    # is named for the crate, with kind ["lib"] — the same line shape as the lib itself,
+    # which is why the executable check is what tells them apart.
+    if [ "$t" = "$LIB_STAGED" ]; then
+      sel=(--lib); name="${pkg//-/_}"; kind=lib
+    else
+      sel=(--test "$t"); name="$t"; kind=test
+    fi
+    exec_path=$(cargo test --no-run $CARGO_FEATURES -p "$pkg" "${sel[@]}" \
         --message-format=json \
       | python3 -c '
 import json, sys
-name = sys.argv[1]
+name, kind = sys.argv[1], sys.argv[2]
 for line in sys.stdin:
     try: m = json.loads(line)
     except ValueError: continue
-    if m.get("executable") and (m.get("target") or {}).get("name") == name:
+    target = m.get("target") or {}
+    if m.get("executable") and target.get("name") == name and kind in target.get("kind", []):
         print(m["executable"]); break
-' "$t")
+' "$name" "$kind")
     if [ -z "$exec_path" ] || [ ! -f "$exec_path" ]; then
       echo "ERROR: failed to locate built binary for $pkg:$t"; exit 1
     fi
@@ -559,14 +585,15 @@ if [ "$RUN" -eq 1 ]; then
   : "${PCK_TEST_FILTER:=}"
 
   # GPU tests share one process-wide cuDF/RMM pool, so they must run
-  # sequentially (--test-threads=1) and locate testdata via PEACOCK_TESTDATA_DIR
-  # (the GPU crate honors it). CPU tests have neither constraint.
+  # sequentially (--test-threads=1). CPU tests have neither constraint. Every mode
+  # could point PEACOCK_TESTDATA_DIR at the remote tree now; the plain cpu one does
+  # not yet, and its remote still needs the build box's path (see the note up top).
   if [ "$MODE" = "gpu" ]; then
     THREADS_ARG="--test-threads=1"
     TESTDATA_ENV="export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata"
   elif [ "$RUST_ONLY" -eq 1 ]; then
     THREADS_ARG=""
-    # rust-only test crates honor PEACOCK_TESTDATA_DIR -> point at the remote testdata.
+    # -> the remote testdata rather than the build box's path.
     TESTDATA_ENV="export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata"
   else
     THREADS_ARG=""
@@ -595,6 +622,12 @@ if [ "$RUN" -eq 1 ]; then
   RUST_TEST_NAMES=""
   for spec in "${RUST_TESTS[@]}"; do RUST_TEST_NAMES="$RUST_TEST_NAMES ${spec##*:}"; done
 
+  # rung_args, the one rule for what each binary is run with — shared with
+  # build-test-shadgpu.sh's gate. The gpu mode's lib takes its rung on top of the
+  # developer's filter; the cpu modes run their lib whole, so LIB_RUNG is empty there.
+  RUNG_ARGS_FN=$(cat "$(dirname "${BASH_SOURCE[0]}")/lib/rung-args.sh")
+  filter_q=$(printf '%q' "$PCK_TEST_FILTER")
+
   echo "==> $MODE tests on $HOST"
   # Unquoted heredoc: $VARS expand locally; escape with \$ for remote expansion.
   ssh "$HOST" bash <<EOF
@@ -606,6 +639,7 @@ if [ "$RUN" -eq 1 ]; then
     $LD_ENV
     $TESTDATA_ENV
     $UPDATE_CANON_ENV
+$RUNG_ARGS_FN
 
     rc=0
 
@@ -617,9 +651,28 @@ if [ "$RUN" -eq 1 ]; then
     echo "==> Rust $MODE integration tests (filter='$PCK_TEST_FILTER')"
     for name in $RUST_TEST_NAMES; do
       t="$REMOTE_DIR/cpp/install/rust-tests/\$name"
-      [ -x "\$t" ] || { echo "--- \$name: missing, skipping"; continue; }
+      # The suite is this mode's by name, so a binary the host lacks is a --run after
+      # another mode's --build, not a case to skip.
+      [ -x "\$t" ] || { echo "!!! \$name is not staged on the host — nothing was verified"; rc=1; continue; }
       echo "--- \$name"
-      "\$t" --nocapture $THREADS_ARG '$PCK_TEST_FILTER' || rc=1
+      # A checked assignment, so a listing that fails is the binary not running rather
+      # than an empty intersection — which with a filter set the guard below excuses.
+      if ! args_text=\$(rung_args "\$t" '$LIB_STAGED' '$LIB_RUNG' $filter_q); then
+        echo "!!! \$name could not list its cases — it was not run"
+        rc=1
+        continue
+      fi
+      mapfile -t args <<< "\$args_text"
+      rlog=/tmp/\$name.rustlog
+      "\$t" --nocapture $THREADS_ARG "\${args[@]}" 2>&1 | tee "\$rlog"
+      [ "\${PIPESTATUS[0]}" -eq 0 ] || rc=1
+      # Zero tests is a fault only when nothing was filtered out: with a filter set,
+      # every other binary legitimately matches nothing. The lib's rung is not the
+      # filter, so an unfiltered run that selects nothing is the rung gone stale.
+      if [ -z $filter_q ] && grep -q '^running 0 tests' "\$rlog"; then
+        echo "!!! \$name ran 0 tests (its arguments \${args[*]} matched nothing?) — nothing was verified"
+        rc=1
+      fi
     done
 
     exit \$rc

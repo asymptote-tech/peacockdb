@@ -9,10 +9,11 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::{ArrayRef, RecordBatch, UInt32Array};
 use datafusion::arrow::compute::take;
-use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
+use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_expr::expressions::Column;
 
+use super::CpuEmitter;
 use super::spark_partitioning::rows_per_lane;
 
 use crate::executor::CpuBatch;
@@ -20,14 +21,8 @@ use crate::executor::{BackendError, CallResult, CallStats};
 use crate::plan::GpuEmitPartitions;
 use crate::plan::PlanError;
 
-pub struct CpuEmitter {
-    hash_keys: Vec<Arc<dyn PhysicalExpr>>,
-    lanes: usize,
-    schema: SchemaRef,
-}
-
 impl CpuEmitter {
-    pub fn new(
+    pub(crate) fn new(
         node: &GpuEmitPartitions,
         lanes: usize,
         input: &ArrowSchema,
@@ -57,7 +52,7 @@ impl CpuEmitter {
     /// Exactly N batches, in lane order, empty where the hash sent nothing. The count is
     /// the contract: a driver reads output `p` as lane `p`'s, so a skipped empty would
     /// shift every lane above it.
-    pub fn emit(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
+    pub(crate) fn emit(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
         let batch = batch.into_record_batch();
         let per_lane = rows_per_lane(&batch, &self.hash_keys, self.lanes).map_err(|error| {
             BackendError::new(format!("assigning the scatter's lanes: {error}"))
