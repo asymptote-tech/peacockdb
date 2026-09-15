@@ -22,7 +22,9 @@ use common::corpus_golden::{
     Regeneration, SKIPPED, cost_golden, cpu_golden, merge_section, merged_text, result_golden,
 };
 use common::golden_text::{ordered_sections, parse_node_line, parse_run_section};
-use common::record::{BUILD, COLUMNS, Capture, RunMeta, record_header, rows_match_the_recipes};
+use common::record::{
+    BUILD, COLUMNS, Capture, MEASURED_RUNS, RunMeta, record_header, rows_match_the_recipes,
+};
 
 // --- the write path ------------------------------------------------------------
 
@@ -786,10 +788,6 @@ fn number(text: &str, what: &str) -> u64 {
 /// region; a `1` is a region the clock rounded down — not the same digit.
 #[test]
 fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
-    // The harness's `BENCH_MEASURED_RUNS`, which a rust-only build cannot see: the module
-    // holding it needs the FFI. Written out so the spread's width is pinned by something.
-    const MEASURED_RUNS: usize = 10;
-
     let mut checked = 0;
     for path in benchmark_files() {
         let text = std::fs::read_to_string(&path).expect("a benchmark file");

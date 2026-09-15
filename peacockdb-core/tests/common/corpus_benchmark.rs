@@ -24,7 +24,8 @@ use super::mode::mode_named;
 use super::corpus::plan_at;
 use super::corpus_golden::{Regeneration, SKIPPED, merge_section};
 use super::record::{
-    BUILD, Capture, RunMeta, append_records, declared_steps, record_rows, rows_match_the_recipes,
+    BUILD, Capture, MEASURED_RUNS, RunMeta, append_records, declared_steps, record_rows,
+    rows_match_the_recipes,
 };
 use super::gpu_session::Session;
 use super::registry::stem;
@@ -141,20 +142,23 @@ fn run_section(chosen: &Run, times: &Measurements, spread: &[u64]) -> String {
          allocator={}\n",
         chosen.total_us,
         spread.join(","),
-        install_rmm_pool(),
+        install_rmm_pool(BENCH_POOL_BYTES),
     )
 }
+
+/// The pool this binary reserves, the way each gtest binary declares its own `kPoolBytes`:
+/// bytes it asks for, never a share of the device. Same dataset read in the same place as
+/// `test_tpch.cpp`, whose measured sf40 peak is 67.42 GiB, and 69 is also the most that
+/// lets two processes share the 139.7 GiB H200 (#178) — a gate job can land beside a
+/// measurement. `PEACOCK_RMM_POOL_BYTES` overrides it for a sweep, and the sf40 run that
+/// re-measures the tree is where this binary's own peak gets read.
+const BENCH_POOL_BYTES: u64 = 69 << 30;
 
 /// Discarded runs. The first execution pays for the page cache, CUDA module load and JIT,
 /// and allocator growth — the host's recent history rather than the plan. The pool removes
 /// most of the third before this runs, which is a reason to keep the warm-up: what is left
 /// is the part that varies.
 const BENCH_WARMUP_RUNS: usize = 1;
-
-/// Measured runs per query. The reported run is the second-smallest by end-to-end time:
-/// the minimum is the run most likely to have caught a favourable scheduling accident, the
-/// rest are dragged up by whatever else the shared host was doing. Must be >= 2.
-const BENCH_MEASURED_RUNS: usize = 10;
 
 /// One measured execution.
 struct Run {
@@ -174,7 +178,7 @@ struct Run {
 /// metadata, and repeating that would time the catalog rather than the query. So
 /// `total_us` here is execution only.
 pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
-    const _: () = assert!(BENCH_MEASURED_RUNS >= 2, "a second minimum needs >= 2 runs");
+    const _: () = assert!(MEASURED_RUNS >= 2, "a second minimum needs >= 2 runs");
 
     let mode = mode_named(mode);
     let what = format!("{dataset}/{query} at {} on a device", mode.name);
@@ -186,7 +190,7 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
     // intermediate a cudaMalloc/cudaFree round trip charged to the node that allocated it,
     // and a draining measurement reports a schedule the engine does not run. Installing
     // the pool first because rmm takes whatever resource is current when it allocates.
-    let _ = install_rmm_pool();
+    let _ = install_rmm_pool(BENCH_POOL_BYTES);
     set_node_timing(NodeTiming::Events);
 
     let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
@@ -209,8 +213,8 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
     // dropping it here would close the range before the runs it is meant to contain.
     let _case = nvtx_range(&format!("{dataset}.sf{sf} {query} {}", mode.name));
 
-    let mut runs = Vec::with_capacity(BENCH_MEASURED_RUNS);
-    for _ in 0..BENCH_MEASURED_RUNS {
+    let mut runs = Vec::with_capacity(MEASURED_RUNS);
+    for _ in 0..MEASURED_RUNS {
         let started = Instant::now();
         let (report, regions) = run_once(tree.as_ref(), &what);
         // Read after the run rather than inside it: `GpuUnload` copies the root off the
@@ -230,7 +234,7 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
     // they ran, which `second_smallest` is about to destroy — a repeat of `call_index` 0
     // is where one execution's rows end, and sorting first interleaves them for good.
     let nodes = nodes_as_recorded(tree.as_ref()).unwrap_or_else(|e| panic!("{what}: {e}"));
-    let allocator = install_rmm_pool().to_string();
+    let allocator = install_rmm_pool(BENCH_POOL_BYTES).to_string();
     let meta = RunMeta {
         dataset,
         sf,
@@ -332,7 +336,7 @@ fn run_once(tree: &dyn GpuNode, what: &str) -> (RunReport, Vec<Region>) {
     // it guards goes the same way. `install_rmm_pool` is idempotent, so asking here is
     // asking what the resource is.
     assert!(
-        matches!(install_rmm_pool(), RmmPool::Pool { .. }),
+        matches!(install_rmm_pool(BENCH_POOL_BYTES), RmmPool::Pool { .. }),
         "{what} would measure over rmm's default resource, where every cuDF intermediate is \
          a cudaMalloc/cudaFree round trip charged to the node that allocated it — the \
          numbers would describe the allocator, not the plan"

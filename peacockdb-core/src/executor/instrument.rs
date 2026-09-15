@@ -16,20 +16,20 @@ use peacockdb_ffi::raw::{
     PEACOCK_NODE_TIMING_EVENTS, PEACOCK_NODE_TIMING_OFF, PEACOCK_RMM_POOL_INSTALLED,
 };
 
-/// Install the pooled device allocator and report what happened.
+/// Install the pooled device allocator of `bytes`, before any GPU work, and report what
+/// happened.
 ///
-/// Idempotent, and the guard lives in C++ rather than behind a `OnceLock` here, so the
-/// process has one no matter which side calls first. A second call rebuilding the pool
-/// would drop a resource live allocations still point into.
+/// The budget is the caller's, as `kPoolBytes` is for the gtest binaries: a host that
+/// cannot meet it keeps rmm's default resource rather than a smaller pool, since a pool
+/// of another size changes what every number taken over it means.
 ///
-/// Must run before any GPU work; cheap afterwards, since it returns the first call's
-/// outcome. The engine does not install this for itself — a shipping query still allocates
-/// the expensive way, which is #148, a decision about the product and not about
-/// measurement.
-pub(crate) fn install_rmm_pool() -> RmmPool {
+/// Idempotent, and the guard lives in C++ rather than behind a `OnceLock`, so the process
+/// has one whichever side calls first; a second call would drop a resource live
+/// allocations point into, so a later one only asks what the resource is.
+pub(crate) fn install_rmm_pool(bytes: u64) -> RmmPool {
     let mut info = PeacockRmmPoolInfo::default();
     // Non-zero only for a null pointer, which cannot happen here.
-    let _ = unsafe { peacock_install_rmm_pool(&mut info) };
+    let _ = unsafe { peacock_install_rmm_pool(bytes, &mut info) };
     match info.state {
         PEACOCK_RMM_POOL_INSTALLED => RmmPool::Pool {
             integrated: info.integrated != 0,

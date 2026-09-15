@@ -34,6 +34,13 @@ const QUERY: &str = "q19";
 /// One batch per partition, so the wall-clock bound of check 3 is as tight as it gets.
 const MODE: &str = "tp1_single";
 
+/// The pool this binary reserves, as each gtest binary declares its own `kPoolBytes`:
+/// bytes, never a share of the device, so two processes fit on one card (#178). Swept on
+/// shad-gpu at the sf1 q19 below — 0.5 GiB dies in the lineitem scan with "Maximum pool
+/// size exceeded" and 0.75 GiB passes — and rounded up, because the pool cannot grow and
+/// a budget at the floor is one fragmentation away from that failure.
+const POOL_BYTES: u64 = 2 << 30;
+
 /// Each round runs both modes, so the totals come from interleaved samples. In blocks,
 /// host drift would land entirely on whichever mode ran last — which is the difference the
 /// two walls are read for.
@@ -103,7 +110,7 @@ async fn events_are_free_and_land_where_they_claim() {
     // Before anything allocates: rmm uses whatever resource is current at the time of the
     // call, and without it the two walls would differ by allocator behaviour as much as
     // by instrument.
-    let allocator = install_rmm_pool();
+    let allocator = install_rmm_pool(POOL_BYTES);
 
     let mode = mode_named(MODE);
     let what = format!("{DATASET}/{QUERY} at {}", mode.name);

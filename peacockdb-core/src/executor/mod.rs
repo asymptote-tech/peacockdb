@@ -819,7 +819,7 @@ pub enum NodeTiming {
     Off,
     /// CUDA events around the device work, host clock around the host work, no sync
     /// inside the region. Device numbers arrive via `collect_regions` after the
-    /// root materialize, into [`PartitionStat::device_us`].
+    /// root materialize, into [`Region::device_us`].
     Events,
 }
 
@@ -834,11 +834,13 @@ impl Drop for NvtxRange {
     }
 }
 
-/// Install the pooled device allocator and report what happened. Idempotent; the guard
-/// lives in C++ so the process has one pool whichever side asks first.
+/// Install the pooled device allocator of `bytes` and report what happened. The budget is
+/// the caller's, as `kPoolBytes` is for the gtest binaries; a host that cannot meet it keeps
+/// rmm's default resource rather than a smaller pool. Idempotent; the guard lives in C++ so
+/// the process has one pool whichever side asks first.
 #[cfg(not(feature = "rust-only"))]
-pub fn install_rmm_pool() -> RmmPool {
-    instrument::install_rmm_pool()
+pub fn install_rmm_pool(bytes: u64) -> RmmPool {
+    instrument::install_rmm_pool(bytes)
 }
 
 /// Select the per-node timing mode (process-global, `Off` by default).

@@ -199,11 +199,10 @@ pub fn declared_steps(recipes: &RecipePlan) -> BTreeMap<usize, BTreeSet<Seq>> {
 /// cell per column, every row names a step its own node publishes, and a step's calls are
 /// numbered `0..n` with no gap. The total is then what the plan predicts.
 ///
-/// It exists for the three ways this record is wrong while looking right. A row that lost a
-/// cell still parses: every column is a number or a name, so the cells after the gap each
-/// move one left. A `node_seq` from the pre-order walk names a node that exists and pairs
-/// with a seq that exists, so only the pair is wrong. And a dropped call leaves every
-/// remaining row well formed. Rows of one execution, since `call_index` restarts at each.
+/// It exists for the three ways this record is wrong while looking right: a row that lost a
+/// cell still parses, every later cell one column left; a `node_seq` can pair with a step
+/// another node publishes, so only the pair is wrong; and a dropped call leaves the rest
+/// well formed. Rows of one execution, since `call_index` restarts at each.
 pub fn rows_match_the_recipes(
     rows: &[String],
     declared: &BTreeMap<usize, BTreeSet<Seq>>,
@@ -305,6 +304,12 @@ pub const TIMING_MODE: &str = "events";
 /// it. A literal for the same reason: the harness refuses a build with debug assertions
 /// before it measures anything, so no other value can reach a written file.
 pub const BUILD: &str = "release";
+
+/// Measured executions per case: the width of the tree's `runs=[..]` spread and the number
+/// of `run_index` values a case appends here. Declared in this module, not in the harness,
+/// because the rust-only test that reads a committed file has to name the same number and
+/// cannot link the harness. Must be >= 2 — the reported run is the second-smallest.
+pub const MEASURED_RUNS: usize = 10;
 
 /// The conditions this run measured under, as heading lines. Constant across a run —
 /// which is why they are here and not columns — but each one changes what the microseconds
