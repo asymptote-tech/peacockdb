@@ -55,6 +55,8 @@ Facts the coordinator established before the first dispatch:
 - The plan says "commit per task". The developer never commits; it stops at the boundary
   the dispatch names and the coordinator commits with the plan's message.
 - Dispatch 1: plan Tasks 1 and 2 (the C++ instrument, the ABI and FFI declarations).
+- Dispatch 2: plan Tasks 3, 4 and 5 (instrument facade, the ABI-call journal, measurements
+  and the tree), after Tasks 1–2 landed as `7dad6a7` and `69b3051`. verda still down.
 
 ## Dispatch 1 — plan Tasks 1 and 2 (the C++ instrument, the ABI and the FFI)
 
@@ -144,3 +146,124 @@ No new or deleted files — eight modified, all tracked. `cpp/src/operators/**`,
 master byte for byte; `Cargo.toml`'s `[profile.benchmarks]` and `build.rs`'s
 `PEACOCK_BUILD_PROFILE`/`PEACOCK_BUILD_OPT_LEVEL` are therefore gone, which Task 6 must not
 put back — `assert!(!cfg!(debug_assertions))` is what the spec puts in their place.
+
+## Dispatch 2 — plan Tasks 3, 4 and 5 (the facade, the journal, the measurements)
+
+### The two open points, settled
+
+**`AbiCall::kind` for a bare call.** Neither widened. `FbKind` cannot grow members: it maps
+onto `fb::PlanNodeKind` through `wire_kind()`, which has nothing for a slice or an export,
+and `wire/` has to stay byte-identical to master. So the journal carries its own:
+
+    pub enum AbiTarget { Node(FbKind), Bare(AbiSymbol) }
+
+`AbiSymbol` already exists in `wire/`, is already `pub`, and already names exactly the four
+entry points — so this is the split `Call::target` makes on the wire, under the same word,
+and the field is `AbiCall::target` for that reason. `Display` prints the `FbKind` text or
+`AbiSymbol::name()`, which is what keeps `records.tsv`'s `recipe_kind` cell non-empty for the
+two bare symbols.
+
+**C++'s call order versus the driver's per-seq stamping.** They agree by construction, and the
+construction is: the driver is the only thing that makes ABI calls, it is sequential, and
+`record_calls` runs immediately after each backend call returns, over a journal already in the
+order that call made its own. So the sequence (record_calls invocations × journal order) *is*
+the chronological order C++ counted in. A batched limit interleaves child call and slice the
+same way on both sides for the same reason — C++ is not running a second schedule, it is
+watching ours.
+
+That is not provable inside `join_regions`, so it is checked instead: the join refuses a call
+no region answered and a region no call claimed. A *count* disagreement is caught there; a
+*permutation* (right keys, wrong calls) is not, which is why the construction above has to
+hold. It is pinned end to end by `test_node_timing` (regions == journalled calls on q19, real
+device) and by the new
+`test_gpu_executors::accumulate::a_slice_and_an_export_are_charged_to_the_node_that_produced_the_handle`.
+
+The C++ side needed no change: `RegionSink::produced_by`, `slice_handle` and `time_export`
+already implement the rule, so the gtests from dispatch 1 stand as written.
+
+### What carries the producing seq on this side
+
+`GpuBatch` gains `producer: Seq`, set at every place a handle becomes a batch and propagated
+by the slice onto its output — the exact mirror of C++'s `produced_by[handle] = seq` at every
+`registry.emplace`. `GpuBatch::new` therefore takes it, which is why `test_gpu_batch.rs` and
+`test_gpu_abi.rs` are in the diff although the spec's Scope does not list them.
+
+Alternatives rejected: a new ABI symbol to ask C++ (the spec freezes nineteen), and deriving
+the seq from the plan in `GpuAccumulator::limit`/`GpuExport` (a handle can come from further
+down than the child node, so the derivation would be a second rule that can drift).
+
+### Other decisions in this dispatch
+
+- **`collect_regions` is on the `executor` facade**, not reached through `pub mod gpu_backend`.
+  That is what `tests/common/gpu_session.rs` now imports, and it is why `PUB_MODULES` needed no
+  new entry — plan Task 8 step 5's open question, answered: nothing new is forced.
+  `test_module_layout` also wanted `no_abi_calls`/`Consumed` at `pub(crate)` rather than
+  `pub(super)`; done.
+- **`GpuExec` takes the state schema.** A chain of calls prices every call but the last by the
+  aggregate's `intermediate()`, since nothing builds a batch from a middle call's output.
+  `GpuExec::new` refuses a multi-call recipe with no state schema, which is what caught the one
+  test site that needed it (`one_chaining_node` in `test_gpu_executors`).
+- **Pricing is unconditional.** `AbiCalls::is_armed` and the `measure: bool` threading are gone;
+  `Consumed::of` is two field reads, and `logical_size_from_schema` is computed once per call
+  and shared between the journal entry and the batch (`produced`/`priced` in `gpu_backend`).
+- **`hand_over` and `one_call`** live once in `gpu_backend/mod.rs`; the two copies of
+  `hand_over` in `accumulate.rs` and `join.rs` are gone, and six accumulator call sites are one
+  line each.
+- **`Measured` is `{host_us, device_us, out_rows, out_bytes, regions}`**; `out_rows`/`out_bytes`
+  are copied from the `AbiCall` by the join, never from the region — C++ prices nothing now.
+- **`RunReport::driving_lanes` is gone.** The test that read it now compares `abi_calls[node].len()`
+  against `PlanIndex::build(...).nodes[node].ready_lanes`, which is where the driver fills it
+  from, so the two cannot disagree.
+
+### Work from later tasks that landed early, because the tree had to build
+
+Dispatch 2 was asked to stop at Task 5, and did for new work. But `--run` on shad-gpu refuses
+to start while any rust test binary fails to compile, and four files from Tasks 6 and 7 read
+the types Tasks 4 and 5 reshaped. What was done to them is minimal and is noted inline in the
+plan under the step that owns it: `record.rs` (17 columns, `target`, `in_bytes`), 
+`corpus_benchmark.rs` (`BUILD_PROFILE` → `BUILD`, `measured_of` on the `Result`), 
+`peacock_gpu_benchmarks.rs` (one field rename) and `test_node_timing.rs` (the plan's Task 7
+step 1 in full). Nothing else in those files was touched.
+
+`scripts/build-test-shadgpu.sh` still carries `BENCH_PROFILE=benchmarks` and a comment naming
+`[profile.benchmarks]`, which no longer exists in `Cargo.toml` — plan Task 8 step 2 replaces
+that with `--release`. `--build-benchmarks` is broken until it does; `--build` is unaffected.
+
+### Environment, on top of dispatch 1's traps
+
+- **`testdata/tpcds.sf1` is absent from a fresh worktree** and every tpcds case in
+  `test_cpu_corpus`, `test_cpu_end_to_end` and `test_plan_goldens` fails with
+  `register the tables: IoError(NotFound)` until it exists. `testdata/generate_testdata.sh
+  --bench tpcds --sf 1` needs duckdb-cli **1.5.4 exactly** (it checks, and says so); the
+  release zip from GitHub works and costs one download. `tpch.sf1` can be symlinked from the
+  primary checkout — but `testdata/.gitignore` matches `/tpch.sf*/` with a trailing slash, so
+  a *symlink* shows up as an untracked file while a directory does not. Remove it before
+  handing the tree back.
+- **A poisoned `peacockdb-ffi` OUT_DIR cache.** Running cargo inside the container *without*
+  sourcing `scripts/lib/shadgpu-env.sh` first leaves a `CMakeCache.txt` with
+  `CMAKE_INSTALL_PREFIX=/usr/local`, and every later build through that unit dies on
+  `file INSTALL cannot copy ... Permission denied`. Fix: delete the offending
+  `/build/peacock/cargo-target/debug/build/peacockdb-ffi-*/` (find it by grepping the caches
+  for `/usr/local`). Always `. scripts/lib/shadgpu-env.sh` before a bare cargo in there.
+- `peacock_gpu_benchmarks` is not in `RUST_TESTS`, so `--build` does not compile it. To check
+  it builds: `docker-build.sh ... -- bash -c '. scripts/lib/shadgpu-env.sh && cargo test
+  --no-run -p peacockdb-core --test peacock_gpu_benchmarks'`.
+- Most files under `peacockdb-core/` are not rustfmt-clean at `d9fd723` — the re-homing did not
+  format them. Formatting one whole would bury the change, so this dispatch formatted only the
+  one file that was clean before it (`gpu_backend/source.rs`) and hand-matched rustfmt's shape
+  on the lines it added everywhere else.
+
+### What was proven, and how
+
+- rust-only, whole package, with both datasets present: 0 failures anywhere —
+  `--lib` 444, `test_cpu_corpus` 448, `test_cpu_end_to_end` 24, `test_corpus_goldens` 22,
+  `test_plan_goldens` 20, `test_module_layout` 11, `test_ci_coverage` 7, `test_golden_format` 26.
+- shad-gpu, `--push-binaries --patch --run`: C++ 12/3/35/4/4, rust `test_gpu_abi` 4,
+  `test_gpu_corpus` 8, `test_gpu_executors` 32, `test_gpu_recipe_walk` 10,
+  `test_inc2_conformance` 10, `test_node_timing` 1. Exit 0.
+- The cuDF-shape build is warning-free.
+- Red-green watched on four behaviours: `join_regions` refusing a call with no region and
+  refusing a region with no call (each mutation reddened only its own case), and the slice
+  test against both a broken producer propagation and a slice that journals nothing.
+- `git diff origin/master --stat` over the byte-identical set is empty; `residue-gate.sh`
+  prints nothing under `== bp gates`.

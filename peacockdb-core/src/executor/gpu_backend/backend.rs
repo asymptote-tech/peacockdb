@@ -79,9 +79,18 @@ impl Backend for GpuBackend {
             NodeRef::LoadParquet(load) => {
                 NodeExecutors::Source(GpuSource::new(site, recipe, load, &out(node))?)
             }
-            NodeRef::Filter(_) | NodeRef::Project(_) | NodeRef::Sort(_) | NodeRef::Aggregate(_) => {
-                NodeExecutors::Exec(GpuExec::new(site, recipe, &out(node))?)
+            NodeRef::Filter(_) | NodeRef::Project(_) | NodeRef::Sort(_) => {
+                NodeExecutors::Exec(GpuExec::new(site, recipe, None, &out(node))?)
             }
+            // The one exec node that chains: its first call answers with the state its
+            // finalize reads, and nothing builds a batch from that, so the state schema is
+            // the only thing that can price it.
+            NodeRef::Aggregate(aggregate) => NodeExecutors::Exec(GpuExec::new(
+                site,
+                recipe,
+                Some(&aggregate.intermediate().fields.as_ref().clone()),
+                &out(node),
+            )?),
             NodeRef::CoalesceAllBatches(_) => NodeExecutors::BatchAccumulator(
                 GpuAccumulator::coalesce(site, recipe, &out(node))?,
             ),

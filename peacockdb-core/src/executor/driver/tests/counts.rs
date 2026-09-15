@@ -239,46 +239,30 @@ fn a_released_skip_prefix_counts_as_consumed_and_emits_nothing() {
     assert_conserved(plan.as_ref(), &report);
 }
 
-/// The call record is indexed by the lanes that DRIVE a node, and the report says how
-/// many those are — so a reader never has to guess whether a lane index means the input
-/// side or the output one.
+/// The call record is indexed by the lanes a node is *driven on*, which is what the index
+/// calls `ready_lanes` — so a reader never has to guess whether a lane index means the
+/// input side or the output one.
+///
+/// Asserted where the two part company, which is the only place the distinction can be
+/// seen: a scatter is driven on one lane and emits into four, a cross-lane merge is driven
+/// on four and emits on one. Against the index rather than against a field of the report,
+/// because a field the driver fills from the index cannot disagree with it.
 #[test]
-fn the_call_record_is_indexed_by_the_driving_lanes_the_report_names() {
-    let script = Script::default().source("part", vec![vec![spec(10, 80), spec(7, 56)]]);
-    let plan = unload(filter(source("part", 1)));
-    let report = run(plan.as_ref(), &script);
-    assert_eq!(report.abi_calls.len(), report.driving_lanes.len());
-    for node in 0..report.abi_calls.len() {
-        assert_eq!(
-            report.abi_calls[node].len(),
-            report.driving_lanes[node],
-            "node {node} has one call list per driving lane"
-        );
-        assert_eq!(
-            report.driving_lanes[node], report.lanes_of[node],
-            "a chain of map nodes drives on the lanes it emits into"
-        );
-    }
-}
-
-/// The two counts part company at exactly two nodes, and this is what makes naming them
-/// separately worth the field: a scatter is driven on one lane and emits into four, a
-/// cross-lane merge is driven on four and emits on one.
-#[test]
-fn a_scatter_and_a_cross_lane_merge_drive_on_other_lanes_than_they_emit() {
+fn the_call_record_is_indexed_by_the_lanes_a_node_is_driven_on() {
     let script = Script::default()
         .source("part", vec![vec![spec(12, 96)]])
         .with_emit(EmitRule::RoundRobin);
     let plan = unload(merge_sorted(emit(source("part", 1), 4)));
     let report = run(plan.as_ref(), &script);
+    let index = PlanIndex::build(plan.as_ref()).expect("the plan indexes");
     let differ: Vec<usize> = (0..report.abi_calls.len())
-        .filter(|node| report.driving_lanes[*node] != report.lanes_of[*node])
+        .filter(|node| index.nodes[*node].ready_lanes != report.lanes_of[*node])
         .collect();
     assert_eq!(differ.len(), 2, "the scatter and the merge, and nothing else");
-    for node in differ {
+    for node in 0..report.abi_calls.len() {
         assert_eq!(
             report.abi_calls[node].len(),
-            report.driving_lanes[node],
+            index.nodes[node].ready_lanes,
             "node {node} is recorded on the lanes it was driven on"
         );
     }

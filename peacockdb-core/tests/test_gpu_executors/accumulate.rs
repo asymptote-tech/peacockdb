@@ -5,8 +5,10 @@
 
 use super::*;
 
-use peacockdb_core::executor::LaneEvent;
 use peacockdb_core::executor::gpu_backend::accumulate::{GpuAccumulator, GpuPartitionAccumulator};
+use peacockdb_core::executor::{
+    AbiCall, AbiTarget, CallStats, LaneEvent, NodeTiming, set_node_timing,
+};
 use peacockdb_core::plan::AggFunc;
 use peacockdb_core::plan::AggStateColumns;
 use peacockdb_core::plan::RowInterval;
@@ -222,6 +224,94 @@ fn a_limit_drops_forwards_and_slices_by_where_the_batch_falls() {
         ],
         "the second batch whole and one row of the third; nothing for the first"
     );
+}
+
+/// Timing on for the body of one case, and off again however it ends. The switch is
+/// process-global and every case in this binary shares the process, so a case that panics
+/// with it on would measure every case after it.
+struct Measuring;
+
+impl Measuring {
+    fn on() -> Self {
+        set_node_timing(NodeTiming::Events);
+        Self
+    }
+}
+
+impl Drop for Measuring {
+    fn drop(&mut self) {
+        set_node_timing(NodeTiming::Off);
+    }
+}
+
+/// A slice and an export carry no seq of their own, so both sides charge them to the node
+/// whose output they handled — and `call_index` counts all four entry points together.
+///
+/// Asserted against the device rather than against the journal alone: the two counters are
+/// independent, and a rule only one side follows joins to nothing. The scans here are
+/// driven by hand and journal nothing, which is why the journal holds three entries and
+/// the device six.
+#[test]
+fn a_slice_and_an_export_are_charged_to_the_node_that_produced_the_handle() {
+    let interval = RowInterval {
+        skip: 2,
+        fetch: Some(3),
+    };
+    let tree: Box<dyn GpuNode> = Box::new(GpuLimit::new(source_per_row_group(), interval));
+    let session = Session::open(tree.as_ref());
+    let out = columns();
+    let _measured = Measuring::on();
+    let mut accumulator = GpuAccumulator::limit(session.site(), session.recipe(1), interval, &out)
+        .expect("the limit builds");
+
+    let mut journalled: Vec<AbiCall> = Vec::new();
+    let mut kept = Vec::new();
+    for group in ROW_GROUPS {
+        let (produced, stats) = accumulator
+            .accumulate_and_fetch(session.scan(&[group]))
+            .expect("the arrival is accepted");
+        journalled.extend(made(&stats));
+        kept.extend(produced);
+    }
+    for batch in kept {
+        let (_, stats) = session
+            .export(&out)
+            .unload(batch, RowRange::WHOLE)
+            .expect("the rows cross the boundary");
+        journalled.extend(made(&stats));
+    }
+
+    let seq = session.scan_seq();
+    let regions = session.regions();
+    assert_eq!(
+        regions
+            .iter()
+            .map(|r| (r.seq, r.call_index))
+            .collect::<Vec<_>>(),
+        (0..6).map(|index| (seq, index)).collect::<Vec<_>>(),
+        "three scans, the slice of the straddling batch and two exports, counted as one \
+         run of calls against the scan's seq"
+    );
+    assert_eq!(
+        journalled
+            .iter()
+            .map(|call| (call.seq, call.target))
+            .collect::<Vec<_>>(),
+        vec![
+            (seq, AbiTarget::Bare(AbiSymbol::SliceHandle)),
+            (seq, AbiTarget::Bare(AbiSymbol::ResultFromHandle)),
+            (seq, AbiTarget::Bare(AbiSymbol::ResultFromHandle)),
+        ],
+        "the three calls this side made name the node the device charged them to"
+    );
+}
+
+fn made(stats: &CallStats) -> Vec<AbiCall> {
+    stats
+        .calls
+        .recorded()
+        .expect("a measured run journals what it called")
+        .to_vec()
 }
 
 /// A lane that received nothing emits nothing, here and on the CPU alike.

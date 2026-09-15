@@ -893,7 +893,6 @@ impl<'a, B: Backend> Driver<'a, B> {
             trace: self.trace,
             rows_skipped: self.rows_skipped,
             lanes_of: self.index.nodes.iter().map(|node| node.lanes).collect(),
-            driving_lanes: self.index.nodes.iter().map(|node| node.ready_lanes).collect(),
             peak_queued: self.peak_queued,
             emitted: self.emitted,
             abi_calls: self.abi_calls,

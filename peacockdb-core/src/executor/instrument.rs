@@ -45,17 +45,20 @@ pub(crate) fn install_rmm_pool() -> RmmPool {
 
 /// Select the per-node GPU timing mode (process-global, [`NodeTiming::Off`] by default).
 ///
-/// Why it is opt-in, and why the split into host setup / host submit / device exists, is
-/// argued once on `set_node_timing` and `mark_device_start` in
-/// `cpp/src/plan_executor.h`. The GPU suite runs `--test-threads=1` (cuDF/RMM share one
-/// process-wide pool), so the global needs no cross-test guard.
+/// Why it is opt-in is argued on `set_node_timing` in `cpp/src/plan_executor.h`. The GPU
+/// suite runs `--test-threads=1` (cuDF/RMM share one process-wide pool), so the global
+/// needs no cross-test guard.
 pub(crate) fn set_node_timing(mode: NodeTiming) {
     let raw = match mode {
         NodeTiming::Off => PEACOCK_NODE_TIMING_OFF,
         NodeTiming::Events => PEACOCK_NODE_TIMING_EVENTS,
     };
+    // The C side refuses a mode it does not name. Both sides name the same two, so a
+    // refusal is the two enums having drifted apart, not an input a caller chose — and
+    // the mirror below must not claim a mode the device never entered.
+    let rc = unsafe { peacock_set_node_timing(raw) };
+    assert_eq!(rc, 0, "the ABI refused node timing {mode:?}");
     MEASURING.store(mode != NodeTiming::Off, Ordering::Relaxed);
-    unsafe { peacock_set_node_timing(raw) };
 }
 
 /// The mode the setter last selected, so this side can ask without crossing the FFI on

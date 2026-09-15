@@ -12,7 +12,7 @@ use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
 use super::{CallSite, Consumed, execute_node_many, produced};
 use crate::executor::GpuBatch;
 use crate::executor::node_timing_on;
-use crate::executor::{AbiCalls, BackendError, CallResult, CallStats};
+use crate::executor::{AbiCall, AbiCalls, AbiTarget, BackendError, CallResult, CallStats};
 use crate::plan::PlanError;
 use crate::wire::{CallPattern, FbKind, Input, Recipe, Seq};
 
@@ -57,14 +57,10 @@ impl GpuEmitter {
 
     pub fn emit(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
         let mut calls = AbiCalls::armed(node_timing_on());
-        let taken = calls
-            .is_armed()
-            .then(|| Consumed::of(&batch))
-            .unwrap_or_default();
+        let taken = Consumed::of(&batch);
         let (_, handle) = batch.consume();
         let produced_lanes =
             execute_node_many(self.site, self.seq, self.kind, &[vec![handle]], self.lanes)?;
-        calls.record(self.seq, self.kind, taken.rows, Some(taken.bytes));
         if produced_lanes.len() != self.lanes {
             return Err(BackendError::new(format!(
                 "the scatter answered with {} handles where the plan declares {} lanes — a \
@@ -74,11 +70,26 @@ impl GpuEmitter {
                 self.lanes
             )));
         }
+        let lanes: Vec<GpuBatch> = produced_lanes
+            .into_iter()
+            .map(|(handle, stats)| {
+                produced(self.site.executor, self.seq, handle, stats, &self.schema)
+            })
+            .collect();
+        // One call, so one journal entry: the partitions are what this call produced, and
+        // the region C++ opens for each of them carries the same `call_index`.
+        let made = Consumed::sum(&lanes);
+        calls.record(AbiCall {
+            seq: self.seq,
+            target: AbiTarget::Node(self.kind),
+            call_index: 0,
+            in_rows: taken.rows,
+            in_bytes: taken.bytes,
+            out_rows: made.rows,
+            out_bytes: made.bytes,
+        });
         Ok((
-            produced_lanes
-                .into_iter()
-                .map(|(handle, stats)| produced(self.site.executor, handle, stats, &self.schema))
-                .collect(),
+            lanes,
             CallStats {
                 scratch_bytes: None,
                 calls,

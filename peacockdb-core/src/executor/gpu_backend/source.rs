@@ -15,8 +15,9 @@ use crate::executor::node_timing_on;
 
 use super::GpuSource;
 use super::{CallSite, last_error, produced};
+use crate::executor::Batch;
 use crate::executor::GpuBatch;
-use crate::executor::{AbiCalls, BackendError, CallStats};
+use crate::executor::{AbiCall, AbiCalls, AbiTarget, BackendError, CallStats};
 use crate::plan::GpuLoadParquet;
 use crate::plan::PlanError;
 use crate::wire::{AbiSymbol, CallPattern, Input, Recipe};
@@ -84,12 +85,21 @@ impl GpuSource {
                 last_error(self.site.executor)
             )));
         }
+        let batch = produced(self.site.executor, self.seq, handle, stats, &self.schema);
         // A scan takes no batch, so its input is nothing rather than unknown — the same
         // zero the driver models it with.
         let mut calls = AbiCalls::armed(node_timing_on());
-        calls.record(self.seq, self.kind, 0, Some(0));
+        calls.record(AbiCall {
+            seq: self.seq,
+            target: AbiTarget::Node(self.kind),
+            call_index: 0,
+            in_rows: 0,
+            in_bytes: 0,
+            out_rows: stats.rows,
+            out_bytes: batch.byte_size() as u64,
+        });
         Ok(Some((
-            produced(self.site.executor, handle, stats, &self.schema),
+            batch,
             CallStats {
                 scratch_bytes: None,
                 calls,

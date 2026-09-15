@@ -32,11 +32,13 @@ use peacockdb_ffi::raw::{
 use crate::common::logical_size_from_schema;
 
 use crate::executor::node_timing_on;
+use crate::executor::Batch;
 use crate::executor::CpuBatch;
 use crate::executor::GpuBatch;
-use crate::executor::{AbiCalls, BackendError, CallResult, CallStats, Measured, Region, RowRange};
+use crate::executor::{AbiCall, AbiCalls, AbiTarget, BackendError, CallResult, CallStats};
+use crate::executor::{Region, RowRange};
 use crate::plan::PlanError;
-use crate::wire::{CallPattern, FbKind, Input, Recipe, Seq};
+use crate::wire::{AbiSymbol, CallPattern, FbKind, Input, Recipe, Seq};
 
 /// A lane's reads, in the order the mapping named them.
 ///
@@ -58,14 +60,23 @@ pub struct GpuSource {
 pub struct GpuExec {
     site: CallSite,
     calls: Vec<(Seq, FbKind)>,
+    /// What every call but the last produces. `None` where the node makes one call, which
+    /// is every exec node but an aggregate with a finalize.
+    intermediate: Option<SchemaRef>,
     schema: SchemaRef,
 }
 
 impl GpuExec {
     /// `schema` is what the node declares it produces, which is what prices the batch —
     /// the ABI reports rows and varlen content, and the fixed width per row is the
-    /// schema's.
-    pub fn new(site: CallSite, recipe: &Recipe, schema: &ArrowSchema) -> Result<Self, PlanError> {
+    /// schema's. `intermediate` prices the calls before the last, whose output no batch is
+    /// ever built from: an aggregate's state, read by the finalize above it.
+    pub fn new(
+        site: CallSite,
+        recipe: &Recipe,
+        intermediate: Option<&ArrowSchema>,
+        schema: &ArrowSchema,
+    ) -> Result<Self, PlanError> {
         let mut calls = Vec::with_capacity(recipe.calls.len());
         for (position, call) in recipe.calls.iter().enumerate() {
             if call.when != CallPattern::PerBatch {
@@ -95,11 +106,30 @@ impl GpuExec {
             })?;
             calls.push((seq, kind));
         }
+        if calls.len() > 1 && intermediate.is_none() {
+            return Err(PlanError::Invalid(format!(
+                "a chain of {} calls prices all but the last by the state schema, and this \
+                 node declares none — only an aggregate with a finalize chains",
+                calls.len()
+            )));
+        }
         Ok(Self {
             site,
             calls,
+            intermediate: intermediate.map(|state| Arc::new(state.clone())),
             schema: Arc::new(schema.clone()),
         })
+    }
+
+    /// What the call at `position` produced, priced by the schema that output belongs to.
+    fn out_schema(&self, position: usize) -> &SchemaRef {
+        match position + 1 == self.calls.len() {
+            true => &self.schema,
+            false => self
+                .intermediate
+                .as_ref()
+                .expect("a chaining node declares its state schema, checked at construction"),
+        }
     }
 
     /// One batch in, one batch out. The input handle is consumed by the first call and
@@ -111,23 +141,35 @@ impl GpuExec {
         // drawn from the session the node was built against.
         let mut calls = AbiCalls::armed(node_timing_on());
         // Only the first call reads a batch this side priced; every later one reads the
-        // one before it, which the recipe names `PriorOutput` and only C++ measured.
-        let taken = calls
-            .is_armed()
-            .then(|| Consumed::of(&batch))
-            .unwrap_or_default();
-        let mut input = (taken.rows, Some(taken.bytes));
+        // one before it, whose price this loop computed.
+        let mut input = Consumed::of(&batch);
         let (_, mut handle) = batch.consume();
-        let mut stats = PeacockNodeStats::default();
-        for (seq, kind) in &self.calls {
-            let (produced, node_stats) = execute_node(self.site, *seq, *kind, &[vec![handle]])?;
-            calls.record(*seq, *kind, input.0, input.1);
-            handle = produced;
-            stats = node_stats;
-            input = (node_stats.rows, None);
+        let mut last = (0u64, 0u64);
+        for (position, (seq, kind)) in self.calls.iter().enumerate() {
+            let (out, stats) = execute_node(self.site, *seq, *kind, &[vec![handle]])?;
+            let out_bytes = priced(stats, self.out_schema(position));
+            calls.record(AbiCall {
+                seq: *seq,
+                target: AbiTarget::Node(*kind),
+                call_index: 0,
+                in_rows: input.rows,
+                in_bytes: input.bytes,
+                out_rows: stats.rows,
+                out_bytes,
+            });
+            handle = out;
+            input = Consumed { rows: stats.rows, bytes: out_bytes };
+            last = (stats.rows, out_bytes);
         }
+        let seq = self.calls.last().expect("an exec node makes at least one call").0;
         Ok((
-            produced(self.site.executor, handle, stats, &self.schema),
+            GpuBatch::new(
+                self.site.executor,
+                handle,
+                seq,
+                last.0 as usize,
+                last.1 as usize,
+            ),
             CallStats {
                 scratch_bytes: None,
                 calls,
@@ -157,6 +199,11 @@ impl GpuExport {
     /// of scope — which is the whole of what the row range buys: the rows wanted cross
     /// PCIe rather than the batch they sit in.
     pub fn unload(&mut self, batch: GpuBatch, rows: RowRange) -> CallResult<CpuBatch> {
+        let taken = Consumed::of(&batch);
+        // The export carries no seq of its own, so the region C++ opens is charged to the
+        // node that produced the handle — and so is the call journalled here, or the two
+        // records do not meet.
+        let seq = batch.producer();
         let mut ipc: *mut u8 = std::ptr::null_mut();
         let mut len = 0u64;
         let rc = unsafe {
@@ -178,22 +225,36 @@ impl GpuExport {
                 last_error(self.site.executor)
             )));
         }
-        // A range naming no rows exports nothing at all, and there is nothing to free.
-        if len == 0 {
-            return Ok((
-                CpuBatch::new(RecordBatch::new_empty(self.schema.clone())),
-                no_abi_calls(),
-            ));
-        }
-        let decoded = decode(unsafe { std::slice::from_raw_parts(ipc, len as usize) });
-        unsafe { peacock_result_free(ipc) };
-        let batches = decoded?;
-        let batch = concat_batches(&self.schema, batches.iter()).map_err(|error| {
-            BackendError::new(format!(
-                "the exported stream is not the sink's rows: {error}"
-            ))
-        })?;
-        Ok((CpuBatch::new(batch), no_abi_calls()))
+        // A range naming no rows exports nothing at all, and there is nothing to free. The
+        // call was still made, so it still opened a region and still has to be journalled.
+        let exported = match len {
+            0 => CpuBatch::new(RecordBatch::new_empty(self.schema.clone())),
+            _ => {
+                let decoded = decode(unsafe { std::slice::from_raw_parts(ipc, len as usize) });
+                unsafe { peacock_result_free(ipc) };
+                let batches = decoded?;
+                CpuBatch::new(concat_batches(&self.schema, batches.iter()).map_err(|error| {
+                    BackendError::new(format!("the exported stream is not the sink's rows: {error}"))
+                })?)
+            }
+        };
+        let mut calls = AbiCalls::armed(node_timing_on());
+        calls.record(AbiCall {
+            seq,
+            target: AbiTarget::Bare(AbiSymbol::ResultFromHandle),
+            call_index: 0,
+            in_rows: taken.rows,
+            in_bytes: taken.bytes,
+            out_rows: exported.num_rows() as u64,
+            out_bytes: exported.byte_size() as u64,
+        });
+        Ok((
+            exported,
+            CallStats {
+                scratch_bytes: None,
+                calls,
+            },
+        ))
     }
 }
 
@@ -204,9 +265,11 @@ fn decode(bytes: &[u8]) -> Result<Vec<RecordBatch>, BackendError> {
 }
 
 /// What a call produced, priced by the schema the node declares: the ABI reports rows and
-/// varlen content, and the fixed width per row is the schema's.
+/// varlen content, and the fixed width per row is the schema's. `seq` is the call it came
+/// out of, which is what a slice or an export downstream names itself by.
 pub(crate) fn produced(
     executor: *mut PeacockExecutor,
+    seq: Seq,
     handle: u64,
     stats: PeacockNodeStats,
     schema: &SchemaRef,
@@ -214,13 +277,20 @@ pub(crate) fn produced(
     GpuBatch::new(
         executor,
         handle,
+        seq,
         stats.rows as usize,
-        logical_size_from_schema(
-            schema,
-            stats.rows as usize,
-            stats.varlen_content_bytes as usize,
-        ),
+        priced(stats, schema) as usize,
     )
+}
+
+/// The byte price of what a call answered with — the one formula, for the call in a chain
+/// whose output no batch is ever built from.
+pub(crate) fn priced(stats: PeacockNodeStats, schema: &SchemaRef) -> u64 {
+    logical_size_from_schema(
+        schema,
+        stats.rows as usize,
+        stats.varlen_content_bytes as usize,
+    ) as u64
 }
 
 /// Where an executor's ABI calls are made from: the session they go through, and the
@@ -239,17 +309,32 @@ pub struct CallSite {
     pub lane: usize,
 }
 
+/// How many regions the session has recorded, draining none — the `(NULL, 0)` form of the
+/// ABI call, and what makes the buffer below exactly the right size.
+pub(crate) fn recorded_regions(executor: *mut PeacockExecutor) -> Result<usize, BackendError> {
+    let mut count = 0u64;
+    let rc = unsafe {
+        peacock_executor_collect_node_regions(executor, std::ptr::null_mut(), 0, &mut count)
+    };
+    match rc {
+        0 => Ok(count as usize),
+        _ => Err(BackendError::new(format!(
+            "collect_node_regions(count): {}",
+            last_error(executor)
+        ))),
+    }
+}
+
 /// Drain what the session recorded, after the root export and before the plan ends —
 /// the events die with the plan, and the device times do not exist until then.
 ///
-/// `cap` must bound what the run produced. C++ FAILS rather than truncating, and by then
-/// the drain has happened, so a cap that is too small loses the measurement instead of
-/// reporting less of it. On this path the bound is the calls the driver recorded times the
-/// widest output any single call can have.
-pub fn collect_regions(
+/// Asked, allocated and then taken, because C++ fails a buffer it overruns rather than
+/// truncating, and by then the drain has happened: a caller that guessed too small loses
+/// the measurement instead of reporting less of it.
+pub(crate) fn collect_regions(
     executor: *mut PeacockExecutor,
-    cap: usize,
 ) -> Result<Vec<Region>, BackendError> {
+    let cap = recorded_regions(executor)?;
     let mut buf = vec![PeacockNodeRegion::default(); cap];
     let mut count = 0u64;
     let rc = unsafe {
@@ -267,18 +352,46 @@ pub fn collect_regions(
             seq: region.seq as Seq,
             partition: region.partition as usize,
             call_index: region.call_index,
-            measured: Measured {
-                host_setup_us: region.host_setup_us,
-                host_submit_us: region.host_submit_us,
-                device_us: region.device_us,
-                out_rows: region.rows,
-                out_bytes: region.logical_bytes,
-                // This IS one region, and counting it here is what lets a call's region
-                // count fall out of the same sum as its microseconds.
-                regions: 1,
-            },
+            host_us: region.host_us,
+            device_us: region.device_us,
         })
         .collect())
+}
+
+/// The handles a call is about to consume, and the batches they came from dropped without
+/// releasing: C++ erases each registry entry as it takes it.
+///
+/// Priced on the way through, because `consume` is the last place the sizes exist — the far
+/// side cannot price what it has already erased (#152).
+pub(crate) fn hand_over(batches: Vec<GpuBatch>) -> (Vec<u64>, Consumed) {
+    let taken = Consumed::sum(&batches);
+    let handles = batches.into_iter().map(|batch| batch.consume().1).collect();
+    (handles, taken)
+}
+
+/// One `execute_node` over a whole handover, journalled: what the batches held on the way
+/// in, and what the call answered with on the way out, priced by the schema that output
+/// belongs to. The shape every accumulator's call has, in one place.
+pub(crate) fn one_call(
+    site: CallSite,
+    (seq, kind): (Seq, FbKind),
+    batches: Vec<GpuBatch>,
+    schema: &SchemaRef,
+    calls: &mut AbiCalls,
+) -> Result<GpuBatch, BackendError> {
+    let (handles, taken) = hand_over(batches);
+    let (handle, stats) = execute_node(site, seq, kind, &[handles])?;
+    let out = produced(site.executor, seq, handle, stats, schema);
+    calls.record(AbiCall {
+        seq,
+        target: AbiTarget::Node(kind),
+        call_index: 0,
+        in_rows: taken.rows,
+        in_bytes: taken.bytes,
+        out_rows: stats.rows,
+        out_bytes: out.byte_size() as u64,
+    });
+    Ok(out)
 }
 
 /// What a call reports when it made no ABI call of its own — an accumulator that only
@@ -286,7 +399,7 @@ pub fn collect_regions(
 ///
 /// Not `CallStats::default()`: that says nobody was measuring, and on a measured run an
 /// empty list is the true answer rather than the absent one.
-pub(super) fn no_abi_calls() -> CallStats {
+pub(crate) fn no_abi_calls() -> CallStats {
     CallStats {
         scratch_bytes: None,
         calls: AbiCalls::armed(node_timing_on()),
@@ -296,22 +409,21 @@ pub(super) fn no_abi_calls() -> CallStats {
 /// What a call was handed, as the caller priced it. Read where the handles are given
 /// up: `GpuBatch::consume` is where a batch's own figures stop being reachable.
 #[derive(Clone, Copy, Default)]
-pub(super) struct Consumed {
+pub(crate) struct Consumed {
     pub rows: u64,
     pub bytes: u64,
 }
 
 impl Consumed {
-    pub(super) fn of(batch: &GpuBatch) -> Self {
+    pub(crate) fn of(batch: &GpuBatch) -> Self {
         Self {
             rows: batch.num_rows() as u64,
             bytes: batch.byte_size() as u64,
         }
     }
 
-    /// A whole handover priced in one pass, for a caller that has already checked its log
-    /// is armed — an unmeasured run does not walk the batches at all.
-    pub(super) fn sum(batches: &[GpuBatch]) -> Self {
+    /// A whole handover priced in one pass.
+    pub(crate) fn sum(batches: &[GpuBatch]) -> Self {
         batches.iter().fold(Self::default(), |mut total, batch| {
             total.rows += batch.num_rows() as u64;
             total.bytes += batch.byte_size() as u64;

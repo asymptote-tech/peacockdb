@@ -24,7 +24,7 @@ use super::mode::mode_named;
 use super::corpus::plan_at;
 use super::corpus_golden::{Regeneration, SKIPPED, merge_section};
 use super::record::{RunMeta, append_records, declared_steps, record_rows, rows_match_the_recipes};
-use super::gpu_session::{Session, region_cap};
+use super::gpu_session::Session;
 use super::registry::stem;
 use super::testdata_root;
 
@@ -129,15 +129,11 @@ fn query_order(query: &str) -> (String, u32, String) {
     )
 }
 
-/// How this harness was compiled, as the record states it.
+/// How this harness was compiled, as the record and the tree both state it.
 ///
-/// Built by `--build-benchmarks` this reads `benchmarks opt-level=3`; from a plain
-/// `cargo test` it would read `debug opt-level=1`, which measures a different host
-/// overhead — see `[profile.benchmarks]` in the workspace Cargo.toml. A run under that
-/// build is refused rather than recorded, so this line says WHICH release build measured,
-/// not whether one did.
-pub const BUILD_PROFILE: &str =
-    concat!(env!("PEACOCK_BUILD_PROFILE"), " opt-level=", env!("PEACOCK_BUILD_OPT_LEVEL"));
+/// A literal because it is the only value a written record can carry: `run_once` refuses a
+/// build with debug assertions, so a debug build never reaches the line that writes this.
+pub const BUILD: &str = "release";
 
 /// The extra-data section: what the whole run cost, and under what conditions.
 ///
@@ -159,7 +155,7 @@ fn run_section(chosen: &Run, times: &Measurements, spread: &[u64]) -> String {
          run_us={}\n\
          device_us={device_us}\n\
          runs=[{}]\n\
-         build_profile={BUILD_PROFILE}\n\
+         build={BUILD}\n\
          allocator={}\n",
         chosen.total_us,
         spread.join(","),
@@ -258,7 +254,7 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
         query,
         mode: mode.name,
         timing_mode: "events",
-        build_profile: BUILD_PROFILE,
+        build: BUILD,
         allocator: &allocator,
     };
     // Attached once more here rather than reached for through the session: `Session::open`
@@ -299,33 +295,30 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
             // exports through a door that opens no region), and measured with regions.
             None => "unmeasured".to_string(),
             Some(t) if t.regions == 0 => "no regions".to_string(),
-            Some(t) => format!("{}/{}/{}", t.host_setup_us, t.host_submit_us, t.device_us),
+            Some(t) => format!("{}/{}", t.host_us, t.device_us),
         })
         .collect();
     // Printed until there is a file to write it to. Every time, not just the chosen one: a
     // second minimum says nothing about the spread it was picked out of.
     println!(
-        "{what}: {}us of {times:?}, {} nodes, {} regions, per-node setup/submit/device {per_node:?}",
+        "{what}: {}us of {times:?}, {} nodes, {} regions, per-node host/device {per_node:?}",
         chosen.total_us,
         chosen.report.emitted.len(),
         chosen.regions.len()
     );
 }
 
-/// One run's calls costed, refusing a region no recorded call named.
+/// One run's calls costed.
 ///
-/// A region nobody claimed means the two sides disagree about what ran — a defect in the
-/// join, not a number to report around.
+/// A mismatch in either direction means the two sides disagree about what ran — a defect
+/// in the join, not a number to report around — so the panic is the report.
 fn measured_of(run: &Run, what: &str) -> Measurements {
-    let (costed, unclaimed) = join_regions(&run.report, &run.regions);
-    assert!(
-        unclaimed.is_empty(),
-        "{what}: {} of {} regions match no recorded call — the first is {:?}",
-        unclaimed.len(),
-        run.regions.len(),
-        unclaimed[0]
-    );
-    costed
+    join_regions(&run.report, &run.regions).unwrap_or_else(|refused| {
+        panic!(
+            "{what}: {refused} ({} regions came back)",
+            run.regions.len()
+        )
+    })
 }
 
 /// The run worth reporting: second-smallest by end-to-end time.
@@ -359,15 +352,15 @@ fn run_once(tree: &dyn GpuNode, what: &str) -> (RunReport, Vec<Region>) {
          a cudaMalloc/cudaFree round trip charged to the node that allocated it — the \
          numbers would describe the allocator, not the plan"
     );
-    // Beside it because it is the same kind of statement: the record's `build_profile` line
-    // says WHICH release build measured, and a line saying that is a claim until something
-    // refuses the build that would make it false. A plain `cargo test` compiles this at
-    // opt-level 1, where the host prologue is a different quantity entirely.
+    // Beside it because it is the same kind of statement: the record's `build=` line is a
+    // claim until something refuses the build that would make it false. A plain
+    // `cargo test` compiles this at opt-level 1, where the host prologue is a different
+    // quantity entirely.
     assert!(
         !cfg!(debug_assertions),
-        "{what} would measure a debug build ({BUILD_PROFILE}); build it with \
-         `scripts/build-test-shadgpu.sh --build-benchmarks`, which compiles under \
-         [profile.benchmarks]"
+        "{what} would measure a debug build, which writes `build={BUILD}` about a host \
+         prologue that is not release's; build it with \
+         `scripts/build-test-shadgpu.sh --build-benchmarks`"
     );
     let mut session = Session::open(tree, what);
     let ctx = session.context();
@@ -384,6 +377,6 @@ fn run_once(tree: &dyn GpuNode, what: &str) -> (RunReport, Vec<Region>) {
     );
     // Drained here rather than by the caller: the events die with the session, and the
     // session is this function's.
-    let regions = session.regions(region_cap(&report), what);
+    let regions = session.regions(what);
     (report, regions)
 }

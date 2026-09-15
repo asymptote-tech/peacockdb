@@ -189,24 +189,24 @@ pub fn recorded_regions(executor: *mut PeacockExecutor) -> Result<usize, Backend
 pub fn collect_regions(executor: *mut PeacockExecutor) -> Result<Vec<Region>, BackendError>; // asks the count, allocates, drains
 ```
 
-- [ ] **Step 1: `instrument.rs`** as a private `mod instrument;` of `executor`, `pub(crate)`
+- [x] **Step 1: `instrument.rs`** as a private `mod instrument;` of `executor`, `pub(crate)`
   functions and the `MEASURING` atomic, ported from the reference's
   `src/batch_partitioned/instrument.rs` with `NodeTiming`/`RmmPool` declared in
   `executor/mod.rs` and the free functions there delegating (`pub fn set_node_timing(mode) {
   instrument::set_node_timing(mode) }`). `set_node_timing` asserts the FFI returned 0.
-- [ ] **Step 2: `CallSite`** in `gpu_backend/mod.rs`, doc: "the session a call goes through
+- [x] **Step 2: `CallSite`** in `gpu_backend/mod.rs`, doc: "the session a call goes through
   and the node and lane it belongs to, so a failure names them". Thread it through
   `GpuExec`, `GpuExport`, `GpuSource`, `GpuEmitter`, `GpuJoin`, `GpuAccumulator` constructors
   and `execute_node{,_many}` as the reference does; the error text names node and lane.
-- [ ] **Step 3: `collect_regions`** — `recorded_regions` calls the ABI with `(null, 0)`;
+- [x] **Step 3: `collect_regions`** — `recorded_regions` calls the ABI with `(null, 0)`;
   `collect_regions` allocates exactly that many and drains. `Region` is Task 5's type; until
   then declare it here as the plain struct Task 5 moves.
-- [ ] **Step 4: `tests/common/gpu_session.rs`** — lift `Session` from `corpus_gpu.rs` (the
+- [x] **Step 4: `tests/common/gpu_session.rs`** — lift `Session` from `corpus_gpu.rs` (the
   reference's file, minus `region_cap`): `open`, `context`, `regions(&self, what) ->
   Vec<Region>` calling `collect_regions`, `Drop` ends the plan. `corpus_gpu.rs` imports it.
-- [ ] **Step 5: `test_gpu_executors`** call sites take `CallSite { executor, node: 0, lane: 0 }`
+- [x] **Step 5: `test_gpu_executors`** call sites take `CallSite { executor, node: 0, lane: 0 }`
   (a `site()` helper on the test's session, as the reference).
-- [ ] **Step 6: prove.** rust-only `--test test_cpu_executors` (unchanged) and the cuDF build
+- [x] **Step 6: prove.** rust-only `--test test_cpu_executors` (unchanged) and the cuDF build
   of `test_gpu_executors`; shad-gpu `PCK_TEST_FILTER=test_gpu_executors` green.
 - [ ] **Step 7: commit** — `instrument: the switches and the pool, behind the executor facade`.
 
@@ -231,19 +231,19 @@ pub struct CallStats { pub scratch_bytes: Option<usize>, pub calls: AbiCalls }  
 // RunReport gains: pub abi_calls: Vec<Vec<Vec<AbiCalls>>>   // node → driving lane → calls in order
 ```
 
-- [ ] **Step 1: red.** In `driver/tests/counts.rs`, port
+- [x] **Step 1: red.** In `driver/tests/counts.rs`, port
   `a_lane_records_its_backend_calls_and_not_the_drivers_own` and
   `a_backend_that_names_no_seq_leaves_every_entry_unmeasured` from the reference; not
   `the_call_record_is_indexed_by_the_driving_lanes_the_report_names` — assert instead that
   `report.abi_calls[node].len()` equals the index's `ready_lanes` for a scatter and a
   cross-lane merge (port the second test's plan, compare against `PlanIndex`). Run rust-only
   `--lib driver::tests::counts` — compile error is the red.
-- [ ] **Step 2: types** in `executor/mod.rs` as above; `accounting.rs` takes `&CallStats`.
+- [x] **Step 2: types** in `executor/mod.rs` as above; `accounting.rs` takes `&CallStats`.
   `CpuBackend` and the mock fill `calls: AbiCalls::default()`.
-- [ ] **Step 3: the driver** stamps `call_index` per seq in `record_calls` (port from the
+- [x] **Step 3: the driver** stamps `call_index` per seq in `record_calls` (port from the
   reference's `partitioned.rs`) and `LaneOutcome::calls: Option<AbiCalls>` in
   `single_partition.rs` — port those hunks whole. Delete `driving_lanes`.
-- [ ] **Step 4: the GPU backend journals and prices every call.** Port the reference's
+- [x] **Step 4: the GPU backend journals and prices every call.** Port the reference's
   `calls.record(...)` sites; replace the `measure: bool` / `is_armed().then(..)` plumbing
   with unconditional pricing: `Consumed::of(&batch)` before `consume()`, always. Fill
   `out_rows`/`out_bytes` from the call's own `PeacockNodeStats` and the schema the executor
@@ -253,7 +253,7 @@ pub struct CallStats { pub scratch_bytes: Option<usize>, pub calls: AbiCalls }  
   (`backend.rs` passes `aggregate.intermediate()` for the `Aggregate` arm, `None` otherwise);
   `AggregateBatches::compact` prices the concat with `self.held` (the state schema). For a
   scatter, `out_*` sums the N partitions' stats.
-- [ ] **Step 5: green.** rust-only `--lib` (driver tests), then the cuDF build; shad-gpu
+- [x] **Step 5: green.** rust-only `--lib` (driver tests), then the cuDF build; shad-gpu
   `test_gpu_executors` + `test_gpu_corpus` green.
 - [ ] **Step 6: commit** — `journal: what each ABI call was handed and answered with`.
 
@@ -286,14 +286,14 @@ pub fn render_timings(root: &dyn GpuNode, times: &Measurements) -> String;
   `Measured::out_rows/out_bytes` are copied from the `AbiCall` (Rust's price), never from
   the region. `join_regions` returns `Err` naming the first region no call claimed **or** the
   first call no region answered — every call opens one now, so an absence is a failed run.
-- [ ] **Step 1: red.** In `driver/tests/render.rs` port the reference's tests over the mock
+- [x] **Step 1: red.** In `driver/tests/render.rs` port the reference's tests over the mock
   (`render_timings` over a report with hand-built regions), plus:
   `a_call_without_a_region_is_refused` and `a_region_without_a_call_is_refused`, both asserting
   `join_regions(..).is_err()` with the message naming `(seq, call_index)`.
-- [ ] **Step 2: implement** — port `measurements.rs` and `bench_text.rs`, drop
+- [x] **Step 2: implement** — port `measurements.rs` and `bench_text.rs`, drop
   `Measured::host_us()`, `Measurements::entry`, `per_entry` stays private. `bench_text.rs`
   keeps `call_us`: `Some(t) if t.regions > 0 => t.device_us.max(1)`, `_ => 0`.
-- [ ] **Step 3: green** rust-only `--lib`; **commit** — `measurements: the two halves meet on (seq, call_index)`.
+- [x] **Step 3: green** rust-only `--lib`; **commit** — `measurements: the two halves meet on (seq, call_index)`.
 
 ### Task 6: the harness, the record, the case list
 
@@ -330,12 +330,19 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str);
   middle call is the call before it, taken from the journal; `capture=` in the heading;
   `rows_match_the_recipes` first checks `row.split('\t').count() == COLUMNS.len()`. Rewrite
   `HEADER_NOTES` for the new columns, no capitals.
+  Partly landed in dispatch 2, because the file had to compile: the 17 columns are there
+  (`host_us` replaces the two host ones), `recipe_kind` prints `AbiCall::target`, `in_bytes`
+  is a `u64` the backend fills from the call before it, and `HEADER_NOTES` describes those.
+  Still owed: `capture=` in the heading and the field-count check.
 - [ ] **Step 2: `corpus_benchmark.rs`** — port; `mode_named` from `common/mode.rs`; no
   `file_stem_of`; `Capture::from_env()` decides `set_nvtx_ranges(true)` and skipping
   `write_section`; the trailer is `run_us`, `device_us`, `runs=[…]`, `build=release`,
   `allocator=`; `assert!(!cfg!(debug_assertions))` and the pool assert stay in `run_once`;
   `measured_of` panics on `join_regions`'s `Err`. Case names expand to
   `bench_<dataset>_sf<sf>_<query>_<mode>`.
+  Partly landed in dispatch 2: `BUILD_PROFILE` and its two `env!`s are gone (the Cargo
+  profile they read no longer exists), the trailer says `build=release` from a literal the
+  debug-assertions refusal guards, and `measured_of` panics on the `Err`.
 - [ ] **Step 3: cases** — `corpus_query_benchmark!(tpch, 40, q6, tp1_single | tp4_sized);`
   and `corpus_query_benchmark!(tpch, 40, q19, tp1_single);` with a ≤ 10-line file comment.
 - [ ] **Step 4: `peacock_gpu_benchmarks.rs`** — port the macro and the six assertions
@@ -368,6 +375,8 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str);
   region count check compares `regions.len()` against Σ over the journal of (calls × their
   partitions) — at `tp1_single` that is `report.abi_calls` flattened. Keep `eprintln!` of
   both walls. Runs q19 at sf1, `tp1_single`, `ROUNDS = 7`.
+  Landed in dispatch 2 — the file had to compile against the new `Region`. Re-read it before
+  redoing anything: the cuts are applied and the count check reads the journal.
 - [ ] **Step 2** shad-gpu `PCK_TEST_FILTER=events_are` green; **commit** —
   `node timing: the instrument's structural test`.
 

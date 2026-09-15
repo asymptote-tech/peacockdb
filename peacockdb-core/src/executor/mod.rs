@@ -38,7 +38,7 @@ use datafusion::arrow::array::RecordBatch;
 use crate::plan::ExecutorCategory;
 use crate::plan::PlanError;
 use crate::plan::{GpuNode, RowInterval};
-use crate::wire::{FbKind, Seq};
+use crate::wire::{AbiSymbol, FbKind, Seq};
 
 #[cfg(not(feature = "rust-only"))]
 use peacockdb_ffi::raw::PeacockExecutor;
@@ -87,21 +87,27 @@ impl CpuBatch {
 pub struct GpuBatch {
     executor: *mut PeacockExecutor,
     handle: u64,
+    producer: Seq,
     num_rows: usize,
     byte_size: usize,
 }
 
 #[cfg(not(feature = "rust-only"))]
 impl GpuBatch {
+    /// `producer` is the seq of the call this handle came out of — the same thing C++
+    /// records at every registry insert, and the only way a slice or an export can name
+    /// the node whose output it handled.
     pub fn new(
         executor: *mut PeacockExecutor,
         handle: u64,
+        producer: Seq,
         num_rows: usize,
         byte_size: usize,
     ) -> Self {
         Self {
             executor,
             handle,
+            producer,
             num_rows,
             byte_size,
         }
@@ -109,6 +115,12 @@ impl GpuBatch {
 
     pub fn handle(&self) -> u64 {
         self.handle
+    }
+
+    /// The seq of the call that produced this handle. A slice propagates it: the trimmed
+    /// rows are still that node's output, which is what C++ charges the region to.
+    pub fn producer(&self) -> Seq {
+        self.producer
     }
 
     pub fn executor(&self) -> *mut PeacockExecutor {
@@ -144,15 +156,41 @@ impl BackendError {
 /// resets the session and every resident table with it, so there is nothing to resume from.
 pub type CallResult<T> = Result<(T, CallStats), BackendError>;
 
+/// What an ABI call addressed: a plan node by its kind, or one of the two symbols whose
+/// arguments are runtime row counts and that name no node at all.
+///
+/// The same split [`Call::target`](crate::wire::Call) makes on the wire, and for the same
+/// reason: a slice and an export are handed a handle, so the plan has no seq for them and
+/// [`FbKind`] has no member either. A record still has to print something for them, and
+/// the symbol is what they are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbiTarget {
+    Node(FbKind),
+    Bare(AbiSymbol),
+}
+
+impl std::fmt::Display for AbiTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Node(kind) => write!(f, "{kind}"),
+            Self::Bare(symbol) => write!(f, "{}", symbol.name()),
+        }
+    }
+}
+
 /// One ABI call an executor made, as its CALLER saw it.
 ///
-/// C++ reports what a call produced. What went IN only this side knows: the call consumes
-/// its handles, so by the time the far side could measure them the registry entries are
-/// gone (#152). The two halves meet by `seq` plus the order the calls were made in.
+/// C++ measures what a call cost. What it was handed and what it produced are priced here:
+/// the call consumes its handles, so by the time the far side could measure the input the
+/// registry entries are gone (#152), and C++ prices nothing. The two halves meet on
+/// `(seq, call_index)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AbiCall {
+    /// The node whose output this call handled. Its own for the two symbols that name a
+    /// seq; for a slice and an export, the node that produced the handle — which is what
+    /// C++ charges the region to, and the two must agree or the join cannot close.
     pub seq: Seq,
-    pub kind: FbKind,
+    pub target: AbiTarget,
     /// Which call of this seq the session had reached — the number C++ answers with, and
     /// the other half of the key the two records meet on.
     ///
@@ -160,10 +198,9 @@ pub struct AbiCall {
     /// that sees every call in the order they were made. An executor sees only its own.
     pub call_index: u64,
     pub in_rows: u64,
-    /// `None` where the input was the call before it rather than a batch this side was
-    /// holding: nobody here priced it, and the region for that call reports its
-    /// `out_bytes`.
-    pub in_bytes: Option<u64>,
+    pub in_bytes: u64,
+    pub out_rows: u64,
+    pub out_bytes: u64,
 }
 
 /// The ABI calls one executor call made, collected only while measuring.
@@ -181,22 +218,9 @@ impl AbiCalls {
         Self(measuring.then(Box::default))
     }
 
-    /// Whether anything asked for these calls. What a caller checks BEFORE pricing an
-    /// input: the price is only ever read from here, so an unarmed run should not compute
-    /// one at all.
-    pub fn is_armed(&self) -> bool {
-        self.0.is_some()
-    }
-
-    pub fn record(&mut self, seq: Seq, kind: FbKind, in_rows: u64, in_bytes: Option<u64>) {
+    pub fn record(&mut self, call: AbiCall) {
         if let Some(calls) = &mut self.0 {
-            calls.push(AbiCall {
-                seq,
-                kind,
-                call_index: 0,
-                in_rows,
-                in_bytes,
-            });
+            calls.push(call);
         }
     }
 
@@ -610,11 +634,6 @@ pub struct RunReport {
     pub lanes_of: Vec<usize>,
     /// Per node, per output lane, the batches it emitted in order.
     pub emitted: Vec<Vec<Vec<EmittedBatch>>>,
-    /// Per node, its driving lane count — how many lanes the schedule calls it on, which
-    /// is what [`abi_calls`](RunReport::abi_calls) is indexed by. Equal to
-    /// [`lanes_of`](RunReport::lanes_of) except at a scatter (driven on one, emits into
-    /// many) and a cross-lane accumulator (the reverse).
-    pub driving_lanes: Vec<usize>,
     /// Per node, per driving lane, the ABI calls each of that lane's backend calls made,
     /// in order: one entry per call that reached an executor and none for a step the
     /// driver answered itself. A backend that reports nothing leaves every entry
@@ -637,47 +656,43 @@ pub struct RunReport {
 }
 
 /// One measured region, as C++ reports it: which call it belonged to and what that call
-/// cost. Its key is `(seq, call_index)`, which is what an `AbiCall` carries — the two
-/// records are halves of one row and meet there.
+/// cost on the host and on the device. Its key is `(seq, call_index)`, which is what an
+/// [`AbiCall`] carries — the two records are halves of one row and meet there.
 ///
-/// Here rather than in `gpu_backend` for the reason `AbiCalls` lives in `executor`: this
+/// Here rather than in `gpu_backend` for the reason [`AbiCalls`] lives in `executor`: this
 /// is what a measurement IS, and the backend fills one in. Not the ABI struct, so a
 /// `rust-only` build with no backend still has a driver that compiles.
 ///
-/// One call can answer with several, one per output partition. The shared prologue is
-/// charged to partition 0, so a call's cost is the SUM over its partitions.
-#[derive(Debug, Clone, Copy)]
+/// One call can answer with several, one per output partition, and a call's cost is their
+/// sum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Region {
     pub seq: Seq,
     pub partition: usize,
     pub call_index: u64,
-    /// What this one region cost and produced, in the same shape a summed call carries —
-    /// so summing is `+=` and not a field list that a seventh field can be left out of.
-    pub measured: Measured,
+    pub host_us: u64,
+    pub device_us: u64,
 }
 
-/// What the device reported about one call, summed over the regions it produced.
+/// What one call cost and produced: the device's half summed over the call's regions, the
+/// price of its output taken from the [`AbiCall`] beside them.
 ///
-/// Summed rather than picked: a call that answers with several output partitions charges
-/// its shared prologue to partition 0, so any single region is a fraction of the call and
-/// only the total is the call. The same holds for what it produced — the partitions of one
-/// call are that call's output.
+/// Summed rather than picked because a call answering with several output partitions
+/// spreads itself across them, so any single region is a fraction of the call.
 ///
 /// Named for the measurement rather than for the time because it carries both: the output
 /// of a call in the middle of a node's chain exists on this side nowhere else.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Measured {
-    pub host_setup_us: u64,
-    pub host_submit_us: u64,
-    /// Zero where the region recorded no complete event pair — it touched no device, or
-    /// the events could not be created. Absent regions are dropped by C++, not zeroed;
-    /// this zero is the other case.
+    /// Steady clock across the whole call, this call's regions added.
+    pub host_us: u64,
+    /// Between each region's two CUDA events. Zero where a region recorded no complete
+    /// pair — it touched no device.
     pub device_us: u64,
-    /// Rows this answered with. The only place a middle call's output exists: a node
-    /// driving several hands its caller the last one's and drops the rest.
+    /// Rows this answered with, as the caller priced them. The only place a middle call's
+    /// output exists: a node driving several hands its caller the last one's and drops
+    /// the rest.
     pub out_rows: u64,
-    /// Priced by C++'s own reconstruction of the byte rule — the only figure that exists
-    /// for a chained call, which this side never built a batch from.
     pub out_bytes: u64,
     /// Regions that answered. One on a [`Region`], where it is what makes the count fall
     /// out of the sum; zero on a call means the device recorded none, which is not the
@@ -686,28 +701,15 @@ pub struct Measured {
 }
 
 impl std::ops::AddAssign for Measured {
-    /// Field for field, because every field of this is additive over regions — including
-    /// `regions` itself. The one operation the three summations in this module need, so
-    /// that a field added above is summed everywhere without visiting them.
+    /// Field for field, because every field of this is additive over calls — including
+    /// `regions` itself. The one operation the summations in `driver::measurements` need,
+    /// so that a field added above is summed everywhere without visiting them.
     fn add_assign(&mut self, other: Self) {
-        self.host_setup_us += other.host_setup_us;
-        self.host_submit_us += other.host_submit_us;
+        self.host_us += other.host_us;
         self.device_us += other.device_us;
         self.out_rows += other.out_rows;
         self.out_bytes += other.out_bytes;
         self.regions += other.regions;
-    }
-}
-
-impl Measured {
-    /// The host side of the region: the prologue plus the submission.
-    ///
-    /// There is deliberately no term that adds `device_us` to this. Under events the two
-    /// OVERLAP — the host submits while the device runs, and `cudf_host_us` is submission
-    /// and not execution — so their sum is the duration of nothing. Which of the three a
-    /// record reports is the record format's decision, not this module's.
-    pub fn host_us(&self) -> u64 {
-        self.host_setup_us + self.host_submit_us
     }
 }
 
@@ -721,6 +723,7 @@ impl Measured {
 /// |---|---|---|
 /// | `.benchmark.txt` | a driver call | its axis is lanes × batches, and a batch is a driver call |
 /// | `records.tsv` | one cuDF call | its row is one call, and the device measured each |
+#[derive(Debug)]
 pub struct Measurements {
     /// Node → driving lane → the calls that lane made, each the sum over the seqs it
     /// addressed. `None` for a call the run did not measure, so an unmeasured backend
@@ -730,12 +733,6 @@ pub struct Measurements {
 }
 
 impl Measurements {
-    /// What one driver call cost, summed over the seqs it addressed — the unit a batch is
-    /// rendered in.
-    pub fn entry(&self, node: usize, lane: usize, position: usize) -> Option<Measured> {
-        self.per_entry[node][lane][position]
-    }
-
     /// Lanes of a node, each with one entry per call it made. For walking the shape without
     /// knowing its lengths.
     pub fn lanes(&self, node: usize) -> &[Vec<Option<Measured>>] {
@@ -752,9 +749,9 @@ impl Measurements {
     }
 }
 
-/// Cost every recorded call from the regions the device answered with. Regions the join
-/// did not claim come back beside the measurements rather than dropped.
-pub fn join_regions(report: &RunReport, regions: &[Region]) -> (Measurements, Vec<Region>) {
+/// Cost every journalled call from the regions the device answered with, refusing a
+/// mismatch in either direction — see `driver::measurements`.
+pub fn join_regions(report: &RunReport, regions: &[Region]) -> Result<Measurements, String> {
     driver::join_regions(report, regions)
 }
 
@@ -868,6 +865,13 @@ pub fn set_nvtx_ranges(on: bool) {
 #[must_use = "the range closes when this is dropped, so dropping it at once ranges nothing"]
 pub fn nvtx_range(name: &str) -> NvtxRange {
     instrument::nvtx_range(name)
+}
+
+/// Drain what the session recorded, after the root export and before the plan ends — the
+/// events die with the plan, and the device times do not exist until then.
+#[cfg(not(feature = "rust-only"))]
+pub fn collect_regions(executor: *mut PeacockExecutor) -> Result<Vec<Region>, BackendError> {
+    gpu_backend::collect_regions(executor)
 }
 
 /// A join, as the schedule sees one: the range of its probe subtree, and how many lanes

@@ -15,11 +15,15 @@ use peacockdb_ffi::raw::peacock_executor_slice_handle;
 
 use crate::common::logical_size_from_schema;
 
-use super::{CallSite, Consumed, execute_node, last_error, no_abi_calls, produced};
+use super::{
+    CallSite, Consumed, execute_node, hand_over, last_error, no_abi_calls, one_call, priced,
+};
 use crate::executor::Batch;
 use crate::executor::GpuBatch;
 use crate::executor::node_timing_on;
-use crate::executor::{AbiCalls, BackendError, CallResult, CallStats, LaneEvent};
+use crate::executor::{
+    AbiCall, AbiCalls, AbiTarget, BackendError, CallResult, CallStats, LaneEvent,
+};
 use crate::plan::PlanError;
 use crate::plan::RowInterval;
 use crate::wire::{AbiSymbol, Call, CallPattern, FbKind, Input, Recipe, Seq};
@@ -170,22 +174,6 @@ fn shape(expected: &str, recipe: &Recipe) -> PlanError {
     PlanError::Invalid(format!("{expected}, and this one is `{recipe}`"))
 }
 
-/// The handles a call is about to consume, and the batches they came from dropped without
-/// releasing: C++ erases each registry entry as it takes it.
-///
-/// `measure` because this is the last place the sizes exist — `consume` ends a batch, and
-/// the far side cannot price what it has already erased. An unmeasured run does not walk
-/// them: the price is read from the log and nowhere else.
-fn hand_over(batches: Vec<GpuBatch>, measure: bool) -> (Vec<u64>, Consumed) {
-    let taken = if measure {
-        Consumed::sum(&batches)
-    } else {
-        Consumed::default()
-    };
-    let handles = batches.into_iter().map(|batch| batch.consume().1).collect();
-    (handles, taken)
-}
-
 /// A lane's batches concatenated into one at done, and nothing at all where none arrived.
 ///
 /// The collapse arm does answer a call with no handles — but with a table of no columns,
@@ -213,13 +201,16 @@ impl Collapse {
         if self.held.is_empty() {
             return Ok((Vec::new(), no_abi_calls()));
         }
-        let (seq, kind) = self.collapse;
         let mut calls = AbiCalls::armed(node_timing_on());
-        let (handles, taken) = hand_over(self.held, calls.is_armed());
-        let (handle, stats) = execute_node(self.site, seq, kind, &[handles])?;
-        calls.record(seq, kind, taken.rows, Some(taken.bytes));
+        let out = one_call(
+            self.site,
+            self.collapse,
+            self.held,
+            &self.schema,
+            &mut calls,
+        )?;
         Ok((
-            vec![produced(self.site.executor, handle, stats, &self.schema)],
+            vec![out],
             CallStats {
                 scratch_bytes: None,
                 calls,
@@ -245,13 +236,9 @@ impl SortedRuns {
     }
 
     fn accumulate_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
-        let (seq, kind) = self.sort;
         let mut calls = AbiCalls::armed(node_timing_on());
-        let (handles, taken) = hand_over(vec![batch], calls.is_armed());
-        let (handle, stats) = execute_node(self.site, seq, kind, &[handles])?;
-        calls.record(seq, kind, taken.rows, Some(taken.bytes));
-        self.held
-            .push(produced(self.site.executor, handle, stats, &self.schema));
+        let run = one_call(self.site, self.sort, vec![batch], &self.schema, &mut calls)?;
+        self.held.push(run);
         Ok((
             Vec::new(),
             CallStats {
@@ -265,13 +252,10 @@ impl SortedRuns {
         if self.held.is_empty() {
             return Ok((Vec::new(), no_abi_calls()));
         }
-        let (seq, kind) = self.merge;
         let mut calls = AbiCalls::armed(node_timing_on());
-        let (handles, taken) = hand_over(self.held, calls.is_armed());
-        let (handle, stats) = execute_node(self.site, seq, kind, &[handles])?;
-        calls.record(seq, kind, taken.rows, Some(taken.bytes));
+        let out = one_call(self.site, self.merge, self.held, &self.schema, &mut calls)?;
         Ok((
-            vec![produced(self.site.executor, handle, stats, &self.schema)],
+            vec![out],
             CallStats {
                 scratch_bytes: None,
                 calls,
@@ -326,13 +310,32 @@ impl AggregateBatches {
         folding.extend(self.state.take());
         folding.append(&mut self.pending);
         let (seq, kind) = self.concat;
-        let (handles, taken) = hand_over(folding, calls.is_armed());
+        let (handles, taken) = hand_over(folding);
         let (concatenated, concat_stats) = execute_node(self.site, seq, kind, &[handles])?;
-        calls.record(seq, kind, taken.rows, Some(taken.bytes));
+        // The concat's output is state, not the node's row — nothing here builds a batch
+        // from it, so the state schema is the only thing that can price it.
+        let concat_bytes = priced(concat_stats, &self.held);
+        calls.record(AbiCall {
+            seq,
+            target: AbiTarget::Node(kind),
+            call_index: 0,
+            in_rows: taken.rows,
+            in_bytes: taken.bytes,
+            out_rows: concat_stats.rows,
+            out_bytes: concat_bytes,
+        });
         let (seq, kind) = self.merge;
         let (handle, stats) = execute_node(self.site, seq, kind, &[vec![concatenated]])?;
-        calls.record(seq, kind, concat_stats.rows, None);
-        let state = produced(self.site.executor, handle, stats, &self.held);
+        let state = super::produced(self.site.executor, seq, handle, stats, &self.held);
+        calls.record(AbiCall {
+            seq,
+            target: AbiTarget::Node(kind),
+            call_index: 0,
+            in_rows: concat_stats.rows,
+            in_bytes: concat_bytes,
+            out_rows: stats.rows,
+            out_bytes: state.byte_size() as u64,
+        });
         self.threshold = self.threshold.max(2 * state.byte_size());
         self.state = Some(state);
         self.compactions += 1;
@@ -354,13 +357,14 @@ impl AggregateBatches {
         let Some((seq, kind)) = self.finalize else {
             return Ok((vec![state], stats_of(calls)));
         };
-        let (handles, taken) = hand_over(vec![state], calls.is_armed());
-        let (handle, stats) = execute_node(self.site, seq, kind, &[handles])?;
-        calls.record(seq, kind, taken.rows, Some(taken.bytes));
-        Ok((
-            vec![produced(self.site.executor, handle, stats, &self.output)],
-            stats_of(calls),
-        ))
+        let out = one_call(
+            self.site,
+            (seq, kind),
+            vec![state],
+            &self.output,
+            &mut calls,
+        )?;
+        Ok((vec![out], stats_of(calls)))
     }
 }
 
@@ -421,7 +425,6 @@ impl GpuPartitionAccumulator {
         if self.live > 0 {
             return Ok((Vec::new(), no_abi_calls()));
         }
-        let (seq, kind) = self.merge;
         let held: Vec<GpuBatch> = std::mem::take(&mut self.per_lane)
             .into_iter()
             .flatten()
@@ -430,11 +433,9 @@ impl GpuPartitionAccumulator {
             return Ok((Vec::new(), no_abi_calls()));
         }
         let mut calls = AbiCalls::armed(node_timing_on());
-        let (handles, taken) = hand_over(held, calls.is_armed());
-        let (handle, stats) = execute_node(self.site, seq, kind, &[handles])?;
-        calls.record(seq, kind, taken.rows, Some(taken.bytes));
+        let out = one_call(self.site, self.merge, held, &self.schema, &mut calls)?;
         Ok((
-            vec![produced(self.site.executor, handle, stats, &self.schema)],
+            vec![out],
             CallStats {
                 scratch_bytes: None,
                 calls,
@@ -474,6 +475,11 @@ impl LimitStream {
         }
         // The session is this executor's, as everywhere on this path: a batch carries the
         // pointer only so that dropping it can release its handle.
+        let taken = Consumed::of(&batch);
+        // A limit carries no seq of its own, so the region C++ opens for the slice is
+        // charged to the node that produced the handle — and the trimmed rows are still
+        // that node's output, so the batch below keeps the same producer.
+        let seq = batch.producer();
         let (_, handle) = batch.consume();
         let mut sliced = 0u64;
         let rc = unsafe {
@@ -498,10 +504,27 @@ impl LimitStream {
         let kept = GpuBatch::new(
             self.site.executor,
             sliced,
+            seq,
             rows.length as usize,
             logical_size_from_schema(&self.schema, rows.length as usize, 0),
         );
-        Ok((vec![kept], no_abi_calls()))
+        let mut calls = AbiCalls::armed(node_timing_on());
+        calls.record(AbiCall {
+            seq,
+            target: AbiTarget::Bare(AbiSymbol::SliceHandle),
+            call_index: 0,
+            in_rows: taken.rows,
+            in_bytes: taken.bytes,
+            out_rows: kept.num_rows() as u64,
+            out_bytes: kept.byte_size() as u64,
+        });
+        Ok((
+            vec![kept],
+            CallStats {
+                scratch_bytes: None,
+                calls,
+            },
+        ))
     }
 
     fn mark_done_and_fetch(self) -> CallResult<Vec<GpuBatch>> {

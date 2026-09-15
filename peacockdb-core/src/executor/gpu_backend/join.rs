@@ -13,11 +13,11 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
 use datafusion::common::JoinType;
 
-use super::{CallSite, Consumed, execute_node, no_abi_calls, produced};
+use super::{CallSite, Consumed, execute_node, hand_over, no_abi_calls, produced};
 use crate::executor::Batch;
 use crate::executor::GpuBatch;
 use crate::executor::node_timing_on;
-use crate::executor::{AbiCalls, BackendError, CallResult, CallStats};
+use crate::executor::{AbiCall, AbiCalls, AbiTarget, BackendError, CallResult, CallStats};
 use crate::plan::PlanError;
 use crate::plan::empty_build_answers_nothing;
 use crate::wire::{CallPattern, FbKind, Input, ProjectRole, Recipe, Seq};
@@ -263,11 +263,10 @@ impl GpuProbingJoin {
         // is a batch this side is holding — the prior output included, since a join builds
         // one from each call rather than passing the raw handle on.
         let mut taken = Consumed::default();
-        let measure = calls.is_armed();
         for input in &call.inputs {
             let (handles, slot) = match input {
                 Input::Batch => {
-                    let (handle, slot) = self.take(batch.take(), "the probe batch", measure)?;
+                    let (handle, slot) = self.take(batch.take(), "the probe batch")?;
                     (vec![handle], slot)
                 }
                 Input::BatchCopy => {
@@ -276,19 +275,17 @@ impl GpuProbingJoin {
                 }
                 Input::BuildSide => {
                     let build = self.build.take();
-                    let (handle, slot) = self.take(build, "the build side", measure)?;
+                    let (handle, slot) = self.take(build, "the build side")?;
                     (vec![handle], slot)
                 }
                 Input::BuildSideCopy => {
                     let build = self.build.take();
-                    let (handle, slot) = self.build_copy(build, measure)?;
+                    let (handle, slot) = self.build_copy(build)?;
                     (vec![handle], slot)
                 }
-                Input::AccumulatedKeys => {
-                    hand_over(std::mem::take(&mut self.accumulated), calls.is_armed())
-                }
+                Input::AccumulatedKeys => hand_over(std::mem::take(&mut self.accumulated)),
                 Input::PriorOutput => {
-                    let (handle, slot) = self.take(prior.take(), "the call before it", measure)?;
+                    let (handle, slot) = self.take(prior.take(), "the call before it")?;
                     (vec![handle], slot)
                 }
                 other => {
@@ -302,9 +299,18 @@ impl GpuProbingJoin {
             slots.push(handles);
         }
         let (handle, stats) = execute_node(self.join.site, call.seq, call.kind, &slots)?;
-        calls.record(call.seq, call.kind, taken.rows, Some(taken.bytes));
         let schema = self.schema_of(call.kind);
-        Ok(produced(self.join.site.executor, handle, stats, schema))
+        let out = produced(self.join.site.executor, call.seq, handle, stats, schema);
+        calls.record(AbiCall {
+            seq: call.seq,
+            target: AbiTarget::Node(call.kind),
+            call_index: 0,
+            in_rows: taken.rows,
+            in_bytes: taken.bytes,
+            out_rows: stats.rows,
+            out_bytes: out.byte_size() as u64,
+        });
+        Ok(out)
     }
 
     /// What the call produced is priced by: the key project's output is the keys, and
@@ -316,19 +322,10 @@ impl GpuProbingJoin {
         }
     }
 
-    fn take(
-        &self,
-        batch: Option<GpuBatch>,
-        what: &str,
-        measure: bool,
-    ) -> Result<(u64, Consumed), BackendError> {
+    fn take(&self, batch: Option<GpuBatch>, what: &str) -> Result<(u64, Consumed), BackendError> {
         batch
             .map(|batch| {
-                let taken = if measure {
-                    Consumed::of(&batch)
-                } else {
-                    Consumed::default()
-                };
+                let taken = Consumed::of(&batch);
                 (batch.consume().1, taken)
             })
             .ok_or_else(|| BackendError::new(format!("{what} was already consumed")))
@@ -349,18 +346,10 @@ impl GpuProbingJoin {
     /// The build side, where the recipe asked for a copy of it. The first probe batch can
     /// have the original; a second has nothing to be given, because the call that read it
     /// erased it.
-    fn build_copy(
-        &self,
-        build: Option<GpuBatch>,
-        measure: bool,
-    ) -> Result<(u64, Consumed), BackendError> {
+    fn build_copy(&self, build: Option<GpuBatch>) -> Result<(u64, Consumed), BackendError> {
         match build {
             Some(build) => {
-                let taken = if measure {
-                    Consumed::of(&build)
-                } else {
-                    Consumed::default()
-                };
+                let taken = Consumed::of(&build);
                 Ok((build.consume().1, taken))
             }
             None => Err(BackendError::new(format!(
@@ -373,14 +362,3 @@ impl GpuProbingJoin {
     }
 }
 
-/// `measure` for the reason argued on the accumulator's copy: `consume` is the last place
-/// a batch's sizes exist, and an unmeasured run should not walk them.
-fn hand_over(batches: Vec<GpuBatch>, measure: bool) -> (Vec<u64>, Consumed) {
-    let taken = if measure {
-        Consumed::sum(&batches)
-    } else {
-        Consumed::default()
-    };
-    let handles = batches.into_iter().map(|batch| batch.consume().1).collect();
-    (handles, taken)
-}

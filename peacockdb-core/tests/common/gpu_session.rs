@@ -1,10 +1,7 @@
 //! A device session over one plan, shared by the tiers that open one.
 
+use peacockdb_core::executor::{GpuContext, Region, collect_regions};
 use peacockdb_core::plan::GpuNode;
-use peacockdb_core::executor::GpuContext;
-use peacockdb_core::executor::Region;
-use peacockdb_core::executor::gpu_backend::collect_regions;
-use peacockdb_core::executor::RunReport;
 use peacockdb_core::wire::{RecipePlan, attach_recipes};
 use peacockdb_ffi::raw::{
     PeacockExecutor, peacock_executor_begin_plan, peacock_executor_create,
@@ -45,11 +42,8 @@ impl Session {
 
     /// What the device recorded, drained while the session is still open: `end_plan`
     /// destroys the events, so a caller reading after the drop reads nothing.
-    ///
-    /// `cap` bounds what the run can have produced — C++ refuses rather than truncating,
-    /// and by then the drain has happened.
-    pub fn regions(&self, cap: usize, what: &str) -> Vec<Region> {
-        collect_regions(self.executor, cap).unwrap_or_else(|e| panic!("{what}: {e}"))
+    pub fn regions(&self, what: &str) -> Vec<Region> {
+        collect_regions(self.executor).unwrap_or_else(|e| panic!("{what}: {e}"))
     }
 
     pub fn context(&mut self) -> GpuContext {
@@ -67,23 +61,6 @@ impl Drop for Session {
             peacock_executor_destroy(self.executor);
         }
     }
-}
-
-/// What a run can have produced: every recorded call, times the widest output a single
-/// call has, which is a scatter's lanes. A bound rather than a count — `collect_regions`
-/// refuses a cap it overruns instead of truncating, so an under-count is a failed run
-/// and an over-count costs a reservation.
-pub fn region_cap(report: &RunReport) -> usize {
-    let calls: usize = report
-        .abi_calls
-        .iter()
-        .flatten()
-        .flatten()
-        .filter_map(|made| made.recorded())
-        .map(|made| made.len())
-        .sum();
-    let widest = report.lanes_of.iter().copied().max().unwrap_or(1).max(1);
-    calls * widest
 }
 
 pub fn error_of(executor: *mut PeacockExecutor) -> String {

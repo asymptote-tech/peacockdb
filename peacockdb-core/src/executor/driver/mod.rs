@@ -54,8 +54,12 @@ pub(crate) fn nodes_as_recorded(root: &dyn GpuNode) -> Result<Vec<(&'static str,
     index::nodes_as_recorded(root)
 }
 
-/// The two halves of a measurement joined on `(seq, call_index)`.
-pub(crate) fn join_regions(report: &RunReport, regions: &[Region]) -> (Measurements, Vec<Region>) {
+/// The two halves of a measurement joined on `(seq, call_index)`, refusing a mismatch in
+/// either direction.
+pub(crate) fn join_regions(
+    report: &RunReport,
+    regions: &[Region],
+) -> Result<Measurements, String> {
     measurements::join_regions(report, regions)
 }
 

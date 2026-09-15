@@ -163,7 +163,7 @@ fn the_record_is_written_only_when_a_path_is_named() {
         query: "q6",
         mode: "tp1-single",
         timing_mode: "events",
-        build_profile: "test",
+        build: "test",
         allocator: "none",
     };
     let row = "one\ttwo\tthree".to_string();

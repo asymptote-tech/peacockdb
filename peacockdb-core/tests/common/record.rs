@@ -45,8 +45,7 @@ pub const COLUMNS: &[&str] = &[
     "in_bytes",
     "out_rows",
     "out_bytes",
-    "peacock_host_us",
-    "cudf_host_us",
+    "host_us",
     "device_us",
 ];
 
@@ -64,7 +63,7 @@ pub struct RunMeta<'a> {
     /// at two modes is a different plan and a different set of calls.
     pub mode: &'a str,
     pub timing_mode: &'a str,
-    pub build_profile: &'a str,
+    pub build: &'a str,
     pub allocator: &'a str,
 }
 /// One row per call the run made, in the order the driver made them.
@@ -125,15 +124,14 @@ fn row(
         node_type.to_string(),
         lane.to_string(),
         call.seq.to_string(),
-        call.kind.to_string(),
+        call.target.to_string(),
         call.call_index.to_string(),
         run_index.to_string(),
         call.in_rows.to_string(),
-        or_empty(call.in_bytes),
+        call.in_bytes.to_string(),
         or_empty(measured.map(|m| m.out_rows)),
         or_empty(measured.map(|m| m.out_bytes)),
-        or_empty(measured.map(|m| m.host_setup_us)),
-        or_empty(measured.map(|m| m.host_submit_us)),
+        or_empty(measured.map(|m| m.host_us)),
         or_empty(measured.map(|m| m.device_us)),
     ]
     .join("\t")
@@ -243,7 +241,7 @@ const RUN_PREFIX: &str = "# run: ";
 fn run_conditions(meta: &RunMeta<'_>) -> Vec<String> {
     vec![
         format!("{RUN_PREFIX}timing_mode={}", meta.timing_mode),
-        format!("{RUN_PREFIX}build_profile={}", meta.build_profile),
+        format!("{RUN_PREFIX}build={}", meta.build),
         format!("{RUN_PREFIX}allocator={}", meta.allocator),
     ]
 }
@@ -287,15 +285,13 @@ const HEADER_NOTES: &str = "\
 #   file joined against this one (hbm.tsv) names the same execution by the same number
 #   rather than by its own count of the same boundary.
 # out_rows/out_bytes = what the call answered with, summed over its output partitions.
-#   Both come from the device's region: a call in the middle of a node's chain hands the
-#   raw handle on, so this side never built a batch from it and never priced it.
-# in_rows/in_bytes = what the CALLER handed over, summed over the call's input slots.
-#   Empty where the input was the previous call's output: nothing on this side priced it,
-#   and that call's own out_bytes is the figure.
-# peacock_host_us = host time before the region's first device touch — the prologue only
-#   peacockdb pays.
-# cudf_host_us = host time from that touch to the end of the region. NOT launch cost:
-#   cuDF and rmm synchronize internally, so it follows device_us closely.
+#   Priced by the caller from the rows the ABI reported and the schema that output belongs
+#   to; C++ prices nothing.
+# in_rows/in_bytes = what the CALLER handed over, summed over the call's input slots. For
+#   a call in the middle of a node's chain, the call before it — which is the only side
+#   that priced that handle.
+# host_us = the steady clock across the whole call, summed over its regions. NOT launch
+#   cost: cuDF and rmm synchronize internally, so it follows device_us closely.
 # device_us = between the region's CUDA events, on the one stream everything is issued
 #   to. An interval of that stream, not a figure for the device as a whole.
 # hbm_bytes is NOT here: it comes from Nsight and joins on the same tuple.";

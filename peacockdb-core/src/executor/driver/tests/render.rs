@@ -10,8 +10,8 @@
 use super::super::mock::{EmitRule, Script, spec};
 use super::super::plans::*;
 use super::*;
-use crate::executor::AbiCalls;
-use crate::executor::{Measured, Region, join_regions, nodes_as_recorded};
+use crate::executor::{AbiCall, AbiCalls, AbiTarget};
+use crate::executor::{Region, join_regions, nodes_as_recorded};
 use crate::plan_text::{render_plan, render_run, render_timings};
 use crate::wire::FbKind;
 
@@ -177,9 +177,9 @@ fn a_run_that_drained_renders_no_abandoned_at_all() {
 /// The same tree the execution golden renders, annotated with what it cost rather than
 /// what it produced; rows and bytes live in the file beside this one.
 ///
-/// The mock addresses no seq, so the device recorded nothing and every entry is `0` — a
-/// call that opened no region did no device work. The shape is what is pinned here; that
-/// a measured region never renders 0 is `a_region_that_rounds_to_nothing_still_ran`.
+/// The mock addresses no seq, so nothing was journalled and every entry is `0` — a call
+/// that opened no region did no device work. The shape is what is pinned here; that a
+/// measured region never renders 0 is `a_region_that_rounds_to_nothing_still_ran`.
 ///
 /// Two shapes worth reading off this: `GpuUnload` carries no colon, having no properties
 /// to separate; and the source has one entry per batch and none for the step that found
@@ -189,8 +189,7 @@ fn a_timing_record_renders_the_tree_and_what_each_node_cost() {
     let script = Script::default().source("part", vec![vec![spec(10, 80), spec(7, 56)]]);
     let plan = unload(filter(source("part", 1)));
     let report = run(plan.as_ref(), &script);
-    let (times, unclaimed) = join_regions(&report, &[]);
-    assert!(unclaimed.is_empty(), "no regions, so none go unclaimed");
+    let times = join_regions(&report, &[]).expect("nothing was journalled and nothing measured");
     assert_eq!(
         render_timings(plan.as_ref(), &times),
         "\
@@ -212,8 +211,8 @@ batches=multiple
 /// call that ran indistinguishable from one that never happened, and the file is read for
 /// exactly that difference.
 ///
-/// The mock addresses no seq of its own, so the recorded call is stamped here — which is
-/// also the only way this suite reaches the renderer's numeric path at all.
+/// The mock addresses no seq of its own, so the journal is written here — which is also
+/// the only way this suite reaches the renderer's numeric path at all.
 #[test]
 fn a_region_that_rounds_to_nothing_still_ran() {
     let script = Script::default().source("part", vec![vec![spec(10, 80), spec(7, 56)]]);
@@ -221,15 +220,14 @@ fn a_region_that_rounds_to_nothing_still_ran() {
     let mut report = run(plan.as_ref(), &script);
 
     // GpuFilter is pre-order 1, the index `abi_calls` is in; its one lane made two calls.
-    let calls = &mut report.abi_calls[1][0];
+    let calls = &mut report.abi_calls[FILTER][0];
     for (position, seq) in [7u32, 8].into_iter().enumerate() {
         let mut made = AbiCalls::armed(true);
-        made.record(seq, FbKind::Filter, 0, None);
+        made.record(call_of(seq, 0));
         calls[position] = made;
     }
-    let regions = [region(7, 0, 0, 4), region(8, 0, 30, 1)];
-    let (times, unclaimed) = join_regions(&report, &regions);
-    assert!(unclaimed.is_empty(), "both regions belong to a recorded call");
+    let regions = [region(7, 0, 0), region(8, 0, 30)];
+    let times = join_regions(&report, &regions).expect("both regions belong to a journalled call");
 
     let text = render_timings(plan.as_ref(), &times);
     assert!(
@@ -268,34 +266,75 @@ fn the_recorded_node_index_is_the_post_order_not_the_walk_order() {
 fn each_seq_of_one_driver_call_keeps_its_own_measurement() {
     let script = Script::default().source("part", vec![vec![spec(10, 80)]]);
     let plan = unload(filter(source("part", 1)));
-    let report = run(plan.as_ref(), &script);
-    let regions = [
-        region(7, 0, 40, 4),
-        region(8, 0, 60, 1),
-    ];
-    let (measured, unclaimed) = join_regions(&report, &regions);
-    assert_eq!(unclaimed.len(), 2, "the mock addresses no seq, so neither is claimed");
+    let mut report = run(plan.as_ref(), &script);
+    let mut made = AbiCalls::armed(true);
+    made.record(call_of(7, 4));
+    made.record(call_of(8, 1));
+    report.abi_calls[FILTER][0][0] = made;
 
-    let first = measured.call(7, 0).expect("the device answered for it");
-    let second = measured.call(8, 0).expect("and for the other");
+    let times = join_regions(&report, &[region(7, 0, 40), region(8, 0, 60)])
+        .expect("each journalled call was answered");
+    let first = times.call(7, 0).expect("the device answered for it");
+    let second = times.call(8, 0).expect("and for the other");
     assert_eq!((first.device_us, first.out_rows), (40, 4));
     assert_eq!((second.device_us, second.out_rows), (60, 1), "not the pair's total");
+    let entry = times.lanes(FILTER)[0][0].expect("the entry is measured");
+    assert_eq!(entry.device_us, 100, "the entry is the two seqs added");
 }
 
-/// A region with the numbers a case wants to assert on, built here because the mock backend
-/// addresses no seq and so produces none of its own.
-fn region(seq: u32, call_index: u64, device_us: u64, out_rows: u64) -> Region {
+/// A journalled call the device answered nothing for fails the join, naming it.
+///
+/// Every call opens a region now, so an absence is a run that lost its measurement —
+/// reporting the node as free instead is the one reading a benchmark record must never
+/// produce.
+#[test]
+fn a_call_without_a_region_is_refused() {
+    let script = Script::default().source("part", vec![vec![spec(10, 80)]]);
+    let plan = unload(filter(source("part", 1)));
+    let mut report = run(plan.as_ref(), &script);
+    let mut made = AbiCalls::armed(true);
+    made.record(call_of(7, 4));
+    report.abi_calls[FILTER][0][0] = made;
+
+    let refused = join_regions(&report, &[]).expect_err("the call was never answered");
+    assert!(refused.contains("(seq 7, call 0)"), "{refused}");
+}
+
+/// And the other direction: a region no journalled call claims.
+#[test]
+fn a_region_without_a_call_is_refused() {
+    let script = Script::default().source("part", vec![vec![spec(10, 80)]]);
+    let plan = unload(filter(source("part", 1)));
+    let report = run(plan.as_ref(), &script);
+
+    let refused = join_regions(&report, &[region(7, 0, 40)]).expect_err("nobody made that call");
+    assert!(refused.contains("(seq 7, call 0)"), "{refused}");
+}
+
+/// `GpuFilter`'s pre-order index, which is what `abi_calls` and `lanes` are keyed by.
+const FILTER: usize = 1;
+
+/// A journalled call for a seq the mock never addressed, so a case can hand the join one.
+fn call_of(seq: u32, out_rows: u64) -> AbiCall {
+    AbiCall {
+        seq,
+        target: AbiTarget::Node(FbKind::Filter),
+        call_index: 0,
+        in_rows: 0,
+        in_bytes: 0,
+        out_rows,
+        out_bytes: out_rows * 8,
+    }
+}
+
+/// A region with the microseconds a case wants to assert on, built here because the mock
+/// backend addresses no seq and so produces none of its own.
+fn region(seq: u32, call_index: u64, device_us: u64) -> Region {
     Region {
         seq,
         partition: 0,
         call_index,
-        measured: Measured {
-            host_setup_us: 0,
-            host_submit_us: device_us,
-            device_us,
-            out_rows,
-            out_bytes: out_rows * 8,
-            regions: 1,
-        },
+        host_us: device_us,
+        device_us,
     }
 }
