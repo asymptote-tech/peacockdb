@@ -204,3 +204,11 @@ message; `refcounted-tables.md`'s expectation of a panic from the walk, stale si
 10 and the human's when that chain starts. The signoff is on the spec. Awaiting CI on run
 `35032672205` (the code push `74672b43`; the later doc-only pushes are skipped by the changes
 gate and prove nothing).
+
+### 2026-09-15 — done
+
+CI run `35032672205` on `74672b43`: every job green — both dataset-matrix legs, the 25.02 GPU
+build, the remote GPU tests, cost-report, s3 — Pages skipped as on every PR. The later
+documentation-only pushes (`f1bc1983`, `f7ba99a0`, this one) are skipped by the changes gate,
+so `74672b43` is the run that proves the PR. Task 13 is the chain's last task; nothing else
+on the board can progress until the human merges.
