@@ -777,3 +777,25 @@ branch adds are prose in its own new files — "the batch-partitioned planning m
 `corpus_benchmark.rs`, and the like. None is one of the six survivor spellings the gate
 exists to catch. A reader who expects the whole script to print nothing will read these as
 a finding; it prints them on master too.
+
+### CI on 83479e6 is red because master moved
+
+Run 35002080914 fails all three C++ build jobs at `instrument.rs:32`: the PR's merge commit
+carries master's `rmm-pool-budget` (#144, `72fb23f`), where `peacock_install_rmm_pool` takes
+a byte budget, and the branch calls it with the one argument the base had. The branch alone
+compiles and its gate is green; only the merge does not. So `done` is unreachable without a
+rebase, and a rebase is the human's call through the control file. Master's code changes
+since the base are thirteen files, all the pool; the overlap with this branch is
+`peacock_gpu.h`, `gpu_executor.cpp`, `test_cudf.cpp`, `test_plan_executor.cpp`, `lib.rs`,
+plus `build-test.md`, `tickets.md` and the board — conflicts in code go to a developer, the
+rest to the coordinator. The one caller to fix is `executor/instrument.rs`, which then owes
+the harness a budget figure for `install_rmm_pool`.
+
+### The rebase is authorised
+
+The human said so in the session rather than through the control file. Order agreed: finish
+review round 1's reading on `83479e6`; rebase onto master (the coordinator, conflicts in the
+wiki and the board its own); one developer takes the code conflicts and the round's blocking
+and important findings together, and re-proves the gate on shad-gpu; the sf40 measurement
+comes after, on the rebased base. The human reads the review findings before they go to
+the developer.
