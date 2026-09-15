@@ -121,8 +121,24 @@ TEST(CudfGpu, SparkPartitionIdsMatchComet2ColWithNulls) {
   EXPECT_EQ(ids, (std::vector<int32_t>{3, 7, 1, 0, 4, 2}));
 }
 
+// Six-row literal columns and the murmur3 kernel — no dataset at all; measured peak 912
+// bytes (llm-wiki/tasks/rmm-pool-budget-detail.md). 1 GiB is a floor rather than a
+// measurement: nothing here can approach it, and it leaves the timing-floor tests room.
+constexpr std::size_t kPoolBytes = 1ull << 30;
+
+// The one place the tree checks that a pool is the budget its binary declared, rather than a
+// share of what the device had free. That is what #178 was, it is invisible in a passing run,
+// and this binary is in every gpu-tests job. install_rmm_pool is idempotent, so this reads
+// main()'s installation back rather than making a second one.
+TEST(RmmPool, ReservesTheDeclaredBudget) {
+  const peacock::RmmPoolStatus& status = peacock::install_rmm_pool(kPoolBytes);
+  ASSERT_EQ(status.state, peacock::RmmPoolStatus::State::Installed);
+  EXPECT_EQ(status.initial_bytes, peacock::pool_align_down(peacock::pool_budget_bytes(kPoolBytes)));
+  EXPECT_EQ(status.maximum_bytes, status.initial_bytes);
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  peacock::install_rmm_pool();
+  peacock::install_rmm_pool(kPoolBytes);
   return RUN_ALL_TESTS();
 }

@@ -56,3 +56,25 @@ The reason lives on `GpuCrossJoinExec::strips_to_inner` in `cpp`-adjacent Rust
 (`operators/join.rs`); the others reference it. Contrast `GpuInterleaveExec`, which *is*
 stripped so `build_stream` can rebuild it as an equivalent `UnionExec` (its
 single-partition stubs mean `InterleaveExec::try_new` cannot interleave).
+
+## The integrated pool-sizing regime (implementation removed 2026-09-10, constraint live)
+
+`install_rmm_pool()` sized itself as a percentage of *free* device memory and kept two pairs of
+percentages, because "free device memory" meant different things on the two kinds of machine.
+On a DISCRETE part (85% initial, 95% ceiling) VRAM is the GPU's alone, so reserving most of it up
+front costs the host nothing and buys a query whose whole working set fits without a mid-query
+growth event — itself another `cudaMalloc`, the very sync the pool exists to avoid. On an
+INTEGRATED part (25% initial, 90% ceiling) there is one pool of memory and the "device"
+reservation comes straight out of what the OS has for page cache and for the parquet reader's own
+host buffers; reserving 85% there would starve the read path to speed up the compute path, so the
+initial reservation was small and only the ceiling stayed generous.
+
+Callers now pass a measured byte budget, and the discrete pair survives in `rmm_pool.hpp` for
+`multi_gpu.cpp` alone. The integrated pair had no reader left. `llm-wiki/reports/dgx-spark.md`
+holds the GB10 measurements it was derived from.
+
+**What went is the implementation, not the reason.** Every budget in the tree is an H200 number,
+so on GB10 `peacock_tpch_tests` asks for 69 GiB of a machine whose 121.7 GiB is also its system
+RAM — which is the case the 25% initial existed to prevent. `status.integrated` is still reported
+and now nothing reads it. Sizing by host kind is one of the two open questions on
+[#148](../tickets.md#t148).

@@ -88,3 +88,17 @@ takes bytes and does not clamp; the percentage constants remain only for `multi_
 so; two `peacock_tpch_tests` run concurrently on shad-gpu and both pass; every GPU tier is
 byte-identical; #178 is marked tentatively closed carrying the retry-don't-debug instruction; and
 `prompts.md`'s Coordinator section carries it too.
+
+## Completeness signoff
+
+Solved under its constraints, with one Done-when item unmet and four things named rather than
+hidden. Unmet: two `peacock_tpch_tests` at once never ran — a tenant outside this repo held 53 GiB
+of the card for the whole task, and 69+69 needs an idle one. Two `peacock_tpchv_tests` did run
+concurrently and both took their declared budget from very different free-memory readings, which
+proves the rule and not the number. Shortcuts and deviations: the spec's premise for no-clamp is
+false — nothing acts on `Unavailable`, and an unpooled sf40 run loses tests rather than running
+slowly — and the carry-on behaviour was kept as specified, with the failure made legible instead;
+the integrated sizing regime was deleted rather than replaced, so every budget is an H200 number
+([#148](../tickets.md#t148) carries the open question); `PEACOCK_RMM_POOL_BYTES` was added past the
+spec to restore what the deleted override gave the swept binaries; and 24 GiB for the 100M-row node
+sweep is a first try, not a bisection.
