@@ -6,7 +6,7 @@
         --hbm testdata/calibration/hbm.tsv \
         --out-dir testdata/calibration/plots
 
-THE one script. Every picture under `plots/`, and the `index.html` that shows them on one
+The one script. Every picture under `plots/`, and the `index.html` that shows them on one
 page, comes from this call and from nothing else. That is the point rather than a tidiness
 preference: a second generator is a second reading of the format, and two readings of one
 file disagree the first time a column moves.
@@ -17,11 +17,13 @@ describable at all, so nothing here reduces a call to one number before it is dr
 every measured execution is a point.
 
 Not matplotlib's default python: this repo's `python3` is a linuxbrew build with neither
-numpy nor matplotlib. `/usr/bin/python3` has both.
+numpy nor matplotlib. `/usr/bin/python3` has both, at matplotlib 3.9.2, which is what the
+committed panels were rendered with — the version is embedded in every PNG, so a re-render
+under another one rewrites all of them with the data unchanged.
 
-WHAT IS DRAWN
+What is drawn
 
-  load/     the SCAN, alone. `CudfScan` is storage and PCIe; everything else is compute.
+  load/     the scan, alone. `CudfScan` is storage and PCIe; everything else is compute.
             See "load is not processing" below -- this separation is the reason the
             directory exists rather than a panel inside `compute/`.
   compute/  per cuDF step kind: device_us against out_bytes and in_bytes, log-log, one
@@ -31,12 +33,13 @@ WHAT IS DRAWN
   spread/   per step kind: every execution's device_us as a ratio to that call's median
             across executions. Any single figure for a call collapses them, and this is
             the plot that says what that discards.
-  query/    per (query, mode): where the time went, by node and by term.
+  query/    per (query, mode): where the time went, by node and by term — host and
+            device, side by side and never summed.
   hbm/      hbm_bytes against out_bytes, where an HBM capture was joined in.
   icicle/   per (query, mode): plan node -> recipe step -> cuDF call, width in device
             microseconds. The record's three-level tuple, drawn as the three levels it is.
 
-LOAD IS NOT PROCESSING
+Load is not processing
 
 A scan at sf40 is most of the query and is entirely `read_parquet`: decompression, page
 decode, PCIe. A filter is arithmetic over resident columns. Putting both on one axis
@@ -44,14 +47,16 @@ draws one picture about two different machines -- one bounded by storage, the ot
 compute -- and a line through the pair describes neither. So no panel here mixes them,
 and every panel says which of the two it is.
 
-READING THE RECORD
+Reading the record
 
-The parser is this file's own. The record's columns are read here and nowhere else, so a
-column that moves breaks one reader loudly rather than two readers differently.
+The parser is `record.py`, shared with the two capture readers, and every column is read by
+name. What is here instead is `READS`: which columns each panel below wants, so a record
+missing one is refused at the door naming it rather than drawing an empty panel — and an
+empty panel is what a call that cost nothing looks like.
 
-Everything is read BY COLUMN NAME. The record's columns have already changed twice, and a
-reader that counts fields survives such a change quietly, drawing whatever slid into the
-slot it wanted.
+Several records may be given, and they must have been taken under the same conditions. Each
+`# run:` line changes what the microseconds mean, so two files that disagree about one are
+two measurements and not one set of samples.
 """
 
 import argparse
@@ -63,52 +68,36 @@ import sys
 
 import matplotlib
 
+import record
+
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 
-# The cuDF step kinds that are STORAGE rather than compute. One name today, and a set
+# The cuDF step kinds that are storage rather than compute. One name today, and a set
 # rather than a comparison because the next loader (a cached scan, a row-group reader)
 # belongs on this side of the line the moment it exists, and a reader that tests
 # `== "CudfScan"` would put it on the wrong one silently.
 LOAD_KINDS = {"CudfScan"}
 
-# The tuple a row is addressed by, and the prefix of it that names one CALL within one
+# The tuple a row is addressed by, and the prefix of it that names one call within one
 # execution of one case. `run_index` last because dropping it is exactly how you go from
 # "this call" to "this call across the ten executions".
 CASE = ("dataset", "sf", "query", "mode")
 CALL = CASE + ("node_seq", "recipe_seq", "call_index")
 
-
-def read_tsv(path):
-    """Rows as dicts, keyed by the file's own column line.
-
-    By name and not by position, for the reason the module docstring gives. A row whose
-    field count disagrees with the header is an error rather than a shorter dict: the two
-    ways it happens -- a tab inside a value, a writer half-updated -- both produce rows
-    that would plot as real points.
-    """
-    names, rows = None, []
-    with open(path) as fh:
-        for line in fh:
-            if line.startswith("#"):
-                continue
-            f = line.rstrip("\n").split("\t")
-            if names is None:
-                names = f
-                continue
-            if len(f) != len(names):
-                sys.exit(f"{path}: row of {len(f)} fields against {len(names)} columns")
-            rows.append(dict(zip(names, f)))
-    if names is None:
-        sys.exit(f"{path} has no column line")
-    return rows
-
-
-def require(rows, path, *columns):
-    missing = [c for c in columns if c not in rows[0]]
-    if missing:
-        sys.exit(f"{path} has no {missing}; it has {sorted(rows[0])}")
+# Which columns each panel reads, per panel, so the union below is derived rather than
+# kept in step by hand. `CALL` and `run_index` are every panel's, since a point is a call
+# in an execution before it is anything else.
+READS = {
+    "load/ and compute/": ("sf", "recipe_kind", "in_bytes", "out_bytes", "device_us"),
+    "spread/": ("recipe_kind", "device_us"),
+    "query/": ("node_seq", "node_type", "host_us", "device_us"),
+    "icicle/": ("node_seq", "node_type", "recipe_seq", "recipe_kind", "call_index",
+                "device_us"),
+    "hbm/": ("out_bytes",),
+}
+HBM_READS = ("recipe_kind", "hbm_bytes", "samples", "device_busy_us")
 
 
 def num(row, column):
@@ -133,7 +122,7 @@ def case_label(row):
 def executions(rows):
     """Rows grouped by call, each group being that call's executions in run order.
 
-    `run_index` is a column, so this is a group-by rather than a recovery from row ORDER:
+    `run_index` is a column, so this is a group-by rather than a recovery from row order:
     which execution a row belongs to is written down rather than inferred.
     """
     by_call = collections.defaultdict(list)
@@ -152,10 +141,10 @@ def executions(rows):
 # ---------------------------------------------------------------------------
 
 def scatter(ax, points, title, xlabel, ylabel):
-    """One log-log panel, one point per EXECUTION.
+    """One log-log panel, one point per execution.
 
     Log-log because a cost proportional to bytes is a straight line of slope 1 here
-    whatever the constant is -- so the eye checks the SHAPE without knowing it. A panel
+    whatever the constant is -- so the eye checks the shape without knowing it. A panel
     whose points bend, or sit at two heights for one x, is a panel no such cost
     describes, and that is visible without computing anything.
     """
@@ -188,7 +177,7 @@ def scatter(ax, points, title, xlabel, ylabel):
 def plot_kinds(rows, out_dir, which):
     """One figure per cuDF step kind, for one side of the load/compute line.
 
-    Per KIND rather than per plan node: the record's `recipe_kind` is what the device was
+    Per kind rather than per plan node: the record's `recipe_kind` is what the device was
     actually asked to do, and one plan node publishes several of them -- an aggregate
     concatenates, merges and finalizes. A per-node panel would average three different
     kernels into one cloud and call the result a node's cost.
@@ -242,7 +231,7 @@ def plot_spread(by_call, out_dir):
     whose ratios sit inside a few percent is one where a median means something, and a
     kind with a long tail is one where a median stands for scheduling noise.
 
-    Ratio to the CALL's own median, not to the kind's: calls of one kind differ by orders
+    Ratio to the call's own median, not to the kind's: calls of one kind differ by orders
     of magnitude in size, and a ratio across them would measure the query, not the noise.
     """
     by_kind = collections.defaultdict(list)
@@ -286,6 +275,11 @@ def plot_spread(by_call, out_dir):
 # query/ — where one case's time went
 # ---------------------------------------------------------------------------
 
+# The two terms the query panel draws, in the order it draws them. Never summed: see
+# plot_queries.
+TERMS = ("host_us", "device_us")
+
+
 def median_run(rows):
     """One real execution: the one whose total device_us is the median.
 
@@ -305,16 +299,15 @@ def median_run(rows):
 
 
 def plot_queries(rows, out_dir):
-    """Per case: device time by node, and the three time terms, for one execution.
+    """Per case: device time by node, and the two time terms, for one execution.
 
     Two panels because they answer different questions. The left says which node to look
-    at. The right says whether the answer is the device at all -- at sf1 the host
-    prologue is most of a small node and none of a big one, and that difference is why
-    the record carries three terms rather than a total.
+    at. The right says whether the answer is the device at all -- at sf1 the host prologue
+    is most of a small node and none of a big one, and that difference is why the record
+    carries a host term beside the device one.
 
-    Never their sum: under CUDA events the host submission CONTAINS the device execution,
-    so `peacock_host_us + cudf_host_us + device_us` describes no interval. Drawn side by
-    side, never stacked on one bar.
+    Never their sum: under CUDA events the host interval contains the device execution, so
+    `host_us + device_us` describes no interval. Drawn side by side, never stacked.
     """
     made = []
     by_case = collections.defaultdict(list)
@@ -325,16 +318,16 @@ def plot_queries(rows, out_dir):
         if run is None:
             continue
         one = [r for r in case_rows if r["run_index"] == run]
-        nodes = collections.defaultdict(lambda: [0, 0, 0])
+        nodes = collections.defaultdict(lambda: [0, 0])
         for r in one:
             label = f"{r['node_seq']} {r['node_type']}"
-            for i, col in enumerate(("peacock_host_us", "cudf_host_us", "device_us")):
+            for i, col in enumerate(TERMS):
                 v = num(r, col)
                 if v is not None:
                     nodes[label][i] += v
-        order = sorted(nodes, key=lambda n: -nodes[n][2])
+        order = sorted(nodes, key=lambda n: -nodes[n][1])
         fig, axes = plt.subplots(1, 2, figsize=(11, 3.8))
-        axes[0].barh(range(len(order)), [nodes[n][2] for n in order], color="tab:blue")
+        axes[0].barh(range(len(order)), [nodes[n][1] for n in order], color="tab:blue")
         axes[0].set_yticks(range(len(order)))
         axes[0].set_yticklabels(order, fontsize=7)
         axes[0].invert_yaxis()
@@ -342,12 +335,9 @@ def plot_queries(rows, out_dir):
         axes[0].set_title("Device time by plan node", fontsize=9)
         axes[0].grid(axis="x", alpha=0.25)
 
-        width = 0.27
-        for i, (col, colour) in enumerate((
-                ("peacock_host_us", "tab:green"),
-                ("cudf_host_us", "tab:orange"),
-                ("device_us", "tab:blue"))):
-            axes[1].barh([y + (i - 1) * width for y in range(len(order))],
+        width = 0.38
+        for i, (col, colour) in enumerate(zip(TERMS, ("tab:green", "tab:blue"))):
+            axes[1].barh([y + (i - 0.5) * width for y in range(len(order))],
                          [nodes[n][i] for n in order], height=width, color=colour,
                          label=col)
         axes[1].set_yticks(range(len(order)))
@@ -355,7 +345,7 @@ def plot_queries(rows, out_dir):
         axes[1].invert_yaxis()
         axes[1].set_xscale("symlog")
         axes[1].set_xlabel("microseconds (log)", fontsize=8)
-        axes[1].set_title("Three terms, side by side — NOT summed:\n"
+        axes[1].set_title("Two terms, side by side — not summed:\n"
                           "under events the host interval contains the device one",
                           fontsize=8)
         axes[1].legend(fontsize=7)
@@ -378,21 +368,21 @@ def plot_queries(rows, out_dir):
 def plot_icicle(rows, out_dir):
     """Per case: plan node -> recipe step -> cuDF call, width in device microseconds.
 
-    The record's tuple has exactly these three levels and they NEST: a plan node
+    The record's tuple has exactly these three levels and they nest: a plan node
     publishes several recipe steps, and a batched run drives each step once per batch per
     lane. So the picture is not a choice of layout -- it is what the tuple already says,
     laid out so a level's children sit under it and end where it ends.
 
-    Nodes run left to right in POST-order, which is both the order the record numbers
+    Nodes run left to right in post-order, which is both the order the record numbers
     them in and the order the device executes them. The plan tree renders the other way
     round, root first; the two are one tree read from opposite ends.
 
     Sums are the structure, not decoration: level 1 is grouped from level 2 and level 0
     from level 1, so a child overflowing its parent would mean the grouping is wrong.
-    What can be checked against ANOTHER source is the set of steps under a node, and that
+    What can be checked against another source is the set of steps under a node, and that
     is `--- recipes ---` (asserted in test_plan_goldens).
 
-    TWO PANELS, and the second is the same rule the scatter panels follow. A scan is 95%
+    Two panels, and the second is the same rule the scatter panels follow. A scan is 95%
     of q6 at sf1, so on a truthful axis every compute frame is a sliver with no room for
     its own name -- the picture says "the scan dominates" and then nothing else. The
     lower panel drops the load frames and rescales, which is not a second truth but the
@@ -536,8 +526,8 @@ def plot_hbm(hbm_rows, rows, out_dir):
     if not hbm_rows:
         return []
 
-    # Keyed by the CALL, deliberately WITHOUT `run_index`: the two files are different
-    # runs, so execution 3 of each is not the same event. Only a per-call CONSTANT may
+    # Keyed by the call, deliberately without `run_index`: the two files are different
+    # runs, so execution 3 of each is not the same event. Only a per-call constant may
     # cross — `out_bytes`, which the check below proves constant here while `device_us`
     # moves 7% at the median. No microsecond of one run ever meets a byte of the other.
     key = lambda r: tuple(r[c] for c in CALL)
@@ -612,9 +602,9 @@ SECTIONS = [
      "level's children sum to it. One real execution — the one whose total is the "
      "median — because per-call medians give a picture belonging to no execution."),
     ("query", "Where a case's time went",
-     "Left: device time per plan node. Right: the three time terms side by side, NEVER "
-     "summed — under CUDA events the host submission interval contains the device one, "
-     "so adding them describes no interval."),
+     "Left: device time per plan node. Right: the host and device terms side by side, "
+     "never summed — under CUDA events the host interval contains the device one, so "
+     "adding them describes no interval."),
     ("load", "Load — the scan, alone",
      "read_parquet: decompression, page decode, PCIe. Kept apart from compute on "
      "purpose: one axis holding both draws a picture about two different machines."),
@@ -688,16 +678,23 @@ def main():
     ap.add_argument("--out-dir", required=True)
     args = ap.parse_args()
 
-    rows = []
+    wanted = sorted({c for panel in READS.values() for c in panel})
+    rows, conditions, taken_from = [], None, None
     for path in args.record:
-        got = read_tsv(path)
-        require(got, path, *CALL, "run_index", "recipe_kind", "device_us", "out_bytes")
+        run, got = record.read_record(path, *CALL, "run_index", *wanted)
+        if conditions is not None and run != conditions:
+            differ = sorted(k for k in set(run) | set(conditions)
+                            if run.get(k) != conditions.get(k))
+            sys.exit(
+                f"{path} and {taken_from} were taken under different conditions "
+                f"({', '.join(differ)}), so their microseconds do not mean the same thing. "
+                "Draw them separately."
+            )
+        conditions, taken_from = run, path
         rows += got
     hbm = []
     for path in args.hbm:
-        got = read_tsv(path)
-        require(got, path, *CALL, "run_index", "hbm_bytes", "samples")
-        hbm += got
+        hbm += record.read_tsv(path, *CALL, "run_index", *HBM_READS)
 
     out_dir = pathlib.Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

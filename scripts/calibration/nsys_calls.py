@@ -1,61 +1,42 @@
 #!/usr/bin/env python3
 """What a timed region spends its time on, one level down, from an Nsight capture.
 
-    PCK_BENCH_NSYS=1 PCK_TEST_FILTER=bench_tpch_sf40_q9_ \
-        ./scripts/build-test-shadgpu.sh --run-benchmarks --pull-benchmarks
+    PEACOCK_BENCHMARK_CAPTURE=trace, which scripts/create_nsys_profile.sh --trace sets:
     scripts/calibration/nsys_calls.py --capture testdata/calibration/capture.sqlite \
-        --out testdata/calibration/calls.tsv \
-        --plans testdata/goldens/tpch.sf40/tp1-single.plans.txt
+        --plans-dir testdata/goldens/tpch.sf1 --out testdata/calibration/calls.tsv
 
-Which query a region belongs to is READ OFF THE CAPTURE: the harness wraps each case in an
-NVTX range naming it, so nothing has to be told on the command line. `--plans` is still a
-path because the goldens live where they live, and its mode selects which of the capture's
-cases it can check.
+The record has one number per region and one input size for it. For a hash join that size
+is the sum over both children, and a join's cost does not depend on its two sides the same
+way, so that sum cannot explain it. This reads the split back out of a capture instead of
+adding columns to the record: libcudf pushes an NVTX range around every public call it
+makes, so the build side (`hash_join`), the probe (`inner_join`) and the materialisation
+(`gather`) are already three separate spans inside our region.
 
-The calibration record has one number per region and one input size for it. For a hash
-join that input size is the SUM over both children -- `input_for` adds every child's
-bytes together -- and a join's cost does not depend on its two sides the same way, so
-that sum cannot explain it. This reads the split back out of a
-capture instead of adding columns to the record: libcudf pushes an NVTX range around
-every public call it makes, so the build side (`hash_join`), the probe (`inner_join`) and
-the materialisation (`gather`) are already three separate spans inside our region. The
-engine is not touched, and neither is the format.
+What a row is. One per (case, node_seq, call, depth), aggregated over the executions in
+the capture. The region is the `p<k>` range our own domain pushes per output partition;
+`depth` is how deep the call sits inside it among calls of the same domain, so depth-0 rows
+partition the region and deeper rows break those down. Summing across depths double-counts.
+The case is read off the harness's own range — seq numbering restarts with every plan, so
+two cases keyed without it merge into one row set that is self-consistent and wrong.
 
-WHAT A ROW IS
+Every region also gets an `(unattributed)` row at depth 0: the part of it inside no call of
+the traced domain at all. Without it a reader cannot tell a region explained by its calls
+from one where they cover a third of the span, and the second is the interesting case — it
+means the cost is in our code, not in cuDF's.
 
-One row per (node_seq, call, depth), aggregated over the executions in the capture. The
-region is the `p<k>` range our own domain pushes per output partition; `depth` is how
-deep the call sits inside it among calls of the same domain, so **depth 0 rows partition
-the region and deeper rows break those down**. Summing across depths double-counts.
+Host and device are different columns. `host_us` is the NVTX range itself, the wall time
+the calling thread spent inside that cuDF call. `device_us` sums the kernel, memcpy and
+memset durations whose launching runtime call falls inside the range, joined through
+CUPTI's correlationId. A call that submits asynchronously and returns has a small host span
+and a large device one; a call that synchronizes has host >= device. And `device_us` is a
+sum over device operations, not a union of their spans, so concurrent work on several
+streams is counted once per operation.
 
-Every region also gets a `(unattributed)` row at depth 0: the part of it that is inside
-no call of the traced domain at all. Without it a reader has no way to tell a region
-explained by its calls from one where they cover a third of the span, and the second is
-the interesting case -- it means the cost is in our code, not in cuDF's.
-
-HOST AND DEVICE ARE DIFFERENT COLUMNS
-
-`host_us` is the NVTX range itself: the wall time the calling thread spent inside that
-cuDF call. `device_us` is the sum of kernel, memcpy and memset durations whose launching
-runtime call falls inside the range, joined through CUPTI's correlationId.
-
-The two are not the same measurement and neither replaces the other. A cuDF call that
-submits asynchronously and returns has a small host span and a large device one; a call
-that synchronizes has host >= device. And `device_us` is a SUM over device operations,
-not a union of their spans -- concurrent work on several streams is counted once per
-operation. It answers "how much device work did this call cause", not "how long was the
-device busy".
-
-WHAT THIS CANNOT SEE
-
-A capture is not a measurement of the unprofiled run. nsys serializes some of what it
-traces, and the .benchmark.txt written by a captured run is not comparable with any
-other -- which is why the capture is a knob and not part of the ordinary run.
-
-Threads other than the one that pushed the region are not attributed to it: a device
-operation launched from a pool thread lands in the `(off-thread)` tally printed at the
-end rather than in a region. For the single-threaded execute path that tally should be
-the parquet reader's and nothing else.
+What this cannot see: a capture is not a measurement of the unprofiled run — nsys
+serializes some of what it traces, which is why a captured run publishes no tree. Device
+work launched from a thread other than the one that pushed the region lands in the
+`(off-thread)` tally printed at the end; for the single-threaded execute path that should
+be the parquet reader's and nothing else.
 """
 
 import argparse
@@ -68,6 +49,7 @@ import re
 import sys
 
 import nvtx_names
+import record
 
 # Our own domain. The two levels it carries, and how their names are read, are
 # `nvtx_names` — shared with `nsys_hbm.py`, which reads the same capture for a different
@@ -79,6 +61,18 @@ DEVICE_TABLES = ("CUPTI_ACTIVITY_KIND_KERNEL",
                  "CUPTI_ACTIVITY_KIND_MEMSET")
 
 UNATTRIBUTED = "(unattributed)"
+
+NOTES = [
+    "What one timed region spends its time on, one level down, from an Nsight capture.",
+    "One row per (case, node_seq, call, depth). A region is one output partition of one",
+    "  call, so a batched mode has several a run: `regions` counts them, `executions`",
+    "  divides them out, and every microsecond below is a median over one region.",
+    "depth 0 partitions the region and deeper rows break those down — summing across",
+    "  depths double-counts. (unattributed) is the part of the region inside no call.",
+    "host_us is the call's own NVTX range; device_us sums the device operations it",
+    "  launched, so an async call has a small host span and a large device one.",
+    "The times are a profiled run's and are not comparable with records.tsv's.",
+]
 
 
 def domain_ids(conn):
@@ -132,7 +126,7 @@ def recipe_seqs(plans_path, query):
 def check_against_recipes(regs, plans_path):
     """Every seq the recipes name was driven, with the kind they name, and no others.
 
-    Which query is read off the CAPTURE, not off the command line. A plans golden holds
+    Which query is read off the capture, not off the command line. A plans golden holds
     every query of one mode, so the capture's own cases select their sections — and a case
     from another mode is skipped rather than checked against a plan it never ran from.
     """
@@ -141,7 +135,12 @@ def check_against_recipes(regs, plans_path):
     mode = pathlib.Path(plans_path).name.split(".plans.txt")[0]
     by_case = collections.defaultdict(dict)
     for case, seq, _, kind, _, _, _, _ in regs:
-        by_case[case][seq] = kind
+        # The export and the slice are left out: they publish no step, and the seq they
+        # carry is the producing node's, whose own kind the plan states. Kept in, the last
+        # of the two written wins and every case reports the plan and the capture as
+        # disagreeing about a node they agree on.
+        if not nvtx_names.is_bare_call(kind):
+            by_case[case][seq] = kind
     checked = sorted(c for c in by_case if c[3] == mode)
     if not checked:
         sys.exit(
@@ -177,13 +176,13 @@ def regions(own):
     """Our domain's ranges -> [(case, seq, call_index, kind, partition, start, end, tid)].
 
     The three levels are told apart by their names rather than by nesting depth -- that
-    rule is `nvtx_names`. What is added here is the CONTAINMENT check, twice: a partition
+    rule is `nvtx_names`. What is added here is the containment check, twice: a partition
     range outside every call range of its thread, or a call outside every case range,
     means the ranges did not come from the code this script thinks they did, and a level
     rule alone cannot see that.
 
     `case` is `(dataset, sf, query, mode)`, read off the harness's own range. It used to
-    be a `--query` the CALLER typed, which is the shape of every quiet mistake: a capture
+    be a `--query` the caller typed, which is the shape of every quiet mistake: a capture
     of q19 analysed under the name q6 is self-consistent all the way down, and even its
     seq numbers line up, because seq numbering restarts with every plan.
     """
@@ -277,7 +276,6 @@ def main():
                     help="NVTX domain to break regions down by; repeatable, "
                          "default libcudf")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--plans", help="one <mode>.plans.txt to check the capture against")
     ap.add_argument("--plans-dir",
                     help="a goldens directory; each case's <mode>.plans.txt is found in "
                          "it, so a capture spanning several modes checks against all of "
@@ -290,8 +288,8 @@ def main():
     conn = sqlite3.connect(args.capture)
     doms = domain_ids(conn)
     if OWN_DOMAIN not in doms:
-        sys.exit(f"capture has no NVTX domain {OWN_DOMAIN!r}: "
-                 "the run needs PEACOCK_NVTX=1, which PCK_BENCH_NSYS sets")
+        sys.exit(f"capture has no NVTX domain {OWN_DOMAIN!r}: the run needs "
+                 "PEACOCK_BENCHMARK_CAPTURE=trace, which turns the harness's ranges on")
     missing = [d for d in call_domains if d not in doms]
     if missing:
         sys.exit(f"capture has no NVTX domain(s) {missing}; it has {sorted(doms)}")
@@ -328,8 +326,8 @@ def main():
     in_regions_ns = 0
 
     for case, seq, call, kind, part, r_start, r_end, tid in regs:
-        ident = (seq, kind, part)
-        # `run` counts occurrences across the capture; `call` is the index within ONE
+        ident = (case, seq, kind, part)
+        # `run` counts occurrences across the capture; `call` is the index within one
         # execution, which is what a record row carries. A session opens per run, so the
         # C++ counter restarts each time and a seq driven once per run is call 0 ten
         # times over. Together they say how many executions the capture holds.
@@ -377,7 +375,21 @@ def main():
         rest[1] += (r_end - r_start) - host_covered
         rest[2] += region_dev - dev_covered
 
-    # Median over executions, per (region, call, depth). Median rather than the mean: the
+    # How many executions the capture holds, per region. A batched mode drives one seq
+    # once per batch, so a region's occurrences are its executions times its calls per
+    # execution — and comparing raw occurrence counts reads that as a run that died.
+    executions = {}
+    for ident, times in seen.items():
+        per_run = len(by_call[ident])
+        if times % per_run:
+            sys.exit(
+                f"region {ident} ran {times} times with {per_run} call indices, which is "
+                "not a whole number of executions — an execution stopped partway through "
+                "the node, and every median below would be short by the part it missed."
+            )
+        executions[ident] = times // per_run
+
+    # Median over occurrences, per (region, call, depth). Median rather than the mean: the
     # warm-up execution is in here, and on a first touch of a column the parquet reader
     # does work no later execution repeats.
     rows = []
@@ -385,37 +397,35 @@ def main():
     for ident, (call, depth) in sorted(keys, key=lambda k: (k[0], k[1][1], k[1][0])):
         runs = [per_exec[(ident, r)].get((call, depth), [0, 0, 0])
                 for r in range(seen[ident])]
-        seq, kind, part = ident
+        (dataset, sf, query, mode), seq, kind, part = ident
         rows.append(dict(
+            dataset=dataset, sf=sf, query=query, mode=mode,
             node_seq=seq, node_type=kind, partition=part, call=call, depth=depth,
-            executions=seen[ident],
-            calls_per_exec=statistics.median(r[0] for r in runs),
+            executions=executions[ident],
+            regions=seen[ident],
+            calls_per_region=statistics.median(r[0] for r in runs),
             host_us=round(statistics.median(r[1] for r in runs) / 1000),
             device_us=round(statistics.median(r[2] for r in runs) / 1000),
             region_us=round(statistics.median(region_span[ident]) / 1000),
         ))
 
-    cols = ["node_seq", "node_type", "partition", "call", "depth", "executions",
-            "calls_per_exec", "host_us", "device_us", "region_us"]
-    with open(args.out, "w") as fh:
-        fh.write("\t".join(cols) + "\n")
-        for r in rows:
-            fh.write("\t".join(str(r[c]) for c in cols) + "\n")
+    cols = ["dataset", "sf", "query", "mode",
+            "node_seq", "node_type", "partition", "call", "depth", "executions",
+            "regions", "calls_per_region", "host_us", "device_us", "region_us"]
+    record.write_tsv(args.out, NOTES, cols, [[r[c] for c in cols] for r in rows])
 
-    runs_seen = set(seen.values())
-    if args.plans:
-        check_against_recipes(regs, args.plans)
+    runs_seen = set(executions.values())
     if args.plans_dir:
         # One goldens file per mode, found rather than listed: the capture already says
         # which modes are in it, and a caller retyping that list is the same class of
-        # mistake `--query` was. A mode with no golden is reported, not skipped — the
-        # check silently covering less than the capture is how it stops meaning anything.
-        modes = sorted({case[3] for case, *_ in regs})
-        for mode in modes:
+        # mistake naming the query on the command line was. A mode with no golden is a
+        # refusal — a check that silently covers less than the capture has stopped being
+        # one, and this is the only thing that says the regions are the plan's.
+        for mode in sorted({case[3] for case, *_ in regs}):
             path = pathlib.Path(args.plans_dir) / f"{mode}.plans.txt"
             if not path.exists():
-                print(f"recipes: no {path} — {mode} unchecked")
-                continue
+                sys.exit(f"{path} does not exist, so the {mode} cases in this capture "
+                         "would go unchecked against the plan they claim to be.")
             check_against_recipes(regs, str(path))
 
     calls_per_exec = {len(v) for v in by_call.values()}
@@ -424,22 +434,26 @@ def main():
     print(f"{len(regs)} region ranges, {len(seen)} distinct regions, "
           f"{sorted(runs_seen)} executions each")
     if len(runs_seen) != 1:
-        print("!! regions disagree about how many times they ran; the capture holds a "
-              "filter that matched more than one case, or an execution died partway")
+        sys.exit(f"regions of one case disagree about how many times they ran: {sorted(runs_seen)}. "
+                 "Every region of a case runs once per execution, so an execution died "
+                 "partway — and the medians below would report the short-changed regions "
+                 "at a fraction of their cost with nothing saying so.")
     print(f"{(device.total - in_regions_ns) / 1e6:.1f} ms of {device.total / 1e6:.1f} ms "
           "of device work was launched outside every region "
           "(reader threads, allocator warm-up, teardown)")
 
     for ident in sorted(seen):
-        top = [r for r in rows if (r["node_seq"], r["node_type"], r["partition"]) == ident
-               and r["depth"] == 0]
+        case, seq, kind, part = ident
+        top = [r for r in rows if r["depth"] == 0
+               and (r["dataset"], r["sf"], r["query"], r["mode"]) == case
+               and (r["node_seq"], r["node_type"], r["partition"]) == (seq, kind, part)]
         top.sort(key=lambda r: -r["host_us"])
         span = top[0]["region_us"] if top else 0
-        print(f"\n#{ident[0]} {ident[1]} p{ident[2]}  region {span} us")
+        print(f"\n{case[2]} {case[3]}  #{seq} {kind} p{part}  region {span} us")
         for r in top[:args.top]:
             share = 100 * r["host_us"] / span if span else 0
             print(f"    {r['host_us']:>9} us  {share:5.1f}%  "
-                  f"dev {r['device_us']:>8} us  x{r['calls_per_exec']:<5g} {r['call']}")
+                  f"dev {r['device_us']:>8} us  x{r['calls_per_region']:<5g} {r['call']}")
     print(f"\nwrote {args.out}")
 
 

@@ -5,21 +5,24 @@ The calibration record deliberately has no hbm_bytes column: nothing inside the 
 can count HBM traffic, so it comes from a profiled run and joins back on the record's own
 coordinates. This is that join's producer.
 
-WHY IT IS A SEPARATE RUN. The capture distorts what it measures -- +7% on a query and
+Why it is a separate run. The capture distorts what it measures -- +7% on a query and
 +11% on a heavy scan, measured -- so the times and the traffic cannot come from one file.
 They come from two runs joined on the tuple, which is the whole reason the record carries
 a tuple rather than a node number.
 
+    scripts/create_nsys_profile.sh --metrics, which runs both commands below:
     nsys profile --trace=nvtx,cuda --sample=none --cpuctxsw=none \
                  --gpu-metrics-device=0 --gpu-metrics-set=<arch> \
                  --gpu-metrics-frequency=20000 -o cap -- <binary>
     nsys export --type=sqlite --force-overwrite=true -o cap.sqlite cap.nsys-rep
-    scripts/calibration/nsys_hbm.py --capture cap.sqlite --record run.tsv --out hbm.tsv
+    scripts/calibration/nsys_hbm.py --capture cap.sqlite --peak-bw <B/s> \
+        --record testdata/calibration/records.tsv --out hbm.tsv
 
-The capture and the record given here must be from ONE run: they are joined on the
-tuple, and a call in one that is not in the other means they describe different work. Any
-number of CASES may be in that run — the harness wraps each in a named NVTX range, so the
-capture says which query a call was in rather than being told on a command line.
+The record is the clean run's: its coordinates and its times are what the output carries,
+and the capture supplies only bytes. The two must describe the same calls, which is checked
+both ways — a call in one and not the other means they are not the same work. Any number of
+cases may be in a capture; the harness wraps each in a named NVTX range, so which query a
+call was in is read rather than typed on a command line.
 
 Nsight's general metric set reports DRAM traffic as a percentage of the device's peak
 bandwidth, not as bytes, so bytes are the integral of that percentage over the sampling
@@ -47,6 +50,7 @@ import statistics
 import sys
 
 import nvtx_names
+import record
 
 # nsys metric ids within the general set. Names are checked against the capture, since a
 # different --gpu-metrics-set numbers them differently.
@@ -54,7 +58,7 @@ DRAM_READ = "DRAM Read Bandwidth"
 DRAM_WRITE = "DRAM Write Bandwidth"
 
 # The record's coordinates, in the order the output writes them. Every one of them comes
-# from the RECORD: the capture names a call `"<seq>.<call_index> <Kind>"` and nothing
+# from the record: the capture names a call `"<seq>.<call_index> <Kind>"` and nothing
 # more, so which query and which plan node that was is knowable only from the row it
 # pairs with. Listed once and used for the required-column check, the output header and
 # the row copy, so the three cannot fall out of step.
@@ -108,33 +112,6 @@ def busy_union(conn):
     return merged
 
 
-def read_record(path):
-    """Record rows as dicts, keyed by the record's own column line.
-
-    By name and not by position: the record's columns have already changed once, and a
-    reader that counts fields survives such a change quietly -- it would write an hbm.tsv
-    whose query and label held whatever slid into those slots.
-    """
-    names, rows = None, []
-    with open(path) as fh:
-        for line in fh:
-            if line.startswith("#"):
-                continue
-            f = line.rstrip("\n").split("\t")
-            if names is None:
-                names = f
-                continue
-            if len(f) != len(names):
-                sys.exit(f"{path}: row of {len(f)} fields against {len(names)} columns")
-            rows.append(dict(zip(names, f)))
-    if names is None:
-        sys.exit(f"{path} has no column line")
-    missing = [c for c in TUPLE if c not in names]
-    if missing:
-        sys.exit(f"{path} has no {missing} column; it has {names}")
-    return rows
-
-
 def cases_in(ranges):
     """The capture's case ranges, in time order: `(start, end, (dataset, sf, query, mode))`.
 
@@ -150,7 +127,7 @@ def cases_in(ranges):
         sys.exit(
             "the capture has no case range. It predates the harness pushing one, so the "
             "query a call belonged to cannot be recovered from it -- retake it with a "
-            "build that does. (Before that range existed the reader had to be TOLD the "
+            "build that does. (Before that range existed the reader had to be told the "
             "query, which is why it is now read rather than passed.)"
         )
     return found
@@ -175,7 +152,7 @@ def key_calls(calls):
     heading states: a repeat of a key is the next execution. Time order is what makes it
     derivable, and it is the only thing about the capture's order this reads.
 
-    Deliberately NOT a pairing by position. The record is written in PLAN order — the
+    Deliberately not a pairing by position. The record is written in plan order — the
     driver walks pre-order, so its first row is the root's — and the capture is in
     execution order, where the scan comes first. The two are both complete and differently
     sorted, and a positional pairing silently reads one as the other. The old
@@ -207,7 +184,7 @@ def report_loss(keyed, rows, record_path):
 
     The failure this is really here for is the warm-up. It used to run with ranges on and
     is never written to the record, so the capture held one execution more than the file —
-    every key present, an extra `run_index` on each. The harness now turns ranges on AFTER
+    every key present, an extra `run_index` on each. The harness now turns ranges on after
     the warm-up, and this is what says so if that stops being true.
     """
     want = {row_key(r) for r in rows}
@@ -232,7 +209,7 @@ def report_loss(keyed, rows, record_path):
     if extra and not missing and runs(have) == runs(want) + 1:
         lines.append(
             "  Exactly one execution more, and every key otherwise matched: that is the "
-            "warm-up, which the record does not hold. Ranges must be turned on AFTER it."
+            "warm-up, which the record does not hold. Ranges must be turned on after it."
         )
     sys.exit("\n".join(lines))
 
@@ -246,8 +223,10 @@ def main():
     ap.add_argument(
         "--peak-bw",
         type=float,
-        default=4.8e12,
-        help="device peak HBM bandwidth in bytes/s; default is H200 SXM",
+        required=True,
+        help="device peak HBM bandwidth in bytes/s (H200 SXM: 4.8e12). Required, not "
+             "defaulted: bytes are the integral of a percentage of it, so a wrong one is "
+             "a silent scale error on every row",
     )
     args = ap.parse_args()
 
@@ -284,10 +263,10 @@ def main():
             "The sampling frequency is above what it sustains; lower it and recapture."
         )
 
-    rows = read_record(args.record)
+    _, rows = record.read_record(args.record, *TUPLE)
     cases = cases_in(ranges)
     # Only the call ranges, each tagged with its containing case. The `p<k>` ranges nest
-    # INSIDE them, so integrating both would count the same bytes twice — and a partition
+    # inside them, so integrating both would count the same bytes twice — and a partition
     # cannot be priced alone anyway, its shared prologue being charged to p0. Dropped
     # here, so every count and message below is about calls.
     skipped = sum(1 for _, _, t in ranges if nvtx_names.is_partition(t))
@@ -328,7 +307,7 @@ def main():
             i += 1
         return total
 
-    # Driven by the RECORD, so the output is in the record's order and a row is emitted
+    # Driven by the record, so the output is in the record's order and a row is emitted
     # for every row of the file. `report_loss` has already established the key sets are
     # equal, so the lookup cannot miss.
     out = []
@@ -342,26 +321,20 @@ def main():
             + [round(r), round(w), round(r + w), n, busy // 1000, (b - a - busy) // 1000]
         )
 
-    with open(args.out, "w") as fh:
-        fh.write("# hbm_bytes per cuDF call, from an Nsight capture with GPU metrics on.\n")
-        fh.write(
-            "# The coordinates are records.tsv's, and joining on all of them is the point:\n"
-            "#   this file's TIMES are not usable — a capture costs the query ~7%, a heavy\n"
-            "#   scan ~11% — so it carries traffic, and the times come from a clean run.\n"
-            "# device_busy_us/device_idle_us are here as a READING of this capture, not as\n"
-            "#   a measurement to fit: idle inside a call is the device waiting through the\n"
-            "#   host prologue, and it says whether a thin sample count is a short call or\n"
-            "#   a stalled one.\n"
-            "# samples = GPU metric samples inside the call. Under ~10 the integral is an\n"
-            "#   estimate from too few points; a reader should weight or drop those rows.\n"
-        )
-        fh.write(
-            "\t".join(TUPLE)
-            + "\thbm_read_bytes\thbm_write_bytes\thbm_bytes\tsamples"
-            "\tdevice_busy_us\tdevice_idle_us\n"
-        )
-        for row in out:
-            fh.write("\t".join(str(x) for x in row) + "\n")
+    notes = [
+        "hbm_bytes per cuDF call, from an Nsight capture with GPU memory counters on.",
+        "The coordinates are records.tsv's, and joining on all of them is the point:",
+        "  this file's times are not usable — a capture costs the query ~7%, a heavy",
+        "  scan ~11% — so it carries traffic, and the times come from a clean run.",
+        "device_busy_us/device_idle_us are here as a reading of this capture, not as a",
+        "  measurement to fit: idle inside a call is the device waiting through the host",
+        "  prologue, and it says whether a thin sample count is a short call or a stalled one.",
+        "samples = GPU metric samples inside the call. Under ~10 the integral is an",
+        "  estimate from too few points; a reader should weight or drop those rows.",
+    ]
+    columns = list(TUPLE) + ["hbm_read_bytes", "hbm_write_bytes", "hbm_bytes", "samples",
+                             "device_busy_us", "device_idle_us"]
+    record.write_tsv(args.out, notes, columns, out)
 
     at = len(TUPLE)
     thin = [r for r in out if r[at + 3] < 10]

@@ -61,6 +61,10 @@ Facts the coordinator established before the first dispatch:
   after Tasks 3–5 landed as one commit. Dispatch 2 already adapted `record.rs`,
   `corpus_benchmark.rs`, `peacock_gpu_benchmarks.rs` and `test_node_timing.rs` to the reshaped
   types (noted inline in the plan); Task 7 step 1 is already done in full.
+- Dispatch 4: plan Tasks 8 and 9 (scripts and CI; captures, the Python and its tests),
+  after Tasks 6–7 landed as one commit. Carries dispatch 3's two findings: `setup-glibc.sh`
+  patches `rust-tests/` only, and `create_nsys_profile.sh` still exports the two retired
+  variables. verda still down.
 
 ## Dispatch 1 — plan Tasks 1 and 2 (the C++ instrument, the ABI and the FFI)
 
@@ -394,3 +398,115 @@ Each new assertion was reddened on its own before being believed:
   symlink before any push. The rust-only tiers need it, so the order is: symlink, run the CPU
   tiers, remove it, push.
 - `cargo` is not on the default `PATH` in this environment; it is `~/.cargo/bin/cargo`.
+
+## Dispatch 4 — plan Tasks 8 and 9 (scripts and CI; the captures, the Python, its tests)
+
+### The benchmark run had no launcher
+
+`--run-benchmarks` set `RUN_BENCH=1` and nothing read it: `remote_bench_script` was defined
+and never called, in `bp-benchmarks-v1` as well as in the squash. So every phase of the
+measurement existed except the one that starts it, and the flag exited 0 having done
+nothing — which is why the validation the spec asks for matters more than it looks: the
+shape that hides a missing launcher is a flag whose success is silence. The block added
+beside the gate's mirrors it, with its own exit code rather than an OR into the gate's.
+
+### What moved into `lib/shadgpu-env.sh`, and what moved back out
+
+In: `die`, `BUILD_GLIBC`, `PATCHED_LD`, `SF40_DIR`, `passed_count`, `pull_one`. Out, back to
+master's text: the ssh `ControlMaster` block, `resilient_rsync`'s rc=23 branch, and
+`stage_cargo_test_binary`'s cargo-diagnostics forwarding — the spec's "not in this task",
+which the squash had brought across. The fixture push is master's hand list again for the
+same reason, and that is what retires dispatch 3's `testdata/tpch.sf1` symlink trap: with no
+`git ls-files` sweep, an untracked symlink is no longer in the file list rsync is handed.
+
+Two of those are less obvious than they look.
+
+- **`PATCHED_LD` is remote shell text, not a path.** It is built here, where `getconf` can
+  read the build host's glibc, but carries `$HOME` and `${LD_LIBRARY_PATH:-}` unexpanded for
+  the remote to resolve. That is what lets one definition serve the gate, the benchmark run
+  and both Nsight passes; `create_nsys_profile.sh` had hardcoded `glibc-2.35`, which is wrong
+  from a 24.04 box — this one says 2.39 here.
+- **`passed_count` runs on the far side.** The logs it counts are written on the host, so the
+  remote heredocs insert its definition with `$(declare -f passed_count)` and call it. That is
+  the only way one copy of the "N passed" sum serves a local script and a remote one.
+
+### `--skip bench_`, and the guard over it
+
+`peacock_gpu_benchmarks` is now in `RUST_TESTS`, in pipeline.yml's staging array, in
+`gpu_runtime_targets()`, and exempt as `GpuJob` rather than `NotRun`. Both runner loops set a
+per-binary `skip` from a `case` on the binary's name and pass `$skip` at the invocation.
+`the_benchmark_binary_runs_without_its_cases_on_ci` reads each loop's body and asserts both
+halves; it resolves `$BENCH_TARGET` out of the shell file first, so one needle reads a file
+that names the target through a variable and a file that spells it out.
+
+### The counters pass joins against the clean record
+
+`nsys_hbm.py --record` is `testdata/calibration/records.tsv` — the clean run's — and the
+metrics pass's own record stays on the host as `calibration/records-metrics.tsv`. Renamed
+from `records-hbm.tsv` so the name the spec keeps out of git does not exist anywhere. The
+join is still both-ways checked (`report_loss`), which now says something stronger: the
+counters run made exactly the calls the clean run made. One consequence to know before
+filtering: a `PCK_TEST_FILTER`ed metrics pass cannot be joined onto a full `records.tsv` —
+`report_loss` refuses it, naming the rows with no captured call.
+
+### The calibration Python
+
+`record.py` is the one reader (`read_record` → `(run, rows)`, `read_tsv`, `require`) and the
+one writer (`write_tsv`); the other three import it. `plot.py` refuses two records whose
+`# run:` lines differ and requires the union of `READS`, which lists per panel what that
+panel reads — so a record missing `host_us` is refused at the door instead of drawing an
+empty term. `nsys_calls.py` keys regions by `(case, seq, kind, partition)` and writes the
+case's four columns; a mode with no plans golden and regions that disagree about how many
+times they ran are both `sys.exit(1)` now, where the second used to be a printed remark.
+
+`scripts/calibration/tests/` holds `harness.py` (copied from `scripts/exec_model/tests/`),
+`capture.py` and the three test files. `capture.py` is a fifth file the plan did not list: it
+builds the synthetic sqlite export both capture readers need, and the two builders would
+otherwise be one copy each of the same NVTX/CUPTI schema. `test_plot.py` needs matplotlib —
+`/usr/bin/python3 <file>` on a dev box, and the new cost-report step installs it the way the
+exec-model step installs pandas.
+
+### Two bugs only a real run could find, and what they have in common
+
+Neither the timed cases nor either capture pass had ever executed — `--run-benchmarks`
+launched nothing, so Task 8's proving run was the first. Both bugs are the same shape: a
+**bare** ABI call (`result_from_handle`, `slice_handle`) publishes no step of its own and is
+named by the seq of the node whose output it was handed, so one seq carries two kinds and
+one node carries a seq that is not its own. Two readers assumed otherwise.
+
+- **`rows_match_the_recipes` refused every case**, one call before the record was written:
+  "a row pairs node 5 with step #6, whose recipe publishes {}". Node 5 is q6's `GpuUnload`,
+  whose recipes line is `result_from_handle(batch, row range)` and names no `#seq`. The rule
+  now: where a node publishes nothing, its row's seq must be published by a node **below**
+  it — post-order is children first, so the producer is always earlier, which is a tighter
+  statement than "by some node". `a_bare_calls_row_names_the_seq_it_was_handed` in
+  `test_corpus_goldens.rs` is the red-green.
+- **`nsys_calls.py` refused every capture**: "kind differs: #10 is CudfProject in the plan
+  and result_from_handle in the capture". `by_case[case][seq] = kind` keeps one kind per seq
+  and the export's range overwrote the project's. The bare names now live in `nvtx_names.py`
+  (`BARE_CALLS`, `AbiSymbol::name()`'s spellings) and are left out of that comparison.
+
+A third came out of the same run and is arithmetic rather than naming: the capture's
+"regions disagree about how many times they ran" check compared raw occurrence counts, and
+a batched mode drives one seq once per batch — q6 at tp4-sized has regions at 4 occurrences
+an execution beside regions at 1, which read as a run that died partway. `executions` is now
+`occurrences / call indices` and refuses a remainder; `calls.tsv` gains a `regions` column
+and `calls_per_exec` becomes `calls_per_region`, both of which now say what they count.
+
+### What Task 11 has to know
+
+- **`testdata/calibration/records-hbm.tsv` is still tracked.** The new `testdata/.gitignore`
+  is deny-by-default over `calibration/`, but a rule does not untrack a file: Task 11 deletes
+  it in the commit that lands the new data.
+- **The committed tree and record are still v1's**, so `plot.py` now refuses `records.tsv`
+  (it has `peacock_host_us`/`cudf_host_us` where the harness writes `host_us`), and the two
+  `#[ignore]`d tests still fail. All three go green on the same re-measurement.
+- **Check who else is on the GPU first**, and this is not a caution but a measurement: with
+  another user's process holding 62 GB of the H200's 140, q6 at tp1-single came in at 553 ms
+  against the committed tree's 90 ms and q19 at 1326 ms against 730 ms. The counters pass is
+  worse — GPU metrics are device-wide, so the neighbour's traffic is inside our regions:
+  37.7 TB of HBM against the committed file's 2.4 TB. Everything ran and every check passed;
+  none of the numbers are publishable. `nvidia-smi --query-compute-apps` before the run.
+- **`--pull-benchmarks` now refuses a died run** as well as a running one, and refuses a pull
+  that brought neither a tree nor a record home. The recovery path for a partial run is to
+  re-run it; the host keeps what it wrote either way.

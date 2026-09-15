@@ -1,10 +1,10 @@
 """The names peacockdb pushes into its own NVTX domain, and how to read them back.
 
-Three levels, told apart by NAME rather than by nesting depth:
+Three levels, told apart by name rather than by nesting depth:
 
-    "tpch.sf40 q6 tp1-single"      a CASE — <dataset>.sf<sf> <query> <mode>
-      "3.0 CudfCoalescePartitions"    a CALL — <seq>.<call_index> <FbKind>
-        "p0"                          a PARTITION, nested inside it
+    "tpch.sf40 q6 tp1-single"      a case — <dataset>.sf<sf> <query> <mode>
+      "3.0 CudfCoalescePartitions"    a call — <seq>.<call_index> <FbKind>
+        "p0"                          a partition, nested inside it
 
 The benchmark harness pushes the first, `NodeSession` the second, `ScopedNodeTimer` the
 third. Both readers of a capture need the same split, and this module is where it lives:
@@ -12,10 +12,10 @@ two implementations of one naming convention drift the moment the convention mov
 the symptom would be a reader that silently classifies a call as a partition and reports
 a query as having done nothing.
 
-WHY THE CASE LEVEL EXISTS. A call range names its `seq`, and seq numbering restarts with
+Why the case level exists. A call range names its `seq`, and seq numbering restarts with
 every plan — q6 and q19 both open with `0.0 CudfScan`. Without an enclosing range a
 capture of several queries cannot say which one a call was in, and a reader can only be
-TOLD, on a command line, which is a thing a human gets wrong in silence.
+told, on a command line, which is a thing a human gets wrong in silence.
 
 The call index is part of the name and not derivable from it: a batched run drives one seq
 many times, so without it every repeat is the same string and no row of a record can be
@@ -29,11 +29,17 @@ import sys
 PUSHPOP_RANGE = 59
 DOMAIN_CREATE = 75
 
+# The two ABI calls that publish no step of their own: they are handed a handle and named
+# by the seq of the node that produced it — the same seq that node's own call carries. So
+# one seq holds two kinds in a capture, and a reader checking a seq against the plan has to
+# leave these out of that comparison. The spellings are `AbiSymbol::name()`'s.
+BARE_CALLS = frozenset({"slice_handle", "result_from_handle"})
+
 
 def is_case(text):
     """A case range: `<dataset>.sf<sf> <query> <mode>`, pushed by the harness.
 
-    Recognised by what it is NOT: a call range starts with `<digits>.<digits>` and a
+    Recognised by what it is not: a call range starts with `<digits>.<digits>` and a
     partition range is `p<k>`. Positive matching on the case's own shape would tie this
     module to how the harness spells a dataset, which is not its business.
     """
@@ -59,6 +65,11 @@ def is_partition(text):
 
 def partition_of(text):
     return int(text[1:])
+
+
+def is_bare_call(kind):
+    """Is this call range's kind one of the two that publish no step of their own?"""
+    return kind in BARE_CALLS
 
 
 def call_of(text):
