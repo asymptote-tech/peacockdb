@@ -80,17 +80,29 @@ impl<'a> Writer<'a> {
     }
 
     /// A scan of nothing, holding a slot open: the second rule, since an empty slot is a
-    /// crash at plan load rather than an absent child. `CudfScan` is the only leaf the
-    /// schema has — every other table carries `input`, `left`/`right` or `inputs`.
+    /// crash at plan load rather than an absent child.
     fn stub(&mut self) -> WIPOffset<fb::PlanNode<'a>> {
-        let scan = fb::CudfScan::create(&mut self.builder, &fb::CudfScanArgs::default());
-        let (_, offset) = self.push(Payload {
-            kind: fb::PlanNodeKind::CudfScan,
-            value: scan.as_union_value(),
-        });
+        let (_, offset) = self.scan_of_nothing();
         // Taken by the node being built, so it does not stay in the pool.
         self.pool.pop();
         offset
+    }
+
+    /// A leaf with nothing to call, occupying one slot: the stub `take` would have made for
+    /// its parent, made now so a seqless parent still has a root. Test-built trees only —
+    /// a planned tree has no leaf but a scan.
+    pub(crate) fn leaf(&mut self) -> Seq {
+        self.scan_of_nothing().0
+    }
+
+    /// `CudfScan` is the only leaf the schema has — every other table carries `input`,
+    /// `left`/`right` or `inputs` — so it is what both the stub and the leaf are made of.
+    fn scan_of_nothing(&mut self) -> (Seq, WIPOffset<fb::PlanNode<'a>>) {
+        let scan = fb::CudfScan::create(&mut self.builder, &fb::CudfScanArgs::default());
+        self.push(Payload {
+            kind: fb::PlanNodeKind::CudfScan,
+            value: scan.as_union_value(),
+        })
     }
 
     fn push(&mut self, payload: Payload) -> (Seq, WIPOffset<fb::PlanNode<'a>>) {

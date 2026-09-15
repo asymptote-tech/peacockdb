@@ -157,3 +157,16 @@ Component-level API expected to change:
   rust-rung modules carry no device type.
 - `test_ci_coverage` green without a workflow edit.
 - `build-test.md` gains one row for the harness, in its table's terms.
+
+## Completeness signoff
+
+Solved under its constraints: two production edits, both mechanism — the test-only upload
+symbol with `adopt` behind it, and the one `attach.rs` arm — and no behaviour change, the recipe
+payloads byte-identical; the harness under `src/tests/` with a driver per category over
+`Backend`, exact comparison slot by slot with its red cases shown, and a kind guard red both
+ways with the three forwarders excluded and thirteen kinds pending for task 9; the round trip,
+seven `GpuUnload` and ten `GpuLimit` cases agreeing on both backends, so no ticket and no `bug_`
+test. Deviations, none a shortcut: `pub(crate)` for the spec's `pub(super)`, and
+`#[cfg(all(test, feature = "gpu"))]` for its `feature = "gpu"`, both the layout test's forms;
+the guard in `gpu_tests/`, since `inventory` collects per binary; one CPU gtest beyond the file
+list; `Script` allowing dead code for the four variants task 9 constructs; 26 device cases, not 21.

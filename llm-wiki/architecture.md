@@ -882,13 +882,15 @@ other code is written against them, so changing one breaks a caller that never n
 Rust side's own traits — `Backend`, the executor families, `GpuNode` — are in
 [Execution](#traits) above, beside the reasons for their shape.
 
-The ABI is sixteen symbols in five groups: lifecycle (`peacock_gpu_version`,
+The ABI is seventeen symbols in five groups: lifecycle (`peacock_gpu_version`,
 `peacock_executor_create` / `_destroy`, `peacock_last_error`, `peacock_result_free`); the
 node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `end_plan`); the three
 per-call entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`);
-instrumentation (`install_rmm_pool`, `set_node_timing`, `measure_timing_floor_us`); and the
-conformance hook `peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow
-C-data batch so the Rust side can compare it against comet's.
+instrumentation (`install_rmm_pool`, `set_node_timing`, `measure_timing_floor_us`); and two
+test hooks: `peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow C-data
+batch so the Rust side can compare it against comet's, and `peacock_handle_from_arrow`, which
+adopts one such batch into the live session as a handle so the operator harness can hand an
+executor a table it wrote.
 
 Three conventions the signatures do not carry:
 

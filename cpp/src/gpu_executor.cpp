@@ -359,3 +359,31 @@ int peacock_spark_partition_ids(const void* schema, const void* array,
     return 1;
   }
 }
+
+int peacock_handle_from_arrow(peacock_executor_t* executor, const void* schema, const void* array,
+                              uint64_t* out_handle) {
+  if (!executor || !schema || !array || !out_handle) return 1;
+  if (!executor->session) {
+    executor->last_error = "no plan loaded (call peacock_executor_begin_plan first)";
+    return 1;
+  }
+  try {
+    auto const* c_schema = reinterpret_cast<const ArrowSchema*>(schema);
+    auto table = cudf::from_arrow(c_schema, reinterpret_cast<const ArrowArray*>(array));
+    std::vector<std::string> names;
+    names.reserve(static_cast<size_t>(c_schema->n_children));
+    for (int64_t i = 0; i < c_schema->n_children; ++i) {
+      names.emplace_back(c_schema->children[i]->name);
+    }
+    *out_handle =
+        executor->session->adopt(peacock::TableResult{std::move(table), std::move(names)});
+    return 0;
+  } catch (const std::exception& e) {
+    // Nothing was consumed, so the session stays usable — unlike execute_node's reset.
+    executor->last_error = e.what();
+    return 1;
+  } catch (...) {
+    executor->last_error = "unknown exception";
+    return 1;
+  }
+}

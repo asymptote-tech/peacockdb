@@ -26,7 +26,7 @@ fn batches() -> Vec<CpuBatch> {
                 chunk.iter().map(|(_, v)| Some(*v)).collect::<Vec<_>>(),
             ));
             CpuBatch::new(
-                RecordBatch::try_new(schema_of(&GROUPED).fields.clone(), vec![keys, values])
+                RecordBatch::try_new(columns(&GROUPED).fields.clone(), vec![keys, values])
                     .expect("the rows fit their schema"),
             )
         })
@@ -57,7 +57,7 @@ fn rendered(batches: &[CpuBatch]) -> Vec<String> {
 
 /// The state a `sum(v)` decomposes into, and the merge that folds it.
 fn summed(keys: &[(&str, DataType)]) -> (Schema, AggregateBody, AggregateBody) {
-    let state = schema_of(&[keys, &[("sum(v)", DataType::Int64)]].concat());
+    let state = columns(&[keys, &[("sum(v)", DataType::Int64)]].concat());
     let group_by: Vec<Expr> = keys
         .iter()
         .enumerate()
@@ -100,11 +100,11 @@ fn answer(shape: Shape) -> Vec<String> {
 }
 
 fn emitted(shape: Shape) -> Vec<String> {
-    let input = schema_of(&GROUPED);
+    let input = columns(&GROUPED);
     match shape {
         Shape::Filter { above } => {
             let node = GpuFilter::new(
-                Given::of_schema(input.clone()),
+                Given::of(input.clone(), BatchLayout::MultipleBatches),
                 Expr::binary(
                     Expr::column(1, "v"),
                     BinaryOp::Gt,
@@ -117,9 +117,9 @@ fn emitted(shape: Shape) -> Vec<String> {
             per_batch(CpuExec::filter(&node, &input.fields, ctx()).expect("the filter builds"))
         }
         Shape::Double => {
-            let out = schema_of(&GROUPED);
+            let out = columns(&GROUPED);
             let node = GpuProject::new(
-                Given::of_schema(input.clone()),
+                Given::of(input.clone(), BatchLayout::MultipleBatches),
                 vec![
                     NamedExpr::new(Expr::column(0, "k"), "k"),
                     NamedExpr::new(
@@ -138,7 +138,7 @@ fn emitted(shape: Shape) -> Vec<String> {
         }
         Shape::SortLane { fetch } => {
             let node = GpuAccumulateBatchesAndSort::new(
-                Given::of_schema(input.clone()),
+                Given::of(input.clone(), BatchLayout::MultipleBatches),
                 vec![ColumnOrder {
                     column: 1,
                     ascending: true,
@@ -151,7 +151,8 @@ fn emitted(shape: Shape) -> Vec<String> {
             at_done(accumulator)
         }
         Shape::CoalesceLane => {
-            let node = GpuCoalesceAllBatches::new(Given::of_schema(input.clone()));
+            let node =
+                GpuCoalesceAllBatches::new(Given::of(input.clone(), BatchLayout::MultipleBatches));
             at_done(CpuAccumulator::coalesce(&node, &input.fields))
         }
         Shape::SumByKey { finalize } => {
@@ -160,7 +161,7 @@ fn emitted(shape: Shape) -> Vec<String> {
             let output = match finalize {
                 true => {
                     merge.finalize = Some(vec![NamedExpr::new(Expr::column(1, "sum(v)"), "total")]);
-                    schema_of(&[("k", DataType::Utf8), ("total", DataType::Int64)])
+                    columns(&[("k", DataType::Utf8), ("total", DataType::Int64)])
                 }
                 false => state.clone(),
             };
@@ -183,7 +184,7 @@ fn emitted(shape: Shape) -> Vec<String> {
                 )
             };
             let node = GpuAggregateBatches::new(
-                Given::of_schema(state.clone()),
+                Given::of(state.clone(), BatchLayout::MultipleBatches),
                 merge,
                 state.clone(),
                 state.clone(),
@@ -207,7 +208,11 @@ fn emitted(shape: Shape) -> Vec<String> {
                 .collect()
         }
         Shape::ScatterLanes { lanes } => {
-            let node = GpuEmitPartitions::new(Given::of_schema(input.clone()), vec![0], lanes);
+            let node = GpuEmitPartitions::new(
+                Given::of(input.clone(), BatchLayout::MultipleBatches),
+                vec![0],
+                lanes,
+            );
             let mut emitter =
                 CpuEmitter::new(&node, lanes, &input.fields).expect("the emitter builds");
             let mut out = Vec::new();
@@ -250,7 +255,7 @@ fn merged(
     output: Schema,
 ) -> Vec<String> {
     let init_node = GpuAggregate::new(
-        Given::of_schema(input.clone()),
+        Given::of(input.clone(), BatchLayout::MultipleBatches),
         init,
         state.clone(),
         state.clone(),
@@ -258,7 +263,7 @@ fn merged(
     let mut partial =
         CpuExec::aggregate(&init_node, &input.fields, ctx()).expect("the init builds");
     let merge_node = GpuAggregateBatches::new(
-        Given::of_schema(state.clone()),
+        Given::of(state.clone(), BatchLayout::MultipleBatches),
         merge,
         state.clone(),
         output,

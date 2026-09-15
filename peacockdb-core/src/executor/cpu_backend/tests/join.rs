@@ -7,7 +7,6 @@
 
 use super::*;
 use crate::executor::cpu_backend::CpuJoin;
-use crate::plan::PartitionLayout;
 use crate::plan::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
 use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
 use datafusion::common::JoinType;
@@ -34,7 +33,7 @@ fn dim() -> CpuBatch {
     ));
     CpuBatch::new(
         RecordBatch::try_new(
-            Arc::new(schema_of(&dim_columns()).fields.as_ref().clone()),
+            Arc::new(columns(&dim_columns()).fields.as_ref().clone()),
             vec![keys, labels],
         )
         .expect("the build side fits its schema"),
@@ -50,7 +49,7 @@ fn fact(rows: &[(i64, i64)]) -> CpuBatch {
     ));
     CpuBatch::new(
         RecordBatch::try_new(
-            Arc::new(schema_of(&fact_columns()).fields.as_ref().clone()),
+            Arc::new(columns(&fact_columns()).fields.as_ref().clone()),
             vec![fks, vs],
         )
         .expect("a probe batch fits its schema"),
@@ -59,16 +58,8 @@ fn fact(rows: &[(i64, i64)]) -> CpuBatch {
 
 /// A stub input with the layout a join requires of that side: the build is one batch per
 /// lane, the probe streams.
-fn side(columns: &[(&str, DataType)], batches: BatchLayout) -> Box<dyn GpuNode> {
-    Box::new(Given {
-        kind: NodeKind::Intermediate {
-            layout: PartitionLayout {
-                batch_layout: batches,
-                ..PartitionLayout::new(1)
-            },
-            schema: schema_of(columns),
-        },
-    })
+fn side(fields: &[(&str, DataType)], batches: BatchLayout) -> Box<dyn GpuNode> {
+    Given::of(columns(fields), batches)
 }
 
 fn hash_join(join_type: JoinType, output: &[(&str, DataType)]) -> GpuHashJoin {
@@ -81,7 +72,7 @@ fn hash_join(join_type: JoinType, output: &[(&str, DataType)]) -> GpuHashJoin {
         Vec::new(),
         false,
         None,
-        schema_of(output),
+        columns(output),
     )
 }
 
@@ -168,8 +159,8 @@ fn the_types_that_emit_both_sides_answer_what_the_matrix_says() {
         let node = hash_join(join_type, &both_sides());
         let join = CpuJoin::hash(
             &node,
-            &schema_of(&dim_columns()).fields,
-            &schema_of(&fact_columns()).fields,
+            &columns(&dim_columns()).fields,
+            &columns(&fact_columns()).fields,
             ctx(),
         )
         .expect("the join builds");
@@ -195,8 +186,8 @@ fn the_build_side_semi_family_answers_out_of_its_finish_pass_alone() {
         let node = hash_join(join_type, &output);
         let join = CpuJoin::hash(
             &node,
-            &schema_of(&dim_columns()).fields,
-            &schema_of(&fact_columns()).fields,
+            &columns(&dim_columns()).fields,
+            &columns(&fact_columns()).fields,
             ctx(),
         )
         .expect("the join builds");
@@ -216,8 +207,8 @@ fn the_probe_side_semi_family_answers_per_batch_and_finishes_with_nothing() {
         let node = hash_join(join_type, &fact_columns());
         let join = CpuJoin::hash(
             &node,
-            &schema_of(&dim_columns()).fields,
-            &schema_of(&fact_columns()).fields,
+            &columns(&dim_columns()).fields,
+            &columns(&fact_columns()).fields,
             ctx(),
         )
         .expect("the join builds");
@@ -250,7 +241,7 @@ fn projecting_join(
         Vec::new(),
         false,
         Some(projection),
-        schema_of(output),
+        columns(output),
     )
 }
 
@@ -270,8 +261,8 @@ fn a_projecting_outer_join_pads_the_columns_its_projection_keeps() {
     let node = projecting_join(JoinType::Left, vec![1, 3], &output);
     let join = CpuJoin::hash(
         &node,
-        &schema_of(&dim_columns()).fields,
-        &schema_of(&fact_columns()).fields,
+        &columns(&dim_columns()).fields,
+        &columns(&fact_columns()).fields,
         ctx(),
     )
     .expect("the join builds");
@@ -290,8 +281,8 @@ fn a_build_row_matched_in_one_batch_is_not_padded_against_another() {
     let node = hash_join(JoinType::Left, &both_sides());
     let join = CpuJoin::hash(
         &node,
-        &schema_of(&dim_columns()).fields,
-        &schema_of(&fact_columns()).fields,
+        &columns(&dim_columns()).fields,
+        &columns(&fact_columns()).fields,
         ctx(),
     )
     .expect("the join builds");
@@ -324,12 +315,12 @@ fn a_cross_join_pairs_every_build_row_with_every_probe_row() {
         side(&dim_columns(), BatchLayout::SingleBatch),
         side(&fact_columns(), BatchLayout::MultipleBatches),
         None,
-        schema_of(&both_sides()),
+        columns(&both_sides()),
     );
     let join = CpuJoin::cross(
         &node,
-        &schema_of(&dim_columns()).fields,
-        &schema_of(&fact_columns()).fields,
+        &columns(&dim_columns()).fields,
+        &columns(&fact_columns()).fields,
         ctx(),
     )
     .expect("the cross join builds");
@@ -363,20 +354,20 @@ fn greater(build: u32, probe: u32) -> (Expr, Vec<JoinFilterColumn>) {
 /// A predicate rather than a key: `k > fk` pairs only `k=3` with the two `fk=2` rows.
 #[test]
 fn a_nested_loop_inner_join_emits_the_pairs_its_predicate_keeps() {
-    let (filter, columns) = greater(0, 0);
+    let (filter, filter_columns) = greater(0, 0);
     let node = GpuNestedLoopJoin::new(
         side(&dim_columns(), BatchLayout::SingleBatch),
         side(&fact_columns(), BatchLayout::MultipleBatches),
         NestedLoopJoinType::Inner,
         filter,
-        columns,
+        filter_columns,
         None,
-        schema_of(&both_sides()),
+        columns(&both_sides()),
     );
     let join = CpuJoin::nested_loop(
         &node,
-        &schema_of(&dim_columns()).fields,
-        &schema_of(&fact_columns()).fields,
+        &columns(&dim_columns()).fields,
+        &columns(&fact_columns()).fields,
         ctx(),
     )
     .expect("the nested loop join builds");
@@ -388,20 +379,20 @@ fn a_nested_loop_inner_join_emits_the_pairs_its_predicate_keeps() {
 /// wrong about, which is why it needs no finish pass of its own.
 #[test]
 fn a_nested_loop_left_join_pads_the_build_rows_no_pair_kept() {
-    let (filter, columns) = greater(0, 0);
+    let (filter, filter_columns) = greater(0, 0);
     let node = GpuNestedLoopJoin::new(
         side(&dim_columns(), BatchLayout::SingleBatch),
         side(&fact_columns(), BatchLayout::SingleBatch),
         NestedLoopJoinType::Left,
         filter,
-        columns,
+        filter_columns,
         None,
-        schema_of(&both_sides()),
+        columns(&both_sides()),
     );
     let join = CpuJoin::nested_loop(
         &node,
-        &schema_of(&dim_columns()).fields,
-        &schema_of(&fact_columns()).fields,
+        &columns(&dim_columns()).fields,
+        &columns(&fact_columns()).fields,
         ctx(),
     )
     .expect("the nested loop join builds");
@@ -431,14 +422,14 @@ fn a_null_key_matches_a_null_key_in_the_finish_pass_when_the_node_says_so() {
             Vec::new(),
             null_equals_null,
             None,
-            schema_of(&dim_columns()),
+            columns(&dim_columns()),
         )
     };
     let keyed_null = |node: &GpuHashJoin| {
         let join = CpuJoin::hash(
             node,
-            &schema_of(&dim_columns()).fields,
-            &schema_of(&fact_columns()).fields,
+            &columns(&dim_columns()).fields,
+            &columns(&fact_columns()).fields,
             ctx(),
         )
         .expect("the join builds");
@@ -446,7 +437,7 @@ fn a_null_key_matches_a_null_key_in_the_finish_pass_when_the_node_says_so() {
         let labels: ArrayRef = Arc::new(StringArray::from(vec![Some("null key"), Some("one")]));
         let build = CpuBatch::new(
             RecordBatch::try_new(
-                Arc::new(schema_of(&dim_columns()).fields.as_ref().clone()),
+                Arc::new(columns(&dim_columns()).fields.as_ref().clone()),
                 vec![build, labels],
             )
             .expect("the build side fits"),
@@ -456,7 +447,7 @@ fn a_null_key_matches_a_null_key_in_the_finish_pass_when_the_node_says_so() {
         let probe_values: ArrayRef = Arc::new(Int64Array::from(vec![Some(0i64), Some(9)]));
         let probe = CpuBatch::new(
             RecordBatch::try_new(
-                Arc::new(schema_of(&fact_columns()).fields.as_ref().clone()),
+                Arc::new(columns(&fact_columns()).fields.as_ref().clone()),
                 vec![probe_keys, probe_values],
             )
             .expect("the probe fits"),
@@ -511,7 +502,7 @@ fn residual() -> (Expr, Vec<JoinFilterColumn>) {
 }
 
 fn filtered(join_type: JoinType, output: &[(&str, DataType)]) -> GpuHashJoin {
-    let (filter, columns) = residual();
+    let (filter, filter_columns) = residual();
     GpuHashJoin::new(
         side(&dim_columns(), BatchLayout::SingleBatch),
         // The planner makes a refusing shape's probe a single batch, and this is that
@@ -520,10 +511,10 @@ fn filtered(join_type: JoinType, output: &[(&str, DataType)]) -> GpuHashJoin {
         join_type,
         vec![(0, 0)],
         Some(filter),
-        columns,
+        filter_columns,
         false,
         None,
-        schema_of(output),
+        columns(output),
     )
 }
 
@@ -546,8 +537,8 @@ fn the_filtered_column_answers_in_one_call_and_never_at_done() {
         let node = filtered(join_type, &output);
         let join = CpuJoin::hash(
             &node,
-            &schema_of(&dim_columns()).fields,
-            &schema_of(&fact_columns()).fields,
+            &columns(&dim_columns()).fields,
+            &columns(&fact_columns()).fields,
             ctx(),
         )
         .expect("the join builds");
@@ -582,8 +573,8 @@ fn the_filtered_column_refuses_five_cells_by_ticket() {
         let node = filtered(join_type, &both_sides());
         let refused = match CpuJoin::hash(
             &node,
-            &schema_of(&dim_columns()).fields,
-            &schema_of(&fact_columns()).fields,
+            &columns(&dim_columns()).fields,
+            &columns(&fact_columns()).fields,
             ctx(),
         ) {
             Err(refused) => refused,
@@ -605,8 +596,8 @@ fn a_finish_over_no_probe_keys_at_all_owes_every_build_row() {
     let node = hash_join(JoinType::LeftAnti, &dim_columns());
     let join = CpuJoin::hash(
         &node,
-        &schema_of(&dim_columns()).fields,
-        &schema_of(&fact_columns()).fields,
+        &columns(&dim_columns()).fields,
+        &columns(&fact_columns()).fields,
         ctx(),
     )
     .expect("the join builds");

@@ -175,6 +175,16 @@ pub mod raw {
             out_cap: u64,
             out_n: *mut u64,
         ) -> i32;
+
+        // Test-only: adopt an Arrow C-Data struct array (= one table) into the live
+        // session and return its handle — the operator harness's upload. Needs
+        // begin_plan first; no recipe names it and no production path calls it.
+        pub fn peacock_handle_from_arrow(
+            executor: *mut PeacockExecutor,
+            schema: *const std::ffi::c_void,
+            array: *const std::ffi::c_void,
+            out_handle: *mut u64,
+        ) -> i32;
     }
 }
 

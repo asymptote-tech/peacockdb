@@ -10,8 +10,8 @@ use crate::executor::Backend;
 use crate::executor::CpuBackend;
 use crate::executor::Executor;
 use crate::executor::cpu_backend::CpuJoin;
+use crate::plan::ColumnOrder;
 use crate::plan::RowInterval;
-use crate::plan::{ColumnOrder, PartitionLayout};
 use crate::plan::{
     ExecutorCategory, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
     GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave,
@@ -22,16 +22,8 @@ use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
 use datafusion::common::JoinType;
 
 /// A stub input with a layout stated, since a join's two sides differ in exactly that.
-fn given(columns: &[(&str, DataType)], batches: BatchLayout) -> Box<dyn GpuNode> {
-    Box::new(Given {
-        kind: NodeKind::Intermediate {
-            layout: PartitionLayout {
-                batch_layout: batches,
-                ..PartitionLayout::new(1)
-            },
-            schema: schema_of(columns),
-        },
-    })
+fn given(fields: &[(&str, DataType)], batches: BatchLayout) -> Box<dyn GpuNode> {
+    Given::of(columns(fields), batches)
 }
 
 fn streaming() -> Box<dyn GpuNode> {
@@ -63,7 +55,7 @@ fn every_kind() -> Vec<Box<dyn GpuNode>> {
             streaming(),
             greater_than_value(0),
             None,
-            schema_of(&GROUPED),
+            columns(&GROUPED),
         )),
         Box::new(GpuProject::new(
             streaming(),
@@ -71,7 +63,7 @@ fn every_kind() -> Vec<Box<dyn GpuNode>> {
                 expr: Expr::column(0, "k"),
                 name: "k".to_string(),
             }],
-            schema_of(&[GROUPED[0].clone()]),
+            columns(&[GROUPED[0].clone()]),
         )),
         Box::new(GpuSort::new(streaming(), vec![order()], None)),
         Box::new(GpuAggregate::new(
@@ -110,13 +102,13 @@ fn every_kind() -> Vec<Box<dyn GpuNode>> {
             Vec::new(),
             false,
             None,
-            schema_of(&[GROUPED, GROUPED].concat()),
+            columns(&[GROUPED, GROUPED].concat()),
         )),
         Box::new(GpuCrossJoin::new(
             one_batch(),
             one_batch(),
             None,
-            schema_of(&[GROUPED, GROUPED].concat()),
+            columns(&[GROUPED, GROUPED].concat()),
         )),
         Box::new(GpuNestedLoopJoin::new(
             one_batch(),
@@ -139,16 +131,16 @@ fn every_kind() -> Vec<Box<dyn GpuNode>> {
                 },
             ],
             None,
-            schema_of(&[GROUPED, GROUPED].concat()),
+            columns(&[GROUPED, GROUPED].concat()),
         )),
         Box::new(GpuMergePartitions::new(streaming())),
         Box::new(GpuUnion::new(
             vec![streaming(), streaming()],
-            schema_of(&GROUPED),
+            columns(&GROUPED),
         )),
         Box::new(GpuInterleave::new(
             vec![streaming(), streaming()],
-            schema_of(&GROUPED),
+            columns(&GROUPED),
         )),
         Box::new(GpuUnload::new(streaming(), None)),
     ]
@@ -156,15 +148,7 @@ fn every_kind() -> Vec<Box<dyn GpuNode>> {
 
 /// A stub input over a state schema, which is what a merge reads.
 fn given_schema(schema: Schema) -> Box<dyn GpuNode> {
-    Box::new(Given {
-        kind: NodeKind::Intermediate {
-            layout: PartitionLayout {
-                batch_layout: BatchLayout::MultipleBatches,
-                ..PartitionLayout::new(1)
-            },
-            schema,
-        },
-    })
+    Given::of(schema, BatchLayout::MultipleBatches)
 }
 
 /// One sum over the value column, grouped by the key — the smallest body there is, since
@@ -288,8 +272,8 @@ fn a_build_side_semi_joins_probe_is_not_charged_the_build_side() {
 
     let semi = CpuJoin::hash(
         &semi_join(JoinType::LeftSemi),
-        &schema_of(&GROUPED).fields,
-        &schema_of(&GROUPED).fields,
+        &columns(&GROUPED).fields,
+        &columns(&GROUPED).fields,
         ctx(),
     )
     .expect("a semi join builds");
@@ -313,8 +297,8 @@ fn an_inner_joins_probe_is_charged_the_build_side_it_reads() {
     let build_bytes = build.record_batch().get_array_memory_size();
     let inner = CpuJoin::hash(
         &semi_join(JoinType::Inner),
-        &schema_of(&GROUPED).fields,
-        &schema_of(&GROUPED).fields,
+        &columns(&GROUPED).fields,
+        &columns(&GROUPED).fields,
         ctx(),
     )
     .expect("an inner join builds");
@@ -384,8 +368,8 @@ fn a_state_value_too_large_for_its_declared_precision_ends_the_query() {
 
 fn semi_join(join_type: JoinType) -> GpuHashJoin {
     let output = match join_type {
-        JoinType::LeftSemi => schema_of(&GROUPED),
-        _ => schema_of(&[GROUPED, GROUPED].concat()),
+        JoinType::LeftSemi => columns(&GROUPED),
+        _ => columns(&[GROUPED, GROUPED].concat()),
     };
     GpuHashJoin::new(
         one_batch(),
