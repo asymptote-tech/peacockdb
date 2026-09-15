@@ -282,6 +282,12 @@ distinct-per-set but not DataFusion's positional bitmask. Safe while no enabled 
 projects or sorts `GROUPING()`; must be fixed before one does (q70/q86 after #23).
 9 rollup rows carry this ticket.
 
+The width is wrong beside the encoding. The gid is built `INT32`
+(`cudf::numeric_scalar<int32_t>`), where DataFusion sizes the column to the group count:
+`UInt8` up to 8 grouping expressions, `UInt16` to 16, `UInt32` to 32, `UInt64` beyond. Too
+wide for every corpus query and too narrow past 32 groups. The fix reads the declared output
+schema rather than picking a type; nothing timed reaches a plan with grouping sets.
+
 <a id="t62"></a>
 ### #62 — count(DISTINCT) ignores the DISTINCT flag in GpuAggregate
 `cpp/src/operators/aggregate.cpp` ignores `AggregateFuncNode.distinct`; a guard now

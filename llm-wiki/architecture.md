@@ -882,13 +882,14 @@ other code is written against them, so changing one breaks a caller that never n
 Rust side's own traits — `Backend`, the executor families, `GpuNode` — are in
 [Execution](#traits) above, beside the reasons for their shape.
 
-The ABI is sixteen symbols in five groups: lifecycle (`peacock_gpu_version`,
+The ABI is nineteen symbols in five groups: lifecycle (`peacock_gpu_version`,
 `peacock_executor_create` / `_destroy`, `peacock_last_error`, `peacock_result_free`); the
 node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `end_plan`); the three
 per-call entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`);
-instrumentation (`install_rmm_pool`, `set_node_timing`, `measure_timing_floor_us`); and the
-conformance hook `peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow
-C-data batch so the Rust side can compare it against comet's.
+instrumentation (`install_rmm_pool`, `set_node_timing`, `set_nvtx_ranges`, `nvtx_push_range`,
+`nvtx_pop_range`, `executor_collect_node_regions`); and the conformance hook
+`peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow C-data batch so
+the Rust side can compare it against comet's.
 
 Three conventions the signatures do not carry:
 
@@ -896,14 +897,18 @@ Three conventions the signatures do not carry:
   past the end empty, an overrun clamped. It is the same convention on `slice_handle` and
   `result_from_handle`, which are otherwise the two halves of the limit rule — one produces
   a handle, the other a result.
-- **Instrumentation is process-global and off by default; only `peacock_gpu_benchmarks`
-  turns it on.** Without the pool every cuDF intermediate is a `cudaMalloc`/`cudaFree` round
-  trip ([#148](tickets.md#t148)); the gtest binaries install it from their own `main()`, and
-  this symbol exists for a Rust caller that cannot include the C++ header. Node timing puts
-  CUDA events around the device work and the host clock around the host work, with no sync
-  inside the region — so a measured run is not a serialized one, which is what lets its
-  numbers stand for the unmeasured run. Device times do not exist when a node returns and
-  are drained afterwards by `peacock_executor_collect_node_regions`.
+- **Instrumentation is process-global and off by default; `peacock_gpu_benchmarks` and
+  `test_node_timing` are what turn it on.** Without the pool every cuDF intermediate is a
+  `cudaMalloc`/`cudaFree` round trip ([#148](tickets.md#t148)); the gtest binaries install it
+  from their own `main()`, and this symbol exists for a Rust caller that cannot include the
+  C++ header. Under `set_node_timing` every per-call entry point opens one region per output
+  partition: a CUDA event recorded on the default stream at open and at close, the host clock
+  around the whole call, and no sync inside — so a measured run is not a serialized one,
+  which is what lets its numbers stand for the unmeasured run. The one sync a call pays in
+  either mode is the string case of `varlen_content_bytes`, which reads an offset back from
+  the device. Device times do not exist when a node returns and are drained afterwards by
+  `peacock_executor_collect_node_regions`. NVTX ranges are a separate switch, so a capture
+  can name what it traced without timing it.
 - **`peacock_executor_create` takes a byte limit it does not enforce.** Residency is the
   Rust driver's accounting; see [Memory accounting](#memory-accounting).
 
@@ -915,9 +920,9 @@ header exposes no cuDF internals; the handle registry lives in that `Impl` and i
 of its own (below).
 
 **[`TableResult` / `NodeStats`](../cpp/src/plan_executor.h)** — the two value types every C++
-path returns. `NodeStats` carries only what C++ alone can measure — rows, var-length content
-bytes, and a time that is zero unless timing is on. The byte formula itself lives in Rust
-(`src/common.rs`) so the two engines cannot drift.
+path returns. `NodeStats` carries only what C++ alone can measure — rows and var-length
+content bytes. The byte formula itself lives in Rust (`src/common.rs`) so the two engines
+cannot drift, and C++ prices nothing.
 
 **[`NodeInputs` and the operator dispatch](../cpp/src/peacock/operators.h)** — the contract
 every operator translation unit shares: one `execute_*` per wire node kind, plus `take_input`
