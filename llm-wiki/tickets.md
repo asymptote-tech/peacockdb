@@ -181,8 +181,8 @@ relative to the direction — `BEFORE` when `nulls_first == asc` — at both sit
 over sorted runs must order as the sort did. At the merge the damage is worse: runs sorted as
 the plan says break cuDF's merge precondition, and the device answers duplicated and dropped
 rows. Pinned by `bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device`
-(`gpu_tests/exec_cases.rs`) and the two `…_descending_key_nulls_first_puts_them_last…` merge
-pins (`gpu_tests/accumulate_cases.rs`).
+(`gpu_tests/exec_cases.rs`), the two `…_descending_key_nulls_first_puts_them_last…` merge pins
+and `…_over_runs_each_carrying_a_null_duplicates_and_drops_rows…` (`gpu_tests/accumulate_cases.rs`).
 
 <a id="t200"></a>
 ### #200 — a Date64 comes back as a type the wire cannot name
