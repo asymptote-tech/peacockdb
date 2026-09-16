@@ -14,13 +14,13 @@ whole task: one is a gap to fill, the other is a claim to demote.
 
 This task teaches the harness the shapes it panics on, turns a device refusal into a recorded outcome
 instead of an abort, and leaves behind a statement of what it can and cannot drive. It **declares no
-schemas and measures no types** — that is [`declared-schemas-derived.md`](declared-schemas-derived.md),
+schemas and measures no types** — that is [`declared-schemas-derived.md`](../archive/archived-tasks.md),
 which cannot be written against a harness that refuses its plans.
 
 ## This task is conditional
 
 It sits behind [`sink-divergence-survey.md`](sink-divergence-survey.md) and
-[`declared-schemas.md`](declared-schemas.md), and **the survey may shrink it to nothing.** If every
+[`declared-schemas.md`](../archive/archived-tasks.md), and **the survey may shrink it to nothing.** If every
 divergence class the corpus produces already surfaces at the sink, a harness that can drive
 intermediate calls buys little, and the `bug_` tests above are worth more than the teaching.
 

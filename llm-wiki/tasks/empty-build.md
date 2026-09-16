@@ -193,7 +193,7 @@ doc comments, and the tests.
 ## Sequencing
 
 **No build dependency on any other task.** An earlier draft placed this after
-[`declared-schemas.md`](declared-schemas.md), reasoning that its zero-row query establishes that a
+[`declared-schemas.md`](../archive/archived-tasks.md), reasoning that its zero-row query establishes that a
 zero-row table carries full type information across the boundary. That rationale does not survive the
 rewrite: this task never sends a zero-row table across the boundary — it hands one to a join. What it
 needs is that the scatter's zero-row output is well-typed for a join to consume, and the spike
