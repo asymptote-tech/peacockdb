@@ -23,6 +23,14 @@ Chain B, task 1. Branch `ENS-utf8-everywhere` off master at `76f17db2`; PR targe
   `Utf8View → Utf8` and nothing else.
 - Progress is judged by what reaches this file and the working tree, not by elapsed time.
 
+## Reviewing — 2026-09-16
+
+Committed as `2902c5f7`, `dee2462c`, `3305fd0b`, `1bff7269` (the plan's four commits) on
+`e8f396d3`; pushed; PR #158 against master, base verified, 6 commits. The coordinator's own
+golden check agreed with the developer's: the residual beyond the word swap is the 18
+`sha256=` pairs in `recipe-payloads.txt` and q24's residual filter in the five tpcds files.
+Review round 1 dispatched.
+
 ## Developer notes
 
 ### Dispatch 1 — what was done, in the plan's order
