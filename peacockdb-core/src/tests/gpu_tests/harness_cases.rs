@@ -1,6 +1,7 @@
 //! The seqless three, and the helper round trip — the cases whose recipe puts nothing on
 //! the wire, so a wrong helper has nowhere to hide.
 
+use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 
 use super::device::Device;
@@ -111,6 +112,49 @@ fn unload_over(rows: usize) -> (GpuUnload, RecordBatch) {
         None,
     );
     (node, batch)
+}
+
+/// A batch whose exported types are not the sink's: the device holds one string layout and
+/// exports it as `Utf8`, so declaring `s` as `LargeUtf8` — a type the plan may carry — is a
+/// divergence the sink refuses, naming the column with its index and both types. The cpu
+/// holds to the declaration and answers, so the refusal is one-sided by construction.
+operator_case! {
+    GpuUnload,
+    fn the_sink_names_a_column_whose_exported_type_is_not_the_declared_one() {
+        let batch = synthetic(8, 2);
+        let fields: Vec<Field> = batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| match f.name().as_str() {
+                "s" => Field::new("s", DataType::LargeUtf8, f.is_nullable()),
+                _ => f.as_ref().clone(),
+            })
+            .collect();
+        let node = GpuUnload::new(
+            Given::of(
+                Schema::new(std::sync::Arc::new(ArrowSchema::new(fields))),
+                BatchLayout::MultipleBatches,
+            ),
+            None,
+        );
+        let outcome = run_both(
+            &node,
+            Script::Unload {
+                batch,
+                rows: RowRange::WHOLE,
+            },
+        );
+        let why = outcome.gpu_refuses();
+        assert!(
+            why.contains("the exported stream is not the sink's rows"),
+            "{why}"
+        );
+        assert!(
+            why.contains("(declared vs exported: 5 s: LargeUtf8 vs Utf8)"),
+            "{why}"
+        );
+    }
 }
 
 #[test]

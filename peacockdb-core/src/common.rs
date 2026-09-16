@@ -39,17 +39,10 @@ pub(crate) fn type_structural_size(dt: &DataType, rows: usize) -> usize {
         // Values are deduped/small; omitting them slightly undercounts but
         // keeps the golden deterministic (no allocation-size dependency).
         DataType::Dictionary(key_type, _) => rows * key_type.primitive_width().unwrap_or(4),
-        // Nested types are NOT handled here — `ColAccum` computes them from
-        // per-level totals (List child overhead can't be derived from the parent
-        // row count alone). `assert_type_accountable` recurses into them.
-        //
-        // HARD fail on any other unhandled type: the old silent 0 undercounted
-        // decimals, and an allocation-based fallback
-        // (get_array_memory_size) would make goldens non-deterministic. Panicking
-        // forces a deterministic per-type arm to be added rather than silently
-        // producing a wrong/unstable size. The guard is reached at stream
-        // construction (see `assert_type_accountable`), NOT in a destructor, so it
-        // unwinds as a normal test failure instead of aborting the process.
+        // Nested types are not handled here: a List child's overhead cannot be derived
+        // from the parent row count alone. Any other type fails hard rather than
+        // counting 0 or falling back to an allocation size, which would make the
+        // goldens non-deterministic; the arm it wants is a deterministic one.
         other => {
             panic!("type_structural_size: unhandled DataType {other:?} — add a deterministic arm")
         }
@@ -85,10 +78,10 @@ pub(crate) fn batch_varlen_content_bytes(batch: &RecordBatch) -> usize {
         .sum()
 }
 
-/// Per-column var-length CONTENT bytes for one batch: `offsets[rows]-offsets[0]` for
-/// offset layouts, or Σ value byte lengths for View layouts. Fixed-width types contribute
-/// 0. This term telescopes across batches — the sum over batches equals the value for the
-/// whole node — so it carries no per-batch overhead and is safe to accumulate.
+/// Per-column var-length CONTENT bytes for one batch: `offsets[rows]-offsets[0]` for the
+/// offset layouts. Fixed-width types contribute 0. This term telescopes across batches —
+/// the sum over batches equals the value for the whole node — so it carries no per-batch
+/// overhead and is safe to accumulate.
 pub(crate) fn array_content_size(dt: &DataType, col: &dyn Array, rows: usize) -> usize {
     // offsets[rows]-offsets[0]; offsets are i32 (Utf8/Binary) or i64 (Large*).
     macro_rules! offset_content {

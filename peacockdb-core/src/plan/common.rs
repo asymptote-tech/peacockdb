@@ -113,6 +113,10 @@ pub(crate) fn check_column_refs(
     site: &str,
 ) -> Result<(), PlanError> {
     check_expr_types(expr, site)?;
+    column_refs_in_range(expr, against, site)
+}
+
+fn column_refs_in_range(expr: &Expr, against: &Schema, site: &str) -> Result<(), PlanError> {
     match expr {
         Expr::Column(reference) => {
             let field = against
@@ -139,14 +143,14 @@ pub(crate) fn check_column_refs(
         }
         Expr::Literal(_) => Ok(()),
         Expr::Binary { left, right, .. } => {
-            check_column_refs(left, against, site)?;
-            check_column_refs(right, against, site)
+            column_refs_in_range(left, against, site)?;
+            column_refs_in_range(right, against, site)
         }
-        Expr::Unary { arg, .. } => check_column_refs(arg, against, site),
-        Expr::Cast { expr, .. } => check_column_refs(expr, against, site),
+        Expr::Unary { arg, .. } => column_refs_in_range(arg, against, site),
+        Expr::Cast { expr, .. } => column_refs_in_range(expr, against, site),
         Expr::Like { expr, pattern, .. } => {
-            check_column_refs(expr, against, site)?;
-            check_column_refs(pattern, against, site)
+            column_refs_in_range(expr, against, site)?;
+            column_refs_in_range(pattern, against, site)
         }
         Expr::Case {
             comparand,
@@ -154,17 +158,17 @@ pub(crate) fn check_column_refs(
             else_expr,
         } => {
             for part in comparand.iter().chain(else_expr.iter()) {
-                check_column_refs(part, against, site)?;
+                column_refs_in_range(part, against, site)?;
             }
             for (when, then) in when_then {
-                check_column_refs(when, against, site)?;
-                check_column_refs(then, against, site)?;
+                column_refs_in_range(when, against, site)?;
+                column_refs_in_range(then, against, site)?;
             }
             Ok(())
         }
         Expr::ScalarFunction { args, .. } => {
             for arg in args {
-                check_column_refs(arg, against, site)?;
+                column_refs_in_range(arg, against, site)?;
             }
             Ok(())
         }

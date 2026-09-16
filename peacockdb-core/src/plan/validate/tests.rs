@@ -483,3 +483,62 @@ fn a_residual_filter_naming_a_view_literal_is_refused() {
         "GpuHashJoin: a literal is Utf8View, a view type the device cannot hold",
     );
 }
+
+/// A grouping-set aggregate over one Utf8 key, summing `n`, with the NULL it substitutes
+/// for the masked key and the intermediate schema both given — the two places an
+/// aggregate names a type that no `check_column_refs` path and no `kind().schema()` reads.
+fn grouping_set_aggregate(masked_key: Expr, intermediate: Schema) -> Box<dyn GpuNode> {
+    let input = source(
+        Schema::new(Arc::new(ArrowSchema::new(vec![
+            Field::new("k", DataType::Utf8, true),
+            Field::new("n", DataType::Int64, true),
+        ]))),
+        PartitionLayout::new(1),
+    );
+    let body = AggregateBody {
+        group_by: vec![Expr::column(0, "k")],
+        grouping_sets: vec![vec![false], vec![true]],
+        null_exprs: vec![masked_key],
+        aggs: vec![AggCall {
+            func: PlanAgg::Sum,
+            args: vec![Expr::column(1, "n")],
+            outputs: vec![Field::new("n", DataType::Int64, true)],
+        }],
+        finalize: None,
+    };
+    let declared = Schema::new(Arc::new(ArrowSchema::new(vec![
+        Field::new("k", DataType::Utf8, true),
+        Field::new("__grouping_id", DataType::UInt8, false),
+        Field::new("n", DataType::Int64, true),
+    ])));
+    Box::new(GpuAggregate::new(input, body, intermediate, declared))
+}
+
+#[test]
+fn a_grouping_sets_null_of_a_view_type_is_refused() {
+    let intermediate = Schema::new(Arc::new(ArrowSchema::new(vec![
+        Field::new("k", DataType::Utf8, true),
+        Field::new("__grouping_id", DataType::UInt8, false),
+        Field::new("n", DataType::Int64, true),
+    ])));
+    let aggregate =
+        grouping_set_aggregate(Expr::Literal(ScalarValue::Utf8View(None)), intermediate);
+    invalid(
+        validate(rooted(aggregate).as_ref()),
+        "GpuAggregate: a literal is Utf8View, a view type the device cannot hold",
+    );
+}
+
+#[test]
+fn an_aggregate_whose_intermediate_names_a_view_type_is_refused() {
+    let intermediate = Schema::new(Arc::new(ArrowSchema::new(vec![
+        Field::new("k", DataType::Utf8View, true),
+        Field::new("__grouping_id", DataType::UInt8, false),
+        Field::new("n", DataType::Int64, true),
+    ])));
+    let aggregate = grouping_set_aggregate(Expr::Literal(ScalarValue::Utf8(None)), intermediate);
+    invalid(
+        validate(rooted(aggregate).as_ref()),
+        "GpuAggregate: intermediate column 0 k: Utf8View is a view type the device cannot hold",
+    );
+}

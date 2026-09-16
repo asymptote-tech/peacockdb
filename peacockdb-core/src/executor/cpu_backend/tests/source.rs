@@ -185,3 +185,43 @@ fn a_lane_past_the_mapping_is_refused_by_number() {
     };
     assert!(format!("{refused:?}").contains("lane 3"), "{refused:?}");
 }
+
+/// The reader answers in the file's types and the node relabels, never casts: a column the
+/// file holds in another type than the plan declares is a refusal naming the column, since
+/// a cast here would hide a scan planned against a type the data does not have.
+#[test]
+fn a_column_the_file_holds_in_another_type_is_refused_rather_than_cast() {
+    let path = table();
+    let scan = ScanMetadata {
+        file: path.to_string_lossy().into_owned(),
+        groups: (0..3)
+            .map(|index| RowGroupMeta {
+                index,
+                rows: 2,
+                bytes: 16,
+            })
+            .collect(),
+        can_be_null: vec![false, false],
+    };
+    let node = GpuLoadParquet::new(
+        "t".to_string(),
+        vec![0, 1],
+        vec![vec![vec![0]]],
+        &scan,
+        None,
+        columns(&[("k", DataType::Utf8), ("v", DataType::Int32)]),
+    );
+    let NodeExecutors::Source(source) =
+        CpuBackend::executors_for(&ctx(), &node, 0, 0).expect("a loader builds a source")
+    else {
+        panic!("a loader is a source");
+    };
+    let refused = match source.next_batch() {
+        Err(error) => error.to_string(),
+        Ok(_) => panic!("Int64 in the file and Int32 declared, and the read went through"),
+    };
+    assert!(
+        refused.contains("Int32") && refused.contains("Int64"),
+        "{refused}"
+    );
+}

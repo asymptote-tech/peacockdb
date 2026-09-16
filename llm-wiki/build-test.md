@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1954 test cases — Rust 1511, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1958 test cases — Rust 1515, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1021 cases: `--lib` 547, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1024 cases: `--lib` 550, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -225,13 +225,14 @@ script, the empty build lane a join owes rows for reaching `SetBuild` while ever
 lane still drops ([#175](archive/archived-tickets.md#t175)), and the mock against its own
 script
 
-| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 64 |
+| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 65 |
 |---|---|--:|
 
 one hand-built node per executor, one hand-written expected result: the exec executors, the
 accumulators over state batches written down rather than produced, the loader over parquet the
-test writes, the scatter, the join capability matrix run per mode, and what `executors_for`
-builds and reports holding
+test writes — which relabels the reader's batch to the declared schema and refuses a column
+the file holds in another type rather than casting it — the scatter, the join capability
+matrix run per mode, and what `executors_for` builds and reports holding
 
 | Executor contract, both engines | [executor::cpu_backend::tests::contract](../peacockdb-core/src/executor/cpu_backend/tests/contract.rs) | 1 |
 |---|---|--:|
@@ -286,11 +287,12 @@ is there
 DataFusion's expression, this engine's, and DataFusion's again must all read the same column
 out of the same rows — asserted on the array each produces, not on shape
 
-| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 34 |
+| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 36 |
 |---|---|--:|
 
 validation's shape rules — a plan ends in a crossing, a sink sits at the root, a limit has a
-real consumer, no schema, literal, cast or function names a view type the device cannot hold;
+real consumer, no schema — an aggregate's intermediate included — literal, cast or function
+names a view type the device cannot hold;
 layout canonical forms and equality; whether a hash survives a regrouping
 
 | Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 11 |
@@ -338,7 +340,7 @@ the crate links; executor lifecycle
 what the batch reports, and that `consume` hands the handle over without releasing it. Needs no
 device: the release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 396 cases: `--lib -- gpu_tests::` 385, `test_gpu_corpus` 11
+#### gpu — `--features gpu`: shad-gpu only. 397 cases: `--lib -- gpu_tests::` 386, `test_gpu_corpus` 11
 
 *crate integration, external*
 
@@ -362,13 +364,14 @@ the gpu column of the registry, the other half of the pair
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 330 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 331 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
 `executors_for`, the outputs compared slot by slot and exactly — schema included, so a type the
 device changes is red here rather than at a query's root. The upload round trip, `GpuUnload`
-and `GpuLimit` proved the harness on the operators whose recipe carries no seq. Then every
+— including the sink naming a column whose exported type is not the declared one — and
+`GpuLimit` proved the harness on the operators whose recipe carries no seq; then every
 seq-bearing operator — the exec three, both aggregates, the three accumulators, the scatter,
 nine hash-join types, cross, nested-loop and the scan — each case green or a `bug_` case
 asserting the wrong answer or the refusal with its ticket above it, every empty shape its own

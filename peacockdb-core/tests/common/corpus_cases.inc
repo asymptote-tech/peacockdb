@@ -27,14 +27,11 @@ corpus_query!(tpch, 1, q12, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgrou
 // THE DEVICE COLUMN, after the first two cycles. q6 runs at all five modes and q19 at
 // tp1-single; every other device cell is off against a ticket. Four causes, none of them
 // this task's to fix: #152 refuses a join whose recipe copies a side the ABI cannot copy (52
-// cases, by name rather than by crash), #183 was an unload declaring a view string type
-// where the device exports Utf8, #184 is a cuDF failure in the hash scatter, and #185 is the
-// device reporting one input row where the cpu reports the group count — which is the golden
-// catching exactly what it is for. T19 is where these are settled query by query.
-// #183 is closed: no plan declares a view type any more, and the 76 string-class cells were
-// re-run at tp1-single. Three run — nested-loop-join, shuffle-stddev, tpcds q84 — and the rest
-// stay off on what the sink or the golden showed next: #187, #191, #185, and #215 for the
-// cpu's joins answering several batches per call where the device answers one.
+// cases, by name rather than by crash), #184 is a cuDF failure in the hash scatter, #185 is
+// the device reporting one input row where the cpu reports the group count — which is the
+// golden catching exactly what it is for — and the string class, gone since no plan declares
+// a view type, whose cells are off on #187, #191, #185 and #215. T19 is where these are
+// settled query by query.
 corpus_query!(tpch, 1, q13, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q15, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q17, none, none, data_fusion_exact, golden_exact);

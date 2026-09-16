@@ -39,6 +39,20 @@ ancestor; the `corpus_cases.inc` comment above `q13` is 11 lines and narrates hi
 `src/common.rs:89,44-52` comments name deleted arms and a nonexistent function; #183 over the
 30-line cap. The coordinator trimmed #183 and #215 (`971f2c6e`); the rest go to the developer.
 
+## Restart — 2026-09-16, round 1 fixes in flight
+
+A fresh coordinator found the board at `reviewing`, `b070a616` pushed, and the round-1 fix
+dispatch dead with its predecessor: twelve files modified in the working tree, uncommitted,
+nothing proven, and only the "sites outside the spec's list" note below reached this file.
+Redispatched a developer to audit the tree against the round-1 list, finish it, and prove it.
+Hosts: **verda down** (name resolution), **shad-gpu up**, 0 MiB held.
+
+**PR #158 is `CONFLICTING` against master and has never had a CI run** — GitHub cannot build
+the merge ref, so the `pull_request` event never fires. Master moved by chain D's `empty-build`
+(`76f17db2..491f1afc`); both sides touched `corpus_cases.inc`, `cost-registry.csv`,
+`build-test.md`, `tickets.md`, `tasks.md`. A rebase is the human's call through the control
+file; until it lands, `completeness approved` cannot reach `done`.
+
 ## Developer notes
 
 ### Dispatch 1 — what was done, in the plan's order
@@ -145,3 +159,65 @@ node line at the reported line number, and the `skipped` sentinel.
   (23 + 4 + 4 = 31, now 34), not the one file it links.
 - #23's note in `tickets.md` still describes the option flip as the fix for #183, which is now
   true of the bump rather than of the present; left as the spec asked (`#23 unchanged`).
+
+### Round 1 fixes — what was done
+
+The dead dispatch had already edited every file the six findings name; nothing was proven.
+The audit found each finding's change complete in the tree, and this dispatch added the doc
+fix on `as_declared`, the red runs, the proofs and this record. Per finding:
+
+1. **`cpu_backend/source.rs` `as_declared`** (important). The `cast` arm and the false doc
+   are gone; the relabel to the declared schema stays and a column the file holds in another
+   type is `RecordBatch::try_new`'s refusal — `"the scan's batch is not its schema: column
+   types must match schema types, expected Int32 but found Int64 at column index 1"`. It names
+   both types and the position, not the field name; the doc says so. The grep missed this site
+   because its reason was prose: the doc said the reader's string "reaches the rest of the plan
+   as a view type", and the cast was there to make that true. Test
+   `a_column_the_file_holds_in_another_type_is_refused_rather_than_cast` in
+   `cpu_backend/tests/source.rs`, run red against HEAD's `source.rs` (panicked at "Int64 in the
+   file and Int32 declared, and the read went through"), then green. The full cpu corpus is the
+   proof that nothing needed the cast.
+2. **The device pin** (important). `harness_cases.rs` gains
+   `the_sink_names_a_column_whose_exported_type_is_not_the_declared_one`: a `GpuUnload`
+   declaring `s` as `LargeUtf8` over a batch uploaded as `Utf8`, asserting the refusal message
+   and `(declared vs exported: 5 s: LargeUtf8 vs Utf8)`. `LargeUtf8` is on the wire
+   (`serialize.rs:117`) and is not a view type, so the rule admits it and the device exports its
+   one string layout as `Utf8`. Not a `bug_` case: the refusal is the right answer, so
+   `script.rs`'s `gpu_refuses` doc now says it serves both. No red run on the device — the state
+   that would fail it is before `6ad5857d`; the assertion on the exact message is what shows it
+   is not passing vacuously.
+3. **`null_exprs` and the intermediate schema** (nit). `AggregateBody::validate` runs
+   `check_expr_types` over `null_exprs`; `no_view_types` in `validate.rs` checks the
+   intermediate of `GpuAggregate` and `GpuAggregateBatches` through `try_as_node_ref` as
+   `intermediate column N`. Two tests in `validate/tests.rs`, both run red against HEAD's
+   `plan/mod.rs` and `validate.rs` (`got Ok(())`), then green.
+4. **`check_expr_types` re-walk** (nit). `check_column_refs` now calls it once at the top and
+   recurses through a private `column_refs_in_range`; `join.rs`'s residual path was already a
+   single call. No behaviour change, no test.
+5. **The `q13` comment** (nit). Eight lines, current state only: the four causes are #152,
+   #184, #185 and the string class, whose cells are off on #187, #191, #185, #215.
+6. **`src/common.rs` comments** (nit). The `array_content_size` doc no longer names View
+   layouts; the `type_structural_size` fallback comment is four lines and names no
+   `assert_type_accountable`.
+
+**Proofs, local (verda down), `--test-threads=2`:**
+- `--lib`: `test result: ok. 539 passed; 0 failed; 2 ignored`
+- `test_ci_coverage` `8 passed`; `test_corpus_goldens` `20 passed`; `test_cost_model`
+  `3 passed`; `test_golden_format` `26 passed`; `test_module_layout` `17 passed`
+- `test_cpu_corpus`: `test result: ok. 448 passed; 0 failed`
+- `grep -rn "Utf8View\|BinaryView" peacockdb-core/src testdata/goldens` → `plan/common.rs`
+  (2) and `plan/validate/tests.rs` (11) only. No golden moved: no change here alters plan
+  shape.
+- `rustfmt --check` clean on every touched leaf and on `plan/mod.rs` itself.
+
+**Device, shad-gpu, `PCK_TEST_FILTER='_cases'`**, `--build` (warm caches, minutes), then
+`--push-binaries --patch`, then `--run`, each foreground under a timeout; no `[rmm] … could not
+be built` line, pools reserved as declared. Two rust binaries ran: `peacockdb_core_gpu_lib`
+`test result: ok. 229 passed; 0 failed; 0 ignored; 0 measured; 602 filtered out` (the new pin
+`... ok` among them; 228 before it); `test_gpu_corpus` `0 passed; 0 failed; 11 filtered out`.
+The five C++ binaries ran unfiltered as the gate always does.
+
+**`build-test.md`** checked against `--list`: `--lib` 541 (539 + 2 ignored); CPU backend
+executors 65 (`executor::cpu_backend::tests::` less `contract`); Plan types 36 (28 + 4 + 4);
+gpu rung 287, of which `tests::gpu_tests::` 232 — the harness row; grand total 1846. The
+harness row's prose names the new sink case.
