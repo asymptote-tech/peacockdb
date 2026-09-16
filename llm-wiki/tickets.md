@@ -16,9 +16,9 @@ reference still resolves there.
 | Section | Open | Tickets |
 |---|--:|---|
 | [Critical correctness](#critical-correctness) | 24 | #214 #211 #210 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
-| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
+| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #212 #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
+| [Infrastructure / process](#infrastructure--process) | 24 | #213 #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
 
@@ -303,6 +303,23 @@ a data dir panics instead of being skipped. Found during the comment audit.
 
 ## Blockers for disabled coverage
 
+<a id="t212"></a>
+### #212 — a build side that emits no batch at all still refuses Right, Full and RightAnti
+A Right, Full or RightAnti join whose build side hands the lane no batch is refused by name
+in `without_build`, where the answer owed is every probe row, padded or not.
+
+The scatter route to this is gone: `driver/partitioned.rs` keeps a zero-row scatter output
+where the join above owes rows ([#175](archive/archived-tickets.md#t175)), and the join then computes the answer. What
+remains is an upstream that emits nothing at all. Two shapes reach it. A limit that skips
+everything: `(SELECT ... FROM nation OFFSET 100) n RIGHT JOIN region r` plans
+`GpuCoalesceAllBatches <- GpuLimit skip=100` under the build side, at every mode. And tpcds
+q77 at the three tp4 modes: its Right outer's build side is a grouped aggregate over an Inner
+join, the Inner join's empty scatter lane drops as it should, its lane emits nothing, and the
+aggregate emits nothing where nothing arrived. Pinned by
+`bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti siblings
+(`gpu_tests/join_cases.rs`), and on the driver by
+`a_join_that_owes_its_probe_side_without_a_build_side_is_refused` (`driver/tests/flow.rs`).
+
 <a id="t206"></a>
 ### #206 — a float or boolean partition key is refused on the device
 
@@ -381,25 +398,10 @@ wall as [#173](#t173) and [#175](#t175). T17 was to have discharged it and did n
 CPU half alone makes the oracle answer a query the device refuses, and the oracle is what the
 device is checked against. Waits on the make-a-table-of-literals call all three want.
 
-<a id="t175"></a>
-### #175 — an empty build side leaves three join types owing rows they cannot make
-`empty_build_answers_nothing` decides what a lane answers when its build side produced no batch.
-Six types owe nothing and end the lane; Right, Full and RightAnti owe their probe side.
-
-The route the corpus took here was the scatter: `driver/partitioned.rs` dropped every empty
-scatter output, and one lane later the join was told its build side did not exist. Answered on
-`ENS-empty-build` — the index marks the lanes that feed the build child of a join whose type
-owes rows, the scatter keeps their typed zero-row table, and the join computes the pad or the
-probe rows over it (`join.cpp` on the device, DataFusion's join on the cpu). Corpus reach was
-tpch q16 and tpcds q77, never q21: q16's three tp4 cells are enabled, and q77's stay disabled on
-[#212](#t212), because its Right outer's build side emits no batch at all rather than an empty
-one. No registry cell names this ticket now. The three `without_build` pins moved to #212.
-
 <a id="t173"></a>
 ### #173 — a finish whose probe produced no keys cannot make the table it owes
 `finish_without_keys` (`gpu_backend/join.rs`) refuses Left, Full, LeftSemi and LeftMark on the
-device when a lane's probe side accumulated no keys: what each owes is an empty table or one
-of literals, and every entry point on the frozen surface loads a table by reading one.
+device when a lane's probe side accumulated no keys: what each owes cannot be loaded from nothing.
 
 One site, on the probe side. LeftAnti hands its build side up and agrees with the cpu, which
 answers all five. The accumulators are not here: a collapse of no handles and a merge of no
@@ -895,6 +897,20 @@ tripped, so something can branch on it, but there is nowhere to record into — 
 trip log, and `Underestimate` is the precedent for what one would look like. Related: #91.
 
 ## Infrastructure / process
+
+<a id="t213"></a>
+### #213 — a golden regeneration can publish a file missing another writer's section
+`corpus_golden::merge_section` locks the inode it opened and `publish` renames a staged sibling
+onto the path, so a writer that opened before another's rename holds a lock on the old inode,
+reads stale text, and publishes without the other's section.
+
+Seen once on `ENS-empty-build`: a whole-corpus `UPDATE_CANONICAL=1` run published
+`tp4-single-mini.cpu.txt` without q16's section while its `.cost.txt` kept it; refilled with
+`PCK_UPDATE_SECTIONS=1 … --exact cpu_tpch_q16_tp4_single`. The doc on `merge_section` says the
+read inside the critical section prevents exactly this, which holds only while the path keeps
+one inode. A fix is a lock on a sibling lock file rather than on the file the rename replaces,
+or an open-after-lock. Test infrastructure, not the engine: no cell, no golden's content is
+wrong once the regeneration is re-read, which is why the rule to read a regeneration's diff exists.
 
 <a id="t201"></a>
 ### #201 — the murmur gate proves a copy of the lane rule, not the rule

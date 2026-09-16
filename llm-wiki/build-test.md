@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1837 test cases — Rust 1394, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1847 test cases — Rust 1404, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,21 +22,21 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1006 cases: `--lib` 535, `test_cpu_corpus` 448, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1016 cases: `--lib` 542, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 447 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 450 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes and its two oracles,
 expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
 checked against plain DataFusion at `target_partitions = 1`. 37 queries at the modes each is
 correct at — `tpcds/q96` carries three disabled by [#180](tasks/active-tickets.md#t180),
-`tpcds/q77` three by [#175](tickets.md#t175) and `tpcds/q80` three by
+`tpcds/q77` three by [#212](tickets.md#t212) and `tpcds/q80` three by
 [#189](tasks/active-tickets.md#t189), `tpcds/q88` three by
 [#180](tasks/active-tickets.md#t180), and thirteen queries are out entirely on
-[#163](tickets.md#t163). 444 cells, plus three checks that every declaration's two oracles suit
+[#163](tickets.md#t163). 447 cells, plus three checks that every declaration's two oracles suit
 each other and every device cell has a cpu cell
 
 | Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
@@ -61,22 +61,23 @@ that contradicts itself is the only witness to a renderer that is wrong
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions` and `accounting` beneath it | 26 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions` and `accounting` beneath it | 27 |
 |---|---|--:|
 
 SQL in, rows out: 17 queries planned and run at all five modes against DataFusion on the same
 SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back
-to zero and holds equal releases at the end of every run — and seven cases no query list can
+to zero and holds equal releases at the end of every run — and eight cases no query list can
 carry: that DataFusion's partial aggregate does not skip grouping here, the call and pull
 counts a limit makes, the smallest budget a query fits in completing where the byte below it
 trips, and that boundary under a drained lane, the model compared against what the calls
 measured, an answer under the wrong column names not being the same answer, the injected set
-keeping the shapes only one query has, and a degenerate hash under a right outer refused by
-name. Two of the 26 are `#[ignore]`d against [#182](tasks/active-tickets.md#t182) — the budget
-boundary and the rebatcher's peak, both properties that pricing a batch from the plan's schema
-took away — so 24 run. The first tier where the planner, the recipes, the executors and both
-drivers run together rather than each against a fixture of the last one's shape — so what it
-tests is the joins between them
+keeping the shapes only one query has, and a degenerate hash under a Right outer and under a
+RightAnti answering like the oracle from the empty build lanes it leaves
+([#175](archive/archived-tickets.md#t175)). Two of the 27 are `#[ignore]`d against
+[#182](tasks/active-tickets.md#t182) — the budget boundary and the rebatcher's peak, both
+properties that pricing a batch from the plan's schema took away — so 25 run. The first tier
+where the planner, the recipes, the executors and both drivers run together rather than each
+against a fixture of the last one's shape — so what it tests is the joins between them
 
 | Harness helpers | [tests::compare](../peacockdb-core/src/tests/compare.rs), [tests::synthetic](../peacockdb-core/src/tests/synthetic.rs) | 14 |
 |---|---|--:|
@@ -211,7 +212,7 @@ batch types, so the trait's associated types are exercised the way both engines 
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 90 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 95 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
@@ -219,7 +220,9 @@ queue bounds, batch release, the trace: the schedule and the two holds, both lim
 the calls not made, what each node emitted and consumed (the two records the corpus goldens
 read), the accountant through the drivers, a backend failure stopping the query with the
 accounting still reconciling, the execution golden's text with every number chosen by the
-script, and the mock against its own script
+script, the empty build lane a join owes rows for reaching `SetBuild` while every other empty
+lane still drops ([#175](archive/archived-tickets.md#t175)), and the mock against its own
+script
 
 | CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 64 |
 |---|---|--:|
@@ -255,12 +258,13 @@ finalizing node reads
 
 *module unit*
 
-| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 43 |
+| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 44 |
 |---|---|--:|
 
-the accountant's formula, cache and two checks on plain figures; the plan index's numbering and
-per-lane slots; the scheduler's corners enumerated and then a differential test against a naive
-rescan on randomized shapes; the lane state machine one call at a time with no tree around it
+the accountant's formula, cache and two checks on plain figures; the plan index's numbering,
+per-lane slots and which lanes feed a build side that owes rows; the scheduler's corners
+enumerated and then a differential test against a naive rescan on randomized shapes; the lane
+state machine one call at a time with no tree around it
 
 | Sink divergence message | [executor::errors::tests](../peacockdb-core/src/executor/errors/tests.rs) | 3 |
 |---|---|--:|
@@ -567,6 +571,10 @@ Consequences worth knowing before you regenerate:
   during the regen, before the goldens are pulled home. It pins what the C++ is handed, and
   it is the file a bulk regen must not quietly rewrite: the diff would come home among the
   others.
+- **Two writers can lose a section** ([#213](tickets.md#t213)): the merge locks the inode
+  it opened and the publish renames over it, so a whole-corpus regeneration can drop one
+  query's section from a `.cpu.txt`. Read the regeneration's `git diff --stat` for a section
+  that vanished, and refill it with `PCK_UPDATE_SECTIONS=1` and `--exact <case>`.
 - **The `.duckdb_cost.txt` path is re-runnable without DuckDB**: `--extract-only` rebuilds
   the goldens from the committed profiles plus the parquet, so only a genuine oracle change
   needs the 1.5.4 pin.
