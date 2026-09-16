@@ -417,3 +417,11 @@ cost report, S3 check all success. The later heads are documentation-only and sk
 design. PR #155's body rewritten for the amended delivery (through the API; `gh pr edit`
 no-op'd behind a projects warning). Next: `aggregate-cases`' rebase onto this branch, with the
 handoff in "Completeness pass 2" above.
+
+## Rebased onto master `302d91dc` — 2026-09-16
+
+The control file said `rebase`. Master gained seven commits since `fafaaaaf`, every one of
+them `llm-wiki/**` only (chain B's specs, chain C archived, chain D's states, `case-expectations`
+added to chain E at `approved to build`). Rebased with no conflict; `git diff --stat` against
+master unchanged. Nothing a test reads moved, so `done` is kept without a re-run. PR #155's
+base is still master. `aggregate-cases` marked `rebase needed(done)` and rebased next.
