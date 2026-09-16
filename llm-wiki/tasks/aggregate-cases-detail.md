@@ -339,3 +339,25 @@ before archiving.
 
 CI green on the head `8fb6f550`: both dataset-matrix legs, the 25.02 GPU build, GPU tests on
 shad-gpu, cost report, S3 check all success. The chain's last task; nothing left to dispatch.
+
+## Reopened — 2026-09-16, rebase onto `ENS-join-cases` `ed1e1cdf`
+
+The human dropped this task from `done` to `building` on master with the amended spec (no view
+type, `c6b7f63c`) and a Task 8 in the plan; the board on the parent branch said `rebase
+needed(building)` once join-cases was `done` again. `git rebase --onto ENS-join-cases 6703c08f`,
+nine commits, resolved by ownership: `tasks.md` and `active-tickets.md` the parent's side at
+every step (the "#183 fix site is the export … nine pins" sentence is gone with it, as it went
+from join-cases); `aggregate-cases-detail.md` both sides, the "Superseded" note under the
+handoff; `build-test.md` the parent's counts plus this branch's delta at each commit (+67, then
++3) and its prose after the join sentence — the counts are re-derived at Task 8, not trusted
+from here. Two conflicts were in code, both a single `use` line where join-cases' Task 8 had
+dropped an import beside one this branch changed (`accumulate_cases.rs`: the compute imports
+without `DataType`; `exec_cases.rs`: `each_answers` without `declaring_view_strings`); resolved
+by the coordinator as the textual union minus the names with no use left in the merged file,
+and proven by nobody yet — the developer's first `--build` is the proof. Expected red before
+Task 8: `aggregate_dimension_cases.rs:21` imports `harness_cases::declaring_view_strings`,
+private again on the parent (`E0603`) — Task 8's Step 2 removes that import; it is not rebase
+breakage. `run_gpu` (`script.rs`) is this branch's extraction of `run_both`'s device half,
+made for the view cases alone: with them gone, `script.rs` goes back to the parent's shape.
+The spec's signoff (appended before the reopening) is rewritten at the completeness pass.
+Outstanding: Task 8, then the proving commands; PR #156 stays, CI re-runs on the new head.
