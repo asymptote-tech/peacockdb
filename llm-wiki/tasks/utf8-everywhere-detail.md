@@ -53,6 +53,18 @@ the merge ref, so the `pull_request` event never fires. Master moved by chain D'
 `build-test.md`, `tickets.md`, `tasks.md`. A rebase is the human's call through the control
 file; until it lands, `completeness approved` cannot reach `done`.
 
+## Completing — 2026-09-16
+
+Round 1's fixes committed as `83396f59`, pushed. Review round 2: 0 blocking, 0 important, 2
+nits; all six round-1 findings closed. The reviewer verified `build-test.md`'s counts against
+the tree (lib 541, executors 65, plan types 36, harness 232, total 1846 — the header's
+off-by-one against its own sum, 1845, predates the fork) and read `architecture.md`'s owning
+sections: nothing falsified. Nits: #183 at 17 lines against the 15 cap, trimmed here; the
+board prose for this task says the option lives in `build_session_state` and the scan is "the
+only producer", where the code sets it on the `ParquetFormat` in `read_table` and the spec
+names `greatest`/`least` as a second — the prose is master's side, so it is left for the human
+or helper to amend at the rebase.
+
 ## Developer notes
 
 ### Dispatch 1 — what was done, in the plan's order

@@ -70,14 +70,8 @@ T17a's drain half is untouched: a drained lane changes rows per lane, so q16's 1
 <a id="t183"></a>
 ### #183 — the device exports Utf8 where the sink declares Utf8View
 
-`GpuUnload lane 0: the exported stream is not the sink's rows: column types must match schema
-types, expected Utf8View`. The sink's schema comes from DataFusion, which uses `Utf8View`; the
-device's IPC export produces `Utf8`. Same values, different arrow type.
-
-`Utf8View` enters a plan only through DataFusion's parquet option `schema_force_view_types`
-(default on); every coercion and string function returns a view only for a view input, and
-cuDF has no view layout to honour. So the fix site is neither the export nor a cast at the
-sink: the option, off, makes every plan declare `Utf8` from the leaf up.
+`GpuUnload lane 0: … column types must match schema types, expected Utf8View`: DataFusion's
+parquet option `schema_force_view_types` (default on) declares every string a view; cuDF has none.
 
 **Done 2026-09-16, by `utf8-everywhere` on branch `ENS-utf8-everywhere`.** The `ParquetFormat`
 in `read_table` (`lib.rs`) has `with_force_view_types(false)`, and `plan/validate.rs` refuses any
