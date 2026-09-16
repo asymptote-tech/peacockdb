@@ -55,6 +55,8 @@ static void export_table_to_ipc(const cudf::table_view& tview,
   col_meta.reserve(column_names.size());
   for (const auto& name : column_names) col_meta.push_back({name});
 
+  // Dead on every reachable path: the scan widens at the source (scan.cpp), no kernel narrows,
+  // and no upload can carry a narrow decimal (arrow-rs 54 has none). Kept only for a hand-built table.
   std::vector<std::unique_ptr<cudf::column>> widened;
   std::vector<cudf::column_view> widened_views;
   widened_views.reserve(tview.num_columns());

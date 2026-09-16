@@ -414,6 +414,16 @@ Four TPC-DS queries fail to physical-plan on DataFusion 45 (`plan_status=fail`):
 SanityCheckPlan vs ROLLUP SortPreservingMerge ordering; q70/q86 `GROUPING()` aggregate
 not planned; q72 `Date32 + Int64` coercion. Whole rows dead until the upgrade. See #114.
 
+View types on the bump. In 45 the parquet scan is the only unconditional source of `Utf8View`/
+`BinaryView` (`schema_force_view_types`, default true); every coercion and string function
+returns a view only for a view input, so turning the option off in `build_session_state` clears
+[#183](active-tickets.md#t183) end to end. Later releases add producers that do not go through
+the scan — `map_varchar_to_utf8view` (SQL `VARCHAR`/`CAST` → `Utf8View`) at least — and Arrow's
+`ListView`/`LargeListView` may gain a first producer. cuDF holds no view layout, so any that reaches
+the wire is #183 again. After the bump: `grep -c 'Utf8View\|BinaryView\|ListView'` over
+`testdata/goldens/*/*.plans.txt` must stay zero, and every new `datafusion.*view*` option is
+read for its default.
+
 <a id="t65"></a>
 ### #65 — __grouping_id encoding doesn't match DataFusion's GROUPING()
 Grouping-set expansion (`cpp/src/operators/aggregate.cpp`) emits a gid that is
@@ -1012,7 +1022,7 @@ belongs here too: a per-node type check in the GPU tiers, the only thing that wo
 wrong-order subtree before the root.
 
 <a id="t163"></a>
-### #163 — a declared type is never checked against the expression that produces it
+### #163 — `avg` declares its count state UInt64 and both engines produce Int64 — nowhere is a declared type derived from its producer
 
 Union's branch check, the root against the DataFusion plan, and `types_across_the_edge` each
 compare one declared schema against another rather than deriving one from an expression, so an

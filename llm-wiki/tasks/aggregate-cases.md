@@ -6,14 +6,15 @@ Kind: production
 ticket, and the production tree is not touched — not to make a case pass, not to close a ticket
 a case happens to reach. The findings are the deliverable; a later task fixes what they name.
 
-Fifteenth in the chain, after [`join-cases.md`](join-cases.md), whose `Utf8View`-as-declaration
-shape it reuses and whose mechanism — a hand-built node over `Given` leaves, a `Script`,
-`run_both`, `assert_same` — it uses unchanged. It adds cases and nothing else.
+Fifteenth in the chain, after [`join-cases.md`](join-cases.md), whose mechanism — a hand-built
+node over `Given` leaves, a `Script`, `run_both`, `assert_same` — it uses unchanged. It adds
+cases and nothing else. Like join-cases it declares no view type: strings are `Utf8`, and the
+corpus's `Utf8View` leaves with the `schema_force_view_types` flip, a task of its own.
 
 ## Why these dimensions
 
 Task 9's aggregate cases group on one `Int32` key over a bare column. The corpus groups on
-strings and dates (tpch q1 on two `Utf8View` keys is its commonest shape), counts with
+strings and dates (tpch q1 on two string keys is its commonest shape), counts with
 `count(*)` 632 times, sums a CASE expression 48 times ([#56](../tickets.md#t56)), and keeps
 thirteen queries out on the stddev finalize ([#163](../tickets.md#t163)). Its project cases
 cover arithmetic, a cast and CASE; the corpus's `date_part` ([#191](active-tickets.md#t191)),
@@ -29,7 +30,7 @@ The right column names the tickets a row may land on; a row with none may still 
 
 | Row | Cases | May land on |
 |---|---|---|
-| Group keys | `GpuAggregate` grouped on `Utf8View`, on `Date32`, on `Int64`, and on two columns (`Int32` and `Utf8View`); each state carried through `GpuAggregateBatches`' merge | [#183](active-tickets.md#t183), pinned once at the aggregate; new |
+| Group keys | `GpuAggregate` grouped on `Utf8`, on `Date32`, on `Int64`, and on two columns (`Int32` and `Utf8`); each state carried through `GpuAggregateBatches`' merge | new |
 | Count and expression arguments | `count(*)`, `count(1)`, `count(col)` over nulls; `sum(a * b)`; `sum(CASE … END)` grouped | [#180](active-tickets.md#t180), [#56](../tickets.md#t56) |
 | Merge arms with rows | keyless `Sum`, `Count`, `Min`, `Max` and `MergeM2` over several arrivals; `Min` and `Max` merged grouped; a merge-level finalize that computes — `avg`'s divide at done; a merge over grouping-set state, `[keys, gid, state]` | [#199](../tickets.md#t199), pinned; new |
 | Welford and its finalize | a global init; the stddev and var finalize — CASE, `Sqrt` and a typed NULL over the count — grouped and global | [#163](../tickets.md#t163) |
@@ -46,7 +47,7 @@ Only where a new path is reached, each its own named case, never a loop:
 | a `desc` merge with one lane empty beside lanes with rows | `GpuMergeSortedPartitions`, once |
 | `count(*)` over a zero-row batch | grouped and global |
 
-Roughly 45 cases. The count is not the deliverable; a case that answers a question another case
+Roughly 40 cases. The count is not the deliverable; a case that answers a question another case
 already answered is one too many.
 
 ## Scope
@@ -76,8 +77,6 @@ case finds. And:
 - The Welford helper's `WELFORD_RELATIVE` is the one place a float is compared inexactly, and
   it stays the one place. A case that needs another tolerance is a finding against the harness,
   recorded in the detail file, not a second constant.
-- Every `Utf8View` group-key case but the one pin projects the key out of its output, so the
-  aggregate is what the comparison reads.
 - Every case is named for its shape. No loop over functions, key types or sort options: a red
   case says which combination it is by its name.
 - The kind guard does not move: no kind gains or loses a case here, only rows.

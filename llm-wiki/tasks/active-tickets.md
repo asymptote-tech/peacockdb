@@ -82,6 +82,16 @@ eight device cases whose rendered comparison had never looked at types. That one
 artefact and was fixed by hashing names; this one is the export genuinely disagreeing with the
 schema the plan declared, and no comparison choice makes it go away.
 
+Fix site, decided: neither the export nor a cast at the sink. `Utf8View` enters a plan only through
+DataFusion's parquet option `schema_force_view_types` (default on); every coercion and string
+function returns a view only for a view input, and cuDF has no view layout to honour. Turning the
+option off in `build_session_state` (`peacockdb-core/src/lib.rs`) makes every plan declare `Utf8`
+from the leaf up and the export agree with no conversion. That task regenerates the plan goldens,
+retires this ticket's pins (`harness_cases.rs`, and whatever join-cases and aggregate-cases still
+carry) and fixes `plan_text/tests.rs` and `planner/translator/schema_tests.rs`, which assert the
+view type from real plans. Any sentence on a chain branch naming the export as the fix site
+predates this decision.
+
 <a id="t184"></a>
 ### #184 — a hash repartition of one lane into four fails in cuDF
 

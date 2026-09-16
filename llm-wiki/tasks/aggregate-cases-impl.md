@@ -143,6 +143,8 @@ operator_case! {
 }
 ```
 
+> **Superseded by Task 8.** The spec no longer declares a view type; the two cases below and the helpers they need are retired there.
+
 The `Utf8View` key: the leaf declares `s` as `Utf8View`, the state declares the key `Utf8View`,
 and the aggregate is followed by nothing — so the output carries the key and the export refuses
 (#183). Two cases: the pin, and the observable one grouped on `s` *and* `key` with a finalize
@@ -634,4 +636,51 @@ git commit -m "accumulate cases: sorted merges on desc, nullable and composite k
 ```bash
 git add llm-wiki/build-test.md llm-wiki/tasks/aggregate-cases-detail.md
 git commit -m "aggregate cases: the record — counts, the bug_ register, the device run"
+```
+
+### Task 8: Retire the view cases
+
+**Files:**
+- Modify: `peacockdb-core/src/tests/gpu_tests/aggregate_dimension_cases.rs`, `aggregate_cases.rs`
+- Modify: `llm-wiki/build-test.md`, `llm-wiki/tasks/aggregate-cases-detail.md`
+
+**Why:** the spec (amended) declares no view type. `Utf8View` reaches a plan only through
+DataFusion's parquet option `schema_force_view_types`; the task that turns it off retires
+`harness_cases.rs`'s #183 pin and the corpus's view types together. The four green cases below
+are exact twins of the `*_on_a_string_agrees` cases at `aggregate_dimension_cases.rs:123-211`.
+
+**Interfaces:**
+- Consumes: `init_by` (Task 1), `run_both`, `sum_i64`.
+- Produces: `init_by(keys, aggs)` without its `declared` parameter — every remaining caller
+  passes `Schema::new(schema())`, so the parameter folds back inside.
+
+- [ ] **Step 1: Delete the cases** — five, by name, in `aggregate_dimension_cases.rs`:
+`a_sum_grouped_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`,
+`a_sum_merge_grouped_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`,
+`a_sum_grouped_on_an_int32_and_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`,
+`a_sum_merge_grouped_on_an_int32_and_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`,
+`bug_a_sum_grouped_on_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device`; and the
+`// #183` block and the comment at `:101-105`.
+
+- [ ] **Step 2: Delete the helpers**: the `declaring_view_strings` import (`:21`), `VIEW`
+(`:44`), `device_on_a_declared…` (`:46-85`), `schema_declaring` (`:87-92`); in
+`aggregate_cases.rs:246-258` drop `init_by`'s `declared` parameter and its doc.
+
+- [ ] **Step 3: Compile and run rust-only** — `cargo test --features rust-only -p peacockdb-core
+--lib -- tests::gpu_tests --no-run`, then `--test test_module_layout`. Expected: green;
+`grep -rn utf8view peacockdb-core/src/tests/gpu_tests/aggregate*` finds nothing.
+
+- [ ] **Step 4: One device run** — `PCK_RUN_CPP=0
+PCK_TEST_FILTER='tests::gpu_tests::aggregate' scripts/build-test-shadgpu.sh --run`.
+Expected: green; the family's count is Task 7's minus five.
+
+- [ ] **Step 5: The record** — `build-test.md`: grand total, Rust and `--lib -- gpu_tests::`
+each minus five, the harness row likewise; strike the sentence naming "one `Utf8View` pin per
+family". Detail file: the retired names, one line each, with this task's reason.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add peacockdb-core/src/tests/gpu_tests llm-wiki/build-test.md llm-wiki/tasks/aggregate-cases-detail.md
+git commit -m "aggregate cases: the view-declared cases are retired; group keys are Utf8"
 ```
