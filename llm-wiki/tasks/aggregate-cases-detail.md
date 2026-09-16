@@ -194,7 +194,6 @@ nullable and two-key merge agrees on both nodes, and four lanes do.
 | `bug_an_accumulating_sort_on_a_descending_key_nulls_first_puts_them_last_on_the_device` | accumulate_cases | cpu the rows nulls first, device the rows nulls last, eleven runs | #202 |
 | `bug_a_merge_on_a_descending_key_nulls_first_puts_them_last_on_the_device` | accumulate_cases | the same through eleven lanes | #202 |
 | `bug_a_merge_on_a_descending_key_nulls_first_over_runs_each_carrying_a_null_duplicates_and_drops_rows_on_the_device` | accumulate_cases | three lanes of 48 rows dealt round-robin: the 48 ids the device answered, three of them thrice and six never (round 1) | #202 |
-| `bug_a_sum_grouped_on_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device` | aggregate_dimension_cases | the device alone through `run_gpu`: slot 0 column 0 is `Utf8` (round 1) | #183 |
 
 ### The rust-only proof
 
@@ -232,8 +231,8 @@ for a declared-`Utf8View` key is gone. Retired, each for that one reason:
 - `a_sum_merge_grouped_on_an_int32_and_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`
   — twin `a_sum_merge_grouped_on_an_int32_and_a_string_agrees` stays.
 - `bug_a_sum_grouped_on_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device` — the
-  #183 pin at the aggregate; the `bug_` register's #183 row above is void, #183's one pin is
-  the unload's in `harness_cases.rs`, and its fix task owns the ticket.
+  #183 pin at the aggregate; its row is struck from the `bug_` register above, #183's one pin
+  is the unload's in `harness_cases.rs`, and its fix task owns the ticket.
 - `device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key`, `schema_declaring`,
   `VIEW` — the helpers the five consumed; the `harness_cases::declaring_view_strings` import
   with them (private again on the parent since join-cases' Task 8, the `E0603` the
@@ -434,3 +433,11 @@ its `declared` parameter, `script.rs` byte-identical to the parent again, the co
 from the rung (385). Rounds 1–2 and the first completeness pass were closed before the
 reopening and are not re-litigated without a reason the rebase or Task 8 gave. Known and left:
 `build-test.md`'s C++ 67 against rows summing to 66 is master's, on the helper's list.
+
+## Review round 3 — 2026-09-16
+
+The code of Task 8 is clean: every retired case's `Utf8` twin present, `script.rs` byte-identical
+to the parent, the two rebase-resolved `use` lines with every name used and nothing lost, the
+counts recounted from the tree (330, 385, 393, 1492, 1928) and matching the page. 0 blocking,
+1 important, 0 nits: the `bug_` register still carried the retired #183 row — struck by the
+coordinator. The spec's signoff is rewritten at the completeness pass. To `completing`.

@@ -94,7 +94,7 @@ projection on every reachable join type, composite and `Int64`/`Utf8`/`Date32` k
 three join code paths, and the non-AST nested-loop path. Roughly 27 cases, one device cycle, no production code.
 
 
-### 2. [`aggregate-cases.md`](aggregate-cases.md) — state: reviewing — PR #156; rebased onto `ENS-join-cases` `ed1e1cdf`, Task 8 landed as `f385f93a`
+### 2. [`aggregate-cases.md`](aggregate-cases.md) — state: completing — PR #156; Task 8 landed as `f385f93a`, round 3 clean
 
 Cases only, after join-cases: group keys the corpus uses (`Utf8`, `Date32`, `Int64`, two
 columns), `count(*)` and expression arguments, every merge arm with rows, the stddev finalize,
