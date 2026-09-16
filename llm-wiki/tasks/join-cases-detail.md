@@ -137,3 +137,11 @@ first `cargo test --features rust-only -p peacockdb-core --lib` failed 35 plan-g
 - The `Utf8View` cases read the device alone (the harness gap above). A `run_both` that casts
   the cpu's upload to the leaf's declared types would let every one of them compare both
   engines; that is a harness task, not this one.
+
+## Coordinator — 2026-09-15, to reviewing
+
+Committed as `9c0fd6b7`, PR #155 against `master` (base verified, 2 commits). Reviewer round 1
+dispatched. Spec-side judgements for the reviewer and the analyst: the harness gap (cpu refuses
+`Utf8` under a `Utf8View` declaration everywhere but the unload) is recorded above, not
+ticketed; `join_cases.rs` at 1483 lines is a known style overrun the spec's "builders local to
+that file" produced.
