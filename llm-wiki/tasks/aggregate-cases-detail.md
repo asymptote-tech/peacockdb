@@ -334,3 +334,8 @@ For the merger: PR #155 (`ENS-join-cases`) first, then #156, each retargeted to 
 `bug_` registers of both tasks live only in the two detail files, which the archive deletes —
 carry them into `build-test.md`'s known-wrong table when `declared-schemas` brings it, or
 before archiving.
+
+## Done — 2026-09-16
+
+CI green on the head `8fb6f550`: both dataset-matrix legs, the 25.02 GPU build, GPU tests on
+shad-gpu, cost report, S3 check all success. The chain's last task; nothing left to dispatch.
