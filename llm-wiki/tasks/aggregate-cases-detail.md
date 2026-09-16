@@ -425,3 +425,12 @@ Outstanding: Task 8, then the proving commands; PR #156 stays, CI re-runs on the
   paths were cleaned there; see `join-cases-detail.md`); `cpp/build26` is absent, so `--build` re-runs cmake there (minutes, not the cold hour).
 - Routing: Task 8's six steps, plus `script.rs` back to the parent's shape; one device cycle
   over `_cases`, then the whole rung; rust-only `--lib` and `test_module_layout` local.
+
+## Coordinator — 2026-09-16, to reviewing (round 3)
+
+Task 8 committed as `f385f93a` on PR #156 (against `ENS-join-cases`). What the reviewer reads
+this round: the rebase and Task 8 — five view cases and their helpers gone, `init_by` without
+its `declared` parameter, `script.rs` byte-identical to the parent again, the counts re-derived
+from the rung (385). Rounds 1–2 and the first completeness pass were closed before the
+reopening and are not re-litigated without a reason the rebase or Task 8 gave. Known and left:
+`build-test.md`'s C++ 67 against rows summing to 66 is master's, on the helper's list.
