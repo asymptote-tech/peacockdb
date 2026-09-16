@@ -333,3 +333,20 @@ null argument's `int_val()` as 0; no sentence of architecture.md falsified. Gree
 
 CI green on `c6e0a5b5` (run 34695609910: both cudf legs, the GPU build, the remote GPU tests, the
 cost report). PR #152 awaits the human's merge.
+
+### 2026-09-16 — rebased onto master's tip; re-verification owed
+
+The control file said `rebase`. The human had already moved the branch off `ENS-drop-mode-name`
+onto master at `10ad6558` (declared-schemas rejected, its files gone) and dropped the task to
+`completing`, untested there. This run rebased it again onto master `c6b5aefa`, ten commits
+further: every conflict was in `tasks.md` (master's board taken at each — chains A, B, D, E,
+chain D's two tasks at `completing`) plus one in `typed-nulls.md` (the signoff kept, the human's
+"After the signoff" section after it). Result `5f6893f2`: the diff against master is the task's
+own eight files; the code differs from the pre-rebase branch only by master's own two files
+(`gpu_executor.cpp`, a two-line comment; `ensemble-watchdog.sh`). `empty-build` marked `rebase
+needed(completing)` — it sits on the old typed-nulls commits until this task is re-proven.
+
+What is owed before `done`, per the spec's last section: rust-only, the C++ tests the task added
+(`peacock_plan_tests`, the seven `Literals.*`; `peacock_cpu_tests`), and the device cells
+(`peacockdb_core_gpu_lib gpu_tests::`, `test_gpu_corpus`). No review round unless a code line
+changed; none did.
