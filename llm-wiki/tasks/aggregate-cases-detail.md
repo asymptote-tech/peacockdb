@@ -218,6 +218,61 @@ peacockdb-core --lib --features gpu --no-run`).
   comparator rather than the plan's; the doc comment on `null_keys_in_one_run` says why, and
   the garbage the ordinary shape produces is in #202's text.
 
+### Task 8 — 2026-09-16, the view cases retired
+
+The spec (amended, `c6b7f63c`) declares no view type, so every case and helper that existed
+for a declared-`Utf8View` key is gone. Retired, each for that one reason:
+
+- `a_sum_grouped_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key` —
+  `aggregate_dimension_cases.rs`; its `Utf8` twin `a_sum_grouped_on_a_string_agrees` stays.
+- `a_sum_grouped_on_an_int32_and_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`
+  — twin `a_sum_grouped_on_an_int32_and_a_string_agrees` stays.
+- `a_sum_merge_grouped_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key` —
+  twin `a_sum_merge_grouped_on_a_string_agrees` stays.
+- `a_sum_merge_grouped_on_an_int32_and_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`
+  — twin `a_sum_merge_grouped_on_an_int32_and_a_string_agrees` stays.
+- `bug_a_sum_grouped_on_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device` — the
+  #183 pin at the aggregate; the `bug_` register's #183 row above is void, #183's one pin is
+  the unload's in `harness_cases.rs`, and its fix task owns the ticket.
+- `device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key`, `schema_declaring`,
+  `VIEW` — the helpers the five consumed; the `harness_cases::declaring_view_strings` import
+  with them (private again on the parent since join-cases' Task 8, the `E0603` the
+  reopening predicted).
+- `init_by`'s `declared` parameter — every caller passed `Schema::new(schema())`, so it is
+  `given()` inside, the parent's shape.
+- `run_gpu` (`script.rs`) — the view cases were its only callers (`grep -rn run_gpu
+  peacockdb-core/src/tests` found nothing else); `script.rs` is byte-identical to the
+  parent's (`git diff ENS-join-cases -- …/script.rs` empty). The harness-gap section above
+  (the cpu's group-by panicking on a `Utf8View` declaration over `Utf8` data) is still true
+  of the harness; nothing exercises it now.
+
+The two `use` lines the rebase resolved (`accumulate_cases.rs`, `exec_cases.rs`) compiled as
+resolved; nothing to fix there. The red before Task 8 was not observed here: a local
+`cargo check --features gpu` stops at `peacockdb-ffi`'s build script (`cudf not configured`),
+so the first `--build` on the edited tree was the first compile, and it was clean.
+
+Proofs. shad-gpu, `--build` with no warning, `--push-binaries --patch`, then
+`PCK_RUN_CPP=0 PCK_TEST_FILTER='_cases'` → `test result: ok. 327 passed; 0 failed; 0
+ignored; 0 measured; 596 filtered out; finished in 1.71s`; the whole rung,
+`PCK_TEST_FILTER='gpu_tests::'` → `test result: ok. 385 passed; 0 failed; 0 ignored; 0
+measured; 538 filtered out; finished in 3.64s`. 385 = join-cases' 320 after its Task 8, plus
+this branch's 70, minus the five. Per module, read off the run: `tests::gpu_tests::` 330
+(accumulate 36, aggregate 20, aggregate_dimension 29, coverage 1, emit 15, exec 55, harness
+24, join 89, join_dimension 28, nested 24, script 2, source 7); `wire::gpu_tests` 10;
+`executor::gpu_backend::gpu_tests` 31 (accumulate 10, backend 2, contract 1, exec 12, join 6);
+`abi` 4; `murmur_conformance` 10. Local, rust-only: `cargo test --features rust-only -p
+peacockdb-core --lib` → `test result: ok. 533 passed; 0 failed; 2 ignored; 0 measured; 0
+filtered out; finished in 48.52s`; `--test test_module_layout` → `test result: ok. 17 passed;
+0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s`.
+`grep -rn -i utf8view peacockdb-core/src/tests/gpu_tests/aggregate*` finds nothing.
+
+`build-test.md`, re-derived from the tree rather than carried: the harness row 335 → 330 (the
+330 above), the gpu header 398 → 393 and its `--lib -- gpu_tests::` 390 → 385 (the run's
+line), Rust 1497 → 1492 and the grand total 1933 → 1928 (the first table's rows sum to 1006 +
+5 + 393, the second's Rust rows to 88). One drift not this branch's, left as found: the header
+says C++ 67 and the C++ rows sum to 66, on master and on the parent alike; nothing here ran
+the C++ suites, so which side is wrong is unproven.
+
 ## Coordinator — 2026-09-16, to reviewing
 
 Committed as `601c308f`, PR #156 against `ENS-join-cases` (base verified, 2 commits). Reviewer

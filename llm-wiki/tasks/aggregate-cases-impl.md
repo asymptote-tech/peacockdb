@@ -654,7 +654,7 @@ are exact twins of the `*_on_a_string_agrees` cases at `aggregate_dimension_case
 - Produces: `init_by(keys, aggs)` without its `declared` parameter — every remaining caller
   passes `Schema::new(schema())`, so the parameter folds back inside.
 
-- [ ] **Step 1: Delete the cases** — five, by name, in `aggregate_dimension_cases.rs`:
+- [x] **Step 1: Delete the cases** — five, by name, in `aggregate_dimension_cases.rs`:
 `a_sum_grouped_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`,
 `a_sum_merge_grouped_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`,
 `a_sum_grouped_on_an_int32_and_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`,
@@ -662,23 +662,23 @@ are exact twins of the `*_on_a_string_agrees` cases at `aggregate_dimension_case
 `bug_a_sum_grouped_on_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device`; and the
 `// #183` block and the comment at `:101-105`.
 
-- [ ] **Step 2: Delete the helpers**: the `declaring_view_strings` import (`:21`), `VIEW`
+- [x] **Step 2: Delete the helpers**: the `declaring_view_strings` import (`:21`), `VIEW`
 (`:44`), `device_on_a_declared…` (`:46-85`), `schema_declaring` (`:87-92`); in
 `aggregate_cases.rs:246-258` drop `init_by`'s `declared` parameter and its doc.
 
-- [ ] **Step 3: Compile and run rust-only** — `cargo test --features rust-only -p peacockdb-core
+- [x] **Step 3: Compile and run rust-only** — `cargo test --features rust-only -p peacockdb-core
 --lib -- tests::gpu_tests --no-run`, then `--test test_module_layout`. Expected: green;
 `grep -rn utf8view peacockdb-core/src/tests/gpu_tests/aggregate*` finds nothing.
 
-- [ ] **Step 4: One device run** — `PCK_RUN_CPP=0
+- [x] **Step 4: One device run** — `PCK_RUN_CPP=0
 PCK_TEST_FILTER='tests::gpu_tests::aggregate' scripts/build-test-shadgpu.sh --run`.
 Expected: green; the family's count is Task 7's minus five.
 
-- [ ] **Step 5: The record** — `build-test.md`: grand total, Rust and `--lib -- gpu_tests::`
+- [x] **Step 5: The record** — `build-test.md`: grand total, Rust and `--lib -- gpu_tests::`
 each minus five, the harness row likewise; strike the sentence naming "one `Utf8View` pin per
 family". Detail file: the retired names, one line each, with this task's reason.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add peacockdb-core/src/tests/gpu_tests llm-wiki/build-test.md llm-wiki/tasks/aggregate-cases-detail.md

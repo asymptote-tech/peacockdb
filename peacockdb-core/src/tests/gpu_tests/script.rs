@@ -127,26 +127,19 @@ pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
         |batch| CpuBatch::new(batch.clone()),
         |batch| batch.into_record_batch(),
     );
-    let gpu = run_gpu(node, &script);
-    Outcome { cpu, gpu }
-}
-
-/// The device's half of `run_both` alone, for a case whose cpu half cannot run: a
-/// declaration the cpu's operator panics on rather than refuses (the aggregate over a
-/// `Utf8View` key, `aggregate_dimension_cases.rs`).
-pub(crate) fn run_gpu(node: &dyn GpuNode, script: &Script) -> Result<Vec<Slot>, BackendError> {
     let device = Device::open(node);
-    drive::<GpuBackend>(
+    let gpu = drive::<GpuBackend>(
         device.ctx(),
         node,
-        script,
+        &script,
         |batch| device.upload(batch),
         |batch| {
             device
                 .fetch(batch, RowRange::WHOLE)
                 .expect("a whole export ships its schema")
         },
-    )
+    );
+    Outcome { cpu, gpu }
 }
 
 /// The script on one backend. `up` and `down` are that backend's two conversions, and the

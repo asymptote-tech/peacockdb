@@ -241,23 +241,17 @@ fn grouping_sets_as_exported(cpu: &RecordBatch) -> RecordBatch {
 /// `aggs` over `synthetic`, grouped by `key` where `grouped`, nothing finalized.
 pub(crate) fn init(grouped: bool, aggs: Vec<AggCall>) -> GpuAggregate {
     let keys: &[GroupKey] = if grouped { &[KEY] } else { &[] };
-    init_by(Schema::new(schema()), keys, aggs)
+    init_by(keys, aggs)
 }
 
-/// `init` grouped on `keys`, over a leaf declaring `declared`: the fixture's schema, or
-/// one declaring `s` as `Utf8View`.
-pub(crate) fn init_by(declared: Schema, keys: &[GroupKey], aggs: Vec<AggCall>) -> GpuAggregate {
+/// `init` grouped on `keys`.
+pub(crate) fn init_by(keys: &[GroupKey], aggs: Vec<AggCall>) -> GpuAggregate {
     let state = state_by(keys, &aggs);
     let group_by = keys
         .iter()
         .map(|(i, name, _)| Expr::column(*i, name))
         .collect();
-    GpuAggregate::new(
-        Given::of(declared, BatchLayout::MultipleBatches),
-        body(group_by, aggs, None),
-        state.clone(),
-        state,
-    )
+    GpuAggregate::new(given(), body(group_by, aggs, None), state.clone(), state)
 }
 
 operator_case! {
