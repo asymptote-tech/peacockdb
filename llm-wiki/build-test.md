@@ -361,16 +361,16 @@ the gpu column of the registry, the other half of the pair
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
 `executors_for`, the outputs compared slot by slot and exactly — schema included, so a type the
 device changes is red here rather than at a query's root. The upload round trip, `GpuUnload`
-and `GpuLimit` proved the harness on the operators whose recipe carries no seq; then every
+and `GpuLimit` proved the harness on the operators whose recipe carries no seq. Then every
 seq-bearing operator — the exec three, both aggregates, the three accumulators, the scatter,
 nine hash-join types, cross, nested-loop and the scan — each case green or a `bug_` case
 asserting the wrong answer or the refusal with its ticket above it, every empty shape its own
-case; then the joins along the dimensions the corpus varies — a crossing projection on every
-type the device reaches, composite, `Int64`, `Utf8`, `Date32` and declared-`Utf8View` keys on
-the three key paths, the residual with a projection, under `null_equals_null`, on a string and
-on a decimal, the nested loop's cross-then-mask path, and one `Utf8View` pin per family for
-#183 — the declared-`Utf8View` cases read the device against the `Utf8`-keyed cpu, since the
-cpu's own schema check refuses `Utf8` data under that declaration; a guard reads the kind each
+case. Then the joins along the dimensions the corpus varies: a crossing projection on every
+type the device reaches; composite, `Int64`, `Utf8`, `Date32` and declared-`Utf8View` keys on
+the three key paths; the residual with a projection, under `null_equals_null`, on a string and
+on a decimal; the nested loop's cross-then-mask path; and one `Utf8View` pin per family for
+#183. The declared-`Utf8View` cases read the device against the `Utf8`-keyed cpu, since the
+cpu's own schema check refuses `Utf8` data under that declaration. A guard reads the kind each
 case declares and names every kind with none, the three forwarders excluded
 
 *component*
