@@ -368,9 +368,9 @@ asserting the wrong answer or the refusal with its ticket above it, every empty 
 case. Then the joins along the dimensions the corpus varies: a crossing projection on every
 type the device reaches; composite, `Int64`, `Utf8` and `Date32` keys on the three key paths;
 the residual with a projection, under `null_equals_null`, on a string and on a decimal; and
-the nested loop's cross-then-mask path. String keys are `Utf8`; no case declares a view type,
-and #183's one pin is the unload's. A guard reads the kind each case declares and names every
-kind with none, the three forwarders excluded
+the nested loop's cross-then-mask path. String keys are `Utf8`; the join cases declare no
+view type, and #183's one pin is the unload's. A guard reads the kind each case declares and
+names every kind with none, the three forwarders excluded
 
 *component*
 

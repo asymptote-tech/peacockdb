@@ -14,3 +14,8 @@ the same strings, asserting the cpu's refusal so a harness that closes the gap t
 `gpu_tests/join_dimension_cases.rs`; the gap itself in `join-cases-detail.md`). Take the same
 reading here unless a `run_both` that casts the cpu's upload to the leaf's declared types has
 landed. The #183 pin asserts the exported type in the slot, as the four operator pins do.
+
+Superseded on 2026-09-16: the amended specs (master `c6b7f63c`) declare no view type, the
+`Utf8View` group-key row is gone, and join-cases' Task 8 deleted the device-only helper and
+the four operator pins named above. The harness gap itself is still true and still recorded in
+`join-cases-detail.md`; nothing here reads a case through it any more.

@@ -97,15 +97,16 @@ so this is the harness feeding data of one type under a declaration of another, 
 - Closing the gap is a `run_both` change — the cpu's upload would cast a batch to the leaf's
   declared types, which the device cannot take — outside this task's "no helper" bound.
 
-### The `bug_` register (the known-wrong table arrives with `declared-schemas`)
+### The `bug_` register
 
-The seven #183 rows below were retired by Task 8 (see its section); the register is kept
-as the record of dispatch 1.
+The seven #183 rows below were retired by Task 8 (see its section); the register is kept as
+the record of dispatch 1. `build-test.md` has no known-wrong table: `declared-schemas`, which
+would have added it, was rejected on master (`fafaaaaf`), so this table is the register.
 
 | case | file | asserts | ticket |
 |---|---|---|---|
-| `bug_a_right_join_with_a_crossing_projection_refuses_its_second_probe_batch_on_the_device` | join_cases | `BUILD_COPY` on batch 2 under a projection | #152 |
-| `bug_an_inner_join_with_a_residual_refuses_its_second_probe_batch_on_the_device` | join_cases | `BUILD_COPY` on batch 2 under a residual | #152 |
+| `bug_a_right_join_with_a_crossing_projection_refuses_its_second_probe_batch_on_the_device` | join_dimension_cases | `BUILD_COPY` on batch 2 under a projection | #152 |
+| `bug_an_inner_join_with_a_residual_refuses_its_second_probe_batch_on_the_device` | join_dimension_cases | `BUILD_COPY` on batch 2 under a residual | #152 |
 | `bug_an_inner_join_keeping_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device` | join_cases | slot 0 columns 1 and 9 are `Utf8` | #183 |
 | `bug_a_right_join_keeping_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device` | join_cases | the same after the swap | #183 |
 | `bug_a_left_anti_join_keeping_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device` | join_cases | slot 1 (the finish) column 1 is `Utf8` | #183 |
@@ -205,7 +206,8 @@ declared-`Utf8View` sentences replaced by what is there now.
   to that file. A split — the key-type row and its builders into a sibling — is one commit.
 - The `Utf8View` cases read the device alone (the harness gap above). A `run_both` that casts
   the cpu's upload to the leaf's declared types would let every one of them compare both
-  engines; that is a harness task, not this one.
+  engines; that is a harness task, not this one. Superseded: the amended spec declares no view
+  type and Task 8 retired those cases, so no case reads the device alone now.
 
 ## Coordinator — 2026-09-15, to reviewing
 
@@ -349,3 +351,18 @@ this round: the rebase onto `fafaaaaf` and Task 8 — ten view cases and their h
 zero-row case kept on `Key::Utf8`, the counts on the page. Rounds 1–2 and the completeness pass
 above were closed before the reopening and are not re-litigated; a finding there needs a reason
 the rebase or Task 8 gave.
+
+## Review round 3 — 2026-09-16
+
+The code of Task 8 is clean: every retired case's `Utf8` twin present, the kept zero-row case
+on `Key::Utf8` through `.same()`, no residue outside `harness_cases.rs`'s own pin, the page's
+counts summing (328, 320, 1427, 1863; 265 harness cases counted in the tree), the rebase
+carrying nothing a case reads. 0 blocking, 2 important, 3 nits, all markdown, applied by the
+coordinator: #183's branch-side sentence ("eight pins … seven green") dropped, the ticket back
+to master's text; the harness row's "no case declares a view type" narrowed to the join cases,
+since the unload pin does; the `bug_` register's heading no longer says the known-wrong table
+arrives with `declared-schemas` (rejected on master) and its two #152 rows name
+`join_dimension_cases`; the "Not done" bullet and `aggregate-cases-detail.md`'s handoff marked
+superseded. The second important item — the spec's completeness signoff describes the delivery
+before Task 8 (44 cases, 12 `bug_`, 330, the device-only row) — is the completeness pass's own
+write: it is rewritten in place there, not appended to. To `completing`.

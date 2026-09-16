@@ -87,7 +87,7 @@ index field, one conditional drop. Replaces the parked `empty-answers.md`.
 Cases only, in `src/tests/gpu_tests/`: independent of every other chain's files. Both tasks
 reopened: the specs no longer declare `Utf8View`, and each plan's Task 8 retires the view cases.
 
-### 1. [`join-cases.md`](join-cases.md) — state: reviewing — PR #155; Task 8 (retire the view cases) landed as `9b2350fc`
+### 1. [`join-cases.md`](join-cases.md) — state: completing — PR #155; Task 8 landed as `9b2350fc`, round 3 clean
 
 Cases only, along the three dimensions operator-cases held constant and the corpus does not: a
 projection on every reachable join type, composite and `Int64`/`Utf8`/`Date32` keys on the

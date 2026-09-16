@@ -80,9 +80,7 @@ q12 q15 — with `#183` on their gpu columns.
 The same divergence bit the digest comparator one layer up, where hashing the column type reddened
 eight device cases whose rendered comparison had never looked at types. That one was a comparison
 artefact and was fixed by hashing names; this one is the export genuinely disagreeing with the
-schema the plan declared, and no comparison choice makes it go away. The fix site is the export
-in `gpu_executor.cpp`, not a cast at the sink: the operator harness's eight pins read the type
-`Device::fetch` takes off the IPC stream, and a sink-side cast would leave seven of them green.
+schema the plan declared, and no comparison choice makes it go away.
 
 Fix site, decided: neither the export nor a cast at the sink. `Utf8View` enters a plan only through
 DataFusion's parquet option `schema_force_view_types` (default on); every coercion and string
