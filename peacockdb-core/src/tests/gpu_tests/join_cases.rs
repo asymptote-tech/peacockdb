@@ -1,6 +1,7 @@
 //! `GpuHashJoin` through the harness: a build batch first and once, the probe streamed,
 //! nine types over the same two prefixed synthetic sides joined on `key`. The scripts
 //! follow the capability matrix, and the filtered forms exist only where it admits one.
+//! The sides, scripts and `hash_join` are `pub(crate)` for `join_dimension_cases.rs`.
 //! Every case is green or a `bug_` test with its ticket above it; nothing here repairs.
 
 use std::sync::Arc;

@@ -200,3 +200,12 @@ Proof: `PCK_TEST_FILTER='gpu_tests::' … --run` → `test result: ok. 330 passe
 → `17 passed`; rust-only `--lib` (sf1 linked in, unlinked after) → `533 passed; 0 failed;
 2 ignored`. `build-test.md` not touched this round: the harness row and the gpu counts
 move by one (274 → 275, 329 → 330, 337 → 338, 1872 → 1873, Rust 1436 → 1437).
+
+## Review round 2 — 2026-09-16
+
+All four round-1 findings closed as stated (the literal residual traced through `expr.cpp` to
+the column-scalar path; the split byte-identical on the moved cases; thirteen `pub(crate)`
+items, each imported). Two nits from the split — a "pinned above" that now points at the other
+file, a missing blank line — fixed by the coordinator as comment-only edits, with a
+cross-reference added to `join_cases.rs`'s top comment. Nothing important outstanding: to
+`completing`.

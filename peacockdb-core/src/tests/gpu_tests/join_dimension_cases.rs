@@ -302,6 +302,7 @@ fn exported_type(outcome: &Outcome, slot: usize, column: usize) -> DataType {
     let gpu = outcome.gpu.as_ref().expect("the device answers");
     gpu[slot][0].schema().field(column).data_type().clone()
 }
+
 /// Two probe batches with no null key and two key values never drawn, so an anti or mark
 /// form has build rows to keep and #59 has no null pair to match.
 fn probes_with_misses() -> Script {
@@ -320,9 +321,10 @@ fn build_with_misses() -> Script {
 // A crossing projection on every type the device reaches: reordered, every key dropped,
 // both sides where the type keeps both. Over two probe batches where the device streams,
 // so the per-batch join and the finish both run under it; the probe-side types whose
-// second batch is #152's refusal (pinned above) take one. Left and Full are that refusal
-// before any projection. The anti and mark forms take a script with misses and no null
-// pair, so they have rows to project and #59 (pinned above) nothing to match.
+// second batch is #152's refusal (pinned in `join_cases.rs`) take one. Left and Full are
+// that refusal before any projection. The anti and mark forms take a script with misses
+// and no null pair, so they have rows to project and #59 (pinned in `join_cases.rs`)
+// nothing to match.
 
 operator_case! {
     GpuHashJoin,
