@@ -99,6 +99,9 @@ so this is the harness feeding data of one type under a declaration of another, 
 
 ### The `bug_` register (the known-wrong table arrives with `declared-schemas`)
 
+The seven #183 rows below were retired by Task 8 (see its section); the register is kept
+as the record of dispatch 1.
+
 | case | file | asserts | ticket |
 |---|---|---|---|
 | `bug_a_right_join_with_a_crossing_projection_refuses_its_second_probe_batch_on_the_device` | join_cases | `BUILD_COPY` on batch 2 under a projection | #152 |
@@ -131,6 +134,70 @@ first `cargo test --features rust-only -p peacockdb-core --lib` failed 35 plan-g
 `test result: ok. 533 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in
 189.49s` — the 535 the page counts. `--test test_module_layout`, for the `pub(crate)` on
 `declaring_view_strings`: `17 passed; 0 failed`.
+
+### 2026-09-16, Task 8: the view cases retired
+
+The spec declares no view type, so every case that declared `Utf8View` tested a declaration
+the engine is about to stop making, and each had a `Utf8` twin. Retired, one line each:
+
+- `an_inner_join_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key` —
+  `join_dimension_cases.rs`; twin of `an_inner_join_on_a_utf8_key_agrees`.
+- `a_right_join_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key` — twin of
+  `a_right_join_on_a_utf8_key_agrees`.
+- `a_left_anti_join_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key` —
+  twin of `a_left_anti_join_on_a_utf8_key_agrees`.
+- `bug_an_inner_join_keeping_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device`,
+  `bug_a_right_join_keeping_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device`,
+  `bug_a_left_anti_join_keeping_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device`
+  — the #183 pins at the join; the unload pin in `harness_cases.rs` is the one #183 keeps.
+- `bug_a_filter_passes_a_column_declared_utf8view_back_as_utf8_from_the_device`,
+  `bug_a_projected_column_declared_utf8view_comes_back_utf8_from_the_device` —
+  `exec_cases.rs`, the same reason.
+- `bug_a_coalesce_hands_a_column_declared_utf8view_up_as_utf8_from_the_device` —
+  `accumulate_cases.rs`, the same reason.
+- `bug_a_scatter_on_a_key_declared_utf8view_hands_every_lane_up_as_utf8_from_the_device` —
+  `emit_cases.rs`, the same reason.
+- `an_inner_join_on_a_declared_utf8view_key_over_a_zero_row_probe_answers_zero_rows_on_the_device`
+  is kept as `an_inner_join_on_a_utf8_key_over_a_zero_row_probe_answers_zero_rows`: `Key::Utf8`,
+  whole outputs compared through `.same()`.
+
+Helpers gone with them: `Key::Utf8ViewDeclared`, `Key::declared_type` (`keyed_side` reads
+`data_type`), `keyed_zero_row_probe` (its one script is inline in the kept case),
+`without_key`, `device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key`,
+`exported_type`; the `declaring_view_strings` imports in the three operator files, and the
+function itself is private again. The harness gap recorded above is now moot for this branch:
+no case feeds `Utf8` data under a `Utf8View` declaration but the unload pin, which slices
+without re-validating. Plan drift: `run_gpu` never existed under `src/tests`; the plan's
+step-3 command puts `--no-run` after `--`, where the test binary rejects it — the compile it
+asks for happens before that and is what the step proves.
+
+Environment, for whoever builds here next: this worktree's directory was renamed from
+`peacockdb-ENS-drop-mode-name`, and both `target/` and `target-cudf-rapids-cuda-12.2/` still
+carried that absolute path in the `output`/`root-output` of the build scripts
+(`flatc-fork`, `zstd-sys`, `bzip2-sys`, `lzma-sys`, `blake3`, `psm`, `peacockdb-core`, and
+`peacockdb-ffi` in the cudf dir). Cargo's fingerprint does not see a rename, so
+`peacockdb-core`'s build script ran a `flatc` at the old path: `failed to run flatc: No such
+file or directory`. Fixed by `cargo clean -p` on those packages in each target dir
+(`scripts/cargo-cudf.sh clean -p …` for the cudf one); the DataFusion stack stayed warm.
+
+Proofs:
+
+- shad-gpu, `PCK_RUN_CPP=0 PCK_TEST_FILTER='_cases' … --run`: `test result: ok. 262 passed;
+  0 failed; 0 ignored; 0 measured; 596 filtered out; finished in 1.54s`.
+- shad-gpu, the whole rung, `PCK_TEST_FILTER='gpu_tests::'`: `test result: ok. 320 passed;
+  0 failed; 0 ignored; 0 measured; 538 filtered out; finished in 3.49s` — 330 less the ten.
+  `test_gpu_corpus` ran 0 tests under both filters, as every cycle. No neighbour on the card.
+- local, `cargo test --features rust-only -p peacockdb-core --lib`: `test result: ok. 533
+  passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 54.22s`.
+- local, `--test test_module_layout`: `test result: ok. 17 passed; 0 failed; 0 ignored;
+  0 measured; 0 filtered out; finished in 0.12s`.
+- The gpu-feature build of the lib binary (`--build`) and the rust-only build both finished
+  with no warning. `grep -rn -i utf8view peacockdb-core/src/tests/gpu_tests/` hits
+  `harness_cases.rs` alone.
+
+`build-test.md` moved by ten: grand total 1873 → 1863, Rust 1437 → 1427, the gpu block
+338 → 328 with `--lib -- gpu_tests::` 330 → 320, the harness row 275 → 265; the row's
+declared-`Utf8View` sentences replaced by what is there now.
 
 ### Not done, for the reviewer
 

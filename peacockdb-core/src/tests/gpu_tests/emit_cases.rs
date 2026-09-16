@@ -9,7 +9,6 @@ use datafusion::arrow::array::{ArrayRef, Int32Array, new_null_array};
 use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::record_batch::RecordBatch;
 
-use super::harness_cases::declaring_view_strings;
 use super::script::{Outcome, Script, run_both};
 use crate::plan::{BatchLayout, GpuEmitPartitions, GpuNode, Schema};
 use crate::tests::compare::Order;
@@ -99,27 +98,6 @@ operator_case! {
     GpuEmitPartitions,
     fn a_string_key_places_every_row_the_same() {
         run_both(&emit(vec![5], 4), Script::Emit(vec![input()])).same(Order::Any);
-    }
-}
-
-// #183 — a scatter on a string key under a schema declaring `s: Utf8View`: every lane
-// comes back with the column as `Utf8`, which at a sink is the unload pin's refusal. The
-// deliberate pin for the emit family. The cpu cannot take the declaration in this harness
-// (its lane check refuses `Utf8` data under it, the detail file's gap) and is not read.
-operator_case! {
-    GpuEmitPartitions,
-    fn bug_a_scatter_on_a_key_declared_utf8view_hands_every_lane_up_as_utf8_from_the_device() {
-        let node = GpuEmitPartitions::new(
-            Given::of(declaring_view_strings(&schema()), BatchLayout::MultipleBatches),
-            vec![5],
-            4,
-        );
-        let outcome = run_both(&node, Script::Emit(vec![input()]));
-        let gpu = outcome.gpu.as_ref().expect("the device answers");
-        assert_eq!(gpu.len(), 4);
-        for lane in gpu {
-            assert_eq!(lane[0].schema().field(5).data_type(), &DataType::Utf8);
-        }
     }
 }
 

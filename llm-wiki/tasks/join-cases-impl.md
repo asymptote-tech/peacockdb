@@ -751,7 +751,7 @@ PCK_RUN_CPP=0 PCK_TEST_FILTER='_cases' scripts/build-test-shadgpu.sh --run
 Expected: every case module green, the kind guard green, counts as recorded. Paste the
 `test result:` lines into the detail file.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add llm-wiki/build-test.md llm-wiki/tasks/join-cases-detail.md
@@ -774,7 +774,7 @@ declaration the engine is about to stop making, and each already has a `Utf8` tw
 - Consumes: `Key` (Task 2), `keyed`, `hash_join_keyed`, `keyed_script`, `run_both` (`script.rs`).
 - Produces: `Key { Composite, Int64, Utf8, Date32 }` — `Utf8ViewDeclared` gone; `run_gpu` gone.
 
-- [ ] **Step 1: Delete the cases** — eleven, by name, in `join_dimension_cases.rs`:
+- [x] **Step 1: Delete the cases** — eleven, by name, in `join_dimension_cases.rs`:
 
 `an_inner_join_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`,
 `a_right_join_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key`,
@@ -792,7 +792,7 @@ and in `exec_cases.rs` `bug_a_filter_passes_a_column_declared_utf8view_back_as_u
 renamed `an_inner_join_on_a_utf8_key_over_a_zero_row_probe_answers_zero_rows` on
 `Key::Utf8`, comparing whole outputs (no `without_key`).
 
-- [ ] **Step 2: Delete the helpers** that exist only for them: in `join_dimension_cases.rs`
+- [x] **Step 2: Delete the helpers** that exist only for them: in `join_dimension_cases.rs`
 `Key::Utf8ViewDeclared` and its doc, `declared_type`, `keyed_zero_row_probe`, `without_key`,
 `device_on_a_declared…`, `exported_type`; in `script.rs` `run_gpu` (its doc names the view
 key as its only reason — confirm with `grep -rn run_gpu peacockdb-core/src/tests` first); the
@@ -800,22 +800,22 @@ key as its only reason — confirm with `grep -rn run_gpu peacockdb-core/src/tes
 and `harness_cases.rs:122`'s `pub(crate)` back to private. Rewrite the comment at
 `join_dimension_cases.rs:405-410` to say string keys are `Utf8`.
 
-- [ ] **Step 3: Compile and run rust-only** — `cargo test --features rust-only -p peacockdb-core
+- [x] **Step 3: Compile and run rust-only** — `cargo test --features rust-only -p peacockdb-core
 --lib -- tests::gpu_tests --no-run` compiles nothing device-side but proves the module still
 builds; then `cargo test --features rust-only -p peacockdb-core --test test_module_layout`.
 Expected: green; no `utf8view` in `grep -rn utf8view peacockdb-core/src/tests/gpu_tests/`
 except `harness_cases.rs`'s own pin.
 
-- [ ] **Step 4: One device run** — `PCK_RUN_CPP=0 PCK_TEST_FILTER='_cases'
+- [x] **Step 4: One device run** — `PCK_RUN_CPP=0 PCK_TEST_FILTER='_cases'
 scripts/build-test-shadgpu.sh --run`. Expected: every case module green; the family's
 count is Task 7's minus ten.
 
-- [ ] **Step 5: The record** — `build-test.md`: grand total, Rust and `--lib -- gpu_tests::`
+- [x] **Step 5: The record** — `build-test.md`: grand total, Rust and `--lib -- gpu_tests::`
 each minus ten, the harness row likewise; strike the three sentences that name declared
 `Utf8View` keys and `run_gpu`. Detail file: the retired names, one line each, with this
 task's reason. `active-tickets.md` #183: nothing — the ticket's fix task owns it.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add peacockdb-core/src/tests/gpu_tests llm-wiki/build-test.md llm-wiki/tasks/join-cases-detail.md

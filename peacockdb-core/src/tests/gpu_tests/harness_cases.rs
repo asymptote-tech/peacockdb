@@ -119,7 +119,7 @@ fn unload_over(rows: usize) -> (GpuUnload, RecordBatch) {
 /// `Utf8View` array (`arrow_utilities.cpp`, "Unsupported type_id conversion to cudf"), so
 /// the harness cannot put one on the device; the corpus never does either, its strings
 /// coming through the parquet reader. The declaration is what #183 is about.
-pub(crate) fn declaring_view_strings(schema: &ArrowSchema) -> Schema {
+fn declaring_view_strings(schema: &ArrowSchema) -> Schema {
     let fields: Vec<Field> = schema
         .fields()
         .iter()

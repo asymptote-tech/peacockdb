@@ -12,7 +12,6 @@ use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::ScalarValue;
 
-use super::harness_cases::declaring_view_strings;
 use super::script::{Outcome, Script, run_both};
 use crate::plan::{
     BatchLayout, BinaryOp, ColumnOrder, Expr, GpuFilter, GpuNode, GpuProject, GpuSort, NamedExpr,
@@ -129,26 +128,6 @@ operator_case! {
     }
 }
 
-// #183 — every row passing under a schema declaring `s: Utf8View`: the device hands the
-// column up as `Utf8`, which at a sink is the unload pin's refusal. The deliberate pin for
-// the filter family. The cpu cannot take the declaration in this harness (its schema check
-// refuses `Utf8` data under it, the detail file's gap) and is not read.
-operator_case! {
-    GpuFilter,
-    fn bug_a_filter_passes_a_column_declared_utf8view_back_as_utf8_from_the_device() {
-        let declared = declaring_view_strings(&schema());
-        let node = GpuFilter::new(
-            Given::of(declared.clone(), BatchLayout::MultipleBatches),
-            gt(2, "i32", lit_i32(i32::MIN)),
-            None,
-            declared,
-        );
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
-        let gpu = outcome.gpu.as_ref().expect("the device answers");
-        assert_eq!(gpu[0][0].schema().field(5).data_type(), &DataType::Utf8);
-    }
-}
-
 operator_case! {
     GpuFilter,
     fn no_row_passing_is_zero_rows_under_the_schema() {
@@ -205,23 +184,6 @@ operator_case! {
     fn a_column_copy_is_the_column() {
         let node = project(vec![(Expr::column(5, "s"), "s", DataType::Utf8), keep_id()]);
         run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
-    }
-}
-
-// #183 — a column copy under a schema declaring `s: Utf8View`: the device hands the copy
-// up as `Utf8`, which at a sink is the unload pin's refusal. The deliberate pin for the
-// project family; the cpu, as for the filter's, is not read.
-operator_case! {
-    GpuProject,
-    fn bug_a_projected_column_declared_utf8view_comes_back_utf8_from_the_device() {
-        let node = GpuProject::new(
-            Given::of(declaring_view_strings(&schema()), BatchLayout::MultipleBatches),
-            vec![NamedExpr::new(Expr::column(5, "s"), "s")],
-            columns(&[("s", DataType::Utf8View)]),
-        );
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
-        let gpu = outcome.gpu.as_ref().expect("the device answers");
-        assert_eq!(gpu[0][0].schema().field(0).data_type(), &DataType::Utf8);
     }
 }
 

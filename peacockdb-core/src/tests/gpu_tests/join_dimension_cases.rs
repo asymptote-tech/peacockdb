@@ -17,11 +17,11 @@ use super::join_cases::{
     BUILD_COPY, build_batch, empty_build, gpu_refuses_with, hash_join, hash_join_with, one_probe,
     padded, probe_batch, residual, script, side, two_probes,
 };
-use super::script::{Outcome, Script, run_both};
+use super::script::{Script, run_both};
 use crate::plan::{
     BatchLayout, BinaryOp, Expr, GpuHashJoin, GpuNode, JoinFilterColumn, JoinSide, Schema,
 };
-use crate::tests::compare::{Order, assert_same};
+use crate::tests::compare::Order;
 use crate::tests::given::Given;
 use crate::tests::synthetic::{prefixed, synthetic};
 
@@ -118,35 +118,24 @@ fn crossing_projection(join_type: JoinType) -> Vec<u32> {
 }
 
 /// The key types the corpus joins on that task 9 did not: a composite key, the `Int64` on
-/// nearly every join, a string, a date. `Utf8ViewDeclared` retypes nothing in the batch —
-/// the leaf *declares* `Utf8View` over `Utf8` data, the corpus's own situation, since
-/// cuDF's `from_arrow` cannot upload a `Utf8View` array. `Utf8` is that key's oracle: the
-/// same strings under the type the data has.
+/// nearly every join, a string, a date. Strings are `Utf8`, the type the data has and the
+/// spec declares.
 #[derive(Clone, Copy)]
 enum Key {
     Composite,
     Int64,
     Utf8,
-    Utf8ViewDeclared,
     Date32,
 }
 
 impl Key {
-    /// What column 1 is cast to in the batch. `Utf8` for the declared view: the data.
+    /// What column 1 is cast to in the batch, and what the leaf declares it as.
     fn data_type(self) -> DataType {
         match self {
             Key::Composite => DataType::Int32,
             Key::Int64 => DataType::Int64,
-            Key::Utf8 | Key::Utf8ViewDeclared => DataType::Utf8,
+            Key::Utf8 => DataType::Utf8,
             Key::Date32 => DataType::Date32,
-        }
-    }
-
-    /// What the leaf declares column 1 as.
-    fn declared_type(self) -> DataType {
-        match self {
-            Key::Utf8ViewDeclared => DataType::Utf8View,
-            other => other.data_type(),
         }
     }
 
@@ -186,14 +175,14 @@ fn keyed(rows: usize, seed: u64, key: Key) -> RecordBatch {
         .expect("the same columns under the keyed schema")
 }
 
-/// `side(prefix)` with column 1 declared as the key's declared type.
+/// `side(prefix)` with column 1 declared as the key's type.
 fn keyed_side(prefix: &str, key: Key) -> Vec<Field> {
     side(prefix)
         .into_iter()
         .enumerate()
         .map(|(i, f)| {
             if i == 1 {
-                Field::new(f.name(), key.declared_type(), true)
+                Field::new(f.name(), key.data_type(), true)
             } else {
                 f
             }
@@ -248,59 +237,6 @@ fn keyed_anti_script(key: Key) -> Script {
         Some(prefixed(&keyed(32, 11, key), "b_")),
         vec![prefixed(&keyed(4, 3, key), "p_")],
     )
-}
-
-fn keyed_zero_row_probe(key: Key) -> Script {
-    script(
-        Some(prefixed(&keyed(32, 11, key), "b_")),
-        vec![prefixed(&keyed(0, 3, key), "p_")],
-    )
-}
-
-/// Every column but the key, both sides where kept: what a Utf8View-keyed case projects to,
-/// so the join is what the comparison reads and not the export (#183).
-fn without_key(join_type: JoinType) -> Vec<u32> {
-    let one_side = |base: u32| (0..8u32).filter(|i| *i != 1).map(move |i| base + i);
-    match join_type {
-        JoinType::Inner | JoinType::Right => one_side(0).chain(one_side(8)).collect(),
-        JoinType::LeftAnti => one_side(0).collect(),
-        other => unreachable!("{other:?}"),
-    }
-}
-
-/// The device under a declared-Utf8View key answers as the cpu under a Utf8 key, the key
-/// projected away on both. The cpu cannot take the declaration itself: its join
-/// concatenates the build side under the declared schema and refuses `Utf8` data there,
-/// so the same join on a `Utf8` key is the oracle — the harness gap is in the detail file.
-fn device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key(
-    join_type: JoinType,
-    script: fn(Key) -> Script,
-) {
-    let projection = Some(without_key(join_type));
-    let declared = hash_join_keyed(join_type, Key::Utf8ViewDeclared, projection.clone());
-    let device = run_both(&declared, script(Key::Utf8ViewDeclared));
-    assert!(
-        device.cpu.is_err(),
-        "the cpu takes the declaration now: read this case with .same()"
-    );
-    let oracle = run_both(
-        &hash_join_keyed(join_type, Key::Utf8, projection),
-        script(Key::Utf8),
-    );
-    assert_same(
-        oracle.cpu.as_ref().expect("the cpu answers on a Utf8 key"),
-        device
-            .gpu
-            .as_ref()
-            .unwrap_or_else(|why| panic!("gpu refused: {}", why.message)),
-        Order::Any,
-    );
-}
-
-/// The arrow type the device handed up in `slot` at `column`.
-fn exported_type(outcome: &Outcome, slot: usize, column: usize) -> DataType {
-    let gpu = outcome.gpu.as_ref().expect("the device answers");
-    gpu[slot][0].schema().field(column).data_type().clone()
 }
 
 /// Two probe batches with no null key and two key values never drawn, so an anti or mark
@@ -406,8 +342,7 @@ operator_case! {
 // The key's type on each of the three code paths: Inner is the per-batch join, Right has
 // cuDF swap the sides and the indices swapped back, LeftAnti is the accumulated-keys
 // finish. The anti cases take the probe with misses, so there are rows to keep and no
-// null pair for #59. A declared-Utf8View key is read against the Utf8-keyed join, the key
-// projected away on both; one case per path keeps it, and is #183's pin at the join.
+// null pair for #59. String keys are `Utf8`, the type the spec declares.
 
 operator_case! {
     GpuHashJoin,
@@ -438,13 +373,6 @@ operator_case! {
     fn an_inner_join_on_a_date32_key_agrees() {
         run_both(&hash_join_keyed(JoinType::Inner, Key::Date32, None), keyed_script(Key::Date32))
             .same(Order::Any);
-    }
-}
-
-operator_case! {
-    GpuHashJoin,
-    fn an_inner_join_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key() {
-        device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key(JoinType::Inner, keyed_script);
     }
 }
 
@@ -482,13 +410,6 @@ operator_case! {
 
 operator_case! {
     GpuHashJoin,
-    fn a_right_join_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key() {
-        device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key(JoinType::Right, keyed_script);
-    }
-}
-
-operator_case! {
-    GpuHashJoin,
     fn a_left_anti_join_on_a_composite_key_agrees() {
         let node = hash_join_keyed(JoinType::LeftAnti, Key::Composite, None);
         run_both(&node, keyed_anti_script(Key::Composite)).same(Order::Any);
@@ -519,52 +440,15 @@ operator_case! {
     }
 }
 
+// The key's empty shape: a string key over zero rows crosses the boundary once.
 operator_case! {
     GpuHashJoin,
-    fn a_left_anti_join_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key() {
-        device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key(JoinType::LeftAnti, keyed_anti_script);
-    }
-}
-
-// #183 — the join keeps its declared-Utf8View key, and the device hands it up as `Utf8`;
-// at a sink that is the unload pin's refusal. The cpu cannot take the declaration in this
-// harness (its join refuses `Utf8` data under it, the detail file's gap) and is not read.
-operator_case! {
-    GpuHashJoin,
-    fn bug_an_inner_join_keeping_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device() {
-        let node = hash_join_keyed(JoinType::Inner, Key::Utf8ViewDeclared, None);
-        let outcome = run_both(&node, keyed_script(Key::Utf8ViewDeclared));
-        assert_eq!(exported_type(&outcome, 0, 1), DataType::Utf8, "b_key");
-        assert_eq!(exported_type(&outcome, 0, 9), DataType::Utf8, "p_key");
-    }
-}
-
-// #183 — the same at the swap: Right keeps both sides, so both keys come back `Utf8`.
-operator_case! {
-    GpuHashJoin,
-    fn bug_a_right_join_keeping_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device() {
-        let node = hash_join_keyed(JoinType::Right, Key::Utf8ViewDeclared, None);
-        let outcome = run_both(&node, keyed_script(Key::Utf8ViewDeclared));
-        assert_eq!(exported_type(&outcome, 0, 1), DataType::Utf8, "b_key");
-        assert_eq!(exported_type(&outcome, 0, 9), DataType::Utf8, "p_key");
-    }
-}
-
-// #183 — the same at the finish, whose slot is the second: LeftAnti keeps the build side.
-operator_case! {
-    GpuHashJoin,
-    fn bug_a_left_anti_join_keeping_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device() {
-        let node = hash_join_keyed(JoinType::LeftAnti, Key::Utf8ViewDeclared, None);
-        let outcome = run_both(&node, keyed_anti_script(Key::Utf8ViewDeclared));
-        assert_eq!(exported_type(&outcome, 1, 1), DataType::Utf8, "b_key");
-    }
-}
-
-// The key's empty shape: a declared-Utf8View key over zero rows crosses the boundary once.
-operator_case! {
-    GpuHashJoin,
-    fn an_inner_join_on_a_declared_utf8view_key_over_a_zero_row_probe_answers_zero_rows_on_the_device() {
-        device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key(JoinType::Inner, keyed_zero_row_probe);
+    fn an_inner_join_on_a_utf8_key_over_a_zero_row_probe_answers_zero_rows() {
+        let zero_row_probe = script(
+            Some(prefixed(&keyed(32, 11, Key::Utf8), "b_")),
+            vec![prefixed(&keyed(0, 3, Key::Utf8), "p_")],
+        );
+        run_both(&hash_join_keyed(JoinType::Inner, Key::Utf8, None), zero_row_probe).same(Order::Any);
     }
 }
 
