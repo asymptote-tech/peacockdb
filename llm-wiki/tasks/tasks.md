@@ -15,10 +15,9 @@ shared. 75 queries carry #152. Memory accounting is deliberately out of scope an
 
 ## Chain ENS-drop-mode-name (base: master)
 
-The layout refactor. It may not run beside the ENS-refcounted-tables chain: both rewrite the same tree, so
-rebasing one across the other is a whole-tree conflict.
+Tasks 1–6, 8 and 9 merged and archived. What remains is the prototype, whose product is on master.
 
-### 7. [`sink-divergence-survey.md`](sink-divergence-survey.md) — state: approved to build
+### 1. [`sink-divergence-survey.md`](sink-divergence-survey.md) — state: done — prototype, branch `ENS-sink-divergence-survey` at `cebe1ead`, no PR; the report and the sink message are on master
 
 **Prototype — no PR, branch never merged; the product is
 [`reports/sink-divergence.md`](../reports/sink-divergence.md).** Sixty-odd disabled cells already fail
@@ -28,7 +27,13 @@ the corpus rollout that was happening anyway then reports which divergence class
 boundary and how often. Fixes nothing and enables no cell. It is what tells `declared-schemas` which
 classes are worth a harness.
 
-### 10. [`declared-schemas.md`](declared-schemas.md) — state: approved to build
+
+## Chain ENS-declared-schemas (base: master)
+
+Task 10 and the task built on the walk it moved. Held: the human marked declared-schemas for
+possible further changes before it merges, and walk-drives-every-plan waits with it.
+
+### 1. [`declared-schemas.md`](declared-schemas.md) — state: blocked(done) — PR #151
 
 The engine declares a schema per node and only the CPU backend is held to it — `declared_as` pulls
 every stage back to the declaration, and the device path has no equivalent. Declares a schema per
@@ -37,23 +42,8 @@ every stage back to the declaration, and the device path has no equivalent. Decl
 through an exporter that casts to the declared type instead of relabelling. Fixes nothing: every
 disagreement is a `bug_` test. Last in the chain because it needs `wire/gpu_tests/`.
 
-### 11. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../tickets.md#t198) — state: approved to build
 
-`build_expr` builds ten literal scalars a second time and assumes validity, so a typed NULL inside an
-AST expression is a typed zero — a wrong value in arithmetic and a wrong row count in a comparison.
-One scalar builder, not a corrected copy. C++ only. Carries a test-helper repair first:
-`CreateScalarValue` gained `is_null` as field 2 and the gtest call sites kept their old positions, so
-every `make_int64_literal` builds the literal 0. Claims no cells.
-
-### 12. [`empty-build.md`](empty-build.md) — closes [#175](../tickets.md#t175) — state: approved to build
-
-A lane whose build side got no rows keeps its typed zero-row table where the join above owes rows, so
-`Right`, `Full` and `RightAnti` answer instead of refusing. No new marker — the driver routes
-`NoBuild` and `without_build` already asks `empty_build_answers_nothing`; only the `false` branch was
-never written, and the table it needs is one the scatter builds and the driver drops. One derived
-index field, one conditional drop. Replaces the parked `empty-answers.md`.
-
-### 13. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: approved to build
+### 2. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: done — PR #154 — shrunk to its §2 by the spec's "Decision" section
 
 **Conditional: its first task reads the survey's report, argues what is still worth teaching, and
 stops for the human.** The walk is the only instrument that can ask what one call produced, and it
@@ -61,14 +51,38 @@ panics on ten shapes — eight never taught, two the engine truly cannot run. Te
 a device refusal an outcome rather than an abort, and records the real limits as `bug_` tests naming
 #136, #152 and #175. No production code. Deliverable: a checked table of what it can drive.
 
-### 14. [`join-cases.md`](join-cases.md) — state: new
+
+## Chain ENS-typed-nulls (base: master)
+
+The two fixes that do not need task 10, rebased beside it, and the two cases tasks after them.
+
+### 1. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../tickets.md#t198) — state: done — PR #152
+
+`build_expr` builds ten literal scalars a second time and assumes validity, so a typed NULL inside an
+AST expression is a typed zero — a wrong value in arithmetic and a wrong row count in a comparison.
+One scalar builder, not a corrected copy. C++ only. Carries a test-helper repair first:
+`CreateScalarValue` gained `is_null` as field 2 and the gtest call sites kept their old positions, so
+every `make_int64_literal` builds the literal 0. Claims no cells.
+
+
+### 2. [`empty-build.md`](empty-build.md) — closes [#175](../tickets.md#t175) — state: done — PR #153
+
+A lane whose build side got no rows keeps its typed zero-row table where the join above owes rows, so
+`Right`, `Full` and `RightAnti` answer instead of refusing. No new marker — the driver routes
+`NoBuild` and `without_build` already asks `empty_build_answers_nothing`; only the `false` branch was
+never written, and the table it needs is one the scatter builds and the driver drops. One derived
+index field, one conditional drop. Replaces the parked `empty-answers.md`.
+
+
+### 3. [`join-cases.md`](join-cases.md) — state: approved to build
 
 Cases only, along the three dimensions task 9 held constant and the corpus does not: a
 projection on every reachable join type, composite and `Int64`/`Utf8View`/`Date32` keys on the
 three join code paths, and the non-AST nested-loop path, with `Utf8View` as a declaration over
 plain strings and a deliberate handful of #183 pins. Roughly 37 cases, one device cycle, no production code.
 
-### 15. [`aggregate-cases.md`](aggregate-cases.md) — state: new
+
+### 4. [`aggregate-cases.md`](aggregate-cases.md) — state: approved to build
 
 Cases only, after task 14: group keys the corpus uses (`Utf8View`, `Date32`, `Int64`, two
 columns), `count(*)` and expression arguments, every merge arm with rows, the stddev finalize,
