@@ -215,3 +215,12 @@ peacockdb-core --lib --features gpu --no-run`).
 - The 11-run merge pins are the one place a fixture's shape is chosen for the device's
   comparator rather than the plan's; the doc comment on `null_keys_in_one_run` says why, and
   the garbage the ordinary shape produces is in #202's text.
+
+## Coordinator — 2026-09-16, to reviewing
+
+Committed as `601c308f`, PR #156 against `ENS-join-cases` (base verified, 2 commits). Reviewer
+round 1 dispatched. For the reviewer and the analyst: the `Utf8View` group-key row (and its
+#183 pin) has no case — the developer reports DataFusion's group-by panics on `Utf8` data under
+the declaration before `run_both` reads the device, so the join-cases reading does not carry
+over; recorded above as a harness gap. Whether that row can still be answered inside the task's
+constraints is the first question of the review. 67 cases against the spec's "roughly 45".
