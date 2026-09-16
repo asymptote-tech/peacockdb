@@ -88,15 +88,15 @@ corpus_query!(tpch, 1, nested_limits, tp1_single | tp1_rowgroup | tp4_single | t
 
 // T19 batch 5, the tpch list from here being aggregates over joins, and the cpu is where it
 // showed. Three of the five are cut before a device ever sees them: q22 carries an `avg` and is
-// out at every mode on #163; q16 and rollup-over-join run at the two tp1 modes and not at the
-// three tp4 ones, which is the shuffle rather than the query — #175's empty build side for q16,
-// and #189 for the rollup, whose grouping-set id is UInt8 and whose hasher has no arm for it.
+// out at every mode on #163; rollup-over-join runs at the two tp1 modes and not at the three
+// tp4 ones, which is the shuffle rather than the query — #189, whose grouping-set id is UInt8
+// and whose hasher has no arm for it.
 // The fourteen cells that did reach a device split evenly, seven and seven, between #152's
 // build-side copy and #183 — every query here aggregates over a join, so which of the two it
 // meets is decided by whether the plan reaches the join before the unload refuses the export.
 corpus_query!(tpch, 1, rollup_over_join, tp1_single | tp1_rowgroup, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q4, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
-corpus_query!(tpch, 1, q16, tp1_single | tp1_rowgroup, none, data_fusion_exact, live_cpu);
+corpus_query!(tpch, 1, q16, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, live_cpu);
 corpus_query!(tpch, 1, q18, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q22, none, none, data_fusion_exact, golden_exact);
 
@@ -233,9 +233,10 @@ corpus_query!(tpcds, 1, q61, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgro
 corpus_query!(tpcds, 1, q10, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 
 // T19 batch 15, the expensive end of the pool: four semi-joins and a rollup over an outer join.
-// q77 runs at the two tp1 modes only: #175's empty build side, the second query to reach it after
-// q16 and mode-scoped for the same reason. Whether its rollup would also meet #189 at those modes
-// is unknown — #175 refuses first, and the ordering is not something a disabled cell can show.
+// q77 runs at the two tp1 modes only: its Right outer's build side is a grouped aggregate over
+// an Inner join whose empty scatter lane drops as it should, so the outer gets no build batch at
+// all — #212, the route #175's fix does not reach. Whether its rollup would also meet #189 at
+// those modes is unknown — #212 refuses first, and a disabled cell cannot show the ordering.
 corpus_query!(tpcds, 1, q33, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q56, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q60, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
@@ -243,8 +244,8 @@ corpus_query!(tpcds, 1, q69, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgro
 corpus_query!(tpcds, 1, q77, tp1_single | tp1_rowgroup, none, data_fusion_exact, golden_exact);
 
 // T19 batch 16, the top of the cost ranking. q80 is q77's shape — a rollup over an outer join —
-// and it refuses at the three tp4 modes on #189's UInt8 grouping-set id rather than on #175's
-// empty build side, which is the ticket that took q77 there. Same two candidates, opposite winner,
+// and it refuses at the three tp4 modes on #189's UInt8 grouping-set id rather than on #212's
+// missing build batch, which is the ticket that took q77 there. Same two candidates, opposite winner,
 // so which one a query meets is a property of the query and not of the shape.
 corpus_query!(tpcds, 1, q74, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q58, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);

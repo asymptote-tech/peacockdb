@@ -86,6 +86,28 @@ and `4bc848a5`). `build_expr`'s literal arm delegates to `build_scalar` through
 `ScalarValue.is_null`. Pinned green by the seven `Literals.*` gtests in
 `cpp/tests/gpu/test_plan_executor.cpp`.
 
+<a id="t175"></a>
+### #175 — an empty build side leaves three join types owing rows they cannot make
+`empty_build_answers_nothing` decides what a lane answers when its build side produced no batch.
+Six types owe nothing and end the lane; Right, Full and RightAnti owe their probe side.
+
+The route the corpus took here was the scatter: `driver/partitioned.rs` dropped every empty
+scatter output, and one lane later the join was told its build side did not exist. Answered on
+`ENS-empty-build` — the index marks the lanes that feed the build child of a join whose type
+owes rows, the scatter keeps their typed zero-row table, and the join computes the pad or the
+probe rows over it (`join.cpp` on the device, DataFusion's join on the cpu). Corpus reach was
+tpch q16 and tpcds q77, never q21: q16's three tp4 cells are enabled, and q77's stay disabled on
+[#212](../tickets.md#t212), because its Right outer's build side emits no batch at all rather than an empty
+one. No registry cell names this ticket now. The three `without_build` pins moved to #212.
+
+**Done 2026-09-12, by task 12 `empty-build` on branch `ENS-empty-build`** (commits `943eb21e`
+and `04688b03`). Proved on the cpu against DataFusion by
+`a_right_join_with_an_empty_build_pads_every_probe_row` and its RightAnti sibling
+(`tests/end_to_end/dimensions.rs`), and on the device by
+`right_over_a_zero_row_build_pads_every_probe_row` and
+`right_anti_over_a_zero_row_build_keeps_every_probe_row` (`gpu_tests/join_cases.rs`, run
+`20260912T140917-414448`); tpch q16 enabled at its three tp4 cpu cells.
+
 <a id="t194"></a>
 ### #194 — the cost gate's git baseline ignores which section it was asked for
 

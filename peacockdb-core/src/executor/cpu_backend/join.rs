@@ -167,14 +167,17 @@ impl CpuJoin {
     }
 
     /// This lane's build side finished with no batch, which a small table scattered over
-    /// many lanes produces routinely. What it owes is the join type's answer.
+    /// many lanes produces routinely for the types that owe nothing. What it owes is the
+    /// join type's answer; for the three that owe their probe side the driver keeps the
+    /// scatter's zero-row table instead (#175), so only an upstream that emitted nothing
+    /// at all reaches the refusal (#212).
     pub(crate) fn without_build(self) -> Result<(), BackendError> {
         if self.calls.empty_build_answers_nothing {
             return Ok(());
         }
         Err(BackendError::new(
             "this lane's build side is empty, and what this join owes is its probe side — \
-             which takes a call over a build table that does not exist (#175)",
+             which takes a call over a build table that does not exist (#212)",
         ))
     }
 

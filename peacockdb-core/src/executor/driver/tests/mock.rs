@@ -63,7 +63,8 @@ pub(crate) enum ExecRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AccRule {
-    /// Holds every batch and emits one at done, its residency growing as it holds.
+    /// Holds every batch and emits one at done, its residency growing as it holds — and
+    /// nothing at done where nothing arrived, which is what the backends' coalesce does.
     CoalesceAll,
     /// Emits each batch as it arrives and holds nothing — what a mid-plan limit does.
     Streaming,
@@ -254,6 +255,7 @@ pub(crate) struct MockExec {
 
 pub(crate) struct MockAcc {
     script: Script,
+    held_batches: usize,
     held_rows: usize,
     held_bytes: usize,
 }
@@ -408,6 +410,7 @@ impl BatchAccumulatorExecutor<Mock> for MockAcc {
         Ok(match self.script.accumulate {
             AccRule::Streaming => (vec![batch], stats),
             _ => {
+                self.held_batches += 1;
                 self.held_rows += batch.rows;
                 self.held_bytes += batch.bytes;
                 (Vec::new(), stats)
@@ -420,6 +423,9 @@ impl BatchAccumulatorExecutor<Mock> for MockAcc {
         let stats = self.script.stats();
         let out = match self.script.accumulate {
             AccRule::Streaming => Vec::new(),
+            // Nothing at all where nothing arrived, as the backends answer: a lane the
+            // scatter gave no batch is how a join comes to have no build side.
+            AccRule::CoalesceAll if self.held_batches == 0 => Vec::new(),
             AccRule::CoalesceAll => vec![MockBatch {
                 rows: self.held_rows,
                 bytes: self.held_bytes.max(8),
@@ -634,6 +640,7 @@ impl Backend for Mock {
                 }
                 NodeExecutors::BatchAccumulator(MockAcc {
                     script,
+                    held_batches: 0,
                     held_rows: 0,
                     held_bytes: 0,
                 })
