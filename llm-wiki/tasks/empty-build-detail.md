@@ -290,3 +290,9 @@ declared-schemas' `wire/gpu_tests/declared.rs`, which left with that task, so on
 rests on `an_unload_of_a_zero_row_batch_is_zero_rows_under_the_schema_on_both` alone — the
 `synthetic` batch's `s` column is the zero-row string column. The 304 / 1 ignored of that entry
 was likewise the pre-merge count. State restored to `completing`; `done` waits on CI.
+
+### 2026-09-16 — done, again
+
+CI run 35150819050 on `30eacf7e` green: both cudf legs, the GPU build, the remote GPU tests, the
+cost report. The tiers above and CI agree; no code changed since the reviewer's signoff, so no
+review round. PR #153 awaits the human's merge, after #152.

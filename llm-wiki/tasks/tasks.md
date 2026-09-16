@@ -59,8 +59,8 @@ test: a validator holding each device batch to its node's schema, four mock-driv
 
 ## Chain D (base: master)
 
-The two fixes, rebased onto master after reaching `done` without a test run. The coordinator finishes
-the rebase onto master's tip, runs the tiers, and writes `done` if all pass or `building` if not.
+The two fixes, rebased onto master's tip and re-proven there on every tier: rust-only, the C++ tests,
+the device cells, and CI. Both await the human's merge, typed-nulls first.
 
 ### 1. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../archive/archived-tickets.md#t198) — state: done — PR #152
 
@@ -70,7 +70,7 @@ One scalar builder, not a corrected copy. C++ only. Carries a test-helper repair
 `CreateScalarValue` gained `is_null` as field 2 and the gtest call sites kept their old positions, so
 every `make_int64_literal` builds the literal 0. Claims no cells.
 
-### 2. [`empty-build.md`](empty-build.md) — closes [#175](../archive/archived-tickets.md#t175) — state: completing — PR #153; re-proven on master's tip, awaiting CI
+### 2. [`empty-build.md`](empty-build.md) — closes [#175](../archive/archived-tickets.md#t175) — state: done — PR #153
 
 A lane whose build side got no rows keeps its typed zero-row table where the join above owes rows, so
 `Right`, `Full` and `RightAnti` answer instead of refusing. No new marker — the driver routes
