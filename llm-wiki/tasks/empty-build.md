@@ -239,3 +239,14 @@ identity row on the CPU, because `gpu_backend/accumulate.rs:307` lacks the CPU's
 clause. A wrong answer, found by reading rather than by a run, and deliberately **not** fixed here:
 it is a different bug on the same page, and the parked spec's habit of bundling the two is what this
 task exists to undo.
+
+## After the signoff: rebased without a test run (2026-09-16)
+
+The branch reached `done` on its old base and was then rebased — first off `ENS-drop-mode-name`
+onto master when chain D was split out, and it is behind master's tip again now — with no build
+and no test run on the new base. The board drops it to `completing` for that reason. What the
+coordinator owes: finish the rebase onto master's tip (typed-nulls first, empty-build on it),
+push, and run the tiers this spec's verification bar names — rust-only, the C++ tests it added,
+the device cells it claims — then write `done` if everything passes, or `building` with the
+failure named in the detail file if anything does not. No new review round unless the rebase
+changed a line of code; the reviewer signed off on the code, not on the base.
