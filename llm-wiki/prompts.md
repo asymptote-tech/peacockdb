@@ -50,10 +50,13 @@ Starting a chain, and everything else the human does: `llm-wiki/README.md`.
 
 ## Board protocol
 
-`llm-wiki/tasks/tasks.md` is the board: one `##` section per chain, naming its base. Tasks
-keep a numbered heading, at most five lines of prose, and a state on the heading line.
+`llm-wiki/tasks/tasks.md` is the board: one `##` section per chain, naming its base. Chains
+are named by letter — `A`, `B`, `C`, … — and the letter is what the watchdog and the
+`/ensemble` command take. Tasks keep a numbered heading, at most five lines of prose, and a
+state on the heading line; the number orders the chain, the name identifies the task, so
+refer to a task by name — "casts", not "task 1".
 
-    ## Chain ENS-casts (base: master)
+    ## Chain A (base: master)
 
     ### 1. [casts.md](casts.md) — closes #183 — state: blocked(done) — PR #114
     <at most five lines of prose>
@@ -209,8 +212,8 @@ state, and a watchdog restarts you.
 - **The task chain, the branch chain and the PR chain are the same chain.** One task =
   one `ENS-` branch = one PR, and all three run in parallel:
 
-      master ── ENS-task-A ── ENS-task-B ── ENS-task-C
-                  PR→master    PR→task-A     PR→task-B
+      master ── ENS-first ── ENS-second ── ENS-third
+                  PR→master   PR→first     PR→second
 
   Task N's branch forks off task N−1's branch, and its PR **targets that same branch** —
   master only for the first task in a chain. A PR aimed at master instead of its parent
@@ -422,8 +425,10 @@ You may not build or run project code. Read-only on files except the task detail
 ## Helper (peacockdb-helper)
 
 Interactive, with the human, never part of an autonomous run. You work in the primary
-checkout on master and never in a chain worktree, so you cannot collide with a running
-coordinator. At most fifteen lines per question.
+checkout on master and never in a workspace, so you cannot collide with a running
+coordinator. At most fifteen lines per question. Refer to tasks by name, never by their
+board number: "join-cases", not "task 1" — numbers shift when a chain is resequenced and
+mean nothing outside its section.
 
 - **Defining a task, in two phases.** `superpowers:brainstorming` with the human produces
   the spec, `llm-wiki/tasks/<task>.md`: what the task is, why this shape, what the
@@ -457,14 +462,19 @@ coordinator. At most fifteen lines per question.
   scaffolding for a task that is now in the history. One reverse-chronological file means the
   history reads as a history; a directory of files does not order itself. This commit carries
   nothing else: it is bookkeeping, and mixing code into it makes the merge point unreadable.
-- **Starting a chain**: one coordinator per chain, each in its own worktree, which is what
-  makes two chains safe to run at once without locking a shared board.
+- **Starting a chain**: one coordinator per chain, each in its own **workspace** — a linked
+  worktree named `alpha`, `beta`, `gamma`, … — which is what makes two chains safe to run at
+  once without locking a shared board. Chains are lettered (`A`, `B`, `C`, …); workspaces are
+  reused, so a workspace has no chain of its own — check out the chain's first branch there
+  and name the chain to the watchdog:
 
-      git worktree add ../peacockdb-<chain> <chain-branch>
-      cd ../peacockdb-<chain> && ../peacockdb/scripts/ensemble-watchdog.sh --non-interactive <chain-branch>
+      git worktree add ../peacockdb-alpha <first-task-branch>      # once per workspace
+      cd ../peacockdb-alpha && git checkout <first-task-branch>    # on reuse
+      ../peacockdb/scripts/ensemble-watchdog.sh --non-interactive <chain>
 
-  The watchdog refuses to run outside a chain worktree, and pins each worktree to the first
-  chain it is run with. Tidy the worktree when the chain is merged.
+  The watchdog refuses to run in the primary checkout. Which chain a workspace is driving is
+  whatever its `.claude/ensemble/<chain>.status` says; nothing else records it, so a
+  workspace is free again the moment its chain is merged and its files are cleared.
 - **Reaching a running coordinator**: write one word to
   `.claude/ensemble/<chain>.control` — `pause`, `rebase` or `stop`. It is read after every
   subagent returns, so the answer is one subagent away at worst. Or run the watchdog with

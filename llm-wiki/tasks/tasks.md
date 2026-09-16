@@ -1,10 +1,10 @@
 # Task board
 
-One `##` section per chain, naming its base. States and transitions: the "Board protocol"
+One `##` section per chain, lettered, naming its base. States and transitions: the "Board protocol"
 section of `llm-wiki/prompts.md`. A coordinator writes this file only on its own chain
 branch, which is why two chains need no locking.
 
-## Chain ENS-refcounted-tables (base: master)
+## Chain A (base: master)
 
 ### 1. [`refcounted-tables.md`](refcounted-tables.md) — closes [#145](../tickets.md#t145), [#152](../tickets.md#t152) — state: new
 
@@ -13,9 +13,11 @@ The largest and the one that frees the most: 39 `.table` sites across 11 files, 
 value, so the registry cannot keep a handle and let an operator own its input unless the owner is
 shared. 75 queries carry #152. Memory accounting is deliberately out of scope and will diverge.
 
-## Chain ENS-drop-mode-name (base: master)
+## Chain B (base: master)
 
-Tasks 1–6, 8 and 9 merged and archived. What remains is the prototype, whose product is on master.
+Formerly `ENS-drop-mode-name`: drop-mode-name, module-layout, rmm-pool-budget, test-layout, test-support,
+visibility, operator-harness and operator-cases merged and archived. What remains is the prototype,
+whose product is on master.
 
 ### 1. [`sink-divergence-survey.md`](sink-divergence-survey.md) — state: done — prototype, branch `ENS-sink-divergence-survey` at `cebe1ead`, no PR; the report and the sink message are on master
 
@@ -28,9 +30,9 @@ boundary and how often. Fixes nothing and enables no cell. It is what tells `dec
 classes are worth a harness.
 
 
-## Chain ENS-declared-schemas (base: master)
+## Chain C (base: master)
 
-Task 10 and the task built on the walk it moved. Held: the human marked declared-schemas for
+declared-schemas and the task built on the walk it moved. Held: the human marked declared-schemas for
 possible further changes before it merges, and walk-drives-every-plan waits with it.
 
 ### 1. [`declared-schemas.md`](declared-schemas.md) — state: blocked(done) — PR #151
@@ -52,9 +54,9 @@ a device refusal an outcome rather than an abort, and records the real limits as
 #136, #152 and #175. No production code. Deliverable: a checked table of what it can drive.
 
 
-## Chain ENS-typed-nulls (base: master)
+## Chain D (base: master)
 
-The two fixes that do not need task 10, rebased beside it.
+The two fixes that do not need declared-schemas, rebased beside it.
 
 ### 1. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../tickets.md#t198) — state: done — PR #152
 
@@ -73,13 +75,13 @@ A lane whose build side got no rows keeps its typed zero-row table where the joi
 never written, and the table it needs is one the scatter builds and the driver drops. One derived
 index field, one conditional drop. Replaces the parked `empty-answers.md`.
 
-## Chain ENS-join-cases (base: master)
+## Chain E (base: master)
 
 Cases only, in `src/tests/gpu_tests/`: independent of every other chain's files.
 
 ### 1. [`join-cases.md`](join-cases.md) — state: approved to build
 
-Cases only, along the three dimensions task 9 held constant and the corpus does not: a
+Cases only, along the three dimensions operator-cases held constant and the corpus does not: a
 projection on every reachable join type, composite and `Int64`/`Utf8View`/`Date32` keys on the
 three join code paths, and the non-AST nested-loop path, with `Utf8View` as a declaration over
 plain strings and a deliberate handful of #183 pins. Roughly 37 cases, one device cycle, no production code.
@@ -88,7 +90,7 @@ plain strings and a deliberate handful of #183 pins. Roughly 37 cases, one devic
 
 ### 2. [`aggregate-cases.md`](aggregate-cases.md) — state: approved to build
 
-Cases only, after task 14: group keys the corpus uses (`Utf8View`, `Date32`, `Int64`, two
+Cases only, after join-cases: group keys the corpus uses (`Utf8View`, `Date32`, `Int64`, two
 columns), `count(*)` and expression arguments, every merge arm with rows, the stddev finalize,
 the project expressions and casts with no case, and sorted merges on `desc`, nullable and
 composite keys — #202's second site. No fixture change, no production code. Roughly 45 cases.

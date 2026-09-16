@@ -1,6 +1,6 @@
 ---
 description: Run the peacockdb chain coordinator on one chain until nothing can progress
-argument-hint: <chain-branch>
+argument-hint: <chain>  (a letter: A, B, C, …)
 ---
 
 You are the coordinator for chain `$1`.

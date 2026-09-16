@@ -15,7 +15,7 @@
 # nothing, and a commit-based counter would call that progress forever.
 set -uo pipefail
 
-usage="usage: ensemble-watchdog.sh [--non-interactive] [--max-idle-restarts N] [--limit-seconds N] <chain-branch>"
+usage="usage: ensemble-watchdog.sh [--non-interactive] [--max-idle-restarts N] [--limit-seconds N] <chain>"
 
 # Interactive is the default because a human starting one watches it; --non-interactive is the
 # unattended form, which is the one that needs the log and the headless permission grant.
@@ -74,28 +74,21 @@ board_state() {
   ' "$board" 2>/dev/null | md5sum | cut -d' ' -f1
 }
 
-# Run from inside that chain's worktree. Getting this wrong drives a coordinator across
-# another chain's branch, and the first thing it would do is commit a board it should not own.
-#
-# The check is worktree identity, not branch name: a chain is a stack of branches and the
-# coordinator walks up it, so HEAD stops matching the chain name after the first task. A
-# linked worktree has its own git dir; the primary checkout's git dir is the common one.
+# Run from inside a workspace (a linked worktree: alpha, beta, ...), never the primary
+# checkout, where the helper and the human work on master. A linked worktree has its own git
+# dir; the primary checkout's git dir is the common one. Workspaces are reused across chains,
+# so nothing pins one to a chain: the chain is the argument, and a workspace with another
+# chain's status file still present is one that was not cleared after its merge.
 if [ "$(git rev-parse --git-dir)" = "$(git rev-parse --git-common-dir)" ]; then
-  printf 'watchdog: this is the primary checkout; run inside the chain worktree\n' >&2
+  printf 'watchdog: this is the primary checkout; run inside a workspace\n' >&2
   exit 2
 fi
-
-marker=".claude/ensemble/chain"
-mkdir -p "$(dirname "$marker")"
-if [ -s "$marker" ]; then
-  owner=$(cat "$marker")
-  if [ "$owner" != "$chain" ]; then
-    printf 'watchdog: this worktree belongs to %s, not %s\n' "$owner" "$chain" >&2
-    exit 2
-  fi
-else
-  printf '%s\n' "$chain" > "$marker"
-fi
+mkdir -p .claude/ensemble
+for other in .claude/ensemble/*.status; do
+  [ -e "$other" ] && [ "$other" != "$status" ] || continue
+  printf 'watchdog: this workspace still carries %s; clear it before running chain %s\n' "$other" "$chain" >&2
+  exit 2
+done
 
 rm -f "$status"
 idle=0
@@ -120,7 +113,7 @@ while :; do
     printf '\n===== %s  /ensemble %s =====\n' "$(date -Is)" "$chain" >> "$log"
     # Unattended, so permissions cannot be granted: a headless run refuses any tool that
     # would prompt, and the coordinator then fails to commit or push while looking like it
-    # simply made no progress. This is confined to a chain worktree on a chain branch.
+    # simply made no progress. This is confined to a workspace on a chain branch.
     claude -p --dangerously-skip-permissions "/ensemble ${chain}" 2>&1 | tee -a "$log"
     rc=${PIPESTATUS[0]}   # tee's status otherwise, which is 0 however the coordinator died
   fi
