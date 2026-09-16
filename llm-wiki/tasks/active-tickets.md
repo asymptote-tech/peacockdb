@@ -74,28 +74,15 @@ T17a's drain half is untouched: a drained lane changes rows per lane, so q16's 1
 types, expected Utf8View`. The sink's schema comes from DataFusion, which uses `Utf8View`; the
 device's IPC export produces `Utf8`. Same values, different arrow type.
 
-Twelve of T18's device cases over eleven queries — tpcds q3 q15 q37 q42 q43 q52 q55 q82, tpch q10
-q12 q15 — with `#183` on their gpu columns.
-
-The same divergence bit the digest comparator one layer up, where hashing the column type reddened
-eight device cases whose rendered comparison had never looked at types. That one was a comparison
-artefact and was fixed by hashing names; this one is the export genuinely disagreeing with the
-schema the plan declared, and no comparison choice makes it go away.
-
-Fix site, decided: neither the export nor a cast at the sink. `Utf8View` enters a plan only through
-DataFusion's parquet option `schema_force_view_types` (default on); every coercion and string
-function returns a view only for a view input, and cuDF has no view layout to honour. Turning the
-option off in `build_session_state` (`peacockdb-core/src/lib.rs`) makes every plan declare `Utf8`
-from the leaf up and the export agree with no conversion. That task regenerates the plan goldens,
-retires this ticket's pins (`harness_cases.rs`, and whatever join-cases and aggregate-cases still
-carry) and fixes `plan_text/tests.rs` and `planner/translator/schema_tests.rs`, which assert the
-view type from real plans. Any sentence on a chain branch naming the export as the fix site
-predates this decision.
+`Utf8View` enters a plan only through DataFusion's parquet option `schema_force_view_types`
+(default on); every coercion and string function returns a view only for a view input, and
+cuDF has no view layout to honour. So the fix site is neither the export nor a cast at the
+sink: the option, off, makes every plan declare `Utf8` from the leaf up.
 
 **Done 2026-09-16, by `utf8-everywhere` on branch `ENS-utf8-everywhere`.** The `ParquetFormat`
-in `read_table` (`lib.rs`) has `with_force_view_types(false)`, so every plan declares `Utf8` from
-the leaf up, and `plan/validate.rs` refuses any view type in a node schema, a literal, a cast
-target, a binary's type or a scalar function's return. The 76 string-class queries of
+in `read_table` (`lib.rs`) has `with_force_view_types(false)`, and `plan/validate.rs` refuses any
+view type in a node schema, a literal, a cast target, a binary's type or a scalar function's
+return. The 76 string-class queries of
 [`reports/sink-divergence.md`](../reports/sink-divergence.md) were re-run at `tp1-single`: no
 sink showed a string, three cells are enabled (`tpcds/q84`, `tpch/nested-loop-join`,
 `tpch/shuffle-stddev`), four ran the whole device plan clean but have no cpu cell (#163), and
@@ -145,11 +132,12 @@ golden caught the disagreement — every other device failure so far has been a 
 ### #215 — the cpu's joins answer several batches per call where the device answers one
 
 The cpu's `probe_and_fetch` (`cpu_backend/join.rs`) hands back DataFusion's whole output
-stream for one probe batch — an 8192-row split, and one empty batch per probe batch that matched
-nothing — while the device answers one table per `execute_node`. `ProbingJoin` allows a `Vec`,
-so neither side breaks the trait; the per-node golden is what breaks. `output_bytes` is the sum
-of per-batch sizes, each priced by its own row count, so the two engines disagree by the
-per-batch overhead and every 1:1 node above the join carries the extra batches along:
+stream for one probe batch, where the device answers one table per `execute_node`. The stream
+is an 8192-row split, plus one empty batch per probe batch that matched nothing. `ProbingJoin`
+allows a `Vec`, so neither side breaks the trait; the per-node golden is what breaks.
+`output_bytes` is the sum of per-batch sizes, each priced by its own row count, so the two
+engines disagree by the per-batch overhead and every 1:1 node above the join carries the extra
+batches along:
 `tpch/q15` at `tp1-single` has the cpu's join at `batch_rows=[[8192,1808]]`, 946045 bytes, the
 device at 946033; `tpch/q4`'s LeftSemi emits `[[0×18, 52523]]` on the cpu, one batch on the
 device, 72 bytes apart at the join and again at the aggregate over it. First difference in 13 of
