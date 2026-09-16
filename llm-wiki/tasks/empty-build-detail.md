@@ -270,3 +270,23 @@ Owed before `completing` is restored and `done` written, per the spec's last sec
 (the six §6 tests, the driver tests, the corpus cpu tier with q16's tp4 cells), the C++ tests, and
 the device cells (`join_cases::` and the corpus device tier). No review round unless a code line
 changed; none did.
+
+### 2026-09-16 — re-proven on the new base: every tier green, no code changed
+
+Developer run on `30eacf7e`, tree clean after. **rust-only, local** (verda does not resolve,
+`--test-threads=2`): `--lib` 540 passed 0 failed 2 ignored; `test_cpu_corpus` 451 in full, 201 s,
+with `cpu_tpch_q16_tp4_single/_rowgroup/_sized` `ok`; `test_corpus_goldens` 20; `test_cost_model`
+3; `test_module_layout` 17; `test_ci_coverage` 8; `test_golden_format` 26; all rc 0, no golden
+rewritten. **shad-gpu**: `--build --push-binaries --patch` rc 0, zero warnings anywhere; run
+`20260916T211500-47788`, empty filter, gate exit 0, every pool built: C++ 12 / 6 / 34 / 4 / 4;
+`peacockdb_core_gpu_lib gpu_tests::` 287 passed 0 failed 0 ignored, matching `build-test.md`;
+`test_gpu_corpus` 8. The Device workflow's five things read off the same named cases as the
+"plan task 6" entry, all `ok`; the three `bug_` pins on #212 `ok`; q16's device cells stay
+disabled on #152/#183 as the registry says.
+
+**Record drift, not a finding.** The "plan task 6" entry names
+`a_zero_row_batch_types_its_string_column_as_a_populated_one` for thing (4); that case lived in
+declared-schemas' `wire/gpu_tests/declared.rs`, which left with that task, so on this base (4)
+rests on `an_unload_of_a_zero_row_batch_is_zero_rows_under_the_schema_on_both` alone — the
+`synthetic` batch's `s` column is the zero-row string column. The 304 / 1 ignored of that entry
+was likewise the pre-merge count. State restored to `completing`; `done` waits on CI.
