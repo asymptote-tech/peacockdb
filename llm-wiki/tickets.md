@@ -15,8 +15,8 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 27 | #219 #217 #216 #215 #214 #208 #207 #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
-| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 17 | #218 #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
+| [Critical correctness](#critical-correctness) | 28 | #219 #218 #217 #216 #215 #214 #208 #207 #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
@@ -34,6 +34,18 @@ which has no case-insensitive form. The fix is a `to_lower` on both the column a
 when the flag is set, or `cudf::strings::contains_re` with the `IGNORE_CASE` flag. A wrong row
 count under `WHERE … ILIKE`, and a wrong column in a select list; no corpus query writes
 `ILIKE`. Pinned by `bug_ilike_is_case_sensitive_on_the_device` (`gpu_tests/exec_cases.rs`).
+
+<a id="t218"></a>
+### #218 — the device cannot cast text to a date
+
+`CAST(d AS DATE)` over a `Utf8` column answers on the cpu and is refused on the device:
+`cudf::cast` throws "Column type must be numeric or chrono or decimal32/64/128".
+
+The cast arm of `build_column` (`expr.cpp`) hands every non-string target to `cudf::cast`,
+which parses no strings; a text source needs `cudf::strings::to_timestamps` with the format
+DataFusion accepts, or `to_integers`/`to_floats` for the numeric targets, chosen by the input's
+type. The mirror of #203, where the target is the string. No corpus query casts text to a date.
+Pinned by `bug_a_text_cast_to_date_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t217"></a>
 ### #217 — a sort with `fetch 0` keeps every row on the device
@@ -355,18 +367,6 @@ a data dir panics instead of being skipped. Found during the comment audit.
 
 
 ## Blockers for disabled coverage
-
-<a id="t218"></a>
-### #218 — the device cannot cast text to a date
-
-`CAST(d AS DATE)` over a `Utf8` column answers on the cpu and is refused on the device:
-`cudf::cast` throws "Column type must be numeric or chrono or decimal32/64/128".
-
-The cast arm of `build_column` (`expr.cpp`) hands every non-string target to `cudf::cast`,
-which parses no strings; a text source needs `cudf::strings::to_timestamps` with the format
-DataFusion accepts, or `to_integers`/`to_floats` for the numeric targets, chosen by the input's
-type. The mirror of #203, where the target is the string. No corpus query casts text to a date.
-Pinned by `bug_a_text_cast_to_date_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t206"></a>
 ### #206 — a float or boolean partition key is refused on the device

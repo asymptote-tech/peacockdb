@@ -193,6 +193,8 @@ nullable and two-key merge agrees on both nodes, and four lanes do.
 | `bug_a_fetch_of_zero_keeps_every_row_on_the_device` | exec_cases | cpu zero rows, device the whole batch | #217 |
 | `bug_an_accumulating_sort_on_a_descending_key_nulls_first_puts_them_last_on_the_device` | accumulate_cases | cpu the rows nulls first, device the rows nulls last, eleven runs | #202 |
 | `bug_a_merge_on_a_descending_key_nulls_first_puts_them_last_on_the_device` | accumulate_cases | the same through eleven lanes | #202 |
+| `bug_a_merge_on_a_descending_key_nulls_first_over_runs_each_carrying_a_null_duplicates_and_drops_rows_on_the_device` | accumulate_cases | three lanes of 48 rows dealt round-robin: the 48 ids the device answered, three of them thrice and six never (round 1) | #202 |
+| `bug_a_sum_grouped_on_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device` | aggregate_dimension_cases | the device alone through `run_gpu`: slot 0 column 0 is `Utf8` (round 1) | #183 |
 
 ### The rust-only proof
 
@@ -255,3 +257,38 @@ routed to the developer (1–4, 7) and the coordinator (5, 6):
    describes the past. Coordinator's, after round 2.
 6. nit — #218 sits under "Blockers for disabled coverage" though it blocks nothing. Coordinator's.
 7. nit — `same_within_welford(.., keys: usize, ..)` reads only `keys == 1`; a `bool` or an assert.
+
+### Review round 1, addressed
+
+1. The `Utf8View` group-key row. `run_gpu(node, &script)` in `gpu_tests/script.rs` is the
+   device half of `run_both`, which now delegates to it. The oracle helper in
+   `aggregate_dimension_cases.rs` runs the declared node through `run_gpu`, asserts under
+   `catch_unwind` that `run_both` on the same node still panics (the cpu's group-by; a harness
+   that closes the gap turns the case red with "read this case with .same()"), runs the same
+   node on `Utf8` through `run_both` for the cpu's answer, and drops the `Utf8View` key's
+   column from both engines' slots before `assert_same` — column 0 on the single key, column 1
+   on `(key, s)`, so `key` and the sum are what the two-column case compares. Four cases, the
+   init and the merge on `s` and on `(key, s)`, all green on the device; the #183 pin reads
+   the device's slot 0 column 0 through `run_gpu` and is `Utf8`. The harness-gap section
+   above stands as the account of why the cpu is not read; its "has no case" consequences no
+   longer hold, and `build-test.md`'s "has no case" sentence is the coordinator's to drop.
+2. Keys folded: the date and `id` inits take `input_twice()` — `input()` and `synthetic(64, 2)`
+   concatenated, every `id` and nearly every date twice with a different `i64` — and the date
+   merge takes `cut(1), cut(1)`. Green on both.
+3. Dropped: the `(key, b)` init and merge and the keyless count merge; the merge-arm comment
+   says a count merges by `Sum`, so the keyless sum case is its merge.
+4. The 3-run shape pinned as `bug_a_merge_on_a_descending_key_nulls_first_over_runs_each_
+   carrying_a_null_duplicates_and_drops_rows_on_the_device`: the 48 ids the device answered
+   in cycle 2, as a `take` over `synthetic(48, 1)`; deterministic — green on the first run.
+   `null_keys_in_one_run`'s doc now gives the accumulating sort its own reason (the device
+   re-sorts each batch before the merge, so any run shape holds; it takes the same runs for
+   the same expected batch).
+7. `same_within_welford` takes `keyed: bool`.
+
+Proof: `--build`, `--push-binaries --patch` (once retried: `Connection closed by
+89.169.176.82 port 22` mid-rsync, the flaky link, not the host), `PCK_TEST_FILTER='gpu_tests::'
+… --run` → `test result: ok. 400 passed; 0 failed; 0 ignored; 0 measured; 538 filtered out;
+finished in 19.20s` — 397 − 3 + 5 + 1. Locally, sf1 linked in and out: rust-only `--lib` →
+`533 passed; 0 failed; 2 ignored`; `--test test_module_layout` → `17 passed`. The gpu lib
+compiles with no warning. `build-test.md` counts moved by +3 (345, 400, 408, 1943, Rust
+1507). `aggregate_dimension_cases.rs` is 612 lines, `accumulate_cases.rs` 535.

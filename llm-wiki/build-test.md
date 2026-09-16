@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1930 test cases — Rust 1494, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1933 test cases — Rust 1497, C++ 67, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -332,7 +332,7 @@ the crate links; executor lifecycle
 what the batch reports, and that `consume` hands the handle over without releasing it. Needs no
 device: the release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 395 cases: `--lib -- gpu_tests::` 387, `test_gpu_corpus` 8
+#### gpu — `--features gpu`: shad-gpu only. 398 cases: `--lib -- gpu_tests::` 390, `test_gpu_corpus` 8
 
 *crate integration, external*
 
@@ -355,7 +355,7 @@ the gpu column of the registry, the other half of the pair
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 332 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 335 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
@@ -370,13 +370,14 @@ type the device reaches; composite, `Int64`, `Utf8` and `Date32` keys on the thr
 the residual with a projection, under `null_equals_null`, on a string and on a decimal; and
 the nested loop's cross-then-mask path. String keys are `Utf8`; the join cases declare no
 view type, and #183's one pin is the unload's. Then the aggregates,
-expressions and sorted merges along the same dimensions: group keys of every type the corpus
-uses, `count(*)` and expression arguments, every merge arm with rows, the global Welford init
-and the dispersion finalize, the project expressions and casts with no case, and the
-accumulating sorts on descending, nullable and composite keys. The aggregate's
-declared-`Utf8View` key has no case: the cpu's group-by panics inside DataFusion on `Utf8`
-data under it, and a cpu panic in `run_both` takes the device's half with it. A guard reads
-the kind each case declares and names every kind with none, the three forwarders excluded
+expressions and sorted merges along the same dimensions. Group keys on dates, `Int64`, strings
+and pairs, each carried through the merge; `count(*)` and expression arguments; every merge
+arm with rows; the global Welford init and the dispersion finalize; the project expressions,
+casts and functions the corpus uses; sorts and merges on descending, nullable and composite
+keys at four lanes. The aggregate's declared-`Utf8View` key is read on the device alone
+through `run_gpu`, since the cpu's group-by panics inside DataFusion on `Utf8` data under it.
+A guard reads the kind each case declares and names every kind with none, the three
+forwarders excluded
 
 *component*
 

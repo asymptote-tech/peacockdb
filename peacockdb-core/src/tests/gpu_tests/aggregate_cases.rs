@@ -147,16 +147,16 @@ fn welford_answered(outcome: &Outcome, at: usize) {
             (names[i].as_str(), column)
         })
         .collect();
-    same_within_welford(&batch_of(expected), gpu, 1, &[2, 3]);
+    same_within_welford(&batch_of(expected), gpu, true, &[2, 3]);
 }
 
 /// The device's `gpu` against `expected`: every column exactly but the `approximate` ones,
 /// which are `Float64` compared to `WELFORD_RELATIVE`. Rows are matched on the `Int32` key
-/// at column 0 where `keys` is one, and by position — one row — where it is none.
+/// at column 0 where `keyed`, and by position — one row — where not.
 pub(crate) fn same_within_welford(
     expected: &RecordBatch,
     gpu: &RecordBatch,
-    keys: usize,
+    keyed: bool,
     approximate: &[usize],
 ) {
     let exact: Vec<usize> = (0..expected.num_columns())
@@ -170,7 +170,7 @@ pub(crate) fn same_within_welford(
         Order::Any,
     );
     let key_of = |b: &RecordBatch, row: usize| -> Option<Option<i32>> {
-        (keys == 1).then(|| {
+        keyed.then(|| {
             b.column(0)
                 .as_primitive::<Int32Type>()
                 .iter()

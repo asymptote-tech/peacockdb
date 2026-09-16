@@ -232,10 +232,12 @@ operator_case! {
 
 /// Forty-four rows in eleven runs, so every null `key` — row 10, 21, 32, 43 — is in the last
 /// run alone and each run is sorted under either null order. That is the one shape where
-/// the device's merge, whose comparator puts a descending key's nulls at the wrong end
+/// the partition merge, whose comparator puts a descending key's nulls at the wrong end
 /// (#202), still has inputs sorted as it expects and answers a permutation; over runs each
-/// carrying a null, cuDF's merge precondition is broken and it answers duplicated and
-/// dropped rows instead, which no expected batch can state.
+/// carrying a null, cuDF's merge precondition is broken and it answers the rows the pin
+/// below the merge cases states. The accumulating sort re-sorts each batch on the device
+/// before it merges, so its inputs hold under any run shape; it takes the same runs for
+/// the same expected batch.
 fn null_keys_in_one_run(order: &[ColumnOrder]) -> Vec<RecordBatch> {
     runs_ordered(44, 1, 11, order)
 }
@@ -395,6 +397,31 @@ operator_case! {
         cpu.push(vec![ordered(&whole, &order)]);
         let mut gpu = vec![Vec::new(); 21];
         gpu.push(vec![ordered(&whole, &nulls_flipped(&order))]);
+        each_answers(&outcome, &cpu, &gpu);
+    }
+}
+
+// #202 — the same key over three runs dealt round-robin, each carrying a null: the runs are
+// sorted as the plan says and not as the device's comparator expects, cuDF's merge
+// precondition is broken, and the device answers 48 rows with three ids three times each
+// and six ids never — the rows it answered, read off the device, by `id`. Deterministic, so
+// pinned as it is; the cpu answers the merge.
+operator_case! {
+    GpuMergeSortedPartitions,
+    fn bug_a_merge_on_a_descending_key_nulls_first_over_runs_each_carrying_a_null_duplicates_and_drops_rows_on_the_device() {
+        let order = key_descending_nulls_first();
+        let lanes = one_per_lane(runs_ordered(48, 1, 3, &order));
+        let outcome = run_both(&merged_by(3, order.clone(), None), Script::Lanes(lanes));
+        let whole = synthetic(48, 1);
+        let answered = UInt32Array::from(vec![
+            10, 21, 0, 33, 39, 18, 45, 39, 5, 18, 29, 45, 39, 18, 45, 47, 16, 23, 34, 36, 38, 8,
+            15, 31, 40, 44, 1, 6, 12, 27, 37, 42, 3, 9, 11, 20, 35, 41, 46, 2, 4, 7, 13, 24, 25,
+            26, 28, 30,
+        ]);
+        let mut cpu = vec![Vec::new(); 5];
+        cpu.push(vec![ordered(&whole, &order)]);
+        let mut gpu = vec![Vec::new(); 5];
+        gpu.push(vec![take_record_batch(&whole, &answered).expect("ids of the batch")]);
         each_answers(&outcome, &cpu, &gpu);
     }
 }

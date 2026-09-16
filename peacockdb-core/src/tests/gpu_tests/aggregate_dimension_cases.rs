@@ -4,9 +4,11 @@
 //! `aggregate_cases.rs`'s; every case is green or a `bug_` test with its ticket above it,
 //! and nothing here repairs.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use datafusion::arrow::array::{ArrayRef, AsArray, Float64Array, Int64Array, UInt8Array};
+use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::{DataType, Float64Type, UInt64Type};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::ScalarValue;
@@ -16,10 +18,11 @@ use super::aggregate_cases::{
     merge_over, same_within_welford, state_cut, welford_init_aggs, welford_merge_by,
     welford_partial, welford_state_by,
 };
-use super::script::{Script, run_both};
+use super::harness_cases::declaring_view_strings;
+use super::script::{Script, run_both, run_gpu};
 use crate::plan::{
-    AggCall, BatchLayout, BinaryOp, Expr, GpuAggregate, GpuAggregateBatches, NamedExpr, PlanAgg,
-    Schema, finalize, resolve,
+    AggCall, BatchLayout, BinaryOp, Expr, GpuAggregate, GpuAggregateBatches, GpuNode, NamedExpr,
+    PlanAgg, Schema, finalize, resolve,
 };
 use crate::tests::compare::{Order, assert_same};
 use crate::tests::given::{Given, columns};
@@ -38,19 +41,74 @@ const DATE: GroupKey = (6, "d", DataType::Date32);
 const ID: GroupKey = (0, "id", DataType::Int64);
 const BOOL: GroupKey = (7, "b", DataType::Boolean);
 const STRING: GroupKey = (5, "s", DataType::Utf8);
+const VIEW: GroupKey = (5, "s", DataType::Utf8View);
+
+/// The device grouped on a key declared `Utf8View` answers as the cpu grouped on the same
+/// strings declared `Utf8`, the key column dropped from both before they are compared: the
+/// aggregate's finalize cannot drop a key (`finalize_columns` projects every key through),
+/// so the key leaves on the harness side. The cpu cannot take the declaration itself — its
+/// group-by panics inside DataFusion on `Utf8` data under it (the detail file's gap), and a
+/// cpu panic in `run_both` takes the device's half with it — so the device runs alone
+/// through `run_gpu`, and the panic is asserted so a harness that closes the gap turns the
+/// case red. `node` builds the operator over the key's declared type.
+fn device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key(
+    node: impl Fn(GroupKey) -> Box<dyn GpuNode>,
+    script: impl Fn() -> Script,
+    key_at: usize,
+) {
+    let declared = node(VIEW);
+    let gpu = run_gpu(declared.as_ref(), &script())
+        .unwrap_or_else(|why| panic!("gpu refused: {}", why.message));
+    let both = catch_unwind(AssertUnwindSafe(|| run_both(declared.as_ref(), script())));
+    assert!(
+        both.is_err(),
+        "the cpu takes the declaration now: read this case with .same()"
+    );
+    let oracle = run_both(node(STRING).as_ref(), script());
+    let without_key = |slots: &[Vec<RecordBatch>]| -> Vec<Vec<RecordBatch>> {
+        slots
+            .iter()
+            .map(|slot| {
+                slot.iter()
+                    .map(|batch| {
+                        let kept: Vec<usize> =
+                            (0..batch.num_columns()).filter(|i| *i != key_at).collect();
+                        batch.project(&kept).expect("every column but the key")
+                    })
+                    .collect()
+            })
+            .collect()
+    };
+    assert_same(
+        &without_key(oracle.cpu.as_ref().expect("the cpu answers on a Utf8 key")),
+        &without_key(&gpu),
+        Order::Any,
+    );
+}
+
+fn schema_declaring(key: &GroupKey) -> Schema {
+    match key.2 {
+        DataType::Utf8View => declaring_view_strings(&schema()),
+        _ => Schema::new(schema()),
+    }
+}
+
+/// `input()` and a second batch over the same ids, as one batch: every `id` and nearly
+/// every date twice, so an aggregate that never folds two equal keys is a different row count.
+fn input_twice() -> RecordBatch {
+    concat_batches(&schema(), &[input(), synthetic(64, 2)]).expect("one schema")
+}
 
 // The group key's type at the init: the corpus groups on strings and dates, on the
-// `Int64` keys of nearly every join, and on more than one column. The corpus's string key
-// is declared `Utf8View`, and that declaration is unreadable here: the cpu's aggregate
-// panics inside DataFusion on `Utf8` data under it rather than refusing (the detail file's
-// gap), and a cpu panic in `run_both` takes the device's half with it. `Utf8` over the same
-// strings is the string key path this harness can read.
+// `Int64` keys of nearly every join, and on more than one column. Its string key is
+// declared `Utf8View`, read against the `Utf8`-keyed init with the key dropped on both;
+// one case keeps it and is #183's pin at the aggregate.
 
 operator_case! {
     GpuAggregate,
     fn a_sum_grouped_on_a_date_agrees() {
         let node = init_by(Schema::new(schema()), &[DATE], vec![sum_i64()]);
-        run_both(&node, Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&node, Script::Exec(vec![input_twice()])).same(Order::Any);
     }
 }
 
@@ -58,15 +116,7 @@ operator_case! {
     GpuAggregate,
     fn a_sum_grouped_on_an_int64_agrees() {
         let node = init_by(Schema::new(schema()), &[ID], vec![sum_i64()]);
-        run_both(&node, Script::Exec(vec![input()])).same(Order::Any);
-    }
-}
-
-operator_case! {
-    GpuAggregate,
-    fn a_sum_grouped_on_two_columns_agrees() {
-        let node = init_by(Schema::new(schema()), &[KEY, BOOL], vec![sum_i64()]);
-        run_both(&node, Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&node, Script::Exec(vec![input_twice()])).same(Order::Any);
     }
 }
 
@@ -86,6 +136,40 @@ operator_case! {
     }
 }
 
+operator_case! {
+    GpuAggregate,
+    fn a_sum_grouped_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key() {
+        device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key(
+            |key| Box::new(init_by(schema_declaring(&key), &[key], vec![sum_i64()])),
+            || Script::Exec(vec![input()]),
+            0,
+        );
+    }
+}
+
+operator_case! {
+    GpuAggregate,
+    fn a_sum_grouped_on_an_int32_and_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key() {
+        device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key(
+            |key| Box::new(init_by(schema_declaring(&key), &[KEY, key], vec![sum_i64()])),
+            || Script::Exec(vec![input()]),
+            1,
+        );
+    }
+}
+
+// #183 — the init keeps its declared-Utf8View key, and the device hands it up as `Utf8`;
+// at a sink that is the unload pin's refusal. The deliberate pin for the aggregate family.
+// The cpu cannot take the declaration in this harness (the gap above) and is not run.
+operator_case! {
+    GpuAggregate,
+    fn bug_a_sum_grouped_on_a_declared_utf8view_key_hands_it_up_as_utf8_from_the_device() {
+        let node = init_by(schema_declaring(&VIEW), &[VIEW], vec![sum_i64()]);
+        let gpu = run_gpu(&node, &Script::Exec(vec![input()])).expect("the device answers");
+        assert_eq!(gpu[0][0].schema().field(0).data_type(), &DataType::Utf8);
+    }
+}
+
 // The same keys carried through the merge: state cut from `synthetic` under each key's
 // own column, two arrivals with duplicate keys to fold.
 
@@ -94,11 +178,17 @@ fn sum_states_by(keys: &[GroupKey]) -> Script {
     Script::Accumulate(vec![cut(1), cut(2)])
 }
 
+/// `sum_states_by` with the one arrival twice, so a key drawn from 20,000 dates folds.
+fn sum_states_by_twice(keys: &[GroupKey]) -> Script {
+    let cut = |seed| state_cut(32, seed, keys, 3, "sum(i64)", DataType::Int64);
+    Script::Accumulate(vec![cut(1), cut(1)])
+}
+
 operator_case! {
     GpuAggregateBatches,
     fn a_sum_merge_grouped_on_a_date_agrees() {
         let node = merge_by(&[DATE], PlanAgg::Sum, "sum(i64)", DataType::Int64);
-        run_both(&node, sum_states_by(&[DATE])).same(Order::Any);
+        run_both(&node, sum_states_by_twice(&[DATE])).same(Order::Any);
     }
 }
 
@@ -107,14 +197,6 @@ operator_case! {
     fn a_sum_merge_grouped_on_an_int64_agrees() {
         let node = merge_by(&[ID], PlanAgg::Sum, "sum(i64)", DataType::Int64);
         run_both(&node, sum_states_by(&[ID])).same(Order::Any);
-    }
-}
-
-operator_case! {
-    GpuAggregateBatches,
-    fn a_sum_merge_grouped_on_two_columns_agrees() {
-        let node = merge_by(&[KEY, BOOL], PlanAgg::Sum, "sum(i64)", DataType::Int64);
-        run_both(&node, sum_states_by(&[KEY, BOOL])).same(Order::Any);
     }
 }
 
@@ -131,6 +213,28 @@ operator_case! {
     fn a_sum_merge_grouped_on_an_int32_and_a_string_agrees() {
         let node = merge_by(&[KEY, STRING], PlanAgg::Sum, "sum(i64)", DataType::Int64);
         run_both(&node, sum_states_by(&[KEY, STRING])).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuAggregateBatches,
+    fn a_sum_merge_grouped_on_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key() {
+        device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key(
+            |key| Box::new(merge_by(&[key], PlanAgg::Sum, "sum(i64)", DataType::Int64)),
+            || sum_states_by(&[STRING]),
+            0,
+        );
+    }
+}
+
+operator_case! {
+    GpuAggregateBatches,
+    fn a_sum_merge_grouped_on_an_int32_and_a_declared_utf8view_key_answers_on_the_device_as_on_a_utf8_key() {
+        device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key(
+            |key| Box::new(merge_by(&[KEY, key], PlanAgg::Sum, "sum(i64)", DataType::Int64)),
+            || sum_states_by(&[KEY, STRING]),
+            1,
+        );
     }
 }
 
@@ -228,7 +332,8 @@ operator_case! {
 }
 
 // Every merge arm with rows to fold. A keyless merge is `cudf::reduce`'s arm, which only
-// #199's no-arrival pin drove; the grouped `Min` and `Max` arms had no case at all.
+// #199's no-arrival pin drove; the grouped `Min` and `Max` arms had no case at all. A count
+// merges by `Sum` in every plan (`sum(count(*))`), so the keyless sum case is its merge.
 
 fn keyless_states(column: usize, name: &str, ty: DataType) -> Script {
     let cut = |seed| state_cut(8, seed, &[], column, name, ty.clone());
@@ -240,15 +345,6 @@ operator_case! {
     fn a_keyless_sum_merge_over_arrivals_with_rows_agrees() {
         let node = merge_by(&[], PlanAgg::Sum, "sum(i64)", DataType::Int64);
         run_both(&node, keyless_states(3, "sum(i64)", DataType::Int64)).same(Order::Any);
-    }
-}
-
-// A count merges by sum, as every plan writes it: `sum(count(*))`.
-operator_case! {
-    GpuAggregateBatches,
-    fn a_keyless_count_merge_over_arrivals_with_rows_agrees() {
-        let node = merge_by(&[], PlanAgg::Sum, "count(*)", DataType::Int64);
-        run_both(&node, keyless_states(0, "count(*)", DataType::Int64)).same(Order::Any);
     }
 }
 
@@ -465,7 +561,7 @@ fn dispersion_finalize(name: &str, keys: u32) -> NamedExpr {
 fn finalized_within_welford(node: &GpuAggregateBatches) {
     let arrivals = vec![welford_partial(1), welford_partial(2)];
     let outcome = run_both(node, Script::Accumulate(arrivals));
-    same_within_welford(cpu_slot(&outcome, 2), gpu_slot(&outcome, 2), 1, &[1]);
+    same_within_welford(cpu_slot(&outcome, 2), gpu_slot(&outcome, 2), true, &[1]);
 }
 
 operator_case! {
