@@ -384,10 +384,10 @@ finalize list emits state — except the device's keyless Welford, #216), "From 
 (every aggregate merges as state — with that one exception), the `CudfAggregate.mode` row, and
 the three `fetch` sentences that now say the device's sort reads 0 as none (#217).
 
-For the merger: PR #155 (`ENS-join-cases`) first, then #156, each retargeted to master; the
-`bug_` registers of both tasks live only in the two detail files, which the archive deletes —
-carry them into `build-test.md`'s known-wrong table when `declared-schemas` brings it, or
-before archiving.
+For the merger: PR #155 (`ENS-join-cases`) first, then #156, each retargeted to master. The
+`bug_` registers of both tasks live only in the two detail files, which the archive deletes;
+no base has a known-wrong table now that `declared-schemas` is rejected, so the `bug_` prefix
+and the ticket comment above each case are the record that survives.
 
 ## Done — 2026-09-16
 
@@ -441,3 +441,19 @@ to the parent, the two rebase-resolved `use` lines with every name used and noth
 counts recounted from the tree (330, 385, 393, 1492, 1928) and matching the page. 0 blocking,
 1 important, 0 nits: the `bug_` register still carried the retired #183 row — struck by the
 coordinator. The spec's signoff is rewritten at the completeness pass. To `completing`.
+
+## Completeness pass 2 — 2026-09-16, the two lists
+
+Reviewer (what is wrong): 0 blocking, 4 important. Analyst (what is missing): 0 blocking, 2
+important, and the `architecture.md` item. Both name the same two things: #187's pin sentence
+(`bug_a_cast_to_decimal_is_exported_at_precision_38`) lost when the rebase took the parent's
+`active-tickets.md` wholesale — restored; and the `var` overstatement: `architecture.md`'s three
+#216 sentences and #216's first line say the device's keyless path reduces `stddev` *and `var`*
+to one value, but `aggregate.cpp`'s keyless block tests `is_stddev_name` alone, so a keyless
+`var` name falls to `make_reduce_agg`'s `unsupported aggregate function` throw (read from the
+code, not yet observed). The branch's `var` pin never put a `var` name on the wire —
+`welford_state_by` hardcodes `AggFunc::Stddev` and `stddev(f64)$…` state names, so
+`bug_a_global_var_finalize_is_refused_on_the_device` answered the stddev pin's question under a
+`var` finalize. Routed to the developer: a `var`-named state, one device cycle, the pin on what
+the device actually says. The page, #216, the signoff and PR #156's body follow that result.
+The merger note no longer points the `bug_` register at `declared-schemas` (rejected on master).
