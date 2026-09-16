@@ -25,13 +25,13 @@ reference still resolves there.
 <a id="t215"></a>
 ### #215 — a left nested-loop join over a predicate the AST cannot take is refused on the device
 
-A `LEFT JOIN` with no equi-key whose predicate has a decimal or string operand answers on the
-cpu and throws on the device: `non-AST-able NestedLoopJoin filter is only supported for Inner joins`.
+A `LEFT JOIN` with no equi-key whose predicate has a decimal operand or a string literal answers
+on the cpu and throws on the device: `non-AST-able NestedLoopJoin filter is only supported for Inner joins`.
 
 `plan/join.rs` admits a `Left` nested loop over any predicate — it checks the probe's batch
 layout and nothing about the expression — and `join.cpp` (`execute_nested_loop_join`) has two
 paths: a cuDF AST conditional join, which knows Left, and the cross-then-mask path for what
-`is_ast_able` refuses (a `CAST` to `Decimal128`, a string operand), which is written for Inner
+`is_ast_able` refuses (a `CAST` to `Decimal128`, a string literal), which is written for Inner
 alone and throws at the guard. A mask over a cross product cannot re-emit the unmatched build
 rows an outer form owes, which is #160's argument for refusing the other types at plan time;
 this shape is the one the planner lets through. Pinned by

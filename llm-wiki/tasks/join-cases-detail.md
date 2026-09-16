@@ -117,8 +117,10 @@ so this is the harness feeding data of one type under a declaration of another, 
 Findings the matrix's right column allowed for and did not land: no wrong ordinal on any
 projection (row 1 green on every type, both sides, after the swap and through the finish); no
 key-type refusal on the device for `Int64`, `Date32`, a composite or a string (#45 not
-reached: the recipe casts no key); both column-path residuals green on the hash join; the
-cross-then-mask path green for `Inner` with the mask columns in `filter_columns` order.
+reached: the recipe casts no key); the residuals green on the hash join on both of its paths
+(the AST for a cross-side string equality, the column path for a string literal and a
+decimal cast — see review round 1); the cross-then-mask path green for `Inner` with the mask
+columns in `filter_columns` order.
 
 ### The rust-only proof
 
@@ -167,3 +169,34 @@ coordinator (4):
 3. nit, the device-only oracle helper discards `device.cpu` unasserted: assert it is the
    refusal, so a `run_both` that closes the gap turns these cases red and says so.
 4. nit, `build-test.md` harness row is one 195-word sentence: the coordinator splits it.
+
+### Review round 1, addressed
+
+1. The string residual. `is_ast_able` (`expr.cpp:415-435`) refuses a string only as a
+   *literal* operand; `b_s = p_s` over two STRING columns is admitted and `build_column`
+   hands it to `cudf::compute_column`. The case is now two: `an_inner_join_with_a_string_
+   residual_on_the_ast_agrees` (`b_s = p_s`) and `an_inner_join_with_a_string_literal_residual_
+   on_the_column_path_agrees` (`b_s = p_s AND p_s <> ''`). Read under `PEACOCK_GPU_DEBUG=1`
+   with `PCK_TEST_FILTER='string_'`: the AST case makes one `build_column kind=Binary` call
+   and nothing beneath it; the literal case recurses — the `And`, its left `Binary` (the
+   equality, an AST subtree, no `ColumnRef` under it), its right `Binary` then
+   `ColumnRef idx=1 type_id=23` — the column path at the top and at the literal comparison.
+   A cross-side string comparison alone cannot reach the column path: it is AST-able by the
+   C++'s own rule. #215 reworded to "a decimal operand or a string literal". One case added:
+   the rung is 330.
+2. The split. `join_dimension_cases.rs` (618 lines) holds rows 1–3 with `Key`, `keyed`,
+   `hash_join_keyed`, the keyed scripts, `crossing_projection`, `without_key`, the three
+   residuals, `probes_with_misses`, `build_with_misses`, the oracle helper and `exported_type`;
+   `join_cases.rs` (926) keeps task 9's cases and the builders both files use, now
+   `pub(crate)`: `build_batch`, `probe_batch`, `side`, `padded`, `residual`, `hash_join_with`,
+   `hash_join`, `script`, `one_probe`, `two_probes`, `empty_build`, `gpu_refuses_with`,
+   `BUILD_COPY`. `mod.rs` gains the line; the kind guard is untouched.
+3. `device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key` asserts
+   `device.cpu.is_err()` with the message "the cpu takes the declaration now: read this case
+   with .same()".
+
+Proof: `PCK_TEST_FILTER='gpu_tests::' … --run` → `test result: ok. 330 passed; 0 failed;
+0 ignored; 0 measured; 538 filtered out; finished in 16.88s`; `--test test_module_layout`
+→ `17 passed`; rust-only `--lib` (sf1 linked in, unlinked after) → `533 passed; 0 failed;
+2 ignored`. `build-test.md` not touched this round: the harness row and the gpu counts
+move by one (274 → 275, 329 → 330, 337 → 338, 1872 → 1873, Rust 1436 → 1437).
