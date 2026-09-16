@@ -235,8 +235,8 @@ fn grouping_sets_as_exported(cpu: &RecordBatch) -> RecordBatch {
 }
 
 // `GpuAggregate`: aggregators over raw rows, state out — or, with a finalize, the
-// single-node shortcut. The Welford init is grouped only: a global one adds nothing the
-// grouped case and the global sum/min/max/count do not already show.
+// single-node shortcut. The Welford init's global form is #216's pin, in
+// `aggregate_dimension_cases.rs`.
 
 /// `aggs` over `synthetic`, grouped by `key` where `grouped`, nothing finalized.
 pub(crate) fn init(grouped: bool, aggs: Vec<AggCall>) -> GpuAggregate {

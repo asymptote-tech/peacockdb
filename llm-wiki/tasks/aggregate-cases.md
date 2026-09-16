@@ -90,3 +90,16 @@ case finds. And:
   `bug_`; the grand total moves with them.
 - Green on shad-gpu through `build-test-shadgpu.sh`, one device cycle; the rust-only lib
   unchanged.
+
+## Completeness signoff — 2026-09-16
+
+Solved under its constraints: 70 cases, every matrix row and empty shape named but one
+(`GpuAccumulateBatchesAndSort` at four lanes, a one-lane node by definition — the detail file
+says why), no production code, 14 `bug_` cases each with a ticket, #216–#219 new; `gpu_tests::`
+rung 400/400 on shad-gpu, rust-only lib unchanged. Shortcuts, all recorded in the detail file:
+`run_gpu` — the device half of `run_both`, made `pub(crate)` — is a harness addition, so "adds
+cases and nothing else" is not literally true; the `Utf8View` group-key cases read the device
+alone against a `Utf8`-keyed cpu with the key dropped harness-side, since the cpu's group-by
+panics on the declaration and `finalize_columns` cannot drop a key; the known-wrong table does
+not exist on this base, so the detail file's register stands in; the keyless `Count` merge is
+folded into `Sum` and `count(1)` into `count(*)`, both plan facts.

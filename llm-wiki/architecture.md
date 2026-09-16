@@ -206,7 +206,8 @@ both are pipeline breakers.
 usually reaches us with no limit node in the plan at all. It is replicated onto every stage of
 the decomposition — `GpuSort(fetch=n)` per batch, then the accumulator, then the merge — which
 is sound because top-n distributes over concatenation, and is what makes a top-N
-memory-bounded: each stage holds at most n rows per live batch instead of its whole input.
+memory-bounded: each stage holds at most n rows per live batch instead of its whole input —
+except at n = 0, which the device's per-batch sort reads as no fetch ([#217](tickets.md#t217)).
 Skipping it on the accumulator would make a one-lane `ORDER BY … LIMIT 10` sort the entire
 stream to return ten rows.
 
@@ -223,8 +224,10 @@ each position needs. Every aggregate decomposes into three declared parts, each 
 - **finalize** — one expression per output column over the merged state: `avg` a divide,
   `stddev` a `CASE` over a `sqrt`, the rest a rename.
 
-A node with no finalize list emits state; a node with one emits finalized columns. Nothing else
-distinguishes the positions, so the single-node shortcut is not a third case — it is init
+A node with no finalize list emits state; a node with one emits finalized columns — on the cpu
+always, on the device except the keyless Welford path, which reduces `stddev` and `var` to one
+finished value at init and at merge ([#216](tickets.md#t216)). Nothing else distinguishes the
+positions, so the single-node shortcut is not a third case — it is init
 aggregators and finalize expressions on the same node.
 
 | Aggregate | init (over rows) | state | merge (over state) | finalize |
@@ -784,9 +787,10 @@ it is passed, the merge arm merges any k>1 sorted handles, and the repartition a
 the plan-declared N; none of them cross-checks handle counts against the plan tree. And stats
 come back per output handle per call, so a per-node figure is this side's fold over its calls.
 
-**Every aggregate merges as state and finalizes in a project**, with no exception, so both
-engines evaluate the same expression and agree by construction rather than by two
-implementations happening to match. Two appended fbs values buy that: `UnaryOp.Sqrt`, so a
+**Every aggregate merges as state and finalizes in a project**, so both engines evaluate the
+same expression and agree by construction rather than by two implementations happening to
+match. The device's keyless `stddev` and `var` are the one exception, and the project above
+them refuses ([#216](tickets.md#t216)). Two appended fbs values buy that: `UnaryOp.Sqrt`, so a
 finalize can be written, and `AggregateMode.Merge`, so a merge can be only a merge — cuDF's
 `MERGE_M2` is otherwise reachable only from an arm that finalizes on the same call, and these
 plans stack two merges, per lane and then across lanes.
@@ -821,7 +825,7 @@ field with no consumer reads as a knob (#132).
 | [`CudfHashJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::inner_join` / `left_join` / `full_join(left_keys, right_keys, kJoinNulls)`; semi/anti take [`left_semi_join` / `left_anti_join`](../cpp/src/operators/join.cpp), or their `mixed_*` forms when a residual filter must be evaluated during the join |
 | [`CudfCrossJoin`](../flatbuffers/gpu_plan.fbs) | nothing — the node is its two inputs | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::cross_join(ltv, rtv)` |
 | [`CudfNestedLoopJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `filter` + `filter_columns`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::conditional_inner_join` / `conditional_left_join` over the predicate as an AST; a predicate the AST cannot take is `cudf::cross_join`, then [`apply_boolean_mask`](../cpp/src/operators/join.cpp) over the filter evaluated on the crossed table, for Inner alone ([#215](tickets.md#t215)) |
-| [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N |
+| [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N — read as none at 0 ([#217](tickets.md#t217)) |
 | [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
 | [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs) | nothing | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |
 | [`CudfRepartition`](../flatbuffers/gpu_plan.fbs) | `kind`, `num_partitions`, `hash_exprs` (key ordinals) | [`node_session.cpp`](../cpp/src/node_session.cpp) — `spark_hash_partition(tv, key_cols, n)`, ours rather than cuDF's murmur3, then [`cudf::slice`](../cpp/src/node_session.cpp) per partition into an owning table |
@@ -1075,9 +1079,9 @@ to it.
 | `CudfHashJoin.null_equals_null` | `join.rs` | the node's own flag, which the planner set from `HashJoinExec::null_equals_null()` | `cudf::null_equality` (except anti/mark, below) |
 | `JoinFilterColumn{side, index}` | `join.rs` | the join filter's `ColumnIndex` list | `cudf::ast::`<br>`table_reference::LEFT` / `RIGHT`,<br>plus an ordinal |
 | `SortExpr.asc`, `.nulls_first` | `node_writer.rs` | the node's sort keys, from `PhysicalSortExpr::options` | `cudf::order`,<br>`cudf::null_order` |
-| `CudfSort.fetch`,<br>`CudfSortPreservingMerge.fetch` | `node_writer.rs` | the node's `fetch`, `-1` where there is none | a post-sort / post-merge slice |
+| `CudfSort.fetch`,<br>`CudfSortPreservingMerge.fetch` | `node_writer.rs` | the node's `fetch`, `-1` where there is none | a post-sort / post-merge slice; the sort skips it at 0 ([#217](tickets.md#t217)) |
 | `BinaryExpr`<br>`.out_decimal_precision/scale` | `expr_writer.rs` | the expression's declared output type | the binop output type, and division pre-scales to hit it |
-| `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from values, `Merge` merges state into state. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which cuDF aggregation runs, whether state columns are merged, and whether the result is state or a value |
+| `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from values, `Merge` merges state into state. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which cuDF aggregation runs, whether state columns are merged, and whether the result is state or a value — except on the keyless path, where a `stddev` or `var` name decides all three whatever the mode ([#216](tickets.md#t216)) |
 | `CudfRepartition.hash_exprs`,<br>`num_partitions` | `node_writer.rs` | the emit node's keys and lane count | key ordinals and N for<br>`spark_hash_partition` |
 | `CudfScan.limit` | `node_writer.rs` | the source's pushed-down limit | `parquet_reader_options::set_num_rows` |
 | `AggregateFuncNode`<br>`.out_decimal_precision/scale` | `aggregate_writer.rs`, at zero | nothing: decomposition means no `avg` reaches a device, so the scale rides the finalize divide's own pair | **nothing** here, deliberately, and the writer says why |

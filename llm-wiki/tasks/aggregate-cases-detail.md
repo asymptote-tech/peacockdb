@@ -308,3 +308,29 @@ All round-1 findings closed as stated; one important remained — `input_twice` 
 batch from seed 2, so the date init still folded only nulls — fixed as `input()` twice and
 re-proven on the device (400/400). #202's pin list gained the fourth pin (coordinator). Nothing
 important outstanding: to `completing`.
+
+## Completeness pass — 2026-09-16
+
+Reviewer (what is wrong): 0 blocking, 2 important — #216 stated two consequences its own pins
+contradict (the merge answers 0, the finalize above it indexes past; every shape is a refusal,
+none reaches the unload), and `aggregate_cases.rs`'s Welford comment said the global init adds
+nothing. Analyst (what is missing): 0 blocking, 4 important — #202's amendment stated as
+production damage a shape no plan reaches (every run the merge sees was sorted by the same
+mapping; the pin's content is that the two sites move together), the pin's comment likewise;
+the spec's "4 lanes" for `GpuAccumulateBatchesAndSort` has no case and no line saying why;
+#183's pin count and #187's pin list were stale; #56 carried nothing from the case that runs its
+shape green. All six applied by the coordinator as markdown and comment-only edits.
+
+`GpuAccumulateBatchesAndSort` at four lanes has no case on purpose: the node is lane-scoped and
+one lane's stream by definition, so lane 0 of a four-lane input is the same call sequence as
+one lane (`Script::lane()` is 0 for `Accumulate`). The four-lane case is the partition merge's.
+
+`architecture.md` corrected on the analyst's list: "The aggregate sequence" (a node with no
+finalize list emits state — except the device's keyless Welford, #216), "From node to seqs"
+(every aggregate merges as state — with that one exception), the `CudfAggregate.mode` row, and
+the three `fetch` sentences that now say the device's sort reads 0 as none (#217).
+
+For the merger: PR #155 (`ENS-join-cases`) first, then #156, each retargeted to master; the
+`bug_` registers of both tasks live only in the two detail files, which the archive deletes —
+carry them into `build-test.md`'s known-wrong table when `declared-schemas` brings it, or
+before archiving.

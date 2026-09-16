@@ -402,10 +402,11 @@ operator_case! {
 }
 
 // #202 — the same key over three runs dealt round-robin, each carrying a null: the runs are
-// sorted as the plan says and not as the device's comparator expects, cuDF's merge
-// precondition is broken, and the device answers 48 rows with three ids three times each
-// and six ids never — the rows it answered, read off the device, by `id`. Deterministic, so
-// pinned as it is; the cpu answers the merge.
+// sorted as the plan says and not as the device's merge reads them, cuDF's merge precondition
+// is broken, and the device answers 48 rows with three ids three times each and six ids never
+// — the rows it answered, read off the device, by `id`. No plan reaches this shape today
+// (every run the merge sees was sorted by the same mapping); it is why the two sites in #202
+// move together. Deterministic, so pinned as it is; the cpu answers the merge.
 operator_case! {
     GpuMergeSortedPartitions,
     fn bug_a_merge_on_a_descending_key_nulls_first_over_runs_each_carrying_a_null_duplicates_and_drops_rows_on_the_device() {

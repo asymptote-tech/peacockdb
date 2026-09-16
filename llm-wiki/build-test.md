@@ -374,7 +374,7 @@ expressions and sorted merges along the same dimensions. Group keys on dates, `I
 and pairs, each carried through the merge; `count(*)` and expression arguments; every merge
 arm with rows; the global Welford init and the dispersion finalize; the project expressions,
 casts and functions the corpus uses; sorts and merges on descending, nullable and composite
-keys at four lanes. The aggregate's declared-`Utf8View` key is read on the device alone
+keys, and the merge at four lanes. The aggregate's declared-`Utf8View` key is read on the device alone
 through `run_gpu`, since the cpu's group-by panics inside DataFusion on `Utf8` data under it.
 A guard reads the kind each case declares and names every kind with none, the three
 forwarders excluded

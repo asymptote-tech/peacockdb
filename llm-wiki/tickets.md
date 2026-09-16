@@ -62,15 +62,15 @@ DataFusion usually plans it away, so no corpus cell reaches it. Pinned by
 ### #216 — the device's global aggregate has no Welford arm
 
 A keyless `stddev` or `var` answers one finished `Float64` on the device where the plan declares
-the `[count, mean, m2]` state; a merge over that state then indexes past its one column.
+the `[count, mean, m2]` state; the finalize above it then indexes past its one column.
 
 `aggregate.cpp`'s grouped path honours `mergeable` and emits the triple with `MERGE_M2`; its
 keyless path (`key_cols.empty()`) reduces every `stddev` name with `make_std_aggregation`,
 whatever the phase. At the init that is the sample stddev of the argument — the right number in
 the wrong shape. At the merge the reduction runs over the state's first column, the count, so
 two arrivals of counts of one answer 0; and the finalize project above it refuses with
-`ColumnRef index 2 out of range (cols=1)`. So `SELECT stddev(x) FROM t` over more than one
-batch is a refusal on the device, and over one batch a wrong shape at the unload. Pinned by
+`ColumnRef index 2 out of range (cols=1)`. So `SELECT stddev(x) FROM t` is a refusal on the
+device in every shape, since every plan finalizes the state above the init or the merge. Pinned by
 `bug_a_global_welford_init_answers_a_finished_stddev_on_the_device`,
 `bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device` and the two
 `bug_a_global_…_finalize_is_refused_on_the_device` (`gpu_tests/aggregate_dimension_cases.rs`).
@@ -178,9 +178,10 @@ keys are right, which is why every corpus ORDER BY has agreed: no cell's descend
 a null. DataFusion's default for `DESC` is nulls first, so a query sorting a nullable column
 descending gets its null rows first on the cpu and last on the device. The mapping has to be
 relative to the direction — `BEFORE` when `nulls_first == asc` — at both sites, since a merge
-over sorted runs must order as the sort did. At the merge the damage is worse: runs sorted as
-the plan says break cuDF's merge precondition, and the device answers duplicated and dropped
-rows. Pinned by `bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device`
+over sorted runs must order as the sort did, and the two sites have to move together: runs
+sorted as the plan says under a merge that reads them the other way break cuDF's merge
+precondition, and the device answers duplicated and dropped rows — a shape no plan reaches
+today, since every run the merge sees was sorted by the same mapping. Pinned by `bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device`
 (`gpu_tests/exec_cases.rs`), the two `…_descending_key_nulls_first_puts_them_last…` merge pins
 and `…_over_runs_each_carrying_a_null_duplicates_and_drops_rows…` (`gpu_tests/accumulate_cases.rs`).
 
@@ -550,7 +551,9 @@ the row count, or a different CASE lowering (`cpp/src/expr.cpp`).
 ### #56 — q2: CASE-over-string-equality inside a partial-phase sum
 Partial GpuAggregate builds an AST for `sum(CASE WHEN <string equality> …)` → cuDF
 binaryop "Unsupported operator" (string comparand in the aggregate AST path). Support it
-or lower it before the aggregate (`cpp/src/operators/aggregate.cpp`).
+or lower it before the aggregate (`cpp/src/operators/aggregate.cpp`). 2026-09-16: the operator
+harness runs that shape green on the device (`a_grouped_sum_of_a_case_over_a_string_equality_agrees`,
+`gpu_tests/aggregate_dimension_cases.rs`), so re-check q2 before fixing anything here.
 
 <a id="t55"></a>
 ### #55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast
