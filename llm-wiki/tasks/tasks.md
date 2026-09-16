@@ -65,7 +65,7 @@ every enabled cell.
 The two fixes, rebased onto master after reaching `done` without a test run. The coordinator finishes
 the rebase onto master's tip, runs the tiers, and writes `done` if all pass or `building` if not.
 
-### 1. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../tickets.md#t198) — state: completing — PR #152; rebased untested, see the spec's last section
+### 1. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../archive/archived-tickets.md#t198) — state: done — PR #152
 
 `build_expr` builds ten literal scalars a second time and assumes validity, so a typed NULL inside an
 AST expression is a typed zero — a wrong value in arithmetic and a wrong row count in a comparison.
@@ -73,8 +73,7 @@ One scalar builder, not a corrected copy. C++ only. Carries a test-helper repair
 `CreateScalarValue` gained `is_null` as field 2 and the gtest call sites kept their old positions, so
 every `make_int64_literal` builds the literal 0. Claims no cells.
 
-
-### 2. [`empty-build.md`](empty-build.md) — closes [#175](../tickets.md#t175) — state: completing — PR #153; rebased untested, see the spec's last section
+### 2. [`empty-build.md`](empty-build.md) — closes [#175](../tickets.md#t175) — state: rebase needed(completing) — PR #153; its base moved to master's tip, see the spec's last section
 
 A lane whose build side got no rows keeps its typed zero-row table where the join above owes rows, so
 `Right`, `Full` and `RightAnti` answer instead of refusing. No new marker — the driver routes

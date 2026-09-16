@@ -59,6 +59,33 @@ CARGO_MANIFEST_DIR -- peacockdb-core/src` finds nothing. `cost-report`'s four te
 as they are: that crate's tests run where the source is and are never staged, which is the case
 this ticket was about.
 
+<a id="t198"></a>
+### #198 — a typed NULL inside an AST expression is a typed zero on the device
+
+`ScalarValue.is_null` is read in `build_scalar` (`expr.cpp:456`) and assumed `true` in
+`build_expr`'s ten literal arms (`:158`), so which answer a literal gives depends on which
+path evaluated it.
+
+`CASE` and `LIKE`, which `is_ast_able` refuses, reach `build_scalar` and are null. A bare
+literal is null only where `build_column` sees it first: a project asks `is_ast_able` before
+`build_column`, so `NULL::BIGINT` in a select list is a column of zeros. `col <op> NULL::T` for
+a numeric `T` matching the column reaches the bug too. In arithmetic that is a wrong value; in a
+comparison it is a wrong **row count**, since `col = NULL` is true wherever `col` is 0 and SQL
+says the row does not survive.
+
+No cell was disabled against this — it was a wrong answer inside cells that pass. Fixed by
+`tasks/typed-nulls.md`, which removed the second scalar builder rather than correcting it;
+that spec's premise that a bare literal short-circuits to null was false, as the second pin
+showed. The two `bug_` pins in `gpu_tests/exec_cases.rs` went red on the device once
+`build_expr` delegated to `build_scalar`, and were deleted in that change; the gtests
+`Literals.*` in `test_plan_executor.cpp` assert the right answer in their place.
+
+**Done 2026-09-12, by task 11 `typed-nulls` on branch `ENS-typed-nulls`** (commits `097148f8`
+and `4bc848a5`). `build_expr`'s literal arm delegates to `build_scalar` through
+`ast_scalar` and a `cudf::type_dispatcher` downcast; `literal_is_valid` is the one reader of
+`ScalarValue.is_null`. Pinned green by the seven `Literals.*` gtests in
+`cpp/tests/gpu/test_plan_executor.cpp`.
+
 <a id="t194"></a>
 ### #194 — the cost gate's git baseline ignores which section it was asked for
 
