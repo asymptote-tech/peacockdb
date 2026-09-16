@@ -125,3 +125,50 @@ the two `should_panic` tests are red on the old comparator (`did not panic` / ar
 every `build-test.md` figure from the tree. `architecture.md`: no sentence falsified. Named and
 left: `build-test.md`'s C++ 67 against rows summing to 66 is master's, on the helper's list.
 To `completing`.
+
+## Completeness pass, analyst — 2026-09-16
+
+0 blocking, 0 important. Read as `git diff ENS-aggregate-cases...ENS-case-expectations`, four
+commits, PR #157 based on `ENS-aggregate-cases` (4 commits, confirmed).
+
+- **Finding 1** delivered whole: `same_within_welford` (`tests/compare.rs:123`) asserts
+  `names_and_types` over both batches before the exact projection. Two callers in the tree,
+  `welford_answered` (`aggregate_cases.rs:157`, the two #163 pins) and `finalized_within_welford`
+  (`aggregate_dimension_cases.rs:470`, the stddev and var finalizes); no other. `welford_answered`
+  borrows the device's names and casts the count, by its own documented design, so the check
+  binds on the two finalize cases the spec named.
+- **Finding 2** delivered as the spec wrote it — the eight-row probe, cpu 30 and device 27, the
+  device's 27 pinned as the cpu's 30 minus three null-`i32` rows — and listed beside the nine in
+  #59 and in join-cases' register. It is not the nine pins' oracle shape
+  (`device_answers_as_if_null_equals_null`): `hash_join_keyed` carries no flag. The count form
+  still goes red under a fix in either direction, which is what retires a pin.
+- **Finding 3** delivered: count is `is_valid`, mean stays null, m2 0. The fixture's inheritors
+  in the tree are six, not the spec's five: the two grouped finalizes; `bug_a_welford_merge_
+  exports_its_count_as_int64` (#163) directly; and through `keyless_welford_partial` the three
+  #216 pins — the keyless merge (re-pinned on the counts' stddev, reason above), the global
+  stddev finalize refusal and the keyless var merge refusal. All six ran in the 328 `_cases`
+  cycle; #216's ticket text still describes the re-pin's mechanism, and the register row carries
+  both values.
+- **Verification bar** holds as written; every `build-test.md` figure recounted from the tree
+  (321 `operator_case!` + 10 bare tests = 331; 11 + 5 = 16; +3 overall).
+- **`architecture.md`: no sentence falsified.** The branch is test-only, and the three claims it
+  touches — the hardcoded `EQUAL` on anti (#59, "What the finish pass computes" and "Join types
+  and NULL key equality"), the keyless Welford merge reducing the count column (#216, "The
+  aggregate sequence" and "From node to seqs"), the Int64 count export (#163) — are each
+  confirmed by a pin rather than contradicted.
+- **`build-test.md`, operator harness and harness helpers: no sentence falsified.** The helpers
+  row's new clause is true and its count right. The harness row's "compared slot by slot and
+  exactly — schema included" was already loose for the Welford path before this branch; the
+  branch made its schema half true there and disclosed the one inexact comparison two rows up.
+- For the signoff: two files outside the Scope table, `tests/compare.rs` (the accepted move) and
+  `aggregate_dimension_cases.rs` (the sanctioned re-pin and its imports); no shortcut, no bandaid.
+
+## Completeness pass — 2026-09-16, the two lists compared
+
+Reviewer (what is wrong): 0 blocking, 0 important — the two `should_panic` tests red on the old
+comparator, the composite pin's three drops replicated in Python, the re-pin's shape assert
+before its value, every count recounted. Analyst (what is missing): 0 blocking, 0 important —
+six inheritors of the fixture, not five, all in the `_cases` cycle; the composite pin as wide as
+the spec, by count rather than the single-key pins' oracle shape. `architecture.md`: no sentence
+falsified, by both readings; `build-test.md`'s harness rows true. The signoff appended to the
+spec. To `completeness approved`; `done` waits on the CI run for `eb808fd4`.

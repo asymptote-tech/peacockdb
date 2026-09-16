@@ -61,3 +61,15 @@ tolerance constant does not move.
 ## Device workflow
 
 `build-test-shadgpu.sh`, one cycle.
+
+## Completeness signoff — 2026-09-16
+
+Solved under its constraints: the three expectations tightened as the spec wrote them, no
+production code, no fix, `WELFORD_RELATIVE` at `1e-9` still the one inexact comparison; one
+new `bug_` (#59's composite key, cpu 30 rows against the device's 27, the three dropped rows
+each a null second key) and one re-pin (#216's keyless merge, the counts' stddev computed from
+its own arrivals instead of a literal `0.0`), no new ticket; the corrected fixture's six
+inheritors — two finalizes and four pins, one more than the spec counted — green on the device;
+`_cases` 328, `gpu_tests::` 386, rust-only `--lib` 535 and `test_module_layout` 17. Two files
+outside the scope table, by decision: `tests/compare.rs`, where the comparator moved so its red
+is rust-only, and `aggregate_dimension_cases.rs`, the re-pin and its imports. Shortcuts: none.
