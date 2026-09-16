@@ -34,9 +34,8 @@ at the two levels below the corpus; the corpus rows are the third.
 **Files:**
 - Modify: `peacockdb-core/src/tests/gpu_tests/exec_cases.rs` (beside `a_scalar_function_agrees`, `:355`)
 
-- [ ] **Step 1: The case.** `exec_cases.rs`'s `input()` schema has no `Date32` column — add a
-  `Given` leaf local to the case (`given::columns(&[("d", DataType::Date32)])` over four dates
-  spanning two years, the file's `Given::of` shape), then:
+- [ ] **Step 1: The case.** `synthetic::schema()` already carries `d: Date32` at index 6, so
+  `input()` serves as the leaf — no builder needed:
 
 ```rust
 // #191 — cuDF's extract_datetime_component answers INT16 for every field and the device hands
@@ -46,19 +45,19 @@ operator_case! {
     fn bug_a_date_part_year_comes_back_int16_from_the_device() {
         let year = Expr::ScalarFunction {
             name: "date_part".into(),
-            args: vec![Expr::Literal(ScalarValue::Utf8(Some("YEAR".into()))), Expr::column(0, "d")],
+            args: vec![Expr::Literal(ScalarValue::Utf8(Some("YEAR".into()))), Expr::column(6, "d")],
             return_type: DataType::Int32,
             nullable: true,
         };
-        let node = project_over(dates(), vec![(year, "y", DataType::Int32)]);
-        let why = run_both(&node, Script::Exec(vec![dates_batch()])).gpu_refuses();
+        let node = project(vec![keep_id(), (year, "y", DataType::Int32)]);
+        let why = run_both(&node, Script::Exec(vec![input()])).gpu_refuses();
         assert!(why.contains("y: Int32 vs Int16"), "{why}");
     }
 }
 ```
 
-  Adapt names to the file's builders (`project` takes exprs over `input()`; give it a sibling
-  `project_over(leaf, exprs)` if it lacks one — a builder, not a mechanism).
+  `project` and `keep_id` are the file's own builders (`:160`, and the one
+  `a_scalar_function_agrees` uses); nothing new is added.
 
 - [ ] **Step 2: Device cycle**, `PCK_TEST_FILTER='exec_cases'`: the pin green (it asserts the
   refusal), everything else untouched.
@@ -69,13 +68,16 @@ operator_case! {
 **Files:**
 - Modify: `cpp/tests/gpu/test_plan_executor.cpp` (after `ProjectSqrtThroughTheColumnPath`, `:718`)
 
-- [ ] **Step 1:** Three cases sharing a helper `date_part_over_region_dates(field)`: the file's
-  scan of a parquet with a date column (`orders`' `o_orderdate` at `parquet_path("orders")` if
-  `region` has none), a `CudfProject` with one `ScalarFunctionExprNode` — `name "date_part"`,
-  args `[string literal field, col_ref]`, `return_type Int32` — executed through the file's
-  plan runner; assert `result.column(0).type().id() == cudf::type_id::INT32` and the first
-  value (`1996` for orders' first row, or whatever the file's fixture says — read it, do not
-  guess). Fields `YEAR`, `MONTH`, `DAY`.
+- [ ] **Step 1:** `tpch.minimal` has no date column (customer, nation, part, region, supplier
+  only), so the input is made: three cases sharing a helper `date_part_over_a_made_date(field)`
+  — a scan of `nation`, a `CudfProject` whose first expression is `CastExprNode(n_nationkey →
+  Date32)` (a day number becomes a date; the loader's `TIMESTAMP_DAYS`), and above it a second
+  `CudfProject` with one `ScalarFunctionExprNode` — `name "date_part"`, args `[string literal
+  field, col_ref 0]`, `return_type Int32` — executed through the file's plan runner. Assert
+  `result.column(0).type().id() == cudf::type_id::INT32` and the first value (`1970` for
+  `YEAR` over day 0; `1` for `MONTH` and `DAY`). Fields `YEAR`, `MONTH`, `DAY`. The wire's
+  `return_type` is `gpu_plan.fbs:204`; the arm reads it off the node it already holds (`sf`,
+  `expr.cpp:634-661`).
 - [ ] **Step 2:** Build and run on the device: all three red on `INT16 != INT32`.
 - [ ] **Step 3: Commit.** `git commit -m "date_part's declared type, asserted red at the plan executor"`.
 
@@ -96,7 +98,8 @@ operator_case! {
     return component->type() == want ? std::move(component) : cudf::cast(component->view(), want);
 ```
 
-  (`fn` is the `ScalarFunctionExprNode` the arm already holds; use its variable name.)
+  (`sf` is the `ScalarFunctionExprNode` variable the arm already holds; the snippet's `fn`
+  is that.)
 - [ ] **Step 2:** Build; the three gtest cases green; `PCK_TEST_FILTER='exec_cases'`: the pin
   is now red — rewrite it as the green case `a_date_part_answers_in_its_declared_type`
   (`.same(Order::AsEmitted)`, no `bug_`, no ticket line); rerun green.
@@ -115,8 +118,9 @@ operator_case! {
 
 - [ ] `cost-registry.csv`: `tpch/q7` and `q9` gain `191` in `tickets` (the survey saw the class
   on them). `corpus_cases.inc`: the three rows' `gpu_modes` to `tp1_single`; device corpus run;
-  enable green cells with `191` struck, ticket value failures, then the other modes for what
-  passed.
+  enable green cells, ticket value failures, then the other modes for what passed. `191` is
+  struck from a row only when every cell still disabled in it carries another ticket
+  (`registry.rs:229-240`); the registry test green before the push.
 - [ ] Close #191 in `active-tickets.md`; `build-test.md` counts and `bug_` table.
 - [ ] `git commit -m "#191 closed: q7, q8, q9 on the device"`.
 

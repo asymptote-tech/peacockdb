@@ -2,17 +2,17 @@
 
 **Goal:** A handle's schema readable from Rust as cuDF's `{type_id, scale}`, a comparator that
 projects the plan's arrow schema the same way, a new schema case per node kind in every harness
-family, and seven hand-written spot-checks inside the recipe walk — every existing case
+family, and eleven hand-written spot-checks inside the recipe walk — every existing case
 untouched.
 
-**Architecture:** One read-only ABI function returns the IPC schema message; `test_support::
-device_schema` decodes it into `DeviceSchema` and projects `DataType` onto `DeviceType`;
-`Device::schema_of(handle)` is the harness's reader. New cases live in `*_schema_cases.rs`
-files beside each family; the walk gains an `on_call` hook and named spot-check tests. A red
-case is a `bug_` with a ticket, never a fix.
+**Architecture:** `peacock_handle_schema` (task 2's) returns the IPC schema message;
+`test_support::device_schema` decodes it into `DeviceSchema`, projects `DataType` onto
+`DeviceType`, and is where `schema_of(&GpuBatch)` lives — under the `test-support` feature, so
+the corpus binary and the next task's validator can call it; `Device` and the walk's `Session`
+delegate. New cases live in `*_schema_cases.rs` files beside each family; the walk gains an
+`on_call` hook and named spot-check tests. A red case is a `bug_` with a ticket, never a fix.
 
-**Tech stack:** C++ (`gpu_executor.cpp`, one function), Rust FFI, `test_support`, the gpu-rung
-harness on `shad-gpu`.
+**Tech stack:** Rust, `test_support`, the gpu-rung harness on `shad-gpu`. No C++.
 
 **Spec:** [`device-schema-harness.md`](device-schema-harness.md) — frozen.
 
@@ -20,8 +20,12 @@ harness on `shad-gpu`.
 
 - **No existing case changes.** Not an assertion added, not a `bug_` retyped. `git diff` on the
   existing `*_cases.rs` files shows only `mod` lines and shared-builder visibility.
-- The projection is exactly `arrow_utilities.cpp`'s: a type it does not map panics naming it.
-  Precision, timezone and nullability are not compared.
+- The projection is exactly cuDF's interop mapping for the types the wire admits: a type it
+  does not map panics naming it. Precision, timezone and nullability are not compared.
+- `device_divergence`, not `schema_divergence`: `executor/errors.rs:22` owns that name.
+- Chain E has merged before this task starts: `keyed`/`hash_join_keyed` in
+  `join_dimension_cases.rs` are on master. If they are not, the join file waits and the
+  developer says so in the detail file.
 - No fix. A red case gets a ticket (fifteen lines at most) and becomes a `bug_` asserting the
   divergence string.
 - Names say node and type: `a_<node>_over_<type>_declares_the_state_the_device_holds`.
@@ -31,39 +35,20 @@ harness on `shad-gpu`.
 
 | file | responsibility |
 |---|---|
-| `cpp/include/peacock_gpu.h`, `cpp/src/gpu_executor.cpp` | `peacock_handle_schema` |
-| `peacockdb-ffi/src/lib.rs` | extern |
-| `peacockdb-core/src/test_support/device_schema.rs` (new), `test_support/mod.rs` | `TypeId`, `DeviceType`, `DeviceSchema`, `device_type_of`, `device_schema_of`, `schema_divergence`, `from_ipc_schema`; unit tests |
-| `peacockdb-core/src/tests/gpu_tests/device.rs` | `Device::schema_of(&GpuBatch) -> DeviceSchema` |
+| `peacockdb-core/src/test_support/device_schema.rs` (new), `test_support/mod.rs` | `TypeId`, `DeviceType`, `DeviceSchema`, `device_type_of`, `device_schema_of`, `device_divergence`, `from_ipc_schema`, `schema_of` (`not(rust-only)`); unit tests |
+| `peacockdb-core/src/tests/gpu_tests/device.rs` | `Device::schema_of(&GpuBatch)` delegating |
 | `peacockdb-core/src/tests/gpu_tests/{source,exec,accumulate,emit,join,nested,aggregate}_schema_cases.rs` (new), `gpu_tests/mod.rs` | the suite |
 | `peacockdb-core/src/wire/gpu_tests/mod.rs` | `Walk::on_call`; `Session::schema_of`; the spot-checks |
 
 ---
 
-### Task 1: The ABI function
+### Task 1: The ABI function — done by task 2
 
-**Files:**
-- Modify: `cpp/include/peacock_gpu.h` (after `peacock_result_from_handle`), `cpp/src/gpu_executor.cpp` (after `:292`'s function)
-- Modify: `peacockdb-ffi/src/lib.rs`
-- Test: `cpp/tests/gpu/test_plan_executor.cpp`
-
-**Interfaces:**
-- Produces: `int peacock_handle_schema(peacock_executor_t*, uint64_t handle, uint8_t** out_ipc, uint64_t* out_len)` — the Arrow IPC stream containing the schema message only; freed with `peacock_result_free`; 0 on success.
-
-- [ ] **Step 1: Failing gtest.** `TEST(HandleSchema, ReadsTheTablesTypesWithoutRows)`: a scan
-  of `nation` registered as a handle; call the function; decode with `arrow::ipc::RecordBatchStreamReader`;
-  assert the schema has four fields, `n_nationkey` is `int64`, `n_name` is `utf8`, and
-  `ReadNext` yields no batch. `TEST(HandleSchema, UnknownHandleFails)` with handle 999.
-- [ ] **Step 2: Red** — undeclared function.
-- [ ] **Step 3: Implement.** `gpu_executor.cpp`: look up `table_for(handle)` as the export does;
-  `col_meta` from `column_names` (no precision — intermediates declare none, and the reduced
-  schema drops it anyway); `cudf::to_arrow_schema` → `arrow::ImportSchema` →
-  `MakeStreamWriter` + `Close()` with no batch written → buffer to `malloc`. Same error
-  handling as `peacock_result_from_handle`. Header doc: "the schema alone; for reading what the
-  device holds at a handle without moving rows."
-- [ ] **Step 4: Extern** in `ffi/src/lib.rs` beside the export's.
-- [ ] **Step 5:** Build; the two gtest cases green on the device.
-- [ ] **Step 6: Commit.** `git commit -m "peacock_handle_schema: a handle's schema without its rows"`.
+`peacock_handle_schema` and its two gtests landed with `decimal-precision-at-export`'s header
+rebuild. Confirm before anything else: `grep -n peacock_handle_schema cpp/include/peacock_gpu.h
+peacockdb-ffi/src/lib.rs` shows both, and `git log --oneline -1 -S peacock_handle_schema` names
+that task's commit. If not, stop and say so in the detail file: this task does not move the
+header.
 
 ### Task 2: The reduced schema
 
@@ -87,8 +72,12 @@ pub struct DeviceSchema(pub Vec<(String, DeviceType)>);
 pub fn device_type_of(arrow: &DataType) -> DeviceType;          // panics on an unmapped type
 pub fn device_schema_of(declared: &Schema) -> DeviceSchema;
 pub fn from_ipc_schema(schema: &Schema) -> DeviceSchema;          // the export's schema → reduced
-pub fn schema_divergence(declared: &Schema, actual: &DeviceSchema) -> Option<String>;
+pub fn device_divergence(declared: &Schema, actual: &DeviceSchema) -> Option<String>;
+#[cfg(not(feature = "rust-only"))]
+pub fn schema_of(batch: &GpuBatch) -> DeviceSchema;               // peacock_handle_schema on the batch's executor + handle
 ```
+  The module sits in `test_support/mod.rs` beside `corpus_gpu` with the same gating: the
+  feature-independent part always, `schema_of` under `not(rust-only)`.
 
 - [ ] **Step 1: Unit tests** in the same file (`#[cfg(test)] mod tests`):
   `utf8_and_large_utf8_are_one_string` (`Utf8`, `LargeUtf8` → `String`, no scale);
@@ -99,30 +88,36 @@ pub fn schema_divergence(declared: &Schema, actual: &DeviceSchema) -> Option<Str
   `divergence_names_every_differing_column_in_the_sinks_spelling` — declared `[a Int32, b
   Utf8, c Decimal128(15,2)]` vs actual `[a Int16, b String, c Decimal128 s=4]` →
   `Some("0 a: Int32 vs INT16; 2 c: Decimal128(15, 2) vs DECIMAL128 scale 4")`;
-  `a_matching_schema_diverges_nowhere`; `a_column_count_mismatch_is_a_divergence`.
+  `a_matching_schema_diverges_nowhere`; `a_column_count_mismatch_is_a_divergence`. All
+  rust-only: nothing here touches a handle.
 - [ ] **Step 2: Red** — module missing.
 - [ ] **Step 3: Implement** — `device_type_of` as one `match` mirroring
-  `third_party/cudf/cpp/src/interop/arrow_utilities.cpp:30-70` in the same order, with a
-  comment pointing there; `from_ipc_schema` = `device_type_of` over the decoded fields (the
-  export's `utf8` is `String`, its `decimal128(_, s)` keeps `s`); `schema_divergence` compares
-  length, then position by position name and `DeviceType`, formatting `"{at} {name}: {declared
-  arrow type} vs {actual}"` joined by `"; "`, `None` when equal. `Display` for `DeviceType`
-  prints `INT16`, `STRING`, `DECIMAL128 scale 2`, `TIMESTAMP_DAYS`.
+  `third_party/cudf/cpp/src/interop/arrow_utilities.cpp:30-70` for the types the wire admits
+  (the vendored tree is 25.10; its view and DECIMAL32/64 arms have no wire type after task 2,
+  so 25.02's mapping is the same set), with a comment pointing there; `from_ipc_schema` =
+  `device_type_of` over the decoded fields (the export's `utf8` is `String`, its
+  `decimal128(_, s)` keeps `s`); `device_divergence` compares length, then position by
+  position name and `DeviceType`, formatting `"{at} {name}: {declared arrow type} vs
+  {actual}"` joined by `"; "`, `None` when equal. `Display` for `DeviceType` prints `INT16`,
+  `STRING`, `DECIMAL128 scale 2`, `TIMESTAMP_DAYS`. `schema_of(&GpuBatch)`: the batch's
+  executor pointer and handle → `peacock_handle_schema` → `StreamReader` over the buffer for
+  its `schema()` → `from_ipc_schema` → `peacock_result_free`; does not consume the batch.
 - [ ] **Step 4: Green**, rust-only `--lib -- test_support::device_schema`; `test_module_layout`.
 - [ ] **Step 5: Commit.** `git commit -m "test_support::device_schema: an arrow schema projected onto what cuDF stores"`.
 
-### Task 3: `Device::schema_of`
+### Task 3: `Device::schema_of` and `Session::schema_of`
 
 **Files:**
 - Modify: `peacockdb-core/src/tests/gpu_tests/device.rs` (after `fetch`), `wire/gpu_tests/mod.rs` `Session` (after `export`, `:163`)
 
-- [ ] **Step 1:** `pub(crate) fn schema_of(&self, batch: &GpuBatch) -> DeviceSchema` —
-  `peacock_handle_schema` on `batch.handle()`, `StreamReader` over the buffer for its
-  `schema()`, `from_ipc_schema`, `peacock_result_free`. Does not consume the batch. The walk's
-  `Session::schema_of(handle: u64)` is the same over a raw handle.
+- [ ] **Step 1:** `pub(crate) fn schema_of(&self, batch: &GpuBatch) -> DeviceSchema` on
+  `Device` delegates to `test_support::device_schema::schema_of(batch)`. The walk's
+  `Session::schema_of(handle: u64)` takes a raw handle: it calls `peacock_handle_schema` on
+  its own executor and shares the decode through a `pub fn from_ipc_bytes(&[u8]) ->
+  DeviceSchema` in `device_schema.rs` that `schema_of` also uses.
 - [ ] **Step 2: First device case**, in a new `source_schema_cases.rs`: a `Given` leaf of every
   fixture column type uploaded, `schema_of(upload)` compared with `device_schema_of(&schema)`
-  — `schema_divergence == None`. This proves the reader against the uploader.
+  — `device_divergence == None`. This proves the reader against the uploader.
 - [ ] **Step 3:** Device cycle `PCK_TEST_FILTER='schema_cases'`: green.
 - [ ] **Step 4: Commit.** `git commit -m "Device::schema_of reads what the device holds at a handle"`.
 
@@ -132,12 +127,12 @@ pub fn schema_divergence(declared: &Schema, actual: &DeviceSchema) -> Option<Str
 - Create: `exec_schema_cases.rs`, `accumulate_schema_cases.rs`, `emit_schema_cases.rs`, `join_schema_cases.rs`, `nested_schema_cases.rs`, `aggregate_schema_cases.rs`; extend `source_schema_cases.rs`
 - Modify: `gpu_tests/mod.rs` (the `mod` lines); shared builders in the existing files become `pub(super)` where a schema case needs them (visibility only)
 
-One shape for every case: run the node on the device alone (`script.rs`'s device-only runner —
-`run_gpu` if it still exists, else the device half of `run_both` factored out as
-`device_outputs(node, script) -> Vec<GpuBatch>`, a builder not a mechanism), then for every
-output batch `assert_eq!(schema_divergence(node.kind().schema(), &device.schema_of(&batch)),
-None)`. A case that fails is rewritten as `bug_…` asserting the divergence string, with its
-ticket above.
+One shape for every case: run the node on the device alone (chain E's Task 8 retired
+`run_gpu`; factor the device half of `run_both` out as `device_outputs(node, script) ->
+Vec<GpuBatch>` in `script.rs`, a builder not a mechanism), then for every output batch
+`assert_eq!(device_divergence(node.kind().schema(), &device.schema_of(&batch)), None)`. A
+case that fails is rewritten as `bug_…` asserting the divergence string, with its ticket
+above.
 
 - [ ] **Step 1: `exec`** — `GpuProject`: arithmetic on `Int32`, `Int64`, `Float64`,
   `Decimal128(15,2)` (`+`, `*`, `/` — the divide's declared scale); each `Cast` the corpus
@@ -155,10 +150,12 @@ ticket above.
 - [ ] **Step 4: `aggregate`** — init, merge, finalize for `sum`, `count`, `min`, `max`, `avg`,
   `stddev`; grouped on `Int32`, `Utf8`, `Date32`, two keys; global; the grouping-set state
   (`__grouping_id`: expect a `bug_` on #65 — write it as one from the start). Cycle; commit.
-- [ ] **Step 5: `union`** — two `Given` branches whose same-named column differs in cuDF type
-  (`Decimal128(15,2)` against an `Int64(0)` literal cast, as `union.cpp`'s deleted comment
-  described) under the planner's per-branch casts; the union's output schema on the device.
-  Fold into `exec_schema_cases.rs` or its own file per `test_module_layout`'s size rule.
+- [ ] **Step 5: the union's branches** — a `GpuUnion` is a forwarder with no executor
+  (`coverage.rs:37`) and cannot run alone. The case `union.cpp`'s deleted comment described —
+  two branches whose same-named column differs in cuDF type (`Decimal128(15,2)` against an
+  `Int64(0)` literal) — is two `GpuProject` cases in `exec_schema_cases.rs`, each casting its
+  branch's column to the union's declared type and checked on the device; the concatenation
+  itself is the corpus's to prove.
 
 ### Task 5: The walk spot-checks
 
@@ -166,31 +163,33 @@ ticket above.
 - Modify: `peacockdb-core/src/wire/gpu_tests/mod.rs:233-300` (`Walk`, `make`), the test section
 
 - [ ] **Step 1: The hook.** `Walk` gains `on_call: Option<&'a mut dyn FnMut(Seq, FbKind,
-  &[u64], &Session)>`; `make` calls it after `self.session.execute(...)` with the returned
-  handles. `assert_walk_matches_datafusion(sql, knobs)` gains a sibling
+  &[u64], &Session)>`; `make` (`:285-299`) calls it after `self.session.execute(...)` with the
+  returned handles. `assert_walk_matches_datafusion(sql, knobs)` gains a sibling
   `walk_with(sql, knobs, hook)` that installs it and still compares the final batches.
-- [ ] **Step 2: The seven tests**, each named for what it reads, each a `walk_with` whose
+- [ ] **Step 2: The eleven tests**, each named for what it reads, each a `walk_with` whose
   hook matches `(seq, kind)` on the call the spec's table names, reads
-  `session.schema_of(handle)` and asserts the literal `DeviceSchema`:
+  `session.schema_of(handle)` and asserts the literal `DeviceSchema`. `FbKind::Aggregate` is
+  `{ merge: bool }` (`merge: false` is the partial, `true` the merge), not a mode enum:
 
 ```rust
 #[tokio::test]
-async fn an_avg_partial_holds_a_string_key_an_int64_count_and_a_scale_2_sum() {
+async fn an_avg_partial_holds_a_string_key_a_scale_2_sum_and_an_int64_count() {
     let seen = walk_with(AVG_BY_FLAG, ONE_LANE, |_, kind, handles, session| {
-        if let FbKind::Aggregate { mode: Partial } = kind {
+        if let FbKind::Aggregate { merge: false } = kind {
             assert_eq!(session.schema_of(handles[0]), DeviceSchema(vec![
                 ("l_returnflag".into(), DeviceType { id: TypeId::String, scale: None }),
-                ("avg(lineitem.l_quantity)$count".into(), DeviceType { id: TypeId::Int64, scale: None }),
                 ("avg(lineitem.l_quantity)$sum".into(), DeviceType { id: TypeId::Decimal128, scale: Some(2) }),
+                ("avg(lineitem.l_quantity)$count".into(), DeviceType { id: TypeId::Int64, scale: None }),
             ]));
         }
     }).await;
-    assert!(times(&seen, partial_aggregate_kind()) == 1);
+    assert_eq!(times(&seen, FbKind::Aggregate { merge: false }), 1);
 }
 ```
 
-  The state column names come from the plan golden for that query (`--- recipes ---` and the
-  `schema=[…]` of the aggregate node); read them, do not invent them. The rest of the table:
+  The state column order is `aggregates.rs:64`'s (`[$sum, $count]` for `avg`) and the names
+  come from the plan golden for that query (the `schema=[…]` of the aggregate node); read
+  them, do not invent them. The rest of the table:
   `AVG_BY_FLAG` merge and finalize; `SUM_BY_FLAG` partial; `ROLLUP`'s grouping-set aggregate
   as `bug_…_holds_an_int32_grouping_id_where_the_plan_says_uint8` naming #65;
   `PROJECT_OVER_FILTER` after filter and after project; `INNER_JOIN` after the join;

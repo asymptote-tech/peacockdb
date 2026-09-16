@@ -27,15 +27,16 @@ producer is fixed, not the label.
    fields go through the same line. A `return_type` that is not an integer type is a
    `runtime_error` naming the function — the wire promised an allocation type, not a request.
 2. **Tests, three levels.**
-   - `cpp/tests/gpu/test_plan_executor.cpp`: a `CudfProject` with one `ScalarFunctionExprNode
-     {name: "date_part", args: ["YEAR", col], return_type: Int32}` over a one-column
-     `TIMESTAMP_DAYS` table, asserting the output column's `type().id() == INT32` and the
-     values; the same shape for `MONTH` and `DAY`. Red before the fix.
-   - `peacockdb-core/src/tests/gpu_tests/exec_cases.rs`: a `GpuProject` over a `Given`
-     `Date32` leaf with `date_part(YEAR, d) as y` declared `Int32`,
-     `run_both(...).same(Order::AsEmitted)`. Written first as the `bug_` pin whose refusal names
-     `y: Int32 vs Int16`, then flipped to the green case by the fix. The green case's name says
-     what it proves; the pin's name goes with the ticket.
+   - `cpp/tests/gpu/test_plan_executor.cpp`: `tpch.minimal` has no date column, so a
+     `CudfProject` casts `nation`'s `n_nationkey` to `Date32` first; above it a `CudfProject`
+     with one `ScalarFunctionExprNode {name: "date_part", args: ["YEAR", col 0], return_type:
+     Int32}`, asserting the output column's `type().id() == INT32` and the values; the same
+     shape for `MONTH` and `DAY`. Red before the fix.
+   - `peacockdb-core/src/tests/gpu_tests/exec_cases.rs`: a `GpuProject` over the file's
+     `input()` — `synthetic::schema()` carries `d: Date32` at index 6 — with `date_part(YEAR,
+     d) as y` declared `Int32`, `run_both(...).same(Order::AsEmitted)`. Written first as the
+     `bug_` pin whose refusal names `y: Int32 vs Int16`, then flipped to the green case by the
+     fix. The green case's name says what it proves; the pin's name goes with the ticket.
    - The corpus: `tpch/q7`, `q8`, `q9` at `tp1_single`. `q7` and `q9` gain `191` in the registry
      first — the survey (§3) showed the class on them without the ticket.
 3. **The neighbours, looked at and not fixed.** Every other arm of `expr.cpp`'s scalar dispatch
@@ -62,7 +63,8 @@ change to any other scalar arm. No golden moves: the plan already declares `Int3
 ## Registry
 
 `tpch/q7`, `q8`, `q9` at `tp1_single`; the other modes for those that pass. Each is enabled
-with `191` struck where values match, or keeps its next ticket.
+where values match, or keeps its next ticket; `191` is struck from a row only when no disabled
+cell in it is left without a ticket (`registry.rs:229-240`).
 
 ## Verification bar
 

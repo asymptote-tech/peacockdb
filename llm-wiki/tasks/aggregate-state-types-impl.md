@@ -5,8 +5,8 @@ is `Int64` like everything else's, the decimal `avg` finalize asks for its narro
 #163 on both arms.
 
 **Architecture:** One function on the enum owns the table; `decompose` reads it instead of
-DataFusion's accumulator layout; one cast on the CPU Welford init and one cast in `finalize`
-bring the two arms to the declaration. The device changes nowhere.
+DataFusion's accumulator layout; a `ProjectionExec` over the CPU's Welford init and one cast in
+`finalize` bring the two arms to the declaration. The device changes nowhere.
 
 **Tech stack:** Rust, rust-only for everything but the harness pins and the rollout.
 
@@ -17,8 +17,9 @@ bring the two arms to the declaration. The device changes nowhere.
 - Output types are DataFusion's; only *state* types are derived. `Sum`'s decimal rule is quoted
   from `datafusion-functions-aggregate/src/sum.rs:153-168`, not reinvented.
 - No change under `cpp/`. #94 stays open.
-- The golden diff is exactly: count state columns `UInt64 → Int64`, and the `avg` finalize's
-  cast in `recipe-payloads.txt`. Anything else is a finding.
+- The golden diff is exactly three classes: count state columns `UInt64 → Int64`; decimal
+  `avg` `$sum` states from the input type to `(p + 10, s)`; the `avg` finalize's cast in
+  `recipe-payloads.txt`. Anything else is a finding.
 - No wildcard arm in `state_type`.
 - `rustfmt`; commits at most 10 lines; device cycles foreground.
 
@@ -29,9 +30,10 @@ bring the two arms to the declaration. The device changes nowhere.
 | `peacockdb-core/src/plan/aggregates.rs` | `state_type`; the finalize cast |
 | `peacockdb-core/src/plan/aggregates/tests.rs` (new; `mod tests` under `#[cfg(test)]` in `aggregates.rs`) | the producer tests, the decomposition walk |
 | `peacockdb-core/src/planner/translator/aggregate.rs` | `decompose` derives; `declared_state` returns the name only |
-| `peacockdb-core/src/executor/cpu_backend/mod.rs` | the Welford count cast after the init accumulator |
+| `peacockdb-core/src/executor/cpu_backend/mod.rs` | the init wrapped in a `ProjectionExec` casting `$count` when the accumulator's type differs from the declaration |
+| `peacockdb-core/src/executor/cpu_backend/tests/` | the producer test: every decomposition's init schema equals the derived state |
 | `peacockdb-core/src/executor/cpu_backend/merge_m2.rs` | `state_fields`/signature on `Int64` count |
-| `peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs` | four pins retired |
+| `peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs` | three pins retired |
 
 ---
 
@@ -124,11 +126,12 @@ impl PlanAgg {
   `func.state_type(&arg_type)?`, where `arg_type` is the aggregate's first argument's type —
   `aggregate.expressions()[0].data_type(input_schema)?` (a `count(*)` has no argument: use
   `DataType::Null`, which `Count` ignores). `declared_state` keeps returning the field for
-  its name and nullability; delete the comment's "the types are DataFusion's" sentence and
-  say they are `state_type`'s.
+  its nullability (the suffix is `rule.state`'s); delete the comment's "the types are
+  DataFusion's" sentence and say they are `state_type`'s.
 - [ ] **Step 2:** `cargo test --features rust-only -p peacockdb-core --lib --
   planner::tests::plan_goldens` — red on every `avg`/`stddev`/`var` golden, each diff line a
-  count column `UInt64 → Int64`. Read three of them to confirm. Do not regenerate yet.
+  count column `UInt64 → Int64` or a decimal `avg`'s `$sum` from the input type to `(p+10,
+  s)`. Read three of them to confirm. Do not regenerate yet.
 - [ ] **Step 3:** `-- planner::translator` and `-- plan::` tests green.
 - [ ] **Step 4: Commit.** `git commit -m "decompose types the state from state_type; DataFusion's layout supplies names and arity"`.
 
@@ -136,22 +139,29 @@ impl PlanAgg {
 
 **Files:**
 - Modify: `peacockdb-core/src/executor/cpu_backend/mod.rs:430-447` (the init `AggregateExec`), `merge_m2.rs:44-76`
+- Test: `peacockdb-core/src/executor/cpu_backend/tests/` (the aggregate module there, or a new `state_types.rs`)
 
-- [ ] **Step 1: Failing test.** In `cpu_backend/tests/` (or the existing aggregate test module
-  there): a `stddev` init over a four-row `Float64` batch through the backend; assert the
-  produced state batch's count column is `Int64` and the run does not refuse. Red: `declared_as`
-  refuses `UInt64` against the now-`Int64` declaration.
-- [ ] **Step 2: The cast.** Where the init's output is handed to `declared_as` (`:249`), before
-  it: for a Welford init (the `stddev`/`var` UDAF), `cast` the `$count` column to `Int64`.
-  Localize it: a `fn welford_count_as_int64(batch, state) -> RecordBatch` beside
-  `widened_decimal`, applied only when the state's aggregator for that column is
-  `PlanAgg::Count` under a Welford decomposition and the produced type is `UInt64`. Comment:
-  DataFusion's variance accumulator counts in `u64`; the plan and the device count in `Int64`.
+- [ ] **Step 1: Failing tests.** (a) A `stddev` init over a four-row `Float64` batch built
+  through the backend's `executors_for`: today it fails at *construction* — `check_state_layout`
+  (`mod.rs:441`) refuses "column 0 is Int64 in the declared state and UInt64 in the one
+  DataFusion's accumulators produce" — assert instead that construction succeeds and the
+  emitted state batch's count column is `Int64`. (b) The producer test the spec asks for: for
+  every `AggFunc` (`sum`, `min`, `max`, `count`, `avg`, `stddev`, `var`) over a `Decimal128(15,
+  2)` and an `Int32` argument, build the init through the backend and assert its output schema
+  equals the state `decompose` derived, column by column — no escape needed for an init.
+- [ ] **Step 2: The projection.** In the init builder (`:433-441`): after `AggregateExec::try_new`,
+  compare `aggregate.schema()` to the declared state; where a column differs by exactly
+  `UInt64 → Int64` (the Welford count), wrap the aggregate in a
+  `ProjectionExec::try_new(exprs, Arc::new(aggregate))` whose `exprs` are `CastExpr(Column(i),
+  Int64)` for that column and `Column(i)` for every other, and hand `check_state_layout` the
+  projection's schema. Comment: DataFusion's variance accumulator counts in `u64`; the plan and
+  the device count in `Int64`, and a state read positionally has to be the state declared.
+  `widened_decimal` stays for the merge's `sum`-of-`sum` widening.
 - [ ] **Step 3:** `merge_m2.rs`: its `state_fields`/`signature` declare the count `Int64`;
   `MergeM2`'s accumulator reads `Int64Array` for the count.
-- [ ] **Step 4: Green:** the new test; `-- executor::cpu_backend`; `test_cpu_corpus` over
-  three `stddev` queries (`PCK_TEST_FILTER` on tpcds q17, q29, q39 or the file's own choice).
-- [ ] **Step 5: Commit.** `git commit -m "the cpu's welford count is Int64 like every other count"`.
+- [ ] **Step 4: Green:** both tests; `-- executor::cpu_backend`; `test_cpu_corpus` over three
+  `stddev` queries (`PCK_TEST_FILTER` on tpcds q17, q29, q39 or the file's own choice).
+- [ ] **Step 5: Commit.** `git commit -m "the cpu's welford count is Int64 like every other count; inits match their declared state exactly"`.
 
 ### Task 4: The finalize cast
 
@@ -171,21 +181,23 @@ impl PlanAgg {
 ### Task 5: Goldens
 
 - [ ] `UPDATE_CANONICAL=1` over `planner::tests::plan_goldens` and the recipe-payloads test.
-  `git diff testdata/goldens | grep '^[-+]' | grep -v '^[-+][-+]' | grep -v 'UInt64\|Int64\|CAST\|cast'`
-  is empty; `--stat` names only `avg`/`stddev`/`var` queries. Full rust-only tier green.
+  `git diff testdata/goldens | grep '^[-+]' | grep -v '^[-+][-+]' | grep -v 'UInt64\|Int64\|\$sum\|CAST\|cast'`
+  is empty; `--stat` names only `avg`/`stddev`/`var` queries; every `$sum` line moves from the
+  input precision to `p + 10` at the same scale. Full rust-only tier green.
 - [ ] `git commit -m "goldens: count states are Int64; the avg finalize carries its cast"`.
 
 ### Task 6: The device — pins, then the rollout
 
-- [ ] **Step 1:** Harness cycle, `PCK_TEST_FILTER='tests::gpu_tests::aggregate'`: the four pins
-  (`bug_a_welford_init_exports_its_count_as_int64`, `…_merge_…`,
-  `bug_a_decimal_average_is_refused_on_the_cpu`, `aggregate_cases.rs:294`'s) are red because
-  the bug is gone — rewrite each as the green case its name implies, dropping `bug_` and the
-  ticket line; rerun green.
+- [ ] **Step 1:** Harness cycle, `PCK_TEST_FILTER='tests::gpu_tests::aggregate'`: the three
+  pins (`bug_a_welford_init_exports_its_count_as_int64`, `…_merge_…`,
+  `bug_a_decimal_average_is_refused_on_the_cpu`) are red because the bug is gone — rewrite each
+  as the green case its name implies, dropping `bug_` and the ticket line; rerun green.
+  (`aggregate_cases.rs:294` is #187's pin and was retired by the previous task.)
 - [ ] **Step 2:** The 23 rows naming `163` in `cost-registry.csv`: `cpu_tp1_single` and
   `gpu_tp1_single` on; run `test_cpu_corpus` locally and the gpu corpus on the device. Enable
-  what is green with `163` struck; ticket what fails on values; leave what fails above the
-  sink on its own ticket (`q39` #57, `q9` #63, `q6` #152).
+  what is green; ticket what fails on values; leave what fails above the sink on its own ticket
+  (`q39` #57, `q9` #63, `q6` #152). Strike `163` from a row only when every cell still disabled
+  in it carries another ticket (`registry.rs:229-240`); the registry test green before the push.
 - [ ] **Step 3:** Close #163 in `tickets.md` (both arms named); `architecture.md`'s aggregate
   paragraph: "state columns are typed by `PlanAgg::state_type`"; `build-test.md` counts and
   `bug_` table.
