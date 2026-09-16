@@ -29,7 +29,15 @@ Committed as `2902c5f7`, `dee2462c`, `3305fd0b`, `1bff7269` (the plan's four com
 `e8f396d3`; pushed; PR #158 against master, base verified, 6 commits. The coordinator's own
 golden check agreed with the developer's: the residual beyond the word swap is the 18
 `sha256=` pairs in `recipe-payloads.txt` and q24's residual filter in the five tpcds files.
-Review round 1 dispatched.
+Review round 1: 0 blocking, 2 important, 5 nits. Important: (1) `cpu_backend/source.rs`
+`as_declared` keeps a `cast` arm whose stated reason was the view type, and its doc comment now
+states a false fact — a handling site the spec's identifier grep missed; (2) the deleted #183
+pin was the only device-side assertion of the unload's `declared vs exported` refusal
+(`gpu_backend/mod.rs:241-247`). Nits: `null_exprs` and the aggregate `intermediate` schema are
+outside the rule (guarded transitively); `check_expr_types` re-walks each subtree once per
+ancestor; the `corpus_cases.inc` comment above `q13` is 11 lines and narrates history;
+`src/common.rs:89,44-52` comments name deleted arms and a nonexistent function; #183 over the
+30-line cap. The coordinator trimmed #183 and #215 (`971f2c6e`); the rest go to the developer.
 
 ## Developer notes
 
