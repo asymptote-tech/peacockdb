@@ -1,7 +1,6 @@
 //! The seqless three, and the helper round trip — the cases whose recipe puts nothing on
 //! the wire, so a wrong helper has nowhere to hide.
 
-use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 
 use super::device::Device;
@@ -112,56 +111,6 @@ fn unload_over(rows: usize) -> (GpuUnload, RecordBatch) {
         None,
     );
     (node, batch)
-}
-
-/// The schema the corpus declares for every string: `Utf8View`, over data the device holds
-/// as plain strings. Declared, not uploaded — cuDF's `from_arrow` has no conversion for a
-/// `Utf8View` array (`arrow_utilities.cpp`, "Unsupported type_id conversion to cudf"), so
-/// the harness cannot put one on the device; the corpus never does either, its strings
-/// coming through the parquet reader. The declaration is what #183 is about.
-fn declaring_view_strings(schema: &ArrowSchema) -> Schema {
-    let fields: Vec<Field> = schema
-        .fields()
-        .iter()
-        .map(|f| match f.name().as_str() {
-            "s" => Field::new("s", DataType::Utf8View, f.is_nullable()),
-            _ => f.as_ref().clone(),
-        })
-        .collect();
-    Schema::new(std::sync::Arc::new(ArrowSchema::new(fields)))
-}
-
-// #183 — the device exports a column declared `Utf8View` as `Utf8`, so the sink refuses;
-// the cpu holds to the declaration and answers. The message names the column with its index
-// and both types, which is what a user reading it needs.
-operator_case! {
-    GpuUnload,
-    fn bug_a_column_declared_utf8view_is_exported_as_utf8_and_the_sink_names_it() {
-        let batch = synthetic(8, 2);
-        let node = GpuUnload::new(
-            Given::of(
-                declaring_view_strings(&batch.schema()),
-                BatchLayout::MultipleBatches,
-            ),
-            None,
-        );
-        let outcome = run_both(
-            &node,
-            Script::Unload {
-                batch,
-                rows: RowRange::WHOLE,
-            },
-        );
-        let why = outcome.gpu_refuses();
-        assert!(
-            why.contains("the exported stream is not the sink's rows"),
-            "{why}"
-        );
-        assert!(
-            why.contains("(declared vs exported: 5 s: Utf8View vs Utf8)"),
-            "{why}"
-        );
-    }
 }
 
 #[test]

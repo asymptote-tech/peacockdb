@@ -60,8 +60,7 @@ pub(crate) fn payload_text(node: &fb::PlanNode<'_>, indent: &str) -> String {
                     let args = func
                         .args()
                         .map(|args| {
-                            let written: Vec<String> =
-                                args.iter().map(|a| expr_text(&a)).collect();
+                            let written: Vec<String> = args.iter().map(|a| expr_text(&a)).collect();
                             written.join(", ")
                         })
                         .unwrap_or_default();
@@ -179,7 +178,10 @@ pub(crate) fn payload_text(node: &fb::PlanNode<'_>, indent: &str) -> String {
             if let Some(keys) = repartition.hash_exprs() {
                 field(
                     "hash",
-                    keys.iter().map(|e| expr_text(&e)).collect::<Vec<_>>().join(", "),
+                    keys.iter()
+                        .map(|e| expr_text(&e))
+                        .collect::<Vec<_>>()
+                        .join(", "),
                 );
             }
         }
@@ -193,7 +195,10 @@ pub(crate) fn payload_text(node: &fb::PlanNode<'_>, indent: &str) -> String {
 fn ordinals(columns: impl Iterator<Item = u32>) -> String {
     format!(
         "[{}]",
-        columns.map(|c| c.to_string()).collect::<Vec<_>>().join(", ")
+        columns
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     )
 }
 
@@ -329,7 +334,12 @@ fn expr_text(expr: &fb::Expr<'_>) -> String {
                 .expect("a scalar function");
             let args = function
                 .args()
-                .map(|args| args.iter().map(|a| expr_text(&a)).collect::<Vec<_>>().join(", "))
+                .map(|args| {
+                    args.iter()
+                        .map(|a| expr_text(&a))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
                 .unwrap_or_default();
             format!("{}({args})", function.name().unwrap_or("?"))
         }
@@ -345,7 +355,7 @@ fn scalar_text(value: &fb::ScalarValue<'_>) -> String {
     }
     match value.type_() {
         fb::DataType::Boolean => value.bool_val().to_string(),
-        fb::DataType::Utf8 | fb::DataType::LargeUtf8 | fb::DataType::Utf8View => {
+        fb::DataType::Utf8 | fb::DataType::LargeUtf8 => {
             format!("'{}'", value.string_val().unwrap_or(""))
         }
         fb::DataType::Float32 | fb::DataType::Float64 => value.float_val().to_string(),

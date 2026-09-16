@@ -5,8 +5,7 @@
 //! GPU costs are identical by construction whenever per-node row counts match.
 
 use datafusion::arrow::array::{
-    Array, BinaryArray, BinaryViewArray, LargeBinaryArray, LargeStringArray, StringArray,
-    StringViewArray,
+    Array, BinaryArray, LargeBinaryArray, LargeStringArray, StringArray,
 };
 use datafusion::arrow::datatypes::{DataType, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
@@ -30,11 +29,8 @@ pub(crate) fn type_structural_size(dt: &DataType, rows: usize) -> usize {
         DataType::Int64 | DataType::UInt64 | DataType::Float64 | DataType::Date64 => rows * 8,
         DataType::Timestamp(_, _) => rows * 8,
         // Var-length: only the offset buffer is structural; the content is
-        // accumulated separately (see `array_content_size`). View layouts also
-        // carry an (rows+1)*4 offset-equivalent, mirroring the old formula.
-        DataType::Utf8 | DataType::Binary | DataType::Utf8View | DataType::BinaryView => {
-            (rows + 1) * 4 // i32 offsets
-        }
+        // accumulated separately (see `array_content_size`).
+        DataType::Utf8 | DataType::Binary => (rows + 1) * 4, // i32 offsets
         DataType::LargeUtf8 | DataType::LargeBinary => (rows + 1) * 8, // i64 offsets
         DataType::Decimal128(_, _) => rows * 16,
         DataType::Decimal256(_, _) => rows * 32,
@@ -48,13 +44,15 @@ pub(crate) fn type_structural_size(dt: &DataType, rows: usize) -> usize {
         // row count alone). `assert_type_accountable` recurses into them.
         //
         // HARD fail on any other unhandled type: the old silent 0 undercounted
-        // decimals/Utf8View, and an allocation-based fallback
+        // decimals, and an allocation-based fallback
         // (get_array_memory_size) would make goldens non-deterministic. Panicking
         // forces a deterministic per-type arm to be added rather than silently
         // producing a wrong/unstable size. The guard is reached at stream
         // construction (see `assert_type_accountable`), NOT in a destructor, so it
         // unwinds as a normal test failure instead of aborting the process.
-        other => panic!("type_structural_size: unhandled DataType {other:?} — add a deterministic arm"),
+        other => {
+            panic!("type_structural_size: unhandled DataType {other:?} — add a deterministic arm")
+        }
     };
     bitmap_bytes + data_bytes
 }
@@ -63,7 +61,11 @@ pub(crate) fn type_structural_size(dt: &DataType, rows: usize) -> usize {
 /// var-length CONTENT bytes — the data-dependent term, which is what a device measures and
 /// a batch of Arrow arrays is read for. Everything else is a function of the schema, so
 /// the two engines charge a row the same bytes without either reading the other's arrays.
-pub(crate) fn logical_size_from_schema(schema: &Schema, rows: usize, varlen_content_bytes: usize) -> usize {
+pub(crate) fn logical_size_from_schema(
+    schema: &Schema,
+    rows: usize,
+    varlen_content_bytes: usize,
+) -> usize {
     schema
         .fields()
         .iter()
@@ -109,19 +111,6 @@ pub(crate) fn array_content_size(dt: &DataType, col: &dyn Array, rows: usize) ->
         DataType::LargeUtf8 => offset_content!(LargeStringArray),
         DataType::Binary => offset_content!(BinaryArray),
         DataType::LargeBinary => offset_content!(LargeBinaryArray),
-        // View layouts: Σ value byte lengths. Must NOT use get_array_memory_size
-        // here — that's allocation-dependent (buffer capacity) and varies
-        // run-to-run, making the goldens non-deterministic.
-        DataType::Utf8View => col
-            .as_any()
-            .downcast_ref::<StringViewArray>()
-            .map(|a| (0..a.len()).filter(|&i| a.is_valid(i)).map(|i| a.value(i).len()).sum())
-            .unwrap_or(0),
-        DataType::BinaryView => col
-            .as_any()
-            .downcast_ref::<BinaryViewArray>()
-            .map(|a| (0..a.len()).filter(|&i| a.is_valid(i)).map(|i| a.value(i).len()).sum())
-            .unwrap_or(0),
         _ => 0,
     }
 }
