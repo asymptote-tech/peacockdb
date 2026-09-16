@@ -6,9 +6,9 @@ Kind: production
 ticket, and the production tree is not touched — not to make a case pass, not to close a ticket
 a case happens to reach. The findings are the deliverable; a later task fixes what they name.
 
-Fifteenth in the chain, after [`join-cases.md`](join-cases.md), whose fixture form
-`synthetic_extended` it uses and whose mechanism — a hand-built node over `Given` leaves, a
-`Script`, `run_both`, `assert_same` — it uses unchanged. It adds cases and nothing else.
+Fifteenth in the chain, after [`join-cases.md`](join-cases.md), whose `Utf8View`-as-declaration
+shape it reuses and whose mechanism — a hand-built node over `Given` leaves, a `Script`,
+`run_both`, `assert_same` — it uses unchanged. It adds cases and nothing else.
 
 ## Why these dimensions
 

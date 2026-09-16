@@ -65,8 +65,8 @@ a device refusal an outcome rather than an abort, and records the real limits as
 
 Cases only, along the three dimensions task 9 held constant and the corpus does not: a
 projection on every reachable join type, composite and `Int64`/`Utf8View`/`Date32` keys on the
-three join code paths, and the non-AST nested-loop path. One fixture form, `synthetic_extended`,
-and a deliberate handful of #183 pins. Roughly 37 cases, one device cycle, no production code.
+three join code paths, and the non-AST nested-loop path, with `Utf8View` as a declaration over
+plain strings and a deliberate handful of #183 pins. Roughly 37 cases, one device cycle, no production code.
 
 ### 15. [`aggregate-cases.md`](aggregate-cases.md) — state: new
 
