@@ -54,7 +54,7 @@ a device refusal an outcome rather than an abort, and records the real limits as
 
 ## Chain ENS-typed-nulls (base: master)
 
-The two fixes that do not need task 10, rebased beside it, and the two cases tasks after them.
+The two fixes that do not need task 10, rebased beside it.
 
 ### 1. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../tickets.md#t198) — state: done — PR #152
 
@@ -73,8 +73,11 @@ A lane whose build side got no rows keeps its typed zero-row table where the joi
 never written, and the table it needs is one the scatter builds and the driver drops. One derived
 index field, one conditional drop. Replaces the parked `empty-answers.md`.
 
+## Chain ENS-join-cases (base: master)
 
-### 3. [`join-cases.md`](join-cases.md) — state: approved to build
+Cases only, in `src/tests/gpu_tests/`: independent of every other chain's files.
+
+### 1. [`join-cases.md`](join-cases.md) — state: approved to build
 
 Cases only, along the three dimensions task 9 held constant and the corpus does not: a
 projection on every reachable join type, composite and `Int64`/`Utf8View`/`Date32` keys on the
@@ -82,7 +85,8 @@ three join code paths, and the non-AST nested-loop path, with `Utf8View` as a de
 plain strings and a deliberate handful of #183 pins. Roughly 37 cases, one device cycle, no production code.
 
 
-### 4. [`aggregate-cases.md`](aggregate-cases.md) — state: approved to build
+
+### 2. [`aggregate-cases.md`](aggregate-cases.md) — state: approved to build
 
 Cases only, after task 14: group keys the corpus uses (`Utf8View`, `Date32`, `Int64`, two
 columns), `count(*)` and expression arguments, every merge arm with rows, the stddev finalize,
