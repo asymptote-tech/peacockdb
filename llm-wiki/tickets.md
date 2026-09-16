@@ -61,19 +61,20 @@ DataFusion usually plans it away, so no corpus cell reaches it. Pinned by
 <a id="t216"></a>
 ### #216 — the device's global aggregate has no Welford arm
 
-A keyless `stddev` or `var` answers one finished `Float64` on the device where the plan declares
-the `[count, mean, m2]` state; the finalize above it then indexes past its one column.
+A keyless `stddev` answers one finished `Float64` on the device where the plan declares the
+`[count, mean, m2]` state, so the finalize above it fails; a keyless `var` is refused outright.
 
 `aggregate.cpp`'s grouped path honours `mergeable` and emits the triple with `MERGE_M2`; its
-keyless path (`key_cols.empty()`) reduces every `stddev` name with `make_std_aggregation`,
-whatever the phase. At the init that is the sample stddev of the argument — the right number in
-the wrong shape. At the merge the reduction runs over the state's first column, the count, so
-two arrivals of counts of one answer 0; and the finalize project above it refuses with
-`ColumnRef index 2 out of range (cols=1)`. So `SELECT stddev(x) FROM t` is a refusal on the
-device in every shape, since every plan finalizes the state above the init or the merge. Pinned by
+keyless path (`key_cols.empty()`) tests `is_stddev_name` alone and reduces that name with
+`make_std_aggregation`, whatever the phase — at the init the sample stddev of the argument, at
+the merge the stddev of the state's first column, the count — and the finalize project refuses
+with `ColumnRef index 2 out of range (cols=1)`; a `var` name falls to `make_reduce_agg`'s
+`unsupported aggregate function: var`. So `SELECT stddev(x) FROM t` and `SELECT var(x) FROM t`
+are refusals on the device in every shape. Pinned in `gpu_tests/aggregate_dimension_cases.rs` by
 `bug_a_global_welford_init_answers_a_finished_stddev_on_the_device`,
-`bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device` and the two
-`bug_a_global_…_finalize_is_refused_on_the_device` (`gpu_tests/aggregate_dimension_cases.rs`).
+`bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device`,
+`bug_a_global_stddev_finalize_is_refused_on_the_device` and
+`bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device`.
 
 <a id="t215"></a>
 ### #215 — a left nested-loop join over a predicate the AST cannot take is refused on the device

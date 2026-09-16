@@ -184,7 +184,7 @@ nullable and two-key merge agrees on both nodes, and four lanes do.
 | `bug_a_global_welford_init_answers_a_finished_stddev_on_the_device` | aggregate_dimension_cases | one `Float64` column `stddev(f64)`, its value `sqrt(m2 / (count - 1))` of the cpu's state to `WELFORD_RELATIVE` | #216 |
 | `bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device` | aggregate_dimension_cases | the done slot is one `Float64` column holding 0.0; the cpu merges the triple | #216 |
 | `bug_a_global_stddev_finalize_is_refused_on_the_device` | aggregate_dimension_cases | `ColumnRef index 2 out of range (cols=1)` | #216 |
-| `bug_a_global_var_finalize_is_refused_on_the_device` | aggregate_dimension_cases | the same | #216 |
+| `bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device` | aggregate_dimension_cases | `[in CudfAggregate] unsupported aggregate function: var`, at the merge itself under a `var`-named state, before its finalize; the cpu answers the finalized variance | #216 |
 | `bug_a_cast_to_decimal_is_exported_at_precision_38` | exec_cases | the cpu's values at `Decimal128(38, 0)` | #187 |
 | `bug_a_date_cast_to_text_is_refused_on_the_device` | exec_cases | `cast to STRING from a non-string type not supported in column path` | #203 |
 | `bug_a_text_cast_to_date_is_refused_on_the_device` | exec_cases | `Column type must be numeric or chrono or decimal32/64/128` | #218 |
@@ -271,6 +271,36 @@ line), Rust 1497 → 1492 and the grand total 1933 → 1928 (the first table's r
 5 + 393, the second's Rust rows to 88). One drift not this branch's, left as found: the header
 says C++ 67 and the C++ rows sum to 66, on master and on the parent alike; nothing here ran
 the C++ suites, so which side is wrong is unproven.
+
+### Completeness pass 2 — 2026-09-16, the `var` name on the wire
+
+`welford_state_by`, `welford_merge_by` and `welford_partial` (and `keyless_welford_partial`,
+`dispersion_finalize`, `finalized_within_welford` above them) now take the `AggFunc` the state
+belongs to, `Stddev` or `Var`; the state is named `var(f64)$…` under `Var`, so the merge's
+aggregator reaches the device as `var`, the name `sql_name` writes for a `var(x)` plan. Every
+stddev caller passes `AggFunc::Stddev` and is otherwise unchanged. `dispersion_finalize` builds
+its `AggSpec` from the state's own `agg_state` rather than resolving a SQL name, the idiom
+`plan/tests/aggregate.rs` already uses.
+
+What the device said for a keyless `var` merge, verbatim, the first cycle with the old
+`ColumnRef` assertion still in place (`/tmp/agg-var-run1.log`):
+
+    execute_node(#2 CudfAggregate{Merge}): [in CudfAggregate] unsupported aggregate function: var
+
+So the code reading held: the keyless block tests `is_stddev_name` alone, `var` falls to
+`make_reduce_agg`'s throw, and the refusal is at the aggregate, before any finalize — not the
+`ColumnRef index 2 out of range (cols=1)` the stddev pin sees. The case is renamed
+`bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device` and asserts that message
+through `gpu_refuses()`, which also holds the cpu to answering. The grouped
+`a_grouped_var_finalize_agrees_within_welford` still agrees under the `var` name: both names
+take the `MERGE_M2` arm there. No other case declared a `var` finalize over a `stddev` state
+(`dispersion_finalize("var"` had the two callers). No case added or removed, so `build-test.md`'s
+counts stand: 330 on the harness row, 385 on the rung.
+
+    test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured; 874 filtered out   (tests::gpu_tests::aggregate, shad-gpu)
+    test result: ok. 385 passed; 0 failed; 0 ignored; 0 measured; 538 filtered out  (gpu_tests::, shad-gpu)
+    test result: ok. 533 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out    (rust-only --lib, local)
+    test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out     (rust-only test_module_layout, local)
 
 ## Coordinator — 2026-09-16, to reviewing
 
@@ -457,3 +487,14 @@ code, not yet observed). The branch's `var` pin never put a `var` name on the wi
 `var` finalize. Routed to the developer: a `var`-named state, one device cycle, the pin on what
 the device actually says. The page, #216, the signoff and PR #156's body follow that result.
 The merger note no longer points the `bug_` register at `declared-schemas` (rejected on master).
+
+### Completeness pass 2, closed — coordinator
+
+The device, observed: a keyless `var` name is refused at the aggregate, `[in CudfAggregate]
+unsupported aggregate function: var`; the grouped `var` agrees through `MERGE_M2`. Pinned as
+`bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device`; the Welford fixtures now
+carry their `AggFunc`. `architecture.md`'s three #216 sentences and #216 itself rewritten to
+say `stddev` is reduced and `var` refused; #187's pin sentence restored; the signoff rewritten
+in place (65 cases, 13 `bug_`, 385/385, no harness addition); PR #156's body the same. The
+rung is 385 still — a rename, nothing added. To `completeness approved`; `done` waits on the CI
+run for the head that carries this code.

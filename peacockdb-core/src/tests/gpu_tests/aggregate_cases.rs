@@ -77,15 +77,23 @@ pub(crate) fn state_by(keys: &[GroupKey], aggs: &[AggCall]) -> Schema {
 /// the `agg_state` annotation that says the three belong to one `stddev` — without it both
 /// backends refuse `M2` and `MergeM2` (`plan/aggregate.rs`, `welford_owners`).
 pub(crate) fn welford_state() -> Schema {
-    welford_state_by(true)
+    welford_state_by(true, AggFunc::Stddev)
 }
 
-/// `welford_state` with or without its key: `[count, mean, m2]` for a global state.
-pub(crate) fn welford_state_by(grouped: bool) -> Schema {
+/// `welford_state` with or without its key — `[count, mean, m2]` for a global state — and
+/// owned by `func`, `Stddev` or `Var`. The state is named as the planner names it, the
+/// sample form (`sql_name` at `ddof` 1), so the name that reaches the device is the one a
+/// `stddev(x)` or `var(x)` plan writes.
+pub(crate) fn welford_state_by(grouped: bool, func: AggFunc) -> Schema {
+    let output = match func {
+        AggFunc::Stddev => "stddev(f64)",
+        AggFunc::Var => "var(f64)",
+        other => panic!("{other:?} has no Welford state; declare Stddev or Var"),
+    };
     let mut fields = vec![
-        Field::new("stddev(f64)$count", DataType::UInt64, true),
-        Field::new("stddev(f64)$mean", DataType::Float64, true),
-        Field::new("stddev(f64)$m2", DataType::Float64, true),
+        Field::new(format!("{output}$count"), DataType::UInt64, true),
+        Field::new(format!("{output}$mean"), DataType::Float64, true),
+        Field::new(format!("{output}$m2"), DataType::Float64, true),
     ];
     if grouped {
         fields.insert(0, Field::new("key", DataType::Int32, true));
@@ -95,8 +103,8 @@ pub(crate) fn welford_state_by(grouped: bool) -> Schema {
         fields: Arc::new(ArrowSchema::new(fields)),
         group_keys: (0..keys).collect(),
         agg_state: vec![AggStateColumns {
-            output: "stddev(f64)".to_string(),
-            func: AggFunc::Stddev,
+            output: output.to_string(),
+            func,
             ddof: 1,
             positions: (keys..keys + 3).collect(),
         }],
@@ -632,25 +640,31 @@ operator_case! {
 
 /// `merge_m2` is not per column: the three state columns go in as one call's arguments.
 pub(crate) fn welford_merge() -> GpuAggregateBatches {
-    welford_merge_by(true, None)
+    welford_merge_by(true, AggFunc::Stddev, None)
 }
 
-/// `welford_merge` grouped or global, finalized by `finalize` where given — one expression
-/// over the state's three columns, named as the output column it declares, `Float64`.
-pub(crate) fn welford_merge_by(grouped: bool, finalize: Option<NamedExpr>) -> GpuAggregateBatches {
-    let state = welford_state_by(grouped);
+/// `welford_merge` grouped or global, over the state `func` owns, finalized by `finalize`
+/// where given — one expression over the state's three columns, named as the output
+/// column it declares, `Float64`.
+pub(crate) fn welford_merge_by(
+    grouped: bool,
+    func: AggFunc,
+    finalize: Option<NamedExpr>,
+) -> GpuAggregateBatches {
+    let state = welford_state_by(grouped, func);
     let at = u32::from(grouped);
+    let triple: Vec<Field> = state.fields.fields()[at as usize..]
+        .iter()
+        .map(|f| f.as_ref().clone())
+        .collect();
     let aggs = vec![AggCall {
         func: PlanAgg::MergeM2,
-        args: vec![
-            Expr::column(at, "stddev(f64)$count"),
-            Expr::column(at + 1, "stddev(f64)$mean"),
-            Expr::column(at + 2, "stddev(f64)$m2"),
-        ],
-        outputs: state.fields.fields()[at as usize..]
+        args: triple
             .iter()
-            .map(|f| f.as_ref().clone())
+            .enumerate()
+            .map(|(i, f)| Expr::column(at + i as u32, f.name()))
             .collect(),
+        outputs: triple,
     }];
     let group_by = if grouped {
         vec![Expr::column(0, "key")]
@@ -675,13 +689,13 @@ pub(crate) fn welford_merge_by(grouped: bool, finalize: Option<NamedExpr>) -> Gp
 }
 
 /// One Welford partial per row of `synthetic(32, seed)`: count 1, mean `f64`, m2 0 —
-/// what an init over one row emits.
-pub(crate) fn welford_partial(seed: u64) -> RecordBatch {
+/// what an init over one row emits, under the names `func`'s grouped state declares.
+pub(crate) fn welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
     let s = synthetic(32, seed);
     let ones: ArrayRef = Arc::new(UInt64Array::from(vec![1u64; 32]));
     let zeros: ArrayRef = Arc::new(datafusion::arrow::array::Float64Array::from(vec![0.0; 32]));
     RecordBatch::try_new(
-        welford_state().fields.clone(),
+        welford_state_by(true, func).fields.clone(),
         vec![s.column(1).clone(), ones, s.column(4).clone(), zeros],
     )
     .unwrap()
@@ -692,7 +706,8 @@ pub(crate) fn welford_partial(seed: u64) -> RecordBatch {
 operator_case! {
     GpuAggregateBatches,
     fn bug_a_welford_merge_exports_its_count_as_int64() {
-        let arrivals = vec![welford_partial(1), welford_partial(2), welford_partial(3)];
+        let partial = |seed| welford_partial(AggFunc::Stddev, seed);
+        let arrivals = vec![partial(1), partial(2), partial(3)];
         let outcome = run_both(&welford_merge(), Script::Accumulate(arrivals));
         welford_answered(&outcome, 3);
     }

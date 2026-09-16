@@ -17,10 +17,10 @@ use super::aggregate_cases::{
     merge_over, same_within_welford, state_cut, welford_init_aggs, welford_merge_by,
     welford_partial, welford_state_by,
 };
-use super::script::{Script, run_both};
+use super::script::{Outcome, Script, run_both};
 use crate::plan::{
-    AggCall, BatchLayout, BinaryOp, Expr, GpuAggregate, GpuAggregateBatches, NamedExpr, PlanAgg,
-    Schema, finalize, resolve,
+    AggCall, AggFunc, AggSpec, BatchLayout, BinaryOp, Expr, GpuAggregate, NamedExpr, PlanAgg,
+    Schema, finalize,
 };
 use crate::tests::compare::{Order, assert_same};
 use crate::tests::given::{Given, columns};
@@ -275,9 +275,9 @@ operator_case! {
     }
 }
 
-/// `welford_partial(seed)` with its key dropped: what a global init over one row emits.
-fn keyless_welford_partial(seed: u64) -> RecordBatch {
-    welford_partial(seed)
+/// `welford_partial(func, seed)` with its key dropped: what a global init over one row emits.
+fn keyless_welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
+    welford_partial(func, seed)
         .project(&[1, 2, 3])
         .expect("the triple")
 }
@@ -288,8 +288,10 @@ fn keyless_welford_partial(seed: u64) -> RecordBatch {
 operator_case! {
     GpuAggregateBatches,
     fn bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device() {
-        let arrivals = vec![keyless_welford_partial(1), keyless_welford_partial(2)];
-        let outcome = run_both(&welford_merge_by(false, None), Script::Accumulate(arrivals));
+        let partial = |seed| keyless_welford_partial(AggFunc::Stddev, seed);
+        let arrivals = vec![partial(1), partial(2)];
+        let node = welford_merge_by(false, AggFunc::Stddev, None);
+        let outcome = run_both(&node, Script::Accumulate(arrivals));
         assert_eq!(cpu_slot(&outcome, 2).num_columns(), 3, "the cpu merges the triple");
         let zero: ArrayRef = Arc::new(Float64Array::from(vec![0.0]));
         let gpu = outcome.gpu.as_ref().expect("the device answers");
@@ -395,11 +397,12 @@ operator_case! {
 
 // The Welford triple with no key, and the dispersion finalize as the planner writes it —
 // `plan::finalize` over the merged state: a `CASE` over the count, a typed NULL, and for
-// `stddev` a `Sqrt`. Grouped, both agree; keyless, the device has no triple to finalize.
+// `stddev` a `Sqrt`. Grouped, both agree; keyless, the device has no triple to finalize
+// under `stddev` and no arm at all for `var`.
 
 /// The global Welford init: the triple over `f64` with no group.
 fn welford_init_global() -> GpuAggregate {
-    let state = welford_state_by(false);
+    let state = welford_state_by(false, AggFunc::Stddev);
     GpuAggregate::new(
         Given::of(Schema::new(schema()), BatchLayout::MultipleBatches),
         body(Vec::new(), welford_init_aggs(), None),
@@ -430,44 +433,57 @@ operator_case! {
     }
 }
 
-/// The planner's own finalize for `name` — `stddev` or `var` — over the merged triple,
-/// which sits after `keys` key columns.
-fn dispersion_finalize(name: &str, keys: u32) -> NamedExpr {
-    let state = welford_state_by(keys == 1);
+/// The planner's own finalize for `func` — `Stddev` or `Var` — over the merged triple
+/// its state declares, which sits after `keys` key columns; named as that state's output.
+fn dispersion_finalize(func: AggFunc, keys: u32) -> NamedExpr {
+    let state = welford_state_by(keys == 1, func);
     let fields: Vec<_> = state.fields.fields()[keys as usize..]
         .iter()
         .map(|f| f.as_ref().clone())
         .collect();
-    let spec = resolve(name).expect("a dispersion aggregate");
+    let owner = &state.agg_state[0];
+    let spec = AggSpec {
+        func: owner.func,
+        ddof: owner.ddof,
+    };
     NamedExpr::new(
         finalize(spec, &fields, keys, &DataType::Float64),
-        &format!("{name}(f64)"),
+        &owner.output,
     )
 }
 
 /// Both answered the done slot, the key exactly and the finalized `Float64` to
 /// `WELFORD_RELATIVE`: the two merged states differ in their last digits, and a root or a
 /// quotient of them does too.
-fn finalized_within_welford(node: &GpuAggregateBatches) {
-    let arrivals = vec![welford_partial(1), welford_partial(2)];
-    let outcome = run_both(node, Script::Accumulate(arrivals));
+fn finalized_within_welford(func: AggFunc) {
+    let node = welford_merge_by(true, func, Some(dispersion_finalize(func, 1)));
+    let arrivals = vec![welford_partial(func, 1), welford_partial(func, 2)];
+    let outcome = run_both(&node, Script::Accumulate(arrivals));
     same_within_welford(cpu_slot(&outcome, 2), gpu_slot(&outcome, 2), true, &[1]);
 }
 
 operator_case! {
     GpuAggregateBatches,
     fn a_grouped_stddev_finalize_agrees_within_welford() {
-        let node = welford_merge_by(true, Some(dispersion_finalize("stddev", 1)));
-        finalized_within_welford(&node);
+        finalized_within_welford(AggFunc::Stddev);
     }
 }
 
 operator_case! {
     GpuAggregateBatches,
     fn a_grouped_var_finalize_agrees_within_welford() {
-        let node = welford_merge_by(true, Some(dispersion_finalize("var", 1)));
-        finalized_within_welford(&node);
+        finalized_within_welford(AggFunc::Var);
     }
+}
+
+/// The keyless merge under `func`'s finalize, over two global partials.
+fn global_finalize_outcome(func: AggFunc) -> Outcome {
+    let node = welford_merge_by(false, func, Some(dispersion_finalize(func, 0)));
+    let arrivals = vec![
+        keyless_welford_partial(func, 1),
+        keyless_welford_partial(func, 2),
+    ];
+    run_both(&node, Script::Accumulate(arrivals))
 }
 
 // #216 — over the one column the keyless merge answers, the finalize's `m2` reference is
@@ -475,9 +491,7 @@ operator_case! {
 operator_case! {
     GpuAggregateBatches,
     fn bug_a_global_stddev_finalize_is_refused_on_the_device() {
-        let node = welford_merge_by(false, Some(dispersion_finalize("stddev", 0)));
-        let arrivals = vec![keyless_welford_partial(1), keyless_welford_partial(2)];
-        let outcome = run_both(&node, Script::Accumulate(arrivals));
+        let outcome = global_finalize_outcome(AggFunc::Stddev);
         assert!(
             outcome.gpu_refuses().contains("ColumnRef index 2 out of range (cols=1)"),
             "{}",
@@ -486,15 +500,17 @@ operator_case! {
     }
 }
 
-// #216 — the variance the same way.
+// #216 — the variance never reaches its finalize: the keyless path knows `stddev` alone
+// (`is_stddev_name`), so a `var` name falls through to `make_reduce_agg` and the aggregate
+// itself is refused; the cpu answers the finalized variance.
 operator_case! {
     GpuAggregateBatches,
-    fn bug_a_global_var_finalize_is_refused_on_the_device() {
-        let node = welford_merge_by(false, Some(dispersion_finalize("var", 0)));
-        let arrivals = vec![keyless_welford_partial(1), keyless_welford_partial(2)];
-        let outcome = run_both(&node, Script::Accumulate(arrivals));
+    fn bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device() {
+        let outcome = global_finalize_outcome(AggFunc::Var);
         assert!(
-            outcome.gpu_refuses().contains("ColumnRef index 2 out of range (cols=1)"),
+            outcome
+                .gpu_refuses()
+                .contains("[in CudfAggregate] unsupported aggregate function: var"),
             "{}",
             outcome.gpu_refuses()
         );

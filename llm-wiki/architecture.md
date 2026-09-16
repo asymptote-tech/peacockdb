@@ -225,10 +225,10 @@ each position needs. Every aggregate decomposes into three declared parts, each 
   `stddev` a `CASE` over a `sqrt`, the rest a rename.
 
 A node with no finalize list emits state; a node with one emits finalized columns — on the cpu
-always, on the device except the keyless Welford path, which reduces `stddev` and `var` to one
-finished value at init and at merge ([#216](tickets.md#t216)). Nothing else distinguishes the
-positions, so the single-node shortcut is not a third case — it is init
-aggregators and finalize expressions on the same node.
+always, on the device except the keyless Welford path, which reduces a `stddev` name to one
+finished value at init and at merge and refuses a `var` name outright ([#216](tickets.md#t216)).
+Nothing else distinguishes the positions, so the single-node shortcut is not a third case — it
+is init aggregators and finalize expressions on the same node.
 
 | Aggregate | init (over rows) | state | merge (over state) | finalize |
 |---|---|---|---|---|
@@ -789,8 +789,9 @@ come back per output handle per call, so a per-node figure is this side's fold o
 
 **Every aggregate merges as state and finalizes in a project**, so both engines evaluate the
 same expression and agree by construction rather than by two implementations happening to
-match. The device's keyless `stddev` and `var` are the one exception, and the project above
-them refuses ([#216](tickets.md#t216)). Two appended fbs values buy that: `UnaryOp.Sqrt`, so a
+match. The device's keyless Welford path is the one exception: `stddev` comes back finished and
+the project above it refuses, `var` is refused at the aggregate ([#216](tickets.md#t216)). Two
+appended fbs values buy that: `UnaryOp.Sqrt`, so a
 finalize can be written, and `AggregateMode.Merge`, so a merge can be only a merge — cuDF's
 `MERGE_M2` is otherwise reachable only from an arm that finalizes on the same call, and these
 plans stack two merges, per lane and then across lanes.
@@ -1081,7 +1082,7 @@ to it.
 | `SortExpr.asc`, `.nulls_first` | `node_writer.rs` | the node's sort keys, from `PhysicalSortExpr::options` | `cudf::order`,<br>`cudf::null_order` |
 | `CudfSort.fetch`,<br>`CudfSortPreservingMerge.fetch` | `node_writer.rs` | the node's `fetch`, `-1` where there is none | a post-sort / post-merge slice; the sort skips it at 0 ([#217](tickets.md#t217)) |
 | `BinaryExpr`<br>`.out_decimal_precision/scale` | `expr_writer.rs` | the expression's declared output type | the binop output type, and division pre-scales to hit it |
-| `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from values, `Merge` merges state into state. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which cuDF aggregation runs, whether state columns are merged, and whether the result is state or a value — except on the keyless path, where a `stddev` or `var` name decides all three whatever the mode ([#216](tickets.md#t216)) |
+| `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from values, `Merge` merges state into state. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which cuDF aggregation runs, whether state columns are merged, and whether the result is state or a value — except on the keyless path, where a `stddev` name decides all three whatever the mode and a `var` name has no arm ([#216](tickets.md#t216)) |
 | `CudfRepartition.hash_exprs`,<br>`num_partitions` | `node_writer.rs` | the emit node's keys and lane count | key ordinals and N for<br>`spark_hash_partition` |
 | `CudfScan.limit` | `node_writer.rs` | the source's pushed-down limit | `parquet_reader_options::set_num_rows` |
 | `AggregateFuncNode`<br>`.out_decimal_precision/scale` | `aggregate_writer.rs`, at zero | nothing: decomposition means no `avg` reaches a device, so the scale rides the finalize divide's own pair | **nothing** here, deliberately, and the writer says why |
