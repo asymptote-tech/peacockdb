@@ -6,23 +6,22 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::{ArrayRef, AsArray, Float64Array, Int64Array, UInt8Array};
+use datafusion::arrow::array::{ArrayRef, AsArray, Int64Array, UInt8Array};
 use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::{DataType, Float64Type, UInt64Type};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::ScalarValue;
 
 use super::aggregate_cases::{
-    GroupKey, KEY, batch_of, body, call, close, cpu_slot, gpu_slot, init, init_by, input, merge_by,
-    merge_over, same_within_welford, state_cut, welford_init_aggs, welford_merge_by,
-    welford_partial, welford_state_by,
+    GroupKey, KEY, body, call, cpu_slot, gpu_slot, init, init_by, input, merge_by, merge_over,
+    state_cut, welford_init_aggs, welford_merge_by, welford_partial, welford_state_by,
 };
 use super::script::{Outcome, Script, run_both};
 use crate::plan::{
     AggCall, AggFunc, AggSpec, BatchLayout, BinaryOp, Expr, GpuAggregate, NamedExpr, PlanAgg,
     Schema, finalize,
 };
-use crate::tests::compare::{Order, assert_same};
+use crate::tests::compare::{Order, close, same_within_welford};
 use crate::tests::given::{Given, columns};
 use crate::tests::synthetic::{schema, synthetic};
 
@@ -283,22 +282,31 @@ fn keyless_welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
 }
 
 // #216 — the same arm at the merge: the `stddev` it reduces is over the state's first
-// column, the count, and every partial's count is 1, so the device answers 0 where the cpu
-// answers the merged triple.
+// column, the count — 1 per row and 0 where the row's value is null — so the device
+// answers the sample stddev of the counts where the cpu answers the merged triple.
 operator_case! {
     GpuAggregateBatches,
     fn bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device() {
         let partial = |seed| keyless_welford_partial(AggFunc::Stddev, seed);
         let arrivals = vec![partial(1), partial(2)];
+        let counts: Vec<f64> = arrivals
+            .iter()
+            .flat_map(|p| p.column(0).as_primitive::<UInt64Type>().values().iter())
+            .map(|c| *c as f64)
+            .collect();
+        let mean = counts.iter().sum::<f64>() / counts.len() as f64;
+        let m2: f64 = counts.iter().map(|c| (c - mean) * (c - mean)).sum();
+        let stddev_of_counts = (m2 / (counts.len() - 1) as f64).sqrt();
         let node = welford_merge_by(false, AggFunc::Stddev, None);
         let outcome = run_both(&node, Script::Accumulate(arrivals));
         assert_eq!(cpu_slot(&outcome, 2).num_columns(), 3, "the cpu merges the triple");
-        let zero: ArrayRef = Arc::new(Float64Array::from(vec![0.0]));
-        let gpu = outcome.gpu.as_ref().expect("the device answers");
-        assert_same(
-            &[Vec::new(), Vec::new(), vec![batch_of(vec![("stddev(f64)", zero)])]],
-            gpu,
-            Order::Any,
+        let gpu = gpu_slot(&outcome, 2);
+        assert_eq!((gpu.num_columns(), gpu.num_rows()), (1, 1), "one finished value");
+        assert_eq!(gpu.schema().field(0).name(), "stddev(f64)");
+        let answered = gpu.column(0).as_primitive::<Float64Type>().value(0);
+        assert!(
+            close(answered, stddev_of_counts),
+            "device {answered:e}, the counts' stddev {stddev_of_counts:e}"
         );
     }
 }

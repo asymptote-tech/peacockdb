@@ -9,11 +9,13 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::UInt32Array;
+use datafusion::arrow::array::{AsArray, UInt32Array};
 use datafusion::arrow::compute::{
     SortColumn, cast, concat_batches, lexsort_to_indices, take_record_batch,
 };
-use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+use datafusion::arrow::datatypes::{
+    DataType, Field, Float64Type, Int32Type, Schema as ArrowSchema,
+};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::arrow::util::pretty::pretty_format_batches;
 
@@ -110,6 +112,80 @@ fn names_and_types(batch: &RecordBatch) -> Vec<(String, DataType)> {
         .iter()
         .map(|f| (f.name().clone(), f.data_type().clone()))
         .collect()
+}
+
+/// The device's `gpu` against `expected`: every column's name and type exactly, then every
+/// column's values exactly but the `approximate` ones, which are `Float64` compared to
+/// `WELFORD_RELATIVE` — the one inexact comparison in the harness. Rows are matched on the
+/// `Int32` key at column 0 where `keyed`, and by position — one row — where not.
+pub(crate) fn same_within_welford(
+    expected: &RecordBatch,
+    gpu: &RecordBatch,
+    keyed: bool,
+    approximate: &[usize],
+) {
+    assert_eq!(
+        names_and_types(expected),
+        names_and_types(gpu),
+        "schema differs\n  cpu: {}\n  gpu: {}",
+        expected.schema(),
+        gpu.schema()
+    );
+    let exact: Vec<usize> = (0..expected.num_columns())
+        .filter(|i| !approximate.contains(i))
+        .collect();
+    assert_same(
+        &[vec![expected.project(&exact).expect("the exact columns")]],
+        &[vec![
+            gpu.project(&exact).expect("the device's exact columns"),
+        ]],
+        Order::Any,
+    );
+    let key_of = |b: &RecordBatch, row: usize| -> Option<Option<i32>> {
+        keyed.then(|| {
+            b.column(0)
+                .as_primitive::<Int32Type>()
+                .iter()
+                .nth(row)
+                .unwrap()
+        })
+    };
+    let floats = |b: &RecordBatch, i: usize| {
+        b.column(i)
+            .as_primitive::<Float64Type>()
+            .iter()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(expected.num_rows(), gpu.num_rows(), "rows");
+    for &i in approximate {
+        let what = expected.schema().field(i).name().clone();
+        let (ours, theirs) = (floats(expected, i), floats(gpu, i));
+        for row in 0..gpu.num_rows() {
+            let key = key_of(gpu, row);
+            let at = match key {
+                None => row,
+                Some(key) => (0..expected.num_rows())
+                    .find(|r| key_of(expected, *r) == Some(key))
+                    .unwrap_or_else(|| panic!("key {key:?} is the device's alone")),
+            };
+            match (ours[at], theirs[row]) {
+                (None, None) => {}
+                (Some(a), Some(b)) => assert!(
+                    close(a, b),
+                    "{what} at key {key:?}: cpu {a:e}, device {b:e}"
+                ),
+                (a, b) => panic!("{what} at key {key:?}: cpu {a:?}, device {b:?}"),
+            }
+        }
+    }
+}
+
+/// How far the two Welford states may drift, relative to the larger magnitude: the last few
+/// digits of an f64, which is what an order-dependent update over dyadic inputs costs.
+const WELFORD_RELATIVE: f64 = 1e-9;
+
+pub(crate) fn close(a: f64, b: f64) -> bool {
+    a == b || (a - b).abs() <= WELFORD_RELATIVE * a.abs().max(b.abs())
 }
 
 /// A slot's batches concatenated: what one call produced is one table, however it was cut.
@@ -245,4 +321,36 @@ fn the_asserting_form_panics_with_the_reason() {
         &[vec![synthetic(9, 1)]],
         Order::Any,
     );
+}
+
+/// `[key Int32, stddev_x Float64]` over two rows: what a grouped dispersion finalize
+/// answers, with column 1 renamed or retyped as the case asks.
+fn finalized(name: &str, ty: DataType) -> RecordBatch {
+    let key = Arc::new(datafusion::arrow::array::Int32Array::from(vec![1, 2]));
+    let values = Arc::new(datafusion::arrow::array::Float64Array::from(vec![1.5, 2.5]));
+    let column = cast(&(values as datafusion::arrow::array::ArrayRef), &ty).unwrap();
+    RecordBatch::try_new(
+        Arc::new(ArrowSchema::new(vec![
+            Field::new("key", DataType::Int32, true),
+            Field::new(name, ty, true),
+        ])),
+        vec![key, column],
+    )
+    .unwrap()
+}
+
+#[test]
+#[should_panic(expected = "stddev_x")]
+fn a_renamed_approximate_column_is_named_before_its_values_are_compared() {
+    let expected = finalized("stddev_x", DataType::Float64);
+    let gpu = finalized("stddev_y", DataType::Float64);
+    same_within_welford(&expected, &gpu, true, &[1]);
+}
+
+#[test]
+#[should_panic(expected = "Float64")]
+fn a_retyped_approximate_column_is_named_before_its_values_are_compared() {
+    let expected = finalized("stddev_x", DataType::Float64);
+    let gpu = finalized("stddev_x", DataType::Float32);
+    same_within_welford(&expected, &gpu, true, &[1]);
 }
