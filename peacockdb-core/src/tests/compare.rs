@@ -6,6 +6,8 @@
 //! not a zero-row batch: a limit outside its interval and a one-call join's finish return
 //! nothing, and both sides returning nothing is agreement. Nullability is not compared —
 //! the device reports it from the data, and `plan/validate.rs` ignores it for that reason.
+//! `same_within_welford` is the one inexact comparison here: names and types exact, then the
+//! Welford columns within `WELFORD_RELATIVE`, the drift an order-dependent update costs.
 
 use std::sync::Arc;
 

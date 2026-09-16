@@ -623,7 +623,8 @@ pub(crate) fn welford_merge_by(
 
 /// One Welford partial per row of `synthetic(32, seed)`: count 1, mean `f64`, m2 0 — what
 /// an init over one row emits, under the names `func`'s grouped state declares. A null
-/// row counts nothing: count 0, mean NULL, m2 0, as the init would emit for it.
+/// row counts nothing: count 0, so a merge that weights by count folds nothing from it,
+/// and the mean is left null rather than the `0.0` the cpu's own init would write there.
 pub(crate) fn welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
     let s = synthetic(32, seed);
     let counts: ArrayRef = Arc::new(UInt64Array::from_iter_values(

@@ -111,3 +111,17 @@ surprise. Delivered as one commit on PR #157 against `ENS-aggregate-cases`. What
 reads: the comparator and its two `should_panic` tests, the composite-key pin, the fixture and
 the one re-pin (#216's keyless merge, now asserting the counts' stddev computed from its own
 arrivals), the registers and the counts (386 on the rung).
+
+## Review round 1 — 2026-09-16
+
+0 blocking, 0 important, 2 nits, both comment-only and applied by the coordinator: the
+`welford_partial` doc claimed the cpu's init emits a null mean for a null row (it writes `0.0`;
+`VarianceGroupsAccumulator::state`), so the doc now states the fixture's purpose instead; and
+`compare.rs`'s module doc gained the clause naming `same_within_welford` as its one inexact
+comparison. The reviewer simulated the composite-key pin's rows in Python (device drops build
+rows 4, 9, 14 — `key=0`, `i32=NULL`; both engines' counts red under a fix either way), confirmed
+the two `should_panic` tests are red on the old comparator (`did not panic` / arrow's
+`primitive array`), reproduced #216's `sqrt(3.75/63)` from 60 ones and 4 zeros, and recounted
+every `build-test.md` figure from the tree. `architecture.md`: no sentence falsified. Named and
+left: `build-test.md`'s C++ 67 against rows summing to 66 is master's, on the helper's list.
+To `completing`.
