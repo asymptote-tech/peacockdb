@@ -498,3 +498,10 @@ say `stddev` is reduced and `var` refused; #187's pin sentence restored; the sig
 in place (65 cases, 13 `bug_`, 385/385, no harness addition); PR #156's body the same. The
 rung is 385 still — a rename, nothing added. To `completeness approved`; `done` waits on the CI
 run for the head that carries this code.
+
+## Done again — 2026-09-16
+
+CI green on the head `c15bd0b8` (run `35149121688`): both dataset-matrix legs, the 25.02 GPU
+build, GPU tests on shad-gpu, cost report, S3 check all success. The chain's last task; nothing
+left to dispatch. For the merger: #155 first, then #156 retargeted to master, never
+`--delete-branch`.

@@ -94,7 +94,7 @@ projection on every reachable join type, composite and `Int64`/`Utf8`/`Date32` k
 three join code paths, and the non-AST nested-loop path. Roughly 27 cases, one device cycle, no production code.
 
 
-### 2. [`aggregate-cases.md`](aggregate-cases.md) — state: completeness approved — PR #156; waiting on CI for the var repin
+### 2. [`aggregate-cases.md`](aggregate-cases.md) — state: done — PR #156
 
 Cases only, after join-cases: group keys the corpus uses (`Utf8`, `Date32`, `Int64`, two
 columns), `count(*)` and expression arguments, every merge arm with rows, the stddev finalize,
