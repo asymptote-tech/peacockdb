@@ -361,3 +361,12 @@ breakage. `run_gpu` (`script.rs`) is this branch's extraction of `run_both`'s de
 made for the view cases alone: with them gone, `script.rs` goes back to the parent's shape.
 The spec's signoff (appended before the reopening) is rewritten at the completeness pass.
 Outstanding: Task 8, then the proving commands; PR #156 stays, CI re-runs on the new head.
+
+## Dispatch 2 — 2026-09-16, Task 8
+
+- Hosts: **verda down** (`Could not resolve hostname`), rust-only proofs local; the sf1
+  symlinks in this worktree resolve. **shad-gpu up**, 0 MiB of 144 GiB held.
+- Caches: `target-cudf-rapids-cuda-12.2` warm from join-cases' Task 8 (the stale build-script
+  paths were cleaned there; see `join-cases-detail.md`); `cpp/build26` is absent, so `--build` re-runs cmake there (minutes, not the cold hour).
+- Routing: Task 8's six steps, plus `script.rs` back to the parent's shape; one device cycle
+  over `_cases`, then the whole rung; rust-only `--lib` and `test_module_layout` local.
