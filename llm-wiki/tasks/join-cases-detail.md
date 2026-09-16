@@ -235,3 +235,9 @@ the branch put on the record.
 
 For the helper, outside this task: `build-test.md`'s header says C++ 67 and its rows sum to 66;
 on master before this branch, untouched here.
+
+## Done — 2026-09-16
+
+CI green on the code as shipped: run for `9e38c41b` (the last commit touching `.rs`) — both
+dataset-matrix legs, the 25.02 GPU build, GPU tests on shad-gpu, cost report, S3 check all
+success. The head run for `7a59490f` is documentation-only and skipped by design.
