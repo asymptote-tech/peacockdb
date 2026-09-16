@@ -100,3 +100,11 @@ Cases only, after join-cases: group keys the corpus uses (`Utf8`, `Date32`, `Int
 columns), `count(*)` and expression arguments, every merge arm with rows, the stddev finalize,
 the project expressions and casts with no case, and sorted merges on `desc`, nullable and
 composite keys — #202's second site. No fixture change, no production code. Roughly 40 cases.
+
+### 3. [`case-expectations.md`](case-expectations.md) — state: approved to build
+
+Cases only, on the branch that carries both: `same_within_welford` compares names and types before
+its one tolerance; the composite-key form of #59 is pinned instead of sidestepped; `welford_partial`
+counts a null value as 0 so the two backends stop agreeing on a phantom zero. A case that goes red
+under the tightened expectation is a ticket and a `bug_`, never a fixture restored.
+
