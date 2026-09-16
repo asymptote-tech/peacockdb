@@ -57,21 +57,6 @@ The driver takes an optional hook called on every emitted batch — the one prod
 test: a validator holding each device batch to its node's schema, four mock-driver unit tests, and a
 `schema_validation_enabled|disabled` argument on `corpus_query!`, on for every enabled cell.
 
-## Chain C (base: master)
-
-walk-drives-every-plan alone. declared-schemas is rejected and archived (2026-09-16); this task's
-branch is built on `ENS-declared-schemas` and needs a decision — carry its `wire/gpu_tests/walk.rs`
-onto master without the declared catalogue, or drop it with its base.
-
-### 1. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: blocked(completing) — PR #154 → `ENS-declared-schemas`, a rejected base; unverified there
-
-**Conditional: its first task reads the survey's report, argues what is still worth teaching, and
-stops for the human.** The walk is the only instrument that can ask what one call produced, and it
-panics on ten shapes — eight never taught, two the engine truly cannot run. Teaches the eight, makes
-a device refusal an outcome rather than an abort, and records the real limits as `bug_` tests naming
-#136, #152 and #175. No production code. Deliverable: a checked table of what it can drive.
-
-
 ## Chain D (base: master)
 
 The two fixes, rebased onto master after reaching `done` without a test run. The coordinator finishes
