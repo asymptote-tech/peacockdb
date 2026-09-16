@@ -350,3 +350,21 @@ What is owed before `done`, per the spec's last section: rust-only, the C++ test
 (`peacock_plan_tests`, the seven `Literals.*`; `peacock_cpu_tests`), and the device cells
 (`peacockdb_core_gpu_lib gpu_tests::`, `test_gpu_corpus`). No review round unless a code line
 changed; none did.
+
+### 2026-09-16 — re-proven on master's tip: every tier green, no code changed
+
+Developer run on `b1851669`, nothing changed in the tree. **rust-only, local** (verda does not
+resolve): `--lib -- --test-threads=2` 533 passed 0 failed 2 ignored; `test_module_layout` 17,
+`test_ci_coverage` 8, `test_golden_format` 26, all rc 0. The first `--lib` run failed 35 with
+`register the tables: IoError(NotFound)` — this worktree had no `testdata/tpch.sf1` or
+`tpcds.sf1`; the gitignored symlinks to `/home/dmitry/peacockdb/testdata/` the alpha worktree
+carries were added here and the rerun was clean. Environmental. **C++ build** rc 0; the only two
+warnings are `-Wstringop-overflow` inside vendored flatbuffers `reflection.cpp`, rebuilt from
+scratch because `cpp/build` did not exist here — 0 from `cpp/src`, `cpp/tests` or the `gpu`
+rust build. **shad-gpu** run `20260916T205257-41045`, empty filter, gate exit 0, every pool built:
+`peacock_cpu_tests` 12, `peacock_gpu_tests` 6, `peacock_plan_tests` 34 with all seven `Literals.*`
+`OK`, `peacock_tpch_tests` 4, `peacock_tpchv_tests` 4; `peacockdb_core_gpu_lib gpu_tests::` 287
+passed 0 failed 0 ignored (`exec_cases::` 33, the task's three named `ok`); `test_gpu_corpus` 8.
+The 287 is master's own count after tasks 4–9 merged and declared-schemas left; this branch's
+`build-test.md` says 287 and 8, so wiki and run agree. CI run 35148513233 on `b1851669` in
+progress at the time of writing; `done` waits on it.
