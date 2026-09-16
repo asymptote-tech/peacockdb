@@ -68,7 +68,14 @@ async fn read_table(
         .to_string();
 
     let table_url = ListingTableUrl::parse(path.to_str().unwrap()).unwrap();
-    let format = Arc::new(ParquetFormat::default().with_enable_pruning(true));
+    // Strings are Utf8 from the leaf up: in DataFusion 45 the parquet reader is what puts
+    // a view type into a plan, and cuDF has no view layout (#183, tasks/utf8-everywhere.md).
+    // This format's own options are what infer_schema reads; the session config is not.
+    let format = Arc::new(
+        ParquetFormat::default()
+            .with_enable_pruning(true)
+            .with_force_view_types(false),
+    );
     let listing_options = ListingOptions::new(format).with_file_extension(".parquet");
 
     let resolved_schema = listing_options

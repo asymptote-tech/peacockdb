@@ -16,7 +16,7 @@ use datafusion::common::JoinType;
 use super::GpuNode;
 use super::Schema;
 use super::{BatchLayout, KeyDistribution, NodeKind, PartitionLayout, SortOrder};
-use super::{input_layout, input_schema};
+use super::{check_expr_types, input_layout, input_schema};
 
 impl GpuNode for GpuCrossJoin {
     fn kind(&self) -> &NodeKind {
@@ -325,6 +325,7 @@ fn check_filter_columns(
     build: &Schema,
     probe: &Schema,
 ) -> Result<(), PlanError> {
+    check_expr_types(filter, node)?;
     let mut refs = Vec::new();
     collect_column_refs(filter, &mut refs);
     for reference in refs {

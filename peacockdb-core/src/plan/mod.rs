@@ -37,7 +37,8 @@ use crate::executor::RowRange;
 use accumulators::{new_accumulate_batches_and_sort, new_coalesce_all_batches, new_limit};
 use aggregate::{new_aggregate, new_aggregate_batches};
 use common::{
-    check_column_refs, check_merge_keys, input_layout, input_schema, rebase_through_projection,
+    check_column_refs, check_expr_types, check_merge_keys, input_layout, input_schema,
+    is_view_type, rebase_through_projection,
 };
 use exec_ops::{new_filter, new_project, new_sort};
 use join::{joined_layout, new_hash_join};

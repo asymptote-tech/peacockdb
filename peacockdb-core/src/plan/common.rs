@@ -1,9 +1,90 @@
 //! What the plan's implementation modules share: the input a node declares it consumes,
 //! and the three checks more than one node makes.
 
+use datafusion::arrow::datatypes::DataType;
+
 use super::{
     ColumnOrder, Expr, GpuNode, KeyDistribution, PartitionLayout, PlanError, Schema, SortOrder,
 };
+
+/// The arrow layouts cuDF has no counterpart for: it holds one string layout and exports it
+/// as `Utf8`, and cannot import a view array at all.
+pub(crate) fn is_view_type(data_type: &DataType) -> bool {
+    matches!(
+        data_type,
+        DataType::Utf8View
+            | DataType::BinaryView
+            | DataType::ListView(_)
+            | DataType::LargeListView(_)
+    )
+}
+
+/// Every type an expression names — a literal's, a cast's target, a scalar function's return,
+/// a binary's out type — is one the device can hold. The parquet option that produced view
+/// types is off, so one that appears here was minted upstream, and this is where it is caught
+/// rather than at the sink (#183).
+pub(crate) fn check_expr_types(expr: &Expr, site: &str) -> Result<(), PlanError> {
+    let refuse = |what: &str, data_type: &DataType| {
+        Err(PlanError::Invalid(format!(
+            "{site}: {what} is {data_type}, a view type the device cannot hold"
+        )))
+    };
+    match expr {
+        Expr::Column(_) => Ok(()),
+        Expr::Literal(value) if is_view_type(&value.data_type()) => {
+            refuse("a literal", &value.data_type())
+        }
+        Expr::Literal(_) => Ok(()),
+        Expr::Binary {
+            left,
+            right,
+            out_type,
+            ..
+        } => {
+            if is_view_type(out_type) {
+                return refuse("a binary's type", out_type);
+            }
+            check_expr_types(left, site)?;
+            check_expr_types(right, site)
+        }
+        Expr::Unary { arg, .. } => check_expr_types(arg, site),
+        Expr::Cast { expr, target } => {
+            if is_view_type(target) {
+                return refuse("a cast target", target);
+            }
+            check_expr_types(expr, site)
+        }
+        Expr::Like { expr, pattern, .. } => {
+            check_expr_types(expr, site)?;
+            check_expr_types(pattern, site)
+        }
+        Expr::Case {
+            comparand,
+            when_then,
+            else_expr,
+        } => {
+            for part in comparand.iter().chain(else_expr.iter()) {
+                check_expr_types(part, site)?;
+            }
+            for (when, then) in when_then {
+                check_expr_types(when, site)?;
+                check_expr_types(then, site)?;
+            }
+            Ok(())
+        }
+        Expr::ScalarFunction {
+            args, return_type, ..
+        } => {
+            if is_view_type(return_type) {
+                return refuse("a scalar function's return type", return_type);
+            }
+            for arg in args {
+                check_expr_types(arg, site)?;
+            }
+            Ok(())
+        }
+    }
+}
 
 /// The layout a node inherits from its input. A sink is the root, so it is never one.
 pub(crate) fn input_layout(input: &dyn GpuNode) -> PartitionLayout {
@@ -31,6 +112,7 @@ pub(crate) fn check_column_refs(
     against: &Schema,
     site: &str,
 ) -> Result<(), PlanError> {
+    check_expr_types(expr, site)?;
     match expr {
         Expr::Column(reference) => {
             let field = against

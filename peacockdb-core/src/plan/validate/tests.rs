@@ -1,5 +1,6 @@
 use crate::plan::*;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+use datafusion::common::{JoinType, ScalarValue};
 use std::any::Any;
 use std::sync::Arc;
 
@@ -406,4 +407,79 @@ fn a_childs_complaint_comes_before_its_parents() {
     let broken = source(schema_of(&["a"]), PartitionLayout::new(0));
     let tree = rooted(Box::new(GpuMergePartitions::new(broken)));
     invalid(validate(tree.as_ref()), "no lanes");
+}
+
+#[test]
+fn a_node_declaring_a_view_type_is_refused() {
+    // cuDF has one string layout and exports it as Utf8; a schema declaring Utf8View names
+    // a container the device never holds, and the sink would refuse the batch (#183).
+    let tree = rooted(source(
+        one_column("s", DataType::Utf8View),
+        PartitionLayout::new(1),
+    ));
+    invalid(
+        validate(tree.as_ref()),
+        "GpuDeclaring: column 0 s: Utf8View is a view type the device cannot hold",
+    );
+}
+
+#[test]
+fn a_cast_to_a_view_type_is_refused() {
+    let input = source(one_column("s", DataType::Utf8), PartitionLayout::new(1));
+    let project = Box::new(GpuProject::new(
+        input,
+        vec![NamedExpr::new(
+            Expr::Cast {
+                expr: Box::new(Expr::column(0, "s")),
+                target: DataType::Utf8View,
+            },
+            "v",
+        )],
+        one_column("v", DataType::Utf8),
+    ));
+    invalid(
+        validate(rooted(project).as_ref()),
+        "GpuProject: a cast target is Utf8View, a view type the device cannot hold",
+    );
+}
+
+#[test]
+fn a_residual_filter_naming_a_view_literal_is_refused() {
+    // The residual is checked through collect_column_refs rather than check_column_refs,
+    // so the literal would escape a rule that lives only on the latter's path.
+    let build = source(
+        one_column("k", DataType::Utf8),
+        PartitionLayout {
+            batch_layout: BatchLayout::SingleBatch,
+            ..PartitionLayout::new(1)
+        },
+    );
+    let probe = source(one_column("fk", DataType::Utf8), PartitionLayout::new(1));
+    let filter = Expr::binary(
+        Expr::column(0, "k"),
+        BinaryOp::Eq,
+        Expr::Literal(ScalarValue::Utf8View(Some("x".to_string()))),
+        DataType::Boolean,
+    );
+    let join = Box::new(GpuHashJoin::new(
+        build,
+        probe,
+        JoinType::Inner,
+        vec![(0, 0)],
+        Some(filter),
+        vec![JoinFilterColumn {
+            side: JoinSide::Build,
+            index: 0,
+        }],
+        false,
+        None,
+        Schema::new(Arc::new(ArrowSchema::new(vec![
+            Field::new("k", DataType::Utf8, true),
+            Field::new("fk", DataType::Utf8, true),
+        ]))),
+    ));
+    invalid(
+        validate(rooted(join).as_ref()),
+        "GpuHashJoin: a literal is Utf8View, a view type the device cannot hold",
+    );
 }
