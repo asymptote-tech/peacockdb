@@ -172,3 +172,11 @@ six inheritors of the fixture, not five, all in the `_cases` cycle; the composit
 the spec, by count rather than the single-key pins' oracle shape. `architecture.md`: no sentence
 falsified, by both readings; `build-test.md`'s harness rows true. The signoff appended to the
 spec. To `completeness approved`; `done` waits on the CI run for `eb808fd4`.
+
+## Done — 2026-09-16
+
+CI green on the head `eb808fd4` (run `35158281821`): both dataset-matrix legs, the 25.02 GPU
+build, GPU tests on shad-gpu, cost report, S3 check all success; `87b539cd` above it is
+documentation-only and skipped by design. The chain's last task; nothing left to dispatch. For
+the merger: #155 first, then #156 and #157 each retargeted to master in turn, never
+`--delete-branch`.
