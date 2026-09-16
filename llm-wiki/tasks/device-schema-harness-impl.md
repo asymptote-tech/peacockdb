@@ -189,7 +189,14 @@ async fn an_avg_partial_holds_a_string_key_a_scale_2_sum_and_an_int64_count() {
 
   The state column order is `aggregates.rs:64`'s (`[$sum, $count]` for `avg`) and the names
   come from the plan golden for that query (the `schema=[…]` of the aggregate node); read
-  them, do not invent them. The rest of the table:
+  them, do not invent them. **Write every expectation before the first device cycle**, from
+  the plan golden's declared types and DataFusion's typing of the same expression, and commit
+  the eleven tests red-or-green-unknown before running them: that is what keeps the
+  expectation the contract rather than the device's habit. When a check then fails, do not
+  edit the expectation to match — rename the test `bug_…`, assert what the device holds,
+  open a ticket saying what it should hold and why (cite the declared type at the nearest
+  declared node), and correct the spec's table row to state both. Record in the detail file,
+  per check, where its expectation came from. The rest of the table:
   `AVG_BY_FLAG` merge and finalize; `SUM_BY_FLAG` partial; `ROLLUP`'s grouping-set aggregate
   as `bug_…_holds_an_int32_grouping_id_where_the_plan_says_uint8` naming #65;
   `PROJECT_OVER_FILTER` after filter and after project; `INNER_JOIN` after the join;
@@ -197,7 +204,9 @@ async fn an_avg_partial_holds_a_string_key_a_scale_2_sum_and_an_int64_count() {
   device answer differs from the table's expectation is a `bug_` with a ticket, and the detail
   file records the correction to the table.
 - [ ] **Step 3:** Device cycle `PCK_TEST_FILTER='wire::gpu_tests'`: the existing nine green,
-  the spot-checks green or pinned.
+  the spot-checks green or pinned as `bug_` with tickets — never green by a rewritten
+  expectation. The reviewer's question for each: was this expectation derivable without the
+  device? If the detail file cannot say where it came from, the check is sent back.
 - [ ] **Step 4: Commit.** `git commit -m "walk spot-checks: what the device holds between calls, read by hand"`.
 
 ### Task 6: The record

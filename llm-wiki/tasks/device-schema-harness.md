@@ -85,8 +85,17 @@ nothing is retyped. A new case that is red is a `bug_` with a ticket naming the 
   | `MAX_OF_SUMS` | the outer `max` | `[DECIMAL128 s=2]` |
   | `SEMI_JOIN` | the single join call | `[c_custkey INT64]` |
 
-  Eleven checks. A spot-check whose device answer differs from the table is a `bug_` with a
-  ticket, and the table's row is corrected to say what the device holds and why that is wrong.
+  Eleven checks. **The risk here is enshrining wrong behaviour**: an intermediate has no
+  declaration to be held to, so the only thing standing between "what the device holds" and
+  "what it should hold" is the expectation written above. A spot-check whose device answer
+  differs from the table is therefore never made green by editing the expectation to match
+  the device. It becomes a `bug_` test asserting what the device *does* hold, with a ticket
+  naming what it *should* and why (the plan's declared type for the column at the nearest
+  declared node, DataFusion's type for the same expression, or the table's reasoning), and
+  the table's row is corrected to say both. The coordinator and the reviewer read every
+  spot-check with that question: is this expectation the engine's contract, or the engine's
+  habit? A green spot-check whose expectation was derived by running the device first is the
+  habit, and is a finding against the task.
 
 ## Scope
 
@@ -105,6 +114,9 @@ behaviour changes.
 
 No fix rides along: a red case is a ticket. No existing case is edited. The comparator projects
 exactly what cuDF stores — a wider comparison belongs to the sink, a narrower one hides bugs.
+No spot-check expectation is written from a device run: the eleven rows are written from the
+plan and DataFusion before the first cycle, and a row that the device contradicts is pinned as
+`bug_`, not rewritten.
 
 ## Verification bar
 
