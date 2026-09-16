@@ -62,7 +62,7 @@ test: a validator holding each device batch to its node's schema, four mock-driv
 The two fixes, rebased onto master after reaching `done` without a test run. The coordinator finishes
 the rebase onto master's tip, runs the tiers, and writes `done` if all pass or `building` if not.
 
-### 1. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../tickets.md#t198) — state: completing — PR #152; rebased untested, see the spec's last section
+### 1. [`typed-nulls.md`](typed-nulls.md) — closes [#198](../archive/archived-tickets.md#t198) — state: done — PR #152
 
 `build_expr` builds ten literal scalars a second time and assumes validity, so a typed NULL inside an
 AST expression is a typed zero — a wrong value in arithmetic and a wrong row count in a comparison.

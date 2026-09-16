@@ -368,3 +368,9 @@ passed 0 failed 0 ignored (`exec_cases::` 33, the task's three named `ok`); `tes
 The 287 is master's own count after tasks 4–9 merged and declared-schemas left; this branch's
 `build-test.md` says 287 and 8, so wiki and run agree. CI run 35148513233 on `b1851669` in
 progress at the time of writing; `done` waits on it.
+
+### 2026-09-16 — done, again
+
+CI run 35148513233 on `b1851669` green: both cudf legs, the GPU build, the remote GPU tests, the
+cost report. The tiers above and CI agree; no code changed since the reviewer's signoff, so no
+review round. PR #152 awaits the human's merge. `empty-build` is next: rebase onto this tip.
