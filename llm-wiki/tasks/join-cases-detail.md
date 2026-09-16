@@ -341,3 +341,11 @@ new head.
 - Routing: Task 8's six steps as written, one device cycle over `_cases`, then the rust-only
   `--lib` and `test_module_layout` proofs; `build-test.md` counts and the three
   `Utf8View` sentences in the harness row are the developer's in the same change.
+
+## Coordinator — 2026-09-16, to reviewing (round 3)
+
+Task 8 committed as `9b2350fc` on PR #155 (still against `master`). What the reviewer reads
+this round: the rebase onto `fafaaaaf` and Task 8 — ten view cases and their helpers gone, the
+zero-row case kept on `Key::Utf8`, the counts on the page. Rounds 1–2 and the completeness pass
+above were closed before the reopening and are not re-litigated; a finding there needs a reason
+the rebase or Task 8 gave.
