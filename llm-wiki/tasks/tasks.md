@@ -13,6 +13,50 @@ The largest and the one that frees the most: 39 `.table` sites across 11 files, 
 value, so the registry cannot keep a handle and let an operator own its input unless the owner is
 shared. 75 queries carry #152. Memory accounting is deliberately out of scope and will diverge.
 
+## Chain B (base: master)
+
+Schema divergence, end to end: four fixes at the sites the sink survey named, then the harness and
+the driver hook that keep the boundary measured. In order; the fixes first so the measurements
+after them are exact.
+
+### 1. [`utf8-everywhere.md`](utf8-everywhere.md) — closes [#183](active-tickets.md#t183) — state: new
+
+`schema_force_view_types = false` in `build_session_state`: the parquet scan is the only producer of
+`Utf8View` in DataFusion 45, so every plan declares `Utf8` from the leaf and the export agrees with no
+cast. A validation rule refuses any view type that returns; every handling site is deleted; goldens
+regenerate; the survey's 76 string queries roll out at `tp1_single`.
+
+### 2. [`decimal-precision-at-export.md`](decimal-precision-at-export.md) — closes [#187](active-tickets.md#t187) — state: new
+
+cuDF's type is `{type_id, scale}`; precision is a label the export must be told. `peacock_result_from_handle`
+takes a per-column declared precision into `column_metadata`; the dead widening becomes two hard
+failures; a rule refuses any decimal but `Decimal128`; the wire's dead `output_schema` and `union.cpp`'s
+block go on the same rebuild. 53 decimal queries roll out.
+
+### 3. [`aggregate-state-types.md`](aggregate-state-types.md) — closes [#163](../tickets.md#t163) — state: new
+
+`PlanAgg::state_type` types every state column by the aggregator that produces it, and `decompose` uses
+it instead of copying DataFusion's accumulator layout; the CPU's Welford count gets the one cast; the
+decimal `avg` finalize gains its explicit cast. Four pins retire; the 23 rows roll out.
+
+### 4. [`date-part-return-type.md`](date-part-return-type.md) — closes [#191](active-tickets.md#t191) — state: new
+
+`expr.cpp`'s `date_part` arm casts cuDF's INT16 to the `return_type` the wire already names. Three
+plan-executor cases, one harness case written first as the pin, `tpch/q7`, `q8`, `q9`.
+
+### 5. [`device-schema-harness.md`](device-schema-harness.md) — state: new
+
+Testing only. `peacock_handle_schema` reads a handle's schema; `test_support::device_schema` projects an
+arrow schema onto `{type_id, scale}` and compares; a new schema case per node kind in every harness
+family, and seven hand-written spot-checks inside the recipe walk. Existing cases untouched; a red case
+is a `bug_` with a ticket.
+
+### 6. [`driver-output-hook.md`](driver-output-hook.md) — state: new
+
+The driver takes an optional hook called on every emitted batch — the one production change. Under
+test: a validator holding each device batch to its node's schema, four mock-driver unit tests, and a
+`schema_validation_enabled|disabled` argument on `corpus_query!`, on for every enabled cell.
+
 ## Chain C (base: master)
 
 walk-drives-every-plan alone. declared-schemas is rejected and archived (2026-09-16); this task's
