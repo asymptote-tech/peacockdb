@@ -65,7 +65,7 @@ every enabled cell.
 empty-build alone: typed-nulls merged 2026-09-16. Both were re-proven on master's tip by the
 coordinator before the merge; PR #153 is retargeted to master and carries empty-build's commits only.
 
-### 1. [`empty-build.md`](empty-build.md) — closes [#175](../tickets.md#t175) — state: rebase needed(completing) — PR #153; its base moved to master's tip, see the spec's last section
+### 1. [`empty-build.md`](empty-build.md) — closes [#175](../tickets.md#t175) — state: done — PR #153 → master, re-proven on master's tip to master's tip, see the spec's last section
 
 A lane whose build side got no rows keeps its typed zero-row table where the join above owes rows, so
 `Right`, `Full` and `RightAnti` answer instead of refusing. No new marker — the driver routes
