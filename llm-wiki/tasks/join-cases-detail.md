@@ -169,8 +169,9 @@ Helpers gone with them: `Key::Utf8ViewDeclared`, `Key::declared_type` (`keyed_si
 function itself is private again. The harness gap recorded above is now moot for this branch:
 no case feeds `Utf8` data under a `Utf8View` declaration but the unload pin, which slices
 without re-validating. Plan drift: `run_gpu` never existed under `src/tests`; the plan's
-step-3 command puts `--no-run` after `--`, where the test binary rejects it — the compile it
-asks for happens before that and is what the step proves.
+step-3 command puts `--no-run` after `--`, where the test binary rejects it — and either way
+it compiles none of `gpu_tests` (`tests/mod.rs` gates the module on `feature = "gpu"`), so
+the shad-gpu `--build` with no warning is the only compile proof.
 
 Environment, for whoever builds here next: this worktree's directory was renamed from
 `peacockdb-ENS-drop-mode-name`, and both `target/` and `target-cudf-rapids-cuda-12.2/` still
@@ -366,3 +367,44 @@ arrives with `declared-schemas` (rejected on master) and its two #152 rows name
 superseded. The second important item — the spec's completeness signoff describes the delivery
 before Task 8 (44 cases, 12 `bug_`, 330, the device-only row) — is the completeness pass's own
 write: it is rewritten in place there, not appended to. To `completing`.
+
+## Completeness pass 2 — 2026-09-16, analyst (what is missing, after Task 8)
+
+Against the amended spec every matrix row and empty shape has a case, the `Utf8` key row is a
+`.same()` on all three paths and its empty shape, #215 is filed, nothing declares a view type
+outside `harness_cases.rs`'s own pin, and the branch falsifies no sentence of `architecture.md`.
+Delivery against master: 34 cases (28 in `join_dimension_cases.rs`, 6 in `nested_cases.rs`),
+5 `bug_` (two #152, one #190, one #215, one #215 with #190), rung 320/320, `_cases` 262.
+
+Handoff to `aggregate-cases`, for its rebase onto this branch (old base `6703c08f`):
+
+- Its gpu build is red until its Task 8: `aggregate_dimension_cases.rs:21` imports
+  `harness_cases::declaring_view_strings`, private again here. Not a git conflict — an `E0603`
+  at `--build`. Route Task 8 straight after the rebase; do not diagnose it as rebase breakage.
+- `run_gpu` (`script.rs`) lives on the aggregate branch (`97a098dc`), never here. This plan's
+  Task 8 assigned its deletion here; aggregate's Task 8 does not list it. After aggregate's
+  Step 2 it is a `pub(crate)` fn with no caller — a dead-code warning under the gpu build and a
+  doc naming the retired reason. Add it to that Step 2.
+- `build-test.md` conflicts on the counts. The base it now starts from: rung 320, gpu block 328,
+  harness 265, Rust 1427, grand total 1863; the aggregate branch's own delta is +70, its Task 8
+  then −5.
+- `aggregate-cases-detail.md` conflicts (this branch added a "Superseded" paragraph after the
+  handoff; the aggregate branch appended its run record below the same paragraph).
+- Both plans' Task 8 Step 3 is a guard that cannot go red: `tests/mod.rs:16` gates `gpu_tests`
+  on `feature = "gpu"`, so the rust-only `--lib` compiles none of it. The `--build` on shad-gpu
+  is the only compile proof; the sentence at "the compile it asks for happens before that and
+  is what the step proves" above is wrong for the module.
+- The known-wrong table both specs name arrives with nothing: `declared-schemas` was rejected
+  and archived on master. `coding-style.md`'s rule makes the `bug_` prefix and the ticket
+  comment above each case the record; the register above is deleted with this file at archive.
+
+## Completeness pass 2 — 2026-09-16, the two lists compared
+
+Reviewer (what is wrong): 0 blocking, 1 important — PR #155's body still described the
+retired delivery (44 cases, the view keys, the pins, 330); rewritten to 34 / 5 `bug_` / 320.
+Analyst (what is missing): 0 blocking, 2 important — the Task 8 note claiming the rust-only
+`--no-run` step compiles `gpu_tests` (it cannot; struck above, the `--build` is the compile
+proof), and the handoff `aggregate-cases` needs for its rebase, written in the analyst's
+section above and read at that rebase. `architecture.md`: no sentence falsified. The signoff
+rewritten in place at the end of the spec. To `completeness approved`; `done` waits on the CI
+run for `1dd5bd05`, the last head carrying `.rs` changes.
