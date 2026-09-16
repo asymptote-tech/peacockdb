@@ -60,19 +60,6 @@ the `test-support` feature: a validator holding each device batch to its node's 
 mock-driver unit tests, and a `schema_validation_enabled|disabled` argument on `corpus_query!`, on for
 every enabled cell.
 
-## Chain D (base: master)
-
-empty-build alone: typed-nulls merged 2026-09-16. Both were re-proven on master's tip by the
-coordinator before the merge; PR #153 is retargeted to master and carries empty-build's commits only.
-
-### 1. [`empty-build.md`](empty-build.md) — closes [#175](../tickets.md#t175) — state: done — PR #153 → master, re-proven on master's tip to master's tip, see the spec's last section
-
-A lane whose build side got no rows keeps its typed zero-row table where the join above owes rows, so
-`Right`, `Full` and `RightAnti` answer instead of refusing. No new marker — the driver routes
-`NoBuild` and `without_build` already asks `empty_build_answers_nothing`; only the `false` branch was
-never written, and the table it needs is one the scatter builds and the driver drops. One derived
-index field, one conditional drop. Replaces the parked `empty-answers.md`.
-
 ## Chain E (base: master)
 
 Cases only, in `src/tests/gpu_tests/`: independent of every other chain's files. Both tasks
