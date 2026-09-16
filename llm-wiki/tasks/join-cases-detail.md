@@ -145,3 +145,25 @@ dispatched. Spec-side judgements for the reviewer and the analyst: the harness g
 `Utf8` under a `Utf8View` declaration everywhere but the unload) is recorded above, not
 ticketed; `join_cases.rs` at 1483 lines is a known style overrun the spec's "builders local to
 that file" produced.
+
+## Review round 1 — 2026-09-15
+
+Reviewer: 43 cases counted, every matrix row and empty shape present, `bug_` cases precise,
+counts consistent, the `Utf8View` device-only reading accepted as answering the spec's question,
+the extra local functions judged ordinary file-local builders and not the harness mechanism the
+spec's "no other helper" clause guards. Four findings, routed to the developer (1–3) and the
+coordinator (4):
+
+1. important, `join_cases.rs:86-87` and the string-residual case: `b_s = p_s` is AST-able
+   (`is_ast_able` only forces the column path for a string *literal*), so the case ran the AST
+   path, not the column path the spec's row 3 names; comment, detail file and #215's wording
+   ("a decimal or string operand") repeat the premise. Fix: a literal operand to reach the
+   column path, or rename and record; #215 to say "string literal".
+2. important, `join_cases.rs` at 1483 lines against the 1000-line rule. Split by
+   responsibility into a sibling file; the kind guard reads a registry, not files, so it does
+   not move. Coordinator's ruling: the spec's "local to `join_cases.rs`" meant "not in the
+   shared harness"; a builder local to the sibling that holds the cases using it honours that.
+   Recorded here as a deliberate deviation from the spec's path list for the signoff.
+3. nit, the device-only oracle helper discards `device.cpu` unasserted: assert it is the
+   refusal, so a `run_both` that closes the gap turns these cases red and says so.
+4. nit, `build-test.md` harness row is one 195-word sentence: the coordinator splits it.
