@@ -505,3 +505,12 @@ CI green on the head `c15bd0b8` (run `35149121688`): both dataset-matrix legs, t
 build, GPU tests on shad-gpu, cost report, S3 check all success. The chain's last task; nothing
 left to dispatch. For the merger: #155 first, then #156 retargeted to master, never
 `--delete-branch`.
+
+## Rebased onto `ENS-join-cases` `2647c111` — 2026-09-16
+
+The control file said `rebase`. `ENS-join-cases` moved onto master `302d91dc`; everything master
+gained since `fafaaaaf` is `llm-wiki/**` only, so this branch rebased with one `tasks.md`
+conflict (its own state line, taken from this branch's commit) and no code moved. `git diff
+--stat` against `ENS-join-cases` unchanged: 13 files, 1939/139. `done` is kept without a
+re-run. The chain now has a third task, `case-expectations`, at `approved to build`; its
+branch forks off this one.
