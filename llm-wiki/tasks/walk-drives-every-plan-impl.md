@@ -12,6 +12,10 @@ naming their ticket. Nothing in production changes.
 
 **Spec:** [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — frozen.
 
+**Status (2026-09-16):** rebased onto `ENS-declared-schemas` (PR #154 retargeted, branch at `afee1229`),
+unverified — no build or test has run on the new base. Before `completeness approved` again: rust-only
+`--lib`, `test_module_layout`, the `gpu` shape on shad-gpu, and the counts in `build-test.md`.
+
 ## Global constraints
 
 - **No production code.** Everything is the walk, the session helper it drives through, and

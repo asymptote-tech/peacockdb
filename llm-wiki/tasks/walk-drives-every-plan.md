@@ -185,3 +185,12 @@ be verified at all — which is the thing the last three did not have.
 
 `build-test-shadgpu.sh`. Each taught shape needs a device cycle to prove, so order the work by what
 can share one: the join family together, the row range and bare call together.
+
+## After the signoff: rebased onto `ENS-declared-schemas` (2026-09-16)
+
+The branch was carried onto `ENS-declared-schemas` directly, dropping the typed-nulls and empty-build
+commits it used to sit on (chain D, now off master). Eleven commits, two count-line conflicts in
+`build-test.md` resolved arithmetically (+1 gpu case, +3 `bug_` tests over declared-schemas' figures).
+Nothing was built or run: the code change is `wire/gpu_tests/` alone and names nothing from chain D,
+but the rust-only tier, the `gpu` shape on shad-gpu and the `build-test.md` counts all still need
+verifying on the new base. State dropped to `completing` for that reason.

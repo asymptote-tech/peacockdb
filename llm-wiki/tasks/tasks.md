@@ -45,7 +45,7 @@ through an exporter that casts to the declared type instead of relabelling. Fixe
 disagreement is a `bug_` test. Last in the chain because it needs `wire/gpu_tests/`.
 
 
-### 2. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: done — PR #154 — shrunk to its §2 by the spec's "Decision" section
+### 2. [`walk-drives-every-plan.md`](walk-drives-every-plan.md) — state: completing — PR #154 → `ENS-declared-schemas` — rebased off chain D, build and tests not yet re-run on the new base
 
 **Conditional: its first task reads the survey's report, argues what is still worth teaching, and
 stops for the human.** The walk is the only instrument that can ask what one call produced, and it
