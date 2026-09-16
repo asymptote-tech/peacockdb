@@ -209,7 +209,8 @@ place where the DataFusion type is an imperfect proxy for the cuDF one. What is 
 query whose unload sees it.
 
 One cell, `tpch/q8` at `tp1-single` — which is the only mode that gets far enough to reach the
-unload, the other four stopping at [#152](../tickets.md#t152).
+unload, the other four stopping at [#152](../tickets.md#t152). Pinned at the project by
+`bug_a_year_extracted_from_a_date_is_exported_as_int16` (`gpu_tests/exec_cases.rs`).
 
 <a id="t190"></a>
 ### #190 — the CPU backend drops a nested-loop join's projection

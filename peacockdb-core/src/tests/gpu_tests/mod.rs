@@ -5,6 +5,7 @@
 mod coverage;
 mod accumulate_cases;
 mod aggregate_cases;
+mod aggregate_dimension_cases;
 mod device;
 mod emit_cases;
 mod exec_cases;

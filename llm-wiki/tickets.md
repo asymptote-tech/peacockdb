@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 216), which is also the counter for
+New tickets take the next free number (currently 220), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,53 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 24 | #215 #214 #208 #207 #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
-| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
+| [Critical correctness](#critical-correctness) | 27 | #219 #217 #216 #215 #214 #208 #207 #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 17 | #218 #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
+
+<a id="t219"></a>
+### #219 — `ILIKE` is case-sensitive on the device
+
+`s ILIKE 'B%'` answers true for `beta` on the cpu and false on the device: the pattern is
+matched as `LIKE 'B%'`.
+
+The wire carries `case_insensitive` on every `LikeExprNode` (`expr_writer.rs`), and the LIKE
+arm of `build_column` (`expr.cpp`) reads `negated` alone before calling `cudf::strings::like`,
+which has no case-insensitive form. The fix is a `to_lower` on both the column and the pattern
+when the flag is set, or `cudf::strings::contains_re` with the `IGNORE_CASE` flag. A wrong row
+count under `WHERE … ILIKE`, and a wrong column in a select list; no corpus query writes
+`ILIKE`. Pinned by `bug_ilike_is_case_sensitive_on_the_device` (`gpu_tests/exec_cases.rs`).
+
+<a id="t217"></a>
+### #217 — a sort with `fetch 0` keeps every row on the device
+
+`GpuSort` with `fetch: Some(0)` answers zero rows on the cpu and the whole batch on the device.
+
+`sort.cpp` applies its slice under `sort->fetch() > 0`, and the wire writes `-1` for no fetch
+(`node_writer.rs`, `fetch_of`), so zero is a fetch the device reads as none. The merge in
+`node_session.cpp` tests `>= 0` and is right. `LIMIT 0` under an `ORDER BY` is the SQL shape;
+DataFusion usually plans it away, so no corpus cell reaches it. Pinned by
+`bug_a_fetch_of_zero_keeps_every_row_on_the_device` (`gpu_tests/exec_cases.rs`).
+
+<a id="t216"></a>
+### #216 — the device's global aggregate has no Welford arm
+
+A keyless `stddev` or `var` answers one finished `Float64` on the device where the plan declares
+the `[count, mean, m2]` state; a merge over that state then indexes past its one column.
+
+`aggregate.cpp`'s grouped path honours `mergeable` and emits the triple with `MERGE_M2`; its
+keyless path (`key_cols.empty()`) reduces every `stddev` name with `make_std_aggregation`,
+whatever the phase. At the init that is the sample stddev of the argument — the right number in
+the wrong shape. At the merge the reduction runs over the state's first column, the count, so
+two arrivals of counts of one answer 0; and the finalize project above it refuses with
+`ColumnRef index 2 out of range (cols=1)`. So `SELECT stddev(x) FROM t` over more than one
+batch is a refusal on the device, and over one batch a wrong shape at the unload. Pinned by
+`bug_a_global_welford_init_answers_a_finished_stddev_on_the_device`,
+`bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device` and the two
+`bug_a_global_…_finalize_is_refused_on_the_device` (`gpu_tests/aggregate_dimension_cases.rs`).
 
 <a id="t215"></a>
 ### #215 — a left nested-loop join over a predicate the AST cannot take is refused on the device
@@ -125,8 +166,11 @@ keys are right, which is why every corpus ORDER BY has agreed: no cell's descend
 a null. DataFusion's default for `DESC` is nulls first, so a query sorting a nullable column
 descending gets its null rows first on the cpu and last on the device. The mapping has to be
 relative to the direction — `BEFORE` when `nulls_first == asc` — at both sites, since a merge
-over sorted runs must order as the sort did. Pinned by
-`bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device` (`gpu_tests/exec_cases.rs`).
+over sorted runs must order as the sort did. At the merge the damage is worse: runs sorted as
+the plan says break cuDF's merge precondition, and the device answers duplicated and dropped
+rows. Pinned by `bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device`
+(`gpu_tests/exec_cases.rs`) and the two `…_descending_key_nulls_first_puts_them_last…` merge
+pins (`gpu_tests/accumulate_cases.rs`).
 
 <a id="t200"></a>
 ### #200 — a Date64 comes back as a type the wire cannot name
@@ -312,6 +356,18 @@ a data dir panics instead of being skipped. Found during the comment audit.
 
 ## Blockers for disabled coverage
 
+<a id="t218"></a>
+### #218 — the device cannot cast text to a date
+
+`CAST(d AS DATE)` over a `Utf8` column answers on the cpu and is refused on the device:
+`cudf::cast` throws "Column type must be numeric or chrono or decimal32/64/128".
+
+The cast arm of `build_column` (`expr.cpp`) hands every non-string target to `cudf::cast`,
+which parses no strings; a text source needs `cudf::strings::to_timestamps` with the format
+DataFusion accepts, or `to_integers`/`to_floats` for the numeric targets, chosen by the input's
+type. The mirror of #203, where the target is the string. No corpus query casts text to a date.
+Pinned by `bug_a_text_cast_to_date_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
+
 <a id="t206"></a>
 ### #206 — a float or boolean partition key is refused on the device
 
@@ -338,7 +394,8 @@ input is already a string. `cudf::cast` has no string target, so the arm needs
 chosen by the input's type.
 Neighbour of #45, where a join key's cast to string is the same refusal on the join path; a fix
 here answers a projection and does not by itself answer #45, whose fix hashes rather than casts.
-Pinned by `bug_a_cast_to_text_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
+Pinned by `bug_a_cast_to_text_is_refused_on_the_device` and
+`bug_a_date_cast_to_text_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t169"></a>
 ### #169 — a recipe plan is a chain, so its depth is its length, and the verifier caps depth
