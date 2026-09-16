@@ -408,3 +408,12 @@ proof), and the handoff `aggregate-cases` needs for its rebase, written in the a
 section above and read at that rebase. `architecture.md`: no sentence falsified. The signoff
 rewritten in place at the end of the spec. To `completeness approved`; `done` waits on the CI
 run for `1dd5bd05`, the last head carrying `.rs` changes.
+
+## Done again — 2026-09-16
+
+CI green on the code as shipped after Task 8: run `35142845945` for `1dd5bd05` (the last head
+carrying `.rs` changes) — both dataset-matrix legs, the 25.02 GPU build, GPU tests on shad-gpu,
+cost report, S3 check all success. The later heads are documentation-only and skipped by
+design. PR #155's body rewritten for the amended delivery (through the API; `gh pr edit`
+no-op'd behind a projects warning). Next: `aggregate-cases`' rebase onto this branch, with the
+handoff in "Completeness pass 2" above.
