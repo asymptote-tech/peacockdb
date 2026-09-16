@@ -6,8 +6,10 @@
 
 use datafusion::arrow::array::UInt32Array;
 use datafusion::arrow::compute::take_record_batch;
+use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::record_batch::RecordBatch;
 
+use super::harness_cases::declaring_view_strings;
 use super::script::{Script, each_answers, run_both};
 use crate::plan::{
     ColumnOrder, GpuAccumulateBatchesAndSort, GpuCoalesceAllBatches, GpuMergeSortedPartitions,
@@ -70,6 +72,24 @@ operator_case! {
     GpuCoalesceAllBatches,
     fn one_batch_coalesces_to_itself() {
         run_both(&coalesce(), Script::Accumulate(vec![synthetic(16, 1)])).same(Order::AsEmitted);
+    }
+}
+
+// #183 — two batches coalesced under a schema declaring `s: Utf8View`: the device hands
+// the one batch up at done as `Utf8`, which at a sink is the unload pin's refusal. The
+// deliberate pin for the coalesce family. The cpu cannot take the declaration in this
+// harness (it concatenates under the declared schema, the detail file's gap) and is not read.
+operator_case! {
+    GpuCoalesceAllBatches,
+    fn bug_a_coalesce_hands_a_column_declared_utf8view_up_as_utf8_from_the_device() {
+        let node = GpuCoalesceAllBatches::new(Given::with_layout(
+            declaring_view_strings(&schema()),
+            PartitionLayout::new(1),
+        ));
+        let stream = vec![synthetic(16, 1), synthetic(16, 2)];
+        let outcome = run_both(&node, Script::Accumulate(stream));
+        let gpu = outcome.gpu.as_ref().expect("the device answers");
+        assert_eq!(gpu[2][0].schema().field(5).data_type(), &DataType::Utf8);
     }
 }
 

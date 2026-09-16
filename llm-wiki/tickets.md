@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 209), which is also the counter for
+New tickets take the next free number (currently 216), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,28 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 23 | #214 #208 #207 #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Critical correctness](#critical-correctness) | 24 | #215 #214 #208 #207 #205 #204 #202 #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #206 #203 #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
+
+<a id="t215"></a>
+### #215 — a left nested-loop join over a predicate the AST cannot take is refused on the device
+
+A `LEFT JOIN` with no equi-key whose predicate has a decimal or string operand answers on the
+cpu and throws on the device: `non-AST-able NestedLoopJoin filter is only supported for Inner joins`.
+
+`plan/join.rs` admits a `Left` nested loop over any predicate — it checks the probe's batch
+layout and nothing about the expression — and `join.cpp` (`execute_nested_loop_join`) has two
+paths: a cuDF AST conditional join, which knows Left, and the cross-then-mask path for what
+`is_ast_able` refuses (a `CAST` to `Decimal128`, a string operand), which is written for Inner
+alone and throws at the guard. A mask over a cross product cannot re-emit the unmatched build
+rows an outer form owes, which is #160's argument for refusing the other types at plan time;
+this shape is the one the planner lets through. Pinned by
+`bug_a_left_nested_loop_join_with_a_decimal_predicate_is_refused_on_the_device` and its
+projected neighbour (`gpu_tests/nested_cases.rs`). Numbered past #214.
 
 <a id="t214"></a>
 ### #214 — a limit drops a zero-row batch on both backends

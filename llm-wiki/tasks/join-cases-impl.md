@@ -80,7 +80,7 @@ Matrix row 1. `Inner` with a projection exists (`an_inner_join_with_a_projection
 this task adds `Right`, `RightSemi`, `RightAnti`, `LeftSemi`, `LeftAnti`, `LeftMark`. `Left` and
 `Full` are not rows: #152 refuses their first probe batch, pinned already.
 
-- [ ] **Step 1: One projection per type, chosen to reorder, drop the keys, and cross sides**
+- [x] **Step 1: One projection per type, chosen to reorder, drop the keys, and cross sides**
 
 A projection is a list of ordinals into `output_of(join_type)`. Write it so it takes columns
 from both sides where the type keeps both, reverses their order, and omits column 1 (the key)
@@ -104,7 +104,7 @@ fn crossing_projection(join_type: JoinType) -> Vec<u32> {
 }
 ```
 
-- [ ] **Step 2: The six cases, green-form**
+- [x] **Step 2: The six cases, green-form**
 
 ```rust
 operator_case! {
@@ -132,7 +132,7 @@ operator_case! {
 }
 ```
 
-- [ ] **Step 3: The two empties with a projection**
+- [x] **Step 3: The two empties with a projection**
 
 ```rust
 // Row 1's empty shape: a zero-row build under a projection, on the swapping type and on the
@@ -154,14 +154,14 @@ operator_case! {
 }
 ```
 
-- [ ] **Step 4: Run the family on the device, read every failure**
+- [x] **Step 4: Run the family on the device, read every failure**
 
 Run the device cycle with `PCK_TEST_FILTER='tests::gpu_tests::join_cases'`. Expected: the
 `Right` two-probe case refuses the second batch with `BUILD_COPY` (#152, known); every other
 new case green or a schema/row difference that is a *new* finding — a wrong ordinal after the
 side swap, a missing column in the `Narrow` finish project.
 
-- [ ] **Step 5: Ticket and pin what diverged**
+- [x] **Step 5: Ticket and pin what diverged**
 
 For the `Right` two-probe refusal: rename to
 `bug_a_right_join_with_a_crossing_projection_refuses_its_second_probe_batch_on_the_device`,
@@ -191,7 +191,7 @@ git commit -m "join cases: a crossing projection on every reachable type"
   leaves declare the keyed side schemas and whose `keys` are `[(1, 1)]`, or `[(1, 1), (2, 2)]`
   for `Composite`.
 
-- [ ] **Step 1: The key enum and the keyed batch**
+- [x] **Step 1: The key enum and the keyed batch**
 
 ```rust
 use datafusion::arrow::compute::cast;
@@ -260,7 +260,7 @@ fn keyed(rows: usize, seed: u64, key: Key) -> RecordBatch {
 }
 ```
 
-- [ ] **Step 2: The keyed join node**
+- [x] **Step 2: The keyed join node**
 
 `side(prefix)` reads `synthetic(0, 0)`'s fields; the keyed side declares column 1 as the key's
 *declared* type:
@@ -319,12 +319,12 @@ fn keyed_script(key: Key) -> Script {
 }
 ```
 
-- [ ] **Step 3: Make `declaring_view_strings` reachable**
+- [x] **Step 3: Make `declaring_view_strings` reachable**
 
 In `harness_cases.rs`, change `fn declaring_view_strings` to `pub(super) fn
 declaring_view_strings`. Nothing else moves; the spec names it as the shape to reuse.
 
-- [ ] **Step 4: Compile-check without a device**
+- [x] **Step 4: Compile-check without a device**
 
 ```bash
 CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run
@@ -346,7 +346,7 @@ project the key away except one per path, which pins #183 at the join.
 
 > **Amended:** the `Utf8ViewDeclared` key and its cases are retired by Task 8; `Key` ends as `Composite`, `Int64`, `Utf8`, `Date32`.
 
-- [ ] **Step 1: The projection that drops every key**
+- [x] **Step 1: The projection that drops every key**
 
 ```rust
 /// Every column but the keys, both sides where kept: what a Utf8View-keyed case must
@@ -361,7 +361,7 @@ fn without_keys(join_type: JoinType) -> Vec<u32> {
 }
 ```
 
-- [ ] **Step 2: Twelve cases, named for key and path**
+- [x] **Step 2: Twelve cases, named for key and path**
 
 Composite, `Int64` and `Date32` compare whole outputs; `Utf8View` projects the keys away:
 
@@ -391,7 +391,7 @@ operator_case! {
 
 and the same for `Right` and `LeftAnti`.
 
-- [ ] **Step 3: The three #183 pins at the join, one per path**
+- [x] **Step 3: The three #183 pins at the join, one per path**
 
 ```rust
 // #183 — the join keeps its declared-Utf8View key in the output, so the export refuses at
@@ -411,7 +411,7 @@ Same for `Right` (`b_key` and `p_key` both, `Right` keeps both sides) and `LeftA
 Read the exact clause in the run log first — the message is `{index} {name}: {declared} vs
 {exported}` per column; assert the index too once seen.
 
-- [ ] **Step 4: The empty shape**
+- [x] **Step 4: The empty shape**
 
 ```rust
 // Row 2's empty shape: a declared-Utf8View key over zero rows crosses the boundary once.
@@ -426,7 +426,7 @@ operator_case! {
 }
 ```
 
-- [ ] **Step 5: Device cycle, tickets, pins, commit**
+- [x] **Step 5: Device cycle, tickets, pins, commit**
 
 Expected known outcomes: `Right` cases refuse nothing over one probe batch (the script has
 one). A key-type mismatch the device refuses (a `Date32` key, say) is a new ticket and a
@@ -449,7 +449,7 @@ git commit -m "join cases: composite, Int64, Date32 and declared-Utf8View keys o
 Matrix row 3. `residual()` is `b_i64 < p_i64` over `filter_columns` `[build 3, probe 3]`.
 Two more residuals are needed, on a string and on a decimal column; write them beside it:
 
-- [ ] **Step 1: The string and decimal residuals**
+- [x] **Step 1: The string and decimal residuals**
 
 ```rust
 /// `b_s = p_s` — a string comparison the AST cannot do, so the column path evaluates it.
@@ -496,7 +496,7 @@ fn hash_join_with(
 Write it by copying `hash_join`'s body; then make `hash_join` call it with `residual()` or
 `(None, Vec::new())`, so there is one body.
 
-- [ ] **Step 2: Five cases**
+- [x] **Step 2: Five cases**
 
 ```rust
 operator_case! {
@@ -536,7 +536,7 @@ operator_case! {
 }
 ```
 
-- [ ] **Step 3: Device cycle, tickets, pins, commit**
+- [x] **Step 3: Device cycle, tickets, pins, commit**
 
 Expected: the two-probe case refuses the second batch (#152, `BUILD_COPY`) — pin it as
 `bug_an_inner_join_with_a_residual_refuses_its_second_probe_batch_on_the_device`. The string
@@ -560,7 +560,7 @@ Matrix row 4. `nested(join_type, projection)` builds over `residual()` = `b_i64 
 is AST-able. The cross-then-mask path (`join.cpp`, the `filter_columns`-ordered mask) needs a
 predicate `is_ast_able` refuses; a decimal operand is the cheapest.
 
-- [ ] **Step 1: A nested-loop builder that takes its predicate**
+- [x] **Step 1: A nested-loop builder that takes its predicate**
 
 ```rust
 /// `CAST(b_i64 AS DECIMAL(20, 0)) > CAST(p_i64 AS DECIMAL(20, 0))`: a decimal operand is
@@ -591,7 +591,7 @@ fn nested_with(
 As in Task 4: copy `nested`'s body into `nested_with`, then make `nested` call it with
 `residual()`.
 
-- [ ] **Step 2: Four cases and two empties**
+- [x] **Step 2: Four cases and two empties**
 
 ```rust
 operator_case! {
@@ -629,7 +629,7 @@ operator_case! {
 }
 ```
 
-- [ ] **Step 3: Device cycle; the `Left` ticket**
+- [x] **Step 3: Device cycle; the `Left` ticket**
 
 Expected: both `Left` cases refuse on the device with
 `non-AST-able NestedLoopJoin filter is only supported for Inner joins` (`join.cpp:459`), while
@@ -678,7 +678,7 @@ copy), filter (every row passes), coalesce-all, emit on a string key. The unload
 `super::harness_cases::declaring_view_strings(&input().schema())` and asserts the export's
 refusal names column 5.
 
-- [ ] **Step 1: The project pin** (`exec_cases.rs`)
+- [x] **Step 1: The project pin** (`exec_cases.rs`)
 
 `project(exprs)` builds over `given()`; write the leaf by hand here:
 
@@ -700,19 +700,19 @@ operator_case! {
 }
 ```
 
-- [ ] **Step 2: The filter pin** (`exec_cases.rs`)
+- [x] **Step 2: The filter pin** (`exec_cases.rs`)
 
 `GpuFilter::new(leaf, predicate, projection, schema)`: leaf declaring the view, predicate
 `gt(2, "i32", lit_i32(i32::MIN))` so every row passes, no projection, schema the declared one.
 Assert `5 s: Utf8View vs Utf8`.
 
-- [ ] **Step 3: The coalesce pin** (`accumulate_cases.rs`)
+- [x] **Step 3: The coalesce pin** (`accumulate_cases.rs`)
 
 `GpuCoalesceAllBatches::new(Given::with_layout(declared, PartitionLayout::new(1)))` over
 `Script::Accumulate(vec![synthetic(16, 1), synthetic(16, 2)])`; the export at done refuses.
 Assert `5 s: Utf8View vs Utf8`.
 
-- [ ] **Step 4: The emit pin** (`emit_cases.rs`)
+- [x] **Step 4: The emit pin** (`emit_cases.rs`)
 
 `GpuEmitPartitions::new(Given::of(declared, MultipleBatches), vec![5], 4)` — the string
 column as the key — over `Script::Emit(vec![input()])` (read the file's `emit` cases for the
@@ -720,7 +720,7 @@ script variant's exact spelling). Expected on the device: either the export's `5
 vs Utf8` or the kernel's key-type refusal (`refused_key_type`, cuDF `type_id` for a string)
 first — read the log, pin whichever fires, and say in the comment which one wins.
 
-- [ ] **Step 5: Device cycle over all four families, commit**
+- [x] **Step 5: Device cycle over all four families, commit**
 
 ```bash
 git add peacockdb-core/src/tests/gpu_tests/{exec,accumulate,emit}_cases.rs
@@ -734,7 +734,7 @@ git commit -m "the #183 pins: project, filter, coalesce-all and emit under a Utf
 **Files:**
 - Modify: `llm-wiki/build-test.md`, `llm-wiki/tasks/join-cases-detail.md`
 
-- [ ] **Step 1: Counts and rows**
+- [x] **Step 1: Counts and rows**
 
 The `Operator harness` entry's count (`grep -n 'Operator harness |' llm-wiki/build-test.md`)
 grows by the number of cases added; the gpu rung's `--lib -- gpu_tests::` figure and the grand
@@ -742,7 +742,7 @@ total move by the same number. Every new `bug_` test is a line in the detail fil
 name, what it asserts, ticket — the known-wrong table in `build-test.md` arrives with
 `declared-schemas`; until that merges the detail file is the register.
 
-- [ ] **Step 2: The full family run**
+- [x] **Step 2: The full family run**
 
 ```bash
 PCK_RUN_CPP=0 PCK_TEST_FILTER='_cases' scripts/build-test-shadgpu.sh --run
