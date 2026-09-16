@@ -36,6 +36,7 @@ use crate::common::logical_size_from_schema;
 
 use crate::executor::CpuBatch;
 use crate::executor::GpuBatch;
+use crate::executor::errors::schema_divergence;
 use crate::executor::{BackendError, CallResult, CallStats, RowRange};
 use crate::plan::PlanError;
 use crate::wire::{CallPattern, FbKind, Input, Recipe, Seq};
@@ -237,9 +238,14 @@ impl GpuExport {
         unsafe { peacock_result_free(ipc) };
         let batches = decoded?;
         let batch = concat_batches(&self.schema, batches.iter()).map_err(|error| {
-            BackendError::new(format!(
-                "the exported stream is not the sink's rows: {error}"
-            ))
+            // concat_batches is Ok on no batches, so a failing stream decoded at least one,
+            // and that one carries the device's schema — the IPC schema message precedes it.
+            let diverging = schema_divergence(&self.schema, &batches[0].schema());
+            let mut message = format!("the exported stream is not the sink's rows: {error}");
+            if !diverging.is_empty() {
+                message.push_str(&format!(" (declared vs exported: {diverging})"));
+            }
+            BackendError::new(message)
         })?;
         Ok((CpuBatch::new(batch), CallStats::default()))
     }
