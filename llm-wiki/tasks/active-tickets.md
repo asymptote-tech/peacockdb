@@ -92,6 +92,16 @@ carry) and fixes `plan_text/tests.rs` and `planner/translator/schema_tests.rs`, 
 view type from real plans. Any sentence on a chain branch naming the export as the fix site
 predates this decision.
 
+**Done 2026-09-16, by `utf8-everywhere` on branch `ENS-utf8-everywhere`.** The `ParquetFormat`
+in `read_table` (`lib.rs`) has `with_force_view_types(false)`, so every plan declares `Utf8` from
+the leaf up, and `plan/validate.rs` refuses any view type in a node schema, a literal, a cast
+target, a binary's type or a scalar function's return. The 76 string-class queries of
+[`reports/sink-divergence.md`](../reports/sink-divergence.md) were re-run at `tp1-single`: no
+sink showed a string, three cells are enabled (`tpcds/q84`, `tpch/nested-loop-join`,
+`tpch/shuffle-stddev`), four ran the whole device plan clean but have no cpu cell (#163), and
+the rest fail on the next thing in line — #187 (41), #191 (2), #185 (13) and #215 (13), opened
+here. `183` stays on a row only where the other four modes have no ticket yet.
+
 <a id="t184"></a>
 ### #184 — a hash repartition of one lane into four fails in cuDF
 
@@ -130,6 +140,23 @@ Confirmed out of sample: `tpcds/q38`, found seven batches after this was rewritt
 group count. Eight device cells: `tpcds` q96 q48 q93 q38, `tpch` q3 q14.
 `q48` and `q93` are also the first cells in this rollout where a device COMPLETED a plan and the
 golden caught the disagreement — every other device failure so far has been a refusal.
+
+<a id="t215"></a>
+### #215 — the cpu's joins answer several batches per call where the device answers one
+
+The cpu's `probe_and_fetch` (`cpu_backend/join.rs`) hands back DataFusion's whole output
+stream for one probe batch — an 8192-row split, and one empty batch per probe batch that matched
+nothing — while the device answers one table per `execute_node`. `ProbingJoin` allows a `Vec`,
+so neither side breaks the trait; the per-node golden is what breaks. `output_bytes` is the sum
+of per-batch sizes, each priced by its own row count, so the two engines disagree by the
+per-batch overhead and every 1:1 node above the join carries the extra batches along:
+`tpch/q15` at `tp1-single` has the cpu's join at `batch_rows=[[8192,1808]]`, 946045 bytes, the
+device at 946033; `tpch/q4`'s LeftSemi emits `[[0×18, 52523]]` on the cpu, one batch on the
+device, 72 bytes apart at the join and again at the aggregate over it. First difference in 13 of
+the `utf8-everywhere` rollout's cells: tpcds q4 q10 q11 q23 q29 q69 q74, tpch cross-join
+nested-loop-left-join q4 q15 q20 q21; the 13 cells whose first difference is #185 may carry it
+beneath. Row counts agree at every node, and the result comparison never ran, since the section
+is asserted first; which side's batching the golden should record is the decision.
 
 <a id="t187"></a>
 ### #187 — the device widens a decimal the plan declared narrow

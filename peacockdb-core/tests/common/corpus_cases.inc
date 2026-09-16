@@ -27,10 +27,14 @@ corpus_query!(tpch, 1, q12, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgrou
 // THE DEVICE COLUMN, after the first two cycles. q6 runs at all five modes and q19 at
 // tp1-single; every other device cell is off against a ticket. Four causes, none of them
 // this task's to fix: #152 refuses a join whose recipe copies a side the ABI cannot copy (52
-// cases, by name rather than by crash), #183 is an unload declaring Utf8View where the device
-// exports Utf8, #184 is a cuDF failure in the hash scatter, and #185 is the device reporting
-// one input row where the cpu reports the group count — which is the golden catching exactly
-// what it is for. T19 is where these are settled query by query.
+// cases, by name rather than by crash), #183 was an unload declaring a view string type
+// where the device exports Utf8, #184 is a cuDF failure in the hash scatter, and #185 is the
+// device reporting one input row where the cpu reports the group count — which is the golden
+// catching exactly what it is for. T19 is where these are settled query by query.
+// #183 is closed: no plan declares a view type any more, and the 76 string-class cells were
+// re-run at tp1-single. Three run — nested-loop-join, shuffle-stddev, tpcds q84 — and the rest
+// stay off on what the sink or the golden showed next: #187, #191, #185, and #215 for the
+// cpu's joins answering several batches per call where the device answers one.
 corpus_query!(tpch, 1, q13, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q15, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q17, none, none, data_fusion_exact, golden_exact);
@@ -45,7 +49,7 @@ corpus_query!(tpch, 1, q10, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgrou
 // in the scan alone, and the cpu backend's reader does not apply it — six million rows
 // where ten were asked for, #186.
 // No device cell in this batch. All 23 failed on the first cycle, on three causes: #183's
-// Utf8View export for the three string-keyed queries, #187's widened decimal for
+// string export for the three string-keyed queries, #187's widened decimal for
 // filter-project, and #188 for scan-limit, where cuDF refuses row groups and a row count in
 // one read — the same limit-in-the-scan shape #186 is about, erroring rather than ignored.
 corpus_query!(tpch, 1, scan_limit, tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_subset, live_cpu);
@@ -64,7 +68,7 @@ corpus_query!(tpch, 1, hash_join, tp1_single | tp1_rowgroup | tp4_single | tp4_r
 corpus_query!(tpch, 1, left_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, semi_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, live_cpu);
 corpus_query!(tpch, 1, anti_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, live_cpu);
-corpus_query!(tpch, 1, nested_loop_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
+corpus_query!(tpch, 1, nested_loop_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, golden_exact);
 
 // T19 batch 4, the small end of the tpch list emptied, and two firsts.
 // shuffle-additive-avg is out at every mode on BOTH engines — #163's UInt64 count state against
@@ -81,7 +85,7 @@ corpus_query!(tpch, 1, nested_loop_join, tp1_single | tp1_rowgroup | tp4_single 
 // rather than "crossed and was refused" — #168's interval `ScalarValue`, and the plan golden
 // carries the reason at every mode.
 corpus_query!(tpch, 1, shuffle_additive_avg, none, none, data_fusion_exact, golden_exact);
-corpus_query!(tpch, 1, shuffle_stddev, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_approximate, golden_approx_std);
+corpus_query!(tpch, 1, shuffle_stddev, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_approximate, golden_approx_std);
 corpus_query!(tpch, 1, mixed_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, nested_loop_left_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, nested_limits, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
@@ -151,7 +155,7 @@ corpus_query!(tpcds, 1, q48, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgro
 corpus_query!(tpcds, 1, q21, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q93, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q34, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
-corpus_query!(tpcds, 1, q84, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
+corpus_query!(tpcds, 1, q84, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, golden_exact);
 
 // T19 batch 8, tpcds, chosen by expected executor calls rather than plan size: row groups scanned
 // times joins, off the tp4-rowgroup plans. q32 and q26 score as low and are skipped for the

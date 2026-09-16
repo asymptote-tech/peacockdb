@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1949 test cases — Rust 1506, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1954 test cases — Rust 1511, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1018 cases: `--lib` 544, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1021 cases: `--lib` 547, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -271,7 +271,7 @@ state machine one call at a time with no tree around it
 |---|---|--:|
 
 what the sink says when the device's schema is not the declared one: every diverging column
-named with its index and both types, so a string and a narrow decimal read as two findings
+named with its index and both types, so a year and a narrow decimal read as two findings
 rather than `try_new`'s first; nullability is never a clause, since `try_new` does not check it
 
 | Forwarders and row ranges | [interleave_serves_lane_p_from_lane_p_of_every_child](../peacockdb-core/src/executor/forwarder/tests.rs) | 5 |
@@ -286,11 +286,12 @@ is there
 DataFusion's expression, this engine's, and DataFusion's again must all read the same column
 out of the same rows — asserted on the array each produces, not on shape
 
-| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 31 |
+| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 34 |
 |---|---|--:|
 
 validation's shape rules — a plan ends in a crossing, a sink sits at the root, a limit has a
-real consumer; layout canonical forms and equality; whether a hash survives a regrouping
+real consumer, no schema, literal, cast or function names a view type the device cannot hold;
+layout canonical forms and equality; whether a hash survives a regrouping
 
 | Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 11 |
 |---|---|--:|
@@ -337,20 +338,21 @@ the crate links; executor lifecycle
 what the batch reports, and that `consume` hands the handle over without releasing it. Needs no
 device: the release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 394 cases: `--lib -- gpu_tests::` 386, `test_gpu_corpus` 8
+#### gpu — `--features gpu`: shad-gpu only. 396 cases: `--lib -- gpu_tests::` 385, `test_gpu_corpus` 11
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 7 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 10 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
 device and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`,
-the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden. Six
-cells today, `q6` at every mode and `q19` at `tp1-single`; the rest are off against
-[#152](tickets.md#t152), [#183](tasks/active-tickets.md#t183),
-[#184](tasks/active-tickets.md#t184), [#185](tasks/active-tickets.md#t185) and
-[#187](tasks/active-tickets.md#t187). The seventh case is that a device run under a
+the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden. Nine
+cells today: `q6` at every mode, and `q19`, `nested-loop-join`, `shuffle-stddev` and `tpcds/q84`
+at `tp1-single`; the rest are off against [#152](tickets.md#t152),
+[#184](tasks/active-tickets.md#t184), [#185](tasks/active-tickets.md#t185),
+[#187](tasks/active-tickets.md#t187), [#191](tasks/active-tickets.md#t191) and
+[#215](tasks/active-tickets.md#t215). The tenth case is that a device run under a
 regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
@@ -360,7 +362,7 @@ the gpu column of the registry, the other half of the pair
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 331 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 330 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
