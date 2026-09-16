@@ -93,3 +93,14 @@ first, probe streamed. And:
   `bug_`; the grand total moves with them.
 - Green on shad-gpu through `build-test-shadgpu.sh`, one device cycle; the rust-only lib
   unchanged.
+
+## Completeness signoff — 2026-09-16
+
+Solved under its constraints: 44 cases, every matrix row and empty shape named, no production
+code, 12 `bug_` cases each with a ticket, #215 new; `gpu_tests::` rung 330/330 on shad-gpu,
+rust-only lib unchanged. Shortcuts, all recorded in the detail file: the known-wrong table does
+not exist on this base (it arrives with `declared-schemas`), so the detail file's register
+stands in; rows 1–3 and their builders live in `join_dimension_cases.rs`, not `join_cases.rs`,
+to keep both under 1000 lines; the declared-`Utf8View` key row reads the device alone against a
+`Utf8`-keyed cpu oracle (the cpu refuses the data under that declaration everywhere but the
+unload) with `Key::Utf8` added for it; anti and mark forms run on scripts with no null pair.

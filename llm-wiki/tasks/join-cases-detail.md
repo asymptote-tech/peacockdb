@@ -209,3 +209,29 @@ items, each imported). Two nits from the split — a "pinned above" that now poi
 file, a missing blank line — fixed by the coordinator as comment-only edits, with a
 cross-reference added to `join_cases.rs`'s top comment. Nothing important outstanding: to
 `completing`.
+
+## Completeness pass — 2026-09-16
+
+Reviewer (what is wrong): clean, 0/0. Analyst (what is missing): 0 blocking, 2 important, both
+record items, applied by the coordinator:
+
+1. **Handoff to `aggregate-cases`.** Its spec's `Utf8View` group-key row and the constraint
+   "every `Utf8View` group-key case but the one pin projects the key out" rest on the premise
+   this branch showed false: the cpu refuses `Utf8` data under a `Utf8View` declaration
+   everywhere but the unload (`cpu_backend/mod.rs` `declared_as` → `try_new`, reached by the
+   aggregate at `mod.rs` and `accumulate.rs`). That row takes the reading used here — the
+   device under the declaration against the cpu on `Utf8` over the same strings, with the
+   cpu's refusal asserted — unless a `run_both` that casts the cpu's upload lands first.
+   Written into `aggregate-cases-detail.md` too.
+2. **Which fix turns the seven operator-level #183 pins red.** They read the type
+   `Device::fetch` takes off the IPC stream, not a sink refusal; a cast at the Rust sink would
+   leave them green. #183 now names the export in `gpu_executor.cpp` as the fix site.
+
+`architecture.md` corrected on the analyst's list: the `CudfNestedLoopJoin` row and its
+paragraph under "From flat buffer to cuDF call", and the "Inner / Left, non-equi" row under
+"Join types and NULL key equality" — the conditional join is the ordinary path, the
+cross-then-mask path is the non-AST-able fallback and is Inner-only (#215). Pre-existing drift
+the branch put on the record.
+
+For the helper, outside this task: `build-test.md`'s header says C++ 67 and its rows sum to 66;
+on master before this branch, untouched here.
