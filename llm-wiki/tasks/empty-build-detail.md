@@ -251,3 +251,22 @@ The signoff is on the spec. Awaiting CI.
 
 CI green on `fea04b47` (run 34700882450: both cudf legs, the GPU build, the remote GPU tests, the
 cost report). PR #153 awaits the human's merge.
+
+### 2026-09-16 — rebased onto the re-proven typed-nulls; re-verification owed
+
+The control file said `rebase`. The human had moved this branch with `ENS-typed-nulls` onto master
+at `10ad6558` and dropped both to `completing`, untested there. typed-nulls was rebased onto master
+`c6b5aefa` first, re-proven on every tier and CI (run 35148513233), and is `done` at `805aacf1`.
+This branch's fourteen own commits were then replayed onto that tip. Conflicts, all wiki:
+`tasks.md` at seven commits (the typed-nulls branch's board taken each time — chain D task 1
+`done`, task 2 `rebase needed(completing)`), `empty-build.md` once (the signoff kept, the human's
+"After the signoff" section after it), and `join-cases-impl.md` / `aggregate-cases-impl.md` at the
+human's own two board commits (master's later versions taken; both files now equal master's).
+Result: the diff against `ENS-typed-nulls` is the task's own 33 files; the code differs from the
+pre-rebase branch only by master's two files (`gpu_executor.cpp` comment, `ensemble-watchdog.sh`);
+`tickets.md` carries master's #163 retitle and the view-types paragraph under #114.
+
+Owed before `completing` is restored and `done` written, per the spec's last section: rust-only
+(the six §6 tests, the driver tests, the corpus cpu tier with q16's tp4 cells), the C++ tests, and
+the device cells (`join_cases::` and the corpus device tier). No review round unless a code line
+changed; none did.
