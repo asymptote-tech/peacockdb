@@ -255,3 +255,22 @@ onto the new `ENS-join-cases` only after this task is back to `done`.
 
 Outstanding: Task 8 of the plan, then the proving commands; PR #155 stays, CI re-runs on the
 new head.
+
+## Dispatch 2 — 2026-09-16, Task 8
+
+- The control file said `rebase` again at 19:28 (after the reopening commit at 19:23). The
+  lowest branch already sits on master's head `fafaaaaf` and `aggregate-cases` is marked, so
+  the rest of the protocol is this task's remaining workload first, then the child's rebase.
+  File cleared.
+- Hosts at dispatch: **verda down** (`Could not resolve hostname`), so the rust-only check
+  runs locally; `testdata/{tpch,tpcds}.sf1` are symlinks here now and resolve, no linking
+  needed. **shad-gpu up**, 0 MiB of 144 GiB held — no neighbour.
+- Caches: `target-cudf-rapids-cuda-12.2` (22 GB) is warm from the first run; `cpp/build26`
+  is absent, so `--build` re-runs cmake there.
+- Plan drift seen before dispatch: `run_gpu` exists nowhere under `peacockdb-core/src/tests`
+  (the plan's step 2 already says to grep first); the device-only oracle is
+  `device_on_a_declared_utf8view_key_answers_as_the_cpu_on_a_utf8_key` in
+  `join_dimension_cases.rs`, and it goes with the cases that call it.
+- Routing: Task 8's six steps as written, one device cycle over `_cases`, then the rust-only
+  `--lib` and `test_module_layout` proofs; `build-test.md` counts and the three
+  `Utf8View` sentences in the harness row are the developer's in the same change.
