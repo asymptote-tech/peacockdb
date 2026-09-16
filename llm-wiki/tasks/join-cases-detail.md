@@ -241,3 +241,17 @@ on master before this branch, untouched here.
 CI green on the code as shipped: run for `9e38c41b` (the last commit touching `.rs`) — both
 dataset-matrix legs, the 25.02 GPU build, GPU tests on shad-gpu, cost report, S3 check all
 success. The head run for `7a59490f` is documentation-only and skipped by design.
+
+## Reopened — 2026-09-16, rebase onto master `fafaaaaf`
+
+The human dropped both chain tasks from `done` to `building` on master: the specs no longer
+declare `Utf8View` (commit `c6b7f63c`), and each plan gained a Task 8 that retires the view
+cases. The control file said `rebase`. `ENS-join-cases` rebased onto `fafaaaaf` with no code
+conflict — the board took master's side at every step, and `join-cases-impl.md` kept both
+master's "Amended" note and the branch's ticks. Master's four commits touch
+`cpp/src/gpu_executor.cpp` (a comment) and `scripts/`, so this is not a documentation-only
+rebase: the task re-proves. `aggregate-cases` marked `rebase needed(building)`; it is rebased
+onto the new `ENS-join-cases` only after this task is back to `done`.
+
+Outstanding: Task 8 of the plan, then the proving commands; PR #155 stays, CI re-runs on the
+new head.
