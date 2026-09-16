@@ -224,3 +224,34 @@ round 1 dispatched. For the reviewer and the analyst: the `Utf8View` group-key r
 the declaration before `run_both` reads the device, so the join-cases reading does not carry
 over; recorded above as a harness gap. Whether that row can still be answered inside the task's
 constraints is the first question of the review. 67 cases against the spec's "roughly 45".
+
+## Review round 1 — 2026-09-16
+
+Reviewer: 67 cases counted, counts and tickets within caps, the refactored builders reduce to
+the same nodes and expectations, the panic claim verified from DataFusion's sources. Findings,
+routed to the developer (1–4, 7) and the coordinator (5, 6):
+
+1. blocking — the `Utf8View` group-key row and its #183 pin are absent, and a reading exists
+   inside the constraints: the device half of `run_both` is `drive::<GpuBackend>` over
+   `Device`, both already in the harness; only `drive`'s private visibility stands between a
+   case and the device alone. Shape: `pub(crate) fn drive` (or a `run_gpu` that `run_both`
+   delegates to), a case-local `device_alone(node, script)`, the five cases read as
+   `join_dimension_cases.rs` reads its declared-key cases — the device on the `Utf8View` key
+   against `run_both(<same node on Utf8>).cpu`, column 0 dropped from both slots — and the pin
+   as `exported_type` of the device's column 0. Coordinator's ruling: making an existing
+   harness function `pub(crate)` is not a new mechanism; a `catch_unwind` alone answers nothing.
+2. important — `a_sum_grouped_on_an_int64_agrees` groups on unique `id` (64 singleton groups),
+   and the `Date32` init and merge fold only their nulls: an aggregate that never folds two equal
+   non-null keys passes. Feed every key twice (a second `synthetic` with the same ids;
+   `cut(1), cut(1)` for the date merge).
+3. nit — three cases answer answered questions: the `(key, b)` init and merge (the `(key, s)`
+   pair reads the two-column path `.same()`), and the keyless count merge (a `Sum` over `id`
+   with a count's name). Drop them; say in the arm's comment that a count merges by `Sum`.
+4. nit — #202's amendment ("duplicated and dropped rows" over runs each carrying a null) has no
+   pin; and `null_keys_in_one_run`'s doc gives the accumulating sort a reason that is the
+   partition merge's alone (the device re-sorts each batch there).
+5. nit — `build-test.md`'s harness prose: "group keys of every type the corpus uses" false
+   while the `Utf8View` key has no case; "the project expressions and casts with no case"
+   describes the past. Coordinator's, after round 2.
+6. nit — #218 sits under "Blockers for disabled coverage" though it blocks nothing. Coordinator's.
+7. nit — `same_within_welford(.., keys: usize, ..)` reads only `keys == 1`; a `bool` or an assert.
