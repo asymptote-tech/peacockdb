@@ -292,3 +292,19 @@ finished in 19.20s` — 397 − 3 + 5 + 1. Locally, sf1 linked in and out: rust-
 `533 passed; 0 failed; 2 ignored`; `--test test_module_layout` → `17 passed`. The gpu lib
 compiles with no warning. `build-test.md` counts moved by +3 (345, 400, 408, 1943, Rust
 1507). `aggregate_dimension_cases.rs` is 612 lines, `accumulate_cases.rs` 535.
+
+### Review round 2, addressed
+
+`input_twice()` is `input()` concatenated with itself — every `id` and every date twice, every
+sum the row's doubled — where round 1's `synthetic(64, 2)` half drew fresh dates and folded
+only the null group; the doc line says so. One device cycle (`--build`, `--push-binaries
+--patch`, `--run`, foreground, `timeout 590` each), `PCK_TEST_FILTER='gpu_tests::'`: `test
+result: ok. 400 passed; 0 failed; 0 ignored; 0 measured; 538 filtered out; finished in 3.77s`,
+unchanged. Nothing outside the gpu rung moved; counts unchanged.
+
+## Review round 2 — 2026-09-16
+
+All round-1 findings closed as stated; one important remained — `input_twice` drew its second
+batch from seed 2, so the date init still folded only nulls — fixed as `input()` twice and
+re-proven on the device (400/400). #202's pin list gained the fourth pin (coordinator). Nothing
+important outstanding: to `completing`.

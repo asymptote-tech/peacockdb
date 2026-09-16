@@ -93,10 +93,10 @@ fn schema_declaring(key: &GroupKey) -> Schema {
     }
 }
 
-/// `input()` and a second batch over the same ids, as one batch: every `id` and nearly
-/// every date twice, so an aggregate that never folds two equal keys is a different row count.
+/// `input()` twice as one batch: every `id` and every date twice, so an aggregate that never
+/// folds two equal keys is a different row count, and every sum is the row's doubled.
 fn input_twice() -> RecordBatch {
-    concat_batches(&schema(), &[input(), synthetic(64, 2)]).expect("one schema")
+    concat_batches(&schema(), &[input(), input()]).expect("one schema")
 }
 
 // The group key's type at the init: the corpus groups on strings and dates, on the
