@@ -101,7 +101,7 @@ columns), `count(*)` and expression arguments, every merge arm with rows, the st
 the project expressions and casts with no case, and sorted merges on `desc`, nullable and
 composite keys — #202's second site. No fixture change, no production code. Roughly 40 cases.
 
-### 3. [`case-expectations.md`](case-expectations.md) — state: building
+### 3. [`case-expectations.md`](case-expectations.md) — state: reviewing — PR #157
 
 Cases only, on the branch that carries both: `same_within_welford` compares names and types before
 its one tolerance; the composite-key form of #59 is pinned instead of sidestepped; `welford_partial`
