@@ -4,18 +4,18 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::ArrayRef;
+use datafusion::arrow::array::{ArrayRef, AsArray, BooleanArray};
 use datafusion::arrow::compute::{
     SortColumn, SortOptions, cast, lexsort_to_indices, take_record_batch,
 };
-use datafusion::arrow::datatypes::DataType;
+use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::ScalarValue;
 
-use super::script::{Outcome, Script, run_both};
+use super::script::{Outcome, Script, each_answers, run_both};
 use crate::plan::{
     BatchLayout, BinaryOp, ColumnOrder, Expr, GpuFilter, GpuNode, GpuProject, GpuSort, NamedExpr,
-    Schema,
+    Schema, UnaryOp,
 };
 use crate::tests::compare::{Order, assert_same};
 use crate::tests::given::{Given, columns};
@@ -158,6 +158,21 @@ operator_case! {
 // is what the planner would have written; the comparison is of what each engine produced.
 
 fn project(exprs: Vec<(Expr, &str, DataType)>) -> GpuProject {
+    project_over(schema(), exprs)
+}
+
+/// A function by the name the planner emits, `nullable` as every corpus function is.
+fn function(name: &str, args: Vec<Expr>, return_type: DataType) -> Expr {
+    Expr::ScalarFunction {
+        name: name.to_string(),
+        args,
+        return_type,
+        nullable: true,
+    }
+}
+
+/// `project` over a leaf declaring `input`, for a batch that is not the fixture.
+fn project_over(input: Arc<ArrowSchema>, exprs: Vec<(Expr, &str, DataType)>) -> GpuProject {
     let schema = columns(
         &exprs
             .iter()
@@ -168,7 +183,11 @@ fn project(exprs: Vec<(Expr, &str, DataType)>) -> GpuProject {
         .into_iter()
         .map(|(expr, name, _)| NamedExpr::new(expr, name))
         .collect();
-    GpuProject::new(given(), named, schema)
+    GpuProject::new(
+        Given::of(Schema::new(input), BatchLayout::MultipleBatches),
+        named,
+        schema,
+    )
 }
 
 /// DataFusion 45's result types for `SELECT dec + dec, dec / 2.00 FROM t` over
@@ -411,6 +430,281 @@ operator_case! {
     }
 }
 
+// The expressions the corpus projects that task 9 did not: the other arithmetic, a
+// predicate and a conjunction as columns, the unary forms, the casts to and from decimal,
+// date and text, the functions, LIKE's other forms, a typed-NULL branch, a literal column.
+
+operator_case! {
+    GpuProject,
+    fn a_minus_and_a_modulo_agree() {
+        let difference = Expr::binary(
+            Expr::column(3, "i64"),
+            BinaryOp::Minus,
+            Expr::column(0, "id"),
+            DataType::Int64,
+        );
+        let remainder = Expr::binary(
+            Expr::column(3, "i64"),
+            BinaryOp::Modulo,
+            lit_i64(7),
+            DataType::Int64,
+        );
+        let node = project(vec![
+            keep_id(),
+            (difference, "i64 - id", DataType::Int64),
+            (remainder, "i64 % 7", DataType::Int64),
+        ]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn a_comparison_and_a_conjunction_as_columns_agree() {
+        let positive = gt(2, "i32", lit_i32(0));
+        let both = Expr::binary(
+            positive.clone(),
+            BinaryOp::And,
+            Expr::column(7, "b"),
+            DataType::Boolean,
+        );
+        let either = Expr::binary(
+            positive.clone(),
+            BinaryOp::Or,
+            Expr::column(7, "b"),
+            DataType::Boolean,
+        );
+        let node = project(vec![
+            keep_id(),
+            (positive, "positive", DataType::Boolean),
+            (both, "positive and b", DataType::Boolean),
+            (either, "positive or b", DataType::Boolean),
+        ]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn the_unary_forms_agree() {
+        let node = project(vec![
+            keep_id(),
+            (Expr::unary(UnaryOp::IsNull, Expr::column(1, "key")), "key is null", DataType::Boolean),
+            (Expr::unary(UnaryOp::IsNotNull, Expr::column(1, "key")), "key is not null", DataType::Boolean),
+            (Expr::unary(UnaryOp::Not, Expr::column(7, "b")), "not b", DataType::Boolean),
+            (Expr::unary(UnaryOp::Negative, Expr::column(3, "i64")), "-i64", DataType::Int64),
+        ]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+fn cast_to(ordinal: u32, name: &str, target: DataType) -> Expr {
+    Expr::Cast {
+        expr: Box::new(Expr::column(ordinal, name)),
+        target,
+    }
+}
+
+// #187 — the device exports every decimal at precision 38 whatever was declared; the cast
+// itself is the cpu's, at the declared scale.
+operator_case! {
+    GpuProject,
+    fn bug_a_cast_to_decimal_is_exported_at_precision_38() {
+        let declared = DataType::Decimal128(20, 0);
+        let node = project(vec![
+            keep_id(),
+            (cast_to(3, "i64", declared.clone()), "as_decimal", declared),
+        ]);
+        let outcome = run_both(&node, Script::Exec(vec![input()]));
+        let cpu = &outcome.cpu.as_ref().expect("the cpu answers")[0][0];
+        let widened = batch_of(vec![
+            ("id", cpu.column(0).clone()),
+            ("as_decimal", cast(cpu.column(1), &DataType::Decimal128(38, 0)).unwrap()),
+        ]);
+        gpu_answered(&outcome, widened, Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn a_decimal_cast_to_float64_agrees() {
+        let dec = decimals(64, 1);
+        let node = project_over(
+            dec.schema(),
+            vec![keep_id(), (cast_to(1, "dec", DataType::Float64), "as_f64", DataType::Float64)],
+        );
+        run_both(&node, Script::Exec(vec![dec])).same(Order::AsEmitted);
+    }
+}
+
+// #203 — the same arm refuses every cast to text, a date's included.
+operator_case! {
+    GpuProject,
+    fn bug_a_date_cast_to_text_is_refused_on_the_device() {
+        let node = project(vec![keep_id(), (cast_to(6, "d", DataType::Utf8), "as_text", DataType::Utf8)]);
+        let outcome = run_both(&node, Script::Exec(vec![input()]));
+        assert!(
+            outcome
+                .gpu_refuses()
+                .contains("cast to STRING from a non-string type not supported in column path"),
+            "{}",
+            outcome.gpu_refuses()
+        );
+    }
+}
+
+/// `input()` with `d` cast to `Utf8` by arrow, so a text-to-date cast has dates to parse.
+fn dates_as_text() -> RecordBatch {
+    let batch = input();
+    let mut columns = batch.columns().to_vec();
+    columns[6] = cast(&columns[6], &DataType::Utf8).expect("a date renders");
+    let fields: Vec<Field> = batch
+        .schema()
+        .fields()
+        .iter()
+        .map(|f| match f.name().as_str() {
+            "d" => Field::new("d", DataType::Utf8, true),
+            _ => f.as_ref().clone(),
+        })
+        .collect();
+    RecordBatch::try_new(Arc::new(ArrowSchema::new(fields)), columns).expect("d retyped")
+}
+
+// #218 — the cast arm hands a string column to `cudf::cast`, which parses nothing.
+operator_case! {
+    GpuProject,
+    fn bug_a_text_cast_to_date_is_refused_on_the_device() {
+        let batch = dates_as_text();
+        let node = project_over(
+            batch.schema(),
+            vec![keep_id(), (cast_to(6, "d", DataType::Date32), "as_date", DataType::Date32)],
+        );
+        let outcome = run_both(&node, Script::Exec(vec![batch]));
+        assert!(
+            outcome
+                .gpu_refuses()
+                .contains("Column type must be numeric or chrono or decimal32/64/128"),
+            "{}",
+            outcome.gpu_refuses()
+        );
+    }
+}
+
+// #191 — cuDF extracts a year as `Int16`, and the device hands it up so where the plan
+// declares `Int32`; the values are the cpu's.
+operator_case! {
+    GpuProject,
+    fn bug_a_year_extracted_from_a_date_is_exported_as_int16() {
+        let year = function("date_part", vec![lit_str("year"), Expr::column(6, "d")], DataType::Int32);
+        let node = project(vec![keep_id(), (year, "year", DataType::Int32)]);
+        let outcome = run_both(&node, Script::Exec(vec![input()]));
+        let cpu = &outcome.cpu.as_ref().expect("the cpu answers")[0][0];
+        let narrowed = batch_of(vec![
+            ("id", cpu.column(0).clone()),
+            ("year", cast(cpu.column(1), &DataType::Int16).unwrap()),
+        ]);
+        gpu_answered(&outcome, narrowed, Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn a_substring_agrees() {
+        let sub = function("substr", vec![Expr::column(5, "s"), lit_i64(2), lit_i64(3)], DataType::Utf8);
+        let node = project(vec![keep_id(), (sub, "sub", DataType::Utf8)]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn a_coalesce_agrees() {
+        let filled = function("coalesce", vec![Expr::column(1, "key"), lit_i32(0)], DataType::Int32);
+        let node = project(vec![keep_id(), (filled, "filled", DataType::Int32)]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn a_concat_agrees() {
+        let twice = function("concat", vec![Expr::column(5, "s"), Expr::column(5, "s")], DataType::Utf8);
+        let node = project(vec![keep_id(), (twice, "twice", DataType::Utf8)]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn a_lower_agrees() {
+        let quiet = function("lower", vec![Expr::column(5, "s")], DataType::Utf8);
+        let node = project(vec![keep_id(), (quiet, "quiet", DataType::Utf8)]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn a_round_to_one_place_agrees() {
+        let rounded = function("round", vec![Expr::column(4, "f64"), lit_i64(1)], DataType::Float64);
+        let node = project(vec![keep_id(), (rounded, "rounded", DataType::Float64)]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+fn like(pattern: &str, negated: bool, case_insensitive: bool) -> Expr {
+    Expr::Like {
+        expr: Box::new(Expr::column(5, "s")),
+        pattern: Box::new(lit_str(pattern)),
+        negated,
+        case_insensitive,
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn not_like_agrees() {
+        let node = project(vec![keep_id(), (like("b%", true, false), "not_b", DataType::Boolean)]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+// #219 — the LIKE arm reads `negated` and never `case_insensitive`, so `ILIKE 'B%'` is a
+// case-sensitive `LIKE 'B%'` on the device: false on every word, null where `s` is.
+operator_case! {
+    GpuProject,
+    fn bug_ilike_is_case_sensitive_on_the_device() {
+        let node = project(vec![keep_id(), (like("B%", false, true), "b_any_case", DataType::Boolean)]);
+        let outcome = run_both(&node, Script::Exec(vec![input()]));
+        let none: ArrayRef = Arc::new(BooleanArray::from_iter(
+            input().column(5).as_string::<i32>().iter().map(|word| word.map(|_| false)),
+        ));
+        let expected = batch_of(vec![("id", input().column(0).clone()), ("b_any_case", none)]);
+        gpu_answered(&outcome, expected, Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn a_case_with_a_typed_null_branch_agrees() {
+        let case = Expr::Case {
+            comparand: None,
+            when_then: vec![(Expr::column(7, "b"), Expr::Literal(ScalarValue::Int64(None)))],
+            else_expr: Some(Box::new(Expr::column(3, "i64"))),
+        };
+        let node = project(vec![keep_id(), (case, "unless_b", DataType::Int64)]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn a_string_literal_as_a_column_agrees() {
+        let node = project(vec![keep_id(), (lit_str("x"), "x", DataType::Utf8)]);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
 // Empty inputs, each its own case.
 operator_case! {
     GpuProject,
@@ -536,6 +830,62 @@ operator_case! {
         let stream = vec![synthetic(16, 1), synthetic(16, 2), synthetic(8, 3)];
         let node = sort(vec![by(0, false, false)], None);
         run_both(&node, Script::Exec(stream)).same(Order::AsEmitted);
+    }
+}
+
+// The sorts the corpus writes: a `fetch` with a descending key, a fetch at and past the
+// batch, a fetch of nothing, and string and date keys with `id` behind them for a total
+// order.
+
+operator_case! {
+    GpuSort,
+    fn a_fetch_with_a_descending_key_keeps_the_same_top_n() {
+        let node = sort(vec![by(0, false, false)], Some(5));
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuSort,
+    fn a_fetch_at_the_row_count_is_the_whole_batch() {
+        let node = sort(vec![by(0, false, false)], Some(64));
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuSort,
+    fn a_fetch_past_the_row_count_is_the_whole_batch() {
+        let node = sort(vec![by(0, false, false)], Some(100));
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+// #217 — `sort.cpp` slices only for a fetch above zero, the wire's -1 being "none", so a
+// fetch of nothing keeps every row on the device: the cpu answers zero rows, the device the
+// batch, which an ascending `id` leaves as it was.
+operator_case! {
+    GpuSort,
+    fn bug_a_fetch_of_zero_keeps_every_row_on_the_device() {
+        let node = sort(vec![by(0, true, false)], Some(0));
+        let outcome = run_both(&node, Script::Exec(vec![input()]));
+        each_answers(&outcome, &[vec![input().slice(0, 0)]], &[vec![input()]]);
+    }
+}
+
+operator_case! {
+    GpuSort,
+    fn a_string_key_then_by_id() {
+        let node = sort(vec![by(5, true, false), by(0, true, false)], None);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuSort,
+    fn a_date_key_then_by_id() {
+        let node = sort(vec![by(6, true, false), by(0, true, false)], None);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
     }
 }
 

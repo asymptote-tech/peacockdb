@@ -160,7 +160,8 @@ Two sightings, and the pair narrows it: `filter-project`'s projected column decl
 different declarations — so the export appears to produce one width rather than widening each
 value by a step, which is a different fix from a scale rule and points at the export rather than at
 anything upstream of it. Six device cells across T19's first two batches. A bare scan of an `(18, 2)`
-column exports `(38, 2)` too: `bug_a_decimal_column_is_exported_at_precision_38` (`gpu_tests/source_cases.rs`).
+column exports `(38, 2)` too: `bug_a_decimal_column_is_exported_at_precision_38` (`gpu_tests/source_cases.rs`). A second declaration reaches the same export: a `CAST` to `Decimal128(20, 0)` in a project comes
+back at 38 (`bug_a_cast_to_decimal_is_exported_at_precision_38`, `gpu_tests/exec_cases.rs`).
 
 <a id="t188"></a>
 ### #188 — the device refuses a read with row groups and a limit together
@@ -209,7 +210,8 @@ place where the DataFusion type is an imperfect proxy for the cuDF one. What is 
 query whose unload sees it.
 
 One cell, `tpch/q8` at `tp1-single` — which is the only mode that gets far enough to reach the
-unload, the other four stopping at [#152](../tickets.md#t152).
+unload, the other four stopping at [#152](../tickets.md#t152). Pinned at the project by
+`bug_a_year_extracted_from_a_date_is_exported_as_int16` (`gpu_tests/exec_cases.rs`).
 
 <a id="t190"></a>
 ### #190 — the CPU backend drops a nested-loop join's projection

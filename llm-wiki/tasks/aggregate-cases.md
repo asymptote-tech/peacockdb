@@ -90,3 +90,16 @@ case finds. And:
   `bug_`; the grand total moves with them.
 - Green on shad-gpu through `build-test-shadgpu.sh`, one device cycle; the rust-only lib
   unchanged.
+
+## Completeness signoff — 2026-09-16, rewritten after the reopening
+
+Solved under its constraints, as amended: 65 cases against `ENS-join-cases` (29 in
+`aggregate_dimension_cases.rs`, 23 in `exec_cases.rs`, 13 in `accumulate_cases.rs`), every
+matrix row and empty shape named but one (`GpuAccumulateBatchesAndSort` at four lanes, a
+one-lane node by definition — the detail file says why), no production code, no harness
+addition, 13 `bug_` cases each with a ticket, #216–#219 new; strings plain `Utf8` and every
+group-key cell a `.same()` on init and through the merge; `gpu_tests::` rung 385/385 on
+shad-gpu, rust-only lib unchanged. Shortcuts, recorded in the detail file: the known-wrong table
+does not exist on any base now that `declared-schemas` is rejected, so the `bug_` prefix, the
+ticket comment above each case and the detail file's register are the record; the keyless
+`Count` merge is folded into `Sum` and `count(1)` into `count(*)`, both plan facts.

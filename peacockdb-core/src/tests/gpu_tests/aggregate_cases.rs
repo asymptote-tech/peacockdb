@@ -3,6 +3,8 @@
 //! from `synthetic`'s own columns. Every declared type is what the planner would have
 //! written — DataFusion's `state_fields`, read off a planning run — because the cpu holds
 //! its accumulators to the declaration and a wrong one is a refusal rather than a finding.
+//! The builders both aggregate files use are `pub(crate)` here; the cases along the
+//! corpus's dimensions are `aggregate_dimension_cases.rs`.
 
 use std::sync::Arc;
 
@@ -22,7 +24,7 @@ use crate::tests::compare::{Order, assert_same};
 use crate::tests::given::{Given, columns};
 use crate::tests::synthetic::{decimals, schema, synthetic};
 
-fn input() -> RecordBatch {
+pub(crate) fn input() -> RecordBatch {
     synthetic(64, 1)
 }
 
@@ -30,7 +32,7 @@ fn given() -> Box<dyn GpuNode> {
     Given::of(Schema::new(schema()), BatchLayout::MultipleBatches)
 }
 
-fn call(func: PlanAgg, arg: Expr, out: &str, ty: DataType) -> AggCall {
+pub(crate) fn call(func: PlanAgg, arg: Expr, out: &str, ty: DataType) -> AggCall {
     AggCall {
         func,
         args: vec![arg],
@@ -38,7 +40,7 @@ fn call(func: PlanAgg, arg: Expr, out: &str, ty: DataType) -> AggCall {
     }
 }
 
-fn body(
+pub(crate) fn body(
     group_by: Vec<Expr>,
     aggs: Vec<AggCall>,
     finalize: Option<Vec<NamedExpr>>,
@@ -52,12 +54,17 @@ fn body(
     }
 }
 
-/// `[key?, state…]` under the names and types the calls declare.
-fn state_of(grouped: bool, aggs: &[AggCall]) -> Schema {
-    let mut fields: Vec<(&str, DataType)> = Vec::new();
-    if grouped {
-        fields.push(("key", DataType::Int32));
-    }
+/// A group key as `(ordinal in the input, name, declared type)`.
+pub(crate) type GroupKey = (u32, &'static str, DataType);
+
+pub(crate) const KEY: GroupKey = (1, "key", DataType::Int32);
+
+/// `[keys…, state…]` under the names and types the keys and the calls declare.
+pub(crate) fn state_by(keys: &[GroupKey], aggs: &[AggCall]) -> Schema {
+    let mut fields: Vec<(&str, DataType)> = keys
+        .iter()
+        .map(|(_, name, ty)| (*name, ty.clone()))
+        .collect();
     for call in aggs {
         for field in &call.outputs {
             fields.push((field.name().as_str(), field.data_type().clone()));
@@ -69,26 +76,43 @@ fn state_of(grouped: bool, aggs: &[AggCall]) -> Schema {
 /// The Welford triple's state, `[key, count, mean, m2]` in DataFusion's own types, with
 /// the `agg_state` annotation that says the three belong to one `stddev` — without it both
 /// backends refuse `M2` and `MergeM2` (`plan/aggregate.rs`, `welford_owners`).
-fn welford_state() -> Schema {
+pub(crate) fn welford_state() -> Schema {
+    welford_state_by(true, AggFunc::Stddev)
+}
+
+/// `welford_state` with or without its key — `[count, mean, m2]` for a global state — and
+/// owned by `func`, `Stddev` or `Var`. The state is named as the planner names it, the
+/// sample form (`sql_name` at `ddof` 1), so the name that reaches the device is the one a
+/// `stddev(x)` or `var(x)` plan writes.
+pub(crate) fn welford_state_by(grouped: bool, func: AggFunc) -> Schema {
+    let output = match func {
+        AggFunc::Stddev => "stddev(f64)",
+        AggFunc::Var => "var(f64)",
+        other => panic!("{other:?} has no Welford state; declare Stddev or Var"),
+    };
+    let mut fields = vec![
+        Field::new(format!("{output}$count"), DataType::UInt64, true),
+        Field::new(format!("{output}$mean"), DataType::Float64, true),
+        Field::new(format!("{output}$m2"), DataType::Float64, true),
+    ];
+    if grouped {
+        fields.insert(0, Field::new("key", DataType::Int32, true));
+    }
+    let keys = u32::from(grouped);
     Schema {
-        fields: Arc::new(ArrowSchema::new(vec![
-            Field::new("key", DataType::Int32, true),
-            Field::new("stddev(f64)$count", DataType::UInt64, true),
-            Field::new("stddev(f64)$mean", DataType::Float64, true),
-            Field::new("stddev(f64)$m2", DataType::Float64, true),
-        ])),
-        group_keys: vec![0],
+        fields: Arc::new(ArrowSchema::new(fields)),
+        group_keys: (0..keys).collect(),
         agg_state: vec![AggStateColumns {
-            output: "stddev(f64)".to_string(),
-            func: AggFunc::Stddev,
+            output: output.to_string(),
+            func,
             ddof: 1,
-            positions: vec![1, 2, 3],
+            positions: (keys..keys + 3).collect(),
         }],
     }
 }
 
 /// A `bug_` test's assertion: the device answered, and with exactly this one batch.
-fn gpu_answered(outcome: &Outcome, expected: RecordBatch, order: Order) {
+pub(crate) fn gpu_answered(outcome: &Outcome, expected: RecordBatch, order: Order) {
     let gpu = outcome
         .gpu
         .as_ref()
@@ -96,11 +120,15 @@ fn gpu_answered(outcome: &Outcome, expected: RecordBatch, order: Order) {
     assert_same(&[vec![expected]], gpu, order);
 }
 
-fn cpu_slot(outcome: &Outcome, at: usize) -> &RecordBatch {
+pub(crate) fn cpu_slot(outcome: &Outcome, at: usize) -> &RecordBatch {
     &outcome.cpu.as_ref().expect("the cpu answers")[at][0]
 }
 
-fn batch_of(columns: Vec<(&str, ArrayRef)>) -> RecordBatch {
+pub(crate) fn gpu_slot(outcome: &Outcome, at: usize) -> &RecordBatch {
+    &outcome.gpu.as_ref().expect("the device answers")[at][0]
+}
+
+pub(crate) fn batch_of(columns: Vec<(&str, ArrayRef)>) -> RecordBatch {
     RecordBatch::try_from_iter(columns).expect("columns of one length")
 }
 
@@ -113,20 +141,50 @@ fn batch_of(columns: Vec<(&str, ArrayRef)>) -> RecordBatch {
 /// dyadic, and the harness's exact comparison has no tolerance by design.
 fn welford_answered(outcome: &Outcome, at: usize) {
     let cpu = cpu_slot(outcome, at);
-    let gpu = &outcome.gpu.as_ref().expect("the device answers")[at][0];
-    let name = |i: usize| gpu.schema().field(i).name().clone();
-    let expected = batch_of(vec![
-        (&name(0), cpu.column(0).clone()),
-        (&name(1), cast(cpu.column(1), &DataType::Int64).unwrap()),
-    ]);
-    let raw = gpu.project(&[0, 1]).expect("a key and a count");
-    assert_same(&[vec![expected]], &[vec![raw]], Order::Any);
-    // Rows are matched by key, since `Order::Any` is what the count comparison needed.
-    let keys = |b: &RecordBatch| {
-        b.column(0)
-            .as_primitive::<Int32Type>()
-            .iter()
-            .collect::<Vec<_>>()
+    let gpu = gpu_slot(outcome, at);
+    let names: Vec<String> = (0..cpu.num_columns())
+        .map(|i| gpu.schema().field(i).name().clone())
+        .collect();
+    let expected: Vec<(&str, ArrayRef)> = (0..cpu.num_columns())
+        .map(|i| {
+            let column = if i == 1 {
+                cast(cpu.column(i), &DataType::Int64).unwrap()
+            } else {
+                cpu.column(i).clone()
+            };
+            (names[i].as_str(), column)
+        })
+        .collect();
+    same_within_welford(&batch_of(expected), gpu, true, &[2, 3]);
+}
+
+/// The device's `gpu` against `expected`: every column exactly but the `approximate` ones,
+/// which are `Float64` compared to `WELFORD_RELATIVE`. Rows are matched on the `Int32` key
+/// at column 0 where `keyed`, and by position — one row — where not.
+pub(crate) fn same_within_welford(
+    expected: &RecordBatch,
+    gpu: &RecordBatch,
+    keyed: bool,
+    approximate: &[usize],
+) {
+    let exact: Vec<usize> = (0..expected.num_columns())
+        .filter(|i| !approximate.contains(i))
+        .collect();
+    assert_same(
+        &[vec![expected.project(&exact).expect("the exact columns")]],
+        &[vec![
+            gpu.project(&exact).expect("the device's exact columns"),
+        ]],
+        Order::Any,
+    );
+    let key_of = |b: &RecordBatch, row: usize| -> Option<Option<i32>> {
+        keyed.then(|| {
+            b.column(0)
+                .as_primitive::<Int32Type>()
+                .iter()
+                .nth(row)
+                .unwrap()
+        })
     };
     let floats = |b: &RecordBatch, i: usize| {
         b.column(i)
@@ -134,14 +192,18 @@ fn welford_answered(outcome: &Outcome, at: usize) {
             .iter()
             .collect::<Vec<_>>()
     };
-    let (cpu_keys, gpu_keys) = (keys(cpu), keys(gpu));
-    for (i, what) in [(2, "mean"), (3, "m2")] {
-        let (ours, theirs) = (floats(cpu, i), floats(gpu, i));
-        for (row, key) in gpu_keys.iter().enumerate() {
-            let at = cpu_keys
-                .iter()
-                .position(|k| k == key)
-                .unwrap_or_else(|| panic!("key {key:?} is the device's alone"));
+    assert_eq!(expected.num_rows(), gpu.num_rows(), "rows");
+    for &i in approximate {
+        let what = expected.schema().field(i).name().clone();
+        let (ours, theirs) = (floats(expected, i), floats(gpu, i));
+        for row in 0..gpu.num_rows() {
+            let key = key_of(gpu, row);
+            let at = match key {
+                None => row,
+                Some(key) => (0..expected.num_rows())
+                    .find(|r| key_of(expected, *r) == Some(key))
+                    .unwrap_or_else(|| panic!("key {key:?} is the device's alone")),
+            };
             match (ours[at], theirs[row]) {
                 (None, None) => {}
                 (Some(a), Some(b)) => assert!(
@@ -158,7 +220,7 @@ fn welford_answered(outcome: &Outcome, at: usize) {
 /// digits of an f64, which is what an order-dependent update over dyadic inputs costs.
 const WELFORD_RELATIVE: f64 = 1e-9;
 
-fn close(a: f64, b: f64) -> bool {
+pub(crate) fn close(a: f64, b: f64) -> bool {
     a == b || (a - b).abs() <= WELFORD_RELATIVE * a.abs().max(b.abs())
 }
 
@@ -181,17 +243,22 @@ fn grouping_sets_as_exported(cpu: &RecordBatch) -> RecordBatch {
 }
 
 // `GpuAggregate`: aggregators over raw rows, state out — or, with a finalize, the
-// single-node shortcut. The Welford init is grouped only: a global one adds nothing the
-// grouped case and the global sum/min/max/count do not already show.
+// single-node shortcut. The Welford init's global form is #216's pin, in
+// `aggregate_dimension_cases.rs`.
 
 /// `aggs` over `synthetic`, grouped by `key` where `grouped`, nothing finalized.
-fn init(grouped: bool, aggs: Vec<AggCall>) -> GpuAggregate {
-    let state = state_of(grouped, &aggs);
-    let group_by = if grouped {
-        vec![Expr::column(1, "key")]
-    } else {
-        Vec::new()
-    };
+pub(crate) fn init(grouped: bool, aggs: Vec<AggCall>) -> GpuAggregate {
+    let keys: &[GroupKey] = if grouped { &[KEY] } else { &[] };
+    init_by(keys, aggs)
+}
+
+/// `init` grouped on `keys`.
+pub(crate) fn init_by(keys: &[GroupKey], aggs: Vec<AggCall>) -> GpuAggregate {
+    let state = state_by(keys, &aggs);
+    let group_by = keys
+        .iter()
+        .map(|(i, name, _)| Expr::column(*i, name))
+        .collect();
     GpuAggregate::new(given(), body(group_by, aggs, None), state.clone(), state)
 }
 
@@ -227,9 +294,20 @@ operator_case! {
     }
 }
 
-fn welford_init() -> GpuAggregate {
+pub(crate) fn welford_init() -> GpuAggregate {
     let state = welford_state();
-    let aggs = vec![
+    let aggs = welford_init_aggs();
+    GpuAggregate::new(
+        given(),
+        body(vec![Expr::column(1, "key")], aggs, None),
+        state.clone(),
+        state,
+    )
+}
+
+/// The Welford triple's init aggregators over `f64`, in the state's order.
+pub(crate) fn welford_init_aggs() -> Vec<AggCall> {
+    vec![
         call(
             PlanAgg::Count,
             Expr::column(4, "f64"),
@@ -248,13 +326,7 @@ fn welford_init() -> GpuAggregate {
             "stddev(f64)$m2",
             DataType::Float64,
         ),
-    ];
-    GpuAggregate::new(
-        given(),
-        body(vec![Expr::column(1, "key")], aggs, None),
-        state.clone(),
-        state,
-    )
+    ]
 }
 
 // #163 — cuDF's Welford count exports Int64 where every plan declares UInt64.
@@ -429,18 +501,40 @@ operator_case! {
 
 /// `[key, sum(i64)]` rows: the state a partial sum would have emitted, one per row of
 /// `synthetic(rows, seed)`, so a merge over several of them has duplicate keys to fold.
-fn sum_state(rows: usize, seed: u64) -> RecordBatch {
-    let source = synthetic(rows, seed);
-    RecordBatch::try_new(
-        columns(&[("key", DataType::Int32), ("sum(i64)", DataType::Int64)])
-            .fields
-            .clone(),
-        vec![source.column(1).clone(), source.column(3).clone()],
-    )
-    .expect("two of the fixture's columns")
+pub(crate) fn sum_state(rows: usize, seed: u64) -> RecordBatch {
+    state_cut(rows, seed, &[KEY], 3, "sum(i64)", DataType::Int64)
 }
 
-fn merge_over(state: Schema, body: AggregateBody, output: Schema) -> GpuAggregateBatches {
+/// `[keys…, name]` cut from `synthetic(rows, seed)`: each key from its own ordinal, the
+/// state column from `column`, under the type the state declares.
+pub(crate) fn state_cut(
+    rows: usize,
+    seed: u64,
+    keys: &[GroupKey],
+    column: usize,
+    name: &str,
+    ty: DataType,
+) -> RecordBatch {
+    let source = synthetic(rows, seed);
+    let mut fields: Vec<(&str, DataType)> = keys
+        .iter()
+        .map(|(_, name, ty)| (*name, ty.clone()))
+        .collect();
+    fields.push((name, ty));
+    let mut arrays: Vec<ArrayRef> = keys
+        .iter()
+        .map(|(i, _, _)| source.column(*i as usize).clone())
+        .collect();
+    arrays.push(source.column(column).clone());
+    RecordBatch::try_new(columns(&fields).fields.clone(), arrays)
+        .expect("the fixture's columns under the state's names")
+}
+
+pub(crate) fn merge_over(
+    state: Schema,
+    body: AggregateBody,
+    output: Schema,
+) -> GpuAggregateBatches {
     GpuAggregateBatches::new(
         Given::of(state.clone(), BatchLayout::MultipleBatches),
         body,
@@ -449,7 +543,7 @@ fn merge_over(state: Schema, body: AggregateBody, output: Schema) -> GpuAggregat
     )
 }
 
-fn merge_sum(finalize: bool) -> GpuAggregateBatches {
+pub(crate) fn merge_sum(finalize: bool) -> GpuAggregateBatches {
     let state = columns(&[("key", DataType::Int32), ("sum(i64)", DataType::Int64)]);
     let output = if finalize {
         columns(&[("key", DataType::Int32), ("total", DataType::Int64)])
@@ -468,6 +562,22 @@ fn merge_sum(finalize: bool) -> GpuAggregateBatches {
         body(vec![Expr::column(0, "key")], aggs, finalize),
         output,
     )
+}
+
+/// A merge by `func` over `[keys…, name]`, grouped on every key, state out at done.
+pub(crate) fn merge_by(
+    keys: &[GroupKey],
+    func: PlanAgg,
+    name: &str,
+    ty: DataType,
+) -> GpuAggregateBatches {
+    let at = keys.len() as u32;
+    let aggs = vec![call(func, Expr::column(at, name), name, ty)];
+    let state = state_by(keys, &aggs);
+    let group_by = (0..at)
+        .map(|i| Expr::column(i, keys[i as usize].1))
+        .collect();
+    merge_over(state.clone(), body(group_by, aggs, None), state)
 }
 
 operator_case! {
@@ -529,35 +639,63 @@ operator_case! {
 }
 
 /// `merge_m2` is not per column: the three state columns go in as one call's arguments.
-fn welford_merge() -> GpuAggregateBatches {
-    let state = welford_state();
+pub(crate) fn welford_merge() -> GpuAggregateBatches {
+    welford_merge_by(true, AggFunc::Stddev, None)
+}
+
+/// `welford_merge` grouped or global, over the state `func` owns, finalized by `finalize`
+/// where given — one expression over the state's three columns, named as the output
+/// column it declares, `Float64`.
+pub(crate) fn welford_merge_by(
+    grouped: bool,
+    func: AggFunc,
+    finalize: Option<NamedExpr>,
+) -> GpuAggregateBatches {
+    let state = welford_state_by(grouped, func);
+    let at = u32::from(grouped);
+    let triple: Vec<Field> = state.fields.fields()[at as usize..]
+        .iter()
+        .map(|f| f.as_ref().clone())
+        .collect();
     let aggs = vec![AggCall {
         func: PlanAgg::MergeM2,
-        args: vec![
-            Expr::column(1, "stddev(f64)$count"),
-            Expr::column(2, "stddev(f64)$mean"),
-            Expr::column(3, "stddev(f64)$m2"),
-        ],
-        outputs: state.fields.fields()[1..]
+        args: triple
             .iter()
-            .map(|f| f.as_ref().clone())
+            .enumerate()
+            .map(|(i, f)| Expr::column(at + i as u32, f.name()))
             .collect(),
+        outputs: triple,
     }];
+    let group_by = if grouped {
+        vec![Expr::column(0, "key")]
+    } else {
+        Vec::new()
+    };
+    let output = match &finalize {
+        None => state.clone(),
+        Some(named) => {
+            let mut fields = vec![(named.name.as_str(), DataType::Float64)];
+            if grouped {
+                fields.insert(0, ("key", DataType::Int32));
+            }
+            columns(&fields)
+        }
+    };
     merge_over(
-        state.clone(),
-        body(vec![Expr::column(0, "key")], aggs, None),
         state,
+        body(group_by, aggs, finalize.map(|named| vec![named])),
+        output,
     )
 }
 
 /// One Welford partial per row of `synthetic(32, seed)`: count 1, mean `f64`, m2 0 —
-/// what an init over one row emits.
-fn welford_partial(seed: u64) -> RecordBatch {
+/// what an init over one row emits, under the names `func`'s grouped state declares.
+pub(crate) fn welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
     let s = synthetic(32, seed);
     let ones: ArrayRef = Arc::new(UInt64Array::from(vec![1u64; 32]));
     let zeros: ArrayRef = Arc::new(datafusion::arrow::array::Float64Array::from(vec![0.0; 32]));
     RecordBatch::try_new(
-        welford_state().fields.clone(),
+        welford_state_by(true, func).fields.clone(),
         vec![s.column(1).clone(), ones, s.column(4).clone(), zeros],
     )
     .unwrap()
@@ -568,7 +706,8 @@ fn welford_partial(seed: u64) -> RecordBatch {
 operator_case! {
     GpuAggregateBatches,
     fn bug_a_welford_merge_exports_its_count_as_int64() {
-        let arrivals = vec![welford_partial(1), welford_partial(2), welford_partial(3)];
+        let partial = |seed| welford_partial(AggFunc::Stddev, seed);
+        let arrivals = vec![partial(1), partial(2), partial(3)];
         let outcome = run_both(&welford_merge(), Script::Accumulate(arrivals));
         welford_answered(&outcome, 3);
     }
