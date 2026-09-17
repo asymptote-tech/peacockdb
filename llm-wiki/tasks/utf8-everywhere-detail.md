@@ -82,6 +82,14 @@ pre-rollout cell counts — the coordinator added one dated rollout line each, w
 counts read from the csv (22, 50, 3; the analyst's 21 and 47 were undercounts). `architecture.md`:
 none falsified, both readers agree. The analyst's evidence trail is the last section of this file.
 
+## Completeness approved — 2026-09-17
+
+The session-config door closed in `096afbf1` (one line, one red-then-green test, `--lib` 542,
+goldens unmoved); a scoped reviewer read that commit alone: 0 blocking, 0 important, both
+settings load-bearing on disjoint paths, the guard shown to go red. Signoff appended to the spec.
+`done` needs CI green, and CI cannot run while PR #158 conflicts with master — waiting on the
+human's `rebase`. The chain carries on to `decimal-precision-at-export` meanwhile.
+
 ## Developer notes
 
 ### Dispatch 1 — what was done, in the plan's order
