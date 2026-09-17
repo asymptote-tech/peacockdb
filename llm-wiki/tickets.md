@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 221), which is also the counter for
+New tickets take the next free number (currently 225), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,63 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 29 | #219 #218 #217 #216 #215 #214 #211 #210 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Critical correctness](#critical-correctness) | 33 | #224 #223 #222 #221 #219 #218 #217 #216 #215 #214 #211 #210 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #212 #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #213 #201 #197 #196 #195 #178 #176 #174 #167 #164 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
+
+<a id="t224"></a>
+### #224 — the device cannot cast an integer to a date
+
+`CAST(i AS DATE)` over an integer column answers on the cpu and is refused on the device:
+`Timestamps cannot be converted to numeric without converting it to a duration`.
+
+Arrow reads the integer as days. The cast arm of `build_column` (`expr.cpp`) hands every
+numeric-to-chrono cast to `cudf::cast`,
+which routes none of them; an integer source needs a duration in days first, and the wire
+carries no duration type to route it through. The mirror of #218, where the source is text. No
+corpus query casts an integer to a date; `date-part-return-type`'s gtests met it building a
+date from `n_nationkey` and made the date from literals instead. No pin yet.
+
+<a id="t223"></a>
+### #223 — `substr` with a column for its start or length is refused on the device
+
+`substr(s, start, len)` with a column `start` or `len` answers on the cpu and is refused on the
+device: `substr: position/length must be literals`.
+
+The `substr` arm of `build_column_scalar_fn` (`expr.cpp`) reads both from literals, handing
+`cudf::strings::slice_strings` two scalars; the per-row form is that function's column
+overload. No corpus query reaches it. Seen by `date-part-return-type`'s neighbour survey; no pin
+yet.
+
+<a id="t222"></a>
+### #222 — `round(x, places)` with a column for `places` is refused on the device
+
+`round(x, n)` with a column `n` answers on the cpu and the device refuses it: `round: decimal
+places must be a literal`.
+
+DataFusion's signature takes `Int64` for the places, column or literal. The `round` arm of
+`build_column_scalar_fn` (`expr.cpp`) reads `places` from a literal alone,
+since `cudf::round` takes one scale for the whole column; a per-row scale is one `cudf::round`
+per distinct value gathered back, or a refusal the planner makes at plan time so both engines
+agree. No corpus query rounds by a column. Seen by `date-part-return-type`'s neighbour survey;
+no pin yet.
+
+<a id="t221"></a>
+### #221 — `round` over a `Float32` column answers `Float64` on the device
+
+`round(x)` with `x: Float32` is `Float32` on the cpu — DataFusion's signature takes `Float32`
+exactly and declares it — and `FLOAT64` on the device, so the sink refuses the column.
+
+The `round` arm of `build_column_scalar_fn` (`expr.cpp`) casts every operand to `FLOAT64`
+before `cudf::round`, whatever `return_type` the wire carries, and hands the double up. A
+`Float32` operand is the one case where the declaration differs: a decimal or integer operand
+arrives under a planner cast to `Float64`. The fix is a `cudf::cast` back to the wire's
+`return_type` when it differs, as `date_part`'s arm does. No corpus query: tpcds q2, q54 and q78
+round decimals. Pinned by `bug_a_round_over_float32_answers_float64_on_the_device`
+(`gpu_tests/exec_cases.rs`).
 
 <a id="t219"></a>
 ### #219 — `ILIKE` is case-sensitive on the device

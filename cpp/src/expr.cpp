@@ -632,7 +632,13 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
     else if (field == "SECOND")  comp = cudf::datetime::datetime_component::SECOND;
     else throw std::runtime_error("date_part: unsupported field " + field);
     auto ts = build_column(args->Get(1), table);
-    return cudf::datetime::extract_datetime_component(ts->view(), comp);
+    auto component = cudf::datetime::extract_datetime_component(ts->view(), comp);
+    // cuDF answers INT16 for every field; the wire names the type DataFusion declared.
+    cudf::data_type want{fb_to_type_id(sf->return_type())};
+    if (!cudf::is_integral_not_bool(want))
+      throw std::runtime_error(std::string("date_part: return_type ") +
+                               fb::EnumNameDataType(sf->return_type()) + " is not an integer type");
+    return component->type() == want ? std::move(component) : cudf::cast(component->view(), want);
   }
 
   // substr(s, start, length) — SQL semantics: 1-based start.
