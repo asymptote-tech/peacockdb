@@ -20,7 +20,7 @@ the driver hook that keep the boundary measured. In order; the fixes first so th
 after them are exact. Chain E's Task 8 retirements are on its branches and merge first; task 5
 reuses E's join builders. The wire and header move once, in task 2.
 
-### 1. [`utf8-everywhere.md`](utf8-everywhere.md) — closes [#183](active-tickets.md#t183) — state: completeness approved — PR #158
+### 1. [`utf8-everywhere.md`](utf8-everywhere.md) — closes [#183](active-tickets.md#t183) — state: done — PR #158
 
 `schema_force_view_types = false` in `build_session_state`: the parquet scan is the only producer of
 `Utf8View` in DataFusion 45, so every plan declares `Utf8` from the leaf and the export agrees with no

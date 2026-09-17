@@ -402,3 +402,9 @@ opened its own, so the join-batching ticket is renumbered **#220** everywhere (`
 the counter is 221. The pre-rebase tip is tag `pre-rebase/utf8-everywhere` (`49abbaa9`, local).
 `completeness approved` is restored only when the developer re-runs the proving commands green
 on this base; then CI can finally run on PR #158.
+
+## Done — 2026-09-17
+
+Re-proof green (`510e0979`); PR #158 mergeable against master; CI run 35170572167 green on
+every job — both dataset-matrix legs, the GPU tests on shad-gpu, cost report, S3 check. Awaiting
+the human's merge. Task 2's rebase onto this branch is next.
