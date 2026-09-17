@@ -157,3 +157,11 @@ Restriction check: `git diff --stat -- cpp` is empty; `grep -rn "UInt64" peacock
 --include=*.rs` outside `wire/generated` finds `common.rs`'s byte table, `serialize.rs`'s
 literal arm, and `merge_m2.rs`'s cast of the count *into* DataFusion's accumulator — nothing
 casts a count to `UInt64` on the way out; `finalize`'s `out_type` is still DataFusion's.
+
+## Reviewing — 2026-09-17
+
+Dispatch 1 committed as `636c0e96` on `1f7723c1`, pushed; PR #160 against
+`ENS-decimal-precision-at-export`, base verified. The developer's one deviation from the spec's
+finalize shape — the bare sum divided and the quotient cast, rather than the numerator cast
+first — is a finding on the spec, recorded under Developer notes with the digit that decided
+it; the reviewer judges it. Comment-only edits outside the scope table are listed there too.
