@@ -515,7 +515,9 @@ impl CostModel {
 // nullability. Reading a handle through this projection is what lets a case hold the device
 // to a declaration without the export's relabelling in between.
 
-/// `cudf::type_id`, for the types the wire admits.
+/// `cudf::type_id`, for the types the wire admits, plus the two narrow decimal widths a
+/// handle can hold: 25.02's `to_arrow_schema` reports them as `decimal128` at the width's
+/// maximum precision, 9 or 18, which is how a handle read tells them from `DECIMAL128`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeId {
     Empty,
@@ -536,6 +538,8 @@ pub enum TypeId {
     TimestampMicroseconds,
     TimestampNanoseconds,
     String,
+    Decimal32,
+    Decimal64,
     Decimal128,
 }
 
