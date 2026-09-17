@@ -8,9 +8,14 @@
 
 use super::Driver;
 use crate::executor::driver::StepError;
-use crate::executor::{Backend, CallKind};
+use crate::executor::{Backend, CallKind, OutputHook};
 
-impl<B: Backend> Driver<'_, B> {
+impl<'a, B: Backend> Driver<'a, B> {
+    pub(crate) fn with_hook(mut self, hook: OutputHook<'a, B>) -> Self {
+        self.hook = Some(hook);
+        self
+    }
+
     pub(crate) fn hops(&self) -> (usize, usize) {
         self.acct.hops()
     }

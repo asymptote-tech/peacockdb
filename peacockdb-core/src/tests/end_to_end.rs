@@ -31,6 +31,7 @@ use crate::test_support::{
 mod accounting;
 mod dimensions;
 mod limits;
+mod schema_validation;
 
 /// Where a Welford merge is the only divergence: the engine decomposes the aggregate into
 /// an init, two merges and a finalize, and DataFusion computes it in one pass, so the last

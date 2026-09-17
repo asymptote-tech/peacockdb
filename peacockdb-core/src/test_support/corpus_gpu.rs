@@ -17,14 +17,15 @@ use peacockdb_ffi::raw::{
     peacock_executor_destroy, peacock_executor_end_plan, peacock_last_error,
 };
 
-use crate::executor::{GpuBackend, GpuContext, run};
+use crate::executor::{GpuBackend, GpuContext, PlanIndex, run_with_hook};
 use crate::plan::GpuNode;
 use crate::plan_text::render_run;
 use crate::wire::{RecipePlan, attach_recipes};
 
 use super::corpus::{plan_at, run_cpu};
 use super::{
-    BUDGET, Mode, SKIPPED, assert_results_match, batches_to_sorted_str, corpus_golden, mode_named,
+    BUDGET, Mode, SKIPPED, assert_results_match, batches_to_sorted_str, corpus_golden,
+    gpu_schema_validator, mode_named,
 };
 
 /// A device session over one plan: the recipes attached and the buffer handed across, which
@@ -84,16 +85,27 @@ fn error_of(executor: *mut PeacockExecutor) -> String {
     }
 }
 
-/// The whole of a device corpus case: plan, run on the device, then the two read-only
-/// assertions — the mode's `.cpu.txt` section, and the result the declaration names.
-pub(crate) async fn gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, gpu_oracle: &str) {
+/// The whole of a device corpus case: plan, run on the device with the schema validator
+/// installed where the declaration asks for it, then the two read-only assertions — the
+/// mode's `.cpu.txt` section, and the result the declaration names.
+pub(crate) async fn gpu_case(
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    mode: &str,
+    gpu_oracle: &str,
+    validation: &str,
+) {
     let mode = mode_named(mode);
     let what = format!("{dataset}/{query} at {} on a device", mode.name);
+    let validated = schema_validation(validation, &what);
     let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
+    let index = PlanIndex::build(tree.as_ref()).unwrap_or_else(|e| panic!("{what}: {e}"));
     let mut session = Session::open(tree.as_ref(), &what);
     let ctx = session.context();
-    let report =
-        run::<GpuBackend>(tree.as_ref(), &ctx, None).unwrap_or_else(|e| panic!("{what}: {e}"));
+    let hook = validated.then(|| gpu_schema_validator(&index));
+    let report = run_with_hook::<GpuBackend>(tree.as_ref(), &ctx, None, hook)
+        .unwrap_or_else(|e| panic!("{what}: {e}"));
     assert_eq!(report.in_flight_bytes, 0, "{what} ended holding batches");
     assert_eq!(
         report.holds, report.releases,
@@ -188,6 +200,20 @@ async fn assert_result(
         Some(tolerance) => {
             assert_sorted_str_approx(rows.trim_end(), actual.trim_end(), tolerance, &what)
         }
+    }
+}
+
+/// A `corpus_query!` line's last argument, decoded: whether every batch is held to its
+/// node's declaration. Exhaustive, so a misspelling names the row rather than running it
+/// unvalidated.
+fn schema_validation(s: &str, what: &str) -> bool {
+    match s {
+        "schema_validation_enabled" => true,
+        "schema_validation_disabled" => false,
+        other => panic!(
+            "{what}: corpus_query!: unknown schema validation '{other}' \
+             (expected schema_validation_enabled|schema_validation_disabled)"
+        ),
     }
 }
 

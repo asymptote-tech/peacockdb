@@ -101,3 +101,18 @@ hook first. The ad hoc trigger case is not committed.
 ## Device workflow
 
 `build-test-shadgpu.sh`, the corpus binaries; one cycle plus the ad hoc run.
+
+## Completeness signoff — 2026-09-17
+
+Solved under its constraints: `run_with_hook` beside `run` at three levels, `pub(crate)`, the
+one production change; with `None` the driver does exactly what it did; a refusal ends the
+query as a failed call does and releases the refused batch where it was refused, pinned by a
+mock test over every site; the validator under `test-support` holds each device batch to its
+node's declared schema through task 5's reader and comparator, with four mock tests and the
+cpu twin's end-to-end pair; every enabled device cell runs with validation on and is green,
+the ad hoc trigger red at its `GpuProject` by name and not committed. Shortcuts or bandaids:
+none. Deviations, on record: three of the spec's four emission sites are hooked — the unload's
+host batches are a `CpuBatch` a hook on `B::Batch` cannot take, and were to be skipped;
+`OutputHook` lives in `executor/mod.rs` so `test_support` can name it; `tpch/shuffle-stddev`
+runs with validation off on #225, its registry cell untouched. `done` waits on CI; with it the
+chain is complete.

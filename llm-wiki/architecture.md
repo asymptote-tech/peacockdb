@@ -598,7 +598,12 @@ Two drivers, both single-threaded, push-based and deterministic. In `executor/dr
 `partitioned.rs` owns the tree, the queues and the three cross-lane categories;
 `single_partition.rs` owns one lane of one lane-scoped node as a state machine; and
 `scheduler.rs` decides what runs next from plain numbers, with no backend, batch or executor in
-sight.
+sight. The driver also takes an optional output hook, `OutputHook`, through `run_with_hook`
+beside `run`. It is called with the node, the lane and the batch wherever a node queues its
+own device output — never at a forwarder, never for the unload's host batches. A refusal ends
+the query as a failed call does, the refused batch released where it was refused. Production
+passes `None`; the device corpus installs
+`test_support`'s schema validator through it.
 
 Every node carries a **height** (distance to the root) and an **order** (pre-order index). A
 node is **runnable** when any of its lanes can make progress: a source always can, another node
@@ -1186,7 +1191,8 @@ legible: a `Decimal128(38, 6)` in a finalize means nothing without the state col
 scale beside it. It checks nothing — a golden records what the planner declared, and the
 declaration is exactly what a wrong type would move. An aggregate's state is the one declared
 type derived from its producer (`PlanAgg::state_type`); a project's expression is compared
-against nothing, and the C++ half is [#164](tickets.md#t164).
+against nothing at plan time — what the device produces for it is held to the declaration per
+batch by the test harness and the corpus's validator — and the C++ half is [#164](tickets.md#t164).
 
 **Estimates go in a `--- memory ---` section per query, not on the node line.** They churn where
 plan shapes do not — an estimator change, then #19's statistics, then #147's refinement — so on

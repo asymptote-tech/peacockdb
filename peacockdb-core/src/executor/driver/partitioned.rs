@@ -17,8 +17,8 @@ use super::scheduler::Scheduler;
 use super::single_partition::{Avail, LaneCall, LaneDriver, LaneOutputs, LaneSite};
 use crate::executor::{
     Backend, BackendError, Batch, BatchForwarder, CallKind, CpuBatch, EmittedBatch, Forwarder,
-    LaneEvent, NodeExecutors, PartitionAccumulatorExecutor, PartitionEmitterExecutor, PlanIndex,
-    ROOT, RowRange, RunError, RunReport, TraceEvent,
+    LaneEvent, NodeExecutors, OutputHook, PartitionAccumulatorExecutor, PartitionEmitterExecutor,
+    PlanIndex, ROOT, RowRange, RunError, RunReport, TraceEvent,
 };
 use crate::plan::ExecutorCategory;
 use crate::plan::GpuNode;
@@ -38,12 +38,28 @@ pub(crate) fn run<B: Backend>(
     ctx: &B::Context,
     budget: Option<usize>,
 ) -> Result<RunReport, RunError> {
-    Driver::<B>::new(root, ctx, budget)?.run(DEFAULT_MAX_STEPS)
+    run_with_hook::<B>(root, ctx, budget, None)
+}
+
+/// [`run`] with an output hook — see [`OutputHook`].
+pub(crate) fn run_with_hook<'a, B: Backend>(
+    root: &'a dyn GpuNode,
+    ctx: &'a B::Context,
+    budget: Option<usize>,
+    hook: Option<OutputHook<'a, B>>,
+) -> Result<RunReport, RunError> {
+    let mut driver = Driver::<B>::new(root, ctx, budget)?;
+    driver.hook = hook;
+    driver.run(DEFAULT_MAX_STEPS)
 }
 
 pub(crate) struct Driver<'a, B: Backend> {
     index: PlanIndex<'a>,
     ctx: &'a B::Context,
+    /// Called on every batch a node queues as its own device output, after it is recorded
+    /// and before it is queued. The unload's host batches and a forwarder's moves are not
+    /// emissions of a `B::Batch` and never reach it.
+    hook: Option<OutputHook<'a, B>>,
     scheduler: Scheduler,
     acct: ResidentAccountant,
     states: Vec<NodeState<B>>,
@@ -134,6 +150,7 @@ impl<'a, B: Backend> Driver<'a, B> {
         let mut driver = Self {
             index,
             ctx,
+            hook: None,
             scheduler,
             acct,
             states,
@@ -310,8 +327,17 @@ impl<'a, B: Backend> Driver<'a, B> {
             let produced = match outcome.outputs {
                 LaneOutputs::Device(batches) => {
                     let produced = batches.len();
-                    for batch in batches {
+                    let mut batches = batches.into_iter();
+                    while let Some(batch) = batches.next() {
                         self.record_emitted(node, lane, &batch);
+                        // The lane held this call's whole output at once, so a refusal
+                        // gives back the batches behind the refused one as well.
+                        if let Err(refusal) = self.offer(node, lane, &batch) {
+                            for unqueued in batches {
+                                let _ = self.acct.release(unqueued.bytes);
+                            }
+                            return Err(refusal);
+                        }
                         self.states[node].out_queues[lane].push_back(batch);
                     }
                     produced
@@ -391,6 +417,7 @@ impl<'a, B: Backend> Driver<'a, B> {
             let held = Held::of(out);
             self.acct.hold(held.bytes);
             self.record_emitted(node, lane, &held);
+            self.offer(node, lane, &held)?;
             self.states[node].out_queues[lane].push_back(held);
             emitted += 1;
         }
@@ -448,6 +475,7 @@ impl<'a, B: Backend> Driver<'a, B> {
                 let held = Held::of(out);
                 self.acct.hold(held.bytes);
                 self.record_emitted(node, 0, &held);
+                self.offer(node, 0, &held)?;
                 self.states[node].out_queues[0].push_back(held);
             }
             let Some(CrossExecutor::Accumulator(accumulator)) = &self.states[node].cross else {
@@ -812,6 +840,23 @@ impl<'a, B: Backend> Driver<'a, B> {
             "{} lane {lane}: {error}",
             self.index.nodes[node].node.name()
         )))
+    }
+
+    /// The hook's look at a batch `node` is about to queue on `lane`; its refusal ends the
+    /// query where a failed call would. The batch is held and not yet queued, so no queue
+    /// will give it back: the refusal releases it here, as `single_partition::failed`
+    /// releases a failed call's input.
+    fn offer(&mut self, node: usize, lane: usize, held: &Held<B::Batch>) -> Result<(), StepError> {
+        let Some(hook) = self.hook.as_mut() else {
+            return Ok(());
+        };
+        hook(node, lane, &held.batch).map_err(|why| {
+            let _ = self.acct.release(held.bytes);
+            StepError::Run(RunError::CallFailed(format!(
+                "{} lane {lane}: the output hook refused a batch: {why}",
+                self.index.nodes[node].node.name()
+            )))
+        })
     }
 
     fn budget_error(&self, trip: Trip) -> RunError {

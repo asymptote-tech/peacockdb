@@ -10,19 +10,20 @@ use peacockdb_core::test_support::{
     authoritative_mode, cpu_case, load_csv, result_golden, section_of, stem,
 };
 
-/// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, cpu_oracle, gpu_oracle)` — one
-/// test and one registration per enabled cpu mode. The mode arguments read as a bitwise or
-/// and are matched as idents, which is what lets the expansion produce a case per mode
-/// rather than a case that decides at run time whether it is one: a disabled mode has no
-/// test to name and no registration to explain.
+/// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, cpu_oracle, gpu_oracle,
+/// schema_validation)` — one test and one registration per enabled cpu mode. The mode
+/// arguments read as a bitwise or and are matched as idents, which is what lets the
+/// expansion produce a case per mode rather than a case that decides at run time whether
+/// it is one: a disabled mode has no test to name and no registration to explain.
 ///
-/// The device's four arguments are consumed and dropped here. That is the point of one
-/// list: this binary cannot silently disagree with the other about which query exists.
+/// The device's three arguments — its modes, its oracle and its schema validation — are
+/// consumed and dropped here. That is the point of one list: this binary cannot silently
+/// disagree with the other about which query exists.
 macro_rules! corpus_query {
-    ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
         declare_corpus_query!($dataset, $sf, $query, $cpu_oracle, $gpu_oracle);
     };
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
         declare_corpus_query!($dataset, $sf, $query, $cpu_oracle, $gpu_oracle);
         $(
             paste::paste! {
