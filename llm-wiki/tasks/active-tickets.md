@@ -123,7 +123,7 @@ group count. Eight device cells: `tpcds` q96 q48 q93 q38, `tpch` q3 q14.
 q62 q66 q73 q83 q99, `tpch` q5 q12 q16 rollup-over-join. `decimal-precision-at-export`'s,
 2026-09-17: 24 more — `tpcds` q3 q8 q15 q33 q40 q42 q43 q46 q52 q55 q56 q58 q59 q60 q61 q68 q76
 q77 q79 q80 q90, `tpch` hash-join q10 q18. `aggregate-state-types`'s, 2026-09-17: nine more —
-`tpcds` q1 q7 q13 q14 q22 q26 q32 q65 q92 — so 55 registry rows carry it.
+`tpcds` q1 q7 q13 q14 q22 q26 q32 q65 q92; `date-part-return-type`'s: `tpch` q7 q8 q9 — 58 rows.
 `q48` and `q93` are also the first cells in this rollout where a device COMPLETED a plan and the
 golden caught the disagreement — every other device failure so far has been a refusal.
 
@@ -196,24 +196,18 @@ of that tier — 13 GB SIGKILLs a runner as an infrastructure failure, not a tes
 <a id="t191"></a>
 ### #191 — the device exports Int16 for an extracted year the plan declared Int32
 
-`tpch/q8` at `tp1-single`: `the exported stream is not the sink's rows: expected Int32 but found
-Int16 at column index 0`. That column is `o_year`, an `extract(year from o_orderdate)` — DataFusion
-types it `Int32` and the device answers `Int16`.
+`tpch/q8` at `tp1-single`: `expected Int32 but found Int16 at column index 0` at the unload —
+`o_year`, an `extract(year from o_orderdate)`; DataFusion types it `Int32`, cuDF answers `INT16`.
 
-**Not [#187](active-tickets.md#t187), and merging them would lose the distinction.** That one is the
-device *widening* a decimal, to 38 whatever the declaration says. This is the device *narrowing* an
-integer, to the natural width for a year rather than to a maximum. Opposite direction, different
-type family, and a fix for either says nothing about the other.
+The opposite of [#187](active-tickets.md#t187): that one widens a decimal to 38 whatever the
+declaration, this one narrows an integer to a year's natural width.
 
-Not new behaviour either, only newly reached: `extract_year -> INT16` was already on record as a
-place where the DataFusion type is an imperfect proxy for the cuDF one. What is new is a corpus
-query whose unload sees it.
-
-One cell, `tpch/q8` at `tp1-single` — which is the only mode that gets far enough to reach the
-unload, the other four stopping at [#152](../tickets.md#t152). Pinned at the project by
-`bug_a_year_extracted_from_a_date_is_exported_as_int16` (`gpu_tests/exec_cases.rs`).
-`utf8-everywhere`'s rollout, 2026-09-16, added `tpch` q7 and q9 at the same mode, so three
-registry rows carry it.
+**Done 2026-09-17, by `date-part-return-type` on branch `ENS-date-part-return-type`.** The
+`date_part` arm of `build_column_scalar_fn` (`expr.cpp`) casts cuDF's component to the wire's
+`return_type` when the two differ, and refuses a non-integer one by name. Three plan-executor
+cases (`ProjectDatePart{Year,Month,Day}IsInt32`) and `a_date_part_answers_in_its_declared_type`
+(`gpu_tests/exec_cases.rs`) hold it. `tpch` q7, q8, q9 at `tp1-single` now run the whole device
+plan and stop at the golden's `in_rows` at the merge, #185; `191` is on no registry row.
 
 <a id="t190"></a>
 ### #190 — the CPU backend drops a nested-loop join's projection

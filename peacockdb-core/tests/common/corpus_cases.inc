@@ -97,7 +97,7 @@ corpus_query!(tpch, 1, q22, none, none, data_fusion_exact, golden_exact);
 // corpus query whose nested-loop join projects, which is why four batches went past it.
 // tp1-single is the only mode whose join gets a single probe batch, so it is the only one past
 // #152's build-side copy, and what it meets there is per query: #220's join batching for q20
-// and q21, #185's `in_rows` at the merge for q5, #191's year for q9.
+// and q21, #185's `in_rows` at the merge for q5 and q9.
 corpus_query!(tpch, 1, q20, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q5, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q9, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
@@ -107,8 +107,8 @@ corpus_query!(tpch, 1, q21, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgrou
 // T19 batch 7, the end of tpch: three queries rather than five, because these are its deepest
 // plans and the regeneration cost has moved into the queries rather than their number.
 // #152 at four modes each, and at tp1-single, the mode that always reaches the unload: q7
-// and q8 are #191's Int16 for the year extract where the plan declared Int32, a type
-// disagreement the export cannot relabel; q2 is #220's batching at its min aggregate.
+// and q8 run the whole device plan and the golden catches #185's `in_rows` at the merge —
+// the node's own output; q2 is #220's batching at its min aggregate.
 corpus_query!(tpch, 1, q7, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q8, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q2, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
