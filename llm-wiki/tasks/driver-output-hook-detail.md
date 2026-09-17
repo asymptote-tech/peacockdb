@@ -136,6 +136,38 @@ awaiting the human's merge; the chain sits on master `0a338ead`.
 - Nothing outside the spec's Scope table changed except `llm-wiki/tickets.md` (the dated line
   on #225, which the spec's own "a ticket" clause asks for).
 
+### Completeness fix — the refused batch is released (rust-only, green)
+
+- The trace, on `a_hook_that_refuses_fails_the_run_at_that_node_and_lane`: the source holds
+  its batch (1 held); the project's `hold_all` releases that input (1 released) and holds its
+  output (2 held); `offer` refuses and `?` drops the `Held` — 2 held, 1 released. `Held` has
+  no `Drop` and `release_in_flight` walks queues, so the refused batch, never queued, was
+  never released. The emitter and accumulator sites are the same shape one batch at a time;
+  the lane arm drops the whole `Vec<Held<_>>` from the refused one on.
+- The choice: the spec's order stays — offer after `record_emitted`, before the queue.
+  `offer` takes the `&Held` and on `Err` releases its bytes before building the `CallFailed`,
+  the `single_partition::failed` idiom; the lane arm iterates with `while let` and on a
+  refusal releases the rest of the vector before returning. The queue-first alternative
+  would have moved the spec's wording and left `release_in_flight` reconciling a batch the
+  report would then count as abandoned, which a refusal is not.
+- The test is `hook.rs::a_refused_query_gives_back_everything_it_held`, modelled on
+  `failure.rs::a_failed_query_gives_back_everything_it_held`, over
+  `unload(merge_sorted(merge(emit(coalesce_all(source)))))` with
+  `AccRule::EmitAtDone(2)`: four sites — source, coalesce (the lane arm with two on the
+  vector), emit, merge_sorted — each stepped to its `Err`, `release_all`, `holds > 0` and
+  `holds == releases`. It reaches the driver through `Driver::with_hook` in
+  `partitioned/tests.rs`, the sanctioned `pub(crate)` test-only setter beside `hops`. A first
+  draft used `sort` for the lane arm; `category_of` makes `GpuSort` an `Exec`, so it streamed
+  one batch per batch and the vector remainder went unexercised — caught by removing the
+  remainder release and watching the test stay green.
+- Red, before the fix: `node 5: 1 held, 0 released`. With the fix and the remainder release
+  removed: `node 4: 5 held, 4 released`. Green: the hook module `5 passed`;
+  `executor::driver` `144 passed`; `--lib` `587 passed; 2 ignored` (589 listed, 100 in
+  `executor::driver::tests`); `test_module_layout` `17 passed`; no warnings on a rebuild;
+  `testdata/` untouched. No device run: the accountant is the mock driver's, and nothing the
+  validator calls changed. `build-test.md` counts moved by one (99 → 100, 588 → 589,
+  1161 → 1162, 1817 → 1818, 2270 → 2271).
+
 ## Reviewing — 2026-09-17
 
 Dispatch 1 committed as `cb15e798` on `36bb3060`, pushed; PR #163 against
@@ -158,3 +190,81 @@ sentence in `architecture.md` split into short ones. Nits deferred, to ride with
 developer in this code and otherwise dropped: `no_hook_is_the_run_as_it_was` pins only the
 delegation (a concrete property of the report would hold the run too); `corpus_gpu.rs`'s
 `schema_validation(...) -> bool` is a noun, not a claim.
+
+## Completeness — analyst, what is missing — 2026-09-17
+
+0 blocking, 2 important. Read as one change against the spec's Scope and work items, the
+verification bar, `architecture.md` and `build-test.md`; the reviewer's list unseen.
+
+### Important 1 — a hook's refusal drops the refused output still held
+
+`partitioned.rs:409-413` (emitter), `:467-471` (accumulator), `:329-333` (lane arm). At each
+site the batch is held before `offer` and queued after it, so a refusal returns with the batch
+neither queued nor released: `acct.hold` counted, no `acct.release`, and `Driver::run`'s
+error arm (`release_in_flight`) sees only queues. On the lane arm the whole `Vec<Held<_>>`
+from `hold_all` is dropped from the refused one on. Every other failure path is deliberate
+about this — `single_partition::failed` releases the input that went into the failed call;
+`run_emitter` releases the input "whether or not the call came back"; `Driver::run`'s comment
+says "held and released stay equal on every path out of here"; and
+`failure.rs::a_failed_query_gives_back_everything_it_held` pins it for `FailAt::Exec` and
+`FailAt::Emit` by stepping, `release_all`, then `hops`. The same test with a refusing hook at
+any of the three sites would fail. Nothing on the device leaks — `Held<GpuBatch>`'s `Drop`
+releases the handle — so this is the accountant's invariant and the wiki's sentence, not
+memory. Fix: `offer` takes `&Held<B::Batch>` and on `Err` does `let _ =
+self.acct.release(held.bytes)` (the `failed` idiom); the lane arm releases the rest of its
+vector on a refusal; a fifth mock test in `hook.rs` mirroring
+`a_failed_query_gives_back_everything_it_held` over the three sites, which needs a
+`pub(crate) fn with_hook` in `partitioned/tests.rs` since `driver/tests/` cannot set the field.
+
+### Important 2 — #164 says the per-node type check is unstarted
+
+`tickets.md` #164, last sentence: "The third closure #135 named is unstarted and belongs here
+too: a per-node type check in the GPU tiers, the only thing that would surface a wrong-order
+subtree before the root." This branch is that check for the corpus tier — every enabled device
+cell holds every node's batch to its declaration, names and `{type_id, scale}`, and a swapped
+pair is a name finding at the node (which is exactly how `shuffle-stddev` went red) — and
+task 5's harness is it for the operator tier. The two C++ items in #164 stand. One dated line.
+
+### `architecture.md` — sentences the branch falsified
+
+- `## Execution` → `### Traits`: "The driver therefore needs no teardown: it stops scheduling,
+  and the failure site releases the batch it was handed, exactly where the successful path
+  would have." — false for a hook refusal (Important 1). True again with the fix.
+- `### The scheduling rule` (added by this branch): "A refusal ends the query as a failed call
+  does." — ends it and reports as `CallFailed`, but unlike a failed call leaves the refused
+  output held. True again with the fix.
+- `## Node display`, "Types are a plan fact": "a project's expression is compared against
+  nothing, and the C++ half is #164." — every enabled device cell now compares a project's
+  output, per batch, against its declaration through the hook (the ad hoc trigger is that
+  comparison going red at `GpuProject`); what is still compared against nothing is the
+  expression's type at plan time. Reword to say so.
+
+Read and not falsified: Traits' "A call can fail, and failing ends the query" (executor
+methods; the driver paragraph covers the refusal), "A batch is one table's worth of rows",
+`GpuUnload` as the one non-`B::Batch` output (the reason the host arm is unhooked); Memory
+accounting's "Holds and releases are counted, not netted" and the run-time total; Early exit's
+shared release path (a refusal's queued batches do go through it); every Determinism rule (the
+hook is synchronous on the one thread and reorders nothing); "Every cast is explicit" (now
+enforced by the corpus as well as visible in the golden).
+
+### Checked and present
+
+Scope table: every row touched, nothing outside it but `tickets.md` (#225's dated line, which
+the spec asks for). Item 1: type as specified (in `executor/mod.rs`, recorded); five queue
+pushes in the two drivers, three hooked, the host arm and the forwarder not, as recorded;
+`run_with_hook` `pub(crate)` at three levels; `None` is one `match`. Item 2: validator reads
+`node.kind().schema()` — the plan's declaration, nothing invented — and task 5's
+`device_divergence`; cpu flavour present, not in the cpu corpus. Item 3: the four named tests.
+Item 4: both macros; 120 rows changed only by the appended argument (diffed against the
+parent); 13 of 14 device rows `enabled`, `shuffle-stddev` `disabled); // #225`; registry
+`gpu_tp1_single` still `enabled`, `testdata/` untouched; #225 says the names differ, dated
+line present. Item 5: `gpu_` run is all 26 enabled cells (27 passed of 28 in the binary, the
+28th run separately) — the three `tp4_single` cells the corpus enables among them, so the bar's
+`tp1_single` and `tp4_single` reading is met by the corpus as it stands; trigger's plan and
+`Err` line recorded, no trace in the tree (`git status` clean, no file names it); e2e pair in
+`src/tests/end_to_end/`, the refusing one red-able by construction. Counts: driver row 95 → 99
+(99 `#[test]` counted), end-to-end 27 → 29 (+2), `--lib` 582 → 588 and header 2264 → 2270
+(+6, arithmetic); `test_ci_coverage` needs nothing (no target; case names unchanged).
+`build-test.md`'s corpus prose names the one unvalidated cell. Not in the record: a full
+`--lib` run (only `executor::driver` and `tests::end_to_end::schema_validation` filters);
+CI's rust-only job covers it before `done`.

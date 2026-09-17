@@ -327,9 +327,17 @@ impl<'a, B: Backend> Driver<'a, B> {
             let produced = match outcome.outputs {
                 LaneOutputs::Device(batches) => {
                     let produced = batches.len();
-                    for batch in batches {
+                    let mut batches = batches.into_iter();
+                    while let Some(batch) = batches.next() {
                         self.record_emitted(node, lane, &batch);
-                        self.offer(node, lane, &batch.batch)?;
+                        // The lane held this call's whole output at once, so a refusal
+                        // gives back the batches behind the refused one as well.
+                        if let Err(refusal) = self.offer(node, lane, &batch) {
+                            for unqueued in batches {
+                                let _ = self.acct.release(unqueued.bytes);
+                            }
+                            return Err(refusal);
+                        }
                         self.states[node].out_queues[lane].push_back(batch);
                     }
                     produced
@@ -409,7 +417,7 @@ impl<'a, B: Backend> Driver<'a, B> {
             let held = Held::of(out);
             self.acct.hold(held.bytes);
             self.record_emitted(node, lane, &held);
-            self.offer(node, lane, &held.batch)?;
+            self.offer(node, lane, &held)?;
             self.states[node].out_queues[lane].push_back(held);
             emitted += 1;
         }
@@ -467,7 +475,7 @@ impl<'a, B: Backend> Driver<'a, B> {
                 let held = Held::of(out);
                 self.acct.hold(held.bytes);
                 self.record_emitted(node, 0, &held);
-                self.offer(node, 0, &held.batch)?;
+                self.offer(node, 0, &held)?;
                 self.states[node].out_queues[0].push_back(held);
             }
             let Some(CrossExecutor::Accumulator(accumulator)) = &self.states[node].cross else {
@@ -835,17 +843,20 @@ impl<'a, B: Backend> Driver<'a, B> {
     }
 
     /// The hook's look at a batch `node` is about to queue on `lane`; its refusal ends the
-    /// query where a failed call would.
-    fn offer(&mut self, node: usize, lane: usize, batch: &B::Batch) -> Result<(), StepError> {
-        match self.hook.as_mut() {
-            Some(hook) => hook(node, lane, batch).map_err(|why| {
-                StepError::Run(RunError::CallFailed(format!(
-                    "{} lane {lane}: the output hook refused a batch: {why}",
-                    self.index.nodes[node].node.name()
-                )))
-            }),
-            None => Ok(()),
-        }
+    /// query where a failed call would. The batch is held and not yet queued, so no queue
+    /// will give it back: the refusal releases it here, as `single_partition::failed`
+    /// releases a failed call's input.
+    fn offer(&mut self, node: usize, lane: usize, held: &Held<B::Batch>) -> Result<(), StepError> {
+        let Some(hook) = self.hook.as_mut() else {
+            return Ok(());
+        };
+        hook(node, lane, &held.batch).map_err(|why| {
+            let _ = self.acct.release(held.bytes);
+            StepError::Run(RunError::CallFailed(format!(
+                "{} lane {lane}: the output hook refused a batch: {why}",
+                self.index.nodes[node].node.name()
+            )))
+        })
     }
 
     fn budget_error(&self, trip: Trip) -> RunError {

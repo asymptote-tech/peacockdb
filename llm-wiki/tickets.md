@@ -1188,7 +1188,9 @@ behaviour rather than an exception — `filter.cpp` ~L42 reads `fv.column(idx)` 
 returns `type_id::EMPTY` for an out-of-range `ColumnRef` instead of throwing, turning a bad
 ordinal into a confusing type error further along. The third closure #135 named is unstarted and
 belongs here too: a per-node type check in the GPU tiers, the only thing that would surface a
-wrong-order subtree before the root.
+wrong-order subtree before the root. 2026-09-17: chain B's `device-schema-harness` and
+`driver-output-hook` are that check for the operator and corpus tiers — every device batch held
+to its node's names and `{type_id, scale}`; the two C++ items above stand.
 
 <a id="t159"></a>
 ### #159 — RightSemi/RightAnti with a residual filter has no cuDF path

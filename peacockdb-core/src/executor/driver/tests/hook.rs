@@ -5,7 +5,7 @@
 //! rather than the validator; what is proved here is the wiring — where the driver calls
 //! it, what a refusal becomes, and that `None` leaves the run exactly as `run` makes it.
 
-use super::mock::{Mock, Script, spec};
+use super::mock::{AccRule, Mock, Script, spec};
 use super::plans::*;
 use super::*;
 use crate::executor::{Batch, OutputHook};
@@ -130,4 +130,43 @@ fn a_hook_refusing_the_third_batch_names_the_third_batchs_node_and_lane() {
     // The third call is not at the first call's node, so the name above is not the one any
     // failure would carry.
     assert_ne!(seen[0].0, node);
+}
+
+#[test]
+fn a_refused_query_gives_back_everything_it_held() {
+    // The refused batch is held and not yet queued, so no queue can give it back: the
+    // refusal site has to. Four sites, because the lane arm holds a vector and the two
+    // cross-lane loops hold one at a time; the coalesce emits two at done so the batch
+    // behind the refused one is also on the vector.
+    const SOURCE: usize = 5;
+    const COALESCE: usize = 4;
+    const EMIT: usize = 3;
+    const MERGE_SORTED: usize = 1;
+    for at in [SOURCE, COALESCE, EMIT, MERGE_SORTED] {
+        let plan = unload(merge_sorted(merge(emit(
+            coalesce_all(source("part", 1)),
+            4,
+        ))));
+        let script = three_batches().with_accumulator(AccRule::EmitAtDone(2));
+        let hook: OutputHook<'_, Mock> = Box::new(move |node, _, _| match node == at {
+            true => Err("refused".to_string()),
+            false => Ok(()),
+        });
+        let mut driver = driver(plan.as_ref(), &script).with_hook(hook);
+        let error = loop {
+            match driver.step() {
+                Ok(true) => continue,
+                Ok(false) => panic!("node {at}: the run ended without failing"),
+                Err(error) => break error,
+            }
+        };
+        assert!(matches!(error, StepError::Run(RunError::CallFailed(_))));
+        driver.release_all().expect("what it held goes back");
+        let (holds, releases) = driver.hops();
+        assert!(holds > 0, "a query that held nothing proves nothing");
+        assert_eq!(
+            holds, releases,
+            "node {at}: {holds} held, {releases} released"
+        );
+    }
 }
