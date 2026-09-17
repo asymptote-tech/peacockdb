@@ -15,7 +15,7 @@ mod single_partition;
 #[cfg(test)]
 mod tests;
 
-use crate::executor::{Backend, PlanIndex, RunError, RunReport};
+use crate::executor::{Backend, OutputHook, PlanIndex, RunError, RunReport};
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use accounting::Trip;
@@ -27,6 +27,16 @@ pub(crate) fn run<B: Backend>(
     budget: Option<usize>,
 ) -> Result<RunReport, RunError> {
     partitioned::run::<B>(root, ctx, budget)
+}
+
+/// [`run`] with an output hook — see [`OutputHook`].
+pub(crate) fn run_with_hook<B: Backend>(
+    root: &dyn GpuNode,
+    ctx: &B::Context,
+    budget: Option<usize>,
+    hook: Option<OutputHook<'_, B>>,
+) -> Result<RunReport, RunError> {
+    partitioned::run_with_hook::<B>(root, ctx, budget, hook)
 }
 
 /// The tree indexed once — heights, pre-order numbering, lane counts and slot ranges.

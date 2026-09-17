@@ -660,3 +660,22 @@ pub fn run<B: Backend>(
 ) -> Result<RunReport, RunError> {
     driver::run::<B>(root, ctx, budget)
 }
+
+/// What a caller may watch every batch a node emits as its own with: the node's index in
+/// the plan, the lane, and the batch — `Err(why)` fails the run there, as a call failure
+/// does. Production passes `None`; the corpus installs `test_support`'s schema validator.
+pub(crate) type OutputHook<'a, B> =
+    Box<dyn FnMut(usize, usize, &<B as Backend>::Batch) -> Result<(), String> + 'a>;
+
+/// [`run`] with an [`OutputHook`]. `pub(crate)`: no caller outside the crate exists, and
+/// the two inside it are the device corpus and the end-to-end tier, so a release build has
+/// none and the lint is read where those callers are.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn run_with_hook<B: Backend>(
+    root: &dyn GpuNode,
+    ctx: &B::Context,
+    budget: Option<usize>,
+    hook: Option<OutputHook<'_, B>>,
+) -> Result<RunReport, RunError> {
+    driver::run_with_hook::<B>(root, ctx, budget, hook)
+}

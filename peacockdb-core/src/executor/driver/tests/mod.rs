@@ -14,6 +14,7 @@ mod budget;
 mod counts;
 mod failure;
 mod flow;
+mod hook;
 mod instrument;
 mod limit;
 mod memory;

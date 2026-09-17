@@ -11,10 +11,11 @@ use peacockdb_core::test_support::{
 
 /// The device's reading of a declaration: one test and one registration per enabled gpu
 /// mode, and nothing at all for `none`. The cpu arguments are consumed and dropped, which
-/// is what makes one list serve both binaries.
+/// is what makes one list serve both binaries. The last argument says whether the run holds
+/// every batch to its node's declared schema; `gpu_case` decodes it.
 macro_rules! corpus_query {
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, none, $cpu_oracle:ident, $gpu_oracle:ident) => {};
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, none, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {};
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
         $(
             paste::paste! {
                 #[tokio::test]
@@ -25,6 +26,7 @@ macro_rules! corpus_query {
                         &stringify!($query).replace('_', "-"),
                         stringify!($gpu),
                         stringify!($gpu_oracle),
+                        stringify!($validation),
                     )
                     .await;
                 }
@@ -77,7 +79,14 @@ fn a_device_run_under_a_regeneration_writes_no_golden() {
     let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         tokio::runtime::Runtime::new()
             .expect("a runtime")
-            .block_on(gpu_case(dataset, sf, query, mode, "golden_exact"));
+            .block_on(gpu_case(
+                dataset,
+                sf,
+                query,
+                mode,
+                "golden_exact",
+                "schema_validation_enabled",
+            ));
     }));
     unsafe {
         std::env::remove_var("UPDATE_CANONICAL");

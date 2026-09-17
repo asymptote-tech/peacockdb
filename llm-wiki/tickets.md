@@ -34,7 +34,9 @@ under it. No answer is wrong today: the merge packs the triple by offset and the
 it by ordinal; a reader resolving a state column by name would take the wrong one. The fix is
 the three names on the wire, or the suffixes appended in `aggregate.cpp`. Pinned by the two
 `bug_…_holds_its_welford_state_under_the_aggregates_alias_three_times` cases in
-`gpu_tests/aggregate_schema_cases.rs`.
+`gpu_tests/aggregate_schema_cases.rs`. 2026-09-17: the corpus's schema validator refuses
+`tpch/shuffle-stddev` at its `GpuAggregate` on these names, so its row says
+`schema_validation_disabled`; the cell stays enabled and its values match.
 
 <a id="t224"></a>
 ### #224 — the device cannot cast an integer to a date
