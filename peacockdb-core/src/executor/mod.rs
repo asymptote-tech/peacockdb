@@ -668,8 +668,8 @@ pub(crate) type OutputHook<'a, B> =
     Box<dyn FnMut(usize, usize, &<B as Backend>::Batch) -> Result<(), String> + 'a>;
 
 /// [`run`] with an [`OutputHook`]. `pub(crate)`: no caller outside the crate exists, and
-/// the two inside it are the device corpus and the end-to-end tier, so a release build has
-/// none and the lint is read where those callers are.
+/// its callers inside it are test code — the device corpus, the end-to-end tier and the
+/// driver's mock tests — so a release build has none and the lint is read where they are.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn run_with_hook<B: Backend>(
     root: &dyn GpuNode,

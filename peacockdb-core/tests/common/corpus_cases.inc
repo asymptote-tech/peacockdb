@@ -1,21 +1,13 @@
-// The corpus, one line per query — read and diffed as a line rather than as up to ten
-// macro invocations that can disagree with each other. Included by both corpus binaries,
-// which define `corpus_query!` differently: the cpu one expands `cpu_modes`, the device one
-// `gpu_modes`, so a query enabled at four modes on the cpu and one on a device is still one
-// declaration.
+// The corpus, one line per query, included by both corpus binaries — the cpu's macro expands
+// `cpu_modes`, the device's `gpu_modes`, so one declaration covers both engines:
 //
 //   corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, cpu_oracle, gpu_oracle,
 //                 schema_validation)
 //
-// The mode arguments are the five planning modes the plan goldens carry, or'd together, or
-// `none`. Every argument is written rather than deduced from the one beside it: a query's
-// whole coverage reads off the line. The last says whether the device run holds every
-// batch to its node's declared schema; a cell red on schema alone says
-// `schema_validation_disabled` with its ticket on the line, and stays enabled.
-//
-// The twenty here are chosen by plan size off the committed goldens rather than by taste —
-// the smallest carrying no ticket — because the constraint is not what can plan but what is
-// small enough that a failure is legible. The rest of the corpus is T19.
+// Modes are the five planning modes or'd together, or `none`; every argument is written, so
+// a query's whole coverage reads off the line. The last is the device run's schema validation;
+// a cell red on schema alone says `schema_validation_disabled` with its ticket on the line.
+// The first twenty are the smallest plans carrying no ticket; the rest of the corpus is T19.
 
 // --- tpch ---------------------------------------------------------------------
 corpus_query!(tpch, 1, q6, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, data_fusion_exact, golden_exact, schema_validation_enabled);

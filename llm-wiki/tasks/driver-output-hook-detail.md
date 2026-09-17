@@ -144,3 +144,17 @@ sites are hooked — the lane's host arm queues the unload's `CpuBatch`, which a
 `B::Batch` cannot take for a generic `B`, and the sink was to be skipped anyway; `OutputHook`
 lives in `executor/mod.rs` so `test_support` can name it; `tpch/shuffle-stddev` is
 `schema_validation_disabled` on #225 (twelve name findings, no type finding, values match).
+
+## Completing — 2026-09-17
+
+Review round 1: 0 blocking, 0 important, 5 nits. The reviewer confirmed `git diff
+executor/driver/` is the hook and nothing else, the `None` path one `match` with no allocation,
+the host-arm deviation right on typing (an enum over both batch kinds would buy nothing: the
+only consumer would skip `Host`, and `concat_batches` already checks those batches), the lint
+gate right for every build shape, and the four mock tests, the end-to-end pair and the corpus
+chain each able to go red. Nits taken here, comment and wiki: `corpus_cases.inc`'s header
+within the ten-line cap; `run_with_hook`'s doc naming its three test callers; the driver
+sentence in `architecture.md` split into short ones. Nits deferred, to ride with the next
+developer in this code and otherwise dropped: `no_hook_is_the_run_as_it_was` pins only the
+delegation (a concrete property of the report would hold the run too); `corpus_gpu.rs`'s
+`schema_validation(...) -> bool` is a noun, not a claim.

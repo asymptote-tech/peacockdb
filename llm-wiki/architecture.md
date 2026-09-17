@@ -598,11 +598,11 @@ Two drivers, both single-threaded, push-based and deterministic. In `executor/dr
 `partitioned.rs` owns the tree, the queues and the three cross-lane categories;
 `single_partition.rs` owns one lane of one lane-scoped node as a state machine; and
 `scheduler.rs` decides what runs next from plain numbers, with no backend, batch or executor in
-sight. The driver also takes an optional output hook — `OutputHook`, through `run_with_hook`
-beside `run` — called with the node, the lane and the batch wherever a node queues its own
-device output, never at a forwarder or at the unload's host batches; a refusal ends the query
-as a failed call does. Production passes `None`; the device corpus installs `test_support`'s
-schema validator through it.
+sight. The driver also takes an optional output hook, `OutputHook`, through `run_with_hook`
+beside `run`. It is called with the node, the lane and the batch wherever a node queues its
+own device output — never at a forwarder, never for the unload's host batches. A refusal ends
+the query as a failed call does. Production passes `None`; the device corpus installs
+`test_support`'s schema validator through it.
 
 Every node carries a **height** (distance to the root) and an **order** (pre-order index). A
 node is **runnable** when any of its lanes can make progress: a source always can, another node
