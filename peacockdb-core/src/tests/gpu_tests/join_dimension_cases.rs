@@ -4,12 +4,13 @@
 //! `hash_join` are `join_cases.rs`'s. Every case is green or a `bug_` test with its ticket
 //! above it; nothing here repairs.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use datafusion::arrow::array::Int32Array;
-use datafusion::arrow::compute::cast;
+use datafusion::arrow::array::{Array, AsArray, Int32Array};
 use datafusion::arrow::compute::kernels::numeric::rem;
-use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+use datafusion::arrow::compute::{cast, concat_batches};
+use datafusion::arrow::datatypes::{DataType, Field, Int64Type, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::{JoinType, ScalarValue};
 
@@ -18,10 +19,11 @@ use super::join_cases::{
     padded, probe_batch, residual, script, side, two_probes,
 };
 use super::script::{Script, run_both};
+use crate::executor::BackendError;
 use crate::plan::{
     BatchLayout, BinaryOp, Expr, GpuHashJoin, GpuNode, JoinFilterColumn, JoinSide, Schema,
 };
-use crate::tests::compare::Order;
+use crate::tests::compare::{Order, Slot};
 use crate::tests::given::Given;
 use crate::tests::synthetic::{prefixed, synthetic};
 
@@ -239,6 +241,16 @@ fn keyed_anti_script(key: Key) -> Script {
     )
 }
 
+/// The eight-row probe `keyed_anti_script` was cut down from: row 4's `i32` is null, so on
+/// the composite key it is a null pair against every build row that shares its `key` and
+/// carries a null `i32` of its own.
+fn composite_anti_script_with_a_null_second_key() -> Script {
+    script(
+        Some(prefixed(&keyed(32, 11, Key::Composite), "b_")),
+        vec![prefixed(&keyed(8, 3, Key::Composite), "p_")],
+    )
+}
+
 /// Two probe batches with no null key and two key values never drawn, so an anti or mark
 /// form has build rows to keep and #59 has no null pair to match.
 fn probes_with_misses() -> Script {
@@ -413,6 +425,39 @@ operator_case! {
     fn a_left_anti_join_on_a_composite_key_agrees() {
         let node = hash_join_keyed(JoinType::LeftAnti, Key::Composite, None);
         run_both(&node, keyed_anti_script(Key::Composite)).same(Order::Any);
+    }
+}
+
+// #59 — the anti join's hardcoded `EQUAL` reaches the second column of a composite key: a
+// null `i32` on the probe matches the build rows of its `key` whose `i32` is null too, and
+// the device drops them where SQL keeps them. The cpu keeps 30 of 32 build rows, the
+// device 27, and every row the device alone dropped carries the null.
+operator_case! {
+    GpuHashJoin,
+    fn bug_a_left_anti_join_on_a_composite_key_matches_a_null_in_the_second_column_on_the_device() {
+        let node = hash_join_keyed(JoinType::LeftAnti, Key::Composite, None);
+        let outcome = run_both(&node, composite_anti_script_with_a_null_second_key());
+        let kept = |side: &Result<Vec<Slot>, BackendError>| -> RecordBatch {
+            let batches: Vec<RecordBatch> = side.as_ref().expect("answers").concat();
+            concat_batches(&batches[0].schema(), &batches).expect("one schema")
+        };
+        let (cpu, gpu) = (kept(&outcome.cpu), kept(&outcome.gpu));
+        assert_eq!(cpu.num_rows(), 30, "the cpu keeps every build row no probe pair equals");
+        assert_eq!(gpu.num_rows(), 27, "the device matches the null pair too");
+        let device_kept: HashSet<i64> =
+            gpu.column(0).as_primitive::<Int64Type>().values().iter().copied().collect();
+        let ids = cpu.column(0).as_primitive::<Int64Type>();
+        let dropped_beyond_the_cpu: Vec<usize> = (0..cpu.num_rows())
+            .filter(|r| !device_kept.contains(&ids.value(*r)))
+            .collect();
+        assert_eq!(dropped_beyond_the_cpu.len(), 3);
+        for row in dropped_beyond_the_cpu {
+            assert!(
+                cpu.column(2).is_null(row),
+                "build row {} was dropped over a non-null second key",
+                ids.value(row)
+            );
+        }
     }
 }
 

@@ -8,10 +8,9 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::{ArrayRef, AsArray, Int32Array, Int64Array, UInt64Array};
+use datafusion::arrow::array::{Array, ArrayRef, AsArray, Int32Array, Int64Array, UInt64Array};
 use datafusion::arrow::compute::cast;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema, UInt8Type};
-use datafusion::arrow::datatypes::{Float64Type, Int32Type};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::ScalarValue;
 
@@ -20,7 +19,7 @@ use crate::plan::{
     AggCall, AggFunc, AggStateColumns, AggregateBody, BatchLayout, BinaryOp, Expr, GpuAggregate,
     GpuAggregateBatches, GpuNode, NamedExpr, PlanAgg, Schema,
 };
-use crate::tests::compare::{Order, assert_same};
+use crate::tests::compare::{Order, assert_same, same_within_welford};
 use crate::tests::given::{Given, columns};
 use crate::tests::synthetic::{decimals, schema, synthetic};
 
@@ -156,72 +155,6 @@ fn welford_answered(outcome: &Outcome, at: usize) {
         })
         .collect();
     same_within_welford(&batch_of(expected), gpu, true, &[2, 3]);
-}
-
-/// The device's `gpu` against `expected`: every column exactly but the `approximate` ones,
-/// which are `Float64` compared to `WELFORD_RELATIVE`. Rows are matched on the `Int32` key
-/// at column 0 where `keyed`, and by position — one row — where not.
-pub(crate) fn same_within_welford(
-    expected: &RecordBatch,
-    gpu: &RecordBatch,
-    keyed: bool,
-    approximate: &[usize],
-) {
-    let exact: Vec<usize> = (0..expected.num_columns())
-        .filter(|i| !approximate.contains(i))
-        .collect();
-    assert_same(
-        &[vec![expected.project(&exact).expect("the exact columns")]],
-        &[vec![
-            gpu.project(&exact).expect("the device's exact columns"),
-        ]],
-        Order::Any,
-    );
-    let key_of = |b: &RecordBatch, row: usize| -> Option<Option<i32>> {
-        keyed.then(|| {
-            b.column(0)
-                .as_primitive::<Int32Type>()
-                .iter()
-                .nth(row)
-                .unwrap()
-        })
-    };
-    let floats = |b: &RecordBatch, i: usize| {
-        b.column(i)
-            .as_primitive::<Float64Type>()
-            .iter()
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(expected.num_rows(), gpu.num_rows(), "rows");
-    for &i in approximate {
-        let what = expected.schema().field(i).name().clone();
-        let (ours, theirs) = (floats(expected, i), floats(gpu, i));
-        for row in 0..gpu.num_rows() {
-            let key = key_of(gpu, row);
-            let at = match key {
-                None => row,
-                Some(key) => (0..expected.num_rows())
-                    .find(|r| key_of(expected, *r) == Some(key))
-                    .unwrap_or_else(|| panic!("key {key:?} is the device's alone")),
-            };
-            match (ours[at], theirs[row]) {
-                (None, None) => {}
-                (Some(a), Some(b)) => assert!(
-                    close(a, b),
-                    "{what} at key {key:?}: cpu {a:e}, device {b:e}"
-                ),
-                (a, b) => panic!("{what} at key {key:?}: cpu {a:?}, device {b:?}"),
-            }
-        }
-    }
-}
-
-/// How far the two Welford states may drift, relative to the larger magnitude: the last few
-/// digits of an f64, which is what an order-dependent update over dyadic inputs costs.
-const WELFORD_RELATIVE: f64 = 1e-9;
-
-pub(crate) fn close(a: f64, b: f64) -> bool {
-    a == b || (a - b).abs() <= WELFORD_RELATIVE * a.abs().max(b.abs())
 }
 
 /// The cpu's grouping-set state as the device answers it: `__grouping_id` Int32 with the
@@ -688,15 +621,19 @@ pub(crate) fn welford_merge_by(
     )
 }
 
-/// One Welford partial per row of `synthetic(32, seed)`: count 1, mean `f64`, m2 0 —
-/// what an init over one row emits, under the names `func`'s grouped state declares.
+/// One Welford partial per row of `synthetic(32, seed)`: count 1, mean `f64`, m2 0 — what
+/// an init over one row emits, under the names `func`'s grouped state declares. A null
+/// row counts nothing: count 0, so a merge that weights by count folds nothing from it,
+/// and the mean is left null rather than the `0.0` the cpu's own init would write there.
 pub(crate) fn welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
     let s = synthetic(32, seed);
-    let ones: ArrayRef = Arc::new(UInt64Array::from(vec![1u64; 32]));
+    let counts: ArrayRef = Arc::new(UInt64Array::from_iter_values(
+        (0..32).map(|row| u64::from(s.column(4).is_valid(row))),
+    ));
     let zeros: ArrayRef = Arc::new(datafusion::arrow::array::Float64Array::from(vec![0.0; 32]));
     RecordBatch::try_new(
         welford_state_by(true, func).fields.clone(),
-        vec![s.column(1).clone(), ones, s.column(4).clone(), zeros],
+        vec![s.column(1).clone(), counts, s.column(4).clone(), zeros],
     )
     .unwrap()
 }

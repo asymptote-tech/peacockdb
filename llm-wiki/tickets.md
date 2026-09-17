@@ -299,7 +299,9 @@ The two engines disagree today, not latently: the cpu's `HashJoinExec` takes the
 rows, a RightAnti its null-key probe rows, and a LeftMark marks them `false`, while the device
 drops or marks them `true`. The device's answer under `false` is exactly the cpu's under `true`,
 which is how the nine `bug_…null_key…` cases in `gpu_tests/join_cases.rs` pin it — a finish pass,
-a residual filter and a streamed probe all included.
+a residual filter and a streamed probe all included. The composite-key form is
+`bug_a_left_anti_join_on_a_composite_key_matches_a_null_in_the_second_column_on_the_device`
+in `gpu_tests/join_dimension_cases.rs`: a null in the second key column alone is a match.
 
 <a id="t46"></a>
 ### #46 — q61 GPU: 'promotions' sum subtree returns the wrong value

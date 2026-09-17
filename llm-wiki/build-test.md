@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1946 test cases — Rust 1503, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1949 test cases — Rust 1506, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1016 cases: `--lib` 542, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1018 cases: `--lib` 544, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -79,14 +79,15 @@ properties that pricing a batch from the plan's schema took away — so 25 run. 
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 
-| Harness helpers | [tests::compare](../peacockdb-core/src/tests/compare.rs), [tests::synthetic](../peacockdb-core/src/tests/synthetic.rs) | 14 |
+| Harness helpers | [tests::compare](../peacockdb-core/src/tests/compare.rs), [tests::synthetic](../peacockdb-core/src/tests/synthetic.rs) | 16 |
 |---|---|--:|
 
 the synthetic batch and the comparator against themselves, with no engine: `synthetic(rows,
 seed)` deterministic from its seed, null in every column but the id, dyadic in every float, legal at zero
 rows; `assert_same` red on a differing value, a differing type, a differing row count, and a
 slot one side left empty against a zero-row batch on the other — the failures the operator
-harness rests on, each shown for the reason it names
+harness rests on, each shown for the reason it names; and `same_within_welford`, the one
+inexact comparison, red on a renamed and on a retyped column before it reads a value
 
 *component*
 
@@ -370,7 +371,8 @@ seq-bearing operator — the exec three, both aggregates, the three accumulators
 nine hash-join types, cross, nested-loop and the scan — each case green or a `bug_` case
 asserting the wrong answer or the refusal with its ticket above it, every empty shape its own
 case. Then the joins along the dimensions the corpus varies: a crossing projection on every
-type the device reaches; composite, `Int64`, `Utf8` and `Date32` keys on the three key paths;
+type the device reaches; composite, `Int64`, `Utf8` and `Date32` keys on the three key paths,
+the composite's null second key pinned under #59;
 the residual with a projection, under `null_equals_null`, on a string and on a decimal; and
 the nested loop's cross-then-mask path. String keys are `Utf8`; the join cases declare no
 view type, and #183's one pin is the unload's. Then the aggregates,

@@ -36,7 +36,8 @@ forked at `c0660fe6`. PR targets `master`.
   `build_with_misses`, `keyed_anti_script`, four rows), so they run under the SQL default with
   rows to compare and #59 with nothing to match. The `keyed_anti_script` first tried eight rows:
   row 4's `i32` is null, which on the composite key is a null pair again (cpu 30 rows, device
-  27 on `a_left_anti_join_on_a_composite_key` — #59, not a new finding).
+  27 on `a_left_anti_join_on_a_composite_key` — #59, not a new finding). case-expectations
+  restored that probe as the composite-key pin in the register below.
 - The plan's composite key `(key, i32)` never matches: `i32` has a thousand values, and
   32 × 48 rows over 7 000 pairs give zero inner rows, so the case passed with nothing compared.
   `keyed` folds the second key to `i32 % 5` for `Composite` (nine values; 12 inner rows at the
@@ -117,6 +118,7 @@ would have added it, was rejected on master (`fafaaaaf`), so this table is the r
 | `bug_an_inner_nested_loop_join_with_a_decimal_predicate_and_a_projection_is_dropped_on_the_cpu` | nested_cases | cpu `number of columns(16) must match number of fields(3)`; device equals the cpu's unprojected answer projected | #190 |
 | `bug_a_left_nested_loop_join_with_a_decimal_predicate_is_refused_on_the_device` | nested_cases | `non-AST-able NestedLoopJoin filter is only supported for Inner joins` | #215 |
 | `bug_a_left_nested_loop_join_with_a_decimal_predicate_and_a_projection_is_refused_on_both` | nested_cases | the cpu's #190 message and the device's #215 message | #215, #190 |
+| `bug_a_left_anti_join_on_a_composite_key_matches_a_null_in_the_second_column_on_the_device` | join_dimension_cases | the eight-row probe: cpu 30 rows, device 27, every row the device alone dropped null in `i32` (added by case-expectations) | #59 |
 
 Findings the matrix's right column allowed for and did not land: no wrong ordinal on any
 projection (row 1 green on every type, both sides, after the swap and through the finish); no

@@ -182,7 +182,7 @@ nullable and two-key merge agrees on both nodes, and four lanes do.
 | case | file | asserts | ticket |
 |---|---|---|---|
 | `bug_a_global_welford_init_answers_a_finished_stddev_on_the_device` | aggregate_dimension_cases | one `Float64` column `stddev(f64)`, its value `sqrt(m2 / (count - 1))` of the cpu's state to `WELFORD_RELATIVE` | #216 |
-| `bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device` | aggregate_dimension_cases | the done slot is one `Float64` column holding 0.0; the cpu merges the triple | #216 |
+| `bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device` | aggregate_dimension_cases | the done slot is one `Float64` column holding the sample stddev of the partials' counts (0.0 while every count was 1; 0.2439… since case-expectations made a null row count 0); the cpu merges the triple | #216 |
 | `bug_a_global_stddev_finalize_is_refused_on_the_device` | aggregate_dimension_cases | `ColumnRef index 2 out of range (cols=1)` | #216 |
 | `bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device` | aggregate_dimension_cases | `[in CudfAggregate] unsupported aggregate function: var`, at the merge itself under a `var`-named state, before its finalize; the cpu answers the finalized variance | #216 |
 | `bug_a_cast_to_decimal_is_exported_at_precision_38` | exec_cases | the cpu's values at `Decimal128(38, 0)` | #187 |
