@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1949 test cases — Rust 1506, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1959 test cases — Rust 1516, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1018 cases: `--lib` 544, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1025 cases: `--lib` 551, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -119,11 +119,12 @@ corpus plan never varies are the ones it cannot check — every field name a nod
 takes two distinct values across the fixtures, and the selector's output is a cover rather than
 a prefix
 
-| Planner join capability | [planner::tests::join_capability](../peacockdb-core/src/planner/tests/join_capability.rs) | 13 |
+| Planner join capability | [planner::tests::join_capability](../peacockdb-core/src/planner/tests/join_capability.rs) | 14 |
 |---|---|--:|
 
-every hash join type crossed with a residual filter, the co-partitioning and lane rules, and
-the null analysis both ways; writes its own parquet, so no dataset
+every hash join type crossed with a residual filter, the co-partitioning and lane rules, the
+null analysis both ways, and the session config's own registration path declaring strings
+`Utf8`; writes its own parquet, so no dataset
 
 | Null analysis rules | [a_scalar_function_can_be_null_even_over_operands_that_cannot](../peacockdb-core/src/planner/tests/null_analysis.rs) | 8 |
 |---|---|--:|
@@ -225,13 +226,14 @@ script, the empty build lane a join owes rows for reaching `SetBuild` while ever
 lane still drops ([#175](archive/archived-tickets.md#t175)), and the mock against its own
 script
 
-| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 64 |
+| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 65 |
 |---|---|--:|
 
 one hand-built node per executor, one hand-written expected result: the exec executors, the
 accumulators over state batches written down rather than produced, the loader over parquet the
-test writes, the scatter, the join capability matrix run per mode, and what `executors_for`
-builds and reports holding
+test writes — which relabels the reader's batch to the declared schema and refuses a column
+the file holds in another type rather than casting it — the scatter, the join capability
+matrix run per mode, and what `executors_for` builds and reports holding
 
 | Executor contract, both engines | [executor::cpu_backend::tests::contract](../peacockdb-core/src/executor/cpu_backend/tests/contract.rs) | 1 |
 |---|---|--:|
@@ -271,7 +273,7 @@ state machine one call at a time with no tree around it
 |---|---|--:|
 
 what the sink says when the device's schema is not the declared one: every diverging column
-named with its index and both types, so a string and a narrow decimal read as two findings
+named with its index and both types, so a year and a narrow decimal read as two findings
 rather than `try_new`'s first; nullability is never a clause, since `try_new` does not check it
 
 | Forwarders and row ranges | [interleave_serves_lane_p_from_lane_p_of_every_child](../peacockdb-core/src/executor/forwarder/tests.rs) | 5 |
@@ -286,11 +288,13 @@ is there
 DataFusion's expression, this engine's, and DataFusion's again must all read the same column
 out of the same rows — asserted on the array each produces, not on shape
 
-| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 31 |
+| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 36 |
 |---|---|--:|
 
 validation's shape rules — a plan ends in a crossing, a sink sits at the root, a limit has a
-real consumer; layout canonical forms and equality; whether a hash survives a regrouping
+real consumer, no schema — an aggregate's intermediate included — literal, cast or function
+names a view type the device cannot hold;
+layout canonical forms and equality; whether a hash survives a regrouping
 
 | Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 11 |
 |---|---|--:|
@@ -337,20 +341,21 @@ the crate links; executor lifecycle
 what the batch reports, and that `consume` hands the handle over without releasing it. Needs no
 device: the release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 394 cases: `--lib -- gpu_tests::` 386, `test_gpu_corpus` 8
+#### gpu — `--features gpu`: shad-gpu only. 398 cases: `--lib -- gpu_tests::` 387, `test_gpu_corpus` 11
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 7 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 10 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
 device and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`,
-the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden. Six
-cells today, `q6` at every mode and `q19` at `tp1-single`; the rest are off against
-[#152](tickets.md#t152), [#183](tasks/active-tickets.md#t183),
-[#184](tasks/active-tickets.md#t184), [#185](tasks/active-tickets.md#t185) and
-[#187](tasks/active-tickets.md#t187). The seventh case is that a device run under a
+the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden. Nine
+cells today: `q6` at every mode, and `q19`, `nested-loop-join`, `shuffle-stddev` and `tpcds/q84`
+at `tp1-single`; the rest are off against [#152](tickets.md#t152),
+[#184](tasks/active-tickets.md#t184), [#185](tasks/active-tickets.md#t185),
+[#187](tasks/active-tickets.md#t187), [#191](tasks/active-tickets.md#t191) and
+[#220](tasks/active-tickets.md#t220). The tenth case is that a device run under a
 regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
@@ -360,13 +365,14 @@ the gpu column of the registry, the other half of the pair
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 331 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 332 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
 `executors_for`, the outputs compared slot by slot and exactly — schema included, so a type the
 device changes is red here rather than at a query's root. The upload round trip, `GpuUnload`
-and `GpuLimit` proved the harness on the operators whose recipe carries no seq. Then every
+— including the sink naming a column whose exported type is not the declared one — and
+`GpuLimit` proved the harness on the operators whose recipe carries no seq; then every
 seq-bearing operator — the exec three, both aggregates, the three accumulators, the scatter,
 nine hash-join types, cross, nested-loop and the scan — each case green or a `bug_` case
 asserting the wrong answer or the refusal with its ticket above it, every empty shape its own
@@ -375,7 +381,7 @@ type the device reaches; composite, `Int64`, `Utf8` and `Date32` keys on the thr
 the composite's null second key pinned under #59;
 the residual with a projection, under `null_equals_null`, on a string and on a decimal; and
 the nested loop's cross-then-mask path. String keys are `Utf8`; the join cases declare no
-view type, and #183's one pin is the unload's. Then the aggregates,
+view type. Then the aggregates,
 expressions and sorted merges along the same dimensions. Group keys on dates, `Int64`, strings
 and pairs, each carried through the merge; `count(*)` and expression arguments; every merge
 arm with rows; the global Welford init and the dispersion finalize; the project expressions,
@@ -446,7 +452,7 @@ the harness's own format reader — none of which runs engine code.
 | Exec-model prototype (Python) | the scheduler over mock traits, plus pandas-backed operators checked against a single-shot oracle at five partitioning configs, both limit lowerings, the scalar expressions pinned to what `expr.cpp` does rather than what pandas defaults to, and every join mode run on two backends — one pandas, one emitting FlatBuffers nodes and interpreting them as the C++ does — no project code | [test_a_join_in_its_build_phase_holds_back_its_probe_subtree](../scripts/exec_model/tests/test_scheduling.py), [test_every_join_type_matches_the_oracle_on_both_backends](../scripts/exec_model/tests/test_join_capability.py) | cost-report | 216 |
 | Exec-model prototype, TPC-H plan shapes (Python) | the same drivers over real sf1 tables under a live resident budget, each plan re-run at every layout `LayoutInjector` can produce; needs the generated dataset, so it rides dataset-matrix rather than cost-report | [test_the_accumulator_is_what_makes_the_budget_bind](../scripts/exec_model/tests/test_tpch.py), [test_every_layout_gives_the_same_shuffled_join](../scripts/exec_model/tests/test_tpch.py) | dataset-matrix (25.02 leg) | 19 |
 | Exec-model corpus (Python) | every TPC-H query and every TPC-DS query the engine runs that needs no window function, lowered by hand and run over whole sf1 tables at three layouts each — TPC-H against a pandas oracle per query, TPC-DS against DuckDB running the query's own text. Minutes, not seconds, so manual dispatch; `PCK_BACKEND=recipe` re-runs the whole set with every join going through the FlatBuffers emulation | [test_corpus_q21_suppliers_who_kept_orders_waiting](../scripts/exec_model/tests/test_tpch_corpus.py), [plans_tpcds.py](../scripts/exec_model/tests/plans_tpcds.py) | manual — exec-model-corpus.yml, 3 shards | 93 |
-| C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule, and the two refusals of the test-only upload symbol; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.IsAstAble](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 11 |
+| C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule, and the two refusals of the test-only upload symbol; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.IsAstAble](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 12 |
 | cuDF GPU smoke (C++) | the GPU is alive; the Spark-murmur3 kernel matches comet in C++; the timing floor leaves the global switch as it found it; the RMM pool reserves the budget the binary declared | [CudfGpu.SparkPartitionIdsMatchComet2ColWithNulls](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 6 |
 | Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node, plus the per-call entry points at their contract edges (row-group override, export range, slice), the sqrt arm on both evaluators, a merge that emits state rather than a value, and the literal arm: a typed null on the AST path, the decimal literal's scaled double, every wire type walked through the dispatch, the LIKE guard | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot](../cpp/tests/gpu/test_plan_executor.cpp) | shad-gpu | 34 |
 | TPC-H sf40 bare-cuDF (C++) | hand-written cuDF pipelines vs DuckDB sf40; the benchmark vehicle | [TpchSf40.Q1GroupByAggregates](../cpp/tests/gpu/test_tpch.cpp), [Q3JoinsGroupByTopN](../cpp/tests/gpu/test_tpch.cpp) | shad-gpu (sf40 is a hard precondition) | 4 |

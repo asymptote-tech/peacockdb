@@ -13,6 +13,7 @@ use super::GpuNode;
 use super::PlanError;
 use super::Schema;
 use super::emitted_columns;
+use super::is_view_type;
 use super::{AggregateBody, GpuCrossJoin, GpuNestedLoopJoin, NodeRef, try_as_node_ref};
 use super::{KeyDistribution, NodeKind, SortOrder};
 
@@ -65,6 +66,7 @@ fn walk(node: &dyn GpuNode) -> Result<(), PlanError> {
     node.validate_schemas_and_partitions()?;
     structural(node)?;
     declared_width(node)?;
+    no_view_types(node)?;
     types_across_the_edge(node)?;
     earned_claims(node)
 }
@@ -115,6 +117,39 @@ fn earned_claims(node: &dyn GpuNode) -> Result<(), PlanError> {
 /// own hash.
 fn below(node: &dyn GpuNode, accept: &dyn Fn(&dyn GpuNode) -> bool) -> bool {
     accept(node) || node.children().iter().any(|child| below(*child, accept))
+}
+
+/// A node's declared columns are ones the device can hold. The scan is where a view type
+/// entered a plan, and the option that made it do so is off; a schema that still names one
+/// was minted by something this layer does not know about. An aggregate declares a second
+/// schema, its intermediate table, which its finalize reads and no `kind()` exposes.
+fn no_view_types(node: &dyn GpuNode) -> Result<(), PlanError> {
+    let Some(schema) = node.kind().schema() else {
+        return Ok(());
+    };
+    no_view_columns(node.name(), "column", schema)?;
+    match try_as_node_ref(node) {
+        Some(NodeRef::Aggregate(aggregate)) => {
+            no_view_columns(node.name(), "intermediate column", aggregate.intermediate())
+        }
+        Some(NodeRef::AggregateBatches(aggregate)) => {
+            no_view_columns(node.name(), "intermediate column", aggregate.intermediate())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn no_view_columns(node: &str, what: &str, schema: &Schema) -> Result<(), PlanError> {
+    for (at, field) in schema.fields.fields().iter().enumerate() {
+        if is_view_type(field.data_type()) {
+            return Err(PlanError::Invalid(format!(
+                "{node}: {what} {at} {}: {} is a view type the device cannot hold",
+                field.name(),
+                field.data_type()
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// What the plan promised its caller. The layer's contract is that the rows it hands back

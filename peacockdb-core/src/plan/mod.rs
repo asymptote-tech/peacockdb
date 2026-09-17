@@ -37,7 +37,8 @@ use crate::executor::RowRange;
 use accumulators::{new_accumulate_batches_and_sort, new_coalesce_all_batches, new_limit};
 use aggregate::{new_aggregate, new_aggregate_batches};
 use common::{
-    check_column_refs, check_merge_keys, input_layout, input_schema, rebase_through_projection,
+    check_column_refs, check_expr_types, check_merge_keys, input_layout, input_schema,
+    is_view_type, rebase_through_projection,
 };
 use exec_ops::{new_filter, new_project, new_sort};
 use join::{joined_layout, new_hash_join};
@@ -582,10 +583,14 @@ pub(crate) struct AggregateBody {
 
 impl AggregateBody {
     /// References inside `aggs` index the node's input; references inside `finalize`
-    /// index the node's own intermediate table, `[group keys…, state columns…]`.
+    /// index the node's own intermediate table, `[group keys…, state columns…]`. A
+    /// grouping set's NULLs reference nothing, and are checked for their type alone.
     fn validate(&self, node: &str, input: &Schema, intermediate: &Schema) -> Result<(), PlanError> {
         for key in &self.group_by {
             check_column_refs(key, input, node)?;
+        }
+        for null in &self.null_exprs {
+            check_expr_types(null, node)?;
         }
         for call in &self.aggs {
             for arg in &call.args {

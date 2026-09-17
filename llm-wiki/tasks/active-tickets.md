@@ -70,27 +70,18 @@ T17a's drain half is untouched: a drained lane changes rows per lane, so q16's 1
 <a id="t183"></a>
 ### #183 — the device exports Utf8 where the sink declares Utf8View
 
-`GpuUnload lane 0: the exported stream is not the sink's rows: column types must match schema
-types, expected Utf8View`. The sink's schema comes from DataFusion, which uses `Utf8View`; the
-device's IPC export produces `Utf8`. Same values, different arrow type.
+`GpuUnload lane 0: … column types must match schema types, expected Utf8View`: DataFusion's
+parquet option `schema_force_view_types` (default on) declares every string a view; cuDF has none.
 
-Twelve of T18's device cases over eleven queries — tpcds q3 q15 q37 q42 q43 q52 q55 q82, tpch q10
-q12 q15 — with `#183` on their gpu columns.
-
-The same divergence bit the digest comparator one layer up, where hashing the column type reddened
-eight device cases whose rendered comparison had never looked at types. That one was a comparison
-artefact and was fixed by hashing names; this one is the export genuinely disagreeing with the
-schema the plan declared, and no comparison choice makes it go away.
-
-Fix site, decided: neither the export nor a cast at the sink. `Utf8View` enters a plan only through
-DataFusion's parquet option `schema_force_view_types` (default on); every coercion and string
-function returns a view only for a view input, and cuDF has no view layout to honour. Turning the
-option off in `build_session_state` (`peacockdb-core/src/lib.rs`) makes every plan declare `Utf8`
-from the leaf up and the export agree with no conversion. That task regenerates the plan goldens,
-retires this ticket's pins (`harness_cases.rs`, and whatever join-cases and aggregate-cases still
-carry) and fixes `plan_text/tests.rs` and `planner/translator/schema_tests.rs`, which assert the
-view type from real plans. Any sentence on a chain branch naming the export as the fix site
-predates this decision.
+**Done 2026-09-16, by `utf8-everywhere` on branch `ENS-utf8-everywhere`.** The `ParquetFormat`
+in `read_table` (`lib.rs`) has `with_force_view_types(false)`, and `plan/validate.rs` refuses any
+view type in a node schema, a literal, a cast target, a binary's type or a scalar function's
+return. The 76 string-class queries of
+[`reports/sink-divergence.md`](../reports/sink-divergence.md) were re-run at `tp1-single`: no
+sink showed a string, three cells are enabled (`tpcds/q84`, `tpch/nested-loop-join`,
+`tpch/shuffle-stddev`), four ran the whole device plan clean but have no cpu cell (#163), and
+the rest fail on the next thing in line — #187 (41), #191 (2), #185 (13) and #220 (13), opened
+here. `183` stays on a row only where the other four modes have no ticket yet.
 
 <a id="t184"></a>
 ### #184 — a hash repartition of one lane into four fails in cuDF
@@ -128,8 +119,28 @@ is what the consuming side records, not what the aggregate emits.
 Confirmed out of sample: `tpcds/q38`, found seven batches after this was rewritten, reports
 `[[11788]]` against the CPU's `[[12446]]` — again the node's own output, and again neither one nor a
 group count. Eight device cells: `tpcds` q96 q48 q93 q38, `tpch` q3 q14.
+`utf8-everywhere`'s rollout, 2026-09-16, at `tp1-single`: thirteen more — `tpcds` q21 q31 q34 q50
+q62 q66 q73 q83 q99, `tpch` q5 q12 q16 rollup-over-join — so 22 registry rows carry it.
 `q48` and `q93` are also the first cells in this rollout where a device COMPLETED a plan and the
 golden caught the disagreement — every other device failure so far has been a refusal.
+
+<a id="t220"></a>
+### #220 — the cpu's joins answer several batches per call where the device answers one
+
+The cpu's `probe_and_fetch` (`cpu_backend/join.rs`) hands back DataFusion's whole output
+stream for one probe batch, where the device answers one table per `execute_node`. The stream
+is an 8192-row split, plus one empty batch per probe batch that matched nothing. `ProbingJoin`
+allows a `Vec`, so neither side breaks the trait; the per-node golden is what breaks.
+`output_bytes` is the sum of per-batch sizes, each priced by its own row count, so the two
+engines disagree by the per-batch overhead and every 1:1 node above the join carries the extra
+batches along:
+`tpch/q15` at `tp1-single` has the cpu's join at `batch_rows=[[8192,1808]]`, 946045 bytes, the
+device at 946033; `tpch/q4`'s LeftSemi emits `[[0×18, 52523]]` on the cpu, one batch on the
+device, 72 bytes apart at the join and again at the aggregate over it. First difference in 13 of
+the `utf8-everywhere` rollout's cells: tpcds q4 q10 q11 q23 q29 q69 q74, tpch cross-join
+nested-loop-left-join q4 q15 q20 q21; the 13 cells whose first difference is #185 may carry it
+beneath. Row counts agree at every node, and the result comparison never ran, since the section
+is asserted first; which side's batching the golden should record is the decision.
 
 <a id="t187"></a>
 ### #187 — the device widens a decimal the plan declared narrow
@@ -162,6 +173,10 @@ value by a step, which is a different fix from a scale rule and points at the ex
 anything upstream of it. Six device cells across T19's first two batches. A bare scan of an `(18, 2)`
 column exports `(38, 2)` too: `bug_a_decimal_column_is_exported_at_precision_38` (`gpu_tests/source_cases.rs`). A second declaration reaches the same export: a `CAST` to `Decimal128(20, 0)` in a project comes
 back at 38 (`bug_a_cast_to_decimal_is_exported_at_precision_38`, `gpu_tests/exec_cases.rs`).
+`utf8-everywhere`'s rollout, 2026-09-16, at `tp1-single`: 41 more sinks show this once the string
+class is gone — `tpch` aggregate-groupby anti-join semi-join shuffle-additive shuffle-additive-avg
+q1 q2 q10 q18 q22, `tpcds` q3 q7 q8 q15 q18 q19 q24 q25 q26 q30 q37 q40 q42 q43 q45 q46 q52 q55
+q56 q58 q59 q60 q65 q68 q76 q79 q80 q81 q82 q85 q91 — so 50 registry rows carry it.
 
 <a id="t188"></a>
 ### #188 — the device refuses a read with row groups and a limit together
@@ -212,6 +227,8 @@ query whose unload sees it.
 One cell, `tpch/q8` at `tp1-single` — which is the only mode that gets far enough to reach the
 unload, the other four stopping at [#152](../tickets.md#t152). Pinned at the project by
 `bug_a_year_extracted_from_a_date_is_exported_as_int16` (`gpu_tests/exec_cases.rs`).
+`utf8-everywhere`'s rollout, 2026-09-16, added `tpch` q7 and q9 at the same mode, so three
+registry rows carry it.
 
 <a id="t190"></a>
 ### #190 — the CPU backend drops a nested-loop join's projection

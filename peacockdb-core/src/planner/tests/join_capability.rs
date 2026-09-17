@@ -523,6 +523,25 @@ async fn every_join_type_is_reached_by_a_query() {
     }
 }
 
+/// The fixture registers through DataFusion's `register_parquet`, which reads the session
+/// config alone — `read_table`'s format is the other door (tasks/utf8-everywhere.md).
+#[tokio::test]
+async fn a_table_registered_through_the_session_config_declares_its_strings_utf8() {
+    let fixture = Fixture::new("session-strings").await;
+    let plan = fixture.plan("SELECT pad FROM big").await;
+    let pad = plan
+        .schema()
+        .field_with_name("pad")
+        .unwrap()
+        .data_type()
+        .clone();
+    assert_eq!(
+        pad,
+        DataType::Utf8,
+        "the session config still forces a view type"
+    );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Refusals no query reaches
 // ════════════════════════════════════════════════════════════════════════════

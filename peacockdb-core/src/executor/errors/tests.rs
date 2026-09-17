@@ -23,23 +23,23 @@ fn a_diverging_column_is_named_with_both_types() {
     );
 }
 
-/// `try_new` stops at the first mismatch; a sink carrying a string and a narrow decimal
+/// `try_new` stops at the first mismatch; a sink carrying a year and a narrow decimal
 /// is two findings, and the column between them that matches is not one.
 #[test]
 fn every_diverging_column_is_a_clause() {
     let declared = schema(&[
-        ("l_comment", DataType::Utf8View, false),
+        ("l_year", DataType::Int32, false),
         ("l_orderkey", DataType::Int64, false),
         ("l_extendedprice", DataType::Decimal128(15, 2), false),
     ]);
     let exported = schema(&[
-        ("l_comment", DataType::Utf8, false),
+        ("l_year", DataType::Int16, false),
         ("l_orderkey", DataType::Int64, false),
         ("l_extendedprice", DataType::Decimal128(38, 2), false),
     ]);
     assert_eq!(
         schema_divergence(&declared, &exported),
-        "0 l_comment: Utf8View vs Utf8; 2 l_extendedprice: Decimal128(15, 2) vs Decimal128(38, 2)"
+        "0 l_year: Int32 vs Int16; 2 l_extendedprice: Decimal128(15, 2) vs Decimal128(38, 2)"
     );
 }
 
