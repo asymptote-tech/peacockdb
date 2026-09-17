@@ -268,3 +268,22 @@ line present. Item 5: `gpu_` run is all 26 enabled cells (27 passed of 28 in the
 `build-test.md`'s corpus prose names the one unvalidated cell. Not in the record: a full
 `--lib` run (only `executor::driver` and `tests::end_to_end::schema_validation` filters);
 CI's rust-only job covers it before `done`.
+
+## Completeness pass — 2026-09-17
+
+Two blind readings converged. **Reviewer (what is wrong): 0 blocking, 1 important; analyst
+(what is missing): 0 blocking, 2 important** — the same defect from both: a hook refusal
+returned with the batch held and neither queued nor released, the lane arm's remainder with it,
+so the accountant's holds and releases stopped reconciling on the one path this task added,
+and no test reached it (`failure.rs`'s call-failure case is a different shape — input released,
+output never held). A developer fixed it at the refusal site (`82e091c6`): `offer` takes the
+`Held` and gives the hold back on `Err`, the lane arm releases the remainder, and a fifth mock
+test steps a refusal at every site and asserts holds equal releases — red before, red again
+with the remainder release removed. A scoped review of that commit found every `Err` path
+reconciled once, the `None` path byte-for-byte the old order, and the test red-able at each
+site. The analyst's second item: #164's closing sentence still named a per-node type check in
+the GPU tiers as unstarted — dated. `architecture.md`: two sentences the defect had falsified
+(Traits' failure contract, the driver paragraph) are true again with the fix; the driver
+paragraph says the release outright; "Types are a plan fact" now says a project's expression
+is compared against nothing at plan time, the device's product being held per batch by the
+harness and the validator. The analyst's evidence trail is the section below.
