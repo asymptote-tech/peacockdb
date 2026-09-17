@@ -158,6 +158,31 @@ Restriction check: `git diff --stat -- cpp` is empty; `grep -rn "UInt64" peacock
 literal arm, and `merge_m2.rs`'s cast of the count *into* DataFusion's accumulator — nothing
 casts a count to `UInt64` on the way out; `finalize`'s `out_type` is still DataFusion's.
 
+### Round 1 fix — the escape pinned
+
+The finding: `check_state_layout`'s `phase == Phase::Merge` clause had no test that turns
+red. `cpu_backend/tests/state_types.rs` now pins both halves, each red on its own clause
+before the clause was restored:
+- `an_init_declaring_a_narrower_decimal_than_it_produces_is_refused`: `sum(d)` over a
+  `Decimal128(15, 2)` with its state declared at `(15, 2)` — the pre-task declaration —
+  and `CpuExec::aggregate` returns `Err` containing `column 1 is Decimal128(15, 2) in the
+  declared state and Decimal128(25, 2) in the one DataFusion's accumulators produce`. With
+  the phase clause dropped (`|| widened_decimal(...)` alone) it fails at the `.expect`: the
+  init builds. With the clause, green.
+- `a_merge_over_a_widened_decimal_sum_constructs`: a `GpuAggregateBatches` summing a
+  `(25, 2)` `$sum` column, built through `CpuAccumulator::aggregate`. With the escape removed
+  entirely it fails on `column 1 is Decimal128(25, 2) in the declared state and Decimal128(35,
+  2)` — DataFusion's sum widens by ten digits again at the merge, which is the escape's one
+  remaining reason. No existing `--lib` test built a merge over a decimal state; the corpus
+  rows that do are the cpu rollout, not the lib.
+- `init_of` now delegates to `init_declaring`, which takes a `declare` closure over
+  `state_type`'s answer, so the wrong-by-design declaration reuses the exact-case builder.
+
+`mod.rs` is byte-identical to the commit. `--lib`: `564 passed; 0 failed; 2 ignored`, no
+warnings; `git status --short testdata/` empty. `build-test.md`: `--lib` 564 → 566, cpu
+1137 → 1139, `CPU backend executors` 66 → 68 (the row's count excludes `contract`, which has
+its own row), verified against `--list` (566 lib entries, 69 under `cpu_backend::tests::`).
+
 ## Reviewing — 2026-09-17
 
 Dispatch 1 committed as `636c0e96` on `1f7723c1`, pushed; PR #160 against

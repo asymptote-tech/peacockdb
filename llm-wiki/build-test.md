@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2097 test cases — Rust 1647, C++ 81, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2099 test cases — Rust 1649, C++ 81, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1137 cases: `--lib` 564, `test_cpu_corpus` 550, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1139 cases: `--lib` 566, `test_cpu_corpus` 550, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -32,10 +32,12 @@ unit (`foo.rs` beside `foo/tests.rs`).
 one `corpus_query!` line per query declaring its cpu and gpu modes and its two oracles,
 expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
 checked against plain DataFusion at `target_partitions = 1`. 115 queries at the modes each is
-correct at — `tpcds/q96` and `tpcds/q88` carry three disabled by
+correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
 [#180](tasks/active-tickets.md#t180), `tpcds/q77` three by [#212](tickets.md#t212),
-`tpcds/q80`, `tpcds/q18` and `tpcds/q22` three by [#189](tasks/active-tickets.md#t189), and
-five queries are out entirely: `tpch/q11`, `tpch/q22` and `tpcds/q24` on
+`tpcds/q80`, `tpcds/q18`, `tpcds/q22`, `tpcds/q5` and `tpch/rollup-over-join` three by
+[#189](tasks/active-tickets.md#t189), `tpch/scan-limit` two by
+[#186](tasks/active-tickets.md#t186), and five queries are out entirely: `tpch/q11`,
+`tpch/q22` and `tpcds/q24` on
 [#190](tasks/active-tickets.md#t190), `tpcds/q54` and `tpcds/q64`. 546 cells, plus three checks
 that every declaration's two oracles suit each other and every device cell has a cpu cell
 
@@ -226,15 +228,17 @@ script, the empty build lane a join owes rows for reaching `SetBuild` while ever
 lane still drops ([#175](archive/archived-tickets.md#t175)), and the mock against its own
 script
 
-| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 66 |
+| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 68 |
 |---|---|--:|
 
 one hand-built node per executor, one hand-written expected result: the exec executors, the
 accumulators over state batches written down rather than produced, the loader over parquet the
 test writes — which relabels the reader's batch to the declared schema and refuses a column
 the file holds in another type rather than casting it — the scatter, the join capability
-matrix run per mode, what `executors_for` builds and reports holding, and every
-decomposition's init emitting exactly the state `PlanAgg::state_type` declares
+matrix run per mode, what `executors_for` builds and reports holding, every
+decomposition's init emitting exactly the state `PlanAgg::state_type` declares, an init
+declaring a narrower decimal than it produces refused, and a merge over a decimal sum
+DataFusion widens still building
 
 | Executor contract, both engines | [executor::cpu_backend::tests::contract](../peacockdb-core/src/executor/cpu_backend/tests/contract.rs) | 1 |
 |---|---|--:|

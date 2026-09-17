@@ -45,9 +45,11 @@ What DataFusion is reused for is its planning, never its execution:
 
 - physical expression planning and type coercion — the coercions it resolved and the
   decimal precision and scale it derived;
-- per-aggregate state schemas (sum+count for avg, Welford's triple for stddev), read off
-  `AggregateExpr::state_fields()`. The *split* is ours, since a batched lane needs a
-  per-batch init and a merge whatever the lane count;
+- per-aggregate state layouts — how many state columns and whether each is nullable
+  (sum+count for avg, Welford's triple for stddev), read off `AggregateExpr::state_fields()`;
+  the types are `PlanAgg::state_type`'s, since the accumulator `state_fields()` describes is
+  not the one either engine runs. The *split* is ours, since a batched lane needs a per-batch
+  init and a merge whatever the lane count;
 - grouping-set expansion, which arrives as an ordinary `__grouping_id` column;
 - row-group pruning, which hangs off `ParquetExec` statistics.
 
@@ -362,9 +364,9 @@ that its input and its expressions do not account for is a defect whichever side
 invented it, and the plan golden prints the declared schema per node, so it is one a reader can
 see.
 
-Seven coercions are plan nodes rather than something an executor infers: `avg`'s decimal count
-and its finalize divide, `count`'s widening to INT64, the stddev/var operands, union branch
-types, a decimal divide's numerator, and `round`'s operand. Each is a `CastExprNode` the planner
+Six coercions are plan nodes rather than something an executor infers: `avg`'s decimal count
+and its finalize divide, the stddev/var operands, union branch types, a decimal divide's
+numerator, and `round`'s operand. Each is a `CastExprNode` the planner
 emits — the aggregate ones inside the finalize expressions, the union ones as per-branch
 projects, the expression ones at the point of use.
 
