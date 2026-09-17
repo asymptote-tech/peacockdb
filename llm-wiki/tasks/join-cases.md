@@ -93,3 +93,16 @@ first, probe streamed. And:
   `bug_`; the grand total moves with them.
 - Green on shad-gpu through `build-test-shadgpu.sh`, one device cycle; the rust-only lib
   unchanged.
+
+## Completeness signoff — 2026-09-16, rewritten after the reopening
+
+Solved under its constraints, as amended: 34 cases against master (28 in
+`join_dimension_cases.rs`, 6 in `nested_cases.rs`), every matrix row and empty shape named, no
+production code, 5 `bug_` cases each with a ticket (two #152, one #190, two #215; #215 new),
+strings plain `Utf8` and every case a `.same()` on both engines; `gpu_tests::` rung 320/320 on
+shad-gpu, rust-only lib unchanged. Shortcuts, recorded in the detail file: rows 1–3 and their
+builders live in `join_dimension_cases.rs`, not `join_cases.rs`, to keep each file under 1000
+lines; anti and mark forms run on scripts with no null pair, so #59 is not re-pinned; the
+known-wrong table `build-test.md` was to carry does not exist on any base now that
+`declared-schemas` is rejected, so the `bug_` prefix, the ticket comment above each case and
+the detail file's register are the record.

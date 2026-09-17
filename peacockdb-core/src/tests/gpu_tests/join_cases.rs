@@ -1,6 +1,7 @@
 //! `GpuHashJoin` through the harness: a build batch first and once, the probe streamed,
 //! nine types over the same two prefixed synthetic sides joined on `key`. The scripts
 //! follow the capability matrix, and the filtered forms exist only where it admits one.
+//! The sides, scripts and `hash_join` are `pub(crate)` for `join_dimension_cases.rs`.
 //! Every case is green or a `bug_` test with its ticket above it; nothing here repairs.
 
 use std::sync::Arc;
@@ -17,15 +18,15 @@ use crate::tests::compare::{Order, assert_same, same};
 use crate::tests::given::Given;
 use crate::tests::synthetic::{prefixed, synthetic};
 
-fn build_batch(rows: usize) -> RecordBatch {
+pub(crate) fn build_batch(rows: usize) -> RecordBatch {
     prefixed(&synthetic(rows, 11), "b_")
 }
 
-fn probe_batch(rows: usize, seed: u64) -> RecordBatch {
+pub(crate) fn probe_batch(rows: usize, seed: u64) -> RecordBatch {
     prefixed(&synthetic(rows, seed), "p_")
 }
 
-fn side(prefix: &str) -> Vec<Field> {
+pub(crate) fn side(prefix: &str) -> Vec<Field> {
     prefixed(&synthetic(0, 0), prefix)
         .schema()
         .fields()
@@ -34,7 +35,7 @@ fn side(prefix: &str) -> Vec<Field> {
         .collect()
 }
 
-fn padded(fields: Vec<Field>) -> Vec<Field> {
+pub(crate) fn padded(fields: Vec<Field>) -> Vec<Field> {
     fields.into_iter().map(|f| f.with_nullable(true)).collect()
 }
 
@@ -59,7 +60,7 @@ fn output_of(join_type: JoinType) -> Vec<Field> {
 
 /// `b_i64 < p_i64` over the filter's own schema, `[build columns…, probe columns…]` as
 /// `filter_columns` lists them: 0 is the build's `i64`, 1 the probe's.
-fn residual() -> (Option<Expr>, Vec<JoinFilterColumn>) {
+pub(crate) fn residual() -> (Option<Expr>, Vec<JoinFilterColumn>) {
     (
         Some(Expr::binary(
             Expr::column(0, "b_i64"),
@@ -80,17 +81,13 @@ fn residual() -> (Option<Expr>, Vec<JoinFilterColumn>) {
     )
 }
 
-fn hash_join(
+pub(crate) fn hash_join_with(
     join_type: JoinType,
     null_equals_null: bool,
-    filtered: bool,
+    residual: (Option<Expr>, Vec<JoinFilterColumn>),
     projection: Option<Vec<u32>>,
 ) -> GpuHashJoin {
-    let (filter, filter_columns) = if filtered {
-        residual()
-    } else {
-        (None, Vec::new())
-    };
+    let (filter, filter_columns) = residual;
     let fields = output_of(join_type);
     let fields = match &projection {
         None => fields,
@@ -115,19 +112,33 @@ fn hash_join(
     )
 }
 
+pub(crate) fn hash_join(
+    join_type: JoinType,
+    null_equals_null: bool,
+    filtered: bool,
+    projection: Option<Vec<u32>>,
+) -> GpuHashJoin {
+    let residual = if filtered {
+        residual()
+    } else {
+        (None, Vec::new())
+    };
+    hash_join_with(join_type, null_equals_null, residual, projection)
+}
+
 fn join(join_type: JoinType) -> GpuHashJoin {
     hash_join(join_type, false, false, None)
 }
 
-fn script(build: Option<RecordBatch>, probe: Vec<RecordBatch>) -> Script {
+pub(crate) fn script(build: Option<RecordBatch>, probe: Vec<RecordBatch>) -> Script {
     Script::Join { build, probe }
 }
 
-fn one_probe() -> Script {
+pub(crate) fn one_probe() -> Script {
     script(Some(build_batch(32)), vec![probe_batch(48, 21)])
 }
 
-fn two_probes() -> Script {
+pub(crate) fn two_probes() -> Script {
     script(
         Some(build_batch(32)),
         vec![probe_batch(24, 21), probe_batch(24, 22)],
@@ -136,7 +147,7 @@ fn two_probes() -> Script {
 
 // The empty shapes, one script each; a case names the type and the shape.
 
-fn empty_build() -> Script {
+pub(crate) fn empty_build() -> Script {
     script(Some(build_batch(0)), vec![probe_batch(16, 21)])
 }
 
@@ -175,7 +186,7 @@ fn no_probe() -> Script {
 // The `bug_` assertions: a refusal pinned by the stable part of its message, and a
 // null-key divergence pinned as "the device under `false` answers as the cpu under `true`".
 
-fn gpu_refuses_with(outcome: &Outcome, message: &str) {
+pub(crate) fn gpu_refuses_with(outcome: &Outcome, message: &str) {
     let why = outcome.gpu_refuses();
     assert!(why.contains(message), "{why}");
 }
@@ -217,7 +228,7 @@ fn device_answers_as_if_null_equals_null(
     );
 }
 
-const BUILD_COPY: &str =
+pub(crate) const BUILD_COPY: &str =
     "probe batch 2 has no build side left, since the call for batch 1 erased it (#152)";
 const PROBE_COPY: &str = "this join's recipe copies its probe batch — the key project keeps the keys and the join below it reads the same batch — and the ABI has no copy";
 const NO_KEYS: &str = "this lane's probe was empty, so its finish has no keys to join against";

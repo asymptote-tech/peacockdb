@@ -824,7 +824,7 @@ field with no consumer reads as a knob (#132).
 | [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale and `distinct`), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row |
 | [`CudfHashJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::inner_join` / `left_join` / `full_join(left_keys, right_keys, kJoinNulls)`; semi/anti take [`left_semi_join` / `left_anti_join`](../cpp/src/operators/join.cpp), or their `mixed_*` forms when a residual filter must be evaluated during the join |
 | [`CudfCrossJoin`](../flatbuffers/gpu_plan.fbs) | nothing — the node is its two inputs | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::cross_join(ltv, rtv)` |
-| [`CudfNestedLoopJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `filter` + `filter_columns`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::cross_join`, then [`apply_boolean_mask`](../cpp/src/operators/join.cpp) over the filter evaluated on the crossed table |
+| [`CudfNestedLoopJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `filter` + `filter_columns`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::conditional_inner_join` / `conditional_left_join` over the predicate as an AST; a predicate the AST cannot take is `cudf::cross_join`, then [`apply_boolean_mask`](../cpp/src/operators/join.cpp) over the filter evaluated on the crossed table, for Inner alone ([#215](tickets.md#t215)) |
 | [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N |
 | [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
 | [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs) | nothing | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |
@@ -839,10 +839,12 @@ the layout rows sit in — one table has no layout to change — and **three nod
 one call**, because cuDF has no fused form for filter's mask-then-apply, sort's
 order-gather-slice, or union's cast-then-concatenate.
 
-The nested-loop join is the one to read separately rather than filing beside filter. It
-materialises the **full cartesian product** first and only then evaluates its predicate over
-it, so it is three calls whose first is the expensive one — which is why broadcast joins
-([#140](tickets.md#t140)) would change the shape rather than the constant.
+The nested-loop join is the one to read separately rather than filing beside filter. With a
+predicate the AST takes it is one conditional join. With one it cannot — a decimal operand, a
+string literal — it materialises the **full cartesian product** first and only then evaluates
+its predicate over it, on the column path, so it is three calls whose first is the expensive
+one — which is why broadcast joins ([#140](tickets.md#t140)) would change the shape rather than
+the constant. That path is written for Inner alone ([#215](tickets.md#t215)).
 
 ### What the frozen surface costs
 
@@ -1111,7 +1113,7 @@ lowered to a join needs. Whether a join type actually honours it is the interest
 | LeftAnti | `left_anti_join`, `filtered_join::anti_join`, or `mixed_left_anti_join` | **hardcoded `EQUAL`** |
 | RightAnti | the same, sides swapped | **hardcoded `EQUAL`** |
 | LeftMark | `left_semi_join`-shaped, emitting one row per left row plus a boolean mark | **hardcoded `EQUAL`** |
-| Inner / Left, non-equi | `conditional_inner_join` / `conditional_left_join`, or an AST boolean mask | n/a — the predicate decides |
+| Inner / Left, non-equi | `conditional_inner_join` / `conditional_left_join`; a predicate the AST cannot take is a cross join masked on the column path, Inner alone ([#215](tickets.md#t215)) | n/a — the predicate decides |
 
 Three things that table is worth reading for.
 

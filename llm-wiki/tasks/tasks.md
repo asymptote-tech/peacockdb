@@ -65,14 +65,14 @@ every enabled cell.
 Cases only, in `src/tests/gpu_tests/`: independent of every other chain's files. Both tasks
 reopened: the specs no longer declare `Utf8View`, and each plan's Task 8 retires the view cases.
 
-### 1. [`join-cases.md`](join-cases.md) — state: building — PR #155; Task 8 (retire the view cases) outstanding
+### 1. [`join-cases.md`](join-cases.md) — state: done — PR #155
 
 Cases only, along the three dimensions operator-cases held constant and the corpus does not: a
 projection on every reachable join type, composite and `Int64`/`Utf8`/`Date32` keys on the
 three join code paths, and the non-AST nested-loop path. Roughly 27 cases, one device cycle, no production code.
 
 
-### 2. [`aggregate-cases.md`](aggregate-cases.md) — state: building — PR #156; Task 8 (retire the view cases) outstanding
+### 2. [`aggregate-cases.md`](aggregate-cases.md) — state: rebase needed(done) — PR #156; its base `ENS-join-cases` moved onto master `302d91dc`
 
 Cases only, after join-cases: group keys the corpus uses (`Utf8`, `Date32`, `Int64`, two
 columns), `count(*)` and expression arguments, every merge arm with rows, the stddev finalize,
