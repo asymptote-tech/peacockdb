@@ -119,6 +119,8 @@ is what the consuming side records, not what the aggregate emits.
 Confirmed out of sample: `tpcds/q38`, found seven batches after this was rewritten, reports
 `[[11788]]` against the CPU's `[[12446]]` — again the node's own output, and again neither one nor a
 group count. Eight device cells: `tpcds` q96 q48 q93 q38, `tpch` q3 q14.
+`utf8-everywhere`'s rollout, 2026-09-16, at `tp1-single`: thirteen more — `tpcds` q21 q31 q34 q50
+q62 q66 q73 q83 q99, `tpch` q5 q12 q16 rollup-over-join — so 22 registry rows carry it.
 `q48` and `q93` are also the first cells in this rollout where a device COMPLETED a plan and the
 golden caught the disagreement — every other device failure so far has been a refusal.
 
@@ -171,6 +173,10 @@ value by a step, which is a different fix from a scale rule and points at the ex
 anything upstream of it. Six device cells across T19's first two batches. A bare scan of an `(18, 2)`
 column exports `(38, 2)` too: `bug_a_decimal_column_is_exported_at_precision_38` (`gpu_tests/source_cases.rs`). A second declaration reaches the same export: a `CAST` to `Decimal128(20, 0)` in a project comes
 back at 38 (`bug_a_cast_to_decimal_is_exported_at_precision_38`, `gpu_tests/exec_cases.rs`).
+`utf8-everywhere`'s rollout, 2026-09-16, at `tp1-single`: 41 more sinks show this once the string
+class is gone — `tpch` aggregate-groupby anti-join semi-join shuffle-additive shuffle-additive-avg
+q1 q2 q10 q18 q22, `tpcds` q3 q7 q8 q15 q18 q19 q24 q25 q26 q30 q37 q40 q42 q43 q45 q46 q52 q55
+q56 q58 q59 q60 q65 q68 q76 q79 q80 q81 q82 q85 q91 — so 50 registry rows carry it.
 
 <a id="t188"></a>
 ### #188 — the device refuses a read with row groups and a limit together
@@ -221,6 +227,8 @@ query whose unload sees it.
 One cell, `tpch/q8` at `tp1-single` — which is the only mode that gets far enough to reach the
 unload, the other four stopping at [#152](../tickets.md#t152). Pinned at the project by
 `bug_a_year_extracted_from_a_date_is_exported_as_int16` (`gpu_tests/exec_cases.rs`).
+`utf8-everywhere`'s rollout, 2026-09-16, added `tpch` q7 and q9 at the same mode, so three
+registry rows carry it.
 
 <a id="t190"></a>
 ### #190 — the CPU backend drops a nested-loop join's projection

@@ -65,6 +65,23 @@ only producer", where the code sets it on the `ParquetFormat` in `read_table` an
 names `greatest`/`least` as a second — the prose is master's side, so it is left for the human
 or helper to amend at the rebase.
 
+## Completeness pass — 2026-09-17
+
+Two blind readings. **Reviewer (what is wrong): 0 blocking, 1 important** — the T19 batch
+comments in `corpus_cases.inc` still gave #183 as the cause beneath them and said "No device
+cell" above three lines this branch enabled at `tp1_single`. Comment-only, so the coordinator
+rewrote every block to the csv's current state, verified no non-comment line moved and every
+block at or under ten lines. **Analyst (what is missing): 0 blocking, 2 important** — (1)
+`build_session_state` leaves the session config's `schema_force_view_types` at its default
+`true`, and DataFusion's `register_parquet` reads that config rather than `read_table`'s
+`ParquetFormat`, so `src/tests/join_fixture.rs`'s `big` still infers `pad` as `Utf8View`;
+nothing selects `pad` today, so nothing is red, but it is a door the spec's Restriction says
+must not exist — to the developer: the one assignment in `build_session_state`, a red-then-green
+test at that door, and a clause on `read_table`'s comment; (2) #185, #187 and #191 carried
+pre-rollout cell counts — the coordinator added one dated rollout line each, with the row
+counts read from the csv (22, 50, 3; the analyst's 21 and 47 were undercounts). `architecture.md`:
+none falsified, both readers agree. The analyst's evidence trail is the last section of this file.
+
 ## Developer notes
 
 ### Dispatch 1 — what was done, in the plan's order
@@ -233,3 +250,58 @@ The five C++ binaries ran unfiltered as the gate always does.
 executors 65 (`executor::cpu_backend::tests::` less `contract`); Plan types 36 (28 + 4 + 4);
 gpu rung 287, of which `tests::gpu_tests::` 232 — the harness row; grand total 1846. The
 harness row's prose names the new sink case.
+
+## Completeness pass, analyst — 2026-09-17
+
+The branch read as one change against the spec's four items, Scope, Restriction, Registry and
+Verification bar, `architecture.md`'s owning sections and `build-test.md`'s counts. 0 blocking,
+2 important.
+
+1. **`build_session_state` leaves the option at its default, and DataFusion's own registration
+   reads it** (important; spec item 1 and the Restriction). `read_table` sets
+   `with_force_view_types(false)` on its own `ParquetFormat`, the production path.
+   `SessionContext::register_parquet` builds `ParquetFormat::new().with_options(table_options.parquet)`,
+   and `parquet.global` there is a copy of `config.execution.parquet`
+   (`datafusion-45.0.0/src/execution/context/parquet.rs:50`,
+   `datafusion-common-45.0.0/src/config.rs:1398-1401`), whose `schema_force_view_types` defaults to
+   `true` (`config.rs:430`). `src/tests/join_fixture.rs:89-97` takes that path from
+   `build_session_state` over `big`, whose `pad` column is `Utf8` in the file and `Utf8View` in the
+   inferred schema. No test selects `pad` today, so nothing is red; `SELECT pad FROM big` through
+   `planned` would meet the rule's refusal. The spec's own words make that a finding: "a `Utf8View`
+   that survives the option". Fix: one line in `build_session_state`,
+   `config.options_mut().execution.parquet.schema_force_view_types = false;`, a test at the door —
+   the physical plan of `SELECT pad FROM big` declares `pad` as `Utf8` — red before and green after,
+   and a clause on `read_table`'s comment saying the other registration path reads the session config
+   alone. The same line makes #23's note (`tickets.md:424-426`) and the board prose true as written.
+   The spec's "not the session config" is right about `read_table` and says nothing about
+   `register_parquet`. The spec-sanctioned alternative is a ticket and no code.
+2. **#185, #187 and #191 keep their pre-rollout cell inventories** (important; Registry, "gets a
+   ticket naming what the values showed", and the shared rule that wiki content agrees with the
+   tree). The csv carries `185` on 21 rows, `187` on 47 and `191` on 3; the tickets still say "Eight
+   device cells", "Six device cells" and "One cell, `tpch/q8`". The rollout's lists live only in this
+   file, which is deleted at archive, and the #183 note carries counts alone. Fix: one dated line per
+   ticket in `active-tickets.md` naming the rollout's cells at `tp1-single`, from the table above.
+
+**`architecture.md`: none falsified.** Read: Planning with Modes and knobs and The row-group mapping;
+Grouping sets; Every cast is explicit; Traits; Memory accounting; Determinism rules; The wire format
+and its three subsections; Interfaces; Rehash and the comet hash; Column indexing; cuDF options with
+the IPC export row and What the Rust side puts in the flat buffers; Node display, Types are a plan
+fact; Cost model. The page names no string type. The sentences nearest the change stay true: "No
+executor may change a type the plan did not ask it to" (two executor-side casts were removed, none
+added); "Statement order is the wire format … Regenerating it to silence a red defeats its purpose"
+(the 18 digests moved because the payload bytes carry the type tag, re-derived below); the IPC export
+row says nothing of strings.
+
+**Checked and consistent.** Every golden diff line is the word swap except the 18 digest pairs and
+q24's two lines in each tpcds file (minus lines with the substitution against plus lines, per file).
+The csv against the rollout table row by row: 71 rows changed = 76 − `tpch/q2`, which already carried
+187, − the four #163 rows; all 60 rows carrying `183` at the fork changed; ten keep it, as the spec
+allows; no disabled cell lacks a ticket. The rule reaches every `Expr` field in `plan/mod.rs` — filter
+predicate, project list, group keys, `null_exprs`, aggregate args, finalize, both joins' residual
+through `check_filter_columns` — and both schemas; `AggCall.outputs` types never reach the wire (names
+and widths only); `validate` runs at `planner/pipeline.rs:38,73` before any recipe is written.
+`build-test.md`'s deltas (+6 cpu, +3 gpu, +9 header) match the tree. No `pub` item added. The four
+files outside the Scope table — `cpu_backend/source.rs`, its test, `plan/mod.rs`, `gpu_tests/script.rs`
+— are round-1 fixes inside item 3's intent and the Restriction, recorded above. Nothing assigned to
+this task is left for the wire task; `cpp/`, `flatbuffers/`, python and the workflows carry no
+reference to the deleted names. PR #158 is `CONFLICTING` with no checks, as recorded.
