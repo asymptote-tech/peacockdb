@@ -287,3 +287,9 @@ the GPU tiers as unstarted — dated. `architecture.md`: two sentences the defec
 paragraph says the release outright; "Types are a plan fact" now says a project's expression
 is compared against nothing at plan time, the device's product being held per batch by the
 harness and the validator. The analyst's evidence trail is the section below.
+
+## Done — 2026-09-17
+
+PR #163 against `ENS-device-schema-harness`; CI runs 35203942771 and 35205747965 green on every
+job. The chain is complete: six tasks `done`, PRs #158–#163 each targeting its parent, the
+lowest against master. Awaiting the human's merge, oldest first.
