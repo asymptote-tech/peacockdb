@@ -388,7 +388,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     files: /tmp/peacock-plan-bytes-root/tpch.sf1/lineitem.parquet
                                     schema: [l_orderkey:Int64, l_suppkey:Int64, l_commitdate:Date32, l_receiptdate:Date32]
 == tpch q22
-sha256=6e722205b086a289b1ea7a15a6479e9171b4186a7b3e4694b6122948661eeaea
+sha256=b13607e15554e41d65ade2727a16bc2cb59e442049b3e7aa97b1acd257b723b3
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#24 CudfSortPreservingMerge, all lanes)
       #24 CudfSortPreservingMerge
@@ -435,7 +435,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       avg(customer.c_acctbal)$sum: sum(avg(customer.c_acctbal)$sum@0)
                       avg(customer.c_acctbal)$count: sum(avg(customer.c_acctbal)$count@1)
                     #5 CudfProject{finalize}
-                      avg(customer.c_acctbal): (cast(avg(customer.c_acctbal)$sum@0 as Decimal128(19, 6)) Divide cast(avg(customer.c_acctbal)$count@1 as Decimal128(19, 0)))::Decimal128(19, 6)
+                      avg(customer.c_acctbal): cast((avg(customer.c_acctbal)$sum@0 Divide cast(avg(customer.c_acctbal)$count@1 as Decimal128(19, 0)))::Decimal128(19, 6) as Decimal128(19, 6))
                   GpuAggregate: calling_lanes=1, per batch: execute_node(#2 CudfAggregate{Partial}, batch)
                       #2 CudfAggregate{Partial}
                         mode: Partial
@@ -485,7 +485,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                               files: /tmp/peacock-plan-bytes-root/tpch.sf1/orders.parquet
                               schema: [o_custkey:Int64]
 == tpch shuffle-stddev
-sha256=934d8d27728510cd38285a09b9b4c4b3b62ded8ac2ab56f36f32919fabcfed55
+sha256=9f5e38b059c639542363266023e9f1e8894a9795d0e9e023fc3462241d00befc
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=4, per batch: execute_node(#9 CudfProject, batch)
       #9 CudfProject
@@ -796,7 +796,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       files: /tmp/peacock-plan-bytes-root/tpcds.sf1/catalog_sales.parquet
                                       schema: [cs_sold_date_sk:Int64, cs_ship_customer_sk:Int64]
 == tpcds q14
-sha256=a747b79d28dbf4fdf6178b1212986bb9bb8a7b1d224b678bef359c9654e0e1d0
+sha256=a0dd6c242ccf5c8708685fd4bf41fdb61f6df13fbf3ceedc2b00d3ae4fbe6c55
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#385 CudfSortPreservingMerge, all lanes)
       #385 CudfSortPreservingMerge
@@ -869,7 +869,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             avg(sq2.quantity * sq2.list_price)$sum: sum(avg(sq2.quantity * sq2.list_price)$sum@0)
                             avg(sq2.quantity * sq2.list_price)$count: sum(avg(sq2.quantity * sq2.list_price)$count@1)
                           #30 CudfProject{finalize}
-                            avg(sq2.quantity * sq2.list_price): (cast(avg(sq2.quantity * sq2.list_price)$sum@0 as Decimal128(32, 6)) Divide cast(avg(sq2.quantity * sq2.list_price)$count@1 as Decimal128(32, 0)))::Decimal128(32, 6)
+                            avg(sq2.quantity * sq2.list_price): cast((avg(sq2.quantity * sq2.list_price)$sum@0 Divide cast(avg(sq2.quantity * sq2.list_price)$count@1 as Decimal128(32, 0)))::Decimal128(32, 6) as Decimal128(32, 6))
                         GpuMergePartitions: none
                           GpuAggregateBatches: calling_lanes=12, per compaction and at done: execute_node(#26 CudfCoalescePartitions, lane batches), execute_node(#27 CudfAggregate{Merge}, prior output)
                               #26 CudfCoalescePartitions
@@ -1372,7 +1372,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             avg(sq2.quantity * sq2.list_price)$sum: sum(avg(sq2.quantity * sq2.list_price)$sum@0)
                             avg(sq2.quantity * sq2.list_price)$count: sum(avg(sq2.quantity * sq2.list_price)$count@1)
                           #156 CudfProject{finalize}
-                            avg(sq2.quantity * sq2.list_price): (cast(avg(sq2.quantity * sq2.list_price)$sum@0 as Decimal128(32, 6)) Divide cast(avg(sq2.quantity * sq2.list_price)$count@1 as Decimal128(32, 0)))::Decimal128(32, 6)
+                            avg(sq2.quantity * sq2.list_price): cast((avg(sq2.quantity * sq2.list_price)$sum@0 Divide cast(avg(sq2.quantity * sq2.list_price)$count@1 as Decimal128(32, 0)))::Decimal128(32, 6) as Decimal128(32, 6))
                         GpuMergePartitions: none
                           GpuAggregateBatches: calling_lanes=12, per compaction and at done: execute_node(#152 CudfCoalescePartitions, lane batches), execute_node(#153 CudfAggregate{Merge}, prior output)
                               #152 CudfCoalescePartitions
@@ -1875,7 +1875,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             avg(sq2.quantity * sq2.list_price)$sum: sum(avg(sq2.quantity * sq2.list_price)$sum@0)
                             avg(sq2.quantity * sq2.list_price)$count: sum(avg(sq2.quantity * sq2.list_price)$count@1)
                           #282 CudfProject{finalize}
-                            avg(sq2.quantity * sq2.list_price): (cast(avg(sq2.quantity * sq2.list_price)$sum@0 as Decimal128(32, 6)) Divide cast(avg(sq2.quantity * sq2.list_price)$count@1 as Decimal128(32, 0)))::Decimal128(32, 6)
+                            avg(sq2.quantity * sq2.list_price): cast((avg(sq2.quantity * sq2.list_price)$sum@0 Divide cast(avg(sq2.quantity * sq2.list_price)$count@1 as Decimal128(32, 0)))::Decimal128(32, 6) as Decimal128(32, 6))
                         GpuMergePartitions: none
                           GpuAggregateBatches: calling_lanes=12, per compaction and at done: execute_node(#278 CudfCoalescePartitions, lane batches), execute_node(#279 CudfAggregate{Merge}, prior output)
                               #278 CudfCoalescePartitions
@@ -2517,7 +2517,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             files: /tmp/peacock-plan-bytes-root/tpcds.sf1/catalog_returns.parquet
                             schema: [cr_order_number:Int64]
 == tpcds q39
-sha256=b5bfd9d7081cbdde8d7ebe7327c041cdf6cb4c62f5613acf414f3af06ebe8e2f
+sha256=2540ff9f4bb40140187e5e5696b4b53c6372cae386862681d3a64f64a46d69b8
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=1, per batch: execute_node(#71 CudfProject, batch)
       #71 CudfProject

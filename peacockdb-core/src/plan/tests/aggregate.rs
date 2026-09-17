@@ -9,7 +9,7 @@ use crate::plan::AggStateColumns;
 use crate::plan::aggregate::key_width;
 use crate::plan::{AggSpec, decomposition, finalize};
 use crate::plan::{finalize_columns, state_funcs};
-use datafusion::arrow::array::{Array, Float64Array, RecordBatch, UInt64Array};
+use datafusion::arrow::array::{Array, Float64Array, Int64Array, RecordBatch};
 use datafusion::common::ScalarValue;
 use datafusion::execution::context::SessionContext;
 
@@ -151,11 +151,11 @@ fn a_finalize_over_a_grouping_id_carries_it_through_as_a_key() {
     );
 }
 
-/// DataFusion's own Welford state types, which is what makes the finalize's typing a
-/// question at all: the count is unsigned and the output it feeds is a float.
+/// The Welford state as `state_type` declares it, which is what makes the finalize's
+/// typing a question at all: the count is an integer and the output it feeds is a float.
 fn welford_fields(name: &str) -> Vec<Field> {
     vec![
-        Field::new(format!("{name}$count"), DataType::UInt64, true),
+        Field::new(format!("{name}$count"), DataType::Int64, true),
         Field::new(format!("{name}$mean"), DataType::Float64, true),
         Field::new(format!("{name}$m2"), DataType::Float64, true),
     ]
@@ -186,8 +186,8 @@ fn denominator_and_zero(expr: &Expr) -> (&Expr, &ScalarValue) {
 }
 
 /// Every operand in the output's type. The count is cast before anything is subtracted
-/// from it, and the two literals are floats: an Int64 ddof puts the subtraction in the
-/// count's own unsigned type, where a count below ddof wraps instead of going negative.
+/// from it, and the two literals are floats: both engines evaluate this expression, and
+/// arrow refuses Float64 / Int64 outright rather than widening it.
 #[test]
 fn a_dispersion_finalize_subtracts_in_the_type_it_outputs() {
     for func in [AggFunc::Stddev, AggFunc::Var] {
@@ -228,9 +228,9 @@ fn a_dispersion_finalize_subtracts_in_the_type_it_outputs() {
 }
 
 /// What the typing buys, over a state no corpus query produces: a group with fewer rows
-/// than its degrees of freedom has no dispersion to report and owes NULL. Subtracting in
-/// the count's own unsigned type never reaches that arm — cuDF wraps past it and answers a
-/// value, arrow refuses the mixed subtraction outright.
+/// than its degrees of freedom has no dispersion to report and owes NULL. Without the
+/// cast the denominator stays Int64 and arrow refuses the Float64 / Int64 divide, so no
+/// group reaches that arm at all.
 #[test]
 fn a_group_below_its_degrees_of_freedom_finalizes_to_null() {
     let state = welford_fields("d(v)");
@@ -238,7 +238,7 @@ fn a_group_below_its_degrees_of_freedom_finalizes_to_null() {
     let batch = RecordBatch::try_new(
         Arc::new(schema.clone()),
         vec![
-            Arc::new(UInt64Array::from(vec![0u64, 1, 3])),
+            Arc::new(Int64Array::from(vec![0i64, 1, 3])),
             Arc::new(Float64Array::from(vec![0.0, 10.0, 10.0])),
             Arc::new(Float64Array::from(vec![0.0, 0.0, 8.0])),
         ],

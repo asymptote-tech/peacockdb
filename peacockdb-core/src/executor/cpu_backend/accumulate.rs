@@ -77,7 +77,9 @@ impl CpuAccumulator {
     ) -> Result<Self, PlanError> {
         let body = &node.body;
         let state = node.intermediate();
-        let merge = aggregate_exec(body, Phase::Merge, input, state, ctx.as_ref())?;
+        let merge = aggregate_exec(body, Phase::Merge, input, state, ctx.as_ref())?
+            .pop()
+            .expect("a merge is one operator");
         let output = node.kind().schema().expect("an aggregate is not a sink");
         let finalize = match body.finalize {
             Some(_) => {

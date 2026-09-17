@@ -27,6 +27,23 @@ the report rather than emitting one that goes nowhere.
 
 ## Done
 
+<a id="t163"></a>
+### #163 — `avg` declares its count state UInt64 and both engines produce Int64 — nowhere is a declared type derived from its producer
+
+`decompose` typed each state column from DataFusion's `state_fields()`, the layout of an
+accumulator this engine does not run: `avg` and Welford declared their count `UInt64` where both
+engines' `count` is `Int64`, and `avg`'s `$sum` at the input type where `sum` widens a decimal.
+On the cpu `check_state_layout` refused at construction, which is what kept 23 corpus rows off
+both engines. The finalize had the same gap from the other side: arrow typed the decimal `avg`
+divide wider than the declared output and `declared_as` refused it.
+
+**Done 2026-09-17, by `aggregate-state-types` on branch `ENS-aggregate-state-types`.** State
+columns are typed by `PlanAgg::state_type` (`plan/aggregates.rs`); the cpu's Welford init casts
+DataFusion's `u64` count to `Int64` in a second stage; `merge_m2` reads and emits `Int64`; the
+decimal `avg` finalize divides the sum at its own scale and casts the quotient to the declared
+type. Pinned green by `plan::aggregates::tests`, `cpu_backend::tests::state_types` and the three
+former `bug_` cases in `gpu_tests/aggregate_cases.rs`.
+
 <a id="t49"></a>
 ### #49 — Test crates bake CARGO_MANIFEST_DIR for testdata
 **Priority: low**

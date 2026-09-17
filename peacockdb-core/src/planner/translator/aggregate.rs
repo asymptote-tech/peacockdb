@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::{Field, Fields, Schema as ArrowSchema};
+use datafusion::arrow::datatypes::{DataType, Field, Fields, Schema as ArrowSchema};
 use datafusion::physical_expr::aggregate::AggregateFunctionExpr;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode};
 use datafusion::physical_plan::coalesce_batches::CoalesceBatchesExec;
@@ -68,21 +68,23 @@ fn shuffle_below(plan: &Arc<dyn ExecutionPlan>) -> (Arc<dyn ExecutionPlan>, Shuf
     }
 }
 
-/// The state field DataFusion declared for one of our aggregators. With a single state
-/// column there is nothing to mismatch; beyond that the aggregator's tag is what names it
-/// (`avg(x)[count]`), and a tag with no field is a drift this must not paper over.
-fn declared_state<'a>(
-    declared: &'a [Field],
+/// Whether DataFusion declares the state column one of our aggregators produces nullable.
+/// With a single state column there is nothing to mismatch; beyond that the aggregator's
+/// tag is what names it (`avg(x)[count]`), and a tag with no field is a drift this must
+/// not paper over. The type is not read here: it is `state_type`'s.
+fn declared_nullable(
+    declared: &[Field],
     func: PlanAgg,
     aggregate: &str,
-) -> Result<&'a Field, PlanError> {
+) -> Result<bool, PlanError> {
     if declared.len() == 1 {
-        return Ok(&declared[0]);
+        return Ok(declared[0].is_nullable());
     }
     let tag = format!("[{}]", func.tag());
     declared
         .iter()
         .find(|field| field.name().ends_with(&tag))
+        .map(Field::is_nullable)
         .ok_or_else(|| {
             PlanError::Invalid(format!(
                 "{aggregate}: DataFusion declares no {tag} state column, so this mode's \
@@ -141,18 +143,23 @@ fn decompose(
             args.push(translate_expr(&arg, input_schema)?);
         }
 
-        // The state names are ours — the golden and every later reference read them —
-        // and the types are DataFusion's. Paired by the aggregator's tag rather than by
-        // position: DataFusion declares avg as [count, sum] and this table reads
-        // [sum, count], so a positional pairing types both of them wrongly.
+        // The state names are ours and the types are `state_type`'s — the aggregator that
+        // produces each column, which DataFusion's `state_fields` (its own accumulator's
+        // layout, not the one this engine runs) supplies arity and nullability for. Paired
+        // by tag: DataFusion declares avg as [count, sum] and this table reads [sum, count].
+        let arg_type = match aggregate.expressions().first() {
+            Some(arg) => arg
+                .data_type(input_schema)
+                .map_err(|e| PlanError::Invalid(format!("{}: {e}", aggregate.name())))?,
+            None => DataType::Null,
+        };
         let state_at = n_keys + decomposed.state.len();
         let mut state = Vec::with_capacity(rule.state.len());
         for (suffix, func) in rule.state {
-            let field = declared_state(&declared, *func, aggregate.name())?;
             state.push(Field::new(
                 format!("{}{suffix}", aggregate.name()),
-                field.data_type().clone(),
-                field.is_nullable(),
+                func.state_type(&arg_type)?,
+                declared_nullable(&declared, *func, aggregate.name())?,
             ));
         }
 
