@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1958 test cases — Rust 1515, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 1959 test cases — Rust 1516, C++ 74, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1024 cases: `--lib` 550, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1025 cases: `--lib` 551, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -119,11 +119,12 @@ corpus plan never varies are the ones it cannot check — every field name a nod
 takes two distinct values across the fixtures, and the selector's output is a cover rather than
 a prefix
 
-| Planner join capability | [planner::tests::join_capability](../peacockdb-core/src/planner/tests/join_capability.rs) | 13 |
+| Planner join capability | [planner::tests::join_capability](../peacockdb-core/src/planner/tests/join_capability.rs) | 14 |
 |---|---|--:|
 
-every hash join type crossed with a residual filter, the co-partitioning and lane rules, and
-the null analysis both ways; writes its own parquet, so no dataset
+every hash join type crossed with a residual filter, the co-partitioning and lane rules, the
+null analysis both ways, and the session config's own registration path declaring strings
+`Utf8`; writes its own parquet, so no dataset
 
 | Null analysis rules | [a_scalar_function_can_be_null_even_over_operands_that_cannot](../peacockdb-core/src/planner/tests/null_analysis.rs) | 8 |
 |---|---|--:|

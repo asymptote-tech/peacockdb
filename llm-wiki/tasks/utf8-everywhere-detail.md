@@ -251,6 +251,29 @@ executors 65 (`executor::cpu_backend::tests::` less `contract`); Plan types 36 (
 gpu rung 287, of which `tests::gpu_tests::` 232 — the harness row; grand total 1846. The
 harness row's prose names the new sink case.
 
+### Completeness fix — the session config door
+
+The analyst's item 1. `build_session_state` now sets
+`execution.parquet.schema_force_view_types = false` on the session config, so DataFusion's own
+`register_parquet` — which builds its `ParquetFormat` from that config alone — agrees with
+`read_table`, whose format keeps its own `with_force_view_types(false)`. `read_table`'s comment
+gained the clause saying so; both comments sit under the four-line body cap.
+
+- Test: `planner::tests::join_capability::a_table_registered_through_the_session_config_declares_its_strings_utf8`
+  — the fixture's `SELECT pad FROM big`, planned by DataFusion through `register_parquet`, asserts
+  `pad` is `DataType::Utf8`. Red before the line (`left: Utf8View, right: Utf8`), green after.
+  It names `Utf8` only, so the Verification bar's grep is unchanged.
+- `cargo test --features rust-only -p peacockdb-core --lib -- --test-threads=2`:
+  `test result: ok. 540 passed; 0 failed; 2 ignored`; `git status testdata/` empty — no golden moved.
+- `--test test_module_layout`: `17 passed`; `--test test_ci_coverage`: `8 passed` — a new test in
+  an existing module, no CI change.
+- `grep -rn "Utf8View\|BinaryView" peacockdb-core/src testdata/goldens` → `plan/common.rs` and
+  `plan/validate/tests.rs` only.
+- `build-test.md`: `--lib` 541 → 542 and the join-capability row 13 → 14, both read off `--list`;
+  cpu 1012 → 1013, Rust 1403 → 1404, grand total 1846 → 1847.
+- `rustfmt` was run on `join_capability.rs` alone; `lib.rs` was checked with `--check` and the
+  chain split by hand to its output, since formatting `lib.rs` reformats eight other files.
+
 ## Completeness pass, analyst — 2026-09-17
 
 The branch read as one change against the spec's four items, Scope, Restriction, Registry and
