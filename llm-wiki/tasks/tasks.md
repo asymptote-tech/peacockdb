@@ -59,30 +59,3 @@ The driver takes an optional hook called on every emitted batch — the one prod
 the `test-support` feature: a validator holding each device batch to its node's schema, four
 mock-driver unit tests, and a `schema_validation_enabled|disabled` argument on `corpus_query!`, on for
 every enabled cell.
-
-## Chain E (base: master)
-
-Cases only, in `src/tests/gpu_tests/`: independent of every other chain's files. Both tasks
-reopened: the specs no longer declare `Utf8View`, and each plan's Task 8 retires the view cases.
-
-### 1. [`join-cases.md`](join-cases.md) — state: done — PR #155
-
-Cases only, along the three dimensions operator-cases held constant and the corpus does not: a
-projection on every reachable join type, composite and `Int64`/`Utf8`/`Date32` keys on the
-three join code paths, and the non-AST nested-loop path. Roughly 27 cases, one device cycle, no production code.
-
-
-### 2. [`aggregate-cases.md`](aggregate-cases.md) — state: done — PR #156
-
-Cases only, after join-cases: group keys the corpus uses (`Utf8`, `Date32`, `Int64`, two
-columns), `count(*)` and expression arguments, every merge arm with rows, the stddev finalize,
-the project expressions and casts with no case, and sorted merges on `desc`, nullable and
-composite keys — #202's second site. No fixture change, no production code. Roughly 40 cases.
-
-### 3. [`case-expectations.md`](case-expectations.md) — state: done — PR #157
-
-Cases only, on the branch that carries both: `same_within_welford` compares names and types before
-its one tolerance; the composite-key form of #59 is pinned instead of sidestepped; `welford_partial`
-counts a null value as 0 so the two backends stop agreeing on a phantom zero. A case that goes red
-under the tightened expectation is a ticket and a `bug_`, never a fixture restored.
-
