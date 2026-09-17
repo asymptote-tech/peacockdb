@@ -123,7 +123,7 @@ group count. Eight device cells: `tpcds` q96 q48 q93 q38, `tpch` q3 q14.
 q62 q66 q73 q83 q99, `tpch` q5 q12 q16 rollup-over-join. `decimal-precision-at-export`'s,
 2026-09-17: 24 more — `tpcds` q3 q8 q15 q33 q40 q42 q43 q46 q52 q55 q56 q58 q59 q60 q61 q68 q76
 q77 q79 q80 q90, `tpch` hash-join q10 q18. `aggregate-state-types`'s, 2026-09-17: nine more —
-`tpcds` q1 q7 q13 q14 q22 q26 q32 q65 q92; `date-part-return-type`'s, 2026-09-17: `tpch` q7 q8 q9 — 58 rows.
+`tpcds` q1 q7 q13 q14 q22 q26 q32 q65 q92 — so 55 registry rows carry it.
 `q48` and `q93` are also the first cells in this rollout where a device COMPLETED a plan and the
 golden caught the disagreement — every other device failure so far has been a refusal.
 
@@ -143,7 +143,8 @@ device, 72 bytes apart at the join and again at the aggregate over it. First dif
 the `utf8-everywhere` rollout's cells (tpcds q4 q10 q11 q23 q29 q69 q74, tpch cross-join
 nested-loop-left-join q4 q15 q20 q21) and in 10 of `decimal-precision-at-export`'s (tpcds q16
 q19 q25 q45 q91 q94 q95, tpch anti-join semi-join q2) and in 4 of `aggregate-state-types`'s
-(tpcds q18 q30 q35 q81) — 27 rows. Which side's batching the golden records is the decision.
+(tpcds q18 q30 q35 q81) and, once `date-part-return-type` let them run, tpch q7 q8 q9 — 30 rows.
+Which side's batching the golden records is the decision.
 
 <a id="t187"></a>
 ### #187 — the device widens a decimal the plan declared narrow
@@ -207,7 +208,7 @@ declaration, this one narrows an integer to a year's natural width.
 `return_type` when the two differ, and refuses a non-integer one by name. Three plan-executor
 cases (`ProjectDatePart{Year,Month,Day}IsInt32`) and `a_date_part_answers_in_its_declared_type`
 (`gpu_tests/exec_cases.rs`) hold it. `tpch` q7, q8, q9 at `tp1-single` now run the whole device
-plan and stop at the golden's `in_rows` at the merge, #185; `191` is on no registry row.
+plan and stop at the cpu's join batching beneath the merge, #220; `191` is on no registry row.
 
 <a id="t190"></a>
 ### #190 — the CPU backend drops a nested-loop join's projection

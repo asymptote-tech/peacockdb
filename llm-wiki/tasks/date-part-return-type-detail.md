@@ -97,7 +97,7 @@ from the golden's node line at the reported line.
 
 | verdict | queries | registry |
 |---|---|---|
-| the whole device plan runs; golden, `in_rows` at `GpuAggregateBatches` — the node's own output where the cpu records what it consumed (#185): q7 `in_rows=[[509]]` against `[[4]]`, q8 `[[4]]` against `[[2]]`, q9 `[[1416]]` against `[[175]]`, each at line 11 of its section | tpch q7 q8 q9 | `gpu_tp1_single` stays disabled; `185` added, `191` struck |
+| the whole device plan runs; golden, `in_rows` at `GpuAggregateBatches` — q7 `in_rows=[[509]]` against `[[4]]`, q8 `[[4]]` against `[[2]]`, q9 `[[1416]]` against `[[175]]`, each at line 11 of its section. Attributed to #185 at first; the completeness reviewer read the joins beneath: the cpu's 8192-row splits feed the init aggregate ~224 times, the device's one batch once, so the merge's `in_rows` follows the join batching and the sections differ at 15/26/14 lines — #220's signature, not #185's | tpch q7 q8 q9 | `gpu_tp1_single` stays disabled; `220` added, `191` struck |
 | #152's build-side copy, not re-run | tpch q7 q8 q9 at the other four modes | `152` kept |
 
 No cell passes, so no row goes to its other four modes. `191` is struck from all three rows:
@@ -155,3 +155,68 @@ arm's refusal, unreachable from the planner. The reviewer verified `round`'s Dat
 type for `Float32` (#221's verdict), the registry rule on q7/q8/q9 (`152` and `185` on each
 row, so `191` struck), and that #185 is the right first ticket from the cpu golden's own
 `in_rows` at that node.
+
+## Completeness — analyst pass, 2026-09-17
+
+Read as one change against the spec, `architecture.md` and `build-test.md`; the reviewer's list
+unseen. 0 blocking, 0 important. What was checked, with the numbers re-derived from the tree:
+
+- Scope: `git diff --stat` is the seven files the table names plus `architecture.md` (the
+  coordinator's "Every cast is explicit" correction), `tasks.md` (board) and this file. Nothing
+  under `testdata/goldens`, `flatbuffers/`, `cpp/include/` or production Rust moved; `cpp/src` is
+  the `date_part` arm alone. The recorded deviations (CASE over `Date32` literals in the gtest,
+  #221's pin and `input_with` in `exec_cases.rs`, #221 in `tickets.md`) are test code and
+  ticket placement; none widens the change.
+- Item 1: the arm reads `sf->return_type()`, refuses by `is_integral_not_bool` naming
+  `date_part`, casts only when the component's type differs. Item 2: three gtests assert
+  `INT32` and values at rows 0 and 24 (9204 = 1995-03-15, 12384 = 2003-11-28, checked by
+  hand); the harness case is `same(Order::AsEmitted)` over `input()` declared `Int32`.
+- Item 3: `build_column_scalar_fn` has eight arms — `date_part`, `substr`/`substring`, `abs`,
+  `round`, `lower`, `upper`, `concat`, `coalesce` — and the survey table covers all seven
+  others. Each verdict re-read against `datafusion-functions-45.0.0`'s `return_type` in the
+  cargo registry: `round` is `Float32` for a `Float32` operand and `Float64` otherwise;
+  `date_part` is `Float64` for `epoch` and `Int32` for every other field; `abs`, `substr`,
+  `lower`, `concat`, `coalesce` answer in the operand's type. No second scalar dispatch exists:
+  `build_expr` has no `ScalarFunctionExprNode` arm and `is_ast_able` returns false for one.
+- Verification bar: red (cycle 2, `test_plan_executor.cpp:1096`, 41 passed 3 failed) and green
+  (cycle 3, 44 passed, each case named) both quoted; the only code commit is `67eb167a`, so
+  cycle 5's 390/27 is after the last code change. Rust-only `564 + 2 ignored = 566` matches
+  the page's `--lib` figure.
+- Registry: no gpu cell enabled on q7/q8/q9, so no other mode run, and the record says so; the
+  first differing line named per row and the rest declared unread. Registry rule satisfied:
+  every disabled cell carries `152` or `185`. `191` appears on no csv row.
+- Counts from the tree: gtests 12+6+44+4+4+4+1+4+4+1 = 84; `gpu_tests/` operator cases 335
+  (336 `operator_case!`/`#[test]` hits less the macro definition's own `#[test]` in
+  `coverage.rs`); gpu rung 335+10+10+31+4 = 390, block 390+28 = 418; the page's N columns sum
+  to 2103 and Rust = 2103−84−369 = 1650. 26 enabled gpu cells in the csv, as the page says;
+  58 rows carry `185`, as #185's dated line says.
+- Tickets: Contents table 33/16/27/23 matches the headings under each section; counter 225;
+  #221–#224 each name a real site (`round`'s literal check, `substr`'s `lit_int`, the cast
+  arm of `build_column`) and the refusal text in `expr.cpp`; #221's pin is in
+  `gpu_tests/exec_cases.rs`, the device rung. Column-indexing counts unchanged on head
+  (22 `->index()`, 49 `.column(`, 8 `column_names[`).
+- `architecture.md`: no sentence falsified. "Every cast is explicit" now counts four C++
+  casts and lists four; `extract_datetime_component` does answer `INT16` for every
+  component. The `CudfProject` row, "What guards it", "cuDF options" and "Types are a plan
+  fact" read as prose and stand. Noted, not owed here: #221 is a pre-existing violation of
+  "No executor may change a type the plan did not ask it to", found rather than made by this
+  branch, and the page cites no ticket beside that rule.
+- Dropped as nits: #222 and #224 open with three problem lines against coding-style's two; the
+  non-integer refusal has no gtest (reachable from a hand-built plan alone, since the arm
+  refuses `epoch` by name first).
+
+## Completeness pass — 2026-09-17
+
+Two blind readings. **Analyst (what is missing): 0 blocking, 0 important** — every arm of the
+scalar dispatch in the survey with a verdict matched against DataFusion 45's `return_type`;
+red and green both quoted with their runs; counts recomputed; `architecture.md` falsified
+nowhere. **Reviewer (what is wrong): 0 blocking, 2 important** — (1) q7, q8 and q9's next
+ticket is #220, not #185: the cpu golden's `in_rows=[[509]]` at the merge is the init aggregate
+run once per 8192-row join batch, the device's `[[4]]` once per its single batch, so the
+difference follows the join batching beneath and the sections differ at 15/26/14 lines where
+#185's signature is `in_rows` and nothing else — the coordinator moved the three rows to `220`
+in the csv, #185 (55 rows), #220 (30 rows), #191's closing sentence, the batch-6/7 comments and
+the rollout table above; no test reads a ticket's number, only its presence. (2) #222 and #224
+stated their problem in three lines against the two the style allows — trimmed. Two nits left
+dropped: the non-integer `return_type` refusal has no gtest (a hand-built plan is its only
+reach), and `fb_to_type_id`'s `EMPTY` mappings would meet cuDF's own error before the arm's.
