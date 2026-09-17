@@ -14,6 +14,7 @@ mod corpus_golden;
 #[cfg(not(feature = "rust-only"))]
 mod corpus_gpu;
 mod cost_model;
+mod device_schema;
 mod golden_text;
 mod registry;
 mod result_text;
@@ -23,7 +24,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use datafusion::arrow::array::RecordBatch;
+use datafusion::arrow::datatypes::{DataType, Schema as ArrowSchema};
 
+#[cfg(not(feature = "rust-only"))]
+use crate::executor::GpuBatch;
 use crate::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};
 
 // --- where the testdata is ---------------------------------------------------
@@ -504,6 +508,82 @@ impl CostModel {
     pub fn cost_text_from_sections(&self, cpu_text: &str, ctx: &str) -> String {
         cost_model::cost_text_from_sections(self, cpu_text, ctx)
     }
+}
+
+// --- what the device holds at a handle ---------------------------------------------
+// A cuDF column is a `type_id` and, for a decimal, a scale: no precision, no timezone, no
+// nullability. Reading a handle through this projection is what lets a case hold the device
+// to a declaration without the export's relabelling in between.
+
+/// `cudf::type_id`, for the types the wire admits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeId {
+    Empty,
+    Bool8,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    UInt8,
+    UInt16,
+    UInt32,
+    UInt64,
+    Float32,
+    Float64,
+    TimestampDays,
+    TimestampSeconds,
+    TimestampMilliseconds,
+    TimestampMicroseconds,
+    TimestampNanoseconds,
+    String,
+    Decimal128,
+}
+
+/// `cudf::data_type`: the id, and the scale a decimal carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceType {
+    pub id: TypeId,
+    pub scale: Option<i32>,
+}
+
+/// A table's columns as the device holds them, in position, by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceSchema(pub Vec<(String, DeviceType)>);
+
+/// cuDF's interop mapping for an arrow type; a type with no cuDF image panics naming it.
+pub fn device_type_of(arrow: &DataType) -> DeviceType {
+    device_schema::device_type_of(arrow)
+}
+
+pub fn device_schema_of(declared: &ArrowSchema) -> DeviceSchema {
+    device_schema::device_schema_of(declared)
+}
+
+/// Every column where the device holds something other than the declaration's projection,
+/// by position, name and type, in the sink's spelling — or `None`.
+pub fn device_divergence(declared: &ArrowSchema, actual: &DeviceSchema) -> Option<String> {
+    device_schema::device_divergence(declared, actual)
+}
+
+// The two reads below name a raw executor and a `GpuBatch`, so they stay `pub(crate)`, and
+// their callers are the device rung — test code under `gpu` — so every other shape sees
+// them as dead. The attribute leaves with the corpus's first read.
+
+/// What the device holds at a raw handle of `executor`'s session, rows left where they are.
+#[cfg(not(feature = "rust-only"))]
+#[cfg_attr(not(all(test, feature = "gpu")), allow(dead_code))]
+pub(crate) fn schema_at(
+    executor: *mut peacockdb_ffi::raw::PeacockExecutor,
+    handle: u64,
+) -> DeviceSchema {
+    device_schema::schema_at(executor, handle)
+}
+
+/// The same for a batch, which carries its executor and handle.
+#[cfg(not(feature = "rust-only"))]
+#[cfg_attr(not(all(test, feature = "gpu")), allow(dead_code))]
+pub(crate) fn schema_of(batch: &GpuBatch) -> DeviceSchema {
+    device_schema::schema_at(batch.executor(), batch.handle())
 }
 
 // --- a corpus case ----------------------------------------------------------------

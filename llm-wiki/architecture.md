@@ -916,7 +916,7 @@ The ABI is eighteen symbols in five groups: lifecycle (`peacock_gpu_version`,
 `peacock_executor_create` / `_destroy`, `peacock_last_error`, `peacock_result_free`); the
 node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `end_plan`); the per-call
 entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`, and
-`handle_schema`, a handle's schema without its rows, which nothing in Rust calls yet);
+`handle_schema`, a handle's schema without its rows, read by the test harness alone);
 instrumentation (`install_rmm_pool`, `set_node_timing`, `measure_timing_floor_us`); and two
 test hooks: `peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow C-data
 batch so the Rust side can compare it against comet's, and `peacock_handle_from_arrow`, which

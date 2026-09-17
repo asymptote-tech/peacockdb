@@ -48,7 +48,7 @@ fn ordered(batch: &RecordBatch, order: &[ColumnOrder]) -> RecordBatch {
 
 /// `synthetic(rows, seed)` dealt into `n` runs, row `r` to run `r % n`: each run is sorted
 /// by `id`, no `id` is in two, and every run has rows a merge must interleave.
-fn runs(rows: usize, seed: u64, n: usize) -> Vec<RecordBatch> {
+pub(crate) fn runs(rows: usize, seed: u64, n: usize) -> Vec<RecordBatch> {
     runs_ordered(rows, seed, n, &by_id())
 }
 
@@ -78,7 +78,7 @@ fn lanes_ordered(n: usize, order: Vec<ColumnOrder>) -> Box<dyn GpuNode> {
 
 // `GpuCoalesceAllBatches`.
 
-fn coalesce() -> GpuCoalesceAllBatches {
+pub(crate) fn coalesce() -> GpuCoalesceAllBatches {
     GpuCoalesceAllBatches::new(Given::with_layout(
         Schema::new(schema()),
         PartitionLayout::new(1),
@@ -126,7 +126,7 @@ operator_case! {
 
 // `GpuAccumulateBatchesAndSort`.
 
-fn sorted(fetch: Option<usize>) -> GpuAccumulateBatchesAndSort {
+pub(crate) fn sorted(fetch: Option<usize>) -> GpuAccumulateBatchesAndSort {
     sorted_by(by_id(), fetch)
 }
 
@@ -298,7 +298,7 @@ operator_case! {
 // `GpuMergeSortedPartitions`. `Script::Lanes` drives every lane in order, each lane's
 // batches then its `Done`, so lane 0 is always done before lane 1's rows arrive.
 
-fn merged(lanes: usize, fetch: Option<usize>) -> GpuMergeSortedPartitions {
+pub(crate) fn merged(lanes: usize, fetch: Option<usize>) -> GpuMergeSortedPartitions {
     merged_by(lanes, by_id(), fetch)
 }
 
@@ -311,7 +311,7 @@ fn merged_by(
 }
 
 /// Each run in a lane of its own.
-fn one_per_lane(runs: Vec<RecordBatch>) -> Vec<Vec<RecordBatch>> {
+pub(crate) fn one_per_lane(runs: Vec<RecordBatch>) -> Vec<Vec<RecordBatch>> {
     runs.into_iter().map(|run| vec![run]).collect()
 }
 

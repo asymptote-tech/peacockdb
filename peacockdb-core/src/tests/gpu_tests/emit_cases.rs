@@ -23,7 +23,7 @@ fn given() -> Box<dyn GpuNode> {
     Given::of(Schema::new(schema()), BatchLayout::MultipleBatches)
 }
 
-fn emit(keys: Vec<u32>, lanes: usize) -> GpuEmitPartitions {
+pub(crate) fn emit(keys: Vec<u32>, lanes: usize) -> GpuEmitPartitions {
     GpuEmitPartitions::new(given(), keys, lanes)
 }
 

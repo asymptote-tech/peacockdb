@@ -105,7 +105,7 @@ fn decimal_residual() -> (Option<Expr>, Vec<JoinFilterColumn>) {
 
 /// A projection over `output_of(join_type)` that reorders, drops every key, and takes
 /// from both sides where the type keeps both: what the corpus does 634 times.
-fn crossing_projection(join_type: JoinType) -> Vec<u32> {
+pub(crate) fn crossing_projection(join_type: JoinType) -> Vec<u32> {
     match join_type {
         // both sides: probe's s, build's f64, probe's id, build's d
         JoinType::Inner | JoinType::Right => vec![13, 4, 8, 6],
@@ -123,7 +123,7 @@ fn crossing_projection(join_type: JoinType) -> Vec<u32> {
 /// nearly every join, a string, a date. Strings are `Utf8`, the type the data has and the
 /// spec declares.
 #[derive(Clone, Copy)]
-enum Key {
+pub(crate) enum Key {
     Composite,
     Int64,
     Utf8,
@@ -153,7 +153,7 @@ impl Key {
 /// of that type. `key` has seven values and nulls, so every side has matches, misses and a
 /// null to leave out. The composite's second key is `i32 % 5`: `i32` itself has a thousand
 /// values, and a pair over it never matches.
-fn keyed(rows: usize, seed: u64, key: Key) -> RecordBatch {
+pub(crate) fn keyed(rows: usize, seed: u64, key: Key) -> RecordBatch {
     let batch = synthetic(rows, seed);
     let mut columns = batch.columns().to_vec();
     columns[1] = cast(&columns[1], &key.data_type()).expect("Int32 casts to every key type");
@@ -195,7 +195,7 @@ fn keyed_side(prefix: &str, key: Key) -> Vec<Field> {
 /// `hash_join` over keyed leaves, on the three types whose code paths differ: the
 /// per-batch join, the side swap, the accumulated-keys finish. Same output rules as
 /// `output_of`, over the keyed fields.
-fn hash_join_keyed(join_type: JoinType, key: Key, projection: Option<Vec<u32>>) -> GpuHashJoin {
+pub(crate) fn hash_join_keyed(join_type: JoinType, key: Key, projection: Option<Vec<u32>>) -> GpuHashJoin {
     let b = keyed_side("b_", key);
     let p = keyed_side("p_", key);
     let fields: Vec<Field> = match join_type {
@@ -225,7 +225,7 @@ fn hash_join_keyed(join_type: JoinType, key: Key, projection: Option<Vec<u32>>) 
 }
 
 /// A probe over the whole key domain: every build key matched, and null keys on both sides.
-fn keyed_script(key: Key) -> Script {
+pub(crate) fn keyed_script(key: Key) -> Script {
     script(
         Some(prefixed(&keyed(32, 11, key), "b_")),
         vec![prefixed(&keyed(48, 3, key), "p_")],
@@ -234,7 +234,7 @@ fn keyed_script(key: Key) -> Script {
 
 /// A four-row probe with no null in either key column, so an anti join has build rows to
 /// keep and #59 has no null pair to match; the composite still has one match.
-fn keyed_anti_script(key: Key) -> Script {
+pub(crate) fn keyed_anti_script(key: Key) -> Script {
     script(
         Some(prefixed(&keyed(32, 11, key), "b_")),
         vec![prefixed(&keyed(4, 3, key), "p_")],
@@ -253,7 +253,7 @@ fn composite_anti_script_with_a_null_second_key() -> Script {
 
 /// Two probe batches with no null key and two key values never drawn, so an anti or mark
 /// form has build rows to keep and #59 has no null pair to match.
-fn probes_with_misses() -> Script {
+pub(crate) fn probes_with_misses() -> Script {
     script(
         Some(build_batch(32)),
         vec![probe_batch(4, 21), probe_batch(4, 22)],
@@ -262,7 +262,7 @@ fn probes_with_misses() -> Script {
 
 /// A build with no null key and one key value never drawn, so a right anti has probe rows
 /// to keep and #59 has no null pair to match.
-fn build_with_misses() -> Script {
+pub(crate) fn build_with_misses() -> Script {
     script(Some(build_batch(8)), vec![probe_batch(48, 21)])
 }
 
