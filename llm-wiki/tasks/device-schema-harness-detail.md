@@ -180,3 +180,8 @@ stayed green" was reasoning from the stale note, not a run. Reverted (`9d882b35`
 comment now states the true shape. Not ticketed: the failure names no column, but the symbol is
 the harness's alone — a refusal in `peacock_handle_schema` mirroring the export's would be a
 C++ follow-on, outside this spec.
+
+## Done — 2026-09-17
+
+PR #162 against `ENS-date-part-return-type`; CI runs 35195162888 and 35198268705 green on every
+job. Awaiting the human's merge after tasks 1–4.

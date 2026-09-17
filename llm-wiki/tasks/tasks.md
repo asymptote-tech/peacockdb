@@ -46,7 +46,7 @@ decimal `avg` finalize gains its explicit cast. Four pins retire; the 23 rows ro
 `expr.cpp`'s `date_part` arm casts cuDF's INT16 to the `return_type` the wire already names. Three
 plan-executor cases, one harness case written first as the pin, `tpch/q7`, `q8`, `q9`.
 
-### 5. [`device-schema-harness.md`](device-schema-harness.md) — state: completeness approved — PR #162
+### 5. [`device-schema-harness.md`](device-schema-harness.md) — state: done — PR #162
 
 Testing only. `test_support::device_schema` reads a handle's schema through `peacock_handle_schema`,
 projects an arrow schema onto `{type_id, scale}` and compares; a new schema case per node kind in
