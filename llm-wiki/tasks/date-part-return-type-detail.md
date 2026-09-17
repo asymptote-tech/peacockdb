@@ -139,3 +139,19 @@ gtest setup (a `CastExprNode` from `n_nationkey` to `Date32`) cannot work on cuD
 date is made from `Date32` literals through a CASE; #221 went to `tickets.md` rather than
 `active-tickets.md`, since it disables no cell; `exec_cases.rs` carries the #221 pin and a
 generalised helper beyond the Scope row's wording.
+
+## Completing — 2026-09-17
+
+Review round 1: 0 blocking, 2 important, 3 nits; both importants markdown and taken here —
+`architecture.md`'s "Every cast is explicit" counts four casts that stay in C++, `date_part`
+joining the count's shape; and the three device refusals the survey noted but did not file are
+tickets now, in #218's form: #222 (`round` with a column for `places`), #223 (`substr` with a
+column for start or length), #224 (`CAST(int AS DATE)`), counter at 225. Nit taken: the date on
+#185's line. Nits deferred, to ride with the next developer dispatch in this code and otherwise
+dropped: no gtest reaches the non-integer `return_type` refusal (a `date_part` declared
+`Float64` through `date_part_over_a_made_date`, matching `"date_part"` in `e.what()`); the four
+wire types `fb_to_type_id` maps to `EMPTY` would meet cuDF's `Invalid type_id.` rather than the
+arm's refusal, unreachable from the planner. The reviewer verified `round`'s DataFusion return
+type for `Float32` (#221's verdict), the registry rule on q7/q8/q9 (`152` and `185` on each
+row, so `191` struck), and that #185 is the right first ticket from the cpu golden's own
+`in_rows` at that node.
