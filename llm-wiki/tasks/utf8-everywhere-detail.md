@@ -336,3 +336,12 @@ files outside the Scope table — `cpu_backend/source.rs`, its test, `plan/mod.r
 — are round-1 fixes inside item 3's intent and the Restriction, recorded above. Nothing assigned to
 this task is left for the wire task; `cpp/`, `flatbuffers/`, python and the workflows carry no
 reference to the deleted names. PR #158 is `CONFLICTING` with no checks, as recorded.
+
+## Rebase needed — 2026-09-17
+
+The control file said `rebase`. Task 2 (`ENS-decimal-precision-at-export`, PR #159, at
+`reviewing`) is marked `rebase needed(reviewing)` on its own branch. This branch rebases onto
+master (`491f1afc`, chain D's `empty-build` merged and archived) first; the conflicts expected
+are `tasks.md`, `tickets.md`, `build-test.md` (mine) and `corpus_cases.inc`, `cost-registry.csv`
+(a developer's). `completeness approved` is restored only after the developer re-runs the
+proving commands green on the new base; then CI, then `done`, then task 2's turn.
