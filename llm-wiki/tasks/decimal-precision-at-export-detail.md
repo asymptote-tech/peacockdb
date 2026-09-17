@@ -138,3 +138,11 @@ nothing, but the substring survives in the unrelated `check_output_schema` (the 
 against DataFusion, `plan/validate.rs`, `plan/mod.rs`, `planner/pipeline.rs`) — a pre-existing
 validator, not the wire field. Renaming it is outside the Scope table and cosmetic. The
 whole-word grep is clean, which is the meaningful check.
+
+## Reviewing, then rebase needed — 2026-09-17
+
+Dispatch 1 committed as `ddafdb77` on `6bfaa9e9`, pushed; PR #159 against
+`ENS-utf8-everywhere`, base verified, 2 commits. The control file said `rebase` as the developer
+returned, so before any reviewer: task 1 (`ENS-utf8-everywhere`, `completeness approved`) is
+rebased onto master first and carried through CI to `done`; this branch then rebases onto it,
+re-proves, and only then goes to review. Until then `rebase needed(reviewing)`.
