@@ -47,9 +47,8 @@ What DataFusion is reused for is its planning, never its execution:
   decimal precision and scale it derived;
 - per-aggregate state layouts — how many state columns and whether each is nullable
   (sum+count for avg, Welford's triple for stddev), read off `AggregateExpr::state_fields()`;
-  the types are `PlanAgg::state_type`'s, since the accumulator `state_fields()` describes is
-  not the one either engine runs. The *split* is ours, since a batched lane needs a per-batch
-  init and a merge whatever the lane count;
+  the types are `PlanAgg::state_type`'s. The *split* is ours, since a batched lane needs a
+  per-batch init and a merge whatever the lane count;
 - grouping-set expansion, which arrives as an ordinary `__grouping_id` column;
 - row-group pruning, which hangs off `ParquetExec` statistics.
 
@@ -370,9 +369,10 @@ numerator, and `round`'s operand. Each is a `CastExprNode` the planner
 emits — the aggregate ones inside the finalize expressions, the union ones as per-branch
 projects, the expression ones at the point of use.
 
-Two stay in C++ with a reason. The loader's decimal width is the source honouring the output
+Three stay in C++ with a reason. The loader's decimal width is the source honouring the output
 schema it already declares, since cuDF's parquet reader picks the narrowest fixed_point width
-while DataFusion uses Decimal128 throughout. Hash key normalization feeds the hash alone and
+while DataFusion uses Decimal128 throughout. A count is the same shape one node up: cuDF counts
+in INT32 and the aggregate casts to the INT64 the state declares. Hash key normalization feeds the hash alone and
 never reaches a returned value — a cast that cannot change an answer is not one the plan needs
 to carry.
 

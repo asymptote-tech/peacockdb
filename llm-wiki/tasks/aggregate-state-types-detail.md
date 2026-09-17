@@ -190,3 +190,17 @@ Dispatch 1 committed as `636c0e96` on `1f7723c1`, pushed; PR #160 against
 finalize shape — the bare sum divided and the quotient cast, rather than the numerator cast
 first — is a finding on the spec, recorded under Developer notes with the digit that decided
 it; the reviewer judges it. Comment-only edits outside the scope table are listed there too.
+
+## Completing — 2026-09-17
+
+Round 1: 0 blocking, 2 important, 3 nits — the `widened_decimal` escape's phase clause had no
+test that could go red (two added, each shown red without the code it guards, `010c3d02`), and
+`architecture.md`'s Planning list still said state *schemas* come off `state_fields()`; the
+"Seven coercions" list named a count cast no plan emits (six now), and `build-test.md`'s
+partial-mode enumeration named six of the registry's ten rows. Round 2 on the fix: 0 blocking,
+0 important, 2 nits taken — the Planning bullet says it once, and the cast list's "stay in C++"
+paragraph gains cuDF's INT32 count cast to the INT64 the state declares. The reviewer confirmed
+the finalize's shape against arrow's divide rule (`result_scale = s1 + 4`, truncating) and
+DataFusion's `DecimalAverager`, and that the harness case would be red under the spec's original
+shape. Left as a nit: the inner divide is stamped `out_type` while arrow evaluates it at
+`(min(38, p_sum + 4), s_out)` — no behaviour rides on the stamp on either engine.
