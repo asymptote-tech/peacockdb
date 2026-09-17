@@ -129,3 +129,13 @@ join 38, nested 6, aggregate 32. Six `bug_` pins among the 134 and one among the
 ### Tickets
 
 - #225 opened (Welford state names); pins named on #65, #207 and #216 for the new cases.
+
+## Reviewing — 2026-09-17
+
+Dispatch 1 committed as `9b3c8a79` on `d1b4d41e`, pushed; PR #162 against
+`ENS-date-part-return-type`, base verified. For the reviewer: the facade items live in
+`test_support/mod.rs` rather than `device_schema.rs` because the layout rule puts a component's
+API in its `mod.rs`; 45 builders in existing `*_cases.rs` files went `fn` → `pub(crate) fn` and
+nothing else in them moved; `GpuBatch::executor()` is one production accessor, with the same
+test-only accessor deleted from `ffi_tests`; three spot-check rows read differently from the
+plan than the spec's table wrote them and were recorded as read, before any device run.
