@@ -220,3 +220,8 @@ the rollout table above; no test reads a ticket's number, only its presence. (2)
 stated their problem in three lines against the two the style allows — trimmed. Two nits left
 dropped: the non-integer `return_type` refusal has no gtest (a hand-built plan is its only
 reach), and `fb_to_type_id`'s `EMPTY` mappings would meet cuDF's own error before the arm's.
+
+## Done — 2026-09-17
+
+PR #161 against `ENS-aggregate-state-types`; CI runs 35187056570 and 35188709257 green on every
+job. Awaiting the human's merge after tasks 1–3.
