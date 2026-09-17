@@ -190,7 +190,9 @@ fn a_column_count_mismatch_is_a_divergence() {
 }
 
 // What `peacock_handle_schema` hands back: an IPC stream carrying the schema message and
-// no batch, every decimal at `decimal128(38, s)` and every string `utf8`.
+// no batch, every DECIMAL128 at `decimal128(38, s)` and every string `utf8`. A narrow width
+// comes back as arrow `decimal32`/`decimal64` (cuDF #17422, in 25.02 and 25.10), which
+// arrow-rs 54's reader refuses before this decode — loud, naming no column.
 #[test]
 fn a_device_schema_reads_off_a_schema_only_ipc_stream() {
     let exported = Schema::new(vec![

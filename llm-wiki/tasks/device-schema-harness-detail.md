@@ -158,3 +158,25 @@ developer dispatch in this code and otherwise dropped: `join_schema_cases.rs`'s
 `keyed_projection` duplicates two arms of `crossing_projection`; `device_schema.rs`'s
 `schema_at` panics on a non-zero rc without reading `peacock_last_error`; `wire/gpu_tests/mod.rs`
 at 1056 lines could hand the spot-checks a `schema.rs` of their own.
+
+## Completeness pass — 2026-09-17
+
+Two blind readings. **Analyst (what is missing): 0 blocking, 1 important** — the record quoted
+every device run and not the rust-only leg; dispatch 1's lines, now recorded: `--lib --
+test_support::device_schema` `test result: ok. 16 passed; 0 failed`; whole `--lib`
+`test result: ok. 580 passed; 0 failed; 2 ignored` (582 listed); `--test test_module_layout`
+`test result: ok. 17 passed; 0 failed`; `--test test_ci_coverage` `8 passed`. `architecture.md`:
+nothing falsified beyond the Interfaces clause already corrected. **Reviewer (what is wrong):
+0 blocking, 1 important** — that `from_ipc` dropped a decimal's precision where cuDF 25.02's
+`to_arrow_schema` labels a narrow width as `decimal128(9|18, s)`, so a DECIMAL64 at a handle
+would project as the declared DECIMAL128. A developer added `Decimal32`/`Decimal64` ids mapped
+from precision 9/18 (`74c812cb`); the scoped review of that commit traced the fact to its
+source and found the header's `@note` stale: `third_party/cudf` at `v25.02.02` — the installed
+`libcudf-25.02.02` — maps DECIMAL32/64 to arrow `decimal32`/`decimal64` (cuDF #17422), and
+arrow-ipc 54.2.1's reader panics on any decimal bit width but 128 and 256 before the decode
+runs. The coordinator confirmed both at the source. So the pre-fix decode was already loud on a
+narrow width, the mapping was unreachable, and the record's "drop the widening and the case
+stayed green" was reasoning from the stale note, not a run. Reverted (`9d882b35`); the test
+comment now states the true shape. Not ticketed: the failure names no column, but the symbol is
+the harness's alone — a refusal in `peacock_handle_schema` mirroring the export's would be a
+C++ follow-on, outside this spec.
