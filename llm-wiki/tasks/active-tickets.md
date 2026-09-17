@@ -147,7 +147,7 @@ is asserted first; which side's batching the golden should record is the decisio
 
 `expected Decimal128(15, 2) but found Decimal128(38, 2)` at the unload: cuDF's type is
 `{type_id, scale}` and carries no precision, so `to_arrow_schema` wrote the width's maximum, 38,
-whatever the plan declared. Every declared precision from 5 to 33 arrived at 38, scale preserved.
+whatever the plan declared.
 
 **Done 2026-09-17, by `decimal-precision-at-export` on branch `ENS-decimal-precision-at-export`.**
 `peacock_result_from_handle` now takes one `int32` precision per column; `unload` fills it from

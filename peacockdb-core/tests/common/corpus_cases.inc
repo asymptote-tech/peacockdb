@@ -29,9 +29,7 @@ corpus_query!(tpch, 1, q12, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgrou
 // the ABI cannot copy (by name rather than by crash), #184 is a cuDF failure in the hash
 // scatter, #185 is the device reporting its own output as in_rows where the cpu reports what
 // it consumed, #220 is the cpu splitting a join's output into more batches than the device.
-// The decimal class this task closed: the export is now told each declared precision, so a
-// cell that failed on it at the sink now passes or reaches the next cause. T19 is where the
-// rest are settled query by query.
+// T19 is where the rest are settled query by query.
 corpus_query!(tpch, 1, q13, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q15, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q17, none, none, data_fusion_exact, golden_exact);
@@ -45,9 +43,9 @@ corpus_query!(tpch, 1, q10, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgrou
 // scan-limit runs at the tp4 modes only: at the two tp1 modes the planner puts the limit
 // in the scan alone, and the cpu backend's reader does not apply it — six million rows
 // where ten were asked for, #186.
-// aggregate-groupby, shuffle-additive and filter-project run at tp1-single now that the
-// export writes the declared precision; cross-join is off on #220's join batching, scan-limit
-// on #188, where cuDF refuses row groups and a row count in one read — #186's shape, erroring.
+// aggregate-groupby, shuffle-additive and filter-project run at tp1-single; cross-join is off
+// on #220's join batching, scan-limit on #188, where cuDF refuses row groups and a row count in
+// one read — #186's shape, erroring rather than ignored.
 corpus_query!(tpch, 1, scan_limit, tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_subset, live_cpu);
 corpus_query!(tpch, 1, filter_project, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, live_cpu);
 corpus_query!(tpch, 1, aggregate_groupby, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, golden_exact);
@@ -113,8 +111,7 @@ corpus_query!(tpch, 1, q21, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgrou
 // plans and the regeneration cost has moved into the queries rather than their number.
 // #152 at four modes each, and at tp1-single, the mode that always reaches the unload: q7
 // and q8 are #191's Int16 for the year extract where the plan declared Int32, a type
-// disagreement the export cannot relabel; q2's decimal now exports at its declared precision
-// and it reaches #220's batching at its min aggregate instead.
+// disagreement the export cannot relabel; q2 is #220's batching at its min aggregate.
 corpus_query!(tpch, 1, q7, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q8, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q2, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);

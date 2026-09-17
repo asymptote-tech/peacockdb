@@ -191,19 +191,15 @@ int peacock_executor_slice_handle(peacock_executor_t* executor, uint64_t handle,
                                   uint64_t length, uint64_t* out_handle);
 
 /// Materialize rows [offset, offset+length) of a resident handle to an Arrow IPC stream
-/// (called once per handle, at root). `length == UINT64_MAX` means to the end, which is
-/// what a caller wanting the whole table passes. An offset at or past the end, and any
-/// other range naming no rows of a non-empty table, is an empty result → *out_ipc_len==0
-/// and nothing to free; a range running past the end clamps to it rather than failing,
+/// (called once per handle, at root). `length == UINT64_MAX` means to the end. An offset at
+/// or past the end, and any other range naming no rows of a non-empty table, is an empty
+/// result → *out_ipc_len==0 and nothing to free; a range running past the end clamps to it,
 /// because a limit's fetch legitimately overruns the batch it straddles. An EMPTY table
 /// still exports its schema, as whole-table callers have always received.
-/// `decimal_precisions[i]` is the declared precision of column i, 0 for none; scale is
-/// the column's. cuDF holds no precision, so an undeclared DECIMAL128 leaves as
-/// decimal128(38, s). NULL with `n_columns == 0` declares nothing; otherwise `n_columns`
-/// must be the table's column count, and a precision on a non-decimal column fails.
-/// Caller frees *out_ipc with peacock_result_free(). Does NOT release the handle, and a
-/// failure leaves the session standing.
-/// @return 0 on success, non-zero on failure.
+/// `decimal_precisions[i]` is column i's declared precision, 0 for none (undeclared exports
+/// at 38); `n_columns` is the table's column count, or 0 to declare nothing; a precision on a
+/// non-decimal fails. Caller frees *out_ipc with peacock_result_free(). Does NOT release the
+/// handle, and a failure leaves the session standing. @return 0 on success, non-zero on failure.
 int peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle, uint64_t offset,
                                uint64_t length, const int32_t* decimal_precisions,
                                uint64_t n_columns, uint8_t** out_ipc, uint64_t* out_ipc_len);

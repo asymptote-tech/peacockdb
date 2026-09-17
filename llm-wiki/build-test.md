@@ -269,6 +269,11 @@ per-lane slots and which lanes feed a build side that owes rows; the scheduler's
 enumerated and then a differential test against a naive rescan on randomized shapes; the lane
 state machine one call at a time with no tree around it
 
+| Declared precisions | [common::tests](../peacockdb-core/src/common/tests.rs) | 1 |
+|---|---|--:|
+
+what the export is told per column: a `Decimal128(p, _)` its `p`, every other column `0`
+
 | Sink divergence message | [executor::errors::tests](../peacockdb-core/src/executor/errors/tests.rs) | 3 |
 |---|---|--:|
 
@@ -432,7 +437,8 @@ half is the one case in `contract.rs`
 | Per-call ABI | [executor::gpu_backend::gpu_tests::abi](../peacockdb-core/src/executor/gpu_backend/gpu_tests/abi.rs) | 4 |
 |---|---|--:|
 
-the three per-call symbols on a live GPU — a scan's row groups, an export range, a slice — and
+three of the four per-call symbols on a live GPU — a scan's row groups, an export range, a
+slice; `handle_schema` has no Rust caller — and
 the release skipped exactly where a call consumed the handle
 
 

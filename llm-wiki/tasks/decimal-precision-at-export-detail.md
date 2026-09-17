@@ -206,3 +206,20 @@ rollout table. **Master added a #187 pin this task falsifies**:
 `bug_a_cast_to_decimal_is_exported_at_precision_38` (`gpu_tests/exec_cases.rs`) asserts the 38
 the export no longer writes; the developer retires or inverts it as the task did for the scan's
 pin, and the counts move with it. Pre-rebase tip: tag `pre-rebase/decimal-precision-at-export`.
+
+## Completing — 2026-09-17
+
+Review round 1 on the rebased branch: 0 blocking, 2 important, 7 nits. Both importants were
+the coordinator's — `build-test.md` had no row for `common::tests` (header 1976 against tables
+summing 1975; row added, sums now) and `peacock_gpu.h`'s doc above `peacock_result_from_handle`
+ran 14 lines against the ten cap (trimmed). Nits taken here: the three corpus comments that
+narrated the transition now state the cause; `build-test.md`'s "three per-call symbols" says
+three of the four, `handle_schema` having no Rust caller; #187 back within the cap. Nits
+deferred, to ride with the next developer dispatch if one happens and otherwise dropped:
+`Export.NoDeclarationExportsAtTheWidthsMaximum` proves the `n_columns == 0` escape rather than a
+per-entry `0` on a decimal column (pass `{0}, 1`); `Export.ADeclarationOfAnotherWidthIsRefused`
+means the array length, not a decimal width (rename). Recorded as a deviation from the spec's
+letter: `n_columns == 0` with a null array declares nothing — `abi.rs`, the wire session and the
+C++ tests have no schema to size an array from — where the spec says the count must equal the
+column count or the call fails; every non-zero count is still checked. The reviewer's note that
+the export's new code had compiled on 25.02 alone is CI's 26.02 leg to answer.
