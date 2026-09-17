@@ -123,7 +123,7 @@ group count. Eight device cells: `tpcds` q96 q48 q93 q38, `tpch` q3 q14.
 q62 q66 q73 q83 q99, `tpch` q5 q12 q16 rollup-over-join. `decimal-precision-at-export`'s,
 2026-09-17: 24 more — `tpcds` q3 q8 q15 q33 q40 q42 q43 q46 q52 q55 q56 q58 q59 q60 q61 q68 q76
 q77 q79 q80 q90, `tpch` hash-join q10 q18. `aggregate-state-types`'s, 2026-09-17: nine more —
-`tpcds` q1 q7 q13 q14 q22 q26 q32 q65 q92; `date-part-return-type`'s: `tpch` q7 q8 q9 — 58 rows.
+`tpcds` q1 q7 q13 q14 q22 q26 q32 q65 q92; `date-part-return-type`'s, 2026-09-17: `tpch` q7 q8 q9 — 58 rows.
 `q48` and `q93` are also the first cells in this rollout where a device COMPLETED a plan and the
 golden caught the disagreement — every other device failure so far has been a refusal.
 
