@@ -90,7 +90,8 @@ the source column above); the spec is frozen, so the correction lives here.
   comment on `peacock_handle_schema`, which said nothing in Rust calls it. `architecture.md`
   (Interfaces) still says `handle_schema` is "which nothing in Rust calls yet" — the
   coordinator's page; falsified by this branch.
-- Existing case files: no case body touched. Forty-five builders in nine `*_cases.rs` files
+- Existing case files: no case body touched. Forty-five items in nine `*_cases.rs` files
+  (42 builder `fn`s, the `DATE` and `STRING` consts, `enum Key`)
   went `fn` → `pub(crate) fn` (`git diff` over them shows only `pub(crate)` additions), so the
   schema suites reuse `keyed`/`hash_join_keyed` as the spec asks rather than copying them.
   `pub(super)` is refused by `nothing_is_pub_super`, so `pub(crate)` it is.
@@ -124,7 +125,9 @@ the source column above); the spec is frozen, so the correction lives here.
 
 rust-only `--lib` 582 (566 + 16 projection tests); gpu rung `gpu_tests::` 535 (390 + 134
 schema cases + 11 spot-checks). Per file: harness 4, source 8, exec 33, accumulate 7, emit 6,
-join 38, nested 6, aggregate 32. Six `bug_` pins among the 134 and one among the eleven.
+join 38, nested 6, aggregate 32. Five `bug_` pins among the 134 and one among the eleven.
+Left and Full hash joins have no schema case: they refuse their first probe batch (#152,
+pinned in `join_cases.rs`) and hold nothing to read, so the join suite is 7 types × 2.
 
 ### Tickets
 
@@ -139,3 +142,19 @@ API in its `mod.rs`; 45 builders in existing `*_cases.rs` files went `fn` → `p
 nothing else in them moved; `GpuBatch::executor()` is one production accessor, with the same
 test-only accessor deleted from `ffi_tests`; three spot-check rows read differently from the
 plan than the spec's table wrote them and were recorded as read, before any device run.
+
+## Completing — 2026-09-17
+
+Review round 1: 0 blocking, 2 important, 5 nits. Both importants were `build-test.md`'s prose
+over-claiming the suite — "every hash-join type" where Left and Full have no handle to read, and
+"every aggregate's finalize" where sum, avg, stddev and var have one — and counting six `bug_`
+pins where the eight files hold five; both corrected, with the Left/Full fact now in this file
+too. Nits taken: the walk's section comment pointed at this file, which the archive deletes, and
+now names the plan's node line; the record's "forty-five builders" is 42 functions, two consts
+and an enum. The reviewer read all eleven spot-check expectations against the committed plan
+goldens and `aggregates.rs` and found each derivable from them alone, `render_plan` rust-only
+linking no FFI and so unable to leak a device's answer. Nits deferred, to ride with the next
+developer dispatch in this code and otherwise dropped: `join_schema_cases.rs`'s
+`keyed_projection` duplicates two arms of `crossing_projection`; `device_schema.rs`'s
+`schema_at` panics on a non-zero rc without reading `peacock_last_error`; `wire/gpu_tests/mod.rs`
+at 1056 lines could hand the spot-checks a `schema.rs` of their own.

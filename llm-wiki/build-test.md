@@ -430,10 +430,12 @@ One `<family>_schema_cases.rs` beside each family: the reader against the upload
 mid-plan limit; a scan of each fixture column type; a filter with and without its projection;
 arithmetic on each numeric type, the divide's declared scale, each cast the corpus emits, the
 union's two branch casts, each scalar function the dispatch admits, CASE, LIKE and the unary
-forms; a sort; the three accumulators; the scatter on each key type; every hash-join type with
-and without a crossing projection and the three key-path types on each key type; the cross
-and nested loops; and every aggregate's init, merge and finalize, grouped on each key type and
-global. Six are `bug_` pins: the grouping id held `Int32` under a `UInt8` declaration (#65),
+forms; a sort; the three accumulators; the scatter on each key type; the seven hash-join
+types that run past a first probe batch (Left and Full refuse it, #152), with and without a
+crossing projection, and the three key-path types on each key type; the cross and nested
+loops; and each aggregate's init, the merges, and the sum, avg, stddev and var finalizes,
+grouped on each key type and global. Five are `bug_` pins: the grouping id held `Int32` under a
+`UInt8` declaration (#65),
 the cross join's dropped projection (#207), the keyless Welford init's one finished column
 (#216), and the Welford state named three times by its alias at the init and the merge (#225)
 

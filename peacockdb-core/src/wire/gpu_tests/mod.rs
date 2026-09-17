@@ -797,10 +797,9 @@ async fn a_rollup_answers_with_every_grouping_set() {
 }
 
 // What the device holds between calls, read by hand. An intermediate has no declaration
-// to be held to, so every expectation below was written from the plan rendered for its
-// query — `device-schema-harness-detail.md` quotes the node line each came from — before
-// any ran on a device; one the device contradicts becomes a `bug_` with a ticket, never a
-// rewritten expectation.
+// to be held to, so every expectation below was written from the node line of the query's
+// plan, rendered by `render_plan` rust-only, before any ran on a device; one the device
+// contradicts becomes a `bug_` with a ticket, never a rewritten expectation.
 
 /// Every handle a call answered and the schema the device held at it, in call order; a
 /// scatter contributes one entry per lane. The answer is still held to the oracle.
