@@ -1,14 +1,15 @@
 //! `GpuAggregate` and `GpuAggregateBatches` through the harness. The init runs over
 //! `synthetic`; a merge consumes state, so its arrivals are state batches this file builds
 //! from `synthetic`'s own columns. Every declared type is what the planner would have
-//! written — DataFusion's `state_fields`, read off a planning run — because the cpu holds
-//! its accumulators to the declaration and a wrong one is a refusal rather than a finding.
+//! written — `PlanAgg::state_type`, the aggregator that produces the column — because the
+//! cpu holds its accumulators to the declaration and a wrong one is a refusal rather than
+//! a finding.
 //! The builders both aggregate files use are `pub(crate)` here; the cases along the
 //! corpus's dimensions are `aggregate_dimension_cases.rs`.
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Array, ArrayRef, AsArray, Int32Array, Int64Array, UInt64Array};
+use datafusion::arrow::array::{Array, ArrayRef, AsArray, Int32Array, Int64Array};
 use datafusion::arrow::compute::cast;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema, UInt8Type};
 use datafusion::arrow::record_batch::RecordBatch;
@@ -72,9 +73,10 @@ pub(crate) fn state_by(keys: &[GroupKey], aggs: &[AggCall]) -> Schema {
     columns(&fields)
 }
 
-/// The Welford triple's state, `[key, count, mean, m2]` in DataFusion's own types, with
-/// the `agg_state` annotation that says the three belong to one `stddev` — without it both
-/// backends refuse `M2` and `MergeM2` (`plan/aggregate.rs`, `welford_owners`).
+/// The Welford triple's state, `[key, count, mean, m2]` as the plan declares it — an
+/// `Int64` count, as every count — with the `agg_state` annotation that says the three
+/// belong to one `stddev`; without it both backends refuse `M2` and `MergeM2`
+/// (`plan/aggregate.rs`, `welford_owners`).
 pub(crate) fn welford_state() -> Schema {
     welford_state_by(true, AggFunc::Stddev)
 }
@@ -90,7 +92,7 @@ pub(crate) fn welford_state_by(grouped: bool, func: AggFunc) -> Schema {
         other => panic!("{other:?} has no Welford state; declare Stddev or Var"),
     };
     let mut fields = vec![
-        Field::new(format!("{output}$count"), DataType::UInt64, true),
+        Field::new(format!("{output}$count"), DataType::Int64, true),
         Field::new(format!("{output}$mean"), DataType::Float64, true),
         Field::new(format!("{output}$m2"), DataType::Float64, true),
     ];
@@ -131,13 +133,13 @@ pub(crate) fn batch_of(columns: Vec<(&str, ArrayRef)>) -> RecordBatch {
     RecordBatch::try_from_iter(columns).expect("columns of one length")
 }
 
-/// The device's Welford state against the cpu's at slot `at`. The count is the pin: exported
-/// Int64 where the plan declares UInt64 (#163). The device also names all three state columns
-/// by the aggregate's alias, since `aggregate.cpp` names a struct's children by it — a
-/// relabelling unobservable past the sink and carrying no ticket — so the columns are read by
-/// position and the expected batch borrows the device's own names. The mean and m2 are
-/// checked to `WELFORD_RELATIVE`, since a Welford update is order-dependent and a mean is not
-/// dyadic, and the harness's exact comparison has no tolerance by design.
+/// The device's Welford state against the cpu's at slot `at`, the count exact and `Int64`
+/// on both. The device names all three state columns by the aggregate's alias, since
+/// `aggregate.cpp` names a struct's children by it — a relabelling unobservable past the
+/// sink and carrying no ticket — so the columns are read by position and the expected
+/// batch borrows the device's own names. The mean and m2 are checked to
+/// `WELFORD_RELATIVE`, since a Welford update is order-dependent and a mean is not dyadic,
+/// and the harness's exact comparison has no tolerance by design.
 fn welford_answered(outcome: &Outcome, at: usize) {
     let cpu = cpu_slot(outcome, at);
     let gpu = gpu_slot(outcome, at);
@@ -145,14 +147,7 @@ fn welford_answered(outcome: &Outcome, at: usize) {
         .map(|i| gpu.schema().field(i).name().clone())
         .collect();
     let expected: Vec<(&str, ArrayRef)> = (0..cpu.num_columns())
-        .map(|i| {
-            let column = if i == 1 {
-                cast(cpu.column(i), &DataType::Int64).unwrap()
-            } else {
-                cpu.column(i).clone()
-            };
-            (names[i].as_str(), column)
-        })
+        .map(|i| (names[i].as_str(), cpu.column(i).clone()))
         .collect();
     same_within_welford(&batch_of(expected), gpu, true, &[2, 3]);
 }
@@ -245,7 +240,7 @@ pub(crate) fn welford_init_aggs() -> Vec<AggCall> {
             PlanAgg::Count,
             Expr::column(4, "f64"),
             "stddev(f64)$count",
-            DataType::UInt64,
+            DataType::Int64,
         ),
         call(
             PlanAgg::Mean,
@@ -262,10 +257,11 @@ pub(crate) fn welford_init_aggs() -> Vec<AggCall> {
     ]
 }
 
-// #163 — cuDF's Welford count exports Int64 where every plan declares UInt64.
+// The Welford init's count is `Int64` on both: cuDF's `COUNT_VALID` and, on the cpu,
+// DataFusion's `u64` count cast to the declaration at the init.
 operator_case! {
     GpuAggregate,
-    fn bug_a_welford_init_exports_its_count_as_int64() {
+    fn a_welford_init_exports_its_count_as_int64() {
         let outcome = run_both(&welford_init(), Script::Exec(vec![input()]));
         welford_answered(&outcome, 0);
     }
@@ -302,9 +298,7 @@ operator_case! {
 }
 
 // The single-node shortcut: init aggregators and finalize expressions on one node. The
-// finalize indexes `[keys…, state…]`; `avg` is `sum / count` over the state. The count is
-// declared Int64, not the planner's UInt64, because a UInt64 count is #163's signed-arm
-// refusal on the cpu and this case is about the finalize.
+// finalize indexes `[keys…, state…]`; `avg` is `sum / count` over the state.
 operator_case! {
     GpuAggregate,
     fn the_single_node_shortcut_finalizes_an_average() {
@@ -621,8 +615,8 @@ pub(crate) fn welford_merge_by(
 /// and the mean is left null rather than the `0.0` the cpu's own init would write there.
 pub(crate) fn welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
     let s = synthetic(32, seed);
-    let counts: ArrayRef = Arc::new(UInt64Array::from_iter_values(
-        (0..32).map(|row| u64::from(s.column(4).is_valid(row))),
+    let counts: ArrayRef = Arc::new(Int64Array::from_iter_values(
+        (0..32).map(|row| i64::from(s.column(4).is_valid(row))),
     ));
     let zeros: ArrayRef = Arc::new(datafusion::arrow::array::Float64Array::from(vec![0.0; 32]));
     RecordBatch::try_new(
@@ -632,11 +626,11 @@ pub(crate) fn welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
     .unwrap()
 }
 
-// #163 — the merged count comes back Int64 too: cuDF's `merge_m2` takes an Int32 count and
-// the device widens what it returns to Int64, never to the declared UInt64.
+// The merged count is `Int64` on both too: cuDF's `merge_m2` takes an Int32 count and the
+// device widens what it returns to Int64; the cpu's `merge_m2` reads and emits `Int64`.
 operator_case! {
     GpuAggregateBatches,
-    fn bug_a_welford_merge_exports_its_count_as_int64() {
+    fn a_welford_merge_exports_its_count_as_int64() {
         let partial = |seed| welford_partial(AggFunc::Stddev, seed);
         let arrivals = vec![partial(1), partial(2), partial(3)];
         let outcome = run_both(&welford_merge(), Script::Accumulate(arrivals));
@@ -644,67 +638,62 @@ operator_case! {
     }
 }
 
-/// `SELECT avg(dec) FROM t` over `dec DECIMAL(18, 2)`, as the planner writes it: DataFusion
-/// declares the state `[count UInt64, sum Decimal128(18, 2)]` and the output
-/// `Decimal128(22, 6)`; the decomposition orders the state `$sum, $count`, and the
-/// finalize (`plan/aggregates.rs`) is the sum cast to the output type over the count cast
-/// to that precision at scale 0.
+/// `SELECT avg(dec) FROM t` over `dec DECIMAL(18, 2)`, as the planner writes it: the state
+/// `[$sum Decimal128(28, 2), $count Int64]` — `sum`'s widening and `count`'s type — and the
+/// output `Decimal128(22, 6)`; the finalize (`plan/aggregates.rs`) is the sum over the
+/// count cast to the output's precision at scale 0, the divide cast to the output type.
 fn planned_decimal_average() -> (Schema, Schema, Vec<NamedExpr>) {
     let out = DataType::Decimal128(22, 6);
     let state = columns(&[
-        ("avg(dec)$sum", DataType::Decimal128(18, 2)),
-        ("avg(dec)$count", DataType::UInt64),
+        ("avg(dec)$sum", DataType::Decimal128(28, 2)),
+        ("avg(dec)$count", DataType::Int64),
     ]);
     let output = columns(&[("avg(dec)", out.clone())]);
     let divide = Expr::binary(
-        Expr::Cast {
-            expr: Box::new(Expr::column(0, "avg(dec)$sum")),
-            target: out.clone(),
-        },
+        Expr::column(0, "avg(dec)$sum"),
         BinaryOp::Divide,
         Expr::Cast {
             expr: Box::new(Expr::column(1, "avg(dec)$count")),
             target: DataType::Decimal128(22, 0),
         },
-        out,
+        out.clone(),
     );
-    (state, output, vec![NamedExpr::new(divide, "avg(dec)")])
+    let declared = Expr::Cast {
+        expr: Box::new(divide),
+        target: out,
+    };
+    (state, output, vec![NamedExpr::new(declared, "avg(dec)")])
 }
 
-// #163 — the declared output is never checked against the expression that produces it:
-// arrow types the finalize's divide at (26,10) where the planner declares (22,6), and the
-// cpu refuses at `declared_as`. What the device answers is not read past the refusal.
+// The finalize asks for its declared type: the cpu's arrow divide truncates at the sum's
+// scale plus four, (22,6), and the device's pre-scaled divide truncates there too.
 operator_case! {
     GpuAggregateBatches,
-    fn bug_a_decimal_average_is_refused_on_the_cpu() {
+    fn a_decimal_average_finalizes_to_its_declared_type_on_both() {
         let (state, output, finalize) = planned_decimal_average();
         let aggs = vec![
             call(
                 PlanAgg::Sum,
                 Expr::column(0, "avg(dec)$sum"),
                 "avg(dec)$sum",
-                DataType::Decimal128(18, 2),
+                DataType::Decimal128(28, 2),
             ),
             call(
                 PlanAgg::Sum,
                 Expr::column(1, "avg(dec)$count"),
                 "avg(dec)$count",
-                DataType::UInt64,
+                DataType::Int64,
             ),
         ];
         let node = merge_over(state.clone(), body(Vec::new(), aggs, Some(finalize)), output);
-        // One partial per row: the decimal itself, counted once.
+        // One partial per row: the decimal itself at the state's width, counted once.
         let partial = |seed| {
             let d = decimals(32, seed);
-            let ones: ArrayRef = Arc::new(UInt64Array::from(vec![1u64; 32]));
-            RecordBatch::try_new(state.fields.clone(), vec![d.column(1).clone(), ones]).unwrap()
+            let sums = cast(d.column(1), &DataType::Decimal128(28, 2)).unwrap();
+            let ones: ArrayRef = Arc::new(Int64Array::from(vec![1i64; 32]));
+            RecordBatch::try_new(state.fields.clone(), vec![sums, ones]).unwrap()
         };
-        let outcome = run_both(&node, Script::Accumulate(vec![partial(1), partial(2)]));
-        let why = outcome.cpu_refuses();
-        assert!(
-            why.contains("expected Decimal128(22, 6) but found Decimal128(26, 10)"),
-            "{why}"
-        );
+        run_both(&node, Script::Accumulate(vec![partial(1), partial(2)])).same(Order::Any);
     }
 }
 

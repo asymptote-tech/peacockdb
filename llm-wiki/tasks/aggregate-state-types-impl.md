@@ -46,7 +46,7 @@ DataFusion's accumulator layout; a `ProjectionExec` over the CPU's Welford init 
 **Interfaces:**
 - Produces: `impl PlanAgg { pub(crate) fn state_type(self, input: &DataType) -> Result<DataType, PlanError> }`.
 
-- [ ] **Step 1: The failing tests.** `aggregates/tests.rs`:
+- [x] **Step 1: The failing tests.** `aggregates/tests.rs`:
 
 ```rust
 use super::*;
@@ -84,10 +84,10 @@ fn every_decomposition_types_every_state_it_names() {
   The last one is what proves `MergeM2`'s `unreachable!` unreachable: it appears in no
   `state` slice and no `PerColumn` list, so the walk never asks it.
 
-- [ ] **Step 2: Red.** `cargo test --features rust-only -p peacockdb-core --lib --
+- [x] **Step 2: Red.** `cargo test --features rust-only -p peacockdb-core --lib --
   plan::aggregates::tests` — no such method.
 
-- [ ] **Step 3: The function.**
+- [x] **Step 3: The function.**
 
 ```rust
 impl PlanAgg {
@@ -114,7 +114,7 @@ impl PlanAgg {
 }
 ```
 
-- [ ] **Step 4: Green.** Same command. Add `#[cfg(test)] mod tests;` to `aggregates.rs`.
+- [x] **Step 4: Green.** Same command. Add `#[cfg(test)] mod tests;` to `aggregates.rs`.
 - [ ] **Step 5: Commit.** `git commit -m "PlanAgg::state_type: a state column is typed by the aggregator that produces it"`.
 
 ### Task 2: `decompose` derives
@@ -122,17 +122,17 @@ impl PlanAgg {
 **Files:**
 - Modify: `peacockdb-core/src/planner/translator/aggregate.rs:74-92,145-157`
 
-- [ ] **Step 1:** In the state loop (`:149-156`) replace `field.data_type().clone()` with
+- [x] **Step 1:** In the state loop (`:149-156`) replace `field.data_type().clone()` with
   `func.state_type(&arg_type)?`, where `arg_type` is the aggregate's first argument's type —
   `aggregate.expressions()[0].data_type(input_schema)?` (a `count(*)` has no argument: use
   `DataType::Null`, which `Count` ignores). `declared_state` keeps returning the field for
   its nullability (the suffix is `rule.state`'s); delete the comment's "the types are
   DataFusion's" sentence and say they are `state_type`'s.
-- [ ] **Step 2:** `cargo test --features rust-only -p peacockdb-core --lib --
+- [x] **Step 2:** `cargo test --features rust-only -p peacockdb-core --lib --
   planner::tests::plan_goldens` — red on every `avg`/`stddev`/`var` golden, each diff line a
   count column `UInt64 → Int64` or a decimal `avg`'s `$sum` from the input type to `(p+10,
   s)`. Read three of them to confirm. Do not regenerate yet.
-- [ ] **Step 3:** `-- planner::translator` and `-- plan::` tests green.
+- [x] **Step 3:** `-- planner::translator` and `-- plan::` tests green.
 - [ ] **Step 4: Commit.** `git commit -m "decompose types the state from state_type; DataFusion's layout supplies names and arity"`.
 
 ### Task 3: The CPU's Welford count
@@ -141,7 +141,7 @@ impl PlanAgg {
 - Modify: `peacockdb-core/src/executor/cpu_backend/mod.rs:430-447` (the init `AggregateExec`), `merge_m2.rs:44-76`
 - Test: `peacockdb-core/src/executor/cpu_backend/tests/` (the aggregate module there, or a new `state_types.rs`)
 
-- [ ] **Step 1: Failing tests.** (a) A `stddev` init over a four-row `Float64` batch built
+- [x] **Step 1: Failing tests.** (a) A `stddev` init over a four-row `Float64` batch built
   through the backend's `executors_for`: today it fails at *construction* — `check_state_layout`
   (`mod.rs:441`) refuses "column 0 is Int64 in the declared state and UInt64 in the one
   DataFusion's accumulators produce" — assert instead that construction succeeds and the
@@ -149,7 +149,7 @@ impl PlanAgg {
   every `AggFunc` (`sum`, `min`, `max`, `count`, `avg`, `stddev`, `var`) over a `Decimal128(15,
   2)` and an `Int32` argument, build the init through the backend and assert its output schema
   equals the state `decompose` derived, column by column — no escape needed for an init.
-- [ ] **Step 2: The projection.** In the init builder (`:433-441`): after `AggregateExec::try_new`,
+- [x] **Step 2: The projection.** In the init builder (`:433-441`): after `AggregateExec::try_new`,
   compare `aggregate.schema()` to the declared state; where a column differs by exactly
   `UInt64 → Int64` (the Welford count), wrap the aggregate in a
   `ProjectionExec::try_new(exprs, Arc::new(aggregate))` whose `exprs` are `CastExpr(Column(i),
@@ -157,9 +157,9 @@ impl PlanAgg {
   projection's schema. Comment: DataFusion's variance accumulator counts in `u64`; the plan and
   the device count in `Int64`, and a state read positionally has to be the state declared.
   `widened_decimal` stays for the merge's `sum`-of-`sum` widening.
-- [ ] **Step 3:** `merge_m2.rs`: its `state_fields`/`signature` declare the count `Int64`;
+- [x] **Step 3:** `merge_m2.rs`: its `state_fields`/`signature` declare the count `Int64`;
   `MergeM2`'s accumulator reads `Int64Array` for the count.
-- [ ] **Step 4: Green:** both tests; `-- executor::cpu_backend`; `test_cpu_corpus` over three
+- [x] **Step 4: Green:** both tests; `-- executor::cpu_backend`; `test_cpu_corpus` over three
   `stddev` queries (`PCK_TEST_FILTER` on tpcds q17, q29, q39 or the file's own choice).
 - [ ] **Step 5: Commit.** `git commit -m "the cpu's welford count is Int64 like every other count; inits match their declared state exactly"`.
 
@@ -168,19 +168,19 @@ impl PlanAgg {
 **Files:**
 - Modify: `peacockdb-core/src/plan/aggregates.rs:80-101`
 
-- [ ] **Step 1: Failing test.** `aggregates/tests.rs`: `finalize(AggSpec{Avg,0}, &state,
+- [x] **Step 1: Failing test.** `aggregates/tests.rs`: `finalize(AggSpec{Avg,0}, &state,
   0, &Decimal128(22, 6))` returns `Expr::Cast { target: Decimal128(22, 6), expr: Binary{Divide,..} }`.
-- [ ] **Step 2:** Wrap the `Avg` arm's `Expr::binary(...)` in `Expr::Cast { expr: Box::new(…),
+- [x] **Step 2:** Wrap the `Avg` arm's `Expr::binary(...)` in `Expr::Cast { expr: Box::new(…),
   target: out_type.clone() }` for the decimal case only (the non-decimal arm's types already
   agree). Comment: arrow types the divide wider than the declaration; the plan asks for the
   narrowing explicitly, as every cast is.
-- [ ] **Step 3: Green**; then the plan goldens — the `avg` finalizes gain a cast in
+- [x] **Step 3: Green**; then the plan goldens — the `avg` finalizes gain a cast in
   `recipe-payloads.txt` and nowhere else.
 - [ ] **Step 4: Commit.** `git commit -m "the decimal avg finalize casts to the type it declares"`.
 
 ### Task 5: Goldens
 
-- [ ] `UPDATE_CANONICAL=1` over `planner::tests::plan_goldens` and the recipe-payloads test.
+- [x] `UPDATE_CANONICAL=1` over `planner::tests::plan_goldens` and the recipe-payloads test.
   `git diff testdata/goldens | grep '^[-+]' | grep -v '^[-+][-+]' | grep -v 'UInt64\|Int64\|\$sum\|CAST\|cast'`
   is empty; `--stat` names only `avg`/`stddev`/`var` queries; every `$sum` line moves from the
   input precision to `p + 10` at the same scale. Full rust-only tier green.
@@ -188,22 +188,22 @@ impl PlanAgg {
 
 ### Task 6: The device — pins, then the rollout
 
-- [ ] **Step 1:** Harness cycle, `PCK_TEST_FILTER='tests::gpu_tests::aggregate'`: the three
+- [x] **Step 1:** Harness cycle, `PCK_TEST_FILTER='tests::gpu_tests::aggregate'`: the three
   pins (`bug_a_welford_init_exports_its_count_as_int64`, `…_merge_…`,
   `bug_a_decimal_average_is_refused_on_the_cpu`) are red because the bug is gone — rewrite each
   as the green case its name implies, dropping `bug_` and the ticket line; rerun green.
   (`aggregate_cases.rs:294` is #187's pin and was retired by the previous task.)
-- [ ] **Step 2:** The 23 rows naming `163` in `cost-registry.csv`: `cpu_tp1_single` and
+- [x] **Step 2:** The 23 rows naming `163` in `cost-registry.csv`: `cpu_tp1_single` and
   `gpu_tp1_single` on; run `test_cpu_corpus` locally and the gpu corpus on the device. Enable
   what is green; ticket what fails on values; leave what fails above the sink on its own ticket
   (`q39` #57, `q9` #63, `q6` #152). Strike `163` from a row only when every cell still disabled
   in it carries another ticket (`registry.rs:229-240`); the registry test green before the push.
-- [ ] **Step 3:** Close #163 in `tickets.md` (both arms named); `architecture.md`'s aggregate
+- [x] **Step 3:** Close #163 in `tickets.md` (both arms named); `architecture.md`'s aggregate
   paragraph: "state columns are typed by `PlanAgg::state_type`"; `build-test.md` counts and
   `bug_` table.
 - [ ] **Step 4: Commit.** `git commit -m "#163 closed: state typed by its producer, the finalize by its declaration; N cells enabled"`.
 
 ### Task 7: The record
 
-- [ ] Detail file: the golden diff summary, the harness lines, the rollout table.
+- [x] Detail file: the golden diff summary, the harness lines, the rollout table.
   `git commit -m "aggregate-state-types: the record"`.

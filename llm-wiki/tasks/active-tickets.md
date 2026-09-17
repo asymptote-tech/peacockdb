@@ -292,6 +292,6 @@ comes from DataFusion's schema for the final aggregate; what the merge produces 
 own answer, and the two disagree only on nullability, so the same width and the same bytes make it
 invisible to every golden that is not a run.
 
-Neighbour to [#163](../tickets.md#t163) rather than the same thing: that one is a declared type
-never checked against the expression producing it, this one is a declared *nullability* the merge
-contradicts at run time. Found by T18's stage-4 enablement, disabled at three of five modes.
+Neighbour to [#163](../archive/archived-tickets.md#t163) rather than the same thing: that one
+was a declared type never derived from the expression producing it, this one is a declared
+*nullability* the merge contradicts at run time. Found by T18's stage-4 enablement, disabled at three of five modes.

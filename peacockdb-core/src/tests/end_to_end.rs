@@ -174,10 +174,8 @@ struct Oracle<'a> {
 /// The columns an answer declares. Names are not an input to the row encoding, and the
 /// rendered comparison it replaced carried them in its header — so they are asserted here
 /// rather than dropped. The engine's own defect class is what makes it worth an assert: a
-/// finalize project emitting the right values under the wrong names ([#163]), which the
-/// oracle cannot get wrong the same way.
-///
-/// [#163]: ../../../llm-wiki/tickets.md#t163
+/// finalize project emitting the right values under the wrong names, which the oracle
+/// cannot get wrong the same way.
 fn columns_of(batches: &[RecordBatch]) -> Vec<(String, DataType)> {
     batches
         .first()

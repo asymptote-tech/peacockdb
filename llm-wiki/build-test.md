@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 1976 test cases — Rust 1526, C++ 81, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2097 test cases — Rust 1647, C++ 81, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,22 +22,22 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1028 cases: `--lib` 554, `test_cpu_corpus` 451, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1137 cases: `--lib` 564, `test_cpu_corpus` 550, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 450 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 549 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes and its two oracles,
 expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
-checked against plain DataFusion at `target_partitions = 1`. 37 queries at the modes each is
-correct at — `tpcds/q96` carries three disabled by [#180](tasks/active-tickets.md#t180),
-`tpcds/q77` three by [#212](tickets.md#t212) and `tpcds/q80` three by
-[#189](tasks/active-tickets.md#t189), `tpcds/q88` three by
-[#180](tasks/active-tickets.md#t180), and thirteen queries are out entirely on
-[#163](tickets.md#t163). 447 cells, plus three checks that every declaration's two oracles suit
-each other and every device cell has a cpu cell
+checked against plain DataFusion at `target_partitions = 1`. 115 queries at the modes each is
+correct at — `tpcds/q96` and `tpcds/q88` carry three disabled by
+[#180](tasks/active-tickets.md#t180), `tpcds/q77` three by [#212](tickets.md#t212),
+`tpcds/q80`, `tpcds/q18` and `tpcds/q22` three by [#189](tasks/active-tickets.md#t189), and
+five queries are out entirely: `tpch/q11`, `tpch/q22` and `tpcds/q24` on
+[#190](tasks/active-tickets.md#t190), `tpcds/q54` and `tpcds/q64`. 546 cells, plus three checks
+that every declaration's two oracles suit each other and every device cell has a cpu cell
 
 | Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
 |---|---|--:|
@@ -226,14 +226,15 @@ script, the empty build lane a join owes rows for reaching `SetBuild` while ever
 lane still drops ([#175](archive/archived-tickets.md#t175)), and the mock against its own
 script
 
-| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 65 |
+| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 66 |
 |---|---|--:|
 
 one hand-built node per executor, one hand-written expected result: the exec executors, the
 accumulators over state batches written down rather than produced, the loader over parquet the
 test writes — which relabels the reader's batch to the declared schema and refuses a column
 the file holds in another type rather than casting it — the scatter, the join capability
-matrix run per mode, and what `executors_for` builds and reports holding
+matrix run per mode, what `executors_for` builds and reports holding, and every
+decomposition's init emitting exactly the state `PlanAgg::state_type` declares
 
 | Executor contract, both engines | [executor::cpu_backend::tests::contract](../peacockdb-core/src/executor/cpu_backend/tests/contract.rs) | 1 |
 |---|---|--:|
@@ -268,6 +269,15 @@ the accountant's formula, cache and two checks on plain figures; the plan index'
 per-lane slots and which lanes feed a build side that owes rows; the scheduler's corners
 enumerated and then a differential test against a naive rescan on randomized shapes; the lane
 state machine one call at a time with no tree around it
+
+| Aggregate state types | [plan::aggregates::tests](../peacockdb-core/src/plan/aggregates/tests.rs) | 9 |
+|---|---|--:|
+
+`state_type`'s table against the accumulators it was read off: each arm's DataFusion
+accumulator over four rows produces the type the table declares, `Sum`'s decimal rule and its
+refusal of a string, the walk over every decomposition that keeps `MergeM2` out of every state
+slice, and the `avg` finalize's shape — the sum divided at its own scale, the quotient cast to
+the declared output
 
 | Declared precisions | [common::tests](../peacockdb-core/src/common/tests.rs) | 1 |
 |---|---|--:|
@@ -346,22 +356,24 @@ the crate links; executor lifecycle
 what the batch reports, and that `consume` hands the handle over without releasing it. Needs no
 device: the release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 405 cases: `--lib -- gpu_tests::` 389, `test_gpu_corpus` 16
+#### gpu — `--features gpu`: shad-gpu only. 417 cases: `--lib -- gpu_tests::` 389, `test_gpu_corpus` 28
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 15 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 27 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
 device and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`,
-the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden. Fourteen
-cells today: `q6` at every mode, and `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`,
-`tpch/aggregate-groupby`, `tpch/filter-project`, `tpch/shuffle-additive`, `tpcds/q37` and
-`tpcds/q82` at `tp1-single`; the rest are off against [#152](tickets.md#t152),
+the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden.
+Twenty-six cells today: `tpch/q6`, `tpch/q1` and `tpch/shuffle-additive-avg` at every mode,
+and `q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggregate-groupby`,
+`tpch/filter-project`, `tpch/shuffle-additive`, `tpcds/q37`, `tpcds/q82` and `tpcds/q85` at
+`tp1-single`; the rest are off against [#152](tickets.md#t152),
 [#184](tasks/active-tickets.md#t184), [#185](tasks/active-tickets.md#t185),
-[#191](tasks/active-tickets.md#t191) and [#220](tasks/active-tickets.md#t220). The fifteenth
-case is that a device run under a regeneration writes no golden
+[#191](tasks/active-tickets.md#t191), [#220](tasks/active-tickets.md#t220) and the device's
+own tickets (#57, #63, #205). The twenty-seventh case is that a device run under a
+regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
 |---|---|--:|
@@ -423,8 +435,7 @@ and ride here anyway, because the module is the gate and splits nowhere
 each one handed its node's recipe — the exec nodes one batch at a time (filter, project,
 per-batch sort, aggregate with and without its finalize, the export with a row range, and an
 accumulator's recipe refused), the accumulators a stream of them (coalesce, the accumulating
-sort, the state merge, the Welford merge whose count exports Int64 against a UInt64 declaration
-([#163](tickets.md#t163)), the mid-plan limit), and the joins what the matrix says a device
+sort, the state merge, the Welford merge, the mid-plan limit), and the joins what the matrix says a device
 runs: Inner at one probe batch, LeftAnti streamed through its finish pass, the scatter's N
 handles, and the refusals — Left and Full outright, a second probe batch, a zero-input collapse
 — each naming its ticket; plans hand-built over six rows the test writes itself, since the ABI

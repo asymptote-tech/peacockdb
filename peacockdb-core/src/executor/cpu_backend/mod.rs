@@ -30,6 +30,7 @@ use datafusion::logical_expr::AggregateUDF;
 use datafusion::parquet::arrow::ProjectionMask;
 use datafusion::parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use datafusion::physical_expr::aggregate::AggregateExprBuilder;
+use datafusion::physical_expr::expressions::{CastExpr, Column};
 use datafusion::physical_expr::{LexOrdering, PhysicalExpr, PhysicalSortExpr};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
@@ -195,10 +196,15 @@ impl CpuExec {
     ) -> Result<Self, PlanError> {
         let body = &node.body;
         let state = node.intermediate();
-        let mut stages = vec![Stage {
-            node: aggregate_exec(body, Phase::Init, input, state, ctx.as_ref())?,
-            declared: state.fields.clone(),
-        }];
+        let mut stages: Vec<Stage> = aggregate_exec(body, Phase::Init, input, state, ctx.as_ref())?
+            .into_iter()
+            .map(|node| Stage {
+                declared: node.schema(),
+                node,
+            })
+            .collect();
+        // The last operator's rows are the state, under the names the node declares.
+        stages.last_mut().expect("an init aggregates").declared = state.fields.clone();
         if body.finalize.is_some() {
             let output = node.kind().schema().expect("an aggregate is not a sink");
             let columns = finalize_columns(body, state, output)?;
@@ -380,14 +386,16 @@ pub(crate) fn always_aggregating(ctx: Arc<TaskContext>) -> Arc<TaskContext> {
 /// The aggregate as DataFusion runs it: the group list under the names the state gives
 /// them, and one SQL aggregate per [`state_funcs`] entry — which is what makes the state
 /// this produces the state the node declared, three columns at a time where a Welford
-/// triple is one aggregate.
+/// triple is one aggregate. The operators a phase runs, in order: the aggregate alone for a
+/// merge, and for an init whose accumulator counts unsigned, the cast to the declared count
+/// after it — two operators rather than one plan, since each runs over the last one's rows.
 fn aggregate_exec(
     body: &AggregateBody,
     phase: Phase,
     input: &ArrowSchema,
     state: &Schema,
     registry: &dyn FunctionRegistry,
-) -> Result<Arc<dyn ExecutionPlan>, PlanError> {
+) -> Result<Vec<Arc<dyn ExecutionPlan>>, PlanError> {
     let input_schema = Arc::new(input.clone());
     let named = |exprs: &[crate::plan::Expr]| -> Result<Vec<_>, PlanError> {
         exprs
@@ -439,9 +447,48 @@ fn aggregate_exec(
         input_schema,
     )
     .map_err(|error| PlanError::Invalid(format!("the aggregate: {error}")))?;
-    let produced = aggregate.schema();
-    check_state_layout(&produced, state)?;
-    Ok(Arc::new(aggregate))
+    let mut operators: Vec<Arc<dyn ExecutionPlan>> = vec![Arc::new(aggregate)];
+    if phase == Phase::Init {
+        operators.extend(counted_as_declared(&operators[0].schema(), state)?);
+    }
+    let produced = operators.last().expect("the aggregate").schema();
+    check_state_layout(&produced, state, phase)?;
+    Ok(operators)
+}
+
+/// A project casting the `u64` counts of `produced` to the `Int64` the state declares, or
+/// nothing where no column needs it. DataFusion's variance accumulator is the one producer
+/// counting unsigned; the plan and the device count in `Int64`, and a state read
+/// positionally has to be the state declared — at construction, where `check_state_layout`
+/// reads the schema, so a cast per batch cannot serve. Every other column passes through.
+fn counted_as_declared(
+    produced: &ArrowSchema,
+    state: &Schema,
+) -> Result<Option<Arc<dyn ExecutionPlan>>, PlanError> {
+    let mut counts_unsigned = false;
+    let exprs: Vec<(Arc<dyn PhysicalExpr>, String)> = produced
+        .fields()
+        .iter()
+        .zip(state.fields.fields().iter())
+        .enumerate()
+        .map(|(position, (theirs, ours))| {
+            let column: Arc<dyn PhysicalExpr> = Arc::new(Column::new(theirs.name(), position));
+            let expr: Arc<dyn PhysicalExpr> = match (theirs.data_type(), ours.data_type()) {
+                (DataType::UInt64, DataType::Int64) => {
+                    counts_unsigned = true;
+                    Arc::new(CastExpr::new(column, DataType::Int64, None))
+                }
+                _ => column,
+            };
+            (expr, theirs.name().clone())
+        })
+        .collect();
+    if !counts_unsigned {
+        return Ok(None);
+    }
+    let cast = ProjectionExec::try_new(exprs, placeholder(produced))
+        .map_err(|error| PlanError::Invalid(format!("casting the counts: {error}")))?;
+    Ok(Some(Arc::new(cast)))
 }
 
 /// The init's aggregates: one per [`state_funcs`] entry, resolved by the name both engines
@@ -525,7 +572,13 @@ fn key_name(state: &Schema, position: usize) -> String {
 /// The state columns are relabelled positionally, so what DataFusion produces has to be
 /// the shape the node declared. Types only: the names are what differ by design, and
 /// nullability is DataFusion's own, copied into the declaration when the plan was built.
-fn check_state_layout(produced: &ArrowSchema, declared: &Schema) -> Result<(), PlanError> {
+/// An init is exact — its accumulators are what `state_type` was read off — and only a
+/// merge may widen a decimal, summing a column that is already a sum.
+fn check_state_layout(
+    produced: &ArrowSchema,
+    declared: &Schema,
+    phase: Phase,
+) -> Result<(), PlanError> {
     let ours = declared.fields.fields();
     if produced.fields().len() != ours.len() {
         return Err(PlanError::Invalid(format!(
@@ -536,7 +589,7 @@ fn check_state_layout(produced: &ArrowSchema, declared: &Schema) -> Result<(), P
     }
     for (position, (theirs, ours)) in produced.fields().iter().zip(ours.iter()).enumerate() {
         if theirs.data_type() == ours.data_type()
-            || widened_decimal(theirs.data_type(), ours.data_type())
+            || (phase == Phase::Merge && widened_decimal(theirs.data_type(), ours.data_type()))
         {
             continue;
         }

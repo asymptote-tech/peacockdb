@@ -332,12 +332,7 @@ fn a_collapse_with_no_input_handles_is_refused_by_the_device() {
 /// The Welford merge on a device, and the merge where #103 actually bit. Three lane
 /// batches become three partials and one state: for `a` the values are 2, 4 and 6, so a
 /// count of 3, a mean of 4 and an m2 of 8, computed here rather than by either engine.
-///
-/// The count is Int64 here and UInt64 wherever a plan declares it — a plan takes state
-/// types from DataFusion's `state_fields` and cuDF's is what comes back, which is
-/// [#163](../../../llm-wiki/tickets.md#t163). It bites only where state crosses the
-/// boundary: a plan's sink emits the query's own columns, which the validator enforces,
-/// so a finalize always stands between the state and the export.
+/// The count is `Int64`, as the plan declares every count and as cuDF returns it.
 #[test]
 fn a_welford_triple_merges_as_one_aggregate_on_the_device() {
     let state = Schema {

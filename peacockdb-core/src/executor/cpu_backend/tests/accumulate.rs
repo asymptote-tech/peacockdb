@@ -13,7 +13,6 @@ use crate::plan::{
     GpuMergeSortedPartitions,
 };
 use datafusion::arrow::array::Float64Array;
-use datafusion::arrow::datatypes::UInt64Type;
 use datafusion::execution::context::SessionContext;
 
 /// A lane's worth of arrivals through one accumulator, and what it answered with at done.
@@ -378,12 +377,12 @@ fn a_merge_that_received_nothing_emits_nothing() {
     assert!(emitted.is_empty());
 }
 
-/// `[k, count, mean, m2]` — the Welford triple, in DataFusion's own state order and types.
+/// `[k, count, mean, m2]` — the Welford triple as the plan declares it: an `Int64` count.
 fn welford_state() -> Schema {
     state_of(
         &[
             ("k", DataType::Utf8),
-            ("stddev(v)$count", DataType::UInt64),
+            ("stddev(v)$count", DataType::Int64),
             ("stddev(v)$mean", DataType::Float64),
             ("stddev(v)$m2", DataType::Float64),
         ],
@@ -392,13 +391,9 @@ fn welford_state() -> Schema {
     )
 }
 
-fn welford_batch(key: &str, count: u64, mean: f64, m2: f64) -> CpuBatch {
+fn welford_batch(key: &str, count: i64, mean: f64, m2: f64) -> CpuBatch {
     let keys: ArrayRef = Arc::new(StringArray::from(vec![Some(key)]));
-    let counts: ArrayRef = Arc::new(
-        vec![Some(count)]
-            .into_iter()
-            .collect::<datafusion::arrow::array::PrimitiveArray<UInt64Type>>(),
-    );
+    let counts: ArrayRef = Arc::new(Int64Array::from(vec![Some(count)]));
     let means: ArrayRef = Arc::new(Float64Array::from(vec![Some(mean)]));
     let m2s: ArrayRef = Arc::new(Float64Array::from(vec![Some(m2)]));
     CpuBatch::new(
@@ -455,7 +450,7 @@ fn a_welford_triple_merges_as_one_aggregate() {
         vec![(
             "a".to_string(),
             vec![
-                ScalarValue::UInt64(Some(4)),
+                ScalarValue::Int64(Some(4)),
                 ScalarValue::Float64(Some(5.5)),
                 ScalarValue::Float64(Some(35.0)),
             ]

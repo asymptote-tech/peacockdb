@@ -246,9 +246,13 @@ the combine is not a per-column reduction: it needs the count-weighted mean and 
 `ddof` is 1 for the sample forms and 0 for the population ones.
 
 The registry lives in `plan/mod.rs` as two enums — `AggFunc`, what SQL asked
-for, and `PlanAgg`, what a node runs — with state names and types from DataFusion's
-`state_fields()` so our split cannot drift from the split it planned. Adding an aggregate is a
-row there rather than an arm in C++; an aggregate that cannot be decomposed at all (a true
+for, and `PlanAgg`, what a node runs. State columns are typed by `PlanAgg::state_type`
+(`plan/aggregates.rs`), the aggregator that produces each: a count is `Int64` on both engines,
+a decimal sum gains ten digits of precision, the Welford moments are `Float64`. DataFusion's
+`state_fields()` supplies only the arity and nullability, since the accumulator it describes is
+not the one either engine runs. The one producer that disagrees is DataFusion's variance
+accumulator, whose count is `u64`; the cpu casts it to `Int64` at the init. Adding an aggregate
+is a row there rather than an arm in C++; an aggregate that cannot be decomposed at all (a true
 median) is an absent decomposition and a planner that declines to split the phase.
 
 References render `name@ordinal`. Inside `aggs` the ordinal indexes the node's input; inside the
@@ -358,7 +362,7 @@ that its input and its expressions do not account for is a defect whichever side
 invented it, and the plan golden prints the declared schema per node, so it is one a reader can
 see.
 
-Seven coercions are plan nodes rather than something an executor infers: `avg`'s decimal input
+Seven coercions are plan nodes rather than something an executor infers: `avg`'s decimal count
 and its finalize divide, `count`'s widening to INT64, the stddev/var operands, union branch
 types, a decimal divide's numerator, and `round`'s operand. Each is a `CastExprNode` the planner
 emits — the aggregate ones inside the finalize expressions, the union ones as per-branch
@@ -1176,9 +1180,9 @@ lane is the property worth reading and a lane count beside a batch count does no
 **Types are a plan fact.** The declared schema per node is what makes the explicit casts
 legible: a `Decimal128(38, 6)` in a finalize means nothing without the state column's declared
 scale beside it. It checks nothing — a golden records what the planner declared, and the
-declaration is exactly what a wrong type would move. Comparing a declared type against the
-expression that produces it is [#163](tickets.md#t163), and the C++ half is
-[#164](tickets.md#t164).
+declaration is exactly what a wrong type would move. An aggregate's state is the one declared
+type derived from its producer (`PlanAgg::state_type`); a project's expression is compared
+against nothing, and the C++ half is [#164](tickets.md#t164).
 
 **Estimates go in a `--- memory ---` section per query, not on the node line.** They churn where
 plan shapes do not — an estimator change, then #19's statistics, then #147's refinement — so on

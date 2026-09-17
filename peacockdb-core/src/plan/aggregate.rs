@@ -271,8 +271,9 @@ impl GpuNode for GpuAggregateBatches {
 ///
 /// `ddof` is not checked here because nothing at a merge names it: it separates the sample
 /// forms from the population ones and appears only in the finalize expression, which is
-/// built from the same spec that wrote the annotation. Nor are the state column TYPES,
-/// which no rule anywhere derives from what produces them — [#163](../../../llm-wiki/tickets.md).
+/// built from the same spec that wrote the annotation. Nor are the state column types,
+/// which `decompose` derives from `PlanAgg::state_type` and the cpu backend holds its
+/// accumulators to at construction.
 fn check_merges_the_state_it_was_given(
     body: &AggregateBody,
     input: &Schema,

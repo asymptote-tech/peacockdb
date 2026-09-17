@@ -398,7 +398,7 @@ pub(crate) struct AggSpec {
 
 impl PlanAgg {
     /// The name the aggregator goes by, in a plan line and in DataFusion's own state
-    /// field names (`avg(x)[count]`), which is how our state columns find their types.
+    /// field names (`avg(x)[count]`), which is how our state columns find their nullability.
     pub(crate) fn tag(self) -> &'static str {
         match self {
             Self::Sum => "sum",

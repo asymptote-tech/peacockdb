@@ -3,15 +3,18 @@
 //! An aggregate node carries no phase: it declares aggregators over its input and,
 //! where it finishes the aggregate, one expression per output column. The split into
 //! init / merge / finalize is this table, and adding an aggregate is a row here rather
-//! than an arm in C++. State *types* come from DataFusion's `state_fields()`, so the
-//! split cannot drift from the one DataFusion planned; the state *names* are ours,
-//! since the golden and every later reference read them.
+//! than an arm in C++. State *types* are `state_type`'s — the aggregator that produces
+//! each column, which both engines run — and the state *names* are ours, since the golden
+//! and every later reference read them; DataFusion's `state_fields()` supplies the arity.
 
 use super::{AggFunc, AggSpec, Decomposition, Merge, PlanAgg};
 use datafusion::arrow::datatypes::{DataType, Field};
 
 use super::PlanError;
 use super::{BinaryOp, Expr, UnaryOp};
+
+#[cfg(test)]
+mod tests;
 
 pub(crate) fn resolve(name: &str) -> Result<AggSpec, PlanError> {
     let (func, ddof) = match name {
@@ -69,6 +72,31 @@ pub(crate) fn decomposition(func: AggFunc) -> Decomposition {
     }
 }
 
+impl PlanAgg {
+    /// The type of the state column this aggregator produces, given its argument's type.
+    /// Both engines produce it and the plan declares it; no wildcard, so a new aggregator
+    /// says its type here or does not compile.
+    pub(crate) fn state_type(self, input: &DataType) -> Result<DataType, PlanError> {
+        use DataType::*;
+        Ok(match self {
+            Self::Sum => match input {
+                // DataFusion's `sum::return_type`, quoted: Spark's DECIMAL(min(38, p + 10), s).
+                Decimal128(p, s) => Decimal128((*p + 10).min(38), *s),
+                t if t.is_signed_integer() => Int64,
+                t if t.is_unsigned_integer() => UInt64,
+                t if t.is_floating() => Float64,
+                other => return Err(PlanError::Unsupported(format!("sum over {other}"))),
+            },
+            Self::Min | Self::Max => input.clone(),
+            Self::Count => Int64,
+            Self::Mean | Self::M2 => Float64,
+            Self::MergeM2 => {
+                unreachable!("MergeM2 merges the Welford triple and declares no state")
+            }
+        })
+    }
+}
+
 /// The expression that turns merged state into the aggregate's output column. A rename
 /// for the five simple aggregates, a divide for `avg`, and a `CASE` over a `sqrt` for
 /// the Welford pair — all of them ordinary IR, which is what replaces the hardwired
@@ -77,34 +105,40 @@ pub(crate) fn finalize(spec: AggSpec, state: &[Field], state_at: u32, out_type: 
     let column = |offset: usize| Expr::column(state_at + offset as u32, state[offset].name());
     match spec.func {
         AggFunc::Sum | AggFunc::Min | AggFunc::Max | AggFunc::Count => column(0),
-        AggFunc::Avg => {
-            // The denominator is cast to an exact integer-valued decimal, so cuDF's own
-            // divide scale (s_left - s_right) lands on the scale DataFusion declared.
-            let (num_type, den_type) = match out_type {
-                DataType::Decimal128(p, s) => {
-                    (DataType::Decimal128(*p, *s), DataType::Decimal128(*p, 0))
-                }
-                other => (other.clone(), other.clone()),
-            };
-            Expr::binary(
+        AggFunc::Avg => match out_type {
+            // The sum divides at its own scale: arrow's quotient carries four digits more,
+            // the scale DataFusion declares, truncated as DataFusion's `avg` and cuDF
+            // truncate, and the cast narrows the precision alone. The count as an exact
+            // decimal is what puts both operands on the device's pre-scaled divide.
+            DataType::Decimal128(p, _) => Expr::Cast {
+                expr: Box::new(Expr::binary(
+                    column(0),
+                    BinaryOp::Divide,
+                    Expr::Cast {
+                        expr: Box::new(column(1)),
+                        target: DataType::Decimal128(*p, 0),
+                    },
+                    out_type.clone(),
+                )),
+                target: out_type.clone(),
+            },
+            other => Expr::binary(
                 Expr::Cast {
                     expr: Box::new(column(0)),
-                    target: num_type,
+                    target: other.clone(),
                 },
                 BinaryOp::Divide,
                 Expr::Cast {
                     expr: Box::new(column(1)),
-                    target: den_type,
+                    target: other.clone(),
                 },
-                out_type.clone(),
-            )
-        }
+                other.clone(),
+            ),
+        },
         AggFunc::Stddev | AggFunc::Var => {
             // Every operand in the output's type, the count cast up to it before anything
-            // is subtracted. Two reasons, and both engines evaluate this expression: arrow
-            // refuses UInt64 - Int64 and Float64 / UInt64 outright rather than widening
-            // them, and a count below ddof would wrap rather than go negative in the
-            // count's own unsigned type — which is exactly the case the NULL arm is for.
+            // is subtracted: both engines evaluate this expression, and arrow refuses
+            // Float64 / Int64 outright rather than widening it.
             let counted = Expr::Cast {
                 expr: Box::new(column(0)),
                 target: out_type.clone(),
