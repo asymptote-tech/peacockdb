@@ -41,7 +41,7 @@ but `Decimal128`. The chain's one wire/header rebuild: `output_schema` and the v
 it instead of copying DataFusion's accumulator layout; the CPU's Welford count gets the one cast; the
 decimal `avg` finalize gains its explicit cast. Four pins retire; the 23 rows roll out.
 
-### 4. [`date-part-return-type.md`](date-part-return-type.md) — closes [#191](active-tickets.md#t191) — state: completeness approved — PR #161
+### 4. [`date-part-return-type.md`](date-part-return-type.md) — closes [#191](active-tickets.md#t191) — state: done — PR #161
 
 `expr.cpp`'s `date_part` arm casts cuDF's INT16 to the `return_type` the wire already names. Three
 plan-executor cases, one harness case written first as the pin, `tpch/q7`, `q8`, `q9`.
