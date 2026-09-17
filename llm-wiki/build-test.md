@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2103 test cases — Rust 1650, C++ 84, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2264 test cases — Rust 1811, C++ 84, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1139 cases: `--lib` 566, `test_cpu_corpus` 550, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1155 cases: `--lib` 582, `test_cpu_corpus` 550, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -295,6 +295,15 @@ what the sink says when the device's schema is not the declared one: every diver
 named with its index and both types, so a year and a narrow decimal read as two findings
 rather than `try_new`'s first; nullability is never a clause, since `try_new` does not check it
 
+| Device schema projection | [test_support::device_schema::tests](../peacockdb-core/src/test_support/device_schema/tests.rs) | 16 |
+|---|---|--:|
+
+an arrow schema projected onto what cuDF stores — a `type_id` and a decimal's scale, cuDF's
+own interop table for the types the wire admits, a type outside it a panic by name — and the
+comparator over it: every diverging column in the sink's spelling, a renamed one and a width
+mismatch each a finding, precision and nullability never one; the schema-only IPC stream
+`peacock_handle_schema` answers, decoded with no device
+
 | Forwarders and row ranges | [interleave_serves_lane_p_from_lane_p_of_every_child](../peacockdb-core/src/executor/forwarder/tests.rs) | 5 |
 |---|---|--:|
 
@@ -360,7 +369,7 @@ the crate links; executor lifecycle
 what the batch reports, and that `consume` hands the handle over without releasing it. Needs no
 device: the release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 418 cases: `--lib -- gpu_tests::` 390, `test_gpu_corpus` 28
+#### gpu — `--features gpu`: shad-gpu only. 563 cases: `--lib -- gpu_tests::` 535, `test_gpu_corpus` 28
 
 *crate integration, external*
 
@@ -410,9 +419,29 @@ keys, and the merge at four lanes. The group keys are `Utf8` too; the aggregate 
 view type. A guard reads the kind each case declares and names every kind with none, the three
 forwarders excluded
 
+| Operator harness, what the device holds | [a_divide_over_a_decimal_declares_the_scale_6_the_device_holds](../peacockdb-core/src/tests/gpu_tests/exec_schema_cases.rs), [bug_a_stddev_holds_its_welford_state_under_the_aggregates_alias_three_times](../peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs) | 134 |
+|---|---|--:|
+
+the same nodes on the device alone, every output handle read where it sits through
+`peacock_handle_schema` and held to the node's declared schema under cuDF's projection — a
+`type_id` and a decimal's scale, never a precision — so a type the device changes is red at
+the node rather than at the export, and an intermediate's type is read without moving a row.
+One `<family>_schema_cases.rs` beside each family: the reader against the uploader and the
+mid-plan limit; a scan of each fixture column type; a filter with and without its projection;
+arithmetic on each numeric type, the divide's declared scale, each cast the corpus emits, the
+union's two branch casts, each scalar function the dispatch admits, CASE, LIKE and the unary
+forms; a sort; the three accumulators; the scatter on each key type; the seven hash-join
+types that run past a first probe batch (Left and Full refuse it, #152), with and without a
+crossing projection, and the three key-path types on each key type; the cross and nested
+loops; and each aggregate's init, the merges, and the sum, avg, stddev and var finalizes,
+grouped on each key type and global. Five are `bug_` pins: the grouping id held `Int32` under a
+`UInt8` declaration (#65),
+the cross join's dropped projection (#207), the keyless Welford init's one finished column
+(#216), and the Welford state named three times by its alias at the init and the merge (#225)
+
 *component*
 
-| Recipe walk on a device | [an_average_finalizes_to_the_digits_the_oracle_computes](../peacockdb-core/src/wire/gpu_tests/mod.rs) | 10 |
+| Recipe walk on a device | [an_average_finalizes_to_the_digits_the_oracle_computes](../peacockdb-core/src/wire/gpu_tests/mod.rs), [an_avg_partial_holds_a_string_key_a_scale_2_sum_and_an_int64_count](../peacockdb-core/src/wire/gpu_tests/mod.rs) | 21 |
 |---|---|--:|
 
 the recipe plan driven by hand — begin_plan, the calls each recipe names, handles threaded
@@ -421,7 +450,11 @@ aggregates, which take two so a merge happens; `avg` asserts digits, since cuDF 
 divide's scale from its operands where arrow takes it from the declared type. A ROLLUP is here
 because its masks and NULL placeholders are the one payload the plan line does not imply, and
 one read re-walks every query to check the kinds a device has run against the kinds the file
-claims, in both directions
+claims, in both directions. Eleven spot-checks read what the device holds between calls, each
+a literal schema written from the plan before any ran — `avg`'s partial, merge and finalize,
+`sum`'s partial, the filter, the project, the inner and semi joins' one call, the nested
+aggregates' inner finalize and outer `max` — and one `bug_`: the rollup's grouping id held
+`Int32` where the plan says `UInt8` (#65)
 
 *subcomponent*
 
@@ -452,7 +485,7 @@ half is the one case in `contract.rs`
 |---|---|--:|
 
 three of the four per-call symbols on a live GPU — a scan's row groups, an export range, a
-slice; `handle_schema` has no Rust caller — and
+slice; `handle_schema` is `test_support`'s schema read — and
 the release skipped exactly where a call consumed the handle
 
 

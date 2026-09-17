@@ -29,19 +29,19 @@ fn given() -> Box<dyn GpuNode> {
     Given::of(Schema::new(schema()), BatchLayout::MultipleBatches)
 }
 
-fn lit_i32(v: i32) -> Expr {
+pub(crate) fn lit_i32(v: i32) -> Expr {
     Expr::Literal(ScalarValue::Int32(Some(v)))
 }
 
-fn lit_i64(v: i64) -> Expr {
+pub(crate) fn lit_i64(v: i64) -> Expr {
     Expr::Literal(ScalarValue::Int64(Some(v)))
 }
 
-fn lit_str(s: &str) -> Expr {
+pub(crate) fn lit_str(s: &str) -> Expr {
     Expr::Literal(ScalarValue::Utf8(Some(s.into())))
 }
 
-fn keep_id() -> (Expr, &'static str, DataType) {
+pub(crate) fn keep_id() -> (Expr, &'static str, DataType) {
     (Expr::column(0, "id"), "id", DataType::Int64)
 }
 
@@ -60,7 +60,7 @@ fn batch_of(columns: Vec<(&str, ArrayRef)>) -> RecordBatch {
 
 // `GpuFilter`.
 
-fn filter(predicate: Expr, projection: Option<Vec<u32>>) -> GpuFilter {
+pub(crate) fn filter(predicate: Expr, projection: Option<Vec<u32>>) -> GpuFilter {
     let fields = match &projection {
         None => schema(),
         Some(keep) => Arc::new(
@@ -72,7 +72,7 @@ fn filter(predicate: Expr, projection: Option<Vec<u32>>) -> GpuFilter {
     GpuFilter::new(given(), predicate, projection, Schema::new(fields))
 }
 
-fn gt(ordinal: u32, name: &str, literal: Expr) -> Expr {
+pub(crate) fn gt(ordinal: u32, name: &str, literal: Expr) -> Expr {
     Expr::binary(
         Expr::column(ordinal, name),
         BinaryOp::Gt,
@@ -157,12 +157,12 @@ operator_case! {
 // `GpuProject`. The declared type of each expression is DataFusion's own coercion, which
 // is what the planner would have written; the comparison is of what each engine produced.
 
-fn project(exprs: Vec<(Expr, &str, DataType)>) -> GpuProject {
+pub(crate) fn project(exprs: Vec<(Expr, &str, DataType)>) -> GpuProject {
     project_over(schema(), exprs)
 }
 
 /// A function by the name the planner emits, `nullable` as every corpus function is.
-fn function(name: &str, args: Vec<Expr>, return_type: DataType) -> Expr {
+pub(crate) fn function(name: &str, args: Vec<Expr>, return_type: DataType) -> Expr {
     Expr::ScalarFunction {
         name: name.to_string(),
         args,
@@ -172,7 +172,7 @@ fn function(name: &str, args: Vec<Expr>, return_type: DataType) -> Expr {
 }
 
 /// `project` over a leaf declaring `input`, for a batch that is not the fixture.
-fn project_over(input: Arc<ArrowSchema>, exprs: Vec<(Expr, &str, DataType)>) -> GpuProject {
+pub(crate) fn project_over(input: Arc<ArrowSchema>, exprs: Vec<(Expr, &str, DataType)>) -> GpuProject {
     let schema = columns(
         &exprs
             .iter()
@@ -194,7 +194,7 @@ fn project_over(input: Arc<ArrowSchema>, exprs: Vec<(Expr, &str, DataType)>) -> 
 /// `dec DECIMAL(18, 2)`: arrow-arith's `decimal_op` rules, which `get_result_type` applies
 /// to the two operand types — add is `max(p - s) + max(s) + 1` at the wider scale, divide
 /// is `s1 + 4` for the scale and `p1 - s1 + s2 + scale` for the precision.
-fn declared_decimal_types() -> (DataType, DataType) {
+pub(crate) fn declared_decimal_types() -> (DataType, DataType) {
     (DataType::Decimal128(19, 2), DataType::Decimal128(24, 6))
 }
 
@@ -491,7 +491,7 @@ operator_case! {
     }
 }
 
-fn cast_to(ordinal: u32, name: &str, target: DataType) -> Expr {
+pub(crate) fn cast_to(ordinal: u32, name: &str, target: DataType) -> Expr {
     Expr::Cast {
         expr: Box::new(Expr::column(ordinal, name)),
         target,
@@ -541,7 +541,7 @@ operator_case! {
 }
 
 /// `input()` with one column cast by arrow to a type the fixture lacks.
-fn input_with(name: &str, ty: DataType) -> RecordBatch {
+pub(crate) fn input_with(name: &str, ty: DataType) -> RecordBatch {
     let batch = input();
     let ordinal = batch.schema().index_of(name).expect("a fixture column");
     let mut columns = batch.columns().to_vec();
@@ -654,7 +654,7 @@ operator_case! {
     }
 }
 
-fn like(pattern: &str, negated: bool, case_insensitive: bool) -> Expr {
+pub(crate) fn like(pattern: &str, negated: bool, case_insensitive: bool) -> Expr {
     Expr::Like {
         expr: Box::new(Expr::column(5, "s")),
         pattern: Box::new(lit_str(pattern)),
@@ -734,7 +734,7 @@ operator_case! {
 // `GpuSort`. `id` is unique, so it is every single-key sort's key or tie-breaker; `i32`
 // carries nulls and duplicates, so it is the nulls-first/last key with `id` behind it.
 
-fn by(column: u32, ascending: bool, nulls_first: bool) -> ColumnOrder {
+pub(crate) fn by(column: u32, ascending: bool, nulls_first: bool) -> ColumnOrder {
     ColumnOrder {
         column,
         ascending,
@@ -742,7 +742,7 @@ fn by(column: u32, ascending: bool, nulls_first: bool) -> ColumnOrder {
     }
 }
 
-fn sort(keys: Vec<ColumnOrder>, fetch: Option<usize>) -> GpuSort {
+pub(crate) fn sort(keys: Vec<ColumnOrder>, fetch: Option<usize>) -> GpuSort {
     GpuSort::new(given(), keys, fetch)
 }
 

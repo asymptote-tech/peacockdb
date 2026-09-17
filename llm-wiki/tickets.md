@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 225), which is also the counter for
+New tickets take the next free number (currently 226), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -15,12 +15,26 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 33 | #224 #223 #222 #221 #219 #218 #217 #216 #215 #214 #211 #210 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Critical correctness](#critical-correctness) | 34 | #225 #224 #223 #222 #221 #219 #218 #217 #216 #215 #214 #211 #210 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #212 #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #213 #201 #197 #196 #195 #178 #176 #174 #167 #164 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
+
+<a id="t225"></a>
+### #225 — the device names every Welford state column by the aggregate's alias
+
+The plan declares a `stddev` or `var` state as `<out>$count`, `<out>$mean`, `<out>$m2`; the
+device holds all three under `<out>`, at the init and at the merge alike, the types as declared.
+
+The wire folds the triple into one `AggregateFuncNode` with one `alias` (`plan/aggregate.rs`,
+`state_funcs`, `welford: true`), and `aggregate.cpp`'s Partial and Merge arms push each child
+under it. No answer is wrong today: the merge packs the triple by offset and the finalize reads
+it by ordinal; a reader resolving a state column by name would take the wrong one. The fix is
+the three names on the wire, or the suffixes appended in `aggregate.cpp`. Pinned by the two
+`bug_…_holds_its_welford_state_under_the_aggregates_alias_three_times` cases in
+`gpu_tests/aggregate_schema_cases.rs`.
 
 <a id="t224"></a>
 ### #224 — the device cannot cast an integer to a date
@@ -121,11 +135,10 @@ keyless path (`key_cols.empty()`) tests `is_stddev_name` alone and reduces that 
 the merge the stddev of the state's first column, the count — and the finalize project refuses
 with `ColumnRef index 2 out of range (cols=1)`; a `var` name falls to `make_reduce_agg`'s
 `unsupported aggregate function: var`. So `SELECT stddev(x) FROM t` and `SELECT var(x) FROM t`
-are refusals on the device in every shape. Pinned in `gpu_tests/aggregate_dimension_cases.rs` by
-`bug_a_global_welford_init_answers_a_finished_stddev_on_the_device`,
-`bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device`,
-`bug_a_global_stddev_finalize_is_refused_on_the_device` and
-`bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device`.
+are refusals on the device in every shape. Pinned in `aggregate_dimension_cases.rs` by the
+four `bug_` cases `…welford_init_answers_a_finished_stddev…`, `…keyless_welford_merge…`,
+`…global_stddev_finalize_is_refused…` and `…keyless_var_merge_is_refused…`; the init's one
+column read at the handle by `aggregate_schema_cases.rs`'s `bug_a_global_stddev_holds_…`.
 
 <a id="t215"></a>
 ### #215 — a left nested-loop join over a predicate the AST cannot take is refused on the device
@@ -214,7 +227,8 @@ projection field (`gpu_plan.fbs`) so `cross_join_payload` writes none and `execu
 applies none. #190 is the cpu half of the same defect for the nested-loop join, where the device
 does apply it. On the device every ordinal above the join then reads one column of some other
 (#135's shape). Pinned by `bug_a_cross_join_projection_is_dropped_on_both`
-(`gpu_tests/nested_cases.rs`).
+(`gpu_tests/nested_cases.rs`) and, read at the handle, by `nested_schema_cases.rs`'s
+`bug_a_cross_join_with_a_projection_holds_every_column_on_the_device`.
 
 <a id="t205"></a>
 ### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
@@ -564,7 +578,9 @@ distinct-per-set but not DataFusion's positional bitmask: the device sets bit `i
 and the device's column is Int32 where DataFusion declares UInt8. Safe while no enabled query
 projects or sorts `GROUPING()`; must be fixed before one does (q70/q86 after #23).
 9 rollup rows carry this ticket; pinned by the `bug_grouping_sets_…` cases in
-`gpu_tests/aggregate_cases.rs`.
+`gpu_tests/aggregate_cases.rs`, and the `Int32` read at the handle by
+`aggregate_schema_cases.rs`'s `bug_grouping_sets_hold_an_int32_grouping_id_…` and the walk's
+`bug_a_rollup_partial_holds_an_int32_grouping_id_…` (`wire/gpu_tests/mod.rs`).
 
 <a id="t62"></a>
 ### #62 — count(DISTINCT) ignores the DISTINCT flag in GpuAggregate

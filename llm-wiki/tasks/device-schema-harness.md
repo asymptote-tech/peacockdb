@@ -130,3 +130,19 @@ plan and DataFusion before the first cycle, and a row that the device contradict
 
 `build-test-shadgpu.sh`; expect two or three cycles, since the suite is written family by
 family.
+
+## Completeness signoff — 2026-09-17
+
+Solved under its constraints: `test_support::device_schema` projects a declared schema onto
+cuDF's `{type_id, scale}`, reads a handle's through `peacock_handle_schema`, and names every
+diverging column in the sink's spelling, with the projection's unit tests rust-only; 134 schema
+cases across the eight families, each run on the device alone, and eleven walk spot-checks
+whose expectations were written from the plan goldens before the first device cycle — the
+reviewer found each derivable from the goldens and `state_type` alone. Every existing case is
+untouched beyond `pub(crate)` on 45 builders. Two reds became pins with tickets (#225 new, #65)
+and no fix rode along. Shortcuts or bandaids: none. Deviations, on record: the facade items
+live in `test_support/mod.rs` by the layout rule; `GpuBatch::executor()` is one production
+accessor, its test-only twin deleted; three spot-check rows read from the plan differently from
+the spec's table and are recorded as read; Left and Full hash joins have no case, refusing their
+first probe batch (#152). A narrow decimal at a handle is refused by arrow-rs before the decode
+— loud, naming no column — which the record states. `done` waits on CI.

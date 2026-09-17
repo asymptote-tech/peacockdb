@@ -60,7 +60,7 @@ fn leaf(prefix: &str, batches: BatchLayout) -> Box<dyn GpuNode> {
     )
 }
 
-fn cross(projection: Option<Vec<u32>>) -> GpuCrossJoin {
+pub(crate) fn cross(projection: Option<Vec<u32>>) -> GpuCrossJoin {
     let output = output(joined(false), &projection);
     GpuCrossJoin::new(
         leaf("b_", BatchLayout::SingleBatch),
@@ -148,11 +148,11 @@ fn nested(join_type: NestedLoopJoinType, projection: Option<Vec<u32>>) -> GpuNes
     nested_with(join_type, residual(), projection)
 }
 
-fn inner(projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
+pub(crate) fn inner(projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
     nested(NestedLoopJoinType::Inner, projection)
 }
 
-fn left(projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
+pub(crate) fn left(projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
     nested(NestedLoopJoinType::Left, projection)
 }
 
@@ -160,11 +160,11 @@ fn script(build: Option<RecordBatch>, probe: Vec<RecordBatch>) -> Script {
     Script::Join { build, probe }
 }
 
-fn one_probe() -> Script {
+pub(crate) fn one_probe() -> Script {
     script(Some(build_batch(16)), vec![probe_batch(16, 21)])
 }
 
-fn two_probes() -> Script {
+pub(crate) fn two_probes() -> Script {
     script(
         Some(build_batch(16)),
         vec![probe_batch(12, 21), probe_batch(12, 22)],

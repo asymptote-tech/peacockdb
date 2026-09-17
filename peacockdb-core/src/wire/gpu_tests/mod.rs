@@ -30,7 +30,10 @@ use peacockdb_ffi::raw::{
     peacock_result_from_handle,
 };
 
-use crate::test_support::{GPU_BUDGET, assert_results_match, data_dir_for, total_rows};
+use crate::test_support::{
+    DeviceSchema, DeviceType, GPU_BUDGET, TypeId, assert_results_match, data_dir_for, schema_at,
+    total_rows,
+};
 
 // The value the plan goldens are canonized at, so every shape below is one that tier
 // already renders.
@@ -186,6 +189,12 @@ impl Session {
         unsafe { peacock_result_free(ipc) };
         batches
     }
+
+    /// What the device holds at `handle`, read where it sits: an intermediate has no
+    /// declaration, so nothing is told and a decimal reads at its scale alone.
+    fn schema_of(&self, handle: u64) -> DeviceSchema {
+        schema_at(self.executor, handle)
+    }
 }
 
 impl Drop for Session {
@@ -248,7 +257,13 @@ struct Walk<'a> {
     /// the calls rather than the answer, and a failure prints it: a wrong table is the
     /// symptom of one call, and the seq is what a reader looks up in the payload golden.
     made: Vec<(Seq, FbKind)>,
+    /// Told every call `make` made and the handles it answered, while they are resident and
+    /// before the next call consumes them — the one moment an intermediate can be read.
+    on_call: &'a mut dyn FnMut(Seq, FbKind, &[u64], &Session),
 }
+
+/// The hook that reads nothing.
+fn no_hook(_: Seq, _: FbKind, _: &[u64], _: &Session) {}
 
 impl Walk<'_> {
     /// Children first, then this node: the same post-order `attach_recipes` indexed its
@@ -304,7 +319,9 @@ impl Walk<'_> {
             _ => 1,
         };
         self.made.push((seq, kind));
-        self.session.execute(seq, &inputs, out_cap)
+        let handles = self.session.execute(seq, &inputs, out_cap);
+        (self.on_call)(seq, kind, &handles, self.session);
+        handles
     }
 
     fn source(&mut self, node: &dyn GpuNode, recipe: &Recipe) -> Lanes {
@@ -550,6 +567,15 @@ async fn context(target_partitions: usize) -> datafusion::execution::context::Se
 
 /// Plan the query in the engine, hand the recipe plan to a device, and make the calls.
 async fn walk(sql: &str, knobs: PlanKnobs) -> Walked {
+    walk_with(sql, knobs, &mut no_hook).await
+}
+
+/// `walk`, with `on_call` told every call as it is made.
+async fn walk_with(
+    sql: &str,
+    knobs: PlanKnobs,
+    on_call: &mut dyn FnMut(Seq, FbKind, &[u64], &Session),
+) -> Walked {
     let ctx = context(knobs.target_partitions).await;
     let plan = ctx
         .sql(sql)
@@ -567,6 +593,7 @@ async fn walk(sql: &str, knobs: PlanKnobs) -> Walked {
         next_node: 0,
         exported: Vec::new(),
         made: Vec::new(),
+        on_call,
     };
     let left = walk.node(tree.as_ref());
     assert!(left.is_empty(), "the sink answered with resident handles");
@@ -586,7 +613,15 @@ async fn walk(sql: &str, knobs: PlanKnobs) -> Walked {
 /// The walk's answer against DataFusion's on the same SQL, compared as sorted multisets
 /// since a GPU join's output order is not deterministic. Returns the calls it made.
 async fn assert_walk_matches_datafusion(sql: &str, knobs: PlanKnobs) -> Vec<(Seq, FbKind)> {
-    let walked = walk(sql, knobs).await;
+    assert_walk_matches_datafusion_with(sql, knobs, &mut no_hook).await
+}
+
+async fn assert_walk_matches_datafusion_with(
+    sql: &str,
+    knobs: PlanKnobs,
+    on_call: &mut dyn FnMut(Seq, FbKind, &[u64], &Session),
+) -> Vec<(Seq, FbKind)> {
+    let walked = walk_with(sql, knobs, on_call).await;
     // An exact compare of two empty results holds having compared nothing, so a query whose
     // predicate selected none would prove only that the walk did not crash.
     assert!(
@@ -759,6 +794,168 @@ async fn a_rollup_answers_with_every_grouping_set() {
         "the sets are expanded once, by the init: {}",
         trail(&calls)
     );
+}
+
+// What the device holds between calls, read by hand. An intermediate has no declaration
+// to be held to, so every expectation below was written from the node line of the query's
+// plan, rendered by `render_plan` rust-only, before any ran on a device; one the device
+// contradicts becomes a `bug_` with a ticket, never a rewritten expectation.
+
+/// Every handle a call answered and the schema the device held at it, in call order; a
+/// scatter contributes one entry per lane. The answer is still held to the oracle.
+async fn held(sql: &str, knobs: PlanKnobs) -> Vec<(FbKind, DeviceSchema)> {
+    let mut seen = Vec::new();
+    let mut read = |_: Seq, kind: FbKind, handles: &[u64], session: &Session| {
+        for handle in handles {
+            seen.push((kind, session.schema_of(*handle)));
+        }
+    };
+    assert_walk_matches_datafusion_with(sql, knobs, &mut read).await;
+    seen
+}
+
+/// The schemas held after every call of `kind`, in call order.
+fn after(held: &[(FbKind, DeviceSchema)], kind: FbKind) -> Vec<&DeviceSchema> {
+    held.iter()
+        .filter(|(made, _)| *made == kind)
+        .map(|(_, schema)| schema)
+        .collect()
+}
+
+fn column(name: &str, id: TypeId) -> (String, DeviceType) {
+    (name.to_string(), DeviceType { id, scale: None })
+}
+
+fn decimal(name: &str, scale: i32) -> (String, DeviceType) {
+    (
+        name.to_string(),
+        DeviceType {
+            id: TypeId::Decimal128,
+            scale: Some(scale),
+        },
+    )
+}
+
+const PARTIAL: FbKind = FbKind::Aggregate { merge: false };
+const MERGE: FbKind = FbKind::Aggregate { merge: true };
+const FINALIZE: FbKind = FbKind::Project(ProjectRole::Finalize);
+
+/// `avg`'s state as `decomposition(Avg)` orders it, `[$sum, $count]`, under the key.
+fn avg_state() -> DeviceSchema {
+    DeviceSchema(vec![
+        column("l_returnflag", TypeId::String),
+        decimal("avg(lineitem.l_quantity)$sum", 2),
+        column("avg(lineitem.l_quantity)$count", TypeId::Int64),
+    ])
+}
+
+#[tokio::test]
+async fn an_avg_partial_holds_a_string_key_a_scale_2_sum_and_an_int64_count() {
+    let held = held(AVG_BY_FLAG, TWO_LANES).await;
+    assert_eq!(after(&held, PARTIAL), vec![&avg_state(); 2]);
+}
+
+#[tokio::test]
+async fn an_avg_merge_holds_the_partials_state_unchanged() {
+    let held = held(AVG_BY_FLAG, TWO_LANES).await;
+    assert_eq!(after(&held, MERGE), vec![&avg_state(); 4]);
+}
+
+#[tokio::test]
+async fn an_avg_finalize_holds_a_string_key_and_a_scale_6_average() {
+    let held = held(AVG_BY_FLAG, TWO_LANES).await;
+    let expected = DeviceSchema(vec![
+        column("l_returnflag", TypeId::String),
+        decimal("avg(lineitem.l_quantity)", 6),
+    ]);
+    assert_eq!(after(&held, FINALIZE), vec![&expected; 2]);
+}
+
+#[tokio::test]
+async fn a_sum_partial_holds_a_string_key_and_a_scale_2_sum() {
+    let held = held(SUM_BY_FLAG, TWO_LANES).await;
+    let expected = DeviceSchema(vec![
+        column("l_returnflag", TypeId::String),
+        decimal("sum(lineitem.l_quantity)", 2),
+    ]);
+    assert_eq!(after(&held, PARTIAL), vec![&expected; 2]);
+}
+
+// #65 — the plan declares `__grouping_id` `UInt8`, as DataFusion's partial does, and the
+// device holds `INT32`. Wanted: `TypeId::UInt8` at position 2.
+#[tokio::test]
+async fn bug_a_rollup_partial_holds_an_int32_grouping_id_where_the_plan_says_uint8() {
+    let held = held(ROLLUP, ONE_LANE).await;
+    let expected = DeviceSchema(vec![
+        column("l_returnflag", TypeId::String),
+        column("l_linestatus", TypeId::String),
+        column("__grouping_id", TypeId::Int32),
+        decimal("sum(lineitem.l_quantity)", 2),
+    ]);
+    assert_eq!(after(&held, PARTIAL), vec![&expected]);
+}
+
+#[tokio::test]
+async fn a_filter_holds_the_one_column_its_projection_keeps() {
+    let held = held(PROJECT_OVER_FILTER, ONE_LANE).await;
+    let expected = DeviceSchema(vec![column("c_custkey", TypeId::Int64)]);
+    assert_eq!(after(&held, FbKind::Filter), vec![&expected]);
+}
+
+#[tokio::test]
+async fn a_project_holds_the_int64_it_computed() {
+    let held = held(PROJECT_OVER_FILTER, ONE_LANE).await;
+    let expected = DeviceSchema(vec![column("doubled", TypeId::Int64)]);
+    assert_eq!(after(&held, FbKind::PlainProject), vec![&expected]);
+}
+
+/// DataFusion builds on `region`, and the join's projection keeps neither key; the
+/// project above the join is what restores the SELECT's order.
+#[tokio::test]
+async fn an_inner_join_holds_its_two_projected_strings_build_side_first() {
+    let held = held(INNER_JOIN, ONE_LANE).await;
+    let expected = DeviceSchema(vec![
+        column("r_name", TypeId::String),
+        column("n_name", TypeId::String),
+    ]);
+    let inner = FbKind::HashJoin {
+        join_type: JoinType::Inner,
+    };
+    assert_eq!(after(&held, inner), vec![&expected]);
+}
+
+/// The inner aggregate's finalize emits its key and its sum under the aggregate's own
+/// names; `per_flag` is the plain project above it.
+#[tokio::test]
+async fn the_inner_finalize_of_nested_aggregates_holds_the_key_and_the_scale_2_sum() {
+    let held = held(MAX_OF_SUMS, ONE_LANE).await;
+    let expected = DeviceSchema(vec![
+        column("l_returnflag", TypeId::String),
+        decimal("sum(lineitem.l_quantity)", 2),
+    ]);
+    let finalizes = after(&held, FINALIZE);
+    assert_eq!(finalizes.len(), 2, "one finalize per aggregate");
+    assert_eq!(finalizes[0], &expected);
+}
+
+/// `max` keeps its input's type, `state_type(Max)`: the outer init is the second partial.
+#[tokio::test]
+async fn the_outer_max_holds_one_scale_2_decimal() {
+    let held = held(MAX_OF_SUMS, ONE_LANE).await;
+    let expected = DeviceSchema(vec![decimal("max(per_flag)", 2)]);
+    let partials = after(&held, PARTIAL);
+    assert_eq!(partials.len(), 2, "one init per aggregate");
+    assert_eq!(partials[1], &expected);
+}
+
+#[tokio::test]
+async fn a_semi_join_holds_the_build_sides_int64_key() {
+    let held = held(SEMI_JOIN, ONE_LANE).await;
+    let expected = DeviceSchema(vec![column("c_custkey", TypeId::Int64)]);
+    let semi = FbKind::HashJoin {
+        join_type: JoinType::LeftSemi,
+    };
+    assert_eq!(after(&held, semi), vec![&expected]);
 }
 
 /// Which fb kinds a device has now run, and which this walk refuses — the set T15 and T16

@@ -12,6 +12,7 @@ use crate::executor::{
     PartitionEmitterExecutor, ProbingJoin, RowRange, SourceExecutor, SourceStep, UnloadExecutor,
 };
 use crate::plan::{ExecutorCategory, GpuNode, category_of};
+use crate::test_support::device_divergence;
 use crate::tests::compare::{Order, Slot, assert_same, same};
 
 /// One variant per executor category, so `drive` is the whole call protocol in one match.
@@ -126,24 +127,29 @@ pub(crate) fn each_answers(outcome: &Outcome, cpu: &[Vec<RecordBatch>], gpu: &[V
     );
 }
 
-pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
+fn shaped_for(node: &dyn GpuNode, script: &Script) {
     assert_eq!(
         category_of(node),
         script.category(),
         "the script's shape is not the node's category"
     );
+}
+
+pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
+    shaped_for(node, &script);
     let cpu_ctx = SessionContext::new().task_ctx();
-    let cpu = drive::<CpuBackend>(
+    let cpu = drive::<CpuBackend, _>(
         &cpu_ctx,
         node,
         &script,
         |batch| CpuBatch::new(batch.clone()),
         |batch| Ok(batch.into_record_batch()),
+        CpuBatch::into_record_batch,
     );
     let device = Device::open(node);
     // What the node declares its output to be is what the sink would tell the export.
     let declared = node.kind().schema().map(|schema| schema.fields.as_ref());
-    let gpu = drive::<GpuBackend>(
+    let gpu = drive::<GpuBackend, _>(
         device.ctx(),
         node,
         &script,
@@ -153,20 +159,61 @@ pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
                 .fetch(batch, RowRange::WHOLE, declared)
                 .map(|back| back.expect("a whole export ships its schema"))
         },
+        CpuBatch::into_record_batch,
     );
     Outcome { cpu, gpu }
 }
 
+/// The script on the device alone, every output handle read where it sits rather than
+/// exported: what each diverges from the node's declaration by, in slot order, `None` where
+/// it holds it. A device that refuses ends the case naming why, as `run_both` would.
+pub(crate) fn divergences_on_device(node: &dyn GpuNode, script: Script) -> Vec<Option<String>> {
+    shaped_for(node, &script);
+    let device = Device::open(node);
+    let declared = &node
+        .kind()
+        .schema()
+        .expect("a sink declares no schema and holds no handle")
+        .fields;
+    let slots = drive::<GpuBackend, _>(
+        device.ctx(),
+        node,
+        &script,
+        |batch| device.upload(batch),
+        |batch| Ok(device_divergence(declared, &device.schema_of(&batch))),
+        |_| unreachable!("an unload answers host rows, not a handle"),
+    )
+    .unwrap_or_else(|why| panic!("the device refused: {}", why.message));
+    slots.into_iter().flatten().collect()
+}
+
+/// A schema case's assertion: at least one handle was read, and none diverged.
+pub(crate) fn assert_holds_as_declared(node: &dyn GpuNode, script: Script) {
+    assert_none_diverge(divergences_on_device(node, script));
+}
+
+/// The same over divergences already read, for a case with a file to remove first.
+pub(crate) fn assert_none_diverge(found: Vec<Option<String>>) {
+    assert!(!found.is_empty(), "the script produced no handle to read");
+    let diverging: Vec<&String> = found.iter().flatten().collect();
+    assert!(
+        diverging.is_empty(),
+        "the device holds something other than the declaration: {diverging:?}"
+    );
+}
+
 /// The script on one backend. `up` and `down` are that backend's two conversions, and the
 /// only thing that differs between the two runs; a `down` that fails is the device's export
-/// refusing, which ends the run as it would end a query.
-fn drive<B: Backend>(
+/// refusing, which ends the run as it would end a query. `unloaded` lowers the sink's host
+/// rows, the one output that is never a batch of the backend's.
+fn drive<B: Backend, T>(
     ctx: &B::Context,
     node: &dyn GpuNode,
     script: &Script,
     up: impl Fn(&RecordBatch) -> B::Batch,
-    down: impl Fn(B::Batch) -> Result<RecordBatch, BackendError>,
-) -> Result<Vec<Slot>, BackendError> {
+    down: impl Fn(B::Batch) -> Result<T, BackendError>,
+    unloaded: impl Fn(CpuBatch) -> T,
+) -> Result<Vec<Vec<T>>, BackendError> {
     // The root's post-order is the tree's size less one. Counted here rather than read off
     // `PlanIndex::build`, which asks every node's category and so refuses a `Given` leaf.
     fn size(node: &dyn GpuNode) -> usize {
@@ -179,7 +226,7 @@ fn drive<B: Backend>(
         batches
             .into_iter()
             .map(&down)
-            .collect::<Result<Slot, BackendError>>()
+            .collect::<Result<Vec<T>, BackendError>>()
     };
     let mut slots = Vec::new();
     match (executors, script) {
@@ -235,7 +282,7 @@ fn drive<B: Backend>(
         },
         (NodeExecutors::Unload(mut unload), Script::Unload { batch, rows }) => {
             let (out, _) = unload.unload(up(batch), *rows)?;
-            slots.push(vec![out.into_record_batch()]);
+            slots.push(vec![unloaded(out)]);
         }
         (NodeExecutors::Source(mut source), Script::Source { .. }) => loop {
             match source.next_batch()? {

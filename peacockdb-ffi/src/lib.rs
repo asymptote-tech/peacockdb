@@ -164,8 +164,8 @@ pub mod raw {
 
         /// The schema alone, as an Arrow IPC stream carrying the schema message and no
         /// batch: what the device holds at a handle, without moving rows. Freed with
-        /// [`peacock_result_free`]; does NOT release the handle. Nothing in Rust calls
-        /// it yet.
+        /// [`peacock_result_free`]; does NOT release the handle. The harness's schema
+        /// read (`test_support::device_schema`) is its caller.
         pub fn peacock_handle_schema(
             executor: *mut PeacockExecutor,
             handle: u64,

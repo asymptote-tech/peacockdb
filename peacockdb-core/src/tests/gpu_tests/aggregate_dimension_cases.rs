@@ -34,10 +34,10 @@ fn sum_i64() -> AggCall {
     )
 }
 
-const DATE: GroupKey = (6, "d", DataType::Date32);
+pub(crate) const DATE: GroupKey = (6, "d", DataType::Date32);
 const ID: GroupKey = (0, "id", DataType::Int64);
 const BOOL: GroupKey = (7, "b", DataType::Boolean);
-const STRING: GroupKey = (5, "s", DataType::Utf8);
+pub(crate) const STRING: GroupKey = (5, "s", DataType::Utf8);
 
 /// `input()` twice as one batch: every `id` and every date twice, so an aggregate that never
 /// folds two equal keys is a different row count, and every sum is the row's doubled.
@@ -394,7 +394,7 @@ operator_case! {
 // under `stddev` and no arm at all for `var`.
 
 /// The global Welford init: the triple over `f64` with no group.
-fn welford_init_global() -> GpuAggregate {
+pub(crate) fn welford_init_global() -> GpuAggregate {
     let state = welford_state_by(false, AggFunc::Stddev);
     GpuAggregate::new(
         Given::of(Schema::new(schema()), BatchLayout::MultipleBatches),
@@ -420,7 +420,7 @@ operator_case! {
 
 /// The planner's own finalize for `func` — `Stddev` or `Var` — over the merged triple
 /// its state declares, which sits after `keys` key columns; named as that state's output.
-fn dispersion_finalize(func: AggFunc, keys: u32) -> NamedExpr {
+pub(crate) fn dispersion_finalize(func: AggFunc, keys: u32) -> NamedExpr {
     let state = welford_state_by(keys == 1, func);
     let fields: Vec<_> = state.fields.fields()[keys as usize..]
         .iter()

@@ -18,7 +18,7 @@ use crate::tests::synthetic::{decimals, synthetic};
 
 /// `batch` as a parquet file of `rows_per_group`-row row groups, under the temp dir and
 /// named by the case, so two cases never share one. A zero-row batch writes no row group.
-fn write_parquet(name: &str, batch: &RecordBatch, rows_per_group: usize) -> PathBuf {
+pub(crate) fn write_parquet(name: &str, batch: &RecordBatch, rows_per_group: usize) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
         "operator-cases-{name}-{}.parquet",
         std::process::id()
@@ -36,7 +36,7 @@ fn write_parquet(name: &str, batch: &RecordBatch, rows_per_group: usize) -> Path
 
 /// A one-lane scan of `path`, one batch per row group, every column projected, declaring
 /// `schema` — the batch's own, as the planner declares the file's.
-fn scan(path: &Path, schema: SchemaRef, limit: Option<usize>) -> GpuLoadParquet {
+pub(crate) fn scan(path: &Path, schema: SchemaRef, limit: Option<usize>) -> GpuLoadParquet {
     let file = std::fs::File::open(path).expect("the file just written");
     let reader = SerializedFileReader::new(file).expect("a parquet file");
     let groups: Vec<RowGroupMeta> = (0..reader.metadata().num_row_groups())
