@@ -11,6 +11,8 @@
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
 
+#include <cstdint>
+#include <string>
 #include <vector>
 
 namespace peacock {
@@ -30,5 +32,14 @@ bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table);
 // Children of a plan node in canonical order — the order NodeSession indexes
 // post-order in, so a caller walking the tree with this produces the same seqs.
 std::vector<const fb::PlanNode*> node_children(const fb::PlanNode* node);
+
+// The export behind peacock_result_from_handle: the table as an Arrow IPC stream (malloc'd;
+// free with peacock_result_free) with each non-zero `decimal_precisions[i]` written as
+// column i's precision. Throws, naming the column, on a fixed_point that is not DECIMAL128
+// and on a precision for a column that is not a decimal. Reachable here so a test can hand
+// it a table no C-API path can build — a narrow fixed_point column — and see the refusal.
+void export_table_to_ipc(const cudf::table_view& tview,
+                         const std::vector<std::string>& column_names,
+                         const int32_t* decimal_precisions, uint8_t** out_bytes, uint64_t* out_len);
 
 }  // namespace peacock

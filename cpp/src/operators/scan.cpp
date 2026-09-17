@@ -98,8 +98,8 @@ TableResult execute_scan(const fb::CudfScan* scan,
   // Widen narrow decimals to DECIMAL128 (scale preserved). The cuDF parquet reader
   // picks the smallest fixed_point width that fits, but DataFusion — and so our
   // serialized literals and the CPU oracle — use Decimal128 throughout, and cuDF's
-  // binary_operation rejects mixed fixed_point widths. Subsumes the decimal64→128
-  // widening the Arrow IPC export path also does.
+  // binary_operation rejects mixed fixed_point widths. The export refuses any other
+  // width, so this is the only widening.
   auto cols = result.tbl->release();
   for (auto& c : cols) {
     auto id = c->type().id();

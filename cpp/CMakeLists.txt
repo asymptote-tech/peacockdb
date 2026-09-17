@@ -209,7 +209,8 @@ target_include_directories(peacock_plan_tests PRIVATE
 target_compile_definitions(peacock_plan_tests PRIVATE
   PEACOCK_TESTDATA_DIR="${PEACOCK_TESTDATA_DIR}"
 )
-target_link_libraries(peacock_plan_tests PRIVATE peacock_gpu cudf::cudf flatbuffers GTest::gtest)
+# Arrow for reading back what the export wrote: the IPC schema message is the assertion.
+target_link_libraries(peacock_plan_tests PRIVATE peacock_gpu cudf::cudf flatbuffers Arrow::arrow_shared GTest::gtest)
 set_target_properties(peacock_plan_tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 add_dependencies(peacock_plan_tests gpu_plan_fbs)
 add_test(NAME peacock_plan_tests COMMAND peacock_plan_tests)

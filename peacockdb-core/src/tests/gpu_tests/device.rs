@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::{Array, ArrayRef, StructArray};
 use datafusion::arrow::compute::concat_batches;
-use datafusion::arrow::datatypes::Field;
+use datafusion::arrow::datatypes::{Field, Schema};
 use datafusion::arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema, to_ffi};
 use datafusion::arrow::ipc::reader::StreamReader;
 use datafusion::arrow::record_batch::RecordBatch;
@@ -15,7 +15,8 @@ use peacockdb_ffi::raw::{
     peacock_last_error, peacock_result_free, peacock_result_from_handle,
 };
 
-use crate::executor::{Batch, CpuBatch, GpuBatch, GpuContext, RowRange};
+use crate::common::declared_precisions;
+use crate::executor::{BackendError, Batch, CpuBatch, GpuBatch, GpuContext, RowRange};
 use crate::plan::GpuNode;
 use crate::test_support::GPU_BUDGET;
 use crate::wire::attach_recipes;
@@ -80,9 +81,18 @@ impl Device {
     }
 
     /// What the device exported, under the schema it exported it with — never the one the
-    /// node declared, so a type the device changed reaches the comparator as itself.
-    /// `None` is the device shipping nothing: a range naming no rows of a non-empty table.
-    pub(crate) fn fetch(&self, batch: GpuBatch, rows: RowRange) -> Option<RecordBatch> {
+    /// node declared, so a type the device changed reaches the comparator as itself. The
+    /// export is told `declared`'s decimal precisions, as the sink tells it, and its
+    /// refusal comes back as the sink's would; `None` there declares nothing, as the walk's
+    /// intermediates do. `Ok(None)` is the device shipping nothing: a range naming no rows
+    /// of a non-empty table.
+    pub(crate) fn fetch(
+        &self,
+        batch: GpuBatch,
+        rows: RowRange,
+        declared: Option<&Schema>,
+    ) -> Result<Option<RecordBatch>, BackendError> {
+        let precisions = declared.map(declared_precisions).unwrap_or_default();
         let mut ipc: *mut u8 = std::ptr::null_mut();
         let mut len = 0u64;
         let rc = unsafe {
@@ -91,13 +101,20 @@ impl Device {
                 batch.handle(),
                 rows.offset,
                 rows.length,
+                precisions.as_ptr(),
+                precisions.len() as u64,
                 &mut ipc,
                 &mut len,
             )
         };
-        assert_eq!(rc, 0, "fetch: {}", error_of(self.ctx.executor));
+        if rc != 0 {
+            return Err(BackendError::new(format!(
+                "fetch: {}",
+                error_of(self.ctx.executor)
+            )));
+        }
         if len == 0 {
-            return None;
+            return Ok(None);
         }
         let bytes = unsafe { std::slice::from_raw_parts(ipc, len as usize) };
         let reader =
@@ -107,7 +124,7 @@ impl Device {
         let schema = reader.schema();
         let batches: Vec<RecordBatch> = reader.collect::<Result<_, _>>().expect("every batch");
         unsafe { peacock_result_free(ipc) };
-        Some(concat_batches(&schema, &batches).expect("one table"))
+        Ok(Some(concat_batches(&schema, &batches).expect("one table")))
     }
 }
 

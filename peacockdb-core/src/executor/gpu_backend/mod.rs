@@ -32,7 +32,7 @@ use peacockdb_ffi::raw::{
     peacock_result_free, peacock_result_from_handle,
 };
 
-use crate::common::logical_size_from_schema;
+use crate::common::{declared_precisions, logical_size_from_schema};
 
 use crate::executor::CpuBatch;
 use crate::executor::GpuBatch;
@@ -206,6 +206,7 @@ impl GpuExport {
     /// of scope — which is the whole of what the row range buys: the rows wanted cross
     /// PCIe rather than the batch they sit in.
     pub(crate) fn unload(&mut self, batch: GpuBatch, rows: RowRange) -> CallResult<CpuBatch> {
+        let precisions = declared_precisions(&self.schema);
         let mut ipc: *mut u8 = std::ptr::null_mut();
         let mut len = 0u64;
         let rc = unsafe {
@@ -214,6 +215,8 @@ impl GpuExport {
                 batch.handle(),
                 rows.offset,
                 rows.length,
+                precisions.as_ptr(),
+                precisions.len() as u64,
                 &mut ipc,
                 &mut len,
             )

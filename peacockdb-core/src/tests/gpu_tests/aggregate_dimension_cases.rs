@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::{ArrayRef, AsArray, Int64Array, UInt8Array};
 use datafusion::arrow::compute::concat_batches;
-use datafusion::arrow::datatypes::{DataType, Float64Type, UInt64Type};
+use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::ScalarValue;
 
@@ -21,7 +21,7 @@ use crate::plan::{
     AggCall, AggFunc, AggSpec, BatchLayout, BinaryOp, Expr, GpuAggregate, NamedExpr, PlanAgg,
     Schema, finalize,
 };
-use crate::tests::compare::{Order, close, same_within_welford};
+use crate::tests::compare::{Order, same_within_welford};
 use crate::tests::given::{Given, columns};
 use crate::tests::synthetic::{schema, synthetic};
 
@@ -282,32 +282,17 @@ fn keyless_welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
 }
 
 // #216 — the same arm at the merge: the `stddev` it reduces is over the state's first
-// column, the count — 1 per row and 0 where the row's value is null — so the device
-// answers the sample stddev of the counts where the cpu answers the merged triple.
+// column, the count, so the device answers one finished value where the cpu merges the
+// triple, and the export, told the triple's three declarations, refuses the one column.
 operator_case! {
     GpuAggregateBatches,
     fn bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device() {
         let partial = |seed| keyless_welford_partial(AggFunc::Stddev, seed);
-        let arrivals = vec![partial(1), partial(2)];
-        let counts: Vec<f64> = arrivals
-            .iter()
-            .flat_map(|p| p.column(0).as_primitive::<UInt64Type>().values().iter())
-            .map(|c| *c as f64)
-            .collect();
-        let mean = counts.iter().sum::<f64>() / counts.len() as f64;
-        let m2: f64 = counts.iter().map(|c| (c - mean) * (c - mean)).sum();
-        let stddev_of_counts = (m2 / (counts.len() - 1) as f64).sqrt();
         let node = welford_merge_by(false, AggFunc::Stddev, None);
-        let outcome = run_both(&node, Script::Accumulate(arrivals));
+        let outcome = run_both(&node, Script::Accumulate(vec![partial(1), partial(2)]));
+        let why = outcome.gpu_refuses();
+        assert!(why.contains("3 declared precisions for a table of 1 columns"), "{why}");
         assert_eq!(cpu_slot(&outcome, 2).num_columns(), 3, "the cpu merges the triple");
-        let gpu = gpu_slot(&outcome, 2);
-        assert_eq!((gpu.num_columns(), gpu.num_rows()), (1, 1), "one finished value");
-        assert_eq!(gpu.schema().field(0).name(), "stddev(f64)");
-        let answered = gpu.column(0).as_primitive::<Float64Type>().value(0);
-        assert!(
-            close(answered, stddev_of_counts),
-            "device {answered:e}, the counts' stddev {stddev_of_counts:e}"
-        );
     }
 }
 
@@ -421,23 +406,15 @@ fn welford_init_global() -> GpuAggregate {
 
 // #216 — the device's keyless path has no Welford arm: it reduces `stddev` to the one
 // finished `Float64` the SQL aggregate would answer, where the plan declares the
-// `[count, mean, m2]` state the cpu emits. The value is the sample stddev the cpu's state
-// finalizes to, so the merge above it is what goes wrong.
+// `[count, mean, m2]` state the cpu emits; the export, told three declarations, refuses
+// the one column, so the merge above it never sees the value.
 operator_case! {
     GpuAggregate,
     fn bug_a_global_welford_init_answers_a_finished_stddev_on_the_device() {
         let outcome = run_both(&welford_init_global(), Script::Exec(vec![input()]));
-        let cpu = cpu_slot(&outcome, 0);
-        assert_eq!(cpu.num_columns(), 3, "the cpu emits the triple");
-        let gpu = gpu_slot(&outcome, 0);
-        assert_eq!(
-            gpu.schema().fields().iter().map(|f| (f.name().as_str(), f.data_type().clone())).collect::<Vec<_>>(),
-            vec![("stddev(f64)", DataType::Float64)]
-        );
-        let count = cpu.column(0).as_primitive::<UInt64Type>().value(0) as f64;
-        let m2 = cpu.column(2).as_primitive::<Float64Type>().value(0);
-        let finished = gpu.column(0).as_primitive::<Float64Type>().value(0);
-        assert!(close(finished, (m2 / (count - 1.0)).sqrt()), "device {finished:e}");
+        let why = outcome.gpu_refuses();
+        assert!(why.contains("3 declared precisions for a table of 1 columns"), "{why}");
+        assert_eq!(cpu_slot(&outcome, 0).num_columns(), 3, "the cpu emits the triple");
     }
 }
 

@@ -88,8 +88,7 @@ cudf::type_id fb_to_type_id(fb::DataType dt) {
     case fb::DataType_Float32:    return cudf::type_id::FLOAT32;
     case fb::DataType_Float64:    return cudf::type_id::FLOAT64;
     case fb::DataType_Utf8:
-    case fb::DataType_LargeUtf8:
-    case fb::DataType_Utf8View:   return cudf::type_id::STRING;
+    case fb::DataType_LargeUtf8:  return cudf::type_id::STRING;
     case fb::DataType_Date32:     return cudf::type_id::TIMESTAMP_DAYS;
     case fb::DataType_Date64:     return cudf::type_id::TIMESTAMP_MILLISECONDS;
     case fb::DataType_Decimal128: return cudf::type_id::DECIMAL128;
@@ -311,10 +310,8 @@ static bool is_string_like_literal(const fb::Expr* expr) {
   switch (sv->type()) {
     case fb::DataType_Utf8:
     case fb::DataType_LargeUtf8:
-    case fb::DataType_Utf8View:
     case fb::DataType_Binary:
     case fb::DataType_LargeBinary:
-    case fb::DataType_BinaryView:
       return true;
     default:
       return false;
@@ -454,7 +451,6 @@ static std::unique_ptr<cudf::scalar> build_scalar(const fb::ScalarValue* sv) {
       return std::make_unique<cudf::numeric_scalar<double>>(sv->float_val(), valid);
     case fb::DataType_Utf8:
     case fb::DataType_LargeUtf8:
-    case fb::DataType_Utf8View:
       return std::make_unique<cudf::string_scalar>(
           std::string(sv->string_val() ? sv->string_val()->str() : ""), valid);
     case fb::DataType_Date32:

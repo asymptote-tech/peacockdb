@@ -95,18 +95,22 @@ stage_cargo_binary() {
   shift 4
   local exec_path
   # `set -o pipefail` in the caller is what makes a compile failure land here as a
-  # build failure rather than as an empty result reported as a missing binary.
+  # build failure rather than as an empty result reported as a missing binary. The
+  # reader drains stdin rather than stopping at the match: cargo writes a final
+  # `build-finished` line after the artifact, and a closed pipe there is EPIPE.
   if ! exec_path=$(cargo test --no-run -p peacockdb-core "$@" \
       --message-format=json \
     | python3 -c '
 import json, sys
 name, kind = sys.argv[1], sys.argv[2]
+found = None
 for line in sys.stdin:
     try: m = json.loads(line)
     except ValueError: continue
     target = m.get("target") or {}
-    if m.get("executable") and target.get("name") == name and kind in target.get("kind", []):
-        print(m["executable"]); break
+    if found is None and m.get("executable") and target.get("name") == name and kind in target.get("kind", []):
+        found = m["executable"]
+if found: print(found)
 ' "$name" "$kind"); then
     echo "ERROR: building $staged failed (cargo output above)" >&2
     return 1

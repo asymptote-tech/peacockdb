@@ -24,14 +24,12 @@ corpus_query!(tpch, 1, q1, none, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q14, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q19, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q12, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
-// THE DEVICE COLUMN, after the first two cycles. q6 runs at all five modes and q19 at
-// tp1-single; every other device cell is off against a ticket. Four causes, none of them
-// this task's to fix: #152 refuses a join whose recipe copies a side the ABI cannot copy (52
-// cases, by name rather than by crash), #184 is a cuDF failure in the hash scatter, #185 is
-// the device reporting one input row where the cpu reports the group count — which is the
-// golden catching exactly what it is for — and the string class, gone since no plan declares
-// a view type, whose cells are off on #187, #191, #185 and #220. T19 is where these are
-// settled query by query.
+// THE DEVICE COLUMN. q6 runs at all five modes and q19 at tp1-single; every other device
+// cell is off against a ticket. The causes: #152 refuses a join whose recipe copies a side
+// the ABI cannot copy (by name rather than by crash), #184 is a cuDF failure in the hash
+// scatter, #185 is the device reporting its own output as in_rows where the cpu reports what
+// it consumed, #220 is the cpu splitting a join's output into more batches than the device.
+// T19 is where the rest are settled query by query.
 corpus_query!(tpch, 1, q13, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q15, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q17, none, none, data_fusion_exact, golden_exact);
@@ -45,20 +43,21 @@ corpus_query!(tpch, 1, q10, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgrou
 // scan-limit runs at the tp4 modes only: at the two tp1 modes the planner puts the limit
 // in the scan alone, and the cpu backend's reader does not apply it — six million rows
 // where ten were asked for, #186.
-// No device cell: #187's decimal at the sink for aggregate-groupby, shuffle-additive and
-// filter-project, #220's join batching for cross-join, and #188 for scan-limit, where cuDF
-// refuses row groups and a row count in one read — #186's shape, erroring rather than ignored.
+// aggregate-groupby, shuffle-additive and filter-project run at tp1-single; cross-join is off
+// on #220's join batching, scan-limit on #188, where cuDF refuses row groups and a row count in
+// one read — #186's shape, erroring rather than ignored.
 corpus_query!(tpch, 1, scan_limit, tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_subset, live_cpu);
-corpus_query!(tpch, 1, filter_project, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, live_cpu);
-corpus_query!(tpch, 1, aggregate_groupby, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
+corpus_query!(tpch, 1, filter_project, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, live_cpu);
+corpus_query!(tpch, 1, aggregate_groupby, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, cross_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
-corpus_query!(tpch, 1, shuffle_additive, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
+corpus_query!(tpch, 1, shuffle_additive, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, golden_exact);
 
 // T19 batch 2, the five smallest joins. semi-join and anti-join return whole `orders` rows,
 // which is over the result cap, so the device compares against a live cpu run.
 // nested-loop-join runs at tp1-single. Off: #152's copy shapes for left-join (its probe
-// batch) and hash-join (its build side), #187's decimal at the sink for hash-join, semi-join
-// and anti-join at tp1-single. A row keeping `183` has modes never run past the string class.
+// batch) and hash-join (its build side) at four modes; at tp1-single hash-join is #185's
+// in_rows at the merge, and semi-join and anti-join are #220's join batching at the unload.
+// A row keeping `183` has modes never run past the string class.
 corpus_query!(tpch, 1, hash_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, left_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, semi_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, live_cpu);
@@ -88,7 +87,7 @@ corpus_query!(tpch, 1, nested_limits, tp1_single | tp1_rowgroup | tp4_single | t
 // and whose hasher has no arm for it.
 // On the device every query here aggregates over a join: #152's build-side copy where the join
 // sees several probe batches, and at tp1-single, which reaches past it, the golden's `in_rows`
-// at the merge (#185) for q16 and the rollup, #187 for q18 and #220's batching for q4.
+// at the merge (#185) for q16, the rollup and q18, and #220's batching for q4.
 corpus_query!(tpch, 1, rollup_over_join, tp1_single | tp1_rowgroup, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q4, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q16, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, live_cpu);
@@ -110,10 +109,9 @@ corpus_query!(tpch, 1, q21, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgrou
 
 // T19 batch 7, the end of tpch: three queries rather than five, because these are its deepest
 // plans and the regeneration cost has moved into the queries rather than their number.
-// #152 at four modes each, and at tp1-single — the mode that always reaches the unload —
-// two type disagreements at that one node: #191's Int16 for the year q7 and q8 extract where
-// the plan declared Int32, and #187's decimal for q2. Same site, decided by which column type
-// differs first.
+// #152 at four modes each, and at tp1-single, the mode that always reaches the unload: q7
+// and q8 are #191's Int16 for the year extract where the plan declared Int32, a type
+// disagreement the export cannot relabel; q2 is #220's batching at its min aggregate.
 corpus_query!(tpch, 1, q7, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q8, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpch, 1, q2, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
@@ -130,8 +128,8 @@ corpus_query!(tpcds, 1, q55, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgro
 // run, so this is a mode-scoped disablement rather than a query-scoped one.
 corpus_query!(tpcds, 1, q96, tp1_single | tp1_rowgroup, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q15, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
-corpus_query!(tpcds, 1, q37, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
-corpus_query!(tpcds, 1, q82, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
+corpus_query!(tpcds, 1, q37, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, golden_exact);
+corpus_query!(tpcds, 1, q82, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, golden_exact);
 
 // T19 batch 3, tpcds, chosen for feature spread rather than size: q48 carries no feature code,
 // q21 and q84 are top_n, q93 adds an outer join and q34 a correlated subquery. The three smaller
@@ -150,9 +148,9 @@ corpus_query!(tpcds, 1, q84, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgro
 // T19 batch 8, tpcds, chosen by expected executor calls rather than plan size: row groups scanned
 // times joins, off the tp4-rowgroup plans. q32 and q26 score as low and are skipped for the
 // `avg` #163 takes out at every mode.
-// #152 at four modes, and at tp1-single #187's decimal at the sink for q45 and q40, #185's
-// `in_rows` for q50 and q62 — with q97 as the exception: its outer join copies the PROBE batch,
-// which #152 refuses at any batch count, so the one mode that usually gets far enough does not.
+// #152 at four modes, and at tp1-single #220's batching for q45, #185's `in_rows` for q40,
+// q50 and q62 — with q97 as the exception: its outer join copies the PROBE batch, which #152
+// refuses at any batch count, so the one mode that usually gets far enough does not.
 corpus_query!(tpcds, 1, q45, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q40, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q97, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
@@ -162,7 +160,7 @@ corpus_query!(tpcds, 1, q62, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgro
 // T19 batch 9, the next five by expected calls. q1 and q7 carry an `avg` and are out at every
 // mode on #163, which the feature column says and I did not read before choosing them.
 // The fifteen device cells: #152's build copy at four modes, and at tp1-single #185's `in_rows`
-// for q73, #187's decimal at the sink for q79 and q94.
+// for q73 and q79, #220's batching for q94.
 corpus_query!(tpcds, 1, q73, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q79, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q1, none, none, data_fusion_exact, golden_exact);
@@ -170,8 +168,8 @@ corpus_query!(tpcds, 1, q7, none, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q94, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 
 // T19 batch 10, by expected calls with the `avg` #163 disables filtered out in the same pass.
-// Twenty-five device cells: #152's build copy at four modes, and at tp1-single #187's decimal
-// at the sink for q19, q8, q91 and q46, #185's `in_rows` for q99.
+// Twenty-five device cells: #152's build copy at four modes, and at tp1-single #220's batching
+// for q19 and q91, #185's `in_rows` for q8, q46 and q99.
 corpus_query!(tpcds, 1, q19, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q8, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);
 corpus_query!(tpcds, 1, q99, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact);

@@ -424,6 +424,43 @@ fn a_node_declaring_a_view_type_is_refused() {
 }
 
 #[test]
+fn a_decimal256_column_is_refused() {
+    // The device's type is {type_id, scale}, and the only decimal the loader, the kernels
+    // and the export agree on is DECIMAL128; a wider or narrower one has no crossing.
+    let tree = rooted(source(
+        one_column("d", DataType::Decimal256(50, 2)),
+        PartitionLayout::new(1),
+    ));
+    invalid(
+        validate(tree.as_ref()),
+        "GpuDeclaring: column 0 d: Decimal256(50, 2) is not Decimal128, the one decimal that crosses to the device",
+    );
+}
+
+#[test]
+fn a_cast_to_a_decimal256_is_refused() {
+    let input = source(
+        one_column("d", DataType::Decimal128(10, 2)),
+        PartitionLayout::new(1),
+    );
+    let project = Box::new(GpuProject::new(
+        input,
+        vec![NamedExpr::new(
+            Expr::Cast {
+                expr: Box::new(Expr::column(0, "d")),
+                target: DataType::Decimal256(50, 2),
+            },
+            "w",
+        )],
+        one_column("w", DataType::Decimal128(10, 2)),
+    ));
+    invalid(
+        validate(rooted(project).as_ref()),
+        "GpuProject: a cast target is Decimal256(50, 2), not Decimal128, the one decimal that crosses to the device",
+    );
+}
+
+#[test]
 fn a_cast_to_a_view_type_is_refused() {
     let input = source(one_column("s", DataType::Utf8), PartitionLayout::new(1));
     let project = Box::new(GpuProject::new(

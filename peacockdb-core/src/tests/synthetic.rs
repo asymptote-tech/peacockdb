@@ -1,8 +1,7 @@
 //! One batch every operator case starts from: eight typed columns, a null in each but the
 //! id, values a reader can predict from the row number, and floats that are dyadic so a
-//! sum of them is exact on both engines. Decimals are a second batch, because the device
-//! exports every decimal at precision 38 (#187) and one column would make every case that
-//! ticket's `bug_` test.
+//! sum of them is exact on both engines. Decimals are a second batch, so a case is about a
+//! decimal only when it says so.
 
 use std::sync::Arc;
 

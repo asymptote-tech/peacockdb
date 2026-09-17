@@ -6,11 +6,20 @@
 #include "plan_executor_internal.h"
 #include "generated/gpu_plan_generated.h"
 
+#include <cudf/column/column_factories.hpp>
 #include <cudf/column/column_view.hpp>
+#include <cudf/fixed_point/fixed_point.hpp>
+#include <cudf/scalar/scalar.hpp>
 #include <cudf/strings/strings_column_view.hpp>
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
+
+#include <arrow/buffer.h>
+#include <arrow/io/memory.h>
+#include <arrow/ipc/reader.h>
+#include <arrow/record_batch.h>
+#include <arrow/type.h>
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
@@ -19,8 +28,10 @@
 #include <cstdint>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <optional>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -135,11 +146,10 @@ static flatbuffers::Offset<fb::Expr> make_cast_expr(
 }
 
 /// Wrap a plan node kind into a PlanNode table.
-static flatbuffers::Offset<fb::PlanNode> make_plan_node(
-    flatbuffers::FlatBufferBuilder& fbb, fb::PlanNodeKind kind,
-    flatbuffers::Offset<void> node,
-    flatbuffers::Offset<fb::Schema> schema = {}) {
-  return fb::CreatePlanNode(fbb, kind, node, schema);
+static flatbuffers::Offset<fb::PlanNode> make_plan_node(flatbuffers::FlatBufferBuilder& fbb,
+                                                        fb::PlanNodeKind kind,
+                                                        flatbuffers::Offset<void> node) {
+  return fb::CreatePlanNode(fbb, kind, node);
 }
 
 /// Build a Schema from field definitions.
@@ -271,13 +281,13 @@ TEST(PlanExecutor, ScanNation) {
   auto paths = fbb.CreateVector(
       std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
 
-  // nation schema: n_nationkey(Int32), n_name(Utf8View), n_regionkey(Int32),
-  //                n_comment(Utf8View)
+  // nation schema: n_nationkey(Int32), n_name(Utf8), n_regionkey(Int32),
+  //                n_comment(Utf8)
   auto schema = make_schema(fbb, {
       {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8View},
+      {"n_name", fb::DataType_Utf8},
       {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8View},
+      {"n_comment", fb::DataType_Utf8},
   });
 
   auto scan = fb::CreateCudfScan(fbb, paths, schema);
@@ -304,9 +314,9 @@ TEST(PlanExecutor, ScanNationProjected) {
 
   auto schema = make_schema(fbb, {
       {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8View},
+      {"n_name", fb::DataType_Utf8},
       {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8View},
+      {"n_comment", fb::DataType_Utf8},
   });
 
   // Project only columns 1 (n_name) and 2 (n_regionkey).
@@ -334,9 +344,9 @@ TEST(PlanExecutor, FilterNation) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
   auto schema = make_schema(fbb, {
       {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8View},
+      {"n_name", fb::DataType_Utf8},
       {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8View},
+      {"n_comment", fb::DataType_Utf8},
   });
   auto scan = fb::CreateCudfScan(fbb, paths, schema);
   auto scan_node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
@@ -371,9 +381,9 @@ TEST(PlanExecutor, HashJoinNationRegion) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{nation_path});
   auto nation_schema = make_schema(fbb, {
       {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8View},
+      {"n_name", fb::DataType_Utf8},
       {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8View},
+      {"n_comment", fb::DataType_Utf8},
   });
   auto nation_scan = fb::CreateCudfScan(fbb, nation_paths, nation_schema);
   auto nation_node = make_plan_node(
@@ -385,8 +395,8 @@ TEST(PlanExecutor, HashJoinNationRegion) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{region_path});
   auto region_schema = make_schema(fbb, {
       {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8View},
-      {"r_comment", fb::DataType_Utf8View},
+      {"r_name", fb::DataType_Utf8},
+      {"r_comment", fb::DataType_Utf8},
   });
   auto region_scan = fb::CreateCudfScan(fbb, region_paths, region_schema);
   auto region_node = make_plan_node(
@@ -423,9 +433,9 @@ TEST(PlanExecutor, HashJoinWithProjection) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{nation_path});
   auto nation_schema = make_schema(fbb, {
       {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8View},
+      {"n_name", fb::DataType_Utf8},
       {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8View},
+      {"n_comment", fb::DataType_Utf8},
   });
   auto nation_scan = fb::CreateCudfScan(fbb, nation_paths, nation_schema);
   auto nation_node = make_plan_node(
@@ -437,8 +447,8 @@ TEST(PlanExecutor, HashJoinWithProjection) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{region_path});
   auto region_schema = make_schema(fbb, {
       {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8View},
-      {"r_comment", fb::DataType_Utf8View},
+      {"r_name", fb::DataType_Utf8},
+      {"r_comment", fb::DataType_Utf8},
   });
   auto region_scan = fb::CreateCudfScan(fbb, region_paths, region_schema);
   auto region_node = make_plan_node(
@@ -483,9 +493,9 @@ TEST(PlanExecutor, SortNationByName) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
   auto schema = make_schema(fbb, {
       {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8View},
+      {"n_name", fb::DataType_Utf8},
       {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8View},
+      {"n_comment", fb::DataType_Utf8},
   });
   std::vector<uint32_t> proj_cols{1};
   auto proj_vec = fbb.CreateVector(proj_cols);
@@ -527,9 +537,9 @@ TEST(PlanExecutor, SortWithFetch) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
   auto schema = make_schema(fbb, {
       {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8View},
+      {"n_name", fb::DataType_Utf8},
       {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8View},
+      {"n_comment", fb::DataType_Utf8},
   });
   std::vector<uint32_t> proj_cols{1};
   auto proj_vec = fbb.CreateVector(proj_cols);
@@ -563,8 +573,8 @@ TEST(PlanExecutor, AggregateCount) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
   auto schema = make_schema(fbb, {
       {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8View},
-      {"r_comment", fb::DataType_Utf8View},
+      {"r_name", fb::DataType_Utf8},
+      {"r_comment", fb::DataType_Utf8},
   });
   auto scan = fb::CreateCudfScan(fbb, paths, schema);
   auto scan_node =
@@ -605,9 +615,9 @@ TEST(PlanExecutor, AggregateGroupBy) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{nation_path});
   auto nation_schema = make_schema(fbb, {
       {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8View},
+      {"n_name", fb::DataType_Utf8},
       {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8View},
+      {"n_comment", fb::DataType_Utf8},
   });
   auto nation_scan = fb::CreateCudfScan(fbb, nation_paths, nation_schema);
   auto nation_node = make_plan_node(
@@ -618,8 +628,8 @@ TEST(PlanExecutor, AggregateGroupBy) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{region_path});
   auto region_schema = make_schema(fbb, {
       {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8View},
-      {"r_comment", fb::DataType_Utf8View},
+      {"r_name", fb::DataType_Utf8},
+      {"r_comment", fb::DataType_Utf8},
   });
   auto region_scan = fb::CreateCudfScan(fbb, region_paths, region_schema);
   auto region_node = make_plan_node(
@@ -687,8 +697,8 @@ TEST(PlanExecutor, ProjectRename) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
   auto schema = make_schema(fbb, {
       {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8View},
-      {"r_comment", fb::DataType_Utf8View},
+      {"r_name", fb::DataType_Utf8},
+      {"r_comment", fb::DataType_Utf8},
   });
   auto scan = fb::CreateCudfScan(fbb, paths, schema);
   auto scan_node =
@@ -731,8 +741,8 @@ TEST(PlanExecutor, ProjectSqrtThroughTheAst) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
   auto schema = make_schema(fbb, {
       {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8View},
-      {"r_comment", fb::DataType_Utf8View},
+      {"r_name", fb::DataType_Utf8},
+      {"r_comment", fb::DataType_Utf8},
   });
   auto scan = fb::CreateCudfScan(fbb, paths, schema);
   auto scan_node =
@@ -775,8 +785,8 @@ TEST(PlanExecutor, ProjectSqrtThroughTheColumnPath) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
   auto schema = make_schema(fbb, {
       {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8View},
-      {"r_comment", fb::DataType_Utf8View},
+      {"r_name", fb::DataType_Utf8},
+      {"r_comment", fb::DataType_Utf8},
   });
   auto scan = fb::CreateCudfScan(fbb, paths, schema);
   auto scan_node =
@@ -841,9 +851,9 @@ static flatbuffers::Offset<fb::PlanNode> nation_scan_node(
       std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
   auto schema = make_schema(fbb, {
       {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8View},
+      {"n_name", fb::DataType_Utf8},
       {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8View},
+      {"n_comment", fb::DataType_Utf8},
   });
   auto scan = fb::CreateCudfScan(fbb, paths, schema);
   return make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
@@ -1017,8 +1027,8 @@ TEST(PlanExecutor, PassthroughNodes) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
   auto schema = make_schema(fbb, {
       {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8View},
-      {"r_comment", fb::DataType_Utf8View},
+      {"r_name", fb::DataType_Utf8},
+      {"r_comment", fb::DataType_Utf8},
   });
   auto scan = fb::CreateCudfScan(fbb, paths, schema);
   auto scan_node =
@@ -1050,9 +1060,9 @@ TEST(PlanExecutor, JoinProjectSort) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{nation_path});
   auto nation_schema = make_schema(fbb, {
       {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8View},
+      {"n_name", fb::DataType_Utf8},
       {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8View},
+      {"n_comment", fb::DataType_Utf8},
   });
   auto nation_scan = fb::CreateCudfScan(fbb, nation_paths, nation_schema);
   auto nation_node = make_plan_node(
@@ -1064,8 +1074,8 @@ TEST(PlanExecutor, JoinProjectSort) {
       std::vector<flatbuffers::Offset<flatbuffers::String>>{region_path});
   auto region_schema = make_schema(fbb, {
       {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8View},
-      {"r_comment", fb::DataType_Utf8View},
+      {"r_name", fb::DataType_Utf8},
+      {"r_comment", fb::DataType_Utf8},
   });
   auto region_scan = fb::CreateCudfScan(fbb, region_paths, region_schema);
   auto region_node = make_plan_node(
@@ -1149,13 +1159,13 @@ static std::vector<uint8_t> customer_scan_plan(flatbuffers::FlatBufferBuilder& f
   auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
   auto schema = make_schema(fbb, {
                                      {"c_custkey", fb::DataType_Int64},
-                                     {"c_name", fb::DataType_Utf8View},
-                                     {"c_address", fb::DataType_Utf8View},
+                                     {"c_name", fb::DataType_Utf8},
+                                     {"c_address", fb::DataType_Utf8},
                                      {"c_nationkey", fb::DataType_Int32},
-                                     {"c_phone", fb::DataType_Utf8View},
+                                     {"c_phone", fb::DataType_Utf8},
                                      {"c_acctbal", fb::DataType_Decimal128},
-                                     {"c_mktsegment", fb::DataType_Utf8View},
-                                     {"c_comment", fb::DataType_Utf8View},
+                                     {"c_mktsegment", fb::DataType_Utf8},
+                                     {"c_comment", fb::DataType_Utf8},
                                  });
   auto scan = fb::CreateCudfScan(fbb, paths, schema, fbb.CreateVector(projection));
   return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union()));
@@ -1218,8 +1228,8 @@ TEST(ScanRowGroups, ACallOnAnotherKindOfNodeSaysWhichKind) {
   auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
   auto schema = make_schema(fbb, {
                                      {"r_regionkey", fb::DataType_Int32},
-                                     {"r_name", fb::DataType_Utf8View},
-                                     {"r_comment", fb::DataType_Utf8View},
+                                     {"r_name", fb::DataType_Utf8},
+                                     {"r_comment", fb::DataType_Utf8},
                                  });
   auto scan = fb::CreateCudfScan(fbb, paths, schema);
   auto scan_node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
@@ -1311,7 +1321,8 @@ TEST(RangedExport, TheRangesAreTheRowsNamed) {
   auto export_range = [&](uint64_t offset, uint64_t length) {
     uint8_t* ipc = nullptr;
     uint64_t len = 0;
-    EXPECT_EQ(peacock_result_from_handle(plan.get(), handle, offset, length, &ipc, &len), 0);
+    EXPECT_EQ(
+        peacock_result_from_handle(plan.get(), handle, offset, length, nullptr, 0, &ipc, &len), 0);
     std::vector<uint8_t> bytes;
     if (len > 0) bytes.assign(ipc, ipc + len);
     peacock_result_free(ipc);
@@ -1338,15 +1349,175 @@ TEST(RangedExport, TheRangesAreTheRowsNamed) {
   ASSERT_EQ(peacock_executor_slice_handle(plan.get(), handle, rows, 0, &empty), 0);
   uint8_t* ipc = nullptr;
   uint64_t len = 0;
-  EXPECT_EQ(peacock_result_from_handle(plan.get(), empty, 0, UINT64_MAX, &ipc, &len), 0);
+  EXPECT_EQ(peacock_result_from_handle(plan.get(), empty, 0, UINT64_MAX, nullptr, 0, &ipc, &len),
+            0);
   EXPECT_GT(len, 0u);
   peacock_result_free(ipc);
 
   // A failed export leaves the session standing, unlike the node-shaped calls: it read a
   // handle and touched nothing.
-  EXPECT_NE(peacock_result_from_handle(plan.get(), /*handle=*/999, 0, UINT64_MAX, &ipc, &len), 0);
-  EXPECT_EQ(peacock_result_from_handle(plan.get(), empty, 0, UINT64_MAX, &ipc, &len), 0);
+  EXPECT_NE(
+      peacock_result_from_handle(plan.get(), /*handle=*/999, 0, UINT64_MAX, nullptr, 0, &ipc, &len),
+      0);
+  EXPECT_EQ(peacock_result_from_handle(plan.get(), empty, 0, UINT64_MAX, nullptr, 0, &ipc, &len),
+            0);
   peacock_result_free(ipc);
+}
+
+// --- The precision the plan declared ------------------------------------------
+//
+// cuDF's data_type is {type_id, scale}: precision is not a fact the device holds, so an
+// export not told one writes the width's maximum, 38. The declaration crosses the ABI as
+// one int32 per column and is set on the schema message alone; the buffers are the same.
+
+/// The schema message of an exported stream and how many batches followed it.
+struct IpcStream {
+  std::shared_ptr<arrow::Schema> schema;
+  int batches = 0;
+};
+
+static IpcStream read_ipc(const uint8_t* ipc, uint64_t len) {
+  auto input = std::make_shared<arrow::io::BufferReader>(
+      std::make_shared<arrow::Buffer>(ipc, static_cast<int64_t>(len)));
+  auto reader = arrow::ipc::RecordBatchStreamReader::Open(input).ValueOrDie();
+  IpcStream stream{reader->schema(), 0};
+  for (;;) {
+    std::shared_ptr<arrow::RecordBatch> batch;
+    if (!reader->ReadNext(&batch).ok() || !batch) break;
+    ++stream.batches;
+  }
+  return stream;
+}
+
+/// The smaller row group of the plan's one scan, as a handle.
+static uint64_t scan_handle(CApiPlan& plan) {
+  std::vector<uint32_t> groups{1};
+  uint64_t handle = 0;
+  EXPECT_EQ(peacock_executor_execute_scan_rowgroups(plan.get(), 0, groups.data(), groups.size(),
+                                                    &handle, nullptr),
+            0)
+      << plan.last_error();
+  return handle;
+}
+
+static const arrow::Decimal128Type& decimal_type_of(const IpcStream& stream, int field) {
+  return static_cast<const arrow::Decimal128Type&>(*stream.schema->field(field)->type());
+}
+
+TEST(Export, ADeclaredPrecisionIsWrittenToTheSchema) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {5});  // c_acctbal, decimal128(15, 2) in the file
+  CApiPlan plan(buf);
+  auto handle = scan_handle(plan);
+
+  const int32_t precisions[1] = {15};
+  uint8_t* ipc = nullptr;
+  uint64_t len = 0;
+  ASSERT_EQ(
+      peacock_result_from_handle(plan.get(), handle, 0, UINT64_MAX, precisions, 1, &ipc, &len), 0)
+      << plan.last_error();
+  auto stream = read_ipc(ipc, len);
+  peacock_result_free(ipc);
+  EXPECT_EQ(decimal_type_of(stream, 0).precision(), 15);
+  EXPECT_EQ(decimal_type_of(stream, 0).scale(), 2);
+  EXPECT_EQ(stream.batches, 1);
+}
+
+TEST(Export, NoDeclarationExportsAtTheWidthsMaximum) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {5});
+  CApiPlan plan(buf);
+  auto handle = scan_handle(plan);
+
+  uint8_t* ipc = nullptr;
+  uint64_t len = 0;
+  ASSERT_EQ(peacock_result_from_handle(plan.get(), handle, 0, UINT64_MAX, nullptr, 0, &ipc, &len),
+            0)
+      << plan.last_error();
+  auto stream = read_ipc(ipc, len);
+  peacock_result_free(ipc);
+  EXPECT_EQ(decimal_type_of(stream, 0).precision(), 38);
+  EXPECT_EQ(decimal_type_of(stream, 0).scale(), 2);
+}
+
+TEST(Export, APrecisionForANonDecimalColumnIsRefused) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});  // c_custkey, int64
+  CApiPlan plan(buf);
+  auto handle = scan_handle(plan);
+
+  const int32_t precisions[1] = {10};
+  uint8_t* ipc = nullptr;
+  uint64_t len = 0;
+  EXPECT_NE(
+      peacock_result_from_handle(plan.get(), handle, 0, UINT64_MAX, precisions, 1, &ipc, &len), 0);
+  EXPECT_NE(plan.last_error().find("c_custkey"), std::string::npos) << plan.last_error();
+}
+
+TEST(Export, ADeclarationOfAnotherWidthIsRefused) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {5});
+  CApiPlan plan(buf);
+  auto handle = scan_handle(plan);
+
+  const int32_t precisions[2] = {15, 15};
+  uint8_t* ipc = nullptr;
+  uint64_t len = 0;
+  EXPECT_NE(
+      peacock_result_from_handle(plan.get(), handle, 0, UINT64_MAX, precisions, 2, &ipc, &len), 0);
+  EXPECT_NE(plan.last_error().find("2"), std::string::npos) << plan.last_error();
+}
+
+TEST(ExportInternal, ADecimal64ColumnIsRefusedByName) {
+  // No handle can hold a DECIMAL64 — the scan widens, and an upload adopts arrow, which
+  // has no narrow decimal — so the refusal is reached through the function itself.
+  cudf::fixed_point_scalar<numeric::decimal64> hundred(100, numeric::scale_type{-2});
+  auto amount = cudf::make_column_from_scalar(hundred, 2);
+  cudf::table_view tv{{amount->view()}};
+  uint8_t* out = nullptr;
+  uint64_t len = 0;
+  try {
+    peacock::export_table_to_ipc(tv, {"amount"}, nullptr, &out, &len);
+    ADD_FAILURE() << "a DECIMAL64 column was exported";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string(e.what()).find("amount"), std::string::npos) << e.what();
+  }
+}
+
+// --- A handle's schema without its rows ----------------------------------------
+
+TEST(HandleSchema, ReadsTheTablesTypesWithoutRows) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = finish_plan(fbb, nation_scan_node(fbb));
+  CApiPlan plan(buf);
+  std::vector<uint32_t> groups{0};
+  uint64_t handle = 0;
+  ASSERT_EQ(peacock_executor_execute_scan_rowgroups(plan.get(), 0, groups.data(), groups.size(),
+                                                    &handle, nullptr),
+            0)
+      << plan.last_error();
+
+  uint8_t* ipc = nullptr;
+  uint64_t len = 0;
+  ASSERT_EQ(peacock_handle_schema(plan.get(), handle, &ipc, &len), 0) << plan.last_error();
+  auto stream = read_ipc(ipc, len);
+  peacock_result_free(ipc);
+  ASSERT_EQ(stream.schema->num_fields(), 4);
+  EXPECT_EQ(stream.schema->field(0)->name(), "n_nationkey");
+  EXPECT_TRUE(stream.schema->field(0)->type()->Equals(arrow::int32()));
+  EXPECT_EQ(stream.schema->field(1)->name(), "n_name");
+  EXPECT_TRUE(stream.schema->field(1)->type()->Equals(arrow::utf8()));
+  EXPECT_EQ(stream.batches, 0);
+}
+
+TEST(HandleSchema, AnUnknownHandleFails) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = finish_plan(fbb, nation_scan_node(fbb));
+  CApiPlan plan(buf);
+  uint8_t* ipc = nullptr;
+  uint64_t len = 0;
+  EXPECT_NE(peacock_handle_schema(plan.get(), /*handle=*/999, &ipc, &len), 0);
+  EXPECT_NE(plan.last_error().find("unknown"), std::string::npos) << plan.last_error();
 }
 
 TEST(SliceHandle, KeepsTheRowsNamedAndConsumesItsInput) {
@@ -1565,7 +1736,6 @@ TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
       {fb::DataType_Date64, {}},
       // #210: the declared decimal comes back as a double on this path.
       {fb::DataType_Decimal128, id::FLOAT64},
-      {fb::DataType_Utf8View, id::STRING}, {fb::DataType_BinaryView, {}},
   };
   // The list is a copy of the enum; this is what makes it fail by count when the enum
   // grows, which is enough to send the next reader here.
