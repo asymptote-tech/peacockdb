@@ -282,6 +282,47 @@ gained the clause saying so; both comments sit under the four-line body cap.
 - `rustfmt` was run on `join_capability.rs` alone; `lib.rs` was checked with `--check` and the
   chain split by hand to its output, since formatting `lib.rs` reformats eight other files.
 
+### Re-proof after the rebase — 2026-09-17
+
+On master `0a338ead` (`origin/master`; the worktree's local `master` ref is stale at `76f17db2`).
+Nothing in code needed a fix: the branch's code and goldens came through the replay intact.
+Checked mechanically first: the golden diff against `origin/master` is 11642 lines each way and,
+with `Utf8View → Utf8` substituted on the minus side, differs in exactly the 18 digest pairs and
+q24's ten lines, as before the rebase; the q16 registry row carries master's tp4 cells with `175`
+and `183` struck and `185` added, q77 master's, q15 and q76 the branch's; ten rows keep `183`.
+
+**Rust-only, local (verda down), `--test-threads=2`, `testdata/` clean afterwards:**
+- `--lib`: `test result: ok. 549 passed; 0 failed; 2 ignored` (551 listed)
+- `test_module_layout` `17 passed`; `test_golden_format` `26 passed`; `test_cost_model`
+  `3 passed`; `test_corpus_goldens` `20 passed`; `test_ci_coverage` `8 passed`
+- `test_cpu_corpus`: `test result: ok. 451 passed; 0 failed`, with
+  `the_registry_matches_the_cpu_corpus_in_both_directions ... ok` — csv, `corpus_cases.inc` and
+  the goldens agree after the merge.
+- `grep -rn "Utf8View\|BinaryView" peacockdb-core/src testdata/goldens` → `plan/common.rs` (2)
+  and `plan/validate/tests.rs` (11) only.
+- No warning in any build; the device `--build` reconfigured `cpp/build` over warm caches and
+  restaged both rust binaries in about a minute.
+
+**Device, shad-gpu (0 MiB held before, pools reserved as declared, no `[rmm] … could not be
+built` line), one cycle: `--build`, `--push-binaries --patch`, `--run` with
+`PCK_TEST_FILTER='gpu_'`.** Two rust binaries ran: `peacockdb_core_gpu_lib`
+`test result: ok. 387 passed; 0 failed; 0 ignored; 0 measured; 554 filtered out` — the whole
+`gpu_tests::` rung, harness included, the two `should_panic` cases among the passes;
+`test_gpu_corpus` `test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out`
+— the nine `gpu_*` cells and the registry test, the regen property filtered by name. The five
+C++ binaries ran unfiltered as always: 12, 6, 34, 4, 4 tests, all `PASSED`.
+
+**`build-test.md` against `--list`.** Right as merged: `--lib` 551 and every cpu-block row
+(each mapped to its module path), `test_cpu_corpus` 451, `test_gpu_corpus` 11, the cost-report
+crate 37, the header's Rust 1516 and C++ 74. Corrected, all inherited rather than the rebase's
+arithmetic: the harness row 331 → 332 (`tests::gpu_tests::` on the staged binary; master's own
+331 was already one under its tree — chain E's count, and this branch's delete-one-add-one is
+net zero), so `gpu_tests::` 386 → 387 and the gpu block 397 → 398; and the C++ CPU/FFI unit row
+11 → 12 (`peacock_cpu_tests` runs 12), the off-by-one the completing note called pre-fork. The
+rows now sum to the header's 1959. One clause dropped from the harness prose, master's
+"and #183's one pin is the unload's": that pin is the one this branch deleted, and the sink's
+`LargeUtf8` pin is already named earlier in the same paragraph.
+
 ## Completeness pass, analyst — 2026-09-17
 
 The branch read as one change against the spec's four items, Scope, Restriction, Registry and
