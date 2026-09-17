@@ -108,7 +108,7 @@ as `utf8-everywhere`'s rollout found.
 |---|---|---|
 | green, enabled | tpch aggregate-groupby, filter-project, shuffle-additive; tpcds q37, q82 | `gpu_tp1_single` enabled |
 | golden, in_rows at a BatchAccumulator (#185) | tpcds q3 q8 q15 q33 q40 q42 q43 q46 q52 q55 q56 q58 q59 q60 q61 q68 q76 q77 q79 q80 q90; tpch hash-join q10 q18 | `185` added, `187` struck |
-| golden, join batching (#215) | tpcds q16 q19 q25 q45 q91 q94 q95; tpch anti-join semi-join q2 | `215` added, `187` struck |
+| golden, join batching (#220) | tpcds q16 q19 q25 q45 q91 q94 q95; tpch anti-join semi-join q2 | `220` added, `187` struck |
 | device clean, cpu off (#163) | tpcds q7 q18 q24 q26 q30 q65 q81 q85; tpch q1 q22 shuffle-additive-avg | `187` struck (q13 q32 q92 carried 163 alone, unchanged) |
 
 `187` stays on `tpch/filter-project` alone: enabled at tp1_single, its other four modes never
@@ -146,3 +146,18 @@ Dispatch 1 committed as `ddafdb77` on `6bfaa9e9`, pushed; PR #159 against
 returned, so before any reviewer: task 1 (`ENS-utf8-everywhere`, `completeness approved`) is
 rebased onto master first and carried through CI to `done`; this branch then rebases onto it,
 re-proves, and only then goes to review. Until then `rebase needed(reviewing)`.
+
+## Rebased onto the rebased task 1 — 2026-09-17
+
+Task 1 reached `done` on master's tip (`dd2fb406`, PR #158 green), so this branch replayed its
+three commits onto it (`--onto`, from the old fork `0b8c05fb`). Resolved by ownership:
+`build-test.md` counts take task 1's rebased numbers plus this task's deltas (header 1976, cpu
+1028 with `--lib` 554, gpu 405 with `gpu_tests::` 389 and `test_gpu_corpus` 16, harness 334 —
+**arithmetic, to be confirmed against `--list`**); #187 this task's closed form; the corpus
+comments and csv rows this task's state, q77 keeping master's `212` beside this task's `185`;
+`exec_cases.rs`'s import block master's superset, unverified. The join-batching ticket is
+**#220** here too — master took #215 meanwhile — renumbered in the csv, the comments, the
+rollout table. **Master added a #187 pin this task falsifies**:
+`bug_a_cast_to_decimal_is_exported_at_precision_38` (`gpu_tests/exec_cases.rs`) asserts the 38
+the export no longer writes; the developer retires or inverts it as the task did for the scan's
+pin, and the counts move with it. Pre-rebase tip: tag `pre-rebase/decimal-precision-at-export`.
