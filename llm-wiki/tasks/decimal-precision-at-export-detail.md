@@ -139,6 +139,51 @@ against DataFusion, `plan/validate.rs`, `plan/mod.rs`, `planner/pipeline.rs`) �
 validator, not the wire field. Renaming it is outside the Scope table and cosmetic. The
 whole-word grep is clean, which is the meaningful check.
 
+### Re-proof after the rebase
+
+Local, verda down, shad-gpu 0 MiB held; nothing had been built since the replay.
+
+`exec_cases.rs`: master's import superset is right as taken — every name is used — but the
+replay kept this branch's deletion of `batch_of` while master's #191 and #219 pins call it, so
+the helper is restored. `bug_a_cast_to_decimal_is_exported_at_precision_38` inverted to
+`a_cast_to_decimal_is_exported_at_its_declared_precision` (`same(...)`, as the scan's and the
+arithmetic's pins were): no positive cast-to-decimal case existed to retire it against, so the
+count does not move.
+
+First device run red on two of master's #216 pins in `aggregate_dimension_cases.rs`,
+`bug_a_global_welford_init_answers_a_finished_stddev_on_the_device` and
+`bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device`: both pinned the
+device answering one finished `Float64` where the plan declares the Welford triple, and the
+export, now told three declarations, refuses with `3 declared precisions for a table of 1
+columns` — the #207 shape. Converted as #207 and #210 were: `gpu_refuses()` asserting that
+message, the cpu's three columns kept; the finished value is no longer observable through the
+harness. Three imports dropped with the arithmetic. #216 is unchanged and its ticket still
+names both pins; the underlying defect is the ticket's, not the rebase's.
+
+Proofs, rust-only (`--test-threads=2`, goldens unmoved — `git status --short testdata/` empty):
+`--lib` `test result: ok. 552 passed; 0 failed; 2 ignored` (554 listed);
+`test_module_layout` `ok. 17 passed`; `test_golden_format` `ok. 26 passed`; `test_cost_model`
+`ok. 3 passed`; `test_corpus_goldens` `ok. 20 passed`; `test_ci_coverage` `ok. 8 passed`;
+`test_cpu_corpus` `ok. 451 passed`. Recompiled, no warnings. Greps: `-rnw output_schema` →
+nothing once `cpp/build` regenerated its header (the only hits before the build were the stale
+`gpu_plan_generated.h`); `DECIMAL32|DECIMAL64` → `scan.cpp:106` alone; views → nothing.
+
+C++: `ctest -L cpu` in `cpp/build` `100% tests passed`; `peacock_cpu_tests` `[  PASSED  ] 12`.
+
+Device, cycle two (unfiltered, after the #216 conversion; cycle one was `PCK_TEST_FILTER='gpu_'`
+and red on the two pins alone, `387 passed; 2 failed`): `peacock_cpu_tests` 12,
+`peacock_gpu_tests` 6, `peacock_plan_tests` 41 (`Export.*` ×4, `ExportInternal.*`,
+`HandleSchema.*` ×2 each `OK`), `peacock_tpch_tests` 4, `peacock_tpchv_tests` 4;
+`peacockdb_core_gpu_lib` `test result: ok. 389 passed; 0 failed; 557 filtered out`;
+`test_gpu_corpus` `test result: ok. 16 passed; 0 failed`. No `could not be built`, no warnings.
+`a_device_run_under_a_regeneration_writes_no_golden` is the corpus case a `gpu_` filter cannot
+select, which is why cycle two ran unfiltered.
+
+`build-test.md` counts against `--list`: `--lib` 554; `gpu_tests::` 389 = harness 334 + recipe
+walk 10 + murmur 10 + executors on a device 31 + abi 4; `test_gpu_corpus` 16; C++ 12 and 41;
+"Plan types" 38 = `validate::tests` 30 + `layout::tests` 4 + `aggregate::tests` 4. Header 1976
+sums. Nothing to correct.
+
 ## Reviewing, then rebase needed — 2026-09-17
 
 Dispatch 1 committed as `ddafdb77` on `6bfaa9e9`, pushed; PR #159 against

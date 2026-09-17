@@ -27,7 +27,7 @@ reuses E's join builders. The wire and header move once, in task 2.
 cast. A validation rule refuses any view type that returns; every handling site is deleted; goldens
 regenerate; the survey's 76 string queries roll out at `tp1_single`.
 
-### 2. [`decimal-precision-at-export.md`](decimal-precision-at-export.md) — closes [#187](active-tickets.md#t187) — state: rebase needed(reviewing) — PR #159
+### 2. [`decimal-precision-at-export.md`](decimal-precision-at-export.md) — closes [#187](active-tickets.md#t187) — state: reviewing — PR #159
 
 cuDF's type is `{type_id, scale}`; precision is a label the export must be told. `peacock_result_from_handle`
 takes a per-column declared precision, set on the imported Arrow schema (25.02 has no

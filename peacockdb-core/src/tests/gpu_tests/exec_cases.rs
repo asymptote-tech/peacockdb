@@ -54,6 +54,10 @@ fn gpu_answered(outcome: &Outcome, expected: RecordBatch, order: Order) {
     assert_same(&[vec![expected]], gpu, order);
 }
 
+fn batch_of(columns: Vec<(&str, ArrayRef)>) -> RecordBatch {
+    RecordBatch::try_from_iter(columns).expect("columns of one length")
+}
+
 // `GpuFilter`.
 
 fn filter(predicate: Expr, projection: Option<Vec<u32>>) -> GpuFilter {
@@ -494,23 +498,17 @@ fn cast_to(ordinal: u32, name: &str, target: DataType) -> Expr {
     }
 }
 
-// #187 — the device exports every decimal at precision 38 whatever was declared; the cast
-// itself is the cpu's, at the declared scale.
+// A cast to a narrow decimal reads back at the precision the node declares: cuDF's cast
+// lands the column at 38, and the export relabels it to the declaration.
 operator_case! {
     GpuProject,
-    fn bug_a_cast_to_decimal_is_exported_at_precision_38() {
+    fn a_cast_to_decimal_is_exported_at_its_declared_precision() {
         let declared = DataType::Decimal128(20, 0);
         let node = project(vec![
             keep_id(),
             (cast_to(3, "i64", declared.clone()), "as_decimal", declared),
         ]);
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
-        let cpu = &outcome.cpu.as_ref().expect("the cpu answers")[0][0];
-        let widened = batch_of(vec![
-            ("id", cpu.column(0).clone()),
-            ("as_decimal", cast(cpu.column(1), &DataType::Decimal128(38, 0)).unwrap()),
-        ]);
-        gpu_answered(&outcome, widened, Order::AsEmitted);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
     }
 }
 
