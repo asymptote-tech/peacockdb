@@ -249,7 +249,7 @@ the combine is not a per-column reduction: it needs the count-weighted mean and 
 The registry lives in `plan/mod.rs` as two enums — `AggFunc`, what SQL asked
 for, and `PlanAgg`, what a node runs. State columns are typed by `PlanAgg::state_type`
 (`plan/aggregates.rs`), the aggregator that produces each: a count is `Int64` on both engines,
-a decimal sum gains ten digits of precision, the Welford moments are `Float64`. DataFusion's
+a decimal sum gains ten digits of precision, capped at 38, the Welford moments are `Float64`. DataFusion's
 `state_fields()` supplies only the arity and nullability, since the accumulator it describes is
 not the one either engine runs. The one producer that disagrees is DataFusion's variance
 accumulator, whose count is `u64`; the cpu casts it to `Int64` at the init. Adding an aggregate

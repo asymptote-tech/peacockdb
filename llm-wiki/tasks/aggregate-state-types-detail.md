@@ -151,7 +151,11 @@ Outside the Scope table, comment-only, each a sentence the change made false:
 (`types_across_the_edge`), `plan/mod.rs` (`PlanAgg::tag`), `tests/end_to_end.rs`
 (`columns_of`), `executor/gpu_backend/gpu_tests/accumulate.rs` (the Welford merge case's doc);
 `tickets.md` gained a dated line on #205 and one on #63. `#163` moved to
-`archive/archived-tickets.md` with its closing paragraph, fourteen lines.
+`archive/archived-tickets.md` with its closing paragraph, fourteen lines. Two code edits outside
+the table as well, both forced by `aggregate_exec` returning the operators a phase runs:
+`executor/cpu_backend/accumulate.rs` (`.pop()` of the merge's one operator) and
+`planner/translator/schema_tests.rs` (two tests retargeted from `state_fields()`'s types to the
+derived ones).
 
 Restriction check: `git diff --stat -- cpp` is empty; `grep -rn "UInt64" peacockdb-core/src
 --include=*.rs` outside `wire/generated` finds `common.rs`'s byte table, `serialize.rs`'s
@@ -183,6 +187,36 @@ warnings; `git status --short testdata/` empty. `build-test.md`: `--lib` 564 →
 1137 → 1139, `CPU backend executors` 66 → 68 (the row's count excludes `contract`, which has
 its own row), verified against `--list` (566 lib entries, 69 under `cpu_backend::tests::`).
 
+### Completeness fix — the Welford fixture
+
+The analyst's finding: `plan/tests/aggregate.rs`'s `welford_fields` still declared `$count`
+as `UInt64` and fed a `UInt64Array`, and three doc comments still gave the finalize's cast
+the pre-task reason — the count's own unsigned type wrapping below ddof. Every plan declares
+`Int64` now, and `plan/aggregates.rs:139-141` already gives the reason that holds: both
+engines evaluate the expression, and arrow refuses `Float64 / Int64` outright. The fixture
+is `Int64` / `Int64Array` and the three comments say the same thing as the production one.
+No red exists to drive this: the fixture is test data, no production line moved, and the
+proof is the same five tests green over the type the plans emit. No assertion rested on
+the unsigned type — the finalize casts column 0 to the output type either way.
+
+`grep -rn UInt64 peacockdb-core/src`, every hit read in context: `common.rs:48` a byte
+width; `plan/aggregates.rs:86` and `plan/aggregates/tests.rs:43` `Sum` over an unsigned
+input, DataFusion's rule quoted; `wire/serialize.rs:56-57,112` and `wire/fb_text.rs:373`
+scalar and type serialization; `cpu_backend/mod.rs:477` the `(UInt64, Int64)` arm that
+casts DataFusion's count *to* `Int64`; `schema_tests.rs:148` a comment naming DataFusion's
+`state_fields` type as the one not used. One hit is a count cast *to* `UInt64`:
+`cpu_backend/merge_m2.rs:95`, `counted_unsigned`, feeding DataFusion's variance accumulator
+whose `merge_batch` reads `UInt64Array`; `Merging::state` casts it back to `Int64`. It is the
+deviation recorded under Dispatch 1 ("`merge_m2` casts the count both ways"), reviewed in
+both rounds, and it sits inside the accumulator adapter — no plan, state or golden carries
+`UInt64`. Against the spec's Restriction sentence, "nothing casts a count to `UInt64`
+anywhere", it is a literal exception; the signoff is the place to name it.
+
+Verification, local, `--test-threads=2`: `plan::tests::aggregate` `5 passed; 0 failed`
+before and after the flip; `--lib` `564 passed; 0 failed; 2 ignored`, no warnings;
+`git status --short testdata/` empty; `rustfmt` over the one file. `build-test.md`'s
+`Aggregate state columns` row stays at 5.
+
 ## Reviewing — 2026-09-17
 
 Dispatch 1 committed as `636c0e96` on `1f7723c1`, pushed; PR #160 against
@@ -204,3 +238,40 @@ the finalize's shape against arrow's divide rule (`result_scale = s1 + 4`, trunc
 DataFusion's `DecimalAverager`, and that the harness case would be red under the spec's original
 shape. Left as a nit: the inner divide is stamped `out_type` while arrow evaluates it at
 `(min(38, p_sum + 4), s_out)` — no behaviour rides on the stamp on either engine.
+
+## Completeness pass, analyst — 2026-09-17
+
+Read the branch as one change against the spec, `architecture.md` and `build-test.md`; nothing
+built or run. Re-derived mechanically from the committed artifacts:
+- Plan goldens (`*.plans.txt`, `recipe-payloads.txt`), every changed line reduced by the three
+  substitutions: 989 `$count` `UInt64 → Int64`, 621 `$sum` `(p, s) → (min(38, p + 10), s)`,
+  224 `avg` finalizes gaining the outer cast, 4 payload digests, zero lines outside. 24 queries:
+  the 23 `163` rows plus `tpch/shuffle-stddev`.
+- Execution goldens: the only removed lines are 21 `skipped: not enabled at any mode` (results)
+  and 198 `skipped: not enabled at this mode` (99 cpu cells × `.cpu.txt` + `.cost.txt`); the
+  `mode=` author is `tp4-sized` everywhere except `tpcds/q18`, `q22` at `tp1-rowgroup`.
+- Registry: 546 enabled cpu cells (447 + 99), 26 device cells (14 + 12); no `163` left; no row
+  with a disabled cell and no ticket; 115 queries with a cpu cell; `build-test.md`'s 550 = 546 +
+  3 checks + the registry case. CI on `636c0e96` green on every job including the full
+  `test_cpu_corpus`; `010c3d02` (tests only) had its cudf matrix in progress; `76c39515` is
+  documentation only and its run skipped, so the PR head's checks read `SKIPPED` by design.
+- `aggregate.cpp:821-823` and `:418-419` cast cuDF's INT32 count to INT64 — the "stay in C++"
+  sentence is true. `arrow-arith` 54.2.1 `numeric.rs:791-798`: a decimal divide's scale is
+  `s1 + 4`, precision `p1 + 4 + s2` — the finalize's shape is as the record says.
+- Ticket rows after the rollout: #185 46 → 55, #220 23 → 27, #189 3 → 5, #190 2 → 4, #152 79 → 82.
+
+Findings and the `architecture.md` list are in the pass's report to the coordinator.
+
+## Completeness pass — 2026-09-17
+
+Two blind readings. **Reviewer (what is wrong): 0 blocking, 0 important** — it re-derived the
+finalize's digits from arrow's divide rule and cuDF's rescaling for every declared precision the
+corpus carries, reproduced the three golden classes with zero lines outside, and confirmed the
+cpu sections were authored by the cpu tier. **Analyst (what is missing): 0 blocking, 3
+important** — `plan/tests/aggregate.rs`'s Welford fixture still declared `$count` `UInt64` with
+the pre-task reasoning (developer: flipped to `Int64`, comments reworded, `--lib` 564 green);
+#185 and #220 carried stale row counts and #189 and #190 no line for this rollout (coordinator:
+one dated line each, 55/27/5/4 rows per the csv); the record's out-of-scope list omitted two
+code edits, now listed above, and the signoff owes `counted_unsigned` by name. `architecture.md`:
+one sentence the branch wrote was loose — "ten digits of precision" is capped at 38 — corrected;
+nothing else falsified, both readers agree. The analyst's evidence trail is the section below.

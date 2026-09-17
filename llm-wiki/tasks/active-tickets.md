@@ -122,7 +122,8 @@ group count. Eight device cells: `tpcds` q96 q48 q93 q38, `tpch` q3 q14.
 `utf8-everywhere`'s rollout, 2026-09-16, at `tp1-single`: thirteen more — `tpcds` q21 q31 q34 q50
 q62 q66 q73 q83 q99, `tpch` q5 q12 q16 rollup-over-join. `decimal-precision-at-export`'s,
 2026-09-17: 24 more — `tpcds` q3 q8 q15 q33 q40 q42 q43 q46 q52 q55 q56 q58 q59 q60 q61 q68 q76
-q77 q79 q80 q90, `tpch` hash-join q10 q18 — so 46 registry rows carry it.
+q77 q79 q80 q90, `tpch` hash-join q10 q18. `aggregate-state-types`'s, 2026-09-17: nine more —
+`tpcds` q1 q7 q13 q14 q22 q26 q32 q65 q92 — so 55 registry rows carry it.
 `q48` and `q93` are also the first cells in this rollout where a device COMPLETED a plan and the
 golden caught the disagreement — every other device failure so far has been a refusal.
 
@@ -141,8 +142,8 @@ device at 946033; `tpch/q4`'s LeftSemi emits `[[0×18, 52523]]` on the cpu, one 
 device, 72 bytes apart at the join and again at the aggregate over it. First difference in 13 of
 the `utf8-everywhere` rollout's cells (tpcds q4 q10 q11 q23 q29 q69 q74, tpch cross-join
 nested-loop-left-join q4 q15 q20 q21) and in 10 of `decimal-precision-at-export`'s (tpcds q16
-q19 q25 q45 q91 q94 q95, tpch anti-join semi-join q2) — 23 rows; the #185 cells may carry it
-beneath. Row counts agree at every node; which side's batching the golden records is the decision.
+q19 q25 q45 q91 q94 q95, tpch anti-join semi-join q2) and in 4 of `aggregate-state-types`'s
+(tpcds q18 q30 q35 q81) — 27 rows. Which side's batching the golden records is the decision.
 
 <a id="t187"></a>
 ### #187 — the device widens a decimal the plan declared narrow
@@ -239,6 +240,8 @@ join projects at all. `nested-loop-join`, `nested-loop-left-join` and `cross-joi
 so their projection is `None` and passing `None` is correct for every one of them.
 
 Device half untested — the CPU refuses first, as with [#189](active-tickets.md#t189).
+`aggregate-state-types`'s rollout, 2026-09-17, added `tpch/q22` and `tpcds/q24` at every mode —
+four registry rows with `tpch/q11` and `tpcds/q54`.
 
 <a id="t189"></a>
 ### #189 — the shuffle cannot hash a rollup's grouping-set id
@@ -258,7 +261,8 @@ looks like.
 
 First cause in T19's rollout that is not a device cause: the six before it were the device refusing
 or disagreeing. Three cells, `tpch/rollup-over-join` at `tp4-single`, `tp4-rowgroup` and
-`tp4-sized`.
+`tp4-sized`; `aggregate-state-types`'s rollout, 2026-09-17, added `tpcds` q18 and q22 at the same
+three, and `tpcds/q5` and `q80` carry it too — five registry rows.
 
 <a id="t186"></a>
 ### #186 — the CPU backend ignores a limit pushed into the scan
