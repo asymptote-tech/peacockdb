@@ -130,3 +130,12 @@ test run OK`. Local: `test_cpu_corpus … registry` `1 passed`, `test_module_lay
 Restriction check: no other scalar arm changed; no Rust production file changed (`git status`
 lists `exec_cases.rs` and `corpus_cases.inc` on the Rust side, both test code); the planner's
 `date_part` emission untouched.
+
+## Reviewing — 2026-09-17
+
+Dispatch 1 committed as `67eb167a` on `bfc66946`, pushed; PR #161 against
+`ENS-aggregate-state-types`, base verified. Deviations on record for the reviewer: the spec's
+gtest setup (a `CastExprNode` from `n_nationkey` to `Date32`) cannot work on cuDF, so the
+date is made from `Date32` literals through a CASE; #221 went to `tickets.md` rather than
+`active-tickets.md`, since it disables no cell; `exec_cases.rs` carries the #221 pin and a
+generalised helper beyond the Scope row's wording.
