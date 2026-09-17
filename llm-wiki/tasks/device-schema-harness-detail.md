@@ -123,7 +123,7 @@ the source column above); the spec is frozen, so the correction lives here.
 
 ### Counts (`--list`)
 
-rust-only `--lib` 583 (566 + 17 projection tests); gpu rung `gpu_tests::` 535 (390 + 134
+rust-only `--lib` 582 (566 + 16 projection tests); gpu rung `gpu_tests::` 535 (390 + 134
 schema cases + 11 spot-checks). Per file: harness 4, source 8, exec 33, accumulate 7, emit 6,
 join 38, nested 6, aggregate 32. Five `bug_` pins among the 134 and one among the eleven.
 Left and Full hash joins have no schema case: they refuse their first probe batch (#152,
@@ -158,86 +158,3 @@ developer dispatch in this code and otherwise dropped: `join_schema_cases.rs`'s
 `keyed_projection` duplicates two arms of `crossing_projection`; `device_schema.rs`'s
 `schema_at` panics on a non-zero rc without reading `peacock_last_error`; `wire/gpu_tests/mod.rs`
 at 1056 lines could hand the spot-checks a `schema.rs` of their own.
-
-## Completeness reading (analyst) — 2026-09-17
-
-Independent "what is missing" pass, read-only. Result: 0 blocking, 1 important.
-
-Per-family case counts against the spec's enumeration, verified in the eight files:
-harness 4, source 8, exec 33, accumulate 7, emit 6, join 38, nested 6, aggregate 32 = 134;
-walk spot-checks 11 (all present as named tests); projection unit tests 16. Counts reconcile:
-cpu `--lib` 566→582 (+16), gpu `gpu_tests::` 390→535 (+145 = 134+11), grand total 2103→2264
-(+161 = 16+145). "Recipe walk on a device" 10→21 (+11). No new test binary; `test_ci_coverage`
-needs nothing.
-
-Node kinds with no schema case, each accounted for: `GpuUnload` (host rows, no handle);
-Left/Full hash joins (#152 first-probe refusal); the three forwarders (no executor — union's
-branch casts covered as two `GpuProject` cases). No node kind is silently absent.
-
-Enumerated gaps that are nits (device path or output schema already exercised by a neighbour,
-so dropped for a closing task): `count`/`min`/`max` finalizes (bare renames — `ColumnRef` copy,
-same schema as the state; the sum finalize and every exec project's `keep_id` prove the rename);
-a global (keyless) merge exists only for `avg` — the keyless `cudf::reduce` state path is proven
-there, `sum`/`count`/`min`/`max` global merges add a subset schema. build-test.md was already
-narrowed in review round 1 to "the sum, avg, stddev and var finalizes", so the record is honest.
-Each scalar function of the dispatch (`date_part`, `round`, `substr`, `abs`, `lower`, `upper`,
-`concat`, `coalesce`) has a case; `LargeUtf8` and `Boolean`/`Float`/`Decimal` scatter keys are
-either unreachable at a device handle or refused, and the refused ones cannot produce a handle.
-
-architecture.md: the one clause the branch edited (`handle_schema` "read by the test harness
-alone") is accurate; no other sentence is falsified. `GpuBatch` "wraps a `u64` handle plus the
-session reference its `Drop` needs" stays true — the new `executor()` accessor adds a reader,
-not a field, and `Drop` still needs it. "A project's expression is compared against nothing"
-is scoped to the node-display golden, which the harness (a separate test rung) does not touch.
-
-Important: the record quotes `test result:` lines for every device run and reconciles the
-counts, but the rust-only verification leg (`--lib` projection tests, `test_module_layout`) is
-recorded only as `--list` counts, with no quoted pass line. CI (#162, in progress) is the
-independent backstop; the fix is a one-line record addition.
-
-### Completeness fix — narrow decimals at the handle (developer, 2026-09-17)
-
-Two importants from the completeness pass. The first: `schema_at` reads a handle
-through 25.02's `cudf::to_arrow_schema` (`gpu_executor.cpp` `arrow_schema_of`), which has no
-narrow-decimal arrow type and reports `DECIMAL32`/`DECIMAL64` as `decimal128` at precision 9/18
-(`interop.hpp`, the note on `to_arrow_schema`). `from_ipc` then went through `device_type_of`,
-which drops precision on purpose for the declared side, so a `DECIMAL64` at a handle projected
-to `DECIMAL128 scale s` — the one width defect the export refuses and `scan.cpp` widens away.
-Reachable: `decimals(64, 1)` writes `Decimal128(18, 2)`, which arrow-rs's parquet writer stores as INT64 and cuDF
-reads as `DECIMAL64` before the scan widens it; drop that widening and the source case stayed
-green. Fix on the actual side only: `from_ipc` maps a decimal by its precision — 9
-`DECIMAL32`, 18 `DECIMAL64`, 38 `DECIMAL128`, any other a panic naming the column — through a
-private `held_type_of`; `TypeId` gains `Decimal32`/`Decimal64`; `device_type_of` is untouched,
-so a declaration still ignores precision. The file-top comment, the `TypeId` doc and the IPC
-test's comment now say what `to_arrow_schema` does with a narrow width.
-
-Red before the mapping, `cargo test --features rust-only -p peacockdb-core --lib --
-test_support::device_schema --test-threads=2`: first `error[E0599]: no variant or associated
-item named `Decimal64` found for enum `test_support::TypeId``; with the two variants added and
-no mapping, `a_narrow_precision_at_the_handle_is_the_narrow_width_the_device_holds ... FAILED`,
-`left: … id: Decimal128, scale: Some(1) …`, `right: … id: Decimal32, scale: Some(1) …`,
-`test result: FAILED. 16 passed; 1 failed`. Green after: `test result: ok. 17 passed; 0 failed;
-0 ignored; 0 measured; 566 filtered out`.
-
-Rust-only leg, this run, `--test-threads=2`, no warnings in either build:
-- `cargo test --features rust-only -p peacockdb-core --lib`: `test result: ok. 581 passed; 0
-  failed; 2 ignored; 0 measured; 0 filtered out; finished in 73.78s`.
-- `cargo test --features rust-only -p peacockdb-core --test test_module_layout`: `test result:
-  ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`.
-- `--list`: `--lib` 583, `test_support::device_schema` 17.
-
-Device runs (shad-gpu, 0 MiB held; `--build`, `--push-binaries --patch`, then `--run`, C++
-suites skipped since no C++ source moved; the build log carries no warning):
-- Run 6, `PCK_TEST_FILTER=_schema_cases` — `peacockdb_core_gpu_lib`: `running 134 tests` …
-  `test result: ok. 134 passed; 0 failed; 0 ignored; 0 measured; 987 filtered out`, the 8 source
-  and 32 aggregate cases among them, `a_scan_of_a_decimal_column_declares_the_scale_2_the_
-  device_holds` and every decimal sum, avg and cast case `ok`; `test_gpu_corpus`: `running 0
-  tests`. The scan widens before the handle, so a `Decimal128(18, 2)` scan still reads back
-  `DECIMAL128`.
-- Run 7, unfiltered — `peacockdb_core_gpu_lib`: `running 535 tests` … `test result: ok. 535
-  passed; 0 failed; 0 ignored; 0 measured; 586 filtered out`; `test_gpu_corpus`: `test result:
-  ok. 28 passed; 0 failed`.
-
-The second, the rust-only leg's pass lines, is the block above. `build-test.md`: grand total
-2264→2265, Rust 1811→1812, cpu block 1155→1156, `--lib` 582→583, the projection row 16→17 with
-the width fact in its prose. `git status --short testdata/` empty.

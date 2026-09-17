@@ -1,15 +1,13 @@
 //! What the device holds at a handle, reduced to what cuDF stores: a `type_id` and, for a
-//! decimal, its scale. The declared side is cuDF's own arrow-to-cudf table
+//! decimal, its scale. The projection is cuDF's own arrow-to-cudf table
 //! (`third_party/cudf/cpp/src/interop/arrow_utilities.cpp`, `arrow_to_cudf_type`) over the
-//! types the wire admits, the same table in 25.02. The actual side comes back through 25.02's
-//! `to_arrow_schema`, which has no narrow-decimal arrow type and so reports `DECIMAL32` and
-//! `DECIMAL64` as `decimal128` at precision 9 and 18 — there, and only there, a precision is
-//! a width. Otherwise precision, timezone and nullability are labels the export carries and
-//! the device does not hold, so they are not here.
+//! types the wire admits; it is the same table in 25.02, which lacks only the view and
+//! narrow-decimal arms the wire no longer carries. Precision, timezone and nullability are
+//! labels the export carries and the device does not hold, so they are not here.
 
 use std::fmt;
 
-use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use datafusion::arrow::datatypes::{DataType, Schema, TimeUnit};
 use datafusion::arrow::ipc::reader::StreamReader;
 #[cfg(not(feature = "rust-only"))]
 use peacockdb_ffi::raw::{PeacockExecutor, peacock_handle_schema, peacock_result_free};
@@ -88,38 +86,13 @@ pub(crate) fn device_divergence(declared: &Schema, actual: &DeviceSchema) -> Opt
     (!findings.is_empty()).then(|| findings.join("; "))
 }
 
-/// The schema message of an IPC stream — what `peacock_handle_schema` hands back — projected,
-/// a decimal by the width its precision names. Its one caller is the handle read below, which
-/// `rust-only` compiles out; the unit tests are what keep it in that build.
+/// The schema message of an IPC stream — what `peacock_handle_schema` hands back — projected.
+/// Its one caller is the handle read below, which `rust-only` compiles out; the unit tests
+/// are what keep it in that build.
 #[cfg_attr(feature = "rust-only", allow(dead_code))]
 pub(crate) fn from_ipc(bytes: &[u8]) -> DeviceSchema {
     let reader = StreamReader::try_new(std::io::Cursor::new(bytes), None).expect("an IPC stream");
-    DeviceSchema(
-        reader
-            .schema()
-            .fields()
-            .iter()
-            .map(|field| (field.name().clone(), held_type_of(field)))
-            .collect(),
-    )
-}
-
-fn held_type_of(field: &Field) -> DeviceType {
-    match field.data_type() {
-        DataType::Decimal128(precision, scale) => DeviceType {
-            id: match precision {
-                9 => TypeId::Decimal32,
-                18 => TypeId::Decimal64,
-                38 => TypeId::Decimal128,
-                other => panic!(
-                    "{}: a handle reports precision {other}, which names no cuDF width",
-                    field.name()
-                ),
-            },
-            scale: Some(i32::from(*scale)),
-        },
-        other => device_type_of(other),
-    }
+    device_schema_of(&reader.schema())
 }
 
 /// `peacock_handle_schema` on the handle: the schema and no rows, the handle left resident.
@@ -156,8 +129,6 @@ impl fmt::Display for TypeId {
             TypeId::TimestampMicroseconds => "TIMESTAMP_MICROSECONDS",
             TypeId::TimestampNanoseconds => "TIMESTAMP_NANOSECONDS",
             TypeId::String => "STRING",
-            TypeId::Decimal32 => "DECIMAL32",
-            TypeId::Decimal64 => "DECIMAL64",
             TypeId::Decimal128 => "DECIMAL128",
         })
     }

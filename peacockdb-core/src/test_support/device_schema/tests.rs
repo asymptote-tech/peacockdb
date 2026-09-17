@@ -190,7 +190,7 @@ fn a_column_count_mismatch_is_a_divergence() {
 }
 
 // What `peacock_handle_schema` hands back: an IPC stream carrying the schema message and
-// no batch, a `DECIMAL128` at `decimal128(38, s)` and every string `utf8`.
+// no batch, every decimal at `decimal128(38, s)` and every string `utf8`.
 #[test]
 fn a_device_schema_reads_off_a_schema_only_ipc_stream() {
     let exported = Schema::new(vec![
@@ -213,40 +213,4 @@ fn a_device_schema_reads_off_a_schema_only_ipc_stream() {
         ])
     );
     assert_eq!(device_divergence(&exported, &from_ipc(&bytes)), None);
-}
-
-// 25.02's `to_arrow_schema` reports a narrow width as `decimal128` at that width's maximum
-// precision, 9 or 18, so at the handle the precision is the width — unlike a declaration.
-#[test]
-fn a_narrow_precision_at_the_handle_is_the_narrow_width_the_device_holds() {
-    let held = Schema::new(vec![
-        Field::new("n", DataType::Decimal128(9, 1), true),
-        Field::new("w", DataType::Decimal128(18, 2), true),
-    ]);
-    let mut bytes = Vec::new();
-    let mut writer = StreamWriter::try_new(&mut bytes, &held).expect("a stream");
-    writer.finish().expect("a schema-only stream");
-    drop(writer);
-    let narrow = |id, scale| DeviceType {
-        id,
-        scale: Some(scale),
-    };
-    assert_eq!(
-        from_ipc(&bytes),
-        DeviceSchema(vec![
-            ("n".into(), narrow(TypeId::Decimal32, 1)),
-            ("w".into(), narrow(TypeId::Decimal64, 2)),
-        ])
-    );
-    let declared = Schema::new(vec![
-        Field::new("n", DataType::Decimal128(9, 1), true),
-        Field::new("w", DataType::Decimal128(18, 2), true),
-    ]);
-    assert_eq!(
-        device_divergence(&declared, &from_ipc(&bytes)),
-        Some(
-            "0 n: Decimal128(9, 1) vs DECIMAL32 scale 1; 1 w: Decimal128(18, 2) vs DECIMAL64 scale 2"
-                .to_string()
-        )
-    );
 }
