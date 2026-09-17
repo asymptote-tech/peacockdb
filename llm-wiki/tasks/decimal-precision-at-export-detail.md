@@ -294,3 +294,10 @@ markdown; the coordinator applied them all, no developer round. Not scored, reco
 "`Decimal32`/`Decimal64` automatically if arrow ever adds them" is a `Decimal256` match today,
 arrow-schema 54.3.1 having neither variant nor an `is_decimal` predicate. The analyst's evidence
 trail is the section "Completeness pass — analyst, what is missing — 2026-09-17" below.
+
+## Done — 2026-09-17
+
+PR #159 mergeable against `ENS-utf8-everywhere`; CI runs 35173424113, 35174471596 and
+35175955103 green on every job on the rebased branch — both dataset-matrix legs (the 26.02 one
+compiling the new export), the GPU tests on shad-gpu, cost report, S3 check. Awaiting the
+human's merge after task 1's.
