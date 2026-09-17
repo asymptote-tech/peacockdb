@@ -35,7 +35,7 @@ takes a per-column declared precision, set on the imported Arrow schema (25.02 h
 but `Decimal128`. The chain's one wire/header rebuild: `output_schema` and the view values leave,
 `peacock_handle_schema` arrives. 53 decimal queries roll out.
 
-### 3. [`aggregate-state-types.md`](aggregate-state-types.md) — closes [#163](../tickets.md#t163) — state: completeness approved — PR #160
+### 3. [`aggregate-state-types.md`](aggregate-state-types.md) — closes [#163](../tickets.md#t163) — state: done — PR #160
 
 `PlanAgg::state_type` types every state column by the aggregator that produces it, and `decompose` uses
 it instead of copying DataFusion's accumulator layout; the CPU's Welford count gets the one cast; the

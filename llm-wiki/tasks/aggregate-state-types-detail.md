@@ -275,3 +275,9 @@ one dated line each, 55/27/5/4 rows per the csv); the record's out-of-scope list
 code edits, now listed above, and the signoff owes `counted_unsigned` by name. `architecture.md`:
 one sentence the branch wrote was loose — "ten digits of precision" is capped at 38 — corrected;
 nothing else falsified, both readers agree. The analyst's evidence trail is the section below.
+
+## Done — 2026-09-17
+
+PR #160 against `ENS-decimal-precision-at-export`; CI runs 35180663439, 35182179104 and
+35184378440 green on every job — both dataset-matrix legs, the GPU tests on shad-gpu, cost
+report, S3 check. Awaiting the human's merge after tasks 1 and 2.
