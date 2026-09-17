@@ -25,11 +25,11 @@ reference still resolves there.
 <a id="t224"></a>
 ### #224 — the device cannot cast an integer to a date
 
-`CAST(i AS DATE)` over an integer column answers on the cpu — arrow reads the value as days —
-and is refused on the device: `Timestamps cannot be converted to numeric without converting it
-to a duration`.
+`CAST(i AS DATE)` over an integer column answers on the cpu and is refused on the device:
+`Timestamps cannot be converted to numeric without converting it to a duration`.
 
-The cast arm of `build_column` (`expr.cpp`) hands every numeric-to-chrono cast to `cudf::cast`,
+Arrow reads the integer as days. The cast arm of `build_column` (`expr.cpp`) hands every
+numeric-to-chrono cast to `cudf::cast`,
 which routes none of them; an integer source needs a duration in days first, and the wire
 carries no duration type to route it through. The mirror of #218, where the source is text. No
 corpus query casts an integer to a date; `date-part-return-type`'s gtests met it building a
@@ -49,11 +49,11 @@ yet.
 <a id="t222"></a>
 ### #222 — `round(x, places)` with a column for `places` is refused on the device
 
-`round(x, n)` with a column `n` answers on the cpu — DataFusion's signature takes `Int64` for
-the places, column or literal — and the device refuses it: `round: decimal places must be a
-literal`.
+`round(x, n)` with a column `n` answers on the cpu and the device refuses it: `round: decimal
+places must be a literal`.
 
-The `round` arm of `build_column_scalar_fn` (`expr.cpp`) reads `places` from a literal alone,
+DataFusion's signature takes `Int64` for the places, column or literal. The `round` arm of
+`build_column_scalar_fn` (`expr.cpp`) reads `places` from a literal alone,
 since `cudf::round` takes one scale for the whole column; a per-row scale is one `cudf::round`
 per distinct value gathered back, or a refusal the planner makes at plan time so both engines
 agree. No corpus query rounds by a column. Seen by `date-part-return-type`'s neighbour survey;
