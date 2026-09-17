@@ -135,3 +135,12 @@ awaiting the human's merge; the chain sits on master `0a338ead`.
   Red at the project by name, with the field and both types; the sink never saw the batch.
 - Nothing outside the spec's Scope table changed except `llm-wiki/tickets.md` (the dated line
   on #225, which the spec's own "a ticket" clause asks for).
+
+## Reviewing — 2026-09-17
+
+Dispatch 1 committed as `cb15e798` on `36bb3060`, pushed; PR #163 against
+`ENS-device-schema-harness`, base verified. For the reviewer: three of the spec's four emission
+sites are hooked — the lane's host arm queues the unload's `CpuBatch`, which a hook typed on
+`B::Batch` cannot take for a generic `B`, and the sink was to be skipped anyway; `OutputHook`
+lives in `executor/mod.rs` so `test_support` can name it; `tpch/shuffle-stddev` is
+`schema_validation_disabled` on #225 (twelve name findings, no type finding, values match).

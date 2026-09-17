@@ -53,7 +53,7 @@ projects an arrow schema onto `{type_id, scale}` and compares; a new schema case
 every harness family, and eleven hand-written spot-checks inside the recipe walk. Existing cases
 untouched; a red case is a `bug_` with a ticket.
 
-### 6. [`driver-output-hook.md`](driver-output-hook.md) — state: building
+### 6. [`driver-output-hook.md`](driver-output-hook.md) — state: reviewing — PR #163
 
 The driver takes an optional hook called on every emitted batch — the one production change. Under
 the `test-support` feature: a validator holding each device batch to its node's schema, four
