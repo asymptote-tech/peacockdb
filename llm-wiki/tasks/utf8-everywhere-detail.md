@@ -37,7 +37,7 @@ pin was the only device-side assertion of the unload's `declared vs exported` re
 outside the rule (guarded transitively); `check_expr_types` re-walks each subtree once per
 ancestor; the `corpus_cases.inc` comment above `q13` is 11 lines and narrates history;
 `src/common.rs:89,44-52` comments name deleted arms and a nonexistent function; #183 over the
-30-line cap. The coordinator trimmed #183 and #215 (`971f2c6e`); the rest go to the developer.
+30-line cap. The coordinator trimmed #183 and #220 (`971f2c6e`); the rest go to the developer.
 
 ## Restart — 2026-09-16, round 1 fixes in flight
 
@@ -145,7 +145,7 @@ class had hidden: the decimal class (#187), the year (#191), `GpuAggregateBatche
 (#185), or a class no ticket named — the cpu's joins answering DataFusion's batch stream
 (8192-row splits and one empty batch per unmatched probe batch) where the device answers one
 table per call, so `output_bytes` and the batch lists differ by the per-batch overhead. That is
-[#215](active-tickets.md#t215), opened here; the attribution was checked on `tpch/q15`
+[#220](active-tickets.md#t220), opened here; the attribution was checked on `tpch/q15`
 (`[[8192,1808]]` vs one batch, 946045 vs 946033) and `tpch/q4` (18 empty batches × 4 bytes =
 the 72-byte gap at the join and at the aggregate over it) and `tpch/cross-join` (5 batches of
 25 vs one of 125, 92 bytes). Four cells ran the whole device plan clean and failed only because
@@ -168,7 +168,7 @@ until the cpu's is.
 | sink, decimal (#187) | tpcds q3 q7 q8 q15 q18 q19 q24 q25 q26 q30 q37 q40 q42 q43 q45 q46 q52 q55 q56 q58 q59 q60 q65 q68 q76 q79 q80 q81 q82 q85 q91; tpch aggregate-groupby anti-join q1 q2 q10 q18 q22 semi-join shuffle-additive shuffle-additive-avg | `187` added where absent |
 | sink, `Int32` vs `Int16` (#191) | tpch q7 q9 | `191` added |
 | golden, `in_rows` at `GpuAggregateBatches` (#185) | tpcds q21 q31 q34 q50 q62 q66 q73 q83 q99; tpch q5 q12 q16 rollup-over-join | `185` added |
-| golden, batching at a join (#215, new) | tpcds q4 q10 q11 q23 q29 q69 q74; tpch cross-join nested-loop-left-join q4 q15 q20 q21 | `215` added |
+| golden, batching at a join (#220, new) | tpcds q4 q10 q11 q23 q29 q69 q74; tpch cross-join nested-loop-left-join q4 q15 q20 q21 | `220` added |
 | device clean, no cpu cell (#163) | tpcds q1 q17 q22 q35 | unchanged |
 
 The raw first-difference line per cell is in the run log the coordinator can regenerate with
@@ -232,7 +232,7 @@ fix on `as_declared`, the red runs, the proofs and this record. Per finding:
    recurses through a private `column_refs_in_range`; `join.rs`'s residual path was already a
    single call. No behaviour change, no test.
 5. **The `q13` comment** (nit). Eight lines, current state only: the four causes are #152,
-   #184, #185 and the string class, whose cells are off on #187, #191, #185, #215.
+   #184, #185 and the string class, whose cells are off on #187, #191, #185, #220.
 6. **`src/common.rs` comments** (nit). The `array_content_size` doc no longer names View
    layouts; the `type_structural_size` fallback comment is four lines and names no
    `assert_type_accountable`.

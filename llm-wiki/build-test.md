@@ -355,7 +355,7 @@ cells today: `q6` at every mode, and `q19`, `nested-loop-join`, `shuffle-stddev`
 at `tp1-single`; the rest are off against [#152](tickets.md#t152),
 [#184](tasks/active-tickets.md#t184), [#185](tasks/active-tickets.md#t185),
 [#187](tasks/active-tickets.md#t187), [#191](tasks/active-tickets.md#t191) and
-[#215](tasks/active-tickets.md#t215). The tenth case is that a device run under a
+[#220](tasks/active-tickets.md#t220). The tenth case is that a device run under a
 regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |

@@ -80,7 +80,7 @@ return. The 76 string-class queries of
 [`reports/sink-divergence.md`](../reports/sink-divergence.md) were re-run at `tp1-single`: no
 sink showed a string, three cells are enabled (`tpcds/q84`, `tpch/nested-loop-join`,
 `tpch/shuffle-stddev`), four ran the whole device plan clean but have no cpu cell (#163), and
-the rest fail on the next thing in line — #187 (41), #191 (2), #185 (13) and #215 (13), opened
+the rest fail on the next thing in line — #187 (41), #191 (2), #185 (13) and #220 (13), opened
 here. `183` stays on a row only where the other four modes have no ticket yet.
 
 <a id="t184"></a>
@@ -124,8 +124,8 @@ q62 q66 q73 q83 q99, `tpch` q5 q12 q16 rollup-over-join — so 22 registry rows 
 `q48` and `q93` are also the first cells in this rollout where a device COMPLETED a plan and the
 golden caught the disagreement — every other device failure so far has been a refusal.
 
-<a id="t215"></a>
-### #215 — the cpu's joins answer several batches per call where the device answers one
+<a id="t220"></a>
+### #220 — the cpu's joins answer several batches per call where the device answers one
 
 The cpu's `probe_and_fetch` (`cpu_backend/join.rs`) hands back DataFusion's whole output
 stream for one probe batch, where the device answers one table per `execute_node`. The stream
