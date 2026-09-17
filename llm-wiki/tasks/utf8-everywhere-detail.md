@@ -345,3 +345,19 @@ master (`491f1afc`, chain D's `empty-build` merged and archived) first; the conf
 are `tasks.md`, `tickets.md`, `build-test.md` (mine) and `corpus_cases.inc`, `cost-registry.csv`
 (a developer's). `completeness approved` is restored only after the developer re-runs the
 proving commands green on the new base; then CI, then `done`, then task 2's turn.
+
+## Rebased onto master — 2026-09-17
+
+`ENS-utf8-everywhere` now sits on master `0a338ead` (chain D's `empty-build` merged and
+archived, chain E's cases landed, tickets #215–#219 opened there). Fifteen commits replayed;
+four stopped, all resolved by ownership: `build-test.md`'s counts take master's numbers plus
+each commit's own delta (header now 1959, cpu 1025 with `--lib` 551, gpu 397 with
+`gpu_tests::` 386 and `test_gpu_corpus` 11, harness 331 — **to be confirmed against `--list`
+by the re-proof**); `cost-registry.csv` q76 and q15 the branch's rows, q77 master's, q16
+master's cells with both sides' ticket edits (`175` and `183` struck, `185` added); the T19
+batch-5 comment master's cpu lines over the branch's device lines; #187 and #191 master's new
+pins followed by the rollout lines. One collision: master allocated #215 while this branch
+opened its own, so the join-batching ticket is renumbered **#220** everywhere (`99d6be57`) and
+the counter is 221. The pre-rebase tip is tag `pre-rebase/utf8-everywhere` (`49abbaa9`, local).
+`completeness approved` is restored only when the developer re-runs the proving commands green
+on this base; then CI can finally run on PR #158.
