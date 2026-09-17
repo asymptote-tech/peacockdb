@@ -50,9 +50,10 @@ const char* peacock_last_error(peacock_executor_t* executor);
 // The Rust orchestrator drives ONE plan node at a time: load the plan once, then
 // call peacock_executor_execute_node per node (canonical post-order) with the child
 // output handles. Intermediates stay GPU-resident behind handles; Arrow IPC crosses
-// the boundary only at peacock_result_from_handle — once, at the root, for that walk,
-// and once per unloaded batch for a driver using the three per-batch entry points
-// below (a scan read per row-group subset, a sliced handle, a ranged export).
+// the boundary at peacock_result_from_handle — once, at the root, for that walk, and
+// once per unloaded batch for a driver using the three per-batch entry points below (a
+// scan read per row-group subset, a sliced handle, a ranged export) — and, rows-free,
+// at peacock_handle_schema.
 // ---------------------------------------------------------------------------
 
 /// Actual per-node costs. Rust applies the shared ColAccum overhead (validity +
@@ -139,13 +140,13 @@ int peacock_executor_begin_plan(peacock_executor_t* executor,
                                 const uint8_t* plan_bytes, uint64_t plan_len,
                                 uint64_t* out_node_count);
 
-// FAILURE POLICY at the four doors below. The three that execute — execute_node,
+// FAILURE POLICY at the five doors below. The three that execute — execute_node,
 // execute_scan_rowgroups, slice_handle — end the query once work has begun: the loaded plan
 // goes, and every resident handle with it, which is what makes a release on the failure path
 // a no-op and keeps a driver's holds equal to its releases. Their validation arms are the
 // exception — a null out-param, no plan loaded, an empty row-group list — since those refuse
-// before any work and leave the session as it was. peacock_result_from_handle never ends a
-// query: it reads a handle and touches nothing.
+// before any work and leave the session as it was. The two that read —
+// peacock_result_from_handle and peacock_handle_schema — never end a query: they touch nothing.
 
 /// Execute the node at post-order `seq` with already-resident child output handles,
 /// storing each output partition as a new resident handle. A failure ends the query.

@@ -223,3 +223,74 @@ letter: `n_columns == 0` with a null array declares nothing — `abi.rs`, the wi
 C++ tests have no schema to size an array from — where the spec says the count must equal the
 column count or the call fails; every non-zero count is still checked. The reviewer's note that
 the export's new code had compiled on 25.02 alone is CI's 26.02 leg to answer.
+
+## Completeness pass — analyst, what is missing — 2026-09-17
+
+Read as one change against `ENS-utf8-everywhere` (6 commits, 39 files). 0 blocking, 2 important.
+
+**Spec items, sub-part by sub-part.** Item 1: `int32_t` array and count at all three sites
+(`peacock_gpu.h`, `gpu_executor.cpp`, `ffi/src/lib.rs`). Item 2: label set on the imported
+schema between `ImportSchema` and `ImportRecordBatch`, scale off the column; widening loop and
+comment gone; both `runtime_error`s name the column; count check present, with the recorded
+`n_columns == 0` escape; `export_table_to_ipc` non-static in `plan_executor_internal.h`. Item 3:
+`unload` builds from `self.schema`, `concat_batches` untouched; `Device::fetch` takes
+`Option<&Schema>`, zeros on `None`; the walk's `Session::export` passes zeros. Item 4: one
+classifier `unholdable` reaches node schema, intermediate schema, literal, binary out type, cast
+target and scalar return; `Decimal256` refused with two unit tests; `fb_to_type_id` maps
+`Decimal128` alone; `DECIMAL32|64` in `cpp/src` is `scan.cpp:106` only. Item 5: both fbs
+fields, both `None`s, the union block (dead on every driven path — the writer's `CudfUnion` is
+structural and the driver makes no call), `make_plan_node`'s parameter, the `node_session.cpp`
+comment, both enum values, the four view arms the parent still had (task 1 took the fifth),
+the 45 renames, `peacock_handle_schema` in header, executor and extern with its two gtests.
+`test_cudf_nodes.cpp` deviation justified: `EXCLUDE_FROM_ALL`, no gate runs it.
+
+**Verification bar.** Every tier has a `test result:` (or ctest `100%`) line after the rebase:
+rust-only local with verda down and said so; `ctest -L cpu` in `cpp/build` (25.02); device on
+shad-gpu, cycle two unfiltered. The three greps re-run here and hold (`-rnw output_schema`
+empty; the substring survives only in `check_output_schema`). 26.02: `cpp/build26` absent, no
+local compile; PR #159's `CI Pipeline (cudf 26.02)` was in progress at reading time — the wait
+at `done` is what answers it.
+
+**Registry.** All 50 changed csv rows match the rollout table (5 enabled, 24 → `185`, 10 → `220`,
+11 → `163` with cpu off; q13 q32 q92 unchanged on `163`); `187` survives on `tpch/filter_project`
+alone; 14 enabled `gpu_` cells = q6 ×5 + nine at `tp1_single`, so `test_gpu_corpus` 16 =
+14 + regen + registry. `build-test.md` header 1976 = Rust 1526 + C++ 81 + Python 369; blocks
+1028/5/405 sum; `--lib` 554 = 551 + `common::tests` 1 + `validate::tests` 2; harness 334 =
+322 `operator_case!` + 12 `#[test]`; plan-executor 41 `TEST(` in the file; cpu gtests 12.
+`test_ci_coverage` needs no change: no new `--test` target, gtests run by glob.
+
+**Tickets.** Counter 221 = highest anchor #220 + 1. #187's Done line is the #183 shape and its
+cell arithmetic checks (5 + 24 + 10 + 14 = 53). #207, #210, #216 stay true: each describes the
+node's output, which is unchanged; only where the harness observes it moved (export refusal).
+#185 and #220 are the important finding below.
+
+**Handoff to `device-schema-harness`.** `peacock_handle_schema(executor, handle, out_ipc,
+out_len)`: schema message alone via `MakeStreamWriter` + `Close()`, `malloc`'d, freed by
+`peacock_result_free` (`std::free`), 0 on success, extern in `peacockdb-ffi/src/lib.rs`, no Rust
+caller — exactly what task 5's spec assumes. Eighteen exported symbols counted in
+`gpu_executor.cpp`.
+
+**Not scored, for the coordinator's `architecture.md` pass** — three sentences the branch
+falsified and did not touch: the `decimal scale` row of the cuDF options table still names
+`union.cpp` as a site (the deleted block was the only one); `## Column indexing`'s "48
+`.column(…)` calls" is 49 (the export reads `tview.column(i)` twice); `### What guards it`'s
+"six sites indexing names use `operator[]`" is eight (`gpu_executor.cpp:79,83`, the refusal
+messages). The five edits the branch made are true and complete. `build-test.md`'s "Plan
+types" prose still says "names a view type" only, where the row now also counts the two
+`Decimal256` refusals — a clause, not a count.
+
+## Completeness pass — 2026-09-17
+
+Two blind readings. **Reviewer (what is wrong): 0 blocking, 1 important** — three places still
+described the export that widens: `scan.cpp`'s loader comment ("subsumes the widening the
+export also does"), `peacock_gpu.h`'s preamble (IPC crosses at one door; the failure policy's
+"four doors") and #210 in `tickets.md` (the device "answers" a Float64 where the export now
+refuses it by name). **Analyst (what is missing): 0 blocking, 2 important** — the same
+`scan.cpp` comment, and #185 (22 rows stated, 46 in the csv) and #220 (no line for this
+rollout's ten). `architecture.md` falsified by the branch and not corrected: the decimal-scale
+row still named `union.cpp`, and Column indexing's counts (49 `.column(…)` calls, eight
+name-indexing sites) — all three confirmed by counting the tree. Every item comment-only or
+markdown; the coordinator applied them all, no developer round. Not scored, recorded: item 4's
+"`Decimal32`/`Decimal64` automatically if arrow ever adds them" is a `Decimal256` match today,
+arrow-schema 54.3.1 having neither variant nor an `is_decimal` predicate. The analyst's evidence
+trail is the section "Completeness pass — analyst, what is missing — 2026-09-17" below.

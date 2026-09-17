@@ -1025,7 +1025,7 @@ Where the ordinals come from and where they land:
 | `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
 | sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/wire/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) |
 
-`cpp/src/` holds 22 `->index()` reads and 48 `.column(…)` calls, so this is the engine's most
+`cpp/src/` holds 22 `->index()` reads and 49 `.column(…)` calls, so this is the engine's most
 common operation and the one with the least ceremony around it.
 
 ### What guards it, and what does not
@@ -1044,7 +1044,7 @@ offsets and vectors are well formed and has no idea what an ordinal means.
 Two things nothing guards, and [#164](tickets.md#t164) carries the fixes.
 
 **Column names are a parallel array with no invariant.** `TableResult` is a `cudf::table` plus
-a `std::vector<std::string>` with no assertion that the two are the same length, and the six
+a `std::vector<std::string>` with no assertion that the two are the same length, and the eight
 sites indexing names use `operator[]` — so a short names vector is undefined behaviour rather
 than an exception. `filter.cpp` reads the checked `column(idx)` and the unchecked
 `column_names[idx]` in one loop iteration, and the checked read happening first is luck.
@@ -1071,7 +1071,7 @@ precisely so cuDF cannot infer something the CPU side did not.
 | `cudf::out_of_bounds_policy` | [`join.cpp`](../cpp/src/operators/join.cpp) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
 | `cudf::null_policy` (groupby) | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [grouping sets](../cpp/src/operators/aggregate.cpp) | `INCLUDE` | `EXCLUDE` silently drops the NULL group — tpcds q15's NULL `ca_zip` row disappears |
 | `cudf::null_policy` (rolling count) | [`window.cpp`](../cpp/src/operators/window.cpp) | `EXCLUDE` for `COUNT(col)`, `INCLUDE` for `COUNT(*)` | one of the two is always wrong: `COUNT(*)` counts rows, `COUNT(col)` counts non-nulls |
-| decimal scale | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [`union.cpp`](../cpp/src/operators/union.cpp), [`window.cpp`](../cpp/src/operators/window.cpp) | `data_type{id, -out_decimal_scale}` from the flat buffers | cuDF would re-derive a scale per operation and drift from DataFusion's |
+| decimal scale | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [`window.cpp`](../cpp/src/operators/window.cpp) | `data_type{id, -out_decimal_scale}` from the flat buffers | cuDF would re-derive a scale per operation and drift from DataFusion's |
 | binary-op output type | [`expr.cpp`](../cpp/src/expr.cpp) | boolean for predicates, else the wider input; division pre-scales the numerator to hit the flat buffers's `out_decimal_precision/scale` | cuDF promotes by its own rule, which is not SQL's decimal arithmetic |
 | hash seed / algorithm | [`spark_hash_partition.cu`](../cpp/src/spark_hash_partition.cu) | our own Spark-murmur3, seed 42, cuDF only for the scatter | cuDF ships standard murmur3, whose partition numbers differ from comet's — see [Rehash and the comet hash](#rehash-and-the-comet-hash) |
 | IPC export | [`gpu_executor.cpp`](../cpp/src/gpu_executor.cpp) | column names as `column_metadata`; each declared decimal precision set on the imported Arrow schema; a fixed_point that is not DECIMAL128 refused | unnamed columns, and every decimal labelled `decimal128(38, s)`, which the sink refuses against the narrower declaration (#187) |
