@@ -116,7 +116,16 @@ impl LoadedPlan {
         let mut ptr: *mut u8 = std::ptr::null_mut();
         let mut len = 0u64;
         let rc = unsafe {
-            peacock_result_from_handle(self.executor, handle, offset, length, &mut ptr, &mut len)
+            peacock_result_from_handle(
+                self.executor,
+                handle,
+                offset,
+                length,
+                std::ptr::null(),
+                0,
+                &mut ptr,
+                &mut len,
+            )
         };
         if rc != 0 {
             return Err(rc);

@@ -197,11 +197,24 @@ int peacock_executor_slice_handle(peacock_executor_t* executor, uint64_t handle,
 /// and nothing to free; a range running past the end clamps to it rather than failing,
 /// because a limit's fetch legitimately overruns the batch it straddles. An EMPTY table
 /// still exports its schema, as whole-table callers have always received.
+/// `decimal_precisions[i]` is the declared precision of column i, 0 for none; scale is
+/// the column's. cuDF holds no precision, so an undeclared DECIMAL128 leaves as
+/// decimal128(38, s). NULL with `n_columns == 0` declares nothing; otherwise `n_columns`
+/// must be the table's column count, and a precision on a non-decimal column fails.
 /// Caller frees *out_ipc with peacock_result_free(). Does NOT release the handle, and a
 /// failure leaves the session standing.
 /// @return 0 on success, non-zero on failure.
 int peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle, uint64_t offset,
-                               uint64_t length, uint8_t** out_ipc, uint64_t* out_ipc_len);
+                               uint64_t length, const int32_t* decimal_precisions,
+                               uint64_t n_columns, uint8_t** out_ipc, uint64_t* out_ipc_len);
+
+/// The schema alone, as an Arrow IPC stream carrying the schema message and no batch:
+/// for reading what the device holds at a handle without moving rows. Undeclared, so a
+/// decimal reads as decimal128(38, s). Freed with peacock_result_free(); does NOT
+/// release the handle, and a failure leaves the session standing.
+/// @return 0 on success, non-zero on failure.
+int peacock_handle_schema(peacock_executor_t* executor, uint64_t handle, uint8_t** out_ipc,
+                          uint64_t* out_len);
 
 /// Release a resident intermediate handle (idempotent).
 void peacock_handle_release(peacock_executor_t* executor, uint64_t handle);

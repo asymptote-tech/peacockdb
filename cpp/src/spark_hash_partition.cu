@@ -130,8 +130,8 @@ std::unique_ptr<cudf::column> spark_partition_ids(cudf::table_view const& input,
     cudf::column_view col = input.column(ci);
     // (#18) Normalize a dict-encoded key to its STRING values FOR HASHING ONLY. A
     // dict-encoded parquet string arrives as cuDF DICTIONARY32, which no kernel
-    // below handles; decoding yields the identical bytes the comet CPU path hashes
-    // (it sees Utf8View→Utf8). The SCATTERED output keeps the ORIGINAL column.
+    // below handles; decoding yields the identical bytes the comet CPU path hashes.
+    // The SCATTERED output keeps the ORIGINAL column.
     if (col.type().id() == cudf::type_id::DICTIONARY32) {
       decoded_keep.push_back(
           cudf::dictionary::decode(cudf::dictionary_column_view{col}, stream, mr));
@@ -174,7 +174,7 @@ std::unique_ptr<cudf::column> spark_partition_ids(cudf::table_view const& input,
               *dcol, hashes.data(), n);
           break;
         default:
-          // Print the exact cuDF type_id: the DataFusion-plan type (e.g. Utf8View)
+          // Print the exact cuDF type_id: the DataFusion-plan type (e.g. Utf8)
           // is only a proxy for what actually reaches this kernel.
           CUDF_FAIL(
               "peacock spark_partition_ids: unsupported key column cuDF type_id=" +

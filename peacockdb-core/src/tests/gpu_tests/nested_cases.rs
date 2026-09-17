@@ -249,17 +249,16 @@ operator_case! {
 }
 
 // #207 — neither backend applies a cross join's projection: the cpu refuses the sixteen
-// columns it declared two of, and the device hands all sixteen up.
+// columns it declared two of, and the device hands all sixteen to an export told two.
 operator_case! {
     GpuCrossJoin,
     fn bug_a_cross_join_projection_is_dropped_on_both() {
         let outcome = run_both(&cross(Some(vec![0, 8])), one_probe());
-        cpu_refuses_with(&outcome, TWO_OF_SIXTEEN);
-        let every_column = run_both(&cross(None), one_probe());
-        assert_same(
-            every_column.cpu.as_ref().expect("the cpu answers"),
-            outcome.gpu.as_ref().expect("the device answers"),
-            Order::Any,
+        let (cpu, gpu) = outcome.both_refuse();
+        assert!(cpu.contains(TWO_OF_SIXTEEN), "{cpu}");
+        assert!(
+            gpu.contains("2 declared precisions for a table of 16 columns"),
+            "{gpu}"
         );
     }
 }

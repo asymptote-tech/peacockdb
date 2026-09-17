@@ -147,14 +147,30 @@ pub mod raw {
         /// wanting the whole table passes. A range naming no rows of a non-empty table
         /// exports nothing (`*out_ipc_len == 0`, nothing to free) and one running past
         /// the end clamps, because a limit's fetch legitimately overruns the batch it
-        /// straddles. Does NOT release the handle.
+        /// straddles. `decimal_precisions[i]` is the declared precision of column i, 0
+        /// for none; scale is the column's. Null with `n_columns == 0` declares nothing,
+        /// otherwise `n_columns` must be the table's column count. Does NOT release the
+        /// handle.
         pub fn peacock_result_from_handle(
             executor: *mut PeacockExecutor,
             handle: u64,
             offset: u64,
             length: u64,
+            decimal_precisions: *const i32,
+            n_columns: u64,
             out_ipc: *mut *mut u8,
             out_ipc_len: *mut u64,
+        ) -> i32;
+
+        /// The schema alone, as an Arrow IPC stream carrying the schema message and no
+        /// batch: what the device holds at a handle, without moving rows. Freed with
+        /// [`peacock_result_free`]; does NOT release the handle. Nothing in Rust calls
+        /// it yet.
+        pub fn peacock_handle_schema(
+            executor: *mut PeacockExecutor,
+            handle: u64,
+            out_ipc: *mut *mut u8,
+            out_len: *mut u64,
         ) -> i32;
 
         pub fn peacock_handle_release(executor: *mut PeacockExecutor, handle: u64);

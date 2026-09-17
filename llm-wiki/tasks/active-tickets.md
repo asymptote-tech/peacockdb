@@ -145,38 +145,20 @@ is asserted first; which side's batching the golden should record is the decisio
 <a id="t187"></a>
 ### #187 — the device widens a decimal the plan declared narrow
 
-`tpch/filter-project` at all five modes: `expected Decimal128(15, 2) but found Decimal128(38, 2)`
-at the unload. The query is `SELECT l_orderkey, l_quantity FROM lineitem WHERE l_quantity > 30` —
-no arithmetic anywhere, so this is the export or the filter widening the column rather than a scale
-rule at a binop.
+`expected Decimal128(15, 2) but found Decimal128(38, 2)` at the unload: cuDF's type is
+`{type_id, scale}` and carries no precision, so `to_arrow_schema` wrote the width's maximum, 38,
+whatever the plan declared. Every declared precision from 5 to 33 arrived at 38, scale preserved.
 
-The CPU has a rule for this: `widened_decimal` (`cpu_backend.rs:499`) accepts a produced decimal
-wider than the declared one at equal scale, and `declared_as` casts it back — over every exec
-stage's output, not only a merged state, though its doc argues the merge that motivated it. The
-device's unload has no such rule: `gpu_backend.rs:166` concats against the sink schema and arrow
-refuses the type outright.
+**Done 2026-09-17, by `decimal-precision-at-export` on branch `ENS-decimal-precision-at-export`.**
+`peacock_result_from_handle` now takes one `int32` precision per column; `unload` fills it from
+the sink's `Decimal128(p, _)`; `export_table_to_ipc` writes it onto the imported Arrow schema
+before the batch is imported, on cuDF 25.02 and 26.02 alike. No cast, no relabel on the Rust
+side. A fixed_point that is not DECIMAL128 at export is a refusal naming the column.
 
-The value in question is the device's own export; DataFusion produces `(15,2)` throughout and the
-CPU tier is green. So this is two rules for produced-against-declared, one per engine, disagreeing
-on the same bytes — one tolerating and casting back, the other refusing. Whichever is right, one of
-them is wrong. Neighbour of [#163](../tickets.md#t163) for that reason, where
-[#183](active-tickets.md#t183) is two representations of one value rather than two verdicts on it.
-
-First plain decimal projection to reach a device in the corpus: q6's decimals are sums, whose
-declared type is already wide, which is why twenty queries went past this and the twenty-first did
-not.
-
-Two sightings, and the pair narrows it: `filter-project`'s projected column declares `(15,2)` and
-`hash-join`'s sum declares `(25,2)`, and both are found as `(38,2)`. Same scale, same 38, two
-different declarations — so the export appears to produce one width rather than widening each
-value by a step, which is a different fix from a scale rule and points at the export rather than at
-anything upstream of it. Six device cells across T19's first two batches. A bare scan of an `(18, 2)`
-column exports `(38, 2)` too: `bug_a_decimal_column_is_exported_at_precision_38` (`gpu_tests/source_cases.rs`). A second declaration reaches the same export: a `CAST` to `Decimal128(20, 0)` in a project comes
-back at 38 (`bug_a_cast_to_decimal_is_exported_at_precision_38`, `gpu_tests/exec_cases.rs`).
-`utf8-everywhere`'s rollout, 2026-09-16, at `tp1-single`: 41 more sinks show this once the string
-class is gone — `tpch` aggregate-groupby anti-join semi-join shuffle-additive shuffle-additive-avg
-q1 q2 q10 q18 q22, `tpcds` q3 q7 q8 q15 q18 q19 q24 q25 q26 q30 q37 q40 q42 q43 q45 q46 q52 q55
-q56 q58 q59 q60 q65 q68 q76 q79 q80 q81 q82 q85 q91 — so 50 registry rows carry it.
+Rolled out at `tp1-single` over the survey's 53 decimal queries: five enabled
+(`tpch` aggregate-groupby filter-project shuffle-additive, `tpcds` q37 q82); the rest reach the
+next cause and carry it — #185 (24), #220 (10) or #163 (14, cpu off). `187` stays on
+`tpch/filter-project` alone, whose other four modes were never run and have no other ticket.
 
 <a id="t188"></a>
 ### #188 — the device refuses a read with row groups and a limit together

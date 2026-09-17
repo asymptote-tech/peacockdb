@@ -2,16 +2,18 @@
 #include "peacock/partitioning.hpp"
 #include "peacock/rmm_pool.hpp"
 #include "plan_executor.h"
+#include "plan_executor_internal.h"
 
 #include <cudf/copying.hpp>
 #include <cudf/interop.hpp>
 #include <cudf/null_mask.hpp>
-#include <cudf/unary.hpp>
+#include <cudf/utilities/traits.hpp>
 
 #include <arrow/buffer.h>
 #include <arrow/c/bridge.h>
 #include <arrow/io/memory.h>
 #include <arrow/ipc/writer.h>
+#include <arrow/type.h>
 
 #include <cuda_runtime.h>
 
@@ -45,37 +47,53 @@ static_assert(offsetof(PeacockNodeStats, varlen_content_bytes) ==
               offsetof(peacock::NodeStats, varlen_content_bytes));
 static_assert(offsetof(PeacockNodeStats, time_us) == offsetof(peacock::NodeStats, time_us));
 
-// Export a cuDF table to an Arrow IPC stream buffer (malloc'd; free with
-// peacock_result_free), for peacock_result_from_handle. Widens DECIMAL32/64→128 since
-// the Rust arrow-ipc reader rejects narrow decimals.
-static void export_table_to_ipc(const cudf::table_view& tview,
-                                const std::vector<std::string>& column_names,
-                                uint8_t** out_bytes, uint64_t* out_len) {
+/// The IPC stream `bytes` as a malloc'd buffer the caller frees with peacock_result_free.
+static void hand_over(const arrow::Buffer& bytes, uint8_t** out_bytes, uint64_t* out_len) {
+  *out_len = static_cast<uint64_t>(bytes.size());
+  *out_bytes = static_cast<uint8_t*>(std::malloc(*out_len));
+  if (!*out_bytes) throw std::runtime_error("malloc failed for result buffer");
+  std::memcpy(*out_bytes, bytes.data(), *out_len);
+}
+
+/// The table's schema as Arrow sees it: names from `column_names`, every decimal at the
+/// width's maximum precision, since cuDF stores none.
+static std::shared_ptr<arrow::Schema> arrow_schema_of(
+    const cudf::table_view& tview, const std::vector<std::string>& column_names) {
   std::vector<cudf::column_metadata> col_meta;
   col_meta.reserve(column_names.size());
   for (const auto& name : column_names) col_meta.push_back({name});
+  auto c_schema = cudf::to_arrow_schema(tview, col_meta);
+  return arrow::ImportSchema(c_schema.get()).ValueOrDie();
+}
 
-  // Dead on every reachable path: the scan widens at the source (scan.cpp), no kernel narrows,
-  // and no upload can carry a narrow decimal (arrow-rs 54 has none). Kept only for a hand-built table.
-  std::vector<std::unique_ptr<cudf::column>> widened;
-  std::vector<cudf::column_view> widened_views;
-  widened_views.reserve(tview.num_columns());
+namespace peacock {
+
+void export_table_to_ipc(const cudf::table_view& tview,
+                         const std::vector<std::string>& column_names,
+                         const int32_t* decimal_precisions, uint8_t** out_bytes,
+                         uint64_t* out_len) {
   for (cudf::size_type i = 0; i < tview.num_columns(); ++i) {
-    auto col = tview.column(i);
-    auto t = col.type();
-    if (t.id() == cudf::type_id::DECIMAL32 || t.id() == cudf::type_id::DECIMAL64) {
-      auto w = cudf::cast(col, cudf::data_type{cudf::type_id::DECIMAL128, t.scale()});
-      widened_views.push_back(w->view());
-      widened.push_back(std::move(w));
-    } else {
-      widened_views.push_back(col);
-    }
+    auto t = tview.column(i).type();
+    bool fixed = cudf::is_fixed_point(t);
+    if (fixed && t.id() != cudf::type_id::DECIMAL128)
+      throw std::runtime_error("export: column " + column_names[i] +
+                               " is a narrow fixed_point; the loader widens every decimal to "
+                               "DECIMAL128 and nothing may narrow one");
+    if (decimal_precisions && decimal_precisions[i] != 0 && !fixed)
+      throw std::runtime_error("export: column " + column_names[i] +
+                               " is not a decimal but was given precision " +
+                               std::to_string(decimal_precisions[i]));
   }
-  cudf::table_view export_view{widened_views};
-
-  auto c_schema = cudf::to_arrow_schema(export_view, col_meta);
-  auto schema = arrow::ImportSchema(c_schema.get()).ValueOrDie();
-  auto c_array = cudf::to_arrow_host(export_view);
+  auto schema = arrow_schema_of(tview, column_names);
+  // The label the plan declared. cuDF stores no precision (25.02 cannot even be told one),
+  // so the schema message is where it is written; the buffers below are untouched.
+  for (int i = 0; i < schema->num_fields(); ++i) {
+    if (!decimal_precisions || decimal_precisions[i] == 0) continue;
+    auto scale = -tview.column(i).type().scale();
+    auto field = schema->field(i)->WithType(arrow::decimal128(decimal_precisions[i], scale));
+    schema = schema->SetField(i, field).ValueOrDie();
+  }
+  auto c_array = cudf::to_arrow_host(tview);
   auto batch = arrow::ImportRecordBatch(&c_array->array, schema).ValueOrDie();
 
   auto sink = arrow::io::BufferOutputStream::Create().ValueOrDie();
@@ -84,13 +102,10 @@ static void export_table_to_ipc(const cudf::table_view& tview,
   if (!st.ok()) throw std::runtime_error("IPC write: " + st.ToString());
   st = writer->Close();
   if (!st.ok()) throw std::runtime_error("IPC close: " + st.ToString());
-  auto buffer = sink->Finish().ValueOrDie();
-
-  *out_len = static_cast<uint64_t>(buffer->size());
-  *out_bytes = static_cast<uint8_t*>(std::malloc(*out_len));
-  if (!*out_bytes) throw std::runtime_error("malloc failed for result buffer");
-  std::memcpy(*out_bytes, buffer->data(), *out_len);
+  hand_over(*sink->Finish().ValueOrDie(), out_bytes, out_len);
 }
+
+}  // namespace peacock
 
 // ---------------------------------------------------------------------------
 // Versioning
@@ -292,7 +307,8 @@ int peacock_executor_slice_handle(peacock_executor_t* executor, uint64_t handle,
 }
 
 int peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle, uint64_t offset,
-                               uint64_t length, uint8_t** out_ipc, uint64_t* out_ipc_len) {
+                               uint64_t length, const int32_t* decimal_precisions,
+                               uint64_t n_columns, uint8_t** out_ipc, uint64_t* out_ipc_len) {
   if (!executor || !out_ipc || !out_ipc_len) return 1;
   if (!executor->session) {
     executor->last_error = "no plan loaded";
@@ -301,6 +317,13 @@ int peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle, ui
   try {
     const auto& result = executor->session->table_for(handle);
     auto view = result.table->view();
+    if (n_columns != 0 && n_columns != static_cast<uint64_t>(view.num_columns())) {
+      executor->last_error = "result_from_handle: " + std::to_string(n_columns) +
+                             " declared precisions for a table of " +
+                             std::to_string(view.num_columns()) + " columns";
+      return 1;
+    }
+    if (n_columns == 0) decimal_precisions = nullptr;
     auto [begin, end] = peacock::clamp_row_range(offset, length, view.num_rows());
     // A range naming no rows of a non-empty table ships nothing. An empty table takes
     // the whole-table arm instead, so a caller asking for all of one keeps getting the
@@ -311,7 +334,33 @@ int peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle, ui
       return 0;
     }
     if (begin != 0 || end != view.num_rows()) view = cudf::slice(view, {begin, end}).front();
-    export_table_to_ipc(view, result.column_names, out_ipc, out_ipc_len);
+    peacock::export_table_to_ipc(view, result.column_names, decimal_precisions, out_ipc,
+                                 out_ipc_len);
+    return 0;
+  } catch (const std::exception& e) {
+    executor->last_error = e.what();
+    return 1;
+  } catch (...) {
+    executor->last_error = "unknown exception";
+    return 1;
+  }
+}
+
+int peacock_handle_schema(peacock_executor_t* executor, uint64_t handle, uint8_t** out_ipc,
+                          uint64_t* out_len) {
+  if (!executor || !out_ipc || !out_len) return 1;
+  if (!executor->session) {
+    executor->last_error = "no plan loaded";
+    return 1;
+  }
+  try {
+    const auto& result = executor->session->table_for(handle);
+    auto schema = arrow_schema_of(result.table->view(), result.column_names);
+    auto sink = arrow::io::BufferOutputStream::Create().ValueOrDie();
+    auto writer = arrow::ipc::MakeStreamWriter(sink.get(), schema).ValueOrDie();
+    auto st = writer->Close();
+    if (!st.ok()) throw std::runtime_error("IPC close: " + st.ToString());
+    hand_over(*sink->Finish().ValueOrDie(), out_ipc, out_len);
     return 0;
   } catch (const std::exception& e) {
     executor->last_error = e.what();

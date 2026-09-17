@@ -41,7 +41,12 @@ fn an_uploaded_batch_comes_back_as_itself() {
     let device = Device::open(&empty_plan());
     let batch = synthetic(64, 1);
     let back = device
-        .fetch(device.upload(&batch), RowRange::WHOLE)
+        .fetch(
+            device.upload(&batch),
+            RowRange::WHOLE,
+            Some(&batch.schema()),
+        )
+        .expect("the export answers")
         .expect("a whole export ships");
     assert_same(&[vec![batch]], &[vec![back]], Order::AsEmitted);
 }
@@ -57,7 +62,9 @@ fn a_row_range_ships_those_rows_in_order() {
                 offset: 10,
                 length: 5,
             },
+            Some(&batch.schema()),
         )
+        .expect("the export answers")
         .expect("five rows ship");
     assert_same(&[vec![batch.slice(10, 5)]], &[vec![back]], Order::AsEmitted);
 }
@@ -71,8 +78,9 @@ fn a_range_past_the_end_ships_nothing() {
             offset: 8,
             length: 1,
         },
+        None,
     );
-    assert!(back.is_none());
+    assert!(back.expect("the export answers").is_none());
 }
 
 #[test]
@@ -86,7 +94,9 @@ fn a_range_over_the_end_is_clamped() {
                 offset: 6,
                 length: 100,
             },
+            Some(&batch.schema()),
         )
+        .expect("the export answers")
         .expect("two rows ship");
     assert_same(&[vec![batch.slice(6, 2)]], &[vec![back]], Order::AsEmitted);
 }
@@ -96,7 +106,12 @@ fn zero_rows_round_trip_as_zero_rows_under_the_schema() {
     let device = Device::open(&empty_plan());
     let batch = synthetic(0, 1);
     let back = device
-        .fetch(device.upload(&batch), RowRange::WHOLE)
+        .fetch(
+            device.upload(&batch),
+            RowRange::WHOLE,
+            Some(&batch.schema()),
+        )
+        .expect("the export answers")
         .expect("the schema ships");
     assert_same(&[vec![batch]], &[vec![back]], Order::AsEmitted);
 }
@@ -114,10 +129,10 @@ fn unload_over(rows: usize) -> (GpuUnload, RecordBatch) {
     (node, batch)
 }
 
-/// A batch whose exported types are not the sink's: the device holds one string layout and
-/// exports it as `Utf8`, so declaring `s` as `LargeUtf8` — a type the plan may carry — is a
-/// divergence the sink refuses, naming the column with its index and both types. The cpu
-/// holds to the declaration and answers, so the refusal is one-sided by construction.
+// A batch whose exported types are not the sink's: the device holds one string layout and
+// exports it as `Utf8`, so declaring `s` as `LargeUtf8` — a type the plan may carry — is a
+// divergence the sink refuses, naming the column with its index and both types. The cpu
+// holds to the declaration and answers, so the refusal is one-sided by construction.
 operator_case! {
     GpuUnload,
     fn the_sink_names_a_column_whose_exported_type_is_not_the_declared_one() {

@@ -54,10 +54,6 @@ fn gpu_answered(outcome: &Outcome, expected: RecordBatch, order: Order) {
     assert_same(&[vec![expected]], gpu, order);
 }
 
-fn batch_of(columns: Vec<(&str, ArrayRef)>) -> RecordBatch {
-    RecordBatch::try_from_iter(columns).expect("columns of one length")
-}
-
 // `GpuFilter`.
 
 fn filter(predicate: Expr, projection: Option<Vec<u32>>) -> GpuFilter {
@@ -244,11 +240,11 @@ operator_case! {
     }
 }
 
-// #187 — the device exports every decimal at precision 38 whatever was declared. The values
-// are the cpu's; only the precision of the two computed columns moves, and the scale holds.
+// Both computed columns come back at the precision the node declares, the scale read off
+// the column: a cuDF binop lands the sum and the quotient at 38, and the export relabels.
 operator_case! {
     GpuProject,
-    fn bug_decimal_arithmetic_is_exported_at_precision_38() {
+    fn decimal_arithmetic_is_exported_at_its_declared_precision() {
         let dec = decimals(64, 1);
         let (add_type, divide_type) = declared_decimal_types();
         let doubled = Expr::binary(
@@ -277,14 +273,7 @@ operator_case! {
             ],
             schema,
         );
-        let outcome = run_both(&node, Script::Exec(vec![dec]));
-        let cpu = &outcome.cpu.as_ref().expect("the cpu answers")[0][0];
-        let widened = batch_of(vec![
-            ("id", cpu.column(0).clone()),
-            ("doubled", cast(cpu.column(1), &DataType::Decimal128(38, 2)).unwrap()),
-            ("halved", cast(cpu.column(2), &DataType::Decimal128(38, 6)).unwrap()),
-        ]);
-        gpu_answered(&outcome, widened, Order::AsEmitted);
+        run_both(&node, Script::Exec(vec![dec])).same(Order::AsEmitted);
     }
 }
 
@@ -411,7 +400,8 @@ operator_case! {
 }
 
 // #210 — a bare decimal literal is AST-able and cuDF's AST has no fixed-point literal, so
-// the device answers a Float64 column where the plan declares the decimal. The value holds.
+// the device computes a Float64 column where the plan declares the decimal, and the export,
+// told the declared precision, refuses it by name as a column that is not a decimal.
 operator_case! {
     GpuProject,
     fn bug_a_bare_decimal_literal_is_a_float64_column_on_the_device() {
@@ -421,12 +411,11 @@ operator_case! {
             (one_and_a_half, "one_and_a_half", DataType::Decimal128(3, 1)),
         ]);
         let outcome = run_both(&node, Script::Exec(vec![input()]));
-        let cpu = &outcome.cpu.as_ref().expect("the cpu answers")[0][0];
-        let as_float = batch_of(vec![
-            ("id", cpu.column(0).clone()),
-            ("one_and_a_half", cast(cpu.column(1), &DataType::Float64).unwrap()),
-        ]);
-        gpu_answered(&outcome, as_float, Order::AsEmitted);
+        let why = outcome.gpu_refuses();
+        assert!(
+            why.contains("column one_and_a_half is not a decimal but was given precision 3"),
+            "{why}"
+        );
     }
 }
 

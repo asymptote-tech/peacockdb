@@ -292,18 +292,12 @@ fn decimal_sum() -> GpuAggregate {
     )
 }
 
-// #187 — the device exports every decimal at precision 38 whatever was declared; the sum
-// itself is the cpu's.
+// The sum's declared `Decimal128(28, 2)` is what the export is told, so the device's
+// answer carries it rather than the width's maximum.
 operator_case! {
     GpuAggregate,
-    fn bug_a_decimal_sum_is_exported_at_precision_38() {
-        let outcome = run_both(&decimal_sum(), Script::Exec(vec![decimals(64, 1)]));
-        let cpu = cpu_slot(&outcome, 0);
-        let widened = batch_of(vec![(
-            "sum(dec)",
-            cast(cpu.column(0), &DataType::Decimal128(38, 2)).unwrap(),
-        )]);
-        gpu_answered(&outcome, widened, Order::Any);
+    fn a_decimal_sum_is_exported_at_its_declared_precision() {
+        run_both(&decimal_sum(), Script::Exec(vec![decimals(64, 1)])).same(Order::Any);
     }
 }
 

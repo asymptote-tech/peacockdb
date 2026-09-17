@@ -9,7 +9,7 @@ use super::{
 
 /// The arrow layouts cuDF has no counterpart for: it holds one string layout and exports it
 /// as `Utf8`, and cannot import a view array at all.
-pub(crate) fn is_view_type(data_type: &DataType) -> bool {
+fn is_view_type(data_type: &DataType) -> bool {
     matches!(
         data_type,
         DataType::Utf8View
@@ -19,39 +19,51 @@ pub(crate) fn is_view_type(data_type: &DataType) -> bool {
     )
 }
 
+/// A decimal of any width but 128: the loader widens to DECIMAL128, the kernels and the
+/// export take nothing else, and the device's type is `{type_id, scale}`, so a plan naming
+/// another width has no crossing. A `Decimal32`/`Decimal64` arrow ever adds goes here.
+fn is_narrow_or_wide_decimal(data_type: &DataType) -> bool {
+    matches!(data_type, DataType::Decimal256(..))
+}
+
+/// Why the device cannot hold a type, or `None` where it can.
+pub(crate) fn unholdable(data_type: &DataType) -> Option<&'static str> {
+    if is_view_type(data_type) {
+        Some("a view type the device cannot hold")
+    } else if is_narrow_or_wide_decimal(data_type) {
+        Some("not Decimal128, the one decimal that crosses to the device")
+    } else {
+        None
+    }
+}
+
 /// Every type an expression names — a literal's, a cast's target, a scalar function's return,
 /// a binary's out type — is one the device can hold. The parquet option that produced view
 /// types is off, so one that appears here was minted upstream, and this is where it is caught
 /// rather than at the sink (#183).
 pub(crate) fn check_expr_types(expr: &Expr, site: &str) -> Result<(), PlanError> {
-    let refuse = |what: &str, data_type: &DataType| {
-        Err(PlanError::Invalid(format!(
-            "{site}: {what} is {data_type}, a view type the device cannot hold"
-        )))
+    let check = |what: &str, data_type: &DataType| match unholdable(data_type) {
+        Some(why) => Err(PlanError::Invalid(format!(
+            "{site}: {what} is {data_type}, {why}"
+        ))),
+        None => Ok(()),
     };
     match expr {
         Expr::Column(_) => Ok(()),
-        Expr::Literal(value) if is_view_type(&value.data_type()) => {
-            refuse("a literal", &value.data_type())
-        }
-        Expr::Literal(_) => Ok(()),
+        Expr::Literal(value) => check("a literal", &value.data_type()),
         Expr::Binary {
             left,
             right,
             out_type,
             ..
         } => {
-            if is_view_type(out_type) {
-                return refuse("a binary's type", out_type);
-            }
+            check("a binary's type", out_type)?;
             check_expr_types(left, site)?;
             check_expr_types(right, site)
         }
         Expr::Unary { arg, .. } => check_expr_types(arg, site),
         Expr::Cast { expr, target } => {
-            if is_view_type(target) {
-                return refuse("a cast target", target);
-            }
+            check("a cast target", target)?;
             check_expr_types(expr, site)
         }
         Expr::Like { expr, pattern, .. } => {
@@ -75,9 +87,7 @@ pub(crate) fn check_expr_types(expr: &Expr, site: &str) -> Result<(), PlanError>
         Expr::ScalarFunction {
             args, return_type, ..
         } => {
-            if is_view_type(return_type) {
-                return refuse("a scalar function's return type", return_type);
-            }
+            check("a scalar function's return type", return_type)?;
             for arg in args {
                 check_expr_types(arg, site)?;
             }
