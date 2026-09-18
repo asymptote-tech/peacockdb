@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 201), which is also the counter for
+New tickets take the next free number (currently 202), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -17,7 +17,7 @@ reference still resolves there.
 |---|--:|---|
 | [Critical correctness](#critical-correctness) | 17 | #200 #199 #198 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 14 | #169 #168 #158 #175 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
-| [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
+| [Performance / architecture](#performance--architecture) | 28 | #201 #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 #49 |
 
 ## Critical correctness
@@ -338,6 +338,28 @@ Honor the partial-phase operand cast / state schema.
 
 
 ## Performance / architecture
+
+<a id="t201"></a>
+### #201 — a benchmark tree does not say which device, driver, CUDA or cuDF produced it
+The `--- run ---` trailer and the record's `# run:` heading carry `build=`, `allocator=` and
+`capture=`, and nothing about the hardware or the stack. Two hosts now write the same files:
+shad-gpu (cuDF 25.02, driver-side CUDA 12.5 compat) through `build-test-shadgpu.sh` and
+verda-gpu (cuDF 26.02, driver 580) through `build-test.sh`, both H200s today — and
+`--pull-benchmarks` from either overwrites `benchmark-results/tpch.sf40/*.benchmark.txt` and
+`calibration/records.tsv` in place. A `git diff` shows numbers moving and cannot say whether
+the code, the cuDF version or the card moved them; a plot drawn from a mixed record says
+nothing either.
+
+Add to both the trailer and the heading, as constants of a run: `device=` (the
+`cudaDeviceProp` name), `driver=` (`cudaDriverGetVersion`), `cuda=` (`cudaRuntimeGetVersion`,
+the toolkit libcudf was built with), `cudf=` (`CUDF_VERSION_MAJOR.MINOR.PATCH` from
+`cudf/version_config.hpp`), and `host=` (the machine name). The C++ side knows all four
+numbers and the Rust harness knows none, so this is one ABI query returning a struct of
+strings, priced like the `allocator=` line: `install_rmm_pool` already reports what it found,
+and this is the same shape one call earlier. The record's heading check — an append under a
+different heading is refused — then does what it should: a 26.02 row cannot land under a
+25.02 heading. `nsys_hbm.py` joins the capture onto the record's coordinates and should refuse
+a capture whose `TARGET_INFO_GPU` device name differs from the record's.
 
 <a id="t179"></a>
 ### #179 — nothing shows a rebatcher moving an enforced budget boundary

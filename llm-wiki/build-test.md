@@ -198,14 +198,15 @@ A second tree with its own producers. Nothing here is a golden — no run assert
 — so the arrows say which script writes each file rather than which test reads it.
 
 ```
-tpch.sf40 (shad-gpu, outside the repo; symlinked in as testdata/tpch.sf40)
+tpch.sf40 (on the GPU host, outside the repo; symlinked in as testdata/tpch.sf40)
   │
-  ├── build-test-shadgpu.sh --run-benchmarks        (peacock_gpu_benchmarks, event timing)
+  ├── build-test-shadgpu.sh --run-benchmarks        (peacock_gpu_benchmarks, event timing;
+  │   build-test.sh --gpu --run-benchmarks           the same binary on a 26.02 host)
   │     ├──► benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt   the chosen run, per node
   │     └──► calibration/records.tsv                one row per cuDF call × execution
   │           └── --pull-benchmarks brings both home
   │
-  └── create_nsys_profile.sh                        (the same binary, under Nsight)
+  └── create_nsys_profile.sh [--host …]             (the same binary, under Nsight)
         ├── --trace     nvtx and cuda only; PEACOCK_BENCHMARK_CAPTURE=trace
         │     └──► calibration/capture.sqlite          (not committed)
         │           └── nsys_calls.py × goldens/<dataset>.sf1
@@ -452,7 +453,7 @@ Rules that keep this healthy:
 |---|---|---|
 | **shad-gpu** (most used) | GPU test suite (cudf 25.02, H200-class; old glibc → patch step) | `scripts/build-test-shadgpu.sh` (`--build --push-binaries --patch --run[-detached]` / `--all`, `--run-status`). Resilient rsync + retries — the link is flaky |
 | **verda** (when available) | large CPU runs, golden regen | `scripts/build-test.sh --host verda --all` (add `--rust-only` to skip the C++/FFI half) |
-| **verda-gpu** (least used) | same root volume as verda, with a GPU attached | `scripts/build-test.sh --host verda-gpu --gpu --all` |
+| **verda-gpu** | same root volume as verda, with an H200 attached; cuDF 26.02, modern glibc, nsys 2024.5 | `scripts/build-test.sh --host verda-gpu --gpu --all`; the corpus benchmark and its Nsight passes too — see *Corpus benchmarks* |
 | **nebius** | large CPU-only VM | manual |
 
 - **Testing the regen *mechanism* is not a full regen.** Scope it with `PCK_TEST_FILTER`
@@ -561,6 +562,32 @@ the tree step 3 produced. What each writes is the diagram under *Benchmark data 
 `--benchmark-status` exits 0 only when the latest run finished with 0, as `--run-status` does.
 Check `nvidia-smi` for a neighbour before step 3: a process holding the card inflates every
 number here without failing anything.
+
+**The same six steps on a 26.02 host** (verda-gpu) go through `build-test.sh`, which builds
+against the local `rapids` env and needs no docker and no glibc patch. The three benchmark
+flags need `--gpu`; `--all` does not imply them, and `--run` with `--run-benchmarks` is
+refused — one exit code cannot mean both "gate green" and "measurement completed".
+
+```
+./scripts/build-test.sh --gpu --build-benchmarks                       # 1: release build, cold ~35 min at 3 jobs
+./scripts/build-test.sh --host verda-gpu --gpu --push-binaries          # 2: cpp/install, mirrored with --delete
+./scripts/build-test.sh --host verda-gpu --gpu --run-benchmarks         # 3: attached; keep the ssh session; PCK_TEST_FILTER narrows
+./scripts/build-test.sh --host verda-gpu --gpu --pull-benchmarks        # 4
+./scripts/create_nsys_profile.sh --host verda-gpu --remote-dir /home/dmitry/peacockdb \
+    --remote-cudf-root /home/dmitry/miniforge3/envs/rapids-26.02        # 5
+```
+
+Two things the shad-gpu path handles that this one leaves to the host: `testdata/tpch.sf40`
+must already be a symlink to the dataset (the script checks it resolves and creates
+nothing), and the GPU's performance counters must be open to non-root for step 5's
+`--metrics` pass (`options nvidia NVreg_RestrictProfilingToAdminUsers=0` in
+`/etc/modprobe.d/`, then a module reload — verda-gpu has it; nsys says
+`ERR_NVGPUCTRPERM` when a host does not). The profile script's HBM defaults (`gh100`,
+4.8e12 B/s) are an H200's; another card overrides `PCK_BENCH_HBM_SET` and
+`PCK_BENCH_HBM_PEAK_BW`. `--push-binaries` mirrors `cpp/install/` with `--delete`, so a
+push from a checkout that never ran `--build-benchmarks` removes the benchmark binary from
+the host, and a push from one that never ran `--build` removes the gate's. Both hosts write
+the same files and nothing in them says which host it was ([#201](tickets.md#t201)).
 
 **The tree**: one file per (dataset, mode) at
 `testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt`, a `== <query>` section
