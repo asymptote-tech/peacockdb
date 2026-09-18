@@ -27,8 +27,12 @@ COLUMNS = ("dataset sf query mode node_seq node_type lane recipe_seq recipe_kind
            "call_index run_index in_rows in_bytes out_rows out_bytes host_us device_us")
 
 
-def three_call_capture(directory):
-    """One case, three calls, and metric samples in which only the middle one reads."""
+def three_call_capture(directory, unit=""):
+    """One case, three calls, and metric samples in which only the middle one reads.
+
+    `unit` is what the capturing nsys appends to a metric's name: nothing before 2024,
+    " [Throughput %]" since.
+    """
     path = directory / "capture-hbm.sqlite"
     cap = Capture(path)
     spans = cap.case(CASE, [(0, 0, "CudfScan", ["read_parquet"]),
@@ -41,8 +45,8 @@ def three_call_capture(directory):
         inside = busy[0] <= at < busy[1]
         read.append((at, BUSY_READ if inside else 0.0))
         write.append((at, 0.0))
-    cap.metric(nsys_hbm.DRAM_READ, read)
-    cap.metric(nsys_hbm.DRAM_WRITE, write)
+    cap.metric(nsys_hbm.DRAM_READ + unit, read)
+    cap.metric(nsys_hbm.DRAM_WRITE + unit, write)
     cap.close()
     return path
 
@@ -85,6 +89,17 @@ def test_traffic_lands_on_the_call_that_moved_it():
     # The coordinates are the record's own, not the capture's names.
     assert rows[BUSY_CALL]["query"] == "q6"
     assert rows[BUSY_CALL]["node_type"] == "CudfFilter"
+
+
+def test_a_newer_nsys_names_the_unit_in_the_metric():
+    # nsys 2024.5 writes 'DRAM Read Bandwidth [Throughput %]' where 2023.2 wrote
+    # 'DRAM Read Bandwidth'; the samples mean the same, so the lookup takes either.
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        rows = hbm_of(three_call_capture(tmp, unit=" [Throughput %]"), three_row_record(tmp),
+                      tmp / "hbm.tsv", "--peak-bw", str(PEAK_BW))
+    moved = [int(r["hbm_bytes"]) for r in rows]
+    assert moved[0] == 0 and moved[BUSY_CALL] > 0 and moved[2] == 0, moved
 
 
 def test_a_missing_peak_bw_is_refused():

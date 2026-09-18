@@ -17,6 +17,14 @@
 #   ./scripts/create_nsys_profile.sh --metrics       # the counters pass only
 #   PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single ./scripts/create_nsys_profile.sh --trace
 #
+# The host defaults to shad-gpu (lib/shadgpu-env.sh: its repo, its patched glibc, its
+# 25.02 cuDF). Another host — one with a modern glibc and its own cuDF, provisioned by
+# build-test.sh — names all three, since the patched loader path is shad-gpu's alone:
+#   ./scripts/create_nsys_profile.sh --host verda-gpu --remote-dir /home/dmitry/peacockdb \
+#       --remote-cudf-root /home/dmitry/miniforge3/envs/rapids-26.02
+# The HBM defaults below are an H200's; another card overrides PCK_BENCH_HBM_SET and
+# PCK_BENCH_HBM_PEAK_BW, and nsys must be on that host's PATH.
+#
 # WRITES (under testdata/calibration/)
 #   capture.sqlite           the trace capture's export
 #   calls.tsv                what one ABI call splits into, derived from it
@@ -57,15 +65,34 @@ usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; ex
 
 TRACE=0
 METRICS=0
+REMOTE_CUDF_ROOT=""
+HOST_OVERRIDDEN=0
+need_value() { [ -n "${2:-}" ] || die "$1 requires a value"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --trace) TRACE=1 ;;
     --metrics) METRICS=1 ;;
+    --host)             need_value "$1" "${2:-}"; REMOTE="$2"; HOST_OVERRIDDEN=1; shift ;;
+    --remote-dir)       need_value "$1" "${2:-}"; REMOTE_REPO="$2"; HOST_OVERRIDDEN=1; shift ;;
+    --remote-cudf-root) need_value "$1" "${2:-}"; REMOTE_CUDF_ROOT="$2"; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown argument: $1" >&2; usage 1 ;;
   esac
   shift
 done
+
+# The loader path the binary runs under. shad-gpu's is PATCHED_LD: the patched glibc, the
+# CUDA compat libs and the 25.02 env, with the repo path baked in when the lib was sourced.
+# Another host has none of that, so naming it without its cuDF root would run the binary
+# under shad-gpu's paths and fail three directories deep instead of here.
+if [ -n "$REMOTE_CUDF_ROOT" ]; then
+  BENCH_LD="$REMOTE_REPO/cpp/install/lib:$REMOTE_CUDF_ROOT/lib:\${LD_LIBRARY_PATH:-}"
+elif [ "$HOST_OVERRIDDEN" -eq 1 ]; then
+  die "--host/--remote-dir without --remote-cudf-root: the default loader path is shad-gpu's
+     patched glibc and 25.02 env. Name the host's cuDF root (e.g. .../envs/rapids-26.02)."
+else
+  BENCH_LD="$PATCHED_LD"
+fi
 # Neither named means both, which is what a full collection wants. No --both flag: a flag
 # whose only effect is the default is one more thing to get wrong.
 if [ "$TRACE" -eq 0 ] && [ "$METRICS" -eq 0 ]; then TRACE=1; METRICS=1; fi
@@ -100,8 +127,9 @@ remote_pass() {                   # remote_pass <label> <capture rel> <record re
   local flags="$*"
   ssh "$REMOTE" bash <<EOF
 set -uo pipefail
+# The harness finds the sf40 dataset as tpch.sf40 under this, so the host's symlink is
+# the only dataset configuration there is.
 export PEACOCK_TESTDATA_DIR=$REMOTE_REPO/testdata
-export PEACOCK_TPCH_SF40_DIR=$SF40_DIR
 # The one variable that turns the harness's NVTX ranges on. It also stamps the record's
 # heading and stops the run publishing a .benchmark.txt: the tree belongs to the clean run,
 # and either pass would overwrite each section with times taken under a profiler.
@@ -123,7 +151,7 @@ fi
 echo "==> $label pass to \$capture.nsys-rep"
 log=/tmp/$BENCH_TARGET.$label.log
 nsys profile $flags --force-overwrite=true -o "\$capture" \\
-  env LD_LIBRARY_PATH="$PATCHED_LD" \\
+  env LD_LIBRARY_PATH="$BENCH_LD" \\
   $REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET --nocapture --test-threads=1 $filter_q 2>&1 | tee "\$log"
 status=\${PIPESTATUS[0]}
 

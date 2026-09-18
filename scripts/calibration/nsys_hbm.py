@@ -53,7 +53,8 @@ import nvtx_names
 import record
 
 # nsys metric ids within the general set. Names are checked against the capture, since a
-# different --gpu-metrics-set numbers them differently.
+# different --gpu-metrics-set numbers them differently. Named without a unit: nsys 2023.2
+# wrote the name alone, 2024.5 appends " [Throughput %]", and metric_id takes either.
 DRAM_READ = "DRAM Read Bandwidth"
 DRAM_WRITE = "DRAM Write Bandwidth"
 
@@ -70,9 +71,13 @@ TUPLE = (
 
 
 def metric_id(conn, name):
-    row = conn.execute(
-        "select metricId from TARGET_INFO_GPU_METRICS where metricName = ?", (name,)
-    ).fetchone()
+    rows = conn.execute(
+        "select metricId from TARGET_INFO_GPU_METRICS"
+        " where metricName = ? or metricName like ?", (name, name + " [%]")
+    ).fetchall()
+    if len(rows) > 1:
+        sys.exit(f"capture names metric {name!r} {len(rows)} times; the lookup is ambiguous")
+    row = rows[0] if rows else None
     if row is None:
         have = [r[0] for r in conn.execute("select metricName from TARGET_INFO_GPU_METRICS")]
         sys.exit(f"capture has no metric {name!r}; it has {have}")

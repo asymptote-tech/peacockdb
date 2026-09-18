@@ -411,20 +411,35 @@ change. Land [#154](#t154) first, or the numbers are inflated by per-call copies
 
 <a id="t154"></a>
 ### #154 — every operator exit path deep-copies its output into a fresh table
-`std::make_unique<cudf::column>(view)` deep-copies the device buffer, and 18 sites under
-`cpp/src/` do it — 10 in `join.cpp` — mostly to a table the same function just produced.
+`std::make_unique<cudf::column>(view)` deep-copies the device buffer, and 21 sites under
+`cpp/src/` do it — 10 in `join.cpp`, 7 in `aggregate.cpp` — mostly to a table the same
+function just produced.
 
-`execute_hash_join` is worst: `cudf::gather` returns an owning table, the code copies each
-column into `all_cols` (~L337, ~L342), then copies the kept ones again if the node projects
-(~L376). `release()` moves instead; `scan.cpp` L108, `union.cpp` L38, `join.cpp` L254 are the
-pattern, and it is C++-internal — no header, fbs, Rust or golden moves. Four kinds: whole table
+`execute_hash_join` is worst per exit: `cudf::gather` returns an owning table, the code copies
+each column into `all_cols` (~L337, ~L342), then copies the kept ones again if the node projects
+(~L376). `release()` moves instead; `scan.cpp` L103, `union.cpp` L38, `join.cpp` L254 are the
+pattern, and it is C++-internal — no header, fbs, Rust or golden moves. Five kinds: whole table
 freshly produced (`join.cpp` 202, 337, 342, 512, 515), mechanical; ordinal subset (`join.cpp`
 211, 270, 376, 525, `filter.cpp` 41), needing an assert the ordinals are distinct; a column of
-an **input** table (`join.cpp` 259, `project.cpp` 44, `window.cpp` 46, `expr.cpp` 850), changing
-who destroys what under `NodeInputs`; and `aggregate.cpp` 407, 602, 604, 682, unresolved without
+an **input** table kept in the output (`join.cpp` 259, `project.cpp` 44, `window.cpp` 46),
+changing who destroys what under `NodeInputs`; a temporary that only ever needed a view
+(`expr.cpp` 834, below); and `aggregate.cpp` 413, 642, 644, 678, 680, 759, 771, unresolved without
 reading. Traps: a view taken before the release dangles (`ftv` ~L372), and a repeated projection
 ordinal moves one column twice leaving a hole — a wrong answer, not a throw, which is why it
 needs the assert and not the observation. Land before [#155](#t155).
+
+The `expr.cpp` site is the cheapest to fix and the most expensive to leave. `build_column`'s
+`ColumnRef` arm copies the whole column and the caller takes `->view()` of the copy one line
+later; every consumer (`cudf::binary_operation`, `unary_operation`, the function arms) takes
+a `column_view`, and the input table outlives the call. Returning `table.column(idx)` — or
+resolving `ColumnRef` leaves in `build_column_binary` before recursing — needs no ownership
+change. It fires once per `ColumnRef` leaf per batch on every predicate `is_ast_able` rejects
+(a decimal operand, a string literal, LIKE, CASE): q6's filter copies five lineitem columns per
+batch (`l_shipdate` ×2, `l_discount` ×2, `l_quantity`), and q19's copies string columns, offsets
+and chars. The sf40 HBM reading puts it at ~46 of the 107 GB q19's lineitem filter moves, and
+17× the useful traffic at its part filter. The `And` chain's intermediate bool columns are a
+separate cost — one kernel per node, which only fusion (JIT, or stitching back into the AST)
+removes — and not this ticket's.
 
 <a id="t152"></a>
 ### #152 — GpuHashJoin: the build handle does not survive a streamed probe

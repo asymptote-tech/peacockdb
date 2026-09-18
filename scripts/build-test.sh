@@ -51,9 +51,22 @@ INSTALL_DIR="$BUILD_DIR/install"
 CUDA_ARCHITECTURES="80;90"
 RUST_TESTS_STAGING="$INSTALL_DIR/rust-tests"
 
+# The measurement target and where its release build is staged. It is ALSO in the gate
+# set (gpu_runtime_targets): the debug copy in rust-tests/ runs the harness's own
+# assertions under --skip bench_; the release copy in rust-benchmarks/ is what
+# --run-benchmarks times. Same two-copy scheme as build-test-shadgpu.sh, minus the
+# glibc patch and the detached run — this host has a modern glibc, and a measurement
+# here is attached: keep the ssh session (or wrap the call in tmux/nohup yourself).
+BENCH_TARGET=peacock_gpu_benchmarks
+BENCH_STAGING="$INSTALL_DIR/rust-benchmarks"
+BENCH_RECORD_REL=calibration/records.tsv   # the calibration record, beside the results
+
 BUILD=0
+BUILD_BENCH=0    # --build-benchmarks: release build of BENCH_TARGET into rust-benchmarks/
 PUSH_BINARIES=0  # --push-binaries: ship cpp/install (lib + C++ bins + staged rust bins) + goldens
 RUN=0
+RUN_BENCH=0      # --run-benchmarks: the attached measurement run (needs --gpu)
+PULL_BENCH=0     # --pull-benchmarks: fetch testdata/benchmark-results/ + the record
 UPDATE_CANON=0   # --update-canonical: regen goldens during the remote run (UPDATE_CANONICAL=1)
 
 # Per-kind testdata sync, one flag per kind in each direction. The parser IS the
@@ -91,6 +104,16 @@ Usage: build-test.sh --host <ssh-dest> [mode] <action...> [options]
                           goldens by --update-canonical, both duckdb sets by their
                           extractors.)
     --update-canonical   regen goldens during --run instead of asserting
+
+  benchmark actions (all need --gpu; --all does NOT imply them)
+    --build-benchmarks   C++ build+install, then the RELEASE build of the measurement
+                         target into rust-benchmarks/ (shipped by --push-binaries)
+    --run-benchmarks     attached measurement run; PCK_TEST_FILTER selects cases.
+                         Rejected together with --run: one exit code cannot mean both
+                         "gate green" and "measurement completed".
+    --pull-benchmarks    fetch testdata/benchmark-results/ and the calibration record
+    (--push-binaries mirrors cpp/install with --delete, so a push from a checkout that
+     never ran --build-benchmarks removes the benchmark binary from the host.)
     (--push-binaries always ships goldens: binaries without the fixtures they assert
      against is what produced 110/110 "canonical file not found". --push-goldens is the
      subset operation — refresh fixtures without rebuilding or reshipping binaries.)
@@ -216,6 +239,9 @@ while [ $# -gt 0 ]; do
     --push-binaries)    PUSH_BINARIES=1 ;;
     --run)              RUN=1 ;;
     --all)              BUILD=1; PUSH_BINARIES=1; RUN=1 ;;
+    --build-benchmarks) BUILD_BENCH=1 ;;
+    --run-benchmarks)   RUN_BENCH=1 ;;
+    --pull-benchmarks)  PULL_BENCH=1 ;;
     --update-canonical) UPDATE_CANON=1 ;;
     --push-parquet)           PUSH_KINDS+=(parquet) ;;
     --push-queries)           PUSH_KINDS+=(queries) ;;
@@ -357,17 +383,35 @@ fi
 # An invocation that does nothing and exits 0 is indistinguishable from a successful
 # one. `--host x` alone used to be exactly that.
 if [ "$BUILD" -eq 0 ] && [ "$PUSH_BINARIES" -eq 0 ] && [ "$RUN" -eq 0 ] \
+   && [ "$BUILD_BENCH" -eq 0 ] && [ "$RUN_BENCH" -eq 0 ] && [ "$PULL_BENCH" -eq 0 ] \
    && [ ${#PUSH_KINDS[@]} -eq 0 ] && [ ${#PULL_KINDS[@]} -eq 0 ]; then
   echo "error: no action requested — nothing would happen and the script would exit 0." >&2
   echo "       Pass at least one of --build / --push-binaries / --run / --all /" >&2
+  echo "       --build-benchmarks / --run-benchmarks / --pull-benchmarks /" >&2
   echo "       --push-<kind> / --pull-<kind>." >&2
   usage
 fi
 
-if { [ "$PUSH_BINARIES" -eq 1 ] || [ "$RUN" -eq 1 ] || [ ${#PUSH_KINDS[@]} -gt 0 ] \
+if { [ "$PUSH_BINARIES" -eq 1 ] || [ "$RUN" -eq 1 ] || [ "$RUN_BENCH" -eq 1 ] \
+     || [ "$PULL_BENCH" -eq 1 ] || [ ${#PUSH_KINDS[@]} -gt 0 ] \
      || [ ${#PULL_KINDS[@]} -gt 0 ]; } && [ -z "$HOST" ]; then
-  echo "error: --host is required for --push-binaries/--run/--push-<kind>/--pull-<kind>" >&2
-  echo "       (e.g. --host dmitry@86.38.182.185)" >&2
+  echo "error: --host is required for --push-binaries/--run/--run-benchmarks/" >&2
+  echo "       --pull-benchmarks/--push-<kind>/--pull-<kind> (e.g. --host dmitry@86.38.182.185)" >&2
+  exit 1
+fi
+
+# The measurement binary links libpeacock_gpu and times cases on a device, so every
+# benchmark phase is a --gpu phase. Under the default mode the C++ half is built the same
+# way, but the run would ship a GPU binary to a host the mode promises nothing about.
+if { [ "$BUILD_BENCH" -eq 1 ] || [ "$RUN_BENCH" -eq 1 ] || [ "$PULL_BENCH" -eq 1 ]; } \
+   && [ "$MODE" != "gpu" ]; then
+  echo "error: --build-benchmarks/--run-benchmarks/--pull-benchmarks need --gpu." >&2
+  exit 1
+fi
+
+if [ "$RUN" -eq 1 ] && [ "$RUN_BENCH" -eq 1 ]; then
+  echo "error: --run with --run-benchmarks: one exit code cannot mean both 'gate green'" >&2
+  echo "       and 'measurement completed'. Run them as two invocations." >&2
   exit 1
 fi
 
@@ -401,7 +445,36 @@ if [ ${#PUSH_KINDS[@]} -gt 0 ]; then
   done
 fi
 
-if [ "$BUILD" -eq 1 ]; then
+# Build one integration-test target and copy its binary to <dest>/<name>. Extra
+# arguments go to cargo (the measurement build passes --release). cargo test --no-run
+# prints a json artifact line per built target; the one we want has
+# .target.name == <name> and a non-null .executable.
+stage_cargo_test_binary() {
+  local pkg=$1 t=$2 dest=$3; shift 3
+  local exec_path
+  exec_path=$(cargo test --no-run $CARGO_FEATURES "$@" -p "$pkg" --test "$t" \
+      --message-format=json \
+    | python3 -c '
+import json, sys
+name = sys.argv[1]
+for line in sys.stdin:
+    try: m = json.loads(line)
+    except ValueError: continue
+    if m.get("executable") and (m.get("target") or {}).get("name") == name:
+        print(m["executable"]); break
+' "$t")
+  if [ -z "$exec_path" ] || [ ! -f "$exec_path" ]; then
+    echo "ERROR: failed to locate built binary for $pkg:$t"; exit 1
+  fi
+  mkdir -p "$dest"
+  cp -f "$exec_path" "$dest/$t"
+  echo "--- Staged rust test: $dest/$t"
+}
+
+# The C++ half serves both builds: the measurement binary resolves libpeacock_gpu.so
+# from cpp/install/lib like the gate binaries do, and a fresh binary against a stale
+# .so either fails to link on the host or reports zeros for every node.
+if [ "$BUILD" -eq 1 ] || [ "$BUILD_BENCH" -eq 1 ]; then
   CARGO_FEATURES=""
   if [ "$RUST_ONLY" -eq 1 ]; then
     # No C++/FFI — build the test binaries with --features rust-only (the part that
@@ -409,11 +482,6 @@ if [ "$BUILD" -eq 1 ]; then
     # Uses the default ./target so it stays warm alongside plain `cargo test`.
     echo "==> build rust-only test binaries (no C++/FFI)"
     CARGO_FEATURES="--features rust-only"
-    # Stage from EMPTY, as build-test-shadgpu.sh does: a binary left by a previous
-    # mode is otherwise shipped alongside this mode's, and only the run-by-explicit-name
-    # loop keeps it from executing. Renaming a target makes the orphan permanent.
-    rm -rf "$RUST_TESTS_STAGING"
-    mkdir -p "$RUST_TESTS_STAGING"
   else
     # cudf (default-feature) build: isolate it in its OWN target dir so it doesn't
     # recompile the arrow/DataFusion subgraph every time it alternates with a
@@ -461,10 +529,6 @@ if [ "$BUILD" -eq 1 ]; then
     cmake --build "$BUILD_DIR" --parallel "$(nproc)"
     cmake --install "$BUILD_DIR"
 
-    echo "==> stage Rust $MODE test binaries"
-    # Stage from EMPTY here too — see the rust-only branch above.
-    rm -rf "$RUST_TESTS_STAGING"
-    mkdir -p "$RUST_TESTS_STAGING"
     export CUDF_ROOT="$LOCAL_CUDF_ROOT"
     # The FFI crate builds its own libpeacock_gpu via the cmake crate in cargo's
     # OUT_DIR, which caches the resolved cudf_DIR. Clean ONLY when the cuDF root
@@ -483,28 +547,25 @@ if [ "$BUILD" -eq 1 ]; then
       echo "--- peacockdb-ffi: cuDF root unchanged ($CUDF_ROOT); skipping clean"
     fi
   fi
-  for spec in "${RUST_TESTS[@]}"; do
-    pkg="${spec%%:*}"
-    t="${spec##*:}"
-    # cargo test --no-run prints a json artifact line per built target; the
-    # integration test we want has .target.name == $t and a non-null .executable.
-    exec_path=$(cargo test --no-run $CARGO_FEATURES -p "$pkg" --test "$t" \
-        --message-format=json \
-      | python3 -c '
-import json, sys
-name = sys.argv[1]
-for line in sys.stdin:
-    try: m = json.loads(line)
-    except ValueError: continue
-    if m.get("executable") and (m.get("target") or {}).get("name") == name:
-        print(m["executable"]); break
-' "$t")
-    if [ -z "$exec_path" ] || [ ! -f "$exec_path" ]; then
-      echo "ERROR: failed to locate built binary for $pkg:$t"; exit 1
-    fi
-    cp -f "$exec_path" "$RUST_TESTS_STAGING/$t"
-    echo "--- Staged rust test: $RUST_TESTS_STAGING/$t"
-  done
+  if [ "$BUILD" -eq 1 ]; then
+    echo "==> stage Rust $MODE test binaries"
+    # Stage from EMPTY, as build-test-shadgpu.sh does: a binary left by a previous
+    # mode is otherwise shipped alongside this mode's, and only the run-by-explicit-name
+    # loop keeps it from executing. Renaming a target makes the orphan permanent.
+    rm -rf "$RUST_TESTS_STAGING"
+    for spec in "${RUST_TESTS[@]}"; do
+      stage_cargo_test_binary "${spec%%:*}" "${spec##*:}" "$RUST_TESTS_STAGING"
+    done
+  fi
+  if [ "$BUILD_BENCH" -eq 1 ]; then
+    # --release, not a profile of its own: the harness refuses to measure under debug
+    # assertions and writes `build=release` into every file it produces, so the profile
+    # is named once, here. The first release build is a cold compile of the DataFusion
+    # stack plus a second libpeacock_gpu.so; the gate's caches are untouched.
+    echo "==> stage the release $BENCH_TARGET into $BENCH_STAGING"
+    rm -rf "$BENCH_STAGING"
+    stage_cargo_test_binary peacockdb-core "$BENCH_TARGET" "$BENCH_STAGING" --release
+  fi
 fi
 
 if [ "$PUSH_BINARIES" -eq 1 ]; then
@@ -515,6 +576,7 @@ if [ "$PUSH_BINARIES" -eq 1 ]; then
     t="${spec##*:}"
     [ -f "$RUST_TESTS_STAGING/$t" ] && strip --strip-debug "$RUST_TESTS_STAGING/$t"
   done
+  [ -f "$BENCH_STAGING/$BENCH_TARGET" ] && strip --strip-debug "$BENCH_STAGING/$BENCH_TARGET"
   echo "==> rsync $INSTALL_DIR to $HOST:$REMOTE_DIR/cpp/install"
   ssh "$HOST" "mkdir -p '$REMOTE_DIR/cpp/install'"
   # --delete, and the source is "$INSTALL_DIR/" NOT "$INSTALL_DIR"/*: with a glob rsync
@@ -620,12 +682,99 @@ if [ "$RUN" -eq 1 ]; then
     for name in $RUST_TEST_NAMES; do
       t="$REMOTE_DIR/cpp/install/rust-tests/\$name"
       [ -x "\$t" ] || { echo "--- \$name: missing, skipping"; continue; }
+      # The gate copy of the measurement binary is a debug build, and the harness
+      # refuses to time a case under debug assertions: skip the bench_ cases and run
+      # only its own checks. --run-benchmarks owns the timing.
+      skip=""
+      case "\$name" in $BENCH_TARGET) skip="--skip bench_" ;; esac
       echo "--- \$name"
-      "\$t" --nocapture $THREADS_ARG '$PCK_TEST_FILTER' || rc=1
+      "\$t" --nocapture $THREADS_ARG \$skip '$PCK_TEST_FILTER' || rc=1
     done
 
     exit \$rc
 EOF
+fi
+
+# --- run: the benchmark measurement -------------------------------------------
+# Attached: the ssh session is the run. The harness reads PEACOCK_TESTDATA_DIR (the
+# sf40 dataset under it, the results tree under it) and PEACOCK_RECORD_PATH; the sf40
+# link is the host's to keep (shadgpu.sh creates it; here it is only checked, since the
+# dataset's location on this host is not this script's to know).
+if [ "$RUN_BENCH" -eq 1 ]; then
+  : "${PCK_TEST_FILTER:=}"
+  echo "==> benchmark measurement on $HOST (filter='$PCK_TEST_FILTER')"
+  ssh "$HOST" bash <<EOF
+    set -o pipefail
+    export LD_LIBRARY_PATH=$REMOTE_DIR/cpp/install/lib:$REMOTE_CUDF_ROOT/lib:\$LD_LIBRARY_PATH
+    export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata
+    export PEACOCK_RECORD_PATH=\$PEACOCK_TESTDATA_DIR/$BENCH_RECORD_REL
+
+    sf40=\$PEACOCK_TESTDATA_DIR/tpch.sf40
+    if [ ! -d "\$sf40/" ]; then
+      echo "!!! no sf40 dataset at \$sf40 (expected a directory or a symlink to one)"
+      exit 1
+    fi
+    bin=$REMOTE_DIR/cpp/install/rust-benchmarks/$BENCH_TARGET
+    if [ ! -x "\$bin" ]; then
+      echo "!!! benchmark binary not found at \$bin"
+      echo "    Build it with --gpu --build-benchmarks and ship it with --push-binaries."
+      echo "    (A --push-binaries from a checkout that never built it mirrors it away.)"
+      exit 1
+    fi
+    results=\$PEACOCK_TESTDATA_DIR/benchmark-results
+    mkdir -p "\$results" "\$(dirname "\$PEACOCK_RECORD_PATH")"
+    rm -f "\$PEACOCK_RECORD_PATH"
+    stamp=\$(mktemp)
+    blog=/tmp/$BENCH_TARGET.log
+
+    echo "==> $BENCH_TARGET (filter='$PCK_TEST_FILTER')"
+    "\$bin" --nocapture --test-threads=1 '$PCK_TEST_FILTER' 2>&1 | tee "\$blog"
+    status=\${PIPESTATUS[0]}
+    if [ "\$status" -ne 0 ]; then
+      echo "!!! $BENCH_TARGET FAILED (exit \$status)"
+      exit "\$status"
+    fi
+    # Zero tests is a fault here: with one binary there is nothing else the filter
+    # could legitimately have been aimed at.
+    ran=\$(sed -n 's/^test result:.* \([0-9][0-9]*\) passed.*/\1/p' "\$blog" \
+          | awk '{n += \$1} END {print n + 0}')
+    if [ "\$ran" -eq 0 ]; then
+      echo "!!! the run passed no tests (filter '$PCK_TEST_FILTER' matched nothing?)"
+      exit 1
+    fi
+    echo "==> ran \$ran tests"
+    written=\$(find "\$results" -name '*.benchmark.txt' -newer "\$stamp" | wc -l)
+    total=\$(find "\$results" -name '*.benchmark.txt' | wc -l)
+    rm -f "\$stamp"
+    echo "==> benchmark records written by this run: \$written (on host: \$total)"
+    echo "==> calibration rows: \$(grep -vc '^#' "\$PEACOCK_RECORD_PATH" 2>/dev/null || echo 0)"
+    if [ "\$written" -eq 0 ]; then
+      echo "==> no .benchmark.txt written: none of the tests that ran times a case"
+    fi
+EOF
+fi
+
+# --- pull: benchmark results ---------------------------------------------------
+# Additive into the same tree shadgpu.sh fills: a record's heading names its host and
+# build, and git diff is the comparison.
+if [ "$PULL_BENCH" -eq 1 ]; then
+  trees=$(ssh "$HOST" \
+    "find $REMOTE_DIR/testdata/benchmark-results -name '*.benchmark.txt' 2>/dev/null | wc -l")
+  mkdir -p testdata/benchmark-results
+  echo "==> pull $HOST:$REMOTE_DIR/testdata/benchmark-results -> testdata/benchmark-results (additive)"
+  rsync -a "$HOST:$REMOTE_DIR/testdata/benchmark-results/" testdata/benchmark-results/
+  echo "==> fetched $trees benchmark records"
+  mkdir -p "testdata/$(dirname "$BENCH_RECORD_REL")"
+  got_record=0
+  if rsync -a "$HOST:$REMOTE_DIR/testdata/$BENCH_RECORD_REL" "testdata/$BENCH_RECORD_REL" 2>/dev/null; then
+    got_record=1
+    echo "==> fetched testdata/$BENCH_RECORD_REL"
+  fi
+  if [ "$trees" -eq 0 ] && [ "$got_record" -eq 0 ]; then
+    echo "error: nothing came home: no .benchmark.txt on $HOST and no $BENCH_RECORD_REL." >&2
+    echo "       Did the run measure anything? Its log is /tmp/$BENCH_TARGET.log on the host." >&2
+    exit 1
+  fi
 fi
 
 # Pull named testdata kinds remote -> local. Runs last, so an --update-canonical
