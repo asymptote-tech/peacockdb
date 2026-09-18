@@ -1,170 +1,288 @@
-node_seq	node_type	partition	call	depth	executions	calls_per_exec	host_us	device_us	region_us
-0	CudfScan	0	(unattributed)	0	60	1.0	25	0	52095
-0	CudfScan	0	cast	0	60	3.0	271	185	52095
-0	CudfScan	0	read_parquet	0	60	1.0	51786	29537	52095
-0	CudfScan	0	build_string_dict_indices	1	60	1.0	42	8	52095
-0	CudfScan	0	copy_bitmask	1	60	3.0	47	21	52095
-0	CudfScan	0	decode_page_headers	1	60	1.0	262	68	52095
-0	CudfScan	0	decompress_page_data	1	60	2.0	25091	24859	52095
-0	CudfScan	0	detect_malformed_pages	1	60	1.0	112	17	52095
-0	CudfScan	0	make_strings_column	1	60	0.0	0	0	52095
-0	CudfScan	0	mutable_view	1	60	3.0	1	0	52095
-0	CudfScan	0	copy_bitmask	2	60	3.0	43	21	52095
-0	CudfScan	0	sort_pages	2	60	1.0	88	31	52095
-1	CudfFilter	0	(unattributed)	0	60	1.0	572	316	1747
-1	CudfFilter	0	apply_boolean_mask	0	60	1.0	236	141	1747
-1	CudfFilter	0	binary_operation	0	60	6.0	832	523	1747
-1	CudfFilter	0	compute_column	0	60	1.0	63	180	1747
-1	CudfFilter	0	copy_bitmask	0	60	5.0	45	23	1747
-1	CudfFilter	0	make_strings_column	0	60	0.0	0	0	1747
-1	CudfFilter	0	copy_bitmask	1	60	8.0	68	43	1747
-1	CudfFilter	0	copy_if	1	60	1.0	235	141	1747
-1	CudfFilter	0	make_fixed_width_column	1	60	4.0	24	5	1747
-1	CudfFilter	0	make_numeric_column	1	60	0.0	0	0	1747
-1	CudfFilter	0	mutable_view	1	60	7.0	1	0	1747
-1	CudfFilter	0	allocate_like	2	60	4.0	10	0	1747
-1	CudfFilter	0	copy_bitmask	2	60	3.0	25	20	1747
-1	CudfFilter	0	make_numeric_column	2	60	4.0	23	5	1747
-1	CudfFilter	0	make_strings_column	2	60	0.0	0	0	1747
-1	CudfFilter	0	mutable_view	2	60	8.0	1	0	1747
-1	CudfFilter	0	allocate_like	3	60	4.0	8	0	1747
-1	CudfFilter	0	mutable_view	3	60	0.0	0	0	1747
-2	CudfAggregate	0	(unattributed)	0	50	1.0	90	44	580
-2	CudfAggregate	0	aggregate	0	50	1.0	355	158	580
-2	CudfAggregate	0	binary_operation	0	50	1.0	117	42	580
-2	CudfAggregate	0	copy_bitmask	0	50	2.0	14	4	580
-2	CudfAggregate	0	make_fixed_width_column	0	50	1.0	2	0	580
-2	CudfAggregate	0	mutable_view	0	50	1.0	0	0	580
-2	CudfAggregate	0	allocate_like	1	50	2.0	5	0	580
-2	CudfAggregate	0	bitmask_and	1	50	1.0	54	6	580
-2	CudfAggregate	0	copy_bitmask	1	50	3.0	12	4	580
-2	CudfAggregate	0	make_fixed_width_column	1	50	1.0	2	0	580
-2	CudfAggregate	0	make_numeric_column	1	50	2.0	4	0	580
-2	CudfAggregate	0	mutable_view	1	50	7.0	1	0	580
-2	CudfAggregate	0	allocate_like	2	50	2.0	4	0	580
-2	CudfAggregate	0	make_fixed_point_column	2	50	1.0	2	0	580
-2	CudfCoalescePartitions	0	(unattributed)	0	10	1.0	4	0	182
-2	CudfCoalescePartitions	0	concatenate	0	10	1.0	178	30	182
-2	CudfCoalescePartitions	0	allocate_like	1	10	2.0	4	0	182
-2	CudfCoalescePartitions	0	concatenate	1	10	2.0	159	27	182
-2	CudfCoalescePartitions	0	mutable_view	1	10	2.0	0	0	182
-2	CudfCoalescePartitions	0	create_strings_device_views	2	10	2.0	115	16	182
-2	CudfCoalescePartitions	0	make_numeric_column	2	10	2.0	4	0	182
-2	CudfCoalescePartitions	0	make_strings_column	2	10	2.0	0	0	182
-2	CudfCoalescePartitions	0	mutable_view	2	10	2.0	0	0	182
-3	CudfCoalescePartitions	0	(unattributed)	0	50	1.0	3	0	11
-3	CudfCoalescePartitions	0	concatenate	0	50	1.0	8	2	11
-3	CudfCoalescePartitions	0	allocate_like	1	50	1.0	2	0	11
-3	CudfCoalescePartitions	0	mutable_view	1	50	1.0	0	0	11
-3	CudfScan	0	(unattributed)	0	10	1.0	28	0	610982
-3	CudfScan	0	cast	0	10	3.0	4257	4196	610982
-3	CudfScan	0	read_parquet	0	10	1.0	606700	218038	610982
-3	CudfScan	0	build_string_dict_indices	1	10	1.0	157	78	610982
-3	CudfScan	0	copy_bitmask	1	10	3.0	50	76	610982
-3	CudfScan	0	decode_page_headers	1	10	1.0	697	239	610982
-3	CudfScan	0	decompress_page_data	1	10	2.0	73224	71661	610982
-3	CudfScan	0	detect_malformed_pages	1	10	1.0	118	20	610982
-3	CudfScan	0	make_numeric_column	1	10	1.0	4	0	610982
-3	CudfScan	0	make_strings_column	1	10	2.0	1	0	610982
-3	CudfScan	0	mutable_view	1	10	4.0	1	0	610982
-3	CudfScan	0	copy_bitmask	2	10	3.0	45	76	610982
-3	CudfScan	0	sort_pages	2	10	1.0	348	60	610982
-4	CudfAggregate	0	(unattributed)	0	50	1.0	70	7	262
-4	CudfAggregate	0	aggregate	0	50	1.0	188	40	262
-4	CudfAggregate	0	make_fixed_width_column	0	50	1.0	2	0	262
-4	CudfAggregate	0	mutable_view	0	50	1.0	0	0	262
-4	CudfAggregate	0	allocate_like	1	50	2.0	4	0	262
-4	CudfAggregate	0	copy_bitmask	1	50	1.0	1	0	262
-4	CudfAggregate	0	make_fixed_width_column	1	50	1.0	2	0	262
-4	CudfAggregate	0	make_numeric_column	1	50	2.0	4	0	262
-4	CudfAggregate	0	mutable_view	1	50	5.0	1	0	262
-4	CudfAggregate	0	allocate_like	2	50	2.0	4	0	262
-4	CudfAggregate	0	make_fixed_point_column	2	50	1.0	2	0	262
-4	CudfFilter	0	(unattributed)	0	10	1.0	20364	20010	58794
-4	CudfFilter	0	apply_boolean_mask	0	10	1.0	2654	2427	58794
-4	CudfFilter	0	binary_operation	0	10	17.0	35653	34714	58794
-4	CudfFilter	0	copy_bitmask	0	10	16.0	121	218	58794
-4	CudfFilter	0	make_strings_column	0	10	3.0	1	0	58794
-4	CudfFilter	0	copy_bitmask	1	10	19.0	170	350	58794
-4	CudfFilter	0	copy_if	1	10	1.0	2653	2427	58794
-4	CudfFilter	0	make_fixed_width_column	1	10	8.0	55	62	58794
-4	CudfFilter	0	make_numeric_column	1	10	3.0	7	0	58794
-4	CudfFilter	0	mutable_view	1	10	20.0	3	0	58794
-4	CudfFilter	0	allocate_like	2	10	4.0	10	0	58794
-4	CudfFilter	0	copy_bitmask	2	10	9.0	79	205	58794
-4	CudfFilter	0	make_numeric_column	2	10	10.0	58	62	58794
-4	CudfFilter	0	make_strings_column	2	10	2.0	1	0	58794
-4	CudfFilter	0	mutable_view	2	10	12.0	2	0	58794
-4	CudfFilter	0	allocate_like	3	10	4.0	9	0	58794
-4	CudfFilter	0	mutable_view	3	10	2.0	0	0	58794
-5	CudfCoalescePartitions	0	(unattributed)	0	10	1.0	3	0	23
-5	CudfCoalescePartitions	0	concatenate	0	10	1.0	20	5	23
-5	CudfCoalescePartitions	0	allocate_like	1	10	1.0	2	0	23
-5	CudfCoalescePartitions	0	mutable_view	1	10	1.0	0	0	23
-5	CudfHashJoin	0	(unattributed)	0	10	1.0	1007	134	5864
-5	CudfHashJoin	0	apply_boolean_mask	0	10	1.0	307	60	5864
-5	CudfHashJoin	0	binary_operation	0	10	44.0	2976	551	5864
-5	CudfHashJoin	0	compute_column	0	10	3.0	135	19	5864
-5	CudfHashJoin	0	copy_bitmask	0	10	48.0	112	16	5864
-5	CudfHashJoin	0	gather	0	10	2.0	285	65	5864
-5	CudfHashJoin	0	inner_join	0	10	1.0	1035	826	5864
-5	CudfHashJoin	0	make_strings_column	0	10	17.0	3	0	5864
-5	CudfHashJoin	0	allocate_like	1	10	6.0	14	0	5864
-5	CudfHashJoin	0	copy_bitmask	1	10	18.0	111	24	5864
-5	CudfHashJoin	0	copy_if	1	10	1.0	307	60	5864
-5	CudfHashJoin	0	hash_join	1	10	1.0	27	14	5864
-5	CudfHashJoin	0	inner_join	1	10	1.0	864	810	5864
-5	CudfHashJoin	0	make_fixed_width_column	1	10	26.0	98	20	5864
-5	CudfHashJoin	0	make_numeric_column	1	10	17.0	35	0	5864
-5	CudfHashJoin	0	make_strings_column	1	10	2.0	0	0	5864
-5	CudfHashJoin	0	mutable_view	1	10	74.0	9	0	5864
-5	CudfHashJoin	0	allocate_like	2	10	12.0	28	0	5864
-5	CudfHashJoin	0	bitmask_and	2	10	1.0	1	0	5864
-5	CudfHashJoin	0	copy_bitmask	2	10	6.0	33	8	5864
-5	CudfHashJoin	0	make_numeric_column	2	10	28.0	95	20	5864
-5	CudfHashJoin	0	make_strings_column	2	10	2.0	0	0	5864
-5	CudfHashJoin	0	mutable_view	2	10	16.0	3	0	5864
-5	CudfHashJoin	0	allocate_like	3	10	6.0	13	0	5864
-5	CudfHashJoin	0	mutable_view	3	10	2.0	0	0	5864
-5	CudfProject	0	(unattributed)	0	10	1.0	12	1	12
-5	CudfProject	0	copy_bitmask	0	10	1.0	1	0	12
-6	CudfAggregate	0	(unattributed)	0	20	1.0	90	10	421
-6	CudfAggregate	0	aggregate	0	20	1.0	236	50	421
-6	CudfAggregate	0	binary_operation	0	20	1.0	79	18	421
-6	CudfAggregate	0	copy_bitmask	0	20	1.0	7	1	421
-6	CudfAggregate	0	make_fixed_width_column	0	20	1.0	2	0	421
-6	CudfAggregate	0	mutable_view	0	20	1.0	0	0	421
-6	CudfAggregate	0	allocate_like	1	20	2.0	5	0	421
-6	CudfAggregate	0	bitmask_and	1	20	0.5	14	2	421
-6	CudfAggregate	0	copy_bitmask	1	20	2.5	10	2	421
-6	CudfAggregate	0	make_fixed_width_column	1	20	1.0	2	0	421
-6	CudfAggregate	0	make_numeric_column	1	20	2.0	4	0	421
-6	CudfAggregate	0	mutable_view	1	20	6.5	1	0	421
-6	CudfAggregate	0	allocate_like	2	20	2.0	4	0	421
-6	CudfAggregate	0	copy_bitmask	2	20	0.5	3	1	421
-6	CudfAggregate	0	make_fixed_point_column	2	20	1.0	2	0	421
-6	CudfProject	0	(unattributed)	0	10	1.0	10	1	11
-6	CudfProject	0	copy_bitmask	0	10	1.0	1	0	11
-7	CudfCoalescePartitions	0	(unattributed)	0	10	1.0	4	0	14
-7	CudfCoalescePartitions	0	concatenate	0	10	1.0	10	1	14
-7	CudfCoalescePartitions	0	allocate_like	1	10	1.0	2	0	14
-7	CudfCoalescePartitions	0	mutable_view	1	10	1.0	0	0	14
-7	CudfProject	0	(unattributed)	0	10	1.0	12	1	13
-7	CudfProject	0	copy_bitmask	0	10	1.0	1	0	13
-8	CudfAggregate	0	(unattributed)	0	10	1.0	70	7	274
-8	CudfAggregate	0	aggregate	0	10	1.0	200	46	274
-8	CudfAggregate	0	make_fixed_width_column	0	10	1.0	2	0	274
-8	CudfAggregate	0	mutable_view	0	10	1.0	0	0	274
-8	CudfAggregate	0	allocate_like	1	10	2.0	5	0	274
-8	CudfAggregate	0	copy_bitmask	1	10	1.0	1	0	274
-8	CudfAggregate	0	make_fixed_width_column	1	10	1.0	2	0	274
-8	CudfAggregate	0	make_numeric_column	1	10	2.0	4	0	274
-8	CudfAggregate	0	mutable_view	1	10	5.0	1	0	274
-8	CudfAggregate	0	allocate_like	2	10	2.0	4	0	274
-8	CudfAggregate	0	make_fixed_point_column	2	10	1.0	2	0	274
-8	CudfProject	0	(unattributed)	0	10	1.0	10	1	11
-8	CudfProject	0	copy_bitmask	0	10	1.0	1	0	11
-9	CudfProject	0	(unattributed)	0	10	1.0	12	1	13
-9	CudfProject	0	copy_bitmask	0	10	1.0	1	0	13
-10	CudfProject	0	(unattributed)	0	10	1.0	11	1	11
-10	CudfProject	0	copy_bitmask	0	10	1.0	1	0	11
+# What one timed region spends its time on, one level down, from an Nsight capture.
+# One row per (case, node_seq, call, depth). A region is one output partition of one
+#   call, so a batched mode has several a run: `regions` counts them, `executions`
+#   divides them out, and every microsecond below is a median over one region.
+# depth 0 partitions the region and deeper rows break those down — summing across
+#   depths double-counts. (unattributed) is the part of the region inside no call.
+# host_us is the call's own NVTX range; device_us sums the device operations it
+#   launched, so an async call has a small host span and a large device one.
+# The times are a profiled run's and are not comparable with records.tsv's.
+dataset	sf	query	mode	node_seq	node_type	partition	call	depth	executions	regions	calls_per_region	host_us	device_us	region_us
+tpch	40	q19	tp1-single	0	CudfScan	0	(unattributed)	0	10	10	1.0	11	0	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	read_parquet	0	10	10	1.0	17017	13550	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	build_string_dict_indices	1	10	10	1.0	119	28	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	decode_page_headers	1	10	10	1.0	247	54	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	decompress_page_data	1	10	10	1.0	6569	6374	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	detect_malformed_pages	1	10	10	1.0	115	20	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	preprocess_subpass_pages	1	10	10	1.0	147	24	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	read_chunk_internal	1	10	10	1.0	4752	7010	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	allocate_columns	2	10	10	1.0	42	9	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	compute_output_chunks_for_subpass	2	10	10	1.0	1	0	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	decode_page_data	2	10	10	1.0	3968	6310	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	decompress	2	10	10	1.0	161	6359	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	enforce_null_consistency	2	10	10	1.0	1	0	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	finalize_output	2	10	10	1.0	2	0	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	make_strings_column	2	10	10	2.0	1	0	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	sort_pages	2	10	10	1.0	71	21	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	batched_memset	3	10	10	1.0	29	9	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	device_decompress	3	10	10	1.0	71	6333	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	host_decompress	3	10	10	1.0	0	0	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	sort_tasks	3	10	10	1.0	48	24	17028
+tpch	40	q19	tp1-single	0	CudfScan	0	split_tasks	3	10	10	1.0	0	0	17028
+tpch	40	q19	tp1-single	1	CudfFilter	0	(unattributed)	0	10	10	1.0	2023	922	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	apply_boolean_mask	0	10	10	1.0	312	101	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	binary_operation	0	10	10	33.0	5371	3039	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	compute_column	0	10	10	4.0	151	282	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	make_strings_column	0	10	10	15.0	4	0	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	copy_if	1	10	10	1.0	311	101	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	make_fixed_width_column	1	10	10	22.0	97	19	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	make_numeric_column	1	10	10	15.0	35	0	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	mutable_view	1	10	10	52.0	10	0	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	allocate_like	2	10	10	2.0	4	0	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	create_null_mask	2	10	10	4.0	2	0	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	make_numeric_column	2	10	10	24.0	91	19	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	make_strings_column	2	10	10	2.0	1	0	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	mutable_view	2	10	10	8.0	2	0	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	allocate_like	3	10	10	2.0	3	0	7888
+tpch	40	q19	tp1-single	1	CudfFilter	0	mutable_view	3	10	10	2.0	0	0	7888
+tpch	40	q19	tp1-single	2	CudfCoalescePartitions	0	(unattributed)	0	10	10	1.0	5	0	176
+tpch	40	q19	tp1-single	2	CudfCoalescePartitions	0	concatenate	0	10	10	1.0	171	27	176
+tpch	40	q19	tp1-single	2	CudfCoalescePartitions	0	allocate_like	1	10	10	2.0	3	0	176
+tpch	40	q19	tp1-single	2	CudfCoalescePartitions	0	concatenate	1	10	10	2.0	152	24	176
+tpch	40	q19	tp1-single	2	CudfCoalescePartitions	0	mutable_view	1	10	10	2.0	0	0	176
+tpch	40	q19	tp1-single	2	CudfCoalescePartitions	0	create_strings_device_views	2	10	10	2.0	102	15	176
+tpch	40	q19	tp1-single	2	CudfCoalescePartitions	0	make_numeric_column	2	10	10	2.0	3	0	176
+tpch	40	q19	tp1-single	2	CudfCoalescePartitions	0	make_strings_column	2	10	10	2.0	1	0	176
+tpch	40	q19	tp1-single	2	CudfCoalescePartitions	0	mutable_view	2	10	10	2.0	0	0	176
+tpch	40	q19	tp1-single	3	CudfScan	0	(unattributed)	0	10	10	1.0	28	0	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	cast	0	10	10	3.0	65	4150	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	read_parquet	0	10	10	1.0	255630	69848	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	build_string_dict_indices	1	10	10	1.0	328	71	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	decode_page_headers	1	10	10	1.0	634	262	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	decompress_page_data	1	10	10	1.0	26319	25391	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	detect_malformed_pages	1	10	10	1.0	126	28	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	mutable_view	1	10	10	3.0	1	0	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	preprocess_subpass_pages	1	10	10	1.0	526	226	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	read_chunk_internal	1	10	10	1.0	39306	43309	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	allocate_columns	2	10	10	1.0	48	46	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	compute_output_chunks_for_subpass	2	10	10	1.0	1	0	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	decode_page_data	2	10	10	1.0	25764	29909	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	decompress	2	10	10	1.0	232	25280	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	enforce_null_consistency	2	10	10	1.0	1	0	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	finalize_output	2	10	10	1.0	3	0	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	make_numeric_column	2	10	10	1.0	3	0	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	make_strings_column	2	10	10	2.0	1	0	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	mutable_view	2	10	10	1.0	1	0	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	sort_pages	2	10	10	1.0	251	53	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	batched_memset	3	10	10	1.0	31	46	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	device_decompress	3	10	10	1.0	77	25202	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	host_decompress	3	10	10	1.0	0	0	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	sort_tasks	3	10	10	1.0	96	74	255727
+tpch	40	q19	tp1-single	3	CudfScan	0	split_tasks	3	10	10	1.0	0	0	255727
+tpch	40	q19	tp1-single	4	CudfFilter	0	(unattributed)	0	10	10	1.0	15742	15383	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	apply_boolean_mask	0	10	10	1.0	3133	2866	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	binary_operation	0	10	10	17.0	35883	34873	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	make_strings_column	0	10	10	3.0	1	0	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	copy_if	1	10	10	1.0	3132	2866	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	make_fixed_width_column	1	10	10	8.0	59	59	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	make_numeric_column	1	10	10	3.0	5	0	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	mutable_view	1	10	10	20.0	5	0	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	allocate_like	2	10	10	4.0	8	0	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	create_null_mask	2	10	10	6.0	3	0	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	make_numeric_column	2	10	10	10.0	58	59	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	make_strings_column	2	10	10	2.0	1	0	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	mutable_view	2	10	10	12.0	3	0	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	allocate_like	3	10	10	4.0	7	0	54764
+tpch	40	q19	tp1-single	4	CudfFilter	0	mutable_view	3	10	10	2.0	0	0	54764
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	(unattributed)	0	10	10	1.0	1127	118	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	apply_boolean_mask	0	10	10	1.0	297	59	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	binary_operation	0	10	10	44.0	2698	594	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	compute_column	0	10	10	3.0	117	18	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	gather	0	10	10	2.0	281	63	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	inner_join	0	10	10	1.0	794	634	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	make_strings_column	0	10	10	17.0	5	0	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	allocate_like	1	10	10	6.0	11	0	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	copy_if	1	10	10	1.0	297	59	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	create_null_mask	1	10	10	4.0	2	0	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	hash_join	1	10	10	1.0	25	11	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	inner_join	1	10	10	1.0	677	621	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	make_fixed_width_column	1	10	10	26.0	96	24	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	make_numeric_column	1	10	10	17.0	24	0	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	make_strings_column	1	10	10	2.0	1	0	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	mutable_view	1	10	10	74.0	12	0	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	allocate_like	2	10	10	12.0	23	0	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	create_null_mask	2	10	10	4.0	2	0	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	make_numeric_column	2	10	10	28.0	87	24	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	make_strings_column	2	10	10	2.0	1	0	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	mutable_view	2	10	10	16.0	5	0	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	allocate_like	3	10	10	6.0	10	0	5318
+tpch	40	q19	tp1-single	5	CudfHashJoin	0	mutable_view	3	10	10	2.0	0	0	5318
+tpch	40	q19	tp1-single	6	CudfAggregate	0	(unattributed)	0	10	10	1.0	121	13	485
+tpch	40	q19	tp1-single	6	CudfAggregate	0	aggregate	0	10	10	1.0	200	433	485
+tpch	40	q19	tp1-single	6	CudfAggregate	0	binary_operation	0	10	10	2.0	155	38	485
+tpch	40	q19	tp1-single	6	CudfAggregate	0	make_fixed_width_column	0	10	10	1.0	2	0	485
+tpch	40	q19	tp1-single	6	CudfAggregate	0	mutable_view	0	10	10	1.0	0	0	485
+tpch	40	q19	tp1-single	6	CudfAggregate	0	allocate_like	1	10	10	1.0	2	0	485
+tpch	40	q19	tp1-single	6	CudfAggregate	0	make_fixed_width_column	1	10	10	1.0	2	0	485
+tpch	40	q19	tp1-single	6	CudfAggregate	0	make_numeric_column	1	10	10	1.0	2	0	485
+tpch	40	q19	tp1-single	6	CudfAggregate	0	mutable_view	1	10	10	5.0	1	0	485
+tpch	40	q19	tp1-single	6	CudfAggregate	0	allocate_like	2	10	10	1.0	2	0	485
+tpch	40	q19	tp1-single	6	CudfAggregate	0	make_fixed_point_column	2	10	10	1.0	2	0	485
+tpch	40	q19	tp1-single	7	CudfCoalescePartitions	0	(unattributed)	0	10	10	1.0	4	0	15
+tpch	40	q19	tp1-single	7	CudfCoalescePartitions	0	concatenate	0	10	10	1.0	10	1	15
+tpch	40	q19	tp1-single	7	CudfCoalescePartitions	0	allocate_like	1	10	10	1.0	1	0	15
+tpch	40	q19	tp1-single	7	CudfCoalescePartitions	0	mutable_view	1	10	10	1.0	0	0	15
+tpch	40	q19	tp1-single	8	CudfAggregate	0	(unattributed)	0	10	10	1.0	411	8	571
+tpch	40	q19	tp1-single	8	CudfAggregate	0	aggregate	0	10	10	1.0	156	28	571
+tpch	40	q19	tp1-single	8	CudfAggregate	0	make_fixed_width_column	0	10	10	1.0	2	0	571
+tpch	40	q19	tp1-single	8	CudfAggregate	0	mutable_view	0	10	10	1.0	0	0	571
+tpch	40	q19	tp1-single	8	CudfAggregate	0	allocate_like	1	10	10	1.0	2	0	571
+tpch	40	q19	tp1-single	8	CudfAggregate	0	make_fixed_width_column	1	10	10	1.0	2	0	571
+tpch	40	q19	tp1-single	8	CudfAggregate	0	make_numeric_column	1	10	10	1.0	2	0	571
+tpch	40	q19	tp1-single	8	CudfAggregate	0	mutable_view	1	10	10	3.0	1	0	571
+tpch	40	q19	tp1-single	8	CudfAggregate	0	allocate_like	2	10	10	1.0	2	0	571
+tpch	40	q19	tp1-single	8	CudfAggregate	0	make_fixed_point_column	2	10	10	1.0	2	0	571
+tpch	40	q19	tp1-single	9	CudfProject	0	(unattributed)	0	10	10	1.0	13	1	13
+tpch	40	q19	tp1-single	10	CudfProject	0	(unattributed)	0	10	10	1.0	10	1	10
+tpch	40	q19	tp1-single	10	result_from_handle	0	(unattributed)	0	10	10	1.0	56	0	72
+tpch	40	q19	tp1-single	10	result_from_handle	0	to_arrow_host	0	10	10	1.0	16	1	72
+tpch	40	q6	tp1-single	0	CudfScan	0	(unattributed)	0	10	10	1.0	21	0	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	cast	0	10	10	3.0	62	648	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	read_parquet	0	10	10	1.0	35661	11542	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	build_string_dict_indices	1	10	10	1.0	63	10	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	decode_page_headers	1	10	10	1.0	279	69	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	decompress_page_data	1	10	10	1.0	8164	7915	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	detect_malformed_pages	1	10	10	1.0	123	25	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	mutable_view	1	10	10	3.0	1	0	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	preprocess_subpass_pages	1	10	10	1.0	102	20	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	read_chunk_internal	1	10	10	1.0	2154	2770	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	allocate_columns	2	10	10	1.0	43	12	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	compute_output_chunks_for_subpass	2	10	10	1.0	0	0	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	decode_page_data	2	10	10	1.0	2104	2758	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	decompress	2	10	10	1.0	180	7890	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	enforce_null_consistency	2	10	10	1.0	1	0	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	finalize_output	2	10	10	1.0	2	0	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	sort_pages	2	10	10	1.0	84	23	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	batched_memset	3	10	10	1.0	31	12	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	device_decompress	3	10	10	1.0	71	7851	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	host_decompress	3	10	10	1.0	0	0	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	sort_tasks	3	10	10	1.0	63	36	35747
+tpch	40	q6	tp1-single	0	CudfScan	0	split_tasks	3	10	10	1.0	0	0	35747
+tpch	40	q6	tp1-single	1	CudfFilter	0	(unattributed)	0	10	10	1.0	2195	916	4908
+tpch	40	q6	tp1-single	1	CudfFilter	0	apply_boolean_mask	0	10	10	1.0	587	475	4908
+tpch	40	q6	tp1-single	1	CudfFilter	0	binary_operation	0	10	10	6.0	2065	1769	4908
+tpch	40	q6	tp1-single	1	CudfFilter	0	compute_column	0	10	10	1.0	63	619	4908
+tpch	40	q6	tp1-single	1	CudfFilter	0	copy_if	1	10	10	1.0	586	475	4908
+tpch	40	q6	tp1-single	1	CudfFilter	0	make_fixed_width_column	1	10	10	4.0	22	6	4908
+tpch	40	q6	tp1-single	1	CudfFilter	0	mutable_view	1	10	10	7.0	1	0	4908
+tpch	40	q6	tp1-single	1	CudfFilter	0	allocate_like	2	10	10	4.0	10	0	4908
+tpch	40	q6	tp1-single	1	CudfFilter	0	create_null_mask	2	10	10	4.0	2	0	4908
+tpch	40	q6	tp1-single	1	CudfFilter	0	make_numeric_column	2	10	10	4.0	20	6	4908
+tpch	40	q6	tp1-single	1	CudfFilter	0	mutable_view	2	10	10	8.0	1	0	4908
+tpch	40	q6	tp1-single	1	CudfFilter	0	allocate_like	3	10	10	4.0	8	0	4908
+tpch	40	q6	tp1-single	2	CudfAggregate	0	(unattributed)	0	10	10	1.0	110	102	787
+tpch	40	q6	tp1-single	2	CudfAggregate	0	aggregate	0	10	10	1.0	411	11147	787
+tpch	40	q6	tp1-single	2	CudfAggregate	0	binary_operation	0	10	10	1.0	252	97	787
+tpch	40	q6	tp1-single	2	CudfAggregate	0	make_fixed_width_column	0	10	10	1.0	2	0	787
+tpch	40	q6	tp1-single	2	CudfAggregate	0	mutable_view	0	10	10	1.0	0	0	787
+tpch	40	q6	tp1-single	2	CudfAggregate	0	allocate_like	1	10	10	1.0	2	0	787
+tpch	40	q6	tp1-single	2	CudfAggregate	0	make_fixed_width_column	1	10	10	1.0	2	0	787
+tpch	40	q6	tp1-single	2	CudfAggregate	0	make_numeric_column	1	10	10	1.0	2	0	787
+tpch	40	q6	tp1-single	2	CudfAggregate	0	mutable_view	1	10	10	4.0	1	0	787
+tpch	40	q6	tp1-single	2	CudfAggregate	0	allocate_like	2	10	10	1.0	2	0	787
+tpch	40	q6	tp1-single	2	CudfAggregate	0	make_fixed_point_column	2	10	10	1.0	2	0	787
+tpch	40	q6	tp1-single	3	CudfCoalescePartitions	0	(unattributed)	0	10	10	1.0	5	0	15
+tpch	40	q6	tp1-single	3	CudfCoalescePartitions	0	concatenate	0	10	10	1.0	10	1	15
+tpch	40	q6	tp1-single	3	CudfCoalescePartitions	0	allocate_like	1	10	10	1.0	2	0	15
+tpch	40	q6	tp1-single	3	CudfCoalescePartitions	0	mutable_view	1	10	10	1.0	0	0	15
+tpch	40	q6	tp1-single	4	CudfAggregate	0	(unattributed)	0	10	10	1.0	10948	8	11138
+tpch	40	q6	tp1-single	4	CudfAggregate	0	aggregate	0	10	10	1.0	177	34	11138
+tpch	40	q6	tp1-single	4	CudfAggregate	0	make_fixed_width_column	0	10	10	1.0	3	0	11138
+tpch	40	q6	tp1-single	4	CudfAggregate	0	mutable_view	0	10	10	1.0	0	0	11138
+tpch	40	q6	tp1-single	4	CudfAggregate	0	allocate_like	1	10	10	1.0	2	0	11138
+tpch	40	q6	tp1-single	4	CudfAggregate	0	make_fixed_width_column	1	10	10	1.0	2	0	11138
+tpch	40	q6	tp1-single	4	CudfAggregate	0	make_numeric_column	1	10	10	1.0	2	0	11138
+tpch	40	q6	tp1-single	4	CudfAggregate	0	mutable_view	1	10	10	3.0	0	0	11138
+tpch	40	q6	tp1-single	4	CudfAggregate	0	allocate_like	2	10	10	1.0	2	0	11138
+tpch	40	q6	tp1-single	4	CudfAggregate	0	make_fixed_point_column	2	10	10	1.0	2	0	11138
+tpch	40	q6	tp1-single	5	CudfProject	0	(unattributed)	0	10	10	1.0	15	1	15
+tpch	40	q6	tp1-single	6	CudfProject	0	(unattributed)	0	10	10	1.0	10	1	10
+tpch	40	q6	tp1-single	6	result_from_handle	0	(unattributed)	0	10	10	1.0	50	0	66
+tpch	40	q6	tp1-single	6	result_from_handle	0	to_arrow_host	0	10	10	1.0	16	1	66
+tpch	40	q6	tp4-sized	0	CudfScan	0	(unattributed)	0	10	40	1.0	20	0	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	cast	0	10	40	3.0	58	175	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	read_parquet	0	10	40	1.0	21429	10044	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	build_string_dict_indices	1	10	40	1.0	52	8	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	decode_page_headers	1	10	40	1.0	246	55	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	decompress_page_data	1	10	40	1.0	7512	7315	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	detect_malformed_pages	1	10	40	1.0	113	21	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	mutable_view	1	10	40	3.0	1	0	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	preprocess_subpass_pages	1	10	40	1.0	69	11	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	read_chunk_internal	1	10	40	1.0	1905	2448	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	allocate_columns	2	10	40	1.0	42	10	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	compute_output_chunks_for_subpass	2	10	40	1.0	0	0	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	decode_page_data	2	10	40	1.0	1855	2438	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	decompress	2	10	40	1.0	155	7300	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	enforce_null_consistency	2	10	40	1.0	1	0	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	finalize_output	2	10	40	1.0	2	0	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	sort_pages	2	10	40	1.0	71	22	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	batched_memset	3	10	40	1.0	30	10	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	device_decompress	3	10	40	1.0	63	7274	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	host_decompress	3	10	40	1.0	0	0	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	sort_tasks	3	10	40	1.0	49	24	21507
+tpch	40	q6	tp4-sized	0	CudfScan	0	split_tasks	3	10	40	1.0	0	0	21507
+tpch	40	q6	tp4-sized	1	CudfFilter	0	(unattributed)	0	10	40	1.0	537	248	1615
+tpch	40	q6	tp4-sized	1	CudfFilter	0	apply_boolean_mask	0	10	40	1.0	234	138	1615
+tpch	40	q6	tp4-sized	1	CudfFilter	0	binary_operation	0	10	40	6.0	795	524	1615
+tpch	40	q6	tp4-sized	1	CudfFilter	0	compute_column	0	10	40	1.0	53	164	1615
+tpch	40	q6	tp4-sized	1	CudfFilter	0	copy_if	1	10	40	1.0	234	138	1615
+tpch	40	q6	tp4-sized	1	CudfFilter	0	make_fixed_width_column	1	10	40	4.0	19	4	1615
+tpch	40	q6	tp4-sized	1	CudfFilter	0	mutable_view	1	10	40	7.0	2	0	1615
+tpch	40	q6	tp4-sized	1	CudfFilter	0	allocate_like	2	10	40	4.0	8	0	1615
+tpch	40	q6	tp4-sized	1	CudfFilter	0	create_null_mask	2	10	40	4.0	3	0	1615
+tpch	40	q6	tp4-sized	1	CudfFilter	0	make_numeric_column	2	10	40	4.0	17	4	1615
+tpch	40	q6	tp4-sized	1	CudfFilter	0	mutable_view	2	10	40	8.0	1	0	1615
+tpch	40	q6	tp4-sized	1	CudfFilter	0	allocate_like	3	10	40	4.0	7	0	1615
+tpch	40	q6	tp4-sized	2	CudfAggregate	0	(unattributed)	0	10	40	1.0	112	38	11133
+tpch	40	q6	tp4-sized	2	CudfAggregate	0	aggregate	0	10	40	1.0	220	10812	11133
+tpch	40	q6	tp4-sized	2	CudfAggregate	0	binary_operation	0	10	40	1.0	10806	41	11133
+tpch	40	q6	tp4-sized	2	CudfAggregate	0	make_fixed_width_column	0	10	40	1.0	2	0	11133
+tpch	40	q6	tp4-sized	2	CudfAggregate	0	mutable_view	0	10	40	1.0	0	0	11133
+tpch	40	q6	tp4-sized	2	CudfAggregate	0	allocate_like	1	10	40	1.0	2	0	11133
+tpch	40	q6	tp4-sized	2	CudfAggregate	0	make_fixed_width_column	1	10	40	1.0	2	0	11133
+tpch	40	q6	tp4-sized	2	CudfAggregate	0	make_numeric_column	1	10	40	1.0	2	0	11133
+tpch	40	q6	tp4-sized	2	CudfAggregate	0	mutable_view	1	10	40	4.0	1	0	11133
+tpch	40	q6	tp4-sized	2	CudfAggregate	0	allocate_like	2	10	40	1.0	2	0	11133
+tpch	40	q6	tp4-sized	2	CudfAggregate	0	make_fixed_point_column	2	10	40	1.0	2	0	11133
+tpch	40	q6	tp4-sized	3	CudfCoalescePartitions	0	(unattributed)	0	10	40	1.0	5	0	14
+tpch	40	q6	tp4-sized	3	CudfCoalescePartitions	0	concatenate	0	10	40	1.0	9	1	14
+tpch	40	q6	tp4-sized	3	CudfCoalescePartitions	0	allocate_like	1	10	40	1.0	1	0	14
+tpch	40	q6	tp4-sized	3	CudfCoalescePartitions	0	mutable_view	1	10	40	1.0	0	0	14
+tpch	40	q6	tp4-sized	4	CudfAggregate	0	(unattributed)	0	10	40	1.0	70	8	226
+tpch	40	q6	tp4-sized	4	CudfAggregate	0	aggregate	0	10	40	1.0	152	28	226
+tpch	40	q6	tp4-sized	4	CudfAggregate	0	make_fixed_width_column	0	10	40	1.0	2	0	226
+tpch	40	q6	tp4-sized	4	CudfAggregate	0	mutable_view	0	10	40	1.0	0	0	226
+tpch	40	q6	tp4-sized	4	CudfAggregate	0	allocate_like	1	10	40	1.0	2	0	226
+tpch	40	q6	tp4-sized	4	CudfAggregate	0	make_fixed_width_column	1	10	40	1.0	2	0	226
+tpch	40	q6	tp4-sized	4	CudfAggregate	0	make_numeric_column	1	10	40	1.0	2	0	226
+tpch	40	q6	tp4-sized	4	CudfAggregate	0	mutable_view	1	10	40	3.0	1	0	226
+tpch	40	q6	tp4-sized	4	CudfAggregate	0	allocate_like	2	10	40	1.0	1	0	226
+tpch	40	q6	tp4-sized	4	CudfAggregate	0	make_fixed_point_column	2	10	40	1.0	2	0	226
+tpch	40	q6	tp4-sized	5	CudfCoalescePartitions	0	(unattributed)	0	10	10	1.0	4	0	23
+tpch	40	q6	tp4-sized	5	CudfCoalescePartitions	0	concatenate	0	10	10	1.0	19	3	23
+tpch	40	q6	tp4-sized	5	CudfCoalescePartitions	0	allocate_like	1	10	10	1.0	1	0	23
+tpch	40	q6	tp4-sized	5	CudfCoalescePartitions	0	mutable_view	1	10	10	1.0	0	0	23
+tpch	40	q6	tp4-sized	6	CudfAggregate	0	(unattributed)	0	10	10	1.0	67	8	226
+tpch	40	q6	tp4-sized	6	CudfAggregate	0	aggregate	0	10	10	1.0	154	32	226
+tpch	40	q6	tp4-sized	6	CudfAggregate	0	make_fixed_width_column	0	10	10	1.0	2	0	226
+tpch	40	q6	tp4-sized	6	CudfAggregate	0	mutable_view	0	10	10	1.0	0	0	226
+tpch	40	q6	tp4-sized	6	CudfAggregate	0	allocate_like	1	10	10	1.0	2	0	226
+tpch	40	q6	tp4-sized	6	CudfAggregate	0	make_fixed_width_column	1	10	10	1.0	2	0	226
+tpch	40	q6	tp4-sized	6	CudfAggregate	0	make_numeric_column	1	10	10	1.0	2	0	226
+tpch	40	q6	tp4-sized	6	CudfAggregate	0	mutable_view	1	10	10	3.0	5	0	226
+tpch	40	q6	tp4-sized	6	CudfAggregate	0	allocate_like	2	10	10	1.0	2	0	226
+tpch	40	q6	tp4-sized	6	CudfAggregate	0	make_fixed_point_column	2	10	10	1.0	2	0	226
+tpch	40	q6	tp4-sized	7	CudfProject	0	(unattributed)	0	10	10	1.0	13	1	13
+tpch	40	q6	tp4-sized	8	CudfProject	0	(unattributed)	0	10	10	1.0	10	1	10
+tpch	40	q6	tp4-sized	8	result_from_handle	0	(unattributed)	0	10	10	1.0	57	0	73
+tpch	40	q6	tp4-sized	8	result_from_handle	0	to_arrow_host	0	10	10	1.0	17	1	73
