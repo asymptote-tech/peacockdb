@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2260 test cases — Rust 1810, C++ 81, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2267 test cases — Rust 1817, C++ 81, Python 369.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,15 +22,15 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1155 cases: `--lib` 582, `test_cpu_corpus` 550, `test_corpus_goldens` 20, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1162 cases: `--lib` 589, `test_cpu_corpus` 550, `test_corpus_goldens` 20, `test_cost_model` 3
 
 *crate integration, external*
 
 | Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 549 |
 |---|---|--:|
 
-one `corpus_query!` line per query declaring its cpu and gpu modes and its two oracles,
-expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
+one `corpus_query!` line per query declaring its cpu and gpu modes, its two oracles and
+whether its device run is schema-validated, expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
 checked against plain DataFusion at `target_partitions = 1`. 115 queries at the modes each is
 correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
 [#180](tasks/active-tickets.md#t180), `tpcds/q77` three by [#212](tickets.md#t212),
@@ -63,21 +63,23 @@ that contradicts itself is the only witness to a renderer that is wrong
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions` and `accounting` beneath it | 27 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 29 |
 |---|---|--:|
 
 SQL in, rows out: 17 queries planned and run at all five modes against DataFusion on the same
 SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back
-to zero and holds equal releases at the end of every run — and eight cases no query list can
+to zero and holds equal releases at the end of every run — and ten cases no query list can
 carry: that DataFusion's partial aggregate does not skip grouping here, the call and pull
 counts a limit makes, the smallest budget a query fits in completing where the byte below it
 trips, and that boundary under a drained lane, the model compared against what the calls
 measured, an answer under the wrong column names not being the same answer, the injected set
 keeping the shapes only one query has, and a degenerate hash under a Right outer and under a
 RightAnti answering like the oracle from the empty build lanes it leaves
-([#175](archive/archived-tickets.md#t175)). Two of the 27 are `#[ignore]`d against
+([#175](archive/archived-tickets.md#t175)), and the schema validator as the driver's output
+hook — `tpch/q6` at every mode passing under it, and an index over the same tree with one
+project's field retyped refused naming the field. Two of the 29 are `#[ignore]`d against
 [#182](tasks/active-tickets.md#t182) — the budget boundary and the rebatcher's peak, both
-properties that pricing a batch from the plan's schema took away — so 25 run. The first tier
+properties that pricing a batch from the plan's schema took away — so 27 run. The first tier
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 
@@ -216,11 +218,13 @@ batch types, so the trait's associated types are exercised the way both engines 
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 95 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 100 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
-queue bounds, batch release, the trace: the schedule and the two holds, both limit lowerings by
+queue bounds, batch release, the trace, the output hook (called once per batch a node queues
+as its own and not at a forwarder, a refusal failing the run at that node and lane with the
+hook's words, and `None` leaving the report as `run` makes it): the schedule and the two holds, both limit lowerings by
 the calls not made, what each node emitted and consumed (the two records the corpus goldens
 read), the accountant through the drivers, a backend failure stopping the query with the
 accounting still reconciling, the execution golden's text with every number chosen by the
@@ -377,8 +381,11 @@ device: the release is null-guarded on the executor
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
-device and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`,
-the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden.
+device with every batch held to its node's declared schema through the driver's output hook
+(the line's `schema_validation_enabled`; `tpch/shuffle-stddev` says `disabled` against
+[#225](tickets.md#t225), its Welford state columns named for the alias), and asserts,
+read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
+and the bytes — plus the result where `gpu_oracle` names a golden.
 Twenty-six cells today: `tpch/q6`, `tpch/q1` and `tpch/shuffle-additive-avg` at every mode,
 and `q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggregate-groupby`,
 `tpch/filter-project`, `tpch/shuffle-additive`, `tpcds/q37`, `tpcds/q82` and `tpcds/q85` at
@@ -524,7 +531,8 @@ the total above. Everything else in the repo that can be enumerated as a test ca
 Notes
 
 - A mode is one of the five `tp<N>-<sizing>` shapes. A `corpus_query!` line declares
-  which of them a query is correct at, per engine, and the mode name is the golden's name;
+  which of them a query is correct at, per engine, and whether the device run is
+  schema-validated; the mode name is the golden's name;
   the tier (`mini`) is the budget those plans are priced at, and it rides in the execution
   goldens' filenames so a budget and a filename cannot name different tiers.
 - Execution goldens are per mode, not per query: `<mode>-<tier>.cpu.txt` with a

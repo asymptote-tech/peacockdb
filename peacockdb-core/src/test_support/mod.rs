@@ -18,6 +18,7 @@ mod device_schema;
 mod golden_text;
 mod registry;
 mod result_text;
+mod schema_validation;
 mod testdata;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -26,8 +27,9 @@ use std::path::{Path, PathBuf};
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::{DataType, Schema as ArrowSchema};
 
+use crate::executor::{CpuBackend, OutputHook, PlanIndex};
 #[cfg(not(feature = "rust-only"))]
-use crate::executor::GpuBatch;
+use crate::executor::{GpuBackend, GpuBatch};
 use crate::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};
 
 // --- where the testdata is ---------------------------------------------------
@@ -565,9 +567,9 @@ pub fn device_divergence(declared: &ArrowSchema, actual: &DeviceSchema) -> Optio
     device_schema::device_divergence(declared, actual)
 }
 
-// The two reads below name a raw executor and a `GpuBatch`, so they stay `pub(crate)`, and
-// their callers are the device rung — test code under `gpu` — so every other shape sees
-// them as dead. The attribute leaves with the corpus's first read.
+// The two reads below name a raw executor and a `GpuBatch`, so they stay `pub(crate)`. The
+// raw read's callers are the device rung — test code under `gpu` — so every other shape
+// sees it as dead; the batch read is what the validator below composes.
 
 /// What the device holds at a raw handle of `executor`'s session, rows left where they are.
 #[cfg(not(feature = "rust-only"))]
@@ -581,9 +583,25 @@ pub(crate) fn schema_at(
 
 /// The same for a batch, which carries its executor and handle.
 #[cfg(not(feature = "rust-only"))]
-#[cfg_attr(not(all(test, feature = "gpu")), allow(dead_code))]
 pub(crate) fn schema_of(batch: &GpuBatch) -> DeviceSchema {
     device_schema::schema_at(batch.executor(), batch.handle())
+}
+
+// --- the schema validator ---------------------------------------------------------
+// A driver output hook holding every batch a node emits to that node's declared schema, in
+// the sink's spelling. Both flavours name an engine type, so they stay `pub(crate)`: the
+// device corpus installs the gpu one, the end-to-end tier the cpu one.
+
+#[cfg(not(feature = "rust-only"))]
+pub(crate) fn gpu_schema_validator<'a>(index: &'a PlanIndex<'a>) -> OutputHook<'a, GpuBackend> {
+    schema_validation::gpu_schema_validator(index)
+}
+
+/// Its only caller is the end-to-end tier, so a `test-support` build without `test` sees
+/// it as dead.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn cpu_schema_validator<'a>(index: &'a PlanIndex<'a>) -> OutputHook<'a, CpuBackend> {
+    schema_validation::cpu_schema_validator(index)
 }
 
 // --- a corpus case ----------------------------------------------------------------
@@ -598,11 +616,20 @@ pub async fn cpu_case(dataset: &str, sf: &str, query: &str, mode: &str, cpu_orac
     corpus::cpu_case(dataset, sf, query, mode, cpu_oracle).await
 }
 
-/// The whole of a device corpus case: plan, run on the device, then the two read-only
-/// assertions — the mode's `.cpu.txt` section, and the result the declaration names.
+/// The whole of a device corpus case: plan, run on the device — every batch held to its
+/// node's declared schema where `validation` says `schema_validation_enabled` — then the
+/// two read-only assertions: the mode's `.cpu.txt` section, and the result the declaration
+/// names.
 #[cfg(not(feature = "rust-only"))]
-pub async fn gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, gpu_oracle: &str) {
-    corpus_gpu::gpu_case(dataset, sf, query, mode, gpu_oracle).await
+pub async fn gpu_case(
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    mode: &str,
+    gpu_oracle: &str,
+    validation: &str,
+) {
+    corpus_gpu::gpu_case(dataset, sf, query, mode, gpu_oracle, validation).await
 }
 
 /// Which mode authors `.result.txt`: the last mode the query declares, in the fixed
