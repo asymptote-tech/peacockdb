@@ -110,6 +110,13 @@ impl GpuBatch {
         self.handle
     }
 
+    /// The session the handle belongs to, for a call that reads the handle and keeps it:
+    /// the harness's schema read, so a plain build sees it as dead.
+    #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
+    pub(crate) fn executor(&self) -> *mut PeacockExecutor {
+        self.executor
+    }
+
     /// Hand the handle to an FFI call that consumes it — a slice, or an executor call
     /// taking it as an input. The batch is gone by move, and its release is skipped
     /// because C++ has erased the registry entry: releasing again would be a use of a

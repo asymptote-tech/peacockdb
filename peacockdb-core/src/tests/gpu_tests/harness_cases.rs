@@ -13,7 +13,7 @@ use crate::tests::given::Given;
 use crate::tests::synthetic::synthetic;
 
 /// Any node over a given leaf opens a session; the unload's is the emptiest plan there is.
-fn empty_plan() -> GpuUnload {
+pub(crate) fn empty_plan() -> GpuUnload {
     GpuUnload::new(
         Given::of(
             Schema::new(synthetic(0, 0).schema()),
@@ -288,7 +288,7 @@ operator_case! {
 
 /// A limit over a stream of `batches` batches of `rows` rows each. The schema is the
 /// fixture's, which every `synthetic` shares, so a stream of no batches is a legal one.
-fn limit_over(
+pub(crate) fn limit_over(
     skip: u64,
     fetch: Option<u64>,
     rows: usize,

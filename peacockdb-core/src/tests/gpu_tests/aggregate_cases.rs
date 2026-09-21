@@ -269,7 +269,7 @@ operator_case! {
 
 /// DataFusion's `sum` of a `Decimal128(18, 2)` declares `Decimal128(28, 2)` — the precision
 /// plus ten, capped at 38 — read off `SELECT sum(dec) FROM t`.
-fn decimal_sum() -> GpuAggregate {
+pub(crate) fn decimal_sum() -> GpuAggregate {
     let state = columns(&[("sum(dec)", DataType::Decimal128(28, 2))]);
     let aggs = vec![call(
         PlanAgg::Sum,
@@ -338,7 +338,7 @@ operator_case! {
 
 /// Two keys, `key` and `b`, over the sets given; `__grouping_id` is `UInt8` for up to
 /// eight keys, as DataFusion's partial declares it, and each masked key takes a typed NULL.
-fn grouping_sets(sets: Vec<Vec<bool>>) -> GpuAggregate {
+pub(crate) fn grouping_sets(sets: Vec<Vec<bool>>) -> GpuAggregate {
     let state = columns(&[
         ("key", DataType::Int32),
         ("b", DataType::Boolean),
@@ -642,7 +642,7 @@ operator_case! {
 /// `[$sum Decimal128(28, 2), $count Int64]` — `sum`'s widening and `count`'s type — and the
 /// output `Decimal128(22, 6)`; the finalize (`plan/aggregates.rs`) is the sum over the
 /// count cast to the output's precision at scale 0, the divide cast to the output type.
-fn planned_decimal_average() -> (Schema, Schema, Vec<NamedExpr>) {
+pub(crate) fn planned_decimal_average() -> (Schema, Schema, Vec<NamedExpr>) {
     let out = DataType::Decimal128(22, 6);
     let state = columns(&[
         ("avg(dec)$sum", DataType::Decimal128(28, 2)),

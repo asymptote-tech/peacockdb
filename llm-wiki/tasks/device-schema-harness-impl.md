@@ -79,7 +79,7 @@ pub fn schema_of(batch: &GpuBatch) -> DeviceSchema;               // peacock_han
   The module sits in `test_support/mod.rs` beside `corpus_gpu` with the same gating: the
   feature-independent part always, `schema_of` under `not(rust-only)`.
 
-- [ ] **Step 1: Unit tests** in the same file (`#[cfg(test)] mod tests`):
+- [x] **Step 1: Unit tests** in the same file (`#[cfg(test)] mod tests`):
   `utf8_and_large_utf8_are_one_string` (`Utf8`, `LargeUtf8` → `String`, no scale);
   `a_decimal_keeps_its_scale_and_loses_its_precision` (`Decimal128(15,2)` and `(38,2)` →
   `{Decimal128, Some(2)}`, equal); `date32_is_timestamp_days`; `timestamps_keep_the_unit_and_lose_the_zone`;
@@ -90,8 +90,8 @@ pub fn schema_of(batch: &GpuBatch) -> DeviceSchema;               // peacock_han
   `Some("0 a: Int32 vs INT16; 2 c: Decimal128(15, 2) vs DECIMAL128 scale 4")`;
   `a_matching_schema_diverges_nowhere`; `a_column_count_mismatch_is_a_divergence`. All
   rust-only: nothing here touches a handle.
-- [ ] **Step 2: Red** — module missing.
-- [ ] **Step 3: Implement** — `device_type_of` as one `match` mirroring
+- [x] **Step 2: Red** — module missing.
+- [x] **Step 3: Implement** — `device_type_of` as one `match` mirroring
   `third_party/cudf/cpp/src/interop/arrow_utilities.cpp:30-70` for the types the wire admits
   (the vendored tree is 25.10; its view and DECIMAL32/64 arms have no wire type after task 2,
   so 25.02's mapping is the same set), with a comment pointing there; `from_ipc_schema` =
@@ -102,7 +102,7 @@ pub fn schema_of(batch: &GpuBatch) -> DeviceSchema;               // peacock_han
   `STRING`, `DECIMAL128 scale 2`, `TIMESTAMP_DAYS`. `schema_of(&GpuBatch)`: the batch's
   executor pointer and handle → `peacock_handle_schema` → `StreamReader` over the buffer for
   its `schema()` → `from_ipc_schema` → `peacock_result_free`; does not consume the batch.
-- [ ] **Step 4: Green**, rust-only `--lib -- test_support::device_schema`; `test_module_layout`.
+- [x] **Step 4: Green**, rust-only `--lib -- test_support::device_schema`; `test_module_layout`.
 - [ ] **Step 5: Commit.** `git commit -m "test_support::device_schema: an arrow schema projected onto what cuDF stores"`.
 
 ### Task 3: `Device::schema_of` and `Session::schema_of`
@@ -110,15 +110,15 @@ pub fn schema_of(batch: &GpuBatch) -> DeviceSchema;               // peacock_han
 **Files:**
 - Modify: `peacockdb-core/src/tests/gpu_tests/device.rs` (after `fetch`), `wire/gpu_tests/mod.rs` `Session` (after `export`, `:163`)
 
-- [ ] **Step 1:** `pub(crate) fn schema_of(&self, batch: &GpuBatch) -> DeviceSchema` on
+- [x] **Step 1:** `pub(crate) fn schema_of(&self, batch: &GpuBatch) -> DeviceSchema` on
   `Device` delegates to `test_support::device_schema::schema_of(batch)`. The walk's
   `Session::schema_of(handle: u64)` takes a raw handle: it calls `peacock_handle_schema` on
   its own executor and shares the decode through a `pub fn from_ipc_bytes(&[u8]) ->
   DeviceSchema` in `device_schema.rs` that `schema_of` also uses.
-- [ ] **Step 2: First device case**, in a new `source_schema_cases.rs`: a `Given` leaf of every
+- [x] **Step 2: First device case**, in a new `source_schema_cases.rs`: a `Given` leaf of every
   fixture column type uploaded, `schema_of(upload)` compared with `device_schema_of(&schema)`
   — `device_divergence == None`. This proves the reader against the uploader.
-- [ ] **Step 3:** Device cycle `PCK_TEST_FILTER='schema_cases'`: green.
+- [x] **Step 3:** Device cycle `PCK_TEST_FILTER='schema_cases'`: green.
 - [ ] **Step 4: Commit.** `git commit -m "Device::schema_of reads what the device holds at a handle"`.
 
 ### Task 4: The suite, family by family
@@ -134,23 +134,23 @@ Vec<GpuBatch>` in `script.rs`, a builder not a mechanism), then for every output
 case that fails is rewritten as `bug_…` asserting the divergence string, with its ticket
 above.
 
-- [ ] **Step 1: `exec`** — `GpuProject`: arithmetic on `Int32`, `Int64`, `Float64`,
+- [x] **Step 1: `exec`** — `GpuProject`: arithmetic on `Int32`, `Int64`, `Float64`,
   `Decimal128(15,2)` (`+`, `*`, `/` — the divide's declared scale); each `Cast` the corpus
   emits (`Int64→Decimal128`, `Decimal128→Float64`, `Int32→Int64`, `Utf8→…` if any); each
   scalar function in `expr.cpp`'s dispatch (`upper`, `lower`, `substr`, `concat`, `coalesce`,
   `round`, `date_part` each field, `sqrt`), `CASE`; `GpuFilter` with and without projection.
   Device cycle; commit `"exec schema cases: what a project and a filter hand the device up"`.
-- [ ] **Step 2: `source`, `accumulate`, `emit`** — scan of each fixture table (every parquet
+- [x] **Step 2: `source`, `accumulate`, `emit`** — scan of each fixture table (every parquet
   column type); coalesce-all over two batches; emit on `Int64`, `Utf8`, `Date32`, composite
   keys. Cycle; commit.
-- [ ] **Step 3: `join`, `nested`** — each join type × with/without projection × key types
+- [x] **Step 3: `join`, `nested`** — each join type × with/without projection × key types
   `Int64`, `Utf8`, `Date32`, composite (reuse `keyed`/`hash_join_keyed` from
   `join_dimension_cases.rs`, made `pub(super)`); the nested loop `Inner` with and without
   projection. Cycle; commit.
-- [ ] **Step 4: `aggregate`** — init, merge, finalize for `sum`, `count`, `min`, `max`, `avg`,
+- [x] **Step 4: `aggregate`** — init, merge, finalize for `sum`, `count`, `min`, `max`, `avg`,
   `stddev`; grouped on `Int32`, `Utf8`, `Date32`, two keys; global; the grouping-set state
   (`__grouping_id`: expect a `bug_` on #65 — write it as one from the start). Cycle; commit.
-- [ ] **Step 5: the union's branches** — a `GpuUnion` is a forwarder with no executor
+- [x] **Step 5: the union's branches** — a `GpuUnion` is a forwarder with no executor
   (`coverage.rs:37`) and cannot run alone. The case `union.cpp`'s deleted comment described —
   two branches whose same-named column differs in cuDF type (`Decimal128(15,2)` against an
   `Int64(0)` literal) — is two `GpuProject` cases in `exec_schema_cases.rs`, each casting its
@@ -162,11 +162,11 @@ above.
 **Files:**
 - Modify: `peacockdb-core/src/wire/gpu_tests/mod.rs:233-300` (`Walk`, `make`), the test section
 
-- [ ] **Step 1: The hook.** `Walk` gains `on_call: Option<&'a mut dyn FnMut(Seq, FbKind,
+- [x] **Step 1: The hook.** `Walk` gains `on_call: Option<&'a mut dyn FnMut(Seq, FbKind,
   &[u64], &Session)>`; `make` (`:285-299`) calls it after `self.session.execute(...)` with the
   returned handles. `assert_walk_matches_datafusion(sql, knobs)` gains a sibling
   `walk_with(sql, knobs, hook)` that installs it and still compares the final batches.
-- [ ] **Step 2: The eleven tests**, each named for what it reads, each a `walk_with` whose
+- [x] **Step 2: The eleven tests**, each named for what it reads, each a `walk_with` whose
   hook matches `(seq, kind)` on the call the spec's table names, reads
   `session.schema_of(handle)` and asserts the literal `DeviceSchema`. `FbKind::Aggregate` is
   `{ merge: bool }` (`merge: false` is the partial, `true` the merge), not a mode enum:
@@ -203,7 +203,7 @@ async fn an_avg_partial_holds_a_string_key_a_scale_2_sum_and_an_int64_count() {
   `MAX_OF_SUMS` inner finalize and outer max; `SEMI_JOIN` after its one call. A check whose
   device answer differs from the table's expectation is a `bug_` with a ticket, and the detail
   file records the correction to the table.
-- [ ] **Step 3:** Device cycle `PCK_TEST_FILTER='wire::gpu_tests'`: the existing nine green,
+- [x] **Step 3:** Device cycle `PCK_TEST_FILTER='wire::gpu_tests'`: the existing nine green,
   the spot-checks green or pinned as `bug_` with tickets — never green by a rewritten
   expectation. The reviewer's question for each: was this expectation derivable without the
   device? If the detail file cannot say where it came from, the check is sent back.
@@ -211,7 +211,7 @@ async fn an_avg_partial_holds_a_string_key_a_scale_2_sum_and_an_int64_count() {
 
 ### Task 6: The record
 
-- [ ] `build-test.md`: the suite's row per family and the walk's, counts; the `bug_` table
+- [x] `build-test.md`: the suite's row per family and the walk's, counts; the `bug_` table
   gains every new pin with its ticket. Detail file: every device run's `test result:` lines,
   the projection table, every ticket opened.
-- [ ] `git commit -m "device-schema-harness: the record"`.
+- [ ] `git commit -m "device-schema-harness: the record"` — the coordinator's.

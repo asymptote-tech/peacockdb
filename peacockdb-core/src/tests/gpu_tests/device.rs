@@ -18,7 +18,7 @@ use peacockdb_ffi::raw::{
 use crate::common::declared_precisions;
 use crate::executor::{BackendError, Batch, CpuBatch, GpuBatch, GpuContext, RowRange};
 use crate::plan::GpuNode;
-use crate::test_support::GPU_BUDGET;
+use crate::test_support::{DeviceSchema, GPU_BUDGET};
 use crate::wire::attach_recipes;
 
 /// One session over one operator: `attach_recipes` over the node, its bytes handed to
@@ -125,6 +125,14 @@ impl Device {
         let batches: Vec<RecordBatch> = reader.collect::<Result<_, _>>().expect("every batch");
         unsafe { peacock_result_free(ipc) };
         Ok(Some(concat_batches(&schema, &batches).expect("one table")))
+    }
+}
+
+impl Device {
+    /// What the device holds at the batch's handle, rows left where they are: the
+    /// declaration is not told, so a decimal reads at its scale and no precision.
+    pub(crate) fn schema_of(&self, batch: &GpuBatch) -> DeviceSchema {
+        crate::test_support::schema_of(batch)
     }
 }
 
