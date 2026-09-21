@@ -370,6 +370,11 @@ while DataFusion uses Decimal128 throughout. Hash key normalization feeds the ha
 never reaches a returned value — a cast that cannot change an answer is not one the plan needs
 to carry.
 
+The device type is `{type_id, scale}`: a decimal's precision is a label the export is told,
+not a fact the device holds. The plan admits `Decimal128` alone, the unload hands the export
+each column's declared precision, and the export writes it into the stream's schema; a
+fixed_point of any other width at the export is a refusal, never a widening.
+
 ### The limit lowering rule
 
 A per-batch `GpuLimit` call cannot be correct: the wire node's skip/fetch are frozen per seq, so
@@ -835,14 +840,14 @@ field with no consumer reads as a knob (#132).
 | [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs) | nothing | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |
 | [`CudfRepartition`](../flatbuffers/gpu_plan.fbs) | `kind`, `num_partitions`, `hash_exprs` (key ordinals) | [`node_session.cpp`](../cpp/src/node_session.cpp) — `spark_hash_partition(tv, key_cols, n)`, ours rather than cuDF's murmur3, then [`cudf::slice`](../cpp/src/node_session.cpp) per partition into an owning table |
 | [`CudfSortPreservingMerge`](../flatbuffers/gpu_plan.fbs) | `exprs`, `fetch` | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::merge(views, key_cols, orders, null_orders)`, k-way and order-preserving; a concat fallback with no keys or one input (#118) |
-| [`CudfUnion`](../flatbuffers/gpu_plan.fbs) | `inputs`, `interleave`, `output_schema` | [`union.cpp`](../cpp/src/operators/union.cpp) — `cudf::concatenate(views)`, after [`cudf::cast`](../cpp/src/operators/union.cpp) retypes each branch column to the declared output type (#41) |
+| [`CudfUnion`](../flatbuffers/gpu_plan.fbs) | `inputs`, `interleave` | [`union.cpp`](../cpp/src/operators/union.cpp) — `cudf::concatenate(views)`. Branches are planned independently, so one column can land a different cuDF type per branch; the planner's per-branch cast projects are what align them before the concatenate, which refuses mixed types |
 | [`CudfLimit`](../flatbuffers/gpu_plan.fbs) | `skip`, `fetch` | [`limit.cpp`](../cpp/src/operators/limit.cpp) — `cudf::slice(tv, {skip, end})`, and the whole table returned untouched when the range covers it |
 | [`CudfWindow`](../flatbuffers/gpu_plan.fbs) | `window_exprs` (partition keys, order keys, frame bounds, out decimal scale) | [`window.cpp`](../cpp/src/operators/window.cpp) — `cudf::grouped_rolling_window(keys, arg, preceding, following, min_periods, agg)`, which preserves input row order |
 
 Two things recur. **A node handed one input reaches no kernel** where all it does is change
-the layout rows sit in — one table has no layout to change — and **three nodes need more than
-one call**, because cuDF has no fused form for filter's mask-then-apply, sort's
-order-gather-slice, or union's cast-then-concatenate.
+the layout rows sit in — one table has no layout to change — and **two nodes need more than
+one call**, because cuDF has no fused form for filter's mask-then-apply or sort's
+order-gather-slice.
 
 The nested-loop join is the one to read separately rather than filing beside filter. With a
 predicate the AST takes it is one conditional join. With one it cannot — a decimal operand, a
@@ -899,10 +904,11 @@ other code is written against them, so changing one breaks a caller that never n
 Rust side's own traits — `Backend`, the executor families, `GpuNode` — are in
 [Execution](#traits) above, beside the reasons for their shape.
 
-The ABI is seventeen symbols in five groups: lifecycle (`peacock_gpu_version`,
+The ABI is eighteen symbols in five groups: lifecycle (`peacock_gpu_version`,
 `peacock_executor_create` / `_destroy`, `peacock_last_error`, `peacock_result_free`); the
-node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `end_plan`); the three
-per-call entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`);
+node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `end_plan`); the per-call
+entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`, and
+`handle_schema`, a handle's schema without its rows, which nothing in Rust calls yet);
 instrumentation (`install_rmm_pool`, `set_node_timing`, `measure_timing_floor_us`); and two
 test hooks: `peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow C-data
 batch so the Rust side can compare it against comet's, and `peacock_handle_from_arrow`, which
@@ -1019,7 +1025,7 @@ Where the ordinals come from and where they land:
 | `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
 | sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/wire/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) |
 
-`cpp/src/` holds 22 `->index()` reads and 48 `.column(…)` calls, so this is the engine's most
+`cpp/src/` holds 22 `->index()` reads and 49 `.column(…)` calls, so this is the engine's most
 common operation and the one with the least ceremony around it.
 
 ### What guards it, and what does not
@@ -1038,7 +1044,7 @@ offsets and vectors are well formed and has no idea what an ordinal means.
 Two things nothing guards, and [#164](tickets.md#t164) carries the fixes.
 
 **Column names are a parallel array with no invariant.** `TableResult` is a `cudf::table` plus
-a `std::vector<std::string>` with no assertion that the two are the same length, and the six
+a `std::vector<std::string>` with no assertion that the two are the same length, and the eight
 sites indexing names use `operator[]` — so a short names vector is undefined behaviour rather
 than an exception. `filter.cpp` reads the checked `column(idx)` and the unchecked
 `column_names[idx]` in one loop iteration, and the checked read happening first is luck.
@@ -1065,10 +1071,10 @@ precisely so cuDF cannot infer something the CPU side did not.
 | `cudf::out_of_bounds_policy` | [`join.cpp`](../cpp/src/operators/join.cpp) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
 | `cudf::null_policy` (groupby) | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [grouping sets](../cpp/src/operators/aggregate.cpp) | `INCLUDE` | `EXCLUDE` silently drops the NULL group — tpcds q15's NULL `ca_zip` row disappears |
 | `cudf::null_policy` (rolling count) | [`window.cpp`](../cpp/src/operators/window.cpp) | `EXCLUDE` for `COUNT(col)`, `INCLUDE` for `COUNT(*)` | one of the two is always wrong: `COUNT(*)` counts rows, `COUNT(col)` counts non-nulls |
-| decimal scale | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [`union.cpp`](../cpp/src/operators/union.cpp), [`window.cpp`](../cpp/src/operators/window.cpp) | `data_type{id, -out_decimal_scale}` from the flat buffers | cuDF would re-derive a scale per operation and drift from DataFusion's |
+| decimal scale | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [`window.cpp`](../cpp/src/operators/window.cpp) | `data_type{id, -out_decimal_scale}` from the flat buffers | cuDF would re-derive a scale per operation and drift from DataFusion's |
 | binary-op output type | [`expr.cpp`](../cpp/src/expr.cpp) | boolean for predicates, else the wider input; division pre-scales the numerator to hit the flat buffers's `out_decimal_precision/scale` | cuDF promotes by its own rule, which is not SQL's decimal arithmetic |
 | hash seed / algorithm | [`spark_hash_partition.cu`](../cpp/src/spark_hash_partition.cu) | our own Spark-murmur3, seed 42, cuDF only for the scatter | cuDF ships standard murmur3, whose partition numbers differ from comet's — see [Rehash and the comet hash](#rehash-and-the-comet-hash) |
-| IPC export | [`gpu_executor.cpp`](../cpp/src/gpu_executor.cpp) | column names as `column_metadata`; DECIMAL32/64 cast up to DECIMAL128 | unnamed columns, and narrow decimals that the Rust arrow-ipc reader rejects outright |
+| IPC export | [`gpu_executor.cpp`](../cpp/src/gpu_executor.cpp) | column names as `column_metadata`; each declared decimal precision set on the imported Arrow schema; a fixed_point that is not DECIMAL128 refused | unnamed columns, and every decimal labelled `decimal128(38, s)`, which the sink refuses against the narrower declaration (#187) |
 | stream + memory resource | everywhere in the single-GPU path | `cudf::get_default_stream()`, current device resource | fine on device 0 and wrong anywhere else — the multi-GPU rules are in [Multi-GPU notes](#multi-gpu-notes-cudf-2602) |
 
 ### What the Rust side puts in the flat buffers

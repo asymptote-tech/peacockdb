@@ -125,9 +125,10 @@ argument refuses an empty string, so it is a refusal there, not a wrong answer.
 cuDF's AST has no fixed-point literal, so `ast_scalar` (`expr.cpp`) rewrites a `Decimal128`
 literal as a scaled double before the one scalar builder; under a `CAST(… AS Float64)` that is
 the type the plan asked for, but a bare or unary-wrapped decimal literal is AST-able too, and
-`SELECT 1.5 FROM t` then answers a `FLOAT64` column on the device where the plan declares
-`Decimal128(2, 1)`. Same class as [#183](tasks/active-tickets.md#t183) and
-[#191](tasks/active-tickets.md#t191): a declared type exported as another. Pre-existing, carried
+`SELECT 1.5 FROM t` then computes a `FLOAT64` column on the device where the plan declares
+`Decimal128(2, 1)` — and since `decimal-precision-at-export` the export refuses it by name rather
+than answering it, the AST path still computing a double. Same class as
+[#191](tasks/active-tickets.md#t191): a declared type produced as another. Pre-existing, carried
 through `typed-nulls.md` by that spec's own instruction, and pinned by
 `bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` (`gpu_tests/exec_cases.rs`);
 the walk `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` names it on its
@@ -646,8 +647,9 @@ change. Land [#154](#t154) first, or the numbers are inflated by per-call copies
 
 `execute_hash_join` is worst: `cudf::gather` returns an owning table, the code copies each
 column into `all_cols` (~L337, ~L342), then copies the kept ones again if the node projects
-(~L376). `release()` moves instead; `scan.cpp` L108, `union.cpp` L38, `join.cpp` L254 are the
-pattern, and it is C++-internal — no header, fbs, Rust or golden moves. Four kinds: whole table
+(~L376). `release()` moves instead; `scan.cpp` L103 and `join.cpp` L254 are the pattern
+(`union.cpp`'s site went with its `output_schema` block in decimal-precision-at-export); it
+is C++-internal — no header, fbs, Rust or golden moves. Four kinds: whole table
 freshly produced (`join.cpp` 202, 337, 342, 512, 515), mechanical; ordinal subset (`join.cpp`
 211, 270, 376, 525, `filter.cpp` 41), needing an assert the ordinals are distinct; a column of
 an **input** table (`join.cpp` 259, `project.cpp` 44, `window.cpp` 46, `expr.cpp` 850), changing

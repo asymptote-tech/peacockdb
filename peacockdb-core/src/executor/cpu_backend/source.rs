@@ -92,7 +92,7 @@ impl CpuSource {
         )
         .map_err(|error| BackendError::new(format!("joining the row groups read: {error}")))?;
         Ok(Some((
-            CpuBatch::new(as_declared(batch, &self.schema)?),
+            CpuBatch::new(check_batch_schema(batch, &self.schema)?),
             CallStats::default(),
         )))
     }
@@ -102,7 +102,7 @@ impl CpuSource {
 /// own schema — its nullability and field metadata — so the batch is relabelled, never cast:
 /// the types are the plan's, and a column the file holds in another type is a scan planned
 /// against data it does not have, which `try_new` refuses naming both types and the position.
-fn as_declared(batch: RecordBatch, declared: &SchemaRef) -> Result<RecordBatch, BackendError> {
+fn check_batch_schema(batch: RecordBatch, declared: &SchemaRef) -> Result<RecordBatch, BackendError> {
     if batch.schema().fields() == declared.fields() {
         return Ok(batch);
     }

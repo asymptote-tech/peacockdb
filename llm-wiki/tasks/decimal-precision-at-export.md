@@ -123,3 +123,19 @@ real agreement after this.
 
 `build-test-shadgpu.sh`. Staged binaries from before this task are incompatible with the plan
 after it — both sides rebuild together, as always.
+
+## Completeness signoff — 2026-09-17
+
+Solved under its constraints: the export is told one precision per column and writes it onto
+the imported Arrow schema — same buffers, one label, no version branch; no cast, range check or
+relabel on the Rust side; the widening is two refusals naming the column; validation refuses
+any decimal but `Decimal128`; the wire lost `output_schema` and the two view values with their
+C++ arms, `recipe-payloads.txt` standing since both sat at the tail; `peacock_handle_schema`
+declared, externed and pinned by two gtests. 53 queries rolled out at `tp1-single`: five enabled,
+the rest on #185, #220 or #163; no sink shows a decimal. Shortcuts or bandaids: `n_columns == 0`
+with a null array declares nothing, where the spec's letter required the count to match; the
+"`Decimal32`/`Decimal64` automatically" clause is a `Decimal256` match, arrow having neither
+variant; `Arrow::arrow_shared` is linked into `peacock_plan_tests` for the read-back; the
+DECIMAL64 refusal case sits in `test_plan_executor.cpp`, not the ungated `test_cudf_nodes.cpp`.
+Outside scope, reported: `shadgpu-env.sh`'s artifact reader drains cargo's pipe. `done` waits on
+CI, the 26.02 leg being the proof the new export compiles there.

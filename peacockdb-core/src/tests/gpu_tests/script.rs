@@ -97,6 +97,19 @@ impl Outcome {
             .expect_err("the cpu was expected to refuse")
             .message
     }
+
+    /// Both refusals, cpu first — a `bug_` pin where each side is wrong in its own way.
+    pub(crate) fn both_refuse(&self) -> (&str, &str) {
+        let cpu = self
+            .cpu
+            .as_ref()
+            .expect_err("the cpu was expected to refuse");
+        let gpu = self
+            .gpu
+            .as_ref()
+            .expect_err("the device was expected to refuse");
+        (&cpu.message, &gpu.message)
+    }
 }
 
 /// A `bug_` test's assertion: both answered, each with exactly these slots.
@@ -125,9 +138,11 @@ pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
         node,
         &script,
         |batch| CpuBatch::new(batch.clone()),
-        |batch| batch.into_record_batch(),
+        |batch| Ok(batch.into_record_batch()),
     );
     let device = Device::open(node);
+    // What the node declares its output to be is what the sink would tell the export.
+    let declared = node.kind().schema().map(|schema| schema.fields.as_ref());
     let gpu = drive::<GpuBackend>(
         device.ctx(),
         node,
@@ -135,21 +150,22 @@ pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
         |batch| device.upload(batch),
         |batch| {
             device
-                .fetch(batch, RowRange::WHOLE)
-                .expect("a whole export ships its schema")
+                .fetch(batch, RowRange::WHOLE, declared)
+                .map(|back| back.expect("a whole export ships its schema"))
         },
     );
     Outcome { cpu, gpu }
 }
 
 /// The script on one backend. `up` and `down` are that backend's two conversions, and the
-/// only thing that differs between the two runs.
+/// only thing that differs between the two runs; a `down` that fails is the device's export
+/// refusing, which ends the run as it would end a query.
 fn drive<B: Backend>(
     ctx: &B::Context,
     node: &dyn GpuNode,
     script: &Script,
     up: impl Fn(&RecordBatch) -> B::Batch,
-    down: impl Fn(B::Batch) -> RecordBatch,
+    down: impl Fn(B::Batch) -> Result<RecordBatch, BackendError>,
 ) -> Result<Vec<Slot>, BackendError> {
     // The root's post-order is the tree's size less one. Counted here rather than read off
     // `PlanIndex::build`, which asks every node's category and so refuses a `Given` leaf.
@@ -159,38 +175,43 @@ fn drive<B: Backend>(
     let post_order = size(node) - 1;
     let executors = B::executors_for(ctx, node, post_order, script.lane())
         .map_err(|why| BackendError::new(format!("executors_for: {why}")))?;
-    let lower = |batches: Vec<B::Batch>| batches.into_iter().map(&down).collect::<Slot>();
+    let lower = |batches: Vec<B::Batch>| {
+        batches
+            .into_iter()
+            .map(&down)
+            .collect::<Result<Slot, BackendError>>()
+    };
     let mut slots = Vec::new();
     match (executors, script) {
         (NodeExecutors::Exec(mut exec), Script::Exec(batches)) => {
             for batch in batches {
                 let (out, _) = exec.exec(up(batch))?;
-                slots.push(vec![down(out)]);
+                slots.push(vec![down(out)?]);
             }
         }
         (NodeExecutors::BatchAccumulator(mut acc), Script::Accumulate(batches)) => {
             for batch in batches {
                 let (out, _) = acc.accumulate_and_fetch(up(batch))?;
-                slots.push(lower(out));
+                slots.push(lower(out)?);
             }
             let (out, _) = acc.mark_done_and_fetch()?;
-            slots.push(lower(out));
+            slots.push(lower(out)?);
         }
         (NodeExecutors::PartitionAccumulator(mut acc), Script::Lanes(lanes)) => {
             for (lane, batches) in lanes.iter().enumerate() {
                 for batch in batches {
                     let (out, _) = acc.accumulate_and_fetch(lane, LaneEvent::Batch(up(batch)))?;
-                    slots.push(lower(out));
+                    slots.push(lower(out)?);
                 }
                 let (out, _) = acc.accumulate_and_fetch(lane, LaneEvent::Done)?;
-                slots.push(lower(out));
+                slots.push(lower(out)?);
             }
         }
         (NodeExecutors::PartitionEmitter(mut emitter), Script::Emit(batches)) => {
             for batch in batches {
                 let (lanes, _) = emitter.emit(up(batch))?;
                 for out in lanes {
-                    slots.push(vec![down(out)]);
+                    slots.push(vec![down(out)?]);
                 }
             }
         }
@@ -199,10 +220,10 @@ fn drive<B: Backend>(
                 let (mut probing, _) = join.set_build(up(build))?;
                 for batch in probe {
                     let (out, _) = probing.probe_and_fetch(up(batch))?;
-                    slots.push(lower(out));
+                    slots.push(lower(out)?);
                 }
                 let (out, _) = probing.finish_and_fetch()?;
-                slots.push(lower(out));
+                slots.push(lower(out)?);
             }
             None => {
                 assert!(
@@ -223,7 +244,7 @@ fn drive<B: Backend>(
                     source: next,
                     ..
                 } => {
-                    slots.push(vec![down(batch)]);
+                    slots.push(vec![down(batch)?]);
                     source = next;
                 }
                 SourceStep::Exhausted => break,
@@ -249,6 +270,28 @@ fn a_one_sided_refusal_is_read_by_its_message() {
         gpu: Ok(Vec::new()),
     };
     assert_eq!(outcome.cpu_refuses(), "the cpu said no");
+}
+
+#[test]
+fn a_two_sided_refusal_is_read_by_both_messages() {
+    let outcome = Outcome {
+        cpu: Err(BackendError::new("the cpu said no")),
+        gpu: Err(BackendError::new("the device said no")),
+    };
+    assert_eq!(
+        outcome.both_refuse(),
+        ("the cpu said no", "the device said no")
+    );
+}
+
+#[test]
+#[should_panic(expected = "the device was expected to refuse")]
+fn both_refuse_names_the_side_that_answered() {
+    Outcome {
+        cpu: Err(BackendError::new("the cpu said no")),
+        gpu: Ok(Vec::new()),
+    }
+    .both_refuse();
 }
 
 #[test]

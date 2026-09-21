@@ -50,9 +50,10 @@ const char* peacock_last_error(peacock_executor_t* executor);
 // The Rust orchestrator drives ONE plan node at a time: load the plan once, then
 // call peacock_executor_execute_node per node (canonical post-order) with the child
 // output handles. Intermediates stay GPU-resident behind handles; Arrow IPC crosses
-// the boundary only at peacock_result_from_handle — once, at the root, for that walk,
-// and once per unloaded batch for a driver using the three per-batch entry points
-// below (a scan read per row-group subset, a sliced handle, a ranged export).
+// the boundary at peacock_result_from_handle — once, at the root, for that walk, and
+// once per unloaded batch for a driver using the three per-batch entry points below (a
+// scan read per row-group subset, a sliced handle, a ranged export) — and, rows-free,
+// at peacock_handle_schema.
 // ---------------------------------------------------------------------------
 
 /// Actual per-node costs. Rust applies the shared ColAccum overhead (validity +
@@ -139,13 +140,13 @@ int peacock_executor_begin_plan(peacock_executor_t* executor,
                                 const uint8_t* plan_bytes, uint64_t plan_len,
                                 uint64_t* out_node_count);
 
-// FAILURE POLICY at the four doors below. The three that execute — execute_node,
+// FAILURE POLICY at the five doors below. The three that execute — execute_node,
 // execute_scan_rowgroups, slice_handle — end the query once work has begun: the loaded plan
 // goes, and every resident handle with it, which is what makes a release on the failure path
 // a no-op and keeps a driver's holds equal to its releases. Their validation arms are the
 // exception — a null out-param, no plan loaded, an empty row-group list — since those refuse
-// before any work and leave the session as it was. peacock_result_from_handle never ends a
-// query: it reads a handle and touches nothing.
+// before any work and leave the session as it was. The two that read —
+// peacock_result_from_handle and peacock_handle_schema — never end a query: they touch nothing.
 
 /// Execute the node at post-order `seq` with already-resident child output handles,
 /// storing each output partition as a new resident handle. A failure ends the query.
@@ -191,17 +192,26 @@ int peacock_executor_slice_handle(peacock_executor_t* executor, uint64_t handle,
                                   uint64_t length, uint64_t* out_handle);
 
 /// Materialize rows [offset, offset+length) of a resident handle to an Arrow IPC stream
-/// (called once per handle, at root). `length == UINT64_MAX` means to the end, which is
-/// what a caller wanting the whole table passes. An offset at or past the end, and any
-/// other range naming no rows of a non-empty table, is an empty result → *out_ipc_len==0
-/// and nothing to free; a range running past the end clamps to it rather than failing,
+/// (called once per handle, at root). `length == UINT64_MAX` means to the end. An offset at
+/// or past the end, and any other range naming no rows of a non-empty table, is an empty
+/// result → *out_ipc_len==0 and nothing to free; a range running past the end clamps to it,
 /// because a limit's fetch legitimately overruns the batch it straddles. An EMPTY table
 /// still exports its schema, as whole-table callers have always received.
-/// Caller frees *out_ipc with peacock_result_free(). Does NOT release the handle, and a
-/// failure leaves the session standing.
-/// @return 0 on success, non-zero on failure.
+/// `decimal_precisions[i]` is column i's declared precision, 0 for none (undeclared exports
+/// at 38); `n_columns` is the table's column count, or 0 to declare nothing; a precision on a
+/// non-decimal fails. Caller frees *out_ipc with peacock_result_free(). Does NOT release the
+/// handle, and a failure leaves the session standing. @return 0 on success, non-zero on failure.
 int peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle, uint64_t offset,
-                               uint64_t length, uint8_t** out_ipc, uint64_t* out_ipc_len);
+                               uint64_t length, const int32_t* decimal_precisions,
+                               uint64_t n_columns, uint8_t** out_ipc, uint64_t* out_ipc_len);
+
+/// The schema alone, as an Arrow IPC stream carrying the schema message and no batch:
+/// for reading what the device holds at a handle without moving rows. Undeclared, so a
+/// decimal reads as decimal128(38, s). Freed with peacock_result_free(); does NOT
+/// release the handle, and a failure leaves the session standing.
+/// @return 0 on success, non-zero on failure.
+int peacock_handle_schema(peacock_executor_t* executor, uint64_t handle, uint8_t** out_ipc,
+                          uint64_t* out_len);
 
 /// Release a resident intermediate handle (idempotent).
 void peacock_handle_release(peacock_executor_t* executor, uint64_t handle);

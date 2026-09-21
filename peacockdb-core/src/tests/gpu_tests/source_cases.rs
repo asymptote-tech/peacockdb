@@ -5,8 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use datafusion::arrow::compute::cast;
-use datafusion::arrow::datatypes::{DataType, SchemaRef};
+use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::parquet::arrow::ArrowWriter;
 use datafusion::parquet::file::properties::WriterProperties;
@@ -106,14 +105,6 @@ fn cpu_answered(outcome: &Outcome, expected: &[Vec<RecordBatch>]) {
     );
 }
 
-fn gpu_answered(outcome: &Outcome, expected: &[Vec<RecordBatch>]) {
-    assert_same(
-        expected,
-        outcome.gpu.as_ref().expect("the device answers"),
-        Order::AsEmitted,
-    );
-}
-
 /// `synthetic(64, 1)` as the four 16-row batches a per-row-group read of it emits.
 fn four_sixteens() -> Vec<Vec<RecordBatch>> {
     let whole = synthetic(64, 1);
@@ -161,20 +152,12 @@ operator_case! {
     }
 }
 
-// #187 — the file holds `Decimal128(18, 2)` and the cpu reads it so; the device exports
-// the column at precision 38, from a bare scan with no operator between.
+// The file holds `Decimal128(18, 2)`; the cpu reads it so, and the device's export is told
+// the same declaration from a bare scan with no operator between.
 operator_case! {
     GpuLoadParquet,
-    fn bug_a_decimal_column_is_exported_at_precision_38() {
-        let outcome = read_both("decimals", &decimals(64, 1), 16, None);
-        let dec = decimals(64, 1);
-        cpu_answered(&outcome, &(0..4).map(|i| vec![dec.slice(i * 16, 16)]).collect::<Vec<_>>());
-        let widened = RecordBatch::try_from_iter(vec![
-            ("id", dec.column(0).clone()),
-            ("dec", cast(dec.column(1), &DataType::Decimal128(38, 2)).expect("a widening")),
-        ])
-        .expect("two columns of one length");
-        gpu_answered(&outcome, &(0..4).map(|i| vec![widened.slice(i * 16, 16)]).collect::<Vec<_>>());
+    fn a_decimal_column_is_exported_at_its_declared_precision() {
+        read_both("decimals", &decimals(64, 1), 16, None).same(Order::AsEmitted);
     }
 }
 

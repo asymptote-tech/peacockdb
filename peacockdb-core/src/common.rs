@@ -10,6 +10,25 @@ use datafusion::arrow::array::{
 use datafusion::arrow::datatypes::{DataType, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 
+#[cfg(test)]
+mod tests;
+
+/// What the export is told per column: a `Decimal128`'s declared precision, 0 for every
+/// other type. cuDF's type is `{type_id, scale}`, so the precision the plan declared is a
+/// label only this side holds, and the device writes it into the stream's schema.
+// Its one caller is the GPU sink, which `rust-only` compiles out; the unit test remains.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+pub(crate) fn declared_precisions(schema: &Schema) -> Vec<i32> {
+    schema
+        .fields()
+        .iter()
+        .map(|field| match field.data_type() {
+            DataType::Decimal128(precision, _) => *precision as i32,
+            _ => 0,
+        })
+        .collect()
+}
+
 /// Per-column STRUCTURAL byte size: the part that depends only on the column
 /// type and the row count, NOT on how rows are split into batches — the
 /// validity bitmap plus either the fixed-width data buffer or the var-length

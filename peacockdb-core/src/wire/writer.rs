@@ -111,7 +111,6 @@ impl<'a> Writer<'a> {
             &fb::PlanNodeArgs {
                 node_type: payload.kind,
                 node: Some(payload.value),
-                output_schema: None,
             },
         );
         self.pool.push(node);
@@ -140,7 +139,6 @@ impl<'a> Writer<'a> {
             &fb::CudfUnionArgs {
                 inputs: Some(inputs),
                 interleave: false,
-                output_schema: None,
             },
         );
         self.push(Payload {

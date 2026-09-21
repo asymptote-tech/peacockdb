@@ -159,12 +159,21 @@ impl Session {
     }
 
     /// The whole handle across the boundary. No shape here plans a limit, so the sink's
-    /// range is always the batch it is handed.
+    /// range is always the batch it is handed; nothing here declares a precision.
     fn export(&self, handle: u64) -> Vec<RecordBatch> {
         let mut ipc: *mut u8 = std::ptr::null_mut();
         let mut len = 0u64;
         let rc = unsafe {
-            peacock_result_from_handle(self.executor, handle, 0, u64::MAX, &mut ipc, &mut len)
+            peacock_result_from_handle(
+                self.executor,
+                handle,
+                0,
+                u64::MAX,
+                std::ptr::null(),
+                0,
+                &mut ipc,
+                &mut len,
+            )
         };
         assert_eq!(rc, 0, "result_from_handle failed: {}", self.last_error());
         if len == 0 {
