@@ -153,7 +153,7 @@ async fn avgs_state_columns_are_typed_by_what_they_hold_and_not_by_position() {
     assert_eq!(
         types_of(init),
         vec![
-            ("p_brand".to_string(), DataType::Utf8View),
+            ("p_brand".to_string(), DataType::Utf8),
             (
                 "avg(part.p_retailprice)$sum".to_string(),
                 DataType::Decimal128(15, 2)
@@ -282,7 +282,7 @@ async fn a_project_over_a_finished_aggregate_carries_its_types_and_renames_them(
         assert_eq!(
             types_of(branch),
             vec![
-                ("k".to_string(), DataType::Utf8View),
+                ("k".to_string(), DataType::Utf8),
                 ("total".to_string(), summed.clone()),
             ]
         );
@@ -302,7 +302,7 @@ async fn a_project_over_a_finished_aggregate_carries_its_types_and_renames_them(
     assert_eq!(
         types_of(routed),
         vec![
-            ("k".to_string(), DataType::Utf8View),
+            ("k".to_string(), DataType::Utf8),
             ("total".to_string(), summed),
         ]
     );

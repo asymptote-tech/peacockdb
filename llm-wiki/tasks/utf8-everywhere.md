@@ -110,3 +110,16 @@ is what the device run proves, nothing more.
 ## Device workflow
 
 `build-test-shadgpu.sh`. One cycle for the harness, one for the rollout.
+
+## Completeness signoff — 2026-09-17
+
+Solved under its constraints: no cast added anywhere and two removed; the option off on both
+doors (`read_table`'s format and the session config `register_parquet` reads); the rule refuses
+a view type in every schema, intermediate, literal, cast target, binary, function return and
+residual filter, pinned by tests run red first; every golden line is the word swap bar the 18
+digests and q24's dissolved coercion; 76 queries rolled out at `tp1-single`, three enabled, the
+rest ticketed on what the sink showed next. Outside the scope table by review: `cpu_backend/
+source.rs` lost its own view cast and refuses instead; a device pin for the sink's refusal was
+restored on `LargeUtf8`. Shortcuts or bandaids: none. `183` stays on ten rows whose other modes
+were never run past the string class, as the spec's registry rule says. CI has not run: PR #158
+conflicts with master since chain D merged, and `done` waits on the human's rebase.

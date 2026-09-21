@@ -147,7 +147,7 @@ async fn a_filter_that_projects_declares_and_prints_what_it_keeps() {
     .await;
     let filter = line_with(&text, "GpuFilter");
     assert!(filter.contains("projection=[c_name@0]"), "{text}");
-    assert!(filter.contains("schema=[c_name:Utf8View]"), "{text}");
+    assert!(filter.contains("schema=[c_name:Utf8]"), "{text}");
 }
 
 #[tokio::test]

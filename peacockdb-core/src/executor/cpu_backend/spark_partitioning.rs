@@ -12,8 +12,6 @@
 use std::sync::Arc;
 
 use datafusion::arrow::array::ArrayRef;
-use datafusion::arrow::compute::cast;
-use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::{DataFusionError, Result as DfResult};
 use datafusion::physical_expr::PhysicalExpr;
@@ -50,23 +48,12 @@ pub(crate) fn rows_per_lane(
     Ok(per_lane)
 }
 
-/// The key columns, in the layout comet's hasher accepts. DataFusion 45's parquet reader
-/// emits the Arrow view layouts and comet rejects them; the cast is to the same bytes the
-/// device hashes, so the assignment is unchanged.
 fn hash_keys(batch: &RecordBatch, hash_exprs: &[Arc<dyn PhysicalExpr>]) -> DfResult<Vec<ArrayRef>> {
     hash_exprs
         .iter()
         .map(|expr| {
-            let array = expr
-                .evaluate(batch)
-                .and_then(|v| v.into_array(batch.num_rows()))?;
-            match array.data_type() {
-                DataType::Utf8View => cast(&array, &DataType::Utf8).map_err(DataFusionError::from),
-                DataType::BinaryView => {
-                    cast(&array, &DataType::Binary).map_err(DataFusionError::from)
-                }
-                _ => Ok(array),
-            }
+            expr.evaluate(batch)
+                .and_then(|v| v.into_array(batch.num_rows()))
         })
         .collect()
 }

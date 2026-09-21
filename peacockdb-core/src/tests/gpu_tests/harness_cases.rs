@@ -114,33 +114,26 @@ fn unload_over(rows: usize) -> (GpuUnload, RecordBatch) {
     (node, batch)
 }
 
-/// The schema the corpus declares for every string: `Utf8View`, over data the device holds
-/// as plain strings. Declared, not uploaded — cuDF's `from_arrow` has no conversion for a
-/// `Utf8View` array (`arrow_utilities.cpp`, "Unsupported type_id conversion to cudf"), so
-/// the harness cannot put one on the device; the corpus never does either, its strings
-/// coming through the parquet reader. The declaration is what #183 is about.
-fn declaring_view_strings(schema: &ArrowSchema) -> Schema {
-    let fields: Vec<Field> = schema
-        .fields()
-        .iter()
-        .map(|f| match f.name().as_str() {
-            "s" => Field::new("s", DataType::Utf8View, f.is_nullable()),
-            _ => f.as_ref().clone(),
-        })
-        .collect();
-    Schema::new(std::sync::Arc::new(ArrowSchema::new(fields)))
-}
-
-// #183 — the device exports a column declared `Utf8View` as `Utf8`, so the sink refuses;
-// the cpu holds to the declaration and answers. The message names the column with its index
-// and both types, which is what a user reading it needs.
+/// A batch whose exported types are not the sink's: the device holds one string layout and
+/// exports it as `Utf8`, so declaring `s` as `LargeUtf8` — a type the plan may carry — is a
+/// divergence the sink refuses, naming the column with its index and both types. The cpu
+/// holds to the declaration and answers, so the refusal is one-sided by construction.
 operator_case! {
     GpuUnload,
-    fn bug_a_column_declared_utf8view_is_exported_as_utf8_and_the_sink_names_it() {
+    fn the_sink_names_a_column_whose_exported_type_is_not_the_declared_one() {
         let batch = synthetic(8, 2);
+        let fields: Vec<Field> = batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| match f.name().as_str() {
+                "s" => Field::new("s", DataType::LargeUtf8, f.is_nullable()),
+                _ => f.as_ref().clone(),
+            })
+            .collect();
         let node = GpuUnload::new(
             Given::of(
-                declaring_view_strings(&batch.schema()),
+                Schema::new(std::sync::Arc::new(ArrowSchema::new(fields))),
                 BatchLayout::MultipleBatches,
             ),
             None,
@@ -158,7 +151,7 @@ operator_case! {
             "{why}"
         );
         assert!(
-            why.contains("(declared vs exported: 5 s: Utf8View vs Utf8)"),
+            why.contains("(declared vs exported: 5 s: LargeUtf8 vs Utf8)"),
             "{why}"
         );
     }

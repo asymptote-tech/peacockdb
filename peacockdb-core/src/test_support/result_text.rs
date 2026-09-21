@@ -89,9 +89,9 @@ fn row_digests(batches: &[RecordBatch]) -> Vec<(u64, usize)> {
 ///
 /// Names and not types, because the rendering this replaces carried exactly that: a header
 /// of names and no types at all. Hashing the type would redden runs the string compare
-/// passed — the device exports `Utf8` where DataFusion's oracle holds `Utf8View`, same
-/// values, and every string-returning gpu case would fail on a difference the comparator
-/// was never asked about. A type mismatch that matters is `columns_of`'s check, one tier up.
+/// passed — the device exports every decimal at precision 38 where the oracle holds the
+/// declared one, same values (#187). A type mismatch that matters is `columns_of`'s check,
+/// one tier up.
 fn schema_digest(batches: &[RecordBatch]) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     if let Some(batch) = batches.first() {

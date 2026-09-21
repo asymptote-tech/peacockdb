@@ -78,8 +78,8 @@ impl Outcome {
         }
     }
 
-    /// The device's refusal, for a `bug_` test to pin by message; a device that answered
-    /// is the failure that says the ticket closed.
+    /// The device's refusal, read by its message — a `bug_` pin, where a device that answered
+    /// is the failure that says the ticket closed, or a refusal that is the right answer.
     pub(crate) fn gpu_refuses(&self) -> &str {
         assert!(self.cpu.is_ok(), "the cpu refused too: {:?}", self.cpu);
         &self

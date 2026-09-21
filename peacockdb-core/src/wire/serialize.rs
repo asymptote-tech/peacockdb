@@ -69,13 +69,6 @@ pub(crate) fn serialize_scalar_value<'a>(
             args.type_ = fb::DataType::Utf8;
             args.string_val = Some(b.create_string(s));
         }
-        DfScalarValue::Utf8View(Some(s)) => {
-            // Utf8View is a DataFusion 45+ optimizer rewrite of string literals;
-            // cuDF doesn't distinguish view vs. owned strings. Preserve the type
-            // tag for faithful roundtrip, but the wire payload is identical.
-            args.type_ = fb::DataType::Utf8View;
-            args.string_val = Some(b.create_string(s));
-        }
         DfScalarValue::Date32(Some(d)) => {
             args.type_ = fb::DataType::Date32;
             args.int_val = *d as i64;
@@ -127,8 +120,6 @@ pub(crate) fn convert_data_type(dt: &ArrowDataType) -> Result<fb::DataType, Stri
         ArrowDataType::Date32 => fb::DataType::Date32,
         ArrowDataType::Date64 => fb::DataType::Date64,
         ArrowDataType::Decimal128(_, _) => fb::DataType::Decimal128,
-        ArrowDataType::Utf8View => fb::DataType::Utf8View,
-        ArrowDataType::BinaryView => fb::DataType::BinaryView,
         other => return Err(format!("unsupported Arrow data type: {other:?}")),
     })
 }
@@ -160,5 +151,10 @@ pub(crate) fn serialize_schema<'a>(
         })
         .collect();
     let fields_vec = b.create_vector(&fields);
-    fb::Schema::create(b, &fb::SchemaArgs { fields: Some(fields_vec) })
+    fb::Schema::create(
+        b,
+        &fb::SchemaArgs {
+            fields: Some(fields_vec),
+        },
+    )
 }
