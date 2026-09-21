@@ -285,9 +285,9 @@ fn aggregate_width(body: &AggregateBody) -> (usize, &'static str) {
 /// this same declaration, so a column that changed type across an edge costs the same on
 /// either and surfaces only in the answer.
 ///
-/// It covers the nodes that CARRY a column. Deriving the type a computed column would
-/// actually have — a project's expression, an aggregate's state — and checking the
-/// declaration against it is [#163](../../../llm-wiki/tickets.md).
+/// It covers the nodes that CARRY a column. An aggregate's state is derived from its
+/// producer where the plan is built (`PlanAgg::state_type`); a project's expression is
+/// compared against nothing.
 fn types_across_the_edge(node: &dyn GpuNode) -> Result<(), PlanError> {
     let carried: &dyn GpuNode = match try_as_node_ref(node) {
         Some(

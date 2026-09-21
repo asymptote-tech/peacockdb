@@ -45,8 +45,9 @@ What DataFusion is reused for is its planning, never its execution:
 
 - physical expression planning and type coercion — the coercions it resolved and the
   decimal precision and scale it derived;
-- per-aggregate state schemas (sum+count for avg, Welford's triple for stddev), read off
-  `AggregateExpr::state_fields()`. The *split* is ours, since a batched lane needs a
+- per-aggregate state layouts — how many state columns and whether each is nullable
+  (sum+count for avg, Welford's triple for stddev), read off `AggregateExpr::state_fields()`;
+  the types are `PlanAgg::state_type`'s. The *split* is ours, since a batched lane needs a
   per-batch init and a merge whatever the lane count;
 - grouping-set expansion, which arrives as an ordinary `__grouping_id` column;
 - row-group pruning, which hangs off `ParquetExec` statistics.
@@ -246,9 +247,13 @@ the combine is not a per-column reduction: it needs the count-weighted mean and 
 `ddof` is 1 for the sample forms and 0 for the population ones.
 
 The registry lives in `plan/mod.rs` as two enums — `AggFunc`, what SQL asked
-for, and `PlanAgg`, what a node runs — with state names and types from DataFusion's
-`state_fields()` so our split cannot drift from the split it planned. Adding an aggregate is a
-row there rather than an arm in C++; an aggregate that cannot be decomposed at all (a true
+for, and `PlanAgg`, what a node runs. State columns are typed by `PlanAgg::state_type`
+(`plan/aggregates.rs`), the aggregator that produces each: a count is `Int64` on both engines,
+a decimal sum gains ten digits of precision, capped at 38, the Welford moments are `Float64`. DataFusion's
+`state_fields()` supplies only the arity and nullability, since the accumulator it describes is
+not the one either engine runs. The one producer that disagrees is DataFusion's variance
+accumulator, whose count is `u64`; the cpu casts it to `Int64` at the init. Adding an aggregate
+is a row there rather than an arm in C++; an aggregate that cannot be decomposed at all (a true
 median) is an absent decomposition and a planner that declines to split the phase.
 
 References render `name@ordinal`. Inside `aggs` the ordinal indexes the node's input; inside the
@@ -358,15 +363,16 @@ that its input and its expressions do not account for is a defect whichever side
 invented it, and the plan golden prints the declared schema per node, so it is one a reader can
 see.
 
-Seven coercions are plan nodes rather than something an executor infers: `avg`'s decimal input
-and its finalize divide, `count`'s widening to INT64, the stddev/var operands, union branch
-types, a decimal divide's numerator, and `round`'s operand. Each is a `CastExprNode` the planner
+Six coercions are plan nodes rather than something an executor infers: `avg`'s decimal count
+and its finalize divide, the stddev/var operands, union branch types, a decimal divide's
+numerator, and `round`'s operand. Each is a `CastExprNode` the planner
 emits — the aggregate ones inside the finalize expressions, the union ones as per-branch
 projects, the expression ones at the point of use.
 
-Two stay in C++ with a reason. The loader's decimal width is the source honouring the output
+Three stay in C++ with a reason. The loader's decimal width is the source honouring the output
 schema it already declares, since cuDF's parquet reader picks the narrowest fixed_point width
-while DataFusion uses Decimal128 throughout. Hash key normalization feeds the hash alone and
+while DataFusion uses Decimal128 throughout. A count is the same shape one node up: cuDF counts
+in INT32 and the aggregate casts to the INT64 the state declares. Hash key normalization feeds the hash alone and
 never reaches a returned value — a cast that cannot change an answer is not one the plan needs
 to carry.
 
@@ -1176,9 +1182,9 @@ lane is the property worth reading and a lane count beside a batch count does no
 **Types are a plan fact.** The declared schema per node is what makes the explicit casts
 legible: a `Decimal128(38, 6)` in a finalize means nothing without the state column's declared
 scale beside it. It checks nothing — a golden records what the planner declared, and the
-declaration is exactly what a wrong type would move. Comparing a declared type against the
-expression that produces it is [#163](tickets.md#t163), and the C++ half is
-[#164](tickets.md#t164).
+declaration is exactly what a wrong type would move. An aggregate's state is the one declared
+type derived from its producer (`PlanAgg::state_type`); a project's expression is compared
+against nothing, and the C++ half is [#164](tickets.md#t164).
 
 **Estimates go in a `--- memory ---` section per query, not on the node line.** They churn where
 plan shapes do not — an estimator change, then #19's statistics, then #147's refinement — so on

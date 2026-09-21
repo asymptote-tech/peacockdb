@@ -143,11 +143,11 @@ async fn one_aggregate_is_three_schemas_and_each_declares_what_it_holds() {
 }
 
 #[tokio::test]
-async fn avgs_state_columns_are_typed_by_what_they_hold_and_not_by_position() {
-    // DataFusion declares avg's state as [count, sum] and the engine's decomposition reads
-    // [sum, count]. Pairing them by position types both backwards — a sum in a UInt64 and
-    // a count in a decimal — which no per-node byte count can show, because both engines
-    // read the same declared schema.
+async fn avgs_state_columns_are_typed_by_the_aggregator_that_produces_each() {
+    // The state is typed by `PlanAgg::state_type`, not by DataFusion's `state_fields`,
+    // which declares the accumulator this engine does not run: its count is UInt64 where
+    // both engines' `count` is Int64, and its sum is the input type where `sum` widens a
+    // decimal by ten digits.
     let tree = translated(AVG_AT_TP4, 4).await;
     let init = aggregates(tree.as_ref())[0];
     assert_eq!(
@@ -156,12 +156,9 @@ async fn avgs_state_columns_are_typed_by_what_they_hold_and_not_by_position() {
             ("p_brand".to_string(), DataType::Utf8),
             (
                 "avg(part.p_retailprice)$sum".to_string(),
-                DataType::Decimal128(15, 2)
+                DataType::Decimal128(25, 2)
             ),
-            (
-                "avg(part.p_retailprice)$count".to_string(),
-                DataType::UInt64
-            ),
+            ("avg(part.p_retailprice)$count".to_string(), DataType::Int64),
         ]
     );
 
@@ -169,12 +166,12 @@ async fn avgs_state_columns_are_typed_by_what_they_hold_and_not_by_position() {
     let fields = schema_of(init).fields.fields().clone();
     assert_eq!(
         fields[state.positions[0] as usize].data_type(),
-        &DataType::Decimal128(15, 2),
-        "the sum keeps the scale of the column it sums"
+        &DataType::Decimal128(25, 2),
+        "the sum keeps the scale of the column it sums and gains sum's precision"
     );
     assert_eq!(
         fields[state.positions[1] as usize].data_type(),
-        &DataType::UInt64,
+        &DataType::Int64,
         "the count is a count"
     );
 }
@@ -194,27 +191,40 @@ async fn the_divide_that_finishes_an_avg_hits_the_scale_datafusion_declared() {
         .finalize
         .as_ref()
         .expect("the last node finalizes");
-    // One entry per aggregate: the group keys pass through unnamed by this list.
+    // One entry per aggregate: the group keys pass through unnamed by this list. The
+    // divide sits under a cast to the declared type, since arrow types it wider.
     assert_eq!(finalize.len(), 1);
+    let Expr::Cast {
+        expr: divide,
+        target,
+    } = &finalize[0].expr
+    else {
+        panic!(
+            "avg finishes cast to its output, got {:?}",
+            finalize[0].expr
+        );
+    };
+    assert_eq!(target, &out_type);
     let Expr::Binary {
         left,
         op: BinaryOp::Divide,
         right,
         out_type: declared,
-    } = &finalize[0].expr
+    } = divide.as_ref()
     else {
-        panic!("avg finishes as a divide, got {:?}", finalize[0].expr);
+        panic!("avg finishes as a divide, got {divide:?}");
     };
     assert_eq!(declared, &out_type);
-    // The denominator is an exact integer-valued decimal of the same precision, so cuDF's
-    // own divide scale (s_left - s_right) lands on the scale declared above rather than on
-    // one it derived.
-    let target_of = |expr: &Expr| match expr {
-        Expr::Cast { target, .. } => target.clone(),
-        other => panic!("both sides of the divide are casts, got {other:?}"),
+    // The sum divides at its own scale — arrow adds four, which is the scale declared —
+    // by the count as an exact integer-valued decimal of the output's precision.
+    assert_eq!(
+        left.as_ref(),
+        &Expr::column(1, "avg(part.p_retailprice)$sum")
+    );
+    let Expr::Cast { target, .. } = right.as_ref() else {
+        panic!("the count is cast to a decimal, got {right:?}");
     };
-    assert_eq!(target_of(left), DataType::Decimal128(19, 6));
-    assert_eq!(target_of(right), DataType::Decimal128(19, 0));
+    assert_eq!(target, &DataType::Decimal128(19, 0));
 }
 
 #[tokio::test]

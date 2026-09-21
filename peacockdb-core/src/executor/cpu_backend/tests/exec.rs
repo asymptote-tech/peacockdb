@@ -335,13 +335,14 @@ fn an_aggregate_that_finalizes_divides_the_state_it_just_built() {
 /// The Welford triple is three of the engine's aggregators and one of DataFusion's, so what
 /// proves the fold is that one aggregate filled three declared columns — a triple sent as
 /// three separate aggregators would fill three columns of its own and disagree with the
-/// declared state's width.
+/// declared state's width. The count is declared `Int64`, as every count is; DataFusion's
+/// accumulator counts in `u64`, and the init casts it to the declaration.
 #[test]
 fn a_welford_triple_is_one_aggregate_filling_three_declared_columns() {
     let state = state_of(
         &[
             ("k", DataType::Utf8),
-            ("stddev(v)$count", DataType::UInt64),
+            ("stddev(v)$count", DataType::Int64),
             ("stddev(v)$mean", DataType::Float64),
             ("stddev(v)$m2", DataType::Float64),
         ],
@@ -355,7 +356,7 @@ fn a_welford_triple_is_one_aggregate_filling_three_declared_columns() {
             grouping_sets: Vec::new(),
             null_exprs: Vec::new(),
             aggs: vec![
-                agg(PlanAgg::Count, "stddev(v)$count", DataType::UInt64),
+                agg(PlanAgg::Count, "stddev(v)$count", DataType::Int64),
                 agg(PlanAgg::Mean, "stddev(v)$mean", DataType::Float64),
                 agg(PlanAgg::M2, "stddev(v)$m2", DataType::Float64),
             ],
@@ -388,7 +389,7 @@ fn a_welford_triple_is_one_aggregate_filling_three_declared_columns() {
             (
                 "a".to_string(),
                 vec![
-                    ScalarValue::UInt64(Some(3)),
+                    ScalarValue::Int64(Some(3)),
                     ScalarValue::Float64(Some(4.0)),
                     ScalarValue::Float64(Some(8.0))
                 ]
@@ -396,7 +397,7 @@ fn a_welford_triple_is_one_aggregate_filling_three_declared_columns() {
             (
                 "b".to_string(),
                 vec![
-                    ScalarValue::UInt64(Some(1)),
+                    ScalarValue::Int64(Some(1)),
                     ScalarValue::Float64(Some(9.0)),
                     ScalarValue::Float64(Some(0.0))
                 ]

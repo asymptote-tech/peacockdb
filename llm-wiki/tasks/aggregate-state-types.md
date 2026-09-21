@@ -125,3 +125,19 @@ for those that pass.
 ## Device workflow
 
 `build-test-shadgpu.sh`, one cycle for the harness, one for the rollout.
+
+## Completeness signoff — 2026-09-17
+
+Solved under its constraints: `PlanAgg::state_type` types every state column by its producer,
+matched without a wildcard, `Sum`'s decimal rule quoted from DataFusion; `decompose` takes only
+arity and nullability from `state_fields()`; the cpu's Welford init casts its count to `Int64`
+as a second stage and `check_state_layout` admits the widened decimal at a merge alone, both
+pinned red-then-green; three device pins retire as positive cases; 33 goldens move in the three
+classes and no other; 23 rows roll out with `163` struck from every one, 19 green on the cpu at
+all five modes and four on the device. Two deviations, each with its reason on record: the
+finalize divides the bare sum and casts the quotient, since arrow's decimal divide truncates at
+`s_in + 4` and the spec's numerator cast would round where DataFusion and cuDF truncate; and
+`merge_m2`'s `counted_unsigned` casts the arriving `Int64` count to `UInt64` on the way into
+DataFusion's variance accumulator, which reads nothing else — the one line that crosses the
+Restriction's letter, invisible at every plan, wire, state and answer boundary. `aggregate.cpp`
+untouched; `done` waits on CI.

@@ -18,7 +18,7 @@ reference still resolves there.
 | [Critical correctness](#critical-correctness) | 29 | #219 #218 #217 #216 #215 #214 #211 #210 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #212 #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 24 | #213 #201 #197 #196 #195 #178 #176 #174 #167 #164 #163 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
+| [Infrastructure / process](#infrastructure--process) | 23 | #213 #201 #197 #196 #195 #178 #176 #174 #167 #164 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
 
@@ -178,7 +178,8 @@ the same empty answer under the declared schema and gets zero rows, and the cpu 
 the two cpu paths disagree with each other as well as with the device. Downstream, nothing and a
 zero-row batch are different arrivals: a global merge over nothing is #199's site. Pinned by
 `bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu` and its two neighbours
-(`gpu_tests/accumulate_cases.rs`).
+(`gpu_tests/accumulate_cases.rs`). First corpus cell to reach it: `tpcds/q17` at `tp1-single`,
+which answers zero rows — 12 bytes at the device's unload against the cpu's 0 (2026-09-17).
 
 <a id="t204"></a>
 ### #204 — the device's sorted merge drops its fetch when it is handed one input
@@ -551,7 +552,10 @@ emitted cast and handle string keys by hashing rather than casting
 ### #63 — q9 GpuProject copy_if_else size mismatch (CASE over scalar subqueries)
 A top-level CASE over ~15 scalar-subquery comparisons fails in cuDF `copy_if_else`
 (1-row scalar branch vs other-sized branch). Needs scalar-subquery branches broadcast to
-the row count, or a different CASE lowering (`cpp/src/expr.cpp`).
+the row count, or a different CASE lowering (`cpp/src/expr.cpp`). 2026-09-17, the first run
+since the cpu stopped refusing q9: the same site now fails as `copy.cu:367: Both inputs must be
+of the same type` at `tp1-single`, so the two branches reach `copy_if_else` as different cuDF
+types; not re-diagnosed.
 
 <a id="t56"></a>
 ### #56 — q2: CASE-over-string-equality inside a partial-phase sum
@@ -1117,31 +1121,6 @@ returns `type_id::EMPTY` for an out-of-range `ColumnRef` instead of throwing, tu
 ordinal into a confusing type error further along. The third closure #135 named is unstarted and
 belongs here too: a per-node type check in the GPU tiers, the only thing that would surface a
 wrong-order subtree before the root.
-
-<a id="t163"></a>
-### #163 — `avg` declares its count state UInt64 and both engines produce Int64 — nowhere is a declared type derived from its producer
-
-Union's branch check, the root against the DataFusion plan, and `types_across_the_edge` each
-compare one declared schema against another rather than deriving one from an expression, so an
-aggregate's declared state types are checked nowhere — `state_fields` is DataFusion's answer, not
-the producing expression's.
-
-Both engines price a node from the declared schema, so a wrong type moves no golden byte. T16
-confirmed it on a device: cuDF's Welford count exports Int64 where every plan declares UInt64.
-
-The finalize has the same gap from the other side: `avg`'s divide over a decimal state is typed by
-arrow at (26,10) where the output declares (22,6), and `declared_as` refuses it
-(`bug_a_decimal_average_is_refused_on_the_cpu`, `gpu_tests/aggregate_cases.rs`).
-
-T17 closed the widening arm only (`widened_decimal`, `executor/cpu_backend/`). The signed arm remains:
-`avg` declares its count state UInt64 and DataFusion's accumulator produces Int64 — no widening, and
-it must not be escaped the same way, since accepting it masks what the device showed. The queries
-disabled on this return with the fix, not by loosening the guard. Its column runs 1 to 10 over T19's
-seventeen `avg` queries — wherever the count state sits in that query's own state row — so no fix
-special-casing a position can work.
-
-Fix: derive each expression's output type and compare it against the declared field, for the
-nodes that compute rather than carry. Same class as [#135](archive/archived-tickets.md#t135).
 
 <a id="t159"></a>
 ### #159 — RightSemi/RightAnti with a residual filter has no cuDF path
