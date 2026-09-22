@@ -4,7 +4,7 @@
 //
 //   corpus_query_benchmark!(dataset, sf, query, modes)
 //
-// `modes` are the batch-partitioned planning modes of `src/test_support/mod.rs`, or'd, or
+// `modes` are the planning modes of `src/test_support/mod.rs`, or'd, or
 // `none`. Separate from `corpus_cases.inc` because the two disagree about sf on purpose:
 // correctness runs where a wrong answer is legible, timing where there is work to time.
 // build-test.md's Corpus Benchmarks section carries the rest.

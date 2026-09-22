@@ -390,7 +390,7 @@ remote_gate_script() {
     # sf40 suites fall back to a relative golden path and fail as a mis-provisioned
     # run. That dataset lives outside the repo and is read in place.
     export PEACOCK_TESTDATA_DIR=$REMOTE_REPO/testdata
-    export PEACOCK_TPCH_SF40_DIR=/home/info/peacock-datasets/testdata/tpch.sf40
+    export PEACOCK_TPCH_SF40_DIR=$SF40_DIR
     export PEACOCK_TPCH_GOLDEN_DIR=$REMOTE_REPO/testdata/goldens/tpch.sf40
     export PEACOCK_TPCH_VEC_PARAMS=$REMOTE_REPO/testdata/tpch-vec-queries/query_params.jsonl
     export PEACOCK_GPU_DEBUG='$PEACOCK_GPU_DEBUG'

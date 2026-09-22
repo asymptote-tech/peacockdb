@@ -93,12 +93,11 @@ pub(crate) fn set_nvtx_ranges(on: bool) {
 /// ranges are off, and nothing in the engine calls it.
 #[must_use = "the range closes when this is dropped, so dropping it at once ranges nothing"]
 pub(crate) fn nvtx_range(name: &str) -> NvtxRange {
-    // Interior NUL is not an error worth a Result: the name is built by the harness from
-    // its own case identifiers, and a NUL in one of those is a bug in the harness. The
-    // range is simply not opened, which shows up as a capture missing a level.
-    if let Ok(owned) = std::ffi::CString::new(name) {
-        unsafe { peacock_nvtx_push_range(owned.as_ptr()) };
-    }
+    // A NUL is a bug in the harness, which builds the name from its own case identifiers,
+    // and a guard over a range never opened would pop somebody else's on drop.
+    let owned = std::ffi::CString::new(name)
+        .unwrap_or_else(|e| panic!("nvtx range name {name:?} carries a NUL: {e}"));
+    unsafe { peacock_nvtx_push_range(owned.as_ptr()) };
     NvtxRange(())
 }
 

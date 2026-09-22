@@ -86,6 +86,12 @@ fn lanes_of(times: &Measurements, node: usize) -> String {
     format!("[{}]", rendered.join(","))
 }
 
+/// Every node's `total_us` added — the trailer's `device_us`, under the one rule above, so
+/// the file's own arithmetic (Σ `total_us` == `device_us`) holds by construction.
+pub(crate) fn timed_device_us(times: &Measurements) -> u64 {
+    (0..times.nodes()).map(|node| total_of(times, node)).sum()
+}
+
 /// The node's whole device time: the entries above, added. A node that made no call at all
 /// sums nothing and reports 0.
 fn total_of(times: &Measurements, node: usize) -> u64 {

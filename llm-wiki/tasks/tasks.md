@@ -30,7 +30,7 @@ the merged chain; its PR targets master. Held by the human: the alternative is a
 
 ## Chain ENS-bp-benchmarks (base: master)
 
-### 1. [`bp-benchmarks.md`](bp-benchmarks.md) — state: rebase needed(completing) — PR #139
+### 1. [`bp-benchmarks.md`](bp-benchmarks.md) — state: done — PR #139
 
 The corpus benchmark at sf40: one timing tree per (dataset, mode), one record row per cuDF
 call, two Nsight captures and the panels. The branch and PR predate the spec, so the

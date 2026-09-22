@@ -819,7 +819,7 @@ pub struct RunMeta<'a> {
     pub dataset: &'a str,
     pub sf: &'a str,
     pub query: &'a str,
-    /// The batch-partitioned planning mode, `tp4-sized` and the like. The same query
+    /// The planning mode, `tp4-sized` and the like. The same query
     /// at two modes is a different plan and a different set of calls.
     pub mode: &'a str,
     pub allocator: &'a str,

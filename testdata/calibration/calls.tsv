@@ -1,5 +1,6 @@
 # What one timed region spends its time on, one level down, from an Nsight capture.
-# One row per (case, node_seq, call, depth). A region is one output partition of one
+# One row per (case, recipe_seq, call, depth), recipe_seq and recipe_kind being the fb
+#   seq and kind of records.tsv. A region is one output partition of one
 #   call, so a batched mode has several a run: `regions` counts them, `executions`
 #   divides them out, and every microsecond below is a median over one region.
 # depth 0 partitions the region and deeper rows break those down — summing across
@@ -7,7 +8,7 @@
 # host_us is the call's own NVTX range; device_us sums the device operations it
 #   launched, so an async call has a small host span and a large device one.
 # The times are a profiled run's and are not comparable with records.tsv's.
-dataset	sf	query	mode	node_seq	node_type	partition	call	depth	executions	regions	calls_per_region	host_us	device_us	region_us
+dataset	sf	query	mode	recipe_seq	recipe_kind	partition	call	depth	executions	regions	calls_per_region	host_us	device_us	region_us
 tpch	40	q19	tp1-single	0	CudfScan	0	(unattributed)	0	10	10	1.0	11	0	17028
 tpch	40	q19	tp1-single	0	CudfScan	0	read_parquet	0	10	10	1.0	17017	13550	17028
 tpch	40	q19	tp1-single	0	CudfScan	0	build_string_dict_indices	1	10	10	1.0	119	28	17028

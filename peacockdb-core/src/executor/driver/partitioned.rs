@@ -137,7 +137,7 @@ impl<'a, B: Backend> Driver<'a, B> {
             .iter()
             .map(|node| vec![Vec::new(); node.lanes])
             .collect();
-        // By the lanes that DRIVE the node, not the ones it emits into: a cross-lane
+        // By the lanes that drive the node, not the ones it emits into: a cross-lane
         // accumulator is called once per input lane and answers on one.
         let abi_calls = index
             .nodes

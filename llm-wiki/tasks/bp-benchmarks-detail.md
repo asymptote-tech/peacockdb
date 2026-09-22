@@ -1240,3 +1240,354 @@ was re-initialised; the datasets regenerated with `generate_testdata.sh --bench 
   `flatbuffers/`, `plan/`, `planner/`, `wire/`) diffs empty against `origin/master`.
 - `pipeline.yml` parses as YAML; all 30 rendered `run:` blocks pass `bash -n` with
   `${{ }}` substituted; `bash -n` on both scripts. No conflict marker outside `llm-wiki/`.
+
+### Rebase 2 committed: `9ee8b1b2` on `9c781e12`, PR #139 force-pushed
+
+Dispatch 7 resolved every conflict and proved the branch green on the new base (its own
+"Dispatch 7" section above has the placement and the counts). The coordinator staged by path,
+`git rm`'d the five `tests/common/*.rs` the re-homing emptied, finished the rebase as one
+commit, and force-pushed; PR #139 reads one commit against master. The board returns to
+`completing`. Two things to carry: the ffi rung (`--lib -- ffi_tests::`, `test_ffi`) was
+compiled in the cuDF-shape build but not executed locally — the box has no CUDA runtime, and no
+earlier dispatch ran it either; CI's dataset-matrix is where it runs, and a red there is a
+finding for the developer. And `/build` is gone on the dev box: caches now live under
+`~/.cache/peacock-build`, which supersedes the plan's global constraint naming `/build/peacock`.
+
+Next: the same developer takes the six triaged items, round 2's two optional nits and the two
+`#[ignore]`s in `test_corpus_goldens` (green against the committed data), as one commit; then
+the completeness pass reads `origin/master...ENS-bp-benchmarks` as one change.
+
+## Dispatch 7, step 2 — the six triaged items, round 2's nits, the two `#[ignore]`s
+
+On `9ee8b1b2`, one commit's worth, nothing outside the branch's own lines.
+
+1. `peacock_executor_collect_node_regions(ex, NULL, cap > 0, …)` is refused before the
+   session is consulted — non-zero, `last_error` "collect_node_regions: a null buffer with
+   capacity N — (NULL, 0) asks the count", nothing drained. `NodeRegions.ANullBufferWithACapacityIsRefused`
+   sits in the cpu tier (`cpp/tests/cpu/test_executor.cpp`), since the refusal needs no
+   session; reddened by mutation (the message read "no plan loaded"). One line in the
+   plan-executor `AskingTheCountDrainsNothing` proves the shape drains nothing with a live
+   session.
+2. `RegionSink::producer_of(handle, what)` throws for the two populations it cannot name.
+   A handle the sink never saw — produced before timing was turned on — throws saying so.
+   An adopted handle: `adopt` notes it in the sink as `RegionSink::kAdopted` (`UINT64_MAX`,
+   never a seq), and a slice or export of it under `Events` is refused naming the adoption.
+   The decision: no node produced the table, so no node is charged — charging seq 0 would
+   put the region on a real node while the journal named another, and the join would not
+   close; the harness uploads with timing off, and the one `gpu_tests` arm that arms timing
+   (`a_slice_and_an_export_are_charged_to_the_node_that_produced_the_handle`) scans, so the
+   adopted refusal is unreachable from the Rust side. `slice_handle` names the producer
+   before it consumes the handle, so a refusal leaves the registry as it was. Two
+   plan-executor gtests: `NodeRegions.AHandleFromBeforeTimingCannotBeCharged` and
+   `NodeRegions.AnAdoptedHandleCannotBeCharged`, the latter through `NodeSession::adopt` on
+   a copy of a scanned table. Not reddened by mutation (a second shad-gpu cycle); before the
+   change `producer_of` returned 0 without throwing, which `EXPECT_THROW` fails on.
+3. Capitals: "CALLER", "IS" (`executor/mod.rs`), "DRIVE" (`driver/partitioned.rs`) lowered;
+   "SEQ SET" had already gone with the move to `record/tests.rs`. A sweep of every comment
+   line the branch adds found three more — "ALSO" (`build-test.sh`), "BUILD host" and
+   "REMOTE shell text" (`shadgpu-env.sh`) — lowered too. `USAGE`/`WRITES`/`BENCHMARK OUTPUT`
+   are the shell headers' section names (the tree's idiom), `STRING` is cuDF's type id.
+4. `Measured::device_us` says every region has its pair (a failed pair is a collection
+   error, a call with no region is refused by the join); `NodeTiming::Off` says no region
+   is opened, so a collection answers with none.
+5. `nvtx_range` panics naming the name on an interior NUL, before the C side is touched;
+   `executor::ffi_tests::an_nvtx_range_name_with_a_nul_is_refused` (`#[should_panic]`),
+   watched red first. The ffi rung is 4 now.
+6. `create_nsys_profile.sh`: a failed `nsys export` is its own message and exit 1, carrying
+   the pass's status; `bash -n` clean.
+7. `harness_range_is_open()` declared in `plan_executor_internal.h`;
+   `NvtxRanges.ASecondPushReplacesTheFirstRatherThanNesting` moved to the cpu tier with its
+   own `RangesOn` guard. Counts for `build-test.md`: **C++ CPU/FFI unit 13 → 15** (the
+   moved NVTX case and the null-buffer refusal), **Plan-executor 52 → 53** (−1 moved, +2 of
+   item 2), **FFI GpuBatch surface (`ffi_tests`) 3 → 4**, **Corpus goldens 24 → 26**.
+8. The two `#[ignore]`s are gone; `test_corpus_goldens` is 26 passed, 0 ignored.
+
+Proven: rust-only `--lib` 597 (0 warnings), `test_corpus_goldens` 26, `test_module_layout`
+17, `test_ci_coverage` 9; container `ffi_tests::` 4, `peacockdb-ffi --test test_ffi` 3;
+`ctest -L cpu` 1/1 with `peacock_cpu_tests` 15; cuDF-shape build exit 0, five binaries
+staged, no new warnings; shad-gpu gate exit 0 "GPU test run OK" — C++ 15 / 4 / 53 / 4 / 4,
+rust `peacock_gpu_benchmarks` 6 (3 filtered), `peacockdb_core_gpu_lib -- gpu_tests::` 535,
+`test_gpu_corpus` 28, `test_node_timing` 1; `residue-gate.sh` bp gates empty; the
+byte-identical set diffs empty against `origin/master`.
+
+### Step 2 committed as `be07c7b1`; the wiki counts
+
+`build-test.md` recomputed on the branch: cpu 1178 (`--lib` 599 with its two ignored cases,
+`test_corpus_goldens` 26), ffi 7, gpu 573 (`peacock_gpu_benchmarks` 9, `test_node_timing` 1),
+C++ 94, Python 381, 2322 in all. One row was stale on master itself and is corrected here
+rather than left: FFI smoke says 3 (`test_install_rmm_pool_rejects_a_zero_request` came with
+master's pool change and the row still said 2). cuDF GPU smoke goes 6 → 4 because this branch
+deletes the two floor tests. The step-2 ffi rung was executed in the container this time, so the gap noted
+above is closed: `ffi_tests::` 4, `test_ffi` 3.
+
+Next: the completeness pass — a reviewer for what is wrong, a fresh analyst for what is
+missing, over `origin/master...ENS-bp-benchmarks`, neither seeing the other's list.
+
+## Completeness pass — the analyst's reading
+
+Read `origin/master...ENS-bp-benchmarks` (`9c781e12`..`9e799650`, 99 files) as one change,
+against the spec's constraints and "Done when", `build-test.md`'s coverage expectations, and
+`architecture.md`. What was checked and holds, then what is missing, then the page list.
+
+### Checked and holding
+
+- The four products are on the branch with the producers the diagram names, byte-identical to
+  the human's H200 commits (`9f74bcaa` and neighbours; `pre-rebase-bp-benchmarks-2`). Both
+  trees: every `total_us` is the sum beside it, `device_us` = Σ `total_us`, ten `runs`, `run_us`
+  the second-smallest, `build=release`. The record: 450 rows × 17 columns, no empty cell, 45 rows
+  per `run_index` 0..9, the heading is `record_header()`'s, and the chosen run is in it (q19 run
+  9, q6 `tp1-single` run 5, q6 `tp4-sized` run 9 — Σ `device_us` per run equals the tree's).
+  `calls.tsv` keys by all three cases (138/63/77 rows). `hbm.tsv` joins 450/450 on the
+  8-tuple. Six panel directories and `index.html`, every entry backed by a file.
+- The instrument: 21 ABI symbols counted in `peacock_gpu.h`; the region is the five fields; no
+  sync inside a region; `varlen_content_bytes` is the one sync; NVTX names as specified.
+- CI, scripts, guard: `peacock_gpu_benchmarks` and `test_node_timing` in the staging line,
+  `RUST_TESTS`, the `GPUSET` heredoc, `--skip bench_` on both runner loops; `die`, `pull_one`,
+  `PATCHED_LD`, `passed_count` once in the lib; `--run-benchmarks` refuses before any push,
+  `--pull-benchmarks` dies on nothing home / a dead run; `PCK_TEST_FILTER` the one name. The
+  spec's "not in `INTENTIONALLY_NOT_IN_CI`" describes the first version's guard: on master
+  `Exemption::GpuJob` is the verified statement that a target runs from the staged artifact,
+  and `test_gpu_corpus` is listed the same way — the placement is right.
+- Rust-only pins present: trailer arithmetic, release build, preamble, field count, bare
+  calls, timed ⊆ device-enabled. Pytest 5 + 4 + 3. Done-when greps all zero (the one
+  `thread_local` is master's comment). Byte-identity set diffs empty. `== bp gates` empty.
+- Counts: every row of the two tables recounted from `#[test]`/`#[tokio::test]` and
+  `TEST`/`TEST_F` — cpu 1178, ffi 7, gpu 573, C++ 94, Python 381, 2322 — and every block
+  header is the sum of its rows. VRAM bullet matches `POOL_BYTES` (2 GiB) and
+  `BENCH_POOL_BYTES` (69 GiB). The data-flow diagram matches the scripts.
+- #226 and the counter move are the human's own commit `757377a0`; the Corpus benchmarks
+  section is 105 lines against the spec's 50–80 because the human's 26.02 paragraph joined it.
+
+### Findings — 0 blocking, 5 important
+
+1. **`llm-wiki/build-test.md:1052-1155`** — the spec's one required sentence is absent: "the
+   run is measured under event timing and what that cost on sf40 and how it was measured". The
+   test-table row (:434-436) promises "the effect is reported from the sf40 run instead" and
+   nothing reports it; the only figure anywhere is sf1 q19 on shad-gpu beside a 62 GB
+   neighbour (+0.1 %, dispatch 7). Anchor: spec "Wiki and tickets"; plan Task 11 step 3 was
+   never run. Fix: `test_node_timing`'s procedure with `SF = "40"` on q19 at `tp1_single` on
+   the H200 (not committed), then the sentence with N, the host and the cuDF version.
+2. **`scripts/calibration/plot.py:19-22`** — states matplotlib 3.9.2 as "what the committed
+   panels were rendered with"; all 17 committed PNGs embed `Matplotlib version 3.5.1`. Anchor:
+   spec "The panels" — the script "states the matplotlib version its output was rendered with".
+   Fix: say 3.5.1 (verda-gpu's python), and have `write_index` (:642-667) print
+   `matplotlib.__version__` into `index.html` so the claim is a product rather than prose.
+3. **Residue: seven new hits in `residue-gate.sh`'s `== residue` section** — "batch-partitioned"
+   as prose at `src/test_support/corpus_benchmark.rs:1`, `src/test_support/mod.rs:822`,
+   `src/test_support/record.rs:266` (`HEADER_NOTES`, hence `testdata/calibration/records.tsv:16`),
+   `tests/common/corpus_benchmark_cases.inc:7`, `tests/peacock_gpu_benchmarks.rs:1`,
+   `scripts/calibration/nsys_hbm.py:293`. `drop-mode-name` (#141) retired the phrase from every
+   sentence ("a qualifier against an alternative that no longer exists"); the gate's first
+   section is what catches it. Master's own five hits (`batch→partition` map,
+   `ParquetBatchPartitioner`) predate the branch. Anchor: spec line 10 / Done when "the residue
+   gate empty". Fix: "planning mode" / "the corpus" at the six source sites; `records.tsv:16`
+   and `HEADER_NOTES` in one commit, since `the_records_preamble_is_what_record_header_writes`
+   pins them together.
+4. **`scripts/build-test-shadgpu.sh:393`** — the gate's remote script keeps master's literal
+   `/home/info/peacock-datasets/testdata/tpch.sf40` while the branch added `SF40_DIR` to the lib
+   and uses it only in the bench script (:508). Anchor: spec "the sf40 directory ... live once,
+   in `lib/shadgpu-env.sh`". Fix: `export PEACOCK_TPCH_SF40_DIR=$SF40_DIR`.
+5. **Two refusals the spec and `build-test.md` state with no test**: an append under a
+   different `# run:` heading (`record.rs` `assert_run_conditions_match`; `build-test.md:1147`)
+   and `Capture::from_env` on an unnamed value (`build-test.md:1154`). The harness binary's
+   `the_record_is_written_only_when_a_path_is_named` writes one fresh file and never a second
+   heading. Anchor: build-test.md's coverage expectations. Fix: two `#[should_panic(expected =
+   …)]` cases beside it in `tests/peacock_gpu_benchmarks.rs`, which already owns the env var
+   under `--test-threads=1`.
+
+Wiki corrections for the coordinator, no developer needed:
+
+- `build-test.md:789-791` lists the staged `--test` targets as `test_gpu_corpus`,
+  `peacock_gpu_benchmarks` and the lib; `pipeline.yml:383` also stages `test_node_timing`.
+- `build-test.md:1124-1126` explains `1` and `[]` in `time_us` but not `0`, which appears 13
+  times in the committed trees — a driver call the backend answered without crossing the ABI
+  (an accumulator holding a batch, a join's `set_build`); the rule lives only in
+  `bench_text.rs:19-26`. One clause.
+- `build-test.md:1134-1135` "Both counts are constants in `src/test_support/corpus_benchmark.rs`"
+  — `MEASURED_RUNS` is `test_support/mod.rs:843`; `BENCH_WARMUP_RUNS` is `corpus_benchmark.rs:132`.
+
+Scope deviations for the signoff, each a consequence of an in-scope change:
+`scripts/setup-glibc.sh` (patches `rust-benchmarks/`, without which the harness ships
+unpatched), `cpp/src/plan_executor_internal.h` (`harness_range_is_open` for the cpu gtest),
+`executor/driver/index.rs` (`nodes_as_recorded`), `src/tests/gpu_tests/device.rs` (the new
+`GpuBatch::new` argument).
+
+### `architecture.md` — sentences the branch falsified
+
+Three false, quoted with their heading:
+
+- **Interfaces**, the instrumentation bullet (:936-937): "**Instrumentation is process-global
+  and off by default; `peacock_gpu_benchmarks`, `test_node_timing` and the plan-executor
+  gtests' fixtures are what turn it on.**" — also turned on by
+  `executor::gpu_backend::gpu_tests::accumulate`
+  (`a_slice_and_an_export_are_charged_to_the_node_that_produced_the_handle`, :234) and by the
+  cpu-tier gtests `NodeTiming.*` and `RangesOn` (`cpp/tests/cpu/test_executor.cpp:153-197`).
+  Say: the benchmark harness and the timing tests — `peacock_gpu_benchmarks`,
+  `test_node_timing`, one `gpu_tests` case and the gtest fixtures on both tiers.
+- **Node display** (:1167): "**There are two node lines, and the difference is which golden it
+  is in.**" — `plan_text/bench_text.rs` renders a third, in `<mode>.benchmark.txt`, which is
+  not a golden: the node line without `schema=` and without `output_rows`/`output_bytes`, with
+  `time_us=[[…]] total_us=N` beneath it. Say: three node lines, the third the benchmark tree's,
+  described in build-test.md's Corpus benchmarks.
+- **Execution → Traits** (:538): "`GpuBatch` wraps a `u64` handle plus the session reference
+  its `Drop` needs." — `GpuBatch` (`executor/mod.rs:91-97`) also carries `producer: Seq`, the
+  seq of the call the handle came out of; a slice propagates it and an export is charged to it,
+  and C++ keeps the same fact per handle. Add: "and the seq of the call that produced it, which
+  is what a slice or an export is charged to".
+
+Three incomplete rather than false — the coordinator's call:
+
+- **C++ executor layout** (:1017-1019): "`node_session.cpp` (the post-order index, the handle
+  registry, and the multi-partition dispatch — …)" — now also the timed regions (`RegionSink`,
+  `ScopedNodeTimer`, `collect_node_regions`), the NVTX domain and the harness range.
+- **The handle registry has no type** (:988-990): "It is two fields inside the private
+  `NodeSession::Impl` … with allocation, lookup, consume-on-read and erase written inline at
+  every site that touches them." — the registry is still those two fields, but each of the
+  seven allocation sites now pairs `next_handle++` with `note_producer` into a third
+  handle-keyed map in `RegionSink` (measurement-only, never erased), and `adopt` files a handle
+  there as `kAdopted`. The paragraph's conclusion holds and is stronger for it.
+- **The wire format → From node to seqs** (:803-804): "`execute_node` is stateless per seq —
+  the only state is the handle registry" — under `Events` the session also counts calls per
+  seq (`RegionSink::calls_made`, the `call_index`); state that names a call, not one that
+  changes what it computes, and absent from a shipping query.
+
+Verified unchanged and true: the ABI count and groups, the per-call entry points, `NodeStats`
+(rows and varlen bytes), the byte formula in `common.rs` alone, the `varlen_content_bytes`
+sync, `collect_node_regions` draining afterwards, NVTX as a separate switch, "Three additive
+ABI symbols", `Backend::executors_for`, `run_with_hook`, `CallStats.scratch_bytes`, the four
+accounting rules, the driver's file list, "A call can fail" (the driver still adds node and
+lane; the backend now also names them).
+
+## Completeness pass — the two lists compared, and dispatch 8
+
+The reviewer (what is wrong) read `9c781e12..9e799650`: 0 blocking, 7 important. The analyst's
+list is the section above: 0 blocking, 5 important, three wiki corrections, three
+`architecture.md` sentences falsified and three incomplete. Neither saw the other's. Where they
+meet: the sf40 event-timing sentence the spec requires is absent (plan Task 11 step 3 never ran);
+"batch-partitioned" is back in seven lines, growing `residue-gate.sh`'s first section from
+master's five hits to twelve; and the same scope deviations, to be named in the signoff
+(`scripts/setup-glibc.sh`, `cpp/src/plan_executor_internal.h`, `executor/driver/index.rs`,
+`executor/ffi_tests/mod.rs`, `src/tests/gpu_tests/device.rs`,
+`executor/driver/accounting/tests.rs` — each a consequence of an in-scope change).
+
+The reviewer's own four:
+
+1. `corpus_benchmark.rs:102-105` — the trailer's `device_us` is Σ raw `Measured::device_us`,
+   the tree's `total_us` is Σ `call_us()` clamped to `.max(1)` (`bench_text.rs:30-35`); the
+   rust-only pin `every_total_us_is_the_sum_of_the_time_us_beside_it` asserts they agree, so a
+   future collection with one sub-microsecond region turns CI red. Latent today (the record's
+   smallest `device_us` is 3 µs). Fix: one rule, exposed by `bench_text` and used by the trailer.
+2. `nsys_calls.py:427,436-438` and `calls.tsv` — the columns named `node_seq`/`node_type` hold
+   the fb seq and kind, which the record calls `recipe_seq`/`recipe_kind`; a join on the shared
+   name lands on another node. Rename in the script, its test and the committed file's header.
+   The trace capture lives on verda-gpu, which does not resolve, so the header cells are renamed
+   by hand — a re-run would write the same rows under the new names. Named in the signoff.
+3. `tests/test_corpus_goldens.rs` is 1052 lines (704 on master), over the 1000-line limit. The
+   benchmark-and-record block moves to `tests/test_corpus_goldens/benchmark.rs` as a `mod`, the
+   shape `test_ci_coverage/runners.rs` has.
+4. `record.rs:32-99` — `row()` is a positional list against a heading that is `COLUMNS.join`,
+   and the writer runs in no CI tier (the `bench_` cases only); a cell reordered against
+   `COLUMNS` would pass every pin. One rust-only test in `record/tests.rs` asserting each cell by
+   `COLUMNS.position(name)`.
+
+The analyst's own three: `plot.py:19-22` says matplotlib 3.9.2 where every committed PNG embeds
+3.5.1 (say 3.5.1; print `matplotlib.__version__` into `index.html` so the claim is a product);
+`build-test-shadgpu.sh:393` keeps the sf40 path as a literal beside the lib's `SF40_DIR`; and two
+refusals the wiki states have no test — an append under a different `# run:` heading and
+`Capture::from_env` on an unnamed value — two `#[should_panic]` cases in
+`peacock_gpu_benchmarks.rs`.
+
+Not taken, both agreed: `INTENTIONALLY_NOT_IN_CI` carrying both targets as `Exemption::GpuJob`
+is master's verified "runs from the staged artifact" and what the plan asked for; the spec's
+sentence describes the first version's guard. #226 moved the counter the spec said would not
+move; it is the human's own commit and a real follow-up.
+
+Dispatch 8 is all of the above that is code, plus the sf40 measurement for the sentence: the
+same developer, one commit. The wiki side — the sentence itself, the three `build-test.md`
+corrections, the `architecture.md` sentences — is the coordinator's, applied when the figure is
+in. verda still does not resolve; shad-gpu answers with the same neighbour, so the sf40 figure
+is measured beside it and the sentence says so.
+
+## Dispatch 8 — the completeness pass's seven code items and the sf40 figure
+
+On `ce6f447c`. Kept current as each item lands; the measurement is last.
+
+Progress: complete — eight code items landed and proven, the sf40 figure measured, the
+timing copy deleted locally and on the host.
+
+1. `plan_text::timed_device_us` (delegating to `bench_text::timed_device_us`, Σ of every
+   node's `total_of`) is the trailer's `device_us`; `run_section` calls it. The pin is in
+   `driver/tests/render.rs::a_region_that_rounds_to_nothing_still_ran`: rendered
+   `total_us=31` and `timed_device_us == 31`; reddened by mutation (a raw sum answers 30).
+2. `nsys_calls.py` writes `recipe_seq`/`recipe_kind` (rows, `cols`, `NOTES`, docstring);
+   `test_calls.py` reads them (red first, 2 failed, then 5 passed); `calls.tsv`'s heading
+   edited by hand — the two column cells and the `NOTES` line — and checked equal to what
+   `record.write_tsv(NOTES, cols, [])` writes now; the 262 rows are untouched. The capture
+   is on verda-gpu, which does not resolve; a re-run writes the same rows under the new
+   names. `nsys_hbm.py` and `plot.py` read `records.tsv`'s `node_seq`/`node_type`, which are
+   the record's own and stay.
+3. `tests/test_corpus_goldens.rs` is master's 704 lines plus 7 (a `#[path]` `mod benchmark`
+   and one doc sentence); the benchmark-and-record block is
+   `tests/test_corpus_goldens/benchmark.rs` (356 lines), every case under its old name
+   (`benchmark::…`). 26 passed, 0 ignored; `test_module_layout` 17, `test_ci_coverage` 9.
+4. `record/tests.rs::each_cell_sits_under_the_column_named_for_it`: q6 on `CpuBackend`, one
+   armed `AbiCall` in the first `(node, lane)` that reached an executor, one `Region`,
+   `record_rows`, every cell by `COLUMNS.position`. Red first with `host_us`/`device_us`
+   swapped in `row()` (66 against 77).
+5. `plot.py`'s docstring says 3.5.1 (verda-gpu's), and `write_index` prints
+   `matplotlib.__version__` into `index.html` ("rendered with matplotlib N"); `test_plot.py`
+   pins the line (red first). `index.html` is left as committed: `plot.py` has no
+   index-only path, and writing the page here would stamp it with this box's 3.10.8 while
+   every PNG embeds 3.5.1 — the next collection carries the line.
+6. `build-test-shadgpu.sh:393` exports `$SF40_DIR`; `bash -n` clean.
+7. `an_append_under_a_different_heading_is_refused` and
+   `a_capture_variable_naming_no_pass_is_refused` in `peacock_gpu_benchmarks.rs`, both
+   `#[should_panic(expected = …)]`, both red first with the refusals mutated away (6 passed,
+   2 failed) and green restored (8 passed, 3 `bench_` filtered). Each holds its variable in
+   an `EnvLoan` guard that restores on unwind — a panic that left `PEACOCK_RECORD_PATH` at a
+   temp path would send every `bench_` case after it there. Harness row 9 → 11.
+8. "batch-partitioned" dropped at the six source sites and at `records.tsv:16` (the heading
+   matches the new `HEADER_NOTES`; the rows are untouched); `nsys_hbm.py`'s message says
+   "the node-range recorder". `residue-gate.sh`'s first section is master's five.
+
+### The sf40 event-timing figure
+
+Taken 2026-09-22 on shad-gpu (`llm-gpu0h200`, an H200, cuDF 25.02.02 in
+`rapids-cuda-12.2`) with the 62 GB neighbour (pid 2421888) on the card throughout, so the
+absolute walls are inflated and only the ratio is the instrument's. Procedure: dispatch 5's
+— a copy of `test_node_timing.rs` with `SF = "40"` and `ROUNDS = 10`, built `--release`
+into `rust-benchmarks/`, shipped and patched by the gate's `--push-binaries --patch`, run by
+hand over ssh with `PEACOCK_RMM_POOL_BYTES=$((69<<30))` (the harness's budget; the
+binary's own 2 GiB does not hold sf40 q19). The pool built: 69.0 GiB reserved of 78.4 GiB
+free. tpch q19 at tp1-single, 12 regions, second-smallest of ten each:
+
+    off    wall = 1308313 µs
+    events wall = 1293402 µs   (−1.1 %)   host = 1288405   device = 1293102
+
+Events mode read faster than off by 1.1 %, inside the run-to-run spread — the sentence for
+`build-test.md` says "within about 1 %" beside the neighbour rather than a saving. The copy
+is deleted here and on the host (`rust-benchmarks/` holds `peacock_gpu_benchmarks` alone).
+
+### What was proven, and how
+
+rust-only: `--lib` 598 (+1, the cell-order pin; 0 warnings), `test_corpus_goldens` 26 across
+`test_corpus_goldens.rs` and `test_corpus_goldens/benchmark.rs` (0 ignored),
+`test_module_layout` 17, `test_ci_coverage` 9. Python: `test_calls.py` 5, `test_hbm.py` 4,
+`test_plot.py` 3 (rapids-26.02's python, matplotlib 3.10.8). `bash -n` on
+`build-test-shadgpu.sh`. cuDF-shape build exit 0, five binaries staged, 0 warnings. shad-gpu
+gate exit 0, "GPU test run OK": C++ 15 / 4 / 53 / 4 / 4; rust `peacock_gpu_benchmarks` 8
+(3 `bench_` filtered), `peacockdb_core_gpu_lib -- gpu_tests::` 535, `test_gpu_corpus` 28,
+`test_node_timing` 1 (sf1: off 446 ms, events +0.1 %). `residue-gate.sh`: first section
+master's five lines, bp gates empty. The byte-identical set diffs empty against
+`origin/master`. `test_corpus_goldens/` is a new untracked directory for the coordinator to
+`git add`.
+
+## Done — 2026-09-22
+
+CI run 35682260859 on `4379ecd4` is green on every job (both dataset-matrix legs, the 25.02
+build, the GPU job on shad-gpu, cost-report, the S3 check). PR #139 targets master with ten
+commits: the squashed branch rebased onto `9c781e12`, the six triaged findings, the completeness
+pass's code findings, and the wiki and board commits between them. The task is `done`; the merge
+is the human's. For the merge: the branch squashes cleanly, `pre-rebase-bp-benchmarks-2` holds
+the unsquashed history and `bp-benchmarks-v1` the first version, both local tags/branches the
+helper can drop afterwards.

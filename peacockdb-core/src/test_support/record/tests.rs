@@ -72,8 +72,7 @@ async fn a_rows_node_seq_names_the_steps_its_recipes_line_prints() {
             })
             .collect();
         assert_eq!(
-            named,
-            declared[post_order],
+            named, declared[post_order],
             "{name} at post-order {post_order}: the section names {named:?} and the record \
              would write {:?} — a row joining on `node_seq` would land on another node's line",
             declared[post_order]
@@ -83,4 +82,80 @@ async fn a_rows_node_seq_names_the_steps_its_recipes_line_prints() {
         nodes.iter().any(|(_, at)| !declared[at].is_empty()),
         "q6 addresses the device, so this cannot pass by every node declaring nothing"
     );
+}
+
+/// Every cell of a row sits under the column `COLUMNS` names for it.
+///
+/// `row()` is a positional list and the heading is `COLUMNS.join`, and the writer runs in
+/// no CI tier — so two cells swapped against the heading would pass every other pin and
+/// every reader would silently read the wrong column. One known call, one known region,
+/// each cell found by name and held to the value it came from.
+#[tokio::test]
+async fn each_cell_sits_under_the_column_named_for_it() {
+    use crate::executor::{AbiCall, AbiCalls, AbiTarget, Region, join_regions};
+    use crate::test_support::corpus::run_cpu;
+    use crate::test_support::{COLUMNS, Capture, RunMeta};
+    use crate::wire::FbKind;
+
+    let mode = mode_named("tp1_single");
+    let mut run = run_cpu("tpch", "1", "q6", mode).await;
+    let nodes = nodes_as_recorded(run.tree.as_ref()).expect("the tree indexes");
+    // The first (node, lane) that reached an executor takes the one journalled call; the
+    // CPU backend journals nothing itself, so every other entry stays unmeasured.
+    let (node, lane) = (0..nodes.len())
+        .flat_map(|node| (0..run.report.abi_calls[node].len()).map(move |lane| (node, lane)))
+        .find(|&(node, lane)| !run.report.abi_calls[node][lane].is_empty())
+        .expect("q6 makes a call");
+    let call = AbiCall {
+        seq: 5,
+        target: AbiTarget::Node(FbKind::Filter),
+        call_index: 2,
+        in_rows: 11,
+        in_bytes: 22,
+        out_rows: 33,
+        out_bytes: 44,
+    };
+    let mut made = AbiCalls::armed(true);
+    made.record(call);
+    run.report.abi_calls[node][lane][0] = made;
+    let region = Region {
+        seq: 5,
+        partition: 0,
+        call_index: 2,
+        host_us: 77,
+        device_us: 66,
+    };
+    let measured = join_regions(&run.report, &[region]).expect("the one call has its region");
+    let meta = RunMeta {
+        dataset: "tpch",
+        sf: "1",
+        query: "q6",
+        mode: mode.name,
+        allocator: "none",
+        capture: Capture::None,
+    };
+
+    let rows = super::record_rows(&nodes, &run.report, &measured, &meta, 3);
+    assert_eq!(rows.len(), 1, "one journalled call, one row: {rows:?}");
+    let cells: Vec<&str> = rows[0].split('\t').collect();
+    assert_eq!(cells.len(), COLUMNS.len());
+    let cell = |name: &str| cells[COLUMNS.iter().position(|c| *c == name).unwrap()];
+    let (node_type, post_order) = nodes[node];
+    assert_eq!(cell("dataset"), "tpch");
+    assert_eq!(cell("sf"), "1");
+    assert_eq!(cell("query"), "q6");
+    assert_eq!(cell("mode"), "tp1-single");
+    assert_eq!(cell("node_seq"), post_order.to_string());
+    assert_eq!(cell("node_type"), node_type);
+    assert_eq!(cell("lane"), lane.to_string());
+    assert_eq!(cell("recipe_seq"), "5");
+    assert_eq!(cell("recipe_kind"), call.target.to_string());
+    assert_eq!(cell("call_index"), "2");
+    assert_eq!(cell("run_index"), "3");
+    assert_eq!(cell("in_rows"), "11");
+    assert_eq!(cell("in_bytes"), "22");
+    assert_eq!(cell("out_rows"), "33");
+    assert_eq!(cell("out_bytes"), "44");
+    assert_eq!(cell("host_us"), "77");
+    assert_eq!(cell("device_us"), "66");
 }

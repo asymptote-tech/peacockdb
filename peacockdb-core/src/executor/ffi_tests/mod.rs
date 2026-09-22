@@ -37,3 +37,13 @@ fn consume_yields_the_pair_the_ffi_call_needs() {
     assert!(executor.is_null());
     assert_eq!(handle, 42);
 }
+
+/// A range name with an interior NUL cannot cross the FFI. Refused rather than skipped:
+/// the harness builds the name from its own case identifiers, so a NUL is a harness bug,
+/// and a guard returned over a range never opened would pop somebody else's on drop.
+/// Reachable here because the refusal comes before the C side is touched.
+#[test]
+#[should_panic(expected = "nvtx range name")]
+fn an_nvtx_range_name_with_a_nul_is_refused() {
+    let _range = super::nvtx_range("tpch.sf40 q6\0tp1-single");
+}

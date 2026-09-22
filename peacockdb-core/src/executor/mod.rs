@@ -189,7 +189,7 @@ impl std::fmt::Display for AbiTarget {
     }
 }
 
-/// One ABI call an executor made, as its CALLER saw it.
+/// One ABI call an executor made, as its caller saw it.
 ///
 /// C++ measures what a call cost. What it was handed and what it produced are priced here:
 /// the call consumes its handles, so by the time the far side could measure the input the
@@ -680,7 +680,7 @@ pub struct RunReport {
 /// [`AbiCall`] carries — the two records are halves of one row and meet there.
 ///
 /// Here rather than in `gpu_backend` for the reason [`AbiCalls`] lives in `executor`: this
-/// is what a measurement IS, and the backend fills one in. Not the ABI struct, so a
+/// is what a measurement is, and the backend fills one in. Not the ABI struct, so a
 /// `rust-only` build with no backend still has a driver that compiles.
 ///
 /// One call can answer with several, one per output partition, and a call's cost is their
@@ -707,8 +707,8 @@ pub(crate) struct Region {
 pub(crate) struct Measured {
     /// Steady clock across the whole call, this call's regions added.
     pub(crate) host_us: u64,
-    /// Between each region's two CUDA events. Zero where a region recorded no complete
-    /// pair — it touched no device.
+    /// Between each region's two CUDA events, which every region has: a pair that failed
+    /// to record is a collection error, and a call with no region is refused by the join.
     pub(crate) device_us: u64,
     /// Rows this answered with, as the caller priced them. The only place a middle call's
     /// output exists: a node driving several hands its caller the last one's and drops
@@ -859,7 +859,7 @@ impl std::fmt::Display for RmmPool {
 #[cfg(not(feature = "rust-only"))]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) enum NodeTiming {
-    /// No measurement. Every timing field stays 0.
+    /// No measurement: no region is opened, so a collection answers with none.
     #[default]
     Off,
     /// CUDA events around the device work, host clock around the host work, no sync

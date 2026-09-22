@@ -155,7 +155,10 @@ nsys profile $flags --force-overwrite=true -o "\$capture" \\
   $REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET --nocapture --test-threads=1 $filter_q 2>&1 | tee "\$log"
 status=\${PIPESTATUS[0]}
 
-nsys export --type=sqlite --force-overwrite=true -o "\$capture.sqlite" "\$capture.nsys-rep" || true
+if ! nsys export --type=sqlite --force-overwrite=true -o "\$capture.sqlite" "\$capture.nsys-rep"; then
+  echo "!!! nsys export of \$capture.nsys-rep failed (the $label pass exited \$status)"
+  exit 1
+fi
 [ -n "$record_rel" ] && echo "==> rows: \$(grep -vc '^#' "\$PEACOCK_RECORD_PATH" 2>/dev/null || echo 0)"
 [ "\$status" -eq 0 ] || { echo "!!! the $label pass FAILED (exit \$status)"; exit "\$status"; }
 

@@ -1450,10 +1450,56 @@ TEST(NodeRegions, AskingTheCountDrainsNothing) {
   EXPECT_NE(peacock_executor_collect_node_regions(plan.get(), too_small, 0, &reported), 0);
   EXPECT_EQ(reported, 1u);
 
+  // A null buffer with a capacity is neither half of the contract and drains nothing:
+  // the drain below still finds the region.
+  EXPECT_NE(peacock_executor_collect_node_regions(plan.get(), nullptr, count, &reported), 0);
+
   std::vector<PeacockNodeRegion> got(count);
   ASSERT_EQ(peacock_executor_collect_node_regions(plan.get(), got.data(), count, &reported), 0);
   EXPECT_EQ(reported, 1u);
   EXPECT_GT(got[0].host_us, 0u);
+}
+
+/// A handle produced before the switch was turned on names no node the sink knows, and
+/// C++ does not guess: charged to seq 0, the region would sit on a real node while the
+/// journal on the other side named another, and the join would not close.
+TEST(NodeRegions, AHandleFromBeforeTimingCannotBeCharged) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> groups{0};
+  peacock::NodeStats stats{};
+  uint64_t handle = session.execute_scan_rowgroups(0, groups, &stats);
+
+  TimingOn timing;
+  EXPECT_THROW(session.time_export(handle, [] {}), std::runtime_error);
+  EXPECT_THROW(session.slice_handle(handle, 0, 1), std::runtime_error);
+  EXPECT_EQ(session.recorded_regions(), 0u);
+}
+
+/// An adopted table is no node's output, so a slice or an export of it has nothing to be
+/// charged to and is refused naming the adoption — the harness uploads with timing off.
+TEST(NodeRegions, AnAdoptedHandleCannotBeCharged) {
+  TimingOn timing;
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> groups{0};
+  peacock::NodeStats stats{};
+  uint64_t handle = session.execute_scan_rowgroups(0, groups, &stats);
+  const auto& produced = session.table_for(handle);
+  peacock::TableResult copy;
+  copy.column_names = produced.column_names;
+  copy.table = std::make_unique<cudf::table>(produced.table->view());
+  uint64_t adopted = session.adopt(std::move(copy));
+
+  try {
+    session.time_export(adopted, [] {});
+    FAIL() << "an adopted handle's export was charged to a node";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string(e.what()).find("adopted"), std::string::npos) << e.what();
+  }
+  EXPECT_EQ(session.recorded_regions(), 1u) << "only the scan opened a region";
 }
 
 /// Ranges on, timing off. The two switches are separate so a capture can have the node
@@ -1471,23 +1517,6 @@ TEST(NvtxRanges, RangesWithoutTimingRecordNoRegion) {
   session.time_export(handle, [] {});
   EXPECT_GT(stats.rows, 0u);
   EXPECT_EQ(session.recorded_regions(), 0u);
-}
-
-/// The harness range is one level: a case does not nest inside a case, so a second push
-/// replaces the first. A stack instead would leave the outer one open after this pop, and
-/// every later case would be captured inside a query it did not belong to.
-TEST(NvtxRanges, ASecondPushReplacesTheFirstRatherThanNesting) {
-  // No guard yet: the switch is off by default, and a push while it is off is a no-op —
-  // which is what lets the harness call this unconditionally.
-  peacock::push_harness_range("tpch.sf40 q6 tp1-single");
-  EXPECT_FALSE(peacock::harness_range_is_open());
-
-  RangesOn ranges;
-  peacock::push_harness_range("tpch.sf40 q6 tp1-single");
-  EXPECT_TRUE(peacock::harness_range_is_open());
-  peacock::push_harness_range("tpch.sf40 q19 tp1-single");
-  peacock::pop_harness_range();
-  EXPECT_FALSE(peacock::harness_range_is_open());
 }
 
 TEST(ScanRowGroups, ACallOnAnotherKindOfNodeSaysWhichKind) {

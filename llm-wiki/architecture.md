@@ -535,8 +535,9 @@ a node knows what it needs of its children and can name the fix: a limit over fo
 read "the planner inserts `GpuMergePartitions` below it", not "this category is 1:1 per lane".
 
 **A batch is one table's worth of rows** — `num_rows()` and `byte_size()`, nothing else.
-`CpuBatch` wraps an Arrow `RecordBatch`; `GpuBatch` wraps a `u64` handle plus the session
-reference its `Drop` needs. Ownership is by move: every executor method takes its batch by
+`CpuBatch` wraps an Arrow `RecordBatch`; `GpuBatch` wraps a `u64` handle, the session
+reference its `Drop` needs, and the seq of the call that produced it — which is what a slice
+or an export of the handle is charged to when timing is on. Ownership is by move: every executor method takes its batch by
 value, so reuse after consumption is a compile error rather than a run-time throw, and neither
 batch type is `Clone` — a future dual consumer writes an explicit copy. A handle consumed by an
 FFI call skips `Drop`, because C++ erased it.
@@ -801,8 +802,9 @@ The mapping from a plan node to the seqs it addresses, and to the calls a driver
 | `GpuUnload` | none | `result_from_handle` per handle over the driver's row range; batches outside an interval are released without a call |
 
 Three facts about the C++ side are what make this drivable. `execute_node` is stateless per seq
-— the only state is the handle registry, inputs are consumed per call, outputs get fresh handles
-— so calling one seq once per batch is legal. The collapse arm concatenates whatever k handles
+— the only state is the handle registry (and, under timing, a count of calls per seq that names
+a region and changes nothing), inputs are consumed per call, outputs get fresh handles — so
+calling one seq once per batch is legal. The collapse arm concatenates whatever k handles
 it is passed, the merge arm merges any k>1 sorted handles, and the repartition arm scatters into
 the plan-declared N; none of them cross-checks handle counts against the plan tree. And stats
 come back per output handle per call, so a per-node figure is this side's fold over its calls.
@@ -933,8 +935,9 @@ Three conventions the signatures do not carry:
   past the end empty, an overrun clamped. It is the same convention on `slice_handle` and
   `result_from_handle`, which are otherwise the two halves of the limit rule — one produces
   a handle, the other a result.
-- **Instrumentation is process-global and off by default; `peacock_gpu_benchmarks`,
-  `test_node_timing` and the plan-executor gtests' fixtures are what turn it on.** Without
+- **Instrumentation is process-global and off by default; the benchmark harness and the
+  timing tests are what turn it on** — `peacock_gpu_benchmarks`, `test_node_timing`, one
+  `gpu_tests` case in the GPU backend, and the gtest fixtures on both C++ tiers. Without
   the pool every cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip
   ([#148](tickets.md#t148)); the gtest binaries install it from their own `main()`, and this
   symbol exists for a Rust caller that cannot include the C++ header. Under `set_node_timing` every per-call entry point opens one region per output
@@ -987,7 +990,10 @@ persistent stream, and work reaches a device only by `submit`.
 The C++ side keeps intermediates alive behind opaque `u64` handles, and that is not a class.
 It is two fields inside the private [`NodeSession::Impl`](../cpp/src/node_session.cpp) — an
 `unordered_map<uint64_t, TableResult>` and a monotonic `next_handle` — with allocation,
-lookup, consume-on-read and erase written inline at every site that touches them.
+lookup, consume-on-read and erase written inline at every site that touches them. Timing adds
+a third map keyed by the same handles, `RegionSink`'s producer of each, written at every
+allocation site beside `next_handle++` and never erased; an adopted handle is filed there as
+produced by no node, so a slice or export of it under timing is refused rather than charged.
 
 So the consume-once rule the FFI documents ("input handles are CONSUMED") holds by convention
 at each site rather than by construction, and only at run time: reading an already-consumed
@@ -1015,8 +1021,9 @@ same bytes.
 ## C++ executor layout
 
 `cpp/src/`: `gpu_executor.cpp` (the C FFI), `node_session.cpp` (the post-order index, the
-handle registry, and the multi-partition dispatch — scan-map emission, collapse, k-way merge,
-hash repartition, 1:1 map), `expr.cpp` (expression and AST building),
+handle registry, the multi-partition dispatch — scan-map emission, collapse, k-way merge,
+hash repartition, 1:1 map — and the timed regions, the NVTX domain and the harness range),
+`expr.cpp` (expression and AST building),
 `spark_hash_partition.cu` (the murmur3 kernel), and `operators/` (one `execute_*` per wire
 node kind plus `dispatch.cpp` with the `run_op` switch).
 
@@ -1164,13 +1171,15 @@ a filter outright, because no swapped `mixed_*` variant exists.
 
 ## Node display
 
-**There are two node lines, and the difference is which golden it is in.** A plan line is
+**There are three node lines, and the difference is which file it is in.** A plan line is
 `<Name>: <node fields>, lanes=N, batches=single|multiple[, hashed_on=…][, sorted_on=…],
 schema=[name:type, …]`. An execution line drops the schema, adds `output_rows` and
 `output_bytes`, and carries a second line beneath it — `in_rows` nested by child then by that
 child's lane, `batch_rows` and `batch_bytes` by this node's lane then by batch, plus
-`abandoned` where a run left something behind. Indentation draws the tree in both. The files
-themselves are in [build-test.md](build-test.md).
+`abandoned` where a run left something behind. A benchmark line is the plan line without its
+schema, with `time_us=[[…]] total_us=N` beneath it — device microseconds by lane and by call —
+and its file is not a golden: nothing asserts against it. Indentation draws the tree in all
+three. The files themselves are in [build-test.md](build-test.md).
 
 **Every column reference renders `name@ordinal`.** The ordinal is authoritative and the name
 comes from the declared schema at that position, so a reader can follow a reference without

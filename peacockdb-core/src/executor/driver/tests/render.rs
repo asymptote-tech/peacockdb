@@ -12,7 +12,7 @@ use super::plans::*;
 use super::*;
 use crate::executor::{AbiCall, AbiCalls, AbiTarget};
 use crate::executor::{Region, join_regions, nodes_as_recorded};
-use crate::plan_text::{render_plan, render_run, render_timings};
+use crate::plan_text::{render_plan, render_run, render_timings, timed_device_us};
 use crate::wire::FbKind;
 
 #[test]
@@ -234,6 +234,9 @@ fn a_region_that_rounds_to_nothing_still_ran() {
         text.contains("time_us=[[1,30]] total_us=31"),
         "a rounded-down region is 1 and the total is the sum of what is printed:\n{text}"
     );
+    // The trailer's `device_us` is the tree's `total_us` added, under the same rule — a raw
+    // sum would say 30 here, and the committed file's own arithmetic pin would go red.
+    assert_eq!(timed_device_us(&times), 31);
 }
 
 /// The two node indexes stay apart: `node_seq` is the tree's post-order, and the report is
@@ -254,7 +257,10 @@ fn the_recorded_node_index_is_the_post_order_not_the_walk_order() {
         "pre-order names the root first"
     );
     assert_eq!(post, [2, 1, 0], "post-order names the leaf first");
-    assert_ne!(walk, post, "the two orders are what a writer must not confuse");
+    assert_ne!(
+        walk, post,
+        "the two orders are what a writer must not confuse"
+    );
 }
 
 /// A driver call addressing two seqs is measured as two, and the entry is their sum.
@@ -277,7 +283,11 @@ fn each_seq_of_one_driver_call_keeps_its_own_measurement() {
     let first = times.call(7, 0).expect("the device answered for it");
     let second = times.call(8, 0).expect("and for the other");
     assert_eq!((first.device_us, first.out_rows), (40, 4));
-    assert_eq!((second.device_us, second.out_rows), (60, 1), "not the pair's total");
+    assert_eq!(
+        (second.device_us, second.out_rows),
+        (60, 1),
+        "not the pair's total"
+    );
     let entry = times.lanes(FILTER)[0][0].expect("the entry is measured");
     assert_eq!(entry.device_us, 100, "the entry is the two seqs added");
 }

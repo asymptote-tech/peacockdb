@@ -67,6 +67,10 @@ def test_every_section_of_the_index_has_a_panel_behind_it():
              "--out-dir", str(out))
 
         page = (out / "index.html").read_text()
+        # The version the panels embed, stated where a reader looks first: a claim in a
+        # docstring drifts, a line the writer prints is what the PNGs were made with.
+        import matplotlib
+        assert f"rendered with matplotlib {matplotlib.__version__}" in page, page[:600]
         for section, _, _ in plot.SECTIONS:
             drawn = sorted((out / section).glob("*.png"))
             assert drawn, f"{section}/ has no panel, and index.html lists it anyway"
