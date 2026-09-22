@@ -428,7 +428,9 @@ Interactive, with the human, never part of an autonomous run. You work in the pr
 checkout on master and never in a workspace, so you cannot collide with a running
 coordinator. At most fifteen lines per question. Refer to tasks by name, never by their
 board number: "join-cases", not "task 1" — numbers shift when a chain is resequenced and
-mean nothing outside its section.
+mean nothing outside its section. Refer to tickets by number and title, every time: "#185 —
+`GpuAggregateBatches` reports its own output as `in_rows`", never a bare "#185" — the human
+does not carry the index in their head, and a number alone sends them to look it up.
 
 - **Defining a task, in two phases.** `superpowers:brainstorming` with the human produces
   the spec, `llm-wiki/tasks/<task>.md`: what the task is, why this shape, what the
