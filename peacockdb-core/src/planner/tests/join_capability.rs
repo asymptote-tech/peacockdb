@@ -524,7 +524,7 @@ async fn every_join_type_is_reached_by_a_query() {
 }
 
 /// The fixture registers through DataFusion's `register_parquet`, which reads the session
-/// config alone — `read_table`'s format is the other door (tasks/utf8-everywhere.md).
+/// config alone — `read_table`'s format is the other door (archive/archived-tasks.md, utf8-everywhere).
 #[tokio::test]
 async fn a_table_registered_through_the_session_config_declares_its_strings_utf8() {
     let fixture = Fixture::new("session-strings").await;

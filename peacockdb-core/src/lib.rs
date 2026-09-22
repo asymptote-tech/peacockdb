@@ -41,7 +41,7 @@ pub fn build_session_state(target_partitions: usize) -> SessionContext {
     let mut config = base.state().config().clone();
     config.options_mut().execution.target_partitions = target_partitions;
     // The registration door read_table does not take: DataFusion's own register_parquet
-    // builds its format from this config alone (#183, tasks/utf8-everywhere.md).
+    // builds its format from this config alone (#183, archive/archived-tasks.md, utf8-everywhere).
     config
         .options_mut()
         .execution
@@ -76,7 +76,7 @@ async fn read_table(
 
     let table_url = ListingTableUrl::parse(path.to_str().unwrap()).unwrap();
     // Strings are Utf8 from the leaf up: in DataFusion 45 the parquet reader is what puts
-    // a view type into a plan, and cuDF has no view layout (#183, tasks/utf8-everywhere.md).
+    // a view type into a plan, and cuDF has no view layout (#183, archive/archived-tasks.md, utf8-everywhere).
     // This format's own options are what infer_schema reads; the session config is not,
     // and register_parquet reads the session config alone, so build_session_state sets it too.
     let format = Arc::new(
