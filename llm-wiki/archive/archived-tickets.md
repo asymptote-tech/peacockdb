@@ -27,6 +27,24 @@ the report rather than emitting one that goes nowhere.
 
 ## Done
 
+<a id="t187"></a>
+### #187 — the device widens a decimal the plan declared narrow
+
+`expected Decimal128(15, 2) but found Decimal128(38, 2)` at the unload: cuDF's type is
+`{type_id, scale}` and carries no precision, so `to_arrow_schema` wrote the width's maximum, 38,
+whatever the plan declared.
+
+**Done 2026-09-17 by `decimal-precision-at-export`; merged 2026-09-21 as PR #159 (`813acc18`).**
+`peacock_result_from_handle` now takes one `int32` precision per column; `unload` fills it from
+the sink's `Decimal128(p, _)`; `export_table_to_ipc` writes it onto the imported Arrow schema
+before the batch is imported, on cuDF 25.02 and 26.02 alike. No cast, no relabel on the Rust
+side. A fixed_point that is not DECIMAL128 at export is a refusal naming the column.
+
+Rolled out at `tp1-single` over the survey's 53 decimal queries: five enabled
+(`tpch` aggregate-groupby filter-project shuffle-additive, `tpcds` q37 q82); the rest reach the
+next cause and carry it — #185 (24), #220 (10) or #163 (14, cpu off). `187` stays on
+`tpch/filter-project` alone, whose other four modes were never run and have no other ticket.
+
 <a id="t163"></a>
 ### #163 — `avg` declares its count state UInt64 and both engines produce Int64 — nowhere is a declared type derived from its producer
 

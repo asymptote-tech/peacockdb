@@ -145,24 +145,6 @@ nested-loop-left-join q4 q15 q20 q21) and in 10 of `decimal-precision-at-export`
 q19 q25 q45 q91 q94 q95, tpch anti-join semi-join q2) and in 4 of `aggregate-state-types`'s
 (tpcds q18 q30 q35 q81) — 27 rows. Which side's batching the golden records is the decision.
 
-<a id="t187"></a>
-### #187 — the device widens a decimal the plan declared narrow
-
-`expected Decimal128(15, 2) but found Decimal128(38, 2)` at the unload: cuDF's type is
-`{type_id, scale}` and carries no precision, so `to_arrow_schema` wrote the width's maximum, 38,
-whatever the plan declared.
-
-**Done 2026-09-17, by `decimal-precision-at-export` on branch `ENS-decimal-precision-at-export`.**
-`peacock_result_from_handle` now takes one `int32` precision per column; `unload` fills it from
-the sink's `Decimal128(p, _)`; `export_table_to_ipc` writes it onto the imported Arrow schema
-before the batch is imported, on cuDF 25.02 and 26.02 alike. No cast, no relabel on the Rust
-side. A fixed_point that is not DECIMAL128 at export is a refusal naming the column.
-
-Rolled out at `tp1-single` over the survey's 53 decimal queries: five enabled
-(`tpch` aggregate-groupby filter-project shuffle-additive, `tpcds` q37 q82); the rest reach the
-next cause and carry it — #185 (24), #220 (10) or #163 (14, cpu off). `187` stays on
-`tpch/filter-project` alone, whose other four modes were never run and have no other ticket.
-
 <a id="t188"></a>
 ### #188 — the device refuses a read with row groups and a limit together
 
@@ -200,7 +182,7 @@ of that tier — 13 GB SIGKILLs a runner as an infrastructure failure, not a tes
 Int16 at column index 0`. That column is `o_year`, an `extract(year from o_orderdate)` — DataFusion
 types it `Int32` and the device answers `Int16`.
 
-**Not [#187](active-tickets.md#t187), and merging them would lose the distinction.** That one is the
+**Not [#187](../archive/archived-tickets.md#t187), and merging them would lose the distinction.** That one is the
 device *widening* a decimal, to 38 whatever the declaration says. This is the device *narrowing* an
 integer, to the natural width for a year rather than to a maximum. Opposite direction, different
 type family, and a fix for either says nothing about the other.
