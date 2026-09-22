@@ -290,7 +290,7 @@ def main():
     if not calls:
         sys.exit(
             f"domain {args.domain!r} has {len(ranges)} ranges and none is named "
-            '"<seq>.<call_index> <kind>" -- the capture predates the batch-partitioned '
+            '"<seq>.<call_index> <kind>" -- the capture predates the node-range '
             "recorder, or the ranges came from somewhere else"
         )
     keyed = key_calls(calls)

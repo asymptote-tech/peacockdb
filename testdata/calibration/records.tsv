@@ -13,7 +13,7 @@
 # capture = which Nsight pass measured this, `none` for a plain run. Tracing and the
 #   memory counters each cost the query several percent, so a captured run writes this
 #   file and never the .benchmark.txt tree.
-# mode = the batch-partitioned planning mode, `tp4-sized` and the like. The same query
+# mode = the planning mode, `tp4-sized` and the like. The same query
 #   at two modes is a different plan and a different set of calls.
 # node_seq = the node's position in the tree, post-order — the same space recipe_seq is
 #   in. The driver numbers nodes pre-order, so this is a translation and not the index a

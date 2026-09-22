@@ -89,9 +89,9 @@ def test_a_bare_call_is_not_checked_against_the_kind_of_the_seq_it_was_handed():
         cap.close()
         rows = calls_of(path, tmp / "calls.tsv", "--plans-dir", str(goldens))
 
-    exported = [r for r in rows if r["node_type"] == "result_from_handle"]
+    exported = [r for r in rows if r["recipe_kind"] == "result_from_handle"]
     assert exported, "the export's own region is not in the breakdown"
-    assert {r["node_seq"] for r in exported} == {"1"}, exported
+    assert {r["recipe_seq"] for r in exported} == {"1"}, exported
 
 
 def test_a_mode_with_no_golden_is_refused():
@@ -126,7 +126,7 @@ def test_a_region_driven_several_times_an_execution_is_not_a_disagreement():
         cap.close()
         rows = calls_of(path, tmp / "calls.tsv")
 
-    filters = [r for r in rows if r["node_type"] == "CudfFilter" and r["depth"] == "0"]
+    filters = [r for r in rows if r["recipe_kind"] == "CudfFilter" and r["depth"] == "0"]
     assert filters, rows
     assert {r["executions"] for r in filters} == {"2"}, filters
 

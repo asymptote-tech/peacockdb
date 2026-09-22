@@ -17,9 +17,9 @@ describable at all, so nothing here reduces a call to one number before it is dr
 every measured execution is a point.
 
 Not matplotlib's default python: this repo's `python3` is a linuxbrew build with neither
-numpy nor matplotlib. `/usr/bin/python3` has both, at matplotlib 3.9.2, which is what the
-committed panels were rendered with — the version is embedded in every PNG, so a re-render
-under another one rewrites all of them with the data unchanged.
+numpy nor matplotlib. The committed panels were rendered on verda-gpu with matplotlib 3.5.1
+— the version is embedded in every PNG and printed into `index.html`, so a re-render under
+another one rewrites all of them with the data unchanged.
 
 What is drawn
 
@@ -634,7 +634,8 @@ PAGE = """<!doctype html>
 </style>
 <h1>peacockdb cost-model calibration</h1>
 <p class="note">Every picture here comes from one call to
-<code>scripts/calibration/plot.py</code>. Sources: {sources}</p>
+<code>scripts/calibration/plot.py</code>, rendered with matplotlib {version}. Sources:
+{sources}</p>
 {body}
 """
 
@@ -662,7 +663,8 @@ def write_index(out_dir, made, sources):
             rel = f"{name}/{path.name}"
             body.append(f'<figure><img src="{rel}" alt="{html.escape(rel)}">'
                         f'<figcaption>{html.escape(rel)}</figcaption></figure>')
-    page = PAGE.format(sources=html.escape(", ".join(str(s) for s in sources)),
+    page = PAGE.format(version=html.escape(matplotlib.__version__),
+                       sources=html.escape(", ".join(str(s) for s in sources)),
                        body="\n".join(body))
     path = out_dir / "index.html"
     path.write_text(page)

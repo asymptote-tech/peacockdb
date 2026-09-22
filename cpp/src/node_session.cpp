@@ -116,7 +116,9 @@ struct RegionSink {
   /// is a coordinate within one measured run rather than a process-wide tally.
   std::vector<uint64_t> calls_made;
   /// Which node produced each live handle. The slice and the export are given a handle
-  /// and no seq, and this is the only thing that can name one for them.
+  /// and no seq, and this is the only thing that can name one for them. `kAdopted` marks a
+  /// table the harness uploaded, which no node produced.
+  static constexpr uint64_t kAdopted = UINT64_MAX;
   std::unordered_map<uint64_t, uint64_t> produced_by;
   std::deque<RegionSlot> slots;
 
@@ -126,11 +128,20 @@ struct RegionSink {
     return calls_made[seq]++;
   }
 
-  /// The seq behind a handle, 0 for one this sink never saw — a handle from before the
-  /// mode was turned on.
-  uint64_t producer_of(uint64_t handle) const {
+  /// The seq behind a handle. Throws for one it cannot name — a handle from before the
+  /// mode was turned on, or an adopted one — rather than charging a real node's seq: the
+  /// journal on the other side would name another, and the join would not close.
+  uint64_t producer_of(uint64_t handle, const char* what) const {
     auto it = produced_by.find(handle);
-    return it == produced_by.end() ? 0 : it->second;
+    if (it == produced_by.end())
+      throw std::runtime_error(std::string(what) + ": handle " + std::to_string(handle) +
+                               " was produced before timing was turned on, so no node can be "
+                               "charged for it");
+    if (it->second == kAdopted)
+      throw std::runtime_error(std::string(what) + ": handle " + std::to_string(handle) +
+                               " was adopted from Arrow, which no node produced, so nothing "
+                               "can be charged for it");
+    return it->second;
   }
 };
 
@@ -681,14 +692,14 @@ uint64_t NodeSession::slice_handle(uint64_t handle, uint64_t offset, uint64_t le
   auto it = impl_->registry.find(handle);
   if (it == impl_->registry.end())
     throw std::runtime_error("NodeSession::slice_handle: unknown input handle");
+  // A limit carries no seq of its own, so the region is the sliced node's: what the call
+  // costs belongs beside the work that produced the rows it trims. Named before the
+  // handle is consumed, so a refusal leaves the registry as it was.
+  RegionSink* sink = impl_->measuring();
+  const uint64_t seq = sink ? sink->producer_of(handle, "slice_handle") : 0;
+  const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
   TableResult input = std::move(it->second);
   impl_->registry.erase(it);
-
-  // A limit carries no seq of its own, so the region is the sliced node's: what the call
-  // costs belongs beside the work that produced the rows it trims.
-  RegionSink* sink = impl_->measuring();
-  const uint64_t seq = sink ? sink->producer_of(handle) : 0;
-  const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
   OptionalRange node_range(
       [&] { return std::to_string(seq) + "." + std::to_string(call_index) + " slice_handle"; });
 
@@ -711,13 +722,16 @@ uint64_t NodeSession::slice_handle(uint64_t handle, uint64_t offset, uint64_t le
 
 uint64_t NodeSession::adopt(TableResult result) {
   uint64_t handle = impl_->next_handle++;
+  // No node produced it, and the sink says so rather than leaving the handle unknown: a
+  // slice or an export of it under timing is then refused naming the adoption.
+  impl_->note_producer(impl_->measuring(), handle, RegionSink::kAdopted);
   impl_->registry.emplace(handle, std::move(result));
   return handle;
 }
 
 void NodeSession::time_export(uint64_t handle, const std::function<void()>& body) {
   RegionSink* sink = impl_->measuring();
-  const uint64_t seq = sink ? sink->producer_of(handle) : 0;
+  const uint64_t seq = sink ? sink->producer_of(handle, "result_from_handle") : 0;
   const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
   OptionalRange node_range([&] {
     return std::to_string(seq) + "." + std::to_string(call_index) + " result_from_handle";

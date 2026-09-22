@@ -50,7 +50,7 @@ INSTALL_DIR="$BUILD_DIR/install"
 CUDA_ARCHITECTURES="80;90"
 RUST_TESTS_STAGING="$INSTALL_DIR/rust-tests"
 
-# The measurement target and where its release build is staged. It is ALSO in the gate
+# The measurement target and where its release build is staged. It is also in the gate
 # set (gpu_runtime_targets): the debug copy in rust-tests/ runs the harness's own
 # assertions under --skip bench_; the release copy in rust-benchmarks/ is what
 # --run-benchmarks times. Same two-copy scheme as build-test-shadgpu.sh, minus the

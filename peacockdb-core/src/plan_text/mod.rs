@@ -46,3 +46,9 @@ pub(crate) fn render_run(root: &dyn GpuNode, report: &RunReport) -> String {
 pub(crate) fn render_timings(root: &dyn GpuNode, times: &Measurements) -> String {
     bench_text::render_timings(root, times)
 }
+
+/// The tree's `total_us` added under the renderer's rule — what the trailer reports as
+/// `device_us`, so the two cannot disagree by a region the clock rounded to zero.
+pub(crate) fn timed_device_us(times: &Measurements) -> u64 {
+    bench_text::timed_device_us(times)
+}

@@ -1,4 +1,4 @@
-//! One benchmark case at one batch-partitioned mode: plan it, run it, keep what it took.
+//! One benchmark case at one mode: plan it, run it, keep what it took.
 //!
 //! The timing counterpart of `corpus_gpu`, and deliberately not part of it: that module
 //! holds a device run to what the cpu wrote, and this one compares nothing at all. Sharing
@@ -13,7 +13,7 @@ use crate::executor::{
     set_nvtx_ranges,
 };
 use crate::plan::GpuNode;
-use crate::plan_text::render_timings;
+use crate::plan_text::{render_timings, timed_device_us};
 use crate::wire::attach_recipes;
 
 use super::corpus::plan_at;
@@ -99,10 +99,7 @@ fn query_order(query: &str) -> (String, u32, String) {
 /// is the point: it is what the run spent outside the calls — the driver's own scheduling
 /// and the host prologue between them. One name for both would read as a discrepancy.
 fn run_section(chosen: &Run, times: &Measurements, spread: &[u64]) -> String {
-    let device_us: u64 = (0..times.nodes())
-        .filter_map(|node| node_measured(times, node))
-        .map(|time| time.device_us)
-        .sum();
+    let device_us = timed_device_us(times);
     let spread: Vec<String> = spread.iter().map(u64::to_string).collect();
     format!(
         "--- run ---\n\

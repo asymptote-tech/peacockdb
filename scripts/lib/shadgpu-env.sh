@@ -46,13 +46,13 @@ REMOTE_REPO=/home/info/peacockdb
 # cannot do that" is worse than either outcome alone.
 die() { echo "$*" >&2; exit 1; }
 
-# The glibc a shipped binary is patched to is the BUILD host's: 2.35 from a 22.04 box or
+# The glibc a shipped binary is patched to is the build host's: 2.35 from a 22.04 box or
 # CI's container, 2.39 from a 24.04 one. Read here, where the binaries are built, and used
 # by the patch phase and by every remote command that loads one.
 BUILD_GLIBC=$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)
 [ -n "$BUILD_GLIBC" ] || die "cannot read this host's glibc version from getconf"
 
-# The library path a shipped binary needs on the host, as REMOTE shell text: `$HOME` and
+# The library path a shipped binary needs on the host, as remote shell text: `$HOME` and
 # `$LD_LIBRARY_PATH` are left for the remote to expand. Applied per command and never
 # exported — exported, the host's own coreutils load the patched glibc and segfault, so a
 # run reports a bogus code having actually succeeded.

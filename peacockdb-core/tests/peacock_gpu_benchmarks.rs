@@ -1,4 +1,4 @@
-//! Benchmark run over the batch-partitioned corpus: every query
+//! Benchmark run over the corpus: every query
 //! [`corpus_benchmark_cases.inc`](common/corpus_benchmark_cases.inc) names, at the modes
 //! it names. Asserts nothing about an answer — correctness is `test_gpu_corpus`.
 //!
@@ -263,4 +263,70 @@ fn the_record_is_checked_against_what_the_plan_declares() {
         mixed.contains("executions 0 and 1"),
         "two executions at once should be named as that, not as a repeated call: {mixed}"
     );
+}
+
+/// One environment variable held for the length of a case and restored however the case
+/// ends. The refusals below are panics, and a panic that left `PEACOCK_RECORD_PATH` pointing
+/// into a temp dir would send every `bench_` case after it there instead of the record.
+struct EnvLoan {
+    name: &'static str,
+    was: Option<std::ffi::OsString>,
+}
+
+impl EnvLoan {
+    fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let was = std::env::var_os(name);
+        unsafe { std::env::set_var(name, value) };
+        Self { name, was }
+    }
+}
+
+impl Drop for EnvLoan {
+    fn drop(&mut self) {
+        match self.was.take() {
+            Some(value) => unsafe { std::env::set_var(self.name, value) },
+            None => unsafe { std::env::remove_var(self.name) },
+        }
+    }
+}
+
+/// A file is one run: an append whose `# run:` lines differ from the heading already
+/// there is refused rather than merged, since the microseconds would not be comparable.
+#[test]
+#[should_panic(expected = "was written by a different run")]
+fn an_append_under_a_different_heading_is_refused() {
+    use peacockdb_core::test_support::{
+        COLUMNS, Capture, RECORD_PATH_ENV, RunMeta, append_records,
+    };
+
+    let dir = std::env::temp_dir().join(format!("peacock-record-heading-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let _loan = EnvLoan::set(RECORD_PATH_ENV, dir.join("records.tsv"));
+    let row = vec!["0"; COLUMNS.len()].join("\t");
+    let mut meta = RunMeta {
+        dataset: "tpch",
+        sf: "40",
+        query: "q6",
+        mode: "tp1-single",
+        allocator: "rmm-pool",
+        capture: Capture::None,
+    };
+    append_records(std::slice::from_ref(&row), &meta);
+    meta.allocator = "rmm-default";
+    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        append_records(std::slice::from_ref(&row), &meta)
+    }));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::panic::resume_unwind(refused.expect_err("a second heading is refused"));
+}
+
+/// `PEACOCK_BENCHMARK_CAPTURE` names one of two passes or nothing; any other value is
+/// refused naming the two, rather than read as a plain run whose times may be published.
+#[test]
+#[should_panic(expected = "names no Nsight pass")]
+fn a_capture_variable_naming_no_pass_is_refused() {
+    use peacockdb_core::test_support::{CAPTURE_ENV, Capture};
+
+    let _loan = EnvLoan::set(CAPTURE_ENV, "sideways");
+    let _ = Capture::from_env();
 }

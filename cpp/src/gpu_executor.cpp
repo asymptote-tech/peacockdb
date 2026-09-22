@@ -321,6 +321,13 @@ int peacock_executor_slice_handle(peacock_executor_t* executor, uint64_t handle,
 int peacock_executor_collect_node_regions(peacock_executor_t* executor, PeacockNodeRegion* out,
                                           uint64_t cap, uint64_t* out_count) {
   if (!executor || !out_count) return 1;
+  // Neither half of the contract: a count is asked with (NULL, 0), and a drain needs a
+  // buffer. Refused before the session is consulted, so nothing is drained into nothing.
+  if (!out && cap != 0) {
+    executor->last_error = "collect_node_regions: a null buffer with capacity " +
+                           std::to_string(cap) + " — (NULL, 0) asks the count";
+    return 1;
+  }
   if (!executor->session) {
     executor->last_error = "no plan loaded";
     return 1;

@@ -169,6 +169,40 @@ TEST(NodeTiming, TheAbiRefusesAModeItDoesNotName) {
   EXPECT_FALSE(peacock::node_timing_enabled());
 }
 
+// The collection's contract has two halves — (NULL, 0) asks the count, a buffer of at least
+// that many takes the regions — and one shape that is neither: a null buffer with a
+// capacity. Refused before the session is consulted, so nothing is drained into it.
+TEST(NodeRegions, ANullBufferWithACapacityIsRefused) {
+  peacock_executor_t* ex = nullptr;
+  ASSERT_EQ(peacock_executor_create(0, &ex), 0);
+  uint64_t count = 7;
+  EXPECT_NE(peacock_executor_collect_node_regions(ex, nullptr, 4, &count), 0);
+  EXPECT_STREQ(peacock_last_error(ex),
+               "collect_node_regions: a null buffer with capacity 4 — (NULL, 0) asks the count");
+  peacock_executor_destroy(ex);
+}
+
+// The harness range is one level: a case does not nest inside a case, so a second push
+// replaces the first. A stack instead would leave the outer one open after this pop, and
+// every later case would be captured inside a query it did not belong to. NVTX touches no
+// device, which is why this sits on the cpu tier.
+TEST(NvtxRanges, ASecondPushReplacesTheFirstRatherThanNesting) {
+  // No guard yet: the switch is off by default, and a push while it is off is a no-op —
+  // which is what lets the harness call this unconditionally.
+  peacock::push_harness_range("tpch.sf40 q6 tp1-single");
+  EXPECT_FALSE(peacock::harness_range_is_open());
+
+  struct RangesOn {
+    RangesOn() { peacock::set_nvtx_ranges(true); }
+    ~RangesOn() { peacock::set_nvtx_ranges(false); }
+  } ranges;
+  peacock::push_harness_range("tpch.sf40 q6 tp1-single");
+  EXPECT_TRUE(peacock::harness_range_is_open());
+  peacock::push_harness_range("tpch.sf40 q19 tp1-single");
+  peacock::pop_harness_range();
+  EXPECT_FALSE(peacock::harness_range_is_open());
+}
+
 // The row range every per-batch caller's bounds go through, on the tier that needs no
 // device: it is arithmetic, and reaching it through a scan on the GPU host is the long
 // way round to a case that cannot fail there for a reason worth knowing.

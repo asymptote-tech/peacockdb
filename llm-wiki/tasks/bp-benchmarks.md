@@ -202,3 +202,19 @@ moved by chain B's five merges (PRs #158–#160, #162, #163). New benchmark resu
 obtained from a run on an H200; they supersede the figures the review rounds read, and the
 completeness pass checks the committed trees, record and panels against that run.
 
+
+## Completeness signoff — 2026-09-22
+
+Solved under its constraints: the four products are on the branch from the human's H200 run, the
+instrument, the journal, the harness, the scripts and the tests are as specified, and the gate is
+green on shad-gpu with both targets in it. Shortcuts and deviations, each named in the detail file:
+the harness lives in `src/test_support/` (master moved the corpus harness there after this spec was
+written) and its record test sits in `record/tests.rs` so `planner/` stays byte-identical; the
+`calls.tsv` header was renamed by hand, the trace capture being on verda-gpu (unreachable) and the
+rows unchanged; `records.tsv`'s heading lost one retired word; `index.html` carries its matplotlib
+line from the next collection on; six files outside Scope changed as consequences of in-scope work;
+both targets sit in `INTENTIONALLY_NOT_IN_CI` as `Exemption::GpuJob`, master's verified form of the
+spec's sentence; the harness makes eight assertions, not six; #226 moved the counter; the sf40
+event-timing figure was taken beside a 62 GB neighbour on shad-gpu; `BENCH_POOL_BYTES` is the tpch
+gtest's 69 GiB, taken and not measured. Follow-up, not a ticket: `LimitStream` prices a slice with
+varlen 0 as master does, so a string slice's `out_bytes` in the record reads low.

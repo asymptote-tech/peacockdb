@@ -12,8 +12,10 @@ adding columns to the record: libcudf pushes an NVTX range around every public c
 makes, so the build side (`hash_join`), the probe (`inner_join`) and the materialisation
 (`gather`) are already three separate spans inside our region.
 
-What a row is. One per (case, node_seq, call, depth), aggregated over the executions in
-the capture. The region is the `p<k>` range our own domain pushes per output partition;
+What a row is. One per (case, recipe_seq, call, depth), aggregated over the executions in
+the capture. `recipe_seq` and `recipe_kind` are the fb seq and kind the region's range names,
+the record's columns of the same name — not the plan node's `node_seq`, which the range
+does not carry. The region is the `p<k>` range our own domain pushes per output partition;
 `depth` is how deep the call sits inside it among calls of the same domain, so depth-0 rows
 partition the region and deeper rows break those down. Summing across depths double-counts.
 The case is read off the harness's own range — seq numbering restarts with every plan, so
@@ -64,7 +66,8 @@ UNATTRIBUTED = "(unattributed)"
 
 NOTES = [
     "What one timed region spends its time on, one level down, from an Nsight capture.",
-    "One row per (case, node_seq, call, depth). A region is one output partition of one",
+    "One row per (case, recipe_seq, call, depth), recipe_seq and recipe_kind being the fb",
+    "  seq and kind of records.tsv. A region is one output partition of one",
     "  call, so a batched mode has several a run: `regions` counts them, `executions`",
     "  divides them out, and every microsecond below is a median over one region.",
     "depth 0 partitions the region and deeper rows break those down — summing across",
@@ -424,7 +427,7 @@ def main():
         (dataset, sf, query, mode), seq, kind, part = ident
         rows.append(dict(
             dataset=dataset, sf=sf, query=query, mode=mode,
-            node_seq=seq, node_type=kind, partition=part, call=call, depth=depth,
+            recipe_seq=seq, recipe_kind=kind, partition=part, call=call, depth=depth,
             executions=executions[ident],
             regions=seen[ident],
             calls_per_region=statistics.median(r[0] for r in runs),
@@ -434,7 +437,7 @@ def main():
         ))
 
     cols = ["dataset", "sf", "query", "mode",
-            "node_seq", "node_type", "partition", "call", "depth", "executions",
+            "recipe_seq", "recipe_kind", "partition", "call", "depth", "executions",
             "regions", "calls_per_region", "host_us", "device_us", "region_us"]
     record.write_tsv(args.out, NOTES, cols, [[r[c] for c in cols] for r in rows])
 
@@ -446,7 +449,7 @@ def main():
         case, seq, kind, part = ident
         top = [r for r in rows if r["depth"] == 0
                and (r["dataset"], r["sf"], r["query"], r["mode"]) == case
-               and (r["node_seq"], r["node_type"], r["partition"]) == (seq, kind, part)]
+               and (r["recipe_seq"], r["recipe_kind"], r["partition"]) == (seq, kind, part)]
         top.sort(key=lambda r: -r["host_us"])
         span = top[0]["region_us"] if top else 0
         print(f"\n{case[2]} {case[3]}  #{seq} {kind} p{part}  region {span} us")

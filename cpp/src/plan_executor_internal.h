@@ -29,6 +29,11 @@ cudf::data_type binop_output_type(fb::BinaryOp op, cudf::data_type lhs,
 // un-inferrable / mismatched-type binary ops to the column path.
 bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table);
 
+// Whether a harness range is open. Observable only so that push_harness_range's one-level
+// rule can be tested — NvtxRanges.ASecondPushReplacesTheFirstRatherThanNesting is the only
+// caller, since NVTX itself reports nothing back.
+bool harness_range_is_open();
+
 // Children of a plan node in canonical order — the order NodeSession indexes
 // post-order in, so a caller walking the tree with this produces the same seqs.
 std::vector<const fb::PlanNode*> node_children(const fb::PlanNode* node);
