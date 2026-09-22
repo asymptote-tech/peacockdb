@@ -18,10 +18,9 @@ pub mod raw {
     #[derive(Clone, Copy, Default)]
     pub struct PeacockNodeStats {
         pub rows: u64,
+        /// Σ over var-length (string) output columns of content bytes; additive across
+        /// columns, so one total suffices.
         pub varlen_content_bytes: u64,
-        /// Microseconds this output partition took; 0 unless
-        /// [`peacock_set_node_timing`] is on. A node's time is Σ over partitions.
-        pub time_us: u64,
     }
 
     /// What [`peacock_install_rmm_pool`] did — sizes are 0 unless `state` is
@@ -42,6 +41,36 @@ pub mod raw {
     pub const PEACOCK_RMM_POOL_INSTALLED: i32 = 0;
     /// The pool could not be built: the default resource, NOT on purpose.
     pub const PEACOCK_RMM_POOL_UNAVAILABLE: i32 = 1;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    /// One timed region: which call it was, and what it cost. Mirrors
+    /// `PeacockNodeRegion` in `cpp/include/peacock_gpu.h`.
+    ///
+    /// Separate from [`PeacockNodeStats`] because the two have different consumers. Stats
+    /// come back on every call and the driver needs both numbers; nothing on the execution
+    /// path reads any of these, so carrying them there made a shipping query pay per call.
+    pub struct PeacockNodeRegion {
+        /// The node whose output this call handled. `execute_node` and
+        /// `execute_scan_rowgroups` name it; for `slice_handle` and
+        /// [`peacock_result_from_handle`] it is the node that produced the handle.
+        pub seq: u64,
+        pub partition: u64,
+        /// Calls already made against this seq in this session when this one began; 0 for
+        /// the first. Per call, so the partitions of one call share it.
+        pub call_index: u64,
+        /// Host clock across the whole call, this partition's region.
+        pub host_us: u64,
+        /// Between the region's two CUDA events, read at collection.
+        pub device_us: u64,
+    }
+
+    /// The default, and the only mode a shipping query runs in.
+    pub const PEACOCK_NODE_TIMING_OFF: i32 = 0;
+    /// CUDA events around the device work and the host clock around the whole call, with
+    /// no sync inside the region. Device times are read afterwards with
+    /// [`peacock_executor_collect_node_regions`].
+    pub const PEACOCK_NODE_TIMING_EVENTS: i32 = 1;
 
     #[link(name = "peacock_gpu")]
     unsafe extern "C" {
@@ -78,22 +107,50 @@ pub mod raw {
         /// timed it is.
         pub fn peacock_install_rmm_pool(bytes: u64, out_info: *mut PeacockRmmPoolInfo) -> i32;
 
-        /// Turn per-node timing on/off (process-global; OFF by default). When on,
-        /// `peacock_executor_execute_node` synchronizes the default stream at every
-        /// measurement boundary and fills `PeacockNodeStats::time_us`. The sync is
-        /// what makes the number real (cuDF work is async and this path has no sync
-        /// of its own) and also what makes it costly — hence opt-in, and nothing in this
-        /// workspace turns it on today.
-        pub fn peacock_set_node_timing(enable: i32);
-
-        /// Cost of the measurement itself, in microseconds: the same timed region a
-        /// node pays, around no work. A node's `time_us` is real work PLUS one of
-        /// these, so a node at or below this is below the method's resolution rather
-        /// than cheap. Report alongside; never subtract. Returns the second-smallest
-        /// of `samples` (clamped to >= 2), or 0 if CUDA errored.
+        /// Select the per-node timing mode (process-global; [`PEACOCK_NODE_TIMING_OFF`]
+        /// by default). Opt-in because the events mode is not free: it allocates a CUDA
+        /// event pair per region and holds it until collection.
         ///
-        /// Needs a live CUDA context and no concurrent work on the default stream.
-        pub fn peacock_measure_timing_floor_us(samples: u32) -> u64;
+        /// Returns 0, or non-zero for a mode this build does not name, which leaves the
+        /// mode as it was rather than measuring nothing without saying so.
+        pub fn peacock_set_node_timing(mode: i32) -> i32;
+
+        /// Emit NVTX ranges around plan nodes and their output partitions
+        /// (process-global; off by default). A separate switch from
+        /// [`peacock_set_node_timing`]: a profiling run wants the node boundaries
+        /// without the event pairs, whose recording is device work a capture would
+        /// show inside the node. Nonzero to emit.
+        pub fn peacock_set_nvtx_ranges(on: i32);
+
+        /// Open a named NVTX range in peacockdb's domain that spans until
+        /// [`peacock_nvtx_pop_range`], and close it.
+        ///
+        /// For a benchmark harness naming the case it is about to run: a node range
+        /// is `<seq>.<call_index> <kind>` and seq numbering restarts with every plan,
+        /// so a capture of several queries cannot say from the names alone which one
+        /// a call belongs to. A range around the case answers it by containment.
+        ///
+        /// No-ops while ranges are off, and nothing in the engine calls either.
+        /// `name` is borrowed for the call; NVTX copies it.
+        pub fn peacock_nvtx_push_range(name: *const c_char);
+
+        /// Close the range [`peacock_nvtx_push_range`] opened. Idempotent.
+        pub fn peacock_nvtx_pop_range();
+
+        /// Drain the regions recorded since the last call, in execution order. Only
+        /// [`PEACOCK_NODE_TIMING_EVENTS`] produces any. Call it after the root
+        /// [`peacock_result_from_handle`] and before [`peacock_executor_end_plan`],
+        /// which destroys the events.
+        ///
+        /// `out_count` is the number recorded, set in every case. A null `out` with
+        /// `cap` 0 asks that count alone, and a `cap` below it fails; neither form
+        /// drains, so a caller can ask, allocate and then take them.
+        pub fn peacock_executor_collect_node_regions(
+            executor: *mut PeacockExecutor,
+            out: *mut PeacockNodeRegion,
+            cap: u64,
+            out_count: *mut u64,
+        ) -> i32;
 
         // --- node-by-node execution (unified node-executor interface) ---
         pub fn peacock_executor_begin_plan(

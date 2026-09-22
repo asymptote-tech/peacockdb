@@ -10,26 +10,37 @@
 //! out is declared in this file, and no `pub` signature here names an engine type.
 
 mod corpus;
+#[cfg(not(feature = "rust-only"))]
+mod corpus_benchmark;
 mod corpus_golden;
 #[cfg(not(feature = "rust-only"))]
 mod corpus_gpu;
 mod cost_model;
 mod device_schema;
 mod golden_text;
+#[cfg(not(feature = "rust-only"))]
+mod gpu_session;
+#[cfg(not(feature = "rust-only"))]
+mod node_timing;
+mod record;
 mod registry;
 mod result_text;
 mod schema_validation;
 mod testdata;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::{DataType, Schema as ArrowSchema};
+#[cfg(not(feature = "rust-only"))]
+use datafusion::execution::context::SessionContext;
 
 use crate::executor::{CpuBackend, OutputHook, PlanIndex};
 #[cfg(not(feature = "rust-only"))]
 use crate::executor::{GpuBackend, GpuBatch};
+#[cfg(not(feature = "rust-only"))]
+use crate::plan::GpuNode;
 use crate::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};
 
 // --- where the testdata is ---------------------------------------------------
@@ -666,4 +677,237 @@ pub fn take_rows(
 /// The query without its trailing `LIMIT n [OFFSET m]`, and the interval it carried.
 pub fn without_its_limit(sql: &str, what: &str) -> (String, u64, Option<u64>) {
     corpus::without_its_limit(sql, what)
+}
+
+// --- the benchmark harness -----------------------------------------------------------
+// What `peacock_gpu_benchmarks` calls: its case list's declaration, the file a mode's
+// results go to, and the case itself — dataset, scale factor, query and the mode's macro
+// spelling, as strings. The plan, the run and the measurement stay behind the body.
+
+/// One benchmark declaration, submitted where it is written.
+///
+/// Separate from `RegistryEntry`, which is keyed to a column of the coverage CSV: the
+/// benchmark list is its own on purpose, because the sf worth timing and the sf worth
+/// checking differ. What this answers is narrower — which queries a (dataset, mode) file
+/// is supposed to hold a section for.
+pub struct BenchmarkCase {
+    pub dataset: &'static str,
+    pub sf: &'static str,
+    /// Underscore form, as written in the macro (`q6`).
+    pub query: &'static str,
+    /// Underscore form, as written in the macro (`tp1_single`), or `NOT_TIMED`.
+    pub mode: &'static str,
+}
+
+inventory::collect!(BenchmarkCase);
+
+/// The `mode` a declaration carries when it names no mode at all — a query written down
+/// and deliberately not timed. A record rather than an omission, so it reaches every file
+/// of its dataset as a marker instead of being absent for an unstated reason.
+pub const NOT_TIMED: &str = "none";
+
+/// The sections a `(dataset, sf, mode)` file is declared to hold: the queries timed at
+/// this mode, and a marker for each one declared and timed at none.
+#[cfg(not(feature = "rust-only"))]
+pub fn declared_for(dataset: &str, sf: &str, mode: &str) -> Vec<(String, Option<String>)> {
+    corpus_benchmark::declared_for(dataset, sf, mode)
+}
+
+/// `testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt` — one file per
+/// (dataset, mode), holding a section per query it timed.
+#[cfg(not(feature = "rust-only"))]
+pub fn results_file(dataset: &str, sf: &str, mode: &str) -> PathBuf {
+    corpus_benchmark::results_file(dataset, sf, mode)
+}
+
+/// Time `query` at `mode` on the device: the tree's section and the record's rows.
+#[cfg(not(feature = "rust-only"))]
+pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
+    corpus_benchmark::benchmark_case(dataset, sf, query, mode).await
+}
+
+// --- the calibration record --------------------------------------------------------
+// One row per cuDF call, `record.rs`. The binaries reach the writer, the checker and the
+// heading; the row builder names the run report and stays behind them.
+
+/// Env var naming the file rows are appended to. Unset ⇒ no record is written, which
+/// is why every caller can emit unconditionally.
+pub const RECORD_PATH_ENV: &str = "PEACOCK_RECORD_PATH";
+
+/// Env var naming the Nsight pass a run is under. Unset ⇒ [`Capture::None`].
+pub const CAPTURE_ENV: &str = "PEACOCK_BENCHMARK_CAPTURE";
+
+/// Which Nsight pass this run is under — and therefore whether its microseconds may be
+/// published.
+///
+/// A captured run is never the reported one: tracing and the memory counters each cost the
+/// query several percent, so a capture writes the record and the nvtx ranges the capture
+/// joins on, and leaves the `.benchmark.txt` tree alone. It is a property of how the run
+/// was launched, and the case cannot see the nsys command line, so it is named here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Capture {
+    None,
+    Trace,
+    Metrics,
+}
+
+impl Capture {
+    /// Exhaustive on purpose: an unnamed value panics naming the two rather than falling
+    /// back to `None`, which would publish a captured run's times into the committed tree
+    /// with nothing saying they were measured under counters.
+    pub fn from_env() -> Self {
+        let Some(value) = std::env::var_os(CAPTURE_ENV) else {
+            return Capture::None;
+        };
+        match value.to_str() {
+            Some("trace") => Capture::Trace,
+            Some("metrics") => Capture::Metrics,
+            other => panic!(
+                "{CAPTURE_ENV}={other:?} names no Nsight pass — it is `trace` or `metrics`, \
+                 and unset for a run that publishes its times"
+            ),
+        }
+    }
+
+    /// As the heading spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Capture::None => "none",
+            Capture::Trace => "trace",
+            Capture::Metrics => "metrics",
+        }
+    }
+}
+
+/// One row per cuDF call, keyed by `(dataset, sf, query, plan node, recipe step, call)`.
+///
+/// Six coordinates because that is what identifies a call: one plan node publishes several
+/// recipe steps, and a batched run drives each once per batch per lane.
+///
+/// `node_seq` is the post-order position, the space recipes are addressed in; the driver
+/// numbers pre-order, so a writer that forgets to translate produces a plausible number
+/// from the wrong order. `lane` is the driving lane. `run_index` is the seventh: derivable
+/// from where `call_index` restarts, written anyway, since two counting rules can disagree.
+pub const COLUMNS: &[&str] = &[
+    "dataset",
+    "sf",
+    "query",
+    "mode",
+    "node_seq",
+    "node_type",
+    "lane",
+    "recipe_seq",
+    "recipe_kind",
+    "call_index",
+    "run_index",
+    "in_rows",
+    "in_bytes",
+    "out_rows",
+    "out_bytes",
+    "host_us",
+    "device_us",
+];
+
+/// What a row cannot be recovered from: which engine produced it, over what data, and
+/// under what conditions.
+///
+/// The last two are constant across a run and go into the file's `#` heading rather than
+/// into every row — see [`record_header`]. They are still part of this struct because the
+/// heading is written from it. The other two conditions, [`TIMING_MODE`] and [`BUILD`],
+/// are not fields at all: the harness refuses to measure under anything else.
+pub struct RunMeta<'a> {
+    pub dataset: &'a str,
+    pub sf: &'a str,
+    pub query: &'a str,
+    /// The batch-partitioned planning mode, `tp4-sized` and the like. The same query
+    /// at two modes is a different plan and a different set of calls.
+    pub mode: &'a str,
+    pub allocator: &'a str,
+    pub capture: Capture,
+}
+
+/// The only timing mode a record is written under: the harness sets `NodeTiming::Events`
+/// before it plans. A literal because a reader cannot tell events from a host clock by
+/// looking at the microseconds, and a run under anything else writes no record at all.
+pub const TIMING_MODE: &str = "events";
+
+/// How the harness that writes this was compiled, as the record and the tree both state
+/// it. A literal for the same reason: the harness refuses a build with debug assertions
+/// before it measures anything, so no other value can reach a written file.
+pub const BUILD: &str = "release";
+
+/// Measured executions per case: the width of the tree's `runs=[..]` spread and the number
+/// of `run_index` values a case appends here. Declared here, not in the harness, because
+/// the rust-only test that reads a committed file has to name the same number and cannot
+/// link the harness. Must be >= 2 — the reported run is the second-smallest.
+pub const MEASURED_RUNS: usize = 10;
+
+/// The `#` preamble, written once per file. A record has to be readable without this
+/// source, and every line in it is one a reader would otherwise guess wrong.
+pub fn record_header(meta: &RunMeta<'_>) -> String {
+    record::record_header(meta)
+}
+
+/// Append this run's rows to `$PEACOCK_RECORD_PATH`, or do nothing if it is unset.
+pub fn append_records(rows: &[String], meta: &RunMeta<'_>) {
+    record::append_records(rows, meta)
+}
+
+/// One execution's rows against what its plan declares — every row a cell per column,
+/// every row naming a step its own node publishes, a step's calls numbered `0..n` with no
+/// gap. `declared` is per post-order node, the seqs its recipe publishes.
+pub fn rows_match_the_recipes(
+    rows: &[String],
+    declared: &BTreeMap<usize, BTreeSet<u32>>,
+) -> Result<(), String> {
+    record::rows_match_the_recipes(rows, declared)
+}
+
+// --- the instrument's structural test ----------------------------------------------
+// What `test_node_timing` calls: a query planned once, then executed on the device under
+// the timing mode it named, and read back as plain figures.
+
+/// A query planned at a mode and held for repeated device runs.
+#[cfg(not(feature = "rust-only"))]
+pub struct DevicePlan {
+    /// The session the plan was made in, kept for as long as the plan is.
+    _ctx: SessionContext,
+    tree: Box<dyn GpuNode>,
+    what: String,
+}
+
+/// One execution of a [`DevicePlan`]: the wall clock end to end, the calls that reached a
+/// backend executor, the calls the journal holds — zero with timing off — and what the
+/// device recorded, counted and summed.
+#[cfg(not(feature = "rust-only"))]
+pub struct TimedRun {
+    pub total_us: u64,
+    pub calls: usize,
+    pub journalled: usize,
+    pub regions: usize,
+    pub host_us: u64,
+    pub device_us: u64,
+}
+
+#[cfg(not(feature = "rust-only"))]
+pub async fn device_plan(dataset: &str, sf: &str, query: &str, mode: &str) -> DevicePlan {
+    node_timing::device_plan(dataset, sf, query, mode).await
+}
+
+/// The per-node timing switch, `off` or `events`; process-global, as the C++ keeps it.
+#[cfg(not(feature = "rust-only"))]
+pub fn set_node_timing(mode: &str) {
+    node_timing::set_node_timing(mode)
+}
+
+/// Install the pooled device allocator of `bytes` and report what happened — the
+/// `allocator=` line a record carries. Idempotent; the process has one pool.
+#[cfg(not(feature = "rust-only"))]
+pub fn install_rmm_pool(bytes: u64) -> String {
+    crate::executor::install_rmm_pool(bytes).to_string()
+}
+
+#[cfg(not(feature = "rust-only"))]
+pub fn timed_run(plan: &DevicePlan) -> TimedRun {
+    node_timing::timed_run(plan)
 }

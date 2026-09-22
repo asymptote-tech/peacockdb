@@ -13,6 +13,7 @@
 // there; the code stays in every build. The attribute leaves with the first CLI renderer.
 #![cfg_attr(not(test), allow(dead_code))]
 
+mod bench_text;
 mod expr_text;
 mod memory;
 mod node_text;
@@ -21,7 +22,7 @@ mod run_text;
 #[cfg(test)]
 mod tests;
 
-use crate::executor::RunReport;
+use crate::executor::{Measurements, RunReport};
 use crate::plan::GpuNode;
 use crate::planner::MemoryModel;
 
@@ -39,4 +40,9 @@ pub(crate) fn render_plan_memory(root: &dyn GpuNode, model: &MemoryModel) -> Str
 /// The execution golden: the plan with what each node actually ran under it.
 pub(crate) fn render_run(root: &dyn GpuNode, report: &RunReport) -> String {
     run_text::render_run(root, report)
+}
+
+/// The benchmark tree: the plan with the device microseconds each node's calls spent.
+pub(crate) fn render_timings(root: &dyn GpuNode, times: &Measurements) -> String {
+    bench_text::render_timings(root, times)
 }

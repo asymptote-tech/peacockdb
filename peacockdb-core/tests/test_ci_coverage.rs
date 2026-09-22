@@ -45,8 +45,14 @@ pub(crate) enum Exemption {
     NotRun(&'static str),
 }
 
+/// The measurement harness, which is a GPU-job target like the others and is additionally
+/// held to running none of its timed cases there.
+pub(crate) const BENCHMARK_TARGET: &str = "peacock_gpu_benchmarks";
+
 /// Targets deliberately absent from the CI tiers this guard sweeps.
 pub(crate) const INTENTIONALLY_NOT_IN_CI: &[(&str, Exemption)] = &[
+    ("test_node_timing", Exemption::GpuJob),
+    (BENCHMARK_TARGET, Exemption::GpuJob),
     ("test_gpu_corpus", Exemption::GpuJob),
     ("test_ci_coverage", Exemption::NotRun("this test")),
 ];

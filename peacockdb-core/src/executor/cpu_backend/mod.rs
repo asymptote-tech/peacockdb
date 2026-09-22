@@ -42,7 +42,7 @@ use datafusion::physical_plan::sorts::sort::SortExec;
 use single_node::execute_single_node;
 
 use crate::executor::CpuBatch;
-use crate::executor::{BackendError, CallResult, CallStats, RowRange};
+use crate::executor::{AbiCalls, BackendError, CallResult, CallStats, RowRange};
 use crate::plan::ColumnOrder;
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
@@ -267,6 +267,9 @@ impl CpuExec {
             CpuBatch::new(kept),
             CallStats {
                 scratch_bytes: Some(scratch),
+                // This backend addresses no seq, so it has no call to name — and an empty
+                // list would claim it made none, which is a different statement.
+                calls: AbiCalls::default(),
             },
         ))
     }

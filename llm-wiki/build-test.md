@@ -513,9 +513,10 @@ the harness's own format reader — none of which runs engine code.
 | Exec-model prototype (Python) | the scheduler over mock traits, plus pandas-backed operators checked against a single-shot oracle at five partitioning configs, both limit lowerings, the scalar expressions pinned to what `expr.cpp` does rather than what pandas defaults to, and every join mode run on two backends — one pandas, one emitting FlatBuffers nodes and interpreting them as the C++ does — no project code | [test_a_join_in_its_build_phase_holds_back_its_probe_subtree](../scripts/exec_model/tests/test_scheduling.py), [test_every_join_type_matches_the_oracle_on_both_backends](../scripts/exec_model/tests/test_join_capability.py) | cost-report | 216 |
 | Exec-model prototype, TPC-H plan shapes (Python) | the same drivers over real sf1 tables under a live resident budget, each plan re-run at every layout `LayoutInjector` can produce; needs the generated dataset, so it rides dataset-matrix rather than cost-report | [test_the_accumulator_is_what_makes_the_budget_bind](../scripts/exec_model/tests/test_tpch.py), [test_every_layout_gives_the_same_shuffled_join](../scripts/exec_model/tests/test_tpch.py) | dataset-matrix (25.02 leg) | 19 |
 | Exec-model corpus (Python) | every TPC-H query and every TPC-DS query the engine runs that needs no window function, lowered by hand and run over whole sf1 tables at three layouts each — TPC-H against a pandas oracle per query, TPC-DS against DuckDB running the query's own text. Minutes, not seconds, so manual dispatch; `PCK_BACKEND=recipe` re-runs the whole set with every join going through the FlatBuffers emulation | [test_corpus_q21_suppliers_who_kept_orders_waiting](../scripts/exec_model/tests/test_tpch_corpus.py), [plans_tpcds.py](../scripts/exec_model/tests/plans_tpcds.py) | manual — exec-model-corpus.yml, 3 shards | 93 |
-| C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule, and the two refusals of the test-only upload symbol; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.IsAstAble](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 12 |
-| cuDF GPU smoke (C++) | the GPU is alive; the Spark-murmur3 kernel matches comet in C++; the timing floor leaves the global switch as it found it; the RMM pool reserves the budget the binary declared | [CudfGpu.SparkPartitionIdsMatchComet2ColWithNulls](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 6 |
-| Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node, plus the per-call entry points at their contract edges (row-group override, export range, slice), the sqrt arm on both evaluators, a merge that emits state rather than a value, and the literal arm: a typed null on the AST path, the decimal literal's scaled double, every wire type walked through the dispatch, the LIKE guard | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot](../cpp/tests/gpu/test_plan_executor.cpp) | shad-gpu | 41 |
+| Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, `hbm_bytes` lands on the right tuple and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_plot.py](../scripts/calibration/tests/test_plot.py) | cost-report | 11 |
+| C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips and the ABI refuses a mode it does not name; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.IsAstAble](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 12 |
+| cuDF GPU smoke (C++) | the GPU is alive; the Spark-murmur3 kernel matches comet in C++; the RMM pool reserves the budget the binary declared | [CudfGpu.SparkPartitionIdsMatchComet2ColWithNulls](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 6 |
+| Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node, plus the per-call entry points at their contract edges (row-group override, export range, slice), the sqrt arm on both evaluators, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, every wire type walked through the dispatch, the LIKE guard — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region, and a second harness push replaces the first rather than nesting | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [NodeRegions.EveryCallOpensOneRegionPerOutputPartition](../cpp/tests/gpu/test_plan_executor.cpp) | shad-gpu | 41 |
 | TPC-H sf40 bare-cuDF (C++) | hand-written cuDF pipelines vs DuckDB sf40; the benchmark vehicle | [TpchSf40.Q1GroupByAggregates](../cpp/tests/gpu/test_tpch.cpp), [Q3JoinsGroupByTopN](../cpp/tests/gpu/test_tpch.cpp) | shad-gpu (sf40 is a hard precondition) | 4 |
 | TPC-H+V sf40 bare-cuDF (C++) | the same for the vector-embedding queries | [TpchSf40.Q11VectorBruteForce](../cpp/tests/gpu/test_tpchv.cpp) | shad-gpu | 4 |
 | TPC-H sf40 streamed (C++) | the same four queries and the same DuckDB goldens with nothing held resident — a chunked reader under a byte budget, so it answers whether the query fits rather than how fast the operators are | [TpchSf40Streamed.Q1Streamed](../cpp/tests/gpu/test_tpch_streamed.cpp) | manual | 4 |
@@ -659,6 +660,57 @@ Consequences worth knowing before you regenerate:
   the goldens from the committed profiles plus the parquet, so only a genuine oracle change
   needs the 1.5.4 pin.
 
+### Benchmark data flow
+
+A second tree with its own producers. Nothing here is a golden — no run asserts against it
+— so the arrows say which script writes each file rather than which test reads it.
+
+```
+tpch.sf40 (on the GPU host, outside the repo; symlinked in as testdata/tpch.sf40)
+  │
+  ├── build-test-shadgpu.sh --run-benchmarks        (peacock_gpu_benchmarks, event timing;
+  │   build-test.sh --gpu --run-benchmarks           the same binary on a 26.02 host)
+  │     ├──► benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt   the chosen run, per node
+  │     └──► calibration/records.tsv                one row per cuDF call × execution
+  │           └── --pull-benchmarks brings both home
+  │
+  └── create_nsys_profile.sh [--host …]             (the same binary, under Nsight)
+        ├── --trace     nvtx and cuda only; PEACOCK_BENCHMARK_CAPTURE=trace
+        │     └──► calibration/capture.sqlite          (not committed)
+        │           └── nsys_calls.py × goldens/<dataset>.sf1
+        │                 └──► calibration/calls.tsv   what one ABI call splits into, per case
+        │
+        └── --metrics   the same cases under the memory counters; PEACOCK_BENCHMARK_CAPTURE=metrics
+              ├──► calibration/capture-metrics.sqlite  (not committed)
+              ├──► calibration/records-metrics.tsv     stays on the host; its microseconds are unusable
+              └── nsys_hbm.py --peak-bw (capture × records.tsv)
+                    └──► calibration/hbm.tsv           hbm_bytes on records.tsv's coordinates
+
+calibration/records.tsv + calibration/hbm.tsv
+  └── plot.py ──► calibration/plots/{load,compute,spread,query,icicle,hbm}/*.png
+                  calibration/plots/index.html      one call, every panel
+```
+
+What the arrows are there to make checkable:
+
+- **Three runs, and only one of them is timed.** A capture serializes what it traces and the
+  counters pass costs several percent more, so neither writes the tree, and the metrics pass's
+  own record is read for its coordinates and never for its microseconds. The passes meet on the
+  record's tuple — `(dataset, sf, query, mode, node_seq, recipe_seq, call_index, run_index)` —
+  which is why the record carries one rather than a node number.
+- **`calls.tsv` is keyed by case.** The harness names each `(dataset, sf, query, mode)` in an
+  NVTX range around the run, and `nsys_calls.py` reads the case off that range; keyed on the
+  node alone, three cases fold into one row set.
+- **Every derived file has exactly one producer, and the scripts above run it.** A file that
+  only a human regenerates goes stale in silence: nothing checks it against the capture it
+  claims to describe, and a panel drawn from a stale one looks exactly like a fresh one.
+  `plot.py` is the only thing that draws, for the same reason.
+- **The text is committed and the captures are not.** The `.benchmark.txt` tree, the three
+  `.tsv` files and every panel are in git, rewritten in place by each collection, so `git diff`
+  shows how the numbers moved. The two `.sqlite` exports are hundreds of megabytes of
+  undiffable binary that only the scripts above read; `testdata/.gitignore` is deny-by-default
+  over `calibration/` for that, and `records-metrics.tsv` is not re-included.
+
 ## CI structure (`.github/workflows/pipeline.yml`)
 
 `pipeline.yml` runs on pushes to master and on every PR, but not on documentation —
@@ -699,8 +751,8 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   their remaining env must stay byte-identical or the run step recompiles.
 - **cpp-build-2502** — builds the 25.02 C++ side, bundles the Arrow/Parquet runtime libs,
   and stages the device rung, built `--features gpu`, as the `cpp-install-25.02` artifact:
-  `test_gpu_corpus` and the crate's own unit-test binary as `peacockdb_core_gpu_lib`, whose
-  `gpu_tests` modules exist only under that feature. Separate from dataset-matrix so the GPU
+  `test_gpu_corpus`, `peacock_gpu_benchmarks` and the crate's own unit-test binary as
+  `peacockdb_core_gpu_lib`, whose `gpu_tests` modules exist only under that feature. Separate from dataset-matrix so the GPU
   job can start without waiting for the CPU tests.
 - **gpu-tests** (needs cpp-build-2502) — ssh to **shad-gpu** into a per-run `REMOTE_DIR`:
   rsync artifact + testdata, patch the binaries for glibc 2.35, generate sf1 on the host
@@ -713,11 +765,13 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   process-wide pool); `peacockdb_core_gpu_lib` alone also takes `gpu_tests::`, the path
   filter that selects the device rung and leaves the CPU and FFI rungs it also holds to
   dataset-matrix, and a rust binary reporting `running 0 tests` is the same error as the
-  C++ one. No `set -e` — statuses are OR'd so one failure cannot skip the rest — and
+  C++ one; `peacock_gpu_benchmarks` runs under `--skip bench_`, so its harness assertions
+  run on every job and its timed cases only under `--run-benchmarks`. No `set -e` — statuses are OR'd so one failure cannot skip the rest — and
   `REMOTE_DIR` is removed on `always()`.
 - **cost-report** — the report crate and its inputs, and nothing else: python
   `testdata/test_duckdb_cost.py`, the `scripts/exec_model/tests/test_*.py` prototype set,
-  and `cargo test -p cost-report`. Then report generation, the PR-comment upsert and the
+  the `scripts/calibration/tests/test_*.py` cases over a synthetic capture, and
+  `cargo test -p cost-report`. Then report generation, the PR-comment upsert and the
   cost-regression gate against the base SHA, which fails the job on a regression. On a
   master push it uploads the Pages artifact. The comment has a 65,536-byte body to fit —
   `COMMENT_MAX_BYTES` in `cost-report/src/main.rs`, asserted over the real registry — so
@@ -888,7 +942,7 @@ Rules that keep this healthy:
 |---|---|---|
 | **shad-gpu** (most used) | GPU test suite (cudf 25.02, H200-class; old glibc → patch step) | `scripts/build-test-shadgpu.sh` (`--build --push-binaries --patch --run[-detached]` / `--all`, `--run-status`). Resilient rsync + retries — the link is flaky |
 | **verda** (when available) | large CPU runs, golden regen | `scripts/build-test.sh --host verda --all` (add `--rust-only` to skip the C++/FFI half) |
-| **verda-gpu** (least used) | same root volume as verda, with a GPU attached | `scripts/build-test.sh --host verda-gpu --gpu --all` |
+| **verda-gpu** | same root volume as verda, with an H200 attached; cuDF 26.02, modern glibc, nsys 2024.5 | `scripts/build-test.sh --host verda-gpu --gpu --all`; the corpus benchmark and its Nsight passes too — see *Corpus benchmarks* |
 | **nebius** | large CPU-only VM | manual |
 
 - **Testing the regen *mechanism* is not a full regen.** Scope it with `PCK_TEST_FILTER`
@@ -900,9 +954,11 @@ Rules that keep this healthy:
   tests and passes, so say which binaries actually executed; and a filter naming a query
   matches no test whose name is a property rather than a query, so exercising those takes a
   filter that matches them or a separate run.
-- **A GPU binary needs a fixed amount of free VRAM.** Each gtest main reserves a measured
+- **A GPU binary needs a fixed amount of free VRAM.** Each measuring binary reserves a
   byte budget: `peacock_tpch_tests` 69 GiB, `peacock_tpchv_tests` 30, `peacock_cudf_node_tests`
-  10, `peacock_gpu_tests` and `peacock_plan_tests` 1 each. Below its budget a binary does not
+  10, `peacock_gpu_tests` and `peacock_plan_tests` 1 each, `test_node_timing` 2, and
+  `peacock_gpu_benchmarks` 69 — the tpch figure taken for the same sf40 data, not yet measured
+  for the engine's own run. Below its budget a binary does not
   shrink: the pool is not built, and the sf40 pair goes red on rmm's default resource. Read
   `[rmm] pool of N GiB could not be built` at the top of the log first; the
   `cudaErrorMemoryAllocation` failures under it are its consequence. shad-gpu is a shared H200,
@@ -957,7 +1013,114 @@ Rules that keep this healthy:
 
 ## Benchmarks
 
-Wall-time runs of the C++ suites are manual; the protocol: `PEACOCK_BENCHMARK=1`
+### Corpus benchmarks — `peacock_gpu_benchmarks` (scripted)
+
+Its own case list, `peacockdb-core/tests/common/corpus_benchmark_cases.inc`, and
+deliberately not the correctness gate's: the two disagree about sf on purpose. Correctness
+runs at sf1, where a wrong answer is legible in six million rows; at sf1 a query is mostly
+the host prologue, so the rows worth timing are at sf40 and the rows worth checking are not.
+A (query, mode) timed here must still be enabled on a device in `corpus_cases.inc`, and a
+rust-only test in `test_corpus_goldens` reads both files and says so. Today: tpch q6 at
+`tp1_single` and `tp4_sized`, q19 at `tp1_single`.
+
+It asserts nothing about an answer, so it can never gate a merge. Its six harness assertions
+run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here.
+
+Six steps, three scripts:
+
+```
+# 1. a release build of the harness into cpp/install/rust-benchmarks/ — the run refuses a debug build
+scripts/docker-build.sh --no-image --cache-dir /build/peacock -- ./scripts/build-test-shadgpu.sh --build-benchmarks
+# 2. ship and glibc-patch  3. time the corpus  4. bring the tree and the record home
+./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks --pull-benchmarks
+# or, for a run that outlives your ssh session (the suite takes tens of minutes):
+./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks-detached
+./scripts/build-test-shadgpu.sh --benchmark-status     # going? finished? log tail
+./scripts/build-test-shadgpu.sh --pull-benchmarks      # once it reports finished
+# 5. the derived records: both Nsight passes, their captures, calls.tsv and hbm.tsv.
+#    No flag runs both; --trace or --metrics picks one.
+./scripts/create_nsys_profile.sh
+# 6. every panel and index.html, from one call
+python3 scripts/calibration/plot.py \
+    --record testdata/calibration/records.tsv --hbm testdata/calibration/hbm.tsv \
+    --out-dir testdata/calibration/plots
+```
+
+Steps 5 and 6 are separate scripts because they are separate measurements: a capture
+serializes what it traces and the counters pass costs several percent, so neither may write
+the tree step 3 produced. What each writes is the diagram under *Benchmark data flow*.
+`--benchmark-status` exits 0 only when the latest run finished with 0, as `--run-status` does.
+Check `nvidia-smi` for a neighbour before step 3: a process holding the card inflates every
+number here without failing anything.
+
+**The same six steps on a 26.02 host** (verda-gpu) go through `build-test.sh`, which builds
+against the local `rapids` env and needs no docker and no glibc patch. The three benchmark
+flags need `--gpu`; `--all` does not imply them, and `--run` with `--run-benchmarks` is
+refused — one exit code cannot mean both "gate green" and "measurement completed".
+
+```
+./scripts/build-test.sh --gpu --build-benchmarks                       # 1: release build, cold ~35 min at 3 jobs
+./scripts/build-test.sh --host verda-gpu --gpu --push-binaries          # 2: cpp/install, mirrored with --delete
+./scripts/build-test.sh --host verda-gpu --gpu --run-benchmarks         # 3: attached; keep the ssh session; PCK_TEST_FILTER narrows
+./scripts/build-test.sh --host verda-gpu --gpu --pull-benchmarks        # 4
+./scripts/create_nsys_profile.sh --host verda-gpu --remote-dir /home/dmitry/peacockdb \
+    --remote-cudf-root /home/dmitry/miniforge3/envs/rapids-26.02        # 5
+```
+
+Two things the shad-gpu path handles that this one leaves to the host: `testdata/tpch.sf40`
+must already be a symlink to the dataset (the script checks it resolves and creates
+nothing), and the GPU's performance counters must be open to non-root for step 5's
+`--metrics` pass (`options nvidia NVreg_RestrictProfilingToAdminUsers=0` in
+`/etc/modprobe.d/`, then a module reload — verda-gpu has it; nsys says
+`ERR_NVGPUCTRPERM` when a host does not). The profile script's HBM defaults (`gh100`,
+4.8e12 B/s) are an H200's; another card overrides `PCK_BENCH_HBM_SET` and
+`PCK_BENCH_HBM_PEAK_BW`. `--push-binaries` mirrors `cpp/install/` with `--delete`, so a
+push from a checkout that never ran `--build-benchmarks` removes the benchmark binary from
+the host, and a push from one that never ran `--build` removes the gate's. Both hosts write
+the same files and nothing in them says which host it was ([#226](tickets.md#t226)).
+
+**The tree**: one file per (dataset, mode) at
+`testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt`, a `== <query>` section
+each. A section is the plan tree with one line under every node:
+
+    time_us=[[22,37,40],[55,1,30]] total_us=185
+
+Lanes outermost, one entry per call the lane made, each entry the call's device microseconds
+summed over its output partitions; `1` where the clock rounded a region to zero, since every
+call opens one. A lane the node was never driven on is `[]`. Then a `--- run ---` trailer:
+`run_us` (the chosen execution end to end, after planning), `device_us` (Σ of the tree's
+`total_us`; the gap to `run_us` is the host), `runs=[…]` (every measured execution, in order),
+`build=release`, `allocator=` (what `install_rmm_pool` reported: with rmm's default every cuDF
+intermediate is a `cudaMalloc`/`cudaFree` round trip billed to the node that allocated it,
+which moves the profile and not just the scale). The reported execution is the second-smallest
+by `run_us` of ten, after one discarded warm-up: the fastest run is the one most likely to
+have caught a scheduling accident, and a whole run is reported rather than a per-node minimum,
+which would be a tree belonging to no execution. Both counts are constants in
+`tests/common/corpus_benchmark.rs`, so every file in the tree was taken at the same counts.
+`--pull-benchmarks` is additive and no push `--delete`s the directory.
+
+**The record**, `testdata/calibration/records.tsv`: one row per cuDF call — one (plan node,
+recipe step, call index), not one node and not one output partition — for every measured
+execution, so the same call recurs once per `run_index` and the spread is data. Seventeen
+columns: `dataset sf query mode node_seq node_type lane recipe_seq recipe_kind call_index
+run_index in_rows in_bytes out_rows out_bytes host_us device_us`. `node_seq` is post-order,
+`lane` the driving lane, `call_index` what C++ counted to for that seq, `recipe_kind` the fb
+kind or the ABI symbol for a slice and an export. No cell is empty: `out_*` come from the
+call's own `NodeStats` priced by the schema the executor holds, and a middle call's `in_*` is
+the call before it. The `#` heading carries what is constant across a run — `timing_mode=events`,
+`build=release`, `allocator=`, `capture=` — and an append under a different heading is
+refused. The harness checks each execution's rows against the plan before it writes them;
+the rest of the format is in the heading itself and in `tests/common/record.rs`.
+
+Two variables. `PEACOCK_RECORD_PATH` names the record; unset, none is written, so the tree
+and the record never depend on each other. `PEACOCK_BENCHMARK_CAPTURE=trace|metrics` turns
+NVTX on, writes `capture=` into the heading and leaves the tree alone — a captured run is
+never the published one; unset means `capture=none`, any other value fails naming the two.
+`PEACOCK_GPU_DEBUG` is not forwarded: its per-operator sync is the thing being measured.
+
+### Wall-time C++ suites (currently unscripted)
+
+Wall-time runs are manual; the protocol: `PEACOCK_BENCHMARK=1`
 (`PEACOCK_BENCHMARK_RUNS=5`), execute-only timing, all-device-synced, report the
 **2nd-minimum** of the runs. Current numbers: `llm-wiki/reports/benchmark-minimal.md`.
 

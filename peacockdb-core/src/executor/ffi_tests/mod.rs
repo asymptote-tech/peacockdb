@@ -8,7 +8,7 @@ use std::ptr;
 use super::{Batch, GpuBatch};
 
 fn detached(handle: u64, num_rows: usize, byte_size: usize) -> GpuBatch {
-    GpuBatch::new(ptr::null_mut(), handle, num_rows, byte_size)
+    GpuBatch::new(ptr::null_mut(), handle, 0, num_rows, byte_size)
 }
 
 #[test]

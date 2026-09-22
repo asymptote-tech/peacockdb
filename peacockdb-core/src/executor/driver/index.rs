@@ -164,5 +164,19 @@ fn subtree_ranges(nodes: &[IndexedNode<'_>]) -> Vec<(usize, usize)> {
     (0..nodes.len()).map(|index| (index, end[index])).collect()
 }
 
+/// Each node as a record names it — its type and its children-first position — in the
+/// driver's own pre-order, which is the order `RunReport` is indexed by. From here rather
+/// than from a caller's own walk, so the two orders cannot disagree.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+pub(crate) fn nodes_as_recorded(
+    root: &dyn GpuNode,
+) -> Result<Vec<(&'static str, usize)>, PlanError> {
+    Ok(build(root)?
+        .nodes
+        .iter()
+        .map(|node| (node.node.name(), node.post_order))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests;

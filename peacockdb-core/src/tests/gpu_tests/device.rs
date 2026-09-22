@@ -77,7 +77,10 @@ impl Device {
         };
         assert_eq!(rc, 0, "upload: {}", error_of(self.ctx.executor));
         let bytes = CpuBatch::new(batch.clone()).byte_size();
-        GpuBatch::new(self.ctx.executor, handle, batch.num_rows(), bytes)
+        // An uploaded table is no call's output, so it carries seq 0 — what the session
+        // answers for a handle it never produced. Nothing here measures, so no journal
+        // entry ever names it.
+        GpuBatch::new(self.ctx.executor, handle, 0, batch.num_rows(), bytes)
     }
 
     /// What the device exported, under the schema it exported it with — never the one the

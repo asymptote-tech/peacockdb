@@ -1,0 +1,341 @@
+//! One benchmark case at one batch-partitioned mode: plan it, run it, keep what it took.
+//!
+//! The timing counterpart of `corpus_gpu`, and deliberately not part of it: that module
+//! holds a device run to what the cpu wrote, and this one compares nothing at all. Sharing
+//! a module would put an assertion path and a measurement path behind one door.
+
+use std::path::PathBuf;
+use std::time::Instant;
+
+use crate::executor::{
+    GpuBackend, Measurements, NodeTiming, Region, RmmPool, RunReport, install_rmm_pool,
+    join_regions, node_measured, nodes_as_recorded, nvtx_range, run, set_node_timing,
+    set_nvtx_ranges,
+};
+use crate::plan::GpuNode;
+use crate::plan_text::render_timings;
+use crate::wire::attach_recipes;
+
+use super::corpus::plan_at;
+use super::gpu_session::Session;
+use super::record::{append_records, declared_steps, record_rows, rows_match_the_recipes};
+use super::{
+    BUILD, BenchmarkCase, Capture, MEASURED_RUNS, NOT_TIMED, Regeneration, RunMeta, SKIPPED,
+    merge_section, mode_named, stem, testdata_root,
+};
+
+/// The sections a `(dataset, sf, mode)` file is declared to hold: the queries timed at
+/// this mode, and a marker for each one declared and timed at none.
+///
+/// Sorted numerically within the letter prefix, so `q2` precedes `q10`. `inventory` gives
+/// no order of its own — it is link order — and a file whose sections move between builds
+/// would diff against itself.
+pub(crate) fn declared_for(dataset: &str, sf: &str, mode: &str) -> Vec<(String, Option<String>)> {
+    let mut declared: Vec<(String, Option<String>)> = inventory::iter::<BenchmarkCase>
+        .into_iter()
+        .filter(|case| case.dataset == dataset && case.sf == sf)
+        .filter(|case| case.mode == mode || case.mode == NOT_TIMED)
+        .map(|case| {
+            let marker = (case.mode == NOT_TIMED)
+                .then(|| format!("{SKIPPED}declared with no mode to time it at"));
+            (stem(case.query), marker)
+        })
+        .collect();
+    declared.sort_by(|(a, _), (b, _)| query_order(a).cmp(&query_order(b)));
+    declared.dedup_by(|(a, _), (b, _)| a == b);
+    declared
+}
+
+/// `testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt` — one file per
+/// (dataset, mode), holding a section per query it timed.
+///
+/// One file rather than one per query because a mode's queries are read together, and a
+/// directory of one-query files makes that a listing rather than a diff.
+pub(crate) fn results_file(dataset: &str, sf: &str, mode: &str) -> PathBuf {
+    testdata_root()
+        .join(format!("benchmark-results/{dataset}.sf{sf}"))
+        .join(format!("{mode}.benchmark.txt"))
+}
+
+/// Merge this query's section into its file, under the lock the goldens take.
+///
+/// Reused rather than reimplemented: `merge_section` already locks the file, reads inside
+/// the critical section and publishes by rename, and those three are the whole of what
+/// makes several cases writing one path safe.
+///
+/// Always `Sections`, never `Whole`: the binary can be run under a name filter at any
+/// moment with nothing in the run to say so, and pruning what this run did not produce
+/// would delete a measurement nobody asked to lose.
+pub(crate) fn write_section(dataset: &str, sf: &str, mode: &str, query: &str, body: &str) {
+    merge_section(
+        &results_file(dataset, sf, mode),
+        &declared_for(dataset, sf, mode),
+        query,
+        body,
+        Regeneration::Sections,
+    );
+}
+
+/// A query name as `(prefix, number, whole)`, so `q2` sorts before `q10` and a name with
+/// no number in it still has a total order.
+fn query_order(query: &str) -> (String, u32, String) {
+    let digits = query.trim_start_matches(|c: char| !c.is_ascii_digit());
+    let head = &query[..query.len() - digits.len()];
+    let number: String = digits.chars().take_while(char::is_ascii_digit).collect();
+    (
+        head.to_string(),
+        number.parse().unwrap_or(0),
+        query.to_string(),
+    )
+}
+
+/// The extra-data section: what the whole run cost, and under what conditions.
+///
+/// Named `--- run ---` after the `--- recipes ---` and `--- memory ---` the plan goldens
+/// carry, so a reader who has seen one file knows where a section ends in the other.
+///
+/// **Two totals, deliberately named apart.** `run_us` is the whole execution end to end;
+/// `device_us` is the sum of the tree's `total_us`. They do not agree, and the difference
+/// is the point: it is what the run spent outside the calls — the driver's own scheduling
+/// and the host prologue between them. One name for both would read as a discrepancy.
+fn run_section(chosen: &Run, times: &Measurements, spread: &[u64]) -> String {
+    let device_us: u64 = (0..times.nodes())
+        .filter_map(|node| node_measured(times, node))
+        .map(|time| time.device_us)
+        .sum();
+    let spread: Vec<String> = spread.iter().map(u64::to_string).collect();
+    format!(
+        "--- run ---\n\
+         run_us={}\n\
+         device_us={device_us}\n\
+         runs=[{}]\n\
+         build={BUILD}\n\
+         allocator={}\n",
+        chosen.total_us,
+        spread.join(","),
+        install_rmm_pool(BENCH_POOL_BYTES),
+    )
+}
+
+/// The pool this binary reserves, the way each gtest binary declares its own `kPoolBytes`:
+/// bytes it asks for, never a share of the device. Same dataset read in the same place as
+/// `test_tpch.cpp`, whose measured sf40 peak is 67.42 GiB, and 69 is also the most that
+/// lets two processes share the 139.7 GiB H200 (#178) — a gate job can land beside a
+/// measurement. `PEACOCK_RMM_POOL_BYTES` overrides it for a sweep, and the sf40 run that
+/// re-measures the tree is where this binary's own peak gets read.
+const BENCH_POOL_BYTES: u64 = 69 << 30;
+
+/// Discarded runs. The first execution pays for the page cache, CUDA module load and JIT,
+/// and allocator growth — the host's recent history rather than the plan. The pool removes
+/// most of the third before this runs, which is a reason to keep the warm-up: what is left
+/// is the part that varies.
+const BENCH_WARMUP_RUNS: usize = 1;
+
+/// One measured execution.
+struct Run {
+    total_us: u64,
+    report: RunReport,
+    /// What the device answered with, drained before the session that recorded it closed.
+    regions: Vec<Region>,
+}
+
+/// Time `query` at `mode`.
+///
+/// Takes the mode as its macro spelling (`tp4_sized`) rather than a `&Mode`, so a
+/// case-list line and a call site read alike; `mode_named` resolves it and panics naming
+/// the five when it is not one of them.
+///
+/// Planning happens once, outside the runs: `plan_at` reads every file's parquet
+/// metadata, and repeating that would time the catalog rather than the query. So
+/// `total_us` here is execution only.
+pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
+    const _: () = assert!(MEASURED_RUNS >= 2, "a second minimum needs >= 2 runs");
+
+    let mode = mode_named(mode);
+    let what = format!("{dataset}/{query} at {} on a device", mode.name);
+    // Read before anything runs, so a misspelled value fails the case rather than the
+    // publish at the end of it.
+    let capture = Capture::from_env();
+
+    // Conditions of a benchmark run, not choices: rmm's default makes every cuDF
+    // intermediate a cudaMalloc/cudaFree round trip charged to the node that allocated it,
+    // and a draining measurement reports a schedule the engine does not run. Installing
+    // the pool first because rmm takes whatever resource is current when it allocates.
+    let _ = install_rmm_pool(BENCH_POOL_BYTES);
+    set_node_timing(NodeTiming::Events);
+
+    let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
+
+    // Off across the warm-up, and set rather than assumed: the switch is process-global
+    // and this binary runs every case in one process, so a case that only turned it on
+    // would leave later warm-ups ranging with no case range open — calls belonging to no
+    // query. The capture's containment check catches exactly that, and did.
+    set_nvtx_ranges(false);
+    for _ in 0..BENCH_WARMUP_RUNS {
+        run_once(tree.as_ref(), &what);
+    }
+    // After the warm-up, not before: the warm-up is not written to the record, so ranging
+    // it would leave the capture one execution longer than the file it joins against —
+    // and the reader would have to know a Rust constant to allow for it.
+    set_nvtx_ranges(capture != Capture::None);
+    // Around the measured runs, naming the case. A node range carries `seq`, and seq
+    // numbering restarts per plan — q6 and q19 both open with `0.0 CudfScan` — so only
+    // containment says which query a call was in. Held to the end of the function:
+    // dropping it here would close the range before the runs it is meant to contain.
+    let _case = nvtx_range(&format!("{dataset}.sf{sf} {query} {}", mode.name));
+
+    let mut runs = Vec::with_capacity(MEASURED_RUNS);
+    for _ in 0..MEASURED_RUNS {
+        let started = Instant::now();
+        let (report, regions) = run_once(tree.as_ref(), &what);
+        // Read after the run rather than inside it: `GpuUnload` copies the root off the
+        // device, so the driver has returned only once the device is actually finished.
+        // Under events nothing else would guarantee that — the node walk returns while
+        // the stream may still be running.
+        runs.push(Run {
+            total_us: started.elapsed().as_micros() as u64,
+            report,
+            regions,
+        });
+    }
+
+    let times: Vec<u64> = runs.iter().map(|run| run.total_us).collect();
+    // Every run, not the chosen one: a spread of ten separates a call's cost from an
+    // accident of scheduling, while the file beside it reports one run. And in the order
+    // they ran, which `second_smallest` is about to destroy — a repeat of `call_index` 0
+    // is where one execution's rows end, and sorting first interleaves them for good.
+    let nodes = nodes_as_recorded(tree.as_ref()).unwrap_or_else(|e| panic!("{what}: {e}"));
+    let allocator = install_rmm_pool(BENCH_POOL_BYTES).to_string();
+    let meta = RunMeta {
+        dataset,
+        sf,
+        query,
+        mode: mode.name,
+        allocator: &allocator,
+        capture,
+    };
+    // Attached once more here rather than reached for through the session: `Session::open`
+    // hands its plan to the driver and the driver consumes it. `attach_recipes` reads the
+    // finished tree and builds a buffer, which is host work outside every measured run.
+    let recipes = attach_recipes(tree.as_ref()).unwrap_or_else(|e| panic!("{what}: {e}"));
+    let declared = declared_steps(&recipes);
+    // One append for the case rather than one per run: the file is opened, its heading
+    // checked and its lock taken each time, and ten of that says nothing ten times.
+    let rows: Vec<String> = runs
+        .iter()
+        .enumerate()
+        .flat_map(|(at, run)| {
+            let rows = record_rows(&nodes, &run.report, &measured_of(run, &what), &meta, at);
+            // Per run, before they are flattened: the check reads one execution's
+            // `call_index` sequences, and ten concatenated executions repeat every one.
+            rows_match_the_recipes(&rows, &declared)
+                .unwrap_or_else(|e| panic!("{what}: the record disagrees with the plan: {e}"));
+            rows
+        })
+        .collect();
+    append_records(&rows, &meta);
+
+    let chosen = second_smallest(runs);
+    let costed = measured_of(&chosen, &what);
+    let body = format!(
+        "{}{}",
+        render_timings(tree.as_ref(), &costed),
+        run_section(&chosen, &costed, &times)
+    );
+    // A captured run measures under nsys, which costs the query several percent, so its
+    // times must not reach the committed tree. It still wrote the record above — the
+    // capture exists to be joined against exactly those rows.
+    if capture == Capture::None {
+        write_section(dataset, sf, mode.ident().as_str(), query, &body);
+    }
+
+    let per_node: Vec<String> = (0..costed.nodes())
+        .map(|node| match node_measured(&costed, node) {
+            // Three states again: not measured, measured but addressing no seq (an unload
+            // exports through a door that opens no region), and measured with regions.
+            None => "unmeasured".to_string(),
+            Some(t) if t.regions == 0 => "no regions".to_string(),
+            Some(t) => format!("{}/{}", t.host_us, t.device_us),
+        })
+        .collect();
+    // Printed until there is a file to write it to. Every time, not just the chosen one: a
+    // second minimum says nothing about the spread it was picked out of.
+    println!(
+        "{what}: {}us of {times:?}, {} nodes, {} regions, per-node host/device {per_node:?}",
+        chosen.total_us,
+        chosen.report.emitted.len(),
+        chosen.regions.len()
+    );
+}
+
+/// One run's calls costed.
+///
+/// A mismatch in either direction means the two sides disagree about what ran — a defect
+/// in the join, not a number to report around — so the panic is the report.
+fn measured_of(run: &Run, what: &str) -> Measurements {
+    join_regions(&run.report, &run.regions).unwrap_or_else(|refused| {
+        panic!(
+            "{what}: {refused} ({} regions came back)",
+            run.regions.len()
+        )
+    })
+}
+
+/// The run worth reporting: second-smallest by end-to-end time.
+///
+/// The minimum is the run most likely to have caught a favourable scheduling accident,
+/// and the rest are dragged up by whatever else the shared host was doing.
+///
+/// A whole run rather than a per-node minimum across runs: the latter gives a tree
+/// belonging to no single execution, which can sum to less than any of them.
+fn second_smallest(mut runs: Vec<Run>) -> Run {
+    runs.sort_by_key(|run| run.total_us);
+    runs.swap_remove(1)
+}
+
+/// One device session and one run over it.
+///
+/// The session is per run rather than per case: `attach_recipes` and `begin_plan` are what
+/// a query costs on this side of the FFI, and holding one across runs would time the
+/// second differently from the first.
+///
+/// No budget, so the accountant records without ever tripping — a benchmark that refuses
+/// to finish reports nothing, and the mode's budget already sized the batches at plan time.
+fn run_once(tree: &dyn GpuNode, what: &str) -> (RunReport, Vec<Region>) {
+    // In the measured path rather than beside the install, which is the whole point: the
+    // install was once lost with the file that held it, and a check standing next to what
+    // it guards goes the same way. `install_rmm_pool` is idempotent, so asking here is
+    // asking what the resource is.
+    assert!(
+        matches!(install_rmm_pool(BENCH_POOL_BYTES), RmmPool::Pool { .. }),
+        "{what} would measure over rmm's default resource, where every cuDF intermediate is \
+         a cudaMalloc/cudaFree round trip charged to the node that allocated it — the \
+         numbers would describe the allocator, not the plan"
+    );
+    // Beside it because it is the same kind of statement: the record's `build=` line is a
+    // claim until something refuses the build that would make it false. A plain
+    // `cargo test` compiles this at opt-level 1, where the host prologue is a different
+    // quantity entirely.
+    assert!(
+        !cfg!(debug_assertions),
+        "{what} would measure a debug build, which writes `build={BUILD}` about a host \
+         prologue that is not release's; build it with \
+         `scripts/build-test-shadgpu.sh --build-benchmarks`"
+    );
+    let mut session = Session::open(tree, what);
+    let ctx = session.context();
+    let report = run::<GpuBackend>(tree, &ctx, None).unwrap_or_else(|e| panic!("{what}: {e}"));
+
+    // Checked on every run, not on the reported one: a leak surfaces later as a case
+    // timing a device that is still holding batches, and by then it names the wrong query.
+    assert_eq!(report.in_flight_bytes, 0, "{what} ended holding batches");
+    assert_eq!(
+        report.holds, report.releases,
+        "{what} held {} batches and released {}",
+        report.holds, report.releases
+    );
+    // Drained here rather than by the caller: the events die with the session, and the
+    // session is this function's.
+    let regions = session.regions(what);
+    (report, regions)
+}

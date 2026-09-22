@@ -4,8 +4,8 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    INTENTIONALLY_NOT_IN_CI, PIPELINE, cargo_features, fold_continuations, repo_root,
-    workspace_test_targets,
+    BENCHMARK_TARGET, INTENTIONALLY_NOT_IN_CI, PIPELINE, cargo_features, fold_continuations,
+    repo_root, workspace_test_targets,
 };
 
 const SHADGPU: &str = "scripts/build-test-shadgpu.sh";
@@ -451,6 +451,34 @@ fn both_gpu_runners_pass_test_threads_one() {
                 "{rel} runs a staged GPU binary without --test-threads=1:\n  {line}\n\
                  cuDF/RMM share one process-wide pool, so concurrent cases OOM the device, and \
                  the env-var writes in test_gpu_corpus.rs are sound only while this flag holds."
+            );
+        }
+    }
+}
+
+/// The measurement binary is staged with the GPU targets and runs on every job, but never
+/// its `bench_` cases: those are tens of minutes of device time and would write a benchmark
+/// tree from a correctness run. That is `--skip bench_` on two committed runner loops and
+/// nothing else, so a runner that lost it turns the gate into a measurement in silence.
+#[test]
+fn the_benchmark_binary_runs_without_its_cases_on_ci() {
+    for rel in [PIPELINE, SHADGPU] {
+        // The shell names the target through `$BENCH_TARGET`, the workflow spells it out.
+        // Resolved rather than matched two ways, so one needle reads both files.
+        let loop_body = rust_gpu_runner_loop(rel)
+            .join("\n")
+            .replace("$BENCH_TARGET", BENCHMARK_TARGET);
+        assert!(
+            loop_body.contains(&format!("{BENCHMARK_TARGET}) skip=\"--skip bench_\"")),
+            "{rel}'s rust-tests loop does not skip {BENCHMARK_TARGET}'s bench_ cases. Every \
+             gate run would then spend the measurement's device time and overwrite the \
+             committed tree with times nobody asked for."
+        );
+        for line in rust_gpu_runner_invocations(rel) {
+            assert!(
+                line.contains("$skip"),
+                "{rel} runs a staged GPU binary without the per-binary skip:\n  {line}\n\
+                 The case above it sets it and this line is where it takes effect."
             );
         }
     }

@@ -6,7 +6,7 @@
 use super::*;
 
 use super::super::{GpuAccumulator, GpuPartitionAccumulator};
-use crate::executor::LaneEvent;
+use crate::executor::{AbiCall, AbiTarget, CallStats, LaneEvent, NodeTiming, set_node_timing};
 use crate::plan::AggFunc;
 use crate::plan::AggStateColumns;
 use crate::plan::RowInterval;
@@ -48,7 +48,7 @@ fn a_coalesce_answers_with_one_batch_holding_every_row_of_the_lane() {
     let tree: Box<dyn GpuNode> = Box::new(GpuCoalesceAllBatches::new(source_per_row_group()));
     let session = Session::open(tree.as_ref());
     let out = columns();
-    let accumulator = GpuAccumulator::coalesce(session.executor, session.recipe(1), &out)
+    let accumulator = GpuAccumulator::coalesce(session.site(), session.recipe(1), &out)
         .expect("the coalesce builds");
     let answered = accumulate(&session, accumulator, &out);
     assert_eq!(answered.len(), 1, "a coalesce emits nothing until done");
@@ -84,7 +84,7 @@ fn an_accumulating_sort_orders_the_whole_lane() {
     let session = Session::open(tree.as_ref());
     let out = columns();
     let accumulator =
-        GpuAccumulator::sorted(session.executor, session.recipe(1), &out).expect("the sort builds");
+        GpuAccumulator::sorted(session.site(), session.recipe(1), &out).expect("the sort builds");
     let answered = accumulate(&session, accumulator, &out);
     assert_eq!(
         rows(&answered[0])
@@ -104,7 +104,7 @@ fn an_accumulating_sort_with_a_fetch_keeps_the_top_of_the_lane() {
     let session = Session::open(tree.as_ref());
     let out = columns();
     let accumulator =
-        GpuAccumulator::sorted(session.executor, session.recipe(1), &out).expect("the sort builds");
+        GpuAccumulator::sorted(session.site(), session.recipe(1), &out).expect("the sort builds");
     let answered = accumulate(&session, accumulator, &out);
     assert_eq!(
         rows(&answered[0])
@@ -155,7 +155,7 @@ fn a_merge_folds_the_partials_its_init_produced() {
     let out = schema_of(&[("k", DataType::Utf8), ("sum(v)", DataType::Int64)]);
     let mut partial = session.exec(1, &out);
     let mut merge = GpuAccumulator::aggregate(
-        session.executor,
+        session.site(),
         session.recipe(2),
         &out,
         &out,
@@ -200,7 +200,7 @@ fn a_limit_drops_forwards_and_slices_by_where_the_batch_falls() {
     let session = Session::open(tree.as_ref());
     let out = columns();
     let accumulator = GpuAccumulator::limit(
-        session.executor,
+        session.site(),
         session.recipe(1),
         RowInterval {
             skip: 2,
@@ -224,13 +224,101 @@ fn a_limit_drops_forwards_and_slices_by_where_the_batch_falls() {
     );
 }
 
+/// Timing on for the body of one case, and off again however it ends. The switch is
+/// process-global and every case in this binary shares the process, so a case that panics
+/// with it on would measure every case after it.
+struct Measuring;
+
+impl Measuring {
+    fn on() -> Self {
+        set_node_timing(NodeTiming::Events);
+        Self
+    }
+}
+
+impl Drop for Measuring {
+    fn drop(&mut self) {
+        set_node_timing(NodeTiming::Off);
+    }
+}
+
+/// A slice and an export carry no seq of their own, so both sides charge them to the node
+/// whose output they handled — and `call_index` counts all four entry points together.
+///
+/// Asserted against the device rather than against the journal alone: the two counters are
+/// independent, and a rule only one side follows joins to nothing. The scans here are
+/// driven by hand and journal nothing, which is why the journal holds three entries and
+/// the device six.
+#[test]
+fn a_slice_and_an_export_are_charged_to_the_node_that_produced_the_handle() {
+    let interval = RowInterval {
+        skip: 2,
+        fetch: Some(3),
+    };
+    let tree: Box<dyn GpuNode> = Box::new(GpuLimit::new(source_per_row_group(), interval));
+    let session = Session::open(tree.as_ref());
+    let out = columns();
+    let _measured = Measuring::on();
+    let mut accumulator = GpuAccumulator::limit(session.site(), session.recipe(1), interval, &out)
+        .expect("the limit builds");
+
+    let mut journalled: Vec<AbiCall> = Vec::new();
+    let mut kept = Vec::new();
+    for group in ROW_GROUPS {
+        let (produced, stats) = accumulator
+            .accumulate_and_fetch(session.scan(&[group]))
+            .expect("the arrival is accepted");
+        journalled.extend(made(&stats));
+        kept.extend(produced);
+    }
+    for batch in kept {
+        let (_, stats) = session
+            .export(&out)
+            .unload(batch, RowRange::WHOLE)
+            .expect("the rows cross the boundary");
+        journalled.extend(made(&stats));
+    }
+
+    let seq = session.scan_seq();
+    let regions = session.regions();
+    assert_eq!(
+        regions
+            .iter()
+            .map(|r| (r.seq, r.call_index))
+            .collect::<Vec<_>>(),
+        (0..6).map(|index| (seq, index)).collect::<Vec<_>>(),
+        "three scans, the slice of the straddling batch and two exports, counted as one \
+         run of calls against the scan's seq"
+    );
+    assert_eq!(
+        journalled
+            .iter()
+            .map(|call| (call.seq, call.target))
+            .collect::<Vec<_>>(),
+        vec![
+            (seq, AbiTarget::Bare(AbiSymbol::SliceHandle)),
+            (seq, AbiTarget::Bare(AbiSymbol::ResultFromHandle)),
+            (seq, AbiTarget::Bare(AbiSymbol::ResultFromHandle)),
+        ],
+        "the three calls this side made name the node the device charged them to"
+    );
+}
+
+fn made(stats: &CallStats) -> Vec<AbiCall> {
+    stats
+        .calls
+        .recorded()
+        .expect("a measured run journals what it called")
+        .to_vec()
+}
+
 /// A lane that received nothing emits nothing, here and on the CPU alike.
 #[test]
 fn a_lane_that_received_nothing_emits_no_batch() {
     let tree: Box<dyn GpuNode> = Box::new(GpuCoalesceAllBatches::new(source_per_row_group()));
     let session = Session::open(tree.as_ref());
     let out = columns();
-    let accumulator = GpuAccumulator::coalesce(session.executor, session.recipe(1), &out)
+    let accumulator = GpuAccumulator::coalesce(session.site(), session.recipe(1), &out)
         .expect("the coalesce builds");
     let (emitted, _) = accumulator
         .mark_done_and_fetch()
@@ -258,7 +346,7 @@ fn every_lanes_sorted_run_is_merged_at_the_last_done() {
     let out = columns();
     let mut per_batch = session.exec(1, &out);
     let mut merge =
-        GpuPartitionAccumulator::merge_sorted(session.executor, session.recipe(2), 2, &out)
+        GpuPartitionAccumulator::merge_sorted(session.site(), session.recipe(2), 2, &out)
             .expect("the merge builds");
     let lanes: [(usize, &[u32]); 3] = [(0, &[0]), (1, &[1]), (1, &[2])];
     for (lane, groups) in lanes {
@@ -399,7 +487,7 @@ fn a_welford_triple_merges_as_one_aggregate_on_the_device() {
     let out = state.fields.as_ref().clone();
     let mut partial = session.exec(1, &out);
     let mut merge = GpuAccumulator::aggregate(
-        session.executor,
+        session.site(),
         session.recipe(2),
         &out,
         &out,
@@ -455,7 +543,7 @@ fn a_sort_and_a_partition_merge_that_received_nothing_emit_nothing() {
     let session = Session::open(tree.as_ref());
     let out = columns();
     let accumulator =
-        GpuAccumulator::sorted(session.executor, session.recipe(1), &out).expect("the sort builds");
+        GpuAccumulator::sorted(session.site(), session.recipe(1), &out).expect("the sort builds");
     let (emitted, _) = accumulator
         .mark_done_and_fetch()
         .expect("done is accepted whatever arrived");
@@ -466,7 +554,7 @@ fn a_sort_and_a_partition_merge_that_received_nothing_emit_nothing() {
         Box::new(GpuMergeSortedPartitions::new(Box::new(across), keys, None));
     let session = Session::open(tree.as_ref());
     let mut merge =
-        GpuPartitionAccumulator::merge_sorted(session.executor, session.recipe(2), 2, &out)
+        GpuPartitionAccumulator::merge_sorted(session.site(), session.recipe(2), 2, &out)
             .expect("the merge builds");
     let mut emitted = Vec::new();
     for lane in [0, 1] {

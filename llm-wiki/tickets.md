@@ -6,7 +6,7 @@ anchor that the cost widget links to. Device labels are `tp<N>-<tier>` (micro=10
 mini=2GiB, standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 226), which is also the counter for
+New tickets take the next free number (currently 227), which is also the counter for
 `tasks/active-tickets.md` — the rollout's own list, separate file, one ID space. Finished and lapsed tickets move to
 `llm-wiki/archive/archived-tickets.md` (Done / Stale) — numbers are never reused, so an old
 reference still resolves there.
@@ -17,7 +17,7 @@ reference still resolves there.
 |---|--:|---|
 | [Critical correctness](#critical-correctness) | 34 | #225 #224 #223 #222 #221 #219 #218 #217 #216 #215 #214 #211 #210 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #212 #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
-| [Performance / architecture](#performance--architecture) | 27 | #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
+| [Performance / architecture](#performance--architecture) | 28 | #226 #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #213 #201 #197 #196 #195 #178 #176 #174 #167 #164 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
@@ -584,6 +584,12 @@ projects or sorts `GROUPING()`; must be fixed before one does (q70/q86 after #23
 `aggregate_schema_cases.rs`'s `bug_grouping_sets_hold_an_int32_grouping_id_…` and the walk's
 `bug_a_rollup_partial_holds_an_int32_grouping_id_…` (`wire/gpu_tests/mod.rs`).
 
+The width is wrong beside the encoding. The gid is built `INT32`
+(`cudf::numeric_scalar<int32_t>`), where DataFusion sizes the column to the group count:
+`UInt8` up to 8 grouping expressions, `UInt16` to 16, `UInt32` to 32, `UInt64` beyond. Too
+wide for every corpus query and too narrow past 32 groups. The fix reads the declared output
+schema rather than picking a type; nothing timed reaches a plan with grouping sets.
+
 <a id="t62"></a>
 ### #62 — count(DISTINCT) ignores the DISTINCT flag in GpuAggregate
 `cpp/src/operators/aggregate.cpp` ignores `AggregateFuncNode.distinct`; a guard now
@@ -642,6 +648,28 @@ Honor the partial-phase operand cast / state schema.
 
 
 ## Performance / architecture
+
+<a id="t226"></a>
+### #226 — a benchmark tree does not say which device, driver, CUDA or cuDF produced it
+The `--- run ---` trailer and the record's `# run:` heading carry `build=`, `allocator=` and
+`capture=`, and nothing about the hardware or the stack. Two hosts now write the same files:
+shad-gpu (cuDF 25.02, driver-side CUDA 12.5 compat) through `build-test-shadgpu.sh` and
+verda-gpu (cuDF 26.02, driver 580) through `build-test.sh`, both H200s today — and
+`--pull-benchmarks` from either overwrites `benchmark-results/tpch.sf40/*.benchmark.txt` and
+`calibration/records.tsv` in place. A `git diff` shows numbers moving and cannot say whether
+the code, the cuDF version or the card moved them; a plot drawn from a mixed record says
+nothing either.
+
+Add to both the trailer and the heading, as constants of a run: `device=` (the
+`cudaDeviceProp` name), `driver=` (`cudaDriverGetVersion`), `cuda=` (`cudaRuntimeGetVersion`,
+the toolkit libcudf was built with), `cudf=` (`CUDF_VERSION_MAJOR.MINOR.PATCH` from
+`cudf/version_config.hpp`), and `host=` (the machine name). The C++ side knows all four
+numbers and the Rust harness knows none, so this is one ABI query returning a struct of
+strings, priced like the `allocator=` line: `install_rmm_pool` already reports what it found,
+and this is the same shape one call earlier. The record's heading check — an append under a
+different heading is refused — then does what it should: a 26.02 row cannot land under a
+25.02 heading. `nsys_hbm.py` joins the capture onto the record's coordinates and should refuse
+a capture whose `TARGET_INFO_GPU` device name differs from the record's.
 
 <a id="t179"></a>
 ### #179 — nothing shows a rebatcher moving an enforced budget boundary
@@ -715,21 +743,36 @@ change. Land [#154](#t154) first, or the numbers are inflated by per-call copies
 
 <a id="t154"></a>
 ### #154 — every operator exit path deep-copies its output into a fresh table
-`std::make_unique<cudf::column>(view)` deep-copies the device buffer, and 18 sites under
-`cpp/src/` do it — 10 in `join.cpp` — mostly to a table the same function just produced.
+`std::make_unique<cudf::column>(view)` deep-copies the device buffer, and 21 sites under
+`cpp/src/` do it — 10 in `join.cpp`, 7 in `aggregate.cpp` — mostly to a table the same
+function just produced.
 
-`execute_hash_join` is worst: `cudf::gather` returns an owning table, the code copies each
-column into `all_cols` (~L337, ~L342), then copies the kept ones again if the node projects
+`execute_hash_join` is worst per exit: `cudf::gather` returns an owning table, the code copies
+each column into `all_cols` (~L337, ~L342), then copies the kept ones again if the node projects
 (~L376). `release()` moves instead; `scan.cpp` L103 and `join.cpp` L254 are the pattern
-(`union.cpp`'s site went with its `output_schema` block in decimal-precision-at-export); it
-is C++-internal — no header, fbs, Rust or golden moves. Four kinds: whole table
+(`union.cpp`'s site went with its `output_schema` block in decimal-precision-at-export), and it
+is C++-internal — no header, fbs, Rust or golden moves. Five kinds: whole table
 freshly produced (`join.cpp` 202, 337, 342, 512, 515), mechanical; ordinal subset (`join.cpp`
 211, 270, 376, 525, `filter.cpp` 41), needing an assert the ordinals are distinct; a column of
-an **input** table (`join.cpp` 259, `project.cpp` 44, `window.cpp` 46, `expr.cpp` 850), changing
-who destroys what under `NodeInputs`; and `aggregate.cpp` 407, 602, 604, 682, unresolved without
+an **input** table kept in the output (`join.cpp` 259, `project.cpp` 44, `window.cpp` 46),
+changing who destroys what under `NodeInputs`; a temporary that only ever needed a view
+(`expr.cpp` 834, below); and `aggregate.cpp` 413, 642, 644, 678, 680, 759, 771, unresolved without
 reading. Traps: a view taken before the release dangles (`ftv` ~L372), and a repeated projection
 ordinal moves one column twice leaving a hole — a wrong answer, not a throw, which is why it
 needs the assert and not the observation. Land before [#155](#t155).
+
+The `expr.cpp` site is the cheapest to fix and the most expensive to leave. `build_column`'s
+`ColumnRef` arm copies the whole column and the caller takes `->view()` of the copy one line
+later; every consumer (`cudf::binary_operation`, `unary_operation`, the function arms) takes
+a `column_view`, and the input table outlives the call. Returning `table.column(idx)` — or
+resolving `ColumnRef` leaves in `build_column_binary` before recursing — needs no ownership
+change. It fires once per `ColumnRef` leaf per batch on every predicate `is_ast_able` rejects
+(a decimal operand, a string literal, LIKE, CASE): q6's filter copies five lineitem columns per
+batch (`l_shipdate` ×2, `l_discount` ×2, `l_quantity`), and q19's copies string columns, offsets
+and chars. The sf40 HBM reading puts it at ~46 of the 107 GB q19's lineitem filter moves, and
+17× the useful traffic at its part filter. The `And` chain's intermediate bool columns are a
+separate cost — one kernel per node, which only fusion (JIT, or stitching back into the AST)
+removes — and not this ticket's.
 
 <a id="t152"></a>
 ### #152 — GpuHashJoin: the build handle does not survive a streamed probe
@@ -1132,6 +1175,9 @@ pool size exceeded` is ours: the budget is too small, and a re-run buys nothing.
 - 2026-09-12: CI run `34659896447` on PR #144 (`d41f223a`), `peacock_tpch_tests`: `pool of 69.0
   GiB could not be built with 14.9 GiB free` at 00:08 UTC; `peacock_tpchv_tests` four binaries
   later saw 103.0 GiB free, so a stranger held ~129 GiB for those minutes. Re-run once.
+- bp-benchmarks, dispatch 5: not CI — a non-CI process held 62 GiB and 90–98 % of the card
+  for six hours, and `peacock_gpu_benchmarks` measured q6 at six times its committed time
+  beside it. Nothing measured beside a neighbour is published; the gate ran green meanwhile.
 
 <a id="t176"></a>
 ### #176 — the CI coverage guard checks one direction only
