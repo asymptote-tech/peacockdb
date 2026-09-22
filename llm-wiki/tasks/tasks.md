@@ -27,13 +27,3 @@ device or in DataFusion's function registry.
 plan-executor cases, one harness case written first as the pin, `tpch/q7`, `q8`, `q9`. Rebased onto
 the merged chain; its PR targets master. Held by the human: the alternative is a DataFusion-side
 `ScalarUDF` replacement that declares what cuDF produces, which would make the device cast a refusal.
-
-## Chain ENS-bp-benchmarks (base: master)
-
-### 1. [`bp-benchmarks.md`](bp-benchmarks.md) — state: done — PR #139
-
-The corpus benchmark at sf40: one timing tree per (dataset, mode), one record row per cuDF
-call, two Nsight captures and the panels. The branch and PR predate the spec, so the
-coordinator picks the branch up as unfinished work rather than branching afresh: it is one
-squashed commit on master, re-homed into the component layout and never built there;
-`bp-benchmarks-detail.md` says what it holds and what the spec removes.
