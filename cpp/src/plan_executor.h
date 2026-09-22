@@ -4,6 +4,7 @@
 #include <cudf/utilities/span.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -18,53 +19,91 @@ struct TableResult {
 };
 
 /// Per-node actual costs returned across the FFI. The byte formula lives ONLY in
-/// Rust (no CPU/GPU drift): Rust applies the schema+row-derived `ColAccum`
-/// overhead and adds `varlen_content_bytes`, the one data-dependent term that only
-/// C++ can measure on the resident table.
+/// Rust (no CPU/GPU drift): Rust applies the schema+row-derived `ColAccum` overhead
+/// and adds `varlen_content_bytes`, the one data-dependent term that only C++ can
+/// measure on the resident table.
 struct NodeStats {
   uint64_t rows = 0;
   /// Σ over var-length (string) output columns of content bytes
   /// (offsets[n]-offsets[0]); additive across columns, so one total suffices.
   uint64_t varlen_content_bytes = 0;
-  /// Wall-clock microseconds this OUTPUT PARTITION's work took, measured only
-  /// when node timing is enabled (see `set_node_timing`); 0 otherwise. A node's
-  /// time is Σ over its partitions, so the caller can sum without knowing which
-  /// arm of `execute_node` produced them.
-  uint64_t time_us = 0;
 };
 
-/// Enable/disable per-node timing. OFF by default, and deliberately so: measuring
-/// device work requires SYNCHRONIZING the default stream at every measurement
-/// boundary, which serializes what cuDF would otherwise pipeline. That is the right
-/// trade for a benchmark and the wrong one for everything else.
-///
-/// Without the sync a host-side timer around a cuDF call measures kernel SUBMISSION,
-/// not execution. The one incidental sync on the node path is `varlen_content_bytes`,
-/// which reads `chars_size` back to the host, and only for STRING columns — so timings
-/// taken without this flag would be skewed by whether a node happens to output strings.
-void set_node_timing(bool enabled);
+/// How per-node regions are measured. Off by default: measuring is not free.
+enum class NodeTiming : int {
+  Off = 0,
+  /// CUDA events around the device work and the host clock around the whole call, with
+  /// no sync inside the region. Device times are not known at region close and are read
+  /// afterwards by `collect_node_regions`.
+  Events = 1,
+};
 
-/// Current state of the timing switch (see `set_node_timing`).
+/// Set the timing mode (process-global; `Off` by default).
+///
+/// Opt-in because `Events`, though cheap, still allocates an event pair per region and
+/// holds it until collection.
+///
+/// Neither mode removes every sync: `varlen_content_bytes` reads `chars_size` back, so
+/// a node with STRING outputs synchronizes regardless.
+void set_node_timing(NodeTiming mode);
+
+/// The current timing mode (see `set_node_timing`).
+NodeTiming node_timing();
+
+/// True unless the mode is `Off`.
 bool node_timing_enabled();
 
-/// Cost of the MEASUREMENT ITSELF, in microseconds: the same timed region every
-/// node pays, wrapped around no work at all (two `steady_clock` reads plus
-/// `cudaStreamSynchronize` on an already-idle stream).
+/// Emit NVTX ranges around plan nodes and their output partitions
+/// (process-global; off by default).
 ///
-/// Why a caller wants this. A node's reported `time_us` is real work PLUS one of
-/// these, and the sync's return latency is not small next to a cheap node. Without
-/// the floor printed alongside them, a reader cannot tell "this node is cheap" from
-/// "this node is below what the method can resolve" — the two look identical.
+/// A separate switch from `set_node_timing` on purpose. The two answer different
+/// questions — ranges say where a node's work is on a timeline, the modes say how long
+/// it took — and a profiled run wants the first without the second: recording an event
+/// pair is device work, and a capture would show it inside the node.
 ///
-/// Returns the SECOND-smallest of `samples` (min 2, forced), matching how the
-/// benchmark picks a run: the outright minimum is the one most likely to be a
-/// scheduling accident. Deliberately NOT subtracted from node times anywhere —
-/// subtracting a floor from numbers that are individually noisier than it would
-/// manufacture zeros and hide exactly what it claims to expose.
+/// Ranges go in our own NVTX domain, so a capture keeps them apart from the ones
+/// libcudf pushes from inside the calls they enclose.
+void set_nvtx_ranges(bool on);
+
+/// Whether ranges are being emitted (see `set_nvtx_ranges`).
+bool nvtx_ranges();
+
+/// Open a named range in peacockdb's NVTX domain that outlives the call, and close it.
 ///
-/// PRECONDITION: no concurrent execution on the default stream (it synchronizes,
-/// and it flips the global timing switch for the duration).
-uint64_t measure_timing_floor_us(unsigned samples);
+/// For a benchmark harness naming the case it is about to run, so a capture holding
+/// several cases can say which query each node range belongs to — seq numbering restarts
+/// with every plan, so the names alone cannot. No-ops while ranges are off.
+///
+/// One level: a second push without a pop replaces the first rather than nesting under
+/// it. Nothing in the engine calls either.
+void push_harness_range(const char* name);
+void pop_harness_range();
+
+/// Whether a harness range is open. Observable only so that the one-level rule above can
+/// be tested — `NvtxRanges.ASecondPushReplacesTheFirstRatherThanNesting` is the only
+/// caller, since NVTX itself reports nothing back.
+bool harness_range_is_open();
+
+/// One timed region: which call it was, and what it cost.
+///
+/// Separate from `NodeStats` because the two have different consumers. The driver reads
+/// stats on every call and needs two numbers; nothing on the execution path reads any of
+/// these. Carrying them in the returned struct made a shipping query pay for them on
+/// every output partition of every call.
+struct NodeRegion {
+  /// The node whose output this call handled. `execute_node` and
+  /// `execute_scan_rowgroups` name it; for `slice_handle` and the export it is the node
+  /// that produced the handle, which is the only seq either of those can be given.
+  uint64_t seq = 0;
+  uint64_t partition = 0;
+  /// Calls already made against this seq when this one began; 0 for the first. Per call,
+  /// so the partitions of one call share it.
+  uint64_t call_index = 0;
+  /// `steady_clock` across the whole call, this partition's region.
+  uint64_t host_us = 0;
+  /// Between the region's two CUDA events, read at collection.
+  uint64_t device_us = 0;
+};
 
 /// Σ var-length content bytes over a table's columns (see `NodeStats`).
 uint64_t varlen_content_bytes(const cudf::table_view& table);
@@ -119,6 +158,28 @@ class NodeSession {
   /// (`clamp_row_range` for the edges). The input handle is CONSUMED, as every
   /// operation on a resident table is.
   uint64_t slice_handle(uint64_t handle, uint64_t offset, uint64_t length);
+  /// Drain every region recorded since the last call, in execution order. Empty
+  /// unless the mode was `NodeTiming::Events`.
+  ///
+  /// Separate from `execute_node` because the device half of the answer does not exist
+  /// when a node returns, and from session destruction because that destroys the events.
+  /// Call it after the root export. Collected regions are released, so a second call
+  /// does not double-report.
+  ///
+  /// Throws on any CUDA error, having destroyed every event first: a region reported
+  /// with a zero it did not measure is worse than a run that fails.
+  std::vector<NodeRegion> collect_node_regions();
+
+  /// How many regions are waiting, without draining any.
+  size_t recorded_regions() const;
+
+  /// Run `body` — the FFI's IPC export over a borrowed table — inside a region of the
+  /// node that produced `handle`, so the export is a call like every other.
+  ///
+  /// A callback rather than the export itself: the arrow/IPC half lives in the FFI
+  /// translation unit and the region machinery lives here, and this is the seam that
+  /// keeps both where they are. `body` runs exactly once whatever the mode.
+  void time_export(uint64_t handle, const std::function<void()>& body);
 
   /// Register a table the caller built and return its handle — the operator harness's
   /// upload, and nothing on the production path. Test-only by contract, not by build.

@@ -189,6 +189,11 @@ fi
 
 CPP_INSTALL_DIR="${REPO_DIR}/cpp/install"
 
+# The staged rust binaries live in two directories — the gate's and the measurement's.
+# Named once because the patch loop and verify_patched both walk the list, and the two
+# naming it separately is how rust-benchmarks/ shipped unpatched under a green verifier.
+RUST_STAGING=(rust-tests rust-benchmarks)
+
 # The set of binaries to patch is DERIVED from what is actually shipped, not hardcoded.
 # It used to be a fixed list, and a new test binary (peacock_tpch_tests) was silently
 # missed: it shipped with the stock ELF interpreter and died with an instant SIGSEGV and
@@ -288,7 +293,7 @@ patch_dir() {
 }
 
 # Rust integration test binaries (cargo test --no-run output, staged by
-# build-test-shadgpu.sh / CI under cpp/install/rust-tests/). They live one
+# build-test-shadgpu.sh / CI under cpp/install/rust-tests/ and rust-benchmarks/). One
 # directory deep next to cpp/install/lib, so $ORIGIN/../lib resolves
 # libpeacock_gpu.so. Filenames vary, so we ELF-detect by trying patchelf.
 patch_rust_dir() {
@@ -340,8 +345,12 @@ patch_rust_dir() {
 # instead of trusting the loop. Every shipped executable must carry the patched
 # interpreter; name the ones that don't and fail here, where the cause is obvious.
 verify_patched() {
-  local unpatched=() f interp
-  for f in "${CPP_INSTALL_DIR}"/bin/* "${CPP_INSTALL_DIR}"/rust-tests/*; do
+  local unpatched=() f interp d
+  local shipped=("${CPP_INSTALL_DIR}"/bin/*)
+  for d in "${RUST_STAGING[@]}"; do
+    shipped+=("${CPP_INSTALL_DIR}/${d}"/*)
+  done
+  for f in "${shipped[@]}"; do
     [ -f "$f" ] && [ -x "$f" ] || continue
     interp="$(patchelf --print-interpreter "$f" 2>/dev/null || true)"
     [ -n "$interp" ] || continue          # not an ELF executable
@@ -362,7 +371,9 @@ verify_patched() {
 
 patch_dir "$CPP_BUILD_DIR" "build"
 patch_dir "$CPP_INSTALL_DIR" "install"
-patch_rust_dir "${CPP_INSTALL_DIR}/rust-tests"
+for dir in "${RUST_STAGING[@]}"; do
+  patch_rust_dir "${CPP_INSTALL_DIR}/${dir}"
+done
 verify_patched
 
 echo ""

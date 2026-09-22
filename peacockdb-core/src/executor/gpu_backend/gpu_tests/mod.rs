@@ -24,11 +24,11 @@ use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 
 use crate::plan::{AggCall, PlanAgg};
 
-use crate::executor::RowRange;
+use crate::executor::{Region, RowRange, collect_regions};
 
 use crate::plan::{BinaryOp, Expr, NamedExpr};
 
-use super::{GpuExec, GpuExport};
+use super::{CallSite, GpuExec, GpuExport};
 
 use crate::plan::ColumnOrder;
 
@@ -42,7 +42,7 @@ use crate::plan::ScanMetadata;
 
 use crate::plan::RowGroupMeta;
 
-use crate::wire::{AbiSymbol, Recipe, RecipePlan, attach_recipes};
+use crate::wire::{AbiSymbol, Recipe, RecipePlan, Seq, attach_recipes};
 
 use crate::plan::Schema;
 
@@ -176,15 +176,32 @@ impl Session {
         Self { executor, recipes }
     }
 
-    /// The scan's one batch, by the call its own recipe names. The source is driven here
-    /// rather than by an executor because nothing in this task owns one.
-    fn scan(&self, groups: &[u32]) -> GpuBatch {
+    /// Where an executor drawn from this session sits: these tasks build one at a time,
+    /// so the place is the same for all of them and only the session pointer carries.
+    fn site(&self) -> CallSite {
+        CallSite { executor: self.executor, node: 0, lane: 0 }
+    }
+
+    /// What the device recorded, drained while the plan is still open — `end_plan`
+    /// destroys the events.
+    fn regions(&self) -> Vec<Region> {
+        collect_regions(self.executor).expect("the session answers with its regions")
+    }
+
+    /// The seq the scan addresses, which every handle in these trees comes out of.
+    fn scan_seq(&self) -> Seq {
         let recipe = self.recipes.get(0).expect("the scan is the first node");
         let [call] = recipe.calls.as_slice() else {
             panic!("a scan's recipe is one call per batch")
         };
         assert_eq!(call.symbol, AbiSymbol::ExecuteScanRowGroups);
-        let (seq, _) = call.target.expect("a scan addresses its own node");
+        call.target.expect("a scan addresses its own node").0
+    }
+
+    /// The scan's one batch, by the call its own recipe names. The source is driven here
+    /// rather than by an executor because nothing in this task owns one.
+    fn scan(&self, groups: &[u32]) -> GpuBatch {
+        let seq = self.scan_seq();
         let mut handle = 0u64;
         let mut stats = PeacockNodeStats::default();
         let rc = unsafe {
@@ -198,14 +215,23 @@ impl Session {
             )
         };
         assert_eq!(rc, 0, "the scan failed: {}", error_of(self.executor));
-        GpuBatch::new(self.executor, handle, stats.rows as usize, 0)
+        GpuBatch::new(self.executor, handle, seq, stats.rows as usize, 0)
     }
 
     /// The executor for the node at `index` in the tree's post-order, which is what the
-    /// recipes are indexed by.
+    /// recipes are indexed by. For the nodes that make one call, which is every exec node
+    /// but an aggregate with a finalize.
     fn exec(&self, index: usize, schema: &ArrowSchema) -> GpuExec {
         let recipe = self.recipes.get(index).expect("the node makes ABI calls");
-        GpuExec::new(self.executor, recipe, schema).expect("the recipe is an exec node's")
+        GpuExec::new(self.site(), recipe, None, schema).expect("the recipe is an exec node's")
+    }
+
+    /// The same, for the node whose calls chain: `state` is what the call before the last
+    /// answers with, and nothing builds a batch from it.
+    fn chaining_exec(&self, index: usize, state: &ArrowSchema, schema: &ArrowSchema) -> GpuExec {
+        let recipe = self.recipes.get(index).expect("the node makes ABI calls");
+        GpuExec::new(self.site(), recipe, Some(state), schema)
+            .expect("the recipe is an exec node's")
     }
 
     /// The accumulator for the node at `index`, built from the recipe that node published.
@@ -218,7 +244,7 @@ impl Session {
     }
 
     fn export(&self, schema: &ArrowSchema) -> GpuExport {
-        GpuExport::new(self.executor, schema)
+        GpuExport::new(self.site(), schema)
     }
 }
 
@@ -282,6 +308,21 @@ fn one_node(tree: Box<dyn GpuNode>, out: &ArrowSchema) -> CpuBatch {
     let session = Session::open(tree.as_ref());
     let batch = session.scan(&ROW_GROUPS);
     let (produced, _) = session.exec(1, out).exec(batch).expect("the node runs");
+    export_of(&session, produced, out)
+}
+
+/// The same for a node whose calls chain — see [`Session::chaining_exec`].
+fn one_chaining_node(tree: Box<dyn GpuNode>, state: &ArrowSchema, out: &ArrowSchema) -> CpuBatch {
+    let session = Session::open(tree.as_ref());
+    let batch = session.scan(&ROW_GROUPS);
+    let (produced, _) = session
+        .chaining_exec(1, state, out)
+        .exec(batch)
+        .expect("the node runs");
+    export_of(&session, produced, out)
+}
+
+fn export_of(session: &Session, produced: GpuBatch, out: &ArrowSchema) -> CpuBatch {
     let (result, _) = session
         .export(out)
         .unload(produced, RowRange::WHOLE)

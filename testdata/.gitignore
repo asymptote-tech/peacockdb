@@ -4,3 +4,20 @@
 # testdata/goldens/<dataset>.sf<N>/ (the unanchored form caught those too).
 /tpch.sf*/
 /tpcds.sf*/
+
+# Calibration output: the text is committed, the captures are not, and the line between
+# them is size against regenerability. The three .tsv files and the panels are the
+# measurement, rewritten in place by each collection so `git diff` shows how the numbers
+# moved; llm-wiki names the script that writes each. Ignored: the nsys exports, hundreds
+# of megabytes of binary git cannot diff, and the counters pass's own record, whose
+# microseconds are a profiler's.
+# Deny-by-default, so a new file here is ignored until someone says otherwise. The
+# directory and its contents are re-included as two lines: git re-includes a directory
+# happily, but its own documented rule says a file under an excluded parent cannot be, and
+# third-party matchers implement that rule and grey out plots/ entirely.
+/calibration/*
+!/calibration/records.tsv
+!/calibration/hbm.tsv
+!/calibration/calls.tsv
+!/calibration/plots/
+!/calibration/plots/**

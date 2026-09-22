@@ -179,11 +179,11 @@ fn an_aggregate_that_finalizes_runs_both_of_its_calls() {
             ],
             finalize: Some(vec![NamedExpr::new(average, "avg(v)")]),
         },
-        Schema::new(Arc::new(state_columns)),
+        Schema::new(Arc::new(state_columns.clone())),
         Schema::new(Arc::new(out.clone())),
     );
     assert_eq!(
-        by_key(&one_node(Box::new(node), &out)),
+        by_key(&one_chaining_node(Box::new(node), &state_columns, &out)),
         vec![
             vec![string("a"), ScalarValue::Float64(Some(4.0))],
             vec![string("b"), ScalarValue::Float64(Some(3.0))],
@@ -297,8 +297,9 @@ fn a_recipe_whose_calls_wait_for_done_is_refused_by_an_exec_executor() {
     ));
     let recipes = attach_recipes(tree.as_ref()).expect("the payloads are writable");
     let refused = match GpuExec::new(
-        std::ptr::null_mut(),
+        CallSite { executor: std::ptr::null_mut(), node: 0, lane: 0 },
         recipes.get(1).expect("the accumulator makes ABI calls"),
+        None,
         &columns(),
     ) {
         Err(refused) => refused,

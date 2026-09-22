@@ -11,7 +11,7 @@ use datafusion::arrow::ipc::reader::StreamReader;
 use crate::executor::GpuBatch;
 use crate::planner;
 use crate::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};
-use crate::wire::{AbiSymbol, attach_recipes};
+use crate::wire::{AbiSymbol, Seq, attach_recipes};
 use crate::{build_session_state, register_tables_for};
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,
@@ -232,6 +232,7 @@ async fn a_dropped_batch_releases_its_handle_and_a_consumed_one_does_not() {
     drop(GpuBatch::new(
         plan.executor,
         dropped,
+        plan.scan_seq as Seq,
         stats.rows as usize,
         0,
     ));
@@ -241,7 +242,8 @@ async fn a_dropped_batch_releases_its_handle_and_a_consumed_one_does_not() {
     );
 
     let (kept, stats) = plan.scan(&[1]);
-    let (executor, handle) = GpuBatch::new(plan.executor, kept, stats.rows as usize, 0).consume();
+    let (executor, handle) =
+        GpuBatch::new(plan.executor, kept, plan.scan_seq as Seq, stats.rows as usize, 0).consume();
     assert_eq!(handle, kept);
     assert_eq!(executor, plan.executor);
     assert!(
