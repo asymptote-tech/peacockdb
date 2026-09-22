@@ -18,6 +18,722 @@ retargeted to master when that base merged.
 
 ---
 
+<!-- archived from llm-wiki/tasks/driver-output-hook.md -->
+
+**Merged 2026-09-21 as PR #163, squashed to `7583865e`, fast-forwarded onto master after its parent.**
+
+# The driver lets a caller look at every batch a node emits
+
+Kind: production
+
+**Testing infrastructure; closes no ticket.** One production change — the driver accepts a hook
+called on every emitted batch — and everything that uses it lives under the `test-support`
+feature: a validator that holds each device batch to its node's declared schema, driver unit
+tests over a mock, and a corpus switch that turns the validator on for every cell already
+enabled. Sixth and last of chain B; uses [`device-schema-harness.md`](device-schema-harness.md)'s
+comparator and reader.
+
+## Why
+
+Between the scan and the sink nothing on the device compares a produced type to a declared one
+([`reports/sink-divergence.md`](../reports/sink-divergence.md) §4: a divergence born at a
+`GpuProject` rides through eight nodes and surfaces only if the column is projected out). The
+harness now checks nodes one at a time; the corpus runs whole plans. A hook at the driver's
+emission sites is what lets the corpus check every node of every enabled query at every mode,
+for the price of one schema fetch per batch — and only when asked.
+
+## The work
+
+1. **The hook.** `executor/driver/partitioned.rs`: `Driver<'a, B>` holds
+   `hook: Option<OutputHook<'a, B>>` where
+
+       pub(crate) type OutputHook<'a, B> =
+           Box<dyn FnMut(usize /*node*/, usize /*lane*/, &<B as Backend>::Batch) -> Result<(), String> + 'a>;
+
+   called wherever a node's *own* output is queued: the lane's device and host arms
+   (`:314`, `:324`), the emitter's per-lane outputs (`:391`), and the partition accumulator's
+   (`:448`) — after `record_emitted`, before the queue or release. The forwarder at `:495`
+   moves a child's batch between queues and is not an emission; it is left alone. `Err(message)`
+   becomes a `StepError` naming node, lane and the message — the run fails there as a call
+   failure does. `driver::run_with_hook` and `partitioned::run_with_hook` are added beside
+   `run` (which calls them with `None`), and `executor::run_with_hook` is the `pub(crate)`
+   facade — `pub` would need a `SURFACE` entry (`test_module_layout/visibility.rs:37`) and no
+   caller outside the crate exists. With `None` nothing changes: no allocation, no branch
+   beyond the `Option`. `single_partition.rs` has no `run` of its own and is untouched.
+2. **The validator**, in `test_support/schema_validation.rs` under the `test-support` feature
+   and `#[cfg(not(feature = "rust-only"))]` (gated like `corpus_gpu`; `cfg(test)` would hide
+   it from `tests/test_gpu_corpus.rs`, which links the library without it):
+   `gpu_schema_validator<'a>(index: &'a PlanIndex<'a>) -> OutputHook<'a, GpuBackend>` — for
+   each `GpuBatch` it calls `device_schema::schema_of(&batch)` (the batch carries its executor
+   and handle; no device object is needed) and `device_divergence(node's declared schema,
+   actual)`, returning the divergence string on mismatch; a sink's host batches are skipped —
+   the sink node has no schema and `concat_batches` already checks them. A
+   `cpu_schema_validator` compares `batch.schema()` under the same projection, for symmetry and
+   the end-to-end test; the CPU backend's own `declared_as` already holds every stage, so it is
+   not installed in the cpu corpus.
+3. **Driver unit tests**, `executor/driver/tests/hook.rs`, rust-only over `tests/mock.rs`
+   (whose `MockBatch` is rows and bytes, no schema — so the hook under test is a closure, not
+   the validator): a hook that refuses at a chosen node and lane — the run fails there with
+   the hook's message; the same plan with an accepting, counting hook — called once per
+   emitted batch and the run passes; the same plan with `None` — the report equals `run`'s;
+   a hook that refuses the third batch — the failure names the third batch's node and lane.
+4. **The corpus switch.** `corpus_query!` gains a trailing argument,
+   `schema_validation_enabled | schema_validation_disabled`, in both `test_gpu_corpus.rs` and
+   `test_cpu_corpus.rs` (the cpu macro ignores it); `gpu_case` installs `gpu_schema_validator`
+   when enabled. `corpus_cases.inc`: every row whose gpu modes are not `none` says
+   `schema_validation_enabled`. A cell that then fails on schema while its values match gets
+   `schema_validation_disabled` with `// #NNN` on its line and a ticket — the registry cell
+   stays `enabled`, so coverage does not move. Expected: none, since tasks 1–4 cleared the
+   known classes; the switch is for the queries a later rollout enables.
+5. **Verification on a device.** The enabled corpus at its enabled modes with validation on —
+   CI's gpu job as it stands. Plus, once and not committed: an ad hoc device case whose
+   hand-built plan declares a wrong type at one `GpuProject`, run through `run_with_hook` with
+   the validator to show the hook failing that node by name; the run's output goes into the
+   detail file. The `cpu_schema_validator` gets one committed end-to-end test in
+   `src/tests/end_to_end/`: a small query passes under it, and a hook comparing against a
+   schema with one field retyped fails naming the field.
+
+## Scope
+
+| file | change |
+|---|---|
+| `peacockdb-core/src/executor/driver/partitioned.rs`, `driver/mod.rs`, `executor/mod.rs` | the hook; `run_with_hook` beside `run` |
+| `peacockdb-core/src/executor/driver/tests/hook.rs` (new) | the four mock tests |
+| `peacockdb-core/src/test_support/schema_validation.rs` (new), `test_support/mod.rs`, `src/tests/end_to_end/` | the validator; its cpu end-to-end test |
+| `peacockdb-core/tests/test_gpu_corpus.rs`, `test_cpu_corpus.rs`, `tests/common/corpus_cases.inc` | the argument; every enabled row |
+| `llm-wiki/architecture.md`, `build-test.md` | the driver section names the hook; counts |
+
+Component-level API: `run_with_hook` beside `run` at three levels (`pub(crate)`); the
+`OutputHook` type. `run` itself is unchanged. No wire change, no ABI change, no facade change.
+
+## Restriction
+
+The hook is the only production change. No validation code outside the `test-support`
+feature; no default hook; no change to what the driver does with a batch beyond calling the
+hook first. The ad hoc trigger case is not committed.
+
+## Verification bar
+
+- rust-only: `--lib` — the four mock tests and the cpu end-to-end test; `test_module_layout`;
+  `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- --list` (the
+  macro expands with its new argument) and `-- registry` (the registry guard, which reads the
+  csv, not the macro).
+- device: the enabled corpus at `tp1_single` and `tp4_single` with validation on, green; the ad
+  hoc trigger red at its node, recorded.
+- `git diff` of `executor/driver/` shows the hook and nothing else.
+
+## Device workflow
+
+`build-test-shadgpu.sh`, the corpus binaries; one cycle plus the ad hoc run.
+
+## Completeness signoff — 2026-09-17
+
+Solved under its constraints: `run_with_hook` beside `run` at three levels, `pub(crate)`, the
+one production change; with `None` the driver does exactly what it did; a refusal ends the
+query as a failed call does and releases the refused batch where it was refused, pinned by a
+mock test over every site; the validator under `test-support` holds each device batch to its
+node's declared schema through task 5's reader and comparator, with four mock tests and the
+cpu twin's end-to-end pair; every enabled device cell runs with validation on and is green,
+the ad hoc trigger red at its `GpuProject` by name and not committed. Shortcuts or bandaids:
+none. Deviations, on record: three of the spec's four emission sites are hooked — the unload's
+host batches are a `CpuBatch` a hook on `B::Batch` cannot take, and were to be skipped;
+`OutputHook` lives in `executor/mod.rs` so `test_support` can name it; `tpch/shuffle-stddev`
+runs with validation off on #225, its registry cell untouched. `done` waits on CI; with it the
+chain is complete.
+
+
+---
+
+<!-- archived from llm-wiki/tasks/device-schema-harness.md -->
+
+**Merged 2026-09-21 as PR #162, squashed to `0e7804ef`; moved off date-part-return-type onto aggregate-state-types before the merge, its three `date_part` schema cases re-pinned on #191 (date-part-return-type stays open as PR #161).**
+
+# What the device holds, read at the node
+
+Kind: production
+
+**Testing only; closes no ticket and fixes nothing.** A helper that reads a cuDF table's schema
+into Rust, a comparator that holds it against the node's declared schema under the projection
+cuDF can express, and the cases that use them — at every operator family and at chosen calls
+inside the recipe walk. Fifth of chain B, after the four fixes, which is why its comparisons can
+be exact: after them a red case is a defect, not a known class. A simpler replacement for the
+rejected `declared-schemas`, which measured per call against declarations that had to be
+invented; this measures against the declarations the plan already has.
+
+## The helpers
+
+1. **Interop.** `peacock_handle_schema(executor, handle, out_ipc, out_len)` — the IPC
+   *schema message* alone for the handle's table — already exists: `decimal-precision-at-export`
+   declared it on the chain's one header rebuild, with its two gtests, and nothing in Rust
+   calls it until here.
+2. **The reduced schema**, in `peacockdb-core/src/test_support/device_schema.rs`, under the
+   `test-support` feature like its neighbours and `#[cfg(not(feature = "rust-only"))]` for
+   the part that touches a handle:
+
+       pub struct DeviceType { pub id: TypeId, pub scale: Option<i32> }   // cuDF's data_type
+       pub struct DeviceSchema(pub Vec<(String, DeviceType)>);
+       pub fn device_type_of(arrow: &DataType) -> DeviceType;             // the projection
+       pub fn device_schema_of(declared: &Schema) -> DeviceSchema;
+       pub fn device_divergence(declared: &Schema, actual: &DeviceSchema) -> Option<String>;
+       pub fn schema_of(batch: &GpuBatch) -> DeviceSchema;                // not(rust-only)
+
+   `TypeId` mirrors `cudf::type_id` for the types the wire admits. `device_type_of` is the
+   fixed mapping cuDF's interop implements for those types — identical in 25.02 and the
+   vendored 25.10, which differ only in view and narrow-decimal arms the wire no longer has:
+   `Utf8/LargeUtf8 → STRING`, `Decimal128(_, s) → DECIMAL128/s`, `Date32 → TIMESTAMP_DAYS`,
+   `Timestamp(unit, _) → TIMESTAMP_<unit>`, integers and floats by width, `Boolean → BOOL8`,
+   `Null → EMPTY`; a type with no cuDF image panics naming it. `device_divergence` (named apart
+   from `executor/errors.rs`'s `schema_divergence`) compares by position, name and
+   `DeviceType`, and reports every diverging column in the sink's spelling
+   (`3 o_year: Int32 vs INT16`). Precision, timezone and nullability are outside the projection
+   on purpose: after tasks 1–2 they are labels the export carries, not facts the device holds.
+   `schema_of` calls `peacock_handle_schema` on the batch's executor and handle (a `GpuBatch`
+   carries both), decodes the schema through `arrow::ipc` and projects. It lives in
+   `test_support`, not under `src/tests/`' `cfg(test)`, because the corpus binary and the
+   next task's validator must see it.
+3. **Reading a handle from the harness**: `Device::schema_of(&GpuBatch)` in
+   `tests/gpu_tests/device.rs` and the walk's `Session::schema_of(handle)` both delegate to
+   `test_support::device_schema::schema_of`.
+
+## The cases
+
+**Every existing case stays as it is.** No green case gains an assertion; no `bug_` case
+changes what it pins. Every schema check is a new, separately named case, so the count grows and
+nothing is retyped. A new case that is red is a `bug_` with a ticket naming the producer.
+
+- **Operator harness**, one new file per family beside the existing ones
+  (`src/tests/gpu_tests/<family>_schema_cases.rs`): for each node kind the family drives, a case
+  that runs the node on the device alone and asserts `device_divergence(declared,
+  schema_of(output handle)) == None` — join (each type, with and without a projection, on each
+  key type, reusing join-cases' `keyed`/`hash_join_keyed` builders, which chain E merges
+  before this chain starts), aggregate (init, merge, finalize; `sum`, `count`, `min`, `max`,
+  `avg`, `stddev`; grouped and global), project (arithmetic on each numeric type, each cast the
+  corpus uses, each scalar function the dispatch admits), filter, coalesce-all, emit (each key
+  type), sort, scan (each parquet column type of the fixtures). A union is a forwarder with no
+  executor (`coverage.rs:37`) and cannot be run alone: the case `union.cpp`'s deleted block
+  described — two branches whose same-named column differs in cuDF type — is two per-branch
+  `GpuProject` casts, each checked. Names say the node and the type:
+  `a_sum_over_a_decimal_declares_the_state_the_device_holds`.
+- **Walk spot-checks**, in `wire/gpu_tests/mod.rs`: `Walk::make` takes an `on_call(seq, kind,
+  &[handle], &Session)` hook; each check is a named test that drives one of the file's queries
+  with a hook that reads `schema_of` after one call and asserts a literal `DeviceSchema`.
+  Intermediates have no declaration, so each expectation is written by hand with its reason;
+  the state column order and names come from the query's plan golden (`aggregates.rs:64`
+  orders `avg`'s state `[$sum, $count]`):
+
+  | query | after | expected |
+  |---|---|---|
+  | `AVG_BY_FLAG` | `CudfAggregate{Partial}` | `[l_returnflag STRING, avg$sum DECIMAL128 s=2, avg$count INT64]` |
+  | `AVG_BY_FLAG` | `CudfAggregate{Merge}` | the same |
+  | `AVG_BY_FLAG` | the finalize `CudfProject` | `[STRING, DECIMAL128 s=6]` |
+  | `SUM_BY_FLAG` | `CudfAggregate{Partial}` | `[STRING, DECIMAL128 s=2]` |
+  | `ROLLUP` | the grouping-set aggregate | `[STRING, STRING, INT32, DECIMAL128 s=2]` — a `bug_` naming [#65](../tickets.md#t65): the plan says `UInt8` |
+  | `PROJECT_OVER_FILTER` | `CudfFilter` | `[c_custkey INT64, c_nationkey INT64]` |
+  | `PROJECT_OVER_FILTER` | `CudfProject` | `[doubled INT64]` |
+  | `INNER_JOIN` | the join call | `[n_name STRING, r_name STRING]` plus the keys the recipe keeps, in recipe order |
+  | `MAX_OF_SUMS` | the inner finalize | `[per_flag DECIMAL128 s=2]` |
+  | `MAX_OF_SUMS` | the outer `max` | `[DECIMAL128 s=2]` |
+  | `SEMI_JOIN` | the single join call | `[c_custkey INT64]` |
+
+  Eleven checks. **The risk here is enshrining wrong behaviour**: an intermediate has no
+  declaration to be held to, so the only thing standing between "what the device holds" and
+  "what it should hold" is the expectation written above. A spot-check whose device answer
+  differs from the table is therefore never made green by editing the expectation to match
+  the device. It becomes a `bug_` test asserting what the device *does* hold, with a ticket
+  naming what it *should* and why (the plan's declared type for the column at the nearest
+  declared node, DataFusion's type for the same expression, or the table's reasoning), and
+  the table's row is corrected to say both. The coordinator and the reviewer read every
+  spot-check with that question: is this expectation the engine's contract, or the engine's
+  habit? A green spot-check whose expectation was derived by running the device first is the
+  habit, and is a finding against the task.
+
+## Scope
+
+| file | change |
+|---|---|
+| `peacockdb-core/src/test_support/device_schema.rs` (new), `test_support/mod.rs` | the reduced schema, the comparator, `schema_of`, with unit tests of the projection |
+| `peacockdb-core/src/tests/gpu_tests/device.rs`, `*_schema_cases.rs` (new) | `Device::schema_of` delegating; the suite |
+| `peacockdb-core/src/wire/gpu_tests/mod.rs` | the hook; the spot-checks |
+| `llm-wiki/build-test.md`, `tickets.md`, `active-tickets.md` | the suite's rows; every new `bug_`'s ticket |
+
+Component-level API: `test_support::device_schema` (under the `test-support` feature). No ABI
+or wire change — `peacock_handle_schema` arrived with task 2. No production Rust or C++
+behaviour changes.
+
+## Restriction
+
+No fix rides along: a red case is a ticket. No existing case is edited. The comparator projects
+exactly what cuDF stores — a wider comparison belongs to the sink, a narrower one hides bugs.
+No spot-check expectation is written from a device run: the eleven rows are written from the
+plan and DataFusion before the first cycle, and a row that the device contradicts is pinned as
+`bug_`, not rewritten.
+
+## Verification bar
+
+- rust-only: `--lib` (the projection's unit tests), `test_module_layout` (the new files are
+  where the layout rules put them).
+- device: the whole harness, old cases untouched and green, new suite green or pinned; the
+  walk file green with the spot-checks.
+- `build-test.md`'s counts grow by the new cases exactly.
+
+## Device workflow
+
+`build-test-shadgpu.sh`; expect two or three cycles, since the suite is written family by
+family.
+
+## Completeness signoff — 2026-09-17
+
+Solved under its constraints: `test_support::device_schema` projects a declared schema onto
+cuDF's `{type_id, scale}`, reads a handle's through `peacock_handle_schema`, and names every
+diverging column in the sink's spelling, with the projection's unit tests rust-only; 134 schema
+cases across the eight families, each run on the device alone, and eleven walk spot-checks
+whose expectations were written from the plan goldens before the first device cycle — the
+reviewer found each derivable from the goldens and `state_type` alone. Every existing case is
+untouched beyond `pub(crate)` on 45 builders. Two reds became pins with tickets (#225 new, #65)
+and no fix rode along. Shortcuts or bandaids: none. Deviations, on record: the facade items
+live in `test_support/mod.rs` by the layout rule; `GpuBatch::executor()` is one production
+accessor, its test-only twin deleted; three spot-check rows read from the plan differently from
+the spec's table and are recorded as read; Left and Full hash joins have no case, refusing their
+first probe batch (#152). A narrow decimal at a handle is refused by arrow-rs before the decode
+— loud, naming no column — which the record states. `done` waits on CI.
+
+
+---
+
+<!-- archived from llm-wiki/tasks/aggregate-state-types.md -->
+
+**Merged 2026-09-21 as PR #160, squashed to `a08c9453`.**
+
+# An aggregate's state is typed by the aggregator that produces it
+
+Kind: production
+
+**This task closes [#163](../tickets.md#t163)** — both arms: `avg` and Welford declare their
+count state `UInt64` while both engines produce `Int64`, and the decimal `avg` finalize is typed
+by arrow wider than the output it declares. Third of chain B.
+
+## Why it happens
+
+`decompose` (`planner/translator/aggregate.rs:126-157`) builds the partial node's state schema
+from DataFusion's `state_fields()` — the layout of DataFusion's *own* accumulator — and
+`declared_state` (`:74-92`) picks the field by name tag. But this engine does not run that
+accumulator: `decomposition` (`plan/aggregates.rs:36`) rewrites `avg` into `PlanAgg::Count` +
+`PlanAgg::Sum` and `stddev`/`var` into `Count` + `Mean` + `M2`, and our `Count` is `Int64` on
+both backends — cuDF reduces `COUNT_VALID` to INT64 (`aggregate.cpp:262-265`, the Welford path
+`:764-771`), the CPU's `avg` count comes from DataFusion's `count` UDAF (`count.rs:165`, `Int64`)
+while its Welford count comes from the `stddev`/`var` UDAF (`variance.rs:115`, `UInt64`). The
+declaration names one producer and the plan runs another. On the device nothing checks between
+calls, so the state divides fine and the mismatch reached no sink in the survey; on the CPU
+`check_state_layout` (`cpu_backend/mod.rs:441-442, 528-552`) refuses it at construction, before
+any batch, which is why 23 rows have every `cpu_*` and `gpu_*` cell disabled.
+
+`avg`'s `$sum` state is the same defect on a decimal: DataFusion's `state_fields()` declares it
+at the *input* type (`average.rs:154-166`, `avg(x)$sum: Decimal128(7, 2)` in today's goldens),
+but the CPU produces it through the `sum` UDAF at `(p + 10, s)`, and only the `widened_decimal`
+escape in `check_state_layout` lets that through. Typing the state by its producer moves that
+column too.
+
+The finalize arm is the same principle at the next function: `finalize`'s `Avg` case
+(`aggregates.rs:80-101`) casts both operands and stamps the divide with `out_type`, but what
+arrow computes for `Decimal128(p,s) / Decimal128(p,0)` is wider — `(26,10)` where `(22,6)` is
+declared — and the plan never asked for the narrowing.
+
+## The work
+
+1. **The rule.** In `plan/aggregates.rs`, beside `decomposition`:
+
+       impl PlanAgg {
+           pub(crate) fn state_type(self, input: &DataType) -> Result<DataType, PlanError>
+       }
+
+   matched without a wildcard, so a new variant does not compile until it says its type:
+   - `Sum` — DataFusion's `sum::return_type`, quoted: `Decimal128(p, s) → Decimal128(min(38,
+     p + 10), s)`; signed integers `→ Int64`; unsigned `→ UInt64`; floats `→ Float64`; anything
+     else `PlanError::Unsupported("sum over <type>")`.
+   - `Min`, `Max` — the input type.
+   - `Count` — `Int64`.
+   - `Mean`, `M2` — `Float64`.
+   - `MergeM2` — `unreachable!("MergeM2 merges the Welford triple and declares no state")`.
+     It is a merge rule, not a state producer: it appears only as `Merge::Combined` and never
+     in a `state` slice, and `state_type` is called over `state` slices alone. That is a
+     convention today; the test in 5 makes it a check.
+2. **Use it.** `decompose` builds each state `Field` as `Field::new(name, state_type(arg)?,
+   nullable)`; the name suffix is `rule.state`'s already, and `state_fields()` supplies arity
+   and nullability only. `declared_state` stops returning a type.
+3. **The one producer that moves.** The CPU's Welford init runs DataFusion's `stddev`/`var`
+   UDAF, whose count is `UInt64`. The refusal is `check_state_layout` at construction
+   (`cpu_backend/mod.rs:441`), so a cast on a batch cannot help: the init becomes a
+   `ProjectionExec` over the `AggregateExec` with `CastExpr(col($count), Int64)` for that
+   column and pass-through for the rest, and `check_state_layout` reads the projection's
+   schema. `merge_m2.rs:44-76`'s declared layout follows the derived one. The device changes
+   nowhere: its casts already say `Int64`. `widened_decimal` stays: the *merge* still produces
+   `sum`'s wider type over an already-widened state, which is the escape's remaining reason.
+4. **The finalize.** `finalize`'s `Avg` arm wraps the divide: `Expr::Cast { expr: divide,
+   target: out_type }`. The device's pre-scaling (`expr.cpp:587-602`) already lands on the
+   declared scale; the CPU stops refusing.
+5. **Tests.** `plan/aggregates/tests.rs`: for each `PlanAgg` arm, run the CPU accumulator over a
+   four-row batch of the arm's input type and assert the produced array's `data_type()` equals
+   `state_type(arg)` — the "derived from its producer" half that keeps the table honest; plus
+   `Sum` over `Decimal128(15, 2)` declares `(25, 2)` and over `Utf8` is refused. One more
+   test walks `decomposition(func)` for every `AggFunc` and calls `state_type` on every entry
+   of every `state` slice and every `Merge::PerColumn` list — so the whole table is exercised
+   and `MergeM2`'s `unreachable!` is proven unreachable across every decomposition that
+   exists, not assumed. And the producer half: for every `AggFunc`, the CPU init built by
+   `init_aggregates` over a small batch has the schema `state_type` derives, exactly — the
+   test that `check_state_layout` would now pass without its decimal escape for inits. The
+   three `bug_` pins flip and retire with the ticket:
+   `bug_a_welford_init_exports_its_count_as_int64`,
+   `bug_a_welford_merge_exports_its_count_as_int64` (`gpu_tests/aggregate_cases.rs:263, 570`)
+   and `bug_a_decimal_average_is_refused_on_the_cpu`. (`aggregate_cases.rs:294` is #187's pin,
+   the previous task's.)
+6. **Goldens.** Three classes and no other: every `avg`/`stddev`/`var` plan golden changes its
+   count state column `UInt64 → Int64`; every decimal `avg`'s `$sum` state moves from the
+   input type to `sum`'s `(p + 10, s)`; the `avg` finalize gains a cast in
+   `recipe-payloads.txt`. Regenerate rust-only; a diff line outside those three is a finding.
+
+## Scope
+
+| file | change |
+|---|---|
+| `peacockdb-core/src/plan/aggregates.rs`, `plan/mod.rs` | `state_type`; the finalize cast |
+| `peacockdb-core/src/planner/translator/aggregate.rs` | `decompose` derives; `declared_state` shrinks |
+| `peacockdb-core/src/executor/cpu_backend/mod.rs`, `merge_m2.rs` | the init's `ProjectionExec`; layout follows |
+| `peacockdb-core/src/plan/aggregates/tests.rs` (new), `executor/cpu_backend/tests/`, `tests/gpu_tests/aggregate_cases.rs` | the table tests; the producer test; three pins retired |
+| `testdata/goldens/**`, `recipe-payloads.txt` | regenerated |
+| `testdata/cost-registry.csv`, `tests/common/corpus_cases.inc` | the 23 rows |
+| `llm-wiki/tickets.md`, `build-test.md`, `architecture.md` | #163 closed; counts; the aggregate paragraph says states are typed by `state_type` |
+
+Component-level API: `PlanAgg::state_type`, `pub(crate)`. No wire change — the state schema is
+already fields on the wire. No ABI change.
+
+## Restriction
+
+Output types stay DataFusion's — `finalize`'s `out_type` is the SQL contract and is not derived.
+`Sum`'s decimal rule is quoted from DataFusion, not reinvented. No change to `aggregate.cpp`;
+[#94](../tickets.md#t94) stays open and version-gated. Nothing casts a count to `UInt64`
+anywhere.
+
+## Registry
+
+The 23 rows naming #163 at `tp1_single` on both backends: enabled where the CPU stops refusing
+and the device's values match; a ticket where they do not; `163` struck from a row only when no
+disabled cell in it is left without a ticket (`registry.rs:229-240`). Then the other four modes
+for those that pass.
+
+## Verification bar
+
+- rust-only: `--lib` (the producer tests, the validation tests, plan goldens), `test_cpu_corpus`
+  over the 23 rows' cpu cells.
+- device: the harness with the four pins gone; the rollout.
+- `git diff --stat testdata/goldens` shows only `avg`/`stddev`/`var` queries, and the diff's
+  lines are the three classes above.
+
+## Device workflow
+
+`build-test-shadgpu.sh`, one cycle for the harness, one for the rollout.
+
+## Completeness signoff — 2026-09-17
+
+Solved under its constraints: `PlanAgg::state_type` types every state column by its producer,
+matched without a wildcard, `Sum`'s decimal rule quoted from DataFusion; `decompose` takes only
+arity and nullability from `state_fields()`; the cpu's Welford init casts its count to `Int64`
+as a second stage and `check_state_layout` admits the widened decimal at a merge alone, both
+pinned red-then-green; three device pins retire as positive cases; 33 goldens move in the three
+classes and no other; 23 rows roll out with `163` struck from every one, 19 green on the cpu at
+all five modes and four on the device. Two deviations, each with its reason on record: the
+finalize divides the bare sum and casts the quotient, since arrow's decimal divide truncates at
+`s_in + 4` and the spec's numerator cast would round where DataFusion and cuDF truncate; and
+`merge_m2`'s `counted_unsigned` casts the arriving `Int64` count to `UInt64` on the way into
+DataFusion's variance accumulator, which reads nothing else — the one line that crosses the
+Restriction's letter, invisible at every plan, wire, state and answer boundary. `aggregate.cpp`
+untouched; `done` waits on CI.
+
+
+---
+
+<!-- archived from llm-wiki/tasks/decimal-precision-at-export.md -->
+
+**Merged 2026-09-21 as PR #159, squashed to `813acc18`.**
+
+# The export is told the precision it cannot know
+
+Kind: production
+
+**This task closes [#187](active-tickets.md#t187)** — the device exports every decimal at
+precision 38 whatever the plan declared — by handing the declared precision to the export. It
+is also the chain's one wire and header rebuild: the `Utf8View`/`BinaryView` values the
+previous task made dead leave the wire with their C++ arms, the dead `output_schema` fields go,
+and `peacock_handle_schema`, which `device-schema-harness` needs, is declared here so the
+header moves once. Second of chain B, after [`utf8-everywhere.md`](utf8-everywhere.md).
+
+## Why it happens
+
+cuDF's `data_type` is `{type_id, scale}` (`types.hpp`, "only `_fixed_point_scale` is stored"),
+the same in 25.02 and 26.02. Precision is not a field of the column; on export
+`to_arrow_schema` writes the width's maximum — 38 for DECIMAL128 — unless told otherwise, and
+the way to tell it differs by version: 26.02's `column_metadata` has a `precision` field
+(`rapids/include/cudf/interop.hpp:110`), 25.02's has `name` and `children_meta` only
+(`rapids-cuda-12.2/include/cudf/interop.hpp:108-119`), and shad-gpu runs 25.02. So the label is
+set where both versions agree: on the Arrow schema after `arrow::ImportSchema`, before the
+batch is imported against it. `export_table_to_ipc` (`cpp/src/gpu_executor.cpp:51-80`) never
+does that, and `peacock_result_from_handle(handle, offset, length)` is never told a
+declaration. So `Decimal128(15, 2)` leaves as `decimal128(38, 2)`: same 16-byte values, same
+scale, a different number in the schema message — 53 queries, 105 columns, twelve declared
+precisions in the survey, scale preserved in every one.
+
+Nothing narrows and nothing needs checking: DataFusion sizes every result precision to hold its
+value, and a value that did not fit would be a wrong value, which the goldens catch. The label is
+what is wrong, and the export is the only place that writes it.
+
+## The work
+
+1. **ABI.** `peacock_result_from_handle` gains two parameters:
+   `const int32_t* decimal_precisions, uint64_t n_columns` — one entry per exported column,
+   `0` meaning no declaration. `int32_t` because `column_metadata::precision` is
+   `std::optional<int32_t>`. `cpp/include/peacock_gpu.h:203`, `gpu_executor.cpp:292`,
+   `peacockdb-ffi/src/lib.rs:151`.
+2. **Export.** `export_table_to_ipc` takes the array. After `arrow::ImportSchema` and before
+   `ImportRecordBatch`, every column with a non-zero entry has its field's type replaced by
+   `arrow::decimal128(precision, scale)` with the scale read off the cuDF column — the same
+   buffers, only the label — so the stream's schema message says what the plan declared on
+   25.02 and 26.02 alike. The DECIMAL32/64 widening loop (marked dead at `:57-58`) and its
+   comment go. Two hard failures replace it, each a `runtime_error` naming the column: a
+   fixed_point column whose `type_id != DECIMAL128`; a non-zero precision for a column that
+   is not DECIMAL128. `n_columns` must equal the table's column count or the call fails.
+   `export_table_to_ipc` stops being `static` and is declared in
+   `cpp/src/plan_executor_internal.h`, so the C++ tests can hand it a table no C-API path can
+   build — a DECIMAL64 column — and see the refusal.
+3. **Callers.** `GpuExport::unload` (`executor/gpu_backend/mod.rs:207-250`) builds the array
+   from `self.schema` — `Decimal128(p, _)` → `p`, else `0` — and passes it; its
+   `concat_batches` check is unchanged and starts passing. `Device::fetch`
+   (`tests/gpu_tests/device.rs:85-112`) takes a `&Schema` for the declaration and builds the
+   same array, or passes zeros when the caller has none.
+4. **The rule.** `plan/validate.rs`: every decimal in a node schema, literal, `Cast` target or
+   scalar return type is `Decimal128`; `Decimal256` is refused now, `Decimal32`/`Decimal64`
+   automatically if arrow ever adds them. Unit test with a `Decimal256` column. `expr.cpp`'s
+   `fb_to_type_id` maps `Decimal128` alone; no DECIMAL32/64 arm anywhere in `cpp/src` outside
+   the loader's widening (`scan.cpp:98-108`), which stays because cuDF's reader is where 64 is
+   born.
+5. **Wire and header, one rebuild.** `output_schema` leaves `PlanNode` and `CudfUnion` in
+   `gpu_plan.fbs` (`:526`, `:608`); `wire/writer.rs:114,143` drop the `None`; `union.cpp:35-50`'s
+   guarded block goes, and its comment's reason — branches are planned independently, so a
+   column's cuDF type can differ per branch — moves to `architecture.md`'s union row (`:829`)
+   beside the statement that the planner's per-branch cast projects are what align them;
+   `test_plan_executor.cpp`'s `make_plan_node` loses its unused `schema` parameter;
+   `node_session.cpp:275`'s comment stops naming `output_schema`. On the same rebuild the
+   `Utf8View` and `BinaryView` values leave `fb::DataType`, `cpp/src/expr.cpp`'s five view arms
+   (`:89`, `:228`, `:333`, `:336`, `:478`) go, and `test_plan_executor.cpp`'s 45
+   `DataType_Utf8View` uses become `DataType_Utf8`. And the header gains one read-only
+   function, for the harness two tasks on:
+
+       int peacock_handle_schema(peacock_executor_t*, uint64_t handle,
+                                 uint8_t** out_ipc, uint64_t* out_len);
+
+   the Arrow IPC stream holding the handle's schema message alone (`to_arrow_schema` on its
+   view, no rows), freed with `peacock_result_free`, 0 on success; extern in
+   `peacockdb-ffi/src/lib.rs`; two gtest cases (a scan's handle reads back four typed fields
+   and no batch; an unknown handle fails). Nothing in Rust calls it yet.
+
+## Scope
+
+| file | change |
+|---|---|
+| `cpp/include/peacock_gpu.h`, `cpp/src/gpu_executor.cpp`, `cpp/src/plan_executor_internal.h` | the two parameters; the label set on the imported schema; the two hard failures; widening removed; `export_table_to_ipc` exposed to tests; `peacock_handle_schema` |
+| `peacockdb-ffi/src/lib.rs` | both extern signatures |
+| `peacockdb-core/src/common.rs`, `executor/gpu_backend/mod.rs` | `declared_precisions` (feature-independent, unit-tested rust-only); `unload` builds and passes the array |
+| `peacockdb-core/src/tests/gpu_tests/device.rs` | `fetch` takes the declaration |
+| `peacockdb-core/src/plan/validate.rs`, `validate/tests.rs` | the decimal rule and its test |
+| `flatbuffers/gpu_plan.fbs`, `peacockdb-core/src/wire/writer.rs`, `cpp/src/operators/union.cpp`, `cpp/src/node_session.cpp`, `cpp/src/expr.cpp`, `cpp/tests/gpu/test_plan_executor.cpp` | `output_schema` gone; `Utf8View`/`BinaryView` gone from the wire and its C++ readers |
+| `cpp/tests/gpu/test_plan_executor.cpp`, `test_cudf_nodes.cpp` | an export with a declared precision reads back at it; no declaration reads back at 38; a precision on a non-decimal is refused; `export_table_to_ipc` over a hand-built DECIMAL64 column fails naming it; the two `peacock_handle_schema` cases |
+| `llm-wiki/architecture.md` | union row; "every cast is explicit" gains the sentence that the device type is `{type_id, scale}` and precision is a label the export is told |
+| `testdata/cost-registry.csv`, `tests/common/corpus_cases.inc` | cells this task proves |
+| `llm-wiki/build-test.md`, `active-tickets.md` | counts, #187 closed |
+
+Component-level API: one ABI symbol's signature (`peacock_result_from_handle`) and one new
+symbol (`peacock_handle_schema`); the wire loses two fields and two enum values. No facade item
+changes.
+
+## Restriction
+
+No cast, no range check, no relabel on the Rust side after decode. The scale still comes from
+the column and is still compared at the sink. Any other schema difference keeps today's
+"declared vs exported" error.
+
+## Registry
+
+The survey's 53 decimal queries at `tp1_single`, the same rule as the task before: enabled
+where sink and values pass; a ticket where values fail; `187` struck from a row only when no
+disabled cell in it is left without a ticket (`registry.rs:229-240`). Cells that carried both
+classes are decided here. "`Decimal128(38, 4)` agrees for the wrong reason" (survey §4) is a
+real agreement after this.
+
+## Verification bar
+
+- rust-only: `--lib`, `test_module_layout`, the validation test red then green.
+- C++: `ctest -L cpu` and the two new plan-executor cases on a device.
+- device: the harness green (`Device::fetch` with declarations); the rollout at `tp1_single`.
+- `grep -rn "output_schema" cpp peacockdb-core flatbuffers` returns nothing; `grep -rn
+  "DECIMAL32\|DECIMAL64" cpp/src` returns `scan.cpp` alone; `grep -rn "Utf8View\|BinaryView"
+  cpp flatbuffers` returns nothing.
+
+## Device workflow
+
+`build-test-shadgpu.sh`. Staged binaries from before this task are incompatible with the plan
+after it — both sides rebuild together, as always.
+
+## Completeness signoff — 2026-09-17
+
+Solved under its constraints: the export is told one precision per column and writes it onto
+the imported Arrow schema — same buffers, one label, no version branch; no cast, range check or
+relabel on the Rust side; the widening is two refusals naming the column; validation refuses
+any decimal but `Decimal128`; the wire lost `output_schema` and the two view values with their
+C++ arms, `recipe-payloads.txt` standing since both sat at the tail; `peacock_handle_schema`
+declared, externed and pinned by two gtests. 53 queries rolled out at `tp1-single`: five enabled,
+the rest on #185, #220 or #163; no sink shows a decimal. Shortcuts or bandaids: `n_columns == 0`
+with a null array declares nothing, where the spec's letter required the count to match; the
+"`Decimal32`/`Decimal64` automatically" clause is a `Decimal256` match, arrow having neither
+variant; `Arrow::arrow_shared` is linked into `peacock_plan_tests` for the read-back; the
+DECIMAL64 refusal case sits in `test_plan_executor.cpp`, not the ungated `test_cudf_nodes.cpp`.
+Outside scope, reported: `shadgpu-env.sh`'s artifact reader drains cargo's pipe. `done` waits on
+CI, the 26.02 leg being the proof the new export compiles there.
+
+
+---
+
+<!-- archived from llm-wiki/tasks/utf8-everywhere.md -->
+
+**Merged 2026-09-21 as PR #158, squashed to `9f678e9d`; the chain's five branches were each squashed to one commit and fast-forwarded onto master in order, oldest first.**
+
+# Strings are Utf8 from the leaf up
+
+Kind: production
+
+**This task closes [#183](active-tickets.md#t183)** — the sink declares `Utf8View` where the
+device exports `Utf8` — by removing the declaration rather than converting the export. First of
+chain B; the five tasks after it assume no view type exists in any plan.
+
+## Why it happens
+
+`Utf8View` enters a plan through DataFusion 45's parquet option `schema_force_view_types`,
+default `true`. The option that matters is not the session's: `ListingOptions::infer_schema`
+reads the `TableParquetOptions` of the `ParquetFormat` it is given, and `lib.rs:71` builds that
+format with `ParquetFormat::default()` (`datafusion/src/datasource/file_format/parquet.rs:249-250,
+370`); the session config is never consulted for inference. Under it every string column is
+`Utf8View` before an operator exists. Everything downstream follows the input: `string_coercion`
+picks `Utf8View` only "if Utf8View is in any side"
+(`datafusion-expr-common/src/type_coercion/binary.rs:1148`), every string function that can
+return `Utf8View` branches on `arg_types[0] == Utf8View`, and the literal rewrite
+`serialize.rs:72-77` describes is the coercion following the column. One producer is
+unconditional besides the scan: `TypeSignature::Comparable` over all-`Null` arguments
+(`greatest`/`least`, `type_coercion/functions.rs:567`) coerces to `Utf8View` — the corpus never
+reaches it, and the rule below refuses it if it ever does. cuDF has one `STRING` layout, exports
+it as `utf8`, and cannot import a view array at all (`from_arrow_host.cu:431`,
+`harness_cases.rs:117-121`). So the plan declares, from the leaf up, a container the device
+never holds, and the two meet only at the sink — 76 queries and 204 columns in
+[`reports/sink-divergence.md`](../reports/sink-divergence.md).
+
+The corpus's strings enter through cuDF's parquet reader; the view type was never data.
+
+## The work
+
+1. **The option.** `lib.rs:71`: `ParquetFormat::default().with_force_view_types(false)` (the
+   existing `.with_enable_pruning(true)` chain), with a comment naming this task and the reason.
+   Not the session config — inference never reads it. After it every plan declares `Utf8` (or
+   `LargeUtf8`, which the reader does not produce) and no coercion or function can bring a view
+   back.
+2. **The rule.** `plan/validate.rs` gains a structural rule run with the others: a node schema,
+   a literal, a `Cast` target, a binary's out type or a scalar function's return type of
+   `Utf8View`, `BinaryView`, `ListView` or `LargeListView` is `PlanError::Invalid`, naming the
+   node and column. Node schemas are checked in `walk`; expressions through
+   `check_expr_types` in `plan/common.rs`, called at `check_column_refs`'s five node call sites
+   (`exec_ops.rs:23,47`, `plan/mod.rs:588,592,596`) and at the join's residual filter, which
+   goes through `collect_column_refs` (`join.rs:329`) and would otherwise escape. Unit tests in
+   `plan/validate/tests.rs` (under `rooted(...)`, since `validate` refuses a non-sink root
+   first): a node declaring `Utf8View`, a `Cast` to `Utf8View`, a residual filter comparing to a
+   `Utf8View` literal. The rule is what keeps a DataFusion bump ([#23](../tickets.md#t23)'s
+   note) from reintroducing the type silently.
+3. **Drop the Rust handling sites**, since after 1 and 2 they are unreachable code that reads
+   as support: `wire/serialize.rs` `Utf8View` literal arm (`:72-77`) and type arms
+   (`:130-131`); `wire/fb_text.rs:348`; `cpu_backend/spark_partitioning.rs:64`'s cast;
+   `common.rs:8`'s `BinaryViewArray` import and the sizing arms at `:35,115`;
+   `test_support/result_text.rs:92`'s note; `executor/errors/tests.rs:31,42` re-asserted on
+   `Utf8`; `tests/gpu_tests/harness_cases.rs`'s `declaring_view_strings` and its `bug_` pin
+   for #183. The wire's `Utf8View`/`BinaryView` values, `cpp/src/expr.cpp`'s five arms and
+   `cpp/tests/gpu/test_plan_executor.cpp`'s 45 uses of `DataType_Utf8View` are the next task's,
+   which rebuilds the wire once for three reasons; until then those values are dead on the
+   wire, which the rule guarantees. Chain E's join-cases and aggregate-cases retire their own
+   view cases in their Task 8 before this chain starts; if any survive, this task removes them
+   and says so in the detail file.
+4. **Goldens.** Every plan golden's `schema=[…]` and every literal tag in `recipe-payloads.txt`
+   move `Utf8View → Utf8`; regenerate rust-only and diff — the only change is that word.
+   `plan_text/tests.rs:150` and `planner/translator/schema_tests.rs:156,285,305` assert the
+   view type from real plans and are re-asserted on `Utf8`.
+
+## Scope
+
+| file | change |
+|---|---|
+| `peacockdb-core/src/lib.rs` | the option |
+| `peacockdb-core/src/plan/validate.rs`, `validate/tests.rs` | the rule and its tests |
+| `peacockdb-core/src/wire/serialize.rs`, `fb_text.rs` | view arms removed |
+| `peacockdb-core/src/plan/common.rs`, `plan/join.rs` | `check_expr_types`; the residual filter checked |
+| `peacockdb-core/src/executor/cpu_backend/spark_partitioning.rs`, `common.rs`, `test_support/result_text.rs`, `executor/errors/tests.rs` | the cast, the import and sizing arms, the note, two tests re-asserted |
+| `peacockdb-core/src/tests/gpu_tests/harness_cases.rs` | `declaring_view_strings` and the #183 pin removed |
+| `peacockdb-core/src/plan_text/tests.rs`, `planner/translator/schema_tests.rs` | re-asserted on `Utf8` |
+| `testdata/goldens/**/*.plans.txt`, `recipe-payloads.txt` | regenerated |
+| `testdata/cost-registry.csv`, `tests/common/corpus_cases.inc` | cells this task proves |
+| `llm-wiki/build-test.md`, `active-tickets.md`, `tickets.md` | counts, #183 closed, #23 unchanged |
+
+Component-level API: none. No wire change (the next task takes the two enum values), no ABI
+symbol changes, no facade item changes.
+
+## Restriction
+
+No cast anywhere: the fix is that nothing needs one. No change to any string function, to
+`from_arrow`, to the export. A `Utf8View` that survives the option is a finding — a ticket and
+the rule's refusal — not a case for a cast.
+
+## Registry
+
+The survey's 76 queries carrying the string class, at `tp1_single`: each `gpu_*` cell whose sink
+now passes and whose values match its golden is enabled; each that fails on values keeps
+`disabled` and gets a ticket naming what the values showed. Cells that also carry the decimal
+class wait for the next task. `183` is struck from a row only when no disabled cell in it is
+left unexplained — `registry.rs:229-240` requires a ticket on any row with a disabled cell, so
+the number stays until the other modes are enabled or another ticket names them. The registry
+is what the device run proves, nothing more.
+
+## Verification bar
+
+- rust-only: `--lib`, `test_module_layout`, `test_golden_format`, the plan-golden regen, the
+  two validation tests red before the rule and green after.
+- device: the operator harness (`_cases`) green with the retired pins gone; the corpus rollout
+  above at `tp1_single`.
+- `grep -rn "Utf8View\|BinaryView" peacockdb-core/src testdata/goldens` returns only
+  `plan/common.rs`'s rule and `plan/validate/tests.rs`; `cpp/` and `flatbuffers/` are the next
+  task's grep.
+
+## Device workflow
+
+`build-test-shadgpu.sh`. One cycle for the harness, one for the rollout.
+
+## Completeness signoff — 2026-09-17
+
+Solved under its constraints: no cast added anywhere and two removed; the option off on both
+doors (`read_table`'s format and the session config `register_parquet` reads); the rule refuses
+a view type in every schema, intermediate, literal, cast target, binary, function return and
+residual filter, pinned by tests run red first; every golden line is the word swap bar the 18
+digests and q24's dissolved coercion; 76 queries rolled out at `tp1-single`, three enabled, the
+rest ticketed on what the sink showed next. Outside the scope table by review: `cpu_backend/
+source.rs` lost its own view cast and refuses instead; a device pin for the sink's refusal was
+restored on `LargeUtf8`. Shortcuts or bandaids: none. `183` stays on ten rows whose other modes
+were never run past the string class, as the spec's registry rule says. CI has not run: PR #158
+conflicts with master since chain D merged, and `done` waits on the human's rebase.
+
+
+
+---
+
 <!-- archived from llm-wiki/tasks/case-expectations.md -->
 
 **Merged 2026-09-16 as PR #157, squashed to `5fd6136d` (the chain's three branches squashed in order onto master; count lines and the ticket index merged additively with typed-nulls and empty-build).**
