@@ -365,6 +365,60 @@ prebuilt binaries to shad-gpu rather than building there, and the golden/meta ti
 under `rust-only` with no C++ at all. Re-file with concrete time targets if CI length
 becomes a problem again.
 
+<a id="t119"></a>
+### #119 — Unchecked cudaMemcpy in peacock_spark_partition_ids
+`cpp/src/gpu_executor.cpp` (~L250): the device→host `cudaMemcpy` return value is
+discarded, so a failed copy still returns success with `out_pids` holding garbage. Check
+it and surface the error.
+
+**Done 2026-09-22.** The copy's `cudaError_t` is checked: a failure prints `cudaGetErrorString`
+to stderr and returns 1. A test-only conformance hook; its one caller is `murmur_conformance.rs`.
+
+<a id="t120"></a>
+### #120 — peacock_spark_partition_ids' documented error path is unreachable
+`cpp/include/peacock_gpu.h` documents retrieving the failure message via
+`peacock_last_error(NULL)`, but `gpu_executor.cpp` returns `""` for a null executor and
+the implementation only `fprintf`s to stderr — the message cannot be obtained through the
+documented API. Either store it where `peacock_last_error(NULL)` can return it, or fix
+the doc.
+
+**Done 2026-09-22.** The doc was fixed, not the path: `peacock_gpu.h` now says the hook has no
+executor to hold the message, so `peacock_last_error(NULL)` returns `""` and the reason goes to
+stderr.
+
+<a id="t127"></a>
+### #127 — Unowned testdata dirs on shad-gpu
+shad-gpu carries `testdata/plans.sf1` (10 files) and `testdata/plans` (3) that no local
+checkout has, that the git-derived fixture sweep does not produce, and that nothing in
+the test suite references. Same shape as the binary orphans that `--delete` just closed:
+state on a remote host no provisioning path owns, so nobody can say whether it is stale
+or load-bearing. Not deleted, because something outside this repo may read it. Establish
+what wrote them and either bring them under the sweep or remove them.
+
+**Done 2026-09-22.** They were the pre-June plan goldens: `testdata/plans.sf1/` and
+`testdata/plans/`, tracked in git until `9c0979f3` (2026-06-17) moved the goldens to
+`testdata/goldens/`. shad-gpu's copies under `/home/info/peacockdb/testdata/`, dated 2026-04-15,
+outlived the move because the sync never deletes. Nothing in the tree read them; both removed.
+
+<a id="t113"></a>
+### #113 — Provision GPU-host testdata by sweeping git-tracked files
+Hand-maintained rsync lists (`pipeline.yml` gpu-tests, `scripts/build-test-shadgpu.sh`)
+bit four times during the refactor. Fix: sweep
+`git ls-files --cached --others --exclude-standard testdata`. Lessons from the parked
+draft: `--exclude=*.parquet` is wrong (tpch.minimal commits 5 needed .parquet files);
+tracked-only misses new uncommitted fixtures. Needs its own clean verification run.
+
+Bit a fifth time in T19: the script pushed no query directory where `pipeline.yml:461` rsyncs both,
+so a T17 query was absent on the host. An absent file is loud; a stale one runs old text and writes
+cells describing a query the repo does not contain, with nothing red.
+
+**Done 2026-09-22, partially.** `scripts/build-test.sh` sweeps git: `sync_fixtures` pushes
+`git ls-files --cached --others --exclude-standard testdata` less the goldens, which
+`sync_goldens` mirrors with `--delete`. Still hand lists: `scripts/build-test-shadgpu.sh`
+(goldens, `cost-registry.csv`, the two query dirs) and `pipeline.yml`'s gpu-tests push (which
+adds `tpch.minimal`, `tpch-vec-queries`, `generate_testdata.sh`), so the two already disagree.
+No clean verification run is on record.
+
 ## Stale or obsolete
 
 <a id="t41"></a>
@@ -665,3 +719,39 @@ each surviving bucket has its own ticket (#32, #62, #57, #55, #56, #63, #45, #46
 inventory tests check both directions, so a skipped query cannot go untracked. Every
 surviving bucket has its own ticket (#32, #45, #46, #47, #55, #56, #57, #60, #62, #63,
 #115).
+
+<a id="t123"></a>
+### #123 — Unused static helper in test_plan_executor.cpp
+`cpp/tests/gpu/test_plan_executor.cpp:53`: `make_float64_literal(...)` is defined and
+never called — a `-Wunused-function` warning waiting on the next warning-level bump.
+Remove it or use it.
+
+**Stale 2026-09-22.** `make_float64_literal` is called now (`test_plan_executor.cpp:804`), so
+the warning cannot fire. An unused test helper is cosmetic, too, and would not be filed today.
+
+<a id="t117"></a>
+### #117 — register_tables_for silently mis-handles non-parquet files
+`peacockdb-core/src/lib.rs` (~L87): the extension check `if path.extension() != Some("parquet") { () }`
+is a no-op, so non-parquet dir entries are not skipped; and `read_table` never returns
+`Err` (failures panic), making the `else { continue }` dead. A stray non-parquet file in
+a data dir panics instead of being skipped. Found during the comment audit.
+
+**Stale 2026-09-22.** A duplicate of [#196](../tickets/system-hardening.md#t196), which has the
+same cause, who reaches it and the fix. The guard at `lib.rs:61-63` is still a no-op.
+
+<a id="t46"></a>
+### #46 — q61 GPU: 'promotions' sum subtree returns the wrong value
+Cross join is correct; `promotions` sum returns 2855378.83 vs CPU 2894907.87 — an
+upstream filtered-sum / projection / aggregate bug. Bisect that subtree node-by-node,
+CPU vs GPU. q61 stays off on a device.
+
+**Stale 2026-09-22.** Observed on `full_table_gpu`, one of the six legacy modes deleted
+2026-09-08 (`3c0750ee`); the original read "q61 full_table_gpu stays off". Today's device cell is off with no recorded cause.
+
+<a id="t47"></a>
+### #47 — q77 GPU returns 40 rows vs CPU 45
+Cross join correct; an upstream outer-join/aggregate branch drops 5 rows. Bisect
+per-node row counts. q77 stays off on a device.
+
+**Stale 2026-09-22.** Observed on `full_table_gpu`, one of the six legacy modes deleted
+2026-09-08 (`3c0750ee`); the original read "q77 full_table_gpu stays off". Today's device cell is off on #212, the outer join's missing build batch.

@@ -410,6 +410,11 @@ impl PlanAgg {
             Self::MergeM2 => "merge_m2",
         }
     }
+
+    /// The type of the state column this aggregator produces, given its argument's type.
+    pub(crate) fn state_type(self, input: &DataType) -> Result<DataType, PlanError> {
+        aggregates::state_type(self, input)
+    }
 }
 
 /// One aggregator call: what it runs, over which expressions, and the columns it

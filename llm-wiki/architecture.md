@@ -755,6 +755,27 @@ legitimately return different rows where the SQL does not determine them, which 
 unordered `LIMIT` is. Results are compared row-sorted, so emission order is not part of the
 contract; what must hold is that one plan run twice gives one answer, byte for byte.
 
+### Zero-row batches change no answer
+
+**Requirement: a node's output rows do not change when zero-row batches are added to or removed
+from any of its inputs, anywhere and in any number.** "No batch" and "a zero-row batch" are then
+the same arrival as far as rows go. Only the batch count and boundaries may differ.
+
+The rule is not met yet. Known breaks:
+
+- A keyless aggregate owes one row over any input, and emits none over no batch
+  ([#199](tickets/corpus-coverage.md#t199)).
+- Right, Full and RightAnti refuse when the build side sends no batch
+  ([#212](tickets.md#t212)); a finish over no probe keys refuses on the device
+  ([#173](tickets.md#t173)). A hash LeftAnti or LeftMark with a residual filter and a
+  nested-loop Left make no call over no probe batch, and answer nothing (no ticket yet).
+- Producers that drop a zero-row batch expose the breaks above: the limit
+  ([#214](tickets/corpus-coverage.md#t214)) and the cpu's accumulating sort and merge
+  ([#205](tickets/corpus-coverage.md#t205)).
+
+A new node meets the rule by construction: what it owes over an empty input, it owes over no
+input.
+
 ## The wire format
 
 **The flat buffers** are the serialized plan (`flatbuffers/gpu_plan.fbs`) — the only thing

@@ -187,7 +187,7 @@ const WELFORD_RENAMED: &str = "1 stddev(f64)$count: Int64 vs stddev(f64) INT64; 
 // child by it; the types are the declaration's. Wanted: `None`.
 operator_case! {
     GpuAggregate,
-    fn bug_a_stddev_holds_its_welford_state_under_the_aggregates_alias_three_times() {
+    fn bug_stddev_holds_three_identically_named_columns() {
         assert_eq!(
             divergences_on_device(&welford_init(), Script::Exec(vec![input()])),
             vec![Some(WELFORD_RENAMED.to_string())]
@@ -390,7 +390,7 @@ operator_case! {
 // #225 — the merge's `MERGE_M2` children are named the same way. Wanted: `None`.
 operator_case! {
     GpuAggregateBatches,
-    fn bug_a_stddev_merge_holds_its_welford_state_under_the_aggregates_alias_three_times() {
+    fn bug_stddev_merge_holds_three_identically_named_columns() {
         let partial = |seed| welford_partial(AggFunc::Stddev, seed);
         let arrivals = vec![partial(1), partial(2), partial(3)];
         assert_eq!(

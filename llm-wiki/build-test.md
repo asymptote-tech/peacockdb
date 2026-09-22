@@ -407,7 +407,7 @@ and `q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggre
 `tpch/filter-project`, `tpch/shuffle-additive`, `tpcds/q37`, `tpcds/q82` and `tpcds/q85` at
 `tp1-single`; the rest are off against [#152](tickets.md#t152),
 [#184](tasks/active-tickets.md#t184), [#185](tasks/active-tickets.md#t185),
-[#191](tasks/active-tickets.md#t191), [#220](tasks/active-tickets.md#t220) and the device's
+[#191](tickets/corpus-coverage.md#t191), [#220](tasks/active-tickets.md#t220) and the device's
 own tickets (#57, #63, #205). The twenty-seventh case is that a device run under a
 regeneration writes no golden
 
@@ -464,7 +464,7 @@ keys, and the merge at four lanes. The group keys are `Utf8` too; the aggregate 
 view type. A guard reads the kind each case declares and names every kind with none, the three
 forwarders excluded
 
-| Operator harness, what the device holds | [a_divide_over_a_decimal_declares_the_scale_6_the_device_holds](../peacockdb-core/src/tests/gpu_tests/exec_schema_cases.rs), [bug_a_stddev_holds_its_welford_state_under_the_aggregates_alias_three_times](../peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs) | 134 |
+| Operator harness, what the device holds | [a_divide_over_a_decimal_declares_the_scale_6_the_device_holds](../peacockdb-core/src/tests/gpu_tests/exec_schema_cases.rs), [bug_stddev_holds_three_identically_named_columns](../peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs) | 134 |
 |---|---|--:|
 
 the same nodes on the device alone, every output handle read where it sits through

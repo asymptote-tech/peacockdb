@@ -15,132 +15,12 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 34 | #225 #224 #223 #222 #221 #219 #218 #217 #216 #215 #214 #211 #210 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Critical correctness](#critical-correctness) | 28 | #225 #224 #223 #222 #221 #219 #218 #217 #216 #215 #214 #211 #210 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #60 #121 #122 #118 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #212 #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 28 | #226 #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
-| [Infrastructure / process](#infrastructure--process) | 23 | #213 #201 #197 #196 #195 #178 #176 #174 #167 #164 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
+| [Infrastructure / process](#infrastructure--process) | 21 | #213 #201 #197 #196 #195 #178 #176 #174 #167 #164 #159 #160 #161 #162 #134 #129 #128 #125 #13 #94 #69 |
 
 ## Critical correctness
-
-<a id="t225"></a>
-### #225 — the device names every Welford state column by the aggregate's alias
-
-The plan declares a `stddev` or `var` state as `<out>$count`, `<out>$mean`, `<out>$m2`; the
-device holds all three under `<out>`, at the init and at the merge alike, the types as declared.
-
-The wire folds the triple into one `AggregateFuncNode` with one `alias` (`plan/aggregate.rs`,
-`state_funcs`, `welford: true`), and `aggregate.cpp`'s Partial and Merge arms push each child
-under it. No answer is wrong today: the merge packs the triple by offset and the finalize reads
-it by ordinal; a reader resolving a state column by name would take the wrong one. The fix is
-the three names on the wire, or the suffixes appended in `aggregate.cpp`. Pinned by the two
-`bug_…_holds_its_welford_state_under_the_aggregates_alias_three_times` cases in
-`gpu_tests/aggregate_schema_cases.rs`. 2026-09-17: the corpus's schema validator refuses
-`tpch/shuffle-stddev` at its `GpuAggregate` on these names, so its row says
-`schema_validation_disabled`; the cell stays enabled and its values match.
-
-<a id="t224"></a>
-### #224 — the device cannot cast an integer to a date
-
-`CAST(i AS DATE)` over an integer column answers on the cpu and is refused on the device:
-`Timestamps cannot be converted to numeric without converting it to a duration`.
-
-Arrow reads the integer as days. The cast arm of `build_column` (`expr.cpp`) hands every
-numeric-to-chrono cast to `cudf::cast`,
-which routes none of them; an integer source needs a duration in days first, and the wire
-carries no duration type to route it through. The mirror of #218, where the source is text. No
-corpus query casts an integer to a date; `date-part-return-type`'s gtests met it building a
-date from `n_nationkey` and made the date from literals instead. No pin yet.
-
-<a id="t223"></a>
-### #223 — `substr` with a column for its start or length is refused on the device
-
-`substr(s, start, len)` with a column `start` or `len` answers on the cpu and is refused on the
-device: `substr: position/length must be literals`.
-
-The `substr` arm of `build_column_scalar_fn` (`expr.cpp`) reads both from literals, handing
-`cudf::strings::slice_strings` two scalars; the per-row form is that function's column
-overload. No corpus query reaches it. Seen by `date-part-return-type`'s neighbour survey; no pin
-yet.
-
-<a id="t222"></a>
-### #222 — `round(x, places)` with a column for `places` is refused on the device
-
-`round(x, n)` with a column `n` answers on the cpu and the device refuses it: `round: decimal
-places must be a literal`.
-
-DataFusion's signature takes `Int64` for the places, column or literal. The `round` arm of
-`build_column_scalar_fn` (`expr.cpp`) reads `places` from a literal alone,
-since `cudf::round` takes one scale for the whole column; a per-row scale is one `cudf::round`
-per distinct value gathered back, or a refusal the planner makes at plan time so both engines
-agree. No corpus query rounds by a column. Seen by `date-part-return-type`'s neighbour survey;
-no pin yet.
-
-<a id="t221"></a>
-### #221 — `round` over a `Float32` column answers `Float64` on the device
-
-`round(x)` with `x: Float32` is `Float32` on the cpu — DataFusion's signature takes `Float32`
-exactly and declares it — and `FLOAT64` on the device, so the sink refuses the column.
-
-The `round` arm of `build_column_scalar_fn` (`expr.cpp`) casts every operand to `FLOAT64`
-before `cudf::round`, whatever `return_type` the wire carries, and hands the double up. A
-`Float32` operand is the one case where the declaration differs: a decimal or integer operand
-arrives under a planner cast to `Float64`. The fix is a `cudf::cast` back to the wire's
-`return_type` when it differs, as `date_part`'s arm does. No corpus query: tpcds q2, q54 and q78
-round decimals. Pinned on `ENS-date-part-return-type` (PR #161) by
-`bug_a_round_over_float32_answers_float64_on_the_device` (`gpu_tests/exec_cases.rs`).
-
-<a id="t219"></a>
-### #219 — `ILIKE` is case-sensitive on the device
-
-`s ILIKE 'B%'` answers true for `beta` on the cpu and false on the device: the pattern is
-matched as `LIKE 'B%'`.
-
-The wire carries `case_insensitive` on every `LikeExprNode` (`expr_writer.rs`), and the LIKE
-arm of `build_column` (`expr.cpp`) reads `negated` alone before calling `cudf::strings::like`,
-which has no case-insensitive form. The fix is a `to_lower` on both the column and the pattern
-when the flag is set, or `cudf::strings::contains_re` with the `IGNORE_CASE` flag. A wrong row
-count under `WHERE … ILIKE`, and a wrong column in a select list; no corpus query writes
-`ILIKE`. Pinned by `bug_ilike_is_case_sensitive_on_the_device` (`gpu_tests/exec_cases.rs`).
-
-<a id="t218"></a>
-### #218 — the device cannot cast text to a date
-
-`CAST(d AS DATE)` over a `Utf8` column answers on the cpu and is refused on the device:
-`cudf::cast` throws "Column type must be numeric or chrono or decimal32/64/128".
-
-The cast arm of `build_column` (`expr.cpp`) hands every non-string target to `cudf::cast`,
-which parses no strings; a text source needs `cudf::strings::to_timestamps` with the format
-DataFusion accepts, or `to_integers`/`to_floats` for the numeric targets, chosen by the input's
-type. The mirror of #203, where the target is the string. No corpus query casts text to a date.
-Pinned by `bug_a_text_cast_to_date_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
-
-<a id="t217"></a>
-### #217 — a sort with `fetch 0` keeps every row on the device
-
-`GpuSort` with `fetch: Some(0)` answers zero rows on the cpu and the whole batch on the device.
-
-`sort.cpp` applies its slice under `sort->fetch() > 0`, and the wire writes `-1` for no fetch
-(`node_writer.rs`, `fetch_of`), so zero is a fetch the device reads as none. The merge in
-`node_session.cpp` tests `>= 0` and is right. `LIMIT 0` under an `ORDER BY` is the SQL shape;
-DataFusion usually plans it away, so no corpus cell reaches it. Pinned by
-`bug_a_fetch_of_zero_keeps_every_row_on_the_device` (`gpu_tests/exec_cases.rs`).
-
-<a id="t216"></a>
-### #216 — the device's global aggregate has no Welford arm
-
-A keyless `stddev` answers one finished `Float64` on the device where the plan declares the
-`[count, mean, m2]` state, so the finalize above it fails; a keyless `var` is refused outright.
-
-`aggregate.cpp`'s grouped path honours `mergeable` and emits the triple with `MERGE_M2`; its
-keyless path (`key_cols.empty()`) tests `is_stddev_name` alone and reduces that name with
-`make_std_aggregation`, whatever the phase — at the init the sample stddev of the argument, at
-the merge the stddev of the state's first column, the count — and the finalize project refuses
-with `ColumnRef index 2 out of range (cols=1)`; a `var` name falls to `make_reduce_agg`'s
-`unsupported aggregate function: var`. So `SELECT stddev(x) FROM t` and `SELECT var(x) FROM t`
-are refusals on the device in every shape. Pinned in `aggregate_dimension_cases.rs` by the
-four `bug_` cases `…welford_init_answers_a_finished_stddev…`, `…keyless_welford_merge…`,
-`…global_stddev_finalize_is_refused…` and `…keyless_var_merge_is_refused…`; the init's one
-column read at the handle by `aggregate_schema_cases.rs`'s `bug_a_global_stddev_holds_…`.
 
 <a id="t215"></a>
 ### #215 — a left nested-loop join over a predicate the AST cannot take is refused on the device
@@ -157,21 +37,6 @@ rows an outer form owes, which is #160's argument for refusing the other types a
 this shape is the one the planner lets through. Pinned by
 `bug_a_left_nested_loop_join_with_a_decimal_predicate_is_refused_on_the_device` and its
 projected neighbour (`gpu_tests/nested_cases.rs`). Numbered past #214.
-
-<a id="t214"></a>
-### #214 — a limit drops a zero-row batch on both backends
-
-A `GpuLimit` handed a batch of zero rows emits nothing for it, on the cpu and on the device alike.
-
-Both `LimitStream`s take their cut from the one `RowInterval::range_of` (`plan/interval.rs`),
-which answers `None` when `start < stop` is false — and it is false for `n_rows == 0` whatever
-the interval — so the batch is released as if it lay outside the interval. Nothing and a zero-row
-batch are different arrivals downstream, as #205 says: a build side of `filter → limit → coalesce`
-with zero survivors reaches `without_build` and #175's refusal for Right, Full and RightAnti,
-where the same filter without the limit pads and answers. Symmetric, so the harness's cpu-vs-device
-comparison is green by construction. Pinned by `bug_a_stream_of_one_zero_row_batch_is_dropped_on_both`
-and its two neighbours (`gpu_tests/harness_cases.rs`), which want the zero-row batch under the
-schema. Numbered past #213, which the branches above this one have taken.
 
 <a id="t211"></a>
 ### #211 — a typed null argument to substr or round is read as 0 on the device
@@ -194,7 +59,7 @@ the type the plan asked for, but a bare or unary-wrapped decimal literal is AST-
 `SELECT 1.5 FROM t` then computes a `FLOAT64` column on the device where the plan declares
 `Decimal128(2, 1)` — and since `decimal-precision-at-export` the export refuses it by name rather
 than answering it, the AST path still computing a double. Same class as
-[#191](tasks/active-tickets.md#t191): a declared type produced as another. Pre-existing, carried
+[#191](tickets/corpus-coverage.md#t191): a declared type produced as another. Pre-existing, carried
 through `typed-nulls.md` by that spec's own instruction, and pinned by
 `bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` (`gpu_tests/exec_cases.rs`);
 the walk `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` names it on its
@@ -232,22 +97,6 @@ does apply it. On the device every ordinal above the join then reads one column 
 (`gpu_tests/nested_cases.rs`) and, read at the handle, by `nested_schema_cases.rs`'s
 `bug_a_cross_join_with_a_projection_holds_every_column_on_the_device`.
 
-<a id="t205"></a>
-### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
-
-A `GpuAccumulateBatchesAndSort` or `GpuMergeSortedPartitions` whose only batches have zero rows
-emits no batch on the cpu, where the device emits one of zero rows.
-
-DataFusion's `SortExec` over zero rows yields no batch at all, and `SortedRuns::mark_done_and_fetch`
-and `CpuPartitionAccumulator::accumulate_and_fetch` (`cpu_backend/accumulate.rs`) hand that empty
-answer to `one_batch`, which reads it as the lane that received nothing. `CpuExec::exec` concatenates
-the same empty answer under the declared schema and gets zero rows, and the cpu coalesce does too, so
-the two cpu paths disagree with each other as well as with the device. Downstream, nothing and a
-zero-row batch are different arrivals: a global merge over nothing is #199's site. Pinned by
-`bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu` and its two neighbours
-(`gpu_tests/accumulate_cases.rs`). First corpus cell to reach it: `tpcds/q17` at `tp1-single`,
-which answers zero rows — 12 bytes at the device's unload against the cpu's 0 (2026-09-17).
-
 <a id="t204"></a>
 ### #204 — the device's sorted merge drops its fetch when it is handed one input
 
@@ -282,54 +131,6 @@ today, since every run the merge sees was sorted by the same mapping. Pinned by 
 (`gpu_tests/exec_cases.rs`), the two `…_descending_key_nulls_first_puts_them_last…` merge pins
 and `…_over_runs_each_carrying_a_null_duplicates_and_drops_rows…` (`gpu_tests/accumulate_cases.rs`).
 
-<a id="t200"></a>
-### #200 — a Date64 comes back as a type the wire cannot name
-
-`fb_to_type_id` maps `Date64` to `TIMESTAMP_MILLISECONDS`, and `to_arrow_schema` maps that back to
-`Timestamp(ms, None)`. So a column declared `Date64` is exported as a timestamp.
-
-`gpu_plan.fbs` has no `Timestamp` in its `DataType` enum — `Date32` and `Date64` and nothing else in
-that family — so the type the device hands back cannot be expressed on the wire at all. Nothing
-casts it and nothing refuses it: a plan carrying a `Date64` at the sink dies at `concat_batches`
-with `expected Date64 but found Timestamp(Millisecond, None)`.
-
-No corpus column declares a `Date64`, so no cell is disabled against this and it was missed by a
-rollout over sixty queries. A user reaching one gets the failure with no ticket to read.
-
-The same gap seen from the other side: a query *producing* a `Timestamp` cannot be serialized, since
-`convert_data_type` has no arm for it. That refusal has never been exercised, and whether it is clean
-or a panic is unverified.
-
-<a id="t199"></a>
-### #199 — a global aggregate on an empty lane drops its identity row on the device
-
-`gpu_backend/accumulate.rs:307` answers an empty lane with nothing. The CPU counterpart has a
-`!self.grouped` clause and answers with the identity row — `count` is 0, not absent.
-
-So a global aggregate whose lane received no rows disagrees between the engines: the CPU emits one
-row and the device emits none. A wrong answer rather than a refusal, and nothing refuses it.
-Shown on a device by `bug_a_global_merge_over_no_arrival_answers_nothing_on_the_device`
-(`gpu_tests/aggregate_cases.rs`), which also shows the CPU's row is sum's identity, not count's:
-a count merges by sum, so a merged count over nothing is NULL there where SQL says 0. The init over
-a zero-row batch keeps its row on both, so the merge is the one site. No corpus query is known to
-reach it.
-
-<a id="t166"></a>
-### #166 — physical planning drops a LIMIT interval, and the answer changes
-
-DataFusion 45 loses a limit in two shapes, both measured against DuckDB 1.5.4 on the same sf1
-parquet: the interval is absent from the physical plan, so both engines compute the same wrong answer.
-
-A limit inside a `UNION ALL` branch survives only as an `AggregateExec … lim=[n]` early-stop hint,
-which applies neither the offset nor the truncation: two branch limits holding 18 rows under an outer
-`LIMIT 40 OFFSET 5` answer 40 where DuckDB answers 13, at tp1 and tp4 alike. The hint is why a golden
-carrying it looks like coverage — it reads as a limit in plan text and is not one. Separately, at tp4
-only, an outer limit above an aggregate drops the mid-plan limit below it and the aggregate then counts
-its whole input. No corpus query has either shape, so nothing is wrong today; `nested-limits.sql` was
-reshaped rather than canonized against it. Upstream
-[#14406](https://github.com/apache/datafusion/issues/14406) is the same class — a global limit removed
-above children that keep only a local one — and its fix landed after 45.0.0 and is in 46.0.0, so #23's
-upgrade is the experiment; a residual after it would need the logical limit set compared to the physical.
 
 <a id="t153"></a>
 ### #153 — equi-join residual filter is applied after the outer gather
@@ -372,17 +173,6 @@ a residual filter and a streamed probe all included. The composite-key form is
 `bug_a_left_anti_join_on_a_composite_key_matches_a_null_in_the_second_column_on_the_device`
 in `gpu_tests/join_dimension_cases.rs`: a null in the second key column alone is a match.
 
-<a id="t46"></a>
-### #46 — q61 GPU: 'promotions' sum subtree returns the wrong value
-Cross join is correct; `promotions` sum returns 2855378.83 vs CPU 2894907.87 — an
-upstream filtered-sum / projection / aggregate bug. Bisect that subtree node-by-node,
-CPU vs GPU. q61 stays off on a device.
-
-<a id="t47"></a>
-### #47 — q77 GPU returns 40 rows vs CPU 45
-Cross join correct; an upstream outer-join/aggregate branch drops 5 rows. Bisect
-per-node row counts. q77 stays off on a device.
-
 <a id="t60"></a>
 ### #60 — q78 GPU diverges in anti-join + top-N; possibly memory-borderline
 3-CTE anti-join (`LEFT JOIN … IS NULL`) + multi-key DESC LIMIT 100. `round` is proven
@@ -407,12 +197,6 @@ later as a corrupted pool or a teardown crash, not immediately. Release each
 scale today, so the result is correct — but a future divergence would silently produce a
 wrong sum instead of failing. Assert equality.
 
-<a id="t123"></a>
-### #123 — Unused static helper in test_plan_executor.cpp
-`cpp/tests/gpu/test_plan_executor.cpp:53`: `make_float64_literal(...)` is defined and
-never called — a `-Wunused-function` warning waiting on the next warning-level bump.
-Remove it or use it.
-
 <a id="t118"></a>
 ### #118 — SortPreservingMerge concat fallback ignores fetch (LIMIT dropped)
 `cpp/src/node_session.cpp` (~L208): the k-way-merge branch applies `spm->fetch()` after
@@ -423,27 +207,6 @@ instead of the top-N, i.e. a silently dropped LIMIT. Apply the same slice in bot
 branches. Found during the comment audit; not yet reproduced against a corpus query
 (most SPMs arrive multi-partition), so severity depends on whether any enabled plan hits
 the single-partition path.
-
-<a id="t119"></a>
-### #119 — Unchecked cudaMemcpy in peacock_spark_partition_ids
-`cpp/src/gpu_executor.cpp` (~L250): the device→host `cudaMemcpy` return value is
-discarded, so a failed copy still returns success with `out_pids` holding garbage. Check
-it and surface the error.
-
-<a id="t120"></a>
-### #120 — peacock_spark_partition_ids' documented error path is unreachable
-`cpp/include/peacock_gpu.h` documents retrieving the failure message via
-`peacock_last_error(NULL)`, but `gpu_executor.cpp` returns `""` for a null executor and
-the implementation only `fprintf`s to stderr — the message cannot be obtained through the
-documented API. Either store it where `peacock_last_error(NULL)` can return it, or fix
-the doc.
-
-<a id="t117"></a>
-### #117 — register_tables_for silently mis-handles non-parquet files
-`peacockdb-core/src/lib.rs` (~L87): the extension check `if path.extension() != Some("parquet") { () }`
-is a no-op, so non-parquet dir entries are not skipped; and `read_table` never returns
-`Err` (failures panic), making the `else { continue }` dead. A stray non-parquet file in
-a data dir panics instead of being skipped. Found during the comment audit.
 
 
 ## Blockers for disabled coverage
@@ -465,20 +228,6 @@ aggregate emits nothing where nothing arrived. Pinned by
 (`gpu_tests/join_cases.rs`), and on the driver by
 `a_join_that_owes_its_probe_side_without_a_build_side_is_refused` (`driver/tests/flow.rs`).
 
-<a id="t206"></a>
-### #206 — a float or boolean partition key is refused on the device
-
-A `GpuEmitPartitions` hashing a `Float64` or a `Boolean` column is refused by the device's kernel,
-where comet's hasher answers it on the cpu.
-
-`spark_hash_partition.cu`'s type switch takes STRING, INT8-64 and DATE32 and fails on everything
-else: `unsupported key column cuDF type_id=10` for a double, `11` for a boolean, `27` for a decimal
-(that one is #95). Spark hashes a double as its long bits and a boolean as an int, and comet's
-`create_murmur3_hashes` does both, so the cpu lane assignment is defined and the device's is a
-refusal. Any `GROUP BY` or join key of either type at more than one lane reaches it. Pinned by
-`bug_a_float_key_is_refused_on_the_device` and `bug_a_boolean_key_is_refused_on_the_device`
-(`gpu_tests/emit_cases.rs`).
-
 <a id="t203"></a>
 ### #203 — the device cannot cast a number to text
 
@@ -493,23 +242,6 @@ Neighbour of #45, where a join key's cast to string is the same refusal on the j
 here answers a projection and does not by itself answer #45, whose fix hashes rather than casts.
 Pinned by `bug_a_cast_to_text_is_refused_on_the_device` and
 `bug_a_date_cast_to_text_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
-
-<a id="t169"></a>
-### #169 — a recipe plan is a chain, so its depth is its length, and the verifier caps depth
-
-fb children are nested, so the recipe plan for a query is one deep chain rather than a broad
-tree: depth equals the number of addressed nodes plus its stubs. The C++ verifier caps depth at
-1024, and the Rust reader had to have the same limit raised to parse what it had just written.
-
-Deepest today is tpcds at `tp4-rowgroup`, seq 382, so nothing is near it. What makes it worth
-recording is the failure mode: a plan of roughly a thousand addressed nodes fails at
-`begin_plan` — the whole query refused before a call is made — rather than degrading at the call
-that overruns.
-
-The fix belongs here rather than in the verifier. Raising a limit to fit a shape that grows
-without bound only moves the number; splitting one recipe plan into several, loaded in turn, ends
-it. Not urgent at a factor of two and a half of headroom, and it wants measuring before it wants
-designing: nothing yet says a thousand-node plan is a shape this mode should produce.
 
 <a id="t168"></a>
 ### #168 — the fbs ScalarValue has no interval, so one join residual has no payload
@@ -529,21 +261,6 @@ Closing it is a third appended `ScalarValue` variant plus the C++ arm, on the te
 took, both appended so no ordinal moves. Not
 proposed: one query is a thin case for a surface change, and T21 does not need it.
 
-<a id="t158"></a>
-### #158 — an aggregate DataFusion answers from statistics reaches no executor
-`SELECT count(*) FROM nation` never reaches an `AggregateExec`: DataFusion's
-`AggregateStatistics` rule answers it from parquet metadata and emits `PlaceholderRowExec`
-holding the result.
-
-The mode refuses it at plan time, so nothing here runs it. No corpus query reaches it either,
-since all 31 using `count(*)` carry a WHERE, GROUP BY or JOIN and the rule cannot fire.
-
-The fix is small on the CPU and unavailable on a device: the node is a source of constant rows,
-and a table of literals made from no input is what the frozen surface has no call for — the same
-wall as [#173](#t173) and [#175](#t175). T17 was to have discharged it and did not: writing the
-CPU half alone makes the oracle answer a query the device refuses, and the oracle is what the
-device is checked against. Waits on the make-a-table-of-literals call all three want.
-
 <a id="t173"></a>
 ### #173 — a finish whose probe produced no keys cannot make the table it owes
 `finish_without_keys` (`gpu_backend/join.rs`) refuses Left, Full, LeftSemi and LeftMark on the
@@ -555,22 +272,6 @@ runs answer nothing on the Rust side before any call, on both engines, and the C
 `node_session.cpp` behind them is unreachable. Unfreezing buys a make-empty-of-schema call and
 the refusal goes; until then it is the contract. Blocks no registry cell. Pinned by
 `bug_…_finishing_with_no_probe_batch_is_refused_on_the_device` (`gpu_tests/join_cases.rs`).
-
-<a id="t23"></a>
-### #23 — Upgrade DataFusion 45→46+ to unblock q27/q70/q72/q86
-Four TPC-DS queries fail to physical-plan on DataFusion 45 (`plan_status=fail`): q27
-SanityCheckPlan vs ROLLUP SortPreservingMerge ordering; q70/q86 `GROUPING()` aggregate
-not planned; q72 `Date32 + Int64` coercion. Whole rows dead until the upgrade. See #114.
-
-View types on the bump. In 45 the parquet scan is the only unconditional source of `Utf8View`/
-`BinaryView` (`schema_force_view_types`, default true); every coercion and string function
-returns a view only for a view input, so turning the option off in `build_session_state` clears
-[#183](active-tickets.md#t183) end to end. Later releases add producers that do not go through
-the scan — `map_varchar_to_utf8view` (SQL `VARCHAR`/`CAST` → `Utf8View`) at least — and Arrow's
-`ListView`/`LargeListView` may gain a first producer. cuDF holds no view layout, so any that reaches
-the wire is #183 again. After the bump: `grep -c 'Utf8View\|BinaryView\|ListView'` over
-`testdata/goldens/*/*.plans.txt` must stay zero, and every new `datafusion.*view*` option is
-read for its default.
 
 <a id="t65"></a>
 ### #65 — __grouping_id encoding doesn't match DataFusion's GROUPING()
@@ -598,17 +299,6 @@ DataFusion's `SingleDistinctToGroupBy` rewrite (q16×2/q94/q95 green); the flag 
 only for mixed distinct + non-distinct, blocking q28. Fix: map count+distinct → cuDF
 `nunique` (`null_policy::EXCLUDE`) in the grouped and global paths without regressing
 the rewrite queries.
-
-<a id="t95"></a>
-### #95 — Decimal partition keys for real-8-way murmur3
-murmur3 covers int/date/timestamp/composite/null; decimal deferred (float indefinitely).
-Needed by the first shuffle on a decimal key (tpch q18 `o_totalprice`, q22 `c_acctbal`,
-tpcds `i_current_price`). Dispatch by *logical* precision (≤18 → low 8 LE bytes of int128;
->18 → raw 16B LE) and thread precision through the partition FFI. Until then
-`spark_hash_partition.cu`'s type switch fails with `unsupported key column cuDF type_id=27`,
-which is what [#184](tasks/active-tickets.md#t184)'s q15 hits on `total_revenue`. The cpu's comet
-hasher takes the decimal, so the shape is a refusal on one side. Pinned by
-`bug_a_decimal_key_is_refused_on_the_device` (`gpu_tests/emit_cases.rs`).
 
 <a id="t57"></a>
 ### #57 — Value-form CASE produces wrong results on the GPU column path
@@ -648,28 +338,6 @@ Honor the partial-phase operand cast / state schema.
 
 
 ## Performance / architecture
-
-<a id="t226"></a>
-### #226 — a benchmark tree does not say which device, driver, CUDA or cuDF produced it
-The `--- run ---` trailer and the record's `# run:` heading carry `build=`, `allocator=` and
-`capture=`, and nothing about the hardware or the stack. Two hosts now write the same files:
-shad-gpu (cuDF 25.02, driver-side CUDA 12.5 compat) through `build-test-shadgpu.sh` and
-verda-gpu (cuDF 26.02, driver 580) through `build-test.sh`, both H200s today — and
-`--pull-benchmarks` from either overwrites `benchmark-results/tpch.sf40/*.benchmark.txt` and
-`calibration/records.tsv` in place. A `git diff` shows numbers moving and cannot say whether
-the code, the cuDF version or the card moved them; a plot drawn from a mixed record says
-nothing either.
-
-Add to both the trailer and the heading, as constants of a run: `device=` (the
-`cudaDeviceProp` name), `driver=` (`cudaDriverGetVersion`), `cuda=` (`cudaRuntimeGetVersion`,
-the toolkit libcudf was built with), `cudf=` (`CUDF_VERSION_MAJOR.MINOR.PATCH` from
-`cudf/version_config.hpp`), and `host=` (the machine name). The C++ side knows all four
-numbers and the Rust harness knows none, so this is one ABI query returning a struct of
-strings, priced like the `allocator=` line: `install_rmm_pool` already reports what it found,
-and this is the same shape one call earlier. The record's heading check — an append under a
-different heading is refused — then does what it should: a 26.02 row cannot land under a
-25.02 heading. `nsys_hbm.py` joins the capture onto the record's coordinates and should refuse
-a capture whose `TARGET_INFO_GPU` device name differs from the record's.
 
 <a id="t179"></a>
 ### #179 — nothing shows a rebatcher moving an enforced budget boundary
@@ -741,39 +409,6 @@ Each follows from a handle being consumed by its reader, or an fb node's fields 
 constants, and they overlap. The session subsumes the bitmap; the top two rows need no ABI
 change. Land [#154](#t154) first, or the numbers are inflated by per-call copies.
 
-<a id="t154"></a>
-### #154 — every operator exit path deep-copies its output into a fresh table
-`std::make_unique<cudf::column>(view)` deep-copies the device buffer, and 21 sites under
-`cpp/src/` do it — 10 in `join.cpp`, 7 in `aggregate.cpp` — mostly to a table the same
-function just produced.
-
-`execute_hash_join` is worst per exit: `cudf::gather` returns an owning table, the code copies
-each column into `all_cols` (~L337, ~L342), then copies the kept ones again if the node projects
-(~L376). `release()` moves instead; `scan.cpp` L103 and `join.cpp` L254 are the pattern
-(`union.cpp`'s site went with its `output_schema` block in decimal-precision-at-export), and it
-is C++-internal — no header, fbs, Rust or golden moves. Five kinds: whole table
-freshly produced (`join.cpp` 202, 337, 342, 512, 515), mechanical; ordinal subset (`join.cpp`
-211, 270, 376, 525, `filter.cpp` 41), needing an assert the ordinals are distinct; a column of
-an **input** table kept in the output (`join.cpp` 259, `project.cpp` 44, `window.cpp` 46),
-changing who destroys what under `NodeInputs`; a temporary that only ever needed a view
-(`expr.cpp` 834, below); and `aggregate.cpp` 413, 642, 644, 678, 680, 759, 771, unresolved without
-reading. Traps: a view taken before the release dangles (`ftv` ~L372), and a repeated projection
-ordinal moves one column twice leaving a hole — a wrong answer, not a throw, which is why it
-needs the assert and not the observation. Land before [#155](#t155).
-
-The `expr.cpp` site is the cheapest to fix and the most expensive to leave. `build_column`'s
-`ColumnRef` arm copies the whole column and the caller takes `->view()` of the copy one line
-later; every consumer (`cudf::binary_operation`, `unary_operation`, the function arms) takes
-a `column_view`, and the input table outlives the call. Returning `table.column(idx)` — or
-resolving `ColumnRef` leaves in `build_column_binary` before recursing — needs no ownership
-change. It fires once per `ColumnRef` leaf per batch on every predicate `is_ast_able` rejects
-(a decimal operand, a string literal, LIKE, CASE): q6's filter copies five lineitem columns per
-batch (`l_shipdate` ×2, `l_discount` ×2, `l_quantity`), and q19's copies string columns, offsets
-and chars. The sf40 HBM reading puts it at ~46 of the 107 GB q19's lineitem filter moves, and
-17× the useful traffic at its part filter. The `And` chain's intermediate bool columns are a
-separate cost — one kernel per node, which only fusion (JIT, or stitching back into the AST)
-removes — and not this ticket's.
-
 <a id="t152"></a>
 ### #152 — GpuHashJoin: the build handle does not survive a streamed probe
 `NodeSession::execute_node` erases every input handle it reads (`node_session.cpp` ~L250, ~L339,
@@ -792,142 +427,6 @@ Whether the copy is tolerable is answerable from the goldens: each join's two
 `GpuCoalescePartitionsExec` lines carry both sides' `output_bytes`, and B copies cost `B ×
 build_bytes` against one probe stream. Take the ratio on **bytes, not rows** — tpch q3 is 24:1
 by rows and 73:1 by bytes. Decide before T16, under [#155](#t155).
-
-<a id="t150"></a>
-### #150 — store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%
-The sf40 embedding columns are written SNAPPY and do not compress: `ps_image_embedding`
-12306/12661 MB and `p_text_embedding` 3205/3293 MB, both 1.03x against ~1.6x elsewhere.
-
-Float32 embeddings are high-entropy, so that is the data rather than the writer — and the GPU
-decompresses them anyway. On q11v (`nsys`, share of GPU kernel time) `nvcomp::unsnap_kernel` is
-564.7 ms / 37.9% on H200 and 419.5 ms / 24.9% on GB10, against 60.5 ms / 4.0% for the cuVS
-distances and top-k the query exists to do; loading is 93.8% of H200 kernel time.
-
-The change is `compression=NONE` for those two columns in `testdata/generate_testdata.sh`.
-Parquet compression is lossless, so no value changes and no golden moves — only file size (~440
-MB more) and the load path. Not free to do, though: sf40 is generated, uploaded and mirrored to
-shad-gpu, so it means re-uploading 40 GB and re-verifying the 16 sf40 goldens. Measure with
-`load_ms` per vector probe and the `unsnap` line from `nsys stats`.
-
-<a id="t149"></a>
-### #149 — the parquet load must use pinned host memory
-**Priority: high**
-
-Nothing in the engine sets a host memory resource for IO, so parquet loads from pageable host
-memory — 10.6 GB/s H2D on the H200 against 47.3 GB/s pinned, 2 GiB buffers, 2nd-min of 5.
-
-A discrete GPU's DMA engine transfers by physical address and cannot be handed a page the OS may
-move, so a pageable source is bounced through an internal pinned staging buffer: a host memcpy
-of every byte, which is what bounds the rate — H200's 10.6 GB/s sits just under its 11.8 GB/s
-single-core memcpy, nowhere near its link rate. That is 4.4x on every byte the loader moves, and
-the load dominates: 400-690 ms against 19-48 ms of execute on sf40. cuDF exposes
-`cudf::io::set_host_memory_resource` and defaults to pageable — [#148](#t148)'s shape one side
-over. Condition it on the device: GB10 shows 59.5 vs 59.2 because it has one physical pool, so
-`pageableMemoryAccess` is the branch. Tests: compare the existing `[bench] … load_ms=` on both
-hosts, asserting the discrete host improves and the integrated one does not regress.
-
-<a id="t148"></a>
-### #148 — the engine installs no RMM allocator, and `gpu_memory_limit` is accepted and ignored
-**Priority: high**
-
-Nothing under `cpp/src/` or `cpp/include/` calls `set_current_device_resource`, so every cuDF
-intermediate takes rmm's default: a `cudaMalloc`/`cudaFree` driver round trip each.
-
-Measured: TPC-H q1 over sf40 whole-table on GB10 is 76.5 s execute (2nd-min of 5, all runs
-inside [75.4, 78.8], so steady state) against 3.9 s streamed through bounded batches for the
-same answer. The gap was fixed three times already — `multi_gpu.cpp`, the gtest mains and the
-benchmark harness, the last two sharing `cpp/include/peacock/rmm_pool.hpp`
-([#151](archive/archived-tickets.md#t151)); the engine is the only one of the four that ships.
-The second half is the same fix: `gpu_memory_limit` is documented as a bound, stored at
-`gpu_executor.cpp:99` and never read — the #132 shape one level up. Care: install per device
-before any cuDF call, and tear down on the owning thread (`set_per_device_resource(id, nullptr)`
-misses the ref map). Two questions #178 did not answer for the engine: whether the limit is a
-reservation or a ceiling — the test binaries take `initial == maximum` because it fails loudly —
-and how an integrated part is sized, whose only implementation went with the percentages
-(`archive/historical-comments.md`). Tests: the GPU tiers stay byte-identical, plus a case
-asserting a small limit is honoured.
-
-<a id="t19"></a>
-### #19 — the planner has no cardinality estimate, and the memory model pays for it
-Widths are facts and source rows are facts — the schema, and the `rows`/`bytes` a scan reads
-off its surviving row groups at plan time (`planner/translator/scan_mapping/parquet_meta.rs`).
-What a query
-does to them is guessed: `estimator.rs::rows` has a filter pass every row, an aggregate emit
-one group per input row, and a join emit its larger side.
-
-It shows twice, both in `estimate`. An accumulator is charged what it holds whatever the batch
-size, so an aggregate's state is priced at its whole input — tpch q1 groups six million rows
-into four and is billed six million — and that total comes off the budget before anything is
-divided, so `share_per_source` and every batch size derived from it come out smaller than the
-plan needs. `rows_are_certain` is what keeps the error one-directional: only the part of the
-accumulator total that rests on facts can refuse a plan, so a guess shrinks batches and never
-rejects a query.
-
-Not part of this any more: build/probe order is DataFusion's own JoinSelection over its own
-nodes, which nothing of ours now sits between — the 55-of-103 measurement this ticket opened
-with was of a wrapper tree that is deleted. #147 is the mechanism a real estimate would arrive
-through; #73 and #20 are what it unlocks.
-
-<a id="t16"></a>
-### #16 — Dynamic / runtime filters: build-side keys → probe-side scan
-Star-schema fact scans read 100% of rows while the joined dimension is filtered to ~30%. Build
-an IN-set / min-max (later Bloom) at build completion and feed the probe-side GpuScan.
-
-Applies to 76/99 TPC-DS queries; validate on q3/q19/q33. Best after #19. **Design it as the
-groundwork for CTEs, not a join-to-scan special case.** A dynamic filter is the first thing here
-whose producer has two consumers: the build side feeds the join, and it also feeds a replanning
-consumer that turns those keys into a predicate on a scan below. That is a diamond, and every
-plan model here is a tree. What serves it — a fork handing one batch stream to N consumers, plus
-a consumer that plans rather than executes — is what a materialized CTE needs ([#101](#t101))
-and what [#147](#t147) calls refinement in flight. Do it after the streamed lanes, which
-suit the shape: with refcounted handles ([#145](#t145)) a tee costs nothing on the device, the
-accountant already models a fork's residency as the slowest consumer's backlog, and a consumer
-blocking its producer is the join hold, one rule already mutation-tested. A diamond in the plan
-is then routing rather than scheduling.
-
-<a id="t20"></a>
-### #20 — Join enumeration: DPccp/DPhyp cost-based tree reshaping
-DataFusion 45 has no join enumerator — trees come out in FROM-clause order, and ~70/99
-TPC-DS queries have 4+ joins (q64 ≈ 18 tables). Implement DPccp (extend to DPhyp, IKKBZ
-fallback beyond 14 tables) as a logical rule after PushDownFilter, cost = Σ intermediate
-cardinality. Blocked by #19. Landing rewrites all plan goldens.
-
-<a id="t71"></a>
-### #71 — GPU scan: no predicate pushdown into the cuDF read
-Partly addressed: stats-based row-group pruning exists
-(`planner/translator/scan_mapping/rowgroup_prune.rs` → cuDF `set_row_groups`, parity with
-ParquetExec). Remaining: serialize the predicate itself
-into the cuDF `read_parquet` filter AST (page pruning / pre-filter during decode),
-multi-file scans, dynamic ranges (#16). Cause of red widget ratios on selective queries.
-
-<a id="t101"></a>
-### #101 — No CSE / CTE materialization: identical subexpressions recomputed N times
-**Priority: post-MVP**
-
-DataFusion inlines every CTE reference and peacock re-scans each copy. Worst: tpcds q23
-(CTEs ×5/×3/×2 → 6 scans), q4/q11 (`year_total` ×6/×4), q31; tpch q15 (`revenue0` ×2),
-q2. Direction: CTE materialization or physical CSE; at minimum make the cost model aware.
-
-The mechanism a materialized CTE needs — one producer, N consumers of the same batch
-stream — is the one [#16](#t16) has to build first for dynamic filters, and it is cheap in
-a streamed-batch model and expensive in a single-resident-table one. Sequence them
-that way round.
-
-<a id="t73"></a>
-### #73 — Cost-based optimizer (CBO) umbrella
-Move physical planning from static heuristics to cost-based, validated against the DuckDB
-cost oracle and goldens. In scope: adaptive filter placement, join enumeration (#20),
-stats (#19, the load-bearing prereq), runtime filters (#16).
-
-<a id="t75"></a>
-### #75 — Refactor duckdb_cost.py: separate cost formula from extraction
-**Priority: low** — not started (867 lines, 29 top-level defs as of 2026-08-05), and it buys
-readability, not behaviour.
-
-~870 lines where the ~80-line cost formula hides inside JSON parsing, predicate parsing
-and row-group pruning. Shape: preprocessor → flat per-node intermediate
-(op/rows_read/bytes_read/out_rows/out_bytes/breaker) → one-line cost. Pure refactor:
-`.duckdb_cost.txt` numbers must not move.
 
 <a id="t136"></a>
 ### #136 — GpuHashJoin: build-side match tracking when the probe side streams
@@ -1026,23 +525,6 @@ loader's remaining batch sizes; later revisions may replace the plan outright, k
 in-progress GPU work and rebuilding the driver rather than editing the running tree — which is
 why the driver owns no state a caller must survive it.
 
-<a id="t146"></a>
-### #146 — aggregate shaping beyond the fixed sequence
-**Priority: low** — each part optimizes an already-correct plan and needs the same estimate.
-
-The aggregate sequence applies one shape everywhere — per-batch init, merge per lane,
-shuffle, finalizing merge — right where group cardinality is far below row count.
-
-Three shapes it cannot express or choose. **(a) A merge accepting raw rows.**
-`GpuAggregateBatches` requires pre-aggregated state, so the per-batch `GpuAggregate` is
-mandatory: a lane with few batches pays B groupbys where one over the concatenation would do,
-and a non-reducing aggregate pays an init that shrinks nothing. A raw-accepting merge holds
-rows where a state merge holds groups, so it fits only the non-reducing case. **(b) A loader
-emitting one batch per partition**, where its consumer materializes the whole partition anyway
-— decide it from the subtree beneath the loader. **(c) The cardinality estimate all three
-want** — does this aggregate reduce? — which the constant estimators (#19) cannot answer and
-which gates [#141](#t141). Land after #19.
-
 <a id="t145"></a>
 ### #145 — Refcounted handles: stop copying every partition out of a scatter
 `spark_hash_partition` returns one table whose N partitions are already contiguous, and
@@ -1076,22 +558,6 @@ outer computes each count from the rows carrying its own gid. That needs a new r
 node, which is why it is a ticket rather than a planner tweak. Not [#65](#t65), whose gid is the
 ROLLUP/CUBE `__grouping_id` — the two would coexist as separate columns. Until it lands the
 planner refuses the shape at plan time.
-
-<a id="t142"></a>
-### #142 — no recourse for oversized batches
-Nothing downstream of the loader can split a batch: minimum load granularity is one row
-group, `GpuCoalesceAllBatches` before a join build side can exceed any budget, and the
-planner deliberately still produces a plan — `executor/driver/accounting.rs` then trips at run time and
-the query dies cleanly. Recourse options, deferred until better estimators and adaptive execution: a split
-operator (needs a C++ slice-to-handles entry point), or adaptive replanning on trip (re-plan
-with more partitions or smaller batches) — the second being the only one that would make a trip
-anything other than the end of the query.
-
-Both checks abort today, pre-call and post-call alike, and the pre-call one refuses on an
-estimate rather than on a fact. Recording it and letting the call proceed is the cheaper
-recourse and is deliberately not taken: `RunError::BudgetExceeded` now carries which check
-tripped, so something can branch on it, but there is nowhere to record into — `RunReport` has no
-trip log, and `Underestimate` is the precedent for what one would look like. Related: #91.
 
 ## Infrastructure / process
 
@@ -1131,18 +597,6 @@ condition is met and nothing left in the tree can hand this arm two handles — 
 copy of a single table on every call. Removing it needs a device run to prove, which is why it
 is a ticket rather than part of the rename that found it.
 
-<a id="t196"></a>
-### #196 — the table registrar's non-parquet guard does nothing, so a stray file panics
-`read_table` in `lib.rs` opens with `if path.extension() != Some("parquet") { () }` — the
-condition is computed and discarded, so a non-parquet entry falls through to
-`ListingTableUrl::parse` and four `unwrap`s. The caller's `let Ok(..) else { continue }` says
-the intent was an `Err` there.
-
-Nothing in the tree provokes it: every dataset dir holds parquet and nothing else, and
-`.duckdb_cache/` is a sibling rather than a child. The CLI is what makes it reachable by a
-user, since it registers whatever directory it is pointed at. The fix is the `return Err(())`
-the shape already asks for, with a case putting a non-parquet file in the dir.
-
 <a id="t195"></a>
 ### #195 — the corpus is numeric-aggregate heavy, and six shapes have no query at all
 Measured off `tp1-single.plans.txt` over the 61 enabled queries and the four largest held
@@ -1159,39 +613,6 @@ tables, no new dataset, plus the engine work it needs.
 - two `DISTINCT` args over different expressions: [#144](#t144) has no refusal of its own, and
   `count_distinct` marks queries this mode handles, so a grep for one finds the wrong two.
 - a wide `SELECT DISTINCT`: dedup whose state is the whole row, the compaction worst case.
-
-<a id="t178"></a>
-### #178 — shad-gpu is shared, and a pool that cannot be built is a neighbour's fault
-Each gtest main reserves a fixed byte budget (`kPoolBytes` beside its `main()`, listed in
-`build-test.md`). Our own runs queue on the `shad-gpu` concurrency group. Work outside this repo
-does not, so a stranger holding part of the card still fails us. **Tentatively closed**: it cannot
-be proven closed from here.
-
-The pool line says whose failure it is. `[rmm] pool of N GiB could not be built with M GiB free`
-at the top of the log is a neighbour: date a line below naming the run and the binary, re-run the
-job once, and do not debug it. A pool that *was* built and a test that then dies with `Maximum
-pool size exceeded` is ours: the budget is too small, and a re-run buys nothing.
-
-- 2026-09-12: CI run `34659896447` on PR #144 (`d41f223a`), `peacock_tpch_tests`: `pool of 69.0
-  GiB could not be built with 14.9 GiB free` at 00:08 UTC; `peacock_tpchv_tests` four binaries
-  later saw 103.0 GiB free, so a stranger held ~129 GiB for those minutes. Re-run once.
-- bp-benchmarks, dispatch 5: not CI — a non-CI process held 62 GiB and 90–98 % of the card
-  for six hours, and `peacock_gpu_benchmarks` measured q6 at six times its committed time
-  beside it. Nothing measured beside a neighbour is published; the gate ran green meanwhile.
-
-<a id="t176"></a>
-### #176 — the CI coverage guard checks one direction only
-`every_rust_test_target_is_named_by_ci` fails when a target exists that no workflow runs. Nothing
-fails when a workflow names a target that does not exist.
-
-That way round is not silent, but it is expensive and late: cargo errors inside the cuDF leg after
-the C++ build and the dataset generation, so a typo or a step added ahead of its test file costs a
-full run to discover. The case: a `--test test_cpu_end_to_end` step was added three commits
-before the file, and both legs went red on it.
-
-The converse is nearly free — `workspace_test_targets()` and the `--test` line parsing both exist,
-so it is one assertion that every target pipeline.yml names is in the workspace set. The exemption
-list already gets this treatment; the step lines do not.
 
 <a id="t174"></a>
 ### #174 — two clamps for one rule, and nothing compares them
@@ -1286,18 +707,6 @@ because no corpus query carries one, so the cost of each is one arm and its test
 belongs to this family but does not parse, so it is reachable only from a constructor and is
 covered as a unit test rather than by a query.
 
-<a id="t113"></a>
-### #113 — Provision GPU-host testdata by sweeping git-tracked files
-Hand-maintained rsync lists (`pipeline.yml` gpu-tests, `scripts/build-test-shadgpu.sh`)
-bit four times during the refactor. Fix: sweep
-`git ls-files --cached --others --exclude-standard testdata`. Lessons from the parked
-draft: `--exclude=*.parquet` is wrong (tpch.minimal commits 5 needed .parquet files);
-tracked-only misses new uncommitted fixtures. Needs its own clean verification run.
-
-Bit a fifth time in T19: the script pushed no query directory where `pipeline.yml:461` rsyncs both,
-so a T17 query was absent on the host. An absent file is loud; a stale one runs old text and writes
-cells describing a query the repo does not contain, with nothing red.
-
 <a id="t134"></a>
 ### #134 — begin_plan's out_node_count is unused on the prod path
 The C++ reports how many fb nodes it indexed; `RecipePlan::wire_nodes()` is what the writer
@@ -1335,15 +744,6 @@ once: write it, run `cargo test --features rust-only -p peacockdb-core --doc` in
 dataset-matrix tier, and teach the guard that `--doc` is a target class it must see named
 (the `--lib` check at `line_runs_lib_tests` is the pattern).
 
-<a id="t127"></a>
-### #127 — Unowned testdata dirs on shad-gpu
-shad-gpu carries `testdata/plans.sf1` (10 files) and `testdata/plans` (3) that no local
-checkout has, that the git-derived fixture sweep does not produce, and that nothing in
-the test suite references. Same shape as the binary orphans that `--delete` just closed:
-state on a remote host no provisioning path owns, so nobody can say whether it is stale
-or load-bearing. Not deleted, because something outside this repo may read it. Establish
-what wrote them and either bring them under the sweep or remove them.
-
 <a id="t125"></a>
 ### #125 — `elsewhere` parameter in assert_registry_matches_csv is dead
 `peacockdb-core/tests/common/registry.rs`: after the by-mode file split every CSV column
@@ -1352,24 +752,3 @@ staleness checking can no longer fire. Reviewer's read is *delete* (coding-style
 fallbacks the task didn't ask for); the parameter was kept only to hold branch scope, and
 its doc paragraph was rewritten to stop justifying it with a now-false example. Re-add it
 in the commit that actually splits a column across binaries again.
-
-<a id="t13"></a>
-### #13 — Hermetic builds: system-library whitelist + CI audit
-`ld` silently prefers system libs over the conda env (seen as
-`libarrow.so.2300: undefined reference to curl_easy_getinfo@CURL_OPENSSL_4`). Whitelist
-glibc/libgcc_s/libcuda only; everything else from `$CUDF_ROOT`. Enforce via CMake
-find-root pinning, build.rs link-search order, and a post-link `ldd` audit that fails CI.
-
-<a id="t94"></a>
-### #94 — MERGE_M2 count-child type is cuDF-version-specific
-The stddev/var Final path (`cpp/src/operators/aggregate.cpp`) hardcodes INT32
-`valid_count` for the 25.02 GPU runtime; 25.10/26.02 want INT64/FLOAT64. The 26.02 CI leg
-is build-only so it stays green — this bites at the next GPU-remote cuDF bump. Switch or
-version-gate the type then; the comment marks the site.
-
-<a id="t69"></a>
-### #69 — DuckDB cost oracle: multi-threaded golden generation for larger SF
-`gen_duckdb_cost.sh` pins `PRAGMA threads=1` because `operator_rows_scanned` scales with
-thread count (`output_bytes`/`output_rows` are thread-invariant). Fine at sf1, too slow
-at sf10/sf100. Simplest fix: parallelize across queries, keep per-query threads=1; or
-drop/normalize the thread-sensitive field.

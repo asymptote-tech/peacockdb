@@ -461,7 +461,13 @@ int peacock_spark_partition_ids(const void* schema, const void* array,
     auto const view = pid->view();
     auto const n    = static_cast<uint64_t>(view.size());
     if (n > out_cap) return 1;
-    cudaMemcpy(out_pids, view.data<int32_t>(), n * sizeof(int32_t), cudaMemcpyDeviceToHost);
+    cudaError_t const copied =
+        cudaMemcpy(out_pids, view.data<int32_t>(), n * sizeof(int32_t), cudaMemcpyDeviceToHost);
+    if (copied != cudaSuccess) {
+      std::fprintf(stderr, "peacock_spark_partition_ids: cudaMemcpy: %s\n",
+                   cudaGetErrorString(copied));
+      return 1;
+    }
     *out_n = n;
     return 0;
   } catch (const std::exception& e) {
