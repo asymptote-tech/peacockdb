@@ -220,14 +220,11 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
 /// half is checked in the device binary, because `inventory` collects per linked binary.
 #[test]
 fn the_registry_matches_the_cpu_corpus_in_both_directions() {
-    assert_registry_matches_csv(
-        &[
-            "cpu_tp1_single",
-            "cpu_tp1_rowgroup",
-            "cpu_tp4_single",
-            "cpu_tp4_rowgroup",
-            "cpu_tp4_sized",
-        ],
-        &[],
-    );
+    assert_registry_matches_csv(&[
+        "cpu_tp1_single",
+        "cpu_tp1_rowgroup",
+        "cpu_tp4_single",
+        "cpu_tp4_rowgroup",
+        "cpu_tp4_sized",
+    ]);
 }

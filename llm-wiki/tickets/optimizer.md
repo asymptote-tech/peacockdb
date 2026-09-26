@@ -20,6 +20,74 @@ stream — is the one [#16](#t16) has to build first for dynamic filters, and it
 a streamed-batch model and expensive in a single-resident-table one. Sequence them
 that way round.
 
+<a id="t140"></a>
+### #140 — broadcast joins (1:N partition broadcast)
+Deferred by the design. Lets one partition (small dimension side) be broadcast to all N
+partitions of the other side without shuffling the big side; also unblocks partitioned
+cross/nested-loop joins. The blocker is consume-once: a GPU handle feeds exactly one
+call, so a broadcast build needs either an explicit device copy (`GpuBatch::copy()` — 
+keep `!Clone` so the cost stays visible at call sites) or a C++-side non-consuming/
+refcounted handle. Interacts with #136's persistent-build option, which would solve both
+at once.
+
+<a id="t170"></a>
+### #170 — a source whose lanes each hold one batch could say so, and three shortcuts would fire
+
+The loader declares `MultipleBatches` unconditionally
+([architecture.md](architecture.md#modes-and-knobs)), so no downstream node may assume one
+batch per partition. That was incremental simplicity rather than a missing fact: `scan_mapping/partition.rs`
+computes the row-group → (partition, batch) mapping once at plan time and everything downstream
+consumes it verbatim, so the batch count per lane is `partition_groups[lane].len()` — known in all
+three batching forms, `Sized` included, since the planner cuts by bytes and the loader only
+executes what it was handed.
+
+The condition is that every lane holds exactly one batch, `SingleBatch` being a property of the
+node rather than of a lane: a source with lanes of one and two batches stays `MultipleBatches`.
+
+Saying it fires shortcuts the aggregate sequence already specifies: a 1-partition single-batch
+input needs one `GpuAggregate` carrying both `aggs` and `final`, and a single-batch-per-partition
+input skips the first `GpuAggregateBatches`. Join build sides need nothing new — `translator/nodes.rs`
+already elides their coalesce when the input is `SingleBatch`. So the change is one declaration
+and the plans get smaller by themselves. Every plan golden moves, which is its real cost.
+
+<a id="t141"></a>
+### #141 — the planner cannot skip the shuffle for small group-key sets
+v1 skips `GpuMergePartitions` + `GpuEmitPartitions` around an aggregate only when the
+input is already one partition or the aggregate is keyless. Skipping when the key set is
+merely small (collapse to one partition, run `GpuAggregateBatches[final]` once, avoid the
+shuffle) needs a cardinality estimate that does not exist — the estimators are constants
+(#19). When stats land, add the rule and regenerate the affected plan goldens.
+
+<a id="t139"></a>
+### #139 — GpuCoalesceBatches(target): compact post-filter fragments
+Dropped from v1. After a selective filter, batches shrink to a few rows and every
+downstream kernel pays per-launch overhead on each fragment. A `BatchAccumulator` that
+concatenates to a minimum target size (DataFusion semantics: merge only, never split),
+streaming out one batch whenever the threshold is crossed. `cudf::concatenate` via the
+existing collapse arm — no C++ change; target size from the same budget rule that sizes
+loader batches. The T0 prototype has the node
+(`scripts/exec_model/operators/accumulators.py`, `ReBatchToTarget`) so the drivers are
+shown to tolerate one at any tree position; it also splits, which the ticket's node does
+not need, because the prototype uses it to make a stream's batches any shape.
+
+<a id="t147"></a>
+### #147 — PlanEstimates: a tree the planner emits and the runtime refines
+The planner's `target_batch_bytes` walk already computes a per-node maximum resident size and
+throws all but one number away. Keep it, as a tree shaped like the plan, one estimate per node.
+
+`ParquetBatchPartitioner` emits it beside the row-group mapping. Nothing in the plan's
+executability depends on it, but a wrong estimate is not free: too low and the query dies at the
+accountant's `scratch_bytes` pre-check, or as a cuda OOM below that. Neither is a wrong answer,
+and #142 handles both gracefully later; a better estimate makes fewer queries reach either. Two
+consumers, neither existing yet. **Placement** moves subtrees onto the CPU where the GPU cannot
+hold them — the `Backend` trait already makes that a matter of choosing per node. **Refinement
+in flight** extrapolates from one batch actually read, since the estimates otherwise rest on
+constants (#19). The first version rewrites only what needs no replanning, a still-reading
+loader's remaining batch sizes; later revisions may replace the plan outright, killing
+in-progress GPU work and rebuilding the driver rather than editing the running tree — which is
+why the driver owns no state a caller must survive it.
+
+
 <a id="t20"></a>
 ### #20 — Join enumeration: DPccp/DPhyp cost-based tree reshaping
 DataFusion 45 has no join enumerator — trees come out in FROM-clause order, and ~70/99

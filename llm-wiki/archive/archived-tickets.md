@@ -27,6 +27,27 @@ the report rather than emitting one that goes nowhere.
 
 ## Done
 
+<a id="t213"></a>
+### #213 — a golden regeneration can publish a file missing another writer's section
+`corpus_golden::merge_section` locks the inode it opened and `publish` renames a staged sibling
+onto the path, so a writer that opened before another's rename holds a lock on the old inode,
+reads stale text, and publishes without the other's section.
+
+Seen once on `ENS-empty-build`: a whole-corpus `UPDATE_CANONICAL=1` run published
+`tp4-single-mini.cpu.txt` without q16's section while its `.cost.txt` kept it; refilled with
+`PCK_UPDATE_SECTIONS=1 … --exact cpu_tpch_q16_tp4_single`. The doc on `merge_section` says the
+read inside the critical section prevents exactly this, which holds only while the path keeps
+one inode. A fix is a lock on a sibling lock file rather than on the file the rename replaces,
+or an open-after-lock. Test infrastructure, not the engine: no cell, no golden's content is
+wrong once the regeneration is re-read, which is why the rule to read a regeneration's diff exists.
+
+**Done 2026-09-25.** `merge_section` now locks the golden's directory, which the rename never
+replaces, and reads the file under that lock. The same lock serializes `publish`'s staged sibling,
+whose name carries only the process id. Held by
+`concurrent_merges_into_one_file_keep_every_section` (`test_support/corpus_golden/tests.rs`):
+sixteen writers into one file over twenty rounds, red before the fix (15 of 16 sections lost in
+round 0) and green after.
+
 <a id="t187"></a>
 ### #187 — the device widens a decimal the plan declared narrow
 
@@ -420,6 +441,45 @@ adds `tpch.minimal`, `tpch-vec-queries`, `generate_testdata.sh`), so the two alr
 No clean verification run is on record.
 
 ## Stale or obsolete
+
+<a id="t125"></a>
+### #125 — `elsewhere` parameter in assert_registry_matches_csv is dead
+Resolution: obsolete
+After the split by execution mode every registry CSV column is owned wholly by one test binary,
+so both callers passed `&[]` and the exception list could never fire. The parameter and its
+staleness check are deleted from `test_support/registry.rs`. A column split across binaries
+again would need its exceptions re-added in that same commit.
+
+<a id="t134"></a>
+### #134 — begin_plan's out_node_count is unused on the prod path
+Resolution: won't fix
+The C++ reports how many fb nodes it indexed; `RecipePlan::wire_nodes()` is what the writer
+created. Comparing them is the one free check that both sides number one tree, which every
+handle's seq rests on — and no library code reads it: `src/` never calls `begin_plan`, so
+outside the tests the number is returned and dropped. Three of the four test openers compare
+(`corpus_gpu.rs`, `wire::gpu_tests`, `gpu_backend::gpu_tests`); `gpu_backend::gpu_tests::abi` does not. Fix:
+a helper beside `RecipePlan` that opens a plan and errors naming both numbers, used by all.
+
+
+<a id="t121"></a>
+### #121 — Multi-GPU q3 frees GPU-p memory on the calling thread
+Resolution: won't fix
+`cpp/tests/gpu/test_multi_gpu_tpch.cpp` (~L634): `shuffled` (from `hash_shuffle`) is a
+local of the `execute` lambda, so it is destroyed on the **calling** thread. Each
+`shuffled[p]` for p≠0 is a `cudf::table` from GPU p's RMM pool, so this frees device-p
+memory while device 0 is current — the exact worker-per-GPU destruction rule this file
+follows everywhere else (every other buffer is explicitly released on its worker). Pool
+deallocation is stream-ordered per device, so this is the class of mistake that shows up
+later as a corrupted pool or a teardown crash, not immediately. Release each
+`shuffled[p]` on `pool[p]` like the neighbouring `local_top` block.
+
+<a id="t122"></a>
+### #122 — Multi-GPU q6 host merge doesn't check partial scales agree
+Resolution: won't fix
+`cpp/tests/gpu/test_multi_gpu_tpch.cpp` (~L198): the host `__int128` sum overwrites
+`scale` with each partial's scale without verifying they match. All partials share a
+scale today, so the result is correct — but a future divergence would silently produce a
+wrong sum instead of failing. Assert equality.
 
 <a id="t41"></a>
 ### #41 — Standing test for GpuUnion branch-type normalization cast

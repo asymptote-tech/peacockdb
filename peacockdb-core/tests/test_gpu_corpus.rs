@@ -109,14 +109,11 @@ fn a_device_run_under_a_regeneration_writes_no_golden() {
 /// than a gap to close: `inventory` collects per linked binary.
 #[test]
 fn the_registry_matches_the_gpu_corpus_in_both_directions() {
-    assert_registry_matches_csv(
-        &[
-            "gpu_tp1_single",
-            "gpu_tp1_rowgroup",
-            "gpu_tp4_single",
-            "gpu_tp4_rowgroup",
-            "gpu_tp4_sized",
-        ],
-        &[],
-    );
+    assert_registry_matches_csv(&[
+        "gpu_tp1_single",
+        "gpu_tp1_rowgroup",
+        "gpu_tp4_single",
+        "gpu_tp4_rowgroup",
+        "gpu_tp4_sized",
+    ]);
 }

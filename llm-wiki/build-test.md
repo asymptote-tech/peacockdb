@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2325 test cases — Rust 1850, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2326 test cases — Rust 1851, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1179 cases: `--lib` 600, `test_cpu_corpus` 550, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1180 cases: `--lib` 601, `test_cpu_corpus` 550, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -306,6 +306,12 @@ what the export is told per column: a `Decimal128(p, _)` its `p`, every other co
 the record's reading of a plan: a row's `node_seq` names the steps its `recipes` line prints,
 so the record and the plan golden agree on what a call is; and every cell of a written row
 sits under the column named for it, since `row()` is positional and the heading is not
+
+| Golden merge under contention | [test_support::corpus_golden::tests](../peacockdb-core/src/test_support/corpus_golden/tests.rs) | 1 |
+|---|---|--:|
+
+sixteen writers merging one golden file at once each keep their section: the lock is on the
+directory, because the rename that publishes replaces the file's inode (#213)
 
 | Sink divergence message | [executor::errors::tests](../peacockdb-core/src/executor/errors/tests.rs) | 3 |
 |---|---|--:|

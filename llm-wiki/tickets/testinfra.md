@@ -36,3 +36,16 @@ before the file, and both legs went red on it.
 The converse is nearly free — `workspace_test_targets()` and the `--test` line parsing both exist,
 so it is one assertion that every target pipeline.yml names is in the workspace set. The exemption
 list already gets this treatment; the step lines do not.
+
+<a id="t129"></a>
+### #129 — The "26.02" CI leg builds against a 25.10a image; the GPU job has no fork guard
+Two unrelated smells in `pipeline.yml`, both found auditing the CI section of
+build-test.md. (a) The dataset-matrix matrix leg labelled `cudf: "26.02"` runs
+`rapidsai/base:25.10a-cuda12-py3.12`, so the compile-only 26.02 coverage the wiki and
+`#94` both rely on is actually 25.10a coverage; the label is the only place 26.02 appears.
+Either bump the image or rename the leg — as it stands, "26.02 compiles" is a claim no job
+makes. (b) `s3-datasets` explains its fork guard as mirroring "the GPU job's fork guard",
+but `gpu-tests` has no job-level `if:` — on a fork PR `secrets.SHAD_GPU_SSH_KEY` is empty,
+so Setup SSH writes an empty key and the job goes red on ssh instead of skipping. Moot
+while the repo has no forks, which is exactly why it will bite later.
+

@@ -59,10 +59,9 @@ pub enum PlanError {
 }
 
 // The expression IR. Types and literals are DataFusion's own — the coercions and the
-// decimal precision and scale it derived are exactly what must not be re-derived (#55/#56/#63
-// are what re-deriving them costs). What is not reused is the shape: a column reference is an
-// ordinal into a child whose column order this engine decides, so every reference is rebased
-// at each node the translation layer inserts.
+// decimal precision and scale it derived are exactly what must not be re-derived. What is not
+// reused is the shape: a column reference is an ordinal into a child whose column order this
+// engine decides, so every reference is rebased at each node the translation layer inserts.
 
 /// The name rides beside the ordinal so a plan can be checked against the schema at that
 /// position rather than trusting it — #135's class, caught at plan time here.

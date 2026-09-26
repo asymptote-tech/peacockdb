@@ -37,3 +37,19 @@ without bound only moves the number; splitting one recipe plan into several, loa
 it. Not urgent at a factor of two and a half of headroom, and it wants measuring before it wants
 designing: nothing yet says a thousand-node plan is a shape this mode should produce.
 
+<a id="t128"></a>
+### #128 — Doctests run nowhere, and the meta guard cannot see them
+No step in `pipeline.yml` passes `--doc`, and `test_ci_coverage.rs` enumerates `--test`
+targets plus `--lib`, so a doctest is invisible to the guard whose whole job is finding
+targets CI does not run. The crate has none today: the one it had documented an entry point
+that no longer exists.
+
+There is now one pipeline to document, and it is three calls in a fixed order —
+`planner::plan` for the tree, `wire::attach_recipes` where a device is involved, and
+`executor::run` over a backend. `peacockdb/src/main.rs` is the only place that
+sequence is written down, and a reader of the crate meets the three functions separately. A
+doctest on the entry it documents is the natural fix and the reason to close both halves at
+once: write it, run `cargo test --features rust-only -p peacockdb-core --doc` in the
+dataset-matrix tier, and teach the guard that `--doc` is a target class it must see named
+(the `--lib` check at `line_runs_lib_tests` is the pattern).
+

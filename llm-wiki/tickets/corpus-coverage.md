@@ -108,7 +108,55 @@ no batch included — today such a lane gets no call. Sources of nothing below t
 limit, #205's sort, the joins) need no fix of their own for this; between init and merge a keyless
 sequence only collapses lanes, which keeps the one-row batch.
 
+<a id="t55"></a>
+### #55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast
+
+Filed against the old executor. DataFusion casts `sum(decimal / int)`'s divisor to Decimal128 in
+the Partial phase only. The device's Final aggregate evaluated the argument again, over the
+partial state, where the cast column does not exist, and cuDF failed the cast.
+
+Most likely stale. The wire has no Final aggregate any more: `aggregate_writer.rs` writes `Init`
+as `Partial` and `Merge` as `Merge`. The division runs once, in `Partial`, where `arg_col`
+(`cpp/src/operators/aggregate.cpp`) builds a computed argument over the original input. A merge
+reads state columns by reference. q66's five cpu cells, which run the same translated expression,
+are green. What is missing is a device run: nothing has put a summed quotient on a device.
+
+**Corpus queries:** `tpcds/q66` — twelve `sum(<month>_sales / w_warehouse_sq_ft)` over a two-branch
+union. Its five gpu cells are off (`corpus_cases.inc` gpu modes `none`). Closing #55 enables none
+of them: the four multi-batch modes are held by #152, tp1-single by #183 (the plan's string keys
+are `Utf8View`). Registry row 67 tags `55 152 185`; `185` looks like a typo for `183`.
+
+**Fix proposed:** no code change — a proof, then archive. Add a walk test beside
+`each_lane_merges_its_own_state_before_the_cross_lane_merge_folds_them` in
+`wire/gpu_tests/mod.rs`: `SUM_OF_QUOTIENTS`, a grouped `sum(l_extendedprice / l_linenumber)`
+under an outer `sum`, through `assert_walk_matches_datafusion` at `TWO_LANES`. The oracle
+compare on the digits is the proof: a merge that re-evaluated the quotient over state would
+throw or answer different digits. Pin the `PARTIAL`, `MERGE` and `FINALIZE` counts from the
+trail, as the neighbouring tests do, so the shape cannot quietly lose its merges. Green on
+shad-gpu closes #55: drop `55` from registry row 67 and archive the ticket as stale. Red means
+the defect is live, and the throwing call names its phase.
+
 ## Sort / Limit
+
+<a id="t202"></a>
+### #202 — a descending sort key puts its nulls on the wrong end on the device
+
+On a descending key the device places nulls at the end the plan did not declare: `i32 DESC
+NULLS LAST` comes back nulls first, and `DESC NULLS FIRST` comes back nulls last.
+
+`sort.cpp` and the merge in `node_session.cpp` map `nulls_first` to `cudf::null_order::BEFORE`
+and its absence to `AFTER`, and cuDF applies that before it flips a `DESCENDING` key. Ascending
+keys are right, which is why every corpus ORDER BY has agreed: no cell's descending key carries
+a null. DataFusion's default for `DESC` is nulls first, so a query sorting a nullable column
+descending gets its null rows first on the cpu and last on the device. The mapping has to be
+relative to the direction — `BEFORE` when `nulls_first == asc` — at both sites, since a merge
+over sorted runs must order as the sort did, and the two sites have to move together: runs
+sorted as the plan says under a merge that reads them the other way break cuDF's merge
+precondition, and the device answers duplicated and dropped rows — a shape no plan reaches
+today, since every run the merge sees was sorted by the same mapping. Pinned by `bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device`
+(`gpu_tests/exec_cases.rs`), the two `…_descending_key_nulls_first_puts_them_last…` merge pins
+and `…_over_runs_each_carrying_a_null_duplicates_and_drops_rows…` (`gpu_tests/accumulate_cases.rs`).
+
 
 <a id="t217"></a>
 ### #217 — a sort with `fetch 0` keeps every row on the device
@@ -210,6 +258,74 @@ registry rows carry it.
 field. All three stop here at `tp1-single`; their other four modes stop earlier, at #152.
 Simplest: `select extract(year from o_orderdate) from orders;` (tpch).
 
+<a id="t210"></a>
+### #210 — a bare decimal literal on the AST path comes back as a Float64 column
+
+cuDF's AST has no fixed-point literal, so `ast_scalar` (`expr.cpp`) rewrites a `Decimal128`
+literal as a scaled double before the one scalar builder; under a `CAST(… AS Float64)` that is
+the type the plan asked for, but a bare or unary-wrapped decimal literal is AST-able too, and
+`SELECT 1.5 FROM t` then computes a `FLOAT64` column on the device where the plan declares
+`Decimal128(2, 1)` — and since `decimal-precision-at-export` the export refuses it by name rather
+than answering it, the AST path still computing a double. Same class as
+[#191](tickets/corpus-coverage.md#t191): a declared type produced as another. Pre-existing, carried
+through `typed-nulls.md` by that spec's own instruction, and pinned by
+`bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` (`gpu_tests/exec_cases.rs`);
+the walk `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` names it on its
+`Decimal128` row. The likely fix is `is_ast_able` refusing a bare decimal literal as it already
+refuses a decimal operand, so the column path builds a real `fixed_point_scalar`.
+
+<a id="t57"></a>
+### #57 — the device refuses a value-form CASE
+`build_column_case` (`cpp/src/expr.cpp`) throws `value-form CASE not supported in column path`
+for any `CASE x WHEN v THEN …`. The search form, `CASE WHEN x = v THEN …`, folds through
+`copy_if_else` and works. `bug_a_value_case_is_refused_on_the_device`
+(`src/tests/gpu_tests/exec_cases.rs`) pins the refusal, and `plan/mod.rs` lists it among the
+known refusals.
+
+Filed as a wrong answer: the value form came back all-0 or all-null, so it was reverted to a
+throw. `reports/corpus-fixes.md` (fix 7) found that a misdiagnosis. The gtest built every Int64
+literal as 0, because `CreateScalarValue`'s second parameter is `is_null`, and the lowering had
+run q39 correctly at 8f471cc0. The guard stayed on that false measurement.
+
+**Corpus queries:** `tpcds/q39` — `CASE mean WHEN 0 THEN NULL ELSE stdev/mean END` in a project
+and `CASE mean WHEN 0 THEN 0 ELSE stdev/mean END > 1` in a filter, each twice per plan (the CTE is
+read twice). All five gpu cells are off and registry row 40 tags `57` alone. At tp1-single this
+is the refusal (`corpus_cases.inc:284`); the other four modes have not run on a device and may
+meet [#152](joins.md#t152) next.
+
+**Fix proposed:** fix 7 of `reports/corpus-fixes.md`, about 20 lines in `build_column_case`.
+Delete the throw and build the comparand once. Each WHEN becomes `binary_operation(comparand,
+when, EQUAL, BOOL8)`, with a scalar fast path for a literal WHEN, feeding the search form's fold
+unchanged. A NULL never matches, since `copy_if_else` reads a null condition as false, and the
+first match wins. No wire or ABI change, no golden moves. Proof: a gtest in
+`cpp/tests/gpu/test_plan_executor.cpp` whose comparand holds a NULL and a WHEN maps to NULL, now
+that `make_int64_literal` and `make_null_literal` build real values; the `bug_` case turned into
+a cpu-vs-device agreement; `tpcds/q39` enabled at tp1-single on shad-gpu. Drop the #57 clause
+from `plan/mod.rs` and `57` from registry row 40 in the same change.
+
+<a id="t56"></a>
+### #56 — q2: CASE-over-string-equality inside a partial-phase sum
+
+Filed against the old executor: the device built a cuDF AST for `sum(CASE WHEN <string equality>
+…)`, and cuDF refused with binaryop "Unsupported operator", since its AST cannot compare strings.
+`reports/corpus-fixes.md` traced the recorded error to the old Final phase, which evaluated the
+arguments in every phase — the same root as #55.
+
+Neither path is left. The aggregate builds no AST: only `filter.cpp` calls `is_ast_able`. Its
+`arg_col` (`cpp/src/operators/aggregate.cpp`) builds a computed argument with `build_column`,
+which compares strings, and a merge reads state columns by reference.
+
+**Corpus queries:** `tpcds/q2`, whose `sum(CASE WHEN d_day_name = 'Sunday' …)` repeats the shape
+per weekday. Its five gpu cells are off (`corpus_cases.inc` gpu modes `none`), also held by #152 at
+every mode; registry row 3 tags `56 152`. The harness test's comment counts the shape 48 times
+in the corpus.
+
+**Fix proposed:** likely fixed already. `a_grouped_sum_of_a_case_over_a_string_equality_agrees`
+(`src/tests/gpu_tests/aggregate_dimension_cases.rs`) runs this shape through a device
+`GpuAggregate` and matches the CPU, green since 2026-09-16. It covers the init alone, one operator,
+not a plan's merges across lanes. The complete proof is `tpcds/q2` enabled at every gpu mode once
+#152 lands; green there, archive #56 and drop `56` from registry row 3.
+
 ## Repartitioning
 
 <a id="t206"></a>
@@ -231,6 +347,24 @@ has no float column. Simplest, at any `tp4` mode: `select cast(l_quantity as dou
 from lineitem group by q;` and `select l_quantity > 25 b, count(*) from lineitem group by b;`
 (tpch).
 
+<a id="t145"></a>
+### #145 — Refcounted handles: stop copying every partition out of a scatter
+`spark_hash_partition` returns one table whose N partitions are already contiguous, and
+`node_session.cpp` (~L265-272) deep-copies each range out, because a handle owns its memory.
+
+So every shuffle copies its whole input a second time and peaks at twice the data — the concrete
+form of [#91](#t91)'s repartition spike, once per aggregate and once per join side. The change:
+`TableResult` (`plan_executor.h:13`) becomes a `shared_ptr<cudf::table> owner` plus a
+`cudf::table_view view`, and the scatter registers N handles sharing one owner. Mechanical but
+wide — 35 sites across 11 files touch `.table` / `->table`. **No ABI change**: a handle stays a
+`u64`. The cost to weigh: a slice pins its whole parent, so a skewed hash leaves one hot lane
+holding the pre-scatter table — the peak halves and the tail lengthens. Also unlocks
+[#140](#t140). Tests: the GPU tiers stay byte-identical, plus a gtest releasing N−1 handles and
+reading the survivor. A streamed join waits on it too: a handle is erased by its reader
+(`node_session.cpp:254`), so `Input::BuildSideCopy` has no build side after the first probe batch,
+and T16 refuses a second until this lands ([#152](#t152)).
+
+
 <a id="t95"></a>
 ### #95 — a decimal partition key is refused on the device
 murmur3 covers int/date/timestamp/composite/null; decimal deferred (float indefinitely).
@@ -246,6 +380,17 @@ hasher takes the decimal, so the shape is a refusal on one side. Pinned by
 q10 (`c_acctbal`), q15 (`total_revenue`, precision 38), q18 (`o_totalprice`); tpcds q24, q37,
 q82 (`i_current_price`), q75 (`sales_amt`, precision 31). Their `tp4` device cells are off, on
 blockers that refuse first (#152, #184); q15 and q75 need the >18 path.
+
+<a id="t197"></a>
+### #197 — the repartition arm still concatenates a child it can only be handed one of
+`node_session.cpp`'s Hash-repartition arm
+[concatenates](../../cpp/src/node_session.cpp#L538) `child[0]`'s handles before scattering, and
+the planner puts a `GpuCoalesceAllBatches` above the merge feeding an emit, so it gets one.
+
+The comment there said to retire the branch when the legacy modes retired. They have, so the
+condition is met and nothing left in the tree can hand this arm two handles — the concat is a
+copy of a single table on every call. Removing it needs a device run to prove, which is why it
+is a ticket rather than part of the rename that found it.
 
 ## Performance
 
@@ -284,3 +429,65 @@ and chars. The sf40 HBM reading puts it at ~46 of the 107 GB q19's lineitem filt
 separate cost — one kernel per node, which only fusion (JIT, or stitching back into the AST)
 removes — and not this ticket's.
 
+## Testing
+
+<a id="t227"></a>
+### #227 Check schema nullability in tests
+
+Column nullability is maintained tin node's output_schema, but not tested anywhere. Start testing
+it in the CPU engine, by adding this logic to declared_as() - if not null constraint is set in the
+schema, check that every record batch produced does not have any nulls.
+
+<a id="t164"></a>
+### #164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws
+
+The C++ half of [#135](archive/archived-tickets.md#t135), which the planner
+closed on the Rust side by checking a reference's name against the field at its position.
+
+`TableResult` is a `cudf::table` plus a name vector with no invariant that the two are the same
+length, and the six sites indexing names use `operator[]`, so a short vector is undefined
+behaviour rather than an exception — `filter.cpp` ~L42 reads `fv.column(idx)` and
+`input.column_names[idx]` in one iteration and only the first is checked. Assert
+`num_columns() == column_names.size()` where `TableResult` is built. Separately `expr.cpp` ~L349
+returns `type_id::EMPTY` for an out-of-range `ColumnRef` instead of throwing, turning a bad
+ordinal into a confusing type error further along. The third closure #135 named is unstarted and
+belongs here too: a per-node type check in the GPU tiers, the only thing that would surface a
+wrong-order subtree before the root. 2026-09-17: chain B's `device-schema-harness` and
+`driver-output-hook` are that check for the operator and corpus tiers — every device batch held
+to its node's names and `{type_id, scale}`; the two C++ items above stand.
+
+<a id="t201"></a>
+### #201 — the murmur gate proves a copy of the lane rule, not the rule
+`executor/cpu_backend/gpu_tests/murmur_conformance.rs` re-derives the lane rule (seed-42 pre-fill,
+comet murmur3, `pmod`) in its own `cpu_partition_ids`, so only that copy is held against the device.
+
+The production copy is `rows_per_lane` in `executor/cpu_backend/spark_partitioning.rs`, the one
+the CPU backend's repartition actually runs. A drift there — a seed, a `%` for `pmod`, a key
+cast — leaves the gate green while every CPU lane assignment moves off the device's and the
+goldens'. The fix is the gate calling `rows_per_lane` over the same columns and comparing lane
+by lane, and the local helper going; not done in the visibility task that found it, since a
+test whose subject changes is not a demotion.
+
+<a id="t174"></a>
+### #174 — two clamps for one rule, and nothing compares them
+A limit keeps a row range of each batch, and the two backends clamp that range in their own code.
+`RowRange::clamp` (`peacockdb-core/src/executor/row_range.rs`) returns `(offset, length)`; its one
+caller is `CpuUnload::unload`. C++ `clamp_row_range` (`cpp/src/node_session.cpp`) returns
+`(begin, end)`; `slice_handle` and `peacock_result_from_handle` share it. The rule is one: `begin =
+min(offset, n)`, `take = min(length, n − begin)`, the subtraction keeping the `u64::MAX` to-the-end
+sentinel from overflowing.
+
+No test reads both. The four Rust cases (`executor/row_range/tests.rs`) and the ten C++ cases
+(`cpp/tests/cpu/test_executor.cpp`, `ClampRowRange`) each prove one side, in shapes that cannot be
+compared as written. Both docs name the risk: the two answering differently "would be a divergence
+no test of either one alone could see". They agree today, line for line. The claim that landed
+with the second clamp, "RowRange::clamp is now the one clamp", is what this corrects.
+
+**Fix proposed:** one case table both suites read, the instrument `src/tests/executor_cases.rs`
+already is for operators. A text file of `offset length rows → begin end` lines, `max` spelling
+the sentinel, beside the gtest in `cpp/tests/cpu/`. The Rust test embeds it with `include_str!`
+and checks `RowRange::clamp` after mapping `(offset, length)` to `(offset, offset + length)`. The
+`ClampRowRange` gtest reads it through a path CMake passes as a compile definition. The fourteen
+existing cases move into the file, deduplicated, and the per-side literals go. Both run on the cpu
+tier, with no FFI and no device. A case added once then reaches both clamps, and a drift on
+either side fails that side's test on the shared line.

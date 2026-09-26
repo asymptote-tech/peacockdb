@@ -16,6 +16,33 @@ carries no duration type to route it through. The mirror of #218, where the sour
 corpus query casts an integer to a date; `date-part-return-type`'s gtests met it building a
 date from `n_nationkey` and made the date from literals instead. No pin yet.
 
+<a id="t211"></a>
+### #211 — a typed null argument to substr or round is read as 0 on the device
+
+`build_column_scalar_fn` (`expr.cpp`) reads a literal argument's `int_val()` for `substr`'s
+start and `round`'s places without asking `is_null`, so `substr(s, NULL)` runs as `substr(s, 0)`
+and `round(x, NULL)` as `round(x, 0)` where SQL answers NULL. The literal arms of `build_expr`
+and `build_scalar` were made to share one reader of the flag by `tasks/typed-nulls.md`; these
+two positional reads are outside them and were found on the way. Reachability through the
+planner is unconfirmed — DataFusion may fold a null argument before serialization — so this has
+no `bug_` pin yet; the C++ side is unguarded whatever the planner does. `date_part`'s field
+argument refuses an empty string, so it is a refusal there, not a wrong answer.
+
+<a id="t203"></a>
+### #203 — the device cannot cast a number to text
+
+`CAST(key AS VARCHAR)` in a select list answers on the cpu and is refused on the device:
+"cast to STRING from a non-string type not supported in column path".
+
+`build_column`'s cast arm (`expr.cpp`) refuses every cast whose target is `STRING` unless the
+input is already a string. `cudf::cast` has no string target, so the arm needs
+`cudf::strings::from_integers`, `from_floats`, `from_booleans` and the datetime converters,
+chosen by the input's type.
+Neighbour of #45, where a join key's cast to string is the same refusal on the join path; a fix
+here answers a projection and does not by itself answer #45, whose fix hashes rather than casts.
+Pinned by `bug_a_cast_to_text_is_refused_on_the_device` and
+`bug_a_date_cast_to_text_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
+
 <a id="t223"></a>
 ### #223 — `substr` with a column for its start or length is refused on the device
 
@@ -101,4 +128,15 @@ or a panic is unverified.
 tpch q7, q8 and q9's `date_part` answers an integer, not a date. Simplest:
 `select arrow_cast(o_orderdate, 'Date64') from orders limit 1;` (tpch) — speculative: whether our
 planner accepts `arrow_cast` is unchecked.
+
+<a id="t162"></a>
+### #162 — expression forms the planner refuses
+`TRY_CAST`, the regex match operator, an unrecognized binary operator, and an unrecognized
+expression kind are each refused by name at translation.
+
+Every one is a gap in `planner/translator/expr.rs` rather than a limit of the surface: the C++ has
+`build_expr` cases for most of them, and what is missing is our mapping. They are refusals
+because no corpus query carries one, so the cost of each is one arm and its test. `IN ()`
+belongs to this family but does not parse, so it is reachable only from a constructor and is
+covered as a unit test rather than by a query.
 

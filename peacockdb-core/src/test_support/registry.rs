@@ -260,20 +260,11 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
 /// in an owned column must have a registration (a CSV row with no backing test
 /// fails). Without the reverse direction the CSV could claim coverage that no test
 /// provides — which is the exact failure mode this registry replaces.
-/// `elsewhere` lists cells `(dataset, sf, query, column)` that belong to an owned
-/// column but are registered in a DIFFERENT test binary, so the reverse direction
-/// must not demand them here.
 ///
-/// No binary needs `elsewhere` today: after the split by execution mode, every
-/// column is registered entirely within the one binary that owns it. The parameter
-/// stays because listing exceptions explicitly — rather than weakening the reverse
-/// check to "only verify what this binary happens to register" — is what keeps the
-/// check meaningful when a column IS split again: a whole column going missing must
-/// still fail. Stale entries are rejected below, so an empty list cannot rot.
-pub(crate) fn assert_registry_matches_csv(
-    owned_columns: &[&str],
-    elsewhere: &[(&str, &str, &str, &str)],
-) {
+/// Every owned column must be registered entirely within this binary. A column split
+/// across binaries would need its cells listed as exceptions here, not a reverse check
+/// weakened to "only what this binary happens to register".
+pub(crate) fn assert_registry_matches_csv(owned_columns: &[&str]) {
     for c in owned_columns {
         assert!(COLUMNS.contains(c), "unknown column {c:?}");
     }
@@ -340,39 +331,10 @@ pub(crate) fn assert_registry_matches_csv(
             if registered.contains(&key) {
                 continue;
             }
-            if elsewhere.iter().any(|(d, s, q, c)| {
-                *d == row.dataset && *s == row.sf && *q == row.query && *c == *col
-            }) {
-                continue; // registered by another test binary
-            }
             problems.push(format!(
                 "CSV claims {state:?} but NO test registers it: {} sf{} {} [{col}] — \
                  either add the test or set the cell to disabled/na",
                 row.dataset, row.sf, row.query
-            ));
-        }
-    }
-
-    // Keep `elsewhere` honest: an entry naming a cell that is NOT enabled/skip, or
-    // that this binary actually does register, is stale and would mask a real gap.
-    for (d, s, q, c) in elsewhere {
-        let key = (d.to_string(), s.to_string(), q.to_string());
-        let Some(row) = csv.get(&key) else {
-            problems.push(format!(
-                "`elsewhere` names a query with no CSV row: {d} sf{s} {q}"
-            ));
-            continue;
-        };
-        let state = row.states.get(*c).map(String::as_str).unwrap_or("na");
-        if state != "enabled" && state != "skip" {
-            problems.push(format!(
-                "stale `elsewhere` entry: {d} sf{s} {q} [{c}] is {state:?}, so the reverse \
-                 check would not demand it anyway — remove it"
-            ));
-        }
-        if registered.contains(&(d.to_string(), s.to_string(), q.to_string(), c.to_string())) {
-            problems.push(format!(
-                "stale `elsewhere` entry: {d} sf{s} {q} [{c}] IS registered in this binary"
             ));
         }
     }
