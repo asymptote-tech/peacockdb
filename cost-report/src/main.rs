@@ -247,16 +247,17 @@ struct Links {
     tickets: TicketIndex,
 }
 
-/// Which wiki file each ticket number's anchor lives in. `tickets.md` holds open work,
-/// `tasks/active-tickets.md` the rollout's, and `archive/archived-tickets.md` the rest — and a
-/// closed ticket keeps its registry cell, since a `na` should say which decision it rests
-/// on, so the link has to follow the number rather than assume the file. The id space is
-/// shared across all three, so a number is never two things.
+/// Which wiki file each ticket number's anchor lives in. Open work sits in `tickets.md` and
+/// the milestone files under `tickets/`, the rollout's in `tasks/active-tickets.md`, and the
+/// rest in `archive/archived-tickets.md` — and a closed ticket keeps its registry cell, since
+/// a `na` should say which decision it rests on, so the link has to follow the number rather
+/// than assume the file. The id space is shared across every file, so a number is never two
+/// things; where a move leaves one anchored twice, the first file [`TicketIndex::load`] reads
+/// answers.
 #[derive(Debug, Default, Clone)]
 struct TicketIndex {
-    open: BTreeSet<String>,
-    rollout: BTreeSet<String>,
-    archived: BTreeSet<String>,
+    /// Ticket number → the repo-relative file holding its anchor.
+    files: BTreeMap<String, String>,
 }
 
 /// The number an anchor line declares, or `None` for a line that has none — including the
@@ -310,38 +311,54 @@ fn names_ticket(header: &str, number: &str) -> bool {
 }
 
 impl TicketIndex {
-    /// All three files, by their anchors: every ticket carries `<a id="tNN">` wherever it
-    /// lives, which is the same thing the links point at, and each above its own header.
+    /// Every ticket file, by its anchors: every ticket carries `<a id="tNN">` wherever it
+    /// lives, which is the same thing the links point at, and each above its own header. The
+    /// milestone files are listed from the directory, so a new one needs no edit here.
     fn load(wiki: &Path) -> Self {
-        let numbers = |path: PathBuf| -> BTreeSet<String> {
-            let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        let read = |path: &Path| -> String {
+            std::fs::read_to_string(path).unwrap_or_else(|e| {
                 eprintln!("cost-report: cannot read {}: {e}", path.display());
-                std::process::exit(1);
-            });
-            anchored_numbers(&text).unwrap_or_else(|misplaced| {
-                eprintln!("cost-report: {}: {misplaced}", path.display());
                 std::process::exit(1);
             })
         };
-        Self {
-            open: numbers(wiki.join("tickets.md")),
-            rollout: numbers(wiki.join("tasks/active-tickets.md")),
-            archived: numbers(wiki.join("archive/archived-tickets.md")),
+        let mut milestones: Vec<PathBuf> = std::fs::read_dir(wiki.join("tickets"))
+            .map(|dir| {
+                dir.filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                    .filter(|path| path.extension().is_some_and(|ext| ext == "md"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        milestones.sort();
+        let relative = |path: &Path| -> String {
+            let within = path.strip_prefix(wiki).unwrap_or(path);
+            format!("llm-wiki/{}", within.display())
+        };
+        let mut files: Vec<PathBuf> = vec![wiki.join("tickets.md")];
+        files.extend(milestones);
+        files.push(wiki.join("tasks/active-tickets.md"));
+        files.push(wiki.join("archive/archived-tickets.md"));
+        let mut index = Self::default();
+        for path in &files {
+            let numbers = anchored_numbers(&read(path)).unwrap_or_else(|misplaced| {
+                eprintln!("cost-report: {}: {misplaced}", path.display());
+                std::process::exit(1);
+            });
+            index.add(&relative(path), numbers);
+        }
+        index
+    }
+
+    /// Record a file's numbers, leaving any number an earlier file already holds.
+    fn add<I: IntoIterator<Item = String>>(&mut self, file: &str, numbers: I) {
+        for number in numbers {
+            self.files.entry(number).or_insert_with(|| file.to_string());
         }
     }
 
-    /// The repo-relative file a number resolves to, or `None` where it is in neither —
-    /// which is a link to nowhere and is refused rather than rendered.
-    fn path_for(&self, ticket: &str) -> Option<&'static str> {
-        if self.open.contains(ticket) {
-            Some("llm-wiki/tickets.md")
-        } else if self.rollout.contains(ticket) {
-            Some("llm-wiki/tasks/active-tickets.md")
-        } else if self.archived.contains(ticket) {
-            Some("llm-wiki/archive/archived-tickets.md")
-        } else {
-            None
-        }
+    /// The repo-relative file a number resolves to, or `None` where no ticket file anchors it
+    /// — which is a link to nowhere and is refused rather than rendered.
+    fn path_for(&self, ticket: &str) -> Option<&str> {
+        self.files.get(ticket).map(String::as_str)
     }
 }
 
@@ -450,9 +467,9 @@ fn main() {
         .collect();
     if !unresolved.is_empty() {
         eprintln!(
-            "cost-report: {} ticket(s) named in the registry are in neither \
-             llm-wiki/tickets.md, llm-wiki/tasks/active-tickets.md nor \
-             llm-wiki/archive/archived-tickets.md: {}",
+            "cost-report: {} ticket(s) named in the registry are anchored in no ticket file \
+             (llm-wiki/tickets.md, llm-wiki/tickets/*.md, llm-wiki/tasks/active-tickets.md, \
+             llm-wiki/archive/archived-tickets.md): {}",
             unresolved.len(),
             unresolved.into_iter().cloned().collect::<Vec<_>>().join(", ")
         );
@@ -786,7 +803,7 @@ fn ticket_link(t: &str, links: &Links) -> String {
     let path = links.tickets.path_for(t).unwrap_or_else(|| {
         // Unreachable after the startup gate; if it ever is reached, a dead link is the
         // one outcome worse than no report.
-        eprintln!("cost-report: ticket #{t} is in none of the three ticket files");
+        eprintln!("cost-report: ticket #{t} is in no ticket file");
         std::process::exit(1);
     });
     format!(
@@ -1642,15 +1659,15 @@ mod tests {
     }
 
     fn links_with_every_file(open: &[&str], rollout: &[&str], archived: &[&str]) -> Links {
-        let numbers = |list: &[&str]| list.iter().map(|t| t.to_string()).collect();
+        let numbers = |list: &[&str]| list.iter().map(|t| t.to_string()).collect::<Vec<_>>();
+        let mut tickets = TicketIndex::default();
+        tickets.add("llm-wiki/tickets.md", numbers(open));
+        tickets.add("llm-wiki/tasks/active-tickets.md", numbers(rollout));
+        tickets.add("llm-wiki/archive/archived-tickets.md", numbers(archived));
         Links {
             repo: "asymptote-tech/peacockdb".into(),
             sha: None,
-            tickets: TicketIndex {
-                open: numbers(open),
-                rollout: numbers(rollout),
-                archived: numbers(archived),
-            },
+            tickets,
         }
     }
 
@@ -1702,7 +1719,8 @@ mod tests {
     fn the_index_reads_the_anchors_of_every_wiki_file() {
         let wiki = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../llm-wiki");
         let index = TicketIndex::load(&wiki);
-        assert_eq!(index.path_for("170"), Some("llm-wiki/tickets.md"));
+        assert_eq!(index.path_for("204"), Some("llm-wiki/tickets.md"));
+        assert_eq!(index.path_for("152"), Some("llm-wiki/tickets/joins.md"));
         assert_eq!(index.path_for("180"), Some("llm-wiki/tasks/active-tickets.md"));
         assert_eq!(
             index.path_for("103"),
@@ -2160,7 +2178,11 @@ mod tests {
         let linked = Links {
             repo: "o/r".into(),
             sha: Some("deadbeef".into()),
-            tickets: TicketIndex { open: ["163".to_string()].into_iter().collect(), ..Default::default() },
+            tickets: {
+                let mut tickets = TicketIndex::default();
+                tickets.add("llm-wiki/tickets.md", ["163".to_string()]);
+                tickets
+            },
         };
         let mut d = sample_dataset();
         d.rows[0].tickets = vec!["163".to_string()];

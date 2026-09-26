@@ -59,7 +59,7 @@ pub(crate) fn results_file(dataset: &str, sf: &str, mode: &str) -> PathBuf {
 
 /// Merge this query's section into its file, under the lock the goldens take.
 ///
-/// Reused rather than reimplemented: `merge_section` already locks the file, reads inside
+/// Reused rather than reimplemented: `merge_section` already locks the directory, reads inside
 /// the critical section and publishes by rename, and those three are the whole of what
 /// makes several cases writing one path safe.
 ///

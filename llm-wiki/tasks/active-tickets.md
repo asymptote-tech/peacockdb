@@ -175,28 +175,6 @@ Nothing refused it because the corpus tier passes no budget: `run_cpu` calls
 `executor::run(tree, &ctx.task_ctx(), None)`. Enabling it is a decision about every run
 of that tier — 13 GB SIGKILLs a runner as an infrastructure failure, not a test failure.
 
-<a id="t191"></a>
-### #191 — the device exports Int16 for an extracted year the plan declared Int32
-
-`tpch/q8` at `tp1-single`: `the exported stream is not the sink's rows: expected Int32 but found
-Int16 at column index 0`. That column is `o_year`, an `extract(year from o_orderdate)` — DataFusion
-types it `Int32` and the device answers `Int16`.
-
-**Not [#187](../archive/archived-tickets.md#t187), and merging them would lose the distinction.** That one is the
-device *widening* a decimal, to 38 whatever the declaration says. This is the device *narrowing* an
-integer, to the natural width for a year rather than to a maximum. Opposite direction, different
-type family, and a fix for either says nothing about the other.
-
-Not new behaviour either, only newly reached: `extract_year -> INT16` was already on record as a
-place where the DataFusion type is an imperfect proxy for the cuDF one. What is new is a corpus
-query whose unload sees it.
-
-One cell, `tpch/q8` at `tp1-single` — which is the only mode that gets far enough to reach the
-unload, the other four stopping at [#152](../tickets.md#t152). Pinned at the project by
-`bug_a_year_extracted_from_a_date_is_exported_as_int16` (`gpu_tests/exec_cases.rs`).
-`utf8-everywhere`'s rollout, 2026-09-16, added `tpch` q7 and q9 at the same mode, so three
-registry rows carry it.
-
 <a id="t190"></a>
 ### #190 — the CPU backend drops a nested-loop join's projection
 

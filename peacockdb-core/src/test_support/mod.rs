@@ -348,8 +348,8 @@ pub fn load_csv() -> Vec<CsvRow> {
 
 /// Assert this binary's inventory agrees with the CSV, in BOTH directions, for the columns
 /// it owns. `inventory` collects per linked binary, so no single test can see them all.
-pub fn assert_registry_matches_csv(owned_columns: &[&str], elsewhere: &[(&str, &str, &str, &str)]) {
-    registry::assert_registry_matches_csv(owned_columns, elsewhere)
+pub fn assert_registry_matches_csv(owned_columns: &[&str]) {
+    registry::assert_registry_matches_csv(owned_columns)
 }
 
 // --- comparing an answer --------------------------------------------------------

@@ -21,7 +21,7 @@ driver-output-hook; specs in `../archive/archived-tasks.md`). What remains is th
 held back: `date_part`'s device cast, pending a decision whether the return type is fixed on the
 device or in DataFusion's function registry.
 
-### 1. [`date-part-return-type.md`](date-part-return-type.md) — closes [#191](active-tickets.md#t191) — state: blocked(done) — PR #161
+### 1. [`date-part-return-type.md`](date-part-return-type.md) — closes [#191](../tickets/corpus-coverage.md#t191) — state: blocked(done) — PR #161
 
 `expr.cpp`'s `date_part` arm casts cuDF's INT16 to the `return_type` the wire already names. Three
 plan-executor cases, one harness case written first as the pin, `tpch/q7`, `q8`, `q9`. Rebased onto

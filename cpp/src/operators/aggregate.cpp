@@ -671,8 +671,8 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
         // group (Welford-Chan); the finalize happens in the assembly below.
         // Consumes THREE Final cols. Child ORDER + TYPES are fixed by cuDF's
         // group_merge_m2: child(0)=valid_count INT32, child(1)=mean f64,
-        // child(2)=M2 f64. Count MUST be INT32 — cuDF 25.02 rejects INT64 at
-        // runtime (25.10 relaxed it), so an INT64 here compiles and then fails.
+        // child(2)=M2 f64. Count MUST be INT32 on cuDF 25.02, which rejects INT64
+        // at runtime; 25.10 reverses it and accepts only INT64 or FLOAT64 (#94).
         auto cnt = cudf::cast(tv.column(static_cast<cudf::size_type>(in_off)),
                               cudf::data_type{cudf::type_id::INT32});
         auto mean = std::make_unique<cudf::column>(

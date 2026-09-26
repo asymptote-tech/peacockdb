@@ -59,10 +59,10 @@ reference is an ordinal into a child whose column order the engine decides. Ordi
 every node the layer inserts, so a per-branch cast project or an inserted merge shifts every
 reference above it.
 
-An aggregate's argument expression is evaluated against a different table in each phase — the
-init sees input columns, the merge sees state columns — which is the whole of the #55/#56/#63
-bug class: an expression written for one phase is not valid against the other, and the C++
-finds out at run time.
+An aggregate's phases read different tables: the init sees input columns, the merge sees state
+columns. An argument expression is valid against the input only, so it runs once, in the init,
+and a merge reads state columns by reference. #55 and #56 were the old executor breaking this
+rule: its final phase evaluated the argument again, over state, and the C++ found out at run time.
 
 **Targeted unit tests are the coverage; the plan goldens are not.** One test per node kind,
 per expression kind, per planner rule — the shuffle insertion, the limit lowering, the
@@ -754,6 +754,27 @@ pinned.
 legitimately return different rows where the SQL does not determine them, which is what an
 unordered `LIMIT` is. Results are compared row-sorted, so emission order is not part of the
 contract; what must hold is that one plan run twice gives one answer, byte for byte.
+
+### Zero-row batches change no answer
+
+**Requirement: a node's output rows do not change when zero-row batches are added to or removed
+from any of its inputs, anywhere and in any number.** "No batch" and "a zero-row batch" are then
+the same arrival as far as rows go. Only the batch count and boundaries may differ.
+
+The rule is not met yet. Known breaks:
+
+- A keyless aggregate owes one row over any input, and emits none over no batch
+  ([#199](tickets/corpus-coverage.md#t199)).
+- Right, Full and RightAnti refuse when the build side sends no batch
+  ([#212](tickets.md#t212)); a finish over no probe keys refuses on the device
+  ([#173](tickets.md#t173)). A hash LeftAnti or LeftMark with a residual filter and a
+  nested-loop Left make no call over no probe batch, and answer nothing (no ticket yet).
+- Producers that drop a zero-row batch expose the breaks above: the limit
+  ([#214](tickets/corpus-coverage.md#t214)) and the cpu's accumulating sort and merge
+  ([#205](tickets/corpus-coverage.md#t205)).
+
+A new node meets the rule by construction: what it owes over an empty input, it owes over no
+input.
 
 ## The wire format
 

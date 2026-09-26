@@ -3,14 +3,17 @@
 //!
 //! One file per mode holds every query, so several test cases write one path. A whole-file
 //! write would be last-writer-wins — every other query's section dropped, and the run
-//! green. So a write takes an advisory lock on the file, merges its own section into what
+//! green. So a write takes an advisory lock on the directory, merges its own section into what
 //! is there, and publishes by renaming a sibling onto the name.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::golden_text::{line_difference, ordered_sections};
 use super::{Regeneration, SKIPPED, TIER, golden_dir_for, registry};
+
+#[cfg(test)]
+mod tests;
 
 /// `<mode>-<tier>.cpu.txt` — the per-node tree of every query that ran at this mode.
 pub(crate) fn cpu_golden(dataset: &str, sf: &str, mode: &str) -> PathBuf {
@@ -102,11 +105,9 @@ pub(crate) fn assert_section(path: &Path, query: &str, body: &str) {
 /// The lock is on the file rather than in the process: libtest runs a binary's cases as
 /// threads, so a `Mutex` would serialize those and nothing else — not `cargo nextest`, and
 /// not two shells regenerating at once. The rename is for a crash mid-write, which must not
-/// leave a truncated golden. What holds: two writers that opened the same inode are
-/// serialized, and the read inside the critical section sees the earlier one's section.
-/// What does not: the lock is on the inode a writer opened, and the rename replaces that
-/// inode, so a writer that opened before another's rename holds a lock nobody contends,
-/// reads the old text, and publishes without the other's section (#213).
+/// leave a truncated golden. The lock is on the directory, not the file: the rename
+/// replaces the file's inode, so a lock on the file would stop serializing the moment
+/// another writer published, and a writer holding it would merge into stale text (#213).
 pub(crate) fn merge_section(
     path: &Path,
     declared: &[(String, Option<String>)],
@@ -114,23 +115,21 @@ pub(crate) fn merge_section(
     body: &str,
     mode: Regeneration,
 ) {
-    std::fs::create_dir_all(path.parent().expect("a golden directory")).expect("the directory");
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)
-        .unwrap_or_else(|e| panic!("cannot open {} to merge into: {e}", path.display()));
-    file.lock()
-        .unwrap_or_else(|e| panic!("cannot lock {}: {e}", path.display()));
-    let mut text = String::new();
-    file.read_to_string(&mut text)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let dir = path.parent().expect("a golden directory");
+    std::fs::create_dir_all(dir).expect("the directory");
+    let lock = std::fs::File::open(dir)
+        .unwrap_or_else(|e| panic!("cannot open {} to lock: {e}", dir.display()));
+    lock.lock()
+        .unwrap_or_else(|e| panic!("cannot lock {}: {e}", dir.display()));
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => panic!("cannot read {}: {e}", path.display()),
+    };
     let merged = merged_text(&text, declared, query, body, mode);
     publish(path, &merged);
     // Explicit rather than left to the drop, so the unlock is ordered after the rename.
-    let _ = file.unlock();
+    let _ = lock.unlock();
 }
 
 fn merge(
