@@ -20,10 +20,11 @@ recorded here and nowhere else, so the counter never walks back over it:
   diverging from it where it is wrong is the outcome rather than a drift to reconcile
   (`scripts/exec_model/README.md`). Named by commit 4c89d91.
 
-Archiving a ticket the registry names is safe: the cost widget resolves a number to
-whichever of the two files holds its `<a id="tNN">` anchor (`TicketIndex::path_for` in
-`cost-report/src/main.rs`), and refuses to render a link for a number in neither, failing
-the report rather than emitting one that goes nowhere.
+Archiving or moving a ticket the registry names is safe: the cost widget resolves a number to
+whichever ticket file holds its `<a id="tNN">` anchor — `tickets.md`, any `tickets/*.md`,
+`tasks/active-tickets.md` or this archive (`TicketIndex::load` in `cost-report/src/main.rs`). It
+refuses to render a link for a number in none of them, failing the report rather than emitting
+one that goes nowhere.
 
 ## Done
 
