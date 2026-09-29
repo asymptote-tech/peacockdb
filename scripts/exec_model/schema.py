@@ -7,7 +7,7 @@ it needs is the semantics — which columns are group keys, and which columns ar
 aggregate's state — so that a merging or finalizing node can check it is reading the state
 its own partial produced rather than trusting a position.
 
-That check is the prototype's answer to the class [#135](../../llm-wiki/tickets.md#t135)
+That check is the prototype's answer to the class [#135](../../llm-wiki/archive/archived-tickets.md#t135)
 describes: every column reference is an index into the child's output and almost nothing
 verifies it, so a node reading the right *number* of columns in the wrong order produces
 identical per-node statistics everywhere and surfaces only at the root. Here the index and

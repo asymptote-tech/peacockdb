@@ -639,7 +639,7 @@ JOIN_CPP = pathlib.Path(__file__).resolve().parents[3] / "cpp/src/operators/join
 
 #: cuDF calls join.cpp makes that `cudf_calls.py` deliberately does not model, and why.
 _NOT_MODELLED = {
-    # A zero-row slice used only to build a type-only table_view for the is_ast_able
+    # A zero-row slice used only to build a type-only table_view for the cudf_ast_can_evaluate
     # check. The prototype's expressions carry their types in pandas, so there is no
     # type-only view to construct.
     "slice",

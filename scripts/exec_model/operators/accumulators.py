@@ -146,7 +146,7 @@ class LimitStream(BatchAccumulatorExecutor):
 
 
 class ReBatchToTarget(BatchAccumulatorExecutor):
-    """`GpuCoalesceBatches(target)` — [#139](../../../llm-wiki/tickets.md#t139) — with the
+    """`GpuCoalesceBatches(target)` — [#139](../../../llm-wiki/tickets/optimizer.md#t139) — with the
     splitting half added.
 
     The ticket's node merges only, DataFusion-style, because its purpose is compacting

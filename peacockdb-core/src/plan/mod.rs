@@ -59,10 +59,9 @@ pub enum PlanError {
 }
 
 // The expression IR. Types and literals are DataFusion's own — the coercions and the
-// decimal precision and scale it derived are exactly what must not be re-derived (#55/#56/#63
-// are what re-deriving them costs). What is not reused is the shape: a column reference is an
-// ordinal into a child whose column order this engine decides, so every reference is rebased
-// at each node the translation layer inserts.
+// decimal precision and scale it derived are exactly what must not be re-derived. What is not
+// reused is the shape: a column reference is an ordinal into a child whose column order this
+// engine decides, so every reference is rebased at each node the translation layer inserts.
 
 /// The name rides beside the ordinal so a plan can be checked against the schema at that
 /// position rather than trusting it — #135's class, caught at plan time here.
@@ -409,6 +408,11 @@ impl PlanAgg {
             Self::M2 => "m2",
             Self::MergeM2 => "merge_m2",
         }
+    }
+
+    /// The type of the state column this aggregator produces, given its argument's type.
+    pub(crate) fn state_type(self, input: &DataType) -> Result<DataType, PlanError> {
+        aggregates::state_type(self, input)
     }
 }
 

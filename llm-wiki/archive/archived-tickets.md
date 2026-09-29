@@ -20,12 +20,106 @@ recorded here and nowhere else, so the counter never walks back over it:
   diverging from it where it is wrong is the outcome rather than a drift to reconcile
   (`scripts/exec_model/README.md`). Named by commit 4c89d91.
 
-Archiving a ticket the registry names is safe: the cost widget resolves a number to
-whichever of the two files holds its `<a id="tNN">` anchor (`TicketIndex::path_for` in
-`cost-report/src/main.rs`), and refuses to render a link for a number in neither, failing
-the report rather than emitting one that goes nowhere.
+Archiving or moving a ticket the registry names is safe: the cost widget resolves a number to
+whichever ticket file holds its `<a id="tNN">` anchor — `tickets.md`, any `tickets/*.md`,
+`tasks/active-tickets.md` or this archive (`TicketIndex::load` in `cost-report/src/main.rs`). It
+refuses to render a link for a number in none of them, failing the report rather than emitting
+one that goes nowhere.
 
 ## Done
+
+<a id="t181"></a>
+### #181 — the GPU backend reaches `unreachable!` on every Inner join
+
+`gpu_backend/backend.rs:136` calls `per_call_join_type` for every `NodeRef::Join`, and that
+function is total only over the streaming family, so an Inner join lands on
+`unreachable!("Inner needs no finish pass")` at `nodes/join.rs:586`.
+
+The CPU backend does not, and the difference is one guard: `cpu_backend/join.rs:76` returns on
+`capability.answers_in_one_call()` before asking which per-call type a finish pass would need. A
+join that answers in one call has no finish pass to type, so asking is the bug rather than the
+answer being missing.
+
+It is why no ordinary join runs on a device in this mode: 72 of T18's 88 device cases, over 15
+queries at all five modes — tpch q3 q10 q12 q14 q15 q19, tpcds q3 q15 q37 q42 q43 q52 q55 q82
+q96. Those rows carry `#181` on their gpu columns.
+
+**Done 2026-09-28, found already fixed.** `gpu_backend/backend.rs` now reads
+`answers_in_one_call()` first and asks `per_call_join_type` only for a join that has a finish,
+the same guard as the cpu's. Inner joins run on the device: tpcds q37, q82, q84, q85 and tpch
+q17, q19 are enabled at `gpu_tp1_single`.
+
+<a id="t45"></a>
+### #45 — q24 GpuHashJoin: 'Unary cast type must be fixed-width'
+A join-key cast targets string; cuDF's unary cast rejects non-fixed-width. Diagnose the
+emitted cast and handle string keys by hashing rather than casting
+(`cpp/src/operators/join.cpp`).
+
+**Done 2026-09-28, found already fixed.** The cast was q24's residual filter, never a join key,
+and `expr.cpp`'s cast arm returns a string→string cast unchanged. Since utf8-everywhere, q24's
+residual (`c_birth_country != upper(ca_country)`) carries no cast at all. q24 stays off on #190
+and #95.
+
+<a id="t192"></a>
+### #192 — tpcds/q64 needs 13 GB of host memory and no budget stops it
+
+ONE mode measured — 11.2, 12.3, 12.7, 12.9, 13.1 GB on a 15 GiB host, alone at `--test-threads=1`,
+stopped rather than finished, and which mode is not recorded. All five are disabled by decision
+rather than by measurement, and not re-run.
+
+Context rather than the reason for that scope: the plan is the corpus's largest at 399 nodes and 102
+`GpuCoalesceAllBatches` over 37 Inner joins, and its `estimated_max_resident_size` sums per mode to
+35.5 and 35.9 GB at the tp1 modes against 64.8 to 65.4 GB at the tp4 ones. That model counts
+DEVICE-resident bytes where 13.1 GB is host RSS from a `CpuBackend` run — not the same quantity.
+
+Nothing refused it because the corpus tier passes no budget: `run_cpu` calls
+`executor::run(tree, &ctx.task_ctx(), None)`. Enabling it is a decision about every run
+of that tier — 13 GB SIGKILLs a runner as an infrastructure failure, not a test failure.
+
+**Done 2026-09-28, by `utf8-everywhere` (#183), merged 2026-09-21 as PR #158.** The fix report
+(`reports/bugfix-proposals/192-proposal.md`, `-review.md`) traced the 13 GB to arrow 54's
+`Utf8View` buffer lists: each `take` copies a column's buffer list and each `concat` sums them,
+along q64's seventeen-join build chain. The columns were views only because DataFusion's
+`schema_force_view_types` declared them so; utf8-everywhere turned it off. Measured on the cpu
+under a 12 GB cap: every mode matches DataFusion exactly, peak RSS 277 MB to 874 MB, 5 to 6 s.
+q64's cpu cells are enabled at all five modes with their goldens written.
+
+<a id="t183"></a>
+### #183 — the device exports Utf8 where the sink declares Utf8View
+
+`GpuUnload lane 0: … column types must match schema types, expected Utf8View`: DataFusion's
+parquet option `schema_force_view_types` (default on) declares every string a view; cuDF has none.
+
+**Done 2026-09-16, by `utf8-everywhere` on branch `ENS-utf8-everywhere`; merged 2026-09-21 as PR #158 (`9f678e9d`).** The `ParquetFormat`
+in `read_table` (`lib.rs`) has `with_force_view_types(false)`, and `plan/validate.rs` refuses any
+view type in a node schema, a literal, a cast target, a binary's type or a scalar function's
+return. The 76 string-class queries of
+[`reports/sink-divergence.md`](../reports/sink-divergence.md) were re-run at `tp1-single`: no
+sink showed a string, three cells are enabled (`tpcds/q84`, `tpch/nested-loop-join`,
+`tpch/shuffle-stddev`), four ran the whole device plan clean but have no cpu cell (#163), and
+the rest fail on the next thing in line — #187 (41), #191 (2), #185 (13) and #220 (13), opened
+here. `183` stays on a row only where the other four modes have no ticket yet.
+
+<a id="t213"></a>
+### #213 — a golden regeneration can publish a file missing another writer's section
+`corpus_golden::merge_section` locks the inode it opened and `publish` renames a staged sibling
+onto the path, so a writer that opened before another's rename holds a lock on the old inode,
+reads stale text, and publishes without the other's section.
+
+Seen once on `ENS-empty-build`: a whole-corpus `UPDATE_CANONICAL=1` run published
+`tp4-single-mini.cpu.txt` without q16's section while its `.cost.txt` kept it; refilled with
+`PCK_UPDATE_SECTIONS=1 … --exact cpu_tpch_q16_tp4_single`. The doc on `merge_section` says the
+read inside the critical section prevents exactly this, which holds only while the path keeps
+one inode. A fix is a lock on a sibling lock file rather than on the file the rename replaces,
+or an open-after-lock. Test infrastructure, not the engine: no cell, no golden's content is
+wrong once the regeneration is re-read, which is why the rule to read a regeneration's diff exists.
+
+**Done 2026-09-25.** `merge_section` now locks the golden's directory, which the rename never
+replaces, and reads the file under that lock. The same lock serializes `publish`'s staged sibling,
+whose name carries only the process id. Held by
+`concurrent_merges_into_one_file_keep_every_section` (`test_support/corpus_golden/tests.rs`):
+sixteen writers into one file over twenty rounds, red before the fix (15 of 16 sections lost in
+round 0) and green after.
 
 <a id="t187"></a>
 ### #187 — the device widens a decimal the plan declared narrow
@@ -241,8 +335,10 @@ cannot account for -50% on joins. Both halves are now settled by one sweep.
 **Done.** The pool is now the only way the benchmarks run — there is no switch to turn it
 off and no outcome but a pool that the harness will record.
 
-<a id="t173"></a>
-### #173 — a collapse of nothing answers with a table that has no columns
+### #173 (done half) — a collapse of nothing answers with a table that has no columns
+
+The finish half of this ticket stays open as [#173](../tickets/joins.md#t173); the anchor is
+there.
 
 `GpuCoalesceAllBatches` over a lane that received no batch returns a handle whose table carries
 zero columns, so the export decodes a batch whose first column is out of bounds.
@@ -365,7 +461,204 @@ prebuilt binaries to shad-gpu rather than building there, and the golden/meta ti
 under `rust-only` with no C++ at all. Re-file with concrete time targets if CI length
 becomes a problem again.
 
+<a id="t119"></a>
+### #119 — Unchecked cudaMemcpy in peacock_spark_partition_ids
+`cpp/src/gpu_executor.cpp` (~L250): the device→host `cudaMemcpy` return value is
+discarded, so a failed copy still returns success with `out_pids` holding garbage. Check
+it and surface the error.
+
+**Done 2026-09-22.** The copy's `cudaError_t` is checked: a failure prints `cudaGetErrorString`
+to stderr and returns 1. A test-only conformance hook; its one caller is `murmur_conformance.rs`.
+
+<a id="t120"></a>
+### #120 — peacock_spark_partition_ids' documented error path is unreachable
+`cpp/include/peacock_gpu.h` documents retrieving the failure message via
+`peacock_last_error(NULL)`, but `gpu_executor.cpp` returns `""` for a null executor and
+the implementation only `fprintf`s to stderr — the message cannot be obtained through the
+documented API. Either store it where `peacock_last_error(NULL)` can return it, or fix
+the doc.
+
+**Done 2026-09-22.** The doc was fixed, not the path: `peacock_gpu.h` now says the hook has no
+executor to hold the message, so `peacock_last_error(NULL)` returns `""` and the reason goes to
+stderr.
+
+<a id="t127"></a>
+### #127 — Unowned testdata dirs on shad-gpu
+shad-gpu carries `testdata/plans.sf1` (10 files) and `testdata/plans` (3) that no local
+checkout has, that the git-derived fixture sweep does not produce, and that nothing in
+the test suite references. Same shape as the binary orphans that `--delete` just closed:
+state on a remote host no provisioning path owns, so nobody can say whether it is stale
+or load-bearing. Not deleted, because something outside this repo may read it. Establish
+what wrote them and either bring them under the sweep or remove them.
+
+**Done 2026-09-22.** They were the pre-June plan goldens: `testdata/plans.sf1/` and
+`testdata/plans/`, tracked in git until `9c0979f3` (2026-06-17) moved the goldens to
+`testdata/goldens/`. shad-gpu's copies under `/home/info/peacockdb/testdata/`, dated 2026-04-15,
+outlived the move because the sync never deletes. Nothing in the tree read them; both removed.
+
+<a id="t113"></a>
+### #113 — Provision GPU-host testdata by sweeping git-tracked files
+Hand-maintained rsync lists (`pipeline.yml` gpu-tests, `scripts/build-test-shadgpu.sh`)
+bit four times during the refactor. Fix: sweep
+`git ls-files --cached --others --exclude-standard testdata`. Lessons from the parked
+draft: `--exclude=*.parquet` is wrong (tpch.minimal commits 5 needed .parquet files);
+tracked-only misses new uncommitted fixtures. Needs its own clean verification run.
+
+Bit a fifth time in T19: the script pushed no query directory where `pipeline.yml:461` rsyncs both,
+so a T17 query was absent on the host. An absent file is loud; a stale one runs old text and writes
+cells describing a query the repo does not contain, with nothing red.
+
+**Done 2026-09-22, partially.** `scripts/build-test.sh` sweeps git: `sync_fixtures` pushes
+`git ls-files --cached --others --exclude-standard testdata` less the goldens, which
+`sync_goldens` mirrors with `--delete`. Still hand lists: `scripts/build-test-shadgpu.sh`
+(goldens, `cost-registry.csv`, the two query dirs) and `pipeline.yml`'s gpu-tests push (which
+adds `tpch.minimal`, `tpch-vec-queries`, `generate_testdata.sh`), so the two already disagree.
+No clean verification run is on record.
+
 ## Stale or obsolete
+
+<a id="t188"></a>
+### #188 — the device refuses a read with row groups and a limit together
+
+`tpch/scan-limit` at three modes: `CUDF failure … row_groups can't be set along with skip_rows and
+num_rows`. The plan puts the interval in the scan, so the recipe carries both a row-group list and
+a row range, and the reader takes one or the other.
+
+The same plan shape as [#186](../tickets/corpus-coverage.md#t186) from the other side: where the interval sits in
+the scan, the CPU ignores it and answers six million rows and the device refuses the read outright.
+Neither engine runs it and they fail differently, so a fix for either has to decide what that shape
+means — push the limit into the reader, or keep the interval on the unload at every mode as the
+three tp4 ones already do. Even one row group and a limit is refused, since every batch is a
+row-group read: pinned by the two `bug_…_refused_on_the_device` cases in `gpu_tests/source_cases.rs`.
+
+**Stale 2026-09-28.** Merged into [#186](../tickets/corpus-coverage.md#t186): the same plan shape,
+a limit pushed into the scan, seen from the device. One fix covers both engines.
+
+<a id="t180"></a>
+### #180 — a shuffled count(\*) merges to nullable against a non-nullable declaration
+
+`tpcds/q96` at `tp4-single`, `tp4-rowgroup` and `tp4-sized`: "Column 'count(\*)' is
+declared as non-nullable but contains null values". Both tp1 modes are clean and stay enabled.
+
+A shuffle is what puts a state merge under the aggregate, so the three tp4 modes reach a path the
+tp1 ones do not — which is why this is scoped to modes rather than to the query. The declaration
+comes from DataFusion's schema for the final aggregate; what the merge produces is the engine's
+own answer, and the two disagree only on nullability, so the same width and the same bytes make it
+invisible to every golden that is not a run.
+
+Neighbour to [#163](../archive/archived-tickets.md#t163) rather than the same thing: that one
+was a declared type never derived from the expression producing it, this one is a declared
+*nullability* the merge contradicts at run time. Found by T18's stage-4 enablement, disabled at three of five modes.
+
+**Stale 2026-09-28.** A duplicate of [#199](../tickets/corpus-coverage.md#t199): the cpu's keyless
+merge over an empty lane answers sum's NULL for a count, and the declaration refuses it. No shuffle
+is involved; tp4-single cuts a one-row-group table into empty lanes, and an Inner join with no build
+in a lane drains it. Its cells and registry rows moved to #199.
+
+<a id="t185"></a>
+### #185 — `GpuAggregateBatches` reports its own output as `in_rows`
+
+The two engines' sections differ in `in_rows` and in nothing else, at that node and no other. Every
+`batch_rows` entry and every byte agrees, both runs complete, and no result comparison at any
+tolerance could see it — which is the failure the per-node golden exists for.
+
+The rule is the node reporting what it emitted where it should report what it consumed. It read as
+"one row instead of the group count" for three batches, because every early case was an aggregate
+with no group keys, whose output is one row: `tpcds/q96` expected 34 and reported `[[1]]`,
+`tpch/q14` expected 10 and `[[3,3,3,3]]` at `tp4-sized` against `[[1,1,1,1]]`. T19's third batch
+is what showed the general shape — `tpcds/q93` expects `[[7486]]` and reports `[[7169]]`, which is
+neither one nor a group count but is exactly that node's own output.
+
+So a fix keyed on the no-group-key case would have passed q93 and been wrong; the number to correct
+is what the consuming side records, not what the aggregate emits.
+
+Confirmed out of sample: `tpcds/q38`, found seven batches after this was rewritten, reports
+`[[11788]]` against the CPU's `[[12446]]` — again the node's own output, and again neither one nor a
+group count. Eight device cells: `tpcds` q96 q48 q93 q38, `tpch` q3 q14.
+`utf8-everywhere`'s rollout, 2026-09-16, at `tp1-single`: thirteen more — `tpcds` q21 q31 q34 q50
+q62 q66 q73 q83 q99, `tpch` q5 q12 q16 rollup-over-join. `decimal-precision-at-export`'s,
+2026-09-17: 24 more — `tpcds` q3 q8 q15 q33 q40 q42 q43 q46 q52 q55 q56 q58 q59 q60 q61 q68 q76
+q77 q79 q80 q90, `tpch` hash-join q10 q18. `aggregate-state-types`'s, 2026-09-17: nine more —
+`tpcds` q1 q7 q13 q14 q22 q26 q32 q65 q92 — so 55 registry rows carry it.
+`q48` and `q93` are also the first cells in this rollout where a device COMPLETED a plan and the
+golden caught the disagreement — every other device failure so far has been a refusal.
+
+**Stale 2026-09-28.** A duplicate of [#220](../tickets/joins.md#t220). `in_rows` is the driver's
+sum over the batches a node takes, the same on both engines. The cpu's join split its output into
+more batches, so the aggregate over it made more partials; the merge's `in_rows` was the first line
+the golden comparison printed. Its evidence and registry rows moved to #220.
+
+<a id="t184"></a>
+### #184 — a hash repartition of one lane into four fails in cuDF
+
+`GpuEmitPartitions: execute_node(#11 CudfRepartition{Hash, 1 -> 4}): CUDF failure at
+cpp/src/spark_hash_partition.cu:179`. Four of T18's device cases, `tpch/q15` at every mode, and
+no other query reaches it.
+
+One lane in and four out is the shape — a shuffle above a single-lane source. Whether the kernel
+refuses the 1-to-N case or the input carries something it will not take is the first thing to
+establish.
+
+2026-09-12: the input carries something it will not take. Line 179 is the kernel's key-type
+switch, and q15's `#11 CudfRepartition{Hash, 1→4}` hashes `total_revenue@4`, a decimal
+(`recipe-payloads.txt`). `gpu_tests/emit_cases.rs` runs 1→4 and 1→64 green on int, string, date
+and composite keys and reaches this line only on a decimal, float or boolean: this is [#95](../tickets.md#t95).
+
+**Stale 2026-09-28.** A duplicate of [#95](../tickets/corpus-coverage.md#t95): the 1→4 shape was the
+symptom and the decimal key the cause, as the 2026-09-12 note found. q15's registry row carries #95.
+
+<a id="t118"></a>
+### #118 — SortPreservingMerge concat fallback ignores fetch (LIMIT dropped)
+`cpp/src/node_session.cpp` (~L208): the k-way-merge branch applies `spm->fetch()` after
+merging, but the fallback branch — taken when the SPM has no sort keys **or only one
+input partition** — is a plain `cudf::concatenate` with no fetch applied. A
+single-partition SortPreservingMerge carrying a fetch therefore returns **all** rows
+instead of the top-N, i.e. a silently dropped LIMIT. Apply the same slice in both
+branches. Found during the comment audit; not yet reproduced against a corpus query
+(most SPMs arrive multi-partition), so severity depends on whether any enabled plan hits
+the single-partition path.
+
+**Stale 2026-09-28.** A duplicate of [#204](../tickets/corpus-coverage.md#t204), which has the
+same cause, the tests that pin it and the fix.
+
+<a id="t125"></a>
+### #125 — `elsewhere` parameter in assert_registry_matches_csv is dead
+Resolution: obsolete
+After the split by execution mode every registry CSV column is owned wholly by one test binary,
+so both callers passed `&[]` and the exception list could never fire. The parameter and its
+staleness check are deleted from `test_support/registry.rs`. A column split across binaries
+again would need its exceptions re-added in that same commit.
+
+<a id="t134"></a>
+### #134 — begin_plan's out_node_count is unused on the prod path
+Resolution: won't fix
+The C++ reports how many fb nodes it indexed; `RecipePlan::wire_nodes()` is what the writer
+created. Comparing them is the one free check that both sides number one tree, which every
+handle's seq rests on — and no library code reads it: `src/` never calls `begin_plan`, so
+outside the tests the number is returned and dropped. Three of the four test openers compare
+(`corpus_gpu.rs`, `wire::gpu_tests`, `gpu_backend::gpu_tests`); `gpu_backend::gpu_tests::abi` does not. Fix:
+a helper beside `RecipePlan` that opens a plan and errors naming both numbers, used by all.
+
+
+<a id="t121"></a>
+### #121 — Multi-GPU q3 frees GPU-p memory on the calling thread
+Resolution: won't fix
+`cpp/tests/gpu/test_multi_gpu_tpch.cpp` (~L634): `shuffled` (from `hash_shuffle`) is a
+local of the `execute` lambda, so it is destroyed on the **calling** thread. Each
+`shuffled[p]` for p≠0 is a `cudf::table` from GPU p's RMM pool, so this frees device-p
+memory while device 0 is current — the exact worker-per-GPU destruction rule this file
+follows everywhere else (every other buffer is explicitly released on its worker). Pool
+deallocation is stream-ordered per device, so this is the class of mistake that shows up
+later as a corrupted pool or a teardown crash, not immediately. Release each
+`shuffled[p]` on `pool[p]` like the neighbouring `local_top` block.
+
+<a id="t122"></a>
+### #122 — Multi-GPU q6 host merge doesn't check partial scales agree
+Resolution: won't fix
+`cpp/tests/gpu/test_multi_gpu_tpch.cpp` (~L198): the host `__int128` sum overwrites
+`scale` with each partial's scale without verifying they match. All partials share a
+scale today, so the result is correct — but a future divergence would silently produce a
+wrong sum instead of failing. Assert equality.
 
 <a id="t41"></a>
 ### #41 — Standing test for GpuUnion branch-type normalization cast
@@ -665,3 +958,39 @@ each surviving bucket has its own ticket (#32, #62, #57, #55, #56, #63, #45, #46
 inventory tests check both directions, so a skipped query cannot go untracked. Every
 surviving bucket has its own ticket (#32, #45, #46, #47, #55, #56, #57, #60, #62, #63,
 #115).
+
+<a id="t123"></a>
+### #123 — Unused static helper in test_plan_executor.cpp
+`cpp/tests/gpu/test_plan_executor.cpp:53`: `make_float64_literal(...)` is defined and
+never called — a `-Wunused-function` warning waiting on the next warning-level bump.
+Remove it or use it.
+
+**Stale 2026-09-22.** `make_float64_literal` is called now (`test_plan_executor.cpp:804`), so
+the warning cannot fire. An unused test helper is cosmetic, too, and would not be filed today.
+
+<a id="t117"></a>
+### #117 — register_tables_for silently mis-handles non-parquet files
+`peacockdb-core/src/lib.rs` (~L87): the extension check `if path.extension() != Some("parquet") { () }`
+is a no-op, so non-parquet dir entries are not skipped; and `read_table` never returns
+`Err` (failures panic), making the `else { continue }` dead. A stray non-parquet file in
+a data dir panics instead of being skipped. Found during the comment audit.
+
+**Stale 2026-09-22.** A duplicate of [#196](../tickets/system-hardening.md#t196), which has the
+same cause, who reaches it and the fix. The guard at `lib.rs:61-63` is still a no-op.
+
+<a id="t46"></a>
+### #46 — q61 GPU: 'promotions' sum subtree returns the wrong value
+Cross join is correct; `promotions` sum returns 2855378.83 vs CPU 2894907.87 — an
+upstream filtered-sum / projection / aggregate bug. Bisect that subtree node-by-node,
+CPU vs GPU. q61 stays off on a device.
+
+**Stale 2026-09-22.** Observed on `full_table_gpu`, one of the six legacy modes deleted
+2026-09-08 (`3c0750ee`); the original read "q61 full_table_gpu stays off". Today's device cell is off with no recorded cause.
+
+<a id="t47"></a>
+### #47 — q77 GPU returns 40 rows vs CPU 45
+Cross join correct; an upstream outer-join/aggregate branch drops 5 rows. Bisect
+per-node row counts. q77 stays off on a device.
+
+**Stale 2026-09-22.** Observed on `full_table_gpu`, one of the six legacy modes deleted
+2026-09-08 (`3c0750ee`); the original read "q77 full_table_gpu stays off". Today's device cell is off on #212, the outer join's missing build batch.

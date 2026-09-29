@@ -198,8 +198,10 @@ fn a_satisfied_limit_reports_done_so_the_node_above_it_can_finish() {
         1,
         "the accumulator above the limit was never told its input had ended"
     );
-    // 20 rather than 12 because the mock's limit forwards whole batches: trimming a
-    // mid-plan interval is the executor's job, so the number here means "not nothing".
+    // 20 rather than 12, and deliberately so: the mock's limit forwards whole batches where
+    // the real engine's `LimitStream` trims to the interval. This test is about the driver's
+    // done propagation, not the trimming (each backend's own limit tests cover that), so the
+    // number here means "not nothing", not the engine's answer.
     assert_eq!(
         rows_returned(&report),
         20,

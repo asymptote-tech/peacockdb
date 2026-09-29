@@ -17,7 +17,7 @@ joined against lane p of the other and the matching rows were in different lanes
 **Aggregate annotations** — the state-schema chain. A merging or finalizing aggregate
 checks that the state it is about to read is the state its own partial declared: same
 aggregate, same function, same positions. Without it a merge trusts a position, which is
-[#135](../../../llm-wiki/tickets.md#t135)'s class of defect — right column count, wrong
+[#135](../../../llm-wiki/archive/archived-tickets.md#t135)'s class of defect — right column count, wrong
 column, identical per-node statistics, wrong answer at the root.
 
 A child that declares no schema is not an error: sources, projects and joins build columns

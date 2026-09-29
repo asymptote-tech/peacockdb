@@ -6,7 +6,7 @@ branch, which is why two chains need no locking.
 
 ## Chain A (base: master)
 
-### 1. [`refcounted-tables.md`](refcounted-tables.md) — closes [#145](../tickets.md#t145), [#152](../tickets.md#t152) — state: new
+### 1. [`refcounted-tables.md`](refcounted-tables.md) — closes [#145](../tickets/corpus-coverage.md#t145), [#152](../tickets/joins.md#t152) — state: new
 
 The largest and the one that frees the most: 39 `.table` sites across 11 files, plus
 `peacock_handle_retain`, a new ABI symbol — needed because `execute_one` takes its inputs by
@@ -21,7 +21,7 @@ driver-output-hook; specs in `../archive/archived-tasks.md`). What remains is th
 held back: `date_part`'s device cast, pending a decision whether the return type is fixed on the
 device or in DataFusion's function registry.
 
-### 1. [`date-part-return-type.md`](date-part-return-type.md) — closes [#191](active-tickets.md#t191) — state: blocked(done) — PR #161
+### 1. [`date-part-return-type.md`](date-part-return-type.md) — closes [#191](../tickets/corpus-coverage.md#t191) — state: blocked(done) — PR #161
 
 `expr.cpp`'s `date_part` arm casts cuDF's INT16 to the `return_type` the wire already names. Three
 plan-executor cases, one harness case written first as the pin, `tpch/q7`, `q8`, `q9`. Rebased onto

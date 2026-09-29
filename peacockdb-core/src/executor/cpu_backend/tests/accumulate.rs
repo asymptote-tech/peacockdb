@@ -63,9 +63,8 @@ fn a_coalesce_answers_with_one_batch_holding_every_row_it_was_given() {
     assert_eq!(values_of(&out[0]), vec![1, 2, 3, 4, 5]);
 }
 
-/// An empty lane emits nothing, on this backend as on the device — the collapse of no
-/// handles is a refusal there (#173), so a batch invented here would be a row the other
-/// engine cannot produce.
+/// An empty lane emits nothing, on both backends by decision (#173's done half, archived);
+/// the device's collapse of no handles throws only because no executor makes that call.
 #[test]
 fn a_coalesce_that_received_nothing_emits_nothing() {
     assert!(drive(coalesce(), Vec::new()).is_empty());

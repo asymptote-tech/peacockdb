@@ -22,8 +22,8 @@ pub(crate) struct Scheduler {
     lane_ready: Vec<bool>,
     lane_base: Vec<usize>,
     /// Per node, how many readiness indices it has. Kept so a caller passing an output-lane
-    /// index where a readiness index belongs is caught here rather than silently writing
-    /// into the next node's flags.
+    /// index where a readiness index belongs is caught here in debug builds; a release
+    /// build writes into the next node's flags.
     lane_count: Vec<usize>,
     /// Counters, not flags: one node can sit in two joins' probe subtrees, and a lift of
     /// one of them must not free it from the other.

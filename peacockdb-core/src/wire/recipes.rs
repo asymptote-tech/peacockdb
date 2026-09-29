@@ -43,7 +43,14 @@ pub(crate) fn render_plan_recipes(
         flatbuffers::root_with_opts::<fb::GpuPlan>(&options, plan.bytes())
             .expect("the plan we just wrote")
     });
-    render_recipe_node(root, 0, &mut Sequence::default(), plan, buffer.as_ref(), &mut text);
+    render_recipe_node(
+        root,
+        0,
+        &mut Sequence::default(),
+        plan,
+        buffer.as_ref(),
+        &mut text,
+    );
     text
 }
 
@@ -120,7 +127,10 @@ fn render_recipe_node(
             // the tree, and printing nothing there would render a plan whose every later
             // seq addresses the wrong node as if it were fine.
             let node = node_at(buffer, seq)
-                .unwrap_or_else(|| panic!("seq #{seq} is published as {kind} and the plan has no node there"));
+                .unwrap_or_else(|e| panic!("{e}"))
+                .unwrap_or_else(|| {
+                    panic!("seq #{seq} is published as {kind} and the plan has no node there")
+                });
             assert_eq!(
                 node.node_type(),
                 kind.wire_kind(),

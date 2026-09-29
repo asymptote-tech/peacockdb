@@ -145,7 +145,7 @@ impl CpuAccumulator {
 /// (#175). A grouped merge over no arrivals owes no groups, so nothing is also its answer.
 /// The exception is a global aggregate, which owes its identity row whatever arrived — see
 /// [`AggregateBatches::mark_done_and_fetch`].
-fn one_batch(schema: &SchemaRef, held: &[RecordBatch]) -> CallResult<Vec<CpuBatch>> {
+fn coalesce_or_nothing(schema: &SchemaRef, held: &[RecordBatch]) -> CallResult<Vec<CpuBatch>> {
     if held.is_empty() {
         return Ok((Vec::new(), CallStats::default()));
     }
@@ -171,7 +171,7 @@ impl Coalesce {
     }
 
     fn mark_done_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
-        one_batch(&self.schema, &self.held)
+        coalesce_or_nothing(&self.schema, &self.held)
     }
 }
 
@@ -208,7 +208,7 @@ impl SortedRuns {
             return Ok((Vec::new(), CallStats::default()));
         }
         let sorted = run_node(&self.sort, vec![self.held], &self.ctx)?;
-        let (ordered, _) = one_batch(&self.schema, &sorted)?;
+        let (ordered, _) = coalesce_or_nothing(&self.schema, &sorted)?;
         Ok((
             ordered
                 .into_iter()
@@ -265,7 +265,7 @@ impl CpuPartitionAccumulator {
             return Ok((Vec::new(), CallStats::default()));
         }
         let sorted = run_node(&self.sort, vec![partition_major], &self.ctx)?;
-        let (ordered, _) = one_batch(&self.schema, &sorted)?;
+        let (ordered, _) = coalesce_or_nothing(&self.schema, &sorted)?;
         Ok((
             ordered
                 .into_iter()
@@ -360,13 +360,13 @@ impl AggregateBatches {
             self.compact()?;
         }
         let Some(state) = self.state else {
-            return one_batch(&self.output, &[]);
+            return coalesce_or_nothing(&self.output, &[]);
         };
         let Some(finalize) = self.finalize else {
-            return one_batch(&self.held, &[state]);
+            return coalesce_or_nothing(&self.held, &[state]);
         };
         let finalized = run_node(&finalize, vec![vec![state]], &self.ctx)?;
-        one_batch(&self.output, &declared(finalized, &self.output)?)
+        coalesce_or_nothing(&self.output, &declared(finalized, &self.output)?)
     }
 }
 

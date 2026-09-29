@@ -140,16 +140,16 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
 
   // make_agg would silently compute the NON-distinct value for a DISTINCT
   // aggregate (needs cuDF nunique/distinct, unimplemented), while the CPU oracle
-  // honours the flag — a silent divergence, so fail loudly. Unreachable today:
-  // DataFusion rewrites a standalone count(DISTINCT x) into GROUP BY + count; the
-  // flag only survives when DISTINCT is mixed with other aggregates (#62).
+  // honours the flag — a silent divergence, so fail loudly. Unreachable: the
+  // planner refuses a DISTINCT aggregate (translator/aggregate.rs, #62) and the
+  // wire writer always writes distinct=false, so this guards a hand-built plan only.
   if (agg->aggr_funcs()) {
     for (flatbuffers::uoffset_t i = 0; i < agg->aggr_funcs()->size(); ++i) {
       if (agg->aggr_funcs()->Get(i)->distinct())
         throw std::runtime_error(
-            "DISTINCT aggregate (e.g. count(DISTINCT)) not yet supported on the "
-            "GPU when the flag survives to the executor (mixed with other "
-            "aggregates); needs cuDF nunique/distinct aggregations — see #62");
+            "DISTINCT aggregate (e.g. count(DISTINCT)) is not supported on the "
+            "GPU; the planner refuses it and the wire writer never sets the flag, "
+            "so this plan was built by hand — see #62");
     }
   }
 
@@ -671,8 +671,8 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
         // group (Welford-Chan); the finalize happens in the assembly below.
         // Consumes THREE Final cols. Child ORDER + TYPES are fixed by cuDF's
         // group_merge_m2: child(0)=valid_count INT32, child(1)=mean f64,
-        // child(2)=M2 f64. Count MUST be INT32 — cuDF 25.02 rejects INT64 at
-        // runtime (25.10 relaxed it), so an INT64 here compiles and then fails.
+        // child(2)=M2 f64. Count MUST be INT32 on cuDF 25.02, which rejects INT64
+        // at runtime; 25.10 reverses it and accepts only INT64 or FLOAT64 (#94).
         auto cnt = cudf::cast(tv.column(static_cast<cudf::size_type>(in_off)),
                               cudf::data_type{cudf::type_id::INT32});
         auto mean = std::make_unique<cudf::column>(

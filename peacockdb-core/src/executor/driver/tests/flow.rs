@@ -228,9 +228,9 @@ fn a_join_that_owes_nothing_without_a_build_side_ends_its_lane() {
     assert_accounted(&report);
 }
 
-/// The three types that preserve unmatched probe rows owe their probe side, and making it
-/// takes a call over a build table that does not exist. A scatter no longer leaves a lane
-/// here (#175); an accumulator that emits nothing at all still does (#212).
+/// A join executor that refuses `without_build` fails the run with `CallFailed`: the driver
+/// propagates the refusal rather than swallowing it. The refusal itself is #212's, pinned on
+/// both backends in `tests/gpu_tests/join_cases.rs`; this mock names no join type.
 #[test]
 fn a_join_that_owes_its_probe_side_without_a_build_side_is_refused() {
     let plan = join_plan(1);

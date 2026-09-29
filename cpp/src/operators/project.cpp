@@ -42,7 +42,7 @@ TableResult execute_project(const fb::CudfProject* proj, NodeInputs* in) {
       auto* col = expr->node_as_ColumnRef();
       auto idx = static_cast<cudf::size_type>(col->index());
       columns.push_back(std::make_unique<cudf::column>(tv.column(idx)));
-    } else if (is_ast_able(expr, tv)) {
+    } else if (cudf_ast_can_evaluate(expr, tv)) {
       // Pure AST expression: fuse via cudf::compute_column.
       ExprContext ctx;
       auto& ast = build_expr(expr, ctx);

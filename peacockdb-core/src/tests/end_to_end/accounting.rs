@@ -23,7 +23,7 @@ use crate::tests::injection::{
 //
 // So the claim is that a boundary exists and is one byte wide: the smallest budget that
 // completes, and the byte below it that does not.
-/// Ignored under [#182](../../../../llm-wiki/tasks/active-tickets.md) rather than deleted, so it stays
+/// Ignored under [#182](../../../../llm-wiki/tickets/memory.md#t182) rather than deleted, so it stays
 /// compiled and listed: pricing a `CpuBatch` from the plan's schema moved the accounting under
 /// it and the budget stopped being a boundary. The bar for T18 is results and node stats
 /// consistent between the engines; memory accounting is deferred.
@@ -259,7 +259,7 @@ fn boundaries_under(
 // peaks at 8,222 bytes and 8,540 under a rebatcher, and its budget does not move: the
 // pre-call check tests the join's own transient, which merging a lane's batches leaves
 // alone.
-/// Ignored under [#182](../../../../llm-wiki/tasks/active-tickets.md), the same change: the peak stopped
+/// Ignored under [#182](../../../../llm-wiki/tickets/memory.md#t182), the same change: the peak stopped
 /// depending on the batch shape, since logical bytes are a function of rows and var-length
 /// content alone, so `rebatch=sources` moves nothing and this case's premise is gone. Whether a
 /// peak that ignores batch shape is right is the ticket's question.

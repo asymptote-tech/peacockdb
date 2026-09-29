@@ -1,7 +1,7 @@
 // Pooled device allocator: one function, installing a pool of the size its caller asks for.
 // rmm's default is a cudaMalloc/cudaFree per allocation, so a query that materializes dozens
-// of multi-GiB intermediates pays a driver round trip each — TPC-H q1 over the whole table
-// measured 76.5 s that way on GB10. It lives under cpp/include/ because a Rust caller cannot
+// of multi-GiB intermediates pays a driver round trip each — a whole-table q6 load measured
+// 2.5x slower without a pool on GB10, and 5x slower with one forced to grow. It lives under cpp/include/ because a Rust caller cannot
 // include a C++ header and must get the same allocator the gtest binaries have
 // (llm-wiki/archive/archived-tickets.md #151). Callers pass the bytes they measured rather
 // than a share of the device, so two binaries fit on one card (llm-wiki/tickets.md #178).

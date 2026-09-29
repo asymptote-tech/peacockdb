@@ -168,7 +168,7 @@ fn a_join_that_holds_its_build_side_reports_it_while_it_probes() {
     let report = run(plan.as_ref(), &script);
     assert!(
         report.peak_bytes >= 4096,
-        "the build side is resident across every probe call, and was not counted"
+        "the build side's residency was never counted"
     );
     assert_eq!(report.in_flight_bytes, 0);
 }

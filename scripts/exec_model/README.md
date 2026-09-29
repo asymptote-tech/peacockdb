@@ -151,12 +151,12 @@ and the spec's join tables carry all of them.
   refuses to stream, the single-batch fallback is precisely the legacy call.
 - **At a cost the frozen surface makes unavoidable**: a handle is consumed by the call that
   reads it and nothing duplicates one, so a streamed probe copies the build side once per
-  batch — [#152](../../llm-wiki/tickets.md#t152), and Left/Full copy the probe batch as
+  batch — [#152](../../llm-wiki/tickets/joins.md#t152), and Left/Full copy the probe batch as
   well. The session counts every copy, so the figure is asserted rather than estimated.
 - **Except one shape, which turned out to be a defect rather than a limit.** An outer join
   with a residual filter is wrong in the shipping C++ — the filter is applied after the
   outer gather, dropping the rows it was meant to preserve
-  ([#153](../../llm-wiki/tickets.md#t153)). Latent, since no corpus query has that shape.
+  ([#153](../../llm-wiki/tickets/joins.md#t153)). Latent, since no corpus query has that shape.
 
 ## The corpus
 
@@ -325,7 +325,7 @@ F8. **Validation splits by what the rule is about, not by convenience.** Whole-t
    than "this category is 1:1 per lane". That half covers hash distribution, sortedness,
    batch layout, and the aggregate state chain — a merge checks that the state it reads is
    the state its own partial declared, same aggregate and same positions, which is
-   [#135](../../llm-wiki/tickets.md#t135)'s class of defect made checkable.
+   [#135](../../llm-wiki/archive/archived-tickets.md#t135)'s class of defect made checkable.
    Full column types stay out of the prototype (`schema.py` carries annotations only);
    they are the real implementation's T7.
 
@@ -359,7 +359,7 @@ F12. **Modelling the wire found a defect in the shipping engine, not in the mode
    recipe backend reproduces `execute_hash_join` branch for branch, so where it disagreed
    with the SQL oracle the disagreement belonged to the C++: an outer join's residual
    filter is applied after the outer gather and drops the rows the outer join exists to
-   keep ([#153](../../llm-wiki/tickets.md#t153)). Reproducing a code path faithfully is
+   keep ([#153](../../llm-wiki/tickets/joins.md#t153)). Reproducing a code path faithfully is
    worth more than implementing it correctly — a correct model would have hidden this.
    `test_an_outer_join_with_a_residual_filter_is_refused_not_answered_wrongly`.
 

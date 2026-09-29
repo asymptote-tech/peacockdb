@@ -430,11 +430,11 @@ TableResult execute_nested_loop_join(const fb::CudfNestedLoopJoin* join, NodeInp
           "unsupported (cross_join would drop all left rows); expected a "
           "single-row scalar aggregate on the right");
     full_table = cudf::cross_join(ltv, rtv);
-  } else if (!is_ast_able(
+  } else if (!cudf_ast_can_evaluate(
                  join->filter(),
                  // Type-only view of the referenced columns in filter_columns
                  // order: ColumnRef(i) -> filter_columns[i] -> a left/right
-                 // column. is_ast_able only inspects types, but a table_view
+                 // column. cudf_ast_can_evaluate only inspects types, but a table_view
                  // requires equal column sizes — and left/right differ — so use
                  // zero-row slices (which preserve type) to make them uniform.
                  [&] {

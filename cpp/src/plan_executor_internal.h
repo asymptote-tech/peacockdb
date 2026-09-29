@@ -27,7 +27,7 @@ cudf::data_type binop_output_type(fb::BinaryOp op, cudf::data_type lhs,
 // Whether an expression can be evaluated through the cuDF AST fast path (true)
 // or must take the column-producing path (false). Routes decimal operands and
 // un-inferrable / mismatched-type binary ops to the column path.
-bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table);
+bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table);
 
 // Whether a harness range is open. Observable only so that push_harness_range's one-level
 // rule can be tested — NvtxRanges.ASecondPushReplacesTheFirstRatherThanNesting is the only

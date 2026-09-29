@@ -72,29 +72,27 @@ pub(crate) fn decomposition(func: AggFunc) -> Decomposition {
     }
 }
 
-impl PlanAgg {
-    /// The type of the state column this aggregator produces, given its argument's type.
-    /// Both engines produce it and the plan declares it; no wildcard, so a new aggregator
-    /// says its type here or does not compile.
-    pub(crate) fn state_type(self, input: &DataType) -> Result<DataType, PlanError> {
-        use DataType::*;
-        Ok(match self {
-            Self::Sum => match input {
-                // DataFusion's `sum::return_type`, quoted: Spark's DECIMAL(min(38, p + 10), s).
-                Decimal128(p, s) => Decimal128((*p + 10).min(38), *s),
-                t if t.is_signed_integer() => Int64,
-                t if t.is_unsigned_integer() => UInt64,
-                t if t.is_floating() => Float64,
-                other => return Err(PlanError::Unsupported(format!("sum over {other}"))),
-            },
-            Self::Min | Self::Max => input.clone(),
-            Self::Count => Int64,
-            Self::Mean | Self::M2 => Float64,
-            Self::MergeM2 => {
-                unreachable!("MergeM2 merges the Welford triple and declares no state")
-            }
-        })
-    }
+/// The type of the state column `agg` produces, given its argument's type — the body of
+/// [`PlanAgg::state_type`]. Both engines produce it and the plan declares it; no wildcard,
+/// so a new aggregator says its type here or does not compile.
+pub(crate) fn state_type(agg: PlanAgg, input: &DataType) -> Result<DataType, PlanError> {
+    use DataType::*;
+    Ok(match agg {
+        PlanAgg::Sum => match input {
+            // DataFusion's `sum::return_type`, quoted: Spark's DECIMAL(min(38, p + 10), s).
+            Decimal128(p, s) => Decimal128((*p + 10).min(38), *s),
+            t if t.is_signed_integer() => Int64,
+            t if t.is_unsigned_integer() => UInt64,
+            t if t.is_floating() => Float64,
+            other => return Err(PlanError::Unsupported(format!("sum over {other}"))),
+        },
+        PlanAgg::Min | PlanAgg::Max => input.clone(),
+        PlanAgg::Count => Int64,
+        PlanAgg::Mean | PlanAgg::M2 => Float64,
+        PlanAgg::MergeM2 => {
+            unreachable!("MergeM2 merges the Welford triple and declares no state")
+        }
+    })
 }
 
 /// The expression that turns merged state into the aggregate's output column. A rename

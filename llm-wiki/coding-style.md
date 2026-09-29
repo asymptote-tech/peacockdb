@@ -308,7 +308,7 @@ because both parameters are the same type.
 A doc block belongs to the declaration below it, so one inserted above takes it and leaves the
 original none — nothing reads as missing, which is why review passes it. A split leaves the block
 behind a blank line and a guard decides that; an insertion is contiguous and shows only in a diff,
-so read each block's first sentence. `tickets.md`'s `<a id>` anchors the same way: #177 took #170's.
+so read each block's first sentence. The ticket files' `<a id>` anchors the same way: #177 took #170's.
 
 ### A thread-local as an output or side-channel argument
 

@@ -240,10 +240,10 @@ async fn a_build_preserving_join_is_charged_for_the_keys_it_accumulates() {
 
 #[tokio::test]
 async fn a_loader_is_priced_by_the_batches_its_mapping_makes() {
-    // Three batching forms, one budget: what a loader holds is the largest batch the
+    // Two batching forms, one budget: what a loader holds is the largest batch the
     // mapping produces, so per-row-group holds a row group where one-batch-per-lane
     // holds the lane. A model reading the budget's target instead would say the same
-    // number for all three.
+    // number for both.
     let per_lane = modelled_as("SELECT * FROM customer", 1, BatchSizing::OneBatchPerLane).await;
     let per_group = modelled_as(
         "SELECT * FROM customer",

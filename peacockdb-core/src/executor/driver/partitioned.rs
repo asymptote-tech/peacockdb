@@ -67,7 +67,8 @@ pub(crate) struct Driver<'a, B: Backend> {
     results: Vec<CpuBatch>,
     trace: Vec<TraceEvent>,
     steps: usize,
-    /// Per node, rows of its input stream seen so far, summed over every lane. Only the
+    /// Per limit-carrying node (an unload or a mid-plan limit), rows of its input stream seen
+    /// so far, summed over every lane; zero for every other node. Only the
     /// driver can hold this: an unload instance is one lane's and the count is not.
     rows_seen: Vec<u64>,
     rows_skipped: Vec<u64>,

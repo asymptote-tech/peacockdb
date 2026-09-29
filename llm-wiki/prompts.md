@@ -32,8 +32,9 @@ Starting a chain, and everything else the human does: `llm-wiki/README.md`.
   document. `llm-wiki/tasks/<task>-detail.md` holds everything a run accumulates and is what
   a restarted coordinator reads to recover. `llm-wiki/tasks/tasks.md` changes only when a
   state changes.
-- **Tickets** live in `llm-wiki/tickets.md` (GitHub issues are retired). New bugs and
-  follow-ups get a ticket there; ticket IDs (`#NN`) are permanent.
+- **Tickets** live in the milestone files under `llm-wiki/tickets/`, indexed by
+  `llm-wiki/tickets.md` (GitHub issues are retired). New bugs and follow-ups get a ticket in
+  the file of the milestone they block; ticket IDs (`#NN`) are permanent.
 - **Only production behaviour gets a ticket.** A ticket says the engine does the wrong thing
   for a user: a wrong answer, a crash, a refusal, a leak, a regression. Cosmetics never get
   one — an unused output argument, a name you dislike, a shape you would have written
@@ -42,8 +43,8 @@ Starting a chain, and everything else the human does: `llm-wiki/README.md`.
   thing if you are already in that code and it costs nothing; otherwise leave it unfiled. A
   ticket file that collects cosmetics stops being a list of what is broken, and then nobody
   reads it to find out what is broken.
-- **Short sentences and plain language in `architecture.md`, `build-test.md` and
-  `tickets.md`.** One clause where one will do; ordinary words over the clever one; the
+- **Short sentences and plain language in `architecture.md`, `build-test.md` and the
+  ticket files.** One clause where one will do; ordinary words over the clever one; the
   subject near its verb. These three are read under pressure by an agent looking for a single
   fact, and a long sentence hides the fact in the middle of itself.
 - **Every commit keeps code, code comments, and llm-wiki content in agreement.**
@@ -242,7 +243,7 @@ state, and a watchdog restarts you.
   yours alone.
 - **A GPU tier that cannot build its pool is a neighbour, not a bug.** shad-gpu is shared with work
   outside this repo, so `[rmm] pool of N GiB could not be built` means somebody else was holding the
-  card. Add a dated line to [#178](tickets.md#t178) naming the run and the binary, re-run the job
+  card. Add a dated line to [#178](tickets/testinfra.md#t178) naming the run and the binary, re-run the job
   once, and do not debug it — a dispatch spent diagnosing a machine we do not own is a dispatch
   lost. The opposite failure is ours and reproduces every time: a pool that *was* built and a test
   that then dies with `Maximum pool size exceeded` means that binary's declared budget is too
@@ -329,7 +330,7 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
 - **No regression in test coverage** unless a human explicitly authorized it.
   `test_ci_coverage.rs` must be kept up to date and include all necessary coverage.
   **One exception — flaky tests:** if you hit a flaky test, prove it is flaky (repeated
-  runs / signature analysis), disable it, and add a ticket to `llm-wiki/tickets.md`. No
+  runs / signature analysis), disable it, and add a ticket to `llm-wiki/tickets/testinfra.md`. No
   human authorization needed for that.
 - **Follow `llm-wiki/coding-style.md`** in everything you write.
 - Anything the next developer on this task would want to know goes in
