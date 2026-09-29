@@ -221,9 +221,10 @@ struct At {
 /// Where a call's named input comes from, in the handles the walk is already holding.
 ///
 /// The two copies resolve to the handle itself. They name a device copy of something a
-/// later call still needs and the ABI has no symbol for one (#152) — but every shape here
-/// plans a single probe batch, so the handle is used once and handed over, which is what
-/// the join arm asserts before anything reaches this.
+/// later call still needs and the ABI has no symbol for one (#152). `BuildSideCopy` is
+/// safe because every shape here plans one probe batch, so the handle is used once and
+/// handed over, which the join arm asserts before anything reaches this. `BatchCopy`
+/// never reaches here: `driven` refuses the ProbeKeys project that names it.
 fn resolve(input: Input, at: &At) -> Vec<u64> {
     let held = |handle: Option<u64>| vec![handle.unwrap_or_else(|| panic!("no {input:?} here"))];
     match input {

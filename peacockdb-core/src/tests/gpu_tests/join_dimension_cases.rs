@@ -49,13 +49,13 @@ fn strings_equal() -> Expr {
     )
 }
 
-/// `b_s = p_s`: two string columns of one type, which `is_ast_able` admits — it refuses a
+/// `b_s = p_s`: two string columns of one type, which `cudf_ast_can_evaluate` admits — it refuses a
 /// string only as a literal — so cuDF's AST evaluates the comparison.
 fn string_residual() -> (Option<Expr>, Vec<JoinFilterColumn>) {
     (Some(strings_equal()), string_columns())
 }
 
-/// `b_s = p_s AND p_s <> ''`: the literal is what `is_ast_able` refuses, so the column path
+/// `b_s = p_s AND p_s <> ''`: the literal is what `cudf_ast_can_evaluate` refuses, so the column path
 /// evaluates the conjunction and the literal comparison (`cudf::binary_operation` over
 /// strings); the equality beneath is an AST subtree of its own.
 fn string_literal_residual() -> (Option<Expr>, Vec<JoinFilterColumn>) {
@@ -77,7 +77,7 @@ fn string_literal_residual() -> (Option<Expr>, Vec<JoinFilterColumn>) {
 }
 
 /// `CAST(b_i64 AS DECIMAL(20, 0)) < CAST(p_i64 AS DECIMAL(20, 0))`: a decimal operand is
-/// what `is_ast_able` refuses, so the column path evaluates it.
+/// what `cudf_ast_can_evaluate` refuses, so the column path evaluates it.
 fn decimal_residual() -> (Option<Expr>, Vec<JoinFilterColumn>) {
     let dec = |i: u32, name: &str| Expr::Cast {
         expr: Box::new(Expr::column(i, name)),

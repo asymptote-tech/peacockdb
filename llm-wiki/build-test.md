@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2325 test cases — Rust 1850, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2326 test cases — Rust 1851, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,23 +22,23 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1179 cases: `--lib` 600, `test_cpu_corpus` 550, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1185 cases: `--lib` 601, `test_cpu_corpus` 555, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 549 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 554 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its two oracles and
 whether its device run is schema-validated, expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
-checked against plain DataFusion at `target_partitions = 1`. 115 queries at the modes each is
+checked against plain DataFusion at `target_partitions = 1`. 116 queries at the modes each is
 correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
-[#180](tasks/active-tickets.md#t180), `tpcds/q77` three by [#212](tickets.md#t212),
+[#199](tickets/corpus-coverage.md#t199), `tpcds/q77` three by [#212](tickets/joins.md#t212),
 `tpcds/q80`, `tpcds/q18`, `tpcds/q22`, `tpcds/q5` and `tpch/rollup-over-join` three by
-[#189](tasks/active-tickets.md#t189), `tpch/scan-limit` two by
-[#186](tasks/active-tickets.md#t186), and five queries are out entirely: `tpch/q11`,
+[#189](tickets/corpus-coverage.md#t189), `tpch/scan-limit` two by
+[#186](tickets/corpus-coverage.md#t186), and four queries are out entirely: `tpch/q11`,
 `tpch/q22` and `tpcds/q24` on
-[#190](tasks/active-tickets.md#t190), `tpcds/q54` and `tpcds/q64`. 546 cells, plus three checks
+[#190](tickets/joins.md#t190), and `tpcds/q54`. 551 cells, plus three checks
 that every declaration's two oracles suit each other and every device cell has a cpu cell
 
 | Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
@@ -82,7 +82,7 @@ RightAnti answering like the oracle from the empty build lanes it leaves
 ([#175](archive/archived-tickets.md#t175)), and the schema validator as the driver's output
 hook — `tpch/q6` at every mode passing under it, and an index over the same tree with one
 project's field retyped refused naming the field. Two of the 29 are `#[ignore]`d against
-[#182](tasks/active-tickets.md#t182) — the budget boundary and the rebatcher's peak, both
+[#182](tickets/memory.md#t182) — the budget boundary and the rebatcher's peak, both
 properties that pricing a batch from the plan's schema took away — so 27 run. The first tier
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
@@ -184,9 +184,9 @@ every refusal in a golden names a ticket that exists and carries no host path
 the claims the payload golden cannot make: every published seq resolves to the kind its recipe
 names, over every corpus query rather than only the payload subset; the payload set covers
 every fb kind and call shape the ten goldens hold; the queries that cannot cross the wire are
-declared; no plan approaches the verifier's depth cap ([#169](tickets.md#t169)); and the
+declared; no plan approaches the verifier's depth cap ([#169](tickets/system-hardening.md#t169)); and the
 index's post-order agrees with the numbering `attach_recipes` gave, over the corpus, since the
-two are separate walks in separate files and [#134](tickets.md#t134) is the same pair one
+two are separate walks in separate files and [#134](archive/archived-tickets.md#t134) is the same pair one
 boundary over
 
 | Recipe payloads golden | [the_payload_golden_carries_what_each_call_hands_the_executor](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 1 |
@@ -307,6 +307,12 @@ the record's reading of a plan: a row's `node_seq` names the steps its `recipes`
 so the record and the plan golden agree on what a call is; and every cell of a written row
 sits under the column named for it, since `row()` is positional and the heading is not
 
+| Golden merge under contention | [test_support::corpus_golden::tests](../peacockdb-core/src/test_support/corpus_golden/tests.rs) | 1 |
+|---|---|--:|
+
+sixteen writers merging one golden file at once each keep their section: the lock is on the
+directory, because the rename that publishes replaces the file's inode (#213)
+
 | Sink divergence message | [executor::errors::tests](../peacockdb-core/src/executor/errors/tests.rs) | 3 |
 |---|---|--:|
 
@@ -399,15 +405,15 @@ release is null-guarded on the executor
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
 device with every batch held to its node's declared schema through the driver's output hook
 (the line's `schema_validation_enabled`; `tpch/shuffle-stddev` says `disabled` against
-[#225](tickets.md#t225), its Welford state columns named for the alias), and asserts,
+[#225](tickets/corpus-coverage.md#t225), its Welford state columns named for the alias), and asserts,
 read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
 and the bytes — plus the result where `gpu_oracle` names a golden.
 Twenty-six cells today: `tpch/q6`, `tpch/q1` and `tpch/shuffle-additive-avg` at every mode,
 and `q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggregate-groupby`,
 `tpch/filter-project`, `tpch/shuffle-additive`, `tpcds/q37`, `tpcds/q82` and `tpcds/q85` at
-`tp1-single`; the rest are off against [#152](tickets.md#t152),
-[#184](tasks/active-tickets.md#t184), [#185](tasks/active-tickets.md#t185),
-[#191](tasks/active-tickets.md#t191), [#220](tasks/active-tickets.md#t220) and the device's
+`tp1-single`; the rest are off against [#152](tickets/joins.md#t152),
+[#95](tickets/corpus-coverage.md#t95),
+[#191](tickets/corpus-coverage.md#t191), [#220](tickets/joins.md#t220) and the device's
 own tickets (#57, #63, #205). The twenty-seventh case is that a device run under a
 regeneration writes no golden
 
@@ -464,7 +470,7 @@ keys, and the merge at four lanes. The group keys are `Utf8` too; the aggregate 
 view type. A guard reads the kind each case declares and names every kind with none, the three
 forwarders excluded
 
-| Operator harness, what the device holds | [a_divide_over_a_decimal_declares_the_scale_6_the_device_holds](../peacockdb-core/src/tests/gpu_tests/exec_schema_cases.rs), [bug_a_stddev_holds_its_welford_state_under_the_aggregates_alias_three_times](../peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs) | 134 |
+| Operator harness, what the device holds | [a_divide_over_a_decimal_declares_the_scale_6_the_device_holds](../peacockdb-core/src/tests/gpu_tests/exec_schema_cases.rs), [bug_stddev_holds_three_identically_named_columns](../peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs) | 134 |
 |---|---|--:|
 
 the same nodes on the device alone, every output handle read where it sits through
@@ -552,7 +558,7 @@ the harness's own format reader — none of which runs engine code.
 | Exec-model prototype, TPC-H plan shapes (Python) | the same drivers over real sf1 tables under a live resident budget, each plan re-run at every layout `LayoutInjector` can produce; needs the generated dataset, so it rides dataset-matrix rather than cost-report | [test_the_accumulator_is_what_makes_the_budget_bind](../scripts/exec_model/tests/test_tpch.py), [test_every_layout_gives_the_same_shuffled_join](../scripts/exec_model/tests/test_tpch.py) | dataset-matrix (25.02 leg) | 19 |
 | Exec-model corpus (Python) | every TPC-H query and every TPC-DS query the engine runs that needs no window function, lowered by hand and run over whole sf1 tables at three layouts each — TPC-H against a pandas oracle per query, TPC-DS against DuckDB running the query's own text. Minutes, not seconds, so manual dispatch; `PCK_BACKEND=recipe` re-runs the whole set with every join going through the FlatBuffers emulation | [test_corpus_q21_suppliers_who_kept_orders_waiting](../scripts/exec_model/tests/test_tpch_corpus.py), [plans_tpcds.py](../scripts/exec_model/tests/plans_tpcds.py) | manual — exec-model-corpus.yml, 3 shards | 93 |
 | Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, `hbm_bytes` lands on the right tuple and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_plot.py](../scripts/calibration/tests/test_plot.py) | cost-report | 12 |
-| C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.IsAstAble](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 15 |
+| C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 15 |
 | cuDF GPU smoke (C++) | the GPU is alive; the Spark-murmur3 kernel matches comet in C++; the RMM pool reserves the budget the binary declared | [CudfGpu.SparkPartitionIdsMatchComet2ColWithNulls](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 4 |
 | Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node, plus the per-call entry points at their contract edges (row-group override, export range, slice), the sqrt arm on both evaluators, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, every wire type walked through the dispatch, the LIKE guard — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [NodeRegions.EveryCallOpensOneRegionPerOutputPartition](../cpp/tests/gpu/test_plan_executor.cpp) | shad-gpu | 53 |
 | TPC-H sf40 bare-cuDF (C++) | hand-written cuDF pipelines vs DuckDB sf40; the benchmark vehicle | [TpchSf40.Q1GroupByAggregates](../cpp/tests/gpu/test_tpch.cpp), [Q3JoinsGroupByTopN](../cpp/tests/gpu/test_tpch.cpp) | shad-gpu (sf40 is a hard precondition) | 4 |
@@ -625,8 +631,8 @@ sha256 matches local). Notes on the rows above:
 
 ## Golden files
 
-All goldens are committed, under `testdata/goldens/`: `tpch.sf1` (38 files), `tpcds.sf1`
-(115), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top, the recipe payloads with
+All goldens are committed, under `testdata/goldens/`: `tpch.sf1` (39 files), `tpcds.sf1`
+(116), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top, the recipe payloads with
 a digest each. Most of each sf1 count is the per-query DuckDB cost oracle (22 + 99); the
 engine's own are 16 apiece, one plan and one execution set per mode. The committed DuckDB
 profile inputs live beside them in `testdata/duckdb-profiles/{tpch,tpcds}` (22 + 99) and
@@ -642,6 +648,7 @@ The generator scripts live in `testdata/`.
 | `<mode>-<tier>.cost.txt` | derived from the sibling `.cpu.txt` **section**, × `cost_model.conf` | that `.cpu.txt`, `cost_model.conf` | the corpus cpu tier + `test_cost_model`, which re-derives every section independently |
 | `<tier>.result.txt` | the last mode a query declares, under either variable; a run without that mode leaves the section alone | sf1 parquet; one section per query, its `mode=` line naming the author | the corpus cpu tier; the device tier where `gpu_oracle` names a golden |
 | `<q>.duckdb_cost.txt` | `gen_duckdb_cost.sh --gen`<br>(DuckDB 1.5.4, `threads=1`, pyarrow 19.0.1) | committed pass-1 profiles ∩ pass-2 dynamic-filter bounds ∩ parquet row-group stats | the cost-report widget (directional signal, not a test) |
+| `duckdb-result.txt` | `testdata/duckdb_result.py`<br>(DuckDB 1.5.4, `threads=1`) | sf1 parquet, the query text in `<bench>-queries/` | nothing yet: #235's comparison test is to come |
 | `tpch.sf40/duckdb_<q>.csv`, `.count.csv` | `gen_duckdb_goldens.sh --sf 40`<br>on shad-gpu | sf40 parquet, query text from `tpch_query_sql.sh` | `peacock_tpch_tests` / `peacock_tpchv_tests` |
 
 How they hang together — parquet at the top, goldens derived left to right:
@@ -661,7 +668,20 @@ testdata/{tpch,tpcds}-queries/*.sql
           ├── the corpus cpu tier, UPDATE_CANONICAL=1   (the author; a device never writes)
           │     ├──► <mode>-<tier>.cpu.txt        (a == <query> section each)
           │     │       └──× cost_model.conf ──► <mode>-<tier>.cost.txt
-          │     └──► <tier>.result.txt         (one section per query)
+          │     └──► <tier>.result.txt         (one section per query, from its last mode)
+          │               │
+          │               ▼  read-only, never written
+          │     the corpus device tier (test_gpu_corpus, shad-gpu)
+          │       ├── <mode>-<tier>.cpu.txt, .cost.txt ──► every device cell, per node
+          │       └── <tier>.result.txt ──► the device's answer, per gpu_oracle:
+          │             golden_exact            text for text, one section serving all modes
+          │             golden_approx[_std]     within 1e-12 / 1e-11
+          │             live_cpu                not read: a cpu run at the same mode instead,
+          │                                     for a query whose section is skipped
+          │             skip                    no answer check
+          │
+          ├── duckdb_result.py  (DuckDB 1.5.4, threads=1)
+          │     └──► duckdb-result.txt   (DuckDB's answers; to be compared with <tier>.result.txt, #235)
           │
           └── gen_duckdb_cost.sh --gen  (DuckDB 1.5.4, threads=1, pyarrow 19.0.1)
                 ├── pass 1, JFP off ──► duckdb-profiles/<bench>/<q>.json     (committed)
@@ -690,7 +710,7 @@ Consequences worth knowing before you regenerate:
   during the regen, before the goldens are pulled home. It pins what the C++ is handed, and
   it is the file a bulk regen must not quietly rewrite: the diff would come home among the
   others.
-- **Two writers can lose a section** ([#213](tickets.md#t213)): the merge locks the inode
+- **Two writers can lose a section** ([#213](archive/archived-tickets.md#t213)): the merge locks the inode
   it opened and the publish renames over it, so a whole-corpus regeneration can drop one
   query's section from a `.cpu.txt`. Read the regeneration's `git diff --stat` for a section
   that vanished, and refill it with `PCK_UPDATE_SECTIONS=1` and `--exact <case>`.
@@ -1001,7 +1021,7 @@ Rules that keep this healthy:
   shrink: the pool is not built, and the sf40 pair goes red on rmm's default resource. Read
   `[rmm] pool of N GiB could not be built` at the top of the log first; the
   `cudaErrorMemoryAllocation` failures under it are its consequence. shad-gpu is a shared H200,
-  so check `nvidia-smi` before debugging a red GPU tier ([#178](tickets.md#t178)). Budgets are
+  so check `nvidia-smi` before debugging a red GPU tier ([#178](tickets/testinfra.md#t178)). Budgets are
   H200 numbers; `PEACOCK_RMM_POOL_BYTES=<bytes>` replaces one for a sweep or another host.
 - **Prefer verda for large CPU runs** (whole suite or big selections). It is not always
   up (the human starts it manually) — falling back to a local run is completely fine.
@@ -1123,7 +1143,7 @@ nothing), and the GPU's performance counters must be open to non-root for step 5
 `PCK_BENCH_HBM_PEAK_BW`. `--push-binaries` mirrors `cpp/install/` with `--delete`, so a
 push from a checkout that never ran `--build-benchmarks` removes the benchmark binary from
 the host, and a push from one that never ran `--build` removes the gate's. Both hosts write
-the same files and nothing in them says which host it was ([#226](tickets.md#t226)).
+the same files and nothing in them says which host it was ([#226](tickets/benchmarks.md#t226)).
 
 **The tree**: one file per (dataset, mode) at
 `testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt`, a `== <query>` section

@@ -2,7 +2,7 @@
 
 Kind: production
 
-**This task closes [#191](active-tickets.md#t191)** — `extract(year …)` is `Int32` in DataFusion
+**This task closes [#191](../tickets/corpus-coverage.md#t191)** — `extract(year …)` is `Int32` in DataFusion
 and on the CPU, INT16 from cuDF, and the device hands the INT16 up unchanged. Fourth of chain B.
 
 ## Why it happens

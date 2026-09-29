@@ -88,8 +88,9 @@ fn row_digests(batches: &[RecordBatch]) -> Vec<(u64, usize)> {
 /// The column NAMES as one digest, so a right answer under the wrong names is still wrong.
 ///
 /// Names and not types, because the rendering this replaces carried exactly that: a header
-/// of names and no types at all. A type mismatch that matters is `columns_of`'s check, one
-/// tier up.
+/// of names and no types at all. Types are checked elsewhere: every device batch against its
+/// node's declaration by the schema-validation hook (`schema_validation.rs`), and the cpu
+/// end-to-end answer by `end_to_end.rs`'s `columns_of`.
 fn schema_digest(batches: &[RecordBatch]) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     if let Some(batch) = batches.first() {

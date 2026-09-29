@@ -386,7 +386,7 @@ fn line_matcher_rejects_both_false_coverage_modes() {
 /// The gate and the leg list are two spellings of one value in one file, and only one of them
 /// is checked by anything: `every_rust_test_target_is_named_by_ci` asserts a target is NAMED
 /// by a step, never that the step can RUN. Relabel a leg or drop one and the steps gated on
-/// it stop running with that meta-test still green — and [#129](tickets.md#t129) records that
+/// it stop running with that meta-test still green — and [#129](../../llm-wiki/tickets/testinfra.md#t129) records that
 /// the leg labels already disagree with their images, so the label is the untrustworthy half
 /// of a pair that seven steps now depend on.
 #[test]

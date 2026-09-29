@@ -191,8 +191,8 @@ fn shape(expected: &str, recipe: &Recipe) -> PlanError {
 ///
 /// The collapse arm does answer a call with no handles — but with a table of no columns,
 /// which is not the batch of the node's schema a SingleBatch output owes downstream. So
-/// this backend emits nothing and the empty batch is the driver's to supply, which is the
-/// one place that knows the schema without asking the device.
+/// this backend emits nothing, as the cpu's does, and nothing supplies a batch in its place:
+/// every consumer below reads a lane that emitted nothing as a lane that received nothing.
 pub(crate) struct Collapse {
     site: CallSite,
     collapse: (Seq, FbKind),

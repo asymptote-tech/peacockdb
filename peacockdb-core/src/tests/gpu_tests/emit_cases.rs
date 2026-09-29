@@ -1,6 +1,6 @@
 //! `GpuEmitPartitions` through the harness: one batch in, N lanes out, each lane a slot of
 //! its own — so a row the two engines put in different lanes is a wrong slot, not a passing
-//! multiset. Every case is one lane in and N out, the shape #184 names. Every case is green
+//! multiset. Every case is one lane in and N out, the shape q15 fails in (#95). Every case is green
 //! or a `bug_` test with its ticket above it; nothing here repairs.
 
 use std::sync::Arc;
@@ -142,8 +142,8 @@ operator_case! {
     }
 }
 
-// #95 — a decimal key (`DECIMAL128`, 27) is refused at the same switch; #184's q15 is this
-// shape. The refusal comes before any export, so #187 is not reached.
+// #95 — a decimal key (`DECIMAL128`, 27) is refused at the same switch; tpch q15's `total_revenue`
+// is this shape. The refusal comes before any export, so #187 is not reached.
 operator_case! {
     GpuEmitPartitions,
     fn bug_a_decimal_key_is_refused_on_the_device() {

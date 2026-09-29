@@ -114,9 +114,9 @@ fn four_sixteens() -> Vec<Vec<RecordBatch>> {
 const GROUPS_AND_LIMIT: &str = "row_groups can't be set along with skip_rows and num_rows";
 
 // A pushed-down limit: the wire carries it as `num_rows`, and every batch is a row-group
-// read, so the two reach cuDF together (#188) — while the cpu never reads it (#186).
+// read, so the two reach cuDF together — while the cpu never reads it. Both are #186.
 
-// #188 — even one row group and a limit is a row-group list beside `num_rows`.
+// #186 — even one row group and a limit is a row-group list beside `num_rows`.
 operator_case! {
     GpuLoadParquet,
     fn bug_a_limit_over_one_row_group_is_refused_on_the_device() {
@@ -134,7 +134,7 @@ operator_case! {
     }
 }
 
-// #188 — the first batch's read is refused, so nothing of the four is answered.
+// #186 — the first batch's read is refused, so nothing of the four is answered.
 operator_case! {
     GpuLoadParquet,
     fn bug_row_groups_and_a_limit_together_are_refused_on_the_device() {

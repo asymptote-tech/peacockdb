@@ -266,7 +266,7 @@ def grouping_set_id(mask) -> int:
 
     Distinct per set, which is all the merge needs to keep sets apart when a placeholder
     NULL collides with a natural one — but not DataFusion's `GROUPING()` encoding, which
-    is [#65](../../../llm-wiki/tickets.md#t65) and unobservable until a query projects it.
+    is [#65](../../../llm-wiki/tickets/corpus-coverage.md#t65) and unobservable until a query projects it.
     """
     return sum(1 << i for i, masked in enumerate(mask) if masked)
 

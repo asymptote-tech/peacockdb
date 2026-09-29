@@ -790,9 +790,21 @@ fn absolute_path_in(line: &str) -> Option<usize> {
 #[test]
 fn every_refusal_names_a_ticket_that_exists() {
     let wiki = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../llm-wiki");
-    let tickets = ["tickets.md", "archive/archived-tickets.md"]
+    // Open tickets live in the milestone files under `tickets/`, closed ones in the archive;
+    // `tickets.md` is their index. The same files cost-report's `TicketIndex` reads.
+    let mut files = vec![
+        wiki.join("tickets.md"),
+        wiki.join("archive/archived-tickets.md"),
+    ];
+    files.extend(
+        std::fs::read_dir(wiki.join("tickets"))
+            .expect("the milestone ticket files")
+            .map(|entry| entry.expect("a ticket file").path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "md")),
+    );
+    let tickets = files
         .iter()
-        .map(|name| std::fs::read_to_string(wiki.join(name)).expect("the ticket list"))
+        .map(|path| std::fs::read_to_string(path).expect("a ticket file"))
         .collect::<String>();
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
         for mode in &MODES {
@@ -824,7 +836,7 @@ fn every_refusal_names_a_ticket_that_exists() {
                 for number in cited {
                     assert!(
                         tickets.contains(&format!("### #{number} ")),
-                        "{dataset}/{name}: a refusal names #{number}, which tickets.md does not have:\n{line}"
+                        "{dataset}/{name}: a refusal names #{number}, which no ticket file has:\n{line}"
                     );
                 }
             }
@@ -861,7 +873,7 @@ fn sections_of(path: &Path) -> std::collections::BTreeMap<String, String> {
 /// position beside it; `attach_recipes` numbers children-first and stores a recipe at that
 /// position. Two walks, two files, one at plan time and one at run time — and a backend
 /// looks a recipe up by the number the index handed it. Nothing else compares them, which
-/// is [#134](../../llm-wiki/tickets.md#t134)'s shape one boundary in.
+/// is [#134](../../../../llm-wiki/archive/archived-tickets.md#t134)'s shape one boundary in.
 ///
 /// Two claims, and the first is what the second rests on: the position the index recorded
 /// is the node's own, against a children-first walk written here rather than the one under

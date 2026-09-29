@@ -14,11 +14,11 @@ where the frozen surface cannot express something it is named rather than worked
 
 - **consume-on-use.** Every call erases the handles it reads, and a streamed probe needs
   the build side once per batch. `NodeSession.copy_handle` is off-surface and counted; the
-  counts are what [#152](../../../llm-wiki/tickets.md#t152) asks for.
+  counts are what [#152](../../../llm-wiki/tickets/joins.md#t152) asks for.
 - **the finish pass.** A build-preserving type emits build rows that matched no probe
-  batch. The probe calls therefore accumulate the probe **keys** ([#136](../../../llm-wiki/tickets.md#t136)),
+  batch. The probe calls therefore accumulate the probe **keys** ([#136](../../../llm-wiki/tickets/joins.md#t136)),
   which costs a second copy — of the probe batch this time, since the join consumed it.
-  Both copies disappear under [#145](../../../llm-wiki/tickets.md#t145)'s refcounted handle.
+  Both copies disappear under [#145](../../../llm-wiki/tickets/corpus-coverage.md#t145)'s refcounted handle.
 
 **Ordinals arrive late.** The translation layer emits these seqs at plan time, from the
 schemas. The prototype has no typed schema (T7), so it resolves column names to ordinals

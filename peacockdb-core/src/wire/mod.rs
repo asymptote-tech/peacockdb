@@ -144,7 +144,7 @@ pub(crate) enum Input {
     Batch,
     /// A copy of it, because the call below consumes it and something else needs it too.
     /// The surface has no copy symbol, so a recipe naming this is one an executor refuses
-    /// until [#145](../../../../llm-wiki/tickets.md#t145) — see #152.
+    /// until [#145](../../../llm-wiki/tickets/corpus-coverage.md#t145) — see #152.
     BatchCopy,
     /// The build side, handed over: the call consumes it and nothing needs it again.
     BuildSide,

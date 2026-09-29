@@ -281,7 +281,8 @@ void peacock_executor_end_plan(peacock_executor_t* executor);
 // array = the table), so the live conformance test can assert the REAL GPU path
 // == the REAL comet CPU helper over the SAME bytes. Writes up to `out_cap` ids
 // into `out_pids` and sets `*out_n`.
-/// @return 0 on success; non-zero on failure (message via peacock_last_error(NULL)).
+/// @return 0 on success; non-zero on failure. There is no executor to hold the message, so
+/// peacock_last_error(NULL) returns ""; the reason is printed to stderr.
 int peacock_spark_partition_ids(const void* schema, const void* array,
                                 const uint32_t* key_cols, uint64_t num_keys,
                                 uint32_t num_partitions, uint32_t seed,

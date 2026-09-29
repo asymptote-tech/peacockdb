@@ -11,28 +11,44 @@ use super::RecipePlan;
 use crate::plan::PlanError;
 
 /// The node at `seq`, by the post-order the C++ indexes with — children in
-/// `node_children` order, then the node.
-pub(crate) fn node_at<'a>(plan: &fb::GpuPlan<'a>, seq: u32) -> Option<fb::PlanNode<'a>> {
+/// `node_children` order, then the node. `None` where the tree is shorter than `seq`; an
+/// error where the walk meets a node kind it does not know.
+pub(crate) fn node_at<'a>(
+    plan: &fb::GpuPlan<'a>,
+    seq: u32,
+) -> Result<Option<fb::PlanNode<'a>>, PlanError> {
     let mut position = 0;
-    let root = plan.root()?;
+    let Some(root) = plan.root() else {
+        return Ok(None);
+    };
     find(root, seq, &mut position)
 }
 
-fn find<'a>(node: fb::PlanNode<'a>, seq: u32, position: &mut u32) -> Option<fb::PlanNode<'a>> {
-    for child in children(&node) {
-        if let Some(found) = find(child, seq, position) {
-            return Some(found);
+fn find<'a>(
+    node: fb::PlanNode<'a>,
+    seq: u32,
+    position: &mut u32,
+) -> Result<Option<fb::PlanNode<'a>>, PlanError> {
+    for child in children(&node)? {
+        if let Some(found) = find(child, seq, position)? {
+            return Ok(Some(found));
         }
     }
     let at = *position;
     *position += 1;
-    (at == seq).then_some(node)
+    Ok((at == seq).then_some(node))
 }
 
 /// The child order `NodeSession::node_children` walks, which is what makes a seq mean the
 /// same node on both sides.
-fn children<'a>(node: &fb::PlanNode<'a>) -> Vec<fb::PlanNode<'a>> {
-    match node.node_type() {
+///
+/// Total, as the C++ twin is: every kind is named, a leaf included, and an unknown one is an
+/// error rather than a leaf. FlatBuffers generates `PlanNodeKind` as a struct over a `u8`, so
+/// the compiler cannot see a kind missing here; `the_child_walk_names_every_node_kind`
+/// (`wire/tests.rs`) is what goes red when the schema gains one.
+pub(crate) fn children<'a>(node: &fb::PlanNode<'a>) -> Result<Vec<fb::PlanNode<'a>>, PlanError> {
+    Ok(match node.node_type() {
+        fb::PlanNodeKind::CudfScan => Vec::new(),
         fb::PlanNodeKind::CudfFilter => one(node.node_as_cudf_filter().and_then(|n| n.input())),
         fb::PlanNodeKind::CudfProject => one(node.node_as_cudf_project().and_then(|n| n.input())),
         fb::PlanNodeKind::CudfAggregate => {
@@ -70,8 +86,13 @@ fn children<'a>(node: &fb::PlanNode<'a>) -> Vec<fb::PlanNode<'a>> {
             .and_then(|n| n.inputs())
             .map(|inputs| inputs.iter().collect())
             .unwrap_or_default(),
-        _ => Vec::new(),
-    }
+        other => {
+            return Err(PlanError::Invalid(format!(
+                "the recipe plan holds a node kind the child walk does not know: {other:?} — \
+                 name it in `wire/read.rs`'s `children`, in `NodeSession::node_children`'s order"
+            )));
+        }
+    })
 }
 
 fn one<'a>(child: Option<fb::PlanNode<'a>>) -> Vec<fb::PlanNode<'a>> {
@@ -109,7 +130,7 @@ pub(crate) fn check_seq_kinds(plan: &RecipePlan) -> Result<(), PlanError> {
             let Some((seq, kind)) = call.target else {
                 continue;
             };
-            let Some(written) = node_at(&buffer, seq) else {
+            let Some(written) = node_at(&buffer, seq)? else {
                 return Err(PlanError::Invalid(format!(
                     "seq #{seq} is published as {kind} and the plan has no node there — the \
                      numbering is longer than the tree, so every seq above it addresses the \
@@ -140,9 +161,13 @@ pub(crate) fn depth(plan: &RecipePlan) -> Result<usize, PlanError> {
     let root = buffer
         .root()
         .ok_or_else(|| PlanError::Invalid("the recipe plan has no root".to_string()))?;
-    Ok(depth_of(root))
+    depth_of(root)
 }
 
-fn depth_of(node: fb::PlanNode<'_>) -> usize {
-    1 + children(&node).into_iter().map(depth_of).max().unwrap_or(0)
+fn depth_of(node: fb::PlanNode<'_>) -> Result<usize, PlanError> {
+    let mut deepest = 0;
+    for child in children(&node)? {
+        deepest = deepest.max(depth_of(child)?);
+    }
+    Ok(1 + deepest)
 }

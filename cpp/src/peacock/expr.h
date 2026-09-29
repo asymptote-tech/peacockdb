@@ -4,7 +4,7 @@
 // Expression building: the AST fast path and the column-producing path.
 //
 // plan_executor_internal.h is included, NOT folded in: it is the narrow contract
-// the host-only CPU tests compile against (binop_output_type, is_ast_able) and
+// the host-only CPU tests compile against (binop_output_type, cudf_ast_can_evaluate) and
 // carries the rationale for exposing those two at all.
 
 #include "peacock/plan_types.h"
@@ -48,6 +48,6 @@ std::unique_ptr<cudf::column> build_column(const fb::Expr* expr,
 
 cudf::type_id fb_to_type_id(fb::DataType dt);
 
-// binop_output_type and is_ast_able come from plan_executor_internal.h, above.
+// binop_output_type and cudf_ast_can_evaluate come from plan_executor_internal.h, above.
 
 }  // namespace peacock

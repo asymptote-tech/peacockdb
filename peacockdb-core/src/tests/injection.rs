@@ -345,7 +345,7 @@ fn mix(seed: u64, value: u64) -> u64 {
 // ── the rewrites, and the settings that name them ──────────────────────────
 
 /// Where a rebatcher goes. One direction only: nothing below the loader splits a batch
-/// ([#142](../../../llm-wiki/tickets.md#t142)), so the node is `GpuCoalesceAllBatches`
+/// ([#142](../../../llm-wiki/tickets/optimizer.md#t142)), so the node is `GpuCoalesceAllBatches`
 /// merging a lane to one, and the finer direction is the mode axis already.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Rebatch {

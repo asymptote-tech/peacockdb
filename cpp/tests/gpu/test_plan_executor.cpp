@@ -793,7 +793,7 @@ TEST(PlanExecutor, ProjectSqrtThroughTheColumnPath) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
 
   // sqrt(CASE WHEN r_regionkey >= 0 THEN CAST(r_regionkey AS FLOAT64) ELSE 0.0 END).
-  // The CASE is what routes it: the AST has no such node, so is_ast_able says no for the
+  // The CASE is what routes it: the AST has no such node, so cudf_ast_can_evaluate says no for the
   // whole expression and the column evaluator takes it.
   auto when = make_binary_expr(fbb, make_col_ref(fbb, 0), fb::BinaryOp_GtEq,
                                make_int64_literal(fbb, 0));
@@ -1889,7 +1889,7 @@ TEST(SliceHandle, AnUnknownHandleFails) {
 //
 // A literal reaches the device as a ScalarValue whose is_null flag is what separates a
 // null from a zero. The first two tests cast the Int32 column to Int64 so both operands
-// infer to the same type: is_ast_able's binary arm routes a mismatch to build_column,
+// infer to the same type: cudf_ast_can_evaluate's binary arm routes a mismatch to build_column,
 // which reads the flag and would answer correctly for the wrong reason.
 
 TEST(Literals, ATypedNullInsideAnAstExpressionIsNullAndNotZero) {
@@ -1962,7 +1962,7 @@ TEST(Literals, ANullDecimalLiteralInAnAstExpressionIsNull) {
 
   // A Decimal128 reaches the AST as a scaled double, the one conversion the delegation
   // does not cover, so this is the arm that breaks if the refactor breaks. Both operands
-  // sit under a cast to Float64: is_ast_able types a bare decimal literal from the wire
+  // sit under a cast to Float64: cudf_ast_can_evaluate types a bare decimal literal from the wire
   // and refuses it, but a cast to Float64 is AST-able and carries the literal in.
   auto as_double = make_cast_expr(fbb, make_col_ref(fbb, 0, "n_nationkey"),
                                   fb::DataType_Float64);
@@ -2089,7 +2089,7 @@ TEST(Literals, ALikeWithANullPatternIsRefusedByTheGuard) {
 TEST(Literals, ABareTypedNullIsStillNull) {
   flatbuffers::FlatBufferBuilder fbb;
 
-  // No binary op. A project asks is_ast_able before build_column, and a numeric literal
+  // No binary op. A project asks cudf_ast_can_evaluate before build_column, and a numeric literal
   // is AST-able, so this takes build_expr and compute_column, not build_column's
   // literal short-circuit; the fix is what made this path answer null.
   auto buf = nation_project(fbb, make_null_literal(fbb, fb::DataType_Int64), "justnull");

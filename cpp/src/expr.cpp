@@ -378,7 +378,13 @@ static cudf::type_id infer_expr_type(const fb::Expr* expr,
   }
 }
 
-bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table) {
+// Whether cuDF's AST (`cudf::compute_column`, one fused kernel) can evaluate `expr` over
+// `table`; false sends it to the column path (`build_column`, one cuDF call per node), which
+// handles strings, decimals, type coercion and every cast. Not exhaustive: an expression kind
+// with no arm below is assumed AST-able (`default: true`), and the binary arm checks operand
+// types but never the operator, so a new node kind or an operator the AST lacks (a bitwise
+// shift) is sent to the AST and throws there instead of taking the column path.
+bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table) {
   switch (expr->node_type()) {
     case fb::ExprNode_LikeExprNode:
     case fb::ExprNode_CaseExprNode:
@@ -410,10 +416,10 @@ bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table) {
         return false;
       if (lt != rt)
         return false;
-      return is_ast_able(b->left(), table) && is_ast_able(b->right(), table);
+      return cudf_ast_can_evaluate(b->left(), table) && cudf_ast_can_evaluate(b->right(), table);
     }
     case fb::ExprNode_UnaryExprNode:
-      return is_ast_able(expr->node_as_UnaryExprNode()->arg(), table);
+      return cudf_ast_can_evaluate(expr->node_as_UnaryExprNode()->arg(), table);
     case fb::ExprNode_CastExprNode: {
       // cuDF AST only has CAST_TO_INT64 / CAST_TO_FLOAT64. Any other target
       // (notably Decimal128) must go through the column path, which uses
@@ -421,7 +427,7 @@ bool is_ast_able(const fb::Expr* expr, cudf::table_view const& table) {
       auto target = fb_to_type_id(expr->node_as_CastExprNode()->target_type());
       if (target != cudf::type_id::INT64 && target != cudf::type_id::FLOAT64)
         return false;
-      return is_ast_able(expr->node_as_CastExprNode()->expr(), table);
+      return cudf_ast_can_evaluate(expr->node_as_CastExprNode()->expr(), table);
     }
     default:
       return true;
@@ -833,7 +839,7 @@ std::unique_ptr<cudf::column> build_column(
   }
 
   // AST-able expressions go through cudf::compute_column for fusion.
-  if (is_ast_able(expr, table)) {
+  if (cudf_ast_can_evaluate(expr, table)) {
     auto out = eval_ast_subtree(expr, table);
     debug_sync("AST->compute_column");
     return out;
@@ -893,7 +899,7 @@ std::unique_ptr<cudf::column> build_column(
       // String->string cast is a no-op: cuDF maps every Arrow string variant to
       // the single STRING type, so DataFusion's coercion of two char keys has
       // nothing to convert. cudf::cast has no STRING overload and would throw
-      // "Unary cast type must be fixed-width" (#45); a genuine non-string ->
+      // "Unary cast type must be fixed-width"; a genuine non-string ->
       // STRING conversion isn't producible by cudf::cast at all.
       if (target_id == cudf::type_id::STRING) {
         if (inner->type().id() == cudf::type_id::STRING)

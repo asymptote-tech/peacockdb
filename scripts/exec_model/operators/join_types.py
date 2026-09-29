@@ -15,7 +15,7 @@ unmatched rows come from:
   streaming needs nothing extra. Inner, Right, RightSemi, RightAnti.
 - **build-preserving** — the output includes build rows that matched *nothing across every
   probe batch*, which no single batch can know. Streaming needs a finish pass, and the
-  finish pass needs the probe keys kept ([#136](../../../llm-wiki/tickets.md#t136)).
+  finish pass needs the probe keys kept ([#136](../../../llm-wiki/tickets/joins.md#t136)).
   Left, Full, LeftSemi, LeftAnti, LeftMark.
 - **refused** — a shape with no path on the frozen C++ surface at all.
 

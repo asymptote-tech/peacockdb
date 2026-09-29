@@ -325,7 +325,7 @@ fn a_lane_that_received_nothing_emits_no_batch() {
         .expect("done is accepted whatever arrived");
     assert!(
         emitted.is_empty(),
-        "the empty batch a SingleBatch output owes is the driver's to supply"
+        "a lane that received nothing emits nothing, on both backends"
     );
 }
 

@@ -5,7 +5,7 @@
 
 use super::attach::{accumulate_and_sort, aggregate, aggregate_batches};
 use super::generated::peacock::plan as fb;
-use super::read::node_at;
+use super::read::{children, node_at};
 use super::writer::Writer;
 use super::*;
 use crate::plan::AggregateBody;
@@ -537,6 +537,7 @@ fn a_finalize_project_emits_the_group_keys_the_finalize_list_leaves_out() {
     let plan = flatbuffers::root::<fb::GpuPlan>(&bytes).expect("the buffer verifies");
     let seq = *recipe.seqs().last().expect("the finalize is the last call");
     let project = node_at(&plan, seq)
+        .expect("the walk names every kind")
         .and_then(|node| node.node_as_cudf_project())
         .expect("the last seq is the finalize project");
     let aliases: Vec<&str> = project.aliases().expect("named columns").iter().collect();
@@ -676,6 +677,7 @@ fn a_finishing_joins_pad_project_emits_the_columns_the_node_declares() {
         .last()
         .expect("the pad project is the last call");
     let project = node_at(&plan, seq)
+        .expect("the walk names every kind")
         .and_then(|node| node.node_as_cudf_project())
         .expect("the last seq is the pad project");
     let aliases: Vec<&str> = project.aliases().expect("named columns").iter().collect();
@@ -719,6 +721,7 @@ fn a_projecting_semi_joins_recipe_narrows_what_its_finish_emitted() {
     );
     let seq = *recipe.seqs().last().expect("the narrow project is last");
     let project = node_at(&plan, seq)
+        .expect("the walk names every kind")
         .and_then(|node| node.node_as_cudf_project())
         .expect("the last seq is the narrow project");
     let aliases: Vec<&str> = project.aliases().expect("named columns").iter().collect();
@@ -740,6 +743,7 @@ fn a_projecting_mark_joins_recipe_keeps_the_mark_as_a_column_and_not_as_a_null()
     let plan = flatbuffers::root::<fb::GpuPlan>(&bytes).expect("the buffer verifies");
     let seq = *recipe.seqs().last().expect("the narrow project is last");
     let project = node_at(&plan, seq)
+        .expect("the walk names every kind")
         .and_then(|node| node.node_as_cudf_project())
         .expect("the last seq is the narrow project");
     let aliases: Vec<&str> = project.aliases().expect("named columns").iter().collect();
@@ -791,11 +795,13 @@ fn the_finish_join_reads_the_accumulated_keys_under_the_names_they_carry() {
     let plan = flatbuffers::root::<fb::GpuPlan>(&bytes).expect("the buffer verifies");
     let seqs = recipe.seqs();
     let keys = node_at(&plan, seqs[0])
+        .expect("the walk names every kind")
         .and_then(|node| node.node_as_cudf_project())
         .expect("the first call is the key project");
     let named: Vec<&str> = keys.aliases().expect("named columns").iter().collect();
 
     let finish = node_at(&plan, seqs[3])
+        .expect("the walk names every kind")
         .and_then(|node| node.node_as_cudf_hash_join())
         .expect("the fourth call is the finish join");
     let read: Vec<String> = finish
@@ -939,4 +945,36 @@ fn a_seqless_operator_over_a_given_leaf_is_a_plan_of_one_stub() {
         AbiSymbol::SliceHandle
     );
     assert_eq!(plan.wire_nodes(), 1, "the stub, and nothing else");
+}
+
+/// The Rust child walk is total, as `NodeSession::node_children` is: every kind the schema
+/// declares is named, so a kind added to `gpu_plan.fbs` and forgotten in `wire/read.rs` fails
+/// here rather than renumbering every seq above it. An empty table verifies as any kind, the
+/// schema having no required field.
+#[test]
+fn the_child_walk_names_every_node_kind() {
+    for kind in fb::PlanNodeKind::ENUM_VALUES {
+        let mut b = flatbuffers::FlatBufferBuilder::new();
+        let table = b.start_table();
+        let table = b.end_table(table);
+        let node = fb::PlanNode::create(
+            &mut b,
+            &fb::PlanNodeArgs {
+                node_type: *kind,
+                // A node of no kind carries no table; the verifier refuses one that does.
+                node: (*kind != fb::PlanNodeKind::NONE).then(|| table.as_union_value()),
+            },
+        );
+        b.finish(node, None);
+        let node = flatbuffers::root::<fb::PlanNode>(b.finished_data()).expect("it verifies");
+        let walked = children(&node);
+        if *kind == fb::PlanNodeKind::NONE {
+            assert!(walked.is_err(), "a node with no kind is not a leaf");
+        } else {
+            assert!(
+                walked.is_ok(),
+                "{kind:?} is missing from the child walk: {walked:?}"
+            );
+        }
+    }
 }

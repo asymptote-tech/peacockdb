@@ -248,8 +248,8 @@ fn declared_width(node: &dyn GpuNode) -> Result<(), PlanError> {
         ),
         NodeRef::Aggregate(aggregate) => aggregate_width(&aggregate.body),
         NodeRef::AggregateBatches(aggregate) => aggregate_width(&aggregate.body),
-        // The rest emit their input's columns, which `types_across_the_edge` compares
-        // field for field — a stronger statement than a count.
+        // The rest emit their input's columns. `types_across_the_edge` compares the fields
+        // the two share, pairwise, which does not check the count.
         _ => return Ok(()),
     };
     if declared != emitted {

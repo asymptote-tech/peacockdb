@@ -77,9 +77,9 @@ cudf::column_view typed_col(cudf::data_type dt) {
 
 }  // namespace
 
-// is_ast_able: same-type non-decimal operands fuse via AST; any decimal operand
+// cudf_ast_can_evaluate: same-type non-decimal operands fuse via AST; any decimal operand
 // or a type mismatch routes to the column path.
-TEST(AstRouting, IsAstAble) {
+TEST(AstRouting, CudfAstCanEvaluate) {
   // int32 < int32  →  AST-able.
   {
     flatbuffers::FlatBufferBuilder b;
@@ -87,7 +87,7 @@ TEST(AstRouting, IsAstAble) {
     auto* expr = flatbuffers::GetRoot<fb::Expr>(buf.data());
     std::vector<cudf::column_view> cols{typed_col(cudf::data_type{cudf::type_id::INT32}),
                                         typed_col(cudf::data_type{cudf::type_id::INT32})};
-    EXPECT_TRUE(peacock::is_ast_able(expr, cudf::table_view{cols}));
+    EXPECT_TRUE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}));
   }
   // int32 < int64  →  type mismatch, column path.
   {
@@ -96,7 +96,7 @@ TEST(AstRouting, IsAstAble) {
     auto* expr = flatbuffers::GetRoot<fb::Expr>(buf.data());
     std::vector<cudf::column_view> cols{typed_col(cudf::data_type{cudf::type_id::INT32}),
                                         typed_col(cudf::data_type{cudf::type_id::INT64})};
-    EXPECT_FALSE(peacock::is_ast_able(expr, cudf::table_view{cols}));
+    EXPECT_FALSE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}));
   }
   // decimal * decimal  →  decimal operand, column path.
   {
@@ -104,7 +104,7 @@ TEST(AstRouting, IsAstAble) {
     auto buf = make_binary(b, fb::BinaryOp_Multiply);
     auto* expr = flatbuffers::GetRoot<fb::Expr>(buf.data());
     std::vector<cudf::column_view> cols{typed_col(dec(-2)), typed_col(dec(-2))};
-    EXPECT_FALSE(peacock::is_ast_able(expr, cudf::table_view{cols}));
+    EXPECT_FALSE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}));
   }
   // Bare column ref is trivially AST-able.
   {
@@ -112,7 +112,7 @@ TEST(AstRouting, IsAstAble) {
     auto buf = make_column_ref(b, 0);
     auto* expr = flatbuffers::GetRoot<fb::Expr>(buf.data());
     std::vector<cudf::column_view> cols{typed_col(cudf::data_type{cudf::type_id::INT32})};
-    EXPECT_TRUE(peacock::is_ast_able(expr, cudf::table_view{cols}));
+    EXPECT_TRUE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}));
   }
 }
 

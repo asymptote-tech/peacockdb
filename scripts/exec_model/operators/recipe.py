@@ -24,7 +24,7 @@ expression IR is name-based on purpose (`expressions.py`); the intermediate tabl
 sees is still assembled by ordinal, through `filter_columns`, exactly as the C++ does.
 
 **Handles are consumed.** `NodeSession::execute_node` erases every input handle it reads,
-and so does this — that is the constraint [#152](../../../llm-wiki/tickets.md#t152) is
+and so does this — that is the constraint [#152](../../../llm-wiki/tickets/joins.md#t152) is
 about, and a model that quietly kept a handle alive would answer the wrong question.
 `copy_handle` is therefore **not** part of the frozen surface: it is here so the cost of
 working around that can be counted instead of hidden.

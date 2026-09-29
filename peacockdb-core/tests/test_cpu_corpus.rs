@@ -86,7 +86,7 @@ include!("common/corpus_cases.inc");
 ///
 /// The device tier asserts read-only against the section the cpu authored AT THAT MODE, so a
 /// gpu cell whose cpu twin is off compares against a skipped marker and passes having checked
-/// nothing. It holds across all 600 cells today by six hand-chosen cells rather than by a
+/// nothing. Today it holds because a few device cells were hand-chosen, not because of a
 /// rule, and the moment [#152] clears somebody enables device modes in bulk.
 ///
 /// Read off the registry rather than the declarations: `CorpusDeclaration` carries the two
@@ -220,14 +220,11 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
 /// half is checked in the device binary, because `inventory` collects per linked binary.
 #[test]
 fn the_registry_matches_the_cpu_corpus_in_both_directions() {
-    assert_registry_matches_csv(
-        &[
-            "cpu_tp1_single",
-            "cpu_tp1_rowgroup",
-            "cpu_tp4_single",
-            "cpu_tp4_rowgroup",
-            "cpu_tp4_sized",
-        ],
-        &[],
-    );
+    assert_registry_matches_csv(&[
+        "cpu_tp1_single",
+        "cpu_tp1_rowgroup",
+        "cpu_tp4_single",
+        "cpu_tp4_rowgroup",
+        "cpu_tp4_sized",
+    ]);
 }

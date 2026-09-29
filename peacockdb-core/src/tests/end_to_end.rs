@@ -366,7 +366,7 @@ end_to_end!(tpcds, q87);
 // their sum. q77 is the shape this claim was written for — 4+1+4 — and it is not here
 // because its Right outer's build side emits no batch at all: the Inner join under it
 // drops its empty lane as it should, so the outer is refused by name
-// ([#212](../../../llm-wiki/tickets.md#t212)).
+// ([#212](../../../llm-wiki/tickets/joins.md#t212)).
 // injected: tpcds/q2
 // Both row-interval lowerings on one root-to-leaf path — the root-adjacent one becoming
 // the unload's skip/fetch and the mid-plan one a limit over the scan — and the only

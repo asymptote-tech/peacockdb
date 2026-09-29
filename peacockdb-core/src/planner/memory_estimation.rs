@@ -9,8 +9,6 @@
 //! Every cardinality here is the trivial estimate the planner has today (#19, #73): a
 //! filter passes everything and a join is 1:1. Widths are real, from the declared schemas.
 
-use std::collections::HashMap;
-
 use datafusion::arrow::datatypes::{Fields, Schema as ArrowSchema};
 
 use super::{MIN_TARGET_BATCH_BYTES, MemoryModel, SourceEstimate};
@@ -68,11 +66,7 @@ pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, P
         })
         .collect();
 
-    let targets: HashMap<usize, u64> = sources
-        .iter()
-        .map(|source| (source.seq, source.target_batch_bytes))
-        .collect();
-    let batch_bytes = tree.batch_bytes(&targets);
+    let batch_bytes = tree.batch_bytes();
     let resident = (0..tree.nodes.len())
         .map(|seq| match tree.held_by_accumulator(seq) {
             // A join holds its build side and is handed a probe batch per lane on top of
@@ -305,11 +299,10 @@ impl<'a> Tree<'a> {
         amplification.max(1.0)
     }
 
-    /// One in-flight batch at each node, bottom up: a source emits its target, an
-    /// accumulator emits what it held as one batch per lane, and everything between scales
-    /// its input by the rows and width it changes.
-    fn batch_bytes(&self, targets: &HashMap<usize, u64>) -> Vec<u64> {
-        let _ = targets;
+    /// One in-flight batch at each node, bottom up: a source emits the largest batch its
+    /// mapping makes, an accumulator emits what it held as one batch per lane, and everything
+    /// between scales its input by the rows and width it changes.
+    fn batch_bytes(&self) -> Vec<u64> {
         let mut batch = vec![0u64; self.nodes.len()];
         for seq in 0..self.nodes.len() {
             batch[seq] = if let NodeRef::LoadParquet(load) = as_node_ref(self.nodes[seq]) {

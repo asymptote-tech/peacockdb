@@ -94,7 +94,7 @@ fn residual() -> (Expr, Vec<JoinFilterColumn>) {
 }
 
 /// `CAST(b_i64 AS DECIMAL(20, 0)) > CAST(p_i64 AS DECIMAL(20, 0))`: a decimal operand is
-/// what `is_ast_able` refuses, so this predicate takes the cross-then-mask path.
+/// what `cudf_ast_can_evaluate` refuses, so this predicate takes the cross-then-mask path.
 fn decimal_residual() -> (Expr, Vec<JoinFilterColumn>) {
     let dec = |i: u32, name: &str| Expr::Cast {
         expr: Box::new(Expr::column(i, name)),
