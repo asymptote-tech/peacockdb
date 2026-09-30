@@ -72,6 +72,10 @@ class SinglePartitionDriver:
             self._executor = self._make_executor()
         return self._executor
 
+    def resident_bytes(self) -> int:
+        """What the lane's executor holds; nothing before its first step."""
+        return 0 if self._executor is None else self._executor.resident_bytes()
+
     def can_step(self, inputs: LaneInputs) -> bool:
         if self.finished:
             return False

@@ -9,6 +9,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/<file>.p
     __package__ = "scripts.exec_model.tests"
 
 from .harness import main
+from .rescan import CheckedDriver
 from ..partitioned_driver import partitioned_driver
 from ..plan import Plan
 from .mocks import (
@@ -30,7 +31,7 @@ def node_names(driver):
 
 
 def run(root, budget=None):
-    driver = partitioned_driver(Plan.build(root), MockSelector(), budget)
+    driver = CheckedDriver(Plan.build(root), MockSelector(), budget)
     driver.run()
     return driver
 

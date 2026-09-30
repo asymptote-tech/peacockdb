@@ -614,7 +614,7 @@ unload: Unload
 unload: Unload
   sort_merge: PartitionAccumulator, by=['c_last_name', 'c_first_name', 'sales'], ascending=[True, True, True], nulls_first=True, fetch=100, lanes=1, single_batch, sorted_on=[0, 1, 2]
     sort: Exec, by=['c_last_name', 'c_first_name', 'sales'], ascending=[True, True, True], nulls_first=True, fetch=100, lanes=2, sorted_on=[0, 1, 2]
-      q23_union: BatchForwarder, lanes=2
+      q23_union: BatchForwarder, lanes=2, single_batch
         q23_cs_agg_final: BatchAccumulator, keys=['c_last_name', 'c_first_name'], aggs=[sum(spent)->sales], final_exprs=[sales], lanes=1, single_batch
           q23_cs_agg_merge: BatchForwarder, lanes=1
             q23_cs_agg_batches: BatchAccumulator, keys=['c_last_name', 'c_first_name'], aggs=[sum(spent)->sales], lanes=1, single_batch
@@ -1110,7 +1110,7 @@ unload: Unload
         q33_total_merge: BatchForwarder, lanes=1
           q33_total_batches: BatchAccumulator, keys=['i_manufact_id'], aggs=[sum(total_sales)->total_sales], lanes=3, single_batch
             q33_total_partial: Exec, keys=['i_manufact_id'], aggs=[sum(total_sales)->total_sales], lanes=3
-              q33_union: BatchForwarder, lanes=3
+              q33_union: BatchForwarder, lanes=3, single_batch
                 q33_ss_agg_final: BatchAccumulator, keys=['i_manufact_id'], aggs=[sum(ss_ext_sales_price)->total_sales], final_exprs=[total_sales], lanes=1, single_batch
                   q33_ss_agg_merge: BatchForwarder, lanes=1
                     q33_ss_agg_batches: BatchAccumulator, keys=['i_manufact_id'], aggs=[sum(ss_ext_sales_price)->total_sales], lanes=1, single_batch
@@ -1742,7 +1742,7 @@ unload: Unload
         q56_total_merge: BatchForwarder, lanes=1
           q56_total_batches: BatchAccumulator, keys=['i_item_id'], aggs=[sum(total_sales)->total_sales], lanes=3, single_batch
             q56_total_partial: Exec, keys=['i_item_id'], aggs=[sum(total_sales)->total_sales], lanes=3
-              q56_union: BatchForwarder, lanes=3
+              q56_union: BatchForwarder, lanes=3, single_batch
                 q56_ss_agg_final: BatchAccumulator, keys=['i_item_id'], aggs=[sum(ss_ext_sales_price)->total_sales], final_exprs=[total_sales], lanes=1, single_batch
                   q56_ss_agg_merge: BatchForwarder, lanes=1
                     q56_ss_agg_batches: BatchAccumulator, keys=['i_item_id'], aggs=[sum(ss_ext_sales_price)->total_sales], lanes=1, single_batch
@@ -1982,7 +1982,7 @@ unload: Unload
         q60_total_merge: BatchForwarder, lanes=1
           q60_total_batches: BatchAccumulator, keys=['i_item_id'], aggs=[sum(total_sales)->total_sales], lanes=3, single_batch
             q60_total_partial: Exec, keys=['i_item_id'], aggs=[sum(total_sales)->total_sales], lanes=3
-              q60_union: BatchForwarder, lanes=3
+              q60_union: BatchForwarder, lanes=3, single_batch
                 q60_ss_agg_final: BatchAccumulator, keys=['i_item_id'], aggs=[sum(ss_ext_sales_price)->total_sales], final_exprs=[total_sales], lanes=1, single_batch
                   q60_ss_agg_merge: BatchForwarder, lanes=1
                     q60_ss_agg_batches: BatchAccumulator, keys=['i_item_id'], aggs=[sum(ss_ext_sales_price)->total_sales], lanes=1, single_batch

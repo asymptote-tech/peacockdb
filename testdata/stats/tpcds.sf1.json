@@ -1,0 +1,585 @@
+{
+  "format": 1,
+  "tables": {
+    "call_center": {
+      "fingerprint": {"rows": 6, "bytes": 6274, "footer_sha256": "68b9c18842df3f488f23c1b3cee743178954d6ab5fd696df20075bc9472afd74"},
+      "columns": {
+        "cc_call_center_sk": {"ndv": 6, "method": "exact"},
+        "cc_call_center_id": {"ndv": 3, "method": "exact", "avg_bytes": 16.0},
+        "cc_rec_start_date": {"ndv": 4, "method": "exact"},
+        "cc_rec_end_date": {"ndv": 3, "method": "exact"},
+        "cc_closed_date_sk": {"ndv": 0, "method": "exact"},
+        "cc_open_date_sk": {"ndv": 3, "method": "exact"},
+        "cc_name": {"ndv": 3, "method": "exact", "avg_bytes": 11.833},
+        "cc_class": {"ndv": 2, "method": "exact", "avg_bytes": 5.333},
+        "cc_employees": {"ndv": 5, "method": "exact"},
+        "cc_sq_ft": {"ndv": 6, "method": "exact"},
+        "cc_hours": {"ndv": 2, "method": "exact", "avg_bytes": 7.0},
+        "cc_manager": {"ndv": 4, "method": "exact", "avg_bytes": 12.5},
+        "cc_mkt_id": {"ndv": 3, "method": "exact"},
+        "cc_mkt_class": {"ndv": 5, "method": "exact", "avg_bytes": 40.833},
+        "cc_mkt_desc": {"ndv": 4, "method": "exact", "avg_bytes": 57.333},
+        "cc_market_manager": {"ndv": 4, "method": "exact", "avg_bytes": 12.667},
+        "cc_division": {"ndv": 4, "method": "exact"},
+        "cc_division_name": {"ndv": 4, "method": "exact", "avg_bytes": 3.667},
+        "cc_company": {"ndv": 4, "method": "exact"},
+        "cc_company_name": {"ndv": 4, "method": "exact", "avg_bytes": 3.833},
+        "cc_street_number": {"ndv": 3, "method": "exact", "avg_bytes": 3.0},
+        "cc_street_name": {"ndv": 3, "method": "exact", "avg_bytes": 7.5},
+        "cc_street_type": {"ndv": 3, "method": "exact", "avg_bytes": 4.667},
+        "cc_suite_number": {"ndv": 3, "method": "exact", "avg_bytes": 8.333},
+        "cc_city": {"ndv": 2, "method": "exact", "avg_bytes": 6.667},
+        "cc_county": {"ndv": 1, "method": "exact", "avg_bytes": 17.0},
+        "cc_state": {"ndv": 1, "method": "exact", "avg_bytes": 2.0},
+        "cc_zip": {"ndv": 2, "method": "exact", "avg_bytes": 5.0},
+        "cc_country": {"ndv": 1, "method": "exact", "avg_bytes": 13.0},
+        "cc_gmt_offset": {"ndv": 1, "method": "exact"},
+        "cc_tax_percentage": {"ndv": 4, "method": "exact"}
+      }
+    },
+    "catalog_page": {
+      "fingerprint": {"rows": 11718, "bytes": 696381, "footer_sha256": "4adcdc1bf4ef4d1b0a31e0bed7b589281f27f755ee79eccdc3783c2f8a2d7779"},
+      "columns": {
+        "cp_catalog_page_sk": {"ndv": 11718, "method": "exact"},
+        "cp_catalog_page_id": {"ndv": 11718, "method": "exact", "avg_bytes": 16.0},
+        "cp_start_date_sk": {"ndv": 91, "method": "exact"},
+        "cp_end_date_sk": {"ndv": 97, "method": "exact"},
+        "cp_department": {"ndv": 1, "method": "exact", "avg_bytes": 10.0},
+        "cp_catalog_number": {"ndv": 109, "method": "exact"},
+        "cp_catalog_page_number": {"ndv": 108, "method": "exact"},
+        "cp_description": {"ndv": 11602, "method": "exact", "avg_bytes": 74.685},
+        "cp_type": {"ndv": 3, "method": "exact", "avg_bytes": 7.673}
+      }
+    },
+    "catalog_returns": {
+      "fingerprint": {"rows": 144067, "bytes": 11556179, "footer_sha256": "dd9c10f9d83fb6ee70446d947c42614f4749d1b696da852922af87a2eb56934d"},
+      "columns": {
+        "cr_returned_date_sk": {"ndv": 2055, "method": "exact"},
+        "cr_returned_time_sk": {"ndv": 64982, "method": "exact"},
+        "cr_item_sk": {"ndv": 17862, "method": "exact"},
+        "cr_refunded_customer_sk": {"ndv": 60390, "method": "exact"},
+        "cr_refunded_cdemo_sk": {"ndv": 90815, "method": "exact"},
+        "cr_refunded_hdemo_sk": {"ndv": 7200, "method": "exact"},
+        "cr_refunded_addr_sk": {"ndv": 42305, "method": "exact"},
+        "cr_returning_customer_sk": {"ndv": 75394, "method": "exact"},
+        "cr_returning_cdemo_sk": {"ndv": 135381, "method": "exact"},
+        "cr_returning_hdemo_sk": {"ndv": 7200, "method": "exact"},
+        "cr_returning_addr_sk": {"ndv": 46970, "method": "exact"},
+        "cr_call_center_sk": {"ndv": 6, "method": "exact"},
+        "cr_catalog_page_sk": {"ndv": 6534, "method": "exact"},
+        "cr_ship_mode_sk": {"ndv": 20, "method": "exact"},
+        "cr_warehouse_sk": {"ndv": 5, "method": "exact"},
+        "cr_reason_sk": {"ndv": 35, "method": "exact"},
+        "cr_order_number": {"ndv": 94339, "method": "exact"},
+        "cr_return_quantity": {"ndv": 100, "method": "exact"},
+        "cr_return_amount": {"ndv": 82701, "method": "exact"},
+        "cr_return_tax": {"ndv": 26032, "method": "exact"},
+        "cr_return_amt_inc_tax": {"ndv": 96935, "method": "exact"},
+        "cr_fee": {"ndv": 9951, "method": "exact"},
+        "cr_return_ship_cost": {"ndv": 64645, "method": "exact"},
+        "cr_refunded_cash": {"ndv": 74281, "method": "exact"},
+        "cr_reversed_charge": {"ndv": 55363, "method": "exact"},
+        "cr_store_credit": {"ndv": 54745, "method": "exact"},
+        "cr_net_loss": {"ndv": 86996, "method": "exact"}
+      },
+      "composite": [
+        {"columns": ["cr_item_sk", "cr_order_number"], "ndv": 144067, "method": "exact"}
+      ]
+    },
+    "catalog_sales": {
+      "fingerprint": {"rows": 1441548, "bytes": 123375009, "footer_sha256": "4c08f2adab82123772391de257c0896b8504300c0256bafaacbebe43fbb269a4"},
+      "columns": {
+        "cs_sold_date_sk": {"ndv": 1830, "method": "exact"},
+        "cs_sold_time_sk": {"ndv": 67461, "method": "exact"},
+        "cs_ship_date_sk": {"ndv": 1921, "method": "exact"},
+        "cs_bill_customer_sk": {"ndv": 79641, "method": "exact"},
+        "cs_bill_cdemo_sk": {"ndv": 153251, "method": "exact"},
+        "cs_bill_hdemo_sk": {"ndv": 7200, "method": "exact"},
+        "cs_bill_addr_sk": {"ndv": 47999, "method": "exact"},
+        "cs_ship_customer_sk": {"ndv": 79704, "method": "exact"},
+        "cs_ship_cdemo_sk": {"ndv": 153334, "method": "exact"},
+        "cs_ship_hdemo_sk": {"ndv": 7200, "method": "exact"},
+        "cs_ship_addr_sk": {"ndv": 48005, "method": "exact"},
+        "cs_call_center_sk": {"ndv": 6, "method": "exact"},
+        "cs_catalog_page_sk": {"ndv": 6588, "method": "exact"},
+        "cs_ship_mode_sk": {"ndv": 20, "method": "exact"},
+        "cs_warehouse_sk": {"ndv": 5, "method": "exact"},
+        "cs_item_sk": {"ndv": 18000, "method": "exact"},
+        "cs_promo_sk": {"ndv": 300, "method": "exact"},
+        "cs_order_number": {"ndv": 160000, "method": "exact"},
+        "cs_quantity": {"ndv": 100, "method": "exact"},
+        "cs_wholesale_cost": {"ndv": 9901, "method": "exact"},
+        "cs_list_price": {"ndv": 29464, "method": "exact"},
+        "cs_sales_price": {"ndv": 26096, "method": "exact"},
+        "cs_ext_discount_amt": {"ndv": 392739, "method": "exact"},
+        "cs_ext_sales_price": {"ndv": 393521, "method": "exact"},
+        "cs_ext_wholesale_cost": {"ndv": 341614, "method": "exact"},
+        "cs_ext_list_price": {"ndv": 558996, "method": "exact"},
+        "cs_ext_tax": {"ndv": 85106, "method": "exact"},
+        "cs_coupon_amt": {"ndv": 157095, "method": "exact"},
+        "cs_ext_ship_cost": {"ndv": 258321, "method": "exact"},
+        "cs_net_paid": {"ndv": 423519, "method": "exact"},
+        "cs_net_paid_inc_tax": {"ndv": 540041, "method": "exact"},
+        "cs_net_paid_inc_ship": {"ndv": 544276, "method": "exact"},
+        "cs_net_paid_inc_ship_tax": {"ndv": 701935, "method": "exact"},
+        "cs_net_profit": {"ndv": 492188, "method": "exact"}
+      },
+      "composite": [
+        {"columns": ["cs_bill_customer_sk", "cs_item_sk"], "ndv": 1433779, "method": "exact"},
+        {"columns": ["cs_item_sk", "cs_order_number"], "ndv": 1441548, "method": "exact"}
+      ]
+    },
+    "customer": {
+      "fingerprint": {"rows": 100000, "bytes": 5622683, "footer_sha256": "b70f8e07c64c0ba002a329225ee6afd278a111b832221d85ebccd9968f80e41a"},
+      "columns": {
+        "c_customer_sk": {"ndv": 100000, "method": "exact"},
+        "c_customer_id": {"ndv": 100000, "method": "exact", "avg_bytes": 16.0},
+        "c_current_cdemo_sk": {"ndv": 94215, "method": "exact"},
+        "c_current_hdemo_sk": {"ndv": 7200, "method": "exact"},
+        "c_current_addr_sk": {"ndv": 43282, "method": "exact"},
+        "c_first_shipto_date_sk": {"ndv": 3651, "method": "exact"},
+        "c_first_sales_date_sk": {"ndv": 3651, "method": "exact"},
+        "c_salutation": {"ndv": 6, "method": "exact", "avg_bytes": 3.241},
+        "c_first_name": {"ndv": 4131, "method": "exact", "avg_bytes": 5.839},
+        "c_last_name": {"ndv": 4972, "method": "exact", "avg_bytes": 6.125},
+        "c_preferred_cust_flag": {"ndv": 2, "method": "exact", "avg_bytes": 1.0},
+        "c_birth_day": {"ndv": 31, "method": "exact"},
+        "c_birth_month": {"ndv": 12, "method": "exact"},
+        "c_birth_year": {"ndv": 69, "method": "exact"},
+        "c_birth_country": {"ndv": 211, "method": "exact", "avg_bytes": 8.709},
+        "c_login": {"ndv": 1, "method": "exact", "avg_bytes": 0.0},
+        "c_email_address": {"ndv": 96477, "method": "exact", "avg_bytes": 27.452},
+        "c_last_review_date_sk": {"ndv": 366, "method": "exact"}
+      }
+    },
+    "customer_address": {
+      "fingerprint": {"rows": 50000, "bytes": 1091309, "footer_sha256": "489820972b9ae7ab3488e86265cecc2638ed3732ee0988fde9bacd4264a4bef9"},
+      "columns": {
+        "ca_address_sk": {"ndv": 50000, "method": "exact"},
+        "ca_address_id": {"ndv": 50000, "method": "exact", "avg_bytes": 16.0},
+        "ca_street_number": {"ndv": 1000, "method": "exact", "avg_bytes": 2.895},
+        "ca_street_name": {"ndv": 6901, "method": "exact", "avg_bytes": 8.708},
+        "ca_street_type": {"ndv": 20, "method": "exact", "avg_bytes": 4.207},
+        "ca_suite_number": {"ndv": 75, "method": "exact", "avg_bytes": 7.884},
+        "ca_city": {"ndv": 695, "method": "exact", "avg_bytes": 8.943},
+        "ca_county": {"ndv": 1846, "method": "exact", "avg_bytes": 13.96},
+        "ca_state": {"ndv": 51, "method": "exact", "avg_bytes": 2.0},
+        "ca_zip": {"ndv": 3698, "method": "exact", "avg_bytes": 5.0},
+        "ca_country": {"ndv": 1, "method": "exact", "avg_bytes": 13.0},
+        "ca_gmt_offset": {"ndv": 6, "method": "exact"},
+        "ca_location_type": {"ndv": 3, "method": "exact", "avg_bytes": 8.998}
+      },
+      "composite": [
+        {"columns": ["ca_address_sk", "ca_zip"], "ndv": 48461, "method": "exact"},
+        {"columns": ["ca_county", "ca_state"], "ndv": 3108, "method": "exact"}
+      ]
+    },
+    "customer_demographics": {
+      "fingerprint": {"rows": 1920800, "bytes": 7802641, "footer_sha256": "218c28035a5481cbd546f22432ba73ced497545fb742f1a142c8e262aeb5b7b6"},
+      "columns": {
+        "cd_demo_sk": {"ndv": 1920800, "method": "exact"},
+        "cd_gender": {"ndv": 2, "method": "exact", "avg_bytes": 1.0},
+        "cd_marital_status": {"ndv": 5, "method": "exact", "avg_bytes": 1.0},
+        "cd_education_status": {"ndv": 7, "method": "exact", "avg_bytes": 9.571},
+        "cd_purchase_estimate": {"ndv": 20, "method": "exact"},
+        "cd_credit_rating": {"ndv": 4, "method": "exact", "avg_bytes": 7.0},
+        "cd_dep_count": {"ndv": 7, "method": "exact"},
+        "cd_dep_employed_count": {"ndv": 7, "method": "exact"},
+        "cd_dep_college_count": {"ndv": 7, "method": "exact"}
+      },
+      "composite": [
+        {"columns": ["cd_demo_sk", "cd_education_status", "cd_marital_status"], "ndv": 1920800, "method": "exact"}
+      ]
+    },
+    "date_dim": {
+      "fingerprint": {"rows": 73049, "bytes": 1814759, "footer_sha256": "1cd83ea3c2c2f09e1d60669577b2b1f9b1eef1621f743f7d0f3d4e0124379d1c"},
+      "columns": {
+        "d_date_sk": {"ndv": 73049, "method": "exact"},
+        "d_date_id": {"ndv": 73049, "method": "exact", "avg_bytes": 16.0},
+        "d_date": {"ndv": 73049, "method": "exact"},
+        "d_month_seq": {"ndv": 2401, "method": "exact"},
+        "d_week_seq": {"ndv": 10436, "method": "exact"},
+        "d_quarter_seq": {"ndv": 801, "method": "exact"},
+        "d_year": {"ndv": 201, "method": "exact"},
+        "d_dow": {"ndv": 7, "method": "exact"},
+        "d_moy": {"ndv": 12, "method": "exact"},
+        "d_dom": {"ndv": 31, "method": "exact"},
+        "d_qoy": {"ndv": 4, "method": "exact"},
+        "d_fy_year": {"ndv": 201, "method": "exact"},
+        "d_fy_quarter_seq": {"ndv": 801, "method": "exact"},
+        "d_fy_week_seq": {"ndv": 10436, "method": "exact"},
+        "d_day_name": {"ndv": 7, "method": "exact", "avg_bytes": 7.143},
+        "d_quarter_name": {"ndv": 801, "method": "exact", "avg_bytes": 6.0},
+        "d_holiday": {"ndv": 2, "method": "exact", "avg_bytes": 1.0},
+        "d_weekend": {"ndv": 2, "method": "exact", "avg_bytes": 1.0},
+        "d_following_holiday": {"ndv": 2, "method": "exact", "avg_bytes": 1.0},
+        "d_first_dom": {"ndv": 2401, "method": "exact"},
+        "d_last_dom": {"ndv": 2401, "method": "exact"},
+        "d_same_day_ly": {"ndv": 73000, "method": "exact"},
+        "d_same_day_lq": {"ndv": 72698, "method": "exact"},
+        "d_current_day": {"ndv": 1, "method": "exact", "avg_bytes": 1.0},
+        "d_current_week": {"ndv": 1, "method": "exact", "avg_bytes": 1.0},
+        "d_current_month": {"ndv": 2, "method": "exact", "avg_bytes": 1.0},
+        "d_current_quarter": {"ndv": 2, "method": "exact", "avg_bytes": 1.0},
+        "d_current_year": {"ndv": 2, "method": "exact", "avg_bytes": 1.0}
+      }
+    },
+    "household_demographics": {
+      "fingerprint": {"rows": 7200, "bytes": 31296, "footer_sha256": "aa558ad036529e9489755aaed937a3f250099509f3aa717e7247e8329c103eb5"},
+      "columns": {
+        "hd_demo_sk": {"ndv": 7200, "method": "exact"},
+        "hd_income_band_sk": {"ndv": 20, "method": "exact"},
+        "hd_buy_potential": {"ndv": 6, "method": "exact", "avg_bytes": 7.5},
+        "hd_dep_count": {"ndv": 10, "method": "exact"},
+        "hd_vehicle_count": {"ndv": 6, "method": "exact"}
+      }
+    },
+    "income_band": {
+      "fingerprint": {"rows": 20, "bytes": 831, "footer_sha256": "b81f9e120341f9e1ebc183aba6c4e238da115bb433bb26a4ec0d5d0010b98be8"},
+      "columns": {
+        "ib_income_band_sk": {"ndv": 20, "method": "exact"},
+        "ib_lower_bound": {"ndv": 20, "method": "exact"},
+        "ib_upper_bound": {"ndv": 20, "method": "exact"}
+      }
+    },
+    "inventory": {
+      "fingerprint": {"rows": 11745000, "bytes": 27934910, "footer_sha256": "9490a0c5e1303272e95ba05660f3e3cad58f7750ab74f717222c38be7c2a7211"},
+      "columns": {
+        "inv_date_sk": {"ndv": 261, "method": "exact"},
+        "inv_item_sk": {"ndv": 18000, "method": "exact"},
+        "inv_warehouse_sk": {"ndv": 5, "method": "exact"},
+        "inv_quantity_on_hand": {"ndv": 1001, "method": "exact"}
+      }
+    },
+    "item": {
+      "fingerprint": {"rows": 18000, "bytes": 1763118, "footer_sha256": "ffc7c17bdb6a6063acd74157423514d1eb28681e06f74e9e7784dc3a0c0171b1"},
+      "columns": {
+        "i_item_sk": {"ndv": 18000, "method": "exact"},
+        "i_item_id": {"ndv": 9000, "method": "exact", "avg_bytes": 16.0},
+        "i_rec_start_date": {"ndv": 4, "method": "exact"},
+        "i_rec_end_date": {"ndv": 3, "method": "exact"},
+        "i_item_desc": {"ndv": 13442, "method": "exact", "avg_bytes": 100.766},
+        "i_current_price": {"ndv": 2688, "method": "exact"},
+        "i_wholesale_cost": {"ndv": 2040, "method": "exact"},
+        "i_brand_id": {"ndv": 948, "method": "exact"},
+        "i_brand": {"ndv": 712, "method": "exact", "avg_bytes": 16.197},
+        "i_class_id": {"ndv": 16, "method": "exact"},
+        "i_class": {"ndv": 99, "method": "exact", "avg_bytes": 7.777},
+        "i_category_id": {"ndv": 10, "method": "exact"},
+        "i_category": {"ndv": 10, "method": "exact", "avg_bytes": 5.895},
+        "i_manufact_id": {"ndv": 994, "method": "exact"},
+        "i_manufact": {"ndv": 989, "method": "exact", "avg_bytes": 11.343},
+        "i_size": {"ndv": 7, "method": "exact", "avg_bytes": 4.34},
+        "i_formulation": {"ndv": 13497, "method": "exact", "avg_bytes": 20.0},
+        "i_color": {"ndv": 92, "method": "exact", "avg_bytes": 5.388},
+        "i_units": {"ndv": 21, "method": "exact", "avg_bytes": 4.192},
+        "i_container": {"ndv": 1, "method": "exact", "avg_bytes": 7.0},
+        "i_manager_id": {"ndv": 100, "method": "exact"},
+        "i_product_name": {"ndv": 17964, "method": "exact", "avg_bytes": 18.039}
+      },
+      "composite": [
+        {"columns": ["i_brand_id", "i_category_id", "i_class_id"], "ndv": 5326, "method": "exact"}
+      ]
+    },
+    "promotion": {
+      "fingerprint": {"rows": 300, "bytes": 20816, "footer_sha256": "ea58adc248398d8e9e943860208e29efeb8598ece62f79bbe7d10d367f3900f3"},
+      "columns": {
+        "p_promo_sk": {"ndv": 300, "method": "exact"},
+        "p_promo_id": {"ndv": 300, "method": "exact", "avg_bytes": 16.0},
+        "p_start_date_sk": {"ndv": 255, "method": "exact"},
+        "p_end_date_sk": {"ndv": 249, "method": "exact"},
+        "p_item_sk": {"ndv": 291, "method": "exact"},
+        "p_cost": {"ndv": 1, "method": "exact"},
+        "p_response_target": {"ndv": 1, "method": "exact"},
+        "p_promo_name": {"ndv": 10, "method": "exact", "avg_bytes": 3.993},
+        "p_channel_dmail": {"ndv": 2, "method": "exact", "avg_bytes": 1.0},
+        "p_channel_email": {"ndv": 1, "method": "exact", "avg_bytes": 1.0},
+        "p_channel_catalog": {"ndv": 1, "method": "exact", "avg_bytes": 1.0},
+        "p_channel_tv": {"ndv": 1, "method": "exact", "avg_bytes": 1.0},
+        "p_channel_radio": {"ndv": 1, "method": "exact", "avg_bytes": 1.0},
+        "p_channel_press": {"ndv": 1, "method": "exact", "avg_bytes": 1.0},
+        "p_channel_event": {"ndv": 1, "method": "exact", "avg_bytes": 1.0},
+        "p_channel_demo": {"ndv": 1, "method": "exact", "avg_bytes": 1.0},
+        "p_channel_details": {"ndv": 298, "method": "exact", "avg_bytes": 39.946},
+        "p_purpose": {"ndv": 1, "method": "exact", "avg_bytes": 7.0},
+        "p_discount_active": {"ndv": 1, "method": "exact", "avg_bytes": 1.0}
+      }
+    },
+    "reason": {
+      "fingerprint": {"rows": 35, "bytes": 1478, "footer_sha256": "d5ade1ad68a723e671cc45e028eed2a3834c4a1a033fba7958a1d17ab1648e94"},
+      "columns": {
+        "r_reason_sk": {"ndv": 35, "method": "exact"},
+        "r_reason_id": {"ndv": 35, "method": "exact", "avg_bytes": 16.0},
+        "r_reason_desc": {"ndv": 34, "method": "exact", "avg_bytes": 16.514}
+      }
+    },
+    "ship_mode": {
+      "fingerprint": {"rows": 20, "bytes": 1906, "footer_sha256": "80a5a09a09e5de3a6d12eb556e9698fa62f2d8623607eb8dbd2aa178e15c4c2e"},
+      "columns": {
+        "sm_ship_mode_sk": {"ndv": 20, "method": "exact"},
+        "sm_ship_mode_id": {"ndv": 20, "method": "exact", "avg_bytes": 16.0},
+        "sm_type": {"ndv": 6, "method": "exact", "avg_bytes": 7.5},
+        "sm_code": {"ndv": 4, "method": "exact", "avg_bytes": 4.35},
+        "sm_carrier": {"ndv": 20, "method": "exact", "avg_bytes": 6.65},
+        "sm_contract": {"ndv": 20, "method": "exact", "avg_bytes": 12.6}
+      }
+    },
+    "store": {
+      "fingerprint": {"rows": 12, "bytes": 6974, "footer_sha256": "4f6f8a042f0709b0623614c66f655ffcedd808bfd5a1a0304a90a99096aec40f"},
+      "columns": {
+        "s_store_sk": {"ndv": 12, "method": "exact"},
+        "s_store_id": {"ndv": 6, "method": "exact", "avg_bytes": 16.0},
+        "s_rec_start_date": {"ndv": 4, "method": "exact"},
+        "s_rec_end_date": {"ndv": 3, "method": "exact"},
+        "s_closed_date_sk": {"ndv": 3, "method": "exact"},
+        "s_store_name": {"ndv": 8, "method": "exact", "avg_bytes": 4.25},
+        "s_number_employees": {"ndv": 9, "method": "exact"},
+        "s_floor_space": {"ndv": 10, "method": "exact"},
+        "s_hours": {"ndv": 2, "method": "exact", "avg_bytes": 7.083},
+        "s_manager": {"ndv": 7, "method": "exact", "avg_bytes": 12.0},
+        "s_market_id": {"ndv": 7, "method": "exact"},
+        "s_geography_class": {"ndv": 1, "method": "exact", "avg_bytes": 7.0},
+        "s_market_desc": {"ndv": 10, "method": "exact", "avg_bytes": 55.333},
+        "s_market_manager": {"ndv": 7, "method": "exact", "avg_bytes": 14.0},
+        "s_division_id": {"ndv": 1, "method": "exact"},
+        "s_division_name": {"ndv": 1, "method": "exact", "avg_bytes": 7.0},
+        "s_company_id": {"ndv": 1, "method": "exact"},
+        "s_company_name": {"ndv": 1, "method": "exact", "avg_bytes": 7.0},
+        "s_street_number": {"ndv": 9, "method": "exact", "avg_bytes": 2.833},
+        "s_street_name": {"ndv": 12, "method": "exact", "avg_bytes": 6.583},
+        "s_street_type": {"ndv": 8, "method": "exact", "avg_bytes": 4.833},
+        "s_suite_number": {"ndv": 11, "method": "exact", "avg_bytes": 8.25},
+        "s_city": {"ndv": 2, "method": "exact", "avg_bytes": 6.5},
+        "s_county": {"ndv": 1, "method": "exact", "avg_bytes": 17.0},
+        "s_state": {"ndv": 1, "method": "exact", "avg_bytes": 2.0},
+        "s_zip": {"ndv": 2, "method": "exact", "avg_bytes": 5.0},
+        "s_country": {"ndv": 1, "method": "exact", "avg_bytes": 13.0},
+        "s_gmt_offset": {"ndv": 1, "method": "exact"},
+        "s_tax_percentage": {"ndv": 5, "method": "exact"}
+      },
+      "composite": [
+        {"columns": ["s_county", "s_state"], "ndv": 1, "method": "exact"}
+      ]
+    },
+    "store_returns": {
+      "fingerprint": {"rows": 287867, "bytes": 17456501, "footer_sha256": "857b93627625b3dca69bba58919ca361d5ba1ff0dc8f3dae9dbfcd9ec063bf57"},
+      "columns": {
+        "sr_returned_date_sk": {"ndv": 2003, "method": "exact"},
+        "sr_return_time_sk": {"ndv": 32390, "method": "exact"},
+        "sr_item_sk": {"ndv": 17997, "method": "exact"},
+        "sr_customer_sk": {"ndv": 86959, "method": "exact"},
+        "sr_cdemo_sk": {"ndv": 258702, "method": "exact"},
+        "sr_hdemo_sk": {"ndv": 7200, "method": "exact"},
+        "sr_addr_sk": {"ndv": 49816, "method": "exact"},
+        "sr_store_sk": {"ndv": 6, "method": "exact"},
+        "sr_reason_sk": {"ndv": 35, "method": "exact"},
+        "sr_ticket_number": {"ndv": 169508, "method": "exact"},
+        "sr_return_quantity": {"ndv": 100, "method": "exact"},
+        "sr_return_amt": {"ndv": 113694, "method": "exact"},
+        "sr_return_tax": {"ndv": 29157, "method": "exact"},
+        "sr_return_amt_inc_tax": {"ndv": 141504, "method": "exact"},
+        "sr_fee": {"ndv": 9951, "method": "exact"},
+        "sr_return_ship_cost": {"ndv": 82029, "method": "exact"},
+        "sr_refunded_cash": {"ndv": 102045, "method": "exact"},
+        "sr_reversed_charge": {"ndv": 72875, "method": "exact"},
+        "sr_store_credit": {"ndv": 72209, "method": "exact"},
+        "sr_net_loss": {"ndv": 118253, "method": "exact"}
+      },
+      "composite": [
+        {"columns": ["sr_customer_sk", "sr_item_sk"], "ndv": 277738, "method": "exact"},
+        {"columns": ["sr_customer_sk", "sr_item_sk", "sr_ticket_number"], "ndv": 277776, "method": "exact"},
+        {"columns": ["sr_item_sk", "sr_ticket_number"], "ndv": 287867, "method": "exact"}
+      ]
+    },
+    "store_sales": {
+      "fingerprint": {"rows": 2880404, "bytes": 160505512, "footer_sha256": "e20919dd130b078cac5baa2ad61c00d059b55a3d236de390b2cf6b25c2b291f4"},
+      "columns": {
+        "ss_sold_date_sk": {"ndv": 1823, "method": "exact"},
+        "ss_sold_time_sk": {"ndv": 45647, "method": "exact"},
+        "ss_item_sk": {"ndv": 18000, "method": "exact"},
+        "ss_customer_sk": {"ndv": 90858, "method": "exact"},
+        "ss_cdemo_sk": {"ndv": 225783, "method": "exact"},
+        "ss_hdemo_sk": {"ndv": 7200, "method": "exact"},
+        "ss_addr_sk": {"ndv": 49600, "method": "exact"},
+        "ss_store_sk": {"ndv": 6, "method": "exact"},
+        "ss_promo_sk": {"ndv": 300, "method": "exact"},
+        "ss_ticket_number": {"ndv": 240000, "method": "exact"},
+        "ss_quantity": {"ndv": 100, "method": "exact"},
+        "ss_wholesale_cost": {"ndv": 9901, "method": "exact"},
+        "ss_list_price": {"ndv": 19727, "method": "exact"},
+        "ss_sales_price": {"ndv": 18691, "method": "exact"},
+        "ss_ext_discount_amt": {"ndv": 209610, "method": "exact"},
+        "ss_ext_sales_price": {"ndv": 411372, "method": "exact"},
+        "ss_ext_wholesale_cost": {"ndv": 380540, "method": "exact"},
+        "ss_ext_list_price": {"ndv": 578879, "method": "exact"},
+        "ss_ext_tax": {"ndv": 78556, "method": "exact"},
+        "ss_coupon_amt": {"ndv": 209534, "method": "exact"},
+        "ss_net_paid": {"ndv": 463270, "method": "exact"},
+        "ss_net_paid_inc_tax": {"ndv": 618443, "method": "exact"},
+        "ss_net_profit": {"ndv": 566695, "method": "exact"}
+      },
+      "composite": [
+        {"columns": ["ss_customer_sk", "ss_item_sk", "ss_ticket_number"], "ndv": 2751012, "method": "exact"},
+        {"columns": ["ss_item_sk", "ss_ticket_number"], "ndv": 2880404, "method": "exact"}
+      ]
+    },
+    "time_dim": {
+      "fingerprint": {"rows": 86400, "bytes": 1129565, "footer_sha256": "4113d7999664ef82d487a2bd9e83ff346c0fcb4155eb177f180fc9221eadf6f4"},
+      "columns": {
+        "t_time_sk": {"ndv": 86400, "method": "exact"},
+        "t_time_id": {"ndv": 86400, "method": "exact", "avg_bytes": 16.0},
+        "t_time": {"ndv": 86400, "method": "exact"},
+        "t_hour": {"ndv": 24, "method": "exact"},
+        "t_minute": {"ndv": 60, "method": "exact"},
+        "t_second": {"ndv": 60, "method": "exact"},
+        "t_am_pm": {"ndv": 2, "method": "exact", "avg_bytes": 2.0},
+        "t_shift": {"ndv": 3, "method": "exact", "avg_bytes": 5.333},
+        "t_sub_shift": {"ndv": 4, "method": "exact", "avg_bytes": 6.917},
+        "t_meal_time": {"ndv": 4, "method": "exact", "avg_bytes": 2.875}
+      }
+    },
+    "warehouse": {
+      "fingerprint": {"rows": 5, "bytes": 2858, "footer_sha256": "dacfe9d8a1464ea2e47a32a949c30f19bb5c03da1a96bccfa1192af4496c273e"},
+      "columns": {
+        "w_warehouse_sk": {"ndv": 5, "method": "exact"},
+        "w_warehouse_id": {"ndv": 5, "method": "exact", "avg_bytes": 16.0},
+        "w_warehouse_name": {"ndv": 4, "method": "exact", "avg_bytes": 17.75},
+        "w_warehouse_sq_ft": {"ndv": 4, "method": "exact"},
+        "w_street_number": {"ndv": 4, "method": "exact", "avg_bytes": 3.0},
+        "w_street_name": {"ndv": 4, "method": "exact", "avg_bytes": 8.5},
+        "w_street_type": {"ndv": 4, "method": "exact", "avg_bytes": 5.25},
+        "w_suite_number": {"ndv": 4, "method": "exact", "avg_bytes": 7.75},
+        "w_city": {"ndv": 1, "method": "exact", "avg_bytes": 8.0},
+        "w_county": {"ndv": 1, "method": "exact", "avg_bytes": 17.0},
+        "w_state": {"ndv": 1, "method": "exact", "avg_bytes": 2.0},
+        "w_zip": {"ndv": 1, "method": "exact", "avg_bytes": 5.0},
+        "w_country": {"ndv": 1, "method": "exact", "avg_bytes": 13.0},
+        "w_gmt_offset": {"ndv": 1, "method": "exact"}
+      }
+    },
+    "web_page": {
+      "fingerprint": {"rows": 60, "bytes": 4310, "footer_sha256": "fda4ffafb681d987a05205f4749779eeb6c87d34bd70c34ab0a00279fc688b76"},
+      "columns": {
+        "wp_web_page_sk": {"ndv": 60, "method": "exact"},
+        "wp_web_page_id": {"ndv": 30, "method": "exact", "avg_bytes": 16.0},
+        "wp_rec_start_date": {"ndv": 4, "method": "exact"},
+        "wp_rec_end_date": {"ndv": 3, "method": "exact"},
+        "wp_creation_date_sk": {"ndv": 9, "method": "exact"},
+        "wp_access_date_sk": {"ndv": 40, "method": "exact"},
+        "wp_autogen_flag": {"ndv": 2, "method": "exact", "avg_bytes": 1.0},
+        "wp_customer_sk": {"ndv": 17, "method": "exact"},
+        "wp_url": {"ndv": 1, "method": "exact", "avg_bytes": 18.0},
+        "wp_type": {"ndv": 7, "method": "exact", "avg_bytes": 6.475},
+        "wp_char_count": {"ndv": 42, "method": "exact"},
+        "wp_link_count": {"ndv": 21, "method": "exact"},
+        "wp_image_count": {"ndv": 7, "method": "exact"},
+        "wp_max_ad_count": {"ndv": 5, "method": "exact"}
+      }
+    },
+    "web_returns": {
+      "fingerprint": {"rows": 71654, "bytes": 5605459, "footer_sha256": "03eb66343e508b70f42a35f0e431927ec5359241ae0b370849f524292b03c3fc"},
+      "columns": {
+        "wr_returned_date_sk": {"ndv": 2114, "method": "exact"},
+        "wr_returned_time_sk": {"ndv": 44650, "method": "exact"},
+        "wr_item_sk": {"ndv": 16981, "method": "exact"},
+        "wr_refunded_customer_sk": {"ndv": 49479, "method": "exact"},
+        "wr_refunded_cdemo_sk": {"ndv": 67167, "method": "exact"},
+        "wr_refunded_hdemo_sk": {"ndv": 7200, "method": "exact"},
+        "wr_refunded_addr_sk": {"ndv": 37264, "method": "exact"},
+        "wr_returning_customer_sk": {"ndv": 49435, "method": "exact"},
+        "wr_returning_cdemo_sk": {"ndv": 67201, "method": "exact"},
+        "wr_returning_hdemo_sk": {"ndv": 7200, "method": "exact"},
+        "wr_returning_addr_sk": {"ndv": 37280, "method": "exact"},
+        "wr_web_page_sk": {"ndv": 60, "method": "exact"},
+        "wr_reason_sk": {"ndv": 35, "method": "exact"},
+        "wr_order_number": {"ndv": 42242, "method": "exact"},
+        "wr_return_quantity": {"ndv": 100, "method": "exact"},
+        "wr_return_amt": {"ndv": 49147, "method": "exact"},
+        "wr_return_tax": {"ndv": 18238, "method": "exact"},
+        "wr_return_amt_inc_tax": {"ndv": 54878, "method": "exact"},
+        "wr_fee": {"ndv": 9944, "method": "exact"},
+        "wr_return_ship_cost": {"ndv": 40498, "method": "exact"},
+        "wr_refunded_cash": {"ndv": 44384, "method": "exact"},
+        "wr_reversed_charge": {"ndv": 34185, "method": "exact"},
+        "wr_account_credit": {"ndv": 34001, "method": "exact"},
+        "wr_net_loss": {"ndv": 51860, "method": "exact"}
+      },
+      "composite": [
+        {"columns": ["wr_item_sk", "wr_order_number"], "ndv": 71654, "method": "exact"}
+      ]
+    },
+    "web_sales": {
+      "fingerprint": {"rows": 719384, "bytes": 60330121, "footer_sha256": "dbc027bb650c84f69c800d1c55201c2fbf00ae79b63ab43e1c5038f37e581523"},
+      "columns": {
+        "ws_sold_date_sk": {"ndv": 1823, "method": "exact"},
+        "ws_sold_time_sk": {"ndv": 41020, "method": "exact"},
+        "ws_ship_date_sk": {"ndv": 1945, "method": "exact"},
+        "ws_item_sk": {"ndv": 18000, "method": "exact"},
+        "ws_bill_customer_sk": {"ndv": 45161, "method": "exact"},
+        "ws_bill_cdemo_sk": {"ndv": 59093, "method": "exact"},
+        "ws_bill_hdemo_sk": {"ndv": 7197, "method": "exact"},
+        "ws_bill_addr_sk": {"ndv": 34971, "method": "exact"},
+        "ws_ship_customer_sk": {"ndv": 45181, "method": "exact"},
+        "ws_ship_cdemo_sk": {"ndv": 59121, "method": "exact"},
+        "ws_ship_hdemo_sk": {"ndv": 7198, "method": "exact"},
+        "ws_ship_addr_sk": {"ndv": 35012, "method": "exact"},
+        "ws_web_page_sk": {"ndv": 60, "method": "exact"},
+        "ws_web_site_sk": {"ndv": 30, "method": "exact"},
+        "ws_ship_mode_sk": {"ndv": 20, "method": "exact"},
+        "ws_warehouse_sk": {"ndv": 5, "method": "exact"},
+        "ws_promo_sk": {"ndv": 300, "method": "exact"},
+        "ws_order_number": {"ndv": 60000, "method": "exact"},
+        "ws_quantity": {"ndv": 100, "method": "exact"},
+        "ws_wholesale_cost": {"ndv": 9901, "method": "exact"},
+        "ws_list_price": {"ndv": 29060, "method": "exact"},
+        "ws_sales_price": {"ndv": 24585, "method": "exact"},
+        "ws_ext_discount_amt": {"ndv": 282889, "method": "exact"},
+        "ws_ext_sales_price": {"ndv": 282908, "method": "exact"},
+        "ws_ext_wholesale_cost": {"ndv": 273057, "method": "exact"},
+        "ws_ext_list_price": {"ndv": 388376, "method": "exact"},
+        "ws_ext_tax": {"ndv": 68484, "method": "exact"},
+        "ws_coupon_amt": {"ndv": 97196, "method": "exact"},
+        "ws_ext_ship_cost": {"ndv": 198050, "method": "exact"},
+        "ws_net_paid": {"ndv": 298339, "method": "exact"},
+        "ws_net_paid_inc_tax": {"ndv": 365832, "method": "exact"},
+        "ws_net_paid_inc_ship": {"ndv": 372494, "method": "exact"},
+        "ws_net_paid_inc_ship_tax": {"ndv": 460817, "method": "exact"},
+        "ws_net_profit": {"ndv": 337288, "method": "exact"}
+      },
+      "composite": [
+        {"columns": ["ws_item_sk", "ws_order_number"], "ndv": 719384, "method": "exact"}
+      ]
+    },
+    "web_site": {
+      "fingerprint": {"rows": 30, "bytes": 9865, "footer_sha256": "8528328618507bcc55805af08b8e3c36d799e99a0c48a8d14d163c26c5783a62"},
+      "columns": {
+        "web_site_sk": {"ndv": 30, "method": "exact"},
+        "web_site_id": {"ndv": 15, "method": "exact", "avg_bytes": 16.0},
+        "web_rec_start_date": {"ndv": 4, "method": "exact"},
+        "web_rec_end_date": {"ndv": 3, "method": "exact"},
+        "web_name": {"ndv": 5, "method": "exact", "avg_bytes": 6.0},
+        "web_open_date_sk": {"ndv": 15, "method": "exact"},
+        "web_close_date_sk": {"ndv": 10, "method": "exact"},
+        "web_class": {"ndv": 1, "method": "exact", "avg_bytes": 7.0},
+        "web_manager": {"ndv": 21, "method": "exact", "avg_bytes": 12.333},
+        "web_mkt_id": {"ndv": 6, "method": "exact"},
+        "web_mkt_class": {"ndv": 23, "method": "exact", "avg_bytes": 35.767},
+        "web_mkt_desc": {"ndv": 27, "method": "exact", "avg_bytes": 56.1},
+        "web_market_manager": {"ndv": 24, "method": "exact", "avg_bytes": 12.3},
+        "web_company_id": {"ndv": 6, "method": "exact"},
+        "web_company_name": {"ndv": 6, "method": "exact", "avg_bytes": 4.033},
+        "web_street_number": {"ndv": 23, "method": "exact", "avg_bytes": 2.967},
+        "web_street_name": {"ndv": 30, "method": "exact", "avg_bytes": 9.067},
+        "web_street_type": {"ndv": 15, "method": "exact", "avg_bytes": 4.067},
+        "web_suite_number": {"ndv": 23, "method": "exact", "avg_bytes": 8.2},
+        "web_city": {"ndv": 2, "method": "exact", "avg_bytes": 6.733},
+        "web_county": {"ndv": 1, "method": "exact", "avg_bytes": 17.0},
+        "web_state": {"ndv": 1, "method": "exact", "avg_bytes": 2.0},
+        "web_zip": {"ndv": 2, "method": "exact", "avg_bytes": 5.0},
+        "web_country": {"ndv": 1, "method": "exact", "avg_bytes": 13.0},
+        "web_gmt_offset": {"ndv": 1, "method": "exact"},
+        "web_tax_percentage": {"ndv": 11, "method": "exact"}
+      }
+    }
+  }
+}

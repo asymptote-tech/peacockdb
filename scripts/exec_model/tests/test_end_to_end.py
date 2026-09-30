@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 from .harness import main, raises
-from ..partitioned_driver import partitioned_driver
+from .rescan import CheckedDriver
 from ..errors import ResidentBudgetExceeded
 from ..node import CpuBackendSelector
 from ..operators import aggregates as A
@@ -57,7 +57,7 @@ BUDGET = 8 * 1024 * 1024
 
 
 def execute(root, budget: int | None = BUDGET, selector=None):
-    driver = partitioned_driver(
+    driver = CheckedDriver(
         Plan.build(root), selector or CpuBackendSelector(), budget
     )
     driver.run()

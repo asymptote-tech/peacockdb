@@ -82,13 +82,24 @@ class MockExecutor(Executor):
 class ScriptedSource(MockExecutor, SourceExecutor):
     def __init__(self, batches: Iterable[MockBatch]):
         self._queue = list(batches)
+        self._fetched: MockBatch | None = None
         self.calls = 0
 
     def next_batch(self):
         self.calls += 1
+        if self._fetched is not None:
+            batch, self._fetched = self._fetched, None
+            return batch, CallStats(scratch_bytes=0)
         if not self._queue:
             return None
         return self._queue.pop(0), CallStats(scratch_bytes=0)
+
+    def can_prefetch(self) -> bool:
+        return self._fetched is None and bool(self._queue)
+
+    def prefetch(self) -> int:
+        self._fetched = self._queue.pop(0)
+        return self._fetched.byte_size()
 
 
 class MapExec(MockExecutor, ExecExecutor):

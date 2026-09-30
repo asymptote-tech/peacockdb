@@ -64,8 +64,10 @@ class LaneInputs:
     batch owns releasing it.
     """
 
-    def __init__(self, sources: list[tuple[NodeState, int]]):
+    def __init__(self, sources: list[tuple[NodeState, int]], consumed=None):
         self._sources = sources
+        #: per slot, per the producer's lane: rows taken — the run report's `in_rows`
+        self._consumed = consumed
 
     def has(self, slot: int) -> bool:
         state, lane = self._sources[slot]
@@ -82,4 +84,7 @@ class LaneInputs:
 
     def take(self, slot: int) -> Batch:
         state, lane = self._sources[slot]
-        return state.out_queues[lane].popleft()
+        batch = state.out_queues[lane].popleft()
+        if self._consumed is not None:
+            self._consumed[slot][lane] += batch.num_rows()
+        return batch
