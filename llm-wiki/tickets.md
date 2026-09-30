@@ -15,33 +15,12 @@ reference still resolves there.
 
 | Section | Open | Tickets |
 |---|--:|---|
-| [Critical correctness](#critical-correctness) | 36 | #228 #227 #225 #224 #223 #222 #221 #219 #218 #217 #216 #215 #214 #211 #210 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
+| [Critical correctness](#critical-correctness) | 34 | #225 #224 #223 #222 #221 #219 #218 #217 #216 #215 #214 #211 #210 #208 #207 #205 #204 #202 #200 #199 #166 #153 #80 #59 #46 #47 #60 #121 #122 #123 #118 #119 #120 #117 |
 | [Blockers for disabled coverage](#blockers-for-disabled-coverage) | 16 | #212 #206 #203 #169 #168 #158 #173 #23 #65 #62 #95 #57 #45 #63 #56 #55 |
 | [Performance / architecture](#performance--architecture) | 28 | #226 #179 #177 #170 #155 #154 #152 #150 #149 #148 #19 #16 #20 #71 #101 #73 #75 #136 #137 #138 #139 #140 #141 #147 #146 #145 #144 #142 |
 | [Infrastructure / process](#infrastructure--process) | 23 | #213 #201 #197 #196 #195 #178 #176 #174 #167 #164 #159 #160 #161 #162 #113 #134 #129 #128 #127 #125 #13 #94 #69 |
 
 ## Critical correctness
-
-<a id="t228"></a>
-### #228 — a mark or right-semi join's projection prints under the wrong names
-`projection_field` (`plan_text/node_text.rs`) names each ordinal from build++probe, but a join
-projects its type's own output: build and `mark` for LeftMark, probe alone for RightSemi and
-RightAnti. The ordinal is right and the name beside it is not.
-
-Seen in tpcds q10, q35, q45 (LeftMark: `mark` printed as a probe column) and q58 (RightSemi: probe
-columns printed as build ones) — 55 fields over the 5 `plans.txt` goldens. No answer is wrong; a
-reader resolving a column by the name it is printed under takes the wrong one. The fix is to name
-them from the join's own output schema, then regenerate.
-
-<a id="t227"></a>
-### #227 — a null decimal literal renders as `None,23,8` in the plan text
-`literal_text` (`plan_text/expr_text.rs`) handles `Decimal128(Some…)` and `Decimal256(Some…)`
-only; a null one falls to DataFusion's `Display`, which prints `{v:?},{p:?},{s:?}`. Every
-other null prints `NULL`.
-
-Seen in tpcds q90 (`` CASE WHEN pmc@1 = 0 THEN `None,23,8` … ``), 5 `plans.txt` and 2 `cpu.txt`
-goldens. No answer is wrong; a reader of the text cannot tell the value is null. The fix is a
-`None` arm printing `NULL`, then regenerate.
 
 <a id="t225"></a>
 ### #225 — the device names every Welford state column by the aggregate's alias

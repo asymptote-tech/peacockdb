@@ -27,6 +27,36 @@ the report rather than emitting one that goes nowhere.
 
 ## Done
 
+<a id="t228"></a>
+### #228 — a mark or right-semi join's projection prints under the wrong names
+`projection_field` (`plan_text/node_text.rs`) names each ordinal from build++probe, but a join
+projects its type's own output: build and `mark` for LeftMark, probe alone for RightSemi and
+RightAnti. The ordinal is right and the name beside it is not.
+
+Seen in tpcds q10, q35, q45 (LeftMark: `mark` printed as a probe column) and q58 (RightSemi: probe
+columns printed as build ones) — 55 fields over the 5 `plans.txt` goldens. No answer is wrong; a
+reader resolving a column by the name it is printed under takes the wrong one. The fix is to name
+them from the join's own output schema, then regenerate.
+
+**Done.** `projection_field` names each ordinal by the output column it becomes — the node's own
+schema at that position — so no join type's emitted table is re-derived in the renderer.
+`plans.txt` and the `cpu.txt` sections regenerated (q10, q35, q45, q58, q83; 55 fields, names
+only). Pinned by `plan_text::tests::a_mark_join_names_its_mark_in_its_projection`.
+
+<a id="t227"></a>
+### #227 — a null decimal literal renders as `None,23,8` in the plan text
+`literal_text` (`plan_text/expr_text.rs`) handles `Decimal128(Some…)` and `Decimal256(Some…)`
+only; a null one falls to DataFusion's `Display`, which prints `{v:?},{p:?},{s:?}`. Every
+other null prints `NULL`.
+
+Seen in tpcds q90 (`` CASE WHEN pmc@1 = 0 THEN `None,23,8` … ``), 5 `plans.txt` and 2 `cpu.txt`
+goldens. No answer is wrong; a reader of the text cannot tell the value is null. The fix is a
+`None` arm printing `NULL`, then regenerate.
+
+**Done.** `literal_text` prints a null `Decimal128`/`Decimal256` as `NULL`; `plans.txt` and the
+`cpu.txt` sections regenerated (q90 in five modes). Pinned by
+`plan_text::tests::a_null_decimal_literal_prints_as_null`.
+
 <a id="t187"></a>
 ### #187 — the device widens a decimal the plan declared narrow
 
