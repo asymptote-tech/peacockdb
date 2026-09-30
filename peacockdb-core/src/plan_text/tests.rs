@@ -209,9 +209,41 @@ async fn a_join_prints_its_keys_and_its_projection_by_name() {
         join.contains("on=[(s_nationkey@1, c_nationkey@1)]"),
         "{text}"
     );
-    // A projection is ordinals into the joined table, so it is named from both sides
-    // rather than printed as bare positions.
+    // A projection is ordinals into what the join emits, each named by the output
+    // column it becomes rather than printed as a bare position.
     assert!(join.contains("projection=[s_name@0, c_name@2]"), "{text}");
+}
+
+#[tokio::test]
+async fn a_mark_join_names_its_mark_in_its_projection() {
+    // #228: a mark join emits the build side and the mark, so the ordinal past the
+    // build side is the mark — naming it from the probe side printed a probe column.
+    let text = rendered(
+        "SELECT c_name FROM customer WHERE c_acctbal > 0 \
+         OR EXISTS (SELECT 1 FROM supplier WHERE s_nationkey = c_nationkey)",
+        1,
+    )
+    .await;
+    let join = line_with(&text, "GpuHashJoin");
+    assert!(join.contains("join_type=LeftMark"), "{text}");
+    // The key is used by nothing above, so the join projects it away and keeps the mark.
+    assert!(
+        join.contains("projection=[c_name@0, c_acctbal@2, mark@3]"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn a_null_decimal_literal_prints_as_null() {
+    // #227: `Display` spells a null decimal as its `None,p,s` triple.
+    let text = rendered(
+        "SELECT CASE WHEN c_nationkey = 0 THEN NULL ELSE c_acctbal END AS x FROM customer",
+        1,
+    )
+    .await;
+    let project = line_with(&text, "GpuProject");
+    assert!(project.contains("THEN NULL ELSE"), "{text}");
+    assert!(!text.contains("None,"), "{text}");
 }
 
 #[tokio::test]
