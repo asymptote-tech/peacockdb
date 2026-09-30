@@ -780,6 +780,11 @@ jobs:
       - name: cost-report unit tests (Rust)
         run: cargo test -p cost-report
 
+      # Dependency-free, so it builds in seconds beside cost-report rather than in the jobs that
+      # carry the DataFusion stack.
+      - name: DPhyp unit tests (Rust)
+        run: cargo test -p peacockdb-dphyp
+
       # It reads committed workflow text and asserts about CI rather than about the engine,
       # so it is tooling and lives with the tooling — and its whole value is saying EARLY that a
       # target is unwired, which it cannot do from behind a container and a dataset build.
