@@ -2158,6 +2158,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "peacockdb-dphyp"
+version = "0.1.0"
+
+[[package]]
 name = "peacockdb-ffi"
 version = "0.1.0"
 dependencies = [

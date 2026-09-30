@@ -1,0 +1,11 @@
+[package]
+name = "peacockdb-dphyp"
+version = "0.1.0"
+edition = "2024"
+
+# DPhyp join enumeration with no dependencies, so it builds in seconds: peacockdb-core links
+# the rlib, the Python prototype loads the cdylib through ctypes — one implementation for both.
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
