@@ -88,6 +88,16 @@ class SourceExecutor(Executor):
     def next_batch(self) -> tuple[Batch, CallStats] | None:
         """None means this lane is exhausted; it is never called again."""
 
+    def can_prefetch(self) -> bool:
+        """Whether a next batch remains whose bytes are not fetched yet. A source with no fetch
+        phase — one whose batches are in memory already — never has one."""
+        return False
+
+    def prefetch(self) -> int:
+        """Fetches the next batch's bytes ahead of its decode, on the host alone — no device,
+        no session — for `next_batch` to decode. Returns the bytes now held."""
+        raise NotImplementedError(f"{type(self).__name__} has no fetch phase")
+
 
 class UnloadExecutor(Executor):
     """Its own category because it is the one operator whose output is not a `Batch`.

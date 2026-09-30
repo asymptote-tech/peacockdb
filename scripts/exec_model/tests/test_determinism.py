@@ -15,6 +15,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/<file>.p
     __package__ = "scripts.exec_model.tests"
 
 from .harness import main
+from .rescan import CheckedDriver
 from ..partitioned_driver import partitioned_driver
 from ..plan import Plan
 from .mocks import (
@@ -77,7 +78,7 @@ PLANS = {
 
 
 def run_once(builder):
-    driver = partitioned_driver(Plan.build(builder()), MockSelector())
+    driver = CheckedDriver(Plan.build(builder()), MockSelector())
     driver.run()
     return driver
 

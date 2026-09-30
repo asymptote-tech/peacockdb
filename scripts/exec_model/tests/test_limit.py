@@ -25,15 +25,15 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/<file>.p
 
 from . import mocks
 from .harness import main, raises
+from .rescan import CheckedDriver
 from .mocks import MockSelector
-from ..partitioned_driver import partitioned_driver
 from ..errors import PlanError
 from ..limit import RowInterval, RowRange
 from ..plan import Plan
 
 
 def run(root, budget=None):
-    driver = partitioned_driver(Plan.build(root), MockSelector(), budget)
+    driver = CheckedDriver(Plan.build(root), MockSelector(), budget)
     driver.run()
     return driver
 

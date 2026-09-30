@@ -4,6 +4,8 @@ name: Exec-model corpus (manual)
 # into the engine's nodes (scripts/exec_model/tests/test_tpch_corpus.py,
 # test_tpcds.py). TPC-H is checked against a hand-written pandas oracle per query; TPC-DS
 # against DuckDB running the query's own text, which also needs the DuckDB CLI below.
+# test_engine_answers.py runs the engine's own plan goldens the same way, against DuckDB;
+# test_engine_dynamic_filters.py runs them again pruned by their dynamic filters.
 #
 # Manual dispatch only, for two reasons. They need the generated sf1 datasets, which the
 # push pipeline builds inside the dataset-matrix container job; and they are minutes rather than
@@ -48,6 +50,14 @@ jobs:
       - name: Install python dependencies
         run: pip install --quiet pandas pyarrow
 
+      # The optimized plans are ordered by the DPhyp crate, which the prototype calls through its
+      # C ABI: built here, seconds, and named by PEACOCK_DPHYP_LIB for the run step.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the DPhyp library
+        run: cargo build --release -p peacockdb-dphyp
+
       # Byte-for-byte the pipeline's generator step: the same pinned DuckDB release build
       # the committed goldens come from, for the same reason (the dsdgen column types drift
       # between releases). Both benches, since the two corpus files need one each.
@@ -69,13 +79,23 @@ jobs:
           PCK_BACKEND: ${{ inputs.backend }}
           FILTER: ${{ inputs.filter }}
           DUCKDB: /tmp/duckdb-bin/duckdb
+          PEACOCK_DPHYP_LIB: ${{ github.workspace }}/target/release/libpeacockdb_dphyp.so
         run: |
           set -euo pipefail
-          # Both files are corpus files now, so no name filter is needed to select them; a
-          # filter narrows within them. No `set -e` short-circuit on the first file: both
-          # run, statuses are OR'd, so one failure cannot hide the other file's.
+          # Every file here is a corpus file, so no name filter is needed to select them; a
+          # filter narrows within them. No `set -e` short-circuit on the first file: each
+          # runs, statuses are OR'd, so one failure cannot hide another file's.
           status=0
-          for f in scripts/exec_model/tests/test_tpch_corpus.py scripts/exec_model/tests/test_tpcds.py; do
+          files=(scripts/exec_model/tests/test_tpch_corpus.py scripts/exec_model/tests/test_tpcds.py)
+          # The engine's plans join by position, which the name-based recipe emulation does
+          # not model: that backend refuses them, so they run on pandas only.
+          if [ "$PCK_BACKEND" = pandas ]; then
+            files+=(scripts/exec_model/tests/test_engine_answers.py
+                    scripts/exec_model/tests/test_engine_dynamic_filters.py
+                    scripts/exec_model/tests/test_engine_reassembled.py
+                    scripts/exec_model/tests/test_engine_optimized.py)
+          fi
+          for f in "${files[@]}"; do
             echo "== $f (shard $PCK_SHARD, backend $PCK_BACKEND)"
             python3 "$f" ${FILTER:+"$FILTER"} || status=1
           done

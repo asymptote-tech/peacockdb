@@ -9,10 +9,12 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/<file>.p
     __package__ = "scripts.exec_model.tests"
 
 from .harness import main, raises
-from ..partitioned_driver import partitioned_driver
+from .rescan import CheckedDriver
+from ..partitioned_driver import PartitionedDriver, partitioned_driver
 from ..errors import ResidentBudgetExceeded
 from ..plan import Plan
 from .mocks import (
+    BYTES_PER_ROW,
     MockSelector,
     coalesce_all,
     coalesce_target,
@@ -40,14 +42,21 @@ def run(root, budget=None):
     so it drains first, and the transitive join hold closes the one exception, covering
     the producer too since anything under a held node is reached through the same probe
     edge. `test_the_queue_bound_assertion_is_live` is the input that does turn it red.
+
+    Every plan runs a second time reading ahead, and must make the same calls in the same
+    steps: a fetch is host work beside the schedule, never a change to it.
     """
-    driver = partitioned_driver(Plan.build(root), MockSelector(), budget)
+    driver = CheckedDriver(Plan.build(root), MockSelector(), budget)
     driver.run()
     for info in driver.plan.nodes:
         assert driver.peak_queued[info.id] <= info.n_lanes, f"{info}: queue bound broken"
     # Every plan here drains fully, so every executor finished — and a finished executor
     # stops contributing to the accounted resident set.
     assert driver.accountant.executor_bytes == 0, "a finished executor still counted"
+    ahead = CheckedDriver(Plan.build(root), MockSelector(), budget, prefetch=True)
+    ahead.run()
+    assert [e for e in ahead.trace if e.call != "prefetch"] == driver.trace, "reading ahead changed the run"
+    assert not ahead.fetched, "a fetched batch was never decoded"
     return driver
 
 
@@ -103,6 +112,25 @@ def two_sided_shuffle_join(lanes=4):
 
     build = coalesce_all("build_collect", shuffled("build", [4]))
     return sink("unload", join("join", build, shuffled("probe", [4, 4])))
+
+
+def test_a_held_source_does_not_read_ahead_and_a_free_one_holds_one_batch_a_lane():
+    class IntoAnEmptyPlace(PartitionedDriver):
+        def _prefetch(self, state, lane):
+            assert not state.out_queues[lane], "fetched with the lane's queue still holding a batch"
+            super()._prefetch(state, lane)
+
+    driver = IntoAnEmptyPlace(Plan.build(two_sided_shuffle_join()), MockSelector(), prefetch=True)
+    driver.run()
+    fetched = [(e.step, e.node.split("#")[0]) for e in driver.trace if e.call == "prefetch"]
+    first_build = min(e.step for e in driver.trace if e.call == "set_build")
+    # The probe scan is held until every lane has its build: all its fetches come after. The
+    # build scan has one batch a lane, read on its own first step — nothing left to fetch.
+    probe = [step for step, node in fetched if node == "probe_scan"]
+    assert probe and min(probe) > first_build and len(probe) == 4  # the second batch of each lane
+    assert all(node == "probe_scan" for _, node in fetched)
+    # One 4-row batch a lane at most, however far ahead the source is.
+    assert 0 < driver.fetched_peak <= 4 * 4 * BYTES_PER_ROW
 
 
 def test_a_join_with_a_shuffle_on_both_sides_co_partitions_and_completes():

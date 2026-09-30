@@ -152,6 +152,18 @@ class IsNotNull(Expr):
 
 
 @dataclass(frozen=True)
+class IsNull(Expr):
+    inner: Expr
+    alias: str | None = None
+
+    def evaluate(self, frame: pd.DataFrame) -> pd.Series:
+        return self.inner.evaluate(frame).isna()
+
+    def name(self) -> str:
+        return self.alias or f"({self.inner.name()} is null)"
+
+
+@dataclass(frozen=True)
 class Sqrt(Expr):
     """`cudf::unary_operator::SQRT`, which the IR gains for the stddev finalize."""
 
@@ -267,7 +279,14 @@ class Cast(Expr):
     alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
-        return self.inner.evaluate(frame).astype(self.dtype)
+        import numpy as np
+
+        values = self.inner.evaluate(frame)
+        if self.dtype == "int64" and values.isna().any():
+            # An integer column holding a null is float64 here (`frame.py`): the cast
+            # truncates what it can and keeps the null, where `astype` would refuse the batch.
+            return np.trunc(values.astype("float64"))
+        return values.astype(self.dtype)
 
     def name(self) -> str:
         return self.alias or f"cast({self.inner.name()} as {self.dtype})"
@@ -414,4 +433,9 @@ def columns_of(expr: Expr) -> list[str]:
 
 def project(frame: pd.DataFrame, exprs: list[Expr]) -> pd.DataFrame:
     """Build a new frame from an expression list — column order is the list order."""
-    return pd.DataFrame({expr.name(): expr.evaluate(frame).to_numpy() for expr in exprs})
+    # `.array`, not `.to_numpy()`: both drop the index, but only the array keeps a nullable
+    # dtype — a comparison's `boolean` would come out object, holding NA no `&` accepts.
+    # The index keeps the row count when the list is empty: `SELECT 1 FROM t` projects no
+    # column of `t`, and the rows it counts must survive to the cross join above (tpcds q9).
+    return pd.DataFrame({expr.name(): expr.evaluate(frame).array for expr in exprs},
+                        index=pd.RangeIndex(len(frame)))

@@ -44,6 +44,7 @@ import decimal
 import functools
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -89,6 +90,37 @@ def dataset_dir(bench: str, name: str) -> pathlib.Path:
         "The corpus tests need the generated sf1 tables: run testdata/generate_testdata.sh "
         "(CI's dataset-matrix job does this before running these files)."
     )
+
+
+def row_group_rows(path: pathlib.Path) -> list[int]:
+    """A parquet file's row groups' sizes, file order — what an engine scan's numbers index."""
+    metadata = pq.ParquetFile(path).metadata
+    return [metadata.row_group(i).num_rows for i in range(metadata.num_row_groups)]
+
+
+class ParquetTables:
+    """An engine plan's tables, out of one directory of `<table>.parquet`: what
+    `engine_nodes.build` asks of a scan — its columns, typed as `_typed` types them, and its
+    file's row-group sizes."""
+
+    def __init__(self, directory: pathlib.Path):
+        self.directory = pathlib.Path(directory)
+
+    def frame(self, table: str, columns) -> pd.DataFrame:
+        return _typed(pq.read_table(self.directory / f"{table}.parquet", columns=list(columns)))
+
+    def row_counts(self, table: str) -> list[int]:
+        return row_group_rows(self.directory / f"{table}.parquet")
+
+    def column_ranges(self, table: str, column: str) -> list[tuple | None]:
+        """Per row group, the column's (min, max) from the footer; None where it holds none."""
+        metadata = pq.ParquetFile(self.directory / f"{table}.parquet").metadata
+        at = [metadata.schema.column(i).name for i in range(metadata.num_columns)].index(column)
+        ranges = []
+        for group in range(metadata.num_row_groups):
+            stats = metadata.row_group(group).column(at).statistics
+            ranges.append((stats.min, stats.max) if stats is not None and stats.has_min_max else None)
+        return ranges
 
 
 @functools.lru_cache(maxsize=4)
@@ -432,6 +464,16 @@ def _sections(path: pathlib.Path) -> dict:
     return sections
 
 
+def cpu_rows(path: pathlib.Path) -> dict[str, list[tuple[str, int]]]:
+    """A `<mode>-<tier>.cpu.txt` golden as each query's nodes in pre-order, `(kind, output_rows)`
+    — the engine's own CPU run over the whole dataset."""
+    rows = {}
+    for query, text in _sections(path).items():
+        rows[query] = [(match[1], int(match[2])) for match in
+                       re.finditer(r"^\s*(Gpu\w+)\b.*?\boutput_rows=(\d+)", text, re.MULTILINE)]
+    return rows
+
+
 def schema_of(*frames, **computed) -> pd.DataFrame:
     """A zero-row frame with every column these frames carry, plus the computed ones.
 
@@ -486,6 +528,13 @@ def execute(root, budget: int | None = BUDGET):
     frames = [batch.frame for batch in driver.results]
     got = concatenate(frames) if frames else pd.DataFrame()
     return got, driver
+
+
+def execute_lanes(root, budget: int | None = BUDGET) -> list[pd.DataFrame]:
+    """`root` run, its output by lane — a build side's batch per lane, as a probe plan keeps it."""
+    driver = partitioned_driver(Plan.build(root), backend_selector(), budget)
+    driver.run()
+    return [concatenate([batch.frame for batch in lane]) for lane in driver.root_lanes]
 
 
 def same(got: pd.DataFrame, want: pd.DataFrame, label: str) -> None:

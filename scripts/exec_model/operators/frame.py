@@ -90,6 +90,26 @@ def concatenate(frames: list[pd.DataFrame]) -> pd.DataFrame:
     return normalize(pd.concat(non_empty or frames[:1], ignore_index=True))
 
 
+def sort_frame(frame: pd.DataFrame, by, ascending, nulls_first) -> pd.DataFrame:
+    """A stable sort, `cudf::order` and `cudf::null_order` both explicit — rule 3.
+
+    `nulls_first` is one flag for every key or one per key. pandas places nulls by a single
+    `na_position` for the whole sort, and DataFusion's default mixes them (`desc` nulls
+    first, `asc` nulls last), so a mixed sort orders on a null indicator ahead of each key.
+    """
+    placements = [nulls_first] * len(by) if isinstance(nulls_first, bool) else list(nulls_first)
+    if len(set(placements)) == 1:
+        position = "first" if placements[0] else "last"
+        return frame.sort_values(by=by, ascending=ascending, na_position=position, kind="stable")
+    keys, orders = {}, []
+    for i, (column, up, first) in enumerate(zip(by, ascending, placements)):
+        values = frame[column].reset_index(drop=True)
+        keys[f"nulls{i}"], keys[f"key{i}"] = values.isna(), values
+        orders += [not first, up]
+    order = pd.DataFrame(keys).sort_values(by=list(keys), ascending=orders, kind="stable").index
+    return frame.iloc[order]
+
+
 def empty_like(frame: pd.DataFrame) -> pd.DataFrame:
     """A zero-row frame with the same columns and dtypes."""
     return frame.iloc[0:0].copy()

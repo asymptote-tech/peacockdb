@@ -13,7 +13,7 @@ from ..batch import CallStats
 from ..executors import BatchAccumulatorExecutor, LaneEvent, PartitionAccumulatorExecutor
 from ..limit import RowInterval, RowRange
 from . import aggregates
-from .frame import PandasBatch, concatenate, empty_frame, no_scratch, scratch_of
+from .frame import PandasBatch, concatenate, empty_frame, no_scratch, scratch_of, sort_frame
 
 # The contract every SingleBatch accumulator here honours: exactly one batch at done, even
 # when nothing was accumulated (F7 — a join's build lane cannot tell an empty build side
@@ -275,7 +275,7 @@ class AggregateBatches(BatchAccumulatorExecutor):
         """Fold every pending arrival into the state. Returns the transient's size."""
         frames = ([] if self._state is None else [self._state]) + self._pending
         merged = frames[0] if len(frames) == 1 else concatenate(frames)
-        self._state = aggregates.merge(merged, self.keys, self.aggs)
+        self._state = self._merge(merged)
         self._pending, self._pending_bytes = [], 0
         self.compactions += 1
         # A compaction that did not shrink will not shrink next time either — the keys are
@@ -291,11 +291,32 @@ class AggregateBatches(BatchAccumulatorExecutor):
         if state is None:
             # Zero-input lane: the schema IS the output — no phase left to run over it.
             out = _empty_single_batch(self.name, self.schema)
-        elif self.final_exprs is not None:
-            out = aggregates.finalize(state, self.keys, self.aggs)
         else:
-            out = state
+            out = self._emit(state)
         return [PandasBatch(out, f"[{'+'.join(tags)}]>{self.name}")], no_scratch()
+
+    def _merge(self, frame: pd.DataFrame) -> pd.DataFrame:
+        return aggregates.merge(frame, self.keys, self.aggs)
+
+    def _emit(self, state: pd.DataFrame) -> pd.DataFrame:
+        if self.final_exprs is None:
+            return state
+        return aggregates.finalize(state, self.keys, self.aggs)
+
+
+class PlanAggregateBatches(AggregateBatches):
+    """An engine `GpuAggregateBatches`: the same compaction, the plan's own calls."""
+
+    def __init__(self, body: aggregates.PlanAggregate, name: str, schema: dict | None = None,
+                 compact_bytes: int = DEFAULT_COMPACT_BYTES):
+        super().__init__(None, None, body.final, name, schema, compact_bytes)
+        self.body = body
+
+    def _merge(self, frame: pd.DataFrame) -> pd.DataFrame:
+        return self.body.aggregate(frame)
+
+    def _emit(self, state: pd.DataFrame) -> pd.DataFrame:
+        return self.body.emit(state)
 
 
 class AccumulateBatchesAndSort(BatchAccumulatorExecutor):
@@ -331,12 +352,7 @@ class AccumulateBatchesAndSort(BatchAccumulatorExecutor):
         if not frames:
             out = _empty_single_batch(self.name, self.schema)
             return [PandasBatch(out, f"[]>{self.name}")], no_scratch()
-        out = concatenate(frames).sort_values(
-            by=self.by,
-            ascending=self.ascending,
-            na_position="first" if self.nulls_first else "last",
-            kind="stable",
-        )
+        out = sort_frame(concatenate(frames), self.by, self.ascending, self.nulls_first)
         merged = out
         if self.fetch is not None:
             out = out.iloc[: self.fetch]
@@ -388,12 +404,7 @@ class MergeSortedPartitions(PartitionAccumulatorExecutor):
         if not frames:
             out = _empty_single_batch(self.name, self.schema)
             return [PandasBatch(out, f"[]>{self.name}")], no_scratch()
-        out = concatenate(frames).sort_values(
-            by=self.by,
-            ascending=self.ascending,
-            na_position="first" if self.nulls_first else "last",
-            kind="stable",
-        )
+        out = sort_frame(concatenate(frames), self.by, self.ascending, self.nulls_first)
         merged = out
         if self.fetch is not None:
             out = out.iloc[: self.fetch]

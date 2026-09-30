@@ -46,6 +46,7 @@ from ..operators.expressions import (
     Round,
     Substring,
     Upper,
+    project,
 )
 from ..operators.frame import PandasBatch, concatenate
 from ..operators.joins import HashJoin, JoinType
@@ -111,6 +112,10 @@ def test_project_output_column_order_is_the_expression_order():
     assert out.frame["sum"].iloc[0] == 3
 
 
+def test_a_projection_of_no_columns_keeps_the_rows():
+    assert len(project(pd.DataFrame({"v": [1, 2, 3]}), [])) == 3
+
+
 def test_is_not_null_is_available_as_a_predicate():
     # The filter #137 wants inserted under a shuffle on placement-free sides.
     frame = pd.DataFrame({"k": [1.0, np.nan, 3.0]})
@@ -125,6 +130,14 @@ def test_sort_null_placement_is_explicit_in_both_directions():
     assert np.isnan(last.frame.v.iloc[-1])
     first, _ = SortExec(["v"], nulls_first=True).exec(batch(frame))
     assert np.isnan(first.frame.v.iloc[0])
+
+
+def test_null_placement_is_per_key_when_the_keys_differ():
+    # DataFusion's default mixes them — `desc` nulls first, `asc` nulls last — and an engine
+    # plan carries the placement per key.
+    frame = pd.DataFrame({"a": [1.0, np.nan, 1.0, np.nan], "b": [np.nan, 2.0, 3.0, np.nan]})
+    out, _ = SortExec(["a", "b"], nulls_first=[False, True]).exec(batch(frame))
+    assert out.frame.fillna(-1).values.tolist() == [[1, -1], [1, 3], [-1, -1], [-1, 2]]
 
 
 def test_per_batch_sort_fetch_is_a_top_n_within_the_batch():
@@ -348,6 +361,14 @@ def test_the_same_key_always_lands_in_the_same_partition():
     left = partition_ids(pd.DataFrame({"k": [1, 2, 3]}), ["k"], 4)
     right = partition_ids(pd.DataFrame({"k": [3, 2, 1]}), ["k"], 4)
     assert left == right[::-1]
+
+
+def test_a_key_lands_by_its_value_not_by_how_pandas_holds_it():
+    # An integer key holding a null is float64 in pandas; the other side's is int64. The
+    # two must co-locate, or a four-lane join matches nothing across them (tpcds, tp4).
+    ints = partition_ids(pd.DataFrame({"k": [1, 2, 3]}), ["k"], 4)
+    floats = partition_ids(pd.DataFrame({"k": [1.0, 2.0, 3.0, None]}), ["k"], 4)
+    assert floats[:3] == ints
 
 
 # -- joins ------------------------------------------------------------------------

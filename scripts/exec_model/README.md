@@ -47,7 +47,7 @@ as a script, so the relative imports resolve either way.
 | File | Holds |
 |---|---|
 | `layout.py` | `NodeKind`, `KeyDistribution`, `SortOrder`, `BatchLayout`, `PartitionLayout` |
-| `errors.py` | `PlanError`, `DriverError`, `ResidentBudgetExceeded` — what each failure class means |
+| `errors.py` | `PlanError`, `DriverError`, `ResidentBudgetExceeded`, `EnginePlanFormatError`, `StatsError` — what each failure class means |
 | `batch.py` | the `Batch` value type and `CallStats` |
 | `executors.py` | `Executor` plus the seven executor traits and `LaneEvent` |
 | `forwarder.py` | `BatchForwarder` and the merge / union / interleave mappings |
@@ -58,23 +58,42 @@ as a script, so the relative imports resolve either way.
 | `limit.py` | `RowInterval`, `RowRange`, and the per-batch decision behind the two lowerings |
 | `runtime.py` | per-node queue state and one lane's view of its inputs |
 | `single_partition_driver.py` | one lane of one lane-scoped node |
-| `partitioned_driver.py` | the scheduler and everything cross-partition |
+| `partitioned_driver.py` | everything cross-partition, and the events it tells the scheduler: a readiness index, a join lane leaving build, a limit satisfied |
+| `scheduler.py` | which node runs next — `executor/driver/scheduler.rs`'s interface: events in, `pick() -> Pick{run, prefetch}` out, holds as counters; with the `prefetch` policy the pick also names unheld source lanes to fetch ahead |
 | `operators/frame.py` | the pandas batch, and the rules that keep pandas inside cuDF's vocabulary |
 | `operators/expressions.py` | the expression IR — what `cudf::ast` accepts, nothing more |
-| `operators/aggregates.py` | aggregate specs and the init / merge / finalize decomposition, and the registry that emits each one's finalize expressions |
-| `operators/source.py` | the loader and the row-group → (partition, batch) policy (T2) |
-| `operators/exec_ops.py` | filter, project, sort, partial aggregate, limit, unload |
-| `operators/accumulators.py` | coalesce-all, aggregate-batches, accumulate-and-sort, merge-sorted |
+| `operators/aggregates.py` | aggregate specs and the init / merge / finalize decomposition, and the registry that emits each one's finalize expressions; an engine plan's aggregates run as the plan decomposed them (`PlanAggregate`) |
+| `operators/source.py` | the loader and the row-group → (partition, batch) policy (T2); an engine scan's real row groups as row ranges, a batch's bytes fetchable ahead of its decode (read once either way); a memory source's lane, its one kept batch |
+| `operators/exec_ops.py` | filter, project, sort, partial aggregate, an engine plan's aggregate, limit, unload |
+| `operators/accumulators.py` | coalesce-all, aggregate-batches (and an engine plan's), accumulate-and-sort, merge-sorted |
 | `operators/partition_ops.py` | the hash scatter |
 | `operators/join_types.py` | `JoinType` in the fbs vocabulary, and the capability matrix as a function both join backends read |
-| `operators/joins.py` | the pandas join backend — nine hash-join types, cross, nested loop |
+| `operators/joins.py` | the pandas join backend — nine hash-join types, cross, nested loop; their positional forms for engine plans, and what each type emits before its projection |
 | `operators/cudf_calls.py` | the cuDF calls `cpp/src/operators/join.cpp` makes, modelled: joins that return gather maps, `gather` with its out-of-bounds policy, `scatter`, `apply_boolean_mask` |
 | `operators/recipe.py` | the FlatBuffers node structs, the handle registry with consume-on-use, and the C++ that reads them |
 | `operators/recipe_join.py` | the second join backend: answers every call by emitting fb nodes and making `execute_node` calls |
-| `operators/nodes.py` | `GpuNode` implementations wiring the operators into plans |
+| `operators/nodes.py` | `GpuNode` implementations wiring the operators into plans; the builders an engine plan's nodes need — its scan, positional joins, plan-level aggregates — and the layouts they declare |
 | `operators/validation.py` | the checks a node's `_validator` is composed from with `all_of` — layout expectations and the aggregate state chain. The method is abstract on `GpuNode` (`node.py`) and implemented once, on `PandasNode` (`operators/nodes.py`), which just runs that validator |
 | `operators/injection.py` | `LayoutInjector` — rewrite a plan's partitioning, batching and hash placement |
 | `plan_text.py` | rendering a plan as text, for the corpus plan goldens |
+| `engine_plan.py` | the engine planner's `<mode>.plans.txt` goldens read back into trees — node lines and refusals, field values verbatim, the schema as (name, type) pairs with names unquoted; `GpuMemorySource`, the prototype's own kind the engine does not have yet, is read too |
+| `engine_expr.py` | the engine's expression text parsed back into a syntax tree and rendered again (`expr_text`) — `plan_text/expr_text.rs` both ways; a literal stays text, since the rendering does not print its type |
+| `engine_ir.py` | a node's expression fields in the expression IR — ordinals resolved to frame names (`name@ordinal` where a schema repeats a name), each literal typed by what it meets |
+| `engine_nodes.py` | an engine plan tree built as a prototype plan, one engine node to one prototype node; each output named by its node's schema; a hash join's fanout from the estimate, where one is given; a `GpuMemorySource` from the frames `tables.materialized` holds, laid out as they were made |
+| `engine_run.py` | a prototype run of an engine plan rendered as the engine renders its own (`cpu.txt`): node lines, `output_rows`, per-lane `in_rows`/`batch_rows` |
+| `dynamic_filters.py` | dynamic filters: which joins can prune a fact scan's row groups (filtered build, key lifted to an ordered scan column), the probe plan — the build side itself, whose lanes the main plan then reads as a memory source, so the side is read once — the host reducer, and the replan that re-maps each pruned scan as the engine's partitioner would |
+| `stats.py` | table statistics for the estimator — NDV and strings' mean length from the committed sidecar (`testdata/gen_stats.py`), rows, min/max and nulls from the footer over the row groups a scan reads; a sidecar that is missing or no longer matches its file is refused |
+| `observed.py` | the NDV of an intermediate result: a materialized build side's from per-lane counts — exact where the lanes are hashed on the counted columns, bounds otherwise — and a stream's cap |
+| `estimator.py` | filter selectivity from NDV, min/max and nulls — equality as 1/NDV, a range as the share of evenly spaced values, bounds on one column merged, DuckDB's 20% where statistics cannot speak |
+| `cardinality.py` | every node's row estimate over an engine plan — column lineage and NDV carried up, a join over containment and the key domain its sides share, semi / anti / outer by the share of rows that match; a memory source is `known`, `measured` from its frames — true rows, NDV clamped into what the lanes' counts bound |
+| `cost.py` | C_out in bytes — each join's estimated rows times the width of what it passes on, a string by its mean length from the sidecar |
+| `join_order.py` | what DPhyp is asked of a set of a cluster's relations — its rows by `cardinality`'s formulas in one canonical order, and its C_out bytes — the orientation pass: each join's cheaper build, the build copied per probe batch while #152 is open, a probe shuffled onto the join's lanes cut once per lane — and `optimize`: every cluster of a plan reordered by DPhyp on C_out, oriented and disassembled |
+| `adaptive.py` | the adaptive loop's events: a driver that reports each join's `BuildDone` before it sets a build (true rows, bytes, key NDV) — and `BuildExceeds` where a build passes its cap — to a hook that may stop the run with the build left queued; a stopped run's `extraction` — the build just done and those set but not probed, where nothing else has started |
+| `replan.py` | the adaptive loop: a build further than `threshold` times off its estimate stops the run, every build made so far becomes a memory source, the plan is optimized again with their sizes known and run by a new driver; a replan that would run started work again is refused. `WithMaterialized`, the tables such a plan reads its memory sources from |
+| `call_cost.py` | the cost of one device call by kind, `fixed + slope × volume`, fitted from the benchmark's calibration record — what decides lanes and batch size, where C_out cannot see a difference |
+| `dphyp.py` | DPhyp from the `peacockdb-dphyp` crate through its C ABI (`ctypes`): the library by `PEACOCK_DPHYP_LIB`, refused without it; the tree as disassembly takes it |
+| `multijoin.py` | a cluster of inner joins as DPhyp takes it in — relations, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included |
+| `disassembly.py` | a join order back into an engine plan — keys, residual and projection from the MultiJoin's identities, wiring as the translator derives it; `baseline` is the order the plan already has |
 | `tests/corpus.py` | reading the generated datasets, the corpus budget, the layout runner, and the plan-golden check |
 | `tests/plans_tpch*.py`, `tests/plans_tpcds*.py` | the corpus query lowerings — builders over a table provider, so a plan needs no data |
 | `tests/plan_helpers.py` | the aggregate and sort sequences every lowering is built from |
@@ -117,10 +136,14 @@ join waiting on its other side, and putting the build side on the left removes t
 One rule sits on top of the height rule: **a join in its build phase holds back its whole
 probe subtree**, transitively to the root. F3 below has the reasoning and the evidence.
 
-`partitioned_driver` owns the tree, the queues, the schedule and the three cross-lane
-categories, and delegates each lane-scoped call to `single_partition_driver`. The unit
-is one node's lane rather than a chain of them: min-height selection walks a batch up a
-chain node by node on its own.
+`partitioned_driver` owns the tree, the queues and the three cross-lane categories, and
+delegates each lane-scoped call to `single_partition_driver`. The unit is one node's lane
+rather than a chain of them: min-height selection walks a batch up a chain node by node on
+its own. The choice itself is `scheduler.Scheduler`'s, as in Rust: the driver reports what a
+step changed — the readiness of the node that ran and of its parent, a join lane leaving
+build, a limit satisfied — and the holds are counters there, not walks to the root. The walk
+survives as a test oracle, `tests/rescan.py`: the driver helpers of five suites check every
+pick against it, and runs each plan again reading ahead: the same calls in the same steps, the fetches beside them.
 
 ## The two join backends
 
@@ -165,6 +188,22 @@ text lowered by hand into the mode's nodes, over **whole** sf1 tables with the s
 parameters. 22 TPC-H queries and 71 TPC-DS ones: every TPC-DS query the engine already runs
 in `full_table` mode (`testdata/cost-registry.csv`, `ftc_tp1 = enabled`) except the seven
 that need a window function, which the mode has no node for.
+
+`tests/test_engine_answers.py` runs the engine's **own** plans the same way: each planned query
+of a mode's `plans.txt` golden, built by `engine_nodes.py`, against DuckDB — all 120 at
+`tp4-single`. `tests/test_engine_dynamic_filters.py` runs them again pruned by
+their dynamic filters (`dynamic_filters.py`): still DuckDB's answer, and no more row groups than
+DuckDB's own filter keeps. `tests/test_engine_corpus.py` needs no data: every golden plan builds,
+validates, and declares the layout the engine printed for each node. `tests/test_stats_sidecar.py`
+checks the committed NDV sidecars (`testdata/stats/`) against the generated data — footers only —
+and `tests/test_cardinality_corpus.py` every join's row estimate (`cardinality.py`) against the
+`output_rows` of the engine's own CPU run in `<mode>-mini.cpu.txt`.
+`tests/test_disassembly_corpus.py` needs no data either: every cluster of every golden,
+disassembled in the order it has (`disassembly.py`), builds a plan the engine would lay out the
+same. `tests/test_engine_reassembled.py` runs those plans: still DuckDB's answer, and every join
+the rows the engine's CPU run gave it.
+`tests/test_engine_optimized.py` runs the plans `join_order.optimize` makes of them — every
+cluster reordered by DPhyp and oriented — against DuckDB; it needs the DPhyp library.
 
 **Two oracles, on purpose.** TPC-H has a hand-written pandas equivalent per query: it states
 what the query means in a second language, and catches a lowering that answered a

@@ -19,12 +19,13 @@ node wins and the build subtree drains first.
 out-queue is drained by its parent before the producer runs again, since the parent's
 height is strictly lower. The one shape that breaks it is a join in its build phase — it
 cannot consume a probe batch yet, so nothing drains its probe child — and that is closed
-by holding the join's whole probe subtree until the build is set (`_held_by_a_join_build`).
+by holding the join's whole probe subtree until the build is set (`Scheduler`'s join hold).
 With the hold in place the bound is unconditional, and the draft's cap-Q mechanism is
 unnecessary — nothing here caps a queue.
 
 Lane-scoped work is delegated to `single_partition_driver`; this driver owns the
-tree, the queues, the schedule, and the three cross-lane categories.
+tree, the queues and the three cross-lane categories, and tells `scheduler.Scheduler` what
+changed — a readiness index, a join lane leaving build, a limit satisfied — which picks the node.
 """
 
 from __future__ import annotations
@@ -38,11 +39,8 @@ from .executors import LaneEvent
 from .node import LANE_SCOPED, BackendSelector, ExecutorCategory
 from .plan import Plan, PlanNodeInfo
 from .runtime import LaneInputs, NodeState
-from .single_partition_driver import (
-    PROBE_SLOT,
-    JoinPhase,
-    single_partition_driver,
-)
+from .scheduler import Pick, PlanShape, Scheduler
+from .single_partition_driver import single_partition_driver
 
 #: Safety valve: a step that neither moves a batch nor finalizes a lane cannot happen,
 #: so a run that never ends is a bug in the scheduler, and the prototype should say so.
@@ -59,11 +57,14 @@ class TraceEvent:
 
 
 class PartitionedDriver:
-    def __init__(self, plan: Plan, selector: BackendSelector, budget: int | None = None):
+    def __init__(self, plan: Plan, selector: BackendSelector, budget: int | None = None,
+                 prefetch: bool = False):
         self.plan = plan
         self.selector = selector
         self.accountant = ResidentAccountant(budget)
         self.results: list[Batch] = []
+        #: the root's output by its lane — what a plan whose root is not a sink hands on
+        self.root_lanes: list[list[Batch]] = [[] for _ in range(plan.nodes[plan.root].n_lanes)]
         self.trace: list[TraceEvent] = []
         self.steps = 0
         #: per node: rows of its input stream seen so far, summed over every lane. Only
@@ -75,6 +76,22 @@ class PartitionedDriver:
             NodeState.create(info, self._input_lane_count(info)) for info in plan.nodes
         ]
         self.peak_queued: list[int] = [0] * len(plan.nodes)
+        #: per node, per its lane: (rows, bytes) of every batch it emitted, in order
+        self.emitted: list[list[list[tuple[int, int]]]] = [
+            [[] for _ in range(info.n_lanes)] for info in plan.nodes
+        ]
+        #: per node, per child slot, per that child's lane: rows it took
+        self.consumed: list[list[list[int]]] = [
+            [[0] * plan.nodes[child].n_lanes for child in info.children] for info in plan.nodes
+        ]
+        self._prefetching = prefetch
+        #: host bytes fetched ahead and not yet decoded, by (source node, lane); and their peak
+        self.fetched: dict[tuple[int, int], int] = {}
+        self.fetched_peak = 0
+        self.scheduler = Scheduler(PlanShape.of(plan, [self._readiness_count(s) for s in self.states]),
+                                   prefetch)
+        for state in self.states:
+            self._refresh(state)
 
     # -- public ------------------------------------------------------------------
 
@@ -92,97 +109,88 @@ class PartitionedDriver:
     @property
     def early_exit(self) -> bool:
         """The run stopped because a limit was satisfied, not because work ran out."""
-        return any(self._is_satisfied(state) for state in self.states)
+        return self.scheduler.any_satisfied()
+
+    def satisfied(self) -> list[int]:
+        """The nodes whose row interval the run satisfied — the early exits, by node id."""
+        return [state.info.id for state in self.states if self.scheduler.is_satisfied(state.info.id)]
 
     def step(self) -> bool:
-        """Run one node — every lane of it. False when nothing is runnable."""
-        chosen = self.choose()
-        if chosen is None:
+        """Run one node — every lane of it — after the source lanes the pick reads ahead.
+        False when nothing is runnable."""
+        pick = self._pick()
+        if pick is None:
             return False
         self.steps += 1
+        for node, lane in pick.prefetch:
+            self._prefetch(self.states[node], lane)
+        chosen = self.states[pick.run]
         self._run(chosen)
+        # A node's readiness is a fact about its inputs: the step changed the node's own and,
+        # through its queues, its parent's; a child's queue it took from is what makes a source
+        # lane fetchable again.
+        for state in (chosen, *(self.states[c] for c in chosen.info.children)):
+            self._refresh(state)
+        if chosen.info.parent is not None:
+            self._refresh(self.states[chosen.info.parent])
         self._settle_limits()
         self._drain_root()
         return True
 
     def runnable_nodes(self) -> list[PlanNodeInfo]:
-        return [s.info for s in self.states if self._runnable(s)]
+        return [self.plan.nodes[node] for node in sorted(self.scheduler.runnable())]
 
     # -- scheduling --------------------------------------------------------------
 
     def choose(self) -> NodeState | None:
         """The scheduling decision: smallest height among runnable nodes, ties leftmost."""
-        candidates = [s for s in self.states if self._runnable(s)]
-        if not candidates:
-            return None
-        return min(candidates, key=lambda s: (s.info.height, s.info.order))
+        pick = self._pick()
+        return None if pick is None else self.states[pick.run]
 
-    def _runnable(self, state: NodeState) -> bool:
-        if self._held_by_a_join_build(state) or self._held_by_a_satisfied_limit(state):
-            return False
+    def _pick(self) -> Pick | None:
+        return self.scheduler.pick()
+
+    def _prefetch(self, state: NodeState, lane: int) -> None:
+        """The host half of a source's next call: its bytes, held for the decode."""
+        self.fetched[(state.info.id, lane)] = self._lane_driver(state, lane).executor.prefetch()
+        self.fetched_peak = max(self.fetched_peak, sum(self.fetched.values()))
+        self.scheduler.set_fetchable(state.info.id, lane, False)
+        self._record(state, lane, "prefetch", 0)
+
+    def _readiness_count(self, state: NodeState) -> int:
+        category = state.info.category
+        if category is ExecutorCategory.PARTITION_EMITTER:
+            return 1
+        if category is ExecutorCategory.PARTITION_ACCUMULATOR:
+            return len(state.lane_done_sent)
+        return state.info.n_lanes
+
+    def _refresh(self, state: NodeState) -> None:
+        for index in range(self._readiness_count(state)):
+            self.scheduler.set_lane_ready(state.info.id, index, self._index_ready(state, index))
+        if self._prefetching and state.info.category is ExecutorCategory.SOURCE:
+            for lane in range(state.info.n_lanes):
+                self.scheduler.set_fetchable(state.info.id, lane, self._fetchable(state, lane))
+
+    def _fetchable(self, state: NodeState, lane: int) -> bool:
+        """A next batch to fetch, and an empty place in the queue for it to go once decoded."""
+        driver = self._lane_driver(state, lane)
+        return not driver.finished and not state.out_queues[lane] and driver.executor.can_prefetch()
+
+    def _index_ready(self, state: NodeState, index: int) -> bool:
         category = state.info.category
         if category in LANE_SCOPED:
-            return any(
-                self._lane_driver(state, lane).can_step(self._lane_inputs(state, lane))
-                for lane in range(state.info.n_lanes)
-            )
+            return self._lane_driver(state, index).can_step(self._lane_inputs(state, index))
         if category is ExecutorCategory.PARTITION_EMITTER:
             inputs = self._lane_inputs(state, 0)
             return inputs.has(0) or (inputs.done(0) and not state.emitter_finished)
         if category is ExecutorCategory.PARTITION_ACCUMULATOR:
-            return any(
-                self._accumulator_lane_ready(state, lane)
-                for lane in range(len(state.lane_done_sent))
-            )
+            return self._accumulator_lane_ready(state, index)
         if category is ExecutorCategory.BATCH_FORWARDER:
-            return any(
-                self._forwarder_lane_ready(state, lane) for lane in range(state.info.n_lanes)
-            )
+            return self._forwarder_lane_ready(state, index)
         raise DriverError(f"{state.info}: unhandled category {category.value}")
 
     # -- backpressure ------------------------------------------------------------
-
-    def _held_by_a_join_build(self, state: NodeState) -> bool:
-        """A join in its build phase holds back its whole probe subtree.
-
-        The join itself cannot consume a probe batch until `set_build` has run, so
-        without this the probe side runs anyway and its output piles up. Blocking only
-        the probe *child* would not help — its own child would keep producing and the
-        pile would simply move one node down — so the hold is transitive over every edge
-        on the path to the root.
-
-        This cannot deadlock. Plans are trees, so a join's build subtree is disjoint from
-        its probe subtree and is never held by this rule; the build side therefore always
-        has a runnable node until it completes, and completing it is what lifts the hold.
-        Nested joins resolve outermost-first for the same reason.
-        """
-        info = state.info
-        while info.parent is not None:
-            parent = self.states[info.parent]
-            if (
-                parent.info.category is ExecutorCategory.JOIN
-                and info.child_slot == PROBE_SLOT
-                and self._awaits_build(parent)
-            ):
-                return True
-            info = parent.info
-        return False
-
-    def _held_by_a_satisfied_limit(self, state: NodeState) -> bool:
-        """A satisfied limit holds its whole subtree, and itself.
-
-        The same shape as the join hold, and for the same reason: blocking one node would
-        leave its child producing into a queue nothing drains. It differs in never lifting
-        — no later batch can change an answer that is already complete — so a run ends here
-        with lanes not done and queues non-empty, which is what `_drop_in_flight` is for.
-        """
-        info = state.info
-        while True:
-            if self._is_satisfied(self.states[info.id]):
-                return True
-            if info.parent is None:
-                return False
-            info = self.states[info.parent].info
 
     def _is_satisfied(self, state: NodeState) -> bool:
         """Enough rows have reached this node that no later one can change its answer."""
@@ -192,27 +200,21 @@ class PartitionedDriver:
     def _settle_limits(self) -> None:
         """A satisfied limit will never produce again, so say so before anything waits.
 
-        Without this the hold below would also stop the node itself from reporting done,
-        and its parent would wait forever for a lane that had in fact finished. The
-        pathological case is a zero-row interval, satisfied before a single step: the plan
-        has to complete and return nothing, not stall.
+        Without this its hold would also stop the node itself from reporting done, and its
+        parent would wait forever for a lane that had in fact finished. The pathological case
+        is a zero-row interval, satisfied before a single step: the plan has to complete and
+        return nothing, not stall.
         """
         for state in self.states:
-            if self._is_satisfied(state) and not all(state.out_done):
+            if self._is_satisfied(state) and not self.scheduler.is_satisfied(state.info.id):
+                self.scheduler.satisfy(state.info.id)
                 state.out_done = [True] * len(state.out_done)
+                if state.info.parent is not None:
+                    self._refresh(self.states[state.info.parent])
 
     def _awaits_build(self, state: NodeState) -> bool:
-        """True while any of the join's lanes has yet to leave its build phase.
-
-        A lane with no driver yet has not been entered, so it is still in build.
-        """
-        for lane in range(state.info.n_lanes):
-            driver = state.lane_drivers.get(lane)
-            if driver is None:
-                return True
-            if not driver.finished and driver.join_phase is JoinPhase.BUILD:
-                return True
-        return False
+        """True while any of the join's lanes has yet to leave its build phase."""
+        return self.scheduler.is_building(state.info.id)
 
     # -- running -----------------------------------------------------------------
 
@@ -262,6 +264,9 @@ class PartitionedDriver:
                     if rows.covers(arriving):
                         rows = None   # every row wanted: the fetch needs no range
             result = driver.step(inputs, rows)
+            self.fetched.pop((state.info.id, lane), None)
+            if result.call == "set_build":
+                self.scheduler.lane_left_build(state.info.id)
             self.rows_seen[state.info.id] += arriving
             for batch in result.outputs:
                 self._enqueue(state, lane, batch)
@@ -307,7 +312,7 @@ class PartitionedDriver:
         executor = self._cross_executor(state)
         child = self.states[state.info.children[0]]
         for lane in range(len(state.lane_done_sent)):
-            inputs = LaneInputs([(child, lane)])
+            inputs = LaneInputs([(child, lane)], self.consumed[state.info.id])
             label = str(state.info)
             if inputs.has(0):
                 batch = inputs.take(0)
@@ -359,6 +364,8 @@ class PartitionedDriver:
                 # A move between queues: the batch stays in flight, so no accounting.
                 batch = child.out_queues[child_lane].popleft()
                 state.out_queues[lane].append(batch)
+                self.consumed[state.info.id][child_index][child_lane] += batch.num_rows()
+                self.emitted[state.info.id][lane].append((batch.num_rows(), batch.byte_size()))
                 state.cursors[lane] = (index + 1) % n
                 return batch
             if child.out_done[child_lane]:
@@ -394,7 +401,7 @@ class PartitionedDriver:
 
     def _lane_inputs(self, state: NodeState, lane: int) -> LaneInputs:
         sources = [(self.states[child], lane) for child in state.info.children]
-        return LaneInputs(sources)
+        return LaneInputs(sources, self.consumed[state.info.id])
 
     def _accumulator_lane_ready(self, state: NodeState, lane: int) -> bool:
         child = self.states[state.info.children[0]]
@@ -419,15 +426,17 @@ class PartitionedDriver:
 
     def _enqueue(self, state: NodeState, lane: int, batch: Batch) -> None:
         state.out_queues[lane].append(batch)
+        self.emitted[state.info.id][lane].append((batch.num_rows(), batch.byte_size()))
         self.accountant.hold(batch)
 
     def _drain_root(self) -> None:
         root = self.states[self.plan.root]
-        for queue in root.out_queues:
+        for lane, queue in enumerate(root.out_queues):
             while queue:
                 batch = queue.popleft()
                 self.accountant.release(batch)
                 self.results.append(batch)
+                self.root_lanes[lane].append(batch)
 
     def _drop_in_flight(self) -> None:
         """Release every batch still queued. Nothing will consume them now."""
@@ -451,7 +460,7 @@ class PartitionedDriver:
 
 
 def partitioned_driver(
-    plan: Plan, selector: BackendSelector, budget: int | None = None
+    plan: Plan, selector: BackendSelector, budget: int | None = None, prefetch: bool = False
 ) -> PartitionedDriver:
     """Constructor spelled as the driver name the spec uses."""
-    return PartitionedDriver(plan, selector, budget)
+    return PartitionedDriver(plan, selector, budget, prefetch)
