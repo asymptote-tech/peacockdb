@@ -18,7 +18,7 @@ so they are out of scope; their rows keep `32 143`.
 
 **Corpus queries:** `tpcds/q27` and `tpcds/q72`, plan cells off at all five modes.
 
-**Fix proposed:** fix 9 of `reports/corpus-fixes.md`, two session rules in
+**Fix proposed:** [fix 9 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix9), two session rules in
 `lib.rs::build_session_state`, with no upgrade.
 - `planner::MergeInputSort`, a `PhysicalOptimizerRule` inserted before `SanityCheckPlan`: under a
   `SortPreservingMergeExec` whose input does not satisfy its ordering, add a `SortExec` with the

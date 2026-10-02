@@ -219,12 +219,12 @@ validator refuses the width. Pinned by the two `bug_grouping_sets_…` cases in
 **Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join` and tpcds
 q5, q14, q18, q22, q77, q80. None reaches it on the device yet: each cell is off first on #152,
 #189 or #220. The value shows only through `GROUPING()`, and q70 and q86, the corpus's users, are
-window queries that never run. Simplest (from `reports/corpus-fixes.md`, fix 14):
+window queries that never run. Simplest (from [`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14)):
 `select n_regionkey, n_nationkey, grouping(n_regionkey, n_nationkey) as g, count(*) from nation
 group by rollup (n_regionkey, n_nationkey);` (tpch): 31 rows with g in {0, 1, 3} on the cpu; the
 device answers the five subtotal rows with g = 2.
 
-**Fix proposed:** fix 14 of `reports/corpus-fixes.md`, in C++ alone. A static
+**Fix proposed:** [fix 14 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix14), in C++ alone. A static
 `grouping_id_column(gid, nkeys, rows)` in `aggregate.cpp` folds `gid = (gid << 1) | masked` into a
 `uint64_t` and builds `numeric_scalar<uint8_t/uint16_t/uint32_t/uint64_t>` by `nkeys` ≤ 8/16/32,
 throwing past 64 keys as DataFusion does. No wire change and no golden regenerates: payloads print
@@ -251,10 +251,10 @@ own merge. So q16, q94 and q95 plan, and q28 keeps the flag. `decompose`
 
 **Corpus queries:** `tpcds/q28`, six global `avg, count, count(DISTINCT ss_list_price)` blocks
 cross-joined. Refused at every mode on both engines (registry: cpu and gpu `na`). Next, per
-`reports/corpus-fixes.md` fix 11 and unconfirmed: the cpu cells pass now that #163 has landed,
+[`reports/corpus-fixes.md` fix 11](../reports/corpus-fixes.md#fix11) and unconfirmed: the cpu cells pass now that #163 has landed,
 and the device cells meet #152, the cross join copying its build side.
 
-**Fix proposed:** fix 11 of `reports/corpus-fixes.md`, with `62-review.md`. The translator does
+**Fix proposed:** [fix 11 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix11), with `62-review.md`. The translator does
 the rewrite DataFusion declines, as two aggregate sequences in `aggregate_sequence`. It applies
 when every DISTINCT aggregate is a `count` of one shared argument `x`. The inner sequence groups
 by `(keys, x)` and runs the other aggregates' inits, shuffled on `(keys, x)` where lanes split;
@@ -510,7 +510,7 @@ for any `CASE x WHEN v THEN …`. The search form, `CASE WHEN x = v THEN …`, f
 known refusals.
 
 Filed as a wrong answer: the value form came back all-0 or all-null, so it was reverted to a
-throw. `reports/corpus-fixes.md` (fix 7) found that a misdiagnosis. The gtest built every Int64
+throw. [`reports/corpus-fixes.md` (fix 7)](../reports/corpus-fixes.md#fix7) found that a misdiagnosis. The gtest built every Int64
 literal as 0, because `CreateScalarValue`'s second parameter is `is_null`, and the lowering had
 run q39 correctly at 8f471cc0. The guard stayed on that false measurement.
 
@@ -520,7 +520,7 @@ read twice). All five gpu cells are off and registry row 40 tags `57` alone. At 
 is the refusal (`corpus_cases.inc:284`); the other four modes have not run on a device and may
 meet [#152](joins.md#t152) next.
 
-**Fix proposed:** fix 7 of `reports/corpus-fixes.md`, about 20 lines in `build_column_case`.
+**Fix proposed:** [fix 7 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix7), about 20 lines in `build_column_case`.
 Delete the throw and build the comparand once. Each WHEN becomes `binary_operation(comparand,
 when, EQUAL, BOOL8)`, with a scalar fast path for a literal WHEN, feeding the search form's fold
 unchanged. A NULL never matches, since `copy_if_else` reads a null condition as false, and the
@@ -535,7 +535,7 @@ from `plan/mod.rs` and `57` from registry row 40 in the same change.
 
 Filed against the old executor: the device built a cuDF AST for `sum(CASE WHEN <string equality>
 …)`, and cuDF refused with binaryop "Unsupported operator", since its AST cannot compare strings.
-`reports/corpus-fixes.md` traced the recorded error to the old Final phase, which evaluated the
+[`reports/corpus-fixes.md`](../reports/corpus-fixes.md) traced the recorded error to the old Final phase, which evaluated the
 arguments in every phase — the same root as #55.
 
 Neither path is left. The aggregate builds no AST: only `filter.cpp` calls `cudf_ast_can_evaluate`. Its
@@ -564,14 +564,14 @@ and computes `ip + round(fp·10^p)/10^p`; DataFusion computes `(x·10^p).round()
 puts `2 + fl(0.78)` on a midpoint of the result grid, and ties-to-even takes the upper double.
 Re-emulated over q78's committed answer, exactly five `ratio` cells split under `golden_exact`;
 q2 takes the same kernel seven times per row. This ticket used to describe an anti join and memory
-pressure on q78 (`reports/corpus-fixes.md` fix 6 found neither), and called `round` proven by q54.
+pressure on q78 ([`reports/corpus-fixes.md` fix 6](../reports/corpus-fixes.md#fix6) found neither), and called `round` proven by q54.
 
 **Corpus queries:** tpcds q78 and q2, both off first on #152. After #152, q78 at `gpu_tp1_single`
 must differ from the golden in exactly the five `ratio` cells before this fix and in nothing
 after. Simplest: `select n_nationkey, round((cast(n_nationkey as double) * 25.0) / 9.0, 2) as r
 from nation;` (tpch): two rows differ on the device today.
 
-**Fix proposed:** fix 6 of `reports/corpus-fixes.md`, in `expr.cpp`. `places == 0` keeps
+**Fix proposed:** [fix 6 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix6), in `expr.cpp`. `places == 0` keeps
 `cudf::round(·, 0, HALF_UP)`. Otherwise multiply by a FLOAT64 scalar `10^|p|` (exact for p ≤ 22;
 `1/10^|p|` for a negative p), `cudf::round(·, 0, HALF_UP)`, divide: bit-identical to DataFusion.
 The comment beside it names which kernel agrees. The cpu relays `round` to DataFusion,

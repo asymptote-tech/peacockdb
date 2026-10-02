@@ -34,6 +34,7 @@ together, most first. The raw proposals and critiques are in
 
 ## Proposals
 
+<a id="fix1"></a>
 ### 1. CPU nested-loop join keeps its projection — S
 
 **Closes:** #190. Re-attributes nothing. Clears the same axis for tpch/q22 and tpcds/q24, which
@@ -74,6 +75,7 @@ tpch sf1, tp1-single, cpu. Plans as `GpuNestedLoopJoin … projection=[n_name@1]
 first probe call, "3 columns … 1 field"; 50 rows after. Not in testdata (`nested-loop-join.sql`
 is `SELECT *`).
 
+<a id="fix2"></a>
 ### 2. The rollup shuffle hashes user keys, never the grouping id — S
 
 **Closes:** #189. Moves tpcds/q77 × tp4's next wall from #175 to this and then to #175 shape
@@ -124,6 +126,7 @@ tpch sf1, cpu, tp4-single (also rowgroup, sized). Plans and validates with
 `hash=[l_returnflag@0, __grouping_id@1]`; refused in `CpuEmitter::emit`; four rows after. Not
 in testdata (the projected columns read 5.3 MB, just over the small-table threshold).
 
+<a id="fix3"></a>
 ### 3. A keyless aggregate's identity row comes from init, on the finalizing node only — S
 
 **Closes:** #180. Narrows #199 to the finalizing-node divergence (the device answers no row
@@ -177,6 +180,7 @@ inserted). All tp4 modes: `SELECT count(*) FROM store, store_sales WHERE ss_stor
 s_store_sk AND s_store_name = 'ese'`. Every lane empty, the finalize path: the same with `'no
 such store'` → `0`. None in testdata.
 
+<a id="fix4"></a>
 ### 4. One spelling of the zero-column table on a device, `__rowcount__`, at the scan and the cross join — S
 
 **Closes:** #63 (misdiagnosed: the cross join appends the device's placeholder column and
@@ -237,6 +241,7 @@ testdata; recommended as `tpch/scalar-subqueries` (16 goldens) — added before 
 tp4-single cpu cell carries `180`. The scan arm: `tpch/nested_limits` on a device after fix 13
 (in testdata).
 
+<a id="fix5"></a>
 ### 5. `date_part` casts to the declared return type — S
 
 **Closes:** #191. Re-attributed: tpch q7, q9 (#183 → #191 once fix 8 lands, → #185 once this
@@ -277,6 +282,7 @@ SELECT extract(year FROM o_orderdate) AS o_year FROM orders WHERE o_orderkey < 8
 All five modes, gpu; scan → filter → project → unload, refused at the unload today. Not in
 testdata.
 
+<a id="fix6"></a>
 ### 6. `round(x, p > 0)` on the device is three IEEE operations, like the oracle — S
 
 **Closes:** #60 (misdiagnosed: no anti join, no memory; a one-ulp split on `round(float, p >
@@ -317,6 +323,7 @@ SELECT n_nationkey, round((CAST(n_nationkey AS DOUBLE) * 25.0) / 9.0, 2) AS r FR
 tpch sf1, every mode, both backends; the device via the walk; two rows differ today. Not in
 testdata.
 
+<a id="fix7"></a>
 ### 7. Value-form CASE takes the column path — S
 
 **Closes:** #57 (misdiagnosed: the recorded wrong answer came from a gtest whose Int64 literals
@@ -357,6 +364,7 @@ FROM date_dim WHERE d_year = 2001 AND CASE d_moy WHEN 1 THEN 0 ELSE d_moy END > 
 any mode; the device fails the first `CudfProject`/`CudfFilter` with the throw. Not in
 testdata.
 
+<a id="fix8"></a>
 ### 8. Strings are declared `Utf8` because that is what both readers read — M
 
 **Closes:** #183 (misdiagnosed: the plan inherits `Utf8View` from a DataFusion parquet-reader
@@ -421,6 +429,7 @@ tp1-single, gpu — `GpuUnload` over one loader, refused at the unload. The comm
 `tpch/cross_join` (off at all five on `183` alone). For #192: q64 at tp1-single, cpu (in
 testdata).
 
+<a id="fix9"></a>
 ### 9. Two session rules let DataFusion 45 plan q27 and q72 — M
 
 **Closes:** #23 for q27 and q72 without an upgrade. q70/q86 are `rank() OVER` window queries
@@ -483,6 +492,7 @@ SELECT count(*) FROM lineitem WHERE l_receiptdate > l_shipdate + 5;
 Both refused by DataFusion before the engine's planner, every mode, both backends; neither in
 testdata.
 
+<a id="fix10"></a>
 ### 10. The CPU join returns one batch per call, as every other executor does — M
 
 **Closes:** #185 under its corrected title ("a CPU join returns a probe call's output as
@@ -548,6 +558,7 @@ tpch sf1, any mode, both backends. Today CPU: `GpuHashJoin batch_rows=[[8192,180
 `[[1]]`. After: both read the device's. Not in testdata (nearest: `tpch/join_int`, off on `152
 185`).
 
+<a id="fix11"></a>
 ### 11. `count(DISTINCT x)` with any companion lowers to two stages, the outer running merge aggregators over the inner's state — M
 
 **Closes:** #62 (misdiagnosed in location: a plan-time refusal at
@@ -611,6 +622,7 @@ SELECT count(ss_customer_sk), count(DISTINCT ss_customer_sk) FROM store_sales WH
 
 All five modes, both backends; refused by `planner::plan` at `:119` today. Not in testdata.
 
+<a id="fix12"></a>
 ### 12. A decimal shuffle key hashes as comet does, by declared precision — M
 
 **Closes:** #184 (misdiagnosed: the shuffle key is a decimal and the kernel has no decimal arm
@@ -672,6 +684,7 @@ SELECT x, sum(l_quantity) FROM (SELECT l_extendedprice * l_discount AS x, l_quan
 tp4 modes, gpu; both plan, run on the CPU, and die at the first `CudfRepartition` call with
 `type_id=27`. Neither in testdata; q15 at tp4 is the committed carrier (16-byte path).
 
+<a id="fix13"></a>
 ### 13. A limited scan is one lane and one batch over the row groups that cover the limit; each reader bounds that one call — M
 
 **Closes:** #186 and #188 as one defect. Closes `reports/hacks-audit.md:49` (production bug 2)
@@ -740,6 +753,7 @@ Bare-scan shape at all five modes: CPU 25 rows for 3, device first call refused.
 Oracle-comparable: `SELECT count(n_name) FROM (SELECT * FROM nation LIMIT 3)`. In testdata:
 `tpch/scan_limit` (lineitem).
 
+<a id="fix14"></a>
 ### 14. The grouping id is DataFusion's value and width on the device — M
 
 **Closes:** #65 for every reader but q70/q86 (a wall: window functions, #143). Drops `65` from
@@ -790,6 +804,7 @@ tpch sf1; integer keys and an Int64 count so #183/#187 cannot fire; one lane at 
 31 rows with g ∈ {0, 1, 3}; the device answers the five subtotal rows with `g = 2` — a silent
 wrong answer. Vehicle: the walk at `ONE_LANE`. Not in testdata.
 
+<a id="fix15"></a>
 ### 15. A finish with no probe keys answers from the build side it still holds — M
 
 **Closes:** #173 part A; narrows #173 to the LeftMark-through-a-merge shape and part B (walls).
@@ -855,6 +870,7 @@ Neither in testdata. If DataFusion swaps the second to Right it is #175's residu
 A the device pads every build row from the handle it holds, so no limit change is needed for
 it.
 
+<a id="fix16"></a>
 ### 16. A whole-day interval literal crosses the wire — M
 
 **Closes:** #168 (ticket drift: the writer substitutes nothing any more — the whole plan fails
@@ -907,6 +923,7 @@ SELECT count(*) FROM orders WHERE o_orderdate + INTERVAL '90' DAY < DATE '1993-0
 All five modes, gpu; `not runnable` at plan time today at `#1`; not in testdata.
 `tpch/mixed-join` is the committed carrier.
 
+<a id="fix17"></a>
 ### 17. A state column's type is the SQL aggregate the executor runs it as; `avg`'s finalize keeps the divide's declared scale — L
 
 **Closes:** #163 for the CPU; narrows it to the device's Welford count (Int64 exported vs
@@ -972,6 +989,7 @@ alone: refused at the finalize, `(19,6)` vs `(23,10)`. After (a)+(b): one row, D
 digits. For a real four-lane merge at every tp4 mode: `SELECT avg(l_quantity) FROM lineitem`.
 Not in testdata. On a device: crosses, refused at the unload (#187 → D1).
 
+<a id="fix18"></a>
 ### 18. A handle can be retained, so a build side survives a streamed probe — L
 
 **Closes:** #152. Re-attributes the 79 rows' remaining cells to #183 (fix 8), #187 (D1), #185
