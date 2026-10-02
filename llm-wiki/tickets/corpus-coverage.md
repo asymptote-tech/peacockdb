@@ -4,6 +4,49 @@
 Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and named queries, and 84/99 TPC-DS queries (window functions excluded). Minimum SQL functionality needs to be built for this milestone.
 
 
+## Contents
+
+- [Welford aggregation](#welford-aggregation)
+  - [#225 — the device names every Welford state column by the same alias](#t225)
+  - [#216 — the device's global aggregate has no Welford arm](#t216)
+  - [#94 — MERGE_M2 count-child type is cuDF-version-specific](#t94)
+- [Aggregates](#aggregates)
+  - [#199 — a global aggregate over no arrival drops its identity row](#t199)
+  - [#55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast](#t55)
+  - [#65 — the device's grouping-set id is not DataFusion's value or width](#t65)
+  - [#62 — a DISTINCT beside an avg or a count is refused at planning](#t62)
+- [Sort / Limit](#sort--limit)
+  - [#202 — a descending sort key puts its nulls on the wrong end on the device](#t202)
+  - [#217 — a sort with `fetch 0` keeps every row on the device](#t217)
+  - [#204 — the device's sorted merge drops its fetch when it is handed one input](#t204)
+  - [#214 — a limit drops a zero-row batch on both backends](#t214)
+  - [#205 — the cpu's accumulating sort and merge answer nothing over zero-row batches](#t205)
+- [Scalars](#scalars)
+  - [#168 — interval type can not be represented in the fbs ScalarValue](#t168)
+  - [#191 — the device exports Int16 for an extracted year the plan declared Int32](#t191)
+  - [#210 — a bare decimal literal on the AST path comes back as a Float64 column](#t210)
+  - [#57 — the device refuses a value-form CASE](#t57)
+  - [#56 — q2: CASE-over-string-equality inside a partial-phase sum](#t56)
+  - [#60 — `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
+- [Source](#source)
+  - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
+- [Repartitioning](#repartitioning)
+  - [#206 — a float or boolean partition key is refused on the device](#t206)
+  - [#189 — the shuffle cannot hash a rollup's grouping-set id](#t189)
+  - [#145 — Refcounted handles: stop copying every partition out of a scatter](#t145)
+  - [#95 — a decimal partition key is refused on the device](#t95)
+  - [#197 — the repartition arm still concatenates a child it can only be handed one of](#t197)
+- [Performance](#performance)
+  - [#154 — every operator exit path deep-copies its output into a fresh table](#t154)
+- [Testing](#testing)
+  - [#227 Check schema nullability in tests](#t227)
+  - [#164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
+  - [#201 — the murmur gate proves a copy of the lane rule, not the rule](#t201)
+  - [#174 — two clamps for one rule, and nothing compares them](#t174)
+  - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
+  - [#234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
+  - [#235 — no independent oracle checks the result goldens](#t235)
+
 ## Welford aggregation
 
 <a id="t225"></a>
@@ -451,7 +494,7 @@ the type the plan asked for, but a bare or unary-wrapped decimal literal is AST-
 `SELECT 1.5 FROM t` then computes a `FLOAT64` column on the device where the plan declares
 `Decimal128(2, 1)` — and since `decimal-precision-at-export` the export refuses it by name rather
 than answering it, the AST path still computing a double. Same class as
-[#191](tickets/corpus-coverage.md#t191): a declared type produced as another. Pre-existing, carried
+[#191](#t191): a declared type produced as another. Pre-existing, carried
 through `typed-nulls.md` by that spec's own instruction, and pinned by
 `bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` (`gpu_tests/exec_cases.rs`);
 the walk `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` names it on its
@@ -644,16 +687,16 @@ merge's `hashed_on`, and the tpcds q5 payload's `hash_exprs` shrinks. A planner 
 `node_session.cpp` (~L265-272) deep-copies each range out, because a handle owns its memory.
 
 So every shuffle copies its whole input a second time and peaks at twice the data — the concrete
-form of [#91](#t91)'s repartition spike, once per aggregate and once per join side. The change:
+form of [#91](../archive/archived-tickets.md#t91)'s repartition spike, once per aggregate and once per join side. The change:
 `TableResult` (`plan_executor.h:13`) becomes a `shared_ptr<cudf::table> owner` plus a
 `cudf::table_view view`, and the scatter registers N handles sharing one owner. Mechanical but
 wide — 35 sites across 11 files touch `.table` / `->table`. **No ABI change**: a handle stays a
 `u64`. The cost to weigh: a slice pins its whole parent, so a skewed hash leaves one hot lane
 holding the pre-scatter table — the peak halves and the tail lengthens. Also unlocks
-[#140](#t140). Tests: the GPU tiers stay byte-identical, plus a gtest releasing N−1 handles and
+[#140](optimizer.md#t140). Tests: the GPU tiers stay byte-identical, plus a gtest releasing N−1 handles and
 reading the survivor. A streamed join waits on it too: a handle is erased by its reader
 (`node_session.cpp:254`), so `Input::BuildSideCopy` has no build side after the first probe batch,
-and T16 refuses a second until this lands ([#152](#t152)).
+and T16 refuses a second until this lands ([#152](joins.md#t152)).
 
 
 <a id="t95"></a>
@@ -705,7 +748,7 @@ changing who destroys what under `NodeInputs`; a temporary that only ever needed
 (`expr.cpp` 834, below); and `aggregate.cpp` 413, 642, 644, 678, 680, 759, 771, unresolved without
 reading. Traps: a view taken before the release dangles (`ftv` ~L372), and a repeated projection
 ordinal moves one column twice leaving a hole — a wrong answer, not a throw, which is why it
-needs the assert and not the observation. Land before [#155](#t155).
+needs the assert and not the observation. Land before [#155](joins.md#t155).
 
 The `expr.cpp` site is the cheapest to fix and the most expensive to leave. `build_column`'s
 `ColumnRef` arm copies the whole column and the caller takes `->view()` of the copy one line
@@ -732,7 +775,7 @@ schema, check that every record batch produced does not have any nulls.
 <a id="t164"></a>
 ### #164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws
 
-The C++ half of [#135](archive/archived-tickets.md#t135), which the planner
+The C++ half of [#135](../archive/archived-tickets.md#t135), which the planner
 closed on the Rust side by checking a reference's name against the field at its position.
 
 `TableResult` is a `cudf::table` plus a name vector with no invariant that the two are the same
