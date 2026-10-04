@@ -3,27 +3,6 @@
 
 Tests, CI, hosts, testdata etc
 
-<a id="t237"></a>
-### #237 — a mark or right-semi join's projection prints under the wrong names
-`projection_field` (`plan_text/node_text.rs`) names each ordinal from build++probe, but a join
-projects its type's own output: build and `mark` for LeftMark, probe alone for RightSemi and
-RightAnti. The ordinal is right and the name beside it is not.
-
-Seen in tpcds q10, q35, q45 (LeftMark: `mark` printed as a probe column) and q58, q83 (RightSemi:
-probe columns printed as build ones) — 80 fields over the 5 `plans.txt` goldens. No answer is wrong; a
-reader resolving a column by the name it is printed under takes the wrong one. The fix is to name
-them from the join's own output schema, then regenerate.
-
-<a id="t236"></a>
-### #236 — a null decimal literal renders as `None,23,8` in the plan text
-`literal_text` (`plan_text/expr_text.rs`) handles `Decimal128(Some…)` and `Decimal256(Some…)`
-only; a null one falls to DataFusion's `Display`, which prints `{v:?},{p:?},{s:?}`. Every
-other null prints `NULL`.
-
-Seen in tpcds q90 (`` CASE WHEN pmc@1 = 0 THEN `None,23,8` … ``), 5 `plans.txt` and 2 `cpu.txt`
-goldens. No answer is wrong; a reader of the text cannot tell the value is null. The fix is a
-`None` arm printing `NULL`, then regenerate.
-
 <a id="t178"></a>
 ### #178 — shad-gpu is shared, and a pool that cannot be built is a neighbour's fault
 Each gtest main reserves a fixed byte budget (`kPoolBytes` beside its `main()`, listed in
