@@ -149,7 +149,7 @@ fn node_fields(node: &dyn GpuNode) -> Vec<String> {
             if join.null_equals_null {
                 fields.push("null_equals_null=true".to_string());
             }
-            projection_field(&mut fields, join.projection.as_ref(), build, probe);
+            projection_field(&mut fields, join.projection.as_ref(), schema_of(node));
         }
         NodeRef::NestedLoopJoin(join) => {
             let (build, probe) = (schema_of(node.children()[0]), schema_of(node.children()[1]));
@@ -158,14 +158,11 @@ fn node_fields(node: &dyn GpuNode) -> Vec<String> {
                 "filter={}",
                 join_filter_text(&join.filter, &join.filter_columns, build, probe)
             ));
-            projection_field(&mut fields, join.projection.as_ref(), build, probe);
+            projection_field(&mut fields, join.projection.as_ref(), schema_of(node));
         }
-        NodeRef::CrossJoin(join) => projection_field(
-            &mut fields,
-            join.projection.as_ref(),
-            schema_of(node.children()[0]),
-            schema_of(node.children()[1]),
-        ),
+        NodeRef::CrossJoin(join) => {
+            projection_field(&mut fields, join.projection.as_ref(), schema_of(node))
+        }
         NodeRef::EmitPartitions(emit) => {
             let keys: Vec<String> = emit
                 .hash_keys
@@ -182,31 +179,23 @@ fn node_fields(node: &dyn GpuNode) -> Vec<String> {
     fields
 }
 
-/// Ordinals into the crossed table, so they are named from both sides in order — the same
-/// rule as every other reference.
+/// Ordinals into what the join emits before projecting — both sides, one side, or the build
+/// side and a mark, by join type — each named by the output column it becomes, which is the
+/// node's own schema at that position.
 fn projection_field(
     fields: &mut Vec<String>,
     projection: Option<&Vec<u32>>,
-    build: Option<&Schema>,
-    probe: Option<&Schema>,
+    output: Option<&Schema>,
 ) {
     let Some(projection) = projection else {
         return;
     };
-    let build_width = build
-        .map(|schema| schema.fields.fields().len() as u32)
-        .unwrap_or(0);
-    let joined: Vec<String> = projection
+    let named: Vec<String> = projection
         .iter()
-        .map(|ordinal| {
-            if *ordinal < build_width {
-                format!("{}@{ordinal}", name_at(build, *ordinal))
-            } else {
-                format!("{}@{ordinal}", name_at(probe, *ordinal - build_width))
-            }
-        })
+        .enumerate()
+        .map(|(position, ordinal)| format!("{}@{ordinal}", name_at(output, position as u32)))
         .collect();
-    fields.push(format!("projection=[{}]", joined.join(", ")));
+    fields.push(format!("projection=[{}]", named.join(", ")));
 }
 
 fn aggregate_fields(fields: &mut Vec<String>, body: &AggregateBody) {

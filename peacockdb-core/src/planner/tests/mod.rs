@@ -6,6 +6,7 @@
 //! than a subcomponent directly.
 
 mod join_capability;
+mod join_projection_names;
 mod join_refusals;
 mod null_analysis;
 mod plan_goldens;
