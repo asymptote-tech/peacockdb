@@ -101,7 +101,7 @@ fn every_declared_mode_names_the_queries_its_file_will_hold() {
 fn the_sections_of_a_file_are_ordered_numerically() {
     let declared = declared_for("tpch", "40", "tp1_single");
     let names: Vec<&str> = declared.iter().map(|(name, _)| name.as_str()).collect();
-    assert_eq!(names, ["q6", "q19"], "6 before 19, not '19' before '6'");
+    assert_eq!(names, ["q1", "q6", "q17", "q19"], "6 before 17 before 19, not '17' before '6'");
 }
 
 /// Where a mode's results land: one file per (dataset, mode), stemmed by the mode.

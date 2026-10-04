@@ -1079,6 +1079,11 @@ Rules that keep this healthy:
   success as yours. Run state lives in `$REMOTE_REPO/.run-state/gate.{sh,log,rc,id}`,
   deliberately outside `cpp/install/` — that tree is mirrored with `--delete`, so a marker
   kept there is erased by the next push.
+- **A run beside the gate's checkout** sets `PEACOCK_REMOTE_REPO=<dir>`: every phase then
+  pushes, patches, runs and pulls under that directory instead of `/home/info/peacockdb`, which
+  a measurement taken while the gate is in use must leave alone. Create `<dir>/cpp` and
+  `<dir>/testdata` first — rsync makes no parent directories, and a push into a fresh one
+  retries a hundred times before it fails.
 
 ## Benchmarks
 
@@ -1089,8 +1094,11 @@ deliberately not the correctness gate's: the two disagree about sf on purpose. C
 runs at sf1, where a wrong answer is legible in six million rows; at sf1 a query is mostly
 the host prologue, so the rows worth timing are at sf40 and the rows worth checking are not.
 A (query, mode) timed here must still be enabled on a device in `corpus_cases.inc`, and a
-rust-only test in `test_corpus_goldens` reads both files and says so. Today: tpch q6 at
-`tp1_single` and `tp4_sized`, q19 at `tp1_single`.
+rust-only test in `test_corpus_goldens` reads both files and says so. Today: tpch q6 and q1 at
+all five modes, q17 and q19 at `tp1_single` — joins run at `tp1_single` alone on the device
+(#152). At the two rowgroup modes a scan is one call per row group, a thousand-odd per pass, so
+those cases are most of a full run's record — 175 thousand rows, 17 MB, too large for git — and
+`calibration/records.tsv` stays the record of q6 and q19.
 
 It asserts nothing about an answer, so it can never gate a merge. Its eight harness assertions
 run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here.

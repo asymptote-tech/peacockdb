@@ -40,7 +40,9 @@ if [ -z "${CARGO_BUILD_JOBS:-}" ]; then
 fi
 
 REMOTE=shad-gpu
-REMOTE_REPO=/home/info/peacockdb
+# The gate's checkout. A run that must leave it alone — a measurement beside it — names its
+# own directory on the host here; everything a phase writes is under it.
+REMOTE_REPO=${PEACOCK_REMOTE_REPO:-/home/info/peacockdb}
 
 # Validation belongs before a phase's first side effect: half a deploy followed by "you
 # cannot do that" is worse than either outcome alone.
