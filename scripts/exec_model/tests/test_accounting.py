@@ -21,6 +21,8 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/<file>.p
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[3]))
     __package__ = "scripts.exec_model.tests"
 
+import pathlib
+
 import pandas as pd
 
 from .harness import main, raises
@@ -243,6 +245,35 @@ def test_a_tight_budget_fails_the_query_cleanly():
 def test_a_generous_budget_completes_and_records_a_peak():
     driver = run(shuffle_plan(), budget=50_000_000)
     assert 0 < driver.accountant.peak <= 50_000_000
+
+
+def test_the_accumulator_is_what_makes_the_budget_bind():
+    """Streaming the whole table fits a budget that collecting it does not.
+
+    Same 150k customer rows (the committed `tpch.minimal`), same scan, same budget — opposite
+    outcomes. That is the claim the mode exists to make: with batches only the accumulator's
+    state is mandatory residency, so a query fits in a budget the materialized table does not.
+    The budget sits between the two peaks (1.28 MB streamed, 2.4 MB collected); both are
+    asserted, so a drift shows as a number rather than as this test ceasing to discriminate.
+    """
+    from .corpus import BUDGET, ParquetTables  # pyarrow, which the rest of this file does not need
+
+    tables = ParquetTables(pathlib.Path(__file__).resolve().parents[3] / "testdata" / "tpch.minimal")
+    customer = tables.frame("customer", ["c_custkey", "c_acctbal"])
+    budget = 2 * 1024 * 1024
+    scan_config = dict(n_partitions=2, rows_per_group=20_000, target_batch_rows=40_000)
+
+    streamed = N.unload(
+        "unload",
+        N.filter_("f", N.scan("c", customer, **scan_config), Binary(">", Col("c_acctbal"), Lit(0.0))),
+    )
+    assert run(streamed, budget=budget).accountant.peak < budget
+
+    collected = N.unload("unload", N.coalesce_all("collect", N.scan("c", customer, **scan_config)))
+    with raises(ResidentBudgetExceeded):
+        run(collected, budget=budget)
+    # And the collected plan does complete once the budget covers the whole table.
+    assert run(collected, budget=BUDGET).accountant.peak > budget
 
 
 def test_a_consumed_input_stays_accounted_through_its_call():

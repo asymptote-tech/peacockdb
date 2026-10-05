@@ -86,3 +86,63 @@ fixes #236 and #237):
 - Local tools: no DuckDB CLI is on the PATH; `/build/peacock/duckdb-1.5.4/duckdb` is the
   release build CI uses (08e34c447b). `/usr/bin/python3` has pyarrow 18.1;
   `/build/peacock/venv-exec-model` has pyarrow 25.0.1 and pandas 2.2.2.
+
+## Task 2
+
+- Gone: `tests/plans*.py` (15 files), `tests/plan_helpers.py`, `test_tpch.py`,
+  `test_tpch_corpus.py` (22 cases), `test_tpcds.py` (71), `scripts/exec_model/{tpch,tpcds}.plans.txt`.
+- `test_tpch.py` was not a lowering. Five of its 19 cases test what stays, so they were ported
+  into the cheap tier over the committed `testdata/tpch.minimal`:
+  - The injector's four guards went to `test_injection.py`, with its `aggregate_plan`,
+    `shuffled_join_plan` and `streamed_join_plan`.
+  - The budget claim went to `test_accounting.py`.
+  - Their customer and nation columns are sf1's exactly (`pyarrow.Table.equals`), and the two
+    measured peaks are unchanged: 1,280,000 and 2,400,000 bytes.
+  - The other 14 cases re-ran the same operators over real rows: what `test_end_to_end` and
+    `test_join_capability` cover, or the lowered corpus did.
+- Each port was shown red:
+  - An `apply` that returns the plan unchanged turns three of the injector tests red.
+  - No empty batches turns the empty-batch test red.
+  - An ignored seed turns the reproducibility test red.
+  - Repartitioning any join turns the lane-count test red.
+  - For the budget test, dropping only `CoalesceAllBatches`' held bytes stays green. The
+    collected peak is the coalesced output batch, counted in flight. The test pins that a
+    collected table is counted in full and that a stream is bounded per batch.
+  - A `release` that does not subtract fails it at the streamed assertion. `hold`/`release`
+    and the accumulator's held bytes all inert fail it at `raises`.
+- Counts after: cheap tier 35 files, 363 cases; Python 802.
+- Rust in `build-test.md` was corrected to the code: 1875, not 1861. Grand total 2771.
+  - Rust-only `--list`: `--lib` 606, because `wire/tests.rs` has 24 where the page said 23.
+    `cost-report` has 36, not 37.
+  - From source:
+    - "Operator harness" stays 334: 453 `operator_case!` and 15 `#[test]` less the 134 of
+      "what the device holds" (the `#[test]` at `coverage.rs:30` is the macro's template).
+    - `peacock_gpu_benchmarks` has 8 harness tests and 12 `bench_` cases (q6 and q1 at five
+      modes, q17 and q19 at one), so 20, not 11. The header was not moved when the case list
+      grew.
+  - The block headers now match their rows.
+- No surviving suite imported a lowering or `plan_helpers.py`. Only the deleted files imported
+  them.
+- `plan_text.py` is gone on purpose. It rendered only the deleted lowerings' goldens. The plan
+  diff Task 6 needs is in the engine's own golden format, which this renderer was not.
+  `join-optimizer.md`'s layout still lists it under `plans/`.
+- `tests/corpus.py` lost what only the lowerings called: the table reader and cache,
+  `schema_reader`, `build_join`, `run_layouts`/`PCK_LAYOUT`, `check_plan`, `schema_of`,
+  `agg_schemas`, `same`, `in_order`, and the `PCK_BACKEND` switch. That switch re-ran the
+  lowered corpus on the recipe backend, which refuses the engine's positional joins. So
+  exec-model-corpus.yml lost its `backend` input and its unread `SHARDS` env. Its shard rule
+  names the matrix list and the `/3`.
+- `scripts/calibration/tests/harness.py` is outside the spec's scope but was edited. It is a
+  copy of the exec-model harness, kept identical below its header, and the comments changed in
+  one had to change in the other.
+- `test_cardinality_corpus` is still red on tpcds (median 1.29, 69.5 % within 2×). That is the
+  q64 state above, not this change: `cpu_rows`/`_sections` are AST-identical to HEAD → Task 5.
+- For Task 3:
+  - Nothing in `operators/nodes.py` or `aggregates.py` lost its last caller by name, so the
+    residue has to be found by coverage.
+  - `LayoutInjector` and `nodes.Recipe` now serve `test_join_capability.py` and
+    `test_injection.py`.
+  - The recipe backend (`RecipeJoinBackendSelector`, `operators/recipe*.py`, `cudf_calls.py`)
+    is reached only from `test_join_capability.py`.
+  - `corpus.dataset_dir`'s `tpch.minimal` fallback serves only `duckdb_answer`.
+  - The harness's `-substring` exclusion has no CI caller.

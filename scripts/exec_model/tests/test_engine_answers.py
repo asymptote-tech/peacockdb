@@ -1,8 +1,8 @@
 """The engine's own plans, built by `engine_nodes` and run by the prototype, against DuckDB.
 
 Every planned query of a mode's `plans.txt` golden that has a SQL text runs over the sf1
-tables and is compared with DuckDB's answer to that text, as the lowered corpus is
-(`test_tpcds.py`). Two things differ from there, both because the plan is DataFusion's:
+tables and is compared with DuckDB's answer to that text (`corpus.matches_oracle`). Two things
+in that compare follow from the plan being DataFusion's:
 
 - **Columns are compared by position.** The output's names are DataFusion's
   (`sum(lineitem.l_quantity)`), the oracle's DuckDB's; which engine spells an unaliased

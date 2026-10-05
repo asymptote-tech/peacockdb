@@ -693,13 +693,14 @@ def cudf_calls_module():
 
 
 def test_every_join_type_survives_every_layout_on_both_backends():
-    # `test_tpch.py` does this to whole queries over real tables; this does it to the join
-    # matrix. A join is the operator most exposed to layout — its build side must arrive as
-    # exactly one batch, its lanes must be co-located, and its finish pass runs per lane —
-    # so an empty lane or a hash that puts every row in one place is where it would break.
-    # The hash mode rotates with the pair rather than nesting inside it: every preset and
-    # every placement still appears against every type across the sweep, at a fifth of the
-    # runs a full cross product would cost. Derived from the indices, so it reproduces.
+    """A join is the operator most exposed to layout — its build side must arrive as exactly
+    one batch, its lanes must be co-located, and its finish pass runs per lane — so an empty
+    lane or a hash that puts every row in one place is where it would break.
+
+    The hash mode rotates with the pair rather than nesting inside it: every preset and every
+    placement still appears against every type across the sweep, at a fifth of the runs a full
+    cross product would cost. Derived from the indices, so it reproduces.
+    """
     build, probe = build_side(), probe_side()
     modes = list(HashMode)
     for preset_index, preset in enumerate(LayoutPreset):

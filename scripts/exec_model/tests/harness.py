@@ -59,7 +59,7 @@ def _selected(tests, path):
     """The subset this process runs: every test, a named few, or one shard of them.
 
     Two selectors, because two callers want different things. A person debugging wants
-    names — `python3 tests/test_tpch.py q3 q12`. A CI matrix wants a share of the file
+    names — `python3 tests/test_engine_answers.py q3 q12`. A CI matrix wants a share of the file
     without naming anything, so `PCK_SHARD=k/n` takes every n-th test starting at k; the
     corpus files are minutes long and their queries are independent, so n processes finish
     in a fraction of the time one does.
@@ -71,7 +71,7 @@ def _selected(tests, path):
     names = [arg for arg in sys.argv[1:] if not arg.startswith("-")]
     if names:
         # An argument that *is* a test's name selects that test and nothing else. Without
-        # this, `test_tpcds.py test_corpus_q1` also runs q10, q11, q13, q15, q16 and q19 —
+        # this, `test_engine_answers.py test_tpcds_q1` also runs every `test_tpcds_q1…` —
         # substring matching is what a person wants when they type `q3`, and exactly what
         # they do not want when they have named a test in full.
         available = {name for name, _ in tests}
@@ -82,9 +82,7 @@ def _selected(tests, path):
         if not selected:
             raise SystemExit(f"  FAIL {path}: no test matches {names}")
         tests = selected
-    # `-substring` drops matching tests. One file can then serve two CI steps: the corpus
-    # queries in `test_tpch.py` are minutes long and run on manual dispatch, while the same
-    # file's short plan tests keep running on every push as `test_tpch.py -corpus`.
+    # `-substring` drops matching tests: `test_engine_answers.py -tpcds` runs the TPC-H half.
     excluded = [arg[1:] for arg in sys.argv[1:] if arg.startswith("-") and len(arg) > 1]
     if excluded:
         tests = [(n, o) for n, o in tests if not any(part in n for part in excluded)]

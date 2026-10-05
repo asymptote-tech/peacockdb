@@ -11,15 +11,16 @@ spec it models is coordinator-owned.
 
 **Two halves.** The scheduler — plan, drivers, traits — is stdlib only and uses mock
 executors. The operators under `operators/` are pandas-backed, so `test_operators.py`,
-`test_end_to_end.py`, `test_accounting.py` and the TPC-H/TPC-DS files need pandas (and pyarrow for
-the last) and **fail rather than skip** without them: a skipped operator suite reads
-exactly like a passing one.
+`test_end_to_end.py`, `test_accounting.py` and the files over the engine's plans need pandas,
+and the engine-plan files, `test_injection.py` and `test_accounting.py`'s budget test, which
+read parquet, need pyarrow too. They **fail rather than skip** without them: a skipped operator
+suite reads exactly like a passing one.
 
-`test_tpch.py` runs simple hand-built plans over real TPC-H tables. It runs in CI's
-**dataset-matrix** job, after that job generates sf1; every other file runs in cost-report, which
-has no dataset. Locally it falls back to the committed `testdata/tpch.minimal` when sf1 was
-never generated — for the four tables it uses the two are the same data, same schema and
-same row counts, so the assertions hold either way. Every plan there and in
+The prototype runs two kinds of plan: small ones the tests build from `operators/nodes.py`, and
+the engine's own, read from its `testdata/goldens/<bench>.sf1/<mode>.plans.txt` goldens. The
+files that need the generated sf1 tables are listed in [The corpus](#the-corpus), and
+`test_stats_embeddings.py` is run by hand, since it generates its own tables from the embeddings
+cache. Every other file runs in cost-report, which has no dataset. Every plan in
 `test_end_to_end.py` runs under a real resident budget, so the accountant is engaged rather
 than dormant.
 
@@ -75,7 +76,6 @@ as a script, so the relative imports resolve either way.
 | `operators/nodes.py` | `GpuNode` implementations wiring the operators into plans; the builders an engine plan's nodes need — its scan, positional joins, plan-level aggregates — and the layouts they declare |
 | `operators/validation.py` | the checks a node's `_validator` is composed from with `all_of` — layout expectations and the aggregate state chain. The method is abstract on `GpuNode` (`node.py`) and implemented once, on `PandasNode` (`operators/nodes.py`), which just runs that validator |
 | `operators/injection.py` | `LayoutInjector` — rewrite a plan's partitioning, batching and hash placement |
-| `plan_text.py` | rendering a plan as text, for the corpus plan goldens |
 | `engine_plan.py` | the engine planner's `<mode>.plans.txt` goldens read back into trees — node lines and refusals, field values verbatim, the schema as (name, type) pairs with names unquoted; `GpuMemorySource`, the prototype's own kind the engine does not have yet, is read too |
 | `engine_expr.py` | the engine's expression text parsed back into a syntax tree and rendered again (`expr_text`) — `plan_text/expr_text.rs` both ways; a literal stays text, since the rendering does not print its type |
 | `engine_ir.py` | a node's expression fields in the expression IR — ordinals resolved to frame names (`name@ordinal` where a schema repeats a name), each literal typed by what it meets |
@@ -94,10 +94,7 @@ as a script, so the relative imports resolve either way.
 | `dphyp.py` | DPhyp from the `peacockdb-dphyp` crate through its C ABI (`ctypes`): the library by `PEACOCK_DPHYP_LIB`, refused without it; the tree as disassembly takes it |
 | `multijoin.py` | a cluster of inner joins as DPhyp takes it in — relations, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included |
 | `disassembly.py` | a join order back into an engine plan — keys, residual and projection from the MultiJoin's identities, wiring as the translator derives it; `baseline` is the order the plan already has |
-| `tests/corpus.py` | reading the generated datasets, the corpus budget, the layout runner, and the plan-golden check |
-| `tests/plans_tpch*.py`, `tests/plans_tpcds*.py` | the corpus query lowerings — builders over a table provider, so a plan needs no data |
-| `tests/plan_helpers.py` | the aggregate and sort sequences every lowering is built from |
-| `tests/plans.py` | render or rewrite the plan goldens without executing anything |
+| `tests/corpus.py` | running a plan, reading the generated datasets, the corpus budget, the DuckDB oracle and its comparison, and an engine `cpu.txt` golden's rows per node |
 
 Traits are declarations only. The driver tests drive mocks (`tests/mocks.py`) because the
 strategy under test is *which node runs when*; the operator tests drive the real thing.
@@ -183,17 +180,11 @@ and the spec's join tables carry all of them.
 
 ## The corpus
 
-`tests/test_tpch_corpus.py` and `tests/test_tpcds.py` run real benchmark queries — the query
-text lowered by hand into the mode's nodes, over **whole** sf1 tables with the spec's own
-parameters. 22 TPC-H queries and 71 TPC-DS ones: every TPC-DS query the engine already runs
-in `full_table` mode (`testdata/cost-registry.csv`, `ftc_tp1 = enabled`) except the seven
-that need a window function, which the mode has no node for.
-
-`tests/test_engine_answers.py` runs the engine's **own** plans the same way: each planned query
-of a mode's `plans.txt` golden, built by `engine_nodes.py`, against DuckDB — all 120 at
-`tp4-single`. `tests/test_engine_dynamic_filters.py` runs them again pruned by
-their dynamic filters (`dynamic_filters.py`): still DuckDB's answer, and no more row groups than
-DuckDB's own filter keeps. `tests/test_engine_corpus.py` needs no data: every golden plan builds,
+`tests/test_engine_answers.py` runs the engine's **own** plans over **whole** sf1 tables: each
+planned query of a mode's `plans.txt` golden, built by `engine_nodes.py`, against DuckDB running
+the query's own text — all 120 at `tp4-single`. `tests/test_engine_dynamic_filters.py` runs
+them again pruned by their dynamic filters (`dynamic_filters.py`): still DuckDB's answer, and no
+more row groups than DuckDB's own filter keeps. `tests/test_engine_corpus.py` needs no data: every golden plan builds,
 validates, and declares the layout the engine printed for each node. `tests/test_stats_sidecar.py`
 recounts the committed NDV sidecars (`testdata/stats/`) from the generated data with
 `gen_stats.py`, byte for byte, and checks the reader serves every column they list;
@@ -206,48 +197,23 @@ the rows the engine's CPU run gave it.
 `tests/test_engine_optimized.py` runs the plans `join_order.optimize` makes of them — every
 cluster reordered by DPhyp and oriented — against DuckDB; it needs the DPhyp library.
 
-**Two oracles, on purpose.** TPC-H has a hand-written pandas equivalent per query: it states
-what the query means in a second language, and catches a lowering that answered a
-differently-shaped question. TPC-DS runs the query's **own text** through DuckDB over the
-same parquet files: that catches a *reading* of the SQL, which a hand-written pair cannot,
-since both halves would share one reading — the circularity #80 complains of. It also pins
-the output column names, which come from the query's aliases and from nowhere else.
-Seventy-one hand-written oracles would have been seventy-one new places to be wrong.
+**DuckDB is the oracle.** It runs the query's **own text** over the same parquet files, so it
+catches a *reading* of the SQL, which a hand-written pandas equivalent cannot, since both
+halves would share one reading — the circularity #80 complains of.
 
 What a comparison asserts is what SQL determines: the rows as a **multiset**, and the ORDER
-BY columns **positionally** (`corpus.matches_oracle`, shared by both benchmarks). Comparing
-whole rows positionally makes a tie into a failure, which is how TPC-H q11 failed — two
-German parts come to 223626.0 exactly, and which of them is printed first is not the
-query's to say. The rest of the TPC-H corpus is still compared positionally throughout,
-because its sort keys are unique in this data; a query that starts failing there has found
-a tie, and the fix is to name its `order_by`, not to re-sort the oracle until they agree.
+BY columns **positionally** (`corpus.matches_oracle`). Comparing whole rows positionally makes
+a tie into a failure, which is how TPC-H q11 failed — two German parts come to 223626.0
+exactly, and which of them is printed first is not the query's to say.
 
 **Manual dispatch only** (`.github/workflows/exec-model-corpus.yml`): six million lineitem
 rows through a pandas operator chain is minutes, not seconds. The queries are independent,
-so `PCK_SHARD=k/n` splits a file across n processes and `PCK_LAYOUT` picks one of the three
-layouts each query runs at. `test_tpch.py`'s short plan-shape tests are a separate file and
-still run on every push in dataset-matrix.
+so `PCK_SHARD=k/n` splits a file across n processes. `test_stats_sidecar.py` and
+`test_cardinality_corpus.py` are seconds, and run on every push in dataset-matrix.
 
-**`PCK_BACKEND=recipe`** re-runs the whole corpus with every join going through the
-FlatBuffers emulation instead of pandas — the same `Cudf*` node sequence the C++ reads off
-the wire, interpreted by a python model of the cuDF calls. That is the claim the join
-capability work made, checked against real queries rather than against a synthetic matrix.
-
-**Plans are separate from tests.** A plan is a function of the schemas, so the builders in
-`plans_tpch*.py` and `plans_tpcds*.py` take a table provider and never read a row; `plans.py`
-renders every plan from parquet footers in a fraction of a second and writes
-`tpch.plans.txt` / `tpcds.plans.txt`, which the corpus tests then check the default layout
-against. Regenerating a plan golden does not cost a corpus run — only verifying it does.
-
-The TPC-DS lowerings are grouped by what the lowering has to do rather than by number —
-stars, bucketed reports, baskets, correlated subqueries, banded disjunctions, semi/anti/mark
-joins, channel unions, year-over-year self-joins — and `plans_tpcds.py` is the registry that
-names them all.
-
-**Sampling was tried and abandoned.** Both benchmarks are written clustered by date, so a
-row prefix is one quarter of 1992, a row-group sample is a set of date windows, and two
-tables sampled independently join to nothing. Every one of those bit before whole tables
-settled it; `corpus.py` records the reasoning.
+**Whole tables, not a sample.** Both benchmarks are written clustered by date, so a row prefix
+is one quarter of 1992, a row-group sample is a set of date windows, and two tables sampled
+independently join to nothing.
 
 ## Layout injection
 
@@ -257,7 +223,9 @@ groups, batch sizes and hash placement are whatever preset you name — one lane
 batch, a few of each, many small lanes, lanes with nothing in them, re-cut batch
 boundaries — with sources injecting zero-row batches at a given probability, and with
 `GpuEmitPartitions` placing rows by a hash that ranges from well spread to
-everything-in-one-lane. Each corpus plan is written once and run at every shape.
+everything-in-one-lane. `test_join_capability.py` writes each join plan once and runs it at
+every shape; `test_injection.py` checks that the shapes really differ, that an unshuffled join
+keeps its lanes, that the empty batches really arrive, and that a seed reproduces.
 
 Rebuilding, not editing: a node's partitioning is baked into a closure at build time, so
 every builder in `nodes.py` records its call and a rewrite re-runs it. Two rules keep the

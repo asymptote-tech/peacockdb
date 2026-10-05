@@ -7,8 +7,8 @@ violently as the engine permits and demand the same answer every time.
 
 That is what this does. Give it a plan built from `nodes.py` and it hands back an
 equivalent plan whose lanes, row groups, batch sizes and hash placement are whatever the
-chosen preset says. The plans in `test_tpch.py` are written once, at whatever partitioning
-reads clearly, and then run at every shape.
+chosen preset says. The join plans in `test_join_capability.py` are written once, at
+whatever partitioning reads clearly, and then run at every shape.
 
 **Why rebuilding rather than editing.** A node's partitioning is not a field: the source
 captured a row-group mapping computed at build time, the emitter captured its lane count,

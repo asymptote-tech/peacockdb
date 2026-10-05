@@ -178,29 +178,21 @@ jobs:
           testdata/generate_testdata.sh --bench tpch
           testdata/generate_testdata.sh --bench tpcds
 
-      # Tier A: structural validation of the freshly generated sf1 data. Runs in the
-      # rapids container (matrix leg). CI generates SYNTHETIC embeddings (no fetch), so
-      # the DEEP/GloVe embedding checks auto-skip on FLOAT[8]; the row-count / schema /
-      # sort-order / clustering checks always run. numpy+pyarrow ship in the rapids base
-      # image (cudf depends on pyarrow), but self-heal if a future image drops them
-      # rather than letting the validator fail to import.
-      # The exec-model prototype's TPC-H plan shapes, its statistics sidecars counted again
-      # from the data by gen_stats.py with the DuckDB the generator step unpacked (its
-      # `export` ends with that step, hence `env` here), and its row estimates against the
-      # engine's CPU runs, which need the sf1 tables generated above — the rest of that suite runs in the cost-report tier, which has no
-      # dataset. One matrix leg only: the two legs differ in cuDF, which this pure-python
-      # test cannot see, and a second run would only report the same failure twice.
-      # The corpus queries are minutes rather than seconds: they live in
-      # test_tpch_corpus.py and run in exec-model-corpus.yml on manual dispatch, so this
-      # file has none left to exclude.
-      - name: Exec-model TPC-H plans, statistics and row estimates (Python)
+      # The exec-model prototype's statistics sidecars counted again from the data by
+      # gen_stats.py with the DuckDB the generator step unpacked (its `export` ends with that
+      # step, hence `env` here), and its row estimates against the engine's CPU runs, which
+      # need the sf1 tables generated above — the rest of that suite runs in the cost-report
+      # tier, which has no dataset. One matrix leg only: the two legs differ in cuDF, which
+      # this pure-python test cannot see, and a second run would only report the same failure
+      # twice. The engine's plans run over the same tables in exec-model-corpus.yml on manual
+      # dispatch: they are minutes rather than seconds.
+      - name: Exec-model statistics and row estimates (Python)
         if: matrix.cudf == '25.02'
         env:
           DUCKDB: /tmp/duckdb-bin/duckdb
         run: |
           set -euo pipefail
           python3 -c "import pandas, pyarrow" 2>/dev/null || pip install --quiet pandas pyarrow
-          python3 scripts/exec_model/tests/test_tpch.py
           python3 scripts/exec_model/tests/test_stats_sidecar.py
           python3 scripts/exec_model/tests/test_cardinality_corpus.py
 
@@ -233,7 +225,12 @@ jobs:
         if: matrix.cudf == '25.02'
         run: cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens
 
-
+      # Tier A: structural validation of the freshly generated sf1 data. Runs in the
+      # rapids container (matrix leg). CI generates SYNTHETIC embeddings (no fetch), so
+      # the DEEP/GloVe embedding checks auto-skip on FLOAT[8]; the row-count / schema /
+      # sort-order / clustering checks always run. numpy+pyarrow ship in the rapids base
+      # image (cudf depends on pyarrow), but self-heal if a future image drops them
+      # rather than letting the validator fail to import.
       - name: Validate sf1 datasets
         run: |
           python3 -c "import numpy, pyarrow" 2>/dev/null \
@@ -741,17 +738,14 @@ jobs:
           cargo build --release -p peacockdb-dphyp
           export PEACOCK_DPHYP_LIB=$PWD/target/release/libpeacockdb_dphyp.so
           shopt -s nullglob
-          # Nine of these need the generated sf1 tables, which this job does not have.
-          # test_tpch.py, test_stats_sidecar.py and test_cardinality_corpus.py run in
-          # dataset-matrix; the corpus files run in exec-model-corpus.yml on manual
-          # dispatch. test_stats_embeddings.py generates its own tables from the embeddings
-          # cache, which no CI host may fetch, so it is run by hand. Named rather than
+          # Six of these need the generated sf1 tables, which this job does not have.
+          # test_stats_sidecar.py and test_cardinality_corpus.py run in dataset-matrix; the
+          # four engine-plan files run in exec-model-corpus.yml on manual dispatch.
+          # test_stats_embeddings.py generates its own tables from the embeddings cache,
+          # which no CI host may fetch, so it is run by hand. Named rather than
           # pattern-matched, and a missing one is an error, so renaming a file cannot
           # silently drop it from every job.
-          elsewhere=(scripts/exec_model/tests/test_tpch.py
-                     scripts/exec_model/tests/test_tpch_corpus.py
-                     scripts/exec_model/tests/test_tpcds.py
-                     scripts/exec_model/tests/test_engine_answers.py
+          elsewhere=(scripts/exec_model/tests/test_engine_answers.py
                      scripts/exec_model/tests/test_engine_dynamic_filters.py
                      scripts/exec_model/tests/test_stats_sidecar.py
                      scripts/exec_model/tests/test_stats_embeddings.py

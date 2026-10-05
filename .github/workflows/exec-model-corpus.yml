@@ -1,27 +1,14 @@
 name: Exec-model corpus (manual)
 
-# The T0 prototype's corpus queries — 22 TPC-H and 71 TPC-DS query texts lowered by hand
-# into the engine's nodes (scripts/exec_model/tests/test_tpch_corpus.py,
-# test_tpcds.py). TPC-H is checked against a hand-written pandas oracle per query; TPC-DS
-# against DuckDB running the query's own text, which also needs the DuckDB CLI below.
-# test_engine_answers.py runs the engine's own plan goldens the same way, against DuckDB;
-# test_engine_dynamic_filters.py runs them again pruned by their dynamic filters.
+# The engine's own plan goldens run by the prototype over the sf1 tables, each against DuckDB
+# running the query's own text: as planned, pruned by dynamic filters, reassembled, and
+# reordered by DPhyp (the four test_engine_*.py files below). Manual dispatch: they need the
+# generated datasets and take minutes.
 #
-# Manual dispatch only, for two reasons. They need the generated sf1 datasets, which the
-# push pipeline builds inside the dataset-matrix container job; and they are minutes rather than
-# seconds, being real tables through a pandas operator chain. The prototype's short tests
-# keep running on every push — the whole suite in cost-report, and test_tpch.py's plan
-# shapes in dataset-matrix, which is now a separate file rather than a `-corpus` exclusion.
-#
-# `backend` chooses what the joins run on. `pandas` is the default sweep; `recipe` routes
-# every join through the FlatBuffers emulation (operators/recipe_join.py), which is the
-# claim PR #121 made — that the frozen fbs and C++ surface executes these queries' joins —
-# checked here against the same oracles rather than against a synthetic matrix.
-#
-# Sharded across processes: the queries are independent, so PCK_SHARD=k/n gives process k
-# every n-th test (scripts/exec_model/tests/harness.py). A shard that selects nothing is an
-# error rather than a green no-op, so SHARDS must not exceed the smallest file's test
-# count — 22 today.
+# PCK_SHARD=k/n gives process k every n-th test (scripts/exec_model/tests/harness.py), and a
+# shard that selects nothing is an error. So the matrix's shard list and the `/3` in PCK_SHARD
+# must agree, and the shard count may not exceed the smallest file's test count — 58 today,
+# test_engine_dynamic_filters.py's.
 on:
   workflow_dispatch:
     inputs:
@@ -29,21 +16,15 @@ on:
         description: 'Run only tests whose name contains this (empty = all corpus tests)'
         required: false
         default: ''
-      backend:
-        description: 'Join backend: pandas, or recipe for the FlatBuffers emulation'
-        required: false
-        default: 'pandas' 
 
 jobs:
   corpus:
-    name: Corpus queries (${{ inputs.backend }}, shard ${{ matrix.shard }})
+    name: Corpus queries (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
-    env:
-      SHARDS: 3
     steps:
       - uses: actions/checkout@v4
 
@@ -60,7 +41,7 @@ jobs:
 
       # Byte-for-byte the pipeline's generator step: the same pinned DuckDB release build
       # the committed goldens come from, for the same reason (the dsdgen column types drift
-      # between releases). Both benches, since the two corpus files need one each.
+      # between releases). Both benches, since the engine's plans cover both.
       - name: Generate SF-1 test data
         run: |
           set -euo pipefail
@@ -76,7 +57,6 @@ jobs:
       - name: Run corpus queries
         env:
           PCK_SHARD: ${{ matrix.shard }}/3
-          PCK_BACKEND: ${{ inputs.backend }}
           FILTER: ${{ inputs.filter }}
           DUCKDB: /tmp/duckdb-bin/duckdb
           PEACOCK_DPHYP_LIB: ${{ github.workspace }}/target/release/libpeacockdb_dphyp.so
@@ -86,17 +66,12 @@ jobs:
           # filter narrows within them. No `set -e` short-circuit on the first file: each
           # runs, statuses are OR'd, so one failure cannot hide another file's.
           status=0
-          files=(scripts/exec_model/tests/test_tpch_corpus.py scripts/exec_model/tests/test_tpcds.py)
-          # The engine's plans join by position, which the name-based recipe emulation does
-          # not model: that backend refuses them, so they run on pandas only.
-          if [ "$PCK_BACKEND" = pandas ]; then
-            files+=(scripts/exec_model/tests/test_engine_answers.py
-                    scripts/exec_model/tests/test_engine_dynamic_filters.py
-                    scripts/exec_model/tests/test_engine_reassembled.py
-                    scripts/exec_model/tests/test_engine_optimized.py)
-          fi
+          files=(scripts/exec_model/tests/test_engine_answers.py
+                 scripts/exec_model/tests/test_engine_dynamic_filters.py
+                 scripts/exec_model/tests/test_engine_reassembled.py
+                 scripts/exec_model/tests/test_engine_optimized.py)
           for f in "${files[@]}"; do
-            echo "== $f (shard $PCK_SHARD, backend $PCK_BACKEND)"
+            echo "== $f (shard $PCK_SHARD)"
             python3 "$f" ${FILTER:+"$FILTER"} || status=1
           done
           exit $status

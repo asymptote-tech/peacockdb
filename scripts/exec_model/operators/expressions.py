@@ -48,7 +48,7 @@ class Lit(Expr):
 
     def name(self) -> str:
         # A date renders as a date: `Timestamp('1994-01-01 00:00:00')` is the same value
-        # said at four times the length, and these names end up in plan goldens.
+        # said at four times the length, and an unaliased expression's name is its column's.
         if isinstance(self.value, pd.Timestamp):
             return self.value.date().isoformat()
         return repr(self.value)
