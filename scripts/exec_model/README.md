@@ -195,8 +195,9 @@ of a mode's `plans.txt` golden, built by `engine_nodes.py`, against DuckDB — a
 their dynamic filters (`dynamic_filters.py`): still DuckDB's answer, and no more row groups than
 DuckDB's own filter keeps. `tests/test_engine_corpus.py` needs no data: every golden plan builds,
 validates, and declares the layout the engine printed for each node. `tests/test_stats_sidecar.py`
-checks the committed NDV sidecars (`testdata/stats/`) against the generated data — footers only —
-and `tests/test_cardinality_corpus.py` every join's row estimate (`cardinality.py`) against the
+recounts the committed NDV sidecars (`testdata/stats/`) from the generated data with
+`gen_stats.py`, byte for byte, and checks the reader serves every column they list;
+`tests/test_cardinality_corpus.py` checks every join's row estimate (`cardinality.py`) against the
 `output_rows` of the engine's own CPU run in `<mode>-mini.cpu.txt`.
 `tests/test_disassembly_corpus.py` needs no data either: every cluster of every golden,
 disassembled in the order it has (`disassembly.py`), builds a plan the engine would lay out the

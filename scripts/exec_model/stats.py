@@ -12,14 +12,14 @@ from __future__ import annotations
 import hashlib
 import json
 import pathlib
-import struct
 from dataclasses import dataclass
+from decimal import Decimal
 
 import pyarrow.parquet as pq
 
 from .errors import StatsError
 
-FORMAT = 1
+FORMAT = 2
 
 
 @dataclass(frozen=True)
@@ -35,16 +35,45 @@ class ColumnStats:
     avg_bytes: float | None = None
 
 
-def fingerprint(path: pathlib.Path, rows: int) -> dict:
-    """What `gen_stats.py` records per table: rows, bytes and the sha256 of the footer — the
-    file's last `4 + length + 8` bytes, its length the little-endian u32 before the magic."""
-    size = path.stat().st_size
-    with path.open("rb") as file:
-        file.seek(size - 8)
-        (length,) = struct.unpack("<I", file.read(4))
-        file.seek(size - 8 - length)
-        footer = file.read(length)
-    return {"rows": rows, "bytes": size, "footer_sha256": hashlib.sha256(footer).hexdigest()}
+def column_paths(metadata) -> list[str]:
+    """The footer's leaf columns by path, in schema order: the index of one is its chunk's."""
+    return [metadata.schema.column(i).path for i in range(metadata.num_columns)]
+
+
+def flat_columns(metadata) -> list[str]:
+    """The columns whose footer min/max bound a row's value, in schema order. A list column's
+    leaf, `name.list.element`, has min/max over its elements, so the embeddings are not among them."""
+    return [p for p in column_paths(metadata) if "." not in p]
+
+
+def fingerprint(metadata) -> dict:
+    """What `gen_stats.py` records per table: the rows, and a sha256 over each flat column's
+    footer statistics — null count, min and max per row group, as stored. The vector columns
+    are left out, so one sidecar fits a dataset whichever embeddings it was generated with."""
+    flat = set(flat_columns(metadata))
+    chunks = lambda i: [chunk_statistics(metadata.row_group(g).column(i).statistics)
+                        for g in range(metadata.num_row_groups)]
+    kept = [[path, chunks(i)] for i, path in enumerate(column_paths(metadata)) if path in flat]
+    digest = hashlib.sha256(json.dumps(kept, separators=(",", ":")).encode()).hexdigest()
+    return {"rows": metadata.num_rows, "statistics_sha256": digest}
+
+
+def chunk_statistics(stats) -> list | None:
+    """One chunk's statistics in a hashable form: physical values, as stored."""
+    if stats is None:
+        return None
+    raw = lambda v: v.hex() if isinstance(v, bytes) else v
+    bounds = [raw(stats.min_raw), raw(stats.max_raw)] if stats.has_min_max else [None, None]
+    return [stats.null_count if stats.has_null_count else None] + bounds
+
+
+def chunk_bounds(stats, column) -> tuple:
+    """A chunk's (min, max) as values. A decimal is built from the stored integer: pyarrow
+    before 23 cannot convert one kept as INT32/INT64, which is how DuckDB writes them."""
+    if column.logical_type.type != "DECIMAL":
+        return stats.min, stats.max
+    unscaled = lambda v: int.from_bytes(v, "big", signed=True) if isinstance(v, bytes) else v
+    return tuple(Decimal(f"{unscaled(v)}e-{column.scale}") for v in (stats.min_raw, stats.max_raw))
 
 
 class Statistics:
@@ -70,7 +99,7 @@ class Statistics:
         entry = self._tables[table]["columns"].get(column)
         if entry is None:
             raise StatsError(f"{self._sidecar}: no column {table}.{column}")
-        paths = [metadata.schema.column(i).path for i in range(metadata.num_columns)]
+        paths = column_paths(metadata)
         if column not in paths:
             raise StatsError(f"{table}.{column} is not a flat column: its footer has no min/max")
         at = paths.index(column)
@@ -81,9 +110,9 @@ class Statistics:
         if any(s is None or not s.has_min_max and s.num_values > 0 for s in stats):
             low = high = None
         else:
-            bounded = [s for s in stats if s.has_min_max]
-            low = min((s.min for s in bounded), default=None)
-            high = max((s.max for s in bounded), default=None)
+            bounds = [chunk_bounds(s, metadata.schema.column(at)) for s in stats if s.has_min_max]
+            low = min((b[0] for b in bounds), default=None)
+            high = max((b[1] for b in bounds), default=None)
         return ColumnStats(entry["ndv"], nulls, low, high, entry.get("avg_bytes"))
 
     def composite_ndv(self, table: str, columns) -> int | None:
@@ -100,7 +129,7 @@ class Statistics:
                 raise StatsError(f"{self._sidecar}: no table {table}")
             path = self.directory / f"{table}.parquet"
             metadata = pq.ParquetFile(path).metadata
-            recorded, actual = self._tables[table]["fingerprint"], fingerprint(path, metadata.num_rows)
+            recorded, actual = self._tables[table]["fingerprint"], fingerprint(metadata)
             if recorded != actual:
                 raise StatsError(f"{path} does not match {self._sidecar} (recorded {recorded}, file "
                                  f"{actual}): regenerate the sidecar with testdata/gen_stats.py")

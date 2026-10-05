@@ -74,7 +74,7 @@ the sidecar's tests.
 ### Task 4: one folder per component
 
 **Files:** every `scripts/exec_model/*.py`, `tests/`, the two workflows, `README.md`,
-`build-test.md`'s links.
+`build-test.md`'s links, `testdata/gen_stats.py` (it imports `scripts.exec_model.stats`).
 
 - [ ] `git mv` into `engine/`, `plans/`, `optimizer/` as the spec lists, with relative imports
   fixed and nothing else changed; tests into `tests/{engine,operators,plans,optimizer}/` with

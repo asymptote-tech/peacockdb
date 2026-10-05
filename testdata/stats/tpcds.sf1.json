@@ -1,8 +1,8 @@
 {
-  "format": 1,
+  "format": 2,
   "tables": {
     "call_center": {
-      "fingerprint": {"rows": 6, "bytes": 6274, "footer_sha256": "68b9c18842df3f488f23c1b3cee743178954d6ab5fd696df20075bc9472afd74"},
+      "fingerprint": {"rows": 6, "statistics_sha256": "ddbea38306bc16fdfb96dde2a7278eedd5c0704dcedd135a6a48f2ae4ad6ebfc"},
       "columns": {
         "cc_call_center_sk": {"ndv": 6, "method": "exact"},
         "cc_call_center_id": {"ndv": 3, "method": "exact", "avg_bytes": 16.0},
@@ -38,7 +38,7 @@
       }
     },
     "catalog_page": {
-      "fingerprint": {"rows": 11718, "bytes": 696381, "footer_sha256": "4adcdc1bf4ef4d1b0a31e0bed7b589281f27f755ee79eccdc3783c2f8a2d7779"},
+      "fingerprint": {"rows": 11718, "statistics_sha256": "7f1a7eebdcd8343f47e5a3ba12a68221b311ea17ddf8fd902d113839c5e5592a"},
       "columns": {
         "cp_catalog_page_sk": {"ndv": 11718, "method": "exact"},
         "cp_catalog_page_id": {"ndv": 11718, "method": "exact", "avg_bytes": 16.0},
@@ -52,7 +52,7 @@
       }
     },
     "catalog_returns": {
-      "fingerprint": {"rows": 144067, "bytes": 11556179, "footer_sha256": "dd9c10f9d83fb6ee70446d947c42614f4749d1b696da852922af87a2eb56934d"},
+      "fingerprint": {"rows": 144067, "statistics_sha256": "e7c11d6611d701e97508aaa6d883eb7f37a746bd542b5e47747b4628b37ce5d8"},
       "columns": {
         "cr_returned_date_sk": {"ndv": 2055, "method": "exact"},
         "cr_returned_time_sk": {"ndv": 64982, "method": "exact"},
@@ -87,7 +87,7 @@
       ]
     },
     "catalog_sales": {
-      "fingerprint": {"rows": 1441548, "bytes": 123375009, "footer_sha256": "4c08f2adab82123772391de257c0896b8504300c0256bafaacbebe43fbb269a4"},
+      "fingerprint": {"rows": 1441548, "statistics_sha256": "eea45d1db6b5f5d521704606e14b380ec09c3902d5ab6b529dcae2167492457f"},
       "columns": {
         "cs_sold_date_sk": {"ndv": 1830, "method": "exact"},
         "cs_sold_time_sk": {"ndv": 67461, "method": "exact"},
@@ -130,7 +130,7 @@
       ]
     },
     "customer": {
-      "fingerprint": {"rows": 100000, "bytes": 5622683, "footer_sha256": "b70f8e07c64c0ba002a329225ee6afd278a111b832221d85ebccd9968f80e41a"},
+      "fingerprint": {"rows": 100000, "statistics_sha256": "26f84b0194cb792444a296006703c92bd76c516f70cc413c0ed50d2e5e0fb397"},
       "columns": {
         "c_customer_sk": {"ndv": 100000, "method": "exact"},
         "c_customer_id": {"ndv": 100000, "method": "exact", "avg_bytes": 16.0},
@@ -153,7 +153,7 @@
       }
     },
     "customer_address": {
-      "fingerprint": {"rows": 50000, "bytes": 1091309, "footer_sha256": "489820972b9ae7ab3488e86265cecc2638ed3732ee0988fde9bacd4264a4bef9"},
+      "fingerprint": {"rows": 50000, "statistics_sha256": "6d10f3f59bc5cf737d5b9fb8c076f58cea17f5ef5880c962b4d50e44d9f338ea"},
       "columns": {
         "ca_address_sk": {"ndv": 50000, "method": "exact"},
         "ca_address_id": {"ndv": 50000, "method": "exact", "avg_bytes": 16.0},
@@ -175,7 +175,7 @@
       ]
     },
     "customer_demographics": {
-      "fingerprint": {"rows": 1920800, "bytes": 7802641, "footer_sha256": "218c28035a5481cbd546f22432ba73ced497545fb742f1a142c8e262aeb5b7b6"},
+      "fingerprint": {"rows": 1920800, "statistics_sha256": "6b33a78b0ff38a85c29862e43af53bfa3c7c9e835061cae7ea6ee9c7ac3db8a5"},
       "columns": {
         "cd_demo_sk": {"ndv": 1920800, "method": "exact"},
         "cd_gender": {"ndv": 2, "method": "exact", "avg_bytes": 1.0},
@@ -192,7 +192,7 @@
       ]
     },
     "date_dim": {
-      "fingerprint": {"rows": 73049, "bytes": 1814759, "footer_sha256": "1cd83ea3c2c2f09e1d60669577b2b1f9b1eef1621f743f7d0f3d4e0124379d1c"},
+      "fingerprint": {"rows": 73049, "statistics_sha256": "e4da902c0c59b2f7844adb8b5ffb01ed3a735df5707a26278e3b8589e49541be"},
       "columns": {
         "d_date_sk": {"ndv": 73049, "method": "exact"},
         "d_date_id": {"ndv": 73049, "method": "exact", "avg_bytes": 16.0},
@@ -225,7 +225,7 @@
       }
     },
     "household_demographics": {
-      "fingerprint": {"rows": 7200, "bytes": 31296, "footer_sha256": "aa558ad036529e9489755aaed937a3f250099509f3aa717e7247e8329c103eb5"},
+      "fingerprint": {"rows": 7200, "statistics_sha256": "2b2857df9e675c0e8fe7c91386688f52cd1ae44d23ccf5cb3579211ccc9dd271"},
       "columns": {
         "hd_demo_sk": {"ndv": 7200, "method": "exact"},
         "hd_income_band_sk": {"ndv": 20, "method": "exact"},
@@ -235,7 +235,7 @@
       }
     },
     "income_band": {
-      "fingerprint": {"rows": 20, "bytes": 831, "footer_sha256": "b81f9e120341f9e1ebc183aba6c4e238da115bb433bb26a4ec0d5d0010b98be8"},
+      "fingerprint": {"rows": 20, "statistics_sha256": "730cdced23f0df4af5c1deb1d5db1ae1dcfae1f5fc462adb759fb67e0e89ff8a"},
       "columns": {
         "ib_income_band_sk": {"ndv": 20, "method": "exact"},
         "ib_lower_bound": {"ndv": 20, "method": "exact"},
@@ -243,7 +243,7 @@
       }
     },
     "inventory": {
-      "fingerprint": {"rows": 11745000, "bytes": 27934910, "footer_sha256": "9490a0c5e1303272e95ba05660f3e3cad58f7750ab74f717222c38be7c2a7211"},
+      "fingerprint": {"rows": 11745000, "statistics_sha256": "65dfa753851cad84fbb2c81a66d1dff4014665df686d4431c26c9f18ae77e969"},
       "columns": {
         "inv_date_sk": {"ndv": 261, "method": "exact"},
         "inv_item_sk": {"ndv": 18000, "method": "exact"},
@@ -252,7 +252,7 @@
       }
     },
     "item": {
-      "fingerprint": {"rows": 18000, "bytes": 1763118, "footer_sha256": "ffc7c17bdb6a6063acd74157423514d1eb28681e06f74e9e7784dc3a0c0171b1"},
+      "fingerprint": {"rows": 18000, "statistics_sha256": "cf063172dafb54ce95c3bdbe7e5c657cdf091c5f86642879eb349ac56eef1740"},
       "columns": {
         "i_item_sk": {"ndv": 18000, "method": "exact"},
         "i_item_id": {"ndv": 9000, "method": "exact", "avg_bytes": 16.0},
@@ -282,7 +282,7 @@
       ]
     },
     "promotion": {
-      "fingerprint": {"rows": 300, "bytes": 20816, "footer_sha256": "ea58adc248398d8e9e943860208e29efeb8598ece62f79bbe7d10d367f3900f3"},
+      "fingerprint": {"rows": 300, "statistics_sha256": "09be5f5b67f5a3e1151f814b9ba0556a980ddbf82f40f859ffeec214a59d9f2b"},
       "columns": {
         "p_promo_sk": {"ndv": 300, "method": "exact"},
         "p_promo_id": {"ndv": 300, "method": "exact", "avg_bytes": 16.0},
@@ -306,7 +306,7 @@
       }
     },
     "reason": {
-      "fingerprint": {"rows": 35, "bytes": 1478, "footer_sha256": "d5ade1ad68a723e671cc45e028eed2a3834c4a1a033fba7958a1d17ab1648e94"},
+      "fingerprint": {"rows": 35, "statistics_sha256": "de235af813517ed07eac4aea3b6f713d8b7a987f6c2252c20efbf80bf4cb1ac6"},
       "columns": {
         "r_reason_sk": {"ndv": 35, "method": "exact"},
         "r_reason_id": {"ndv": 35, "method": "exact", "avg_bytes": 16.0},
@@ -314,7 +314,7 @@
       }
     },
     "ship_mode": {
-      "fingerprint": {"rows": 20, "bytes": 1906, "footer_sha256": "80a5a09a09e5de3a6d12eb556e9698fa62f2d8623607eb8dbd2aa178e15c4c2e"},
+      "fingerprint": {"rows": 20, "statistics_sha256": "a9b21bf7ed2cfdf3d49c75311c23b8894adbbf4c2d7755ecb8388ea103f921b6"},
       "columns": {
         "sm_ship_mode_sk": {"ndv": 20, "method": "exact"},
         "sm_ship_mode_id": {"ndv": 20, "method": "exact", "avg_bytes": 16.0},
@@ -325,7 +325,7 @@
       }
     },
     "store": {
-      "fingerprint": {"rows": 12, "bytes": 6974, "footer_sha256": "4f6f8a042f0709b0623614c66f655ffcedd808bfd5a1a0304a90a99096aec40f"},
+      "fingerprint": {"rows": 12, "statistics_sha256": "8e7ea584f8ae9202a04ce25b3fb0b4f3085466309f9b363683677bf7f72441fb"},
       "columns": {
         "s_store_sk": {"ndv": 12, "method": "exact"},
         "s_store_id": {"ndv": 6, "method": "exact", "avg_bytes": 16.0},
@@ -362,7 +362,7 @@
       ]
     },
     "store_returns": {
-      "fingerprint": {"rows": 287867, "bytes": 17456501, "footer_sha256": "857b93627625b3dca69bba58919ca361d5ba1ff0dc8f3dae9dbfcd9ec063bf57"},
+      "fingerprint": {"rows": 287867, "statistics_sha256": "3ae8eec7c2dbd9c604b7fd570c3cc37668e3331ffa213590645e1835c300b93e"},
       "columns": {
         "sr_returned_date_sk": {"ndv": 2003, "method": "exact"},
         "sr_return_time_sk": {"ndv": 32390, "method": "exact"},
@@ -392,7 +392,7 @@
       ]
     },
     "store_sales": {
-      "fingerprint": {"rows": 2880404, "bytes": 160505512, "footer_sha256": "e20919dd130b078cac5baa2ad61c00d059b55a3d236de390b2cf6b25c2b291f4"},
+      "fingerprint": {"rows": 2880404, "statistics_sha256": "6077f1583977fd39d0717b2eedb2277585218ebb085a32fcc54bc0850d3f7817"},
       "columns": {
         "ss_sold_date_sk": {"ndv": 1823, "method": "exact"},
         "ss_sold_time_sk": {"ndv": 45647, "method": "exact"},
@@ -424,7 +424,7 @@
       ]
     },
     "time_dim": {
-      "fingerprint": {"rows": 86400, "bytes": 1129565, "footer_sha256": "4113d7999664ef82d487a2bd9e83ff346c0fcb4155eb177f180fc9221eadf6f4"},
+      "fingerprint": {"rows": 86400, "statistics_sha256": "d885b799cf5d49d8493637b539f87a422490e5a56c87c4375402954a430f1aa0"},
       "columns": {
         "t_time_sk": {"ndv": 86400, "method": "exact"},
         "t_time_id": {"ndv": 86400, "method": "exact", "avg_bytes": 16.0},
@@ -439,7 +439,7 @@
       }
     },
     "warehouse": {
-      "fingerprint": {"rows": 5, "bytes": 2858, "footer_sha256": "dacfe9d8a1464ea2e47a32a949c30f19bb5c03da1a96bccfa1192af4496c273e"},
+      "fingerprint": {"rows": 5, "statistics_sha256": "41935e7f597154531ee541a39d67988c0fe29c3db7747d09e9685ffa5fa9dd66"},
       "columns": {
         "w_warehouse_sk": {"ndv": 5, "method": "exact"},
         "w_warehouse_id": {"ndv": 5, "method": "exact", "avg_bytes": 16.0},
@@ -458,7 +458,7 @@
       }
     },
     "web_page": {
-      "fingerprint": {"rows": 60, "bytes": 4310, "footer_sha256": "fda4ffafb681d987a05205f4749779eeb6c87d34bd70c34ab0a00279fc688b76"},
+      "fingerprint": {"rows": 60, "statistics_sha256": "aba35c6e17f69528f3c000e4b96964413082e122c5c27a5f48fe64621ca34157"},
       "columns": {
         "wp_web_page_sk": {"ndv": 60, "method": "exact"},
         "wp_web_page_id": {"ndv": 30, "method": "exact", "avg_bytes": 16.0},
@@ -477,7 +477,7 @@
       }
     },
     "web_returns": {
-      "fingerprint": {"rows": 71654, "bytes": 5605459, "footer_sha256": "03eb66343e508b70f42a35f0e431927ec5359241ae0b370849f524292b03c3fc"},
+      "fingerprint": {"rows": 71654, "statistics_sha256": "e53ba6ef8fca3d385e4b312c53598d1564f1efb93b895fffc24082d5acd474b9"},
       "columns": {
         "wr_returned_date_sk": {"ndv": 2114, "method": "exact"},
         "wr_returned_time_sk": {"ndv": 44650, "method": "exact"},
@@ -509,7 +509,7 @@
       ]
     },
     "web_sales": {
-      "fingerprint": {"rows": 719384, "bytes": 60330121, "footer_sha256": "dbc027bb650c84f69c800d1c55201c2fbf00ae79b63ab43e1c5038f37e581523"},
+      "fingerprint": {"rows": 719384, "statistics_sha256": "5dc189a938af6a6fb37571e224e085951bfae165917499d3beddbc4d7cbb8523"},
       "columns": {
         "ws_sold_date_sk": {"ndv": 1823, "method": "exact"},
         "ws_sold_time_sk": {"ndv": 41020, "method": "exact"},
@@ -551,7 +551,7 @@
       ]
     },
     "web_site": {
-      "fingerprint": {"rows": 30, "bytes": 9865, "footer_sha256": "8528328618507bcc55805af08b8e3c36d799e99a0c48a8d14d163c26c5783a62"},
+      "fingerprint": {"rows": 30, "statistics_sha256": "8c794b955097d883aadf287ad64dce4907669373918758eee5fe2de49499b989"},
       "columns": {
         "web_site_sk": {"ndv": 30, "method": "exact"},
         "web_site_id": {"ndv": 15, "method": "exact", "avg_bytes": 16.0},

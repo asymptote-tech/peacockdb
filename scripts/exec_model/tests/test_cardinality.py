@@ -19,7 +19,7 @@ import pyarrow.parquet as pq
 from .harness import main
 from ..cardinality import estimate
 from ..engine_plan import parse_plans
-from ..stats import Statistics, fingerprint
+from ..stats import FORMAT, Statistics, fingerprint
 
 TABLES = {
     # a dimension of 1000 keys over ten "years"; a fact whose 1000 rows cover year 5 only
@@ -48,12 +48,12 @@ def dataset() -> Statistics:
     for name, table in TABLES.items():
         pq.write_table(table, directory / f"{name}.parquet")
         frame = table.to_pandas()
-        sidecar[name] = {"fingerprint": fingerprint(directory / f"{name}.parquet", table.num_rows),
+        sidecar[name] = {"fingerprint": fingerprint(pq.read_metadata(directory / f"{name}.parquet")),
                          "columns": {c: {"ndv": int(frame[c].nunique()), "method": "exact"} for c in frame},
                          "composite": [{"columns": k, "ndv": len(frame[k].drop_duplicates()), "method": "exact"}
                                        for k in COMPOSITE.get(name, [])]}
     (root / "stats").mkdir()
-    (root / "stats" / "toy.sf1.json").write_text(json.dumps({"format": 1, "tables": sidecar}))
+    (root / "stats" / "toy.sf1.json").write_text(json.dumps({"format": FORMAT, "tables": sidecar}))
     return Statistics(directory)
 
 

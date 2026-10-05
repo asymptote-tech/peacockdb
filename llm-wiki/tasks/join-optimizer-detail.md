@@ -37,6 +37,8 @@ fixes #236 and #237):
   Without q64: 599 joins, median 1.21, 73 %. → Task 5.
 - Green otherwise: rust-only, DPhyp, the cheap tier (34 files), and q64 in the corpus answer,
   reassembled and optimized suites at every mode.
+- CI run `37233204588`'s GPU job failed only because a neighbour held the card (the pool could
+  not be built); its re-run passed.
 - `test_call_cost`'s check against the measured record is not on the branch; it needs the
   sf40 record → Task 7.
 
@@ -47,3 +49,40 @@ fixes #236 and #237):
   `/tmp/peacock-opt` with its own Python 3.13 venv, DuckDB 1.5.4 and DPhyp built on the host
   (its glibc 2.31 is older than a local build needs). `/home/info/peacockdb` is the gate's
   checkout and is not touched. tpcds exists there at sf1 only.
+
+## Task 1
+
+- The fingerprint is `stats.fingerprint(metadata)`: the rows plus a sha256 over each flat
+  column's per-row-group null count and raw min/max. `gen_stats.py` imports it, with
+  `flat_columns`, from `scripts/exec_model/stats.py`, so the writer and the reader share one
+  definition. A flat column is a footer path without a dot; a list leaf is `x.list.element`.
+  The sidecar format is 2.
+- Per row group, not whole-file aggregates: measured, external and synthetic tpch sf1 have the
+  same row groups (part 2, partsupp 7, lineitem 49) and the same stock-column statistics, so
+  the stricter hash still matches across modes. HEAD's `gen_stats.py` over the external data
+  differed from the committed file only in part/partsupp's fingerprints and the three
+  `*_embedding` NDVs. After the change, every other NDV and composite count is unchanged.
+- The fingerprint cannot catch every stale NDV: data can change with no row group's null
+  count, min or max moving (ps_tag with ten tags between the same extremes). So
+  `test_stats_sidecar` recounts both sidecars with `gen_stats.py --out` in dataset-matrix
+  and compares byte for byte, with the DuckDB the generator step unpacked (`DUCKDB` in the
+  step's `env`). That also runs `gen_stats.py`'s import of `stats.py` in CI. Because of it,
+  `test_stats_embeddings` keeps only the external case.
+- Decimals: pyarrow before 23 cannot decode a decimal stored as INT32/INT64 (22 fails, 23
+  works), and DuckDB stores them so. This was red in CI too, not only locally: dataset-matrix's
+  image has an older pyarrow, `test_stats_sidecar` failed at `Statistics.column`, and `set -e`
+  skipped `test_cardinality_corpus`. The reader now builds decimal bounds from
+  `min_raw`/`max_raw` and the column's scale. The value is built from a string, because
+  `Decimal.scaleb` rounds past the context's 28 digits. It matches pyarrow 25 on all 844
+  decimal chunks of both datasets. Pinned by `test_a_decimal_s_bounds_are_read_whatever_its_storage`.
+- `test_stats_embeddings.py` is run by hand. It links the generator into a temp dir and
+  generates there (about 2 min locally), so `testdata/tpch.sf1` is left alone:
+  `TMPDIR=/build/peacock/tmp DUCKDB=/build/peacock/duckdb-1.5.4/duckdb
+  PEACOCK_EMBEDDINGS_CACHE=/build/peacock/embeddings/testdata/embeddings-cache
+  /usr/bin/python3 scripts/exec_model/tests/test_stats_embeddings.py`.
+  The cache was fetched by a symlinked `fetch_embeddings.sh`, which caches beside itself.
+  It is not linked into the tree: the root `.gitignore` entry `testdata/embeddings-cache/`
+  matches a directory only, so a symlink would show as untracked.
+- Local tools: no DuckDB CLI is on the PATH; `/build/peacock/duckdb-1.5.4/duckdb` is the
+  release build CI uses (08e34c447b). `/usr/bin/python3` has pyarrow 18.1;
+  `/build/peacock/venv-exec-model` has pyarrow 25.0.1 and pandas 2.2.2.

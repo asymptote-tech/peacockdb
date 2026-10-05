@@ -1,8 +1,8 @@
 {
-  "format": 1,
+  "format": 2,
   "tables": {
     "customer": {
-      "fingerprint": {"rows": 150000, "bytes": 12388477, "footer_sha256": "62594b03a41aa5bcfaceb08981e94d59b3cf7839a0089e8e85e39bbb7f7a9d1e"},
+      "fingerprint": {"rows": 150000, "statistics_sha256": "0847001f35b08283e81983cf0d2a0664ef1c3d1ff26d4d1858c234d8c48de3bb"},
       "columns": {
         "c_custkey": {"ndv": 150000, "method": "exact"},
         "c_name": {"ndv": 150000, "method": "exact", "avg_bytes": 18.0},
@@ -15,7 +15,7 @@
       }
     },
     "lineitem": {
-      "fingerprint": {"rows": 6001215, "bytes": 208529521, "footer_sha256": "a75112ad92c5b84cf824635c174990e1f53563e2c230f5fa624a2f6aece66063"},
+      "fingerprint": {"rows": 6001215, "statistics_sha256": "f1ac882aec6e4c4a1ce9732a7fb5191996821778662f5ca16ad207dd10369063"},
       "columns": {
         "l_orderkey": {"ndv": 1500000, "method": "exact"},
         "l_partkey": {"ndv": 200000, "method": "exact"},
@@ -39,7 +39,7 @@
       ]
     },
     "nation": {
-      "fingerprint": {"rows": 25, "bytes": 2311, "footer_sha256": "71f6b60621aa0efc5b040ab01f5824478f5a8c0223bcfec7a0be26c9dc32e677"},
+      "fingerprint": {"rows": 25, "statistics_sha256": "487d958db1803c396084abc3b90b70d500dd325024e788df730d91d055d7ca3c"},
       "columns": {
         "n_nationkey": {"ndv": 25, "method": "exact"},
         "n_name": {"ndv": 25, "method": "exact", "avg_bytes": 7.08},
@@ -48,7 +48,7 @@
       }
     },
     "orders": {
-      "fingerprint": {"rows": 1500000, "bytes": 55296465, "footer_sha256": "551e5294facbf1c620fe87f47f23a10d6eac97a40c2d959a26e3438d4ea07890"},
+      "fingerprint": {"rows": 1500000, "statistics_sha256": "43172aa378de77e0c2f45f56f4bada605291c50814d7ad5e80b1e01ac0ca8a2a"},
       "columns": {
         "o_orderkey": {"ndv": 1500000, "method": "exact"},
         "o_custkey": {"ndv": 99996, "method": "exact"},
@@ -62,7 +62,7 @@
       }
     },
     "part": {
-      "fingerprint": {"rows": 200000, "bytes": 12773841, "footer_sha256": "dc507a5c2f477a7405dcfc622f8831d937587704548a2aa0247148e4791f8d80"},
+      "fingerprint": {"rows": 200000, "statistics_sha256": "98c7d3e55973cb8463ae7b25151b7e40b3a73221768d31b200c030bbfe9d1760"},
       "columns": {
         "p_partkey": {"ndv": 200000, "method": "exact"},
         "p_name": {"ndv": 199997, "method": "exact", "avg_bytes": 32.751},
@@ -72,20 +72,17 @@
         "p_size": {"ndv": 50, "method": "exact"},
         "p_container": {"ndv": 40, "method": "exact", "avg_bytes": 7.575},
         "p_retailprice": {"ndv": 20899, "method": "exact"},
-        "p_comment": {"ndv": 130704, "method": "exact", "avg_bytes": 13.512},
-        "p_text_embedding": {"ndv": 200000, "method": "exact"}
+        "p_comment": {"ndv": 130704, "method": "exact", "avg_bytes": 13.512}
       }
     },
     "partsupp": {
-      "fingerprint": {"rows": 800000, "bytes": 94330805, "footer_sha256": "5a439ea7a02f613ce3ac4f765b72d7f6e851ec3de229f67d5a58a40ef0111fcd"},
+      "fingerprint": {"rows": 800000, "statistics_sha256": "c05b5e87c2fcbe439620ff7fd8d895dc31d0c7f55f2fffdb05e9e081eebbfe3a"},
       "columns": {
         "ps_partkey": {"ndv": 200000, "method": "exact"},
         "ps_suppkey": {"ndv": 10000, "method": "exact"},
         "ps_availqty": {"ndv": 9999, "method": "exact"},
         "ps_supplycost": {"ndv": 99865, "method": "exact"},
         "ps_comment": {"ndv": 772739, "method": "exact", "avg_bytes": 123.615},
-        "ps_image_embedding": {"ndv": 800000, "method": "exact"},
-        "ps_text_embedding": {"ndv": 800000, "method": "exact"},
         "ps_tag": {"ndv": 8, "method": "exact", "avg_bytes": 6.75}
       },
       "composite": [
@@ -93,7 +90,7 @@
       ]
     },
     "region": {
-      "fingerprint": {"rows": 5, "bytes": 1071, "footer_sha256": "2529a73bf58a8f1c237e47ba75eb37ffb7b4124a1a4382699a97c4ae225d8095"},
+      "fingerprint": {"rows": 5, "statistics_sha256": "86e0833f03e5c7a72f38d49fc81006c8978fcf59cdec64fb4b922b4c2f7b9208"},
       "columns": {
         "r_regionkey": {"ndv": 5, "method": "exact"},
         "r_name": {"ndv": 5, "method": "exact", "avg_bytes": 6.8},
@@ -101,7 +98,7 @@
       }
     },
     "supplier": {
-      "fingerprint": {"rows": 10000, "bytes": 793644, "footer_sha256": "acd095c4055734a5ade5bbd139c660130c8b782846c9d0c79496a3af377e6698"},
+      "fingerprint": {"rows": 10000, "statistics_sha256": "b7d1886d4b152ed28f05114e8a7db2c9b198d6ec3a87c26aeb716e27d1a6e296"},
       "columns": {
         "s_suppkey": {"ndv": 10000, "method": "exact"},
         "s_name": {"ndv": 10000, "method": "exact", "avg_bytes": 18.0},

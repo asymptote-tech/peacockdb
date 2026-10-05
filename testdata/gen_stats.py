@@ -1,30 +1,32 @@
 #!/usr/bin/env python3
-"""The statistics sidecar: exact distinct counts for every column of every table of a dataset,
-plus the same-table composite join keys below, and the mean length of each string column's
-values, into `testdata/stats/<bench>.sf<N>.json`.
+"""The statistics sidecar: exact distinct counts for every flat column of every table of a
+dataset, plus the same-table composite join keys below, and the mean length of each string
+column's values, into `testdata/stats/<bench>.sf<N>.json`.
 
 Only what the footer lacks: rows, min/max and null counts are in each parquet footer already,
 and two sources of one number drift; the footer's byte sizes are of the encoded pages, which
-for a dictionary-encoded string column are its indices. A NULL is not a value, as in a join key. Each table carries a
-fingerprint of its file (rows, bytes, footer sha256): a reader whose footer differs must refuse
-the sidecar rather than fall back to guessing, since a stale NDV is exactly the error it exists
-to remove.
+for a dictionary-encoded string column are its indices. A NULL is not a value, as in a join key.
+Vector columns are skipped: no estimate reads them, and tpch's change with `--embeddings`. Each
+table carries `stats.py`'s fingerprint; a reader whose footer statistics differ refuses the
+sidecar rather than guess, since a stale NDV is exactly the error it exists to remove.
 
-    testdata/gen_stats.py --bench tpch --sf 1 [--data-dir DIR] [--duckdb PATH]
+    testdata/gen_stats.py --bench tpch --sf 1 [--data-dir DIR] [--out FILE] [--duckdb PATH]
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import pathlib
-import struct
 import subprocess
 import sys
 
+import pyarrow.parquet as pq
+
 TESTDATA = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(TESTDATA.parent))
+from scripts.exec_model.stats import FORMAT, fingerprint, flat_columns  # noqa: E402
 
 #: Join keys of two or more columns that all come from one table, per the plan goldens. A set
 #: that spans tables exists only in an intermediate result and cannot be counted here.
@@ -52,18 +54,6 @@ COMPOSITE = {
 }
 
 
-def fingerprint(path: pathlib.Path, rows: int) -> dict:
-    """Rows, bytes and the footer's sha256; the footer is the file's last `4 + length + 8`
-    bytes, its length the little-endian u32 before the closing magic."""
-    size = path.stat().st_size
-    with path.open("rb") as file:
-        file.seek(size - 8)
-        (length,) = struct.unpack("<I", file.read(4))
-        file.seek(size - 8 - length)
-        footer = file.read(length)
-    return {"rows": rows, "bytes": size, "footer_sha256": hashlib.sha256(footer).hexdigest()}
-
-
 def duckdb_rows(duckdb: str, sql: str) -> list[dict]:
     done = subprocess.run([duckdb, "-json", "-c", "SET threads=1; " + sql], capture_output=True, text=True)
     if done.returncode:
@@ -77,12 +67,13 @@ def quoted(name: str) -> str:
 
 def table_stats(duckdb: str, path: pathlib.Path, composite: list[tuple[str, ...]]) -> dict:
     source = f"read_parquet('{path}')"
-    described = duckdb_rows(duckdb, f"DESCRIBE SELECT * FROM {source}")
-    columns = [row["column_name"] for row in described]
+    metadata = pq.read_metadata(path)
+    columns = flat_columns(metadata)
+    described = duckdb_rows(duckdb, f"DESCRIBE SELECT {', '.join(map(quoted, columns))} FROM {source}")
     # Bytes, not characters: `strlen` of a VARCHAR, `octet_length` of a BLOB.
     strings = {row["column_name"]: {"VARCHAR": "strlen", "BLOB": "octet_length"}[row["column_type"]]
                for row in described if row["column_type"] in ("VARCHAR", "BLOB")}
-    counts = ["count(*) AS rows"] + [f"count(DISTINCT {quoted(c)}) AS c{i}" for i, c in enumerate(columns)]
+    counts = [f"count(DISTINCT {quoted(c)}) AS c{i}" for i, c in enumerate(columns)]
     counts += [f"avg({strings[c]}({quoted(c)})) AS b{i}" for i, c in enumerate(columns) if c in strings]
     for i, key in enumerate(composite):
         missing = [c for c in key if c not in columns]
@@ -91,7 +82,7 @@ def table_stats(duckdb: str, path: pathlib.Path, composite: list[tuple[str, ...]
         present = " AND ".join(f"{quoted(c)} IS NOT NULL" for c in key)
         counts.append(f"count(DISTINCT ({', '.join(map(quoted, key))})) FILTER (WHERE {present}) AS k{i}")
     [row] = duckdb_rows(duckdb, f"SELECT {', '.join(counts)} FROM {source}")
-    stats = {"fingerprint": fingerprint(path, row["rows"]),
+    stats = {"fingerprint": fingerprint(metadata),
              "columns": {c: {"ndv": row[f"c{i}"], "method": "exact"} for i, c in enumerate(columns)}}
     for i, c in enumerate(columns):
         if c in strings:
@@ -120,6 +111,7 @@ def main() -> None:
     parser.add_argument("--bench", required=True, choices=sorted(COMPOSITE))
     parser.add_argument("--sf", required=True)
     parser.add_argument("--data-dir", type=pathlib.Path)
+    parser.add_argument("--out", type=pathlib.Path)
     parser.add_argument("--duckdb", default=os.environ.get("DUCKDB", "duckdb"))
     args = parser.parse_args()
     data = args.data_dir or TESTDATA / f"{args.bench}.sf{args.sf}"
@@ -130,9 +122,9 @@ def main() -> None:
     if unknown:
         sys.exit(f"composite keys name tables not in {data}: {sorted(unknown)}")
     tables = {f.stem: table_stats(args.duckdb, f, COMPOSITE[args.bench].get(f.stem, [])) for f in files}
-    out = TESTDATA / "stats" / f"{args.bench}.sf{args.sf}.json"
+    out = args.out or TESTDATA / "stats" / f"{args.bench}.sf{args.sf}.json"
     out.parent.mkdir(exist_ok=True)
-    out.write_text(dumps({"format": 1, "tables": tables}) + "\n")
+    out.write_text(dumps({"format": FORMAT, "tables": tables}) + "\n")
     print(f"{out}: {len(tables)} tables, {sum(len(t['columns']) for t in tables.values())} columns")
 
 
