@@ -218,7 +218,11 @@ validates, and declares the layout the engine printed for each node. `tests/opti
 recounts the committed NDV sidecars (`testdata/stats/`) from the generated data with
 `gen_stats.py`, byte for byte, and checks the reader serves every column they list;
 `tests/optimizer/test_cardinality_corpus.py` checks every join's row estimate (`cardinality.py`) against the
-`output_rows` of the engine's own CPU run in `<mode>-mini.cpu.txt`.
+`output_rows` of the engine's own CPU run in `tp1-single-mini.cpu.txt`, as a golden of one line per
+join — `testdata/goldens/<bench>/tp1-single.cardinality.txt` in this folder, rewritten by `UPDATE_CANONICAL=1` —
+so a worse estimate is a named line in the diff. One mode suffices because the other four run no
+join tp1-single does not; `tests/optimizer/test_cardinality_modes.py` holds them to it from the goldens'
+text alone, in the cheap python tier.
 `tests/optimizer/test_disassembly_corpus.py` needs no data either: every cluster of every golden,
 disassembled in the order it has (`disassembly.py`), builds a plan the engine would lay out the
 same. `tests/optimizer/test_engine_reassembled.py` runs those plans: still DuckDB's answer, and every join

@@ -32,9 +32,8 @@ fixes #236 and #237):
 
 ## Known state
 
-- `test_cardinality_corpus` is red in dataset-matrix: with tpcds q64 in the corpus its 37 joins
-  (median q-error 4.9, 14 % within 2×) take the share within 2× to 69.5 % against 70 %.
-  Without q64: 599 joins, median 1.21, 73 %. → Task 5.
+- `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
+  limit, not a threshold (Task 5 below).
 - Green otherwise: rust-only, DPhyp, the cheap tier (34 files), and q64 in the corpus answer,
   reassembled and optimized suites at every mode.
 - CI run `37233204588`'s GPU job failed only because a neighbour held the card (the pool could
@@ -399,3 +398,73 @@ fixes #236 and #237):
   - The corpus files: answers 120, dynamic filters 58, reassembled 100, optimized 100.
   - Dataset tier: `test_stats_sidecar` 4/4. `test_cardinality_corpus` is 2 passed, 1 failed,
     the same as before: q64, 636 joins, median 1.2912, 0.6950 within 2×.
+
+## Task 5
+
+- The golden. `scripts/exec_model/testdata/goldens/<bench>/tp1-single.cardinality.txt`, the tree
+  `run.py`'s `<mode>.cpu.txt` and `.optimizer.txt` will share. One line per join: query, its
+  ordinal among the query's joins in pre-order (`n`), kind/type, `joins` (the joins in its
+  subtree, itself included), true rows, estimate, q-error, the join keys by the plan's names.
+  Lines sorted by query (natural order) and ordinal. A six-line header: the join count, median
+  and share within 2×, the queries the engine did not run at the mode (tpch q11 q22 scan-limit,
+  tpcds q24 q54), those whose run's tree differs from the plan (none), a gloss of `n` and
+  `joins`, the column names. `UPDATE_CANONICAL` set rewrites both files, as the Rust goldens
+  do; a mismatch fails with a zero-context unified diff ending in how to regenerate, so an
+  estimate that moved is a named `-`/`+` pair and a new query is `+` lines. Both shown: the column-equality experiment below printed its eleven
+  moved joins by name, and a golden with q3's lines removed printed them as two `+` lines.
+- One mode, tp1-single, as the old test's default. Every join the other four modes run as planned
+  is one of tp1-single's by query, kind, type, keys, `joins` and true rows: `test_cardinality_modes`
+  holds it, from the plan goldens and `-mini.cpu.txt` alone, so it is in the cheap tier (2 cases;
+  shown green in a copy with no sf1). Shown red in a temp copy: a tp4-single join's
+  `output_rows` one higher, and a tp4-sized join made Left, each failed it naming the join. The
+  estimates were also equal when measured, which the guard does not check — it needs the data.
+  The tp4 modes have fewer joins:
+  their `cpu.txt` leaves more queries unrun (`skipped: not enabled at this mode`; tpcds 10 against
+  2). Five files would print every estimator change five times.
+- Formatting. Estimates `.1f`, q-error `.2f`, fixed widths but the query's, which is the bench's
+  longest name (21 for tpch's `nested-loop-left-join`), so a line moves when its join does or a
+  longer name joins the corpus. The estimator is pure float arithmetic over footer and sidecar values; the only libm
+  call is `pow` in Cardenas, and a last-bit difference there cannot reach the first decimal.
+  Byte-identical and green on four: `/usr/bin/python3` 3.12.3, pandas 2.2.2, pyarrow 18.1;
+  the venv with pyarrow 25.0.1; CI's `rapidsai/base:25.02-cuda12.0-py3.12` (3.12.9, pandas
+  2.2.3, pyarrow 18.1, run by docker over the same data); shad-gpu 3.13.15, pandas 3.0.6,
+  pyarrow 25.0.1 (`/tmp/peacock-opt/t5`, synced with `rsync --delete`).
+- q64: where the error is born. The spec's guess, correlated filters across repeated tables, is
+  not what the numbers show. Each half (store_sales for 1999, then 2000; 18 joins each) misses
+  by three independence and default assumptions, none of them a correlation:
+
+  | node | estimate | true | why |
+  |---|---|---|---|
+  | `cs_ui` HAVING `sum(cs_ext_list_price) > 2 * sum(refunds)` | 3,572 (0.20) | 17,157 (0.96) | an aggregate against an aggregate: DuckDB's default 0.2. ×4.80 under |
+  | `cs_ui ⋈ (store_returns ⋈ store_sales)` | 57,142 | 279,021 | carries it: q 4.88 |
+  | `d_year = 1999`, store, customer, two dates, `cd1` | 11,373 throughout | 53,265 → 48,301 | each FK join keeps every row; the truth loses 0.7–3.5 % per join to NULL foreign keys (×0.91 over five) |
+  | `cd2` with `cd1.cd_marital_status != cd2.cd_marital_status` | 2,275 (×0.20) | 38,203 (×0.79) | a column against a column: the default 0.2. Five values, so independence says 0.80 — the truth, so no correlation. ×3.96 under |
+  | promo, `hd` ×2, `ca` ×2, `ib` ×2 | 2,275 | 38,096 → 37,840 | q 16.6 (1999: 4.88 × 0.959 `d_year` × 0.907 NULLs × 3.955 marital × 0.991 tail) and 17.1 (2000: 4.88 × 0.972 × 0.912 × 3.982 × 0.990) |
+  | item: six colours and `i_current_price` in [65, 74] | 105.6 | 12 | colours 6/92 (1,174; true 1,188); price as uniform over 0.09–99.99 is 9.0 % (NDV 2,688), true 0.92 % (165 items): ×9.8. The two are independent (1,188 × 165 / 18,000 = 10.9). ×8.8 over in all: skew, no histogram |
+  | `ss_item_sk = i_item_sk`, the aggregate above | 13.3 | 37 (1999), 2 (2000) | the item overestimate half cancels the 17× under: q 2.77 and 6.67 |
+  | the root, `cs1 ⋈ cs2` on item, store name, zip, `cnt2 <= cnt1` | 2.7 | 2 | q 1.33 |
+
+  q64's 37 joins: median q-error 4.88, 5 within 2×. The rest of tpcds: 599 joins, median 1.21,
+  73.3 % within 2×.
+- Tried and not kept, each a correct rule locally that loses elsewhere:
+  - `a = b` / `a != b` over two columns with statistics as one value of the larger NDV, among
+    rows NULL in neither (`estimator._Estimate`). Locally right: q64's residual 0.80 against a
+    true 0.79, q46's `bought_city != ca_city` 0.94 against 0.93. tpcds: median 1.29 → 1.26,
+    69.5 → 70.0 % within 2×, joins past 10× 69 → 55, 22 better, 4 worse; q64's 37 joins median
+    4.88 → 4.27; q16 13.6 → 3.4, q94 9.5 → 2.4, q95's three 3.9–4.2 → 1.04–1.06. But it unmasks
+    what the 0.2 was cancelling: tpch q21's anti join 2.82 → 4,141 (estimate 0.9 rows: `1 −
+    matched × residual` with a residual near 1 leaves none, while the truth keeps 5.7 %: it is a
+    self-join, each row matches itself and `l_suppkey != l_suppkey` always rejects that pair,
+    which the independence model cannot see); q46 and q68's top joins 2.5 → 11.9 and 12.2 (the aggregate under them, keyed on
+    `ss_ticket_number` with three columns it determines, is estimated at its input, 123 k
+    against 10.7 k); q64's root 1.33 → 5.34 and its 2000 item join 6.67 → 26.7 (the price
+    skew). tpch's geometric-mean q-error 1.97 → 2.14.
+  - NULL foreign keys in an equi-join's rows (× each key's non-NULL share on both sides). tpcds
+    86 joins worse, 64 better, geometric mean 2.373 → 2.382, median 1.29 → 1.25; 27 of q64's
+    joins worse, its middle ones 16.6 → 26.4, because they are under already. tpch unchanged. q93 10.7 → 1.03.
+- So the limit, for `design.md`: the estimator has no histograms, so a skewed column's range is
+  read as uniform (q64's price, ×9.8); a comparison of two aggregates, or of two columns, is
+  DuckDB's 0.2 whatever the NDVs say; and a semi or anti join's residual scales the matched
+  share as if each row had one partner. Fixing the second alone exposes the third and an
+  aggregate's NDV under functional dependence (q46, q68). The estimator is unchanged by Task 5,
+  so no corpus suite was re-run for it.

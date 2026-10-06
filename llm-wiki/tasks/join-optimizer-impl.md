@@ -181,7 +181,8 @@ under `scripts/calibration/`, `scripts/build-test-shadgpu.sh`, `scripts/lib/shad
   alternative it beat; what the prototype does not model (device bytes, concurrency). Name the
   imports that run against the folders' direction — `engine/adaptive` → `plans` and
   `optimizer.observed`, `plans/engine_nodes` → `optimizer.cardinality` and `optimizer.stats` —
-  and why they stay.
+  and why they stay. The estimator's limits, with their numbers, are in the detail file's
+  `## Task 5`.
 - [ ] `README.md`: environment (Python, pandas, pyarrow, DuckDB pin), DPhyp build and
   `PEACOCK_DPHYP_LIB`, the three tiers and their data, `run.py` and its outputs, the record
   fetch.

@@ -1,0 +1,75 @@
+# tpch tp1-single: each join's estimate against its rows in tp1-single-mini.cpu.txt
+# 69 joins: median q-error 1.09, 68.1% within 2x
+# not run: q11 q22 scan-limit
+# tree differs: -
+# n: the join's place among its query's, in pre-order; joins: the joins in its subtree, itself included
+# query n kind/type joins true estimate q-error keys
+anti-join              1 Hash/RightAnti    1    1196041    1049982.0     1.14  c_custkey=o_custkey
+cross-join             1 Cross/Cross       1        125        125.0     1.00  -
+hash-join              1 Hash/Inner        1    6001215    6001215.0     1.00  o_orderkey=l_orderkey
+join-int               1 Hash/Inner        1    1500000    1500000.0     1.00  c_custkey=o_custkey
+left-join              1 Hash/Left         1    6001215    6001215.0     1.00  o_orderkey=l_orderkey
+mixed-join             1 Hash/Inner        1    4464071    1200243.0     3.72  o_orderkey=l_orderkey
+nested-limits          1 Cross/Cross       1        115        115.0     1.00  -
+nested-loop-join       1 NestedLoop/Inner  1         50         25.0     2.00  -
+nested-loop-left-join  1 NestedLoop/Left   1         51         25.0     2.04  -
+q2                     1 Hash/Inner        8        460        640.0     1.39  p_partkey=ps_partkey,ps_supplycost=min(partsupp.ps_supplycost)
+q2                     2 Hash/Inner        4        642        640.0     1.00  r_regionkey=n_regionkey
+q2                     3 Hash/Inner        3       2988       3200.0     1.07  n_nationkey=s_nationkey
+q2                     4 Hash/Inner        2       2988       3200.0     1.07  s_suppkey=ps_suppkey
+q2                     5 Hash/Inner        1       2988       3200.0     1.07  p_partkey=ps_partkey
+q2                     6 Hash/Inner        3     158960     160000.0     1.01  r_regionkey=n_regionkey
+q2                     7 Hash/Inner        2     800000     800000.0     1.00  n_nationkey=s_nationkey
+q2                     8 Hash/Inner        1     800000     800000.0     1.00  s_suppkey=ps_suppkey
+q3                     1 Hash/Inner        2      30519     314459.6    10.30  o_orderkey=l_orderkey
+q3                     2 Hash/Inner        1     147126     145405.5     1.01  c_custkey=o_custkey
+q4                     1 Hash/LeftSemi     1      52523      57072.0     1.09  o_orderkey=l_orderkey
+q5                     1 Hash/Inner        5       7243       7283.9     1.01  r_regionkey=n_regionkey
+q5                     2 Hash/Inner        4      36236      36419.6     1.01  n_nationkey=s_nationkey
+q5                     3 Hash/Inner        3      36236      36419.6     1.01  s_suppkey=l_suppkey,s_nationkey=c_nationkey
+q5                     4 Hash/Inner        2     910519     910490.1     1.00  o_orderkey=l_orderkey
+q5                     5 Hash/Inner        1     227597     227576.4     1.00  c_custkey=o_custkey
+q7                     1 Hash/Inner        5       5924       5106.5     1.16  n_nationkey=c_nationkey
+q7                     2 Hash/Inner        4     145703     145899.1     1.00  n_nationkey=s_nationkey
+q7                     3 Hash/Inner        3    1828450    1823739.2     1.00  c_custkey=o_custkey
+q7                     4 Hash/Inner        2    1828450    1823739.2     1.00  l_orderkey=o_orderkey
+q7                     5 Hash/Inner        1    1828450    1823739.2     1.00  s_suppkey=l_suppkey
+q8                     1 Hash/Inner        7       2603       2434.3     1.07  r_regionkey=n_regionkey
+q8                     2 Hash/Inner        6      13389      12171.4     1.10  n_nationkey=s_nationkey
+q8                     3 Hash/Inner        5      13389      12171.4     1.10  n_nationkey=c_nationkey
+q8                     4 Hash/Inner        4      13389      12171.4     1.10  c_custkey=o_custkey
+q8                     5 Hash/Inner        3      13389      12171.4     1.10  o_orderkey=l_orderkey
+q8                     6 Hash/Inner        2      43693      40008.1     1.09  s_suppkey=l_suppkey
+q8                     7 Hash/Inner        1      43693      40008.1     1.09  p_partkey=l_partkey
+q9                     1 Hash/Inner        5     319404    1200243.0     3.76  n_nationkey=s_nationkey
+q9                     2 Hash/Inner        4     319404    1200243.0     3.76  o_orderkey=l_orderkey
+q9                     3 Hash/Inner        3     319404    1200243.0     3.76  ps_suppkey=l_suppkey,ps_partkey=l_partkey
+q9                     4 Hash/Inner        2     319404    1200243.0     3.76  s_suppkey=l_suppkey
+q9                     5 Hash/Inner        1     319404    1200243.0     3.76  p_partkey=l_partkey
+q10                    1 Hash/Inner        3     114705      39158.9     2.93  n_nationkey=c_nationkey
+q10                    2 Hash/Inner        2     114705      39158.9     2.93  o_orderkey=l_orderkey
+q10                    3 Hash/Inner        1      57069      57361.7     1.01  c_custkey=o_custkey
+q12                    1 Hash/Inner        1      30988       9749.4     3.18  l_orderkey=o_orderkey
+q13                    1 Hash/Left         1    1534302    1250004.0     1.23  c_custkey=o_custkey
+q14                    1 Hash/Inner        1      75983      75202.9     1.01  p_partkey=l_partkey
+q15                    1 Hash/Inner        2          1          1.0     1.00  total_revenue=max(revenue0.total_revenue)
+q15                    2 Hash/Inner        1      10000      10000.0     1.00  s_suppkey=supplier_no
+q16                    1 Hash/RightAnti    2     118274      78643.2     1.50  s_suppkey=ps_suppkey
+q16                    2 Hash/Inner        1     118324      98304.0     1.20  p_partkey=ps_partkey
+q17                    1 Hash/Inner        2        587       1200.2     2.04  p_partkey=l_partkey
+q17                    2 Hash/Inner        1       6088       6001.2     1.01  p_partkey=l_partkey
+q18                    1 Hash/RightSemi    3        399    1200243.0  3008.13  l_orderkey=o_orderkey
+q18                    2 Hash/Inner        2    6001215    6001215.0     1.00  o_orderkey=l_orderkey
+q18                    3 Hash/Inner        1    1500000    1500000.0     1.00  c_custkey=o_custkey
+q19                    1 Hash/Inner        1        121          0.3   121.00  p_partkey=l_partkey
+q20                    1 Hash/LeftSemi     4        186        400.0     2.15  s_suppkey=ps_suppkey
+q20                    2 Hash/Inner        1        412        400.0     1.03  n_nationkey=s_nationkey
+q20                    3 Hash/Inner        2       5833      32000.0     5.49  ps_partkey=l_partkey,ps_suppkey=l_suppkey
+q20                    4 Hash/RightSemi    1       8508     160000.0    18.81  p_partkey=ps_partkey
+q21                    1 Hash/LeftAnti     5       4141       1468.3     2.82  l_orderkey=l_orderkey
+q21                    2 Hash/LeftSemi     4      73089       1835.4    39.82  l_orderkey=l_orderkey
+q21                    3 Hash/Inner        3      75871       9176.9     8.27  n_nationkey=s_nationkey
+q21                    4 Hash/Inner        2    1828911     229422.4     7.97  o_orderkey=l_orderkey
+q21                    5 Hash/Inner        1    3793296    1200243.0     3.16  s_suppkey=l_suppkey
+rollup-over-join       1 Hash/Inner        1     150000     150000.0     1.00  n_nationkey=c_nationkey
+semi-join              1 Hash/RightSemi    1     303959     450018.0     1.48  c_custkey=o_custkey
