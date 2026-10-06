@@ -66,10 +66,10 @@ jobs:
           # filter narrows within them. No `set -e` short-circuit on the first file: each
           # runs, statuses are OR'd, so one failure cannot hide another file's.
           status=0
-          files=(scripts/exec_model/tests/test_engine_answers.py
-                 scripts/exec_model/tests/test_engine_dynamic_filters.py
-                 scripts/exec_model/tests/test_engine_reassembled.py
-                 scripts/exec_model/tests/test_engine_optimized.py)
+          files=(scripts/exec_model/tests/plans/test_engine_answers.py
+                 scripts/exec_model/tests/optimizer/test_engine_dynamic_filters.py
+                 scripts/exec_model/tests/optimizer/test_engine_reassembled.py
+                 scripts/exec_model/tests/optimizer/test_engine_optimized.py)
           for f in "${files[@]}"; do
             echo "== $f (shard $PCK_SHARD)"
             python3 "$f" ${FILTER:+"$FILTER"} || status=1

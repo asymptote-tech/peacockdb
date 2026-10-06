@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ..batch import Batch, CallStats
+from ..engine.batch import Batch, CallStats
 
 
 def normalize(frame: pd.DataFrame) -> pd.DataFrame:

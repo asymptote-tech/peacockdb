@@ -26,7 +26,7 @@ import pyarrow.parquet as pq
 
 TESTDATA = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTDATA.parent))
-from scripts.exec_model.stats import FORMAT, fingerprint, flat_columns  # noqa: E402
+from scripts.exec_model.optimizer.stats import FORMAT, fingerprint, flat_columns  # noqa: E402
 
 #: Join keys of two or more columns that all come from one table, per the plan goldens. A set
 #: that spans tables exists only in an intermediate result and cannot be counted here.

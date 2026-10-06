@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ..batch import CallStats
-from ..executors import ExecExecutor, UnloadExecutor
+from ..engine.batch import CallStats
+from ..engine.executors import ExecExecutor, UnloadExecutor
 from . import aggregates
 from .expressions import Expr, project as project_exprs
 from .frame import PandasBatch, no_scratch, scratch_of, sort_frame

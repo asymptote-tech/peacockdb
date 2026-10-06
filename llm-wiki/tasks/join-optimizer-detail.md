@@ -56,7 +56,7 @@ fixes #236 and #237):
 
 - The fingerprint is `stats.fingerprint(metadata)`: the rows plus a sha256 over each flat
   column's per-row-group null count and raw min/max. `gen_stats.py` imports it, with
-  `flat_columns`, from `scripts/exec_model/stats.py`, so the writer and the reader share one
+  `flat_columns`, from `scripts/exec_model/optimizer/stats.py`, so the writer and the reader share one
   definition. A flat column is a footer path without a dot; a list leaf is `x.list.element`.
   The sidecar format is 2.
 - Per row group, not whole-file aggregates: measured, external and synthetic tpch sf1 have the
@@ -81,7 +81,7 @@ fixes #236 and #237):
   generates there (about 2 min locally), so `testdata/tpch.sf1` is left alone:
   `TMPDIR=/build/peacock/tmp DUCKDB=/build/peacock/duckdb-1.5.4/duckdb
   PEACOCK_EMBEDDINGS_CACHE=/build/peacock/embeddings/testdata/embeddings-cache
-  /usr/bin/python3 scripts/exec_model/tests/test_stats_embeddings.py`.
+  /usr/bin/python3 scripts/exec_model/tests/optimizer/test_stats_embeddings.py`.
   The cache was fetched by a symlinked `fetch_embeddings.sh`, which caches beside itself.
   It is not linked into the tree: the root `.gitignore` entry `testdata/embeddings-cache/`
   matches a directory only, so a symlink would show as untracked.
@@ -313,3 +313,89 @@ fixes #236 and #237):
   scratch copy re-synced: answers at `tp4-rowgroup` 120 passed and at `tp4-single` 120
   passed, dynamic filters (memory sources) at `tp4-single` 58 passed, 40 shards each. q8
   alone: 137,760 steps, 169,049 calls, cap 169,049, 666 s beside the shards.
+
+## Task 4
+
+- Layout. Files were moved with `mv`; the coordinator stages them, and git pairs the renames.
+  - `engine/`: plan, node, layout, runtime, batch, executors, accounting, forwarder, limit,
+    single_partition_driver, partitioned_driver, scheduler, adaptive.
+  - `operators/`: unchanged.
+  - `plans/`: engine_plan, engine_expr, engine_ir, engine_nodes, engine_run. There is no
+    `plan_text`: Task 2 removed it, though the spec's layout still lists it.
+  - `optimizer/`: stats, observed, estimator, cardinality, cost, call_cost, multijoin,
+    disassembly, join_order, dphyp, dynamic_filters, replan.
+  - Root: `errors.py` and `__init__.py`. `errors.py` stays at the root because every component
+    raises from it: engine (plan, accounting, both drivers, adaptive), plans (engine_plan,
+    engine_expr, engine_ir), optimizer (stats, cardinality) and operators (validation).
+  - Each new folder has an `__init__.py`. The production folders get a one-line docstring; the
+    test folders get an empty file, as `tests/__init__.py` is.
+- Tests, placed by the module they test:
+  - `tests/engine/`: accounting, adaptive, determinism, limit, partitioned_driver, plan,
+    scheduler, scheduling, single_partition_driver, and `mocks.py`, whose users are all here.
+  - `tests/operators/`: operators, end_to_end ("whole queries through the real operators"),
+    join_capability, injection, parquet_scan.
+  - `tests/plans/`: engine_plan, engine_expr, engine_ir, engine_nodes, engine_run,
+    engine_corpus, engine_answers.
+  - `tests/optimizer/`: stats, stats_sidecar, stats_embeddings, observed, estimator,
+    cardinality, cardinality_corpus, cost, call_cost, multijoin, disassembly,
+    disassembly_corpus, join_order, dphyp, dynamic_filters, optimize, replan, memory_source,
+    engine_dynamic_filters, engine_reassembled, engine_optimized.
+  - Left in `tests/` because more than one folder uses them: `harness.py` (all), `corpus.py`
+    (all four), `rescan.py` (four engine files and `operators/test_end_to_end`).
+  - Tests import helpers from other folders' tests. `engine/test_accounting` imports
+    `aggregate_over` from `operators/test_end_to_end`. `engine/test_adaptive` and several
+    optimizer tests import from `plans/test_engine_nodes`. The optimizer corpus files import
+    `MODE`/`ROOT` and the rest from `plans/test_engine_answers`.
+- Did not fit cleanly. Code stays as it was; a later task may revisit these. The layout implies
+  optimizer → plans → engine, with operators implementing engine's traits. Two modules import
+  against that direction:
+  - `engine/adaptive.py` imports `plans` (`engine_ir`, `engine_expr.parse_columns`/
+    `parse_join_keys`, `engine_plan.EngineNode`). It names a build's keys from the engine plan.
+    It also imports `optimizer.observed` (`NdvBounds`, `observed_ndv`) to measure a finished
+    build's key NDV.
+  - `plans/engine_nodes.py` imports `optimizer.cardinality.estimate` and
+    `optimizer.stats.Statistics`: a hash join's fanout comes from the estimate.
+  - Every other cross-folder import points the expected way: operators → engine, plans → engine
+    and operators, optimizer → plans, engine and operators.
+- What changed in each moved file, besides the move. Checked against `git show HEAD:<old path>`:
+  - Relative imports.
+  - Each test header: `parents[3]` → `[4]`, `__package__` gains the folder, and the comment's
+    path gains the folder.
+  - Paths from `__file__` to the repo root, one level deeper:
+    - `optimizer/call_cost.py`'s `RECORD`: `parents[2]` → `[3]`.
+    - In the tests, `parents[3]` → `[4]`: `GOLDENS` in the four plans files that read the
+      goldens, `ROOT` in `test_engine_answers`, `TABLES` in `test_injection`, `test_accounting`'s
+      `tpch.minimal`, and `JOIN_CPP` in `test_join_capability`.
+  - Unmoved files changed only in their imports: `operators/*` (they import engine), and
+    `tests/corpus.py` and `tests/rescan.py`.
+  - `tests/harness.py` changed one docstring example's path. `scripts/calibration/tests/harness.py`
+    took the same edit, so the two stay identical below their headers.
+  - Lines changed per folder (diff `<`/`>` lines, so 2 = one line replaced):
+    | folder | files | lines changed |
+    |---|---|---|
+    | engine | 13 | 18 |
+    | plans | 5 | 28 |
+    | optimizer | 12 | 58 |
+    | tests/engine | 10 | 192 |
+    | tests/operators | 5 | 116 |
+    | tests/plans | 7 | 130 |
+    | tests/optimizer | 21 | 338 |
+
+    The most in any one file is 34 lines (`test_accounting`).
+- Outside the package:
+  - `testdata/gen_stats.py` imports `scripts.exec_model.optimizer.stats`.
+  - `pipeline.yml`'s cheap loop uses `shopt -s nullglob globstar` and
+    `tests/**/test_*.py`; `**` also matches `tests/` itself. Every `elsewhere` name and the two
+    dataset-matrix lines gained their folder.
+  - `exec-model-corpus.yml`'s file list gained the folders.
+  - `README.md`: the run loop, the pytest example, a paragraph on the folders, and the module
+    table, prefixed and grouped by folder.
+  - `build-test.md`: the seven test links and two globs.
+  - The path in `tickets/system-hardening.md` #238.
+- Counts, before → after, identical file by file:
+  - Cheap tier, rendered from `pipeline.yml`: 35 files, 353 passed → 35 files, 353 passed.
+  - Every test file, counted by import: 42 files, 739 cases, at `tp4-single`, `tp1-single`
+    and `tp4-rowgroup`. pytest `--collect-only` also finds 739.
+  - The corpus files: answers 120, dynamic filters 58, reassembled 100, optimized 100.
+  - Dataset tier: `test_stats_sidecar` 4/4. `test_cardinality_corpus` is 2 passed, 1 failed,
+    the same as before: q64, 636 joins, median 1.2912, 0.6950 within 2×.

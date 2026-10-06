@@ -89,7 +89,7 @@ the sidecar's tests.
 **Files:** every `scripts/exec_model/*.py`, `tests/`, the two workflows, `README.md`,
 `build-test.md`'s links, `testdata/gen_stats.py` (it imports `scripts.exec_model.stats`).
 
-- [ ] `git mv` into `engine/`, `plans/`, `optimizer/` as the spec lists, with relative imports
+- [ ] Move into `engine/`, `plans/`, `optimizer/` as the spec lists, with relative imports
   fixed and nothing else changed; tests into `tests/{engine,operators,plans,optimizer}/` with
   `harness.py`, `corpus.py`, `mocks.py`, `rescan.py` where their users are or in `tests/`.
   `errors.py` goes where its callers are.
@@ -178,7 +178,10 @@ under `scripts/calibration/`, `scripts/build-test-shadgpu.sh`, `scripts/lib/shad
 
 - [ ] `design.md`: plan text → tree → estimates → dynamic filters → clusters → DPhyp →
   orientation → disassembly → adaptive run and replan; each component's shape and the
-  alternative it beat; what the prototype does not model (device bytes, concurrency).
+  alternative it beat; what the prototype does not model (device bytes, concurrency). Name the
+  imports that run against the folders' direction — `engine/adaptive` → `plans` and
+  `optimizer.observed`, `plans/engine_nodes` → `optimizer.cardinality` and `optimizer.stats` —
+  and why they stay.
 - [ ] `README.md`: environment (Python, pandas, pyarrow, DuckDB pin), DPhyp build and
   `PEACOCK_DPHYP_LIB`, the three tiers and their data, `run.py` and its outputs, the record
   fetch.

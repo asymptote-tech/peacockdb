@@ -21,7 +21,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
-from ..executors import PartitionEmitterExecutor
+from ..engine.executors import PartitionEmitterExecutor
 from .frame import PandasBatch, no_scratch
 
 SEED = 42

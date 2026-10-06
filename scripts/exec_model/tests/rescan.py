@@ -5,10 +5,10 @@ pick and fails where the incremental scheduler would choose otherwise — the pr
 
 from __future__ import annotations
 
-from ..node import ExecutorCategory
-from ..partitioned_driver import PartitionedDriver
-from ..runtime import NodeState
-from ..single_partition_driver import PROBE_SLOT, JoinPhase
+from ..engine.node import ExecutorCategory
+from ..engine.partitioned_driver import PartitionedDriver
+from ..engine.runtime import NodeState
+from ..engine.single_partition_driver import PROBE_SLOT, JoinPhase
 
 
 def rescan(driver: PartitionedDriver) -> NodeState | None:

@@ -13,7 +13,7 @@ import random
 
 import pandas as pd
 
-from ..executors import SourceExecutor
+from ..engine.executors import SourceExecutor
 from .frame import PandasBatch, no_scratch
 
 

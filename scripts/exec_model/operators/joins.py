@@ -43,8 +43,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from ..batch import CallStats
-from ..executors import JoinExecutor
+from ..engine.batch import CallStats
+from ..engine.executors import JoinExecutor
 from . import join_types as J
 from .frame import PandasBatch, concatenate, no_scratch, scratch_of, normalize
 from .join_types import JoinType, capability, joined_names, joined_projection

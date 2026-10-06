@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ..batch import CallStats
-from ..executors import BatchAccumulatorExecutor, LaneEvent, PartitionAccumulatorExecutor
-from ..limit import RowInterval, RowRange
+from ..engine.batch import CallStats
+from ..engine.executors import BatchAccumulatorExecutor, LaneEvent, PartitionAccumulatorExecutor
+from ..engine.limit import RowInterval, RowRange
 from . import aggregates
 from .frame import PandasBatch, concatenate, empty_frame, no_scratch, scratch_of, sort_frame
 

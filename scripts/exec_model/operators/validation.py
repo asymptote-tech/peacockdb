@@ -11,7 +11,7 @@ distribution, sortedness, batch layout: the properties that make a plan silently
 from __future__ import annotations
 
 from ..errors import PlanError
-from ..layout import KeyDistributionKind
+from ..engine.layout import KeyDistributionKind
 
 
 def _child(node, slot: int = 0):

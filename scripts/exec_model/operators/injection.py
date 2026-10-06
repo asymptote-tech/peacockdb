@@ -37,7 +37,7 @@ import math
 from dataclasses import dataclass, field
 from enum import Enum
 
-from ..node import ExecutorCategory
+from ..engine.node import ExecutorCategory
 from . import nodes as N
 from . import partition_ops
 from .nodes import PandasNode

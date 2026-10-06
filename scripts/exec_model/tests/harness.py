@@ -59,10 +59,10 @@ def _selected(tests, path):
     """The subset this process runs: every test, a named few, or one shard of them.
 
     Two selectors, because two callers want different things. A person debugging wants
-    names — `python3 tests/test_engine_answers.py q3 q12`. A CI matrix wants a share of the file
-    without naming anything, so `PCK_SHARD=k/n` takes every n-th test starting at k; the
-    corpus files are minutes long and their queries are independent, so n processes finish
-    in a fraction of the time one does.
+    names — `python3 tests/plans/test_engine_answers.py q3 q12`. A CI matrix wants a share
+    of the file without naming anything, so `PCK_SHARD=k/n` takes every n-th test starting
+    at k; the corpus files are minutes long and their queries are independent, so n
+    processes finish in a fraction of the time one does.
 
     Both refuse to select nothing. A shard or a name that matches no test would otherwise
     print `0 passed` and exit 0, which is the "green having verified nothing" failure the

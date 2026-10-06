@@ -18,14 +18,14 @@ import zlib
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-from ..executors import Executor
-from ..forwarder import (
+from ..engine.executors import Executor
+from ..engine.forwarder import (
     BatchForwarder,
     InterleaveForwarder,
     MergePartitionsForwarder,
     UnionForwarder,
 )
-from ..layout import (
+from ..engine.layout import (
     BatchLayout,
     ColumnOrder,
     KeyDistribution,
@@ -34,8 +34,8 @@ from ..layout import (
     PartitionLayout,
     SortOrder,
 )
-from ..limit import RowInterval
-from ..node import ExecutorBackends, ExecutorCategory, GpuNode, NodeExecutors
+from ..engine.limit import RowInterval
+from ..engine.node import ExecutorBackends, ExecutorCategory, GpuNode, NodeExecutors
 from . import (
     accumulators,
     exec_ops,

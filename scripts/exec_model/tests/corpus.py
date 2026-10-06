@@ -23,10 +23,10 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from ..partitioned_driver import partitioned_driver
-from ..node import CpuBackendSelector
+from ..engine.partitioned_driver import partitioned_driver
+from ..engine.node import CpuBackendSelector
 from ..operators.frame import concatenate
-from ..plan import Plan
+from ..engine.plan import Plan
 
 #: `execute`'s default: far from unbounded, so the accountant is exercised on every call and
 #: a blown resident set fails the test.
