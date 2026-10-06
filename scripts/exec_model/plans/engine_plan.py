@@ -59,6 +59,17 @@ class Refusal:
     text: str
 
 
+def plan_text(plan: EngineNode) -> str:
+    """`plan` as a golden's tree lines: what `parse_plans` reads back into it."""
+    lines, stack = [], [(plan, 0)]
+    while stack:
+        node, depth = stack.pop()
+        fields = ", ".join(f"{key}={value}" for key, value in node.fields.items())
+        lines.append("  " * depth + node.kind + (f": {fields}" if fields else ""))
+        stack.extend((child, depth + 1) for child in reversed(node.children))
+    return "\n".join(lines) + "\n"
+
+
 def read_plans(path: pathlib.Path) -> dict[str, EngineNode | Refusal]:
     """Every section of a plan golden, by query name, in file order."""
     return parse_plans(path.read_text(), str(path))

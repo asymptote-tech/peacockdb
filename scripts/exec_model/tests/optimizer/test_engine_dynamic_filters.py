@@ -26,15 +26,14 @@ import os
 from .. import corpus
 from ..harness import main
 from ..plans.test_engine_answers import ROOT, order_positions
-from ...optimizer.dynamic_filters import Batching, KeySummary, apply, as_number, candidates, row_group_survives
+from ...optimizer.dynamic_filters import KeySummary, apply, as_number, candidates, row_group_survives
+from ...optimizer.pipeline import mode_shape
 from ...plans.engine_nodes import build
 from ...plans.engine_plan import EngineNode, read_plans
 from ...optimizer.replan import WithMaterialized
 
 MODE = os.environ.get("PCK_MODE", "tp4-single")
-#: the mode's batching, by the golden's name — the one place a mode is named
-BATCHING = {"single": Batching.ONE_PER_LANE, "rowgroup": Batching.ONE_PER_ROW_GROUP,
-            "sized": Batching.KEEP_BATCHES}[MODE.split("-")[1]]
+BATCHING = mode_shape(MODE).batching
 
 
 def _duckdb_bounds(bench: str, query: str) -> list[dict]:

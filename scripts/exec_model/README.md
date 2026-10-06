@@ -84,11 +84,13 @@ plan. `errors.py` sits at the root: all four raise from it. The tests mirror the
 | `operators/nodes.py` | `GpuNode` implementations wiring the operators into plans; the builders an engine plan's nodes need — its scan, positional joins, plan-level aggregates — and the layouts they declare |
 | `operators/validation.py` | the checks a node's `_validator` is composed from with `all_of` — what it needs of its children's layouts. The method is abstract on `GpuNode` (`node.py`) and implemented once, on `PandasNode` (`operators/nodes.py`), which just runs that validator |
 | `operators/injection.py` | `LayoutInjector` — rewrite a plan's partitioning, batching and hash placement |
-| `plans/engine_plan.py` | the engine planner's `<mode>.plans.txt` goldens read back into trees — node lines and refusals, field values verbatim, the schema as (name, type) pairs with names unquoted; `GpuMemorySource`, the prototype's own kind the engine does not have yet, is read too |
+| `plans/engine_plan.py` | the engine planner's `<mode>.plans.txt` goldens read back into trees, and `plan_text` writing one back — node lines and refusals, field values verbatim, the schema as (name, type) pairs with names unquoted; `GpuMemorySource`, the prototype's own kind the engine does not have yet, is read too |
 | `plans/engine_expr.py` | the engine's expression text parsed back into a syntax tree and rendered again (`expr_text`) — `plan_text/expr_text.rs` both ways; a literal stays text, since the rendering does not print its type |
 | `plans/engine_ir.py` | a node's expression fields in the expression IR — ordinals resolved to frame names (`name@ordinal` where a schema repeats a name), each literal typed by what it meets |
 | `plans/engine_nodes.py` | an engine plan tree built as a prototype plan, one engine node to one prototype node; each output named by its node's schema; a hash join's fanout from the estimate, where one is given; a `GpuMemorySource` from the frames `tables.materialized` holds, laid out as they were made |
-| `plans/engine_run.py` | a prototype run of an engine plan rendered as the engine renders its own (`cpu.txt`): node lines, `output_rows`, per-lane `in_rows`/`batch_rows` |
+| `plans/engine_run.py` | a prototype run of an engine plan — `run_plan`, read as one answer or by lane, under `CORPUS_BUDGET` for a corpus query — rendered as the engine renders its own (`cpu.txt`): node lines, `output_rows`, per-lane `in_rows`/`batch_rows` |
+| `plans/tables.py` | the generated parquet tables as an engine plan's scans read them, decimals as float64 and dates as `datetime64[ns]` |
+| `plans/answers.py` | two answers to one query compared as strictly as SQL allows — a multiset, the ORDER BY columns by position, money within a tolerance — and the queries whose LIMIT leaves which rows open |
 | `optimizer/dynamic_filters.py` | dynamic filters: which joins can prune a fact scan's row groups (filtered build, key lifted to an ordered scan column), the probe plan — the build side itself, whose lanes the main plan then reads as a memory source, so the side is read once — the host reducer, and the replan that re-maps each pruned scan as the engine's partitioner would |
 | `optimizer/stats.py` | table statistics for the estimator — NDV and strings' mean length from the committed sidecar (`testdata/gen_stats.py`), rows, min/max and nulls from the footer over the row groups a scan reads; a sidecar that is missing or no longer matches its file is refused |
 | `optimizer/observed.py` | the NDV of an intermediate result: a materialized build side's from per-lane counts — exact where the lanes are hashed on the counted columns, bounds otherwise — and a stream's cap |
@@ -101,7 +103,11 @@ plan. `errors.py` sits at the root: all four raise from it. The tests mirror the
 | `optimizer/dphyp.py` | DPhyp from the `peacockdb-dphyp` crate through its C ABI (`ctypes`): the library by `PEACOCK_DPHYP_LIB`, refused without it; the tree as disassembly takes it |
 | `optimizer/multijoin.py` | a cluster of inner joins as DPhyp takes it in — relations, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included |
 | `optimizer/disassembly.py` | a join order back into an engine plan — keys, residual and projection from the MultiJoin's identities, wiring as the translator derives it; `baseline` is the order the plan already has |
-| `tests/corpus.py` | running a plan, reading the generated datasets, the corpus budget, the DuckDB oracle and its comparison, and an engine `cpu.txt` golden's rows per node |
+| `optimizer/pipeline.py` | the optimizer end to end over one plan — dynamic filters, then DPhyp and orientation with the probes' builds known, then the adaptive run — and its report; each mode's lanes and batching, by name |
+| `optimizer/report.py` | what the optimizer did to a plan, as data: dynamic-filter candidates and pruned scans, each DPhyp call (relations, edges, the sets priced through the cost callback, its budget, the tree, the chosen joins and the plan order's C_out, the flips), each replan and refusal, the plan text before and after |
+| `optimizer/report_text.py` | that report as a `.optimizer.txt` section |
+| `run.py` | the corpus through the optimizer, [below](#runpy-the-corpus-through-the-optimizer) |
+| `tests/corpus.py` | the tests' default budget, the generated datasets found or the generator named, DuckDB's answer to a query's text, and an engine `cpu.txt` golden's rows per node |
 
 Traits are declarations only. The driver tests drive mocks (`tests/engine/mocks.py`) because the
 strategy under test is *which node runs when*; the operator tests drive the real thing.
@@ -235,18 +241,55 @@ catches a *reading* of the SQL, which a hand-written pandas equivalent cannot, s
 halves would share one reading — the circularity #80 complains of.
 
 What a comparison asserts is what SQL determines: the rows as a **multiset**, and the ORDER
-BY columns **positionally** (`corpus.matches_oracle`). Comparing whole rows positionally makes
+BY columns **positionally** (`plans/answers.matches_oracle`). Comparing whole rows positionally makes
 a tie into a failure, which is how TPC-H q11 failed — two German parts come to 223626.0
 exactly, and which of them is printed first is not the query's to say.
 
 **Manual dispatch only** (`.github/workflows/exec-model-corpus.yml`): six million lineitem
 rows through a pandas operator chain is minutes, not seconds. The queries are independent,
-so `PCK_SHARD=k/n` splits a file across n processes. `test_stats_sidecar.py` and
-`test_cardinality_corpus.py` are seconds, and run on every push in dataset-matrix.
+so `PCK_SHARD=k/n` splits a file across n processes. `test_stats_sidecar.py`,
+`test_cardinality_corpus.py` and `tests/test_run_corpus.py` — `run.py` over two small tpch
+queries and a refused tpcds one — are seconds, and run on every push in dataset-matrix.
 
 **Whole tables, not a sample.** Both benchmarks are written clustered by date, so a row prefix
 is one quarter of 1992, a row-group sample is a set of date windows, and two tables sampled
 independently join to nothing.
+
+## run.py: the corpus through the optimizer
+
+```
+PEACOCK_DPHYP_LIB=/build/peacock/rust-only-target/release/libpeacockdb_dphyp.so \
+  python3 scripts/exec_model/run.py --bench tpcds --query q3 q64 --mode tp4-single --jobs 2
+```
+
+Every filter is optional: both benches, every query of the plan golden, all five modes. One task
+per (query, mode), over `--jobs` processes, runs the plan twice over the sf1 tables, as planned
+and through `optimizer/pipeline.py`, holds the optimized answer to the planned one
+(`plans/answers.same_answer`: the planned answer is DuckDB's, and no rule touches what sorts the
+rows), and returns both runs in the `cpu.txt` format with the optimizer's report. The sf1 tables
+and the DPhyp library are checked before anything runs. The parent writes, under
+`testdata/goldens/<bench>/` here (`--out` moves it):
+
+- `<mode>.cpu.txt` — the optimized plan's run to its end, as the engine renders its own
+  (`-mini.cpu.txt`); its bytes are pandas', and where no rule changed the plan its joins' rows are
+  the engine's. A probe plan's run and a run a replan stopped are not in it; the worker returns
+  them.
+- `<mode>.optimizer.txt` — what each rule did: the dynamic filters' candidates, key bounds and
+  row groups; each DPhyp call's relations, edges and how many sets it priced, its tree — or its
+  budget and the plan's order kept — the orientation, each join of the chosen tree with its
+  estimated rows and C_out, the tree's C_out beside the plan order's, and the joins flipped
+  against the plan; each replan's miss, what it kept and the order made again; then a unified
+  diff of the plan text. `nothing fired` where no rule did. The sets priced are not listed — 6,626
+  for one of q64's clusters — but the report keeps them (`JoinOrder.priced`).
+
+A `== <query>` section each, in the engine's registry order (its `-mini.cpu.txt`); a query the
+planner refused has none there and a `skipped:` line here, placed after the query that sorts
+before it. A run without `--query` owns its files and drops sections no query accounts for; with
+it, only its own sections change, the rule `UPDATE_CANONICAL` and `PCK_UPDATE_SECTIONS` follow
+for the engine's goldens — a fresh file from a filtered run would lose every other query. A query
+that raises — an optimized answer that is not the planned one among them — gets a `failed:`
+section and the run exits 1. Nothing compares the files with a
+previous copy.
 
 ## Layout injection
 

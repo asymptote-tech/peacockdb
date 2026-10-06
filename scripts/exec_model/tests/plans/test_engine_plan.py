@@ -11,7 +11,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/plans/<f
 import pathlib
 
 from ..harness import main, raises
-from ...plans.engine_plan import KINDS, EngineNode, Refusal, parse_plans, read_plans
+from ...plans.engine_plan import KINDS, EngineNode, Refusal, parse_plans, plan_text, read_plans
 from ...errors import EnginePlanFormatError
 
 GOLDENS = pathlib.Path(__file__).resolve().parents[4] / "testdata" / "goldens"
@@ -28,13 +28,6 @@ def walk(node):
     yield node
     for child in node.children:
         yield from walk(child)
-
-
-def rendered(node, depth=0):
-    fields = ", ".join(f"{key}={value}" for key, value in node.fields.items())
-    yield "  " * depth + node.kind + (f": {fields}" if fields else "")
-    for child in node.children:
-        yield from rendered(child, depth + 1)
 
 
 def tree_text(text):
@@ -67,13 +60,13 @@ def test_every_plan_golden_parses_to_a_tree_or_a_refusal_per_section():
             assert kinds[0] == "GpuUnload" and kinds.count("GpuUnload") == 1, (path, name)
 
 
-def test_rendering_the_tree_back_gives_the_golden_lines():
+def test_plan_text_gives_the_golden_lines_back():
     for path in plan_goldens():
         text = path.read_text()
         expected = tree_text(text)
         for name, plan in read_plans(path).items():
             if isinstance(plan, EngineNode):
-                assert list(rendered(plan)) == expected[name], (path, name)
+                assert plan_text(plan) == "\n".join(expected[name]) + "\n", (path, name)
 
 
 def test_every_node_but_the_sink_declares_its_schema():

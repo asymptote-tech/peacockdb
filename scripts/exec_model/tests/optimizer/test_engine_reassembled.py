@@ -18,14 +18,16 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/optimize
 
 from .. import corpus
 from ..harness import main
-from ..plans.test_engine_answers import EMPTY_BY_DESIGN, MODE, ROOT, UNORDERED_LIMIT, order_positions
+from ..plans.test_engine_answers import EMPTY_BY_DESIGN, MODE, ROOT, order_positions
+from ...plans.answers import UNORDERED_LIMIT
 from ...optimizer.disassembly import reassembled
 from ...plans.engine_nodes import build
+from ...optimizer.pipeline import mode_shape
 from ...plans.engine_plan import EngineNode, read_plans
 from ...optimizer.multijoin import clusters
 
 JOINS = ("GpuHashJoin", "GpuNestedLoopJoin", "GpuCrossJoin")
-LANES = int(MODE[2])
+LANES = mode_shape(MODE).lanes
 
 
 def _preorder(node):

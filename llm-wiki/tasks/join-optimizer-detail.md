@@ -468,3 +468,142 @@ fixes #236 and #237):
   share as if each row had one partner. Fixing the second alone exposes the third and an
   aggregate's NDV under functional dependence (q46, q68). The estimator is unchanged by Task 5,
   so no corpus suite was re-run for it.
+
+## Task 6a
+
+- `.optimizer.txt` does not list every set DPhyp priced, which the spec's "the estimated sets
+  it priced" would read as: per call it prints the relations, the edges, `priced N sets`, the
+  chosen tree's joins with their rows and cost, and that tree's C_out beside the plan order's.
+  The priced sets were 97 % of q64's section (28,663 of 29,572 lines at tp4-single), most of
+  them from calls the budget stopped, and they move by thousands of lines on any estimator
+  change. `JoinOrder.priced` keeps every set.
+
+- `run.py --bench --query --mode --jobs [--out]`, every filter optional (both benches, every
+  query of the plan golden, all five modes, one job). One task per (query, mode) over `--jobs`
+  `ProcessPoolExecutor` processes runs the plan as planned, then
+  `optimizer/pipeline.run_optimized`, holds the optimized answer to the planned one
+  (`plans/answers.same_answer`), and returns a `QueryRun`: both runs in the `cpu.txt` format (so
+  6b can price per-node rows and bytes), each probe plan's run and each stopped run the same way,
+  wall seconds of the two, the report. The parent alone writes, after every task is done: one
+  writer, so no lock. `main` checks the sf1 tables and loads DPhyp (`preflight`) before any work;
+  `generate` is the pool and the writing.
+- Merge, as the engine's goldens do (`corpus_golden.rs::merged_text`). Without `--query` a run
+  owns its files (`Regeneration.WHOLE`): sections no query accounts for go. With it
+  (`SECTIONS`) only its sections change; the rest stay byte for byte, a stale one included. A
+  fresh file from a filtered run would drop every other query, and the full run is the one that
+  takes an hour. A file the run made no section for is not touched.
+- Corpus order is the engine's registry order, read from `<mode>-mini.cpu.txt`; the plan golden
+  is sorted by name. The 18 tpcds queries the planner refused have no section there. Each gets its
+  refusal's first line as `skipped:`, placed after the query that sorts before it. That is
+  natural order for tpcds, whose registry is q1..q99. The full text can be DataFusion's plan,
+  20 KB for q27. A query that raises gets `failed: <error>` in both files and the run exits 1:
+  an optimized answer that is not the planned one is that.
+- No corpus suite runs the whole optimizer: each runs one rule. `pipeline.run_optimized` composes
+  them: `dynamic_filters.apply`, then `join_order.ordered` with `kept_estimates` known, then
+  `run_adaptive(kept=…)`. That is the order `run_adaptive`'s `kept` parameter is shaped for.
+- The report is data (`optimizer/report.py`); `optimizer/report_text.py` renders it.
+  - Dynamic filters: `FilterCandidate`s from `candidates(plan)`, `apply`'s own `Pruned` list, and
+    the probes' builds kept as memory sources (name, rows).
+  - Each DPhyp call is a `JoinOrder`: relation labels, key edges (DPhyp's input), every set
+    priced, the tree or `unsolved`, the oriented tree, and the flips. A priced set is the mask,
+    rows and cost. A flip is a join whose two sides the plan joined too, with the other side
+    building.
+  - Replans are `Replan(BuildMiss, kept, orders)`. Refused ones are `BuildMiss`es.
+  - The plan before and after, as `plan_text`.
+- Changed in the optimizer, no decision with it:
+  - `optimize` is now `ordered(...)[0]`. `ordered` wraps the cost callback. The wrapper returns
+    `sets.cost(mask)` unchanged and appends the set, with `sets.rows(mask)`; `rows` reads
+    `_estimate`'s cache, which `cost` has just filled. The C ABI is untouched.
+  - `run_adaptive` builds a `BuildMiss` per `BuildDone`. The threshold test reads the same two
+    numbers as before. `AdaptiveRun.refused` holds misses, not events; its one reader
+    (`test_replan`) reads `.rows`, which both have. It gains `replans`.
+  - `plans/engine_plan.plan_text` is `test_engine_plan`'s former `rendered` helper, moved into
+    production. The round-trip test now runs over it.
+- Shown unchanged on shad-gpu, from `/tmp/peacock-opt/t6a` (rsync `--delete`, testdata linked to
+  the existing sf1 copies; `.py` sha256 equal to the worktree's), tp4-single, 10 shards each,
+  19 min: answers 120, optimized 100, dynamic filters 58, reassembled 100, no failures. The
+  cardinality golden is unchanged (dataset tier, local).
+- `-mini.cpu.txt` rows are the engine's at joins only. A partial `GpuAggregate` emits once per
+  batch, so its rows follow the backend's batching: join-int's is 4,875 in the engine's run and
+  400 here. `test_run_corpus` compares the tree, the answer's rows and the joins' rows.
+- Tests: cheap tier 36 → 40 files, 355 → 380 cases (`test_report` 8, `test_report_text` 3,
+  `test_run` 9, `plans/test_answers` 5; counts after the review rounds below). Dataset tier gains `tests/test_run_corpus.py` (1): about 20 s locally, DPhyp
+  built in the step. It is on the cheap loop's `elsewhere` list. Each shown red:
+  - recording: no priced sets; the flip test inverted; `JoinOrder`s not appended; replans not
+    appended; refusals not appended; pipeline candidates, scans or probed builds dropped; the
+    after plan taken as the before;
+  - rendering: `fired` ignoring orders; the diff reversed; the flipped line, the range
+    compaction, the replan's indent, a date's ISO form, a replan's orders or the refused line
+    dropped;
+  - `run.py`: `SECTIONS` dropping, `WHOLE` keeping, the existing file winning the merge, missing
+    queries appended at the end, a refusal run as work, the missing-query check removed, a
+    query one of two benches names refused, a refusal's whole text;
+  - `test_run_corpus`: a writer ignoring the existing file, a renderer word changed. A writer
+    always `WHOLE` stays green there, correctly: `WHOLE` keeps declared sections, as the engine's
+    does. `test_run` holds that difference.
+- Sample on shad-gpu, out of the tree in `/tmp/peacock-opt/t6a/out`: tpch q3 q5 q9 and tpcds q3
+  q64 at tp4-single and tp1-rowgroup, two invocations side by side (`--jobs 6` and `4`), 2:21 and
+  4:20 wall, peak RSS 4.6 and 7.0 GB per worker. Seconds as planned / optimized:
+
+  | | tp4-single | tp1-rowgroup |
+  |---|---|---|
+  | tpch q3 | 18.7 / 18.5 | 5.5 / 5.3 |
+  | tpch q5 | 34.4 / 30.6 | 6.3 / 5.5 |
+  | tpch q9 | 96.3 / 44.5 | 13.8 / 13.8 |
+  | tpcds q3 | 12.1 / 10.6 | 1.7 / 2.2 |
+  | tpcds q64 | 102.7 / 155.3 | 11.3 / 45.9 |
+
+  The corpus suites spent about one process-minute per run at tp4-single. A full `run.py` makes
+  two runs per (query, mode) plus probes and replans. Estimate for 6b: 600 × ~2.5 process-min ÷ 20
+  jobs ≈ 75 min, plus q8 at `tp4-rowgroup` (≈ 500 s a run). That is past the spec's forty
+  minutes, so 6b profiles first.
+- `.optimizer.txt` size, before the format decision below: q64 at tp4-single was 29,572 lines,
+  2.1 MB, 28,663 of them one line per priced set. Its 18-relation clusters exceed `MAX_PAIRS`
+  (6,626 sets priced, then the plan's order kept and orientation alone), again in each of its 7
+  replans, until memory sources cut the clusters to 8 relations. No set repeated within a call
+  (all 72 calls of the sample).
+- q64 has no dynamic-filter candidate at tp4-single; tpcds q3 has one that prunes nothing (24 → 24).
+- Review round 1, every finding fixed:
+  - Moved out of `tests/corpus.py` into production: the parquet reader into `plans/tables.py`,
+    since `engine_nodes.build` is what reads scans through it. Running a plan went into
+    `plans/engine_run.py` (`run_plan`, `execute`, `execute_lanes`, `by_lane`, `answer`,
+    `CORPUS_BUDGET`), and the answer compare with `UNORDERED_LIMIT` into `plans/answers.py`.
+    `tests/corpus.py` imports them and keeps the tests' 256 MB default on `execute` and
+    `execute_lanes`. `pipeline`'s probe is `run_plan` + `by_lane`, not a copy.
+  - `run_query` holds the optimized answer to the planned one (`same_answer`: column count, then
+    names by position, then `matches_oracle`'s multiset with its tolerance, or the row count for
+    `UNORDERED_LIMIT`). A mismatch raises `AssertionError`: a `failed:` section and exit 1. Shown
+    red on tpcds q3 at tp1-rowgroup, two ways. A stubbed result one row short gives `88 rows vs
+    89`. A dynamic filter dropping the first 12 surviving row groups gives `53 rows vs 89`.
+    Dropping only group 0 or only group 23 leaves the answer as it is: group 0 holds no November
+    sale of manufacturer 128's items, and group 23 is the NULL-date tail.
+  - One mode table, `pipeline.MODES`/`mode_shape` (exhaustive; an unknown name raises naming the
+    five). It is used by `run.py` and the three corpus suites that decoded `PCK_MODE` themselves.
+  - `main` runs `preflight` (sf1 directories, `dphyp.load()`) before any work; `generate` is the
+    pool and the writes. Both are tested cheaply: a task for a query no plan golden has fails
+    with `KeyError` in both files next to an intact `skipped:` section and exits 1, and a
+    missing dataset or library is refused.
+  - Format, the human's decision: per DPhyp call, `priced N sets`, the tree or `DPhyp stopped at
+    its budget of N pairs after pricing M sets: the plan's order kept`, the oriented tree, one
+    line per chosen join (sides, rows, C_out), the tree's C_out beside the plan order's, the
+    flips. `JoinOrder` gains `max_pairs`, `joins` (`ChosenJoin`) and `plan_cost`. Those sets
+    are estimated after DPhyp returns, so they decide nothing. `priced` still holds every set.
+  - Shown red: the compare (unordered-limit branch either way, no rename, no tolerance), the mode
+    table (a wrong entry, no refusal), `failed:` (not counted, one file only), the preflight
+    (each check removed), `max_pairs`, chosen joins over DPhyp's tree, `plan_cost` over the
+    chosen tree (a plan DPhyp reorders, test_optimize's), and each new rendered line.
+  - Proven again: cheap tier 40 files, 379 passed; dataset tier 4 + 3 + 1. On shad-gpu (`.py`
+    sha256 equal to the worktree's) the four suites at tp4-single: 120, 100, 58, 100, none
+    failed. The sample again, every answer equal to the planned one, 2:19 and 4:02 wall. tpch
+    tp4-single q3 17.8 / 17.3, q5 31.4 / 28.7, q9 94.5 / 43.9; tp1-rowgroup q3 5.7 / 5.4, q5
+    6.4 / 5.6, q9 13.8 / 14.2. tpcds tp4-single q3 12.1 / 10.7, q64 98.4 / 142.2; tp1-rowgroup
+    q3 1.5 / 2.3, q64 11.3 / 43.9.
+  - q64's section is now 1,178 lines and 198 KB at tp4-single (337 of them the plan diff), and
+    954 lines and 116 KB at tp1-rowgroup. The tpcds sample file is 206 KB, the tpch one 40 KB.
+- Review round 2: `plans/answers.py` raises `AssertionError` by hand (`_require`) instead of
+  `assert`, which `python -O` strips. Under `-O` the old compare passed a dropped row;
+  `test_a_mismatch_is_raised_under_python_dash_o_too` runs it under `-O` in a subprocess and was
+  red before. With `_require` disabled, three of the file's five tests go red. `_canonical` and
+  `matches_oracle` docstrings are cut to the cap; the README's "The corpus" carries the
+  argument. `engine_ir` points at `plans/tables.typed`. Cheap tier 40 files, 380 passed;
+  `test_run_corpus` 1 passed.

@@ -17,8 +17,9 @@ from ..engine.adaptive import AdaptiveDriver, BuildDone, Extraction, hashed_name
 from .cardinality import Estimate, Estimator, estimator, measured
 from ..plans.engine_nodes import build
 from ..plans.engine_plan import EngineNode, memory_source
-from .join_order import optimize
+from .join_order import ordered
 from .multijoin import replaced
+from .report import BuildMiss, Replan
 from ..engine.node import BackendSelector
 from ..engine.single_partition_driver import BUILD_SLOT
 from .stats import Statistics
@@ -46,7 +47,9 @@ class AdaptiveRun:
     drivers: list[AdaptiveDriver] = field(default_factory=list)
     plans: list[EngineNode] = field(default_factory=list)
     #: builds off their estimate where something outside the builds had started
-    refused: list[BuildDone] = field(default_factory=list)
+    refused: list[BuildMiss] = field(default_factory=list)
+    #: one per new driver: the build it stopped at, what it kept, the order made again
+    replans: list[Replan] = field(default_factory=list)
     #: the memory sources' measured estimates, by name
     known: dict[str, Estimate] = field(default_factory=dict)
 
@@ -66,11 +69,11 @@ def run_adaptive(plan: EngineNode, stats: Statistics, tables, lanes: int, select
         def stops(event) -> bool:
             if not isinstance(event, BuildDone):
                 return False
-            guess = planned.estimates[id(event.join.children[BUILD_SLOT])].rows
-            if _q_error(event.rows, guess) <= threshold:
+            miss = _miss(event, planned)
+            if _q_error(miss.rows, miss.estimate) <= threshold:
                 return False
             if driver.extraction() is None:
-                run.refused.append(event)
+                run.refused.append(miss)
                 return False
             return True
 
@@ -81,8 +84,12 @@ def run_adaptive(plan: EngineNode, stats: Statistics, tables, lanes: int, select
         run.results = driver.run()
         if driver.stopped is None:
             return run
+        had = set(frames)
         plan = _with_memory_sources(plan, driver.extraction(), planned, known, frames)
-        plan = optimize(plan, stats, lanes, known=known)
+        plan, orders = ordered(plan, stats, lanes, known=known)
+        made = tuple((name, sum(len(frame) for frame in by_lane)) for name, by_lane in frames.items()
+                     if name not in had)
+        run.replans.append(Replan(_miss(driver.stopped, planned), made, tuple(orders)))
 
 
 def kept_estimates(kept: dict, stats: Statistics) -> dict[str, Estimate]:
@@ -105,6 +112,12 @@ def _with_memory_sources(plan: EngineNode, extraction: Extraction, planned: Esti
         frames[name] = lanes
         plan = replaced(plan, side, memory_source(name, side))
     return plan
+
+
+def _miss(event: BuildDone, planned: Estimator) -> BuildMiss:
+    join = event.join
+    described = join.kind + (f" on={join.fields['on']}" if "on" in join.fields else "")
+    return BuildMiss(described, event.rows, planned.estimates[id(join.children[BUILD_SLOT])].rows)
 
 
 def _q_error(true: float, guess: float) -> float:

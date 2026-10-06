@@ -1,4 +1,5 @@
-"""A prototype run of an engine plan, rendered as the engine renders its own (`cpu.txt`).
+"""A prototype run of an engine plan — `run_plan`, read as one answer or by lane — and the run
+rendered as the engine renders its own (`cpu.txt`).
 
 `plan_text/run_text.rs`'s shape: an `early_exit=` line, then per node the plan golden's line
 minus its schema plus `output_rows` and `output_bytes`, and under it `in_rows` — per child
@@ -9,8 +10,49 @@ backend is: bytes are pandas', and a lane's rows follow the prototype's hash.
 
 from __future__ import annotations
 
+import pandas as pd
+
 from .engine_plan import EngineNode
-from ..engine.partitioned_driver import PartitionedDriver
+from ..engine.node import CpuBackendSelector
+from ..engine.partitioned_driver import PartitionedDriver, partitioned_driver
+from ..engine.plan import Plan
+from ..operators.frame import concatenate
+
+#: What a corpus query runs under. The legacy tiers' "mini" device is 2 GiB and this is the
+#: same number, which is the point: a row costs more in pandas than in cuDF, so a budget
+#: that binds here binds harder than the GPU's would — a plan that fits is not flattered.
+CORPUS_BUDGET = 2 * 1024 * 1024 * 1024
+
+
+def run_plan(root, budget: int | None) -> PartitionedDriver:
+    """`root`, a built plan, run to its end: the driver holds its results and every node's
+    batches."""
+    driver = partitioned_driver(Plan.build(root), CpuBackendSelector(), budget)
+    driver.run()
+    return driver
+
+
+def execute(root, budget: int | None) -> tuple[pd.DataFrame, PartitionedDriver]:
+    """`root` run to its answer, and the driver that ran it."""
+    driver = run_plan(root, budget)
+    return answer(driver.results), driver
+
+
+def execute_lanes(root, budget: int | None) -> list[pd.DataFrame]:
+    """`root` run, its output by lane — a build side's batch per lane, as a probe plan keeps it."""
+    return by_lane(run_plan(root, budget))
+
+
+def answer(batches) -> pd.DataFrame:
+    """A run's result batches as one frame. The plan's own concatenate, not pandas': it keeps the
+    first batch's schema when every batch is empty, so a query whose answer is the empty set still
+    reports its columns (tpcds q17)."""
+    frames = [batch.frame for batch in batches]
+    return concatenate(frames) if frames else pd.DataFrame()
+
+
+def by_lane(driver: PartitionedDriver) -> list[pd.DataFrame]:
+    return [concatenate([batch.frame for batch in lane]) for lane in driver.root_lanes]
 
 
 def render_run(plan: EngineNode, driver: PartitionedDriver) -> str:

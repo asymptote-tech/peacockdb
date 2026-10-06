@@ -38,7 +38,7 @@ def solve(n: int, edges: list[tuple[int, int]], set_cost: Callable[[int], float]
           max_pairs: int = 2**32 - 1) -> Solved:
     """The cheapest tree over relations `0..n` joined by `edges` (pairs of relation masks), a set
     costing `set_cost(mask)`; `max_pairs` bounds the enumeration."""
-    lib = _library()
+    lib = load()
     lefts = (ctypes.c_uint64 * max(len(edges), 1))(*[left for left, _ in edges])
     rights = (ctypes.c_uint64 * max(len(edges), 1))(*[right for _, right in edges])
     callback = _SET_COST(lambda s, _ctx: float(set_cost(s)))
@@ -68,7 +68,8 @@ def _tree(postfix) -> int | tuple:
 _LOADED = None
 
 
-def _library():
+def load():
+    """The library `PEACOCK_DPHYP_LIB` names, loaded once; a missing one is refused naming the build."""
     global _LOADED
     if _LOADED is None:
         path = os.environ.get("PEACOCK_DPHYP_LIB")

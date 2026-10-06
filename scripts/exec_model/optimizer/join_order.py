@@ -24,6 +24,7 @@ from .disassembly import baseline, planned_lanes, reassembled
 from ..plans.engine_expr import parse_columns
 from ..plans.engine_plan import EngineNode
 from .multijoin import MultiJoin, RelColumn, sided_columns
+from .report import ChosenJoin, JoinOrder, PricedSet
 from .stats import Statistics
 
 #: DuckDB's budget of connected pairs, past which it stops enumerating exactly
@@ -180,18 +181,82 @@ def optimize(plan: EngineNode, stats: Statistics, lanes: int, copies: int = 1,
     residual connects would be a nested loop — the residual goes on the first join that has its
     relations anyway. A cluster past `max_pairs` keeps the plan's order, oriented again: the
     greedy fallback is not built yet. `known` are the memory sources' measured estimates."""
+    return ordered(plan, stats, lanes, copies, max_pairs, known)[0]
+
+
+def ordered(plan: EngineNode, stats: Statistics, lanes: int, copies: int = 1,
+            max_pairs: int = MAX_PAIRS, known: dict[str, Estimate] | None = None
+            ) -> tuple[EngineNode, list[JoinOrder]]:
+    """`optimize`, and each DPhyp call it made, outermost cluster first. The sets priced are
+    read off the cost callback, which hands DPhyp the value it would have had."""
     planned = estimator(plan, stats, known)
+    orders = []
 
     def order(cluster: MultiJoin):
-        sets = SetEstimates(cluster, planned)
-        edges = [(edge.left, edge.right) for edge in cluster.edges if edge.keys]
+        sets, priced = SetEstimates(cluster, planned), []
+
+        def cost(mask: int) -> float:
+            value = sets.cost(mask)
+            priced.append(PricedSet(mask, sets.rows(mask), value))
+            return value
+
+        edges = [edge for edge in cluster.edges if edge.keys]
+        unsolved = None
         try:
-            tree = dphyp.solve(len(cluster.relations), edges, sets.cost, max_pairs).tree
-        except dphyp.Unsolved as unsolved:
-            if unsolved.reason != "budget":
+            pairs = [(edge.left, edge.right) for edge in edges]
+            tree = dphyp.solve(len(cluster.relations), pairs, cost, max_pairs).tree
+        except dphyp.Unsolved as refusal:
+            if refusal.reason != "budget":
                 raise
-            tree = baseline(cluster)
-        return orient(tree, sets, copies, lanes, planned_lanes(cluster))
+            tree, unsolved = baseline(cluster), refusal.reason
+        oriented, plan_order = orient(tree, sets, copies, lanes, planned_lanes(cluster)), baseline(cluster)
+        # The chosen joins' and the plan order's sets are estimated after DPhyp has returned, so
+        # those it did not ask decide nothing.
+        orders.append(JoinOrder(
+            tuple(_label(r.root) for r in cluster.relations),
+            tuple((e.left, e.right, _keys_text(cluster, e)) for e in edges), tuple(priced), max_pairs,
+            tree, unsolved, oriented,
+            tuple(ChosenJoin(b, p, sets.rows(b | p), sets.cost(b | p)) for b, p in _joins(oriented)),
+            sum(sets.cost(b | p) for b, p in _joins(plan_order)), _flipped(oriented, plan_order)))
+        return oriented
 
-    return reassembled(plan, lanes, order)
+    return reassembled(plan, lanes, order), orders
 
+
+def _label(root: EngineNode) -> str:
+    """A relation as its root's kind and the tables and memory sources under it."""
+    names, stack = [], [root]
+    while stack:
+        node = stack.pop()
+        if node.kind == "GpuLoadParquet":
+            names.append(node.fields["table"])
+        elif node.kind == "GpuMemorySource":
+            names.append(node.fields["name"])
+        stack.extend(reversed(node.children))
+    return f"{root.kind.removeprefix('Gpu')} {','.join(dict.fromkeys(names))}"
+
+
+def _keys_text(cluster: MultiJoin, edge) -> str:
+    def name(c: RelColumn) -> str:
+        return f"r{c.relation}.{cluster.relations[c.relation].names[c.ordinal]}"
+
+    return " and ".join(f"{name(a)} = {name(b)}" for a, b in edge.keys)
+
+
+def _flipped(oriented, planned) -> tuple[tuple[int, int], ...]:
+    """The (build, probe) masks of each join in `oriented` that the plan had over the same two
+    sides with the other one building."""
+    had = {frozenset(pair): pair[0] for pair in _joins(planned)}
+    return tuple((build, probe) for build, probe in _joins(oriented)
+                 if had.get(frozenset((build, probe))) == probe)
+
+
+def _joins(tree) -> list[tuple[int, int]]:
+    """Each join of `tree` as its (build, probe) relation masks, bottom up."""
+    if isinstance(tree, int):
+        return []
+    return _joins(tree[0]) + _joins(tree[1]) + [(_mask(tree[0]), _mask(tree[1]))]
+
+
+def _mask(tree) -> int:
+    return 1 << tree if isinstance(tree, int) else _mask(tree[0]) | _mask(tree[1])

@@ -30,7 +30,7 @@ from ..operators.joins import own_output
 
 class Kind(Enum):
     """A type as far as the prototype tells types apart: decimals are float64 here
-    (`tests/corpus.py`), and one integer width is as good as another."""
+    (`plans/tables.typed`), and one integer width is as good as another."""
 
     BOOLEAN = "boolean"
     INTEGER = "integer"
@@ -83,7 +83,7 @@ def columns(schema) -> tuple[Column, ...]:
     return tuple(Column(name, kind_of(type_text), frame) for (name, type_text), frame in zip(schema, frames))
 
 
-#: The pandas dtype of a kind, as `tests/corpus.py` reads parquet into it.
+#: The pandas dtype of a kind, as `plans/tables.typed` reads parquet into it.
 _DTYPES = {
     Kind.BOOLEAN: "bool", Kind.INTEGER: "int64", Kind.FLOAT: "float64", Kind.STRING: "object",
     Kind.DATE: "datetime64[ns]",

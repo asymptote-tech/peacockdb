@@ -16,14 +16,16 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/optimize
 
 from .. import corpus
 from ..harness import main
-from ..plans.test_engine_answers import EMPTY_BY_DESIGN, MODE, ROOT, UNORDERED_LIMIT, order_positions
+from ..plans.test_engine_answers import EMPTY_BY_DESIGN, MODE, ROOT, order_positions
+from ...plans.answers import UNORDERED_LIMIT
 from ...plans.engine_nodes import build
+from ...optimizer.pipeline import mode_shape
 from ...plans.engine_plan import EngineNode, read_plans
 from ...optimizer.join_order import optimize
 from ...optimizer.multijoin import clusters
 from ...optimizer.stats import Statistics
 
-LANES = int(MODE[2])
+LANES = mode_shape(MODE).lanes
 
 
 def _optimized_test(bench: str, query: str, plan: EngineNode):

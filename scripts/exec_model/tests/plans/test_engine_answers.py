@@ -29,6 +29,7 @@ from .. import corpus
 from ..harness import main
 from ...plans.engine_expr import ColumnRef, parse_column_orders, parse_named_exprs
 from ...plans.engine_nodes import build
+from ...plans.answers import UNORDERED_LIMIT
 from ...plans.engine_plan import EngineNode, read_plans
 
 ROOT = pathlib.Path(__file__).resolve().parents[4] / "testdata"
@@ -37,8 +38,6 @@ SORTS = frozenset({"GpuMergeSortedPartitions", "GpuAccumulateBatchesAndSort", "G
 
 #: Correct answers that are empty at sf1 — declared, since an empty compare asserts nothing.
 EMPTY_BY_DESIGN = frozenset({("tpcds", "q17")})
-#: A LIMIT over unordered rows: which rows is not determined, only how many.
-UNORDERED_LIMIT = frozenset({("tpch", "scan-limit"), ("tpch", "nested-limits")})
 
 
 def order_positions(plan: EngineNode) -> list[int] | None:

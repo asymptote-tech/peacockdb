@@ -185,8 +185,9 @@ jobs:
       # tier, which has no dataset. One matrix leg only: the two legs differ in cuDF, which
       # this pure-python test cannot see, and a second run would only report the same failure
       # twice. The engine's plans run over the same tables in exec-model-corpus.yml on manual
-      # dispatch: they are minutes rather than seconds.
-      - name: Exec-model statistics and row estimates (Python)
+      # dispatch: they are minutes rather than seconds. test_run_corpus.py runs run.py over
+      # two small queries, twenty seconds, and calls DPhyp, so the library is built here.
+      - name: Exec-model statistics, row estimates and run.py (Python)
         if: matrix.cudf == '25.02'
         env:
           DUCKDB: /tmp/duckdb-bin/duckdb
@@ -195,6 +196,9 @@ jobs:
           python3 -c "import pandas, pyarrow" 2>/dev/null || pip install --quiet pandas pyarrow
           python3 scripts/exec_model/tests/optimizer/test_stats_sidecar.py
           python3 scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
+          cargo build --release -p peacockdb-dphyp
+          PEACOCK_DPHYP_LIB=$PWD/target/release/libpeacockdb_dphyp.so \
+            python3 scripts/exec_model/tests/test_run_corpus.py
 
       # The rust tests that read committed goldens rather than a device or a dataset. They
       # ran in the cost-report tier until that tier was named for what it contains rather
@@ -740,9 +744,10 @@ jobs:
           # globstar: the tests sit in one folder per component, and `**` also matches
           # tests/ itself.
           shopt -s nullglob globstar
-          # Six of these need the generated sf1 tables, which this job does not have.
-          # test_stats_sidecar.py and test_cardinality_corpus.py run in dataset-matrix; the
-          # four engine-plan files run in exec-model-corpus.yml on manual dispatch.
+          # Seven of these need the generated sf1 tables, which this job does not have.
+          # test_stats_sidecar.py, test_cardinality_corpus.py and test_run_corpus.py run in
+          # dataset-matrix; the four engine-plan files run in exec-model-corpus.yml on manual
+          # dispatch.
           # test_stats_embeddings.py generates its own tables from the embeddings cache,
           # which no CI host may fetch, so it is run by hand. Named rather than
           # pattern-matched, and a missing one is an error, so renaming a file cannot
@@ -753,7 +758,8 @@ jobs:
                      scripts/exec_model/tests/optimizer/test_stats_embeddings.py
                      scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
                      scripts/exec_model/tests/optimizer/test_engine_reassembled.py
-                     scripts/exec_model/tests/optimizer/test_engine_optimized.py)
+                     scripts/exec_model/tests/optimizer/test_engine_optimized.py
+                     scripts/exec_model/tests/test_run_corpus.py)
           for e in "${elsewhere[@]}"; do
             [ -f "$e" ] || { echo "$e is missing; is it still run elsewhere?"; exit 1; }
           done

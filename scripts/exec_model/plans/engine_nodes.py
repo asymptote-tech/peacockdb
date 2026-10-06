@@ -5,7 +5,7 @@ Every node's output frame names its columns `frame_names(its schema)`, by positi
 child's columns, whose schema the engine prints identical; nodes that build columns name them.
 
 `tables` is what the scans read: `frame(table, columns)` — every row, file order — and
-`row_counts(table)`, the file's row-group sizes (`tests/corpus.ParquetTables`) — and, for a
+`row_counts(table)`, the file's row-group sizes (`tables.ParquetTables`) — and, for a
 plan with a `GpuMemorySource`, `materialized(name)`, its frames by lane. `fanouts` gives
 a hash join its output rows per probe row, which sizes its scratch; without one it is the
 constant 1 the engine's estimator has today.

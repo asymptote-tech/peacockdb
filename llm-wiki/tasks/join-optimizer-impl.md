@@ -113,6 +113,9 @@ the sidecar's tests.
 
 ### Task 6: run.py, its goldens and the report
 
+Two steps: 6a is `run.py`, the optimizer's report as data, `<mode>.cpu.txt` and
+`<mode>.optimizer.txt`; 6b is the cost, `cost_report.html` and the timed full run.
+
 **Files:** new `scripts/exec_model/run.py`, `scripts/exec_model/optimizer/report.py` (or
 beside `run.py`), `scripts/exec_model/testdata/goldens/{tpch,tpcds}/*`, `README.md`.
 

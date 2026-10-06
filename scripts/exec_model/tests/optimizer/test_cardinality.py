@@ -40,13 +40,13 @@ TABLES = {
 COMPOSITE = {"lines": [["li", "lo"]], "returns": [["ri", "ro"]]}
 
 
-def dataset() -> Statistics:
+def dataset(row_group_size: int | None = None) -> Statistics:
     root = pathlib.Path(tempfile.mkdtemp())
     directory = root / "toy.sf1"
     directory.mkdir()
     sidecar = {}
     for name, table in TABLES.items():
-        pq.write_table(table, directory / f"{name}.parquet")
+        pq.write_table(table, directory / f"{name}.parquet", row_group_size=row_group_size)
         frame = table.to_pandas()
         sidecar[name] = {"fingerprint": fingerprint(pq.read_metadata(directory / f"{name}.parquet")),
                          "columns": {c: {"ndv": int(frame[c].nunique()), "method": "exact"} for c in frame},
