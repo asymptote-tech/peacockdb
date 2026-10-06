@@ -71,6 +71,19 @@ the sidecar's tests.
   the input to `design.md`'s operators section.
 - [ ] Proving: all tiers, corpus at every mode.
 
+### Task 3a: the driver's step cap follows from the plan
+
+**Files:** `scripts/exec_model/partitioned_driver.py`, its tests.
+
+- [ ] `DEFAULT_MAX_STEPS` (100,000) is a fixed safety valve, and the row-group modes legitimately
+  need more: tpch q8 at `tp4-rowgroup` takes 137,760 steps and then matches DuckDB. Each step
+  moves a batch or finishes a lane, so derive the cap from the plan — source batches times nodes,
+  plus lanes times nodes — and keep it a guard against a driver that stops making progress.
+- [ ] A driver test of an honest run that passes a small fixed cap, and one that still trips
+  on a run that does not progress.
+- [ ] Proving: cheap tier; `test_engine_answers.py` at `tp4-rowgroup` over the whole corpus on
+  shad-gpu (q8 green).
+
 ### Task 4: one folder per component
 
 **Files:** every `scripts/exec_model/*.py`, `tests/`, the two workflows, `README.md`,
@@ -79,7 +92,7 @@ the sidecar's tests.
 - [ ] `git mv` into `engine/`, `plans/`, `optimizer/` as the spec lists, with relative imports
   fixed and nothing else changed; tests into `tests/{engine,operators,plans,optimizer}/` with
   `harness.py`, `corpus.py`, `mocks.py`, `rescan.py` where their users are or in `tests/`.
-  `errors.py` and `schema.py` go where their callers are.
+  `errors.py` goes where its callers are.
 - [ ] The test runner loop in `pipeline.yml` globs the subfolders; the `elsewhere` names gain
   their folder.
 - [ ] Proving: the same test count before and after, every tier green; `git diff -M --stat`

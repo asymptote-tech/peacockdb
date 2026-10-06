@@ -209,11 +209,9 @@ class ReBatchToTarget(BatchAccumulatorExecutor):
 DEFAULT_COMPACT_BYTES = 1 << 20
 
 
-class AggregateBatches(BatchAccumulatorExecutor):
-    """`GpuAggregateBatches` — merges pre-aggregated batches, emits at done.
-
-    `final=False` re-partials (compacting a partition's batches without finishing them);
-    `final=True` produces the declared outputs.
+class PlanAggregateBatches(BatchAccumulatorExecutor):
+    """An engine `GpuAggregateBatches` — merges pre-aggregated batches with the plan's own
+    calls, emits at done: the state, or with a `final` list the declared outputs.
 
     **Compaction runs on a byte threshold that doubles when it fails to pay.** The two
     obvious policies are each wrong in one regime. Compacting on every arrival keeps the
@@ -233,16 +231,11 @@ class AggregateBatches(BatchAccumulatorExecutor):
     backstop (#142).
     """
 
-    def __init__(self, keys, aggs, final_exprs=None, name: str = "agg_batches",
-                 schema: dict | None = None, compact_bytes: int = DEFAULT_COMPACT_BYTES):
-        self.keys = keys
-        self.aggs = aggs
-        #: the node's `final` list, or None to emit state. Its presence is the only thing
-        #: distinguishing a merging node from a finalizing one — there is no phase flag.
-        self.final_exprs = final_exprs
+    def __init__(self, body: aggregates.PlanAggregate, name: str, schema: dict | None = None,
+                 compact_bytes: int = DEFAULT_COMPACT_BYTES):
+        self.body = body
         self.name = name
-        #: `{column: dtype}` of THIS phase's output (state columns for final=False, keys +
-        #: declared outputs for final=True); consulted only for the zero-input empty case
+        #: `{column: dtype}` of the output, consulted only for the zero-input empty case
         self.schema = schema
         self.threshold = compact_bytes
         self._state: pd.DataFrame | None = None
@@ -275,7 +268,7 @@ class AggregateBatches(BatchAccumulatorExecutor):
         """Fold every pending arrival into the state. Returns the transient's size."""
         frames = ([] if self._state is None else [self._state]) + self._pending
         merged = frames[0] if len(frames) == 1 else concatenate(frames)
-        self._state = self._merge(merged)
+        self._state = self.body.aggregate(merged)
         self._pending, self._pending_bytes = [], 0
         self.compactions += 1
         # A compaction that did not shrink will not shrink next time either — the keys are
@@ -292,31 +285,8 @@ class AggregateBatches(BatchAccumulatorExecutor):
             # Zero-input lane: the schema IS the output — no phase left to run over it.
             out = _empty_single_batch(self.name, self.schema)
         else:
-            out = self._emit(state)
+            out = self.body.emit(state)
         return [PandasBatch(out, f"[{'+'.join(tags)}]>{self.name}")], no_scratch()
-
-    def _merge(self, frame: pd.DataFrame) -> pd.DataFrame:
-        return aggregates.merge(frame, self.keys, self.aggs)
-
-    def _emit(self, state: pd.DataFrame) -> pd.DataFrame:
-        if self.final_exprs is None:
-            return state
-        return aggregates.finalize(state, self.keys, self.aggs)
-
-
-class PlanAggregateBatches(AggregateBatches):
-    """An engine `GpuAggregateBatches`: the same compaction, the plan's own calls."""
-
-    def __init__(self, body: aggregates.PlanAggregate, name: str, schema: dict | None = None,
-                 compact_bytes: int = DEFAULT_COMPACT_BYTES):
-        super().__init__(None, None, body.final, name, schema, compact_bytes)
-        self.body = body
-
-    def _merge(self, frame: pd.DataFrame) -> pd.DataFrame:
-        return self.body.aggregate(frame)
-
-    def _emit(self, state: pd.DataFrame) -> pd.DataFrame:
-        return self.body.emit(state)
 
 
 class AccumulateBatchesAndSort(BatchAccumulatorExecutor):

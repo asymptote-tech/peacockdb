@@ -54,7 +54,6 @@ as a script, so the relative imports resolve either way.
 | `forwarder.py` | `BatchForwarder` and the merge / union / interleave mappings |
 | `node.py` | `GpuNode`, `NodeExecutors`, `ExecutorBackends`, `BackendSelector` |
 | `plan.py` | heights, left-to-right order, whole-tree structural validation, which limit lowering applies |
-| `schema.py` | what a node declares about its columns — annotations, not types |
 | `accounting.py` | `ResidentAccountant` — the resident formula, the cached-delta executor total, and the budget trip (`ResidentBudgetExceeded`) |
 | `limit.py` | `RowInterval`, `RowRange`, and the per-batch decision behind the two lowerings |
 | `runtime.py` | per-node queue state and one lane's view of its inputs |
@@ -63,10 +62,10 @@ as a script, so the relative imports resolve either way.
 | `scheduler.py` | which node runs next — `executor/driver/scheduler.rs`'s interface: events in, `pick() -> Pick{run, prefetch}` out, holds as counters; with the `prefetch` policy the pick also names unheld source lanes to fetch ahead |
 | `operators/frame.py` | the pandas batch, and the rules that keep pandas inside cuDF's vocabulary |
 | `operators/expressions.py` | the expression IR — what `cudf::ast` accepts, nothing more |
-| `operators/aggregates.py` | aggregate specs and the init / merge / finalize decomposition, and the registry that emits each one's finalize expressions; an engine plan's aggregates run as the plan decomposed them (`PlanAggregate`) |
+| `operators/aggregates.py` | an engine plan's aggregates run as the plan decomposed them (`PlanAggregate`): its init and merge calls over expressions — Welford's `m2` and `merge_m2` among them — grouping sets with DataFusion's id, and its `final` expressions |
 | `operators/source.py` | the loader and the row-group → (partition, batch) policy (T2); an engine scan's real row groups as row ranges, a batch's bytes fetchable ahead of its decode (read once either way); a memory source's lane, its one kept batch |
-| `operators/exec_ops.py` | filter, project, sort, partial aggregate, an engine plan's aggregate, limit, unload |
-| `operators/accumulators.py` | coalesce-all, aggregate-batches (and an engine plan's), accumulate-and-sort, merge-sorted |
+| `operators/exec_ops.py` | filter, project, sort, an engine plan's aggregate, unload |
+| `operators/accumulators.py` | coalesce-all, limit, re-batch, an engine plan's aggregate-batches, accumulate-and-sort, merge-sorted |
 | `operators/partition_ops.py` | the hash scatter |
 | `operators/join_types.py` | `JoinType` in the fbs vocabulary, and the capability matrix as a function both join backends read |
 | `operators/joins.py` | the pandas join backend — nine hash-join types, cross, nested loop; their positional forms for engine plans, and what each type emits before its projection |
@@ -74,7 +73,7 @@ as a script, so the relative imports resolve either way.
 | `operators/recipe.py` | the FlatBuffers node structs, the handle registry with consume-on-use, and the C++ that reads them |
 | `operators/recipe_join.py` | the second join backend: answers every call by emitting fb nodes and making `execute_node` calls |
 | `operators/nodes.py` | `GpuNode` implementations wiring the operators into plans; the builders an engine plan's nodes need — its scan, positional joins, plan-level aggregates — and the layouts they declare |
-| `operators/validation.py` | the checks a node's `_validator` is composed from with `all_of` — layout expectations and the aggregate state chain. The method is abstract on `GpuNode` (`node.py`) and implemented once, on `PandasNode` (`operators/nodes.py`), which just runs that validator |
+| `operators/validation.py` | the checks a node's `_validator` is composed from with `all_of` — what it needs of its children's layouts. The method is abstract on `GpuNode` (`node.py`) and implemented once, on `PandasNode` (`operators/nodes.py`), which just runs that validator |
 | `operators/injection.py` | `LayoutInjector` — rewrite a plan's partitioning, batching and hash placement |
 | `engine_plan.py` | the engine planner's `<mode>.plans.txt` goldens read back into trees — node lines and refusals, field values verbatim, the schema as (name, type) pairs with names unquoted; `GpuMemorySource`, the prototype's own kind the engine does not have yet, is read too |
 | `engine_expr.py` | the engine's expression text parsed back into a syntax tree and rendered again (`expr_text`) — `plan_text/expr_text.rs` both ways; a literal stays text, since the rendering does not print its type |
@@ -331,11 +330,7 @@ F8. **Validation splits by what the rule is about, not by convenience.** Whole-t
    in its `_validator`, composed from the checks in `operators/validation.py` and run by
    `validate_schemas_and_partitions()`, because only there can the message name the fix: "the planner inserts GpuMergePartitions below it" rather
    than "this category is 1:1 per lane". That half covers hash distribution, sortedness,
-   batch layout, and the aggregate state chain — a merge checks that the state it reads is
-   the state its own partial declared, same aggregate and same positions, which is
-   [#135](../../llm-wiki/archive/archived-tickets.md#t135)'s class of defect made checkable.
-   Full column types stay out of the prototype (`schema.py` carries annotations only);
-   they are the real implementation's T7.
+   and batch layout.
 
 F9. **A cardinality estimate belongs on the join node, not in the model's signature.** A
    join's transient is sized by the *output* cardinality — matched rows × the combined

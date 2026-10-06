@@ -232,9 +232,8 @@ masks and names, never an id. The report rejects carrying the id or its type on 
 frozen-surface append and a `recipe-payloads.txt` regen for a value the C++ can compute; that
 changes at DataFusion 55, where the width depends on the ordinal (#228). Tests: the four `bug_`
 pins flip and `grouping_sets_as_exported` goes; a rollup contract case on both engines; a walk
-test running the query above; the exec model's fold (`scripts/exec_model/operators/aggregates.py`)
-and its three pins, `{0, 2, 3}` to `{0, 1, 3}`. Cleaner after #189's fix, which stops hashing the
-id; independent of it.
+test running the query above. Cleaner after #189's fix, which stops hashing the id; independent
+of it.
 
 <a id="t62"></a>
 ### #62 — a DISTINCT beside an avg or a count is refused at planning

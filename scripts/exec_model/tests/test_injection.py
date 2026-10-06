@@ -19,8 +19,7 @@ import pathlib
 
 from .corpus import BUDGET, ParquetTables, execute
 from .harness import main
-from .test_end_to_end import agg_schemas, same
-from ..operators import aggregates as A
+from .test_end_to_end import aggregate_over, same
 from ..operators import nodes as N
 from ..operators.expressions import Binary, Col, Lit
 from ..operators.injection import HashMode, LayoutInjector, LayoutPreset
@@ -71,23 +70,14 @@ def execution_shape(driver) -> tuple:
 
 
 def aggregate_plan(customer, keys):
-    aggs = [
-        A.Agg(A.SUM, "c_acctbal", "total"),
-        A.Agg(A.MEAN, "c_acctbal", "avg_bal"),
-        A.Agg(A.COUNT, None, "n"),
-    ]
-    state_schema, final_schema = agg_schemas(customer, keys, aggs)
+    """sum, avg and count(*) of the positive balances, as the planner decomposes them."""
+    bal = (Col("c_acctbal"),)
+    calls = [("sum", bal, ("total",)), ("sum", bal, ("avg$sum",)),
+             ("count", bal, ("avg$count",)), ("count", (Lit(1),), ("n",))]
+    final = (Col("total"), Binary("/", Col("avg$sum"), Col("avg$count")), Col("n"))
     scan = N.scan("customer", customer, 4, 500, 1000)
     filtered = N.filter_("positive", scan, Binary(">", Col("c_acctbal"), Lit(0.0)))
-    partial = N.partial_aggregate("agg_partial", filtered, keys, aggs)
-    compacted = N.aggregate_batches("agg_batches", partial, keys, aggs, schema=state_schema)
-    shuffle_in = N.coalesce_all("shuffle_in", N.merge_partitions("merge", compacted))
-    emitted = N.emit_partitions("emit", shuffle_in, keys, 4)
-    return N.unload(
-        "unload",
-        N.aggregate_batches("agg_final", emitted, keys, aggs,
-                            A.finalize_exprs(aggs), schema=final_schema),
-    )
+    return aggregate_over(filtered, customer, 4, keys, calls, final, ("total", "avg_bal", "n"))
 
 
 def aggregate_oracle(customer, key):

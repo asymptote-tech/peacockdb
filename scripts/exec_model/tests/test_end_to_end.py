@@ -29,9 +29,9 @@ from .harness import main, raises
 from .rescan import CheckedDriver
 from ..errors import ResidentBudgetExceeded
 from ..node import CpuBackendSelector
-from ..operators import aggregates as A
 from ..operators import nodes as N
-from ..operators.expressions import Alias, Binary, Col, Lit
+from ..operators.aggregates import GROUPING_ID, PlanAggregate, PlanCall
+from ..operators.expressions import Alias, Binary, Case, Col, Lit, Sqrt
 from ..plan import Plan
 
 #: (n_partitions, rows_per_group, target_batch_rows). The first is the degenerate
@@ -97,45 +97,87 @@ def same(got: pd.DataFrame, want: pd.DataFrame, label: str) -> None:
             assert nulls_alike(left) == nulls_alike(right), f"{label}: column {column} differs"
 
 
-# -- queries ----------------------------------------------------------------------
+# -- aggregates, as the planner decomposes them -------------------------------------
+#
+# An init `GpuAggregate` per batch, a per-lane `GpuAggregateBatches` merging its state, a
+# shuffle on the group keys, and a final `GpuAggregateBatches` merging again and finalizing:
+# the sequence an engine plan states, over named columns rather than an engine plan's text.
 
 
-def agg_schemas(df, keys, aggs):
-    """Typed `{column: dtype}` for each aggregate phase, derived by running the phase
-    over a zero-row slice — the empty-lane case each node may have to emit."""
-    state = A.partial(df.iloc[0:0], keys, aggs)
-    return dict(state.dtypes), dict(A.final(state, keys, aggs).dtypes)
+def body(keys, calls, state, final=None, output=None, masks=None) -> PlanAggregate:
+    """An aggregate node's body: `calls` as (func, args, outputs) over named columns, and
+    `final` aliased to the outputs after the keys, as an engine plan names them."""
+    output = tuple(output or state)
+    if final is not None:
+        final = tuple(Alias(expr, name) for expr, name in zip(final, output[len(keys):]))
+    return PlanAggregate(tuple(Col(k) for k in keys),
+                         tuple(PlanCall(f, args, outputs) for f, args, outputs in calls),
+                         masks, tuple(state), final, output)
 
 
-def shuffled_aggregate(df, config, aggs, keys=("g",)):
-    parts, group, target = config
+def typed(phase: PlanAggregate, rows: pd.DataFrame) -> dict:
+    """The `{column: dtype}` a phase emits, read off a run over no rows: what a lane that
+    received nothing must still emit."""
+    return dict(phase.emit(phase.aggregate(rows.iloc[0:0])).dtypes)
+
+
+def merge_of(init: PlanAggregate) -> list:
+    """The calls that merge an init's state, in its order: a count merges by sum, and
+    Welford's `x$count`, `x$mean` and `x$m2` together by one merge_m2."""
+    welford = {call.outputs[0].rpartition("$")[0] for call in init.calls if call.func == "mean"}
+    calls = []
+    for call in init.calls:
+        stem, _, part = call.outputs[0].rpartition("$")
+        if stem not in welford:
+            calls.append(({"count": "sum"}.get(call.func, call.func), (Col(call.outputs[0]),),
+                          call.outputs))
+        elif part == "mean":
+            state = tuple(f"{stem}${p}" for p in ("count", "mean", "m2"))
+            calls.append(("merge_m2", tuple(Col(o) for o in state), state))
+    assert [o for _, _, outputs in calls for o in outputs] == [
+        o for call in init.calls for o in call.outputs], "a merge emits its init's state"
+    return calls
+
+
+def aggregate_over(child, rows, lanes, keys, init_calls, final, output, masks=None):
+    """The whole sequence above `child`, whose rows are `rows`' columns, finishing on `lanes`.
+    `final` and `output` name the finalized columns after the keys; None emits the state."""
     keys = list(keys)
-    state_schema, final_schema = agg_schemas(df, keys, aggs)
+    group_keys = keys + ([GROUPING_ID] if masks else [])
+    state = group_keys + [o for _, _, outputs in init_calls for o in outputs]
+    init = body(keys, init_calls, state, masks=masks)
+    merge = body(group_keys, merge_of(init), state)
+    finish = body(group_keys, merge_of(init), state, final,
+                  output and group_keys + list(output))
+    partial = N.plan_aggregate("agg_init", child, init)
+    compacted = N.plan_aggregate_batches("agg_batches", partial, merge, typed(init, rows))
+    # GpuCoalesceAllBatches between the merge and the emit: the emit then makes one
+    # scatter call and hands the final aggregate N batches rather than L*N. Hashed on the
+    # user keys only where sets are expanded: the id is a group column the shuffle skips.
+    shuffle_in = N.coalesce_all("shuffle_in", N.merge_partitions("merge", compacted))
+    emitted = N.emit_partitions("emit", shuffle_in, keys, lanes)
+    final_schema = dict(finish.emit(merge.aggregate(init.aggregate(rows.iloc[0:0]))).dtypes)
+    return N.unload("unload", N.plan_aggregate_batches("agg_final", emitted, finish, final_schema))
+
+
+def shuffled_aggregate(df, config, init_calls, final, output, keys=("g",), masks=None):
+    parts, group, target = config
     scan = N.scan("scan", df, parts, group, target)
     filtered = N.filter_("filter", scan, Binary(">", Col("v"), Lit(20)))
-    partial = N.partial_aggregate("agg_partial", filtered, keys, aggs)
-    compacted = N.aggregate_batches("agg_batches", partial, keys, aggs, schema=state_schema)
-    if parts == 1:
-        return N.unload(
-            "unload",
-            N.aggregate_batches("agg_final", compacted, keys, aggs,
-                                A.finalize_exprs(aggs), schema=final_schema),
-        )
-    # GpuCoalesceAllBatches between the merge and the emit: the emit then makes one
-    # scatter call and hands the final aggregate N batches rather than L*N. See the
-    # spec's "The shuffle beneath a final aggregate is coalesced first".
-    shuffle_in = N.coalesce_all("shuffle_in", N.merge_partitions("merge", compacted))
-    emitted = N.emit_partitions("emit", shuffle_in, keys, parts)
-    return N.unload(
-        "unload",
-        N.aggregate_batches("agg_final", emitted, keys, aggs,
-                            A.finalize_exprs(aggs), schema=final_schema),
-    )
+    return aggregate_over(filtered, df, parts, keys, init_calls, final, output, masks)
+
+
+#: sum(v), avg(v) and count(*), as the planner states them.
+GROUPED = (
+    [("sum", (Col("v"),), ("sum_v",)), ("sum", (Col("v"),), ("avg$sum",)),
+     ("count", (Col("v"),), ("avg$count",)), ("count", (Lit(1),), ("n",))],
+    (Col("sum_v"), Binary("/", Col("avg$sum"), Col("avg$count")), Col("n")),
+    ("sum_v", "avg_v", "n"),
+)
 
 
 def test_grouped_aggregate_matches_the_oracle_at_every_config():
     df = fixture()
-    aggs = [A.Agg(A.SUM, "v", "sum_v"), A.Agg(A.MEAN, "v", "avg_v"), A.Agg(A.COUNT, None, "n")]
     sub = df[df.v > 20]
     want = (
         sub.groupby("g", dropna=False)
@@ -143,24 +185,25 @@ def test_grouped_aggregate_matches_the_oracle_at_every_config():
         .reset_index()
     )
     for config in CONFIGS:
-        got, _ = execute(shuffled_aggregate(df, config, aggs))
+        got, _ = execute(shuffled_aggregate(df, config, *GROUPED))
         same(got, want, f"grouped aggregate {config}")
 
 
 def test_keyless_aggregate_matches_the_oracle_at_every_config():
     df = fixture()
-    aggs = [A.Agg(A.SUM, "v", "sum_v"), A.Agg(A.MIN, "v", "min_v"), A.Agg(A.MAX, "v", "max_v")]
+    calls = [("sum", (Col("v"),), ("sum_v",)), ("min", (Col("v"),), ("min_v",)),
+             ("max", (Col("v"),), ("max_v",))]
+    state = ["sum_v", "min_v", "max_v"]
+    init = body([], calls, state)
+    merge = body([], merge_of(init), state)
     want = pd.DataFrame([{"sum_v": df.v.sum(), "min_v": df.v.min(), "max_v": df.v.max()}])
     for parts, group, target in CONFIGS:
         scan = N.scan("scan", df, parts, group, target)
-        partial = N.partial_aggregate("agg_partial", scan, [], aggs)
-        compacted = N.aggregate_batches("agg_batches", partial, [], aggs)
-        # Keyless needs no shuffle — collapse the lanes and finish once (the v1 shortcut).
+        compacted = N.plan_aggregate_batches("agg_batches", N.plan_aggregate("agg_init", scan, init),
+                                             merge, typed(init, df))
+        # Keyless needs no shuffle — collapse the lanes and finish once.
         collapsed = N.merge_partitions("merge", compacted)
-        root = N.unload(
-            "unload",
-            N.aggregate_batches("agg_final", collapsed, [], aggs, A.finalize_exprs(aggs)),
-        )
+        root = N.unload("unload", N.plan_aggregate_batches("agg_final", collapsed, merge))
         got, _ = execute(root)
         same(got, want, f"keyless aggregate {(parts, group, target)}")
 
@@ -217,24 +260,34 @@ def test_a_top_n_holds_only_the_fetch_at_each_stage():
     assert len(sorted_out) > 3, "the input needs several batches for this to mean anything"
 
 
+def stddev(count, m2, ddof, root=True):
+    """The planner's finalize of a Welford state: NULL where count - ddof <= 0."""
+    divisor = Binary("-", Col(count), Lit(float(ddof)))
+    value = Binary("/", Col(m2), divisor)
+    return Case(whens=((Binary("<=", divisor, Lit(0.0)), Lit(np.nan)),),
+                otherwise=Sqrt(value) if root else value)
+
+
 def test_every_corpus_aggregate_matches_the_oracle_at_every_config():
-    # The whole set the corpus uses, in one query: sum (1010 uses), avg (204), count (190),
-    # stddev (24), max (22), min (12), var_pop (5), var (5), stddev_pop (5). stddev and var
-    # are the interesting ones — their state is Welford's [count, mean, m2] and their merge
-    # is MERGE_M2, so they are the only aggregates whose merge is not a plain re-aggregation.
+    # The functions an engine plan's aggregates call: sum, count, min, max, and avg as sum
+    # and count; stddev and var as Welford's count, mean and m2, merged by merge_m2 — the
+    # only state whose merge is not a plain re-aggregation.
     df = fixture()
-    aggs = [
-        A.Agg(A.SUM, "v", "sum_v"),
-        A.Agg(A.COUNT, None, "n_rows"),
-        A.Agg(A.COUNT, "v", "n_v"),
-        A.Agg(A.MEAN, "v", "avg_v"),
-        A.Agg(A.MIN, "v", "min_v"),
-        A.Agg(A.MAX, "v", "max_v"),
-        A.Agg(A.STDDEV, "v", "sd_samp", ddof=1),
-        A.Agg(A.STDDEV, "v", "sd_pop", ddof=0),
-        A.Agg(A.VAR, "v", "var_samp", ddof=1),
-        A.Agg(A.VAR, "v", "var_pop", ddof=0),
+    v = (Col("v"),)
+    calls = [
+        ("sum", v, ("sum_v",)), ("count", (Lit(1),), ("n_rows",)), ("count", v, ("n_v",)),
+        ("sum", v, ("avg$sum",)), ("count", v, ("avg$count",)),
+        ("min", v, ("min_v",)), ("max", v, ("max_v",)),
+        ("count", v, ("w$count",)), ("mean", v, ("w$mean",)), ("m2", v, ("w$m2",)),
     ]
+    final = (
+        Col("sum_v"), Col("n_rows"), Col("n_v"), Binary("/", Col("avg$sum"), Col("avg$count")),
+        Col("min_v"), Col("max_v"),
+        stddev("w$count", "w$m2", 1), stddev("w$count", "w$m2", 0),
+        stddev("w$count", "w$m2", 1, root=False), stddev("w$count", "w$m2", 0, root=False),
+    )
+    output = ("sum_v", "n_rows", "n_v", "avg_v", "min_v", "max_v",
+              "sd_samp", "sd_pop", "var_samp", "var_pop")
     sub = df[df.v > 20]
     want = (
         sub.groupby("g", dropna=False)
@@ -247,18 +300,8 @@ def test_every_corpus_aggregate_matches_the_oracle_at_every_config():
         .reset_index()
     )
     for config in CONFIGS:
-        got, _ = execute(shuffled_aggregate(df, config, aggs))
+        got, _ = execute(shuffled_aggregate(df, config, calls, final, output))
         same(got, want, f"every aggregate {config}")
-
-
-def test_a_single_group_stddev_is_null_not_a_divide_by_zero():
-    # count - ddof <= 0 is the finalize's CASE arm: one row has no sample dispersion, and
-    # the answer is NULL rather than a division by zero or a root of a negative.
-    df = pd.DataFrame({"g": ["only"], "v": [5.0], "k": [0]})
-    aggs = [A.Agg(A.STDDEV, "v", "sd", ddof=1), A.Agg(A.STDDEV, "v", "sd_pop", ddof=0)]
-    got = A.single(df, ["g"], aggs)
-    assert np.isnan(got.sd.iloc[0])       # sample: divisor 0
-    assert got.sd_pop.iloc[0] == 0.0      # population: divisor 1, no spread
 
 
 def test_a_rollup_matches_the_oracle_at_every_config():
@@ -266,166 +309,35 @@ def test_a_rollup_matches_the_oracle_at_every_config():
     # above groups on the keys plus __grouping_id as if it were an ordinary column. Nothing
     # in the sequence is grouping-set aware except that first node.
     df = fixture()
-    aggs = [A.Agg(A.SUM, "v", "sum_v"), A.Agg(A.COUNT, None, "n")]
-    keys, masks = ["g", "k"], A.rollup_masks(2)
-    with_id = keys + [A.GROUPING_ID]
-    want = A.single_over_sets(df, keys, aggs, masks)
-
-    for parts, group, target in CONFIGS:
-        expanded = N.partial_aggregate(
-            "agg_init", N.scan("scan", df, parts, group, target), keys, aggs,
-            grouping_sets=masks,
-        )
-        state_schema = dict(A.partial_over_sets(df.iloc[0:0], keys, aggs, masks).dtypes)
-        compacted = N.aggregate_batches("agg_batches", expanded, with_id, aggs,
-                                        schema=state_schema)
-        shuffle_in = N.coalesce_all("shuffle_in", N.merge_partitions("merge", compacted))
-        # Hashing the user keys only — the subset rule, since the group columns are
-        # keys + the id. A masked key is NULL and the kernel skips null columns, so the
-        # grand-total row lands in one fixed lane; it is one row.
-        emitted = N.emit_partitions("emit", shuffle_in, keys, parts)
-        final_schema = dict(A.final(A.partial_over_sets(df.iloc[0:0], keys, aggs, masks),
-                                    with_id, aggs).dtypes)
-        root = N.unload("unload", N.aggregate_batches("agg_final", emitted, with_id, aggs,
-                                                      A.finalize_exprs(aggs),
-                                                      schema=final_schema))
-        got, _ = execute(root)
-        same(got, want, f"rollup {(parts, group, target)}")
-
-
-def test_a_rollup_carries_the_grouping_id_through_the_whole_sequence():
-    # The id is a real column from the init onward: absent below it, present above it, and
-    # dropped only by a projection the query's own output shape asks for.
-    df = fixture()
-    aggs = [A.Agg(A.SUM, "v", "sum_v")]
-    keys, masks = ["g", "k"], A.rollup_masks(2)
-    with_id = keys + [A.GROUPING_ID]
-    expanded = N.partial_aggregate("agg_init", N.scan("scan", df, 4, 5, 10), keys, aggs,
-                                   grouping_sets=masks)
-    collapsed = N.merge_partitions("merge", expanded)
-    root = N.unload("unload", N.aggregate_batches("agg_final", collapsed, with_id, aggs,
-                                                  A.finalize_exprs(aggs)))
-    got, _ = execute(root)
-    assert list(got.columns) == ["g", "k", A.GROUPING_ID, "sum_v"]
-    assert set(got[A.GROUPING_ID]) == {0, 2, 3}
-
-    # …and the projection that drops it, which is what the plan in the spec shows.
-    exprs = [Alias(Col("g"), "g"), Alias(Col("k"), "k"), Alias(Col("sum_v"), "sum_v")]
-    projected = N.unload("unload", N.project("drop_gid",
-                                             N.aggregate_batches("agg_final2", collapsed, with_id,
-                                                                 aggs, A.finalize_exprs(aggs)),
-                                             exprs))
-    got2, _ = execute(projected)
-    assert list(got2.columns) == ["g", "k", "sum_v"]
-
-
-# -- DISTINCT ----------------------------------------------------------------------
-#
-# DISTINCT is never a flag on an aggregator: it lowers to grouping, so each shape below is
-# an ordinary aggregate sequence with an extra group key. See the spec's "DISTINCT lowers
-# to grouping".
+    calls = [("sum", (Col("v"),), ("sum_v",)), ("count", (Lit(1),), ("n",))]
+    masks = ((False, False), (False, True), (True, True))
+    sub = df[df.v > 20]
+    sets = []
+    for held, grouping_id in ((["g", "k"], 0), (["g"], 1), ([], 3)):
+        if held:
+            one = sub.groupby(held).agg(sum_v=("v", "sum"), n=("v", "size")).reset_index()
+        else:
+            one = pd.DataFrame([{"sum_v": sub.v.sum(), "n": len(sub)}])
+        for key in ("g", "k"):
+            if key not in held:
+                one[key] = np.nan
+        one[GROUPING_ID] = grouping_id
+        sets.append(one[["g", "k", GROUPING_ID, "sum_v", "n"]])
+    want = pd.concat(sets, ignore_index=True)
+    for config in CONFIGS:
+        got, _ = execute(shuffled_aggregate(df, config, calls, (Col("sum_v"), Col("n")),
+                                            ("sum_v", "n"), keys=("g", "k"), masks=masks))
+        same(got, want, f"rollup {config}")
 
 
 def test_select_distinct_is_an_aggregate_with_no_aggregators():
-    # `SELECT DISTINCT g, k` — group keys, empty `aggs`, no `final` list. Dedup is
-    # idempotent and associative, so per batch, per lane and post-shuffle all compose.
+    # `SELECT DISTINCT g, k` — group keys, no calls, no `final`. Dedup is idempotent and
+    # associative, so per batch, per lane and post-shuffle all compose.
     df = fixture()
-    want = df[["g", "k"]].drop_duplicates().reset_index(drop=True)
-    for parts, group, target in CONFIGS:
-        keys = ["g", "k"]
-        scan = N.scan("scan", df, parts, group, target)
-        per_batch = N.partial_aggregate("dedup_batch", scan, keys, [])
-        per_lane = N.aggregate_batches("dedup_lane", per_batch, keys, [],
-                                       schema={"g": df.g.dtype, "k": df.k.dtype})
-        shuffle_in = N.coalesce_all("shuffle_in", N.merge_partitions("merge", per_lane))
-        emitted = N.emit_partitions("emit", shuffle_in, keys, parts)
-        root = N.unload("unload", N.aggregate_batches("dedup_final", emitted, keys, [],
-                                                      A.finalize_exprs([]),
-                                                      schema={"g": df.g.dtype, "k": df.k.dtype}))
-        got, _ = execute(root)
-        same(got, want, f"select distinct {(parts, group, target)}")
-
-
-def test_count_distinct_lowers_to_two_aggregates():
-    # `SELECT g, count(DISTINCT k) FROM t GROUP BY g` — the shape DataFusion's
-    # SingleDistinctToGroupBy already produces: an inner aggregate grouping on the distinct
-    # argument, then an outer one counting it. No distinct flag reaches any executor.
-    df = fixture()
-    want = (
-        df.groupby("g", dropna=False)["k"].nunique().reset_index(name="n_distinct_k")
-    )
-    for parts, group, target in CONFIGS:
-        scan = N.scan("scan", df, parts, group, target)
-        # inner: dedup (g, k) — group keys, no aggregators
-        inner_keys = ["g", "k"]
-        deduped = N.aggregate_batches(
-            "dedup", N.partial_aggregate("dedup_batch", scan, inner_keys, []),
-            inner_keys, [], schema={"g": df.g.dtype, "k": df.k.dtype},
-        )
-        # The per-lane dedup above is only a head start: the same (g, k) can survive in
-        # several lanes, so the count must sit above a GLOBAL dedup. Shuffling on g puts
-        # every row of a group in one lane, and the second dedup there is the global one.
-        outer = [A.Agg(A.COUNT, "k", "n_distinct_k")]
-        _, count_schema = agg_schemas(df, ["g"], outer)
-        pair_schema = {"g": df.g.dtype, "k": df.k.dtype}
-        shuffle_in = N.coalesce_all("shuffle_in", N.merge_partitions("merge", deduped))
-        emitted = N.emit_partitions("emit", shuffle_in, ["g"], parts)
-        globally = N.aggregate_batches("dedup_global", emitted, inner_keys, [],
-                                       schema=pair_schema)
-        counted = N.partial_aggregate("count_batch", globally, ["g"], outer)
-        root = N.unload("unload", N.aggregate_batches("count_final", counted, ["g"], outer,
-                                                      A.finalize_exprs(outer),
-                                                      schema=count_schema))
-        got, _ = execute(root)
-        same(got, want, f"count distinct {(parts, group, target)}")
-
-
-def test_a_distinct_beside_non_distinct_aggregates_lowers_the_same_way():
-    # q28's shape — count(DISTINCT v) beside avg(v) and count(v) — which DataFusion refuses
-    # because its rewrite re-applies the same function outside. Ours does not: the outer
-    # level applies the MERGE aggregators, so a count merges by sum and the companions ride
-    # through the inner grouping untouched. Σ over the inner groups recovers each total.
-    df = fixture()
-    want = pd.DataFrame([{
-        "n_distinct_v": df.v.nunique(),
-        "sum_v": float(df.v.sum()),
-        "n_v": len(df),
-        "avg_v": df.v.mean(),
-    }])
-    for parts, group, target in CONFIGS:
-        scan = N.scan("scan", df, parts, group, target)
-        # inner: group by the distinct argument, computing the companions per distinct value
-        inner = [A.Agg(A.SUM, "v", "sum_v"), A.Agg(A.COUNT, "v", "n_v")]
-        inner_state, _ = agg_schemas(df, ["v"], inner)
-        per_value = N.aggregate_batches(
-            "per_value", N.partial_aggregate("per_value_batch", scan, ["v"], inner),
-            ["v"], inner, schema=inner_state,
-        )
-        # outer: count the distinct values, and merge the companions Σ-wise
-        outer = [
-            A.Agg(A.COUNT, "v", "n_distinct_v"),
-            A.Agg(A.SUM, "sum_v", "sum_v"),
-            A.Agg(A.SUM, "n_v", "n_v"),
-        ]
-        # As above, the per-lane grouping is a head start only: one value of v can survive
-        # in several lanes, so the inner grouping is made global on one lane before the
-        # outer count runs, or a distinct value would be counted once per lane that had it.
-        collapsed = N.merge_partitions("merge", per_value)
-        globally = N.aggregate_batches("per_value_global", collapsed, ["v"], inner,
-                                       schema=inner_state)
-        totalled = N.aggregate_batches(
-            "totals", N.partial_aggregate("totals_batch", globally, [], outer),
-            [], outer, A.finalize_exprs(outer),
-        )
-        # avg comes from the two totals, which is what the finalize would have written
-        exprs = [
-            Alias(Col("n_distinct_v"), "n_distinct_v"),
-            Alias(Col("sum_v"), "sum_v"),
-            Alias(Col("n_v"), "n_v"),
-            Alias(Binary("/", Col("sum_v"), Col("n_v")), "avg_v"),
-        ]
-        got, _ = execute(N.unload("unload", N.project("avg", totalled, exprs)))
-        same(got, want, f"mixed distinct {(parts, group, target)}")
+    want = df[df.v > 20][["g", "k"]].drop_duplicates().reset_index(drop=True)
+    for config in CONFIGS:
+        got, _ = execute(shuffled_aggregate(df, config, [], None, None, keys=("g", "k")))
+        same(got, want, f"select distinct {config}")
 
 
 def test_union_of_two_branches_matches_the_oracle():
@@ -499,15 +411,14 @@ def test_the_accountant_is_actually_engaged_in_these_runs():
     # A budget of None would make every plan above pass whatever the accounting did. This
     # asserts the budget is live: the same plan trips when the budget is small enough.
     df = fixture()
-    aggs = [A.Agg(A.SUM, "v", "sum_v")]
     driver = None
     for config in CONFIGS:
-        _, driver = execute(shuffled_aggregate(df, config, aggs))
+        _, driver = execute(shuffled_aggregate(df, config, *GROUPED))
         assert driver.accountant.peak > 0
         assert driver.accountant.peak <= BUDGET
 
     with raises(ResidentBudgetExceeded):
-        execute(shuffled_aggregate(df, CONFIGS[0], aggs), budget=1)
+        execute(shuffled_aggregate(df, CONFIGS[0], *GROUPED), budget=1)
 
 
 def test_every_config_agrees_with_every_other():
@@ -515,10 +426,9 @@ def test_every_config_agrees_with_every_other():
     # it is the same claim as agreeing with pandas — but this states it directly, which is
     # what a regression in the batching policy would break first.
     df = fixture()
-    aggs = [A.Agg(A.SUM, "v", "sum_v"), A.Agg(A.MEAN, "v", "avg_v")]
     baseline = None
     for config in CONFIGS:
-        got, _ = execute(shuffled_aggregate(df, config, aggs))
+        got, _ = execute(shuffled_aggregate(df, config, *GROUPED))
         if baseline is None:
             baseline = got
         else:

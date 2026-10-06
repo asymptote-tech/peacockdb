@@ -389,9 +389,6 @@ class MockNode(GpuNode):
     def row_interval(self):
         return self._row_interval
 
-    def output_schema(self):
-        return None
-
     def children(self):
         return self._children
 

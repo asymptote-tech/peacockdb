@@ -18,17 +18,17 @@ import pandas as pd
 
 from .harness import main, raises
 from ..executors import LaneEvent
-from ..operators import aggregates as A
 from ..operators import source
 from ..limit import RowRange
 from ..operators.accumulators import (
     AccumulateBatchesAndSort,
-    AggregateBatches,
     CoalesceAllBatches,
     LimitStream,
     MergeSortedPartitions,
+    PlanAggregateBatches,
     ReBatchToTarget,
 )
+from ..operators.aggregates import PlanAggregate, PlanCall, plan_aggregate
 from ..operators.exec_ops import FilterExec, ProjectExec, SortExec
 from ..operators.expressions import (
     Alias,
@@ -257,36 +257,29 @@ def test_the_null_group_survives_aggregation():
     # cuDF groups with null_policy::INCLUDE; pandas drops NaN keys unless told not to,
     # which is how tpcds q15's NULL ca_zip row disappears.
     frame = pd.DataFrame({"g": ["a", None, "a"], "v": [1, 2, 3]})
-    out = A.single(frame, ["g"], [A.Agg(A.SUM, "v", "s")])
+    out = plan_aggregate(frame, (Col("g"),), (PlanCall("sum", (Col("v"),), ("s",)),))
     assert len(out) == 2
-    assert out.s.sum() == 6
+    assert out.iloc[:, 1].sum() == 6
 
 
-def test_count_star_and_count_column_are_different_aggregates():
+def test_count_of_a_literal_counts_rows_and_count_of_a_column_its_non_nulls():
+    # The planner's `count(*)` is `count(1)`: the same call, a different argument.
     frame = pd.DataFrame({"g": ["a", "a"], "v": [1.0, np.nan]})
-    out = A.single(frame, ["g"], [A.Agg(A.COUNT, None, "rows"), A.Agg(A.COUNT, "v", "non_null")])
-    assert out.rows.iloc[0] == 2
-    assert out.non_null.iloc[0] == 1
+    calls = (PlanCall("count", (Lit(1),), ("rows",)), PlanCall("count", (Col("v"),), ("non_null",)))
+    out = plan_aggregate(frame, (Col("g"),), calls)
+    assert out.iloc[0].tolist() == ["a", 2, 1]
 
 
-def test_mean_decomposes_to_sum_and_count_not_a_mean_of_means():
-    # Averaging partial means is wrong whenever the batches differ in size, which is the
-    # multi-GPU rule in build-test.md. Two batches of 1 and 3 rows make it visible.
-    frame = pd.DataFrame({"g": ["a"] * 4, "v": [10.0, 1.0, 1.0, 1.0]})
-    first = A.partial(frame.iloc[:1], ["g"], [A.Agg(A.MEAN, "v", "m")])
-    rest = A.partial(frame.iloc[1:], ["g"], [A.Agg(A.MEAN, "v", "m")])
-    merged = A.final(concatenate([first, rest]), ["g"], [A.Agg(A.MEAN, "v", "m")])
-    assert merged.m.iloc[0] == 3.25  # 13/4, not (10 + 1)/2
-    assert list(first.columns) == ["g", "m$sum", "m$count"]
-
-
-def test_a_final_phase_emits_its_declared_columns_when_empty():
-    # An all-empty lane must not leak the partial's state columns into the final's output:
-    # the frames are concatenated downstream and cudf::concatenate rejects a mismatch.
-    aggs = [A.Agg(A.MEAN, "v", "m")]
-    empty = A.partial(pd.DataFrame({"g": [], "v": []}), ["g"], aggs)
-    out = A.final(empty, ["g"], aggs)
-    assert list(out.columns) == ["g", "m"]
+def test_a_finalizing_aggregate_over_no_rows_emits_its_declared_columns():
+    # An all-empty lane must not leak the state columns into the output: the frames are
+    # concatenated downstream and cudf::concatenate rejects a mismatch.
+    body = PlanAggregate(
+        (Col("g"),),
+        (PlanCall("sum", (Col("v"),), ("m$sum",)), PlanCall("count", (Col("v"),), ("m$count",))),
+        None, ("g", "m$sum", "m$count"), (Alias(Binary("/", Col("m$sum"), Col("m$count")), "m"),),
+        ("g", "m"))
+    out = body.emit(body.aggregate(pd.DataFrame({"g": [], "v": []})))
+    assert list(out.columns) == ["g", "m"] and len(out) == 0
 
 
 # -- the partitioner (T2 policy) --------------------------------------------------
@@ -434,14 +427,13 @@ def test_the_build_side_is_residency_and_is_reported():
 def test_an_empty_partial_does_not_retype_the_key_it_is_concatenated_onto():
     # An empty batch reaching an aggregate makes it emit a frame with no rows, and that
     # frame still has to carry types — a cudf::column has one and cannot not have one.
-    # pandas will happily default them to float64 and then let the concatenation retype
-    # the key it lands on. That is not cosmetic: `partition_ids` stringifies 5.0 where it
-    # stringifies 5, so a lane that saw an empty batch stops co-locating with one that
-    # did not, and the shuffled aggregate quietly comes out short.
-    aggs = [A.Agg(A.SUM, "v", "total")]
+    # pandas will happily default them to float64, and pandas 3 lets the concatenation
+    # retype the key it lands on.
+    calls = (PlanCall("sum", (Col("v"),), ("total",)),)
     rows = pd.DataFrame({"k": [5, 6], "v": [1.0, 2.0]})
-    merged = concatenate([A.partial(rows, ["k"], aggs), A.partial(rows.iloc[0:0], ["k"], aggs)])
-    assert merged.k.dtype == rows.k.dtype
+    empty = plan_aggregate(rows.iloc[0:0], (Col("k"),), calls)
+    merged = concatenate([plan_aggregate(rows, (Col("k"),), calls), empty])
+    assert empty.iloc[:, 0].dtype == merged.iloc[:, 0].dtype == rows.k.dtype
 
 
 # -- re-batching ------------------------------------------------------------------
@@ -507,17 +499,23 @@ def disjoint(i):
     return pd.DataFrame({"k": [3 * i, 3 * i + 1, 3 * i + 2], "v": [1.0, 2.0, 3.0]})
 
 
-def partial_of(rows, aggs):
+#: `sum(v) AS total GROUP BY k`, as an init over raw rows and as the merge over its state.
+INIT = PlanAggregate((Col("k"),), (PlanCall("sum", (Col("v"),), ("total",)),), None,
+                     ("k", "total"), None, ("k", "total"))
+MERGE = PlanAggregate((Col("k"),), (PlanCall("sum", (Col("total"),), ("total",)),), None,
+                      ("k", "total"), None, ("k", "total"))
+
+
+def partial_of(rows):
     """What an init `GpuAggregate` hands the merge accumulator: state, not raw rows."""
-    return A.partial(rows, ["k"], aggs)
+    return INIT.aggregate(rows)
 
 
 def test_a_low_cardinality_aggregate_compacts_and_stays_at_group_cardinality():
-    aggs = [A.Agg(A.SUM, "v", "total")]
-    node = AggregateBatches(["k"], aggs, compact_bytes=400)
+    node = PlanAggregateBatches(MERGE, "agg", compact_bytes=400)
     peak = 0
     for i in range(20):
-        node.accumulate_and_fetch(batch(partial_of(repeating(i), aggs)))
+        node.accumulate_and_fetch(batch(partial_of(repeating(i))))
         peak = max(peak, node.resident_bytes())
     assert node.compactions > 0, "the threshold was never reached"
     # Three groups repeat forever, so each compaction leaves a 3-row state and the bar
@@ -527,10 +525,9 @@ def test_a_low_cardinality_aggregate_compacts_and_stays_at_group_cardinality():
 
 
 def test_a_high_cardinality_aggregate_doubles_its_way_out_instead_of_rescanning():
-    aggs = [A.Agg(A.SUM, "v", "total")]
-    node = AggregateBatches(["k"], aggs, compact_bytes=400)
+    node = PlanAggregateBatches(MERGE, "agg", compact_bytes=400)
     for i in range(40):
-        node.accumulate_and_fetch(batch(partial_of(disjoint(i), aggs)))
+        node.accumulate_and_fetch(batch(partial_of(disjoint(i))))
     # Nothing merged, so the bar rose and the compactions are logarithmic in the arrivals
     # rather than one per arrival — the quadratic re-scan this rule exists to avoid.
     assert node.threshold > 400
@@ -538,82 +535,33 @@ def test_a_high_cardinality_aggregate_doubles_its_way_out_instead_of_rescanning(
 
 
 def test_the_compaction_policy_never_changes_the_answer():
-    aggs = [A.Agg(A.SUM, "v", "total"), A.Agg(A.MEAN, "v", "avg"), A.Agg(A.COUNT, None, "n")]
+    # sum, avg as the planner decomposes it (sum and count, divided at the end), count(*).
+    init = PlanAggregate(
+        (Col("k"),),
+        (PlanCall("sum", (Col("v"),), ("total",)), PlanCall("sum", (Col("v"),), ("avg$sum",)),
+         PlanCall("count", (Col("v"),), ("avg$count",)), PlanCall("count", (Lit(1),), ("n",))),
+        None, ("k", "total", "avg$sum", "avg$count", "n"), None,
+        ("k", "total", "avg$sum", "avg$count", "n"))
+    state = ("k", "total", "avg$sum", "avg$count", "n")
+    final = PlanAggregate(
+        (Col("k"),), tuple(PlanCall("sum", (Col(c),), (c,)) for c in state[1:]), None, state,
+        (Alias(Col("total"), "total"), Alias(Binary("/", Col("avg$sum"), Col("avg$count")), "avg"),
+         Alias(Col("n"), "n")),
+        ("k", "total", "avg", "n"))
     frames = [repeating(i) for i in range(9)]
-    want = A.single(concatenate([f.copy() for f in frames]), ["k"], aggs)
+    want = (concatenate([f.copy() for f in frames]).groupby("k")
+            .agg(total=("v", "sum"), avg=("v", "mean"), n=("v", "size")).reset_index())
 
     for threshold in (1, 300, 10**9):     # per-arrival, mid-stream, never-until-done
-        node = AggregateBatches(["k"], aggs, A.finalize_exprs(aggs), compact_bytes=threshold)
+        node = PlanAggregateBatches(final, "agg", compact_bytes=threshold)
         for f in frames:
-            node.accumulate_and_fetch(batch(partial_of(f, aggs)))
+            node.accumulate_and_fetch(batch(init.aggregate(f)))
         got = node.mark_done_and_fetch()[0][0].frame.sort_values("k").reset_index(drop=True)
         assert list(got.columns) == list(want.columns), threshold
         for column in want.columns:
             assert np.allclose(got[column].to_numpy(), want[column].to_numpy()), (
                 f"threshold {threshold}: column {column}"
             )
-
-
-# -- grouping sets -------------------------------------------------------------------
-
-
-def rollup_frame():
-    return pd.DataFrame({"a": [1, 1, 2, 2], "b": [10, 20, 10, 20], "v": [1.0, 2.0, 4.0, 8.0]})
-
-
-def test_a_rollup_expands_into_one_batch_carrying_every_set():
-    # k groupbys over the same input, tagged and concatenated — one frame out, never one
-    # per set, because an executor may return at most one batch per call per output lane.
-    aggs = [A.Agg(A.SUM, "v", "s")]
-    out = A.partial_over_sets(rollup_frame(), ["a", "b"], aggs, A.rollup_masks(2))
-    assert set(out[A.GROUPING_ID]) == {0, 2, 3}          # bitmask of masked positions
-    assert len(out) == 4 + 2 + 1                          # (a,b) x4, (a) x2, () x1
-    assert out[out[A.GROUPING_ID] == 3].s.iloc[0] == 15.0  # the grand total
-
-
-def test_the_grouping_id_sits_between_the_keys_and_the_state():
-    # The position the C++ gives it, and what fixes the ordinals in a plan: keys, then the
-    # id, then the state columns.
-    aggs = [A.Agg(A.SUM, "v", "s"), A.Agg(A.MEAN, "v", "m")]
-    out = A.partial_over_sets(rollup_frame(), ["a", "b"], aggs, A.rollup_masks(2))
-    assert list(out.columns) == ["a", "b", A.GROUPING_ID, "s", "m$sum", "m$count"]
-
-
-def test_a_masked_key_is_null_rather_than_absent():
-    # All sets share one schema — that is what lets them sit in a single table — so a
-    # masked position is a NULL value, not a missing column.
-    out = A.partial_over_sets(rollup_frame(), ["a", "b"], [A.Agg(A.SUM, "v", "s")],
-                              A.rollup_masks(2))
-    masked = out[out[A.GROUPING_ID] == 2]
-    assert masked.b.isna().all() and masked.a.notna().all()
-    assert out[out[A.GROUPING_ID] == 3][["a", "b"]].isna().all().all()
-
-
-def test_the_merge_accepts_the_sets_in_any_order():
-    # What the concatenation actually produces once a lane has several batches: each set's
-    # rows are non-contiguous. Every consumer is a hash groupby over keys + id, so runs are
-    # never a precondition — but order is pinned for float determinism, not for grouping.
-    aggs = [A.Agg(A.SUM, "v", "s"), A.Agg(A.STDDEV, "v", "sd")]
-    masks, keys = A.rollup_masks(2), ["a", "b"]
-    with_id = keys + [A.GROUPING_ID]
-    batches = [A.partial_over_sets(rollup_frame(), keys, aggs, masks) for _ in range(2)]
-    interleaved = concatenate(batches)                                   # set-major per batch
-    contiguous = interleaved.sort_values(with_id, na_position="last").reset_index(drop=True)
-    shuffled = interleaved.sample(frac=1, random_state=5).reset_index(drop=True)
-
-    results = [A.final(f, with_id, aggs).sort_values(with_id, na_position="last")
-               .reset_index(drop=True) for f in (interleaved, contiguous, shuffled)]
-    for other in results[1:]:
-        assert other[with_id].equals(results[0][with_id])
-        for column in ("s", "sd"):
-            assert np.allclose(other[column], results[0][column], equal_nan=True)
-
-
-def test_a_grouping_set_mask_must_match_the_key_count():
-    with raises(ValueError, match="against 2 group keys"):
-        A.partial_over_sets(rollup_frame(), ["a", "b"], [], [(True,)])
-    with raises(ValueError, match="at least one set"):
-        A.partial_over_sets(rollup_frame(), ["a", "b"], [], [])
 
 
 # -- the empty single-batch contract ------------------------------------------------
@@ -651,9 +599,7 @@ def test_an_empty_merge_sorted_still_emits_one_typed_batch():
 
 
 def test_a_zero_input_aggregate_emits_its_declared_typed_empty():
-    aggs = [A.Agg(A.SUM, "v", "total")]
-    node = AggregateBatches(["k"], aggs, A.finalize_exprs(aggs),
-                             schema={"k": "int64", "total": "float64"})
+    node = PlanAggregateBatches(MERGE, "agg", schema={"k": "int64", "total": "float64"})
     outputs, _ = node.mark_done_and_fetch()
     frame = outputs[0].frame
     assert list(frame.columns) == ["k", "total"]
@@ -664,7 +610,7 @@ def test_a_zero_input_aggregate_emits_its_declared_typed_empty():
 def test_an_empty_single_batch_accumulator_without_a_schema_is_loud():
     for node in (
         CoalesceAllBatches(),
-        AggregateBatches(["g"], [A.Agg(A.SUM, "v", "s")], A.finalize_exprs([A.Agg(A.SUM, "v", "s")])),
+        PlanAggregateBatches(MERGE, "agg"),
         AccumulateBatchesAndSort(["v"]),
     ):
         with raises(ValueError, match="no schema"):

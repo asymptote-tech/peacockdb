@@ -31,13 +31,13 @@ from ..batch import CallStats
 from ..partitioned_driver import partitioned_driver
 from ..errors import ResidentBudgetExceeded
 from ..node import CpuBackendSelector
-from ..operators import aggregates as A
 from ..operators import nodes as N
 from ..operators.expressions import Binary, Col, Lit
 from ..operators.frame import PandasBatch
 from ..operators.joins import HashJoin, JoinType
 from ..plan import Plan
 from .mocks import MockBatch, MockSelector, coalesce_all, exec_node, sink, source
+from .test_end_to_end import aggregate_over
 
 
 class StatefulExecutor:
@@ -150,19 +150,14 @@ def test_the_peak_is_the_high_water_mark_not_the_final_value():
 
 
 def shuffle_plan(rows=40, lanes=4):
+    """sum(v) and avg(v) by g, shuffled on g."""
     df = pd.DataFrame({"g": ["x", "y"] * (rows // 2), "v": list(range(rows))})
-    aggs = [A.Agg(A.SUM, "v", "s"), A.Agg(A.MEAN, "v", "m")]
-    state = A.partial(df.iloc[0:0], ["g"], aggs)
-    state_schema, final_schema = dict(state.dtypes), dict(A.final(state, ["g"], aggs).dtypes)
+    v = (Col("v"),)
+    calls = [("sum", v, ("s",)), ("sum", v, ("m$sum",)), ("count", v, ("m$count",))]
+    final = (Col("s"), Binary("/", Col("m$sum"), Col("m$count")))
     scan = N.scan("scan", df, lanes, 5, 10)
     filtered = N.filter_("filter", scan, Binary(">", Col("v"), Lit(3)))
-    partial = N.partial_aggregate("agg_partial", filtered, ["g"], aggs)
-    compacted = N.aggregate_batches("agg_batches", partial, ["g"], aggs, schema=state_schema)
-    emitted = N.emit_partitions("emit", N.merge_partitions("merge", compacted), ["g"], lanes)
-    return N.unload(
-        "unload", N.aggregate_batches("agg_final", emitted, ["g"], aggs,
-                            A.finalize_exprs(aggs), schema=final_schema)
-    )
+    return aggregate_over(filtered, df, lanes, ["g"], calls, final, ("s", "m"))
 
 
 def join_plan():

@@ -94,15 +94,6 @@ class CpuBackendSelector(BackendSelector):
         return backends.cpu(lane)
 
 
-class GpuBackendSelector(BackendSelector):
-    def select(
-        self, category: ExecutorCategory, backends: ExecutorBackends, lane: int | None
-    ) -> Executor:
-        if backends.gpu is None:
-            raise ValueError(f"{category.value} has no GPU backend")
-        return backends.gpu(lane)
-
-
 class RecipeJoinBackendSelector(BackendSelector):
     """Joins through the FlatBuffers emulation; everything else through pandas.
 
@@ -137,10 +128,6 @@ class GpuNode(ABC):
     @abstractmethod
     def output_partitions(self) -> PartitionLayout | None:
         """Present for non-sink nodes."""
-
-    @abstractmethod
-    def output_schema(self):
-        """Present for non-sink nodes. Out of scope for the prototype (T0)."""
 
     @abstractmethod
     def children(self) -> list["GpuNode"]: ...

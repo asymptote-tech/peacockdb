@@ -12,8 +12,7 @@ import pandas as pd
 
 from .harness import main, raises
 from ..errors import PlanError
-from ..layout import BatchLayout, NodeKind, PartitionLayout, UniqueScope
-from ..operators import aggregates as A
+from ..layout import BatchLayout, NodeKind, PartitionLayout
 from ..operators import nodes as N
 from ..operators.expressions import Alias, Col
 from ..operators.joins import JoinType
@@ -159,43 +158,11 @@ def test_partition_accumulator_outputs_one_lane():
 # What a node needs of its children, as opposed to plan.py's whole-tree rules. Each of
 # these is a plan that runs and returns a wrong answer if the check is absent, which is
 # why they are checks rather than comments. Built with the real (pandas) nodes, since the
-# mocks declare no schema and no distribution.
+# mocks declare no distribution.
 
 
 def frame():
     return pd.DataFrame({"g": ["x", "y", "x"], "v": [1.0, 2.0, 3.0]})
-
-
-def sum_aggs():
-    return [A.Agg(A.SUM, "v", "s"), A.Agg(A.MEAN, "v", "m")]
-
-
-def init_over(df, keys, aggs, lanes=1):
-    return N.partial_aggregate("init", N.scan("scan", df, lanes, 2), keys, aggs)
-
-
-def test_a_merge_must_group_on_what_its_partial_grouped_on():
-    df, aggs = frame(), sum_aggs()
-    with raises(PlanError, match="not grouping on what the partial grouped on|is not in its input"):
-        Plan.build(N.unload("u", N.aggregate_batches("merge", init_over(df, ["g"], aggs),
-                                                     ["v"], aggs)))
-
-
-def test_a_merge_must_find_state_for_every_aggregate_it_declares():
-    df = frame()
-    partial = init_over(df, ["g"], [A.Agg(A.SUM, "v", "s")])
-    with raises(PlanError, match="no state for 'm'"):
-        Plan.build(N.unload("u", N.aggregate_batches("merge", partial, ["g"], sum_aggs())))
-
-
-def test_a_merge_must_agree_with_its_partial_about_the_function():
-    # The silent one: `s` exists and is a real column, but a sum read where a mean's
-    # sum-half sits computes a wrong number from a right column.
-    df = frame()
-    partial = init_over(df, ["g"], [A.Agg(A.SUM, "v", "s")])
-    with raises(PlanError, match="is a mean.* but its input declares sum"):
-        Plan.build(N.unload("u", N.aggregate_batches("merge", partial, ["g"],
-                                                     [A.Agg(A.MEAN, "v", "s")])))
 
 
 def test_a_multi_lane_join_must_have_both_sides_hashed():
@@ -237,21 +204,6 @@ def test_a_limit_after_a_per_batch_sort_is_rejected():
     # Stream-sorted, so the same limit is fine.
     stream = N.accumulate_and_sort("accum", sorted_batches, ["v"], schema=dict(frame().dtypes))
     Plan.build(N.unload("u", N.project("after", N.limit("limit", stream, fetch=2), keep)))
-
-
-def test_an_aggregate_declares_the_uniqueness_of_its_own_output():
-    # Not checked anywhere — declared so later work does not have to re-derive it.
-    df, aggs = frame(), sum_aggs()
-    init = init_over(df, ["g"], aggs, lanes=2)
-    assert init.output_partitions().unique_keys[0].scope is UniqueScope.PER_BATCH
-
-    per_lane = N.aggregate_batches("merge", init, ["g"], aggs)
-    assert per_lane.output_partitions().unique_keys[0].scope is UniqueScope.PER_PARTITION
-
-    shuffled = N.emit_partitions("emit", N.coalesce_all(
-        "c", N.merge_partitions("m", per_lane)), ["g"], 2)
-    final = N.aggregate_batches("final", shuffled, ["g"], aggs, A.finalize_exprs(aggs))
-    assert final.output_partitions().unique_keys[0].scope is UniqueScope.GLOBAL
 
 
 def test_routing_category_rejects_backends():

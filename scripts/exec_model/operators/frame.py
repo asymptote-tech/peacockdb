@@ -110,17 +110,12 @@ def sort_frame(frame: pd.DataFrame, by, ascending, nulls_first) -> pd.DataFrame:
     return frame.iloc[order]
 
 
-def empty_like(frame: pd.DataFrame) -> pd.DataFrame:
-    """A zero-row frame with the same columns and dtypes."""
-    return frame.iloc[0:0].copy()
-
-
 def empty_frame(schema) -> pd.DataFrame:
     """A zero-row frame from a `{column: dtype}` mapping.
 
     Typed on purpose: a `cudf::column` has a type whether or not it has rows, and an
     untyped pandas empty defaults to object/float64 and retypes whatever it is later
-    concatenated onto — the key-retyping bug `aggregates._apply` documents.
+    concatenated onto.
     """
     return pd.DataFrame({column: pd.Series([], dtype=dtype) for column, dtype in schema.items()})
 

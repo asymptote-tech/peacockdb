@@ -338,7 +338,7 @@ def test_an_outer_join_with_a_residual_filter_is_refused_not_answered_wrongly():
         assert capability(join_type, has_filter=False).streams
     build, probe = build_side(), probe_side()
     for _label, selector in BACKENDS:
-        with raises(NotImplementedError):
+        with raises(NotImplementedError, match="ON-condition demoted to a WHERE"):
             execute(
                 join_plan(build, probe, (1, 5, 10), JoinType.LEFT,
                           residual=Binary(">", Col("v"), Lit(50))),
@@ -372,7 +372,7 @@ def test_a_right_semi_join_with_a_residual_filter_is_refused_not_approximated():
     assert capability(JoinType.RIGHT_SEMI, has_filter=False).streams
     build, probe = build_side(), probe_side()
     for _label, selector in BACKENDS:
-        with raises(NotImplementedError):
+        with raises(NotImplementedError, match="residual filter has no cuDF path"):
             execute(
                 join_plan(build, probe, (1, 5, 10), JoinType.RIGHT_SEMI,
                           residual=Binary(">", Col("v"), Lit(50))),
@@ -628,7 +628,7 @@ def test_a_filtered_right_semi_throws_in_the_recipe_layer_as_the_c_side_does():
     # planner would have run into.
     build, probe = build_side(), probe_side()
     for join_type in (JoinType.RIGHT_SEMI, JoinType.RIGHT_ANTI):
-        with raises(NotImplementedError):
+        with raises(NotImplementedError, match=r"the C\+\+ throws here"):
             legacy_call(join_type, build, probe, residual=Binary(">", Col("v"), Lit(50)))
 
 

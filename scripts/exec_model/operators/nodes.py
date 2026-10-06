@@ -34,13 +34,10 @@ from ..layout import (
     PartitionLayout,
     SortOrder,
 )
-from ..layout import UniqueKeys, UniqueScope
 from ..limit import RowInterval
 from ..node import ExecutorBackends, ExecutorCategory, GpuNode, NodeExecutors
-from ..schema import aggregate_schema, finalized_schema
 from . import (
     accumulators,
-    aggregates,
     exec_ops,
     joins,
     partition_ops,
@@ -62,14 +59,12 @@ class PandasNode(GpuNode):
         forwarder: BatchForwarder | None = None,
         row_interval: RowInterval | None = None,
         validator: Callable[["PandasNode"], None] | None = None,
-        schema=None,
         recipe_factory: Callable[[int | None], Executor] | None = None,
     ):
         #: the second backend, where a node has one: an executor that answers by emitting
         #: FlatBuffers nodes and making `execute_node` calls (`recipe_join.py`). Only the
         #: joins carry one — the join is what the emulation was written to prove.
         self._recipe_factory = recipe_factory
-        self._schema = schema
         self._row_interval = row_interval
         self._validator = validator
         self._name = name
@@ -97,10 +92,6 @@ class PandasNode(GpuNode):
     def output_partitions(self):
         return self._layout
 
-    def output_schema(self):
-        """Annotations, not types — see `schema.py`. None where nothing can be declared."""
-        return self._schema
-
     def children(self):
         return self._children
 
@@ -113,8 +104,8 @@ class PandasNode(GpuNode):
         )
 
     def validate_schemas_and_partitions(self) -> None:
-        """What this node needs of its children — layout expectations and the aggregate
-        state chain. Whole-tree facts (arity, lane agreement) stay in `plan.py`."""
+        """What this node needs of its children's layouts. Whole-tree facts (arity, lane
+        agreement) stay in `plan.py`."""
         if self._validator is not None:
             self._validator(self)
 
@@ -163,10 +154,9 @@ def _records_its_recipe(builder):
 
 
 def _layout(n, batch_layout=BatchLayout.MULTIPLE_BATCHES, hash_keys=None, sort_by=None,
-            unique_keys=(), distribution=None, order=None):
+            distribution=None, order=None):
     return PartitionLayout(
         n=n,
-        unique_keys=unique_keys,
         key_distribution=(
             distribution
             if distribution is not None
@@ -195,19 +185,6 @@ def _inherit(child: PandasNode):
     or building new columns does not, and those declare afresh.
     """
     return child.output_partitions().key_distribution
-
-
-def _passthrough(child: PandasNode):
-    """Re-laning and re-batching do not touch columns, so the declaration carries over."""
-    return child.output_schema()
-
-
-def _unique(schema, keys, scope: UniqueScope):
-    """The key set an aggregate's output is unique on, at the scope its position gives it."""
-    positions = tuple(schema.position_of(k) for k in keys)
-    if any(p is None for p in positions):
-        return ()
-    return (UniqueKeys(positions, scope),)
 
 
 # -- source -----------------------------------------------------------------------
@@ -312,7 +289,6 @@ def filter_(name, child, predicate, projection=None, sources=None) -> PandasNode
         ExecutorCategory.EXEC,
         [child],
         factory=lambda lane: exec_ops.FilterExec(predicate, name, projection),
-        schema=_passthrough(child) if projection is None else None,
     )
 
 
@@ -344,28 +320,6 @@ def sort(name, child, by, ascending=None, nulls_first=False, fetch=None, order=N
         ExecutorCategory.EXEC,
         [child],
         factory=lambda lane: exec_ops.SortExec(by, ascending, nulls_first, fetch, name),
-        schema=_passthrough(child),
-    )
-
-
-@_records_its_recipe
-def partial_aggregate(name, child, keys, aggs, grouping_sets=None) -> PandasNode:
-    """`grouping_sets` makes this the expanding init: its output gains `__grouping_id`
-    between the keys and the state, and every node above groups on keys + that column."""
-    gid = aggregates.GROUPING_ID if grouping_sets else None
-    schema = aggregate_schema(keys, aggs, gid)
-    group_columns = list(keys) + ([gid] if gid else [])
-    return PandasNode(
-        name,
-        NodeKind.INTERMEDIATE,
-        # One row per group per batch, so the group columns are unique within a batch and
-        # no further: the next batch groups the same keys again.
-        _layout(_lanes(child),
-                unique_keys=_unique(schema, group_columns, UniqueScope.PER_BATCH)),
-        ExecutorCategory.EXEC,
-        [child],
-        factory=lambda lane: exec_ops.PartialAggregateExec(keys, aggs, name, grouping_sets),
-        schema=schema,
     )
 
 
@@ -396,7 +350,6 @@ def limit(name, child, skip=0, fetch=None) -> PandasNode:
         [child],
         factory=lambda lane: accumulators.LimitStream(skip, fetch, name),
         row_interval=RowInterval(skip, fetch),
-        schema=_passthrough(child),
         validator=validation.all_of(validation.one_partition_in,
                                     validation.prefix_is_meaningful),
     )
@@ -435,42 +388,6 @@ def coalesce_all(name, child, schema=None) -> PandasNode:
         ExecutorCategory.BATCH_ACCUMULATOR,
         [child],
         factory=lambda lane: accumulators.CoalesceAllBatches(name, schema),
-        schema=_passthrough(child),
-    )
-
-
-@_records_its_recipe
-def aggregate_batches(
-    name, child, keys, aggs, final_exprs=None, schema=None,
-    compact_bytes=accumulators.DEFAULT_COMPACT_BYTES,
-) -> PandasNode:
-    """Merges pre-aggregated state. `final_exprs` present = this node finalizes; absent =
-    it emits state. There is no phase flag — see the spec's aggregate sequence."""
-    declared = finalized_schema(keys, aggs) if final_exprs is not None else _passthrough(child)
-    # Per lane the merge collapses every group it holds, so its keys are unique within the
-    # lane. They are unique globally only when a shuffle put every row of a group in one
-    # lane, which is exactly what a hash distribution over a subset of them means.
-    hashed = child.output_partitions().key_distribution.is_subset_of(
-        [p for p in ((declared.position_of(k) if declared else None) for k in keys)
-         if p is not None]
-    )
-    scope = UniqueScope.GLOBAL if hashed or _lanes(child) == 1 else UniqueScope.PER_PARTITION
-    return PandasNode(
-        name,
-        NodeKind.INTERMEDIATE,
-        _layout(_lanes(child), batch_layout=BatchLayout.SINGLE_BATCH,
-                distribution=_inherit(child),
-                unique_keys=_unique(declared, keys, scope) if declared else ()),
-        ExecutorCategory.BATCH_ACCUMULATOR,
-        [child],
-        factory=lambda lane: accumulators.AggregateBatches(
-            keys, aggs, final_exprs, name, schema, compact_bytes
-        ),
-        schema=declared,
-        validator=validation.all_of(
-            validation.merges_its_own_partial(keys, aggs),
-            validation.hash_keys_subset_of_groups(keys),
-        ),
     )
 
 
@@ -484,7 +401,6 @@ def rebatch(name, child, target_rows) -> PandasNode:
         ExecutorCategory.BATCH_ACCUMULATOR,
         [child],
         factory=lambda lane: accumulators.ReBatchToTarget(target_rows, name),
-        schema=_passthrough(child),
     )
 
 
@@ -501,7 +417,6 @@ def accumulate_and_sort(name, child, by, ascending=None, nulls_first=False, fetc
         factory=lambda lane: accumulators.AccumulateBatchesAndSort(
             by, ascending, nulls_first, fetch, name, schema
         ),
-        schema=_passthrough(child),
         validator=validation.sorted_input,
     )
 
@@ -519,7 +434,6 @@ def merge_sorted_partitions(name, child, by, ascending=None, nulls_first=False, 
         factory=lambda lane: accumulators.MergeSortedPartitions(
             n_in, by, ascending, nulls_first, fetch, name, schema
         ),
-        schema=_passthrough(child),
         validator=validation.sorted_input,
     )
 
@@ -536,7 +450,6 @@ def merge_partitions(name, child) -> PandasNode:
         ExecutorCategory.BATCH_FORWARDER,
         [child],
         forwarder=MergePartitionsForwarder(_lanes(child)),
-        schema=_passthrough(child),
     )
 
 
@@ -553,7 +466,6 @@ def emit_partitions(name, child, keys, n_partitions, hash_fn=None, key_positions
         ExecutorCategory.PARTITION_EMITTER,
         [child],
         factory=lambda lane: partition_ops.EmitPartitions(keys, n_partitions, name, hash_fn),
-        schema=_passthrough(child),
     )
 
 

@@ -39,6 +39,9 @@ fixes #236 and #237):
   reassembled and optimized suites at every mode.
 - CI run `37233204588`'s GPU job failed only because a neighbour held the card (the pool could
   not be built); its re-run passed.
+- tpch q8 at `tp4-rowgroup` fails `test_engine_answers` on the driver's step cap (100,000;
+  it needs 137,760), before and after Task 3; `exec-model-corpus.yml` runs `tp4-single` only,
+  so CI never saw it. → Task 3a.
 - `test_call_cost`'s check against the measured record is not on the branch; it needs the
   sf40 record → Task 7.
 
@@ -146,3 +149,118 @@ fixes #236 and #237):
     is reached only from `test_join_capability.py`.
   - `corpus.dataset_dir`'s `tpch.minimal` fallback serves only `duckdb_answer`.
   - The harness's `-substring` exclusion has no CI caller.
+
+## Task 3
+
+- Measured with coverage.py 7.16.2 on shad-gpu: the cheap tier (35 files), and the corpus files
+  over the whole corpus — answers and optimized at `tp4-single`, `tp1-single` and `tp4-rowgroup`,
+  dynamic filters and reassembled at `tp4-single` (80 shards). Then each function the corpus
+  never ran was read. The runners lived in a scratch copy, `/tmp/peacock-opt/t3`.
+- Coverage of `scripts/exec_model/*.py` and `operators/` (tests excluded), in statements:
+
+  | | package | corpus reaches | either tier reaches | `operators/` | corpus | either |
+  |---|---|---|---|---|---|---|
+  | before | 5,612 | 4,316 | 5,429 | 2,296 | 1,418 | 2,191 |
+  | after | 5,272 | 4,196 | 5,134 | 2,005 | 1,329 | 1,942 |
+
+  Either tier reaches 96.7 % before and 97.4 % after (`operators/`: 95.4 % → 96.9 %). The corpus
+  count falls because the deleted `def` and field lines ran at import. What no test reaches
+  after is listed under "Unreached but kept" below.
+- Proven after the change. Cheap tier, local and on shad-gpu: 35 files, 349 passed. Corpus on
+  shad-gpu, whole corpus under coverage:
+  - answers 120 at each of the five modes;
+  - optimized 100 at `tp4-single`, `tp1-single` and `tp4-rowgroup`;
+  - dynamic filters 58 and reassembled 100 at `tp4-single`.
+
+  All passed except tpch q8 at `tp4-rowgroup`, which fails the same way before the change
+  (below). Dataset tier: `test_stats_sidecar` 4/4, and `test_cardinality_corpus` red only for
+  q64 (636 joins, median 1.29, 69.5 %).
+
+- Gone. The corpus ran none of it; only its own tests did, or tests that used it as a fixture:
+  - The handwritten plans' aggregate. `aggregates.Agg` and its phases: `partial`, `merge`,
+    `finalize`, `final`, `single`, `finalize_exprs`, and the grouping-set expansion
+    (`partial_over_sets`, `single_over_sets`, `rollup_masks`, `grouping_set_id`). Also
+    `exec_ops.PartialAggregateExec` and `nodes.partial_aggregate`/`aggregate_batches`.
+    `AggregateBatches` is folded into `PlanAggregateBatches`, which keeps its compaction.
+  - The column annotations that aggregate declared. `schema.py`, `GpuNode.output_schema` and
+    `PandasNode`'s schema plumbing, and `validation.merges_its_own_partial`/
+    `hash_keys_subset_of_groups`. `layout.UniqueKeys`/`UniqueScope`/`unique_keys` were declared
+    by those aggregates alone and read by nothing. `KeyDistribution.is_subset_of` goes too.
+  - Expression names. Every expression's `alias` field, and every `name()` but `Alias`'s. An
+    engine plan names each output through an `Alias` (`engine_ir`), so only the lowerings'
+    unaliased columns were named this way. No test reached them. `project` now requires an
+    `Alias`; an unnamed expression raises `TypeError`, not the `NotImplementedError` of a
+    join refusal. The three refusal tests in `test_join_capability` now carry a `match=` on
+    their own message, and each goes red with its refusal removed.
+  - Unreferenced: `validation.single_batch_in`, `frame.empty_like`, `node.GpuBackendSelector`.
+  - 807 production lines, 33 added. Cases: cheap tier 363 → 349 (`test_operators` 66 → 60,
+    `test_end_to_end` 18 → 14, `test_plan` 22 → 18).
+- Ported rather than dropped, because they pin what the engine's aggregate does:
+  - `test_operators`: the null group, `count(1)` against `count(v)`, a finalizing aggregate
+    over no rows, an empty partial's key type, the three compaction-policy tests, the typed
+    zero-input batch and the loud one.
+  - `test_end_to_end`: grouped, keyless, every corpus function (Welford included), ROLLUP and
+    DISTINCT, each at every partitioning config; the accountant's engagement and config
+    agreement. They are built with `plan_aggregate`/`plan_aggregate_batches` as the planner
+    decomposes them (`aggregate_over`).
+  - `test_injection`'s and `test_accounting`'s aggregate plans take the same builders.
+  - Dropped with the shape: mean-of-means, the grouping-set unit tests, the single-group
+    stddev, the id carried through the sequence, the two count-distinct lowerings, the three
+    merge-validation tests and the uniqueness declaration. The planner decides each of these;
+    the prototype only runs them.
+- Each port was shown red by a mutation of the code it pins:
+  - `dropna=True` reddens the null group; `count` as `size` the count test.
+  - Skipping `final` reddens the empty finalize; a float empty partial the key-type test.
+  - No doubling, no compaction, or dropping the held state each redden their compaction test.
+  - An untyped empty batch reddens both empty-batch tests.
+  - `merge_m2` without its spread reddens every-function; a zero grouping id reddens ROLLUP.
+  - An undeduplicated DISTINCT reddens DISTINCT; `sum` as `max` reddens grouped, keyless and
+    config agreement.
+  - An `apply` that returns its input reddens the presets test; no budget trip reddens the
+    accountant test.
+  - The key-type test went red only once it also asserted the empty partial's own dtype:
+    `frame.concatenate` drops empty frames, so a concatenation alone cannot show it.
+  - Mutations were run without bytecode (`PYTHONDONTWRITEBYTECODE=1`). A same-size edit
+    restored within one second otherwise leaves a stale `.pyc` of the mutant.
+- What stays, for `design.md`'s operators section:
+  - Columns by position. `engine_ir` resolves ordinals to frame names. A join renames its
+    inputs to `Positional.joined` and picks its projection by ordinal from the join type's own
+    output (`own_output`). It declares its hash where every row keeps the keys unpadded
+    (`_join_distribution`). A one-to-one node carries its child's hash to where `sources` puts
+    it (`_copied_layout`, `_kept_hash`).
+  - Each join type's own output. `HashJoin` covers nine types: per-call emission for the
+    probe-local half, a finish pass over `matched` for the build-preserving half, and a
+    single-batch probe as the whole join. Null keys are held out unless `null_equals_null`;
+    anti and mark stay EQUAL. `probe_schema` pads an outer finish that saw no probe batch, and
+    the positional join always passes it. Nested loop is Inner and Left; cross streams. The
+    name-based classes are the positional ones' base and the recipe backend's oracle.
+  - The planner's aggregate forms: `PlanAggregate`/`PlanCall`. Init calls are
+    sum/count/min/max/mean/m2 and merge calls sum/min/max/merge_m2 (Chan's form). Grouping
+    sets carry DataFusion's id, first key in the high bit; `final` holds aliased
+    expressions. A global aggregate over no rows is one row, no calls is a DISTINCT, the null
+    group is kept, and a sum over nulls is NULL. `PlanAggregateBatches` compacts on a doubling
+    threshold and emits one typed batch even from no input.
+  - Real row groups. `parquet_scan` reads a file's own row groups as the planner mapped
+    lanes → batches (`source.row_group_ranges`, `TableSource`, with fetch-ahead). A scan
+    limit sits on one lane. `MemorySource` is a materialized build, one batch per lane.
+  - Expression and hash details. Comparisons are three-valued; LIKE is translated to a regex
+    with two metacharacters; literals broadcast. Cast, round, substring and date_part follow
+    the C++. A shuffle key hashes as its SQL value (5.0 lands where 5 does), and null key
+    columns are skipped.
+  - On purpose, for the tests the spec keeps (iii):
+    - `LayoutInjector` needs the synthetic `nodes.scan` with `split_row_groups`,
+      `partition_row_groups` and `drain_lanes`, plus `rebatch`/`ReBatchToTarget`, the
+      degenerate hash placements, `TableSource`'s empty batches and `Recipe`.
+    - `test_join_capability` needs the name-based `hash_join`/`cross_join`/`nested_loop_join`
+      with their recipe factories, `recipe*.py`, `cudf_calls.py` and
+      `expressions.columns_of`.
+    - The driver tests need the mocks.
+  - Unreached but kept: interface defaults (`Batch.slice_rows`, `SourceExecutor.prefetch`,
+    `GpuNode.row_interval`), refusals and validation raises (`plan._validate_structure`,
+    `NodeExecutors`, the join refusals), a nested-loop join without a predicate, and
+    `PandasBatch.__repr__`.
+- Found on the way, not this task: tpch q8 at `tp4-rowgroup` fails `test_engine_answers` on
+  this branch's base as well. It needs 137,760 driver steps against `DEFAULT_MAX_STEPS`
+  (100,000). With the cap raised it answers, matching DuckDB, in 486 s on shad-gpu.
+  `exec-model-corpus.yml` runs `tp4-single` only, which is why CI never saw it.
+- For Task 4: `schema.py` no longer exists. The impl plan's Task 4 still names it.
