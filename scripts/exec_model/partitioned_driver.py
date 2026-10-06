@@ -42,10 +42,6 @@ from .runtime import LaneInputs, NodeState
 from .scheduler import Pick, PlanShape, Scheduler
 from .single_partition_driver import single_partition_driver
 
-#: Safety valve: a step that neither moves a batch nor finalizes a lane cannot happen,
-#: so a run that never ends is a bug in the scheduler, and the prototype should say so.
-DEFAULT_MAX_STEPS = 100_000
-
 
 @dataclass(frozen=True)
 class TraceEvent:
@@ -67,6 +63,9 @@ class PartitionedDriver:
         self.root_lanes: list[list[Batch]] = [[] for _ in range(plan.nodes[plan.root].n_lanes)]
         self.trace: list[TraceEvent] = []
         self.steps = 0
+        #: every traced call but a prefetch, which is what `step_cap` owes: executor calls,
+        #: forwarder moves, closings, and an unload's release of an unwanted batch
+        self.calls = 0
         #: per node: rows of its input stream seen so far, summed over every lane. Only
         #: the driver can hold this — an Unload instance is one lane's.
         self.rows_seen: list[int] = [0] * len(plan.nodes)
@@ -88,23 +87,41 @@ class PartitionedDriver:
         #: host bytes fetched ahead and not yet decoded, by (source node, lane); and their peak
         self.fetched: dict[tuple[int, int], int] = {}
         self.fetched_peak = 0
-        self.scheduler = Scheduler(PlanShape.of(plan, [self._readiness_count(s) for s in self.states]),
-                                   prefetch)
+        readiness = [self._readiness_count(s) for s in self.states]
+        self.scheduler = Scheduler(PlanShape.of(plan, readiness), prefetch)
         for state in self.states:
             self._refresh(state)
+        #: calls owed beyond the sources' batches: each readiness index's closing call, and
+        #: one per batch queued below the root, for the call that takes it
+        self._calls_owed = sum(readiness)
+        self._source_lanes = [self._lane_driver(state, lane) for state in self.states
+                              if state.info.category is ExecutorCategory.SOURCE
+                              for lane in range(state.info.n_lanes)]
 
     # -- public ------------------------------------------------------------------
 
-    def run(self, max_steps: int = DEFAULT_MAX_STEPS) -> list[Batch]:
+    def run(self) -> list[Batch]:
         self._settle_limits()   # a zero-row interval is satisfied before anything runs
         while self.step():
-            if self.steps > max_steps:
-                raise DriverError(f"no termination after {max_steps} steps")
+            if max(self.steps, self.calls) > (cap := self.step_cap()):
+                raise DriverError(f"no termination after {self.steps} steps and {self.calls} calls: "
+                                  f"the run owes {cap}")
         if self.early_exit:
             self._drop_in_flight()
         else:
             self._assert_drained()
         return self.results
+
+    def step_cap(self) -> int:
+        """The most calls, and so steps, a run that progresses can have made by now.
+
+        Every call is owed: a source lane's batch, by `max_batches` once the lane has an
+        executor; a batch queued below the root, by the one call that takes it; or a readiness
+        index's one closing call. A step makes at least one call, so steps outrun this where a
+        driver stops making calls, and calls outrun it where a source produces past its count.
+        Not a constant, because stacked shuffles multiply a plan's batches (README, "The step cap").
+        """
+        return self._calls_owed + sum(lane.max_batches() for lane in self._source_lanes)
 
     @property
     def early_exit(self) -> bool:
@@ -363,9 +380,8 @@ class PartitionedDriver:
             if child.out_queues[child_lane]:
                 # A move between queues: the batch stays in flight, so no accounting.
                 batch = child.out_queues[child_lane].popleft()
-                state.out_queues[lane].append(batch)
                 self.consumed[state.info.id][child_index][child_lane] += batch.num_rows()
-                self.emitted[state.info.id][lane].append((batch.num_rows(), batch.byte_size()))
+                self._queue(state, lane, batch)
                 state.cursors[lane] = (index + 1) % n
                 return batch
             if child.out_done[child_lane]:
@@ -425,9 +441,14 @@ class PartitionedDriver:
         return live == 0
 
     def _enqueue(self, state: NodeState, lane: int, batch: Batch) -> None:
+        self._queue(state, lane, batch)
+        self.accountant.hold(batch)
+
+    def _queue(self, state: NodeState, lane: int, batch: Batch) -> None:
         state.out_queues[lane].append(batch)
         self.emitted[state.info.id][lane].append((batch.num_rows(), batch.byte_size()))
-        self.accountant.hold(batch)
+        if state.info.id != self.plan.root:
+            self._calls_owed += 1
 
     def _drain_root(self) -> None:
         root = self.states[self.plan.root]
@@ -447,6 +468,8 @@ class PartitionedDriver:
 
     def _record(self, state: NodeState, lane: int, call: str, n_out: int) -> None:
         self.trace.append(TraceEvent(self.steps, str(state.info), lane, call, n_out))
+        if call != "prefetch":
+            self.calls += 1
 
     def _assert_drained(self) -> None:
         stranded = [

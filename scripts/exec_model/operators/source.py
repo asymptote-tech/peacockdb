@@ -184,6 +184,10 @@ class TableSource(SourceExecutor):
         self.emitted += 1
         return PandasBatch(piece, tag), no_scratch()   # the slice is the output
 
+    def max_batches(self) -> int:
+        """Its batches, and the empty ones it may inject between and after them."""
+        return len(self.batches) + (self._budget if self._rng is not None else 0)
+
     def can_prefetch(self) -> bool:
         return self._fetched is None and self._remains()
 
@@ -230,3 +234,6 @@ class MemorySource(SourceExecutor):
             return None
         self.emitted = True
         return PandasBatch(self.frame, f"{self.name}.p{self.lane}"), no_scratch()
+
+    def max_batches(self) -> int:
+        return 1

@@ -82,8 +82,12 @@ class MockExecutor(Executor):
 class ScriptedSource(MockExecutor, SourceExecutor):
     def __init__(self, batches: Iterable[MockBatch]):
         self._queue = list(batches)
+        self._total = len(self._queue)
         self._fetched: MockBatch | None = None
         self.calls = 0
+
+    def max_batches(self) -> int:
+        return self._total
 
     def next_batch(self):
         self.calls += 1

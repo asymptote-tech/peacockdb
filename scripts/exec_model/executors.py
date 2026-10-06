@@ -88,6 +88,11 @@ class SourceExecutor(Executor):
     def next_batch(self) -> tuple[Batch, CallStats] | None:
         """None means this lane is exhausted; it is never called again."""
 
+    @abstractmethod
+    def max_batches(self) -> int:
+        """The most batches `next_batch` returns before None. The driver's step cap rests on
+        it: a lane that produces past it is one that may never finish."""
+
     def can_prefetch(self) -> bool:
         """Whether a next batch remains whose bytes are not fetched yet. A source with no fetch
         phase — one whose batches are in memory already — never has one."""

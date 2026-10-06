@@ -76,6 +76,10 @@ class SinglePartitionDriver:
         """What the lane's executor holds; nothing before its first step."""
         return 0 if self._executor is None else self._executor.resident_bytes()
 
+    def max_batches(self) -> int:
+        """A source lane's most batches; 0 before its executor is made, when it has made none."""
+        return 0 if self._executor is None else self._executor.max_batches()
+
     def can_step(self, inputs: LaneInputs) -> bool:
         if self.finished:
             return False

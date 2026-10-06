@@ -99,6 +99,16 @@ def test_a_batch_fetched_ahead_decodes_as_the_one_read_in_turn():
         assert ahead.reads == plain.reads == sum(1 for batch in want if batch), kwargs  # each read once
 
 
+def test_a_lane_injecting_empty_batches_returns_as_many_as_it_declares():
+    frame = pd.DataFrame({"id": range(10)})
+    lane = source.TableSource(frame, source.row_group_ranges([3, 3, 3, 1]), [[0], [1, 2], [3]],
+                              "t", 0, empty_probability=1.0)
+    returned = 0
+    while lane.next_batch() is not None:
+        returned += 1
+    assert returned == lane.max_batches() == 2 * 3 + 1
+
+
 def test_a_mapping_the_file_cannot_hold_is_refused():
     path = written()
     frame = pq.read_table(path).to_pandas()

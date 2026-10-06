@@ -39,9 +39,8 @@ fixes #236 and #237):
   reassembled and optimized suites at every mode.
 - CI run `37233204588`'s GPU job failed only because a neighbour held the card (the pool could
   not be built); its re-run passed.
-- tpch q8 at `tp4-rowgroup` fails `test_engine_answers` on the driver's step cap (100,000;
-  it needs 137,760), before and after Task 3; `exec-model-corpus.yml` runs `tp4-single` only,
-  so CI never saw it. → Task 3a.
+- tpch q8 at `tp4-rowgroup` is green since Task 3a: 137,760 steps and 169,049 calls under a
+  derived cap of 169,049. `exec-model-corpus.yml` runs `tp4-single` only, so CI does not run that mode.
 - `test_call_cost`'s check against the measured record is not on the branch; it needs the
   sf40 record → Task 7.
 
@@ -264,3 +263,53 @@ fixes #236 and #237):
   (100,000). With the cap raised it answers, matching DuckDB, in 486 s on shad-gpu.
   `exec-model-corpus.yml` runs `tp4-single` only, which is why CI never saw it.
 - For Task 4: `schema.py` no longer exists. The impl plan's Task 4 still names it.
+
+## Task 3a
+
+- The cap is `PartitionedDriver.step_cap()`, the calls the run owes so far; `run()` trips when
+  the steps or the calls (`calls`, counted in `_record`, prefetches excluded) pass it. Every
+  call is owed by a source lane's batch (`SourceExecutor.max_batches`, new and abstract), by a
+  batch queued below the root (one call takes it), or by a readiness index's closing call
+  (`_readiness_count` is exactly that count), each before or in the step that makes the call.
+  So steps ≤ calls ≤ the cap for any run that progresses, and a run ends with calls equal to
+  the cap when every source returns all it declares (q8: 169,049 both), below it otherwise. README, "The step cap".
+- Steps alone miss over-production: one step runs every lane, so a source producing past its
+  count over two lanes owes four calls for every three steps and never trips. Steps catch a
+  stall (no calls); calls catch over-production.
+- Why not the plan's shape. Each `GpuEmitPartitions` turns a batch into one per lane, and q8
+  stacks six shuffles on its probe path. (source batches + lanes) × nodes is 16,002 for q8,
+  which takes 137,760 steps; a static bound that holds would be ×4 per stacked shuffle, too
+  loose to trip in time. So the batch term grows as batches are queued.
+- When a source's count is not known before the run: a lane's `max_batches` joins the cap when
+  its executor is first made, which is at its first call (or at `__init__` when reading ahead).
+  No eager construction, because a `MemorySource` build side's resident bytes would then show
+  in `AdaptiveDriver._accumulated` before its first step. Memory sources declare 1; a
+  `TableSource` its batches plus its injection budget when it injects empties; a replan is a
+  new driver with its own cap. `AdaptiveDriver` inherits the check; `run_adaptive` passes no
+  cap. Nothing else called `run(max_steps=…)`, so the parameter went.
+- The Rust driver keeps a fixed `DEFAULT_MAX_STEPS` of 1,000,000
+  (`executor/driver/partitioned.rs`), outside this task's files. Whether an sf40 row-group run
+  reaches it is not measured.
+- Tests in `test_partitioned_driver.py`, each red against its mutation (files restored after):
+  - An honest run three shuffles fragment takes 513 steps and passes; a `step_cap` of its
+    shape alone, (8 + 27) × 9 = 315, trips on it. Red under a cap of 100, and under a cap
+    without the queued-batch term (15 other driver tests go red with it).
+  - A source declaring two batches that never ends raises `DriverError`, on one lane and on
+    two. Red with the source term unbounded, with the check removed, with each step owing a
+    call, and — the two-lane case — with steps checked and calls not.
+  - A driver whose `_run` does nothing raises at step 23, past 22 owed. Red with the check
+    removed and with each step owing a call.
+  - Each never-ending case asserts out at 10,000 calls, so a red run fails instead of hanging.
+  - Counting prefetches as calls false-trips 19 honest driver tests: the exclusion is needed.
+  - `test_parquet_scan`: a `TableSource` injecting empties (probability 1) over three batches
+    returns 7 = `max_batches()`; red with the injection-budget term dropped.
+- Proven with steps alone checked. Cheap tier local and on shad-gpu: 35 files, 352 passed. On
+  shad-gpu, from `/tmp/peacock-opt/t3a/work` (the worktree's `scripts/exec_model`, testdata linked to
+  `/tmp/peacock-opt/repo/testdata`, identical to the worktree's by `rsync -c`):
+  `test_engine_answers` at `tp4-rowgroup` in 40 shards, 120 passed, q8 included, 16 min wall;
+  at `tp4-single` shards 0, 13 and 26 of 40, 9 passed. q8 alone: 137,760 steps, cap 169,049,
+  483 s.
+- Proven, with the call check. Cheap tier local: 35 files, 353 passed. On shad-gpu, same
+  scratch copy re-synced: answers at `tp4-rowgroup` 120 passed and at `tp4-single` 120
+  passed, dynamic filters (memory sources) at `tp4-single` 58 passed, 40 shards each. q8
+  alone: 137,760 steps, 169,049 calls, cap 169,049, 666 s beside the shards.

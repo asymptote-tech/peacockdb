@@ -1,6 +1,20 @@
 
 # Pre-production system hardening tasks
 
+<a id="t238"></a>
+### #238 — the driver's fixed step cap refuses a large row-group query as non-terminating
+**Priority: low**
+`DEFAULT_MAX_STEPS` in `executor/driver/partitioned.rs` is 1,000,000, on the claim that only a
+wrong schedule runs that long. A row-group run is long legitimately: each shuffle splits every
+batch per lane, and the prototype's driver, which steps the same way, takes 137,760 steps for
+tpch q8 at `tp4-rowgroup` sf1. Steps grow with the data and the lane count, so sf40, or the CLI
+at `num_cpus` lanes, can pass the cap and fail with "no termination".
+
+No corpus or benchmark case reaches it today. Measure `RunReport.steps` for q8 at sf1
+`tp4_rowgroup` first. The fix is the prototype's (`scripts/exec_model/partitioned_driver.py`):
+a cap of the calls the run owes — declared source batches, batches queued below the root, one
+closing call per readiness index — checked against both steps and calls.
+
 <a id="t13"></a>
 ### #13 — Hermetic builds: system-library whitelist + CI audit
 `ld` silently prefers system libs over the conda env (seen as

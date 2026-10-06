@@ -141,6 +141,28 @@ build, a limit satisfied — and the holds are counters there, not walks to the 
 survives as a test oracle, `tests/rescan.py`: the driver helpers of five suites check every
 pick against it, and runs each plan again reading ahead: the same calls in the same steps, the fetches beside them.
 
+### The step cap
+
+`run()` raises `DriverError` once the steps or the calls pass `step_cap()`, the calls the run
+owes so far. Each call is owed by one of three things: a source lane's batches, which its
+executor declares as `max_batches`; a batch queued below the root, which exactly one call
+takes; or the closing call each readiness index ends with. Each is owed before or in the step
+that makes its call, so a run ends with its calls equal to the cap when every source returns
+all it declares, and below it otherwise.
+
+Both counts are needed. A step makes at least one call, so a driver that picks a node and does
+none of its work makes steps and no calls, and the steps overtake the cap. A source that
+produces past its count makes calls nothing owed. Steps alone miss that over several lanes,
+because one step runs every lane: over two lanes, source → exec → unload owes four calls
+for every three steps.
+
+The cap grows with the batches queued because the plan's shape cannot bound them. An emitter
+turns one batch into one per lane, and stacked shuffles multiply. tpch q8 at `tp4-rowgroup`
+has 62 source batches and 63 nodes, so (batches + lanes) × nodes is 16,002; it takes 137,760
+steps and 169,049 calls, the cap at its end. A memory source declares its one batch, reading
+ahead changes no call count, and a replan is a new driver with its own cap. A lane's count
+joins the cap when its executor is first made.
+
 ## The two join backends
 
 Every join test runs twice, on backends that share no join code.

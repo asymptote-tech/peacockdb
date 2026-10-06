@@ -10,12 +10,18 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/<file>.p
 
 from .harness import main, raises
 from .rescan import CheckedDriver
+from ..batch import CallStats
 from ..partitioned_driver import PartitionedDriver, partitioned_driver
-from ..errors import ResidentBudgetExceeded
+from ..errors import DriverError, ResidentBudgetExceeded
+from ..layout import NodeKind
+from ..node import ExecutorCategory
 from ..plan import Plan
 from .mocks import (
     BYTES_PER_ROW,
+    MockBatch,
+    MockNode,
     MockSelector,
+    ScriptedSource,
     coalesce_all,
     coalesce_target,
     emit_partitions,
@@ -302,6 +308,77 @@ def test_no_batch_is_ever_stranded():
     # the deadlock the height rule plus build-left orientation is meant to rule out.
     driver = run(shuffle_aggregate_plan(lanes=3, batches_per_lane=3, rows=7))
     assert all(state.all_done() for state in driver.states)
+
+
+# -- the step cap ----------------------------------------------------------------
+
+#: Where a test's own executor gives up: a run the cap lets get this far runs for ever.
+FOREVER = 10_000
+
+
+def fragmenting_plan():
+    """One lane of eight batches shuffled four ways three times. Each shuffle multiplies the
+    batches above it by four, as tpch q8's stacked shuffles do at `tp4-rowgroup`."""
+    node = source("load", [[64] * 8])
+    for level in (1, 2, 3):
+        if level > 1:
+            node = merge_partitions(f"merge{level}", exec_node(f"project{level}", node))
+        node = emit_partitions(f"emit{level}", node, 4, even_router(4))
+    return sink("unload", node)
+
+
+def test_a_run_its_shuffles_fragment_passes_a_cap_its_shape_alone_would_set():
+    plan = Plan.build(fragmenting_plan())
+    shape_cap = (8 + sum(info.n_lanes for info in plan.nodes)) * len(plan.nodes)
+    driver = run(fragmenting_plan())
+    assert total_rows(driver) == 8 * 64
+    assert driver.steps > shape_cap, (driver.steps, shape_cap)
+
+    class ShapeCapped(PartitionedDriver):
+        def step_cap(self):
+            return shape_cap
+
+    with raises(DriverError, match="no termination"):
+        ShapeCapped(plan, MockSelector()).run()
+
+
+class EndlessSource(ScriptedSource):
+    """Declares two batches and never runs out."""
+
+    def __init__(self):
+        super().__init__([])
+
+    def max_batches(self) -> int:
+        return 2
+
+    def next_batch(self):
+        self.calls += 1
+        assert self.calls < FOREVER, "the step cap never tripped"
+        return MockBatch(f"endless.b{self.calls}"), CallStats(scratch_bytes=0)
+
+
+def test_a_source_that_never_finishes_trips_the_cap():
+    # Two lanes as well as one: a step runs every lane, so over two lanes the calls a step
+    # makes, and the batches it queues, outrun the steps.
+    for lanes in ([[1]], [[1], [1]]):
+        endless = MockNode("endless", NodeKind.SOURCE, source("shape", lanes).output_partitions(),
+                           ExecutorCategory.SOURCE, factory=lambda lane: EndlessSource())
+        driver = partitioned_driver(Plan.build(sink("unload", exec_node("project", endless))),
+                                    MockSelector())
+        with raises(DriverError, match="no termination"):
+            driver.run()
+
+
+def test_a_driver_that_stops_making_progress_trips_the_cap():
+    class Stalled(PartitionedDriver):
+        """Does none of the picked node's work, so the same node is picked for ever."""
+
+        def _run(self, state):
+            assert self.steps < FOREVER, "the step cap never tripped"
+
+    driver = Stalled(Plan.build(shuffle_aggregate_plan()), MockSelector())
+    with raises(DriverError, match="no termination"):
+        driver.run()
 
 
 # -- accounting ------------------------------------------------------------------
