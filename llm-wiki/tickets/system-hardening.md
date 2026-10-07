@@ -53,3 +53,28 @@ once: write it, run `cargo test --features rust-only -p peacockdb-core --doc` in
 dataset-matrix tier, and teach the guard that `--doc` is a target class it must see named
 (the `--lib` check at `line_runs_lib_tests` is the pattern).
 
+<a id="t244"></a>
+### #244 — cuDF 25.02 is kept for a host constraint that may no longer hold
+**Priority: low** — a cost, not a defect; it waits on `verify-26.02`.
+
+The engine compiles and is tested against two cuDF versions: 25.02 on shad-gpu
+(`envs/rapids-cuda-12.2`) and 26.02 on verda (`envs/rapids`), with the CI's "26.02" leg really
+25.10a ([#129](testinfra.md#t129)). 25.02 was kept only because shad-gpu's driver is 535
+(CUDA 12.2) and the host gives no sudo to upgrade it.
+
+That constraint may be gone. shad-gpu already holds a 26.02 environment,
+`~/miniforge3/envs/rapids-2602` (libcudf 26.02, nvcc 12.2, created 2026-08-13), and a CMake build
+of two C++ targets against it, `~/build-2602` (`~/build2602.sh`, the same day). On 2026-10-07 a
+standalone libcudf program built against it ran on the H200 under driver 535.247.01, giving the
+same join and group answers as 25.02 (#243's probe). The repo's own tiers have not run there:
+`verify-26.02` (the join-rewrite chain's last task) runs them on shad-gpu's 26.02 environment.
+
+What dropping 25.02 would remove: the `__has_include(<cudf/join/join.hpp>)` header split in
+`join.cpp` and the gtests; the portable-constructor constraints on `hash_join` and
+`distinct_hash_join`; the CI's 25.02 C++ build job; `rapids-cuda-12.2` in the shad-gpu scripts
+and `build-test.md`. What it would allow: the 26.02-only joins of [#242](performance.md#t242),
+one cuDF for every host, and a CI leg that is really 26.02 (#129). To evaluate: whether every tier
+passes on shad-gpu's 26.02 (verify-26.02's record), whether sf40 benchmarks on the H200 hold or
+improve, and whether anything else on shad-gpu (the actions runner, its jobs) depends on the
+25.02 environment.
+
