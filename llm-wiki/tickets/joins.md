@@ -410,3 +410,21 @@ cuDF's `strings::like` takes a scalar pattern; a column of patterns needs a per-
 **Corpus queries:** none in tpch or tpcds. pbench's `like-column-pattern`
 (`SELECT d_id, t_id FROM dim JOIN tiny ON d_name LIKE t_pat`), its device cells off on this ticket.
 
+<a id="t250"></a>
+### #250 — an `IN` subquery whose NULL answer is read is refused when its data holds NULLs
+`x IN (S)` is three-valued: NULL when `x` is NULL and `S` is non-empty, or when `S` holds a NULL
+and `x` matches nothing. Where a filter reads that NULL as a value — `IS [NOT] NULL`,
+`IS [NOT] TRUE/FALSE/UNKNOWN`, a comparison (`(x IN S) = false`), `COALESCE`, a function argument
+— the answer needs a NULL the engine cannot produce: DataFusion 45 plans the `IN` as a mark join,
+and a mark is never NULL (`join_type.rs:56-69`). The join-rewrite chain's `NOT IN` rule (design
+§3.5) answers every `IN`/`NOT IN` reached through `AND`, `OR` and `NOT` alone (it puts the
+predicate in negation normal form first), and refuses these forms at plan time, by name, wherever
+the data says `x` or `y` can be NULL; where neither can, `IN` is two-valued and plans.
+
+The fix is the three-valued rewrite: `CASE WHEN EXISTS (S AND y = x) THEN true WHEN (x IS NULL AND
+EXISTS (S)) OR EXISTS (S AND y IS NULL) THEN NULL ELSE false END`, planned as two mark joins and a
+count, or a nullable mark join type of our own.
+
+**Corpus queries:** none in tpch or tpcds. pbench's `in-is-null`
+(`SELECT f_id FROM fact WHERE (f_k IN (SELECT s_y FROM sub)) IS NULL`), refused on this ticket.
+
