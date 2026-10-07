@@ -32,6 +32,15 @@ fixes #236 and #237):
 
 ## Known state
 
+- `exec-model-corpus.yml` was dispatched on `8c846434` (run `37599528455`): the three corpus
+  shards and the `call-cost` job green; the CI `S3_*` keys read the `calibration` bucket (the
+  record fetched, 174,690 rows, sha256 as pinned).
+- Completeness reading: the corpus suites had run at `tp4-single` only after Tasks 6a, 6b and
+  9; at `dd9fa865` they ran at the other four modes, and `run.py` over all five reproduced the
+  committed outputs byte for byte (Corpus verification below).
+- Task 8 is not on the branch yet: its measurement waits for a free device. tpcds sf40 exists on
+  shad-gpu (`/home/info/peacock-datasets/testdata/tpcds.sf40`); the case list and the scripts'
+  dataset links are kept outside the branch until the run.
 - `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
   limit, not a threshold (Task 5 below).
 - Green otherwise: rust-only, DPhyp, the cheap tier (34 files), and q64 in the corpus answer,
@@ -825,3 +834,127 @@ fixes #236 and #237):
   two calls die on any non-zero code, as before, now after a "the transfer failed" line. The
   two `record_home` blocks are merged and `names` is local to `publish_record`. No tree+pin
   guard (the human's decision).
+
+## Task 9
+
+- Written: `scripts/exec_model/design.md` (new), `scripts/exec_model/README.md` (rewritten as
+  how to work with the prototype), `peacockdb-dphyp/design.md` (new, 172 lines). The README's
+  design sections — the strategy, the step cap, the two join backends, pandas inside cuDF's
+  vocabulary, the corpus oracle, layout injection, the limit, the findings, the prototype as a
+  model — moved into `design.md`, condensed and without their history. The module table stays.
+- Comment-only edits that follow: four comments pointed at README sections that moved
+  (`engine/partitioned_driver.py`'s `step_cap`, `plans/answers.py`'s `matches_oracle`,
+  `tests/corpus.py`, `__init__.py`); they now name `design.md`, "The step cap" and "DuckDB, the
+  oracle".
+- What the documents revealed, code against text:
+  - The committed `.costs.txt` files give tpch 55 cheaper, 1 dearer, 139 equal and tpcds 379
+    cheaper, 5 dearer (q5 at every mode, by at most 0.03 %), 21 equal. Task 6b's 50/1/144 and
+    364/0/41 are the same files counted at the page's two-decimal ratio, which is how
+    `cost_report._summary` counted; it now counts by the integer totals, and the committed page's
+    summary line reads 55/1/139 and 379/5/21. `design.md` has the exact counts. The rule counts (500, 325, 290, 270, 191, 311, 5, 37) and the final ratios
+    (17 of 20, 64 of 79; medians 0.86, 0.81) recount as stated.
+  - `peacockdb-dphyp/Cargo.toml` said peacockdb-core links the rlib; no crate depends on it. The
+    comment now says the rlib is for a Rust caller, which nothing is yet.
+  - `optimizer/call_cost.py`'s docstring said it decides lanes, batch size and shuffles; only
+    `test_call_cost*.py` import it. Docstring and the README's row now say no rule reads it.
+  - `plans/engine_nodes.py`'s import of `optimizer.cardinality`/`stats` serves only
+    `estimated_fanouts`, whose one caller is `tests/optimizer/test_cost.py`: `run.py` builds every
+    join at fanout 1. `design.md` says so, and that the helper can move once something in
+    production calls it.
+  - The README's loop ran every test file, the four corpus files included, and its
+    `pytest scripts/exec_model/tests` collects 787 tests, the 120 + 100 corpus queries among them.
+    The README now selects the cheap tier as `pipeline.yml` does and warns off whole-folder
+    pytest.
+  - The README said the coordinator owns the prototype and edits it directly, against
+    `prompts.md`; the paragraph went.
+  - A Python cost callback that raises is swallowed by ctypes ("Exception ignored on calling
+    ctypes callback function"), answers 0, and `dphyp.solve` returns a tree: shown with a raising
+    callback over a three-relation chain. A `StatsError` inside `SetEstimates.cost` would not stop
+    the optimizer. Fixed in `optimizer/dphyp.py`: the crate has no cost that stops it (a NaN is
+    kept like any other), so the wrapper holds the first exception, answers every later set 0
+    without calling the cost, and raises it after `dphyp_solve` returns. With no exception it
+    returns `float(set_cost(mask))` as before, so no tree moves. Pinned by
+    `test_a_cost_that_raises_stops_the_solve_with_its_exception` (`test_dphyp.py`, a chain of
+    four whose cost raises on the first set): red before the fix (`_Priced was not raised`, six
+    "Exception ignored"), green after; red again with the re-raise removed, and with the
+    short-circuit removed (the cost asked after the failure). `test_dphyp` 4 passed,
+    `test_optimize` 2. Both design documents state the contract and the wrapper. What ctypes
+    hands the crate is not promised; it was 0 in every run seen.
+  - DPhyp's boundaries, measured through the ABI: a budget of exactly the pair count solves (chain
+    of three, 4 pairs: 4 solves, 3 is `budget`); `out_len` is untouched on any non-zero code;
+    65 relations return -3 with a capacity below 129 and -1 above, since the capacity is checked
+    first.
+- README commands, each run once as written (`/usr/bin/python3` first on the PATH, since the
+  linuxbrew `python3` has no pandas; DuckDB the downloaded v1.5.4 release, 08e34c447b):
+  - environment check (pandas 2.2.2, pyarrow 18.1.0); the DuckDB download, in a scratch directory;
+    `cargo build --release -p peacockdb-dphyp` with `CARGO_TARGET_DIR=/build/peacock/rust-only-target`
+    and the export after it; `cargo test -p peacockdb-dphyp`, 6 passed.
+  - cheap: `test_determinism.py`, then the loop in bash: 43 files, 399 passed, 1:59 wall; after
+    the callback fix, 400 passed, 1:56, no "Exception ignored" in the log. zsh selects the same 43
+    files. The harness's name selection and the pytest node id, 1 passed each.
+  - dataset: `test_stats_sidecar` 4 passed, `test_cardinality_corpus` 3, again under
+    `UPDATE_CANONICAL=1` 3 with the goldens byte-identical, `test_run_corpus` 1.
+  - corpus: `test_engine_optimized.py test_tpch_q3` 1 passed, 18 s; the shard form narrowed to
+    `test_tpch_q3`, 1 passed. The whole-file shard form was not run here: the four suites ran
+    whole on shad-gpu at `tp4-single` (Task 6b, 10 shards each), and nothing under
+    `scripts/exec_model` but `call_cost.py`, its new test, the README and the callback wrapper
+    (identical for a cost that does not raise) has changed since.
+  - manual: `test_stats_embeddings` 1 passed, 1:12; `fetch_record.sh --ssh shad-gpu tpch.sf40` and
+    then `test_call_cost_measured`, 1 passed, both in a `git archive HEAD` extraction so the
+    worktree's `testdata/` was not written; the plain `fetch_record.sh tpch.sf40` on shad-gpu
+    with `/home/info/bin` on the PATH, in a scratch directory removed after. Both fetches: 174,690
+    rows, the pinned sha256.
+  - `run.py --bench tpch --query q3 join-int --mode tp1-single --jobs 2 --out …` into a scratch
+    directory, 2 runs, 0 failed, 12 s; `cost_report.py` re-rendered the committed page
+    byte-identical. The full `run.py --jobs 16` is Task 6b's run (shad-gpu, 15:59), not repeated.
+- Corrections from a second reading against the code:
+  - `peacockdb-dphyp/design.md`'s chain(3) example showed `0 1 -1 2 -2`; the call returns
+    `0 1 2 -2 -1`, `(0 ⋈₀ (1 ⋈₁ 2))`, after 4 pairs, the tie kept as first found (run through the
+    ABI with popcount costs; asked `{1,2}`, `{0,1}`, `{0,1,2}`). Cycles in the tests start at 3.
+  - `ParquetBatchPartitioner` names nothing in the code: `design.md` and `operators/source.py`'s
+    docstring now name `scan_mapping/partition.rs` (`balanced_chunks`).
+  - `cost_report._summary` classified at two decimals, so the page said tpcds "dearer at 0" with
+    five runs dearer. It counts `optimized.total` against `planned.total`; the cells keep their
+    two-decimal colouring. `test_the_summary_counts_a_run_cheaper_or_dearer_by_its_totals_not_its_shown_ratio`
+    (0.996, 1.0002 and 1.0, each shown as 1.00): red under rounding (0/0/3), green after (1/1/1).
+    `cost_report.py` re-rendered the committed page from the committed files: one line changed,
+    the summary, to 55/1/139 and 379/5/21.
+  - `design.md` rewritten shorter (452 → 415 lines): each pipeline step as its role and what it was
+    chosen over, the mechanics left to the module docstrings; the #139 and #186 observations
+    folded into the step cap and the projected final ratio; the residual-filter streaming finding
+    added under the operators. The footer does carry a per-row-group distinct count for some
+    DuckDB columns, so `design.md` says why the NDV still comes from the sidecar.
+  - README: the corpus files run the queries each applies to (58 with a filter candidate, 100
+    with a cluster); `cost_report.py` is shown with the run's `--out`, and without it re-renders the
+    committed page.
+  - Proven: cheap tier 43 files, 401 passed (399 + `test_dphyp` 1 + `test_cost_report` 1), so
+    `build-test.md`'s exec-model row goes 399 → 401; `test_run_corpus` 1 passed; the README's
+    `run.py` and `cost_report.py --out` commands run as written; no-history scan clean.
+  - `test_dphyp`'s 14-clique case bounded wall time (< 1 s) in the cheap tier. It now counts the
+    cost callback's calls: 2^14 − 15 = 16,369, each set once (in a clique every set of two or more
+    relations is connected), measured through the ABI before pinning; renamed
+    `test_a_clique_of_fourteen_prices_each_set_once_and_a_budget_stops_it`, budget half kept. Red
+    with a wrapper that asks twice. Cheap tier 43 files, 401 passed: the count does not move.
+
+## Corpus verification
+
+- `dd9fa865` checked again on shad-gpu after Tasks 6a, 6b and 9, with no code changed. Source: a
+  `git archive` of `scripts/exec_model`, `peacockdb-dphyp` and the testdata it reads, in
+  `/tmp/peacock-opt/cv`. sf1 is linked as in `t6d`. Python 3.13.15, pandas 3.0.6, pyarrow 25.0.1,
+  DuckDB 1.5.4. DPhyp was built there and is byte-identical to the host's earlier build.
+- `run.py --jobs 16 --out full`, both benches, all five modes: 600 runs, 0 failed, 90 skipped
+  (tpcds, 18 per mode), exit 0. Wall 16:48, peak RSS 7.0 GB. All 31 outputs are byte-identical to
+  the committed `scripts/exec_model/testdata/goldens/` (30 `.cpu`/`.optimizer`/`.costs.txt` and
+  `cost_report.html`). Checked with `cmp` and against the `dd9fa865` blobs' sha256. So the
+  outputs are deterministic and Task 9's callback fix moved nothing.
+- Corpus suites, sharded with `PCK_SHARD`. Passed counts, and the longest shard in seconds:
+
+  | suite | tp1-single | tp1-rowgroup | tp4-rowgroup | tp4-sized |
+  |---|---|---|---|---|
+  | `test_engine_answers` | 120 (142) | 120 (164) | 120 (1337) | 120 (673) |
+  | `test_engine_dynamic_filters` | 58 (81) | 58 (49) | 58 (225) | 58 (274) |
+  | `test_engine_reassembled` | 100 (93) | 100 (95) | 100 (1183) | 100 (583) |
+
+  0 failed, and no log has a `FAIL`, `Traceback`, `Error` or `Killed`. `test_engine_optimized`
+  ran at `tp4-single` only. At the other four modes `run.py` stands in: it holds every optimized
+  answer to the planned one, and the planned one is checked against DuckDB above.
