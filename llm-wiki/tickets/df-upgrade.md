@@ -1,6 +1,30 @@
 
 # Tickets related to DataFusion upgrade
 
+<a id="t241"></a>
+### #241 — DataFusion 49 plans `RightMark`, which the planner and the wire cannot express
+
+An upgrade to DataFusion 49 or later refuses every mark join that `JoinSelection` swaps, on both
+backends. On 45 those same queries plan and run.
+
+DataFusion 45 has one mark type, `LeftMark`, and `JoinType::supports_swap` is false for it
+(`datafusion-common-45/src/join_type.rs`). So a mark join keeps the outer query as its left
+input, which our build side is: the outer query is hashed and held, the subquery side streams as
+the probe, and the marks come out only at finish. DataFusion 49 adds `RightMark` and lets
+`LeftMark` swap to it. When the subquery side is the smaller one, the outer query becomes the
+streamed probe and each probe call can answer its own rows with their marks.
+
+Nothing here knows `RightMark`. The translator maps DataFusion's `JoinType` one to one, the fbs
+`JoinType` enum stops at `LeftMark`, the join session has no arm for it, and `planner/nulls.rs`
+and the capability matrix list the mark type by name.
+
+The fix is a probe-side mark beside `RightSemi`: the same `distinct_hash_join` matcher over the
+build's distinct keys, emitting every probe row plus `mark` per call, with no finish. The
+null-aware form reads its two facts from the build side, known before the first probe.
+
+**Corpus queries:** the mark joins, `tpcds` q10, q35 and q45 — whichever of them `JoinSelection`
+swaps on the upgraded version.
+
 <a id="t23"></a>
 ### #23 — q27 and q72 do not plan on DataFusion 45, and an upgrade fixes neither
 
