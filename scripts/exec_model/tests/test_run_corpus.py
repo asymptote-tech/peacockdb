@@ -1,6 +1,6 @@
 """`run.py` over the sf1 tables: two small tpch queries and a refused tpcds one at tp4-single, by two
-workers, into a temp directory, each optimized answer held to the planned one; then one of them
-again, alone. Needs the generated sf1 tables and the DPhyp library, so it runs in
+workers, into a temp directory, each optimized answer held to the planned one, the costs and the
+report written; then one of them again, alone. Needs the generated sf1 tables and the DPhyp library, so it runs in
 dataset-matrix, not the cheap tier."""
 
 from __future__ import annotations
@@ -30,13 +30,13 @@ def run(out: pathlib.Path, *queries: str) -> None:
                     "--query", *queries], check=True, timeout=600)
 
 
-def test_run_writes_both_files_per_bench_and_a_filtered_run_keeps_the_other_sections():
+def test_run_writes_every_file_per_bench_and_the_report_and_a_filtered_run_keeps_the_other_sections():
     with tempfile.TemporaryDirectory() as scratch:
         out = pathlib.Path(scratch)
         run(out, *QUERIES)
         files = {(bench, kind): (out / bench / f"{MODE}.{kind}.txt").read_text()
-                 for bench in ("tpch", "tpcds") for kind in ("cpu", "optimizer")}
-        for kind in ("cpu", "optimizer"):
+                 for bench in ("tpch", "tpcds") for kind in ("cpu", "optimizer", "costs")}
+        for kind in ("cpu", "optimizer", "costs"):
             assert [name for name, _ in sections(files["tpch", kind])] == ["filter-project", "join-int"]
             assert files["tpcds", kind] == "== q27\nskipped: refused by datafusion: SanityCheckPlan\n"
         optimizer = dict(sections(files["tpch", "optimizer"]))
@@ -52,11 +52,16 @@ def test_run_writes_both_files_per_bench_and_a_filtered_run_keeps_the_other_sect
             assert ours[query][0] == engine[query][0], query
             assert [n for n in ours[query] if "Join" in n[0]] == [n for n in engine[query] if "Join" in n[0]], query
         assert all(body.startswith("early_exit=") for _, body in sections(files["tpch", "cpu"]))
+        # Where nothing fired the optimized run is the planned one, byte for byte.
+        planned, optimized = dict(sections(files["tpch", "costs"]))["filter-project"].splitlines()[:2]
+        assert planned.startswith("planned peacockdb_cost=") and optimized == "optimized" + planned[len("planned"):]
+        page = (out / "cost_report.html").read_text()
+        assert all(f"<td>{query}</td>" in page for query in QUERIES), page[:300]
 
         # The query DPhyp is called for, alone: its sections made again byte for byte, the
         # other one's left.
         run(out, "join-int")
-        for kind in ("cpu", "optimizer"):
+        for kind in ("cpu", "optimizer", "costs"):
             assert (out / "tpch" / f"{MODE}.{kind}.txt").read_text() == files["tpch", kind]
 
 

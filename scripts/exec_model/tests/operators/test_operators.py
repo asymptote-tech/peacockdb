@@ -55,6 +55,7 @@ from ...operators.partition_ops import (
     first_lane_ids,
     last_lane_ids,
     partition_ids,
+    row_digests,
     skewed_ids,
 )
 
@@ -362,6 +363,22 @@ def test_a_key_lands_by_its_value_not_by_how_pandas_holds_it():
     ints = partition_ids(pd.DataFrame({"k": [1, 2, 3]}), ["k"], 4)
     floats = partition_ids(pd.DataFrame({"k": [1.0, 2.0, 3.0, None]}), ["k"], 4)
     assert floats[:3] == ints
+
+
+def test_each_key_dtype_digests_to_its_pinned_value():
+    # A row's lane is its digest, so how a column is read must not move one: a float32 1.0 is not
+    # the integer 1, and a NaT or a None is skipped like a NaN.
+    frame = pd.DataFrame({
+        "i": [1, -2, 3, 4], "f": [1.0, np.nan, 2.5, -0.0], "f32": np.array([1.0, 2.5, 3.0, 4.0], dtype="float32"),
+        "b": [True, False, True, False], "d": pd.to_datetime(["1998-01-02", None, "1995-03-15", "2000-12-31"]),
+        "s": ["a", None, "BUILDING", "x"], "n": pd.array([5, None, 7, 8], dtype="Int64"),
+        "st": pd.array(["p", "q", None, "r"], dtype="string")})
+    assert row_digests(frame, list(frame.columns)) == [1783956634, 89061065, 4046862361, 3090925563]
+    assert [row_digests(frame, [column]) for column in frame.columns] == [
+        [3451661298, 2312776583, 2409180303, 2237408662], [3451661298, 42, 2329789544, 18230124],
+        [2671126803, 3977929669, 2628975997, 2583555064], [243197796, 2038028274, 243197796, 2038028274],
+        [3708629189, 42, 2538144622, 3337479593], [269853996, 42, 2055651698, 1954418156],
+        [1240868104, 42, 198386293, 3539153113], [2057668062, 228767048, 42, 2494293234]]
 
 
 # -- joins ------------------------------------------------------------------------

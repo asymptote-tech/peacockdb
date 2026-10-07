@@ -4,10 +4,10 @@ processes, the optimized answer held to the planned one.
 
     python3 scripts/exec_model/run.py [--bench B ...] [--query Q ...] [--mode M ...] [--jobs N]
 
-Writes `testdata/goldens/<bench>/<mode>.cpu.txt` here, the optimized run as the engine renders
-its own, and `<mode>.optimizer.txt`, what each rule did: a `== <query>` section each, in corpus
-order, a refused query's a `skipped:` line. Without `--query` a run owns its files; with it, only
-its sections change. README.md, "run.py", has the rest."""
+Writes under `testdata/goldens/<bench>/` here `<mode>.cpu.txt`, the optimized run as the engine
+renders its own, `<mode>.optimizer.txt`, what each rule did, and `<mode>.costs.txt`, both runs
+priced; a `== <query>` section each. Then `cost_report.html` from every costs file there.
+README.md, "run.py", has the rest."""
 
 from __future__ import annotations
 
@@ -27,20 +27,19 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
 
+from .cost_report import QueryCost, section as cost_section, write as write_cost_report
 from .optimizer import dphyp
 from .optimizer.pipeline import MODES, mode_shape, run_optimized
-from .optimizer.report import OptimizerReport
+from .optimizer.report import OptimizerReport, fired
 from .optimizer.report_text import render
 from .optimizer.stats import Statistics
 from .plans.answers import same_answer
+from .plans.cost_model import CostModel, load as load_cost_model
 from .plans.engine_nodes import build
 from .plans.engine_plan import EngineNode, read_plans
 from .plans.engine_run import CORPUS_BUDGET, answer, execute, render_run
+from .plans.goldens import BENCHES, OUT, ROOT, sections
 from .plans.tables import ParquetTables
-
-ROOT = pathlib.Path(__file__).resolve().parents[2] / "testdata"
-OUT = pathlib.Path(__file__).resolve().parent / "testdata" / "goldens"
-BENCHES = ("tpch", "tpcds")
 
 
 class Regeneration(Enum):
@@ -146,18 +145,6 @@ def run_query(task: Task) -> QueryRun:
                     run.report)
 
 
-def sections(text: str) -> list[tuple[str, str]]:
-    """A file's `== <query>` sections, every one, in file order."""
-    found = []
-    for line in text.splitlines(keepends=True):
-        if line.startswith("== "):
-            found.append((line[3:].strip(), ""))
-        else:
-            name, body = found[-1]
-            found[-1] = (name, body + line)
-    return found
-
-
 def merged(text: str, order: list[str], made: dict[str, str], regeneration: Regeneration) -> str:
     """`text` with the sections this run `made` put in: each query of `order` that has a section,
     in that order, then — where the run owns only its sections — those `order` does not name."""
@@ -197,10 +184,11 @@ def preflight(benches, root: pathlib.Path) -> None:
 
 
 def generate(selection: Selection, jobs: int, out: pathlib.Path, regeneration: Regeneration) -> int:
-    """The selection's runs over `jobs` processes, then its files written; 1 where a run failed."""
-    cpu = {key: dict(made) for key, made in selection.skipped.items()}
-    optimizer = {key: dict(made) for key, made in selection.skipped.items()}
-    failed, start = [], time.monotonic()
+    """The selection's runs over `jobs` processes, then its files and the cost report written; 1
+    where a run failed."""
+    files = {suffix: {key: dict(made) for key, made in selection.skipped.items()}
+             for suffix in ("cpu.txt", "optimizer.txt", "costs.txt")}
+    model, failed, start = load_cost_model(), [], time.monotonic()
     with ProcessPoolExecutor(jobs) as pool:
         futures = {pool.submit(run_query, task): task for task in selection.work}
         for future in as_completed(futures):
@@ -210,20 +198,35 @@ def generate(selection: Selection, jobs: int, out: pathlib.Path, regeneration: R
             # the run exits non-zero.
             try:
                 done = future.result()
+                cost = priced(done, model)
             except Exception as error:
                 failed.append(task)
-                cpu[key][task.query] = optimizer[key][task.query] = f"failed: {type(error).__name__}: {error}\n"
+                for made in files.values():
+                    made[key][task.query] = f"failed: {type(error).__name__}: {error}\n"
                 print(f"{task.bench} {task.mode} {task.query}: FAILED {error!r}", flush=True)
                 continue
-            cpu[key][task.query], optimizer[key][task.query] = done.optimized, render(done.report)
+            files["cpu.txt"][key][task.query] = done.optimized
+            files["optimizer.txt"][key][task.query] = render(done.report)
+            files["costs.txt"][key][task.query] = cost_section(cost, model)
             print(f"{task.bench} {task.mode} {task.query}: planned {done.seconds[0]:.1f} s, "
-                  f"optimized {done.seconds[1]:.1f} s", flush=True)
+                  f"optimized {done.seconds[1]:.1f} s, cost ratio {cost.ratio:.2f}", flush=True)
     for (bench, mode), order in selection.order.items():
-        for suffix, made in (("cpu.txt", cpu[bench, mode]), ("optimizer.txt", optimizer[bench, mode])):
-            if made:
-                _write(out / bench / f"{mode}.{suffix}", order, made, regeneration)
+        for suffix, made in files.items():
+            if made[bench, mode]:
+                _write(out / bench / f"{mode}.{suffix}", order, made[bench, mode], regeneration)
+    write_cost_report(out)
     print(f"{len(selection.work)} runs in {time.monotonic() - start:.1f} s, {len(failed)} failed", flush=True)
     return 1 if failed else 0
+
+
+def priced(done: QueryRun, model: CostModel) -> QueryCost:
+    """The planned run's cost and the optimized pipeline's: its final run, and every probe plan and
+    stopped run it made on the way, which are work done too."""
+    context = f"{done.task.bench} {done.task.mode} {done.task.query}"
+    probes = sum((model.price(text, f"{context} probe") for text in done.probes), model.price("", context))
+    stopped = sum((model.price(text, f"{context} stopped") for text in done.stopped), model.price("", context))
+    return QueryCost(model.price(done.planned, context), model.price(done.optimized, context) + probes + stopped,
+                     probes, stopped, fired(done.report))
 
 
 def _write(path: pathlib.Path, order: list[str], made: dict[str, str], regeneration: Regeneration) -> None:

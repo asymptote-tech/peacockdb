@@ -89,7 +89,9 @@ plan. `errors.py` sits at the root: all four raise from it. The tests mirror the
 | `plans/engine_ir.py` | a node's expression fields in the expression IR — ordinals resolved to frame names (`name@ordinal` where a schema repeats a name), each literal typed by what it meets |
 | `plans/engine_nodes.py` | an engine plan tree built as a prototype plan, one engine node to one prototype node; each output named by its node's schema; a hash join's fanout from the estimate, where one is given; a `GpuMemorySource` from the frames `tables.materialized` holds, laid out as they were made |
 | `plans/engine_run.py` | a prototype run of an engine plan — `run_plan`, read as one answer or by lane, under `CORPUS_BUDGET` for a corpus query — rendered as the engine renders its own (`cpu.txt`): node lines, `output_rows`, per-lane `in_rows`/`batch_rows` |
-| `plans/tables.py` | the generated parquet tables as an engine plan's scans read them, decimals as float64 and dates as `datetime64[ns]` |
+| `plans/tables.py` | the generated parquet tables as an engine plan's scans read them, decimals as float64 and dates as `datetime64[ns]`; a scan's columns read once per `ParquetTables`, since a replan builds every scan again |
+| `plans/goldens.py` | where the engine's goldens and this prototype's live, and the `== <query>` sections every golden is cut into |
+| `plans/cost_model.py` | the engine's cost function (`test_support/cost_model.rs`) over a run in the `cpu.txt` format, by `testdata/cost_model.conf`, read, summed and rounded as the Rust is; `GpuMemorySource` free, outside the conf |
 | `plans/answers.py` | two answers to one query compared as strictly as SQL allows — a multiset, the ORDER BY columns by position, money within a tolerance — and the queries whose LIMIT leaves which rows open |
 | `optimizer/dynamic_filters.py` | dynamic filters: which joins can prune a fact scan's row groups (filtered build, key lifted to an ordered scan column), the probe plan — the build side itself, whose lanes the main plan then reads as a memory source, so the side is read once — the host reducer, and the replan that re-maps each pruned scan as the engine's partitioner would |
 | `optimizer/stats.py` | table statistics for the estimator — NDV and strings' mean length from the committed sidecar (`testdata/gen_stats.py`), rows, min/max and nulls from the footer over the row groups a scan reads; a sidecar that is missing or no longer matches its file is refused |
@@ -104,9 +106,10 @@ plan. `errors.py` sits at the root: all four raise from it. The tests mirror the
 | `optimizer/multijoin.py` | a cluster of inner joins as DPhyp takes it in — relations, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included |
 | `optimizer/disassembly.py` | a join order back into an engine plan — keys, residual and projection from the MultiJoin's identities, wiring as the translator derives it; `baseline` is the order the plan already has |
 | `optimizer/pipeline.py` | the optimizer end to end over one plan — dynamic filters, then DPhyp and orientation with the probes' builds known, then the adaptive run — and its report; each mode's lanes and batching, by name |
-| `optimizer/report.py` | what the optimizer did to a plan, as data: dynamic-filter candidates and pruned scans, each DPhyp call (relations, edges, the sets priced through the cost callback, its budget, the tree, the chosen joins and the plan order's C_out, the flips), each replan and refusal, the plan text before and after |
+| `optimizer/report.py` | what the optimizer did to a plan, as data: dynamic-filter candidates and pruned scans, each DPhyp call (relations, edges, the sets priced through the cost callback, its budget, the tree, the chosen joins and the plan order's C_out, the flips), each replan and refusal, the plan text before and after; `Fired`, how often each rule acted |
 | `optimizer/report_text.py` | that report as a `.optimizer.txt` section |
 | `run.py` | the corpus through the optimizer, [below](#runpy-the-corpus-through-the-optimizer) |
+| `cost_report.py` | each (query, mode)'s costs as a section of `<mode>.costs.txt` and back, and `cost_report.html` rendered from those files |
 | `tests/corpus.py` | the tests' default budget, the generated datasets found or the generator named, DuckDB's answer to a query's text, and an engine `cpu.txt` golden's rows per node |
 
 Traits are declarations only. The driver tests drive mocks (`tests/engine/mocks.py`) because the
@@ -281,6 +284,28 @@ and the DPhyp library are checked before anything runs. The parent writes, under
   against the plan; each replan's miss, what it kept and the order made again; then a unified
   diff of the plan text. `nothing fired` where no rule did. The sets priced are not listed — 6,626
   for one of q64's clusters — but the report keeps them (`JoinOrder.priced`).
+- `<mode>.costs.txt` — both runs priced by the engine's own cost function (`plans/cost_model.py`,
+  reading `testdata/cost_model.conf`, the file the engine's `.cost.txt` goldens are made by):
+  `planned`, `optimized`, and of the optimized the `probes` and `stopped` parts, each a total and
+  its bytes per category; then `fired`, how often each rule acted. Not a function of `cpu.txt`, as
+  the engine's `.cost.txt` is: it prices runs that file does not hold. Optimized is all the work
+  the pipeline did: the optimized plan's run, every dynamic filter's probe plan and every run a
+  replan stopped. A memory source — a build one of those made, read back — costs nothing, by
+  nature rather than by a multiplier: the build was paid for once, where it was made. Any other
+  kind the conf does not list is refused.
+- `cost_report.html`, at the top of the output directory — one self-contained page rendered from
+  every `<mode>.costs.txt` there, so a filtered run still renders the whole corpus.
+  `python3 scripts/exec_model/cost_report.py` renders it again from the files alone. A row per
+  query: per mode non-optimized | optimized | ratio (optimized / non-optimized); the engine's own
+  `.cost.txt` figure (`<mode>-mini.cost.txt`) at the mode the final ratio takes; DuckDB's
+  `duckdb_cost=` (`<q>.duckdb_cost.txt`; the named tpch queries have none); the projected final
+  ratio, min over modes of the engine's figure × that mode's ratio / DuckDB's; and the rules that
+  changed the plan, each with the modes it did so at — a dynamic filter that narrowed a scan, a
+  DPhyp tree whose C_out is below the plan order's, a flip, a replan — every count in the hover;
+  `nothing changed the plan` where rules ran and none did, `nothing fired` where none ran.
+  The prototype's bytes are pandas', so its costs compare only with each other: the final ratio
+  projects the optimizer's ratio onto the engine's bytes, which are what DuckDB's compare with on
+  the published cost report; it is not a measured engine cost.
 
 A `== <query>` section each, in the engine's registry order (its `-mini.cpu.txt`); a query the
 planner refused has none there and a `skipped:` line here, placed after the query that sorts
@@ -290,6 +315,19 @@ for the engine's goldens — a fresh file from a filtered run would lose every o
 that raises — an optimized answer that is not the planned one among them — gets a `failed:`
 section and the run exits 1. Nothing compares the files with a
 previous copy.
+
+The committed files are a whole run, regenerated on shad-gpu (heavy runs do not belong on a
+laptop) from a scratch copy of the tree, with the sf1 tables beside it and `PEACOCK_DPHYP_LIB` set
+as above, under Python 3.13.15 and pandas 3.0.6. A batch's bytes are pandas'
+`memory_usage(deep=True)`, so another pandas moves every cost line:
+
+```
+python3 scripts/exec_model/run.py --jobs 16
+```
+
+That is 600 (query, mode) runs, all five modes of both benches, in 15:59 wall at `--jobs 16` on
+shad-gpu's 22 cores, at most 7.7 GB per worker. The tail is one task, tpch q9 at `tp4-rowgroup`,
+whose planned run takes 14 to 15 minutes alone; the optimized one takes 14 seconds.
 
 ## Layout injection
 

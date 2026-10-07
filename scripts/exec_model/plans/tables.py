@@ -22,13 +22,20 @@ def row_group_rows(path: pathlib.Path) -> list[int]:
 class ParquetTables:
     """An engine plan's tables, out of one directory of `<table>.parquet`: what
     `engine_nodes.build` asks of a scan — its columns, typed as `typed` types them, and its
-    file's row-group sizes."""
+    file's row-group sizes. Columns are read once for the life of the object, since a replanned
+    run builds every scan of its plan again."""
 
     def __init__(self, directory: pathlib.Path):
         self.directory = pathlib.Path(directory)
+        self._read: dict[tuple[str, tuple[str, ...]], pd.DataFrame] = {}
 
     def frame(self, table: str, columns) -> pd.DataFrame:
-        return typed(pq.read_table(self.directory / f"{table}.parquet", columns=list(columns)))
+        """A frame of the caller's own, which a scan renames; the data is shared, and nothing
+        writes into a scan's columns."""
+        key = (table, tuple(columns))
+        if key not in self._read:
+            self._read[key] = typed(pq.read_table(self.directory / f"{table}.parquet", columns=list(columns)))
+        return self._read[key].copy(deep=False)
 
     def row_counts(self, table: str) -> list[int]:
         return row_group_rows(self.directory / f"{table}.parquet")

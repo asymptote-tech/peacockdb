@@ -54,11 +54,11 @@ def row_digests(frame: pd.DataFrame, keys: list[str]) -> list[int]:
     keys must still give equal digests, and that is what keeps co-location true.
     """
     digests = []
-    columns = [frame[key] for key in keys]
-    for position in range(len(frame)):
+    # A column's array yields what `.iloc` would — a float32 stays a numpy float32 — at a
+    # fraction of the cost per row, which the corpus pays tens of millions of times.
+    for row in zip(*(frame[key].array for key in keys)):
         digest = SEED
-        for column in columns:
-            value = column.iloc[position]
+        for value in row:
             if pd.isna(value):
                 continue  # comet skips null columns — all-null keys collapse to one lane
             digest = zlib.crc32(_hash_value(value), digest)

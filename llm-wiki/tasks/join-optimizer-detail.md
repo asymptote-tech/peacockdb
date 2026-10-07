@@ -607,3 +607,138 @@ fixes #236 and #237):
   `matches_oracle` docstrings are cut to the cap; the README's "The corpus" carries the
   argument. `engine_ir` points at `plans/tables.typed`. Cheap tier 40 files, 380 passed;
   `test_run_corpus` 1 passed.
+
+## Task 6b
+
+- Cost is `plans/cost_model.py`: `test_support/cost_model.rs` in Python, reading
+  `testdata/cost_model.conf` (no table copied) and node lines by `golden_text.rs`'s rule. It
+  matches the Rust where Python differs. Lines split at `\n` alone, as `str::lines`, not
+  `splitlines`, which also splits at a form feed. The total is added term by term, because `sum`
+  compensates on 3.12+ (1e16 + 1 + 1 is 1e16 in Rust and 1e16 + 2 under `sum`). It rounds as
+  `f64::round` on the double (0.49999999999999994 → 0, where `floor(t + 0.5)` gives 1), and a
+  negative total is 0, as `as u64` saturates. Pinned by deriving all ten committed
+  `-mini.cost.txt` again from their `cpu.txt`, byte for byte, and by cases for each of these.
+  Stripping a `\r` before `\n` is Rust's too, but no count can show it: a field value is trimmed,
+  and a bare kind has no `output_bytes`.
+- `GpuMemorySource`, the one prototype kind (`engine_plan.PROTOTYPE_KINDS` = `cost_model.FREE`),
+  costs nothing, outside the conf (the human's decision). A memory source hands back a build that a
+  probe plan or a stopped run made and was priced for, kept where the plan reads it: free by
+  nature, not because `ram_to_vram_bytes` is 0.0 today. Any other kind the conf lacks raises, as
+  the engine panics.
+- Optimized = the final plan's run + every probe plan's run + every run a replan stopped
+  (`run.priced`). All of it is work done. Check: q64's optimized `storage_read_bytes` equals the
+  planned run's exactly at every mode (805,720,426 at tp4-single), so nothing is read twice.
+- A fourth output, `<bench>/<mode>.costs.txt` (the human kept it, under a name that does not
+  promise what the engine's `.cost.txt` is, a function of its `.cpu.txt`): per query `planned`,
+  `optimized`, `probes`, `stopped` (total and bytes per category) and `fired` (`report.Fired`:
+  probes, scans narrowed, DPhyp calls, calls whose tree's C_out is below the plan order's
+  (`reordered`), calls stopped at budget, flips, replans, refusals). It merges like the other two,
+  and `cost_report.html` is rendered from every such file. So a `--query` run re-renders the whole
+  page instead of a page of three rows, and a cost that moves is one line in a diff.
+  `cost_report.py` alone renders the page again from the files.
+- The page (`cost_report.py`, the published report's CSS and its 1.4 threshold): a row per query.
+  Per mode it shows non-optimized | optimized | ratio, where ratio = optimized / non-optimized,
+  green below 1 and red above. A tooltip on optimized gives the probe and stopped parts. Then the
+  engine figure, DuckDB, the final ratio — titled and defined as projected — and the rules. A
+  rule's chip counts the modes where it changed the plan, of the modes run: dynamic filters where
+  a scan was narrowed, DPhyp where a tree beat the plan order's C_out, flips, replans. Calls,
+  probes, budget hits and refusals are in the hover with every other count. A query skipped at
+  every mode gets one cell across all fifteen columns. A
+  skipped or failed (query, mode) gets one cell over its three columns.
+- Final ratio = min over modes of E × (O / P) / D. E is the engine's `-mini.cost.txt` figure,
+  O / P the prototype's ratio at that mode, D DuckDB's `duckdb_cost=`. The engine column shows E
+  at that mode. Why not O / D: the spec says only two prototype runs compare, and the numbers
+  agree. The prototype's planned cost over the engine's figure has median 0.80 (tpch) and 0.85
+  (tpcds), range 0.61–1.33 in tpcds. tpch `scan-limit` is 3.4e-6: the prototype's scan stops at
+  the limit and the engine's reads 1 GB (#186). O / D would shift each row by that factor. E × O / P
+  keeps the published report's scale and takes from the prototype only its own ratio. The cost:
+  no final ratio where the engine has no figure at any mode run here. That is tpch q11 and q22,
+  tpcds q24 and q54.
+- Profile, cProfile in `run_query` on shad-gpu, wall under the profiler. q64 tp1-rowgroup: 67.6 s,
+  of which 39 s in `engine_nodes.build`. Every one of 9 builds (1 planned, 7 stopped, final)
+  re-read every scan's parquet: 197 reads, `table_to_dataframe` 26.5 s. DPhyp's cost callback
+  (estimation) is 14 s over 30 calls. q64 tp4-single: 1013 s, of which 888 s is
+  `partition_ops.row_digests`, 59 M `.iloc` reads of one value each. tpch q9 tp4-single: 461 s,
+  316 s in `row_digests`. tpch q8 tp4-rowgroup: 974 s, 860 s of it the planned run: 139 k driver
+  steps, `row_digests` 209 s, `memory_usage(deep=True)` behind `byte_size` 220 s over 609 k calls.
+  Pandas' own operations (merge factorize, take) are a few seconds each. The time is the driver's
+  Python, so no Polars.
+- Two wins, no behaviour change. `row_digests` iterates `Series.array`, whose scalars are `.iloc`'s
+  (a float32 stays a numpy float32, which `tolist` would turn into a float and move to another
+  lane): 3–4× per row. `ParquetTables` reads a (table, columns) once per instance and hands each
+  caller a shallow copy to rename. `run_query` makes one instance per task, so the planned run, the
+  probes and every replan share it; nothing writes into a scan's columns (joins copy their build,
+  rename their probe). Not done: caching `byte_size`, because the accountant adds and removes a
+  batch by it and a cached value could change a budget decision; and caching `Statistics.column`,
+  which is worth a few seconds per q64 replan.
+- Same output, shown: the 6a sample's sections (tpch q3 q5 q9, tpcds q3 q64, at tp4-single and
+  tp1-rowgroup, `cpu.txt` and `optimizer.txt`, 20 sections) are byte-identical to the full run's.
+  That includes every lane's `batch_rows`/`batch_bytes`, which the hash decides. The per-dtype
+  digests are pinned by a test that passed before the change. The cardinality golden is unchanged.
+  The four corpus suites at tp4-single on shad-gpu, from the same copy (`.py` sha256 equal to the
+  worktree's, 120 files), 10 shards each over 16 processes: answers 120, optimized 100, dynamic
+  filters 58, reassembled 100, none failed, 10 min wall (19 in 6a).
+- Seconds as planned / optimized, before → after: q64 tp4-single 98.4 / 142.2 → 34.7 / 52.7;
+  q64 tp1-rowgroup 11.3 / 43.9 → 7.1 / 12.5; tpch q9 tp4-single 94.5 / 43.9 → 73.2 / 10.8.
+- q64 is slower optimized, and the cost does not show it. It replans 7 times at every mode. The
+  stopped runs come in two triples with near-equal bytes (1.0 MB, 148 MB, 1.39 GB at tp4-single).
+  These are the two copies of the `cross_sales` CTE (cs1, cs2), whose builds are alike; nothing
+  runs twice. The optimized cost is lower at every mode (0.83 to 0.93). The extra seconds were the
+  rebuild of every scan per replan, gone with the read-once tables, and the Python estimation and
+  DPhyp of 30 calls (9 stopped at the budget), which remain. Bytes cannot see either, so the report
+  shows q64 as a saving. It is a cost of the prototype's replanning, not of the plan.
+- Full run on shad-gpu, `/tmp/peacock-opt/t6d` (rsync `--delete` from the worktree, sf1 linked as
+  in 6a), `run.py --jobs 16` on 22 cores (another user held about four), both benches, all five
+  modes: 600 runs, 0 failed, 15:59 wall, peak RSS 7.7 GB in one worker. The first run, before the
+  review, took 16:27 and 7.5 GB; its `cpu.txt` and `optimizer.txt` are byte-identical to this
+  one's. Each optimized answer held to the planned one. tpch: 39 run at each mode. tpcds: 81 run
+  and 18 skipped (refused by the planner) at each mode. The tail is tpch q9 at tp4-rowgroup, 818 s
+  planned (901 s in the first run) and 13.9 s optimized; then, in the first run, tpch q8
+  tp4-rowgroup 445 s and tpcds q24 tp4-rowgroup 420 s.
+- Results. tpch: 195 runs, optimized cheaper at 50, dearer at 1, equal at 144. tpcds: 405 runs,
+  cheaper at 364, dearer at none; median ratio 0.62, least 0.02 (q39 tp4-rowgroup). The one dearer
+  run is tpch q18 at tp1-rowgroup, 1.0098: an orientation flip and a replan after a build of 57
+  rows against 300,000 estimated. Final ratio within 1.4 for 17 of 20 tpch rows and 64 of 79
+  tpcds rows; medians 0.86 and 0.81. The rules by what they changed, of the 600 runs: DPhyp was
+  called in 500 and its tree beat the plan order's C_out in 325; a probe plan ran in 290 and
+  narrowed a scan in 270; joins flipped in 191; replans in 311; a call stopped at the budget in 5
+  (q64, every mode); a replan refused in 37. No memory source is priced: `ram_to_vram_bytes` is 0
+  in every section.
+- Output sizes: 30 text files, 20.2 MB together, and `cost_report.html` 174 KB. The largest is
+  tpcds `tp4-single.optimizer.txt`, 2.6 MB; tpcds `tp4-rowgroup.cpu.txt` is 1.9 MB, each
+  `.costs.txt` is at most 125 KB. The engine's largest committed golden is 7.8 MB (tpcds
+  `tp4-rowgroup-mini.cpu.txt`), and its sf1 goldens total 52 MB.
+- Tests: cheap tier 40 → 43 files, 380 → 399 cases: `plans/test_cost_model` 8, `test_cost_report`
+  8, `plans/test_tables` 1, `test_run` +1, `operators/test_operators` +1. `test_run_corpus` (1)
+  now checks the costs file and the page. Each shown red against a mutation of the code it pins:
+  - cost function: Python's round, `floor(t + 0.5)`, `sum`, a negative total kept, `splitlines`,
+    a memory source priced, nesting or quotes ignored in the field split, an unknown kind passed,
+    multipliers ignored, the placeholder comment, a capitalized non-node line read as a node;
+  - report: replan orders or narrowed scans miscounted, a marker kept whole, the ratio inverted,
+    the best mode as max or without the ratio, the final ratio without the ratio, the engine column
+    at the first mode, a skipped query per mode, a failed run dropped, a `<link>`, the caveat's
+    words, `stopped` left out of the section, DuckDB's footer misread, the row's colour, the ratio
+    cell's class, a chip over all modes, `reordered` as every call or with `<=`, the DPhyp chip by
+    calls, the filters chip by probes, a budget chip, "projected" dropped from the title or the
+    definition;
+  - `run.py`: probes or stopped runs left out of optimized, no cost file, no page;
+  - `test_run_corpus`: no page, planned priced into optimized;
+  - tables: the cached frame handed out shared; digests: `tolist` for `.array`.
+- Review round 1: no blocking or important finding; the human's decisions applied. The output is
+  `<mode>.costs.txt`. The final ratio stays E × (O / P) / D and the page calls it projected, in
+  its title and its one-sentence definition. The chips count effects (`Fired.reordered`,
+  `narrowed`), with calls and probes in the hover. `GpuMemorySource` is free outside the conf.
+  Nits: the `run.py` docstring within its cap; Rust's line split, sum and rounding (above);
+  `cost_text` moved into its one caller, the test; the engine's `.cost.txt`, not the prototype's
+  file, is a function of its `.cpu.txt` (build-test.md, README); "once per task" for the table
+  cache; the digest test named for what it pins; the README names the generating environment
+  (shad-gpu, Python 3.13.15, pandas 3.0.6) and that pandas' `memory_usage(deep=True)` is the byte
+  count. Regenerated as above; cheap tier 43 files, 398 passed; `test_run_corpus` 1; cardinality
+  golden unchanged.
+- Review round 2: a row whose rules ran and changed nothing shows `nothing changed the plan` with
+  its counts in the hover; `nothing fired` is kept for a row where no rule ran, as in
+  `.optimizer.txt`. The re-render from the committed files changed only the rules cell of 10 rows
+  (tpch q3, q19, q20, hash-join, join-int, mixed-join, rollup-over-join; tpcds q2, q78, q93). The
+  total saturates as `as u64` does: NaN or negative 0, at or past 2^64 or infinite u64::MAX. Each
+  new case shown red: the hover dropped without a chip, the old label, NaN through `< 0`, no cap.
+  Cheap tier 43 files, 399 passed.

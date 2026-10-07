@@ -99,3 +99,27 @@ class OptimizerReport:
     refused: tuple[BuildMiss, ...]
     before: str
     after: str
+
+
+@dataclass(frozen=True)
+class Fired:
+    """How often each rule acted on one run: probe plans run and scans they narrowed; DPhyp calls —
+    before the run and in replans — those whose tree's C_out is below the plan order's, and those
+    stopped at their budget; joins flipped, replans and replans refused."""
+
+    probes: int = 0
+    narrowed: int = 0
+    dphyp: int = 0
+    reordered: int = 0
+    budget: int = 0
+    flips: int = 0
+    replans: int = 0
+    refused: int = 0
+
+
+def fired(report: OptimizerReport) -> Fired:
+    orders = report.orders + tuple(order for replan in report.replans for order in replan.orders)
+    return Fired(probes=len(report.probed), narrowed=sum(len(p.after) < len(p.before) for p in report.pruned),
+                 dphyp=len(orders), reordered=sum(sum(j.cost for j in o.joins) < o.plan_cost for o in orders),
+                 budget=sum(o.unsolved is not None for o in orders), flips=sum(len(o.flipped) for o in orders),
+                 replans=len(report.replans), refused=len(report.refused))

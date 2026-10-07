@@ -16,7 +16,12 @@ import tempfile
 from .harness import main, raises
 from ..optimizer.dynamic_filters import Batching
 from ..optimizer.pipeline import MODES, ModeShape, mode_shape
-from ..run import Regeneration, Selection, Task, corpus_order, generate, merged, preflight, sections, tasks
+from .optimizer.test_report_text import EVERY_RULE
+from ..optimizer.report import fired
+from ..plans.cost_model import parse
+from ..run import (
+    QueryRun, Regeneration, Selection, Task, corpus_order, generate, merged, preflight, priced, sections, tasks,
+)
 
 FILE = "== a\nold a\n== gone\nold gone\n== b\nold b\n"
 
@@ -72,7 +77,7 @@ def test_a_mode_name_is_its_lanes_and_batching_and_an_unknown_one_is_refused():
         mode_shape("tp8-standard")
 
 
-def test_a_query_that_raises_is_a_failed_section_in_both_files_and_the_run_exits_1():
+def test_a_query_that_raises_is_a_failed_section_in_every_file_and_the_run_exits_1():
     # A query the plan golden lacks raises KeyError in the worker before any data is read.
     key = ("tpcds", "tp4-single")
     selection = Selection([Task(*key, "nope")], {key: ["q27", "nope"]},
@@ -80,9 +85,23 @@ def test_a_query_that_raises_is_a_failed_section_in_both_files_and_the_run_exits
     with tempfile.TemporaryDirectory() as scratch:
         out = pathlib.Path(scratch)
         assert generate(selection, 1, out, Regeneration.WHOLE) == 1
-        for kind in ("cpu", "optimizer"):
+        for kind in ("cpu", "optimizer", "costs"):
             text = (out / "tpcds" / f"tp4-single.{kind}.txt").read_text()
             assert text == "== q27\nskipped: refused\n== nope\nfailed: KeyError: 'nope'\n", text
+        page = (out / "cost_report.html").read_text()
+        assert "skipped: refused" in page and "failed: KeyError: &#x27;nope&#x27;" in page
+
+
+def test_the_optimized_cost_is_the_final_run_s_and_every_probe_plan_s_and_stopped_run_s():
+    model = parse("scan_bytes 1.0 GpuLoadParquet\nram_to_vram_bytes 0.0\n")
+    scan = "early_exit=none\nGpuLoadParquet: table=t, output_rows=1, output_bytes={}\n".format
+    done = QueryRun(Task("tpch", "tp4-single", "q"), (1.0, 2.0), scan(100), scan(30) + "  GpuMemorySource: output_bytes=9\n",
+                    (scan(5), scan(6)), (scan(20),), EVERY_RULE)
+    cost = priced(done, model)
+    assert (cost.planned.total, cost.optimized.total, cost.probes.total, cost.stopped.total) == (100, 61, 11, 20)
+    # The memory source reads back a build already priced: nothing.
+    assert cost.optimized.bytes == (61, 0)
+    assert cost.fired == fired(EVERY_RULE)
 
 
 def test_a_missing_dataset_or_dphyp_library_is_refused_before_any_work():
