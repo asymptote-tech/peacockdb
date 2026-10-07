@@ -98,6 +98,30 @@ static flatbuffers::Offset<fb::Expr> make_null_literal(
   return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
 }
 
+/// Build an Expr wrapping a Utf8 literal; the string is built before the value table
+/// opens, since a FlatBuffer builder nests nothing.
+static flatbuffers::Offset<fb::Expr> make_string_literal(flatbuffers::FlatBufferBuilder& fbb,
+                                                         const char* val) {
+  auto str = fbb.CreateString(val);
+  fb::ScalarValueBuilder sb(fbb);
+  sb.add_type(fb::DataType_Utf8);
+  sb.add_string_val(str);
+  auto sv = sb.Finish();
+  auto lit = fb::CreateLiteralExpr(fbb, sv);
+  return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
+}
+
+/// Build an Expr wrapping a Date32 literal, `days` since the epoch.
+static flatbuffers::Offset<fb::Expr> make_date32_literal(flatbuffers::FlatBufferBuilder& fbb,
+                                                         int32_t days) {
+  fb::ScalarValueBuilder sb(fbb);
+  sb.add_type(fb::DataType_Date32);
+  sb.add_int_val(days);
+  auto sv = sb.Finish();
+  auto lit = fb::CreateLiteralExpr(fbb, sv);
+  return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
+}
+
 /// A Decimal128 literal. `hi`/`lo` form the 128-bit signed value; Arrow scale is the
 /// count of fractional digits, so 250 at scale 2 is 2.50.
 static flatbuffers::Offset<fb::Expr> make_decimal_literal(
@@ -843,7 +867,8 @@ TEST(PlanExecutor, ProjectSqrtThroughTheColumnPath) {
 // that needs no knowledge of the data — the counts and the sums double, the mean does
 // not move — so the assertions are about the merge rather than about nation.parquet.
 
-/// The nation scan the merge cases aggregate and the literal cases at the end read.
+/// The nation scan the merge cases aggregate, the date_part cases make a date from, and
+/// the literal cases at the end read.
 static flatbuffers::Offset<fb::PlanNode> nation_scan_node(
     flatbuffers::FlatBufferBuilder& fbb) {
   auto path = fbb.CreateString(parquet_path("nation"));
@@ -1018,6 +1043,66 @@ TEST(AggregateMerge, AOneColumnAggregateMergesByItsOwnRule) {
     }
   }
 }
+
+// --- date_part: the type the wire names --------------------------------------
+//
+// cuDF's extract_datetime_component answers INT16 for every field, and the wire's
+// `return_type` carries what DataFusion declared: Int32, for every field. tpch.minimal
+// has no date column and cudf::cast makes no timestamp from a number, so one is made
+// from two literals: 1995-03-15 for the first ten nations, 2003-11-28 for the rest.
+
+/// `date_part(field, d)` over nation with `d` the made date, declared Int32.
+static std::vector<uint8_t> date_part_over_a_made_date(flatbuffers::FlatBufferBuilder& fbb,
+                                                       const char* field) {
+  auto scan_node = nation_scan_node(fbb);
+  auto early =
+      make_binary_expr(fbb, make_col_ref(fbb, 0), fb::BinaryOp_Lt, make_int64_literal(fbb, 10));
+  auto arm = fb::CreateCaseWhenThen(fbb, early, make_date32_literal(fbb, 9204));
+  auto arms = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::CaseWhenThen>>{arm});
+  auto later = make_date32_literal(fbb, 12384);
+  auto made = fb::CreateCaseExprNode(fbb, /*expr=*/flatbuffers::Offset<fb::Expr>{}, arms, later);
+  auto made_expr = fb::CreateExpr(fbb, fb::ExprNode_CaseExprNode, made.Union());
+  auto date_exprs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{made_expr});
+  auto date_alias = fbb.CreateString("d");
+  auto date_aliases =
+      fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{date_alias});
+  auto date_proj = fb::CreateCudfProject(fbb, date_exprs, date_aliases, scan_node);
+  auto date_node = make_plan_node(fbb, fb::PlanNodeKind_CudfProject, date_proj.Union());
+
+  auto field_lit = make_string_literal(fbb, field);
+  auto args =
+      fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{field_lit, make_col_ref(fbb, 0)});
+  auto name = fbb.CreateString("date_part");
+  auto fn = fb::CreateScalarFunctionExprNode(fbb, name, args, fb::DataType_Int32,
+                                             /*return_decimal_precision=*/0,
+                                             /*return_decimal_scale=*/0, /*nullable=*/true);
+  auto expr = fb::CreateExpr(fbb, fb::ExprNode_ScalarFunctionExprNode, fn.Union());
+  auto exprs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{expr});
+  auto alias = fbb.CreateString(field);
+  auto aliases = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{alias});
+  auto proj = fb::CreateCudfProject(fbb, exprs, aliases, date_node);
+  return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfProject, proj.Union()));
+}
+
+/// The column is the declared INT32 and the first and last rows are the field's values.
+static void expect_date_part_as_int32(const char* field, int32_t first, int32_t last) {
+  flatbuffers::FlatBufferBuilder fbb;
+  WholePlan plan(date_part_over_a_made_date(fbb, field));
+  const auto& result = plan.result();
+
+  ASSERT_EQ(result.table->num_columns(), 1) << field;
+  auto col = result.table->view().column(0);
+  ASSERT_EQ(col.type().id(), cudf::type_id::INT32) << field;
+  ASSERT_EQ(col.size(), 25) << field;
+  EXPECT_EQ(get_scalar_value<int32_t>(col, 0), first) << field;
+  EXPECT_EQ(get_scalar_value<int32_t>(col, 24), last) << field;
+}
+
+TEST(PlanExecutor, ProjectDatePartYearIsInt32) { expect_date_part_as_int32("YEAR", 1995, 2003); }
+
+TEST(PlanExecutor, ProjectDatePartMonthIsInt32) { expect_date_part_as_int32("MONTH", 3, 11); }
+
+TEST(PlanExecutor, ProjectDatePartDayIsInt32) { expect_date_part_as_int32("DAY", 15, 28); }
 
 TEST(PlanExecutor, PassthroughNodes) {
   flatbuffers::FlatBufferBuilder fbb;

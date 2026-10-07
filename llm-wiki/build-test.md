@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2326 test cases — Rust 1851, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2330 test cases — Rust 1852, C++ 97, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -395,7 +395,7 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 575 cases: `--lib -- gpu_tests::` 535, `test_gpu_corpus` 28, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 576 cases: `--lib -- gpu_tests::` 536, `test_gpu_corpus` 28, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
@@ -413,8 +413,7 @@ and `q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggre
 `tpch/filter-project`, `tpch/shuffle-additive`, `tpcds/q37`, `tpcds/q82` and `tpcds/q85` at
 `tp1-single`; the rest are off against [#152](tickets/joins.md#t152),
 [#95](tickets/corpus-coverage.md#t95),
-[#191](tickets/corpus-coverage.md#t191), [#220](tickets/joins.md#t220) and the device's
-own tickets (#57, #63, #205). The twenty-seventh case is that a device run under a
+[#220](tickets/joins.md#t220) and the device's own tickets (#57, #63, #205). The twenty-seventh case is that a device run under a
 regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
@@ -445,7 +444,7 @@ from the sf40 run instead
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 334 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 335 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
@@ -485,9 +484,8 @@ forms; a sort; the three accumulators; the scatter on each key type; the seven h
 types that run past a first probe batch (Left and Full refuse it, #152), with and without a
 crossing projection, and the three key-path types on each key type; the cross and nested
 loops; and each aggregate's init, the merges, and the sum, avg, stddev and var finalizes,
-grouped on each key type and global. Eight are `bug_` pins: the grouping id held `Int32` under a
-`UInt8` declaration (#65), `date_part`'s year, month and day held `INT16` under `Int32` (#191),
-the cross join's dropped projection (#207), the keyless Welford init's one finished column
+grouped on each key type and global. Five are `bug_` pins: the grouping id held `Int32` under a
+`UInt8` declaration (#65), the cross join's dropped projection (#207), the keyless Welford init's one finished column
 (#216), and the Welford state named three times by its alias at the init and the merge (#225)
 
 *component*
@@ -560,7 +558,7 @@ the harness's own format reader — none of which runs engine code.
 | Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, `hbm_bytes` lands on the right tuple and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_plot.py](../scripts/calibration/tests/test_plot.py) | cost-report | 12 |
 | C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 15 |
 | cuDF GPU smoke (C++) | the GPU is alive; the Spark-murmur3 kernel matches comet in C++; the RMM pool reserves the budget the binary declared | [CudfGpu.SparkPartitionIdsMatchComet2ColWithNulls](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 4 |
-| Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node, plus the per-call entry points at their contract edges (row-group override, export range, slice), the sqrt arm on both evaluators, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, every wire type walked through the dispatch, the LIKE guard — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [NodeRegions.EveryCallOpensOneRegionPerOutputPartition](../cpp/tests/gpu/test_plan_executor.cpp) | shad-gpu | 53 |
+| Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node, plus the per-call entry points at their contract edges (row-group override, export range, slice), the sqrt arm on both evaluators, `date_part` answering in the type the wire names for three fields, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, every wire type walked through the dispatch, the LIKE guard — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [NodeRegions.EveryCallOpensOneRegionPerOutputPartition](../cpp/tests/gpu/test_plan_executor.cpp) | shad-gpu | 56 |
 | TPC-H sf40 bare-cuDF (C++) | hand-written cuDF pipelines vs DuckDB sf40; the benchmark vehicle | [TpchSf40.Q1GroupByAggregates](../cpp/tests/gpu/test_tpch.cpp), [Q3JoinsGroupByTopN](../cpp/tests/gpu/test_tpch.cpp) | shad-gpu (sf40 is a hard precondition) | 4 |
 | TPC-H+V sf40 bare-cuDF (C++) | the same for the vector-embedding queries | [TpchSf40.Q11VectorBruteForce](../cpp/tests/gpu/test_tpchv.cpp) | shad-gpu | 4 |
 | TPC-H sf40 streamed (C++) | the same four queries and the same DuckDB goldens with nothing held resident — a chunked reader under a byte budget, so it answers whether the query fits rather than how fast the operators are | [TpchSf40Streamed.Q1Streamed](../cpp/tests/gpu/test_tpch_streamed.cpp) | manual | 4 |

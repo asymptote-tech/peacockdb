@@ -475,15 +475,15 @@ Not new behaviour either, only newly reached: `extract_year -> INT16` was alread
 place where the DataFusion type is an imperfect proxy for the cuDF one. What is new is a corpus
 query whose unload sees it.
 
-One cell, `tpch/q8` at `tp1-single` — which is the only mode that gets far enough to reach the
-unload, the other four stopping at [#152](joins.md#t152). Pinned at the project by
-`bug_a_year_extracted_from_a_date_is_exported_as_int16` (`gpu_tests/exec_cases.rs`).
-`utf8-everywhere`'s rollout, 2026-09-16, added `tpch` q7 and q9 at the same mode, so three
-registry rows carry it.
-
-**Corpus queries:** `tpch/q7`, `q8` and `q9` — the only corpus queries that extract a date
-field. All three stop here at `tp1-single`; their other four modes stop earlier, at #152.
-Simplest: `select extract(year from o_orderdate) from orders;` (tpch).
+**Done 2026-09-17 by `date-part-return-type`, PR #161; awaiting merge.** The `date_part` arm of
+`build_column_scalar_fn` (`expr.cpp`) casts cuDF's component to the wire's `return_type` when
+the two differ, and refuses a non-integer one by name. Three plan-executor cases
+(`ProjectDatePart{Year,Month,Day}IsInt32`), three node-level schema cases
+(`a_date_part_{year,month,day}_holds_the_int32_the_plan_declares`, `exec_schema_cases.rs`) and
+`a_date_part_answers_in_its_declared_type` (`exec_cases.rs`) hold it. `tpch` q7, q8, q9 at
+`tp1-single` now run the whole device plan and stop at [#220](joins.md#t220); `191` is on no
+registry row. The alternative — DataFusion declaring what cuDF produces — is
+[#239](complete-coverage.md#t239).
 
 <a id="t210"></a>
 ### #210 — a bare decimal literal on the AST path comes back as a Float64 column
