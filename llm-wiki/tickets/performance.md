@@ -131,3 +131,26 @@ plan already sized (one chunk), and concatenates only if it returns several. The
 the plan's, not a second size: 1-4 GiB was the sweet spot and 128 MiB cost 4x, so a batch sized
 below 1 GiB wants re-measuring too. Tests: the device tiers stay byte-identical; a benchmark
 section for the load.
+
+<a id="t242"></a>
+### #242 — the join session calls only the cuDF API that 25.02 and 26.02 share, and leaves 26.02's faster joins unused
+**Priority: low** — nothing measured; the one real candidate may be slower.
+
+The join rewrite (`tasks/join-rewrite-design.md` §3.10) calls nothing that only one cuDF version
+has, so one code path runs on shad-gpu (25.02), the CI image (25.10a) and verda-gpu (26.02). Four
+26.02 APIs could replace a portable step, each as a second path selected by
+`CUDF_VERSION_MAJOR`/`MINOR` (`<cudf/version_config.hpp>`):
+
+- `filtered_join(build, set_as_build_table::LEFT).semi_join(batch)` for LeftSemi, LeftAnti and
+  LeftMark, in place of `hash_join::inner_join(distinct(probe keys))`. It saves the per-batch
+  `distinct`, but cuDF documents the LEFT mode, a `static_multiset`, as the slower one. The
+  likeliest win: tpch q4 q16 q21 q22 and tpcds q10 q16 q35 q69 q94 are build-side semi joins.
+- `filtered_join(build, RIGHT)` for RightSemi and RightAnti, in place of `distinct_hash_join`
+  over the build's distinct keys. Saves one `distinct` per join, at build.
+- `hash_join` plus `filter_join_indices` for Inner, Left and Full with an AST-able residual, in
+  place of gathering the condition's columns and masking the pairs. No corpus query has such a
+  join today.
+- `hash_join(build, nullable_join::NO, cmp, load_factor)` when the build keys hold no NULL.
+
+A second path is tested only where 26.02 runs, so each wants a measured win first: the
+corpus benchmark's join nodes on verda-gpu, each path against the portable one.

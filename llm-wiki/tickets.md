@@ -11,13 +11,13 @@ above its header, which the cost widget links to, so link a ticket as
 standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 242), one ID space across every file.
+New tickets take the next free number (currently 243), one ID space across every file.
 Finished and lapsed tickets move to `archive/archived-tickets.md` (Done / Stale). Numbers
 are never reused, so an old reference still resolves there.
 
 ## Contents
 
-103 open tickets, in file order.
+104 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
@@ -28,7 +28,7 @@ are never reused, so an old reference still resolves there.
 | [`df-upgrade.md`](tickets/df-upgrade.md) | The DataFusion upgrade | 4 | #241 #23 #166 #228 |
 | [`memory.md`](tickets/memory.md) | Memory accounting and budgets | 5 | #182 #179 #177 #167 #229 |
 | [`optimizer.md`](tickets/optimizer.md) | The optimizer project | 16 | #73 #101 #140 #170 #141 #139 #147 #20 #71 #19 #16 #75 #146 #158 #142 #138 |
-| [`performance.md`](tickets/performance.md) | The pre-production performance path | 5 | #150 #149 #148 #231 #232 |
+| [`performance.md`](tickets/performance.md) | The pre-production performance path | 6 | #150 #149 #148 #231 #232 #242 |
 | [`benchmarks.md`](tickets/benchmarks.md) | Wall-time benchmarks | 2 | #226 #69 |
 | [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 4 | #13 #196 #169 #128 |
 | [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 3 | #178 #176 #129 |
