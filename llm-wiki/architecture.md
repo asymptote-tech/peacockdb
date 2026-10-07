@@ -416,18 +416,19 @@ a join, or a limit at the root, reaches this layer as two intervals.
 
 ## Joins
 
-The build side is always left and one batch per lane (the planner inserts a
-`GpuCoalesceAllBatches`); the streamable side is always right. Translation swaps sides where
-DataFusion chose otherwise, remapping the join type and restoring output column order with a
-project.
+The build side is DataFusion's left input and one batch per lane (the planner inserts a
+`GpuCoalesceAllBatches`); the streamable side is its right input. Translation never swaps them
+(`translator/nodes.rs`): which table is left is DataFusion's choice. Its `JoinSelection` swaps
+by size where `JoinType::supports_swap` allows, so `big LEFT JOIN small` can arrive as a Right
+join with `small` on the left, and it never swaps a `LeftMark`.
 
 ### Capability matrix
 
 | Mode | Also covers | What it becomes |
 |---|---|---|
 | **Inner** | multi-key and composite keys; `null_equals_null=true`; a residual filter, which still streams since every emitted row is decided by (build, this batch) | `GpuHashJoin{Inner}`, probe streams, no finish |
-| **Right outer** (probe side preserved) | a DataFusion Left-outer the swap moved | `GpuHashJoin{Right}`, probe streams, no finish — a probe row unmatched in this batch is unmatched everywhere, because the build side is complete before the first call |
-| **Left outer** (build side preserved) | a DataFusion Right-outer after the swap | `GpuHashJoin{Left}`, probe streams **with finish**; the accumulated probe keys are resident until it runs |
+| **Right outer** (probe side preserved) | DataFusion's Right, which includes a Left that `JoinSelection` swapped | `GpuHashJoin{Right}`, probe streams, no finish — a probe row unmatched in this batch is unmatched everywhere, because the build side is complete before the first call |
+| **Left outer** (build side preserved) | DataFusion's Left, which includes a Right that `JoinSelection` swapped | `GpuHashJoin{Left}`, probe streams **with finish**; the accumulated probe keys are resident until it runs |
 | **Full outer** | — | `GpuHashJoin{Full}` — Left's finish, Right's per-call emission |
 | **Build-side semi family** — `LeftSemi` | `LeftAnti`, `LeftMark`; the filtered forms, which take a single-batch probe | probe streams with finish, and **the per-call join disappears**: a probe call is only the key project, so the build side is untouched until the finish consumes it |
 | **Probe-side semi family** — `RightSemi` | `RightAnti` | probe streams, no finish — membership in a complete build side is a per-row question |
@@ -454,13 +455,17 @@ correspondence and the node becomes a `GpuUnion` instead. tpcds q77 is the case 
 web branches stay four lanes hashed on their channel key while the catalog branch is a cross
 join, which asks both its inputs onto one lane, so the union declares 4+1+4.
 
-**Three shapes are refused at plan time.** Left, Right or Full with a residual filter, because
+**Four shapes are refused at plan time.** Left, Right or Full with a residual filter, because
 `execute_hash_join` applies the filter after the outer gather and so demotes the ON condition to
 a WHERE ([#153](tickets/joins.md#t153)) — a live defect in the C++ executor, not a limitation of the
 planner.
 RightSemi or RightAnti with a residual filter, because no swapped `mixed_*` variant exists; the
-fix is orientation rather than code. And a nested-loop join that is neither Inner nor Left,
-which the C++ rejects outright.
+fix is orientation rather than code. A nested-loop join that is neither Inner nor Left,
+which the C++ rejects outright. And a LeftAnti, RightAnti or LeftMark under
+`null_equals_null=false` whose key can be NULL on both sides (`planner/nulls.rs`, [#59](tickets/joins.md#t59),
+[#80](tickets/joins.md#t80)): the C++ hardcodes NULL = NULL for those three, so a NULL key would match.
+Two narrower refusals sit beside them: a join filter that reads the mark column, and a join key
+that is not a bare column.
 
 ### What a streamed probe costs
 
