@@ -75,3 +75,16 @@ cell in it is left without a ticket (`registry.rs:229-240`).
 ## Device workflow
 
 `build-test-shadgpu.sh`, one cycle.
+
+## Completeness signoff — 2026-09-17
+
+Solved under its constraints: the `date_part` arm alone changed, casting cuDF's INT16
+component to the `return_type` the wire names and refusing a non-integer one by name; three
+plan-executor cases red before and green after on the device; the harness pin flipped to the
+positive case; no Rust-side cast, no other arm, no golden moved. `tpch/q7`, `q8`, `q9` at
+`tp1-single` now run the whole device plan and stop on the cpu's join batching beneath the
+merge (#220); `191` is on no row. The neighbour survey read every other arm and found one
+mismatch, `round` over `Float32` (#221, pinned), and three refusals of shapes the cpu answers
+(#222–#224). Shortcuts or bandaids: none. Deviations, each on record: the spec's gtest date
+came from `Date32` literals through a CASE, since cuDF makes no date from an integer (#224);
+#221 sits in `tickets.md`, disabling no cell. `done` waits on CI.

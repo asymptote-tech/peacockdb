@@ -62,13 +62,11 @@ turned on; the evidence #244 waits on.
 
 Schema divergence, end to end. Five of its six tasks merged 2026-09-21 as PRs #158–#160, #162 and
 #163 (utf8-everywhere, decimal-precision-at-export, aggregate-state-types, device-schema-harness,
-driver-output-hook; specs in `../archive/archived-tasks.md`). What remains is the one fix the human
-held back: `date_part`'s device cast, pending a decision whether the return type is fixed on the
-device or in DataFusion's function registry.
+driver-output-hook; specs in `../archive/archived-tasks.md`). What remains is `date_part`'s device cast.
 
-### 1. [`date-part-return-type.md`](date-part-return-type.md) — closes [#191](../tickets/corpus-coverage.md#t191) — state: blocked(done) — PR #161
+### 1. [`date-part-return-type.md`](date-part-return-type.md) — closes [#191](../tickets/corpus-coverage.md#t191) — state: done — PR #161
 
 `expr.cpp`'s `date_part` arm casts cuDF's INT16 to the `return_type` the wire already names. Three
 plan-executor cases, one harness case written first as the pin, `tpch/q7`, `q8`, `q9`. Rebased onto
-the merged chain; its PR targets master. Held by the human: the alternative is a DataFusion-side
-`ScalarUDF` replacement that declares what cuDF produces, which would make the device cast a refusal.
+the merged chain; its PR targets master. The human chose the device cast; the DataFusion-side
+`ScalarUDF` alternative, declaring what cuDF produces, is [#239](../tickets/complete-coverage.md#t239).
