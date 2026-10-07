@@ -81,7 +81,7 @@ so the gap shows as a plan-time refusal naming the type rather than a wrong pad;
 themselves remain to add here.
 
 **Corpus queries:** none in tpch or tpcds. pbench: a time or interval column carried through a
-join (`SELECT d_id, CAST(t_v AS INTERVAL SECOND) iv FROM dim LEFT JOIN tiny ON d_k = t_k`) and a
+join (`SELECT d_id, t.iv FROM dim LEFT JOIN (SELECT t_k, INTERVAL '1' DAY AS iv FROM tiny) t ON d_k = t_k`) and a
 struct column carried through one (`SELECT d_id, d_kstruct FROM dim JOIN tiny ON d_k = t_k`),
 each declared not runnable on this ticket.
 
