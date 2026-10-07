@@ -1,12 +1,12 @@
-"""The 1:1-per-batch operators: filter, project, sort, partial aggregate, limit, unload."""
+"""The 1:1-per-batch operators: filter, project, sort, aggregate, unload."""
 
 from __future__ import annotations
 
-from ..batch import CallStats
-from ..executors import ExecExecutor, UnloadExecutor
+from ..engine.batch import CallStats
+from ..engine.executors import ExecExecutor, UnloadExecutor
 from . import aggregates
 from .expressions import Expr, project as project_exprs
-from .frame import PandasBatch, no_scratch, scratch_of
+from .frame import PandasBatch, no_scratch, scratch_of, sort_frame
 
 
 class _Exec(ExecExecutor):
@@ -22,9 +22,11 @@ class _Exec(ExecExecutor):
 class FilterExec(_Exec):
     """`cudf::apply_boolean_mask`. The mask is one expression over the input."""
 
-    def __init__(self, predicate: Expr, name: str = "filter"):
+    def __init__(self, predicate: Expr, name: str = "filter", projection=None):
         self.predicate = predicate
         self.name = name
+        #: `GpuFilter.projection`: the columns kept after the mask, as `Alias`es naming them
+        self.projection = projection
 
     def exec(self, batch: PandasBatch):
         frame = batch.consume()
@@ -32,6 +34,8 @@ class FilterExec(_Exec):
         # fillna(False): a null predicate is not true, which is SQL's rule and cuDF's.
         applied = mask.fillna(False).astype(bool)
         out = frame[applied]
+        if self.projection is not None:
+            out = project_exprs(out, self.projection)
         return PandasBatch(out, f"{batch.tag}>{self.name}"), scratch_of(applied.to_frame())
 
 
@@ -51,9 +55,9 @@ class ProjectExec(_Exec):
 class SortExec(_Exec):
     """Per-batch sort, optional per-batch top-N.
 
-    `ascending` and `na_position` are both passed explicitly — they are `cudf::order` and
-    `cudf::null_order`, two separate arguments, and the sort here must agree with the merge
-    in `accumulators.py` or a k-way merge would order differently from the sort feeding it.
+    `ascending` and `nulls_first` are both passed explicitly — they are `cudf::order` and
+    `cudf::null_order`, two separate arguments — and the sort is `sort_frame`, the one the
+    merges in `accumulators.py` use: a k-way merge must order as the sort feeding it did.
     """
 
     def __init__(self, by: list[str], ascending=None, nulls_first=False, fetch=None, name="sort"):
@@ -65,12 +69,7 @@ class SortExec(_Exec):
 
     def exec(self, batch: PandasBatch):
         frame = batch.consume()
-        out = frame.sort_values(
-            by=self.by,
-            ascending=self.ascending,
-            na_position="first" if self.nulls_first else "last",
-            kind="stable",
-        )
+        out = sort_frame(frame, self.by, self.ascending, self.nulls_first)
         sorted_full = out
         if self.fetch is not None:
             out = out.iloc[: self.fetch]
@@ -78,28 +77,16 @@ class SortExec(_Exec):
         return PandasBatch(out, f"{batch.tag}>{self.name}"), scratch_of(sorted_full.iloc[len(out):])
 
 
-class PartialAggregateExec(_Exec):
-    """One batch in, its init state out — the `GpuAggregate` that starts the sequence.
+class PlanAggregateExec(_Exec):
+    """An engine `GpuAggregate`: one batch in, the plan's calls over it out — finalized too
+    where the plan gives it a `final`, a single-phase aggregate over one batch."""
 
-    `grouping_sets` present means this node expands: one groupby per set over the same
-    batch, each tagged with its id, concatenated into a single output batch. It is a
-    construction-time property of the node rather than a per-call decision, and the two
-    paths are separate functions in `aggregates.py`.
-    """
-
-    def __init__(self, keys: list[str], aggs: list[aggregates.Agg], name: str = "agg_partial",
-                 grouping_sets=None):
-        self.keys = keys
-        self.aggs = aggs
+    def __init__(self, body: aggregates.PlanAggregate, name: str):
+        self.body = body
         self.name = name
-        self.grouping_sets = grouping_sets
 
     def exec(self, batch: PandasBatch):
-        frame = batch.consume()
-        if self.grouping_sets is None:
-            out = aggregates.partial(frame, self.keys, self.aggs)
-        else:
-            out = aggregates.partial_over_sets(frame, self.keys, self.aggs, self.grouping_sets)
+        out = self.body.emit(self.body.aggregate(batch.consume()))
         return PandasBatch(out, f"{batch.tag}>{self.name}"), no_scratch()
 
 

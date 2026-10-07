@@ -38,11 +38,13 @@ mark ignore the flag and stay at EQUAL, as the C++ does (#80, #59).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
-from ..batch import CallStats
-from ..executors import JoinExecutor
+from ..engine.batch import CallStats
+from ..engine.executors import JoinExecutor
 from . import join_types as J
 from .frame import PandasBatch, concatenate, no_scratch, scratch_of, normalize
 from .join_types import JoinType, capability, joined_names, joined_projection
@@ -108,6 +110,9 @@ class _PandasJoin(JoinExecutor):
     def _take_build(self, frame: pd.DataFrame) -> pd.DataFrame:
         return frame.copy()
 
+    def _take_probe(self, frame: pd.DataFrame) -> pd.DataFrame:
+        return frame
+
     def probe_and_fetch(self, batch: PandasBatch):
         if self.build is None:
             raise AssertionError(f"{self.name}: probed before set_build")
@@ -118,12 +123,13 @@ class _PandasJoin(JoinExecutor):
                 f"({self._capability().reason}); the planner inserts GpuCoalesceAllBatches "
                 "under the probe side"
             )
-        probe = batch.consume()
+        probe = self._take_probe(batch.consume())
         self._probe_columns = list(probe.columns)
         self._transients = []
         frames = self._probe(probe)
         return (
-            [PandasBatch(f, f"({self.name}#{self.probe_calls}⋈{batch.tag})") for f in frames],
+            [PandasBatch(self._emit(f), f"({self.name}#{self.probe_calls}⋈{batch.tag})")
+             for f in frames],
             scratch_of(*self._transients),
         )
 
@@ -131,7 +137,11 @@ class _PandasJoin(JoinExecutor):
         outputs = self._finish()
         # Nothing stays resident after the finish, so the accountant can drop this executor.
         self.build = None
-        return [PandasBatch(f, f"({self.name}⋈finish)") for f in outputs], no_scratch()
+        return [PandasBatch(self._emit(f), f"({self.name}⋈finish)") for f in outputs], no_scratch()
+
+    def _emit(self, frame: pd.DataFrame) -> pd.DataFrame:
+        """An output frame as the node hands it on."""
+        return frame
 
     def _probe(self, probe: pd.DataFrame) -> list[pd.DataFrame]:
         raise NotImplementedError
@@ -142,6 +152,9 @@ class _PandasJoin(JoinExecutor):
 
 class HashJoin(_PandasJoin):
     """`CudfHashJoin`: equi-join on key pairs, with an optional residual filter."""
+
+    #: the column a LEFT_MARK finish appends to the build rows
+    MARK = "mark"
 
     def __init__(
         self,
@@ -296,7 +309,7 @@ class HashJoin(_PandasJoin):
         if self.join_type is JoinType.LEFT_ANTI:
             return [normalize(build[~self.matched])]
         if self.join_type is JoinType.LEFT_MARK:
-            return [normalize(build.assign(mark=self.matched))]
+            return [normalize(build.assign(**{self.MARK: self.matched}))]
         # LEFT / FULL: unmatched build rows, probe columns null-padded.
         out = build[~self.matched]
         for column in self._pad_columns(build):
@@ -389,3 +402,73 @@ class NestedLoopJoin(_PandasJoin):
         for column in probe.columns:
             padded[column] = np.nan
         return [normalize(concatenate([matches, padded[list(matches.columns)]]))]
+
+
+def own_output(join_type: JoinType, build_width: int, probe_width: int) -> tuple[int | None, ...]:
+    """What a join emits before its projection, as positions in `[build…, probe…]`: build
+    alone for a left semi or anti join, build and the mark (`None`) for a mark join, probe
+    alone for a right semi or anti join, both sides otherwise."""
+    build = tuple(range(build_width))
+    probe = tuple(range(build_width, build_width + probe_width))
+    if join_type in (JoinType.LEFT_SEMI, JoinType.LEFT_ANTI):
+        return build
+    if join_type is JoinType.LEFT_MARK:
+        return build + (None,)
+    if join_type in (JoinType.RIGHT_SEMI, JoinType.RIGHT_ANTI):
+        return probe
+    return build + probe
+
+
+@dataclass(frozen=True)
+class Positional:
+    """An engine join's columns, which it addresses by position.
+
+    `joined` names the build columns and then the probe columns — unique across both sides,
+    which is what lets a residual read two columns both called `k` — and the join renames
+    its inputs to them on arrival. `projection` picks, by ordinal, from the join type's own
+    output — `[build…, probe…]`, or build alone for LEFT_SEMI/ANTI, build and the mark for
+    LEFT_MARK, probe alone for RIGHT_SEMI/ANTI — and `output` names what it picked.
+    """
+
+    joined: tuple[str, ...]
+    build_width: int
+    projection: tuple[int, ...] | None
+    output: tuple[str, ...]
+
+
+class _PositionalMixin:
+    """Renames the inputs to `Positional.joined` and shapes every output frame."""
+
+    #: never one of `joined`, which are an engine schema's names
+    MARK = "__mark__"
+
+    def _take_build(self, frame: pd.DataFrame) -> pd.DataFrame:
+        names = self.columns.joined[: self.columns.build_width]
+        return super()._take_build(frame.set_axis(list(names), axis=1))
+
+    def _take_probe(self, frame: pd.DataFrame) -> pd.DataFrame:
+        return frame.set_axis(list(self.columns.joined[self.columns.build_width :]), axis=1)
+
+    def _emit(self, frame: pd.DataFrame) -> pd.DataFrame:
+        picked = frame if self.columns.projection is None else frame.iloc[:, list(self.columns.projection)]
+        return normalize(picked.set_axis(list(self.columns.output), axis=1))
+
+
+class PositionalHashJoin(_PositionalMixin, HashJoin):
+    """`HashJoin` over an engine plan's positions: keys and residual in `joined` names."""
+
+    def __init__(self, columns: Positional, *args, **kwargs):
+        self.columns = columns
+        super().__init__(*args, probe_schema=list(columns.joined[columns.build_width :]), **kwargs)
+
+
+class PositionalNestedLoopJoin(_PositionalMixin, NestedLoopJoin):
+    def __init__(self, columns: Positional, *args, **kwargs):
+        self.columns = columns
+        super().__init__(*args, **kwargs)
+
+
+class PositionalCrossJoin(_PositionalMixin, CrossJoin):
+    def __init__(self, columns: Positional, *args, **kwargs):
+        self.columns = columns
+        super().__init__(*args, **kwargs)

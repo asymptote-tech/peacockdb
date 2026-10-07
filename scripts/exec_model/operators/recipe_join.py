@@ -30,8 +30,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ..batch import CallStats
-from ..executors import JoinExecutor
+from ..engine.batch import CallStats
+from ..engine.executors import JoinExecutor
 from .frame import PandasBatch, no_scratch
 from . import expressions
 from . import join_types as J

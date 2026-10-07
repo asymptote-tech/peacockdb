@@ -26,7 +26,8 @@ class Expr:
         raise NotImplementedError
 
     def name(self) -> str:
-        raise NotImplementedError
+        """The output column's name: an `Alias`'s, which is how a plan names every output."""
+        raise TypeError(f"{self} is unnamed; a projected expression is an Alias")
 
 
 @dataclass(frozen=True)
@@ -38,20 +39,10 @@ class Col(Expr):
             raise KeyError(f"no column {self.column!r} in {list(frame.columns)}")
         return frame[self.column]
 
-    def name(self) -> str:
-        return self.column
-
 
 @dataclass(frozen=True)
 class Lit(Expr):
     value: object
-
-    def name(self) -> str:
-        # A date renders as a date: `Timestamp('1994-01-01 00:00:00')` is the same value
-        # said at four times the length, and these names end up in plan goldens.
-        if isinstance(self.value, pd.Timestamp):
-            return self.value.date().isoformat()
-        return repr(self.value)
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         # Broadcast, not materialized element by element: `[value] * len(frame)` builds a
@@ -108,7 +99,6 @@ class Binary(Expr):
     op: str
     left: Expr
     right: Expr
-    alias: str | None = None
 
     def __post_init__(self):
         if self.op not in _BINARY:
@@ -121,20 +111,13 @@ class Binary(Expr):
             return three_valued(result, left, right)
         return result
 
-    def name(self) -> str:
-        return self.alias or f"({self.left.name()} {self.op} {self.right.name()})"
-
 
 @dataclass(frozen=True)
 class Not(Expr):
     inner: Expr
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         return ~self.inner.evaluate(frame)
-
-    def name(self) -> str:
-        return self.alias or f"(not {self.inner.name()})"
 
 
 @dataclass(frozen=True)
@@ -142,13 +125,17 @@ class IsNotNull(Expr):
     """The predicate #137 wants the planner to insert under a shuffle."""
 
     inner: Expr
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         return self.inner.evaluate(frame).notna()
 
-    def name(self) -> str:
-        return self.alias or f"({self.inner.name()} is not null)"
+
+@dataclass(frozen=True)
+class IsNull(Expr):
+    inner: Expr
+
+    def evaluate(self, frame: pd.DataFrame) -> pd.Series:
+        return self.inner.evaluate(frame).isna()
 
 
 @dataclass(frozen=True)
@@ -156,15 +143,11 @@ class Sqrt(Expr):
     """`cudf::unary_operator::SQRT`, which the IR gains for the stddev finalize."""
 
     inner: Expr
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         import numpy as np
 
         return pd.Series(np.sqrt(self.inner.evaluate(frame).to_numpy(dtype="float64")))
-
-    def name(self) -> str:
-        return self.alias or f"sqrt({self.inner.name()})"
 
 
 @dataclass(frozen=True)
@@ -180,7 +163,6 @@ class Like(Expr):
     inner: Expr
     pattern: str
     negated: bool = False
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         regex = "^" + "".join(
@@ -189,11 +171,6 @@ class Like(Expr):
         ) + "$"
         matched = self.inner.evaluate(frame).str.match(regex, na=False)
         return ~matched if self.negated else matched
-
-    def name(self) -> str:
-        if self.alias:
-            return self.alias
-        return f"({self.inner.name()} {'not ' if self.negated else ''}like {self.pattern!r})"
 
 
 @dataclass(frozen=True)
@@ -204,14 +181,10 @@ class DatePart(Expr):
 
     field: str
     inner: Expr
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         values = pd.to_datetime(self.inner.evaluate(frame))
         return getattr(values.dt, self.field.lower())
-
-    def name(self) -> str:
-        return self.alias or f"date_part({self.field}, {self.inner.name()})"
 
 
 @dataclass(frozen=True)
@@ -222,14 +195,10 @@ class Substring(Expr):
     inner: Expr
     start: int
     length: int
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         begin = self.start - 1
         return self.inner.evaluate(frame).str.slice(begin, begin + self.length)
-
-    def name(self) -> str:
-        return self.alias or f"substr({self.inner.name()}, {self.start}, {self.length})"
 
 
 @dataclass(frozen=True)
@@ -243,7 +212,6 @@ class Round(Expr):
 
     inner: Expr
     places: int = 0
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         import numpy as np
@@ -253,9 +221,6 @@ class Round(Expr):
         return pd.Series(np.sign(values) * np.floor(np.abs(values) * scale + 0.5) / scale,
                          index=frame.index)
 
-    def name(self) -> str:
-        return self.alias or f"round({self.inner.name()}, {self.places})"
-
 
 @dataclass(frozen=True)
 class Cast(Expr):
@@ -264,13 +229,16 @@ class Cast(Expr):
 
     inner: Expr
     dtype: str
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
-        return self.inner.evaluate(frame).astype(self.dtype)
+        import numpy as np
 
-    def name(self) -> str:
-        return self.alias or f"cast({self.inner.name()} as {self.dtype})"
+        values = self.inner.evaluate(frame)
+        if self.dtype == "int64" and values.isna().any():
+            # An integer column holding a null is float64 here (`frame.py`): the cast
+            # truncates what it can and keeps the null, where `astype` would refuse the batch.
+            return np.trunc(values.astype("float64"))
+        return values.astype(self.dtype)
 
 
 @dataclass(frozen=True)
@@ -278,13 +246,9 @@ class Upper(Expr):
     """`upper(col)` — `cudf::strings::to_upper` (`expr.cpp` ~L730)."""
 
     inner: Expr
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         return self.inner.evaluate(frame).str.upper()
-
-    def name(self) -> str:
-        return self.alias or f"upper({self.inner.name()})"
 
 
 @dataclass(frozen=True)
@@ -293,13 +257,9 @@ class Lower(Expr):
     handles at ~L730. TPC-DS q99 sorts call centres by their lowercased name."""
 
     inner: Expr
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         return self.inner.evaluate(frame).str.lower()
-
-    def name(self) -> str:
-        return self.alias or f"lower({self.inner.name()})"
 
 
 @dataclass(frozen=True)
@@ -312,7 +272,6 @@ class Concat(Expr):
     """
 
     parts: tuple
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         result = None
@@ -321,9 +280,6 @@ class Concat(Expr):
             result = piece if result is None else result + piece
         return result
 
-    def name(self) -> str:
-        return self.alias or f"concat({', '.join(part.name() for part in self.parts)})"
-
 
 @dataclass(frozen=True)
 class Coalesce(Expr):
@@ -331,7 +287,6 @@ class Coalesce(Expr):
     fold from the last argument back (~L754)."""
 
     parts: tuple
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         result = self.parts[-1].evaluate(frame)
@@ -339,9 +294,6 @@ class Coalesce(Expr):
             values = part.evaluate(frame)
             result = values.where(values.notna(), result)
         return result
-
-    def name(self) -> str:
-        return self.alias or f"coalesce({', '.join(part.name() for part in self.parts)})"
 
 
 @dataclass(frozen=True)
@@ -356,7 +308,6 @@ class Case(Expr):
 
     whens: tuple           # ((condition, then), …)
     otherwise: Expr
-    alias: str | None = None
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         result = self.otherwise.evaluate(frame)
@@ -364,12 +315,6 @@ class Case(Expr):
             mask = condition.evaluate(frame).fillna(False).astype(bool)
             result = then.evaluate(frame).where(mask, result)
         return result
-
-    def name(self) -> str:
-        if self.alias:
-            return self.alias
-        arms = " ".join(f"WHEN {c.name()} THEN {t.name()}" for c, t in self.whens)
-        return f"CASE {arms} ELSE {self.otherwise.name()} END"
 
 
 @dataclass(frozen=True)
@@ -414,4 +359,9 @@ def columns_of(expr: Expr) -> list[str]:
 
 def project(frame: pd.DataFrame, exprs: list[Expr]) -> pd.DataFrame:
     """Build a new frame from an expression list — column order is the list order."""
-    return pd.DataFrame({expr.name(): expr.evaluate(frame).to_numpy() for expr in exprs})
+    # `.array`, not `.to_numpy()`: both drop the index, but only the array keeps a nullable
+    # dtype — a comparison's `boolean` would come out object, holding NA no `&` accepts.
+    # The index keeps the row count when the list is empty: `SELECT 1 FROM t` projects no
+    # column of `t`, and the rows it counts must survive to the cross join above (tpcds q9).
+    return pd.DataFrame({expr.name(): expr.evaluate(frame).array for expr in exprs},
+                        index=pd.RangeIndex(len(frame)))

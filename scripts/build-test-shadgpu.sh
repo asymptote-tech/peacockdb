@@ -29,7 +29,9 @@
 # behind a flag: the rows are derived from the run that wrote the tree above, and a flag
 # someone has to remember is a way for the two to silently disagree about which measurement
 # they describe. Truncated at the start of every run — appending across runs would mix
-# allocators and builds under one heading, which record.rs refuses anyway.
+# allocators and builds under one heading, which record.rs refuses anyway. Not in git:
+# --pull-benchmarks publishes it to the `calibration` bucket, a file per dataset keyed by its
+# sha256, and pins that sha256 in testdata/calibration/records.sha256 beside the tree.
 
 # pipefail so a failing cargo in stage_cargo_test_binary's pipeline reports as a build
 # failure, not a missing binary. The remote scripts do not inherit it: see launch_remote.
@@ -38,6 +40,8 @@ set -euo pipefail
 # Toolchain pinning, CARGO_TARGET_DIR, REMOTE/REMOTE_REPO, resilient_rsync,
 # stage_cargo_test_binary.
 . "$(dirname "${BASH_SOURCE[0]}")/lib/shadgpu-env.sh"
+# The calibration bucket, its endpoint and the pin --pull-benchmarks writes.
+. "$(dirname "${BASH_SOURCE[0]}")/lib/calibration-bucket.sh"
 
 # The glibc the binaries link against is this host's, and the host patches them to a
 # prefix of the same version: 2.35 from a 22.04 box, 2.39 from a 24.04 one. Read here,
@@ -102,7 +106,8 @@ Usage: build-test-shadgpu.sh [flags]
   --run-benchmarks            attached measurement run
   --run-benchmarks-detached   setsid on the host; poll with --benchmark-status
   --benchmark-status          read-only: still going / finished / log tail
-  --pull-benchmarks           fetch testdata/benchmark-results/ and the calibration record
+  --pull-benchmarks           fetch testdata/benchmark-results/ and the calibration record;
+                              publish the record to S3 and pin it, a whole passing run only
 
   --all                       = --build --push-binaries --patch --run
 
@@ -110,7 +115,9 @@ Knobs read from the environment, not flags:
   PCK_TEST_FILTER=<sub>       cargo-test name filter forwarded to the rust binaries
 
 --all deliberately does not imply the benchmark phases: that is what keeps a
-measurement out of the merge gate.
+measurement out of the merge gate. A pull's record is published under its own sha256, so
+nothing in the bucket is replaced: committing records.sha256 beside the tree keeps the run,
+and `git checkout` of it drops the run.
 
 Nsight captures are scripts/create_nsys_profile.sh, which runs against the binaries
 this script pushes.
@@ -635,6 +642,57 @@ if [ "$BENCH_STATUS" -eq 1 ]; then
   report_status benchmark || status_rc=$?
 fi
 
+# publish_record — the pulled record into the bucket by content, a file per dataset, and each
+# sha256 into the pin. Only a whole, plain, passing run: the record must still be the host's (no
+# run started since the pull), the run must have exited 0 (a failing case appends its rows before
+# it panics), and split_record.py refuses a captured run and one short of, or beyond, what this
+# checkout declares. Uploaded through the host's CLI, read back, then pinned and moved where
+# fetch_record.sh puts it, so the pin never names an object the bucket lacks.
+publish_record() {
+  local here host names name sha key landed s3
+  here=$(sha256sum "testdata/$BENCH_RECORD_REL" | cut -d' ' -f1)
+  host=$(ssh "$REMOTE" bash <<EOF
+    sha256sum $REMOTE_REPO/testdata/$BENCH_RECORD_REL | cut -d' ' -f1
+    id=\$(cat $phase_id 2>/dev/null || true)
+    grep "^\$id " $phase_rc 2>/dev/null || echo "\$id none"
+EOF
+  ) || die "reading the record's state on $REMOTE failed (above); nothing was published."
+  if [ "$(sed -n 1p <<< "$host")" != "$here" ]; then
+    die "not published: testdata/$BENCH_RECORD_REL is not the record on $REMOTE any more —
+     a run has started since the pull. The tree came home."
+  fi
+  if [ "$(sed -n 2p <<< "$host" | cut -d' ' -f2)" != 0 ]; then
+    die "not published: the run that wrote the record ($(sed -n 2p <<< "$host")) did not exit 0,
+     and a failing case appends its rows before it panics. The tree came home."
+  fi
+  PUBLISH_DIR=$(mktemp -d)
+  trap 'rm -rf "$PUBLISH_DIR"' EXIT
+  names=$(python3 scripts/calibration/split_record.py --record "testdata/$BENCH_RECORD_REL" \
+            --cases peacockdb-core/tests/common/corpus_benchmark_cases.inc \
+            --out-dir "$PUBLISH_DIR") \
+    || die "not published (the reason is above). The tree came home."
+  s3=$(printf '%q ' "$REMOTE_AWS" "${CALIBRATION_S3[@]}")
+  for name in $names; do
+    sha=$(sha256sum "$PUBLISH_DIR/$name/records.tsv" | cut -d' ' -f1)
+    key=$(record_key "$name" "$sha")
+    ssh "$REMOTE" "${s3}s3 cp --content-type text/tab-separated-values - s3://$CALIBRATION_BUCKET/$key" \
+      < "$PUBLISH_DIR/$name/records.tsv" || die "uploading $key through $REMOTE failed (above)."
+    landed=$(ssh "$REMOTE" bash -o pipefail <<EOF
+${s3}s3 cp s3://$CALIBRATION_BUCKET/$key - | sha256sum | cut -d' ' -f1
+EOF
+    ) || die "reading s3://$CALIBRATION_BUCKET/$key back failed (above); it is not pinned."
+    [ "$landed" = "$sha" ] || die "s3://$CALIBRATION_BUCKET/$key reads back as $landed, not the
+     $sha sent; it is not pinned. Pull again."
+    { awk -v path="$name/records.tsv" '$2 != path' "$CALIBRATION_PIN"
+      printf '%s  %s\n' "$sha" "$name/records.tsv"; } | LC_ALL=C sort -k2 > "$CALIBRATION_PIN.new"
+    mv "$CALIBRATION_PIN.new" "$CALIBRATION_PIN"
+    mkdir -p "testdata/calibration/$name"
+    mv "$PUBLISH_DIR/$name/records.tsv" "testdata/calibration/$name/records.tsv"
+    echo "==> s3://$CALIBRATION_BUCKET/$key, pinned for $name"
+  done
+  echo "==> commit $CALIBRATION_PIN beside the tree to keep this run; check it out to drop it"
+}
+
 if [ "$PULL_BENCH" -eq 1 ]; then
   # The detached workflow is two invocations, and this is the second one. All three states
   # that are not "finished" refuse: a pull mid-run brings home a partial tree that looks
@@ -674,7 +732,11 @@ EOF
   echo "==> fetched $trees benchmark records"
   # The record beside the tree; the captures are create_nsys_profile.sh's.
   record_home=1
-  pull_one "$BENCH_RECORD_REL" "the calibration record" || record_home=0
+  pull_one "$BENCH_RECORD_REL" "the calibration record" || {
+    [ $? -eq 1 ] || die "pulling testdata/$BENCH_RECORD_REL from $REMOTE failed, so the copy
+     here is broken and nothing was published. Pull again."
+    record_home=0
+  }
   # A pull that moved neither product is a failure and not an empty success: the two ways
   # it happens — a run that measured nothing, a host tree someone cleared — both leave the
   # caller with whatever the last pull left, which is indistinguishable from fresh data.
@@ -692,6 +754,9 @@ EOF
   done
   if [ "$record_home" -eq 1 ]; then
     echo "      testdata/$BENCH_RECORD_REL ($(($(grep -vc '^#' "testdata/$BENCH_RECORD_REL") - 1)) rows)"
+    publish_record
+  else
+    echo "==> no record came home, so none is published"
   fi
 fi
 
