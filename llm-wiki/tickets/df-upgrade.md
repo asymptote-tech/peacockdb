@@ -130,3 +130,22 @@ it: append an `ordinal` to `GroupingSetMask` (`gpu_plan.fbs`), written from Data
 grouping sets. #65's `grouping_id_column` packs it above the key bits and takes the width from
 the plan's declared type rather than from `nkeys`, since the width is no longer a function of
 the key count alone. The payload golden regenerates for every rollup.
+
+<a id="t247"></a>
+### #247 — DataFusion 45 refuses or mis-answers seven subquery shapes
+Each is DataFusion 45's own limit, so both engines refuse it (or, for the last, both answer the
+same wrong thing), and the fix is an upgrade or a rewrite of ours, not executor work. Checked
+against DataFusion 45's source by the chain-J review (2026-10-07); pbench tables.
+
+| shape | example | DataFusion 45 |
+|---|---|---|
+| uncorrelated `EXISTS` / `NOT EXISTS` | `SELECT * FROM tiny WHERE EXISTS (SELECT 1 FROM sub)` | refused: `build_join` returns `None` without a correlation, and the physical planner refuses the `Exists` left in the filter |
+| `IN` / `EXISTS` as a projected value | `SELECT f_k IN (SELECT s_y FROM sub) FROM fact` | refused: subqueries decorrelate only inside a filter |
+| a tuple `IN` / `NOT IN` | `... WHERE (f_k, f_qty) NOT IN (SELECT s_y, s_z FROM sub)` | refused: "InSubquery should only return one column" |
+| `ANY` / `ALL` over a subquery | `... WHERE f_k <> ALL (SELECT s_y FROM sub)` | not planned (inferred) |
+| `LATERAL` | `SELECT * FROM tiny t, LATERAL (SELECT * FROM dim WHERE d_k = t.t_k) x` | refused (inferred: no lateral decorrelation) |
+| a correlation under a `LIMIT`, union, sort or window | `... WHERE f_k IN (SELECT s_y FROM sub WHERE s_z = f_qty LIMIT 1)` | refused: `can_pull_up = false` (`decorrelate.rs:126-151`) |
+| a scalar subquery returning several rows | `SELECT (SELECT s_y FROM sub) FROM tiny` | wrong: no single-row check, so both engines agree on an answer SQL forbids; DuckDB errors |
+
+**Corpus queries:** none. Each line above is the test once an upgrade lands.
+

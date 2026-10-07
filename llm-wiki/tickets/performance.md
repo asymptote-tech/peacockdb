@@ -154,3 +154,20 @@ has, so one code path runs on shad-gpu (25.02), the CI image (25.10a) and verda-
 
 A second path is tested only where 26.02 runs, so each wants a measured win first: the
 corpus benchmark's join nodes on verda-gpu, each path against the portable one.
+
+<a id="t248"></a>
+### #248 — three join shapes run on one lane or skewed after the rewrite
+The chain-J join rewrite answers all three correctly; each costs parallelism.
+
+- **`CollectLeft` is merged, not broadcast.** A join DataFusion plans `CollectLeft` has both sides
+  merged to one lane (`translator/nodes.rs`, the not-co-partitioned arm). The join session is the
+  broadcast's foundation; the planner and driver work is [#140](optimizer.md#t140).
+- **A Full join's NULL keys are not dropped.** #137 filters NULL keys only on a side whose
+  unmatched rows are never emitted; a Full join emits both sides', so every NULL-key row of both
+  sides still hashes to one lane.
+- **A keyless condition outside the hoistable form** (`fact JOIN tiny ON abs(f_qty - t_v) < 3`:
+  `abs` takes the column path) runs as a chunked cross product, |build| × |probe| pairs, on one lane.
+
+**Corpus queries:** pbench's collapse readings (`tasks/pbench.md`) and `dim FULL JOIN fact ON d_k = f_k`
+at tp4.
+

@@ -346,3 +346,67 @@ bytes. Test: a join of 10000 matches through one probe call answers one batch, n
 Every `.cpu.txt` section with a join regenerates. After it, re-run the `220` cells at `tp1-single`
 on a device; one that fails past the join gets a fresh ticket.
 
+## Complete Join Coverage
+
+Join shapes the chain-J rewrite leaves refused or wrong, each with a pbench query that shows it.
+Not part of the bulk rewrite above: each is its own fix.
+
+<a id="t243"></a>
+### #243 — the cpu treats -0.0 and 0.0, and NaNs of different bits, as different keys
+A float join or group key equates `-0.0` with `0.0` and every NaN with every other NaN on the
+device and in DuckDB, and does not on the cpu, so the two engines answer a float-keyed join or
+`GROUP BY` differently wherever those values occur. At the tp4 modes the device can also disagree
+with itself.
+
+Measured on 2026-10-07 over keys `0.0, -0.0, NaN, -NaN, NULL, 1.0` (scratch probes, parquet
+written by DuckDB):
+
+| engine | `-0.0 = 0.0` | `NaN = NaN` | `NaN = -NaN` | groups of the six |
+|---|---|---|---|---|
+| DuckDB 1.5.4 | yes | yes | yes | 4 |
+| DataFusion 45, 1 and 4 partitions, Partitioned and CollectLeft | no | yes (same bits) | no | 6 |
+| cuDF 25.02 and 26.02 (`inner_join`, `hash_join`, `distinct_hash_join`, `groupby`) | yes | yes | yes | 4 |
+
+DataFusion compares and hashes floats by their bits; cuDF and DuckDB by value, with NaNs equal.
+The lane rule adds a third behaviour: comet's hasher, the cpu's lane rule and the one the device
+kernel must match, maps `-0.0` to `0` but hashes a NaN by its raw bits
+(`datafusion-comet-spark-expr-0.6.0/src/hash_funcs/utils.rs:78-105`). So at tp4 `NaN` and `-NaN`
+land in different lanes and stop matching or grouping on the device, while tp1 merges them
+(inferred from the hasher's code, not run).
+
+Spark avoids all three by normalizing float keys before a join or an aggregate
+(`NormalizeFloatingNumbers`: `-0.0` to `0.0`, every NaN to one canonical NaN), so its hash only
+ever sees canonical values. The fix here is the same: the planner normalizes every float join and
+group key under the key, on both engines, and the lane rule then never sees `-0.0` or a
+non-canonical NaN.
+
+**Corpus queries:** none in tpch or tpcds, whose float columns hold no `-0.0` or NaN. pbench's
+`float64-key-join`, `float64-key-group` and `float32-key-group` show it (`tasks/pbench.md`); they
+land as commented-out `corpus_query!` lines naming this ticket. Pins: `bug_` cases in the operator
+harness for a float-keyed join and a float-keyed aggregate, cpu against device (`repartition-keys`).
+
+<a id="t245"></a>
+### #245 — a nested-type key cannot cross a shuffle
+A join or `GROUP BY` keyed on a struct or list column is refused at run time at the tp4 modes, on
+both engines: comet's hasher has no struct or list arm, and neither has the device kernel
+(`cpp/src/spark_hash_partition.cu`). The tp1 modes, which do not shuffle, answer.
+
+The lane rule needs a definition for nested values that both engines share — hashing each child
+in order, as Spark does for a struct, with a list's elements in order — and the conformance gate
+extended to it.
+
+**Corpus queries:** none in tpch or tpcds. pbench's `struct-key-join`
+(`SELECT f_id, d_id FROM fact JOIN dim ON f_kstruct = d_kstruct`), its cells off on this ticket.
+
+<a id="t246"></a>
+### #246 — a `LIKE` whose pattern is a column is refused on the device
+`expr.cpp:873-877` takes a `LIKE` pattern only as a literal. A join condition that matches one
+side's strings against the other side's patterns — a nested loop, since it has no key — is
+refused on the device; the cpu answers. The same holds for any `LIKE` over two columns.
+
+cuDF's `strings::like` takes a scalar pattern; a column of patterns needs a per-row arm (one
+`like` per distinct pattern, scattered back, or a regex per row).
+
+**Corpus queries:** none in tpch or tpcds. pbench's `like-column-pattern`
+(`SELECT d_id, t_id FROM dim JOIN tiny ON d_name LIKE t_pat`), its device cells off on this ticket.
+

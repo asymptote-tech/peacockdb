@@ -49,38 +49,3 @@ outer computes each count from the rows carrying its own gid. That needs a new r
 node, which is why it is a ticket rather than a planner tweak. Not [#65](corpus-coverage.md#t65), whose gid is the
 ROLLUP/CUBE `__grouping_id` — the two would coexist as separate columns. Until it lands the
 planner refuses the shape at plan time.
-
-<a id="t243"></a>
-### #243 — the cpu treats -0.0 and 0.0, and NaNs of different bits, as different keys
-A float join or group key equates `-0.0` with `0.0` and every NaN with every other NaN on the
-device and in DuckDB, and does not on the cpu, so the two engines answer a float-keyed join or
-`GROUP BY` differently wherever those values occur. At the tp4 modes the device can also disagree
-with itself.
-
-Measured on 2026-10-07 over keys `0.0, -0.0, NaN, -NaN, NULL, 1.0` (scratch probes, parquet
-written by DuckDB):
-
-| engine | `-0.0 = 0.0` | `NaN = NaN` | `NaN = -NaN` | groups of the six |
-|---|---|---|---|---|
-| DuckDB 1.5.4 | yes | yes | yes | 4 |
-| DataFusion 45, 1 and 4 partitions, Partitioned and CollectLeft | no | yes (same bits) | no | 6 |
-| cuDF 25.02 and 26.02 (`inner_join`, `hash_join`, `distinct_hash_join`, `groupby`) | yes | yes | yes | 4 |
-
-DataFusion compares and hashes floats by their bits; cuDF and DuckDB by value, with NaNs equal.
-The lane rule adds a third behaviour: comet's hasher, the cpu's lane rule and the one the device
-kernel must match, maps `-0.0` to `0` but hashes a NaN by its raw bits
-(`datafusion-comet-spark-expr-0.6.0/src/hash_funcs/utils.rs:78-105`). So at tp4 `NaN` and `-NaN`
-land in different lanes and stop matching or grouping on the device, while tp1 merges them
-(inferred from the hasher's code, not run).
-
-Spark avoids all three by normalizing float keys before a join or an aggregate
-(`NormalizeFloatingNumbers`: `-0.0` to `0.0`, every NaN to one canonical NaN), so its hash only
-ever sees canonical values. The fix here is the same: the planner normalizes every float join and
-group key under the key, on both engines, and the lane rule then never sees `-0.0` or a
-non-canonical NaN.
-
-**Corpus queries:** none in tpch or tpcds, whose float columns hold no `-0.0` or NaN. pbench's
-`float64-key-join`, `float64-key-group` and `float32-key-group` show it (`tasks/pbench.md`); they
-land as commented-out `corpus_query!` lines naming this ticket. Pins: `bug_` cases in the operator
-harness for a float-keyed join and a float-keyed aggregate, cpu against device (`repartition-keys`).
-
