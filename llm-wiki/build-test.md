@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2789 test cases — Rust 1875, C++ 94, Python 820.** The Python figure includes the 378 runs of the engine's own plans, which only a manual dispatch runs, and the external-embeddings sidecar recount, which is run by hand. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2817 test cases — Rust 1875, C++ 94, Python 848.** The Python figure includes the 378 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, and the external-embeddings sidecar recount, which is run by hand. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -54,11 +54,12 @@ the committed sections against their own arithmetic, with no dataset and no run:
 abandoned == emitted` at every node, lane counts against `lanes=N`, the loader's `batch_rows` a
 prefix of its own lane's `partition_groups`, the root's `out_rows` against `.result.txt`, and
 the tree the indentation draws. The golden is written by the run it will later check, so a file
-that contradicts itself is the only witness to a renderer that is wrong. The benchmark tree and
-the record get the same reading: every `total_us` is the sum of the `time_us` beside it, every
-committed tree reports a release build, every timed (query, mode) is enabled on a device in
-`corpus_cases.inc`, a row that lost a cell is refused, a bare `calls` row names the seq it was
-handed, and the record's preamble is what `record_header()` writes
+that contradicts itself is the only witness to a renderer that is wrong. The benchmark tree gets
+the same reading: every `total_us` is the sum of the `time_us` beside it, every committed tree
+reports a release build, and every timed (query, mode) is enabled on a device in
+`corpus_cases.inc`. The record, which lives in S3, is held to its writer instead: a row that lost
+a cell is refused, a bare `calls` row names the seq it was handed, and a record the harness's
+own writer produces carries `record_header()`'s preamble, read as its readers read it
 
 | Cost-model goldens | [cost_goldens_match_and_total_is_byte_identical](../peacockdb-core/tests/test_cost_model.rs) | 3 |
 |---|---|--:|
@@ -568,7 +569,8 @@ the harness's own format reader — none of which runs engine code.
 | Exec-model statistics and estimates (Python) | the committed NDV sidecars counted again from the generated data by `gen_stats.py` and compared byte for byte, each column they list served by the reader, and every join's row estimate against the engine's own CPU run, one golden line per join. And `run.py` over two small tpch queries and a refused tpcds one, by two workers into a temp directory: each optimized answer the planned one, its three files per bench and the cost report, the engine's tree and join rows where no rule changed the plan, the optimized cost the planned one where nothing fired, and a filtered run of the query DPhyp is called for that leaves the other sections alone. They ride dataset-matrix because that is where sf1 and its DuckDB are | [test_the_tpch_sidecar_is_what_gen_stats_counts_from_its_data](../scripts/exec_model/tests/optimizer/test_stats_sidecar.py), [test_tpcds_join_estimates_match_the_golden](../scripts/exec_model/tests/optimizer/test_cardinality_corpus.py), [test_run_corpus.py](../scripts/exec_model/tests/test_run_corpus.py) | dataset-matrix (25.02 leg) | 8 |
 | Exec-model sidecar across embeddings (Python) | tpch sf1 generated with `--embeddings external`, counted by `gen_stats.py`, gives the committed sidecar byte for byte — the synthetic default is the dataset tier's own recount. It generates the dataset, a minute or two, and needs the embeddings cache, which no CI host may fetch; without the cache it fails rather than skips | [test_tpch_with_external_embeddings_gives_the_committed_sidecar](../scripts/exec_model/tests/optimizer/test_stats_embeddings.py) | manual — a host with the embeddings cache | 1 |
 | Exec-model engine plans (Python) | the engine's own plan goldens run by the prototype over sf1 against DuckDB: as planned (120), pruned by their dynamic filters (58), with every join cluster disassembled and rebuilt (100), and reordered by DPhyp and oriented (100) — pandas backend only, the recipe emulation not joining by position | [test_engine_answers.py](../scripts/exec_model/tests/plans/test_engine_answers.py), [test_engine_optimized.py](../scripts/exec_model/tests/optimizer/test_engine_optimized.py) | manual — exec-model-corpus.yml, 3 shards | 378 |
-| Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, `hbm_bytes` lands on the right tuple and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_plot.py](../scripts/calibration/tests/test_plot.py) | cost-report | 12 |
+| Exec-model per-call model, measured (Python) | the per-call model fitted from the sf40 calibration record orders each query's modes as the device did: at least fifteen pairs of modes whose measured times differ by more than 10 %, none the wrong way round — 17 of the record's 20 today. The record is not in git: the job fetches it from S3, and the test fails naming the fetch script when it is absent | [test_the_measured_record_orders_each_query_s_modes_as_they_were_measured](../scripts/exec_model/tests/optimizer/test_call_cost_measured.py) | manual — exec-model-corpus.yml, call-cost job | 1 |
+| Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, `hbm_bytes` lands on the right tuple and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`. And the split a record is published by: a run of one dataset is its file byte for byte, two datasets are two files under one heading, a query is spelled as the benchmark macro spells it, and a run missing a declared case, timing an undeclared one or captured under Nsight is refused naming why, with nothing written; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_plot.py](../scripts/calibration/tests/test_plot.py), [test_split.py](../scripts/calibration/tests/test_split.py) | cost-report | 20 |
 | C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 15 |
 | cuDF GPU smoke (C++) | the GPU is alive; the Spark-murmur3 kernel matches comet in C++; the RMM pool reserves the budget the binary declared | [CudfGpu.SparkPartitionIdsMatchComet2ColWithNulls](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 4 |
 | Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node, plus the per-call entry points at their contract edges (row-group override, export range, slice), the sqrt arm on both evaluators, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, every wire type walked through the dispatch, the LIKE guard — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [NodeRegions.EveryCallOpensOneRegionPerOutputPartition](../cpp/tests/gpu/test_plan_executor.cpp) | shad-gpu | 53 |
@@ -616,6 +618,7 @@ generated or fetched per host. S3 is Nebius object storage, endpoint
 | TPC-DS sf200 | 24 tables, 80 GB | — | — | ✓ | `tpcds-sf200` | no tests — S3 check, validate-large |
 | TPC-H sf200 | not generated yet | — | — | — | `tpch-sf200` | nothing yet |
 | embeddings cache | 1.8 GB local / 129 GB shad-gpu | ✓ | — | ✓ | — | generator input, not a test input |
+| calibration record | the sf40 benchmark run's per-call rows: 175 thousand, 17 MB | — | — | — | `calibration` | `test_call_cost_measured`, `plot.py` |
 
 Paths: `testdata/{tpch.minimal,tpch.sf1,tpcds.sf1,embeddings-cache}`; sf40 and sf200 live
 outside the repo on shad-gpu, under `/home/info/peacock-datasets/testdata/`. **+V** means
@@ -633,6 +636,15 @@ sha256 matches local). Notes on the rows above:
   `--push`/`--pull` kind covers it; `fetch_embeddings.sh` is local-only and hard-guards
   against running on CI/verda/shad-gpu. Regenerate it where you need it, or ship the
   augmented parquet instead.
+- **The calibration record is fetched, not generated**, and fetched where it is used, so no host
+  column holds it. Objects are keyed by content, `<dataset>.sf<sf>/<sha256>.tsv`, and never
+  replaced. `testdata/calibration/records.sha256`, committed, names the sha256 each dataset's
+  tree was measured beside; `scripts/calibration/fetch_record.sh tpch.sf40` fetches that object
+  into `testdata/calibration/tpch.sf40/records.tsv` and checks its sha256. The aws CLI it runs
+  is `$AWS`, `aws` by default: on shad-gpu `/home/info/bin/aws` with credentials in `~/.aws`; in
+  CI the runner's own with the `S3_*` secrets; a dev box without credentials runs it on
+  shad-gpu, `AWS=/home/info/bin/aws scripts/calibration/fetch_record.sh --ssh shad-gpu tpch.sf40`.
+  Only `build-test-shadgpu.sh --pull-benchmarks` writes the bucket.
 - **sf40 lives only on shad-gpu**, and its presence there is a hard precondition of the
   GPU job; the sf40 goldens are committed (see below), so CI compares without touching
   40 GB.
@@ -763,7 +775,12 @@ tpch.sf40 (on the GPU host, outside the repo; symlinked in as testdata/tpch.sf40
   │   build-test.sh --gpu --run-benchmarks           the same binary on a 26.02 host)
   │     ├──► benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt   the chosen run, per node
   │     └──► calibration/records.tsv                one row per cuDF call × execution
-  │           └── --pull-benchmarks brings both home
+  │           └── --pull-benchmarks brings both home  (the record gitignored), and
+  │               split_record.py: a whole, plain, passing run per dataset, or nothing
+  │                 ├──► s3://calibration/<dataset>.sf<sf>/<sha256>.tsv
+  │                 └──► calibration/records.sha256      that sha256, committed with the tree
+  │                       └── fetch_record.sh <dataset>.sf<sf>
+  │                             └──► calibration/<dataset>.sf<sf>/records.tsv   (gitignored)
   │
   └── create_nsys_profile.sh [--host …]             (the same binary, under Nsight)
         ├── --trace     nvtx and cuda only; PEACOCK_BENCHMARK_CAPTURE=trace
@@ -796,11 +813,29 @@ What the arrows are there to make checkable:
   only a human regenerates goes stale in silence: nothing checks it against the capture it
   claims to describe, and a panel drawn from a stale one looks exactly like a fresh one.
   `plot.py` is the only thing that draws, for the same reason.
-- **The text is committed and the captures are not.** The `.benchmark.txt` tree, the three
-  `.tsv` files and every panel are in git, rewritten in place by each collection, so `git diff`
-  shows how the numbers moved. The two `.sqlite` exports are hundreds of megabytes of
-  undiffable binary that only the scripts above read; `testdata/.gitignore` is deny-by-default
-  over `calibration/` for that, and `records-metrics.tsv` is not re-included.
+- **The derived text is committed; the record and the captures are not.** The
+  `.benchmark.txt` tree, `calls.tsv`, `hbm.tsv` and every panel are in git, rewritten in place
+  by each collection, so `git diff` shows how the numbers moved. The record is 17 MB at sf40
+  and grows with every case, so it lives in S3 and git holds its sha256: `--pull-benchmarks`
+  writes both, and the commit that moves the tree moves the pin. The two `.sqlite` exports are
+  hundreds of megabytes of undiffable binary that only the scripts above read.
+  `testdata/.gitignore` is deny-by-default over `calibration/`, re-including the pin and the
+  derived files only. `calls.tsv` and `hbm.tsv` in git cover three cases of an earlier run —
+  q6 at `tp1-single` and `tp4-sized`, q19 at `tp1-single` — whose record is in git's history;
+  the published record holds all twelve cases of the tree. `hbm.tsv` joins a record by call,
+  not by execution, so step 6 of *Corpus benchmarks* over the fetched record redraws the
+  panels; the two derived files cover the twelve only after step 5 over a fresh run.
+- **A record is published whole or not at all, and keeping it is a commit.** Every pull
+  uploads under the record's own sha256, so nothing in the bucket is replaced: committing
+  `records.sha256` beside the tree keeps the run, and `git checkout` of it drops the run,
+  leaving an unused object. A run truncates the record when it starts, so a filtered run's is
+  a fraction of the full one under the same name; `split_record.py` cuts the pulled record
+  into one file per dataset and refuses the lot unless each holds exactly the (query, mode)
+  set `corpus_benchmark_cases.inc` declares, under `capture=none`. Before that, the pull
+  requires the host's record to be the one it pulled (no run started since) and the run to have
+  exited 0, since a failing case appends its rows before it panics. A refused record leaves the
+  pin as it was, and the pull exits 1 with the tree home. Only shad-gpu publishes: the key names
+  no host (#226), and `build-test.sh` keeps what it pulls.
 
 ## CI structure (`.github/workflows/pipeline.yml`)
 
@@ -1121,8 +1156,9 @@ A (query, mode) timed here must still be enabled on a device in `corpus_cases.in
 rust-only test in `test_corpus_goldens` reads both files and says so. Today: tpch q6 and q1 at
 all five modes, q17 and q19 at `tp1_single` — joins run at `tp1_single` alone on the device
 (#152). At the two rowgroup modes a scan is one call per row group, a thousand-odd per pass, so
-those cases are most of a full run's record — 175 thousand rows, 17 MB, too large for git — and
-`calibration/records.tsv` stays the record of q6 and q19.
+those cases are most of a full run's record — 175 thousand rows, 17 MB, too large for git. It
+lives in the `calibration` bucket under its sha256, and `testdata/calibration/records.sha256`
+names the one that goes with the committed tree.
 
 It asserts nothing about an answer, so it can never gate a merge. Its eight harness assertions
 run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here.
@@ -1139,7 +1175,8 @@ Six steps, three scripts:
 ```
 # 1. a release build of the harness into cpp/install/rust-benchmarks/ — the run refuses a debug build
 scripts/docker-build.sh --no-image --cache-dir /build/peacock -- ./scripts/build-test-shadgpu.sh --build-benchmarks
-# 2. ship and glibc-patch  3. time the corpus  4. bring the tree and the record home
+# 2. ship and glibc-patch  3. time the corpus  4. bring the tree and the record home,
+#    publish the record and pin it in records.sha256 — commit that beside the tree
 ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks --pull-benchmarks
 # or, for a run that outlives your ssh session (the suite takes tens of minutes):
 ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks-detached
@@ -1154,6 +1191,11 @@ python3 scripts/calibration/plot.py \
     --out-dir testdata/calibration/plots
 ```
 
+Step 4 publishes only a whole, plain run that exited 0 and is still the host's record, a file
+per dataset; it names what it refused, leaves the pin alone and exits 1. It uploads through
+shad-gpu's aws CLI, reads each object back and pins its sha256 only when that matches, so the
+pin never names an object the bucket lacks; *Benchmark data flow* has why.
+
 Steps 5 and 6 are separate scripts because they are separate measurements: a capture
 serializes what it traces and the counters pass costs several percent, so neither may write
 the tree step 3 produced. What each writes is the diagram under *Benchmark data flow*.
@@ -1162,7 +1204,8 @@ Check `nvidia-smi` for a neighbour before step 3: a process holding the card inf
 number here without failing anything.
 
 **The same six steps on a 26.02 host** (verda-gpu) go through `build-test.sh`, which builds
-against the local `rapids` env and needs no docker and no glibc patch. The three benchmark
+against the local `rapids` env and needs no docker and no glibc patch. Its pull publishes
+nothing: the bucket's key names no host, so the records it holds are shad-gpu's. The three benchmark
 flags need `--gpu`; `--all` does not imply them, and `--run` with `--run-benchmarks` is
 refused — one exit code cannot mean both "gate green" and "measurement completed".
 
@@ -1210,7 +1253,9 @@ which would be a tree belonging to no execution. Both counts are constants in
 every file in the tree was taken at the same counts.
 `--pull-benchmarks` is additive and no push `--delete`s the directory.
 
-**The record**, `testdata/calibration/records.tsv`: one row per cuDF call — one (plan node,
+**The record**, `testdata/calibration/records.tsv` where a run's pull puts it, and
+`testdata/calibration/<dataset>.sf<sf>/records.tsv` where `fetch_record.sh` puts the published
+one (*Datasets* says how); neither is in git. One row per cuDF call — one (plan node,
 recipe step, call index), not one node and not one output partition — for every measured
 execution, so the same call recurs once per `run_index` and the spread is data. Seventeen
 columns: `dataset sf query mode node_seq node_type lane recipe_seq recipe_kind call_index

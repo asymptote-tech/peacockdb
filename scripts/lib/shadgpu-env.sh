@@ -65,6 +65,10 @@ PATCHED_LD="$PATCHED_LD:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\${LD_LIBRAR
 # sf40 lives outside the repo on the host and is read in place; 40 GB is not copied per run.
 SF40_DIR=/home/info/peacock-datasets/testdata/tpch.sf40
 
+# The host's aws CLI, with the S3 credentials in its ~/.aws. Not on a non-interactive ssh's
+# PATH, so named in full; a workstation reaches the buckets through it.
+REMOTE_AWS=/home/info/bin/aws
+
 # The "N passed" libtest printed in a log, summed over its passes. That count is the only
 # honest answer to "did the filter match anything" — counting output files answers a
 # different question. Shipped into a remote script with `declare -f`, since the run it
@@ -157,9 +161,10 @@ if found: print(found)
 
 # pull_one <path under testdata/> <what it is>
 #
-# Fetch one file from the host into the same place here, and return 1 when there is none.
-# Tested over ssh rather than by letting the transfer fail: resilient_rsync retries a
-# missing source a hundred times, and eight minutes of backoff reads as a hang.
+# Fetch one file from the host into the same place here: 1 when there is none, 2 when the
+# transfer failed, so a caller can tell a missing file from a broken copy of one. Tested over
+# ssh rather than by letting the transfer fail: resilient_rsync retries a missing source a
+# hundred times, and eight minutes of backoff reads as a hang.
 pull_one() {
   local rel=$1 what=$2
   if ! ssh "$REMOTE" test -f "$REMOTE_REPO/testdata/$rel"; then
@@ -167,7 +172,8 @@ pull_one() {
     return 1
   fi
   mkdir -p "testdata/$(dirname "$rel")"
-  resilient_rsync "$REMOTE:$REMOTE_REPO/testdata/$rel" "testdata/$rel"
+  resilient_rsync "$REMOTE:$REMOTE_REPO/testdata/$rel" "testdata/$rel" \
+    || { echo "==> $what: the transfer failed" >&2; return 2; }
   case "$rel" in
     *.tsv) echo "==> $what: $(grep -vc '^#' "testdata/$rel") rows" ;;
     *)     echo "==> $what: $(du -h "testdata/$rel" | cut -f1)" ;;

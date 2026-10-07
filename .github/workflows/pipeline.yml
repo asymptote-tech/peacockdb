@@ -749,7 +749,9 @@ jobs:
           # dataset-matrix; the four engine-plan files run in exec-model-corpus.yml on manual
           # dispatch.
           # test_stats_embeddings.py generates its own tables from the embeddings cache,
-          # which no CI host may fetch, so it is run by hand. Named rather than
+          # which no CI host may fetch, so it is run by hand. test_call_cost_measured.py
+          # reads the sf40 calibration record, which is not in git: exec-model-corpus.yml's
+          # call-cost job fetches it from S3 and runs it. Named rather than
           # pattern-matched, and a missing one is an error, so renaming a file cannot
           # silently drop it from every job.
           elsewhere=(scripts/exec_model/tests/plans/test_engine_answers.py
@@ -759,6 +761,7 @@ jobs:
                      scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
                      scripts/exec_model/tests/optimizer/test_engine_reassembled.py
                      scripts/exec_model/tests/optimizer/test_engine_optimized.py
+                     scripts/exec_model/tests/optimizer/test_call_cost_measured.py
                      scripts/exec_model/tests/test_run_corpus.py)
           for e in "${elsewhere[@]}"; do
             [ -f "$e" ] || { echo "$e is missing; is it still run elsewhere?"; exit 1; }

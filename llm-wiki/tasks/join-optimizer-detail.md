@@ -40,8 +40,10 @@ fixes #236 and #237):
   not be built); its re-run passed.
 - tpch q8 at `tp4-rowgroup` is green since Task 3a: 137,760 steps and 169,049 calls under a
   derived cap of 169,049. `exec-model-corpus.yml` runs `tp4-single` only, so CI does not run that mode.
-- `test_call_cost`'s check against the measured record is not on the branch; it needs the
-  sf40 record → Task 7.
+- The record is out of git since Task 7: keyed by content in the `calibration` bucket,
+  published by `build-test-shadgpu.sh --pull-benchmarks`, pinned by
+  `testdata/calibration/records.sha256`, fetched by `scripts/calibration/fetch_record.sh`; the
+  measured call-cost check runs where it is fetched.
 
 ## Hosts
 
@@ -742,3 +744,84 @@ fixes #236 and #237):
   total saturates as `as u64` does: NaN or negative 0, at or past 2^64 or infinite u64::MAX. Each
   new case shown red: the hover dropped without a chip, the old label, NaN through `< 0`, no cap.
   Cheap tier 43 files, 399 passed.
+
+## Task 7
+
+- Keys are by content, `<dataset>.sf<sf>/<sha256>.tsv` (the human's choice in review, over
+  the plan's fixed key): the bucket keeps no versions (`get-bucket-versioning` is empty), and a
+  content key is never replaced. `testdata/calibration/records.sha256`, committed, maps each
+  dataset to its sha256 in sha256sum's format (`<sha>  tpch.sf40/records.tsv`), so
+  `sha256sum -c` also checks the fetched files. Bucket, endpoint, pin, `pinned_sha` and
+  `record_key` are in `scripts/lib/calibration-bucket.sh`.
+- `--pull-benchmarks` publishes and pins (`publish_record` in `build-test-shadgpu.sh`). Keeping
+  a run is committing the pin beside the tree; dropping it is `git checkout` of the pin, which
+  leaves an unused object. Before splitting, one ssh call checks that the host's record still
+  has the pulled file's sha256 (no run started since) and that `.rc` reads `<current id> 0` (a
+  failing case appends its rows before it panics). Then `split_record.py` writes one file per
+  dataset into a `mktemp -d`, refusing everything unless the heading has `capture=none` and each
+  dataset's (query, mode) set is exactly what `corpus_benchmark_cases.inc` declares. Queries and
+  modes lose their `_` as the macro does (`stringify!($query).replace('_', "-")`). A refusal
+  leaves the pin alone and exits 1 with the tree home. Each file is uploaded through
+  `REMOTE_AWS=/home/info/bin/aws` on stdin and read back under `bash -o pipefail`. Only then is
+  it pinned and moved to `testdata/calibration/<dataset>.sf<sf>/records.tsv`. The benchmark
+  tree cannot be the reference for completeness: it accumulates across runs, and a record is one.
+- Migration: `tpch.sf40/records.tsv` copied server-side to
+  `tpch.sf40/3aab8a668a606f8bf523b6ff688427c278473f09feb530f939816878446e2a7c.tsv`, read back
+  with that sha256 (16,947,451 bytes, `text/tab-separated-values`). The old fixed-key object
+  `tpch.sf40/records.tsv` was then deleted by the coordinator.
+- `scripts/calibration/fetch_record.sh <dataset>.sf<sf> [--ssh HOST]` fetches the pinned key
+  through a `.partial` and checks the sha256. `$AWS` (default `aws`) is the CLI on whichever host
+  makes the call: a CI runner's with the `S3_*` secrets, `/home/info/bin/aws` on shad-gpu (not
+  on a non-interactive ssh's PATH), the same through `--ssh shad-gpu` from a dev box. This
+  workstation has no aws CLI and no `~/.aws`, so it fetched through shad-gpu.
+- Readers of the old path: the preamble test writes its own record (below); `call_cost.RECORD`
+  is the fetched `tpch.sf40/records.tsv`; `create_nsys_profile.sh` and `nsys_hbm.py` keep the
+  pulled `calibration/records.tsv`; `build-test.sh` keeps what it pulls and publishes nothing
+  (the key names no host, #226); `plot.py`'s usage names both records (`hbm.tsv` joins by call,
+  so it may come from another run of the same cases); the calibration tests and
+  `test_call_cost.py` write temp records.
+- The preamble test writes one row through `append_records` into a temp dir, with
+  `PEACOCK_RECORD_PATH` set and restored around a `catch_unwind`, so a panic cannot leave it
+  set. It reads the record back as the readers do: every `#` line, then the column line. The
+  allocator carries `=` and spaces and must read back as the run's; `capture=none` is not read
+  back. Shown red by dropping the `#` from the last note line. `EnvLoan` was not moved into
+  `test_support`: that would change `src/` and `peacock_gpu_benchmarks.rs`, which this host
+  cannot build.
+- The measured check is `tests/optimizer/test_call_cost_measured.py`, `dc8d33bf`'s body over
+  `call_cost.RECORD`; absent, it fails naming the fetch script. It is a file of its own so the
+  two synthetic cases stay in the cheap tier. It is on `pipeline.yml`'s `elsewhere` list and runs
+  in `exec-model-corpus.yml`'s `call-cost` job: unsharded, only with no filter, fetching with the
+  `S3_*` secrets. Whether those can read `calibration` is not checked from here: the bucket is in
+  the account `tpch-sf40` is in (one `s3 ls` lists both), and Nebius shows no ACL or policy to
+  compare. Over the sf40 record: 12 cases, 17 mode pairs as measured, 0 wrong, 3 within 10 %.
+- Found: `build-test.md`'s header said Python 820 while its rows summed to 839 since `86f0d62d`;
+  now 848 with this task's 9 (`test_split.py` 8, the measured check 1), total 2817. The
+  committed `calls.tsv`, `hbm.tsv` and panels cover three cases of an earlier q6/q19 run, whose
+  record is in git's history; the page says so.
+- Review round 1 (redesign above, and): `split_record.py` spelled queries with `_` (red with a
+  `scan_limit` case, then fixed); the host-record and `.rc` checks; the `capture=none` refusal
+  (red with the check removed); the fetch script's usage takes the `AWS=` form, refuses a
+  second `--ssh` and resolves its path before `cd`; the env var restored on panic; comment caps
+  in `.gitignore`, `exec-model-corpus.yml` and `call_cost.py`; `plot.py` and the page on what
+  `hbm.tsv` joins; the split into a temp dir, moved only after pinning; `pipefail` on the
+  read-back (a missing key fails the read, not the comparison).
+- Proving, no `records*.tsv` under `testdata/`: rust-only lib 604 passed (2 ignored),
+  `test_ci_coverage` 9, `test_corpus_goldens` 26, no warnings; cheap tier, the step's own
+  selection, 43 files, 399 passed; calibration tests 20. `publish_record` was run alone against
+  shad-gpu under a scratch `REMOTE_REPO` and a case file declaring `scratch.sf40`. Each refusal
+  fired: rc 101, an earlier run's rc, the host record changed, `capture=trace`, a declared mode
+  missing. Each left the pin alone. The success path uploaded `scratch.sf40/<sha>.tsv`, pinned
+  it, and `fetch_record.sh --ssh shad-gpu scratch.sf40` fetched the same bytes; the object was
+  then deleted, leaving the bucket as it was. `fetch_record.sh tpch.sf40` by the
+  new key gave 174,690 rows, sha256 OK, through shad-gpu from here and on shad-gpu
+  (`/tmp/peacock-opt/t7`). The measured check passed in both places. `split_record.py` gives the
+  sf40 record back byte for byte. Workflows parsed; every touched `run:` block and script passes
+  `bash -n`; `--upload-record` is now an unknown flag.
+- Review round 2: `pull_one` (`shadgpu-env.sh`) returns 2 when the transfer fails and 1 only
+  when the host has no file. The record's call site dies on 2 ("pulling … failed, so the copy
+  here is broken and nothing was published") instead of reaching the host check, which would
+  have called it a newer run. Shown with `resilient_rsync` stubbed to fail against a scratch
+  `REMOTE_REPO`; the missing-file case still gives `record_home=0`. `create_nsys_profile.sh`'s
+  two calls die on any non-zero code, as before, now after a "the transfer failed" line. The
+  two `record_home` blocks are merged and `names` is local to `publish_record`. No tree+pin
+  guard (the human's decision).

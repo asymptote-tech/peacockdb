@@ -1,14 +1,14 @@
-//! The benchmark tree and the calibration record, read back against their own redundancy
-//! with no device and no run: the trailer's arithmetic, the release build, the record's
-//! preamble against what the writer produces today, the checker's refusals, and the timed
-//! set against the device-enabled set.
+//! The benchmark tree, read back against its own redundancy, and the calibration record's
+//! format, with no device and no run: the trailer's arithmetic, the release build, the
+//! record's preamble against what the writer produces today, the checker's refusals, and the
+//! timed set against the device-enabled set.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use peacockdb_core::test_support::{
-    BUILD, COLUMNS, Capture, MEASURED_RUNS, RunMeta, SKIPPED, ordered_sections, record_header,
-    rows_match_the_recipes, testdata_root,
+    BUILD, COLUMNS, Capture, MEASURED_RUNS, RECORD_PATH_ENV, RunMeta, SKIPPED, append_records,
+    ordered_sections, record_header, rows_match_the_recipes, testdata_root,
 };
 
 /// Every `.benchmark.txt` the tree holds.
@@ -180,21 +180,46 @@ fn every_committed_tree_reports_a_release_build() {
     }
 }
 
-/// The committed record's preamble is the one `record_header` writes today.
+/// A record's preamble, read as its readers read it, is the one `record_header` writes.
 ///
-/// The record is read by three Python scripts and by a person, none of whom can ask this
-/// source what a column means. So the preamble is the column documentation, and a preamble
-/// describing a record the writer no longer produces is worse than none: every line of it
-/// still reads as authoritative.
+/// Three Python scripts and a person read the record, and none can ask this source what a
+/// column means, so the preamble is the column documentation. They take every `#` line, then
+/// one column line: a note that lost its `#` ends the preamble early and fails here.
 ///
-/// `allocator=` is taken from the file, since it names the host that measured and no build
-/// can know it. `capture=none` is not: a captured run's rows are the distorted ones, and
-/// the committed record must not be one.
+/// Written by the harness's own writer into a temp dir, since the measured record is not in
+/// git. `allocator=` is read back, as it names the host that measured and no build can know
+/// it; its value carries `=` and spaces, as a pool's does. `capture=none` is not read back: a
+/// captured run's rows are the distorted ones, and a published record must not be one.
 #[test]
 fn the_records_preamble_is_what_record_header_writes() {
-    let path = testdata_root().join("calibration/records.tsv");
+    let dir = std::env::temp_dir().join(format!("peacock-corpus-{}-record", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("records.tsv");
+    let run = RunMeta {
+        dataset: "tpch",
+        sf: "40",
+        query: "q6",
+        mode: "tp1-single",
+        allocator: "rmm-pool initial=1.0GiB max=1.0GiB of 2.0GiB free on a discrete device",
+        capture: Capture::None,
+    };
+    let row = vec!["0"; COLUMNS.len()].join("\t");
+    let restore = std::env::var_os(RECORD_PATH_ENV);
+    // SAFETY: `append_records` is the variable's only reader, and this is the only case in
+    // this binary that calls it.
+    unsafe { std::env::set_var(RECORD_PATH_ENV, &path) };
+    let wrote = std::panic::catch_unwind(|| append_records(std::slice::from_ref(&row), &run));
+    match restore {
+        Some(value) => unsafe { std::env::set_var(RECORD_PATH_ENV, value) },
+        None => unsafe { std::env::remove_var(RECORD_PATH_ENV) },
+    }
+    if let Err(panic) = wrote {
+        std::panic::resume_unwind(panic);
+    }
     let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e} — the record is committed", path.display()));
+        .unwrap_or_else(|e| panic!("{}: {e} — the writer wrote nothing", path.display()));
+    let _ = std::fs::remove_dir_all(&dir);
+
     let mut found: Vec<&str> = text.lines().take_while(|l| l.starts_with('#')).collect();
     let columns = text
         .lines()
@@ -206,6 +231,7 @@ fn the_records_preamble_is_what_record_header_writes() {
         .iter()
         .find_map(|l| l.strip_prefix("# run: allocator="))
         .unwrap_or_else(|| panic!("{}: no `# run: allocator=` line", path.display()));
+    assert_eq!(allocator, run.allocator, "the allocator line is the run's");
     let meta = RunMeta {
         dataset: "",
         sf: "",

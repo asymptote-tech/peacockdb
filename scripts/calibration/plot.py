@@ -6,6 +6,11 @@
         --hbm testdata/calibration/hbm.tsv \
         --out-dir testdata/calibration/plots
 
+The record is not in git. `--record` names a run's own, as `--pull-benchmarks` brings it home,
+or a published one, as `scripts/calibration/fetch_record.sh tpch.sf40` fetches it into
+`testdata/calibration/tpch.sf40/records.tsv`. `hbm.tsv` joins by call, not by execution, so
+it may come from another run of the same cases; a call it holds that the record lacks is refused.
+
 The one script. Every picture under `plots/`, and the `index.html` that shows them on one
 page, comes from this call and from nothing else. That is the point rather than a tidiness
 preference: a second generator is a second reading of the format, and two readings of one

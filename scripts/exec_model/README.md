@@ -20,7 +20,8 @@ The prototype runs two kinds of plan: small ones the tests build from `operators
 the engine's own, read from its `testdata/goldens/<bench>.sf1/<mode>.plans.txt` goldens. The
 files that need the generated sf1 tables are listed in [The corpus](#the-corpus), and
 `test_stats_embeddings.py` is run by hand, since it generates its own tables from the embeddings
-cache. Every other file runs in cost-report, which has no dataset. Every plan in
+cache. `tests/optimizer/test_call_cost_measured.py` needs the sf40 calibration record, which is
+not in git (below). Every other file runs in cost-report, which has no dataset. Every plan in
 `test_end_to_end.py` runs under a real resident budget, so the accountant is engaged rather
 than dormant.
 
@@ -101,7 +102,7 @@ plan. `errors.py` sits at the root: all four raise from it. The tests mirror the
 | `optimizer/cost.py` | C_out in bytes — each join's estimated rows times the width of what it passes on, a string by its mean length from the sidecar |
 | `optimizer/join_order.py` | what DPhyp is asked of a set of a cluster's relations — its rows by `cardinality`'s formulas in one canonical order, and its C_out bytes — the orientation pass: each join's cheaper build, the build copied per probe batch while #152 is open, a probe shuffled onto the join's lanes cut once per lane — and `optimize`: every cluster of a plan reordered by DPhyp on C_out, oriented and disassembled |
 | `optimizer/replan.py` | the adaptive loop: a build further than `threshold` times off its estimate stops the run, every build made so far becomes a memory source, the plan is optimized again with their sizes known and run by a new driver; a replan that would run started work again is refused. `WithMaterialized`, the tables such a plan reads its memory sources from |
-| `optimizer/call_cost.py` | the cost of one device call by kind, `fixed + slope × volume`, fitted from the benchmark's calibration record — what decides lanes and batch size, where C_out cannot see a difference |
+| `optimizer/call_cost.py` | the cost of one device call by kind, `fixed + slope × volume`, fitted from the benchmark's calibration record — what decides lanes and batch size, where C_out cannot see a difference. The record is tpch sf40's, in S3 and not in git: `scripts/calibration/fetch_record.sh tpch.sf40` fetches it into `RECORD`, `testdata/calibration/tpch.sf40/records.tsv`, verified against the sha256 the checkout pins |
 | `optimizer/dphyp.py` | DPhyp from the `peacockdb-dphyp` crate through its C ABI (`ctypes`): the library by `PEACOCK_DPHYP_LIB`, refused without it; the tree as disassembly takes it |
 | `optimizer/multijoin.py` | a cluster of inner joins as DPhyp takes it in — relations, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included |
 | `optimizer/disassembly.py` | a join order back into an engine plan — keys, residual and projection from the MultiJoin's identities, wiring as the translator derives it; `baseline` is the order the plan already has |
@@ -253,6 +254,17 @@ rows through a pandas operator chain is minutes, not seconds. The queries are in
 so `PCK_SHARD=k/n` splits a file across n processes. `test_stats_sidecar.py`,
 `test_cardinality_corpus.py` and `tests/test_run_corpus.py` — `run.py` over two small tpch
 queries and a refused tpcds one — are seconds, and run on every push in dataset-matrix.
+
+The per-call model is checked against the device the same way, by hand or by that workflow's
+`call-cost` job: `tests/optimizer/test_call_cost_measured.py` fits `call_cost` to the sf40
+record and asks that it order each query's modes as they were measured — at least fifteen pairs
+differing by more than 10 %, none reversed (17 of 20 today, 3 within the spread). The record is
+fetched first, and the test fails naming the fetch when it is absent:
+
+```
+scripts/calibration/fetch_record.sh tpch.sf40   # its header: where the aws CLI comes from
+python3 scripts/exec_model/tests/optimizer/test_call_cost_measured.py
+```
 
 **Whole tables, not a sample.** Both benchmarks are written clustered by date, so a row prefix
 is one quarter of 1992, a row-group sample is a set of date windows, and two tables sampled

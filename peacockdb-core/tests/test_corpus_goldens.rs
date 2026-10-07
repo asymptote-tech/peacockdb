@@ -12,7 +12,8 @@
 //! that will later check it — but a file that contradicts itself is a file the renderer got
 //! wrong, and the renderer is most of what could be wrong.
 //!
-//! The benchmark tree and the calibration record, read back the same way, are `benchmark`.
+//! The benchmark tree, read back the same way, and the calibration record's format are
+//! `benchmark`.
 
 // A test target's child modules resolve against tests/ itself, and a file there would be
 // another target. The path keeps it under a directory named for this one.

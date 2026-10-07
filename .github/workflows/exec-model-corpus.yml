@@ -3,7 +3,8 @@ name: Exec-model corpus (manual)
 # The engine's own plan goldens run by the prototype over the sf1 tables, each against DuckDB
 # running the query's own text: as planned, pruned by dynamic filters, reassembled, and
 # reordered by DPhyp (the four test_engine_*.py files below). Manual dispatch: they need the
-# generated datasets and take minutes.
+# generated datasets and take minutes. Beside them the call-cost job, over the sf40
+# calibration record, which is not in git and is fetched from S3.
 #
 # PCK_SHARD=k/n gives process k every n-th test (scripts/exec_model/tests/harness.py), and a
 # shard that selects nothing is an error. So the matrix's shard list and the `/3` in PCK_SHARD
@@ -75,3 +76,26 @@ jobs:
             python3 "$f" ${FILTER:+"$FILTER"} || status=1
           done
           exit $status
+
+  # One test, so unsharded, and no query to filter on: it runs only when no filter is given.
+  # The record is fetched by the script every host uses, verified against the sha256 this
+  # checkout pins; the runner's aws CLI reads the same S3 secrets as pipeline.yml's
+  # s3-datasets job.
+  call-cost:
+    name: Per-call model on the measured record
+    if: inputs.filter == ''
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install python dependencies
+        run: pip install --quiet pandas
+
+      - name: Fetch the sf40 calibration record
+        run: scripts/calibration/fetch_record.sh tpch.sf40
+
+      - name: Run the per-call model's check
+        run: python3 scripts/exec_model/tests/optimizer/test_call_cost_measured.py

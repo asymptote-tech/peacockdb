@@ -5,18 +5,16 @@
 /tpch.sf*/
 /tpcds.sf*/
 
-# Calibration output: the text is committed, the captures are not, and the line between
-# them is size against regenerability. The three .tsv files and the panels are the
-# measurement, rewritten in place by each collection so `git diff` shows how the numbers
-# moved; llm-wiki names the script that writes each. Ignored: the nsys exports, hundreds
-# of megabytes of binary git cannot diff, and the counters pass's own record, whose
-# microseconds are a profiler's.
-# Deny-by-default, so a new file here is ignored until someone says otherwise. The
-# directory and its contents are re-included as two lines: git re-includes a directory
-# happily, but its own documented rule says a file under an excluded parent cannot be, and
-# third-party matchers implement that rule and grey out plots/ entirely.
+# Calibration output: the derived text is committed so `git diff` shows the numbers move
+# (llm-wiki names each file's writer). The record is not: 17 MB at sf40, it lives in the
+# `calibration` bucket keyed by its sha256, and records.sha256 pins the one this tree goes
+# with. Ignored too: the nsys exports, hundreds of megabytes git cannot diff, and the
+# counters pass's own record, whose microseconds are a profiler's.
+# Deny-by-default, so a new file here is ignored until someone says otherwise. plots/ is
+# re-included as two lines: git re-includes a directory happily, but its documented rule says
+# a file under an excluded parent cannot be, and third-party matchers grey out plots/.
 /calibration/*
-!/calibration/records.tsv
+!/calibration/records.sha256
 !/calibration/hbm.tsv
 !/calibration/calls.tsv
 !/calibration/plots/

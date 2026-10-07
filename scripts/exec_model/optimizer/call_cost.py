@@ -1,14 +1,13 @@
-"""The cost of one call on the device, by kind: `fixed + slope × volume`, fitted from
-the benchmark's calibration record (`testdata/calibration/records.tsv`).
+"""The cost of one call on the device, by kind: `fixed + slope × volume`, fitted from the
+benchmark's calibration record — tpch sf40's, fetched into `RECORD` by `fetch_record.sh tpch.sf40`.
 
 What `cost.py`'s C_out cannot see: a plan of the same bytes in more calls pays each call's fixed
 part again, and on a GPU that part is large — a parquet scan costs ~45 ms however small its row
-group, so reading one row group per call is two orders of magnitude slower than one call per
-lane. This is the model for decisions that change the number or kind of calls: lanes, batch
-size, shuffles. The volume is the one that predicts a kind best: a scan's decoded output bytes
-(its input is row groups), an aggregate's input rows, anything else's input bytes. A call is
-fitted as the median of its measured runs; the fit minimizes relative error, so small calls
-weigh as much as large ones. A forwarder makes no call and costs nothing.
+group, so reading one row group per call is two orders of magnitude slower than one call per lane.
+It decides what changes the number or kind of calls: lanes, batch size, shuffles. The volume is the
+one that predicts a kind best: a scan's decoded output bytes, an aggregate's input rows, anything
+else's input bytes. A call is fitted as the median of its measured runs; the fit minimizes relative
+error, so small calls weigh as much. A forwarder makes no call and costs nothing.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-RECORD = pathlib.Path(__file__).resolve().parents[3] / "testdata" / "calibration" / "records.tsv"
+RECORD = pathlib.Path(__file__).resolve().parents[3] / "testdata" / "calibration" / "tpch.sf40" / "records.tsv"
 #: the volume each kind is priced by; any other kind by its input bytes
 VOLUME = {"CudfScan": "out_bytes", "CudfAggregate{Partial}": "in_rows", "CudfAggregate{Merge}": "in_rows"}
 _CALL = ["query", "mode", "node_seq", "lane", "recipe_seq", "recipe_kind", "call_index"]
