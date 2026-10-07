@@ -28,6 +28,32 @@ one that goes nowhere.
 
 ## Done
 
+<a id="t191"></a>
+### #191 — the device exports Int16 for an extracted year the plan declared Int32
+
+`tpch/q8` at `tp1-single`: `the exported stream is not the sink's rows: expected Int32 but found
+Int16 at column index 0`. That column is `o_year`, an `extract(year from o_orderdate)` — DataFusion
+types it `Int32` and the device answers `Int16`.
+
+**Not [#187](../archive/archived-tickets.md#t187), and merging them would lose the distinction.** That one is the
+device *widening* a decimal, to 38 whatever the declaration says. This is the device *narrowing* an
+integer, to the natural width for a year rather than to a maximum. Opposite direction, different
+type family, and a fix for either says nothing about the other.
+
+Not new behaviour either, only newly reached: `extract_year -> INT16` was already on record as a
+place where the DataFusion type is an imperfect proxy for the cuDF one. What is new is a corpus
+query whose unload sees it.
+
+**Done 2026-09-17 by `date-part-return-type`, PR #161; awaiting merge.** The `date_part` arm of
+`build_column_scalar_fn` (`expr.cpp`) casts cuDF's component to the wire's `return_type` when
+the two differ, and refuses a non-integer one by name. Three plan-executor cases
+(`ProjectDatePart{Year,Month,Day}IsInt32`), three node-level schema cases
+(`a_date_part_{year,month,day}_holds_the_int32_the_plan_declares`, `exec_schema_cases.rs`) and
+`a_date_part_answers_in_its_declared_type` (`exec_cases.rs`) hold it. `tpch` q7, q8, q9 at
+`tp1-single` now run the whole device plan and stop at [#220](joins.md#t220); `191` is on no
+registry row. The alternative — DataFusion declaring what cuDF produces — is
+[#239](complete-coverage.md#t239).
+
 <a id="t181"></a>
 ### #181 — the GPU backend reaches `unreachable!` on every Inner join
 

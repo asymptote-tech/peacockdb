@@ -6,7 +6,7 @@ Tickets for MVP SQL functionality milestone
 <a id="t239"></a>
 ### #239 — `date_part` could declare cuDF's `Int16` in DataFusion instead of casting on the device
 DataFusion 45 types `date_part`/`extract` as `Int32`; cuDF's `extract_datetime_component`
-answers `INT16` for every field. Since [#191](corpus-coverage.md#t191) the device arm in
+answers `INT16` for every field. Since [#191](../archive/archived-tickets.md#t191) the device arm in
 `build_column_scalar_fn` (`expr.cpp`) casts the component to the wire's `return_type`, one
 extra column per extract.
 

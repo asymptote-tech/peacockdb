@@ -23,7 +23,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#205 — the cpu's accumulating sort and merge answer nothing over zero-row batches](#t205)
 - [Scalars](#scalars)
   - [#168 — interval type can not be represented in the fbs ScalarValue](#t168)
-  - [#191 — the device exports Int16 for an extracted year the plan declared Int32](#t191)
   - [#210 — a bare decimal literal on the AST path comes back as a Float64 column](#t210)
   - [#57 — the device refuses a value-form CASE](#t57)
   - [#56 — q2: CASE-over-string-equality inside a partial-phase sum](#t56)
@@ -460,32 +459,6 @@ timestamp side, so `90 days + date` answers a date. Unconfirmed on a build. Then
 and the uncrossable set go empty, the wire test takes a month interval, the golden line becomes
 a plan, and mixed-join's device cells turn on.
 
-<a id="t191"></a>
-### #191 — the device exports Int16 for an extracted year the plan declared Int32
-
-`tpch/q8` at `tp1-single`: `the exported stream is not the sink's rows: expected Int32 but found
-Int16 at column index 0`. That column is `o_year`, an `extract(year from o_orderdate)` — DataFusion
-types it `Int32` and the device answers `Int16`.
-
-**Not [#187](../archive/archived-tickets.md#t187), and merging them would lose the distinction.** That one is the
-device *widening* a decimal, to 38 whatever the declaration says. This is the device *narrowing* an
-integer, to the natural width for a year rather than to a maximum. Opposite direction, different
-type family, and a fix for either says nothing about the other.
-
-Not new behaviour either, only newly reached: `extract_year -> INT16` was already on record as a
-place where the DataFusion type is an imperfect proxy for the cuDF one. What is new is a corpus
-query whose unload sees it.
-
-**Done 2026-09-17 by `date-part-return-type`, PR #161; awaiting merge.** The `date_part` arm of
-`build_column_scalar_fn` (`expr.cpp`) casts cuDF's component to the wire's `return_type` when
-the two differ, and refuses a non-integer one by name. Three plan-executor cases
-(`ProjectDatePart{Year,Month,Day}IsInt32`), three node-level schema cases
-(`a_date_part_{year,month,day}_holds_the_int32_the_plan_declares`, `exec_schema_cases.rs`) and
-`a_date_part_answers_in_its_declared_type` (`exec_cases.rs`) hold it. `tpch` q7, q8, q9 at
-`tp1-single` now run the whole device plan and stop at [#220](joins.md#t220); `191` is on no
-registry row. The alternative — DataFusion declaring what cuDF produces — is
-[#239](complete-coverage.md#t239).
-
 <a id="t210"></a>
 ### #210 — a bare decimal literal on the AST path comes back as a Float64 column
 
@@ -495,7 +468,7 @@ the type the plan asked for, but a bare or unary-wrapped decimal literal is AST-
 `SELECT 1.5 FROM t` then computes a `FLOAT64` column on the device where the plan declares
 `Decimal128(2, 1)` — and since `decimal-precision-at-export` the export refuses it by name rather
 than answering it, the AST path still computing a double. Same class as
-[#191](#t191): a declared type produced as another. Pre-existing, carried
+[#191](../archive/archived-tickets.md#t191): a declared type produced as another. Pre-existing, carried
 through `typed-nulls.md` by that spec's own instruction, and pinned by
 `bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` (`gpu_tests/exec_cases.rs`);
 the walk `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` names it on its
