@@ -32,6 +32,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
 - [Repartitioning](#repartitioning)
   - [#206 — a float or boolean partition key is refused on the device](#t206)
+  - [#240 — a timestamp partition key is refused on the device](#t240)
   - [#189 — the shuffle cannot hash a rollup's grouping-set id](#t189)
   - [#145 — Refcounted handles: stop copying every partition out of a scatter](#t145)
   - [#95 — a decimal partition key is refused on the device](#t95)
@@ -653,6 +654,22 @@ refusal. Any `GROUP BY` or join key of either type at more than one lane reaches
 has no float column. Simplest, at any `tp4` mode: `select cast(l_quantity as double) q, count(*)
 from lineitem group by q;` and `select l_quantity > 25 b, count(*) from lineitem group by b;`
 (tpch).
+
+<a id="t240"></a>
+### #240 — a timestamp partition key is refused on the device
+
+A `GpuEmitPartitions` hashing a `Timestamp` column, in any unit, is refused by the device's
+kernel, where comet's hasher answers it on the cpu.
+
+`spark_hash_partition.cu`'s type switch has no `TIMESTAMP_{SECONDS,MILLISECONDS,MICROSECONDS,
+NANOSECONDS}` arm, so it fails at the `default` with `unsupported key column cuDF type_id=N`.
+Spark and comet hash a timestamp as its `i64` value, so the cpu lane is defined. The kernel's
+own comment ("Timestamp-as-i64 → 8B") and [#95](#t95)'s text both say timestamps are covered;
+the switch says otherwise. Any `GROUP BY` or join key of a timestamp type at more than one lane
+reaches it. Not gated by `murmur_conformance.rs`; no pin yet.
+
+**Corpus query:** none — tpch and tpcds use `Date32`. Simplest, at any `tp4` mode:
+`select cast(o_orderdate as timestamp) t, count(*) from orders group by t;` (tpch).
 
 <a id="t189"></a>
 ### #189 — the shuffle cannot hash a rollup's grouping-set id
