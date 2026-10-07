@@ -49,3 +49,25 @@ outer computes each count from the rows carrying its own gid. That needs a new r
 node, which is why it is a ticket rather than a planner tweak. Not [#65](corpus-coverage.md#t65), whose gid is the
 ROLLUP/CUBE `__grouping_id` — the two would coexist as separate columns. Until it lands the
 planner refuses the shape at plan time.
+
+<a id="t249"></a>
+### #249 — the wire has no Time, Duration, Interval, Struct or List type, and writes such a field as `Null`
+The fbs `DataType` enum (`flatbuffers/gpu_plan.fbs:14-35`) stops at `Decimal128`, and
+`serialize_schema` maps any Arrow type it cannot name to `Null` without saying so
+(`wire/serialize.rs:136`). Most device nodes take a column's type from the data, so such a
+column usually passes through unnoticed; where the device builds a column from the declared
+schema — a join's NULL pads and empty or absent sides, a typed NULL literal — it meets a `Null`
+field and either refuses at run time or builds the wrong type, depending on the mode and the data.
+
+Related: [#168](corpus-coverage.md#t168) (an interval literal cannot cross; proposes
+`DurationDays`), [#224](scalars.md#t224) (an integer-to-date cast needs a duration type), and
+[#245](joins.md#t245) (a nested key cannot cross a shuffle). The join-rewrite chain adds the four
+`Timestamp` variants (repartition-keys) and makes an unmapped type a `PlanError` in every schema,
+so the gap shows as a plan-time refusal naming the type rather than a wrong pad; the types
+themselves remain to add here.
+
+**Corpus queries:** none in tpch or tpcds. pbench: a time or interval column carried through a
+join (`SELECT d_id, CAST(t_v AS INTERVAL SECOND) iv FROM dim LEFT JOIN tiny ON d_k = t_k`) and a
+struct column carried through one (`SELECT d_id, d_kstruct FROM dim JOIN tiny ON d_k = t_k`),
+each declared not runnable on this ticket.
+
