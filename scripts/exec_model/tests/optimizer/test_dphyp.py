@@ -1,6 +1,6 @@
-"""DPhyp from Python through the C ABI: the same optimum a brute force over every split finds, a
-clique of 14 in under a second, and a budget that says so — which also checks the arrays cross
-the boundary laid out as the crate reads them."""
+"""DPhyp from Python through the C ABI: the same optimum a brute force over every split finds,
+each set of a 14-clique priced once, and a budget that says so — which also checks the arrays
+cross the boundary laid out as the crate reads them."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/optimize
 
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[4]))
     __package__ = "scripts.exec_model.tests.optimizer"
-
-import time
 
 from ..harness import main, raises
 from ...optimizer.dphyp import Unsolved, solve
@@ -73,10 +71,16 @@ def test_the_same_optimum_as_a_brute_force_on_every_shape():
                 assert total == brute_force(n, edges, cost_of(seed)), (name, n, seed)
 
 
-def test_a_clique_of_fourteen_in_under_a_second_and_a_budget_that_stops_it():
-    started = time.perf_counter()
-    solve(14, clique(14), lambda mask: float(bin(mask).count("1")))
-    assert time.perf_counter() - started < 1.0
+def test_a_clique_of_fourteen_prices_each_set_once_and_a_budget_stops_it():
+    asked = []
+
+    def cost(mask):
+        asked.append(mask)
+        return float(bin(mask).count("1"))
+
+    solve(14, clique(14), cost)
+    # In a clique every set of two or more relations is connected: 2^14 - 1 - 14 of them.
+    assert len(asked) == 2**14 - 15 == len(set(asked))
     with raises(Unsolved, match="budget"):
         solve(14, clique(14), lambda mask: 1.0, max_pairs=10_000)
 
