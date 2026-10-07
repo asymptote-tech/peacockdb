@@ -41,12 +41,28 @@ def solve(n: int, edges: list[tuple[int, int]], set_cost: Callable[[int], float]
     lib = load()
     lefts = (ctypes.c_uint64 * max(len(edges), 1))(*[left for left, _ in edges])
     rights = (ctypes.c_uint64 * max(len(edges), 1))(*[right for _, right in edges])
-    callback = _SET_COST(lambda s, _ctx: float(set_cost(s)))
+    failed: list[BaseException] = []
+
+    def priced(mask, _ctx) -> float:
+        # ctypes swallows an exception raised here and hands the crate an unset value, and no
+        # cost makes the crate stop: so the first failure is held, every later set answered 0
+        # unpriced, and the failure raised once the call returns.
+        if failed:
+            return 0.0
+        try:
+            return float(set_cost(mask))
+        except BaseException as error:
+            failed.append(error)
+            return 0.0
+
+    callback = _SET_COST(priced)
     capacity = max(2 * n - 1, 1)
     out = (ctypes.c_int32 * capacity)()
     length = ctypes.c_uint32(0)
     code = lib.dphyp_solve(n, lefts, rights, len(edges), callback, None, min(max_pairs, 2**32 - 1),
                            out, capacity, ctypes.byref(length))
+    if failed:
+        raise failed[0]
     if code != 0:
         raise Unsolved(_REASONS.get(code, f"code {code}"))
     postfix = tuple(out[: length.value])

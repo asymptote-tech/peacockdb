@@ -1,58 +1,193 @@
-# execution model — Python prototype
+# exec_model — the Python prototype
 
-An emulation of the execution model in
-[`llm-wiki/architecture.md`](../../llm-wiki/architecture.md), built to settle the scheduling
-rule and the trait set before any Rust existed.
-Not production code. The tests run in CI, in the `cost-report` job's cheap python tier.
+A model of the engine's execution model and a join-order optimizer over the engine's own plans,
+run on pandas. Not production code. Why it has the shape it has is [`design.md`](design.md);
+this page is how to work with it.
 
-**The coordinator owns this prototype.** Changes here are made by the coordinator directly
-rather than delegated, because what it settles is design — which is the same reason the
-spec it models is coordinator-owned.
+## Environment
 
-**Two halves.** The scheduler — plan, drivers, traits — is stdlib only and uses mock
-executors. The operators under `operators/` are pandas-backed, so `test_operators.py`,
-`test_end_to_end.py`, `test_accounting.py` and the files over the engine's plans need pandas,
-and the engine-plan files, `test_injection.py` and `test_accounting.py`'s budget test, which
-read parquet, need pyarrow too. They **fail rather than skip** without them: a skipped operator
-suite reads exactly like a passing one.
+- **Python 3.12 or 3.13, with pandas and pyarrow** (numpy comes with pandas). Seen green:
+  3.12.3 with pandas 2.2.2 and pyarrow 18.1; CI's `rapidsai/base:25.02-cuda12.0-py3.12`, 3.12.9
+  with pandas 2.2.3 and pyarrow 18.1; and 3.13.15 with pandas 3.0.6 and pyarrow 25.0.1 on
+  shad-gpu. The tests run with whatever `python3` is on the PATH, so that one needs both
+  packages. Files that need them fail rather than skip without them: a skipped operator suite
+  reads exactly like a passing one. pytest is optional (below).
 
-The prototype runs two kinds of plan: small ones the tests build from `operators/nodes.py`, and
-the engine's own, read from its `testdata/goldens/<bench>.sf1/<mode>.plans.txt` goldens. The
-files that need the generated sf1 tables are listed in [The corpus](#the-corpus), and
-`test_stats_embeddings.py` is run by hand, since it generates its own tables from the embeddings
-cache. `tests/optimizer/test_call_cost_measured.py` needs the sf40 calibration record, which is
-not in git (below). Every other file runs in cost-report, which has no dataset. Every plan in
-`test_end_to_end.py` runs under a real resident budget, so the accountant is engaged rather
-than dormant.
+  ```
+  python3 -c "import pandas, pyarrow; print(pandas.__version__, pyarrow.__version__)"
+  ```
 
-Every test file runs on its own with the stock python, no pytest:
+- **DuckDB 1.5.4**, the GitHub release build (08e34c447b) every golden is generated with — the
+  dsdgen column types drift between releases, and another build may write other parquet bytes.
+  The corpus oracle and `gen_stats.py` find it by `DUCKDB`, else `duckdb` on the PATH:
+
+  ```
+  curl -fsSL https://github.com/duckdb/duckdb/releases/download/v1.5.4/duckdb_cli-linux-amd64.zip -o duckdb.zip
+  python3 -c "import zipfile; zipfile.ZipFile('duckdb.zip').extractall('duckdb-bin')"
+  chmod +x duckdb-bin/duckdb && export DUCKDB=$PWD/duckdb-bin/duckdb && "$DUCKDB" --version
+  ```
+
+- **The sf1 tables**, `testdata/{tpch,tpcds}.sf1`, from `testdata/generate_testdata.sh`
+  ([`build-test.md`](../../llm-wiki/build-test.md) has the recipe). Only the dataset and corpus
+  tiers read them.
+
+## DPhyp
+
+The optimizer orders joins with the `peacockdb-dphyp` crate through its C ABI
+([`peacockdb-dphyp/design.md`](../../peacockdb-dphyp/design.md)). Build the library and name it
+with `PEACOCK_DPHYP_LIB`; every file that calls DPhyp refuses to run without it, naming the
+build:
+
+```
+cargo build --release -p peacockdb-dphyp
+export PEACOCK_DPHYP_LIB=${CARGO_TARGET_DIR:-$PWD/target}/release/libpeacockdb_dphyp.so
+```
+
+The library links against the host's glibc, so build it on the host that loads it: one built
+on a newer system does not load on shad-gpu.
+
+## The tests
+
+Every test file runs on its own with `python3 <file>`, no pytest: `tests/harness.py` runs a
+module's `test_*` functions and provides `raises`. A test file's five-line header puts the repo
+root on `sys.path`, so the relative imports resolve either way. Arguments select tests: a test's
+full name selects it alone, any other word every test whose name contains it, and `-word`
+drops those. `PCK_SHARD=k/n` (k from 0) takes every n-th test from the k-th. A selection that
+matches nothing fails.
+
+| tier | files | needs | where it runs |
+|---|---|---|---|
+| cheap | every `tests/**/test_*.py` but the nine below | pandas, pyarrow, `PEACOCK_DPHYP_LIB`; committed files only | `pipeline.yml`, cost-report job |
+| dataset | `optimizer/test_stats_sidecar.py`, `optimizer/test_cardinality_corpus.py`, `test_run_corpus.py` | + the sf1 tables and DuckDB | `pipeline.yml`, dataset-matrix (cuDF 25.02 leg) |
+| corpus | `plans/test_engine_answers.py`, `optimizer/test_engine_dynamic_filters.py`, `optimizer/test_engine_reassembled.py`, `optimizer/test_engine_optimized.py` | + the sf1 tables, DuckDB, `PEACOCK_DPHYP_LIB` | `exec-model-corpus.yml`, manual dispatch; whole files on shad-gpu |
+| manual | `optimizer/test_stats_embeddings.py`; `optimizer/test_call_cost_measured.py` | the embeddings cache and DuckDB; the fetched sf40 record | by hand; the record check also in `exec-model-corpus.yml`'s call-cost job |
+
+**Cheap.** One file, then the tier as CI selects it, in bash or zsh:
 
 ```
 python3 scripts/exec_model/tests/engine/test_determinism.py
-shopt -s globstar  # bash; zsh globs ** without it
-for f in scripts/exec_model/tests/**/test_*.py; do python3 "$f" || break; done
+shopt -s globstar 2>/dev/null  # bash; zsh globs ** without it
+heavy='test_engine_answers|test_engine_dynamic_filters|test_engine_reassembled|test_engine_optimized|test_stats_sidecar|test_cardinality_corpus|test_run_corpus|test_stats_embeddings|test_call_cost_measured'
+for f in scripts/exec_model/tests/**/test_*.py; do
+  [[ $(basename "$f" .py) =~ ^($heavy)$ ]] || python3 "$f" || break
+done
 ```
 
-pytest collects the same files if it is available, and is the better loop when it is:
+pytest collects the same files and selects by node id. Do not point it at the whole `tests/`
+folder: it would import and run the corpus files, every query of them.
 
 ```
-python3 -m pytest scripts/exec_model/tests -q
+python3 scripts/exec_model/tests/engine/test_plan.py test_height_is_distance_to_root
 python3 -m pytest scripts/exec_model/tests/engine/test_plan.py::test_height_is_distance_to_root -q
 ```
 
-`tests/harness.py` is what makes both work: a `raises` context manager and a runner over
-the module's `test_*` functions, which is all this suite ever used pytest for. Each test file carries a
-five-line header that puts the repo root on `sys.path` and names its package when it is run
-as a script, so the relative imports resolve either way.
+**Dataset.** Seconds to a minute each. `test_stats_sidecar` recounts the committed sidecars
+(`testdata/stats/`) with `gen_stats.py` and compares byte for byte; `test_cardinality_corpus`
+compares every join's estimate with the golden `testdata/goldens/<bench>/tp1-single.cardinality.txt`
+here, and `UPDATE_CANONICAL=1` rewrites it; `test_run_corpus` runs `run.py` over three queries
+into a temp directory.
+
+```
+python3 scripts/exec_model/tests/optimizer/test_stats_sidecar.py
+python3 scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
+UPDATE_CANONICAL=1 python3 scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
+python3 scripts/exec_model/tests/test_run_corpus.py
+```
+
+**Corpus.** Each file runs the planned queries it applies to, from one mode's plan golden,
+`PCK_MODE` (`tp4-single` by default), over whole sf1 tables against DuckDB: every one as planned
+(120), those with a dynamic-filter candidate pruned (58), and those with a join cluster
+disassembled and rebuilt (100) and reordered by DPhyp (100). A whole file is about a
+process-minute per query at `tp4-single`, so run whole files on shad-gpu, in shards, and single
+queries locally:
+
+```
+PCK_MODE=tp4-single PCK_SHARD=0/3 python3 scripts/exec_model/tests/plans/test_engine_answers.py
+python3 scripts/exec_model/tests/optimizer/test_engine_optimized.py test_tpch_q3
+```
+
+The workflow runs the four files in three shards at `tp4-single`, its `filter` input passed as
+the selecting argument. The other modes run by hand: tpch q8 and q9 at `tp4-rowgroup` take
+eight to fifteen minutes each.
+
+**Manual.** `test_stats_embeddings` generates tpch sf1 with external embeddings in a temp
+directory — a minute or two and about 1.5 GB — and checks it gives the committed sidecar. It
+needs the embeddings cache (`testdata/fetch_embeddings.sh`), which no CI host may fetch, named by
+`PEACOCK_EMBEDDINGS_CACHE` when it is kept outside the tree:
+
+```
+PEACOCK_EMBEDDINGS_CACHE=/path/to/embeddings-cache python3 scripts/exec_model/tests/optimizer/test_stats_embeddings.py
+```
+
+`test_call_cost_measured` fits `optimizer/call_cost.py` to tpch sf40's calibration record and
+asks that it order each query's modes as the device did: at least fifteen pairs whose measured
+times differ by more than 10 %, none reversed. The record is not in git; it lives in the
+`calibration` bucket by its sha256, which `testdata/calibration/records.sha256` pins, and the
+fetch puts it in `testdata/calibration/tpch.sf40/records.tsv`, checked. The test fails naming
+the fetch when the record is absent. With an aws CLI and the bucket's credentials on this host,
+or through shad-gpu, whose CLI is not on a non-interactive ssh's PATH:
+
+```
+scripts/calibration/fetch_record.sh tpch.sf40
+AWS=/home/info/bin/aws scripts/calibration/fetch_record.sh --ssh shad-gpu tpch.sf40
+python3 scripts/exec_model/tests/optimizer/test_call_cost_measured.py
+```
+
+## run.py: the corpus through the optimizer
+
+`run.py` runs each (query, mode) twice over the sf1 tables, as planned and through the optimizer
+(`optimizer/pipeline.py`), holds the optimized answer to the planned one, and writes what it did.
+It checks the sf1 tables and loads DPhyp before any work. Every filter is optional: both benches,
+every planned query, all five modes; `--jobs` worker processes, one task per (query, mode).
+
+```
+python3 scripts/exec_model/run.py --bench tpch --query q3 join-int --mode tp1-single --jobs 2 --out "${TMPDIR:-/tmp}/exec-model-run"
+python3 scripts/exec_model/cost_report.py --out "${TMPDIR:-/tmp}/exec-model-run"
+```
+
+Under `--out`, by default `testdata/goldens/` here, it writes per bench and mode:
+
+- `<bench>/<mode>.cpu.txt` — the optimized plan's run, in the engine's `cpu.txt` format;
+- `<bench>/<mode>.optimizer.txt` — what each rule did: dynamic filters, each DPhyp call and its
+  orientation, each replan, then a unified diff of the plan text; `nothing fired` where no rule
+  ran;
+- `<bench>/<mode>.costs.txt` — the planned and the optimized run priced by the engine's cost
+  function, the optimized cost's probe-plan and stopped-run parts, and how often each rule fired;
+- `cost_report.html` — one page from every `.costs.txt` there, so a filtered run still renders
+  the whole corpus. A row per query: per mode non-optimized | optimized | ratio; the engine's own
+  `-mini.cost.txt` figure at the mode the final ratio takes; DuckDB's `duckdb_cost=` (the named
+  tpch queries have none); the final ratio, projected; the rules that changed the plan, every
+  count in the hover. `cost_report.py` renders it again from the files alone; without `--out` it
+  re-renders the committed page here.
+
+One `== <query>` section each, in the engine's registry order (its `-mini.cpu.txt`); a query the
+planner refused has a `skipped:` line. A run without `--query` owns its files and drops sections
+no query accounts for; with it, only its own sections change — the rule `UPDATE_CANONICAL` and
+`PCK_UPDATE_SECTIONS` follow for the engine's goldens. A query that raises, an optimized answer
+that is not the planned one among them, gets a `failed:` section, and the run exits 1. Nothing
+compares the files with a previous copy.
+
+The committed files are one whole run, on shad-gpu from a scratch copy of the tree with the sf1
+tables beside it, under Python 3.13.15, pandas 3.0.6 and pyarrow 25.0.1. A batch's bytes are
+pandas' `memory_usage(deep=True)`, so another pandas moves every cost line: regenerate in that
+environment, and send exploratory runs elsewhere with `--out`.
+
+```
+python3 scripts/exec_model/run.py --jobs 16
+```
+
+That is 600 (query, mode) runs in 15:59 wall at `--jobs 16` on shad-gpu's 22 cores, at most
+7.7 GB per worker. The tail is one task, tpch q9 at `tp4-rowgroup`, whose planned run takes
+about 14 minutes alone; the optimized one takes 14 seconds.
 
 ## What is here
 
-One folder per component: `engine/` the runtime (the `Plan` structure, traits, drivers,
-scheduler, accounting), `operators/` the pandas-backed operators, `plans/` an engine plan's text turned
-into the prototype's tree, `optimizer/` statistics, estimates, cost and the rules that change a
-plan. `errors.py` sits at the root: all four raise from it. The tests mirror the folders under
-`tests/`; `harness.py`, `corpus.py` and `rescan.py` serve more than one of them and sit in
-`tests/` itself.
+One folder per component: `engine/` the runtime, `operators/` the pandas-backed operators,
+`plans/` an engine plan's text turned into the prototype's tree, `optimizer/` statistics,
+estimates, cost and the rules that change a plan. `errors.py` sits at the root, since all four
+raise from it. The tests mirror the folders under `tests/`; `harness.py`, `corpus.py` and
+`rescan.py` serve more than one and sit in `tests/` itself, and `tests/engine/mocks.py` holds the
+driver tests' mock executors.
 
 | File | Holds |
 |---|---|
@@ -73,7 +208,7 @@ plan. `errors.py` sits at the root: all four raise from it. The tests mirror the
 | `operators/frame.py` | the pandas batch, and the rules that keep pandas inside cuDF's vocabulary |
 | `operators/expressions.py` | the expression IR — what `cudf::ast` accepts, nothing more |
 | `operators/aggregates.py` | an engine plan's aggregates run as the plan decomposed them (`PlanAggregate`): its init and merge calls over expressions — Welford's `m2` and `merge_m2` among them — grouping sets with DataFusion's id, and its `final` expressions |
-| `operators/source.py` | the loader and the row-group → (partition, batch) policy (T2); an engine scan's real row groups as row ranges, a batch's bytes fetchable ahead of its decode (read once either way); a memory source's lane, its one kept batch |
+| `operators/source.py` | the loader and the row-group → (partition, batch) policy; an engine scan's real row groups as row ranges, a batch's bytes fetchable ahead of its decode (read once either way); a memory source's lane, its one kept batch |
 | `operators/exec_ops.py` | filter, project, sort, an engine plan's aggregate, unload |
 | `operators/accumulators.py` | coalesce-all, limit, re-batch, an engine plan's aggregate-batches, accumulate-and-sort, merge-sorted |
 | `operators/partition_ops.py` | the hash scatter |
@@ -102,408 +237,13 @@ plan. `errors.py` sits at the root: all four raise from it. The tests mirror the
 | `optimizer/cost.py` | C_out in bytes — each join's estimated rows times the width of what it passes on, a string by its mean length from the sidecar |
 | `optimizer/join_order.py` | what DPhyp is asked of a set of a cluster's relations — its rows by `cardinality`'s formulas in one canonical order, and its C_out bytes — the orientation pass: each join's cheaper build, the build copied per probe batch while #152 is open, a probe shuffled onto the join's lanes cut once per lane — and `optimize`: every cluster of a plan reordered by DPhyp on C_out, oriented and disassembled |
 | `optimizer/replan.py` | the adaptive loop: a build further than `threshold` times off its estimate stops the run, every build made so far becomes a memory source, the plan is optimized again with their sizes known and run by a new driver; a replan that would run started work again is refused. `WithMaterialized`, the tables such a plan reads its memory sources from |
-| `optimizer/call_cost.py` | the cost of one device call by kind, `fixed + slope × volume`, fitted from the benchmark's calibration record — what decides lanes and batch size, where C_out cannot see a difference. The record is tpch sf40's, in S3 and not in git: `scripts/calibration/fetch_record.sh tpch.sf40` fetches it into `RECORD`, `testdata/calibration/tpch.sf40/records.tsv`, verified against the sha256 the checkout pins |
+| `optimizer/call_cost.py` | the cost of one device call by kind, `fixed + slope × volume`, fitted from the benchmark's calibration record — what lanes and batch size would be chosen by where C_out sees no difference; no rule reads it yet. The record is fetched into `RECORD` (above) |
 | `optimizer/dphyp.py` | DPhyp from the `peacockdb-dphyp` crate through its C ABI (`ctypes`): the library by `PEACOCK_DPHYP_LIB`, refused without it; the tree as disassembly takes it |
 | `optimizer/multijoin.py` | a cluster of inner joins as DPhyp takes it in — relations, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included |
 | `optimizer/disassembly.py` | a join order back into an engine plan — keys, residual and projection from the MultiJoin's identities, wiring as the translator derives it; `baseline` is the order the plan already has |
 | `optimizer/pipeline.py` | the optimizer end to end over one plan — dynamic filters, then DPhyp and orientation with the probes' builds known, then the adaptive run — and its report; each mode's lanes and batching, by name |
 | `optimizer/report.py` | what the optimizer did to a plan, as data: dynamic-filter candidates and pruned scans, each DPhyp call (relations, edges, the sets priced through the cost callback, its budget, the tree, the chosen joins and the plan order's C_out, the flips), each replan and refusal, the plan text before and after; `Fired`, how often each rule acted |
 | `optimizer/report_text.py` | that report as a `.optimizer.txt` section |
-| `run.py` | the corpus through the optimizer, [below](#runpy-the-corpus-through-the-optimizer) |
+| `run.py` | the corpus through the optimizer, [above](#runpy-the-corpus-through-the-optimizer) |
 | `cost_report.py` | each (query, mode)'s costs as a section of `<mode>.costs.txt` and back, and `cost_report.html` rendered from those files |
 | `tests/corpus.py` | the tests' default budget, the generated datasets found or the generator named, DuckDB's answer to a query's text, and an engine `cpu.txt` golden's rows per node |
-
-Traits are declarations only. The driver tests drive mocks (`tests/engine/mocks.py`) because the
-strategy under test is *which node runs when*; the operator tests drive the real thing.
-Both reach the same two drivers through `BackendSelector`, which is what the selector is
-for.
-
-### Keeping pandas inside cuDF's vocabulary
-
-pandas is the backend because it is everywhere; cuDF is what the real executors call. They
-disagree in ways that would let a prototype operator work and its C++ twin fail, so the
-operators are written against the intersection and the divergences are named in
-`operators/frame.py`. The five rules: no index (a `cudf::table` is columns and nothing
-else); no `apply` or python callables; explicit null placement on every sort; explicit
-null equality on every join; concatenate requires identical columns. Each has a test in
-`test_operators.py` that fails if the pandas default is allowed to stand in.
-
-## The strategy
-
-Plans are trees — joins take exactly two children, forwarders any number — oriented so a
-join's build side is always the left child. Each node carries a **height** (distance to
-the root, root = 0) and an **order** (pre-order index, which in a tree is left-to-right
-within a level). Both are computed once.
-
-A node is **runnable** when any of its partitions can make progress: a source always can,
-and any other node can once that lane's inputs hold a batch or are known to be finished.
-Among all runnable nodes the driver takes the smallest height, breaking ties leftmost,
-and then runs **every** lane of that node.
-
-Min-height-first is what makes this a push model. The moment a node produces a batch its
-parent is runnable at a strictly lower height, so the batch is carried up before anything
-below produces again — it stops only at a batch accumulator, a partition accumulator, or
-the sink. That is also the livelock argument: the one thing that can block a batch is a
-join waiting on its other side, and putting the build side on the left removes that wait.
-`run()` fails loudly if it ever ends with nothing runnable and a queue non-empty.
-
-One rule sits on top of the height rule: **a join in its build phase holds back its whole
-probe subtree**, transitively to the root. F3 below has the reasoning and the evidence.
-
-`partitioned_driver` owns the tree, the queues and the three cross-lane categories, and
-delegates each lane-scoped call to `single_partition_driver`. The unit is one node's lane
-rather than a chain of them: min-height selection walks a batch up a chain node by node on
-its own. The choice itself is `scheduler.Scheduler`'s, as in Rust: the driver reports what a
-step changed — the readiness of the node that ran and of its parent, a join lane leaving
-build, a limit satisfied — and the holds are counters there, not walks to the root. The walk
-survives as a test oracle, `tests/rescan.py`: the driver helpers of five suites check every
-pick against it, and runs each plan again reading ahead: the same calls in the same steps, the fetches beside them.
-
-### The step cap
-
-`run()` raises `DriverError` once the steps or the calls pass `step_cap()`, the calls the run
-owes so far. Each call is owed by one of three things: a source lane's batches, which its
-executor declares as `max_batches`; a batch queued below the root, which exactly one call
-takes; or the closing call each readiness index ends with. Each is owed before or in the step
-that makes its call, so a run ends with its calls equal to the cap when every source returns
-all it declares, and below it otherwise.
-
-Both counts are needed. A step makes at least one call, so a driver that picks a node and does
-none of its work makes steps and no calls, and the steps overtake the cap. A source that
-produces past its count makes calls nothing owed. Steps alone miss that over several lanes,
-because one step runs every lane: over two lanes, source → exec → unload owes four calls
-for every three steps.
-
-The cap grows with the batches queued because the plan's shape cannot bound them. An emitter
-turns one batch into one per lane, and stacked shuffles multiply. tpch q8 at `tp4-rowgroup`
-has 62 source batches and 63 nodes, so (batches + lanes) × nodes is 16,002; it takes 137,760
-steps and 169,049 calls, the cap at its end. A memory source declares its one batch, reading
-ahead changes no call count, and a replan is a new driver with its own cap. A lane's count
-joins the cap when its executor is first made.
-
-## The two join backends
-
-Every join test runs twice, on backends that share no join code.
-
-`operators/joins.py` joins with pandas, the way DataFusion joins with DataFusion.
-`operators/recipe_join.py` answers each call the way the GPU will: it emits a **recipe
-plan** — `Cudf*` nodes in the legacy vocabulary, addressed by seq — and makes
-`execute_node(seq, handles)` calls against `operators/recipe.py`, whose registry consumes
-handles exactly as `NodeSession` does and whose node implementations mirror
-`cpp/src/operators/join.cpp` branch for branch over the primitives in
-`operators/cudf_calls.py`. `RecipeJoinBackendSelector` picks it for joins and leaves every
-other category on pandas.
-
-`tests/operators/test_join_capability.py` is where both are driven: one case per join mode against a
-SQL oracle, on both backends, at every batching config and layout preset, plus the emitted
-seq sequence, the copy counts, the null-key asymmetry, and two guards that read
-`cpp/src/operators/join.cpp` and fail when it names a join type or calls a cuDF function
-the model has never heard of. The model mirrors that file by hand and no import links them,
-so those two are the only thing standing between a C++ change and silent drift.
-
-The question it exists to answer is the mode's load-bearing one: can the **frozen** fbs and
-C++ execute every join type with a probe side arriving in batches? Three answers came back,
-and the spec's join tables carry all of them.
-
-- **Yes, for every type**, with the lowering in that table: probe-local types are one node
-  per batch, build-preserving types add the #136 finish sequence, and where the matrix
-  refuses to stream, the single-batch fallback is precisely the legacy call.
-- **At a cost the frozen surface makes unavoidable**: a handle is consumed by the call that
-  reads it and nothing duplicates one, so a streamed probe copies the build side once per
-  batch — [#152](../../llm-wiki/tickets/joins.md#t152), and Left/Full copy the probe batch as
-  well. The session counts every copy, so the figure is asserted rather than estimated.
-- **Except one shape, which turned out to be a defect rather than a limit.** An outer join
-  with a residual filter is wrong in the shipping C++ — the filter is applied after the
-  outer gather, dropping the rows it was meant to preserve
-  ([#153](../../llm-wiki/tickets/joins.md#t153)). Latent, since no corpus query has that shape.
-
-## The corpus
-
-`tests/plans/test_engine_answers.py` runs the engine's **own** plans over **whole** sf1 tables: each
-planned query of a mode's `plans.txt` golden, built by `engine_nodes.py`, against DuckDB running
-the query's own text — all 120 at `tp4-single`. `tests/optimizer/test_engine_dynamic_filters.py` runs
-them again pruned by their dynamic filters (`dynamic_filters.py`): still DuckDB's answer, and no
-more row groups than DuckDB's own filter keeps. `tests/plans/test_engine_corpus.py` needs no data: every golden plan builds,
-validates, and declares the layout the engine printed for each node. `tests/optimizer/test_stats_sidecar.py`
-recounts the committed NDV sidecars (`testdata/stats/`) from the generated data with
-`gen_stats.py`, byte for byte, and checks the reader serves every column they list;
-`tests/optimizer/test_cardinality_corpus.py` checks every join's row estimate (`cardinality.py`) against the
-`output_rows` of the engine's own CPU run in `tp1-single-mini.cpu.txt`, as a golden of one line per
-join — `testdata/goldens/<bench>/tp1-single.cardinality.txt` in this folder, rewritten by `UPDATE_CANONICAL=1` —
-so a worse estimate is a named line in the diff. One mode suffices because the other four run no
-join tp1-single does not; `tests/optimizer/test_cardinality_modes.py` holds them to it from the goldens'
-text alone, in the cheap python tier.
-`tests/optimizer/test_disassembly_corpus.py` needs no data either: every cluster of every golden,
-disassembled in the order it has (`disassembly.py`), builds a plan the engine would lay out the
-same. `tests/optimizer/test_engine_reassembled.py` runs those plans: still DuckDB's answer, and every join
-the rows the engine's CPU run gave it.
-`tests/optimizer/test_engine_optimized.py` runs the plans `join_order.optimize` makes of them — every
-cluster reordered by DPhyp and oriented — against DuckDB; it needs the DPhyp library.
-
-**DuckDB is the oracle.** It runs the query's **own text** over the same parquet files, so it
-catches a *reading* of the SQL, which a hand-written pandas equivalent cannot, since both
-halves would share one reading — the circularity #80 complains of.
-
-What a comparison asserts is what SQL determines: the rows as a **multiset**, and the ORDER
-BY columns **positionally** (`plans/answers.matches_oracle`). Comparing whole rows positionally makes
-a tie into a failure, which is how TPC-H q11 failed — two German parts come to 223626.0
-exactly, and which of them is printed first is not the query's to say.
-
-**Manual dispatch only** (`.github/workflows/exec-model-corpus.yml`): six million lineitem
-rows through a pandas operator chain is minutes, not seconds. The queries are independent,
-so `PCK_SHARD=k/n` splits a file across n processes. `test_stats_sidecar.py`,
-`test_cardinality_corpus.py` and `tests/test_run_corpus.py` — `run.py` over two small tpch
-queries and a refused tpcds one — are seconds, and run on every push in dataset-matrix.
-
-The per-call model is checked against the device the same way, by hand or by that workflow's
-`call-cost` job: `tests/optimizer/test_call_cost_measured.py` fits `call_cost` to the sf40
-record and asks that it order each query's modes as they were measured — at least fifteen pairs
-differing by more than 10 %, none reversed (17 of 20 today, 3 within the spread). The record is
-fetched first, and the test fails naming the fetch when it is absent:
-
-```
-scripts/calibration/fetch_record.sh tpch.sf40   # its header: where the aws CLI comes from
-python3 scripts/exec_model/tests/optimizer/test_call_cost_measured.py
-```
-
-**Whole tables, not a sample.** Both benchmarks are written clustered by date, so a row prefix
-is one quarter of 1992, a row-group sample is a set of date windows, and two tables sampled
-independently join to nothing.
-
-## run.py: the corpus through the optimizer
-
-```
-PEACOCK_DPHYP_LIB=/build/peacock/rust-only-target/release/libpeacockdb_dphyp.so \
-  python3 scripts/exec_model/run.py --bench tpcds --query q3 q64 --mode tp4-single --jobs 2
-```
-
-Every filter is optional: both benches, every query of the plan golden, all five modes. One task
-per (query, mode), over `--jobs` processes, runs the plan twice over the sf1 tables, as planned
-and through `optimizer/pipeline.py`, holds the optimized answer to the planned one
-(`plans/answers.same_answer`: the planned answer is DuckDB's, and no rule touches what sorts the
-rows), and returns both runs in the `cpu.txt` format with the optimizer's report. The sf1 tables
-and the DPhyp library are checked before anything runs. The parent writes, under
-`testdata/goldens/<bench>/` here (`--out` moves it):
-
-- `<mode>.cpu.txt` — the optimized plan's run to its end, as the engine renders its own
-  (`-mini.cpu.txt`); its bytes are pandas', and where no rule changed the plan its joins' rows are
-  the engine's. A probe plan's run and a run a replan stopped are not in it; the worker returns
-  them.
-- `<mode>.optimizer.txt` — what each rule did: the dynamic filters' candidates, key bounds and
-  row groups; each DPhyp call's relations, edges and how many sets it priced, its tree — or its
-  budget and the plan's order kept — the orientation, each join of the chosen tree with its
-  estimated rows and C_out, the tree's C_out beside the plan order's, and the joins flipped
-  against the plan; each replan's miss, what it kept and the order made again; then a unified
-  diff of the plan text. `nothing fired` where no rule did. The sets priced are not listed — 6,626
-  for one of q64's clusters — but the report keeps them (`JoinOrder.priced`).
-- `<mode>.costs.txt` — both runs priced by the engine's own cost function (`plans/cost_model.py`,
-  reading `testdata/cost_model.conf`, the file the engine's `.cost.txt` goldens are made by):
-  `planned`, `optimized`, and of the optimized the `probes` and `stopped` parts, each a total and
-  its bytes per category; then `fired`, how often each rule acted. Not a function of `cpu.txt`, as
-  the engine's `.cost.txt` is: it prices runs that file does not hold. Optimized is all the work
-  the pipeline did: the optimized plan's run, every dynamic filter's probe plan and every run a
-  replan stopped. A memory source — a build one of those made, read back — costs nothing, by
-  nature rather than by a multiplier: the build was paid for once, where it was made. Any other
-  kind the conf does not list is refused.
-- `cost_report.html`, at the top of the output directory — one self-contained page rendered from
-  every `<mode>.costs.txt` there, so a filtered run still renders the whole corpus.
-  `python3 scripts/exec_model/cost_report.py` renders it again from the files alone. A row per
-  query: per mode non-optimized | optimized | ratio (optimized / non-optimized); the engine's own
-  `.cost.txt` figure (`<mode>-mini.cost.txt`) at the mode the final ratio takes; DuckDB's
-  `duckdb_cost=` (`<q>.duckdb_cost.txt`; the named tpch queries have none); the projected final
-  ratio, min over modes of the engine's figure × that mode's ratio / DuckDB's; and the rules that
-  changed the plan, each with the modes it did so at — a dynamic filter that narrowed a scan, a
-  DPhyp tree whose C_out is below the plan order's, a flip, a replan — every count in the hover;
-  `nothing changed the plan` where rules ran and none did, `nothing fired` where none ran.
-  The prototype's bytes are pandas', so its costs compare only with each other: the final ratio
-  projects the optimizer's ratio onto the engine's bytes, which are what DuckDB's compare with on
-  the published cost report; it is not a measured engine cost.
-
-A `== <query>` section each, in the engine's registry order (its `-mini.cpu.txt`); a query the
-planner refused has none there and a `skipped:` line here, placed after the query that sorts
-before it. A run without `--query` owns its files and drops sections no query accounts for; with
-it, only its own sections change, the rule `UPDATE_CANONICAL` and `PCK_UPDATE_SECTIONS` follow
-for the engine's goldens — a fresh file from a filtered run would lose every other query. A query
-that raises — an optimized answer that is not the planned one among them — gets a `failed:`
-section and the run exits 1. Nothing compares the files with a
-previous copy.
-
-The committed files are a whole run, regenerated on shad-gpu (heavy runs do not belong on a
-laptop) from a scratch copy of the tree, with the sf1 tables beside it and `PEACOCK_DPHYP_LIB` set
-as above, under Python 3.13.15 and pandas 3.0.6. A batch's bytes are pandas'
-`memory_usage(deep=True)`, so another pandas moves every cost line:
-
-```
-python3 scripts/exec_model/run.py --jobs 16
-```
-
-That is 600 (query, mode) runs, all five modes of both benches, in 15:59 wall at `--jobs 16` on
-shad-gpu's 22 cores, at most 7.7 GB per worker. The tail is one task, tpch q9 at `tp4-rowgroup`,
-whose planned run takes 14 to 15 minutes alone; the optimized one takes 14 seconds.
-
-## Layout injection
-
-A query's answer is a function of its rows, not of how they were divided. `LayoutInjector`
-takes that seriously: give it a plan and it hands back an equivalent one whose lanes, row
-groups, batch sizes and hash placement are whatever preset you name — one lane and one
-batch, a few of each, many small lanes, lanes with nothing in them, re-cut batch
-boundaries — with sources injecting zero-row batches at a given probability, and with
-`GpuEmitPartitions` placing rows by a hash that ranges from well spread to
-everything-in-one-lane. `test_join_capability.py` writes each join plan once and runs it at
-every shape; `test_injection.py` checks that the shapes really differ, that an unshuffled join
-keeps its lanes, that the empty batches really arrive, and that a seed reproduces.
-
-Rebuilding, not editing: a node's partitioning is baked into a closure at build time, so
-every builder in `nodes.py` records its call and a rewrite re-runs it. Two rules keep the
-rewrite honest. A join may only be re-partitioned when both its sides are hash-partitioned
-on the join keys — otherwise its lane count is load-bearing and splitting it would join
-matching slices and silently return too few rows. And every placement is a pure function
-of the key columns: a shuffle's contract is co-location and nothing above it may depend on
-how evenly the lanes were loaded, so all-to-one-lane is a legal hash and a plan that only
-works under a well-spread one is broken rather than unlucky.
-
-## The limit
-
-Both lowerings are implemented, as the spec's limit rule states them.
-
-Feeding only the sink it is **not a node at all**: `skip`/`fetch` are `GpuUnload`'s. The
-driver counts rows **across lanes** — an unload executor is per lane, so only the driver
-can — and per batch either releases the handle without a call, narrows the call to a row
-range, or passes it whole. Once `_is_satisfied` holds, the node's whole subtree stops being
-runnable: the join hold's shape, but never lifting, so the run ends with lanes not done and
-queues non-empty and the in-flight release is what cleans up.
-
-Anywhere else it **stays a node**, over the one-partition input the planner guarantees and
-any number of batches, streaming and holding nothing: only the two batches straddling
-`start..limit` are sliced, through `peacock_executor_slice_handle`, whose bounds are call
-arguments rather than plan constants. Once satisfied it is held exactly as
-the sink's is — and marked done as it is held, so its parent is not left waiting for a lane
-that has in fact finished.
-
-`limit.py` holds `RowInterval` and `RowRange`; on the GPU the range is
-`peacock_result_from_handle`'s new arguments, so a trimmed unload moves only the rows
-wanted and allocates nothing. `test_limit.py` asserts on the **unload calls**, not on the
-rows that come back — both look the same for a correct implementation, but only the calls
-can tell a limit from a filter applied after the transfer, and that difference is the whole
-feature.
-
-## Findings
-
-The spec's Drivers section was rewritten from these. **Cite them by title, not by
-number** — the numbers have already shifted once as findings merged. F2, F3 and F5 are the
-three that rewrite carried.
-
-F1. **The push behaviour falls out of the height rule alone.** No chain-walking logic is
-   needed — `test_a_batch_is_carried_to_the_root_before_the_next_one_is_produced`.
-
-F2. **Queues are self-bounding; the draft's cap-Q is unnecessary.** A producer's out-queue
-   is drained by its parent before the producer can run again, because the parent's height
-   is strictly lower. No node holds more than one batch per lane, on any shape — the check
-   runs inside the `run()` helper of `test_partitioned_driver.py`, so every plan the suite
-   exercises asserts it.
-   The corollary matters for reading that check: with F3's hold in place the *scheduling*
-   half can no longer go red, and no shape appears to exist that violates it. What the
-   assertion still guards is **executor emission discipline** — no executor may return
-   more than one batch per call per output lane. A partition accumulator emitting per lane
-   event trips it, since the driver feeds it every input lane in one step and the node
-   declares one output lane; [#138](../../llm-wiki/tickets.md)'s ranged merge emission is
-   the same shape arriving from real code. `test_the_queue_bound_assertion_is_live`.
-
-F3. **The bound needed one rule to become unconditional: the join hold.** A join in its
-   build phase cannot consume a probe batch, and the planner's build-side
-   `GpuCoalesceAllBatches` makes the build subtree one level *deeper* than the probe's —
-   so min-height handed the probe every choice, and in a two-sided shuffle join the entire
-   probe input (32 batches) went resident before the first `set_build`. Left-orienting the
-   build removes the deadlock, not that. Holding the whole probe subtree until the build
-   is set brings it back to 4 (the lane count):
-   `test_probe_side_queues_stay_empty_until_the_build_is_set`,
-   `test_a_join_in_its_build_phase_holds_back_its_probe_subtree`,
-   `test_the_hold_is_transitive_over_the_whole_probe_subtree`,
-   `test_the_hold_stays_on_while_any_join_lane_is_still_building`,
-   `test_nested_joins_resolve_outermost_first_without_deadlocking`.
-   Each of those is mutation-checked: dropping the hold, restricting it to the join's
-   direct child, or weakening `_awaits_build` from any-lane to all-lanes each turns one of
-   them red. The shape matters more than it looks — an earlier version of the transitivity
-   test gave the probe the *deeper* subtree, so min-height preferred the build unprompted
-   and the test passed with no hold at all.
-
-F4. **Multi-child forwarders degenerate to left-first.** A source with nothing available is
-   skipped rather than waited on (as the spec requires), and under min-height the leftmost
-   child is always the one holding a batch — so a union or interleave drains its left
-   child first instead of alternating. Deterministic, but not round-robin. Only
-   `GpuMergePartitions` genuinely rotates, because its one child feeds all of its input
-   lanes and "run every partition" fills them in a single step —
-   `test_a_multi_child_forwarder_skips_a_pending_source_instead_of_waiting`.
-
-F5. **`Pending` does not exist in this model.** The `Batch` / `Pending` / `Exhausted`
-   visit contract was a pull-model artefact: a puller has to be told "nothing yet",
-   because it asked. Here runnability is a predicate over queue and done state evaluated
-   *before* any call, so a node that has nothing to do is simply not chosen — there is no
-   third outcome to return, and nothing to propagate through merge visits. `Exhausted`
-   survives only as the per-lane `finished` flag the driver already keeps.
-
-F6. **Executor constructors need their lane.** `ExecutorBackends` holds
-   `Callable[[lane], Executor]`, not `Callable[[], Executor]` — a loader's lane cannot
-   otherwise find its row groups in the partitioner's mapping. Cross-lane categories
-   (`PartitionAccumulator`, `PartitionEmitter`) are built once per node and get `None`.
-
-F7. **A join's build lane must deliver exactly one batch — including an empty one.**
-   `GpuCoalesceAllBatches` therefore emits one batch even when it accumulated nothing;
-   zero and two are both plan errors, and the driver says which.
-
-F8. **Validation splits by what the rule is about, not by convenience.** Whole-tree facts —
-   arity, lane-count agreement, the emitter's single-lane input, the build side's
-   `SingleBatch` — live in `plan.py`, one owner. What a node needs *of its children* lives
-   in its `_validator`, composed from the checks in `operators/validation.py` and run by
-   `validate_schemas_and_partitions()`, because only there can the message name the fix: "the planner inserts GpuMergePartitions below it" rather
-   than "this category is 1:1 per lane". That half covers hash distribution, sortedness,
-   and batch layout.
-
-F9. **A cardinality estimate belongs on the join node, not in the model's signature.** A
-   join's transient is sized by the *output* cardinality — matched rows × the combined
-   width, build side replicated per match — which `scratch_bytes(n_rows, n_bytes)` cannot
-   derive. It does not have to: the executor is constructed from the node, so an estimate
-   the optimizer attaches at plan time reaches the model through `&self`, and the trait is
-   unchanged. `GpuHashJoin` therefore carries a fan-out figure (output rows / probe rows, the
-   ratio `CardinalityEstimator` already returns), constant 1.0 until
-   [#19](../../llm-wiki/tickets.md). Corollary: **model ≥ measured is not an invariant.**
-   The estimate can be wrong, so the model can come in under, and the accountant is built for
-   that — its contract is "fail cleanly when the accounted peak exceeds the budget". The
-   comparison is recorded with its magnitude and never asserted away.
-
-F10. **The executor total must be cached, not summed.** The spec says "Σ cached
-   `resident_bytes()`" and the caching is not an optimization: summing live is what forces
-   the accountant to hold a reference to every executor, which the Rust port cannot do
-   while the driver holds them mutably. Refreshing one instance's delta per call removes
-   the aliasing along with the cost.
-
-F11. **A residual filter does not by itself force a single-batch probe.** The draft matrix
-   refused a streamed probe to any filtered join. What actually forbids it is the *finish
-   pass*: it sees accumulated keys, and a keys-only table cannot evaluate a predicate over
-   both sides. A filtered Inner — or any probe-local type — streams, because each output
-   row is decided by (the whole build, this batch) and the filter is part of that decision.
-   The matrix in the spec was narrowed to say so.
-   `test_a_residual_filter_rides_the_join_on_both_backends`.
-
-F12. **Modelling the wire found a defect in the shipping engine, not in the model.** The
-   recipe backend reproduces `execute_hash_join` branch for branch, so where it disagreed
-   with the SQL oracle the disagreement belonged to the C++: an outer join's residual
-   filter is applied after the outer gather and drops the rows the outer join exists to
-   keep ([#153](../../llm-wiki/tickets/joins.md#t153)). Reproducing a code path faithfully is
-   worth more than implementing it correctly — a correct model would have hidden this.
-   `test_an_outer_join_with_a_residual_filter_is_refused_not_answered_wrongly`.
-
-## The prototype is a model, not a specification
-
-Where the Rust implementation and this prototype disagree and the prototype is the one that
-is wrong, the Rust is right and the divergence is the outcome, not a drift to reconcile.
-This happened first with row-group chunking: the prototype takes groups until a lane's share
-is reached and overshoots by a whole group, while `ParquetBatchPartitioner` stops where
-stopping is closer, which is what holds the balance bound. Do not file that class as a
-defect against the engine, and do not change the engine to match a model it has outgrown.
-
-## Not in this cut
-
-The plan-time `estimated_max_resident_size` estimator, which T6 derives in Rust directly
-rather than here. Window functions are refused by the design (#143). The accountant is here
-with the accounting formula, and trips cleanly on a tight budget.

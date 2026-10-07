@@ -1,10 +1,11 @@
 """The loader, and the row-group → (partition, batch) policy it executes.
 
-`partition_row_groups` is a prototype of the spec's `ParquetBatchPartitioner` (task T2):
-one pure function, computed once at plan time, whose output everything else consumes
-verbatim. Its row groups stand in for parquet's — the shape of the mapping is what matters,
-not where the rows came from. An engine plan brings the real ones instead: its mapping
-numbers a file's own row groups, whose sizes `row_group_ranges` turns into rows.
+`partition_row_groups` is a prototype of the planner's row-group mapping
+(`planner/translator/scan_mapping/partition.rs`): one pure function, computed once at plan time,
+whose output everything else consumes verbatim. Its row groups stand in for parquet's — the
+shape of the mapping is what matters, not where the rows came from. An engine plan brings the
+real ones instead: its mapping numbers a file's own row groups, whose sizes `row_group_ranges`
+turns into rows.
 """
 
 from __future__ import annotations

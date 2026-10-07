@@ -119,7 +119,7 @@ class PartitionedDriver:
         executor; a batch queued below the root, by the one call that takes it; or a readiness
         index's one closing call. A step makes at least one call, so steps outrun this where a
         driver stops making calls, and calls outrun it where a source produces past its count.
-        Not a constant, because stacked shuffles multiply a plan's batches (README, "The step cap").
+        Not a constant: stacked shuffles multiply a plan's batches (design.md, "The step cap").
         """
         return self._calls_owed + sum(lane.max_batches() for lane in self._source_lanes)
 

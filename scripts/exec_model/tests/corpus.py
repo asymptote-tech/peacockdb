@@ -3,7 +3,7 @@
 The engine-plan files read the sf1 tables through `ParquetTables` (`plans/tables.py`) and
 compare with DuckDB through `duckdb_answer` and `matches_oracle` (`plans/answers.py`); a missing
 table **fails**, naming the generator, since a skipped suite reads like a passing one. Tables
-are read whole; the README's "The corpus" says why a sample will not do. Running a plan is
+are read whole; design.md, "DuckDB, the oracle", says why a sample will not do. Running a plan is
 `plans/engine_run.py`'s; `execute` here gives it the tests' default budget.
 """
 

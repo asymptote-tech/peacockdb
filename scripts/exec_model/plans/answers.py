@@ -66,7 +66,7 @@ def matches_oracle(got: pd.DataFrame, want: pd.DataFrame, label: str, order_by=N
     """`got` against another answer — DuckDB's, in the corpus suites — as strictly as SQL allows:
     the column names as declared, the rows as a multiset, and the `order_by` columns (the
     query's ORDER BY as output names; None for none) by position, since tied sort keys leave
-    the rows' order open. The README's "The corpus" says why not whole rows by position."""
+    the rows' order open. design.md, "DuckDB, the oracle", says why not whole rows by position."""
     _require(list(got.columns) == list(want.columns),
              f"{label}: {list(got.columns)} vs the query's {list(want.columns)}")
     _require(len(got) == len(want), f"{label}: {len(got)} rows vs {len(want)} in the answer it is held to")

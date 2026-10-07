@@ -161,6 +161,16 @@ def test_the_page_is_one_file_with_nothing_fetched():
     assert "<em>Final ratio (projected)</em> = min over modes of" in text
 
 
+def test_the_summary_counts_a_run_cheaper_or_dearer_by_its_totals_not_its_shown_ratio():
+    # 0.996 and 1.0002 both show as 1.00; the totals still differ.
+    runs = {"tp1-single": query_cost(1000, 996), "tp4-single": query_cost(10000, 10002),
+            "tp4-sized": query_cost(100, 100)}
+    text = render([Bench("tpch", [Row("q3", runs, {}, None)])])
+    assert "optimized cheaper at 1, dearer at 1, the same at 1;" in text, text[:600]
+    shown = [text for _, _, text in Cells(text).rows[2] if text.startswith("1.00")]
+    assert shown == ["1.00", "1.00", "1.00"]
+
+
 def test_the_rows_are_read_from_the_cost_files_the_engine_s_and_duckdb_s():
     with tempfile.TemporaryDirectory() as scratch:
         out, root = pathlib.Path(scratch) / "out", pathlib.Path(scratch) / "testdata"

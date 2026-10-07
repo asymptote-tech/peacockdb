@@ -89,5 +89,21 @@ def test_what_the_crate_refuses_comes_back_named():
     assert solve(1, [], lambda mask: 1.0).tree == 0
 
 
+class _Priced(Exception):
+    pass
+
+
+def test_a_cost_that_raises_stops_the_solve_with_its_exception():
+    asked = []
+
+    def cost(mask):
+        asked.append(mask)
+        raise _Priced(f"no estimate for {mask:#b}")
+
+    with raises(_Priced, match="no estimate"):
+        solve(4, chain(4), cost)
+    assert len(asked) == 1  # nothing is priced past the failure
+
+
 if __name__ == "__main__":
     raise SystemExit(main(globals()))

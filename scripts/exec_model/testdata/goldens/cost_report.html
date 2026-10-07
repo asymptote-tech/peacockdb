@@ -20,7 +20,7 @@ padding:0 .4rem;color:#38434f;margin:.05rem 0;}
 .caveat{margin-top:.8rem;background:#fff8c5;border:1px solid #d4a72c;border-radius:6px;padding:.6rem .9rem;font-size:.9rem;}
 </style></head><body>
 <h1>PeacockDB join optimizer: cost as planned and optimized</h1>
-<p class="summary">tpch: 39 queries, 195 (query, mode) runs — optimized cheaper at 50, dearer at 1, the same at 144; 0 skipped, 0 failed. tpcds: 99 queries, 405 (query, mode) runs — optimized cheaper at 364, dearer at 0, the same at 41; 90 skipped, 0 failed.</p>
+<p class="summary">tpch: 39 queries, 195 (query, mode) runs — optimized cheaper at 55, dearer at 1, the same at 139; 0 skipped, 0 failed. tpcds: 99 queries, 405 (query, mode) runs — optimized cheaper at 379, dearer at 5, the same at 21; 90 skipped, 0 failed.</p>
 <p class="caveat"><strong>Costs of two prototype runs, in pandas' bytes.</strong> Each cost is the
 engine's own function — <code>testdata/cost_model.conf</code>, the one its <code>.cost.txt</code>
 goldens are made by: Σ multiplier × output bytes per node category — applied to a run of the Python

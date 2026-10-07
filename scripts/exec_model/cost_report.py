@@ -225,8 +225,9 @@ def render(benches: list[Bench]) -> str:
 def _summary(bench: Bench) -> str:
     runs = [run for row in bench.rows for run in row.runs.values()]
     costs = [run for run in runs if isinstance(run, QueryCost)]
-    cheaper = sum(round(run.ratio, 2) < 1 for run in costs)
-    dearer = sum(round(run.ratio, 2) > 1 for run in costs)
+    # By the totals, not the ratio a cell shows: 1.0002 shows as 1.00 and is still dearer.
+    cheaper = sum(run.optimized.total < run.planned.total for run in costs)
+    dearer = sum(run.optimized.total > run.planned.total for run in costs)
     skipped = sum(isinstance(run, str) and run.startswith("skipped") for run in runs)
     failed = sum(isinstance(run, str) and run.startswith("failed") for run in runs)
     return (f"{bench.name}: {len(bench.rows)} queries, {len(costs)} (query, mode) runs — optimized cheaper "

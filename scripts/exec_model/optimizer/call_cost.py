@@ -4,9 +4,9 @@ benchmark's calibration record — tpch sf40's, fetched into `RECORD` by `fetch_
 What `cost.py`'s C_out cannot see: a plan of the same bytes in more calls pays each call's fixed
 part again, and on a GPU that part is large — a parquet scan costs ~45 ms however small its row
 group, so reading one row group per call is two orders of magnitude slower than one call per lane.
-It decides what changes the number or kind of calls: lanes, batch size, shuffles. The volume is the
-one that predicts a kind best: a scan's decoded output bytes, an aggregate's input rows, anything
-else's input bytes. A call is fitted as the median of its measured runs; the fit minimizes relative
+It would decide lanes, batch size and shuffles; no rule reads it yet. The volume is the one that
+predicts a kind best: a scan's decoded output bytes, an aggregate's input rows, anything else's
+input bytes. A call is fitted as the median of its measured runs; the fit minimizes relative
 error, so small calls weigh as much. A forwarder makes no call and costs nothing.
 """
 
