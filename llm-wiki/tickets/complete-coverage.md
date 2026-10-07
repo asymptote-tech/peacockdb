@@ -3,6 +3,20 @@
 
 Tickets for MVP SQL functionality milestone
 
+<a id="t239"></a>
+### #239 — `date_part` could declare cuDF's `Int16` in DataFusion instead of casting on the device
+DataFusion 45 types `date_part`/`extract` as `Int32`; cuDF's `extract_datetime_component`
+answers `INT16` for every field. Since [#191](corpus-coverage.md#t191) the device arm in
+`build_column_scalar_fn` (`expr.cpp`) casts the component to the wire's `return_type`, one
+extra column per extract.
+
+The alternative: register our own `date_part` `ScalarUDF` in DataFusion's function registry
+(`SessionContext::register_udf`), shadowing the built-in, whose `return_type` is the type cuDF
+produces. The cpu and the device would then agree with no cast, and the device arm would refuse
+any other `return_type` rather than cast to it. To decide: what the user then sees (`Int16`
+where DataFusion and Postgres give a wider integer), every field's cuDF type, and whether the
+corpus goldens move. No wrong answer today; this is a choice about where the type is fixed.
+
 <a id="t195"></a>
 ### #195 — the corpus is numeric-aggregate heavy, and six shapes have no query at all
 Measured off `tp1-single.plans.txt` over the 61 enabled queries and the four largest held

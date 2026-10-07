@@ -11,7 +11,7 @@ use super::exec_cases::{
     by, cast_to, declared_decimal_types, filter, function, gt, keep_id, like, lit_i32, lit_i64,
     lit_str, project, project_over, sort,
 };
-use super::script::{Script, assert_holds_as_declared, divergences_on_device};
+use super::script::{Script, assert_holds_as_declared};
 use crate::plan::{BinaryOp, Expr, UnaryOp};
 use crate::tests::synthetic::{decimals, synthetic};
 
@@ -256,38 +256,29 @@ fn date_part(field: &str) -> Expr {
     )
 }
 
-// #191 — cuDF extracts every field as `INT16` and the `date_part` arm hands it up so where
-// the plan declares `Int32`; the fix is on `date-part-return-type`. Wanted: `None`.
+// cuDF extracts every field as `INT16`; the `date_part` arm casts to the `Int32` the plan
+// declares.
 operator_case! {
     GpuProject,
-    fn bug_a_date_part_year_holds_int16_where_the_plan_declares_int32() {
+    fn a_date_part_year_holds_the_int32_the_plan_declares() {
         let node = project(vec![keep_id(), (date_part("year"), "year", DataType::Int32)]);
-        assert_eq!(
-            divergences_on_device(&node, Script::Exec(input())),
-            vec![Some("1 year: Int32 vs INT16".to_string())]
-        );
+        assert_holds_as_declared(&node, Script::Exec(input()));
     }
 }
 
 operator_case! {
     GpuProject,
-    fn bug_a_date_part_month_holds_int16_where_the_plan_declares_int32() {
+    fn a_date_part_month_holds_the_int32_the_plan_declares() {
         let node = project(vec![keep_id(), (date_part("month"), "month", DataType::Int32)]);
-        assert_eq!(
-            divergences_on_device(&node, Script::Exec(input())),
-            vec![Some("1 month: Int32 vs INT16".to_string())]
-        );
+        assert_holds_as_declared(&node, Script::Exec(input()));
     }
 }
 
 operator_case! {
     GpuProject,
-    fn bug_a_date_part_day_holds_int16_where_the_plan_declares_int32() {
+    fn a_date_part_day_holds_the_int32_the_plan_declares() {
         let node = project(vec![keep_id(), (date_part("day"), "day", DataType::Int32)]);
-        assert_eq!(
-            divergences_on_device(&node, Script::Exec(input())),
-            vec![Some("1 day: Int32 vs INT16".to_string())]
-        );
+        assert_holds_as_declared(&node, Script::Exec(input()));
     }
 }
 

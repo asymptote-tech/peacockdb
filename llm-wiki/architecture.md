@@ -369,10 +369,12 @@ numerator, and `round`'s operand. Each is a `CastExprNode` the planner
 emits — the aggregate ones inside the finalize expressions, the union ones as per-branch
 projects, the expression ones at the point of use.
 
-Three stay in C++ with a reason. The loader's decimal width is the source honouring the output
+Four stay in C++ with a reason. The loader's decimal width is the source honouring the output
 schema it already declares, since cuDF's parquet reader picks the narrowest fixed_point width
 while DataFusion uses Decimal128 throughout. A count is the same shape one node up: cuDF counts
-in INT32 and the aggregate casts to the INT64 the state declares. Hash key normalization feeds the hash alone and
+in INT32 and the aggregate casts to the INT64 the state declares; and `date_part` the same at
+the expression, cuDF extracting every component in INT16 and the arm casting to the
+`return_type` the wire names. Hash key normalization feeds the hash alone and
 never reaches a returned value — a cast that cannot change an answer is not one the plan needs
 to carry.
 

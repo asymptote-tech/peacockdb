@@ -540,28 +540,29 @@ operator_case! {
     }
 }
 
-/// `input()` with `d` cast to `Utf8` by arrow, so a text-to-date cast has dates to parse.
-fn dates_as_text() -> RecordBatch {
+/// `input()` with one column cast by arrow to a type the fixture lacks.
+fn input_with(name: &str, ty: DataType) -> RecordBatch {
     let batch = input();
+    let ordinal = batch.schema().index_of(name).expect("a fixture column");
     let mut columns = batch.columns().to_vec();
-    columns[6] = cast(&columns[6], &DataType::Utf8).expect("a date renders");
+    columns[ordinal] = cast(&columns[ordinal], &ty).expect("the column converts");
     let fields: Vec<Field> = batch
         .schema()
         .fields()
         .iter()
-        .map(|f| match f.name().as_str() {
-            "d" => Field::new("d", DataType::Utf8, true),
-            _ => f.as_ref().clone(),
+        .map(|f| match f.name() == name {
+            true => Field::new(name, ty.clone(), true),
+            false => f.as_ref().clone(),
         })
         .collect();
-    RecordBatch::try_new(Arc::new(ArrowSchema::new(fields)), columns).expect("d retyped")
+    RecordBatch::try_new(Arc::new(ArrowSchema::new(fields)), columns).expect("one column retyped")
 }
 
 // #218 — the cast arm hands a string column to `cudf::cast`, which parses nothing.
 operator_case! {
     GpuProject,
     fn bug_a_text_cast_to_date_is_refused_on_the_device() {
-        let batch = dates_as_text();
+        let batch = input_with("d", DataType::Utf8);
         let node = project_over(
             batch.schema(),
             vec![keep_id(), (cast_to(6, "d", DataType::Date32), "as_date", DataType::Date32)],
@@ -577,20 +578,34 @@ operator_case! {
     }
 }
 
-// #191 — cuDF extracts a year as `Int16`, and the device hands it up so where the plan
-// declares `Int32`; the values are the cpu's.
+// cuDF extracts every field as `Int16`; the arm casts to the `Int32` the plan declares.
 operator_case! {
     GpuProject,
-    fn bug_a_year_extracted_from_a_date_is_exported_as_int16() {
+    fn a_date_part_answers_in_its_declared_type() {
         let year = function("date_part", vec![lit_str("year"), Expr::column(6, "d")], DataType::Int32);
         let node = project(vec![keep_id(), (year, "year", DataType::Int32)]);
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+// #221 — the round arm evaluates in FLOAT64 whatever the operand, and DataFusion declares
+// `Float32` for a `Float32` operand; the values are the cpu's.
+operator_case! {
+    GpuProject,
+    fn bug_a_round_over_float32_answers_float64_on_the_device() {
+        let batch = input_with("f64", DataType::Float32);
+        let rounded = function("round", vec![Expr::column(4, "f64")], DataType::Float32);
+        let node = project_over(
+            batch.schema(),
+            vec![keep_id(), (rounded, "rounded", DataType::Float32)],
+        );
+        let outcome = run_both(&node, Script::Exec(vec![batch]));
         let cpu = &outcome.cpu.as_ref().expect("the cpu answers")[0][0];
-        let narrowed = batch_of(vec![
+        let widened = batch_of(vec![
             ("id", cpu.column(0).clone()),
-            ("year", cast(cpu.column(1), &DataType::Int16).unwrap()),
+            ("rounded", cast(cpu.column(1), &DataType::Float64).unwrap()),
         ]);
-        gpu_answered(&outcome, narrowed, Order::AsEmitted);
+        gpu_answered(&outcome, widened, Order::AsEmitted);
     }
 }
 
