@@ -3,12 +3,11 @@
 Kind: production
 
 **This task closes [#235](../tickets/corpus-coverage.md#t235)** (no independent oracle checks the
-result goldens), in the parts that make DuckDB that oracle. First of the join-rewrite chain, so
+result goldens), whole. First of the join-rewrite chain, so
 every later task's newly enabled cell meets DuckDB inside that task's own verification.
 
-Left out of #235, on purpose: the negative tests of the cpu and device helpers
-(`assert_result_section`, `assert_result`), and the `ALL` consts on `CpuOracle` and
-`GpuResultMode`. #235 stays open for those, reworded to them alone.
+With it, #235's two harness items (steps 7 and 8): the corpus helpers proven to fail on a wrong
+answer, and every oracle enum held to the lines that use it.
 
 ## What exists
 
@@ -28,24 +27,33 @@ alone answers, and the over-cap sections.
    It is written on every line — no default, no line without it, so a query's whole coverage still
    reads off its line. Values:
    - `duckdb_exact` — rows as multisets by column position, numbers equal as rendered;
-   - `duckdb_approx` — numbers within the relative tolerance the device's `golden_approx_std`
-     uses, for the decimal-truncation and float-reassociation rows #235 lists;
-   - `duckdb_divergent(<ticket>)` — one variant taking a ticket number: the comparison must
-     fail, and the ticket must be open in `llm-wiki/tickets/` (a closed or unknown number fails);
-   - `duckdb_columns(<positions>)` — compare only the listed column positions, as a multiset:
-     for a LIMIT window whose cutoff ties, where both engines keep valid but different rows. Used
-     only after the tie is confirmed by hand; the PR says so;
+   - `duckdb_approx` — a decimal cell equal to one unit in the last place our rendering carries
+     (`|ours − duck| ≤ 10^−s`, `s` our cell's digits after the point), a float cell within a
+     relative 1e-11: for #235's decimal-truncation rows (DataFusion's fixed-scale `avg` and division
+     differ from DuckDB's double by up to 1.2e-5 relative on tpch q1, 1e-6 on tpcds q58 — measured,
+     far past any float tolerance) and its float-reassociation rows;
+   - `duckdb_divergent(<ticket>, <positions>)` — one variant taking a ticket number and the column
+     positions that diverge: the ticket must be open in `llm-wiki/tickets/` (a closed or unknown
+     number fails); the row count and every column not named are checked as `duckdb_approx` checks
+     them, and the named columns must still differ (one that stopped diverging fails, so the line
+     is updated). Empty positions mean a row-level divergence: the row count alone is checked. A
+     line that diverges in one column is not a line that checks nothing;
    - `duckdb_fingerprint` — the section is at or over the 256 KB cap on both sides, so both hold its
      fingerprint (step 3) and the comparison reads that; numeric columns compared within
      `duckdb_approx`'s tolerance, since a sum of floats reassociates;
    - `duckdb_none` — DuckDB or we do not answer (a refused or not-enabled query, a DuckDB
      `failed:`), so there is nothing to compare.
-   `DuckdbOracle::ALL` lists the six, and a test asserts each is named by some line. The oracle is
+   `DuckdbOracle::ALL` lists the five, and a test asserts each is named by some line.
+   **A sixth, only if needed:** `duckdb_columns(<positions>)` — compare only the listed column
+   positions, as a multiset, for a LIMIT window whose cutoff ties, where both engines keep valid
+   but different rows. It is added only if the first run (step 6) finds a line that needs it,
+   confirmed by hand and named in the PR; if no line needs it, it is not added at all. The oracle is
    explicit both ways: a fingerprinted section under any oracle but `duckdb_fingerprint` fails, and
    so does `duckdb_fingerprint` over a section that is not fingerprinted.
    **Mode sugar:** `all_modes` stands for `tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup |
    tp4_sized` in `cpu_modes` and `gpu_modes`; both macros expand it to the five, and every line
-   that lists all five today is rewritten to it. Both corpus
+   that lists all five today is rewritten to it — and every reader that parses a line's modes
+   (`test_corpus_goldens/benchmark.rs::modes()`, `:356-362`, among them) expands it. Both corpus
    binaries carry the argument through `declare_corpus_query!`.
 2. **The comparison**, in `test_cpu_corpus` (rust-only, no device): one case per line,
    `duckdb_<dataset>_<query>`, reading the query's section from `duckdb-result.txt` and from
@@ -57,25 +65,64 @@ alone answers, and the over-cap sections.
    fingerprint instead of `skipped:`:
    ```
    fingerprint: rows=<n>
-   col <i>: nonnull=<n> [sum=<x> min=<x> max=<x>]      -- the numeric triple where the column is numeric
-   hash: <sha256 of the sorted rendered rows over the non-numeric columns>
+   col <i>: nonnull=<n> [sum=<x> min=<x> max=<x>]      -- the triple where the column is approximate
+   hash: <sha256 of the sorted rendered rows over the exact columns>
    ```
-   A column is numeric when its values parse as numbers on either side, so a decimal on ours and a
-   double on DuckDB's compare as numbers. Under `duckdb_fingerprint` the comparison checks `rows`,
-   each column's `nonnull`, the numeric triples within tolerance, and the hash exactly. A mismatch
-   names the column. Six sections take it today: tpch q11, q16, anti-join,
-   filter-project, semi-join; tpcds q98.
+   A column is **exact** when it renders identically on both sides — integers, strings, dates,
+   booleans, timestamps — and goes into the hash; only a float column, or a decimal whose scale
+   differs between the sides (a decimal on ours, a double on DuckDB's), is **approximate** and
+   compared by its triple. An all-integer over-cap join is then checked row for row, not by sums
+   alone. Under `duckdb_fingerprint` the comparison checks `rows`, each column's `nonnull`, the
+   triples within `duckdb_approx`'s tolerance, and the hash exactly. A mismatch
+   names the column. Five sections take it today: tpch q16, anti-join, filter-project,
+   semi-join; tpcds q98. tpch q11 joins them when join-backend turns its cpu cells on (#190).
 4. **`gpu-result.txt`.** The device's corpus run writes its answers beside `mini.result.txt`
-   under a regeneration variable on shad-gpu, the same sections, rendering and fingerprint,
+   under a regeneration variable on shad-gpu — each section written **before** the device asserts
+   against the cpu, so an answer that differs from the cpu is recorded, the case DuckDB settles — the same sections, rendering and fingerprint,
    pulled home with the benchmark tree. A record, never an authority: the device still asserts
    against the cpu's `mini.result.txt`, and `test_gpu_corpus`'s check that a device run writes no
-   cpu golden stays. The comparison of step 2 runs over it too (`duckdb_gpu_<dataset>_<query>`),
-   for every section it holds.
-5. **Every line's oracle**, from the comparison's first run: `duckdb_exact` where it passes,
-   `duckdb_approx` for #235's digit rows, `duckdb_fingerprint` for the six over-cap sections, `duckdb_none` for the 18 DuckDB-only and the 4
-   not-enabled queries, `duckdb_divergent(<ticket>)` for a real divergence — a new ticket where
-   none exists. #235's "decimal avg truncates at a fixed scale" is filed as a ticket of its own if
+   cpu golden stays. **Keyed by query and mode**: one section per enabled device cell,
+   `== <query> mode=<mode>`, so every device cell meets DuckDB, not only the last mode (a mode-
+   dependent device answer — #243's lane split, a shuffle defect — shows there). The comparison of
+   step 2 runs over every section (`duckdb_gpu_<dataset>_<query>_<mode>`). Two guards:
+   - **Coverage, both ways, rust-only in CI:** every enabled device cell has its section, and every
+     section is an enabled cell's. A task that turns a device cell on or off without regenerating
+     fails. Values are not compared against an earlier run: GPU float reductions are not
+     reproducible run to run, nor across cuDF versions.
+   - **One version per file:** the committed file is cuDF 25.02's (shad-gpu's). A run on another
+     version (verify-26.02) writes `gpu-result-<version>.txt` beside it, gitignored, compared with
+     DuckDB the same way and never committed over the 25.02 file.
+   **When to regenerate**, written into `build-test.md` by this task: run a cycle with
+   `PCK_WRITE_GPU_RESULT=1` and `--pull-results`, and inspect the diff of `gpu-result.txt`, every
+   time a change might move a device answer — a device code change, a cell turned on, a cuDF
+   update — and in every task that turns device cells on. A moved section is read before it is
+   committed, and a moved answer the change did not intend is a finding.
+5. **One rendering.** `duckdb_result.py` renders a timestamp as arrow-rs does — `NaiveDateTime`'s
+   form, no trailing zeros (`…00.001`, not `isoformat()`'s `…00.001000`; `arrow-cast`
+   `display.rs:495`) — so a millisecond timestamp is not a false divergence; a comparator case
+   pins it.
+6. **Every line's oracle**, from the comparison's first run: `duckdb_exact` where it passes,
+   `duckdb_approx` for #235's digit rows, `duckdb_fingerprint` for the five over-cap sections, `duckdb_none` for the 18 DuckDB-only and the 4
+   not-enabled queries, `duckdb_divergent(<ticket>, <positions>)` for a real divergence — a new
+   ticket where none exists. A line left at `duckdb_none` moves to its variant in the task that
+   first turns its cells on (join-backend for tpch q11 and q22, tpcds q24 and q54). #235's "decimal avg truncates at a fixed scale" is filed as a ticket of its own if
    any row needs more than `duckdb_approx`'s tolerance.
+
+7. **The helpers fail on a wrong answer.** `assert_result_section` (`test_support/corpus.rs:430`)
+   and `assert_result` (`test_support/corpus_gpu.rs:97`) read their golden from the fixed testdata
+   path, so no test can show them failing. Each takes the golden section as an argument (the
+   corpus cases pass the file's section, as today); negative tests hand them a doctored section —
+   a wrong row, a missing row, a digit past the tolerance — and assert the failure, for the cpu
+   helper under each `CpuOracle` and the device helper under `golden_exact` and `golden_approx_std`.
+   Today only the string comparator is tested (`tests/test_golden_format.rs`).
+   The device helper's comparison is pure Rust, so it moves out of the device-gated `corpus_gpu`
+   module into an ungated function `assert_result` calls; its negative tests then run in the
+   rust-only tier, with `GpuResultMode` beside it.
+8. **Every oracle enum is held to its lines.** `CpuOracle::ALL` and `GpuResultMode::ALL`, each with
+   the test `DuckdbOracle::ALL` has (step 1): every variant is named by some `corpus_query!` line.
+   The variants no line names go first, with their keyword arms: `GpuResultMode::Skip` (`skip`) and
+   `GpuResultMode::GoldenApprox` (`golden_approx`) — 113 lines say `golden_exact`, 2
+   `golden_approx_std`, 5 `live_cpu`.
 
 ## Scope
 
@@ -87,14 +134,20 @@ alone answers, and the over-cap sections.
 | `testdata/duckdb_result.py` | the fingerprint for over-cap sections |
 | `testdata/goldens/{tpch,tpcds}.sf1/` | `duckdb-result.txt` and `mini.result.txt` regenerated with fingerprints; `gpu-result.txt` |
 | `scripts/build-test-shadgpu.sh` | the regeneration variable, the pull home |
-| `llm-wiki/build-test.md`, `tickets/corpus-coverage.md` | the new tier and counts; #235 reworded to what is left |
+| `.github/workflows/pipeline.yml` | the Python test of `duckdb_result.py`'s rendering in CI |
+| `testdata/test_duckdb_result.py` (new) | timestamps rendered as arrow-rs does |
+| `peacockdb-core/tests/test_golden_format.rs` | the fingerprint's round trip |
+| `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` | `modes()` expands `all_modes` |
+| `testdata/.gitignore` | `gpu-result-*.txt` (a non-25.02 run's file) |
+| `llm-wiki/build-test.md`, `tickets/corpus-coverage.md` | the new tier and counts; when to regenerate `gpu-result.txt`; #235 archived |
 
 Component-level API: none outside the test harness. No engine change.
 
 ## Restriction
 
 The oracle only. No fix to any divergence it finds; each is a ticket and a `duckdb_divergent`
-line. No change to how the cpu or device tiers assert.
+line. No change to what the cpu or device tiers assert (step 7 changes only where their helpers
+read the golden section from).
 
 ## Verification bar
 

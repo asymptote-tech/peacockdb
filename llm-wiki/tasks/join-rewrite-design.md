@@ -130,7 +130,7 @@ emit(cols_build, cols_probe) = apply `projection` over [cols_build..., cols_prob
                                none; the plan never asks for zero kept columns (4.1's placeholder)
 ```
 
-No side and no output has zero columns: the planner makes `__rowcount__` an explicit column (4.1),
+No side and no output has zero columns: the planner makes `__rowmarker__` an explicit column (4.1),
 so the session has no rows-only arm and refuses a zero-column side as a planner bug. `null_table` is the only maker of a padded column, and it builds no literal, so the typed-null
 defects of the expression path (#198, fixed; #211, open) cannot reach a pad. A padded column must
 match what the matched rows carry; the node-level schema tests (`join_schema_cases.rs`) hold that
@@ -159,11 +159,13 @@ if desc.keys non-empty:
         if |s.Bd| == 0: s.empty_build = true; return s                     // every key NULL under UNEQUAL
         s.dhj = distinct_hash_join(s.Bd, cmp)                              // built once
     elif semi_family and cross_filter AST-able:
-        s.Bk = Bk                                                          // mixed_* per probe, 3.4
-    else:
+        s.Bk = Bk                                                          // mixed_* per probe, 3.4; the cross
+                                                                           // conjuncts ANDed at the cuDF AST level
+                                                                           // (NULL_LOGICAL_AND), one expression
+    if keys non-empty and the pairs path can be taken (not RightSemi/RightAnti-without-cross_filter,
+       not semi_family-with-AST-cross_filter):
         s.hj = hash_join(Bk, cmp)                                          // built once; the portable ctor
-                                                                           // — also the pairs path of a semi
-                                                                           // family whose cross_filter is not AST-able
+    // a pairs-path call with s.hj null throws by name — never a null dereference
 if type in {Left, Full, LeftSemi, LeftAnti, LeftMark}:
     s.matched = bools(|B|, false)
 ```
@@ -233,7 +235,10 @@ The residual is evaluated once per key match, over the filter's columns only; fu
 gathered for the survivors.
 
 Memory is bounded by chunking the probe batch, as 3.6 does. Before matching,
-`n = hj.inner_join_size(Pk)` (both versions) prices the pairs at `n × (8 + filter row bytes)`;
+`n = hj.inner_join_size(Pk)` (both versions) prices the pairs at `n × (8 + filter row bytes)`, and
+any range whose `n` exceeds `size_type`'s max is chunked down further — every pairs-producing path
+checks this, so 2³¹+k pairs never wrap to k rows (3.9's refusal names the join if one row range
+alone exceeds it);
 over the scratch budget, `P` is cut into row ranges of about equal share and each range runs the
 path above, the outputs concatenated into the one table the call returns. Every per-row outcome
 (a probe row's match, a build row's `matched` bit) is decided within one range, so chunking never
@@ -277,12 +282,41 @@ DataFusion 45 plans `x NOT IN (S)` as the anti (or, inside an `OR`, mark) join o
 AND y = x)`, and answers wrong when `x` or `y` is NULL (#80): measured, a correlated `NOT IN` gives
 7 rows where SQL gives 3, an uncorrelated one 5 where SQL gives 2. A logical `OptimizerRule` of
 ours, registered in `build_session_state` ahead of DataFusion's `decorrelate_predicate_subquery`,
-rewrites every `InSubquery{negated: true}` in a filter — a top-level conjunct or under an `OR` —
-whose `x` or `y` can be NULL in the data. Every corpus column is declared nullable, so the
+rewrites a `NOT IN` that sits on the **AND/OR spine of a filter** — reached from the `Filter`
+root through `AND` and `OR` alone — whose `x` or `y` can be NULL in the data. On that spine a
+NULL and a `false` drop a row alike, so the two-valued rewrite below is sound there and nowhere
+else. **First the rule puts the filter's predicate in negation normal form**: every `NOT` is
+pushed down to a leaf through `AND` and `OR` by De Morgan, and double negations cancel — both hold
+in SQL's three-valued logic, so the predicate means exactly what it meant. A `NOT` reaching an
+`IN`/`EXISTS` leaf flips its `negated` flag: `NOT (x NOT IN S)` becomes the positive `x IN S`,
+`NOT (x IN S)` becomes `x NOT IN S`, `NOT (a OR x NOT IN S)` becomes `NOT a AND x IN S`. (DataFusion
+decorrelates `Not(InSubquery{negated: false})` as an anti join with `NOT EXISTS` semantics,
+`decorrelate_predicate_subquery.rs:190-216`, and its simplifier never folds the `NOT` in —
+`negate_clause` has no `InSubquery` arm — so without this pass those forms are wrong.) After it,
+every `IN`/`NOT IN` that was under connectives and `NOT`s alone is a spine leaf. The rule visits every `Filter`, including
+those inside expression subqueries — `transform_down_with_subqueries`, or `apply_order:
+Some(TopDown)` matching `Filter` nodes — since a `NOT IN` nested in an `EXISTS` is otherwise
+decorrelated before it is seen (`optimizer.rs:386-392`).
+
+**Where a NULL `IN` result is read, a nullable `IN`/`NOT IN` stays refused.** Inside a filter, an
+`IN` under any operator but `AND`, `OR` and `NOT` — `IS [NOT] NULL`, `IS [NOT] TRUE/FALSE/UNKNOWN`,
+a comparison (`(x IN S) = false`), `COALESCE`, a function argument — reads SQL's NULL answer as a
+value, and a mark join never yields NULL (`join_type.rs:56-69`). A projection or a `CASE` never
+reaches the rule: DataFusion 45 decorrelates subqueries only in a filter (#247). The refusal fires
+only where the data says `x` or `y` can be NULL; otherwise `IN` is two-valued and plans. The refusal names [#250](../tickets/joins.md#t250). So
+`planner/nulls.rs`'s refusal is **narrowed, not deleted**: it moves to `planner/nullability.rs`
+beside `can_be_null` and refuses a nullable `IN`/`NOT IN` subquery off the spine, by name. The
+three-valued form (`CASE WHEN EXISTS(S AND y = x) THEN true WHEN x IS NULL AND <S non-empty> OR
+EXISTS(S AND y IS NULL) THEN NULL ELSE false END`) is [#250](../tickets/joins.md#t250)'s fix.
+
+The rewrite fires on such a `NOT IN` whose `x` or `y` can be NULL in the data. Every corpus column is declared nullable, so the
 declared schema decides nothing: the rule traces `x` and `y` through projections, filters and
 aliases to a `TableScan` column, and reads that column's row-group null counts from the parquet
-footers with the reader `can_be_null` uses (`scan_mapping/parquet_meta.rs`), shared. A column it
-cannot trace, or a footer without the statistic, counts as possibly-NULL. Where neither side can be
+footers with the reader `can_be_null` uses (`scan_mapping/parquet_meta.rs`), shared — opened from
+the `ListingTableUrl`'s `url.as_str()` through `Url::to_file_path()`, since `url.prefix()` is an
+object-store path with no leading `/` (`listing/url.rs:140-156`); a `SubqueryAlias` (`FROM orders
+o`) recurses into its input. A column it cannot trace, or a footer without the statistic, counts
+as possibly-NULL. Where neither side can be
 NULL, `NOT IN` means `NOT EXISTS` and is left alone — so tpch q16 and anti-join, whose keys hold no
 NULL, keep their plans and their lanes; pbench, whose keys do, shows the rewrite:
 
@@ -299,12 +333,22 @@ DataFusion then decorrelates these itself (measured on 45, all four forms equal 
 - uncorrelated: one anti join on `x = y`, hashed; and a cross join and a `Right` nested loop
   against one-row counts, which put the outer side in one lane — a one-row side is what a
   broadcast (#140) would later serve. DataFusion 45 cannot plan an uncorrelated `NOT EXISTS`,
-  hence the counts.
+  hence the counts. The counts are `count(lit(1i32))`, not `Int64(1)`: over an unfiltered `S`,
+  DataFusion's `AggregateStatistics` answers a `count(*)` (`COUNT_STAR_EXPANSION`, Int64(1)) from
+  the table's statistics with a `PlaceholderRowExec` (`aggregate_statistics.rs:45-90`,
+  `count.rs:321-349`), which the translator refuses (`nodes.rs:166`, #158). The rule says so in a
+  comment, and a planner test plans the uncorrelated rewrite over an unfiltered `S` with no
+  `PlaceholderRowExec`.
 
 The cpu answers correctly too, since DataFusion executes the rewritten plan, so the two engines
-agree and the DuckDB oracle confirms. No flag reaches the wire, no executor rule, and
-`planner/nulls.rs`'s refusal of anti and mark joins over nullable keys goes: every type honours
-`null_equals_null`, which is `NOT EXISTS`'s semantics. A positive `IN` needs no rewrite — NULL and
+agree and the DuckDB oracle confirms. No flag reaches the wire, no executor rule.
+`planner/nulls.rs`'s refusal of anti and mark joins over nullable keys becomes the narrower one
+above: every join type honours `null_equals_null`, which is `NOT EXISTS`'s semantics, so only the
+off-spine `IN`/`NOT IN` forms stay refused. Planner tests, each answer checked against DuckDB:
+`NOT (x IN S)` (folded, then rewritten), `w = 0 OR NOT (x IN S)` (the same), `NOT (x NOT IN S)`
+(folded to a positive `IN`, answered as a semi join), `NOT (w = 0 OR x NOT IN S)` (De Morgan, then
+`IN`), a `NOT IN` inside an `EXISTS` (rewritten), and `(x IN S) IS NULL` (refused). pbench shows the
+folds at query level: `not-not-in` and `not-or-not-in`; and the refusal: `in-is-null`. A positive `IN` needs no rewrite — NULL and
 false drop a row alike. `IN` as a projected value does not plan on DataFusion 45 at all.
 
 ### 3.6 Nested loop — no keys, a condition
@@ -325,7 +369,8 @@ A non-empty, R empty — row-wise where the type allows:
     Full:   as 3.4's pairs path from conditional_inner_join: hitP, the unmatched probe rows, s.matched
     LeftSemi/LeftAnti/LeftMark: bi = cudf::conditional_left_semi_join(B', P', ast(A)); s.matched = set_true(…)
     RightSemi: pi = cudf::conditional_left_semi_join(P', B', ast(A, swapped))
-    RightAnti: pi = cudf::conditional_left_anti_join(P', B', ast(A, swapped))
+    RightAnti: pi = cudf::conditional_left_semi_join(P', B', ast(A, swapped)), then the complement
+               (the anti forms' headers drop a row whose predicate is NULL; NOT EXISTS keeps it)
     then emit as in 3.2
 
 A non-empty, R non-empty — candidates, then the rest, chunked like 3.4 by
@@ -402,9 +447,9 @@ the layout is what changed. A later fast path that only a version has (`filtered
   Left, Full, LeftSemi, LeftAnti, LeftMark. `answers_in_one_call` and the probe-side
   `GpuCoalesceAllBatches` go: the probe side is never coalesced.
 - Refusals lifted: outer with a residual (#153), RightSemi/RightAnti with a residual (#159),
-  nested loop beyond Inner and Left (#160), and `planner/nulls.rs`'s refusal of anti and mark
-  joins over keys NULL on both sides (3.5). The file's `can_be_null` analysis stays, renamed
-  `planner/nullability.rs`, for #137 below.
+  nested loop beyond Inner and Left (#160). `planner/nulls.rs`'s refusal of anti and mark joins
+  over keys NULL on both sides is narrowed to 3.5's off-spine `IN`/`NOT IN` forms; it and the
+  file's `can_be_null` analysis move to `planner/nullability.rs`, which #137 below also reads.
 - Two refusals stay as they are, both unreachable from SQL and pinned only by construction: a
   join key that is not a bare column (DataFusion projects `ON t.k + 1 = b.k` below the join, so
   the key it hashes is a column; `join_capability.rs:553`), and a join filter reading the mark
@@ -413,24 +458,45 @@ the layout is what changed. A later fast path that only a version has (`filtered
 - The `NOT IN` rewrite (3.5) is a logical `OptimizerRule` in `planner/`, registered by
   `build_session_state` (`lib.rs`) ahead of `decorrelate_predicate_subquery`.
 - #137: under `null_equals_null = false`, a side whose unmatched rows are never emitted gets
-  `GpuFilter(<key> IS NOT NULL)` under its `GpuEmitPartitions`. That side, per type: Inner both;
+  `GpuFilter(<key> IS NOT NULL)` under its `GpuEmitPartitions`. Decided on the translated side —
+  a side whose top node is a `GpuEmitPartitions` — not on DataFusion's `RepartitionExec`, which
+  DataFusion always wraps in `CoalesceBatchesExec` (`coalesce_batches.rs:57-80`). That side, per type: Inner both;
   Left probe; Right build; Full none; LeftSemi, RightSemi both; LeftAnti probe; RightAnti build;
   LeftMark probe. Only a shuffled side — the skew is a shuffle's — and only where `can_be_null`
   says the key can be NULL. tpch's keys hold none, so its plans do not move; tpcds's foreign keys
   do (`ss_sold_date_sk` holds 129,850 NULLs at sf1, all of them on one lane today), so about 73
   tpcds plans gain the filter at the three tp4 modes, with their cpu, cost and memory goldens.
   Answers do not move. Accepted.
-- **`__rowcount__` is explicit (#63).** Where DataFusion has a zero-column node (19
+- **`__rowmarker__` is explicit (#63).** It is today's `__rowcount__` (`project.cpp`'s placeholder), renamed: the column marks rows, it counts nothing. `project.cpp` and every test or golden naming the old spelling move with it. Where DataFusion has a zero-column node (19
   `GpuProject: exprs=[]` in tpcds, under `count(*)` and q9's cross joins), the translator plans a
-  project of one literal column, `Int8 0 AS __rowcount__`, declared in its schema. A join above
+  project of one literal column, `Int8 0 AS __rowmarker__`, declared in its schema. A join above
   such a side drops the placeholder through its projection; a join whose kept columns would be
   none keeps one placeholder instead. A scan that projects no column (tpch nested-limits:
-  `GpuLoadParquet … projections=[] schema=[]`) declares `__rowcount__` itself, and both engines
-  produce it from the row count they read — a project cannot go below a scan. Plan validation
+  `GpuLoadParquet … projections=[] schema=[]`) declares `__rowmarker__` itself, and both engines
+  produce it from the row count they read — a project cannot go below a scan. The wire says so
+  explicitly: `CudfScan` gains `rows_only: bool`, since an empty projection reads every column
+  today (`scan.cpp:45-53`). Plan validation
   refuses a zero-column schema anywhere. The
   cpu computes the same literal, so both engines hold the table the plan declares, and
   `project.cpp`'s empty-projection arm becomes a refusal. Cost: a cross join materializes the
   1-byte column before its projection drops it.
+- **A side DataFusion folds to nothing** (review row 8). `PropagateEmptyRelation` keeps a Left
+  join over an `EmptyExec` (`SELECT * FROM tiny t LEFT JOIN (SELECT * FROM dim WHERE false) d ON
+  t.t_k = d.d_k`), and the translator has no arm for it today, so the query is refused. A new
+  leaf, `GpuEmpty{schema}`, one lane, emits no batch on either engine and calls nothing on the
+  device (its recipe is driver-routed, as `GpuMergePartitions`' is). A join over it takes
+  `set_build(None)` on that side, or a probe stream with no batch — the shapes 3.8 and 3.3 already
+  answer.
+- **`IS [NOT] DISTINCT FROM`** (review row 9). DataFusion 45 extracts only `=` as a join key, so
+  `ON d.d_k IS NOT DISTINCT FROM t.t_k` is a keyless nested loop whose filter carries the
+  operator, and the device's AST throws on it (`expr.cpp:103-127`). Two changes: the device maps
+  `IsNotDistinctFrom` to cuDF's AST `NULL_EQUAL` and `IsDistinctFrom` to `NOT(NULL_EQUAL)` (25.02
+  and 26.02 both have it), and the column path to `binary_operator::NULL_EQUALS` /
+  `NULL_NOT_EQUALS`, so the nested loop answers on any lane; and the translator promotes a keyless
+  nested loop whose filter's conjuncts include `a IS NOT DISTINCT FROM b` (one column from each
+  side) to a hash join on those pairs with `null_equals_null = true`, the other conjuncts its
+  residual — only when every key pair would be such a conjunct, since `null_equals_null` is one
+  flag for all keys. The hash join shuffles into lanes where the nested loop ran in one.
 - Keyless joins keep both sides in one lane (`check_join_inputs`). A predicate-free
   `NestedLoopJoinExec` becomes `GpuCrossJoin` only when it is Inner; any other type becomes
   `GpuNestedLoopJoin` with the literal `true` as its filter (3.6) — today's arm makes every
@@ -440,9 +506,17 @@ the layout is what changed. A later fast path that only a version has (`filtered
 
 ### 4.2 Wire (`wire/`)
 
+- The wire still writes the join: `wire/join.rs` puts one `fb::CudfJoin` node into the per-query plan buffer through the same writer every node uses, so it has a `seq`, and the session's calls name that `seq` (`peacock_join_build(exec, seq, build)`); the session reads its description from the plan, `node(seq).as<CudfJoin>()`. What goes is the join's call choreography — the chained `execute_node` calls and the extra nodes they needed. Non-join nodes keep their recipes whole.
 - `wire/join.rs`'s recipes go: no `ProjectRole::{ProbeKeys, NullPad, Narrow}`, no
   `Input::{BuildSideCopy, BatchCopy, AccumulatedKeys}`, no `CallPattern::AtDone` for joins. A join
   writes one `CudfJoin` with both side schemas; `attach.rs` dispatches it without a recipe.
+- `CudfJoin.chunk_bytes` (join-session-cpp's field; 0 means 1 GiB) is written from the planner's
+  scratch budget, so the session's chunking follows the mode's budget and the accountant prices it.
+- Timestamps in a `CudfJoin` schema use the fbs `Timestamp*` variants repartition-keys adds. A type
+  `convert_data_type` cannot map is a `PlanError` in every schema from repartition-keys on (#249) —
+  the plan golden says "not runnable" — never the `Null` that `serialize_schema` writes silently
+  today (`serialize.rs:136`), which the session would only refuse at run time, on a lane with no
+  build or probe batch.
 - The plan goldens' recipe line for a join (`per probe batch: execute_node(#4 CudfHashJoin{…},
   build copy, batch)`) becomes the session's: `join_build(#4), per probe batch: join_probe, at
   done: join_finish` — the last only for the finishing types. `recipe-payloads.txt` loses its joins.
@@ -528,6 +602,11 @@ Counts are from master `fc3b0b55`. Every task keeps `build-test.md`'s counts and
 
 ### 5.0 Rules
 
+- **A ticketed refusal is pinned by a `bug_` test.** Every test that asserts a refusal (or a
+  wrong answer) tied to an open ticket is named `bug_…` and cites the ticket, so it goes red the
+  day the ticket is fixed and is flipped then, not deleted: #243, #245, #246, #247, #249 and #250
+  each get one at the lowest layer that shows them; a refusal no SQL reaches, with no ticket (a
+  non-column key, a filter on the mark), is an ordinary test.
 - **A pin flips, it is not deleted.** A `bug_` pin keeps its script and becomes the positive case
   (`bug_a_left_join_refuses_its_first_probe_batch_on_the_device` → `a_left_join_over_one_probe_batch_agrees`).
   A pin whose shape no longer exists (a refusal message, a recipe copy) is replaced by the case
@@ -543,8 +622,9 @@ Counts are from master `fc3b0b55`. Every task keeps `build-test.md`'s counts and
 ### 5.1 duckdb-oracle
 
 `duckdb-oracle.md` holds the detail. `duckdb_oracle` is the first oracle argument of every
-`corpus_query!` line, explicit on each: `duckdb_exact`, `duckdb_approx`, `duckdb_divergent(<ticket>)`,
-`duckdb_columns(<positions>)`, `duckdb_fingerprint` (sections over the 256 KB cap), `duckdb_none`;
+`corpus_query!` line, explicit on each: `duckdb_exact`, `duckdb_approx`, `duckdb_divergent(<ticket>, <positions>)`,
+`duckdb_fingerprint` (sections over the 256 KB cap), `duckdb_none` — and `duckdb_columns(<positions>)`
+only if the first run finds a tied LIMIT window that needs it;
 `DuckdbOracle::ALL` and its test; comparator cases per variant; `all_modes` as mode sugar.
 
 ### 5.2 pbench
@@ -553,7 +633,8 @@ Counts are from master `fc3b0b55`. Every task keeps `build-test.md`'s counts and
   regenerates into a temp dir and compares row content (not parquet bytes) with the committed
   files.
 - Every query lands registered, plan and result goldens written, cpu cells on where the cpu is
-  right, every device cell off with its ticket, `duckdb_exact` unless a ticket says otherwise.
+  right, every device cell off with its ticket, `duckdb_exact` unless a ticket says otherwise and
+  `duckdb_none` where the cpu does not answer.
 - `cost-report`'s widget renders the pbench section; its existing render test gains pbench.
 - Queries include the Left/Full NULL-key pair (device cells off on #152), one per demonstrable
   in-scope ticket, and the shapes that collapse a join to one lane; the list is the pbench spec's.
@@ -568,13 +649,15 @@ Counts are from master `fc3b0b55`. Every task keeps `build-test.md`'s counts and
   production `pmod`.
 - Then new live gates, each red before its kernel arm: Float32, Float64 (with -0.0, +0.0, NaN),
   Boolean, Timestamp in all four units, Decimal128 (15,2) and (38,4) and a decimal composite,
-  plus the gaps the survey found: Int8, a zero-row input, an all-NULL key.
+  plus the gaps the survey found: Int8, a zero-row input, an all-NULL key; and UInt8, UInt16,
+  UInt32, UInt64 (review row 11): one rule on both engines — u8/u16 cast to i32, u32 to i64, u64
+  reinterpreted as i64 bits — before comet on the cpu and in the kernel's normalizing switch.
 - `emit_cases.rs`: the #206 (float, boolean) and #95 (decimal) pins flip. The operator harness
   builds its batches in memory (`tests/synthetic.rs`, a seeded splitmix64 generator; `emit_cases.rs`'s
   `with_key(ArrayRef)`), not from parquet, so every key type gets a case of its own there, both
   backends placing every row in the same lane: Int8, Int16, Int32, Int64, Float32, Float64 (each
-  with -0.0, 0.0, NaN and NULL), Boolean, Date32, Timestamp in all four units, Decimal128 at p ≤ 18
-  and p > 18, Utf8, and a composite of mixed types; `emit_schema_cases.rs` the same types held as
+  with -0.0, 0.0, NaN, -NaN and NULL), Boolean, Date32, Timestamp in all four units, Decimal128 at p ≤ 18
+  and p > 18, Utf8, the four unsigned widths, and a composite of mixed types; `emit_schema_cases.rs` the same types held as
   declared. `synthetic.rs` gains `key_types(rows, seed)`, one column per hashable type with those
   special values, so the join cases below reuse it.
 - #243 (open, not fixed in this chain): two `bug_` pins in the operator harness, cpu against
@@ -584,6 +667,9 @@ Counts are from master `fc3b0b55`. Every task keeps `build-test.md`'s counts and
   when #243 is fixed. pbench's float rows are commented out on #243 (`pbench.md`).
 - #189: a planner test that a rollup's tp4 shuffle hashes no grouping id; the 15 cpu cells of
   tpch rollup_over_join and tpcds q5, q18, q22, q80 turn on (gpu cells stay on other tickets).
+- Every NaN float key is canonicalized before hashing on both engines, so `NaN` and `-NaN` share
+  a lane: a live gate holds both. The fbs `DataType` gains the four timestamp variants; a cast to
+  `Timestamp(Second)` serializes and renders, and pbench's `timestamp-s-key-group` is runnable.
 - Decimals hash the 16 bytes of the unscaled value on both engines (the cpu casts to
   `Decimal128(38, s)` before comet): the decimal gates prove it against `rows_per_lane`. No wire
   change, so no payload golden moves.
@@ -613,7 +699,7 @@ The matrix, each cell a hand-counted case:
 | keys | NULL on both sides under UNEQUAL and EQUAL; duplicates on both sides (many-to-many); a composite key with a NULL in the second column |
 | build | no batch; zero rows; rows |
 | probe | no batch; one; three with a zero-row batch between |
-| projection | none; crossing sides; zero kept columns (`__rowcount__`) |
+| projection | none; crossing sides; zero kept columns (`__rowmarker__`) |
 
 Not the full product: every type × condition × {no batch, zero rows, rows} build, and each other
 dimension against every type at least once. Named cases besides:
@@ -637,6 +723,11 @@ dimension against every type at least once. Named cases besides:
   loop over an empty side; LeftAnti and LeftMark with a residual, and a Left nested loop, over no
   probe batch (`architecture.md`'s "Zero-row batches change no answer" breaks).
 - `join.cpp`'s #154 sites: one allocation check as in 5.5.
+- The binary is in `install(TARGETS)` and the rpath list (`cpp/CMakeLists.txt:321-327`), since CI
+  and shad-gpu run only installed `peacock_*_tests`; its `main()` installs the RMM pool, as
+  `test_plan_executor.cpp:2114` does. A semi join with several cross conjuncts (their AND built at
+  the cuDF AST level, `NULL_LOGICAL_AND`); a pairs path over `size_type` refused by name; one
+  allocation check on a session probe (#154's `join.cpp` sites).
 CI compiles the file on both legs (25.02, 25.10a); verify-26.02 runs it on 26.02.
 
 ### 5.7 join-backend
@@ -651,9 +742,9 @@ case, so a failure is found at the lowest layer first —
 - NULL keys on both sides for all nine types, under the SQL default and `null_equals_null`
   (Left and Full are missing today);
 - many-to-many keys for the semi family; a preserved-side condition that is NULL (D3);
-- each key type of `key_types` as a join key, Inner and LeftSemi at least — floats with -0.0,
-  0.0 and NaN especially, where DataFusion's hashing and cuDF's equality may disagree, settled
-  against DuckDB in pbench;
+- each key type of `key_types` as a join key, Inner and LeftSemi at least — floats holding -0.0
+  and NaN excepted: there the cpu keys by bits and the device by value (#243), pinned by
+  repartition-keys' `bug_` cases, not asserted equal here;
 - lanes with no build batch and with no probe batch for every type (the sparse `tiny` shapes);
 - a predicate-free Left, Right and Full nested loop over an empty side; a keyed semi with a
   non-AST cross residual;
@@ -668,7 +759,7 @@ Planner:
 - `join_refusals.rs`: the five join refusals become "plans and answers" tests.
 - `join_capability.rs`: the matrix is rewritten — every type streams, `needs_finish` for Left,
   Full and the build-side semi family, no probe-side `GpuCoalesceAllBatches`; the nulls.rs tests
-  (:309, :376) flip to planning; `translator/tests.rs:542`, `plan/tests/joins.rs:159, :190` follow.
+  (:309, :376) flip to planning, except the off-spine `IN`/`NOT IN` forms 3.5 still refuses; `translator/tests.rs:542`, `plan/tests/joins.rs:159, :190` follow.
 - `null_analysis.rs` moves with `planner/nullability.rs`, unchanged.
 - The `NOT IN` rewrite: the four forms of the scratch probe (correlated and uncorrelated, top
   level and under `OR`, over `o(w,x)`, `s(z,y)` with NULLs) as planner tests asserting the plan
@@ -683,7 +774,12 @@ Planner:
   `memory_estimation/tests.rs:217` (accumulated keys) becomes the 4.3 pricing.
 - A predicate-free non-Inner nested loop plans as `GpuNestedLoopJoin` over `true`, Inner as
   `GpuCrossJoin`.
-- `__rowcount__`: a zero-column project plans as the one-literal project; a cross join of two
+- An `EmptyExec` plans as `GpuEmpty`, and a Left join over it pads every row on both engines;
+  `IS NOT DISTINCT FROM` as a join condition plans as a hash join with `null_equals_null = true`
+  (and stays a nested loop, answering through `NULL_EQUAL`, when a `=` key sits beside it); a
+  harness case per arm of `NULL_EQUAL` (both NULL, one NULL, equal, unequal) on the AST and the
+  column path.
+- `__rowmarker__`: a zero-column project plans as the one-literal project; a cross join of two
   such sides keeps one placeholder; validation refuses a zero-column schema. tpcds's 19 such nodes
   move in every mode's plan golden and in `recipe-payloads.txt`.
 - **The estimate.** `llm-wiki/reports/join-rewrite-cell-estimate.md` (the analyst's prediction,
@@ -720,13 +816,55 @@ Executors and driver:
   #153 defect pin flip; the two `join.cpp` guards read the new file's calls.
 
 Corpus: of the 87 rows whose only tickets are in this chain, every cell turns on as its last
-ticket closes — up to 23 cpu and 429 gpu cells — each run on shad-gpu at its mode and compared
+ticket closes — up to 23 cpu and 428 gpu cells — each run on shad-gpu at its mode and compared
 with DuckDB. The 21 rows that also carry an out-of-chain ticket (#55, #56, #57, #65, #183, #191,
 #199) keep those cells off and drop the in-chain tickets from their tags. pbench's join cells
 turn on with them.
 
 ### 5.8 verify-26.02
 
-On the temporary host: every tier `build-test.md` lists, with its counts recorded beside the
-25.02 run's; fixes land with their own red case; then the corpus benchmark for every query-mode
-cell this chain turned on, written to the benchmark results.
+On shad-gpu's 26.02 environment (a temporary host only as the fallback): every tier `build-test.md` lists, with its counts recorded beside the
+25.02 run's; fixes land with their own red case; then the corpus benchmark, on 26.02 and 25.02,
+for the cells this chain turned on that it times — the tpch sf40 cases (tpcds and pbench have no
+sf40 data) — written under `benchmark-results/cudf-<version>/`.
+
+## 6. Join shapes after chain J
+
+The chain-J review (2026-10-07) enumerated 29 join shapes; their state once the chain lands,
+with the decisions taken since. Tables from pbench.
+
+- **Fixed in the chain:**
+  - `NOT (x IN S)`, alone and under `OR`, and a `NOT IN` inside a subquery (rows 1, 2, 5): the
+    rewrite works the AND/OR spine of every `Filter`, `Not(InSubquery)` normalized (§3.5);
+  - more than 2³¹ key-match pairs in a call (14): refused by name (`fits_or_throw`);
+  - the semi family with several cross conjuncts (27): ANDed at the AST level, `hj` guarded;
+  - a side DataFusion folds to `EmptyExec` (8): `GpuEmpty` (§4.1), pbench `empty-side-left-join`;
+  - `IS [NOT] DISTINCT FROM` as a join condition (9): `NULL_EQUAL` on the device and a null-equal
+    hash key in the plan (§4.1), pbench `indf-full-join`;
+  - unsigned keys across a shuffle (11): one widening rule on both engines (repartition-keys),
+    pbench `uint-key-group`, `uint-key-join`;
+  - float keys' lane split (part of 6): every NaN canonicalized before hashing (repartition-keys);
+  - timestamp-keyed joins and LeftMark with a cross residual (28, 29): now tested, pbench
+    `ts-key-join`, `mark-cross-residual`;
+  - `NOT IN` under `NOT` (3): the rule's negation normal form folds `NOT (x NOT IN S)` to
+    `x IN S`, a semi join, pbench `not-not-in` and `not-or-not-in`.
+- **Refused at plan time, safely** (never a wrong answer):
+  - `IN` read as a boolean (`IS NULL`, `= false`) over nullable data (4): the narrowed refusal,
+    [#250](../tickets/joins.md#t250), pbench `in-is-null`;
+  - a `count(*)` DataFusion answers from statistics as a join side (7): #158;
+  - a time, interval or nested column carried through a join (10): an unmapped wire type is a
+    `PlanError`, never a `Null` pad — [#249](../tickets/complete-coverage.md#t249), pbench
+    `interval-through-join`, `struct-through-join`;
+  - a key that is not a bare column, a filter reading the mark (23), SortMergeJoin and
+    SymmetricHashJoin (22): unreachable from SQL under this engine's configuration.
+- **Ticketed, open:** float keys' equality on the cpu (6) — [#243](../tickets/joins.md#t243); a
+  nested-type key across a shuffle (12) — [#245](../tickets/joins.md#t245), pbench
+  `struct-key-join`; `LIKE` against a column (13) — [#246](../tickets/joins.md#t246), pbench
+  `like-column-pattern`; `CollectLeft` merged to one lane, a Full join's NULL-key skew, a keyless
+  condition outside the hoistable form (24, 25, 26) — [#248](../tickets/performance.md#t248), with
+  [#140](../tickets/optimizer.md#t140) for the broadcast; a wire type for time, interval and nested
+  columns (10) — [#249](../tickets/complete-coverage.md#t249); `IN` read as a value (4) —
+  [#250](../tickets/joins.md#t250).
+- **DataFusion 45's own limits** (15–21) — [#247](../tickets/df-upgrade.md#t247): uncorrelated
+  `EXISTS`, `IN` as a projected value, a tuple `IN`, `ANY`/`ALL`, `LATERAL`, a correlation under a
+  `LIMIT`/union/window, a scalar subquery returning several rows.

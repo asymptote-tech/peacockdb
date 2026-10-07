@@ -13,7 +13,7 @@ join half (§2–§4, the retain symbol) is not needed, since the join session k
 
 ## Why it happens
 
-`TableResult` is `{unique_ptr<cudf::table>, column_names}` (`cpp/include/peacock/plan_executor.h:16-19`),
+`TableResult` is `{unique_ptr<cudf::table>, column_names}` (`cpp/src/plan_executor.h:16-19`),
 so a handle owns its memory alone. The hash repartition arm (`cpp/src/node_session.cpp:517-578`)
 takes its input (`combined`), writes the partitioned copy (`parted`, from `spark_hash_partition`),
 then deep-copies each partition out of `parted` into its own table (`:567`). `combined` and `parted`
@@ -42,7 +42,7 @@ wrong — join-side emits have no coalesce below them; the guarantee is the emit
      TableResult with(std::unique_ptr<cudf::column>, std::string name) const;  // appends a computed column
    };
    ```
-   Never zero columns (a zero-column view reads 0 rows; the plan's explicit `__rowcount__` keeps
+   Never zero columns (a zero-column view reads 0 rows; the plan's explicit `__rowmarker__` keeps
    one). A consumer reads views; one that needs an owning column copies at that site, with a
    reason. A column is freed when the last handle viewing it goes; a slice pins its parent column,
    not the whole table.
@@ -75,7 +75,7 @@ wrong — join-side emits have no coalesce below them; the guarantee is the emit
 
 | path | change |
 |---|---|
-| `cpp/include/peacock/plan_executor.h` | `TableResult` |
+| `cpp/src/plan_executor.h`, `cpp/src/table_result.cpp` (new), `cpp/CMakeLists.txt` | `TableResult` and its constructors |
 | `cpp/src/node_session.cpp` | the scatter; #197; the registry |
 | `cpp/src/operators/*.cpp`, `cpp/src/gpu_executor.cpp`, `dispatch.cpp` | the `.table` sites |
 | `cpp/tests/gpu/test_plan_executor.cpp` | the scatter tests |
@@ -92,8 +92,12 @@ accounting beyond the ticket.
 
 gtests, an RMM statistics adaptor around each: a scatter's N handles share `parted`'s column owners (release
 N−1, read the survivor); the N outputs concatenate back to the input; `out_stats` per partition
-unchanged; peak during the call is input + one partitioned table, and the partitioned table after
-it; a child of two handles is refused. No golden moves.
+unchanged; the peak during the call is at most the partitioned table plus the scatter's own
+temporaries (hashes, the partition map, a gather map, string offsets) — not a whole input higher,
+which holding `combined` and the slice copies would add — and the drop against today's run is
+recorded by hand in the detail file (the partitioned table, about the input's size, stays resident
+after the call either way, so a before-minus-after bound cannot hold); a child of two handles is
+refused. No golden moves.
 
 ## Verification bar
 

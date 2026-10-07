@@ -2,7 +2,8 @@
 
 Kind: production
 
-**This task closes no ticket.** It adds a third corpus dataset, `pbench`, at sf1 only. Its data
+**This task closes [#227](../tickets/corpus-coverage.md#t227)** (check schema nullability in
+tests), folded in below; otherwise it closes no ticket. It adds a third corpus dataset, `pbench`, at sf1 only. Its data
 deliberately holds what the two benchmarks lack: NULL join keys on both sides, NULLs under
 `NOT IN`, keys of every type the shuffle must hash, duplicate and skewed keys, and empty sides.
 Each in-scope ticket of the join-rewrite chain that can be shown in an answer gets a query that
@@ -27,10 +28,10 @@ no generator step and no S3 entry. The generator script is committed beside it:
 
 | table | rows | row groups | columns |
 |---|---|---|---|
-| `fact` | 20,000 | 10 (DuckDB rounds row groups to 2,048 rows) | `f_id` Int64; `f_k` Int32 (5% NULL, half the rows on keys 0–2, the rest spread over 0–1000); one key column per hashable type — `f_k8` Int8, `f_kb` Boolean (NULLs), `f_kf32` Float32 and `f_kf64` Float64 (NaN, -0.0, 0.0, NULL), `f_kdec15` Decimal128(15,2), `f_kdec38` Decimal128(38,4) (NULLs), `f_ts_ms`, `f_ts_us`, `f_ts_ns` Timestamp, `f_ts_s` second-valued timestamps (parquet has no second unit: queries reach `Timestamp(Second)` through `arrow_cast`), `f_dt` Date32; `f_s` Utf8 (NULLs); measures `f_qty` Int32, `f_amount` Decimal128(15,2) |
-| `dim` | 2,000 | 1 | `d_id`; `d_k` Int32, every key twice (many-to-many against `fact`), 1 in 40 NULL; the same key-type columns as `fact`; `d_w` Int32; `d_name` Utf8 |
+| `fact` | 20,000 | 10 (DuckDB rounds row groups to 2,048 rows) | `f_id` Int64; `f_k` Int32 (5% NULL, half the rows on keys 0–2, the rest spread over 0–1000); one key column per hashable type — `f_k8` Int8, `f_kb` Boolean (NULLs), `f_kf32` Float32 and `f_kf64` Float64 (NaN, -0.0, 0.0, NULL), `f_kdec15` Decimal128(15,2), `f_kdec38` Decimal128(38,4) (NULLs), `f_ts_ms`, `f_ts_us`, `f_ts_ns` Timestamp, `f_ts_s` second-valued timestamps (parquet has no second unit: queries reach `Timestamp(Second)` through `arrow_cast`), `f_dt` Date32, `f_ku32` UInt32 (values past `i32::MAX`, NULLs); `f_kstruct` Struct(a Int32, b Utf8); `f_s` Utf8 (NULLs); measures `f_qty` Int32, `f_amount` Decimal128(15,2) |
+| `dim` | 2,000 | 1 | `d_id`; `d_k` Int32, every key twice (many-to-many against `fact`), 1 in 40 NULL; the same key-type columns as `fact`, its floats holding -0.0 and NaN too (so `float64-key-join` meets them), `d_ku32` and `d_kstruct` overlapping `fact`'s; `d_w` Int32; `d_name` Utf8 |
 | `sub` | 200 | 1 | `s_z` Int32 (the correlation column), `s_y` Int32, 1 in 25 NULL |
-| `tiny` | 8 | 1 | `t_id`, `t_k` (two distinct keys), `t_v` |
+| `tiny` | 8 | 1 | `t_id`, `t_k` (two distinct keys), `t_v`, `t_pat` Utf8 (`LIKE` patterns over `d_name`: `'name1%'`, `'%7'`, …) |
 | `empty` | 0 | 1 | `tiny`'s schema |
 
 A prototype of exactly this generator was run (`gen.sql` in the helper's scratchpad, reproduced
@@ -55,16 +56,18 @@ decides (see Registry).
 | float64-key-group | `SELECT f_kf64, count(*) AS n FROM fact GROUP BY f_kf64` | commented out: #243; gpu tp4: #206 |
 | float32-key-group | `SELECT f_kf32, count(*) AS n FROM fact GROUP BY f_kf32` | commented out: #243; gpu tp4: #206 |
 | bool-key-group | `SELECT f_kb, count(*) AS n FROM fact GROUP BY f_kb` | gpu tp4: #206 |
-| int8-key-group | `SELECT f_k8, count(*) AS n FROM fact GROUP BY f_k8` | — (the gap the conformance gate lacks) |
+| int8-key-group | `SELECT f_k8, count(*) AS n FROM fact GROUP BY f_k8` | none expected: every cell on if it passes; a failing cell gets its ticket (the registry rule allows no off cell without one) |
 | timestamp-ms-key-group | `SELECT f_ts_ms, count(*) AS n FROM fact GROUP BY f_ts_ms` | gpu tp4: #240 |
 | timestamp-us-key-group | `SELECT f_ts_us, count(*) AS n FROM fact GROUP BY f_ts_us` | gpu tp4: #240 |
 | timestamp-ns-key-group | `SELECT f_ts_ns, count(*) AS n FROM fact GROUP BY f_ts_ns` | gpu tp4: #240 |
-| timestamp-s-key-group | `SELECT arrow_cast(f_ts_s, 'Timestamp(Second, None)') AS ts, count(*) AS n FROM fact GROUP BY 1` | gpu tp4: #240 |
+| timestamp-s-key-group | `SELECT arrow_cast(f_ts_s, 'Timestamp(Second, None)') AS ts, count(*) AS n FROM fact GROUP BY 1` | not runnable on #240: the cast to `Timestamp(Second)` cannot cross the wire until repartition-keys adds the fbs timestamp types — declared in `NOT_RUNNABLE` here, enabled there |
 | decimal15-key-group | `SELECT f_kdec15, count(*) AS n FROM fact GROUP BY f_kdec15` | gpu tp4: #95 |
 | decimal38-key-group | `SELECT f_kdec38, count(*) AS n FROM fact GROUP BY f_kdec38` | gpu tp4: #95 |
 | float64-key-join | `SELECT f_id, d_id FROM fact JOIN dim ON f_kf64 = d_kf64` | commented out: #243; gpu: #152, tp4 #206 |
 | decimal15-key-join | `SELECT f_id, d_id FROM fact JOIN dim ON f_kdec15 = d_kdec15` | gpu: #152, tp4 #95 |
 | rollup-small-keys | `SELECT f_k8, f_kb, sum(f_qty) AS q FROM fact GROUP BY ROLLUP (f_k8, f_kb)` | cpu and gpu tp4: #189 |
+| uint-key-group | `SELECT f_ku32, count(*) AS n FROM fact GROUP BY f_ku32` | cpu and gpu tp4: folded into repartition-keys (the review's row 11: comet and the kernel have no unsigned arm), tagged `189` until then — #189 is the same missing unsigned arm, met through the grouping id, and repartition-keys closes both; to confirm from the plan golden |
+| uint-key-join | `SELECT f_id, d_id FROM fact JOIN dim ON f_ku32 = d_ku32` | cpu and gpu tp4: the same; gpu: #152 |
 
 The three float rows hold `-0.0` and NaNs of both signs, where the cpu answers differently from
 DuckDB and the device (#243, open, not fixed in this chain). Each lands with its SQL file and its
@@ -92,12 +95,19 @@ their bits` above it, so the line is enabled by the task that fixes #243. Its re
 | not-in-uncorrelated | `SELECT f_id FROM fact WHERE f_k NOT IN (SELECT s_y FROM sub)` | RightAnti | both: #80, #59 |
 | not-in-correlated | `SELECT f_id FROM fact WHERE f_k NOT IN (SELECT s_y FROM sub WHERE s_z = f_qty)` | RightAnti, two keys | both: #80, #59 |
 | not-in-under-or | `SELECT f_id FROM fact WHERE f_qty = 0 OR f_k NOT IN (SELECT s_y FROM sub WHERE s_z = f_qty)` | LeftMark, two keys | both: #80, #59 |
+| not-not-in | `SELECT f_id FROM fact WHERE NOT (f_k NOT IN (SELECT s_y FROM sub))` | after the rule's NNF fold, a semi join for `f_k IN (...)` | both: #80 |
+| not-or-not-in | `SELECT f_id FROM fact WHERE NOT (f_qty = 0 OR f_k NOT IN (SELECT s_y FROM sub))` | after NNF, `f_qty <> 0 AND f_k IN (...)` | both: #80 |
+| in-is-null | `SELECT f_id FROM fact WHERE (f_k IN (SELECT s_y FROM sub)) IS NULL` | refused at plan time: the `IN`'s NULL is read | both: #250 |
 | sparse-probe-left | `SELECT d_id, t_id FROM dim LEFT JOIN tiny ON d_k = t_k` | Right (build `tiny`) | gpu tp4: #152 |
 | sparse-probe-semi | `SELECT d_id FROM dim WHERE d_k IN (SELECT t_k FROM tiny)` | RightSemi | gpu: #152 |
 | finish-without-probe | `SELECT d_id FROM dim WHERE d_w = 0 OR EXISTS (SELECT 1 FROM tiny WHERE t_k = d_k)` | LeftMark (never swapped) over the two-key `tiny`: two probe lanes with no batch | gpu tp4: #173 |
 | sparse-build-right | `SELECT t_id, f_id FROM tiny RIGHT JOIN fact ON t_k = f_k` | Right, build lanes with no batch | both tp4: #212 |
 | sparse-build-full | `SELECT t_id, f_id FROM tiny FULL JOIN fact ON t_k = f_k` | Full, the same | both tp4: #212 |
 | sparse-build-anti | `SELECT f_id FROM fact WHERE NOT EXISTS (SELECT 1 FROM tiny WHERE t_k = f_k)` | RightAnti, the same | both tp4: #212 |
+| ts-key-join | `SELECT f_id, d_id FROM fact JOIN dim ON f_ts_us = d_ts_us` | Inner on a timestamp key (review row 28), to confirm from the plan golden | gpu: #152; gpu tp4: #240 |
+| mark-cross-residual | `SELECT d_id FROM dim WHERE d_w = 0 OR EXISTS (SELECT 1 FROM fact WHERE f_k = d_k AND f_qty > d_w)` | LeftMark + cross filter (review row 29), to confirm from the plan golden | both: #59 |
+| empty-side-left-join | `SELECT t.t_id, d.d_id FROM tiny t LEFT JOIN (SELECT * FROM dim WHERE false) d ON t.t_k = d.d_k` | Left over an `EmptyExec` (review row 8), to confirm from the plan golden | both: `155` — no arm for `EmptyExec` until join-backend's `GpuEmpty` |
+| indf-full-join | `SELECT d.d_id, t.t_id FROM dim d FULL JOIN tiny t ON d.d_k IS NOT DISTINCT FROM t.t_k` | NLJ Full over `IS NOT DISTINCT FROM` (review row 9), to confirm from the plan golden; join-backend makes it a null-equal hash join | both: #160 (gpu also the AST's missing `NULL_EQUAL`, `155`) |
 
 ### Nested loops and cross joins — #160, #215, #63, #190, #207, #208
 
@@ -116,8 +126,20 @@ their bits` above it, so the line is enabled by the task that fixes #243. Its re
 | nl-projection | `SELECT f_id FROM fact JOIN tiny ON f_qty < t_v` | NLJ Inner, narrowed | cpu: #190; gpu: #152 |
 | cross-projection | `SELECT f_id FROM fact, tiny` | Cross, narrowed | both: #207 |
 | cross-empty-build | `SELECT e.t_id, t.t_id FROM empty e, tiny t` | Cross over a zero-row build | cpu: #208 |
-| scalar-subquery-cross | `SELECT CASE WHEN (SELECT count(*) FROM fact WHERE f_qty BETWEEN 1 AND 20) > 100 THEN (SELECT avg(f_amount) FROM fact WHERE f_qty BETWEEN 1 AND 20) ELSE (SELECT avg(f_amount) FROM fact WHERE f_qty BETWEEN 21 AND 40) END AS b1, (SELECT count(*) FROM dim) AS b2 FROM tiny WHERE t_id = 1` | predicate-free NLJs over one-row aggregates (tpcds q9's shape) | gpu: #63 |
+| scalar-subquery-cross | `SELECT CASE WHEN (SELECT count(*) FROM fact WHERE f_qty BETWEEN 1 AND 20) > 100 THEN (SELECT avg(f_amount) FROM fact WHERE f_qty BETWEEN 1 AND 20) ELSE (SELECT avg(f_amount) FROM fact WHERE f_qty BETWEEN 21 AND 40) END AS b1, (SELECT count(*) FROM dim WHERE d_w >= 0) AS b2 FROM tiny WHERE t_id = 1` | predicate-free NLJs over one-row aggregates (tpcds q9's shape) | gpu: #63 (the filter keeps DataFusion from answering an unfiltered `count(*)` from statistics with a `PlaceholderRowExec`, refused on #158) |
 | outer-on-true-empty | `SELECT t.t_id, e.t_id AS e_id FROM tiny t LEFT JOIN empty e ON true` | predicate-free NLJ Right over a zero-row build | both: #160 (and, once lifted, the cross-join mapping the design replaces) |
+
+### Complete join coverage — shapes that stay open after chain J
+
+Each carries a ticket of `joins.md`'s "Complete Join Coverage" section; the task that fixes the
+ticket turns the cells on.
+
+| name | SQL | plans as | off on |
+|---|---|---|---|
+| struct-key-join | `SELECT f_id, d_id FROM fact JOIN dim ON f_kstruct = d_kstruct` | Inner on a struct key, to confirm from the plan golden | all cells: #245 (no hasher arm for a nested type) and #249 (the wire names no struct type; not runnable from repartition-keys' Task 5c on) |
+| like-column-pattern | `SELECT d_id, t_id FROM dim JOIN tiny ON d_name LIKE t_pat` | NLJ Inner over a column pattern, to confirm from the plan golden | gpu: #246 |
+| interval-through-join | `SELECT d_id, t.iv FROM dim LEFT JOIN (SELECT t_k, INTERVAL '1' DAY AS iv FROM tiny) t ON d_k = t_k` | Left, carrying an interval column the join pads — confirm from the plan golden that `iv` crosses the join; if DataFusion hoists the literal above it, pick another construction (a `TIME` column on `tiny`, padded the same way) | not runnable: #249 (from repartition-keys on; before it, the silent `Null`) |
+| struct-through-join | `SELECT d_id, d_kstruct FROM dim JOIN tiny ON d_k = t_k` | Inner, carrying a struct column | not runnable: #249 |
 
 ### Collapse to one lane — #140's cost, made visible
 
@@ -143,13 +165,16 @@ pbench join DataFusion plans `CollectLeft`; otherwise it is recorded as not reac
 
 1. `testdata/pbench/gen.sql` and `testdata/generate_pbench.sh`; `testdata/pbench.sf1/*.parquet`
    committed; a determinism test regenerating into a temp dir and comparing row content with the
-   committed files (not parquet bytes).
+   committed files (not parquet bytes). The generator writes single-threaded and ordered, and puts
+   -0.0 and NaN into `dim`'s floats and -NaN into `fact`'s, beside the specials of the table above.
 2. `testdata/pbench-queries/*.sql`, the queries above.
 3. Plumbing, wherever a dataset is named today (`git grep -lE '\btpcds\b'` outside goldens and
    wiki, about 30 files): `test_support` (the per-dataset `small_table_bytes`; `golden_dir_for`),
    `tests/common/corpus_cases.inc` (a `// --- pbench ---` section), `test_corpus_goldens.rs`'s five
    dataset lists, `test_cost_model.rs`, `cost-registry.csv` rows, `cost-report/src/main.rs` (the
-   widget renders a pbench section beside TPC-H and TPC-DS, its render test gaining pbench),
+   widget renders a pbench section beside TPC-H and TPC-DS, its render test gaining pbench; and a
+   mode cell whose five modes are all enabled shows one larger tick instead of five small ones —
+   `✔` in the PR comment, a larger `✓` on the HTML page — so a fully covered row reads at a glance),
    `scripts/exec_model` corpus loaders, the CI workflows' dataset matrix, `build-test.sh` and
    `build-test-shadgpu.sh` (pbench needs no generation and no upload), `dataset_checks.py` and
    the S3 checks (pbench is not in S3: skipped by name).
@@ -157,6 +182,20 @@ pbench join DataFusion plans `CollectLeft`; otherwise it is recorded as not reac
    `mini.result.txt`, `duckdb-result.txt` (from `duckdb_result.py --dataset pbench`), and
    `gpu-result.txt` per duckdb-oracle.
 5. One device cycle: every gpu cell run once; the cells that pass are enabled.
+
+## Nullability is checked (#227)
+
+Folded in from [#227](../tickets/corpus-coverage.md#t227) (check schema nullability in tests), so
+the NULL-heavy data meets a check from its first run and the join rewrite after it is held to its
+declarations. Today the schema checks compare types only.
+- **cpu:** `declared_as` (`executor/cpu_backend/mod.rs:309`) refuses a batch whose column holds a
+  NULL where its field is declared non-nullable, naming the column — before its early return for an
+  equal schema, which today skips every check.
+- **device:** the schema validators (`test_support/schema_validation.rs`, `gpu_schema_validator`
+  and `cpu_schema_validator`) check the same against each handle's null counts, wherever a line's
+  `schema_validation` is enabled.
+- A violation found in tpch, tpcds or pbench is a ticket, not a fix here; its cells go off on it.
+  #227 closes when both checks land.
 
 ## Scope
 
@@ -169,25 +208,32 @@ pbench join DataFusion plans `CollectLeft`; otherwise it is recorded as not reac
 | `peacockdb-core/src/test_support/` | the dataset, its `small_table_bytes` |
 | `peacockdb-core/tests/test_corpus_goldens.rs`, `test_cost_model.rs` | pbench in the dataset lists |
 | `cost-report/src/main.rs` | the pbench section |
-| `testdata/duckdb_result.py` | `--dataset pbench` |
+| `testdata/duckdb_result.py` | `--dataset pbench`; a one-entry spelling map rewriting DataFusion's `arrow_cast(…, 'Timestamp(Second, None)')` as DuckDB's `::TIMESTAMP_S` |
 | `scripts/` (build-test, exec_model corpus, dataset checks) | pbench where datasets are listed |
 | `.github/workflows/` | pbench in the matrix, no generation step |
+| `peacockdb-core/src/executor/cpu_backend/mod.rs`, `src/test_support/schema_validation.rs` | #227: a NULL where the node declares none is refused (cpu) and reported (validators) |
+| `peacockdb-core/src/wire/expr_writer.rs` | a wire-type refusal cites its ticket (`(#240)` for a timestamp target, `(#249)` otherwise), so the plan goldens' meta tests accept the not-runnable lines |
+| `peacockdb-core/src/planner/tests/plan_goldens.rs` | pbench in `CORPUS_DATASETS`; `NOT_RUNNABLE` gains `timestamp-s-key-group` on #240 |
+| `cost-report/src/main.rs` | one larger tick for a fully enabled row |
 | `llm-wiki/build-test.md`, `architecture.md` | the third dataset; counts |
 
-Component-level API: none. No engine change: the planner sees a per-dataset knob value it already
-takes.
+Component-level API: none. Two engine changes, each a refusal that changes no answer: #227's
+nullability check (`declared_as` and the schema validators), and a wire-type refusal's text naming
+its ticket. The planner otherwise sees a per-dataset knob value it already takes.
 
 ## Restriction
 
-Test data and plumbing only. No fix to anything a query shows; a query that fails gets its
-ticket on the row. sf1 only, no scaling, no S3.
+Test data and plumbing, plus the two refusals above (#227's check, the ticket in a wire-type
+refusal's text). No fix to anything a query shows; a query that fails gets its ticket on the row.
+sf1 only, no scaling, no S3.
 
 ## Registry
 
 Every pbench row lands with its tickets in the `tickets` column. cpu cells on where the cpu
 answers and agrees with DuckDB; every gpu cell run once, enabled if it passes. Each row's
 `duckdb_oracle` is `duckdb_exact` unless a ticket on the row says the engines diverge from
-DuckDB (`duckdb_divergent(<ticket>)`). A cell that fails on a ticket the table above does not
+DuckDB (`duckdb_divergent(<ticket>, <positions>)`), and `duckdb_none` where the cpu does not answer
+(a refused or not-runnable row) — the task that first turns its cells on moves it to its variant. A cell that fails on a ticket the table above does not
 expect is a finding: the ticket it fails on goes on the row, or a new ticket is filed.
 
 ## Verification bar

@@ -13,14 +13,21 @@ waits on.
 
 On shad-gpu, against its existing 26.02 environment `~/miniforge3/envs/rapids-2602` (libcudf
 26.02, nvcc 12.2; a standalone libcudf program ran there on driver 535.247.01 on 2026-10-07):
-- the C++ build reuses `~/build-2602` (a CMake tree of two C++ targets from 2026-08-13,
-  `~/build2602.sh`) if it configures for the repo's full targets, and otherwise uses a new build
-  directory beside it; never `cpp/build`, which the 25.02 runs use;
-- the cargo build uses its own target directory (`CARGO_TARGET_DIR`), never the 25.02 one;
+- the binaries are built **on the workstation**, as every shad-gpu run's are — shad-gpu has no
+  cargo, and `~/build-2602` (with `~/build2602.sh`) is a C++-only tree built from a separate source
+  copy (`~/peacockdb-src`), not reusable. The C++ builds in `cpp/build26` against the workstation's
+  26.02 environment (libcudf 26.02.01, the host's build), never `cpp/build`; cargo uses its own
+  target directory (`CARGO_TARGET_DIR`), never the 25.02 one;
+- `build-test-shadgpu.sh` gains a 26.02 mode (`PEACOCK_CUDF=26.02`) that pushes to its own remote
+  directory, `/home/info/peacockdb-2602`, never the 25.02 one;
+- the workstation's environment runs CUDA 12.9, the host's 12.2 (driver 535). Whether the shipped
+  binaries load there is unproven, so the first cycle climbs a ladder and records which rung held:
+  the host environment's cudart; the workstation's 12.9 cudart shipped beside the binaries; a local
+  replica of the host's 12.2 environment to build against; and only then the fallback below;
 - the same H200 and the same sf40 data, so the benchmark numbers compare with 25.02's directly.
 
-Only if the build or the driver fails there does it fall back to a GPU host provisioned with
-26.02 for this task alone, released when it ends.
+Only if every rung fails does it fall back to a GPU host provisioned with 26.02 for this task
+alone, released when it ends.
 
 ## The work
 
@@ -31,21 +38,34 @@ Only if the build or the driver fails there does it fall back to a GPU host prov
    cpu tiers once, for the record. Write each tier's counts beside the 25.02 run's.
 3. Fix what fails, each with its own red case first; a failure that is a 26.02 behaviour the
    engine should follow, not a defect, is recorded with its reason.
-4. The corpus benchmark for every query-mode cell the chain turned on (the cells
-   `join-rewrite-cell-estimate.md`'s comparison lists as flipped), on 26.02 and on 25.02, written
-   to `testdata/benchmark-results/` as the benchmark tree is.
+4. The corpus benchmark on 26.02 and on 25.02, for the cells the chain turned on that the
+   benchmark times: it times only tpch sf40 cases (`corpus_benchmark_cases.inc`), and tpcds and
+   pbench have no sf40 data, so the comparison is the tpch sf40 cases among the flipped cells
+   (`join-rewrite-cell-estimate.md`'s comparison). Each run block names its cuDF (`cudf=`), and the
+   results go under `testdata/benchmark-results/cudf-<version>/`, so a 26.02 run never overwrites
+   25.02's.
+4b. The device's answers on 26.02: a corpus cycle with `PCK_WRITE_GPU_RESULT=26.02` writes
+   `gpu-result-26.02.txt` (gitignored, never over the committed 25.02 file), compared with DuckDB
+   by the same `duckdb_gpu_*` cases pointed at it; every divergence from DuckDB that 25.02 does
+   not show is a finding.
 5. Add to #244 what the record shows: every tier's outcome on 26.02, and the benchmark against 25.02.
 
 ## Scope
 
 | path | change |
 |---|---|
-| `scripts/build-test-shadgpu.sh` (or a sibling) | a 26.02 mode: the env, the build dir, the target dir |
+| `scripts/build-test-shadgpu.sh` | `PEACOCK_CUDF=26.02`: the env, `cpp/build26`, the target dir, the remote dir, the cudart rung |
+| `cpp/include/peacock_gpu.h`, `cpp/src/gpu_executor.cpp`, `peacockdb-ffi` | `peacock_cudf_version()`, a new symbol naming the linked cuDF — `peacock_gpu_version()` is unchanged, since `cpp/tests/cpu/test_executor.cpp:9` pins it at `"0.1.0"` |
+| benchmark writers | `cudf=` per run block; the versioned tree |
 | whatever the failures need | fixes, each with its case |
 | `testdata/benchmark-results/` | the numbers |
+| `scripts/lib/shadgpu-env.sh`, `scripts/build.sh` | the 26.02 environment and build dir |
+| `peacockdb-core/tests/common/corpus_benchmark_cases.inc` | the tpch sf40 cases the comparison times |
+| `cpp/tests/cpu/test_executor.cpp` | `peacock_cudf_version()` asserted beside `peacock_gpu_version()`'s `"0.1.0"` |
 | `llm-wiki/build-test.md`, `tickets/system-hardening.md` | how to run on 26.02; #244's evidence |
 
-Component-level API: none expected; any fix that needs one says so in its PR.
+Component-level API: one additive C ABI symbol, `peacock_cudf_version()`. Any fix that needs more
+says so in its PR.
 
 ## Restriction
 

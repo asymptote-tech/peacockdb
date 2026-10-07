@@ -12,7 +12,7 @@ whose `TableResult` (one owner per column, final shape) it uses without changing
 `std::make_unique<cudf::column>(view)` copies the device buffer, and the operators use it to
 build a table out of one they just produced, or out of their input. #154 lists the sites by kind.
 Outside `join.cpp`:
-- **ordinal subset of a fresh table:** `filter.cpp` 41 — a release with a distinct-ordinal assert;
+- **ordinal subset of a fresh table:** `filter.cpp` 41 — a `select` over the fresh table (a repeated ordinal is two entries sharing one owner);
 - **an input column kept in the output:** `project.cpp` 44, `window.cpp` 46;
 - **a temporary that only needed a view:** `expr.cpp` 834, `build_column`'s `ColumnRef` arm, which
   copies a whole column the caller views one line later — about 46 of the 107 GB q19's lineitem
@@ -24,8 +24,9 @@ Outside `join.cpp`:
 
 1. `expr.cpp`: the `ColumnRef` arm returns a view of the input column (`table.column(idx)`); its
    callers take `column_view` already. No ownership change.
-2. `filter.cpp`: release the fresh table's columns, asserting the kept ordinals are distinct — a
-   repeated ordinal would move one column twice and leave a hole, a wrong answer and not a throw.
+2. `filter.cpp`: the kept columns are `select`ed from the fresh table's owners, so a repeated
+   ordinal is two entries sharing one owner and answers correctly — the "moved twice, a hole" trap
+   of a release cannot arise, and nothing is refused.
 3. `project.cpp`, `window.cpp`: an output mixing input columns with computed ones is built with
    refcounted-scatter's `select` and `with`, so it views the input columns it keeps and owns the
    ones it computes, and the input's other columns are freed as today. A repeated
@@ -33,8 +34,11 @@ Outside `join.cpp`:
    tpcds q84 and q85 (a column projected twice, device cells on at tp1-single) are its regression.
    If a site proves costlier to share than to copy, the task keeps that copy with a measured note
    — the PR says which.
-4. `aggregate.cpp`: each of the seven read; a fresh-table site released as in 2, an input-column
-   site as in 3, a site that must copy kept with a one-line reason.
+4. `aggregate.cpp`: each of the seven read; a fresh-table site selected as in 2, an input-column
+   site as in 3, a site that must copy kept with a one-line reason. Expected outcome, from reading
+   them: 6 of the 11 sites outside `join.cpp` lose their copy; 5 keep it — the four Welford struct
+   members and one merged-state child, whose copies are small and whose shared form would cost
+   more than it saves. The PR lists each with its reason.
 5. Traps: a view taken before a release dangles (`ftv` near `join.cpp` ~L372 is the known one;
    none may survive here).
 
@@ -42,7 +46,7 @@ Outside `join.cpp`:
 
 | path | change |
 |---|---|
-| `cpp/src/expr.cpp`, `operators/filter.cpp`, `project.cpp`, `window.cpp`, `aggregate.cpp` | the sites |
+| `cpp/src/expr.cpp`, `cpp/src/peacock/expr.h`, `operators/filter.cpp`, `project.cpp`, `window.cpp`, `aggregate.cpp`, `sort.cpp` | the sites; `evaluate_column`'s borrowed view |
 | `cpp/tests/gpu/test_plan_executor.cpp` | the allocation cases |
 | `llm-wiki/tickets/corpus-coverage.md`, `build-test.md` | #154 reworded to `join.cpp`'s sites; counts |
 
@@ -57,7 +61,7 @@ The 11 sites; `join.cpp` is join-session-cpp's. No operator's output changes.
 
 One gtest per family (aggregate, filter, project, window, a non-AST predicate's `ColumnRef`)
 under an RMM statistics adaptor: the call allocates the output's bytes, not twice them. A filter
-with a repeated projection ordinal is refused. Every existing test green unchanged.
+with a repeated projection ordinal answers both columns correctly. Every existing test green unchanged.
 
 ## Verification bar
 

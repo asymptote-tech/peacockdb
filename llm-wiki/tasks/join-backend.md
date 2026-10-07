@@ -25,13 +25,35 @@ not repeat it.
 
 ## The work
 
-1. **Planner** (§4.1): the capability matrix as two facts; the refusals lifted (#153, #159, #160,
-   the nulls.rs anti/mark refusal), `can_be_null` kept as `planner/nullability.rs`; the two
-   unreachable refusals kept; the `NOT IN` rule with data-driven nullability (§3.5); #137's
-   `IS NOT NULL` filters; the predicate-free nested loop as cross for Inner only, over `true`
-   otherwise; the explicit `__rowcount__` placeholder.
-2. **Wire** (§4.2): `CudfJoin` written for all three plan nodes; the join recipes, roles and
-   inputs removed; the old three fbs tables and `execute_*_join` removed with them.
+1. **Planner** (§4.1): the capability matrix as two facts; the refusals lifted (#153, #159, #160);
+   the nulls.rs anti/mark refusal **narrowed, not deleted** — moved with `can_be_null` to
+   `planner/nullability.rs`, it refuses a nullable `IN`/`NOT IN` subquery off a filter's AND/OR
+   spine after negation normal form (under `IS NULL`, `IS [NOT] TRUE/FALSE`, a comparison, a
+   function — a `NOT` no longer counts: NNF folds it into the leaf), where a mark join cannot give SQL's
+   NULL — refused on [#250](../tickets/joins.md#t250), filed (design §3.5); the two unreachable
+   refusals kept; the `NOT IN` rule (§3.5) — only on the AND/OR spine
+   from a `Filter` root, `Not(InSubquery{negated: false})` normalized there too, every `Filter`
+   visited including those inside expression subqueries, data-driven nullability opened through
+   `Url::to_file_path` with `SubqueryAlias` recursing, the counts as `count(lit(1i32))` so
+   `AggregateStatistics` cannot turn them into a `PlaceholderRowExec`; planner tests for
+   `NOT (x IN S)`, `w = 0 OR NOT (x IN S)`, `NOT (x NOT IN S)` (folded to `x IN S`, a semi join),
+   `NOT (w = 0 OR x NOT IN S)` (De Morgan, then `IN`), a `NOT IN` inside an `EXISTS`,
+   `(x IN S) IS NULL` (refused, #250) and the unfiltered-`S` count, each answer checked against
+   DuckDB; #137's `IS NOT NULL` filters, decided on the translated side (a side whose top node is
+   a `GpuEmitPartitions`); the predicate-free nested loop as cross for Inner only, over `true`
+   otherwise; the explicit `__rowmarker__` placeholder, including a scan's (`CudfScan.rows_only`);
+   an `EmptyExec` arm, a new leaf `GpuEmpty{schema}` that emits no batch on either engine (review
+   row 8); `IS [NOT] DISTINCT FROM` on the device — AST `NULL_EQUAL` / `NOT(NULL_EQUAL)`, column path
+   `NULL_EQUALS` / `NULL_NOT_EQUALS` — and its promotion to hash keys with `null_equals_null = true`
+   when every key of a keyless nested loop would be such a conjunct (review row 9).
+2. **Wire** (§4.2): `CudfJoin` written for all three plan nodes, with `chunk_bytes` from the
+   planner's scratch budget and both side schemas — Arrow `Timestamp(unit, _)` mapped to the fbs
+   `Timestamp*` variants repartition-keys adds and rendered in `fb_text`; an unmapped type is
+   already a `PlanError` in every schema (repartition-keys, #249), so `CudfJoin`'s schemas inherit
+   it. Cases: a
+   Left join carrying a `ts_us` probe column finished with no probe batch, a Right join whose lane
+   gets no build batch. `CudfScan.rows_only` written for a zero-column scan. The join recipes,
+   roles and inputs removed; the old three fbs tables and `execute_*_join` removed with them.
 3. **GPU executor** (§4.3): the session typestate, `set_build(Option)`, `Option` returns,
    `owes_nothing`, `Drop` releasing; `copy_of`, `build_copy`, `finish_without_keys` go; pricing as
    §4.3 says.
@@ -44,7 +66,13 @@ not repeat it.
 7. **Corpus and pbench cells**: every cell whose last ticket closes here is run at its mode on
    shad-gpu and compared with DuckDB, and enabled if it passes; one that meets another issue gets
    that ticket on its row (or a new one).
-8. **Cleanup — nothing of the old join path survives.** Removed, each checked gone by a grep the
+8. **Every commit green.** The plan goldens, the cpu goldens and the cost goldens of a change are
+   regenerated in the same commit (#137's tpcds filters, `__rowmarker__`, the recipe line); each
+   `bug_` pin flips in the commit that changes its behaviour; the cpu's interim adapter, while the
+   trait changes ahead of the stream executor, concatenates a call's chunks into one batch (#220's
+   fix) rather than refusing; tpcds q9's cpu cells, on today, stay green through the
+   `__rowmarker__` step (the cpu applies nested-loop and cross projections before, or with, it).
+9. **Cleanup — nothing of the old join path survives.** Removed, each checked gone by a grep the
    PR quotes and by a build with no dead-code warning on either side:
    - wire: `wire/join.rs`'s recipe writers (all but `CudfJoin`'s), `attach.rs`'s `cross_join`;
      the join-only vocabulary — `Input::{BuildSide, BuildSideCopy, BatchCopy, AccumulatedKeys}`,
@@ -58,7 +86,8 @@ not repeat it.
    - Rust executors: `GpuJoin`'s `per_probe`/`at_done` lists, `make`, `copy_of`, `build_copy`,
      `finish_without_keys`; the cpu's `Calls` (per-call join, key project, finish join, pad
      project, `empty_build_answers_nothing`); `JoinExecutor::without_build`.
-   - planner and plan: `planner/nulls.rs`'s refusal (the analysis moves), `answers_in_one_call`,
+   - planner and plan: `planner/nulls.rs` (its narrowed refusal and analysis move to
+     `nullability.rs`), `answers_in_one_call`,
      `per_call_join_type`, `finish_join_type`, `empty_build_answers_nothing`, the probe-side coalesce.
    - driver: `feeds_owing_build`, the scatter-drop exception, the mock's `empty_build_owes_its_probe`.
    - exec_model: `operators/recipe_join.py`, `recipe.py`'s `copy_handle`, the `cudf_calls.py`
@@ -66,7 +95,7 @@ not repeat it.
    - wiki: `architecture.md`'s join recipes and capability matrix rewritten from the design;
      `hacks-audit.md`'s join items (P1, P4, P8, P9, P10, P13; findings 5, 11, 12) marked resolved;
      `build-test.md`'s rows; `join-rewrite-design.md` archived with the specs.
-9. **The estimate.** [`reports/join-rewrite-cell-estimate.md`](../reports/join-rewrite-cell-estimate.md),
+10. **The estimate.** [`reports/join-rewrite-cell-estimate.md`](../reports/join-rewrite-cell-estimate.md),
    committed with the chain's specs, predicts which cells flip and which meet another issue. The
    completeness record compares it with what turned on: each miss, either way, gets a line with its
    cause.
@@ -81,10 +110,15 @@ not repeat it.
 | `peacockdb-core/src/executor/gpu_backend/`, `cpu_backend/`, `driver/`, `executor/mod.rs` | §4.3–§4.5 |
 | `peacockdb-core/src/planner/memory_estimation.rs` | the session's pricing |
 | `cpp/src/operators/join.cpp`, `project.cpp`, `dispatch.cpp`, `flatbuffers/gpu_plan.fbs` | the old join paths and tables removed; an empty projection refused |
+| `cpp/src/operators/scan.cpp`, `flatbuffers/gpu_plan.fbs` (`CudfScan.rows_only`), `cpp/tests/gpu/test_plan_executor.cpp` | a zero-column scan answers `__rowmarker__`; its gtest |
+| `peacockdb-core/src/wire/serialize.rs` | `serialize_join_schema`, which consumes repartition-keys' timestamp mapping and unmapped-type refusal (#249) |
+| `peacockdb-core/src/plan/` (a new `GpuEmpty` node), `plan_text/node_text.rs`, `wire/attach.rs`, `executor/{cpu,gpu}_backend/backend.rs`, `planner/memory_estimation.rs` | the `EmptyExec` leaf |
+| `cpp/src/expr.cpp` | `IS [NOT] DISTINCT FROM` in `fb_to_ast_op`'s caller and the column path |
 | `peacockdb-core/src/tests/**`, `planner/tests/**`, `plan/tests/**`, `executor/**/tests*`, `wire/tests.rs`, `wire/gpu_tests/` | §5.7 |
 | `cpp/tests/gpu/test_plan_executor.cpp` | the four `CudfHashJoin` tests onto the session |
 | `scripts/exec_model/` | §4.6 |
-| `testdata/goldens/**`, `recipe-payloads.txt`, `cost-registry.csv`, `corpus_cases.inc` | the session's recipe line; #137's tpcds filters; the 19 `__rowcount__` nodes; cells |
+| `peacockdb-core/Cargo.toml` | `url`, for the nullability tracer's `Url::to_file_path` |
+| `testdata/goldens/**`, `recipe-payloads.txt`, `cost-registry.csv`, `corpus_cases.inc` | the session's recipe line; #137's tpcds filters; the 19 `__rowmarker__` nodes and the zero-column scan's payload; cells |
 | `llm-wiki/architecture.md` (Joins), `build-test.md`, `tickets/`, `reports/` | the lasting parts of the design; counts; the closed tickets archived |
 
 Component-level API: the `JoinExecutor`/`ProbingJoin` traits (`set_build(Option)`, `Option`
@@ -104,13 +138,14 @@ three groups to meet an out-of-chain issue instead: tpch rollup_over_join ×5 on
 `65` today), tpcds q78 ×5 on #60, tpcds q32 at tp4 on #199. Those rows gain their tickets. The
 stale `183` rows' 25 join cells (tpch nested-loop-join, q4, cross-join, nested-loop-left-join,
 semi-join, anti-join, q15) are run here, since #183 is closed and #152 is their real blocker.
-pbench's join rows turn on with the rest. Each cell enabled with its DuckDB case green.
+pbench's join rows turn on with the rest — `empty-side-left-join` and `indf-full-join` among
+them. Each cell enabled with its DuckDB case green.
 
 ## Verification bar
 
 - rust-only: the full cpu tier, the planner and wire tests, `test_cpu_corpus` with every newly
   enabled cpu cell and its DuckDB case; the golden regenerations reviewed as one diff per kind
-  (recipe line, #137 filters, `__rowcount__`).
+  (recipe line, #137 filters, `__rowmarker__`).
 - device: the full gpu tier; `test_join_session.cpp`; every newly enabled gpu cell on shad-gpu at
   its mode; `gpu-result.txt` against DuckDB.
 
