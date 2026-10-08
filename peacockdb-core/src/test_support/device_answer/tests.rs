@@ -120,3 +120,25 @@ fn the_device_comparison_fails_on_a_nan_against_a_number() {
     assert!(device_answer_matches(&nan, "golden_approx_std", &answer()).is_err());
     assert!(device_answer_matches(&nan, "golden_exact", &answer()).is_err());
 }
+
+/// cuDF's own `version_config.hpp`, the text `build.rs` copies into the build. The real 25.02
+/// header is the fixture, because the one digit that matters is the zero: cuDF's `MINOR` is `2`
+/// and every path, gitignore line and spec sentence in the tree says `25.02`.
+#[test]
+fn the_cudf_version_is_read_from_its_header_with_the_minor_padded() {
+    use super::cudf_version_of_config;
+    let real = "#pragma once\n\n#define CUDF_VERSION_MAJOR 25\n#define CUDF_VERSION_MINOR 2\n\
+                #define CUDF_VERSION_PATCH 2\n";
+    assert_eq!(cudf_version_of_config(real).as_deref(), Some("25.02"));
+    let next = "#define CUDF_VERSION_MAJOR 26\n#define CUDF_VERSION_MINOR 2\n";
+    assert_eq!(cudf_version_of_config(next).as_deref(), Some("26.02"));
+    let october = "#define CUDF_VERSION_MAJOR 25\n#define CUDF_VERSION_MINOR 10\n";
+    assert_eq!(cudf_version_of_config(october).as_deref(), Some("25.10"));
+    // A rust-only build has no cuDF, so `build.rs` writes an empty file rather than a value
+    // nothing checked.
+    assert_eq!(cudf_version_of_config(""), None);
+    assert_eq!(
+        cudf_version_of_config("#define CUDF_VERSION_MAJOR 25\n"),
+        None
+    );
+}

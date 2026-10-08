@@ -15,7 +15,9 @@ use crate::executor::{GpuBackend, PlanIndex, run_with_hook};
 use crate::plan_text::render_run;
 
 use super::corpus::{self, plan_at, run_cpu};
-use super::device_answer::{GpuResultMode, device_answer_matches, gpu_recording, gpu_result_mode};
+use super::device_answer::{
+    GpuResultMode, cudf_version, device_answer_matches, gpu_recording, gpu_result_mode,
+};
 use super::gpu_session::Session;
 use super::{
     GpuRecording, Mode, assert_results_match, corpus_golden, gpu_schema_validator, mode_named,
@@ -23,8 +25,10 @@ use super::{
 };
 
 /// The whole of a device corpus case: plan, run on the device with the schema validator
-/// installed where the declaration asks for it, then the two read-only assertions — the
-/// mode's `.cpu.txt` section, and the result the declaration names.
+/// installed where the declaration asks for it, record the answer, then the two read-only
+/// assertions it is recorded ahead of — the mode's `.cpu.txt` section, and the result the
+/// declaration names. The run's own accounting is asserted first: a report that held batches
+/// it never released is a broken run rather than an answer DuckDB can settle.
 pub(crate) async fn gpu_case(
     dataset: &str,
     sf: &str,
@@ -49,19 +53,21 @@ pub(crate) async fn gpu_case(
         "{what} held {} batches and released {}",
         report.holds, report.releases
     );
-    corpus_golden::assert_section(
-        &corpus_golden::cpu_golden(dataset, sf, mode.name),
-        query,
-        &render_run(tree.as_ref(), &report),
-    );
     let batches: Vec<RecordBatch> = report
         .batches
         .iter()
         .map(|batch| batch.record_batch().clone())
         .collect();
-    // BEFORE the assertion, so an answer the cpu rejects is still recorded — which is
-    // exactly where DuckDB is the one that says which engine is right (#243).
+    // Ahead of BOTH comparisons against the cpu below, each of which panics. The divergence
+    // DuckDB exists to settle is the one that makes them panic — #243's lane split moves an
+    // aggregate's group count, which `.cpu.txt` carries — so an answer recorded after them is
+    // missing in exactly the case that needs it. Held by `write_order.rs`.
     record_gpu_result(dataset, sf, query, mode, &batches);
+    corpus_golden::assert_section(
+        &corpus_golden::cpu_golden(dataset, sf, mode.name),
+        query,
+        &render_run(tree.as_ref(), &report),
+    );
     assert_result(dataset, sf, query, mode, gpu_oracle, &batches).await;
 }
 
@@ -80,6 +86,12 @@ fn record_gpu_result(dataset: &str, sf: &str, query: &str, mode: &Mode, batches:
         GpuRecording::Committed => None,
         GpuRecording::Versioned(version) => Some(version),
     };
+    // The cuDF the binary is linked against, not the value the operator typed: the committed
+    // file is 25.02's, and a cycle on any other cuDF is refused here rather than noticed in a
+    // diff after it has overwritten answers nothing else holds.
+    let cudf = cudf_version();
+    corpus_golden::recording_cudf_suits_the_path(&cudf, version.as_deref())
+        .unwrap_or_else(|said| panic!("{dataset}/{query}: {said}"));
     let (body, _over_cap) = corpus::rendered_or_fingerprint(batches);
     corpus_golden::merge_mode_section(
         &corpus_golden::gpu_result_golden(dataset, sf, version.as_deref()),
@@ -88,6 +100,7 @@ fn record_gpu_result(dataset: &str, sf: &str, query: &str, mode: &Mode, batches:
         query,
         mode.name,
         &body,
+        &cudf,
     );
 }
 

@@ -112,7 +112,12 @@ Knobs read from the environment, not flags:
   PCK_TEST_FILTER=<sub>       cargo-test name filter forwarded to the rust binaries
   PCK_WRITE_GPU_RESULT=1      the device corpus tier records its answers in gpu-result.txt
                               (any other NON-EMPTY value: gpu-result-<value>.txt, a
-                              non-25.02 cuDF; empty or unset records nothing)
+                              non-25.02 cuDF; empty or unset records nothing). The value
+                              must name the cuDF this build links against, or the cycle
+                              refuses to record: the committed file is 25.02's.
+  PCK_GPU_RESULT_VERSION=<v>  read, not written, and NOT a knob this script forwards: it
+                              points the local `duckdb_gpu_*` cases at gpu-result-<v>.txt
+                              after --pull-results. Set it to the value recorded with.
 
 --all deliberately does not imply the benchmark phases: that is what keeps a
 measurement out of the merge gate.
@@ -387,7 +392,9 @@ filter_q=$(printf '%q' "$PCK_TEST_FILTER")
 #   PCK_TEST_FILTER=<sub>  cargo-test name filter forwarded to the rust binaries
 #   PCK_RUN_CPP=0          skip the C++ suites (default: run them)
 #   PCK_WRITE_GPU_RESULT=1 the device corpus tier writes gpu-result.txt; any other NON-EMPTY
-#                          value writes gpu-result-<value>.txt, for a cuDF that is not 25.02
+#                          value writes gpu-result-<value>.txt, for a cuDF that is not 25.02.
+#                          The tier refuses a value naming a cuDF other than the one the
+#                          binaries were built against, and stamps the file with it.
 #
 # The heredoc marker is unquoted, so $VARS expand locally before the text is sent;
 # escape with \$ anything the remote shell should expand.

@@ -162,3 +162,21 @@ read the golden section from).
 ## Device workflow
 
 `build-test-shadgpu.sh`, one cycle with the regeneration variable set.
+
+## Completeness signoff (2026-10-08)
+
+Solved under its constraints on the cpu, not on the device. Every corpus line names a
+`duckdb_oracle`, a case per line compares our answer with DuckDB's, four over-cap sections compare
+by fingerprint and agree byte for byte across the two writers, and both corpus helpers are now
+shown failing — all of it verified twice by an independent reimplementation of the comparator run
+over the committed goldens. The device half never ran: shad-gpu was off the network for the whole
+task and verda could not be located, so `gpu-result.txt` does not exist and its 26 cases plus the
+coverage guard are honestly red. #235 stays open for that one cycle.
+
+No bandaid, no divergence fixed, no assertion weakened. Three shortfalls, each named rather than
+papered over: step 3's decimal-on-ours-against-double-on-DuckDB's column cannot be approximate on
+both sides — two independent per-side writers and one row-pairing hash make it unachievable — so a
+class disagreement is a named failure instead, filed with the two other paths that cannot record a
+divergence as #253; step 7's negative tests reach two of the three `CpuOracle` variants, not
+`data_fusion_subset`, filed as #254; and the optional `duckdb_columns` variant was looked for and
+not needed, since no `duckdb_divergent` line is a LIMIT tie.

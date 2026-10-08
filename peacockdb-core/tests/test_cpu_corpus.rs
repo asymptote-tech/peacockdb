@@ -9,8 +9,9 @@ use std::collections::BTreeSet;
 
 use peacockdb_core::test_support::{
     CorpusDeclaration, DuckdbOracle, MODES, Mode, RegistryEntry, assert_registry_matches_csv,
-    authoritative_mode, corpus_lines, cpu_case, duckdb_case, duckdb_gpu_case, gpu_result_cells,
-    gpu_result_golden, load_csv, result_golden, section_holds_rows, section_of, stem,
+    authoritative_mode, corpus_lines, cpu_case, duckdb_case, duckdb_gpu_case, gpu_result_coverage,
+    gpu_result_cudf_matches_path, gpu_result_golden, load_csv, result_golden, section_holds_rows,
+    section_of, stem,
 };
 
 /// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, duckdb_oracle, cpu_oracle,
@@ -427,25 +428,20 @@ fn every_duckdb_oracle_is_named_by_some_line() {
 }
 
 /// Every enabled device cell has its `gpu-result.txt` section and no section is any other
-/// cell's, in both directions.
+/// cell's, in both directions, over the datasets the registry holds.
 ///
 /// A task that turns a device cell on or off without running the cycle that records its
 /// answer fails here, which is the whole reason the file is compared with DuckDB by (query,
-/// mode) rather than by query. An ABSENT file fails too: it means no cycle has written it
-/// since the cells moved, which is a gap in the branch and not a case with nothing to do.
-/// Regenerating is what clears either failure in both directions: the writer keeps what the
-/// registry still enables and drops what it does not (`merged_cells`).
+/// mode) rather than by query. An ABSENT file fails where some cell is enabled — no cycle has
+/// written it since the cells moved — but a dataset whose device cells are all off has no file
+/// and wants none, the writer running only from a device case. Regenerating clears either
+/// failure both ways: the writer keeps what the registry enables and drops what it does not
+/// (`merged_cells`).
 #[test]
 fn every_enabled_device_cell_has_its_gpu_result_section_and_no_other() {
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
-        let path = gpu_result_golden(dataset, sf, None);
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-            panic!(
-                "{} does not exist, so no device answer is recorded for any cell. Run a cycle \
-                 with PCK_WRITE_GPU_RESULT=1 and bring it home with --pull-results.",
-                path.display()
-            )
-        });
+    for (dataset, sf) in registry_datasets() {
+        let path = gpu_result_golden(&dataset, &sf, None);
+        let text = std::fs::read_to_string(&path).ok();
         let enabled: BTreeSet<(String, String)> = load_csv()
             .iter()
             .filter(|row| row.dataset == dataset && row.sf == sf)
@@ -458,15 +454,39 @@ fn every_enabled_device_cell_has_its_gpu_result_section_and_no_other() {
                 })
             })
             .collect();
-        let written: BTreeSet<(String, String)> = gpu_result_cells(&text).into_iter().collect();
-        let missing: Vec<&(String, String)> = enabled.difference(&written).collect();
-        let extra: Vec<&(String, String)> = written.difference(&enabled).collect();
-        assert!(
-            missing.is_empty() && extra.is_empty(),
-            "{dataset}: regenerate {} (PCK_WRITE_GPU_RESULT=1, --pull-results) — missing \
-             {missing:?}, not an enabled cell {extra:?}",
-            path.display()
-        );
+        if let Err(said) = gpu_result_coverage(&path, &enabled, text.as_deref()) {
+            panic!("{dataset}: {said}");
+        }
+    }
+}
+
+/// Every (dataset, sf) the registry holds, so a dataset a later task adds is covered by the
+/// guards above without an edit here. It landing with its device cells off is the ordinary
+/// case, and then it has no `gpu-result.txt` and wants none.
+fn registry_datasets() -> BTreeSet<(String, String)> {
+    load_csv()
+        .iter()
+        .map(|row| (row.dataset.clone(), row.sf.clone()))
+        .collect()
+}
+
+/// The committed `gpu-result.txt` holds cuDF 25.02's answers — shad-gpu's — and carries the
+/// version it was recorded under on its first line, so a 26.02 cycle that recorded over it is
+/// a test failure rather than a diff nobody read. Step 4's "one version per file".
+///
+/// A file that does not exist is not this test's failure: the coverage guard above owns
+/// absence, and two cases red for one reason buy nothing. The rule itself is held by
+/// `a_recorded_file_must_carry_the_cudf_its_name_promises` in the rust-only tier, over text a
+/// test can doctor today.
+#[test]
+fn every_committed_gpu_result_file_carries_the_committed_cudfs_stamp() {
+    for (dataset, sf) in registry_datasets() {
+        let path = gpu_result_golden(&dataset, &sf, None);
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        gpu_result_cudf_matches_path(&text, None)
+            .unwrap_or_else(|said| panic!("{}: {said}", path.display()));
     }
 }
 

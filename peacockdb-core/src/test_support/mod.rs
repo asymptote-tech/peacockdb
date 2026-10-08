@@ -574,12 +574,21 @@ pub async fn duckdb_gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, o
     duckdb_oracle::duckdb_gpu_case(dataset, sf, query, mode, oracle).await
 }
 
-/// The (query, mode) each section of `gpu-result.txt` records, in file order.
-pub fn gpu_result_cells(text: &str) -> Vec<(String, String)> {
-    duckdb_oracle::gpu_result_sections(text)
-        .into_iter()
-        .map(|section| (section.query, section.mode))
-        .collect()
+/// A `gpu-result` file's `cudf=` provenance line against the path it was read as: the committed
+/// file holds cuDF 25.02's answers and `gpu-result-<v>.txt` holds v's.
+pub fn gpu_result_cudf_matches_path(text: &str, version: Option<&str>) -> Result<(), String> {
+    corpus_golden::gpu_result_cudf_matches_path(text, version)
+}
+
+/// Every enabled device cell against the sections a `gpu-result` file holds, in both
+/// directions. `text` is `None` where the file does not exist, which is a failure only where
+/// some cell is enabled.
+pub fn gpu_result_coverage(
+    path: &Path,
+    enabled: &BTreeSet<(String, String)>,
+    text: Option<&str>,
+) -> Result<(), String> {
+    duckdb_oracle::gpu_result_coverage(path, enabled, text)
 }
 
 /// `golden_approx_std`'s tolerance (`corpus_gpu.rs`), for FLOAT cells only. A decimal cell
@@ -592,6 +601,12 @@ pub const DUCKDB_FLOAT_TOLERANCE: f64 = 1e-11;
 /// What a section says when it holds no content. One prefix for every such reason, so a
 /// reader scanning a file sees the same word wherever a section is not a run.
 pub const SKIPPED: &str = "skipped: ";
+
+/// The cuDF the COMMITTED `gpu-result.txt` holds the answers of — shad-gpu's. One version per
+/// file: any other cuDF records `gpu-result-<version>.txt` beside it, which
+/// `testdata/.gitignore` lists. The writer and every reader check a file against this one
+/// line, so moving the committed file to another cuDF is one edit.
+pub(crate) const COMMITTED_CUDF_VERSION: &str = "25.02";
 
 /// Whether this run writes goldens, and how much of the file it owns when it does.
 ///

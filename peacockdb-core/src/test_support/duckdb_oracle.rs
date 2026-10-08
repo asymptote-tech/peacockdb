@@ -337,14 +337,16 @@ pub(crate) async fn duckdb_gpu_case(
     let version = std::env::var("PCK_GPU_RESULT_VERSION").ok();
     let path = corpus_golden::gpu_result_golden(dataset, sf, version.as_deref());
     let mode = super::mode_named(mode).name;
+    let knob = corpus_golden::recording_knob(version.as_deref());
     let text = std::fs::read_to_string(&path).unwrap_or_else(|_| {
         panic!(
             "{dataset}/{query} at {mode}: {} does not exist, so no device answer is recorded \
-             for this cell. Run a cycle with PCK_WRITE_GPU_RESULT=1 and bring it home with \
-             --pull-results.",
+             for this cell. Run a cycle with {knob} and bring it home with --pull-results.",
             path.display()
         )
     });
+    corpus_golden::gpu_result_cudf_matches_path(&text, version.as_deref())
+        .unwrap_or_else(|said| panic!("{}: {said}", path.display()));
     let ours = gpu_result_sections(&text)
         .into_iter()
         .find(|section| section.query == query && section.mode == mode)
@@ -352,7 +354,7 @@ pub(crate) async fn duckdb_gpu_case(
         .unwrap_or_else(|| {
             panic!(
                 "{dataset}/{query} at {mode}: {} holds no section for this cell. Regenerate it \
-                 with PCK_WRITE_GPU_RESULT=1 and --pull-results.",
+                 with {knob} and --pull-results.",
                 path.display()
             )
         });
@@ -428,6 +430,47 @@ pub(crate) struct GpuResultSection {
     pub(crate) query: String,
     pub(crate) mode: String,
     pub(crate) body: String,
+}
+
+/// Every enabled device cell against the sections a `gpu-result` file holds, in both
+/// directions: a cell with no section and a section that is no enabled cell's both fail, and
+/// regenerating is what clears either. `text` is `None` where the file does not exist.
+///
+/// An absent file is a failure only where some cell is enabled. A dataset whose device cells
+/// are all off has no file at all — the writer runs from a device case, so zero enabled cells
+/// write zero sections — and a dataset landing with its cells off is the ordinary way one
+/// arrives.
+pub(crate) fn gpu_result_coverage(
+    path: &std::path::Path,
+    enabled: &BTreeSet<(String, String)>,
+    text: Option<&str>,
+) -> Result<(), String> {
+    let Some(text) = text else {
+        return match enabled.is_empty() {
+            true => Ok(()),
+            false => Err(format!(
+                "{} does not exist, so no device answer is recorded for any cell. Run a cycle \
+                 with {} and bring it home with --pull-results.",
+                path.display(),
+                corpus_golden::recording_knob(None)
+            )),
+        };
+    };
+    let written: BTreeSet<(String, String)> = gpu_result_sections(text)
+        .into_iter()
+        .map(|section| (section.query, section.mode))
+        .collect();
+    let missing: Vec<&(String, String)> = enabled.difference(&written).collect();
+    let extra: Vec<&(String, String)> = written.difference(enabled).collect();
+    match missing.is_empty() && extra.is_empty() {
+        true => Ok(()),
+        false => Err(format!(
+            "regenerate {} ({}, --pull-results) — missing {missing:?}, not an enabled cell \
+             {extra:?}",
+            path.display(),
+            corpus_golden::recording_knob(None)
+        )),
+    }
 }
 
 /// Every section of `gpu-result.txt`, by the two fields its header carries. A header the

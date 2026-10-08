@@ -2,6 +2,8 @@
 //! a verdict out. No dataset, no run — the doctored sections are what prove each variant
 //! fails where it should.
 
+use std::collections::BTreeSet;
+
 use crate::test_support::{CellKind, DUCKDB_FLOAT_TOLERANCE, DuckdbOracle, compare_sections};
 
 // --- the keyword -------------------------------------------------------------
@@ -325,4 +327,51 @@ fn an_archived_ticket_is_not_open_and_a_listed_one_is() {
         "#191 is in llm-wiki/archive/archived-tickets.md, which is not a list of what is broken"
     );
     assert!(!ticket_is_open(99_999), "no file holds this number");
+}
+
+// --- the gpu-result file's coverage ------------------------------------------
+
+/// Every enabled device cell has its section and no section is any other cell's, in both
+/// directions, and an ABSENT file is a failure only where some cell is enabled.
+///
+/// The degenerate case is the one a hardcoded dataset list got wrong: a dataset whose device
+/// cells are all off has no file at all, because the writer runs from a device case and zero
+/// enabled cells write zero sections. pbench lands that way.
+#[test]
+fn a_dataset_with_no_enabled_device_cell_has_no_file_and_that_is_not_a_failure() {
+    use super::gpu_result_coverage;
+    let path = std::path::Path::new("testdata/goldens/pbench.sf1/gpu-result.txt");
+    let none: BTreeSet<(String, String)> = BTreeSet::new();
+    assert_eq!(gpu_result_coverage(path, &none, None), Ok(()));
+    let said = gpu_result_coverage(path, &none, Some("== q1 mode=tp1-single\nan answer\n"))
+        .expect_err("a section for a cell nothing enables");
+    assert!(said.contains("not an enabled cell"), "{said}");
+}
+
+/// The two directions over a file that exists, and the absence that IS a failure: a dataset
+/// with enabled cells and no file is a cycle nobody ran since the cells moved.
+#[test]
+fn an_enabled_device_cell_without_its_section_names_the_cycle_to_run() {
+    use super::gpu_result_coverage;
+    let path = std::path::Path::new("testdata/goldens/tpch.sf1/gpu-result.txt");
+    let cell = |query: &str, mode: &str| (query.to_string(), mode.to_string());
+    let enabled: BTreeSet<(String, String)> =
+        [cell("q6", "tp1-single"), cell("q6", "tp4-sized")].into();
+    let whole = "cudf=25.02\n== q6 mode=tp1-single\na\n== q6 mode=tp4-sized\nb\n";
+    assert_eq!(gpu_result_coverage(path, &enabled, Some(whole)), Ok(()));
+    let said = gpu_result_coverage(
+        path,
+        &enabled,
+        Some("cudf=25.02\n== q6 mode=tp1-single\na\n"),
+    )
+    .expect_err("one of the two cells has no section");
+    assert!(
+        said.contains("missing") && said.contains("tp4-sized"),
+        "{said}"
+    );
+    let said = gpu_result_coverage(path, &enabled, None).expect_err("enabled cells and no file");
+    assert!(
+        said.contains("does not exist") && said.contains("PCK_WRITE_GPU_RESULT=1"),
+        "{said}"
+    );
 }

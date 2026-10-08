@@ -1641,3 +1641,76 @@ The reviewer found the working tree dirty under it mid-pass — #253 and #254 ap
 reading — and re-read every wiki fact from `git show 6c92f6b7:` rather than from the tree, which is
 the right instinct and should not have been necessary. A completeness reviewer reads a commit;
 commit the wiki work before dispatching it, or hold it until the pass returns.
+
+### Item 4, from the completeness reviewer — the record moved ahead of BOTH cpu comparisons
+
+The finding is right and it was a real spec violation. `gpu_case` recorded after
+`corpus_golden::assert_section(&cpu_golden(...))`, which is a comparison against the cpu, panics,
+and is not covered by regeneration on the device side — so the divergence class step 4 names was
+exactly the one that got nothing recorded. `render_run` carries per-node rows, bytes, lanes and
+batch lists, so #243's lane split (NaN and -NaN in different lanes, an aggregate's group count
+moving) and #220's batching split abort the case twelve lines before the writer. Latent today:
+#243 names no tpch or tpcds corpus query.
+
+**The fix.** `batches` is cloned and `record_gpu_result` called immediately after the two
+accounting asserts, ahead of both comparisons. Three checks the coordinator asked for:
+
+- **`batches` is still valid to clone there, and more so.** `report.batches` are the report's own
+  `GpuBatch`es, alive to the end of the function with `session` still open, and
+  `record_batch().clone()` is an Arrow clone of ref-counted arrays.
+- **Nothing between the old and the new position could change what is written.** The removed
+  region is `render_run(tree.as_ref(), &report)` — an immutable borrow of a pure renderer — and
+  `assert_section`, which reads a file and panics. The recorded bytes are identical at either
+  position; the only difference is whether a panic reaches the writer.
+- **The accounting asserts stay first**, agreeing with the coordinator's expectation.
+  `in_flight_bytes` and `holds`/`releases` compare the run against ITSELF, not against the cpu, so
+  the spec's "before the device asserts against the cpu" does not reach them; and a report that
+  held batches it never released is a broken run rather than an answer DuckDB can settle. The
+  `gpu_case` doc now says that in one clause.
+
+The comment no longer claims a generality it does not have: it names both comparisons it is
+ahead of, says why they are the ones that matter, and points at the test.
+
+**The test, and what it cannot do.** `tests/test_module_layout/write_order.rs` reads
+`corpus_gpu.rs`, extracts `gpu_case`'s body with comments dropped (`tree::code_only`, which
+exists for exactly this kind of claim) and asserts that `record_gpu_result(` precedes
+`corpus_golden::assert_section(` and `assert_result(`, with each of the three required to appear
+exactly once so a rename fails loudly instead of passing vacuously.
+
+- **Watched red on the real bug**, not on a re-break: the guard was written before the fix,
+  against the code as the reviewer found it, and failed with "gpu_case calls
+  `corpus_golden::assert_section(` before `record_gpu_result(`, so a device answer the cpu
+  rejects is never recorded".
+- **Why that binary.** The honest alternative was `test_cpu_corpus`, where the device tier's
+  other no-card rules live — but it is staged to verda and reads the checkout only through
+  `CARGO_MANIFEST_DIR`, so a case there would have become a fifth name on #252's verda red list
+  that every later dispatch has to carry. `test_module_layout` is never staged (the classifier in
+  `scripts/build-test.sh` greps for `repo_root`, which that target carries deliberately), reads
+  source by design, and its module doc already describes this kind of claim — "the claims that
+  hold today because someone wrote the tree that way and nothing would notice if the next change
+  did not". One clause added to that doc says one rule there is a task spec's rather than the
+  style guide's. Verified mechanically that `test_cpu_corpus.rs` still contains no `repo_root`, so
+  the verda staging set is unchanged.
+- **The new file is a submodule, not a target**: `cargo test --test write_order` errors and lists
+  the eight real targets, which is why `test_ci_coverage` has nothing new to name and still passes
+  9/9. It follows the `#[path = "test_module_layout/<x>.rs"]` convention documented at the top of
+  that binary, in alphabetical position beside the other six. The layout rules themselves read
+  `src/` through `src_root()` and have no opinion about a file under `tests/`.
+- **What this guard does NOT cover, and what the first real cycle must check.** It reads the order
+  of three calls in one function body; it cannot see a panic reached through something called
+  earlier, and nothing without a card can run `gpu_case`. So on the first recording cycle: if any
+  device cell fails its `.cpu.txt` comparison, that cell must still have its `== <query>
+  mode=<mode>` section in the file `--pull-results` brings home. A failing cell with no section is
+  this ordering broken again, whatever the guard says.
+
+**Measured after the reorder**, the whole bar again: `test_module_layout` **18 passed** (17 → 18),
+`test_cpu_corpus` **706: 679 passed, 27 failed** — the same 26 `duckdb_gpu_*` plus the coverage
+guard, 27 of 27 carrying "does not exist, so no device answer is recorded" — `--lib` **657
+passed, 0 failed, 2 ignored**, `test_golden_format` **43**, `test_corpus_goldens` **26**,
+`test_cost_model` **3**, `test_ci_coverage` **9**, `test_duckdb_result.py` **14, OK**. Device
+targets under `--features gpu` against `rapids-cuda-12.2`: `check --tests` rc=0 with the one
+pre-existing `AsArray` warning, and `test_gpu_corpus-5013741728a486dd` links — which matters more
+this time, since `corpus_gpu.rs` compiles in no rust-only build. Clippy rc=0 with the same 26
+warnings as before the round and none on a line it wrote. No golden moved.
+`build-test.md`: grand total 2575 → **2576**, Rust 2083 → **2084**, the module-layout row 17 →
+**18** with the new rule and its case named.

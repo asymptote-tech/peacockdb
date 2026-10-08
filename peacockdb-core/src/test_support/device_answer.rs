@@ -19,6 +19,49 @@ mod tests;
 /// ULP from a single-partition pass.
 const STDDEV_TOLERANCE: f64 = 1e-11;
 
+/// cuDF's `version_config.hpp` as `build.rs` found it under `$CUDF_ROOT`, and empty in a build
+/// that has no cuDF — a rust-only one, or a from-source one where the header is in the cmake
+/// tree rather than at a path this can know.
+const CUDF_VERSION_CONFIG: &str = include_str!(concat!(env!("OUT_DIR"), "/cudf-version-config.h"));
+
+/// The cuDF version `version_config.hpp` declares, as `<major>.<minor padded to two digits>`.
+///
+/// The padding is the whole reason this is read rather than assembled: cuDF's `MINOR` is `2`
+/// and every path, gitignore line and spec sentence in the tree says `25.02`. `None` where the
+/// text declares neither field, which is what an absent cuDF header reads as.
+fn cudf_version_of_config(config: &str) -> Option<String> {
+    let field = |name: &str| -> Option<u32> {
+        let define = format!("#define CUDF_VERSION_{name} ");
+        let mut declared = config
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix(&define))
+            .map(|value| value.trim().parse::<u32>().ok());
+        // Every match, and they have to agree: a field declared twice is a header this cannot
+        // read, which the write path reports rather than taking whichever line came first.
+        let first = declared.next()??;
+        declared.all(|value| value == Some(first)).then_some(first)
+    };
+    Some(format!("{}.{:02}", field("MAJOR")?, field("MINOR")?))
+}
+
+/// The cuDF this binary is linked against, for the provenance line a device recording carries.
+///
+/// Read at build time from `$CUDF_ROOT`, not from the operator's `PCK_WRITE_GPU_RESULT` value —
+/// that value is the thing the stamp exists not to trust. Not from the running library either:
+/// `libcudf.so` carries no version in its soname, and the ABI's `peacock_gpu_version` answers
+/// the ENGINE's `0.1.0`. verify-26.02 adds `peacock_cudf_version()`, which is the stronger
+/// source this should read once it exists.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+pub(crate) fn cudf_version() -> String {
+    cudf_version_of_config(CUDF_VERSION_CONFIG).unwrap_or_else(|| {
+        panic!(
+            "cannot tell which cuDF this binary is linked against: no cudf/version_config.hpp \
+             was copied out of CUDF_ROOT at build time, so a recorded device answer would \
+             carry no provenance. Build with CUDF_ROOT set (scripts/cargo-cudf.sh)."
+        )
+    })
+}
+
 /// What a line's `gpu_oracle` holds the device's answer to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum GpuResultMode {
