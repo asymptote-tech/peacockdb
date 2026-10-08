@@ -214,3 +214,66 @@ Both nits closed; the C++ side re-verified after the comment move (`peacock_cpu_
 `ctest -L cpu` 1/1, `git clang-format --diff` clean) and `--lib` re-run at 602.
 
 No blocking or important finding outstanding, so the task moves to the completeness pass.
+
+### 2026-10-08 — completeness pass (analyst): what is missing
+
+Read as one change against the spec's Scope / Restriction / Tests / Verification bar,
+`architecture.md` and `build-test.md`. No build, no run; arithmetic and text analysis only.
+
+**`architecture.md`: no sentence falsified.** The row-range convention under Interfaces
+("A row range is `[offset, offset+length)`", l.962-965) is a statement about the ABI's
+`slice_handle` / `result_from_handle` and never mentions the Rust twin or any test, so the
+clause the branch replaced in `executor/mod.rs` and `executor/row_range.rs` has no counterpart
+there; all fourteen table lines satisfy it. The page says nothing about `declared_width`,
+`types_across_the_edge` or a pass-through column count. "Nothing checks that a child's column
+*order* is what the plan assumed" (Column indexing → What guards it) stays true: the new check
+compares declared counts, not emitted order. No edit owed.
+
+**Verified complete.** All 14 lines are the exact union of the old literals — Rust's 4 are
+lines 3, 4, 7, 10 and C++'s 10 are the other ten, nothing dropped and nothing to dedup; both
+clamp rules recomputed over the table off-tree, 14/14 agree with the expected spans. The #233
+check reaches every pass-through kind: the 7 the ticket names plus a projection-less Filter via
+`types_across_the_edge`, `GpuUnion` / `GpuInterleave` via `union.rs`'s `check_branch_schemas`
+(count, names and types, pre-existing), `GpuUnload` being a sink with no schema. Four paths run
+`peacock_cpu_tests` and all four reach the fixture: pipeline.yml's dataset-matrix (`ctest -L cpu`
+in the checkout, both cuDF legs), pipeline.yml's GPU job (rsync list + `PEACOCK_TESTDATA_DIR`),
+`build-test-shadgpu.sh` (rsync + `PEACOCK_TESTDATA_DIR`), and `build-test.sh`'s plain cpu mode
+(`sync_fixtures`' git sweep, read through the pre-existing `/media/data/peacockdb` symlink the
+mode already needs). `build-test.md`'s headers recomputed from its rows independently: Rust 1860,
+C++ 94, Python 381, grand 2335, cpu block 1188 = 604 + 555 + 26 + 3 — all exact, and 604 = 602
+passed + 2 ignored. 12 `TEST(` in `test_executor.cpp`.
+
+**Three items reported to the coordinator** (full text in the analyst's reply): `hacks-audit.md`
+§6 and §7 still describe both fixes as open; the C++ clamp's own comment is the one twin comment
+that does not name the shared table; two sentences the branch wrote overclaim
+(`validate.rs`'s `_` arm, `fixtures/README.md`'s opening). Plus the merge bookkeeping list:
+`tickets.md:24` (count 33, both IDs), `corpus-coverage.md:45-46` and the two bodies. No code
+names #174 or #233, so archiving them breaks no refusal test.
+
+### 2026-10-08 — completeness pass closed, all three findings applied
+
+The reviewer's reading found 0 blocking and 0 important. The analyst's found 3 important, all
+comment or markdown, so all three were applied directly rather than routed to a developer:
+
+- `llm-wiki/reports/hacks-audit.md`: §6 and §7 cut, both fully fixed by this branch, and with them
+  the "Tests that would not catch the bug they exist for" bullet about `driver/tests/limit.rs`,
+  which the mock redirection falsifies. The header's prune line is now dated twice. Numbering gaps
+  are the page's own convention — tickets cite the original numbers.
+- `cpp/src/node_session.cpp`: `clamp_row_range`'s comment gained the clause its two Rust twins
+  carry, naming the shared table. It was the side a reader edits and the only one that did not say
+  where the cases live.
+- `peacockdb-core/src/plan/validate.rs`: the `_` arm's comment named only
+  `types_across_the_edge`, which is wrong for union and interleave — they reach that arm too and
+  are checked by `union::check_branch_schemas`. Both halves now named.
+- `testdata/fixtures/README.md`: the opening claimed each fixture is read by the code under test,
+  which is false of `row-range-clamp.txt` — two test-local parsers read it and neither clamp sees
+  the file. Reduced to what all three entries share.
+
+Neither reading falsified a sentence in `architecture.md`. Its row-range convention bullet under
+Interfaces is a statement about the ABI, not about how the rule is tested, and the page carries no
+prose about `declared_width` or `types_across_the_edge`.
+
+The signoff is appended to the spec. CI: the GPU job failed on run `37831124809` with
+`ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out` — the host is
+unreachable, not an rmm pool problem, so not #178 and not a defect in the branch's edits. Chain K
+does not wait on that job. Every other job was green on that run.

@@ -1,7 +1,7 @@
 # fixtures
 
-Committed samples of a format, each read by the code under test rather than by a generator.
-Nothing regenerates them: they are samples of a convention, not goldens of a run.
+Committed input files, each read by a test rather than written by a run, and nothing
+regenerates them: they are samples of a convention, not goldens of a run.
 
 `sectioned-cost.txt` is a two-section `.cost.txt`, the numbers a real q6 section's shape,
 shortened. `cost-report` reads a total out of one section; the test side's parser reads the same
