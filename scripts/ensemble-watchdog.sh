@@ -15,11 +15,12 @@
 # nothing, and a commit-based counter would call that progress forever.
 set -uo pipefail
 
-usage="usage: ensemble-watchdog.sh [--non-interactive] [--max-idle-restarts N] [--limit-seconds N] <chain>"
+usage="usage: ensemble-watchdog.sh [--interactive] [--max-idle-restarts N] [--limit-seconds N] <chain>"
 
-# Interactive is the default because a human starting one watches it; --non-interactive is the
-# unattended form, which is the one that needs the log and the headless permission grant.
-non_interactive=""
+# Unattended is the default: a chain runs overnight with nobody watching, and that is the form
+# that needs the log and the headless permission grant. --interactive is for a human who wants
+# to talk to the coordinator directly. --non-interactive is still accepted and changes nothing.
+interactive=""
 max_idle=3
 limit_seconds=600
 chain=""
@@ -34,7 +35,8 @@ whole_number() {
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --non-interactive) non_interactive=1; shift ;;
+    --interactive)     interactive=1; shift ;;
+    --non-interactive) interactive=""; shift ;;
     --max-idle-restarts) [ $# -ge 2 ] || die "$1 needs a value"
                          whole_number "$1" "$2" restarts; max_idle=$2; shift 2 ;;
     --limit-seconds)     [ $# -ge 2 ] || die "$1 needs a value"
@@ -97,7 +99,7 @@ idle=0
 # dies leaves no trace of what it last said. Appended, not truncated: the interesting history
 # is across restarts. Interactive runs are not teed — a pipe costs the session its terminal.
 log=".claude/ensemble/${chain}.log"
-if [ -z "$non_interactive" ]; then
+if [ -n "$interactive" ]; then
   printf 'watchdog: interactive; not logging\n'
 else
   printf 'watchdog: logging to %s/%s\n' "$(pwd)" "$log"
@@ -106,7 +108,7 @@ fi
 while :; do
   before=$(board_state)
   started=$SECONDS
-  if [ -z "$non_interactive" ]; then
+  if [ -n "$interactive" ]; then
     claude  --dangerously-skip-permissions "/ensemble ${chain}"      # a human is driving; not logged
     rc=$?
   else
@@ -114,7 +116,12 @@ while :; do
     # Unattended, so permissions cannot be granted: a headless run refuses any tool that
     # would prompt, and the coordinator then fails to commit or push while looking like it
     # simply made no progress. This is confined to a workspace on a chain branch.
-    claude -p --dangerously-skip-permissions "/ensemble ${chain}" 2>&1 | tee -a "$log"
+    #
+    # A headless run that ends its turn with a subagent still working waits 600s by default and
+    # then kills it, mid-edit. Twice on 2026-10-07 a coordinator resumed a developer, reported
+    # and ended its turn, and the developer's uncommitted round died with it. 0 waits for as
+    # long as the subagent takes; prompts.md also forbids ending the turn that way.
+    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude -p --dangerously-skip-permissions "/ensemble ${chain}" 2>&1 | tee -a "$log"
     rc=${PIPESTATUS[0]}   # tee's status otherwise, which is 0 however the coordinator died
   fi
   elapsed=$((SECONDS - started))

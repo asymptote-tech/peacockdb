@@ -78,3 +78,81 @@ passes on shad-gpu's 26.02 (verify-26.02's record), whether sf40 benchmarks on t
 improve, and whether anything else on shad-gpu (the actions runner, its jobs) depends on the
 25.02 environment.
 
+
+<a id="t260"></a>
+### #260 — on cuDF 26.02 a multi-batch decimal avg faults in cuDF's shared-memory groupby
+On cuDF 26.02, `CudfAggregate{Partial}` dies with `cudaErrorMisalignedAddress` for any query
+that averages a decimal over more than one batch. The error is sticky, so every later device
+call in the process fails with it too. On 2026-10-08 that turned 8 failing corpus cases into
+17 failures in one `test_gpu_corpus` run.
+
+**Failing on their own:** `gpu_tpch_q1` and `gpu_tpch_shuffle_additive_avg`, each at
+`tp1_rowgroup`, `tp4_rowgroup`, `tp4_single` and `tp4_sized`. Both pass at `tp1_single`, the one
+mode with a single batch, where no Partial runs. q6, which has no avg, passes in every mode.
+`gpu_tpch_shuffle_stddev_tp1_single` also fails, but that is [#94](corpus-coverage.md#t94)'s `group_merge_m2`, not this.
+
+**Where it faults.** compute-sanitizer memcheck reports `Invalid __shared__ write of size 16
+bytes … Access to 0xaa8 is misaligned` in
+`cudf::groupby::detail::hash::single_pass_shmem_aggs_kernel`. The neighbouring threads write
+to 0xab8 and 0xac8: decimal128 slots that sit on 8-byte boundaries, not 16. The host stack
+runs `compute_shared_memory_aggs` ← `compute_single_pass_aggs` ← `cudf::groupby::aggregate`
+← `peacock::execute_aggregate` — the main grouped call in `aggregate.cpp`.
+
+**The request at that call**, captured with a temporary dump for q1 at `tp1_rowgroup`:
+- keys: `l_returnflag`, `l_linestatus` (STRING, no nulls), `null_policy::INCLUDE`;
+- 11 requests of one aggregation each, 122880 rows per batch;
+- requests 0–3: SUM over DECIMAL128 at scales −2, −2, −4, −6;
+- requests 4–9: three pairs of SUM and `COUNT_ALL` over DECIMAL128 at scale −2;
+- request 10: `COUNT_ALL` over INT64.
+
+**Not reproduced outside the engine yet.** The same 11 requests, sent through pylibcudf to the
+same `libcudf.so` over row group 0 of the same file, run clean under compute-sanitizer. So
+something about the engine's call still differs: the memory resource, the stream, or whether
+the shared-memory path is chosen at all.
+
+**It is cuDF 26.02, not the engine's code.** On nebius-gpu the same commit (`38d5f2de`), built
+against cuDF 25.02 with `scripts/build-test-shadgpu.sh --build`, passes all 28 `test_gpu_corpus`
+cases in one process, the 8 above included. Same host, same data, same code; only cuDF
+differs. The 25.02 env is `~/miniforge3/envs/rapids-cuda-12.2`, created from the build box's
+explicit list: libcudf 25.02.02 `cuda12_250303_g8139f3c84f_0`, libarrow 19.0.1, built with
+gcc-12 12.4.0 and nvcc 12.9.86.
+
+**Not the cause:** the GPU (the same 17 fail on Ada and on Blackwell), the dataset (byte-identical
+on both hosts), and cuDF's parquet reader (`cudf.read_parquet` reads all of `lineitem` cleanly).
+
+**Environment**, where it reproduces:
+
+| | nebius-gpu | dev |
+|---|---|---|
+| GPU | NVIDIA L40S, 46068 MiB, compute capability 8.9 | RTX PRO 6000 Blackwell Server Edition, 97887 MiB, compute capability 12.0 |
+| Driver | 580.173.02 (CUDA 13.0) | 580.126.09 (CUDA 13.0) |
+| OS | Ubuntu 24.04.5 LTS, glibc 2.39, 8 vCPU, 31 GiB | Ubuntu 24.04, glibc 2.39 |
+| Commit | master `38d5f2de` | `ENS-repartition-keys` `9b52b6a0` |
+| cuDF env | `~/miniforge3/envs/rapids-26.02` | `~/miniforge3/envs/rapids-26.02-local` |
+
+Both cuDF environments were created from one `conda list --explicit` of the build box's
+`envs/rapids`:
+- libcudf 26.02.01 `cuda12_260205_5b9658c4`;
+- librmm 26.02.00 `cuda12_260204_498dafcf`;
+- libarrow 21.0.0 (cpu);
+- cuda-version 12.9, cuda-cudart 12.9.79, nvcc 12.9.86 from that env.
+
+The build is `scripts/build-test.sh --gpu --build` with gcc-14 14.2.0, cmake 4.2.3 or 4.3.4,
+ninja 1.12.1 and rustc 1.99.0. `libpeacock_gpu.so` is built for sm_80 and sm_90, so both cards
+JIT its PTX. That does not matter here: the faulting kernel is in libcudf, which ships SASS for
+both cards.
+
+The data is `testdata/generate_testdata.sh --bench tpch` with the DuckDB 1.5.4 release CLI and
+synthetic embeddings. `lineitem.parquet` has sha256 `91e14da396295b2f…`, the same on both hosts.
+
+**To reproduce** on either host, from the repo root, after the build:
+
+    E=<the cuDF env>
+    LD_LIBRARY_PATH=cpp/build26/install/lib:$E/lib PEACOCK_TESTDATA_DIR=$PWD/testdata \
+      /usr/local/cuda/bin/compute-sanitizer --tool memcheck --show-backtrace host \
+      cpp/build26/install/rust-tests/test_gpu_corpus gpu_tpch_q1_tp1_rowgroup --exact --test-threads=1
+
+**Next.** Find what makes the engine's call differ from the pylibcudf replay, and file the
+minimal case upstream. Then check whether reordering the requests (decimal128 sums before the
+4-byte counts) avoids it, as a workaround until cuDF is fixed. This blocks a GPU run on 26.02:
+[#244](#t244) and `verify-26.02` wait on it.

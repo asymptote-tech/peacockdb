@@ -13,3 +13,6 @@ before you need it.
 Take the next task where progress is possible and dispatch it. Do not ask the human to
 confirm a task. When nothing can progress, write `stalled: <reason>` to
 `.claude/ensemble/$1.status` and exit.
+
+Never end your turn while a subagent you dispatched or resumed is still working, and never
+to send a progress report: under `claude -p` your last message ends the run and kills it.

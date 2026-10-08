@@ -9,7 +9,7 @@
 # captured run publishes no tree.
 #
 # USAGE (the binaries must already be on the host, and records.tsv already pulled)
-#   scripts/docker-build.sh --no-image -- ./scripts/build-test-shadgpu.sh --build-benchmarks
+#   ./scripts/build-test-shadgpu.sh --build-benchmarks
 #   ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks --pull-benchmarks
 #
 #   ./scripts/create_nsys_profile.sh                 # both passes

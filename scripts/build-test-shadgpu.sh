@@ -6,8 +6,8 @@
 # "measurement completed". Hence the validation block, and two staged copies of the
 # measurement binary — rust-tests/ runs its own assertions on every gate under
 # --skip bench_, rust-benchmarks/ is the release build the cases are timed from. Both
-# builds need a cuDF toolchain, in practice scripts/docker-build.sh; every phase after
-# them needs this workstation's ssh keys and is refused in the container.
+# builds run here, against the cuDF toolchain lib/shadgpu-env.sh pins; every phase after
+# them needs this workstation's ssh keys.
 #
 # USAGE
 #   ./scripts/build-test-shadgpu.sh --all                # build+push+patch+run
@@ -164,12 +164,7 @@ if [ "$RUN_BENCH" -eq 1 ] && [ "$BUILD_BENCH" -eq 0 ] && [ ! -x "$BENCH_STAGING/
   # a measurement run from a checkout that never built one deletes the host's copy and then
   # fails for want of it, half an hour and one deploy later.
   die "--run-benchmarks, but $BENCH_STAGING/$BENCH_TARGET is not staged here.
-     Build it first: scripts/docker-build.sh --no-image -- $0 --build-benchmarks"
-fi
-if [ -f /.dockerenv ] \
-   && [ $((RSYNC + PATCH + RUN + RUN_STATUS + RUN_BENCH + BENCH_STATUS + PULL_BENCH)) -gt 0 ]; then
-  die "only --build / --build-benchmarks work inside the builder container;
-     the remaining phases need this workstation's ssh access to $REMOTE."
+     Build it first: $0 --build-benchmarks"
 fi
 
 # --- build --------------------------------------------------------------------

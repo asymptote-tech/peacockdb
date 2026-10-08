@@ -907,7 +907,6 @@ stack on every switch):
 | C++ only, cudf 25.02 | `scripts/build.sh --cudf_ROOT <rapids-cuda-12.2> --gcc-version 12 ...` | `cpp/build` | — |
 | C++ + staged Rust bins, cudf 26.02 | `scripts/build-test.sh --build` (drives cmake directly) | `cpp/build26` | `target-cudf-<basename cudf_ROOT>` |
 | Rust + cudf (FFI) | via build-test scripts, or manually with `scripts/cargo-cudf.sh` | cargo OUT_DIR | `target-cudf-<basename cudf_ROOT>` |
-| Any of the above, containerized | `scripts/docker-build.sh [--no-image] -- <command>` | `<cache-dir>/cpp-build` | `<cache-dir>/cargo-target` |
 
 ## Inspecting the tree
 
@@ -925,11 +924,6 @@ no arguments beyond what is shown and need no dataset or device.
 It reported a clean tree from the wrong directory once, because `git` rejected the pathspec and
 every section came back empty — a gate that finds nothing and a gate that cannot look are the
 same output otherwise.
-
-The container and the native path deliberately do **not** share a cargo cache
-(`/cache/cargo-target` + `RUSTFLAGS=-C debuginfo=0` vs `$PWD/target-cudf-*`), so
-alternating between them costs a cold rebuild each way. That is the price of having
-both entry points, not thrash to be diagnosed.
 
 ccache is auto-enabled for both C++ workflows when the binary is present (host
 compilers only — ccache + nvcc is unreliable). Rust caching is the per-workflow target
@@ -1094,7 +1088,7 @@ Six steps, three scripts:
 
 ```
 # 1. a release build of the harness into cpp/install/rust-benchmarks/ — the run refuses a debug build
-scripts/docker-build.sh --no-image --cache-dir /build/peacock -- ./scripts/build-test-shadgpu.sh --build-benchmarks
+./scripts/build-test-shadgpu.sh --build-benchmarks
 # 2. ship and glibc-patch  3. time the corpus  4. bring the tree and the record home
 ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks --pull-benchmarks
 # or, for a run that outlives your ssh session (the suite takes tens of minutes):
@@ -1118,7 +1112,7 @@ Check `nvidia-smi` for a neighbour before step 3: a process holding the card inf
 number here without failing anything.
 
 **The same six steps on a 26.02 host** (verda-gpu) go through `build-test.sh`, which builds
-against the local `rapids` env and needs no docker and no glibc patch. The three benchmark
+against the local `rapids` env and needs no glibc patch. The three benchmark
 flags need `--gpu`; `--all` does not imply them, and `--run` with `--run-benchmarks` is
 refused — one exit code cannot mean both "gate green" and "measurement completed".
 

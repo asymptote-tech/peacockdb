@@ -9,6 +9,12 @@ does, fixes what fails, and records the benchmark of every query-mode cell the c
 Its record is the evidence [#244](../tickets/system-hardening.md#t244) (whether to drop 25.02)
 waits on.
 
+It starts from a partial run. On 2026-10-08, with shad-gpu down, the device tiers ran on 26.02 on
+an L40S and an RTX PRO 6000 Blackwell. That run is
+[#260](../tickets/system-hardening.md#t260): its environment, its counts, a cuDF 26.02 fault in
+the shared-memory groupby for a multi-batch decimal avg, and the 25.02 control that clears the
+engine's code. Begin from it rather than rediscovering it.
+
 ## Where it runs
 
 On shad-gpu, against its existing 26.02 environment `~/miniforge3/envs/rapids-2602` (libcudf
@@ -28,6 +34,16 @@ On shad-gpu, against its existing 26.02 environment `~/miniforge3/envs/rapids-26
 
 Only if every rung fails does it fall back to a GPU host provisioned with 26.02 for this task
 alone, released when it ends.
+
+**Without the H200 it proceeds on nebius-gpu.** While shad-gpu is down, the task runs there under
+chain J's board note: an L40S with 46 GB, modern glibc, and both cuDF environments already in
+place (26.02 at `~/miniforge3/envs/rapids-26.02`, 25.02 at `~/data/miniforge3/envs/rapids-cuda-12.2`).
+- Every step that needs no H200 completes there. That covers the build, every tier that fits the
+  card, the fixes, the `gpu-result-26.02.txt` comparison, the report and #260.
+- The H200-only parts are deferred, not blockers, and the report names each one: the sf40 tiers
+  and the step-4 benchmark against 25.02's H200 numbers.
+- The cudart ladder above is shad-gpu's driver-535 question and does not arise there: the driver
+  is 580.
 
 ## The work
 
@@ -49,6 +65,16 @@ alone, released when it ends.
    by the same `duckdb_gpu_*` cases pointed at it; every divergence from DuckDB that 25.02 does
    not show is a finding.
 5. Add to #244 what the record shows: every tier's outcome on 26.02, and the benchmark against 25.02.
+6. Write the report, `llm-wiki/reports/cudf-26.02-verification.md`. It is the record a reader
+   needs without the detail file:
+   - each host and environment, as exactly as #260 states its own;
+   - every tier's counts on 26.02 beside 25.02's;
+   - each failure, with its cause and its fix or reason;
+   - the benchmark comparison and the `gpu-result-26.02.txt` divergences;
+   - what it means for #244.
+7. Update #260 with what this task settles: whether the fault reproduces on the H200, its minimal
+   case and the upstream report, and the fix or workaround. Close it if the fix lands here;
+   otherwise leave it open and point at the report.
 
 ## Scope
 
@@ -62,7 +88,8 @@ alone, released when it ends.
 | `scripts/lib/shadgpu-env.sh`, `scripts/build.sh` | the 26.02 environment and build dir |
 | `peacockdb-core/tests/common/corpus_benchmark_cases.inc` | the tpch sf40 cases the comparison times |
 | `cpp/tests/cpu/test_executor.cpp` | `peacock_cudf_version()` asserted beside `peacock_gpu_version()`'s `"0.1.0"` |
-| `llm-wiki/build-test.md`, `tickets/system-hardening.md` | how to run on 26.02; #244's evidence |
+| `llm-wiki/build-test.md`, `tickets/system-hardening.md` | how to run on 26.02; #244's evidence; #260's update |
+| `llm-wiki/reports/cudf-26.02-verification.md` | new: the verification report |
 
 Component-level API: one additive C ABI symbol, `peacock_cudf_version()`. Any fix that needs more
 says so in its PR.

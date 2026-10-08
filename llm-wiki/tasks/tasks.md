@@ -6,6 +6,60 @@ branch, which is why two chains need no locking.
 
 ## Chain J (base: master)
 
+> **Host override, from 2026-10-08 until the human lifts it.** It overrides the specs and
+> `build-test.md` wherever they disagree.
+>
+> - **shad-gpu is down.** Build and run the GPU tests on **nebius-gpu**,
+>   `dmitry@89.169.109.150`: an NVIDIA L40S with 46 GB, Ubuntu 24.04 and glibc 2.39, so it needs
+>   no glibc patch. Use the address; not every host has the alias.
+> - **Only what needs the GPU goes there.** The device build (`build-test-shadgpu.sh --build`)
+>   and the device runs happen on nebius-gpu. Every CPU build and run stays local, as
+>   `build-test.md` describes: rust-only, the CPU tiers, the C++ CPU tests, cost-report.
+> - **cuDF 25.02, as on shad-gpu.** Its env is `~/data/miniforge3/envs/rapids-cuda-12.2`, the
+>   path `shadgpu-env.sh` names. cuDF 26.02 there is red for reasons outside this chain:
+>   [#260](../tickets/system-hardening.md#t260) and [#94](../tickets/corpus-coverage.md#t94).
+> - **Sync the working tree, uncommitted, before every build. Do not commit to build.** Every
+>   commit stays green as before, and no work-in-progress push spends a CI run. From the workspace
+>   root:
+>   `rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ dmitry@89.169.109.150:peacockdb-J/`.
+>   `--delete-after`, not `--delete`: otherwise the first sync deletes before the `.gitignore` files
+>   arrive, and so deletes the ignored data and build dirs it should keep.
+>   The filter keeps build dirs, target dirs and generated data on both sides.
+> - **On nebius-gpu**, in `~/peacockdb-J`, after `. ~/peacock-env.sh`:
+>   - the sf1 data is already in `testdata/` there (generated 2026-10-08). Regenerate only if it
+>     is missing: `testdata/generate_testdata.sh --bench tpch` and `--bench tpcds`;
+>   - build: `./scripts/build-test-shadgpu.sh --build`;
+>   - run each staged binary directly, never `--run`, which ssh-es to shad-gpu. Set
+>     `LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib` and
+>     `PEACOCK_TESTDATA_DIR=$PWD/testdata`, and pass `--test-threads=1` to each Rust binary:
+>     - `cpp/install/bin/peacock_gpu_tests` and `cpp/install/bin/peacock_plan_tests`. Not
+>       `peacock_cpu_tests`, which runs locally, and not the sf40 pair, `peacock_tpch_tests` and
+>       `peacock_tpchv_tests`;
+>     - `cpp/install/rust-tests/test_gpu_corpus`;
+>     - `cpp/install/rust-tests/test_node_timing`;
+>     - `cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests::`;
+>     - `cpp/install/rust-tests/peacock_gpu_benchmarks --skip bench_`.
+> - **If nebius-gpu runs short of disk** (96 GB in all), the developer finds what is using it
+>   (`du -xh -d2 ~ | sort -rh | head`) and cleans up what can be rebuilt. That means stale build
+>   and target dirs, the conda package cache (`~/miniforge3/bin/conda clean -a`), and the #260
+>   debug build in `~/peacockdb` (`cpp/build26`, `target-cudf-rapids`). Never delete the two cuDF
+>   envs or `~/peacockdb-J/testdata`. Record what was removed in the detail file.
+> - **Large tests and benchmark measurements are out of every task.** That means the sf40
+>   binaries (`peacock_tpch_tests`, `peacock_tpchv_tests`), `--run-benchmarks`, Nsight captures,
+>   and any H200 timing a spec asks for. Record each skipped item in the task's detail file as
+>   deferred; it does not block the task.
+> - **Done** means CI is green except the `gpu-tests` job, "GPU Tests (remote)", which runs on
+>   shad-gpu. The GPU tests above must also have passed on nebius-gpu, with the run recorded in
+>   the detail file.
+> - **On resuming the chain, reset the board first, in one commit:**
+>   - duckdb-oracle: `completeness approved` → `building`;
+>   - pbench: `completeness approved` → `building`;
+>   - repartition-keys: `blocked(reviewing)` → `building`;
+>   - stale-cells: `blocked(approved to build)` → `approved to build`.
+>
+>   Then take the first task, duckdb-oracle, and finish it on nebius-gpu's card under the rules
+>   above. The GPU halves those tasks deferred for want of a device are now runnable.
+
 The join rewrite, and what it stands on. Joins leave the recipe architecture for a C++ session
 (built once, probed per batch, finished once) behind four new C symbols; every non-join node keeps
 its recipes. Shared design: [`join-rewrite-design.md`](join-rewrite-design.md). Replaces chain A's

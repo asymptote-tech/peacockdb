@@ -136,6 +136,18 @@ state, and a watchdog restarts you.
   backgrounded command does not outlive the run — a `sleep` armed to wake you dies with the
   process, and nothing re-invokes you. Measured, not assumed. So dispatch and stay in the
   call; the watchdog's restart is the only wake there is.
+- **Never end your turn while a subagent is still working, and never to report.** A
+  foreground `Agent` blocks until the subagent returns. A background `Agent`, and a
+  `SendMessage` resuming one, do not: they answer at once ("Resuming agent …") and the agent
+  works on. Under `claude -p` your last message ends the run, and a subagent still working is
+  killed mid-edit with its round uncommitted.
+  That cost two developer rounds on 2026-10-07, each time after the coordinator resumed the
+  developer and wrote a status summary. So after either, stay in the turn: keep making tool
+  calls — a bounded wait on the branch head or `<task>-detail.md`, then the control file — until
+  the agent's result reaches you. A summary of where the chain stands is never a reason to
+  end the turn; it belongs in `<chain>.status` and `<task>-detail.md`, which is where anyone
+  reads it. The turn ends only on `stalled`, a tight window, or `stop`, and only with nothing
+  of yours still running.
 - **A dispatch that has stopped moving is an obstacle, not a reason to keep waiting.** Long is
   not the same as stuck: a build can run for hours, so judge by whether anything new has
   reached `<task>-detail.md` or the branch, not by elapsed time. Nothing outside you bounds a
@@ -473,7 +485,7 @@ does not carry the index in their head, and a number alone sends them to look it
 
       git worktree add ../peacockdb-alpha <first-task-branch>      # once per workspace
       cd ../peacockdb-alpha && git checkout <first-task-branch>    # on reuse
-      ../peacockdb/scripts/ensemble-watchdog.sh --non-interactive <chain>
+      ../peacockdb/scripts/ensemble-watchdog.sh <chain>
 
   The watchdog refuses to run in the primary checkout. Which chain a workspace is driving is
   whatever its `.claude/ensemble/<chain>.status` says; nothing else records it, so a
@@ -481,7 +493,7 @@ does not carry the index in their head, and a number alone sends them to look it
 - **Reaching a running coordinator**: write one word to
   `.claude/ensemble/<chain>.control` — `pause`, `rebase` or `stop`. It is read after every
   subagent returns, so the answer is one subagent away at worst. Or run the watchdog with
-  no `--non-interactive` and talk to the coordinator directly, which is the default form.
+  `--interactive` and talk to the coordinator directly; unattended is the default.
 - Unlike the coordinator and reviewer you may build and run project code, and you may
   mutate git state on master. An interactive session has no developer to delegate to, and a
   CI failure on master cannot be diagnosed without a build.

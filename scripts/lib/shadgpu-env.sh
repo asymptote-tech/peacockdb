@@ -6,9 +6,6 @@
 #
 # Sourced, never executed: no `set -e` here, and the only side effect below is a refusal
 # when this host's glibc version cannot be read, which every shipped binary needs.
-#
-# scripts/docker-build.sh greps `^CUDF_ROOT=` out of this file for the conda prefix its
-# container shims into place; moving or reformatting that assignment breaks it.
 
 CUDF_ROOT=/home/dmitry/data/miniforge3/envs/rapids-cuda-12.2
 export CUDF_ROOT

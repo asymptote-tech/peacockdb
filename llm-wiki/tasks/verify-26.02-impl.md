@@ -89,7 +89,7 @@ tree.
 ### Task 1: A 26.02 mode for the shad-gpu flow
 
 **Files:**
-- Modify: `scripts/lib/shadgpu-env.sh` (the `CUDF_ROOT=` line must stay greppable as `^CUDF_ROOT=` for `docker-build.sh`)
+- Modify: `scripts/lib/shadgpu-env.sh`
 - Modify: `scripts/build.sh:13-34` (flags), `scripts/build-test-shadgpu.sh` (every `cpp/install`)
 - Test: `peacockdb-core/tests/test_ci_coverage.rs` (existing guard)
 
@@ -97,8 +97,8 @@ tree.
 - Produces: env `PEACOCK_CUDF` (`25.02` default, `26.02`); shell vars `CPP_BUILD_DIR`, `CPP_INSTALL_DIR`,
   `REMOTE_REPO`, `REMOTE_CUDF_LIB`; `build.sh --build-dir D --install-dir I`.
 
-- [ ] **Step 1: Select the toolchain by version.** In `shadgpu-env.sh`, keep the 25.02 assignment
-  first and literal, then override for 26.02:
+- [ ] **Step 1: Select the toolchain by version.** In `shadgpu-env.sh`, default to 25.02, then
+  override for 26.02:
 
 ```bash
 CUDF_ROOT=/home/dmitry/data/miniforge3/envs/rapids-cuda-12.2
@@ -369,8 +369,33 @@ each run block saying `cudf=`; a query that fails at sf40 (memory, plan) is a li
 - [ ] **Step 2:** If anything differs, it is a fix of Task 4 that broke 25.02: back to Task 4 for it.
 - [ ] **Step 3:** Commit the detail file's final table.
 
+### Task 8: The report, and #260
+
+Last, so the report carries Task 7's 25.02 rerun as well.
+
+- [ ] **Step 1:** Write `llm-wiki/reports/cudf-26.02-verification.md`:
+  - each host and environment, as exactly as #260 states its own: GPU, compute capability,
+    driver, OS and glibc, commit, the cuDF env with its libcudf, librmm, libarrow and CUDA builds,
+    and the compilers;
+  - every tier's counts on 26.02 beside 25.02's, Task 3's table plus Task 7's rerun;
+  - each failure, with its cause and its fix (Task 4) or its recorded reason;
+  - the benchmark per query-mode, 26.02 against 25.02 (Task 5);
+  - the `gpu-result-26.02.txt` divergences from DuckDB that 25.02 does not show;
+  - what it means for #244.
+
+  Short sentences, as for the ticket files. Link #244 and #260; the detail file is not the reader's
+  source.
+- [ ] **Step 2:** Update #260 in `tickets/system-hardening.md`:
+  - whether `single_pass_shmem_aggs_kernel`'s misaligned write reproduces on the H200;
+  - the minimal case that reproduces it outside the engine, and the upstream cuDF report filed
+    for it;
+  - the fix or the workaround Task 4 took.
+
+  Close it to the archive if the fix landed here. Otherwise leave it open, pointing at the report.
+- [ ] **Step 3:** Commit — `cuDF 26.02: the verification report, and #260 settled`.
+
 ## Self-review
 
 - Spec coverage: where it runs (Tasks 1–2), the 26.02 build and dirs (Task 1), every tier (Task 3),
   fixes with red cases (Task 4), the benchmark on both versions (Task 5), #244 and the wiki (Task 6),
-  the 25.02 rerun (Task 7), the temporary-host fallback (Task 2 Step 4.4).
+  the 25.02 rerun (Task 7), the report and #260 (Task 8), the temporary-host fallback (Task 2 Step 4.4).
