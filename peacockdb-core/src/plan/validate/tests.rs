@@ -322,6 +322,51 @@ fn a_column_that_changes_type_across_an_edge_is_refused() {
     );
 }
 
+/// A sort over a two-column source, declaring `declared` instead of the schema its
+/// constructor derived. The planner never builds it; a test rewriting a planned tree can.
+fn sort_declaring(declared: &[&str]) -> Box<dyn GpuNode> {
+    let input = source(schema_of(&["a", "b"]), PartitionLayout::new(1));
+    let mut sort = GpuSort::new(
+        input,
+        vec![ColumnOrder {
+            column: 0,
+            ascending: true,
+            nulls_first: false,
+        }],
+        None,
+    );
+    let layout = sort.kind.layout().expect("a sort has a layout").clone();
+    sort.kind = NodeKind::Intermediate {
+        layout,
+        schema: schema_of(declared),
+    };
+    Box::new(sort)
+}
+
+#[test]
+fn a_pass_through_node_declaring_fewer_columns_than_its_input_is_refused() {
+    // A sort carries its input's columns. Comparing them pairwise stops at the shorter
+    // list, so a dropped column passed both checks.
+    invalid(
+        validate(rooted(sort_declaring(&["a"])).as_ref()),
+        "GpuSort: it declares 1 columns and its input produces 2",
+    );
+}
+
+#[test]
+fn a_pass_through_node_declaring_more_columns_than_its_input_is_refused() {
+    invalid(
+        validate(rooted(sort_declaring(&["a", "b", "c"])).as_ref()),
+        "GpuSort: it declares 3 columns and its input produces 2",
+    );
+}
+
+#[test]
+fn a_pass_through_node_declaring_its_inputs_columns_passes() {
+    validate(rooted(sort_declaring(&["a", "b"])).as_ref())
+        .expect("a sort carrying both columns is valid");
+}
+
 #[test]
 fn a_node_declaring_more_columns_than_it_produces_is_refused() {
     let input = source(one_column("a", DataType::Int64), PartitionLayout::new(1));

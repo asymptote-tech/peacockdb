@@ -5,6 +5,12 @@
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
 TEST(PeacockGpu, Version) {
   EXPECT_STREQ(peacock_gpu_version(), "0.1.0");
 }
@@ -206,28 +212,72 @@ TEST(NvtxRanges, ASecondPushReplacesTheFirstRatherThanNesting) {
 // The row range every per-batch caller's bounds go through, on the tier that needs no
 // device: it is arithmetic, and reaching it through a scan on the GPU host is the long
 // way round to a case that cannot fail there for a reason worth knowing.
-TEST(ClampRowRange, ToTheEndSentinel) {
-  EXPECT_EQ(peacock::clamp_row_range(0, UINT64_MAX, 100), std::make_pair(0, 100));
-  EXPECT_EQ(peacock::clamp_row_range(40, UINT64_MAX, 100), std::make_pair(40, 100));
+namespace {
+
+std::string testdata_dir() {
+  const char* env = std::getenv("PEACOCK_TESTDATA_DIR");
+  return env ? std::string(env) : std::string(PEACOCK_TESTDATA_DIR);
 }
 
-TEST(ClampRowRange, PastTheEndClamps) {
-  EXPECT_EQ(peacock::clamp_row_range(90, 1000, 100), std::make_pair(90, 100));
-  EXPECT_EQ(peacock::clamp_row_range(0, 100, 100), std::make_pair(0, 100));
+struct ClampCase {
+  int line;
+  uint64_t offset, length, rows, begin, end;
+};
+
+// Digits only, as the Rust reader takes them: std::stoull alone would take "-1" (wrapping to
+// UINT64_MAX), "+5" and leading spaces, and throw without naming the line.
+uint64_t clamp_count(const std::string& field, int line) {
+  const bool digits = !field.empty() && field.find_first_not_of("0123456789") == std::string::npos;
+  if (!digits) {
+    ADD_FAILURE() << "row-range-clamp.txt:" << line << ": `" << field << "` is not a count";
+    return 0;
+  }
+  try {
+    return std::stoull(field);
+  } catch (const std::out_of_range&) {
+    ADD_FAILURE() << "row-range-clamp.txt:" << line << ": `" << field << "` does not fit a u64";
+    return 0;
+  }
 }
 
-TEST(ClampRowRange, AtOrPastTheEndIsEmpty) {
-  EXPECT_EQ(peacock::clamp_row_range(100, 10, 100), std::make_pair(100, 100));
-  EXPECT_EQ(peacock::clamp_row_range(500, UINT64_MAX, 100), std::make_pair(100, 100));
-  EXPECT_EQ(peacock::clamp_row_range(0, 0, 100), std::make_pair(0, 0));
-  EXPECT_EQ(peacock::clamp_row_range(0, UINT64_MAX, 0), std::make_pair(0, 0));
+// `max` is the to-the-end sentinel, allowed in offset and length only.
+uint64_t clamp_bound(const std::string& field, int line) {
+  return field == "max" ? UINT64_MAX : clamp_count(field, line);
 }
 
-TEST(ClampRowRange, TheSentinelDoesNotOverflow) {
-  // The reason the length is taken against the rows REMAINING rather than added to the
-  // offset: offset + UINT64_MAX wraps, and the wrapped end lands inside the table.
-  EXPECT_EQ(peacock::clamp_row_range(1, UINT64_MAX, 100), std::make_pair(1, 100));
-  EXPECT_EQ(peacock::clamp_row_range(UINT64_MAX, UINT64_MAX, 100), std::make_pair(100, 100));
+std::vector<ClampCase> clamp_cases() {
+  const std::string path = testdata_dir() + "/fixtures/row-range-clamp.txt";
+  std::ifstream in(path);
+  EXPECT_TRUE(in.is_open()) << "cannot read " << path;
+  std::vector<ClampCase> cases;
+  std::string text;
+  for (int line = 1; std::getline(in, text); ++line) {
+    std::istringstream fields(text);
+    std::vector<std::string> f;
+    for (std::string w; fields >> w;) f.push_back(w);
+    if (f.empty() || f[0][0] == '#') continue;
+    if (f.size() != 6 || f[3] != "->") {
+      ADD_FAILURE() << "row-range-clamp.txt:" << line
+                    << ": expected `offset length rows -> begin end`, got `" << text << "`";
+      continue;
+    }
+    cases.push_back({line, clamp_bound(f[0], line), clamp_bound(f[1], line),
+                     clamp_count(f[2], line), clamp_count(f[4], line), clamp_count(f[5], line)});
+  }
+  EXPECT_FALSE(cases.empty()) << path << " holds no case";
+  return cases;
+}
+
+}  // namespace
+
+TEST(ClampRowRange, AnswersEveryCaseInTheSharedTable) {
+  for (const auto& c : clamp_cases()) {
+    const auto rows = static_cast<cudf::size_type>(c.rows);
+    EXPECT_EQ(
+        peacock::clamp_row_range(c.offset, c.length, rows),
+        std::make_pair(static_cast<cudf::size_type>(c.begin), static_cast<cudf::size_type>(c.end)))
+        << "row-range-clamp.txt:" << c.line;
+  }
 }
 
 int main(int argc, char** argv) {
