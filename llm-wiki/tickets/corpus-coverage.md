@@ -828,8 +828,9 @@ production rule. One line; `driver/tests/limit.rs`'s counts stay as they are.
 ### #233 — the plan validator does not check that a pass-through node keeps its input's column count
 
 A node that carries its input's columns — Sort, CoalesceAllBatches, AccumulateBatchesAndSort,
-Limit, MergePartitions, EmitPartitions, MergeSortedPartitions, and a Filter without a projection
-— passes `validate` while declaring fewer or more columns than its input has.
+Limit, MergePartitions, EmitPartitions, MergeSortedPartitions — passes `validate` while declaring
+fewer or more columns than its input has. A Filter without a projection is not among them:
+`declared_width` checks it against its input.
 
 `declared_width` (`plan/validate.rs`) checks the column count only for the nodes that compute a
 width, and hands these kinds to `types_across_the_edge`. That function zips the node's fields with
@@ -955,3 +956,21 @@ Expected divergences, to declare or to normalize in the comparator:
   queries**: raise the cap, compare a digest of the normalized rows on both sides, or leave them
   unchecked and say so.
 - **A real divergence** is a ticket, and its line in the declared list names it.
+
+<a id="t262"></a>
+### #262 — the DISTINCT lowering's device cells have never run
+
+The DISTINCT lowering (distinct-companions, chain K, closes [#62](#t62)) is built and proven on
+the cpu only: chain K runs without a GPU so as not to contend with chain J for one. Its plans
+reach the wire — a two-stage aggregate whose outer init runs merge aggregators over state, a
+`__distinct_arg` key, a narrowed grouping id — and no device has run one. A device answer could
+differ from the cpu's there, and nothing would say so, because the cells are off.
+
+**Corpus queries:** `tpch/distinct-functions`, gpu cells off at all five modes on this ticket
+alone. tpcds q28 (off on #152) and `tpch/rollup-distinct` (off on #65, #189) carry it too once
+those close.
+
+**Fix proposed:** on a GPU host, once chain J leaves one free: run distinct-functions' five
+device cells against the cpu golden; each one passing is enabled, each one failing gets the
+ticket it fails on. Then this ticket drops from the registry row and is archived. The same run
+takes q28's and rollup-distinct's cells when their own tickets have closed.

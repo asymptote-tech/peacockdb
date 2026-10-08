@@ -64,6 +64,43 @@ node, which is why it is a ticket rather than a planner tweak. Not [#65](corpus-
 ROLLUP/CUBE `__grouping_id` — the two would coexist as separate columns. Until it lands the
 planner refuses the shape at plan time.
 
+<a id="t261"></a>
+### #261 — a `stddev` or `var` beside a DISTINCT is refused at planning
+**Priority: low** — no query in either benchmark has this shape.
+
+`stddev(y), count(DISTINCT x)` does not plan, on either backend. Every other companion of a
+DISTINCT does.
+
+distinct-companions (chain K, closes [#62](corpus-coverage.md#t62)) lowers a DISTINCT in two
+stages. The inner stage groups by `(x, keys)` and runs the companions' inits. The outer stage's
+first node reads two kinds of input: the DISTINCT aggregate reads values, and the companions
+read the inner stage's state. A node has one phase (`AggregateBody`'s `Phase`, the wire's
+`AggregateMode`), so that node is an init, and each companion is merged by an init aggregator:
+`sum` over a count or a sum, `min`, `max`. That works for every `Merge::PerColumn` rule. Welford
+merges as `Merge::Combined(MergeM2)`: the `[count, mean, m2]` triple merges together, and
+`MERGE_M2` exists only as a merge (cuDF's groupby `MERGE_M2`, `cpu_backend/merge_m2.rs`). So the
+translator refuses a Welford companion beside a DISTINCT. A `stddev(DISTINCT x)` is not this
+ticket: it reads values and plans. Pinned, once distinct-companions lands, by a `bug_` test in
+`planner/tests/`.
+
+**Corpus query:** none. Simplest: `select l_returnflag, stddev(l_quantity), count(distinct
+l_partkey) from lineitem group by l_returnflag;` (tpch).
+
+**Fix proposed:** let one node mix phases per call.
+- Plan: `AggCall` takes a `phase`, the node's phase its default. The outer stage's first node
+  marks the DISTINCT aggregate's calls `Init` and the companions' calls `Merge`, `MergeM2`
+  included.
+- Wire: append `mode: AggregateMode` to `AggregateFuncNode`. Unset means the node's mode, so no
+  existing payload moves.
+- Cpu: `aggregate_exec` (`cpu_backend/mod.rs`) already runs `AggregateExec` as Partial in both
+  phases and builds one UDAF per call. Each call picks `init_aggregates` or `merge_aggregates`
+  for itself. The state-layout check and the `u64` → `Int64` count cast go per call.
+- Device: `aggregate.cpp` takes the phase per function, not once per node from `agg_phase`.
+
+After [#216](corpus-coverage.md#t216): a keyless outer stage merging a Welford state meets the
+device's missing keyless Welford arm. The `bug_` test flips to a plan test and a cpu-vs-device
+case.
+
 <a id="t249"></a>
 ### #249 — the wire has no Time, Duration, Interval, Struct or List type, and writes such a field as `Null`
 The fbs `DataType` enum (`flatbuffers/gpu_plan.fbs:14-35`) stops at `Decimal128`, and

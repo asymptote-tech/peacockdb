@@ -111,3 +111,30 @@ Planner, wire, both executors and the driver onto the session; every join refusa
 
 Every tier on shad-gpu's cuDF 26.02 environment, fixes, and the tpch sf40 benchmark of the cells
 the chain turned on, against 25.02; the evidence #244 waits on.
+
+## Chain K (base: master)
+
+> **No GPU, from 2026-10-08 until the human lifts it.** It overrides the specs, `build-test.md`
+> and the coordinator's `done` rule wherever they disagree.
+>
+> - **No device build, no device run, no GPU cycle.** Chain J holds the one GPU host
+>   (nebius-gpu); this chain must not contend for it. Every build and run is local: rust-only,
+>   the CPU tiers, `ctest -L cpu`, the C++ build against cuDF 25.02.
+> - **`done` when every CI job but the GPU tests is green.** The coordinator does not wait on the
+>   GPU jobs. guard-checks' edits to `build-test-shadgpu.sh` and to `pipeline.yml`'s GPU job go in
+>   untested.
+
+Two corpus-coverage tickets and #62, all provable on the cpu, run beside chain J while it holds
+the GPU host.
+
+### 1. [`guard-checks.md`](guard-checks.md) — closes [#233](../tickets/corpus-coverage.md#t233), [#174](../tickets/corpus-coverage.md#t174) — state: approved to build
+
+The validator checks a pass-through node's column count; the Rust and C++ row-range clamps read
+one shared case table, `testdata/fixtures/row-range-clamp.txt`; the driver's mock calls the
+shipped clamp.
+
+### 2. [`distinct-companions.md`](distinct-companions.md) — closes [#62](../tickets/corpus-coverage.md#t62) — state: approved to build
+
+A DISTINCT aggregate lowers to two aggregate sequences beside any per-column companion, with or
+without grouping sets; #144 and #261 refused by name; the wire's `distinct` field deprecated; q28,
+`tpch/rollup-distinct` and `tpch/distinct-functions` on the cpu corpus, their device cells off.
