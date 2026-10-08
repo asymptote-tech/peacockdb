@@ -45,7 +45,7 @@ that every declaration's oracles suit each other and every device cell has a cpu
 and `all_modes` expanding to the same cells as the five spelled out
 
 Then the DuckDB tier, 149 of the count and the only independent oracle over the answers
-([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
+([#235](tickets/corpus-coverage.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
 `mini.result.txt` with `duckdb-result.txt` by column position under the line's
 `duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
 for `gpu-result.txt`. Today 93 lines are `duckdb_exact`, 15 `duckdb_approx`, 4
@@ -1010,7 +1010,7 @@ Rules that keep this healthy:
   build script (zstd-sys, bzip2-sys, lzma-sys, psm, blake3) and rebuilds the whole
   DataFusion stack above them — before this, alternating between the two entry points
   thrashed the cache each way:
-  `CUDF_ROOT=~/data/miniforge3/envs/rapids scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run`
+  `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run`
   For anything more than a one-off command, use `build-test.sh` / `build-test-shadgpu.sh`
   instead — they handle build, staging, shipping and running.
 - **A cudf-shape binary needs `LD_LIBRARY_PATH` to run at all.** `libpeacock_gpu.so` lives in
@@ -1046,8 +1046,8 @@ Rules that keep this healthy:
 | Host | Use | Managed by |
 |---|---|---|
 | **shad-gpu** (most used) | GPU test suite (cudf 25.02, H200-class; old glibc → patch step) | `scripts/build-test-shadgpu.sh` (`--build --push-binaries --patch --run[-detached]` / `--all`, `--run-status`). Resilient rsync + retries — the link is flaky |
-| **verda** (when available) | large CPU runs, golden regen | `scripts/build-test.sh --host verda --all` (add `--rust-only` to skip the C++/FFI half) |
-| **verda-gpu** | same root volume as verda, with an H200 attached; cuDF 26.02, modern glibc, nsys 2024.5 | `scripts/build-test.sh --host verda-gpu --gpu --all`; the corpus benchmark and its Nsight passes too — see *Corpus benchmarks* |
+| **verda** (when available) | large CPU runs, golden regen | `scripts/build-test.sh --host <user@ip> --all` (add `--rust-only` to skip the C++/FFI half) |
+| **verda-gpu** | same root volume as verda, with an H200 attached; cuDF 26.02, modern glibc, nsys 2024.5 | `scripts/build-test.sh --host <user@ip> --gpu --all`; the corpus benchmark and its Nsight passes too — see *Corpus benchmarks* |
 | **nebius** | large CPU-only VM | manual |
 
 - **Testing the regen *mechanism* is not a full regen.** Scope it with `PCK_TEST_FILTER`
@@ -1069,6 +1069,11 @@ Rules that keep this healthy:
   `cudaErrorMemoryAllocation` failures under it are its consequence. shad-gpu is a shared H200,
   so check `nvidia-smi` before debugging a red GPU tier ([#178](tickets/testinfra.md#t178)). Budgets are
   H200 numbers; `PEACOCK_RMM_POOL_BYTES=<bytes>` replaces one for a sweep or another host.
+- **`verda` and `verda-gpu` are names for a host, not addresses of one.** They are ephemeral
+  Verda Cloud instances, reprovisioned with a new IP, so `--host` takes `<user@ip>` and
+  `scripts/list_verda_instances.sh` is what finds it (`VERDA_CLIENT_ID`, `VERDA_CLIENT_SECRET`).
+  `ssh verda` resolves nowhere, so a probe of the bare name reports "down" whether the instance
+  is up or not. Only shad-gpu has a stanza in `~/.ssh/config`.
 - **Prefer verda for large CPU runs** (whole suite or big selections). It is not always
   up (the human starts it manually) — falling back to a local run is completely fine.
 - **Comparing files across hosts: use checksums, and `LC_ALL=C sort` for any listing.**
@@ -1083,7 +1088,7 @@ Rules that keep this healthy:
   from `getconf` where the binaries are built, and the prefix is built once on the first patch
   from that host class. A binary patched to a glibc older than its own dies at load with
   `version GLIBC_2.38 not found`.
-- **Golden regen**: on verda via `scripts/build-test.sh --host verda --rust-only
+- **Golden regen**: on verda via `scripts/build-test.sh --host <user@ip> --rust-only
   --update-canonical`, then `--pull-goldens` to bring regenerated goldens back; or
   locally with `UPDATE_CANONICAL=1 cargo test --features rust-only ...`. Sync is one
   flag per kind per direction — `--push-<kind>` / `--pull-<kind>` for
@@ -1114,7 +1119,10 @@ Rules that keep this healthy:
   `--pull-results` brings the file home afterwards, and it refuses while a detached gate run
   is still going. Any other value (`PCK_WRITE_GPU_RESULT=26.02`) writes
   `gpu-result-<value>.txt` beside it, which `testdata/.gitignore` lists: one cuDF version per
-  committed file.
+  committed file. The read side is a second knob: `PCK_GPU_RESULT_VERSION=<v>` points the
+  `duckdb_gpu_*` cases at `gpu-result-<v>.txt`, which is how a non-25.02 run gets compared at all.
+  The coverage guard reads the committed file whatever that is set to, so a versioned file can
+  exercise the comparison and can never satisfy the guard.
 - **A run that outlives your ssh session** is `--run-detached`, read back with
   `--run-status`. That flag exits 0 only when the latest run finished with 0 — still
   going, died without writing its code, and a completion belonging to an earlier run are

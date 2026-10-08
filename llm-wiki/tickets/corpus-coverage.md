@@ -954,52 +954,16 @@ gtests at sf40 (`testdata/gen_duckdb_goldens.sh`, `cpp/tests/gpu/test_tpch.cpp`)
 engine's corpus.
 
 **Corpus queries:** every section of `testdata/goldens/{tpch,tpcds}.sf1/mini.result.txt`: 120
-queries, 8 of them skipped (4 over the 262144-byte cap, 4 not enabled).
+queries, 4 of them a fingerprint over the 262144-byte cap and 4 not enabled.
 
-**Fix proposed:** a DuckDB golden beside each result golden, and a Rust test comparing them.
-Built by [`duckdb-oracle`](../tasks/duckdb-oracle.md): the generator and both
+**What landed, and what is left:** a DuckDB golden beside each result golden, and a Rust test
+comparing them. Built by [`duckdb-oracle`](../tasks/duckdb-oracle.md): the generator and both
 `duckdb-result.txt` files landed 2026-09-28, and the `duckdb_oracle` argument, the comparator,
 the over-cap fingerprint, the helpers' negative tests and the three `ALL` tests landed with
 that task. **What remains is one device cycle**: `gpu-result.txt` has never been written, so
 its 26 `duckdb_gpu_*` cases and the coverage test are red, and both hosts were down when the
 task was built. One `PCK_WRITE_GPU_RESULT=1` cycle on shad-gpu plus `--pull-results` closes
 this ticket.
-- A Python generator (`testdata/duckdb_result.py`, beside `duckdb_cost.py`) runs each query of
-  `testdata/{tpch,tpcds}-queries/` over the same sf1 parquet with the DuckDB 1.5.4 CLI CI already
-  pins for `generate_testdata.sh`, binding the parquet as views the way `gen_duckdb_goldens.sh`
-  does, and writes `duckdb-result.txt` beside `mini.result.txt`: the
-  same `== <query>` sections and table rendering, rows sorted, the same cap and skip markers. The
-  session sets `default_null_order='nulls_last_on_asc_first_on_desc'` and
-  `integer_division=true`, DataFusion's rules, so those two are not divergences.
-- A Rust test reads both files and compares each query both have: row count, then rows as
-  multisets, by column position, numbers within a relative tolerance. A declared list of
-  (query, reason, ticket) holds the expected divergences, asserted both ways as `NOT_RUNNABLE`
-  is: an undeclared divergence fails, and so does a declared one that stopped diverging.
-- The comparison mode is a ninth `corpus_query!` argument, `duckdb_oracle`, beside `cpu_oracle`
-  and `gpu_oracle`, so a query's whole coverage still reads off its line: `duckdb_exact`,
-  `duckdb_approx` (the tolerance, for the float and decimal-typing divergences below),
-  `duckdb_divergent_<ticket>` (the declared list, per line), `duckdb_none` (only one side answers,
-  or the section is over the cap). Every existing line gains it once the generator's first run
-  says which each query needs.
-- The device run writes its own answers, `gpu-result.txt` beside `mini.result.txt`: the same
-  sections and rendering, from the device's unload, under a regeneration variable on shad-gpu and
-  pulled home as the benchmark tree is. A record, never an authority: the device still asserts
-  against the cpu's `mini.result.txt`, and `test_gpu_corpus`'s check that a device run leaves the
-  cpu's three goldens byte for byte stays. What it buys is a three-way comparison that can be read
-  without a device — ours on the cpu, ours on the device, DuckDB — and the same comparator applied
-  to `gpu-result.txt` against `duckdb-result.txt`, so the device meets an oracle other than our cpu.
-- Negative tests of the corpus helpers: a wrong row in the result golden makes the helper fail
-  with a result divergence, for the cpu tier's `assert_result_section` (`test_support/corpus.rs`),
-  the device tier's `assert_result` under `golden_exact` and `golden_approx*`
-  (`test_support/corpus_gpu.rs`), and the new DuckDB comparison. Today only the section comparator
-  is tested, on strings (`tests/test_golden_format.rs`); the helpers read their golden from the
-  fixed testdata path, so each takes the section as an argument, or its path, for a test to hand
-  it a doctored one.
-- Each oracle enum gains an `ALL` const listing its variants — `CpuOracle`
-  (`test_support/corpus.rs`), `GpuResultMode` (`test_support/corpus_gpu.rs`) and the new DuckDB
-  one — and a test asserts every variant is named by some `corpus_query!` line, so an unused kind
-  is deleted rather than kept. Today `GpuResultMode::Skip` and `GoldenApprox` are unused: 113
-  lines say `golden_exact`, 2 `golden_approx_std`, 5 `live_cpu`.
 
 Measured by the first run (2026-09-28), over every section both files hold: no row count, string
 or NULL differs. tpch 39 queries: 22 identical, 6 differ in column names only, 5 in float or decimal
@@ -1008,7 +972,7 @@ empty answer, 2 not compared, 18 answered by DuckDB alone. `round(x, 2)` (q2) ag
 no tie under a LIMIT and no NULL-order difference appeared; turning DuckDB's integer division off
 changes only the typing of two decimal divisions (q2, q61), no value.
 
-Expected divergences, to declare or to normalize in the comparator:
+The divergences, and the oracle each line carries:
 - **Column names** (18 queries). DataFusion names an unaliased expression by its qualified text
   (`sum(lineitem.l_quantity)`), DuckDB by its own (`sum(l_quantity)`). Compared by position.
 - **Decimal `avg` and division truncate at a fixed scale.** We follow DataFusion's rule, a decimal
