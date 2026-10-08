@@ -644,3 +644,13 @@ off in the registry's ticket rule, where it filters on `disabled` alone and so l
 cells carry no ticket; three comment-cap overruns; rustfmt on two touched files, which nothing in
 CI gates; and `plan_goldens.rs:787` saying `dim` is four lanes at tp4 when it is one row group over
 four declared lanes, three empty.
+
+## A chain fact worth not rediscovering: a documentation-only push makes CI skip
+
+PR #167's latest run reports every job `skipping`, because the last commits on
+`ENS-duckdb-oracle` touch only `llm-wiki/`. `pipeline.yml`'s `changes` job is doing what it should
+— building nothing for a wholly-documentation diff — but the effect on a chain branch is that
+`gh pr checks` shows no failure and the PR reads as though it passed. It did not run. So a `done`
+decision, which is the one transition that asserts CI green, has to look at the last run that
+actually built something, not at the newest one. #167's real state is the earlier red: 27 cases
+on the missing `gpu-result.txt`.
