@@ -114,19 +114,34 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
 /// check no answer at all. Something else has to hold it, and a comment on the line is not
 /// something a test can read: the next line to copy the keyword would get unchecked modes and
 /// an unverified first golden with nothing red. So the register is the decision to grow the
-/// set — `INTENTIONALLY_NOT_IN_CI` and `TEST_ONLY_ITEMS` are this shape — and the test below
-/// holds it to the declared set both ways. The third field is prose for the reader; what is
-/// checked is that somebody wrote it.
-const ANSWER_HELD_ELSEWHERE: &[(&str, &str, &str)] = &[(
-    "tpch",
-    "distinct-functions",
-    "src/tests/end_to_end.rs, distinct_functions_answer_as_their_hand_lowered_form: all five \
-     modes against the DISTINCT aggregates over `SELECT DISTINCT l_returnflag, l_quantity` \
-     joined on the key to the companions over lineitem. DataFusion 45 refuses \
-     stddev(DISTINCT) and answers a grouped decimal avg(DISTINCT) as the plain average.",
-)];
+/// set — `INTENTIONALLY_NOT_IN_CI` and `TEST_ONLY_ITEMS` are this shape — and every claim it
+/// makes is verified below, which is what those two do and what a free-text reason cannot.
+struct AnswerHeldElsewhere {
+    dataset: &'static str,
+    /// Hyphenated, as every golden section and `stem` spell it.
+    query: &'static str,
+    /// Relative to the crate, as `TEST_ONLY_ITEMS` spells its files.
+    file: &'static str,
+    /// The test function. VERIFIED: `file` must exist and still contain this name. It is in
+    /// another target, so a rename is no compile error here — without the check the register
+    /// would go on excusing an answer that five cpu cells no longer look at.
+    test: &'static str,
+    /// Why DataFusion is no oracle, for a reader. Only its non-emptiness is checkable.
+    why: &'static str,
+}
 
-/// The register against the lines carrying the keyword, both directions.
+const ANSWER_HELD_ELSEWHERE: &[AnswerHeldElsewhere] = &[AnswerHeldElsewhere {
+    dataset: "tpch",
+    query: "distinct-functions",
+    file: "src/tests/end_to_end.rs",
+    test: "distinct_functions_answer_as_their_hand_lowered_form",
+    why: "DataFusion 45 refuses stddev(DISTINCT) and answers a grouped decimal avg(DISTINCT) \
+          as the plain average, so the oracle is this query lowered by hand: the DISTINCT \
+          aggregates over `SELECT DISTINCT l_returnflag, l_quantity`, joined on the key to \
+          the companions over lineitem, at all five modes.",
+}];
+
+/// The register against the lines carrying the keyword, and every claim each row makes.
 ///
 /// Its own assertions, and first: an unregistered line should be reported for being
 /// unregistered rather than for whatever its goldens do not hold yet.
@@ -138,7 +153,7 @@ fn every_unchecked_answer_is_held_somewhere() {
         .collect();
     let registered: BTreeSet<String> = ANSWER_HELD_ELSEWHERE
         .iter()
-        .map(|(dataset, query, _)| format!("{dataset}/{query}"))
+        .map(|entry| format!("{}/{}", entry.dataset, entry.query))
         .collect();
     let unregistered: Vec<&String> = declared.difference(&registered).collect();
     assert!(
@@ -152,6 +167,41 @@ fn every_unchecked_answer_is_held_somewhere() {
         stale.is_empty(),
         "these ANSWER_HELD_ELSEWHERE rows name no data_fusion_disabled line, so each has \
          outlived its reason: {stale:?}"
+    );
+
+    let crate_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut stray: Vec<String> = Vec::new();
+    for entry in ANSWER_HELD_ELSEWHERE {
+        let what = format!("{}/{}", entry.dataset, entry.query);
+        if entry.why.trim().is_empty() {
+            stray.push(format!(
+                "  {what}: names {} and says nothing about why DataFusion is no oracle — the \
+                 reason is the one part of this row a reader cannot derive",
+                entry.test
+            ));
+        }
+        let path = crate_root.join(entry.file);
+        if !path.is_file() {
+            stray.push(format!(
+                "  {what}: names {} as holding its answer and that file is gone",
+                entry.file
+            ));
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).expect("read a named holder");
+        if !text.contains(entry.test) {
+            stray.push(format!(
+                "  {what}: names {} in {} and that file no longer holds it, so five cpu cells \
+                 check no answer and nothing else does either",
+                entry.test, entry.file
+            ));
+        }
+    }
+    assert!(
+        stray.is_empty(),
+        "every ANSWER_HELD_ELSEWHERE row has to name a test that exists, in a file that \
+         exists, with the reason written down:\n{}",
+        stray.join("\n")
     );
 }
 

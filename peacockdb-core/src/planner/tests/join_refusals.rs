@@ -130,11 +130,12 @@ async fn bug_one_float32_distinct_argument_under_two_coercions_is_refused() {
              sum(DISTINCT arrow_cast(v, 'Float32')) FROM tiny",
         )
         .await;
-    // The message must describe the shape hit — two arguments that DIFFER — and not claim a
-    // second DISTINCT argument, which this query does not have.
+    // Pinned POSITIVELY, on the differing-arguments arm's own words. A negation of the other
+    // arm's text would be vacuously true the moment either message is reworded, which is what
+    // this assertion was before: it negated a phrase no longer in the tree.
     assert!(
         matches!(&err, PlanError::Unsupported(what)
-            if what.contains("#144") && !what.contains("a second DISTINCT argument")),
+            if what.contains("#144") && what.contains("where another's is")),
         "{err}"
     );
 }

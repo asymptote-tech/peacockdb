@@ -900,3 +900,48 @@ async fn a_rollup_over_eight_keys_narrows_the_id_above_the_outer_stage() {
         shape(tree.as_ref())
     );
 }
+
+#[tokio::test]
+async fn a_decimal_sum_companion_casts_its_finalize_back_to_the_declared_type() {
+    // The cast-back's only live arm, and the only test that can see it: the cpu backend's
+    // `declared_as` casts the same widening away per batch, so a run answers (25, 2) either
+    // way and the plan's declaration is what is actually at stake. `state_type` widens a
+    // decimal sum twice — c_acctbal (15, 2), the inner state (25, 2), the outer init (35, 2).
+    let tree = translated(
+        "SELECT c_nationkey, sum(c_acctbal), count(*), count(DISTINCT c_mktsegment) \
+         FROM customer GROUP BY c_nationkey",
+    )
+    .await;
+    validate_all(tree.as_ref());
+    let outer = *aggregates_in(tree.as_ref())
+        .first()
+        .expect("the outer stage");
+    let body = body_of(outer);
+    let state = &body
+        .aggs
+        .iter()
+        .find(|call| call.outputs[0].name().starts_with("sum("))
+        .expect("the outer init's sum over the inner's state")
+        .outputs[0];
+    assert_eq!(state.data_type(), &DataType::Decimal128(35, 2), "{state:?}");
+    let finalize = body.finalize.as_ref().expect("the outer stage finalizes");
+    let sum = finalize
+        .iter()
+        .find(|named| named.name.starts_with("sum("))
+        .expect("the sum's finalized column");
+    assert!(
+        matches!(&sum.expr, Expr::Cast { target, .. } if target == &DataType::Decimal128(25, 2)),
+        "{:?}",
+        sum.expr
+    );
+    // And the cast target is what the node declares it outputs, which is the claim the wire
+    // carries to a device that has no `declared_as` to paper over it.
+    let declared = outer.kind().schema().expect("a layout").fields.clone();
+    assert_eq!(
+        declared
+            .field_with_name(&sum.name)
+            .expect("the declared column")
+            .data_type(),
+        &DataType::Decimal128(25, 2)
+    );
+}

@@ -638,3 +638,159 @@ the branch is letter-compliant and the gap is the contract's. Routed to the deve
 carrying a deferred fix.** Both were over before this task. Trimming either means deciding which
 detail of a worked-out device fix to throw away, which is what the cap's own exception exists to
 protect, so it is the human's call rather than mine.
+
+### 2026-10-08 — completeness pass, developer's three
+
+All three done, uncommitted. No golden moved (`git diff --name-only HEAD -- testdata/` empty),
+`recipe-payloads.txt` still `b2f9cb2c…`. No `cpp/`, `flatbuffers/` or wire code in scope.
+
+#### 1. The cast-back is tested — and it is NOT what makes the cpu answer right
+
+Closed twice as asked, but **one of the two cannot go red, and the reason matters more than the
+test does.** A plan test and the `sum` companion were both added; only the plan test pins the
+cast-back.
+
+- `a_decimal_sum_companion_casts_its_finalize_back_to_the_declared_type`
+  (`translator/tests.rs`), over `SELECT c_nationkey, sum(c_acctbal), count(*),
+  count(DISTINCT c_mktsegment) FROM customer GROUP BY c_nationkey` on the minimal dataset.
+  `c_acctbal` is `Decimal128(15, 2)`, the inner state `(25, 2)`, the outer init `(35, 2)`,
+  DataFusion declares `(25, 2)`. It asserts the outer init's state type, that the finalize is
+  an `Expr::Cast` to `Decimal128(25, 2)`, and that the node DECLARES `(25, 2)` for that column
+  — under `validate_all`.
+- `sum(l_extendedprice)` added to
+  `a_grouped_count_and_sum_distinct_beside_companions_answer_as_datafusion`, five modes.
+
+**Red proof, and the finding inside it.** With the cast-back behind `if false &&`:
+
+- the plan test fails — `Column(ColumnRef { index: 1, name: "sum(customer.c_acctbal)" })`, a
+  bare column where a cast is wanted;
+- the end-to-end case **passes**, at all five modes.
+
+Not a plan-time schema error, and not a wrong answer either. I probed the executed output type
+at every mode with the cast-back disabled: `sum(lineitem.l_extendedprice)` still comes back
+`Decimal128(25, 2)`. The cause is `declared_as` (`executor/cpu_backend/mod.rs:309`), which
+already casts a `widened_decimal` — same scale, wider precision — back to the declared type per
+batch, with `safe: false` so a value that does not fit errors rather than becoming NULL. Its
+own comment says why it exists: "a state merged twice would carry a wider type than one merged
+once". So on the cpu the plan-level cast-back is **redundant by construction**, and no cpu run
+of any shape can observe its absence.
+
+What the cast-back is actually for, then: the PLAN declaring what it produces. Without it the
+finalize project claims `(25, 2)` and its expression yields `(35, 2)` — a plan that lies about
+itself. `declared_as` papers over that on the cpu; a device has no `declared_as` and the sink's
+schema validator refuses the divergence, so the cast-back is what makes this shape device-runnable
+at all. Untestable on this chain (no GPU, #262).
+
+Plan validation does not catch the lie either, and that is a gap rather than a decision:
+`validate_all` passed with the cast-back disabled, because `check_expr_types`
+(`plan/common.rs:44`) only checks each type is holdable and `finalize_columns` checks the
+finalize list's WIDTH and the key names — nothing compares an expression's result type against
+the field it is declared as. See the ticket candidate at the end.
+
+The e2e case stays: it is the only five-mode value check of a plain decimal `sum` companion
+beside a DISTINCT, which nothing had. Its doc now says the type is the plan test's and why.
+
+**DataFusion is a sound oracle for it**, checked rather than assumed. I ran the new SQL and its
+hand-lowered equivalent — the DISTINCT aggregates over `SELECT DISTINCT l_returnflag,
+l_suppkey`, joined to the companions over `lineitem` — through DataFusion at
+`target_partitions = 1` and compared: identical, row for row, including `se`. The values check
+independently too: `count(DISTINCT l_suppkey)` 10000 and `sum(DISTINCT l_suppkey)` 50005000 =
+10000·10001/2, and `n`/`a` match `rollup-distinct`'s committed golden. `is_single_distinct_agg`
+declines the node because `count(*)` is outside `{sum, min, max}`, so DataFusion runs its own
+distinct accumulators — which it gets right for `count`/`sum(DISTINCT)`; the shapes it gets
+wrong are `stddev`/`var(DISTINCT)`, keyless `avg(DISTINCT)` and grouped decimal `avg(DISTINCT)`,
+none of which is here. The probe was a throwaway and is not in the tree.
+
+#### 2. The register verifies every claim it makes
+
+`ANSWER_HELD_ELSEWHERE` is now a `struct AnswerHeldElsewhere { dataset, query, file, test, why }`
+rather than a tuple with prose in it — the `TEST_ONLY_ITEMS` shape, and for its reason. Three new
+assertions beside the two set-equality ones: `why` is non-empty, `file` exists under
+`CARGO_MANIFEST_DIR`, and `file`'s text still contains `test`. The `test` field's doc carries the
+VERIFIED note, as `Exemption::GpuJob`'s does.
+
+**Each proved red by hand, reverted after each; three distinct messages:**
+
+- `why: ""` → `tpch/distinct-functions: names distinct_functions_answer_as_their_hand_lowered_form
+  and says nothing about why DataFusion is no oracle — the reason is the one part of this row a
+  reader cannot derive`
+- `file` → `src/tests/end_to_end_renamed.rs` → `… names src/tests/end_to_end_renamed.rs as
+  holding its answer and that file is gone`
+- `test` → `…_v2` → `… names distinct_functions_answer_as_their_hand_lowered_form_v2 in
+  src/tests/end_to_end.rs and that file no longer holds it, so five cpu cells check no answer and
+  nothing else does either`
+
+#### 3. The #144 message pin is live
+
+`planner/tests/join_refusals.rs` pinned POSITIVELY on the differing-arguments arm's own words,
+`"where another's is"`, instead of negating a phrase round 2 had already removed from the tree.
+Proved by swapping the two arms' messages by hand: both `bug_two_distinct_arguments_are_refused`
+and `bug_one_float32_distinct_argument_under_two_coercions_is_refused` then fail, each reporting
+`a DISTINCT over more than one argument (#144)` for a shape that is not that. Restored, both green.
+
+#### Counts, re-summed mechanically
+
+The one new plan test: translator 36 → **37**, `--lib` 619 → **620**, cpu block 1215 → **1216**,
+Rust 1887 → **1888**, grand 2362 → **2363**. `test_cpu_corpus` stays 567 — the register check is
+a plain `fn` called from an existing test, deliberately, so it adds no case. Every header equals
+its rows and the cpu breakdown sums to its block.
+
+| command | result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core --lib -- --test-threads=2` | 618 passed, 0 failed, 2 ignored |
+| `… --test test_cpu_corpus -- --test-threads=2` | 567 passed, 0 failed |
+| `… --test test_ci_coverage -- --test-threads=2` | 9 passed, 0 failed |
+| `… --test test_corpus_goldens -- --test-threads=2` | 26 passed, 0 failed |
+| `… --test test_cost_model -- --test-threads=2` | 3 passed, 0 failed |
+| `… --test test_module_layout -- --test-threads=2` | 17 passed, 0 failed |
+| `… --test test_golden_format -- --test-threads=2` | 26 passed, 0 failed |
+| `cargo build --features rust-only` after `touch lib.rs` | 0 warnings |
+
+#### Second ticket candidate for the human, not filed
+
+**Plan validation cannot see a project whose expression type is not the field it declares.**
+`check_expr_types` checks holdability per type; `finalize_columns` checks the finalize list's
+width and the key names. Neither compares a result type against its declared field, so a
+finalize (or any) project may declare `Decimal128(25, 2)` and produce `(35, 2)` and
+`validate_schemas_and_partitions` passes — demonstrated above by disabling the cast-back and
+watching `validate_all` stay green while the plan lied. On the cpu `declared_as` hides it; on
+the device the sink refuses it, so the symptom is a device-only failure for a plan that validated.
+General and pre-existing, not introduced by this branch, and the fix is a type check in
+`plan/`. Not filed because a permanent ID on a validation rule's scope is your call, and the
+first branch to need it is the one that runs this shape on a device (#262).
+
+### 2026-10-08 — completeness findings closed
+
+All three applied. `--lib` 618 passed / 2 ignored, `test_cpu_corpus` 567 (the register check is a
+plain `fn` called from an existing test, so it adds no case), `test_ci_coverage` 9,
+`test_corpus_goldens` 26, `test_cost_model` 3, `test_module_layout` 17, `test_golden_format` 26,
+zero warnings. No golden moved; `recipe-payloads.txt` still `b2f9cb2c…`. `build-test.md` re-summed:
+translator 37, `--lib` 620, cpu block 1216, Rust 1888, grand 2363.
+
+**The cast-back finding came back with a correction worth keeping.** Both readings predicted the
+plan test and the end-to-end case would go red without the cast-back. Only the plan test does. With
+the cast-back disabled the end-to-end case passes at all five modes and the executed output type is
+still `Decimal128(25, 2)`, because `declared_as` (`executor/cpu_backend/mod.rs:309`) already casts a
+widened decimal — same scale, wider precision — back to the declared type per batch, `safe: false`
+so an overflow errors rather than becoming NULL. So on the cpu the plan-level cast-back is
+redundant by construction and **no cpu run can observe its absence.** What it is for is the plan
+declaring what it produces: without it the finalize project claims `(25, 2)` while its expression
+yields `(35, 2)`. A device has no `declared_as` and the sink's schema validator refuses the
+divergence, so the cast-back is what makes this shape device-runnable — untestable on this chain,
+under #262. The plan test is therefore the only possible pin, and it asserts the cast, the outer
+state type and the node's declared type. The end-to-end case stays as the only five-mode value
+check of the shape, with its doc saying where the type is pinned instead.
+
+DataFusion is a sound oracle for the added `sum` companion, checked rather than assumed: the new
+SQL and its hand-lowered equivalent agree row for row at one lane, and the values check
+independently (`sum(DISTINCT l_suppkey)` 50005000 = 10000·10001/2). `is_single_distinct_agg`
+declines the node on `count(*)`, so DataFusion runs its own distinct accumulators — right for
+`count` and `sum(DISTINCT)`, and none of the three shapes it gets wrong is in that query.
+
+**The developer's second ticket candidate is not filed, because `architecture.md` already records
+it.** "Plan validation cannot see a project whose expression type is not the field it declares" is
+the state the page states under *Types are a plan fact*: "a project's expression is compared against
+nothing at plan time — what the device produces for it is held to the declaration per batch by the
+test harness and the corpus's validator — and the C++ half is #164." A ticket would re-file a
+documented property, and nothing behaves wrongly for a user today. The `Float32` candidate stays
+recorded on #144.
