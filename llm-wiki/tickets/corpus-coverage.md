@@ -732,23 +732,19 @@ keys, and those include `__grouping_id`, a `UInt8`. comet's murmur3 has no unsig
 the device's id differs from the cpu's in type and bits (#65), so the two engines would put
 a subtotal row in different lanes. A refusal, not a wrong answer.
 
-**Corpus queries:** 24 cpu cells over seven queries at `tp4-single`, `tp4-rowgroup` and
+**Corpus queries:** 24 cpu cells over eight queries at `tp4-single`, `tp4-rowgroup` and
 `tp4-sized`. **18 of them are on**, landed by [`repartition-keys`](../tasks/repartition-keys.md):
 `tpch/rollup-over-join`, tpcds q5, q18, q22, q80 and `pbench/rollup-small-keys`. **6 are still
 off** — `pbench`'s `uint-key-group` and `uint-key-join`, which reach this refusal by the other road
 below. Their device cells are behind all of them. tpcds q77 is settled and does not meet this
 ticket: its plan moved with the rest of the drop and #212 is all that holds it.
 
-**Fix proposed:** hash the user keys and not the id. In `aggregate_sequence`, before `tree = match
-shuffle`, drop the id's ordinal from `Shuffle::ByHash`'s keys when the aggregate has grouping sets:
-`keys.retain(|k| *k as usize != group.expr().len())`, guarded on `!group.is_single()`. Every row of
-a user-key group then lands in one lane whatever its set, so each (keys, id) group stays whole.
-The rule the plan validates, hash keys a subset of the group columns, already allows it. No hasher
-arm and no C++. The tp4 plan goldens of the six queries change their emit's `hash=` and the
-merge's `hashed_on`, and the tpcds q5 payload's `hash_exprs` shrinks. A planner test pins
-`hash_keys == [0, 1]` for a two-key rollup at tp4.
+**Fixed for the grouping-id half** in [`repartition-keys`](../tasks/repartition-keys.md):
+`drop_grouping_id` takes the id's ordinal out of `Shuffle::ByHash`'s keys when the aggregate has
+grouping sets, so each (keys, id) group stays whole in one lane. The merge still groups on the id;
+the plan rule that permits the difference is hash keys a *subset* of the group columns.
 
-**That fix landed and turned on 18 of the 24 cells, not all of them.** `pbench`'s `uint-key-group` and
+**That turned on 18 of the 24 cells, not all of them.** `pbench`'s `uint-key-group` and
 `uint-key-join` reach the same refusal by the other road: they hash a plain `UInt32` user key, and
 comet's murmur3 has no unsigned arm at any width. The grouping-id fix cannot help them —
 `uint-key-group` is a single grouping set, so `!group.is_single()` excludes it, and `uint-key-join`
