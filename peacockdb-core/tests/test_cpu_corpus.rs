@@ -177,7 +177,9 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
 /// every mode's run is held to that section. So its oracle must compare the whole answer: a
 /// `duckdb_none` or a `duckdb_divergent` would give the next line to copy the keyword unchecked
 /// modes and an unverified first golden, with nothing red. The exact count makes growing the
-/// set a decision rather than a copy.
+/// set a decision rather than a copy. Nothing else needs verifying: the holder is the case the
+/// line itself expands to, so it cannot be renamed away from it, and its section is held by
+/// `every_duckdb_result_section_has_a_registry_row_and_every_row_a_section`.
 #[test]
 fn a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb() {
     let mut checked = 0;
