@@ -69,8 +69,9 @@ one expression under a coercion the lowering declines to strip — `count(DISTIN
 sum(DISTINCT f32)`, where `sum` coerces to `Float64` and `keeps_distinct` admits that only from an
 integer — reach this refusal, and the expand would answer them correctly as two arguments. But
 `Float32 → Float64` is injective, so one arm in `keeps_distinct`
-(`planner/translator/aggregate/distinct.rs`) answers that shape with the ordinary single-distinct
-lowering. Pinned by `bug_one_float32_distinct_argument_under_two_coercions_is_refused`
+(`planner/translator/aggregate/distinct.rs`) would answer that shape with the ordinary
+single-distinct lowering instead, and widening the admitted list is the human's call. Pinned by
+`bug_one_float32_distinct_argument_under_two_coercions_is_refused`
 (`planner/tests/join_refusals.rs`), which goes red the day the arm lands. No corpus query has a
 `Float32` column.
 

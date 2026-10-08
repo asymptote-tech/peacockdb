@@ -218,8 +218,9 @@ stream to return ten rows.
 input, and optionally finalizing expressions over the results — and the planner emits the parts
 each position needs. Every aggregate decomposes into three declared parts, each ordinary IR:
 
-- **init** — aggregators over raw rows, emitting *state* columns. One aggregate may emit
-  several: `avg` emits sum and count, `stddev` emits Welford's count, mean and m2.
+- **init** — aggregators over the columns its stage is handed, emitting *state* columns. Raw rows
+  ordinarily; the DISTINCT lowering's outer stage is an init over the inner stage's state. One
+  aggregate may emit several: `avg` emits sum and count, `stddev` emits Welford's count, mean and m2.
 - **merge** — aggregators over state columns, emitting the same state schema. Not the same
   functions as init: a `count` merges by `sum`, and Welford state merges by `merge_m2`.
 - **finalize** — one expression per output column over the merged state: `avg` a divide,
@@ -263,7 +264,8 @@ schema at that position rather than merely displayed.
 
 Shortcuts: a one-lane single-batch input needs one `GpuAggregate` carrying both lists; a
 one-lane input skips the merge and emit; a single-batch-per-lane input skips the first
-`GpuAggregateBatches`. The shuffle is skipped only for one-lane inputs or keyless aggregates —
+`GpuAggregateBatches`. The shuffle is skipped for one-lane inputs, for keyless aggregates, and
+for a stage already co-located on its keys, which is what the DISTINCT lowering's outer stage is —
 skipping on small key cardinality needs estimators that do not exist ([#141](tickets/optimizer.md#t141)).
 
 **DataFusion's partial-aggregation probe must be off**, and structurally so: an `AggregateExec`
@@ -290,8 +292,9 @@ key than DataFusion's aggregate, so at exactly 8, 16 or 32 keys it declares the 
 and a project above the outer stage casts the id back to DataFusion's. Not a cast in the
 `group_by`: a merge's co-location check reads plain column keys only.
 
-The gid's rendering is asymmetric on purpose — the init's `group_by` does not list it, because
-there it is a tag being synthesized, while every node above lists it as an ordinary key. A
+The gid's rendering is asymmetric on purpose — the init that synthesizes it does not list it in
+its `group_by`, because there it is a tag being made, while every node above lists it as an
+ordinary key, another init included: the DISTINCT lowering's outer stage reads it as a key. A
 projection over the final drops it again, without which the query returns a column it never
 asked for.
 
@@ -1187,7 +1190,7 @@ to it.
 | `SortExpr.asc`, `.nulls_first` | `node_writer.rs` | the node's sort keys, from `PhysicalSortExpr::options` | `cudf::order`,<br>`cudf::null_order` |
 | `CudfSort.fetch`,<br>`CudfSortPreservingMerge.fetch` | `node_writer.rs` | the node's `fetch`, `-1` where there is none | a post-sort / post-merge slice; the sort skips it at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | `BinaryExpr`<br>`.out_decimal_precision/scale` | `expr_writer.rs` | the expression's declared output type | the binop output type, and division pre-scales to hit it |
-| `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from values, `Merge` merges state into state. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which cuDF aggregation runs, whether state columns are merged, and whether the result is state or a value — except on the keyless path, where a `stddev` name decides all three whatever the mode and a `var` name has no arm ([#216](tickets/corpus-coverage.md#t216)) |
+| `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from the columns it reads, `Merge` merges state into state. A `Partial` over state columns is how the DISTINCT lowering's outer init merges a companion — the merge rule rides in the aggregator, not in the mode. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which cuDF aggregation runs, whether state columns are merged, and whether the result is state or a value — except on the keyless path, where a `stddev` name decides all three whatever the mode and a `var` name has no arm ([#216](tickets/corpus-coverage.md#t216)) |
 | `CudfRepartition.hash_exprs`,<br>`num_partitions` | `node_writer.rs` | the emit node's keys and lane count | key ordinals and N for<br>`spark_hash_partition` |
 | `CudfScan.limit` | `node_writer.rs` | the source's pushed-down limit | `parquet_reader_options::set_num_rows` |
 | `AggregateFuncNode`<br>`.out_decimal_precision/scale` | `aggregate_writer.rs`, at zero | nothing: decomposition means no `avg` reaches a device, so the scale rides the finalize divide's own pair | **nothing** here, deliberately, and the writer says why |

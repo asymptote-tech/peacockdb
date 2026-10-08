@@ -234,20 +234,19 @@ holds it as `Int32` where DataFusion declares `UInt8` up to 8 keys, `UInt16` to 
 3 there and 0, 2, 3 here. The merge above only needs one id per set, so it is right; every other
 reader is not. `GROUPING(k1, …, kn)` over the full key list plans on 45 as
 `CAST(__grouping_id AS Int32)` and answers the device's bits, a silent wrong answer. The schema
-validator refuses the width. Pinned by the two `bug_grouping_sets_…` cases in
-`gpu_tests/aggregate_cases.rs` (whose `grouping_sets_as_exported` swaps the bits and the type),
-`bug_grouping_sets_hold_an_int32_grouping_id_where_the_plan_declares_uint8`
-(`gpu_tests/aggregate_schema_cases.rs`) and
-`bug_a_rollup_partial_holds_an_int32_grouping_id_where_the_plan_says_uint8` (`wire/gpu_tests/mod.rs`).
+validator refuses the width. Four `bug_` pins hold it, in `gpu_tests/aggregate_cases.rs` (whose
+`grouping_sets_as_exported` swaps the bits and the type), `gpu_tests/aggregate_schema_cases.rs`
+and `wire/gpu_tests/mod.rs`.
 `GROUPING()` over a subset or a reordering of the keys is refused on the device (#230). DataFusion
 55's duplicate ordinal is #228. Under a DISTINCT the inner stage carries one more key, so there
 the device's id is doubled and at 8, 16 or 32 keys the project above the outer stage overflows
 the cast; the fix below covers both.
 
-**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join` and tpcds
-q5, q14, q18, q22, q77, q80. None reaches it on the device yet: each cell is off first on #152,
-#189 or #220. The value shows only through `GROUPING()`, and q70 and q86, the corpus's users, are
-window queries that never run. Simplest (from [`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14)):
+**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`,
+`tpch/rollup-distinct` and tpcds q5, q14, q18, q22, q77, q80. `rollup-distinct` is the one this
+ticket blocks first, its two tp1 gpu cells off on #65 itself; every other query's are off first on
+#152, #189 or #220. The value shows only through
+`GROUPING()`, and q70 and q86, the corpus's users, are window queries that never run. Simplest (from [`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14)):
 `select n_regionkey, n_nationkey, grouping(n_regionkey, n_nationkey) as g, count(*) from nation
 group by rollup (n_regionkey, n_nationkey);` (tpch): 31 rows with g in {0, 1, 3} on the cpu; the
 device answers the five subtotal rows with g = 2.
@@ -650,19 +649,23 @@ keys, and those include `__grouping_id`, a `UInt8`. comet's murmur3 has no unsig
 the device's id differs from the cpu's in type and bits (#65), so the two engines would put
 a subtotal row in different lanes. A refusal, not a wrong answer.
 
-**Corpus queries:** `tpch/rollup-over-join` and tpcds q5, q18, q22 and q80 at `tp4-single`,
-`tp4-rowgroup` and `tp4-sized`: 15 cpu cells, their device cells behind them. tpcds q77 may meet it
-too once #212 stops refusing it first. Simplest: `select l_returnflag, sum(l_quantity) from
-lineitem group by rollup (l_returnflag);` (tpch) at `tp4-single`.
+**Corpus queries:** `tpch/rollup-over-join`, `tpch/rollup-distinct` and tpcds q5, q18, q22 and
+q80 at `tp4-single`, `tp4-rowgroup` and `tp4-sized`: 18 cpu cells, their device cells behind them.
+tpcds q77 may meet it too once #212 stops refusing it first. Simplest: `select l_returnflag,
+sum(l_quantity) from lineitem group by rollup (l_returnflag);` (tpch) at `tp4-single`.
 
-**Fix proposed:** hash the user keys and not the id. In `aggregate_sequence`, before `tree = match
-shuffle`, drop the id's ordinal from `Shuffle::ByHash`'s keys when the aggregate has grouping sets:
-`keys.retain(|k| *k as usize != group.expr().len())`, guarded on `!group.is_single()`. Every row of
-a user-key group then lands in one lane whatever its set, so each (keys, id) group stays whole.
-The rule the plan validates, hash keys a subset of the group columns, already allows it. No hasher
-arm and no C++. The tp4 plan goldens of the five queries change their emit's `hash=` and the
-merge's `hashed_on`, and the tpcds q5 payload's `hash_exprs` shrinks. A planner test pins
-`hash_keys == [0, 1]` for a two-key rollup at tp4. The 15 cpu cells turn on.
+**Fix proposed:** hash the user keys and not the id. In `sequence`
+(`planner/translator/aggregate.rs`), before `tree = match shuffle`, drop the id's ordinal from
+`Shuffle::ByHash`'s keys when the stage has grouping sets, guarded on `!group.is_single()`. The
+ordinal is the stage's own, not the query's: it is the group-expression count in an ordinary
+stage and one higher in the DISTINCT lowering's inner stage, which prepends `__distinct_arg` —
+so the fix reads it off the stage rather than off the DataFusion aggregate, which `sequence` no
+longer holds. Every row of a user-key group then lands in one lane whatever its set, so each
+(keys, id) group stays whole. The rule the plan validates, hash keys a subset of the group
+columns, already allows it. No hasher arm and no C++. The tp4 plan goldens of the six queries
+change their emit's `hash=` and the merge's `hashed_on`, and the tpcds q5 payload's `hash_exprs`
+shrinks. A planner test pins `hash_keys == [0, 1]` for a two-key rollup at tp4. The 18 cpu cells
+turn on.
 
 <a id="t145"></a>
 ### #145 — Refcounted handles: stop copying every partition out of a scatter
