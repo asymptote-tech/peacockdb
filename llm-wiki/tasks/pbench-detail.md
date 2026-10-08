@@ -1190,3 +1190,47 @@ workspace 66 GB. Nothing was removed anywhere.
 `rustfmt --edition 2024 --check` is clean on `cpu_backend/tests/backend.rs`. `cpu_backend/mod.rs`
 was edited by hand for the reason round 2 recorded — it is a `mod.rs`, so rustfmt would follow its
 `mod` declarations into four unrelated files.
+
+## Review round after the rebase (2026-10-08)
+
+Scoped to the two new commits. **0 blocking, 1 important, 3 nits.** The reviewer re-derived rather
+than read: it parsed `corpus_cases.inc` to get `test_cpu_corpus`'s 886 from its parts, re-summed
+every tier of `build-test.md`, counted the goldens per directory with `git ls-files`, and checked
+all 11 ticket-index rows against their files' anchors. All of it held.
+
+**Important, fixed here: a second dead `#235` link.** `corpus-coverage.md:824`, inside #259's own
+text, still pointed at `#t235` in a file the parent branch had archived it out of. The rebase note
+claimed one such link and there were two; the reviewer found it by diffing the dead-link set across
+the old tip, the new parent and HEAD, which is the check I should have run rather than grepping for
+the one path I happened to think of. Repointed at the archive, where the other six live references
+go.
+
+**The bug fix stands.** The reviewer reproduced the root cause from source rather than taking the
+account here: with `inner`, `joined(false)` keeps `p_id` non-nullable, so declared field 1 is `p_id`
+while batch column 1 is `b_key`, which `synthetic` nulls every eleventh row — which is also why two
+of the four CPU-refusal cases failed and not four, since `left` makes every `p_*` field nullable and
+no violation fires. It confirmed the call order is untouched, so the fix is a guard inside the rule
+and not the reorder the spec forbids; that the new case goes red for the stated reason and not
+incidentally; and that the fewer-columns direction travels the same comparison and is also better
+served by the count. Nothing is let through: at equal widths arrow's own `try_new` still refuses a
+NULL in a non-nullable column, so declining at a mismatch only changes which message a reader gets.
+
+### The nits
+
+- **The width hazard survives one line above the fix**, in the decimal relabelling loop, which zips
+  positionally with no count guard. A mispaired `Decimal128` column that satisfies `widened_decimal`
+  and overflows would name the wrong field, in front of the count — the fault just fixed. Nothing
+  worse is reachable: `try_new`'s count check is unconditionally first, and no test today has a
+  decimal column in that shape. Left as code, since hoisting the check is logic and this round is
+  not the place for it; what is fixed here is the doc comment, which had invited the reader to
+  assume the relabelling was guarded the same way. It now says plainly that it is not.
+- **#259 was missing from its own file's Contents.** Pre-existing, from when the ticket was
+  created; added, first in the Testing section, where its anchor sits. The index listing it last
+  while the file holds it 27th is left alone.
+- **One corpus case is counted in two rows of the cpu block** — `CPU backend executors` covers the
+  whole subtree including `contract.rs`, which also has its own row. Pre-existing and preserved by
+  the bump rather than introduced by it, and two independent measurements of `--lib` still agree
+  with the page, so something else nets it out. On the record, not acted on.
+
+Not verifiable without a card, and said so: every measured pass count above. The arithmetic between
+them is self-consistent and the device list matches the host override item for item.

@@ -42,6 +42,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 - [Performance](#performance)
   - [#154 — every operator exit path deep-copies its output into a fresh table](#t154)
 - [Testing](#testing)
+  - [#259 — pbench landed with every device cell off, and nothing owns running them](#t259)
   - [#227 Check schema nullability in tests](#t227)
   - [#164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
   - [#201 — the murmur gate proves a copy of the lane rule, not the rule](#t201)
@@ -869,7 +870,7 @@ Three pieces, and the first is the one that otherwise never lands:
 **Fix proposed:** one `build-test-shadgpu.sh` cycle filtered to `gpu_pbench_`, plus
 `PCK_WRITE_GPU_RESULT=1` so the answers reach `gpu-result.txt` and meet DuckDB. Each cell is then
 enabled if it passes, or carries the ticket it fails on. The same card closes
-[#235](#t235)'s last step and [`stale-cells`](../tasks/stale-cells.md)'s 16 cells, so one visit
+[#235](../archive/archived-tickets.md#t235)'s last step and [`stale-cells`](../tasks/stale-cells.md)'s 16 cells, so one visit
 settles three things. The record that nothing was run is durable in the section comment at the head
 of pbench's block in `corpus_cases.inc`; this ticket is the part that says whose job it is.
 
