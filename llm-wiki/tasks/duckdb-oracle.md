@@ -163,15 +163,15 @@ read the golden section from).
 
 `build-test-shadgpu.sh`, one cycle with the regeneration variable set.
 
-## Completeness signoff (2026-10-08)
+## Completeness signoff (2026-10-08, revised after the device cycle)
 
-Solved under its constraints on the cpu, not on the device. Every corpus line names a
-`duckdb_oracle`, a case per line compares our answer with DuckDB's, four over-cap sections compare
-by fingerprint and agree byte for byte across the two writers, and both corpus helpers are now
-shown failing — all of it verified twice by an independent reimplementation of the comparator run
-over the committed goldens. The device half never ran: shad-gpu was off the network for the whole
-task and verda could not be located, so `gpu-result.txt` does not exist and its 26 cases plus the
-coverage guard are honestly red. #235 stays open for that one cycle.
+Solved under its constraints, on both engines. Every corpus line names a `duckdb_oracle`, a case
+per line compares our answer with DuckDB's, four over-cap sections compare by fingerprint and
+agree byte for byte across the two writers, and both corpus helpers are shown failing — verified
+twice by an independent reimplementation of the comparator over the committed goldens. The device
+half ran on nebius-gpu under the host override, not shad-gpu: one cycle recorded 26 sections into
+two `gpu-result.txt` files at cuDF 25.02, and every comparison is green, so no divergence is owed
+a ticket. The 27 formerly red cases pass.
 
 No bandaid, no divergence fixed, no assertion weakened. Three shortfalls, each named rather than
 papered over: step 3's decimal-on-ours-against-double-on-DuckDB's column cannot be approximate on

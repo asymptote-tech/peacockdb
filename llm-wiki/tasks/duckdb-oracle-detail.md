@@ -1743,3 +1743,177 @@ and re-proven.
 nebius-gpu answered before this dispatch: `computeinstance-e00tnrse7ayntnzcyt`, NVIDIA L40S,
 46068 MiB, 0 MiB in use. Disk 86G of 96G used, 11G free — the override's cleanup paragraph is
 live, not hypothetical.
+
+## The device recording cycle, run on nebius-gpu (2026-10-08)
+
+The one thing the task never did. `gpu-result.txt` now exists for both datasets and the 27 red
+cases are green. Everything here ran on nebius-gpu's L40S under the host override; every CPU
+number below was measured locally.
+
+### What the cycle recorded
+
+One cycle, the whole device corpus binary, nothing filtered:
+
+```
+rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ dmitry@89.169.109.150:peacockdb-J/
+# on the host, in ~/peacockdb-J, after . ~/peacock-env.sh
+./scripts/build-test-shadgpu.sh --build
+PCK_WRITE_GPU_RESULT=1 \
+  LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib \
+  PEACOCK_TESTDATA_DIR=$PWD/testdata \
+  ./cpp/install/rust-tests/test_gpu_corpus --test-threads=1
+```
+
+**28 passed, 0 failed, in 10.16s.** Two files written, pulled home by rsync rather than
+`--pull-results` (see *Deviations*):
+
+- `testdata/goldens/tpch.sf1/gpu-result.txt` — 28868 bytes, 219 lines, **22 sections**
+- `testdata/goldens/tpcds.sf1/gpu-result.txt` — 3486 bytes, 41 lines, **4 sections**
+
+26 sections for the 26 enabled device cells, no more and no fewer. Both open `cudf=25.02`, so the
+provenance line round-tripped on its first real cycle and `COMMITTED_CUDF_VERSION` reads what the
+binaries were linked against. Query order follows the registry, mode order follows the mode list.
+
+**The fingerprint path is exercised, and it is the strongest single result here.**
+`tpch/filter-project` is the one recorded cell on a `duckdb_fingerprint` line; its section is
+`rows=2402187`, two `nonnull` counts and a SHA-256, and `duckdb_gpu_tpch_filter_project_tp1_single`
+passed — the device's digest over 2.4M rows equals the one `duckdb_result.py` computed
+independently. The other 25 cells sit on `duckdb_exact` (13) and `duckdb_approx` (12 — the
+`q1` and `shuffle-additive-avg` families at five modes each, `shuffle-stddev` and `tpcds/q85`).
+**No cell sits on `duckdb_none` or `duckdb_divergent`**, so not one of the 26 passed by declining
+to compare.
+
+### The 27 red cases, before and after
+
+Measured on the same binary, same flags, before the pull and after it.
+
+| | before | after |
+|---|---|---|
+| `test_cpu_corpus` | 679 passed, **27 failed** | **706 passed, 0 failed** |
+
+All 27 failures carried the one message, counted: `grep -c "does not exist, so no device answer is
+recorded"` → 27. **No divergence. No ticket is owed by this run** — not a wrong answer, not a
+fingerprint mismatch, nothing to file in `corpus-coverage.md` or anywhere else.
+
+### The two guards that were vacuous, shown red against the real file
+
+Both had never seen a file. Each was doctored in place and restored (`cmp` against the backup
+after, both `restored-ok`):
+
+- **the cuDF stamp** — first line rewritten to `cudf=26.02`:
+  `every_committed_gpu_result_file_carries_the_committed_cudfs_stamp` FAILED, and
+  `duckdb_gpu_tpch_q6_tp1_single` FAILED with it at `duckdb_oracle.rs:349`. So the stamp guard is
+  live, not vacuous, and every reader of the file checks it too.
+- **the coverage guard** — the `== q6 mode=tp1-single` section deleted:
+  `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` FAILED with
+  `missing [("q6", "tp1-single")], not an enabled cell []`.
+
+### Item 4's check, which no natural failure could give
+
+The completeness reviewer's note said the ordering guard in `test_module_layout` reads three call
+sites and cannot see a panic reached through something called earlier, so the first real cycle had
+to check: a device cell that fails its `.cpu.txt` comparison must still have its section.
+
+Every cell passed, so there was no natural instance. **One was constructed on the host**, in the
+versioned sandbox so the committed file was never a candidate:
+
+1. `tp1-single-mini.cpu.txt` line 224, `in_rows=[[114160]]` → `[[114161]]`, in the `q6` section;
+2. `PCK_WRITE_GPU_RESULT=25.02 ... --exact gpu_tpch_q6_tp1_single`;
+3. the case FAILED at `corpus_golden.rs:201` with ``  `q6` moved — line 9, column 23 ``;
+4. `gpu-result-25.02.txt` existed anyway, 128 bytes, `cudf=25.02` and **one** `== q6
+   mode=tp1-single` section.
+
+The golden was restored (`cmp` clean) and the sandbox file deleted. The ordering holds in the
+running binary and not only in the source the guard reads.
+
+### The rest of the device set, same host, same build
+
+Run after the recording cycle, sequentially, `--test-threads=1` on every Rust binary. The second
+`test_gpu_corpus` ran **without** the recording variable and left both files untouched — same mtime, same
+size, and `sha256sum` equal to the local copies — which is the ordinary gate shape.
+
+| binary | result |
+|---|--:|
+| `cpp/install/bin/peacock_gpu_tests` | 4 passed |
+| `cpp/install/bin/peacock_plan_tests` | 56 passed |
+| `cpp/install/rust-tests/test_gpu_corpus` | 28 passed |
+| `cpp/install/rust-tests/test_node_timing` | 1 passed |
+| `cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests::` | 536 passed |
+| `cpp/install/rust-tests/peacock_gpu_benchmarks --skip bench_` | 8 passed, 3 filtered |
+
+0 failed everywhere. That is `build-test.md`'s gpu block exactly: 536 + 28 + (8 + 3) + 1 = 576.
+
+The build itself was clean: `./scripts/build-test-shadgpu.sh --build`, **0 warnings**, no error
+line. That also proves the rebase's resolution of `scripts/build-test-shadgpu.sh` — master's hunk,
+with the `/.dockerenv` guard deleted — since the whole build ran through it. Nothing misbehaved.
+
+### The local bar, re-measured after the pull
+
+Every number measured, `--features rust-only -p peacockdb-core`, `--test-threads=2`:
+
+| target | result |
+|---|--:|
+| `test_module_layout` | 18 passed |
+| `--lib` | 657 passed, 2 ignored |
+| `test_cpu_corpus` | **706 passed, 0 failed** |
+| `test_golden_format` | 43 passed |
+| `test_corpus_goldens` | 26 passed |
+| `test_cost_model` | 3 passed |
+| `test_ci_coverage` | 9 passed |
+| `python3 testdata/test_duckdb_result.py` | Ran 14 tests, OK |
+
+Every count is the one `build-test.md` states, so **no wiki count moved and `build-test.md` needed
+no edit**. The diff is two new files and nothing else: `git status --short` shows exactly
+`testdata/goldens/tpch.sf1/gpu-result.txt` and `testdata/goldens/tpcds.sf1/gpu-result.txt`, both
+untracked, neither matched by `git check-ignore`.
+
+### Deferred, by the override
+
+Each skipped on purpose, none blocking:
+
+- **the sf40 pair**, `peacock_tpch_tests` and `peacock_tpchv_tests`. Out by the override, and
+  unrunnable here twice over: `testdata/tpch.sf40` does not exist on nebius-gpu — sf40 lives only
+  on shad-gpu — and `peacock_tpch_tests` reserves 69 GiB against the L40S's 46068 MiB. The staged
+  binaries on the host are from an older build and stale.
+- **`--run-benchmarks`** and the three `bench_` cases inside `peacock_gpu_benchmarks`.
+- **Nsight captures** (`create_nsys_profile.sh`) and any H200 timing.
+
+### Deviations from the dispatch, and why
+
+- **`--pull-results` was not used**, by the override: it ssh-es to shad-gpu and gates on
+  `$REMOTE_STATE/gate.id` there. Two plain `rsync` calls, one file each, brought the files home.
+  `build-test.md`'s `--pull-results` paragraph is still the standing recipe for shad-gpu and was
+  left alone; the override in `tasks.md` is what replaces it while shad-gpu is down.
+- **`--run` was not used** either, same reason; each staged binary ran directly over ssh.
+- **The C++ CPU tier (`ctest -L cpu`, 15 cases) was not re-run locally.** The change is two
+  recorded data files and touches no code, and `peacock_cpu_tests` reads none of them.
+- **The spec's completeness signoff is now false in one sentence** — "the device half never ran
+  ... `gpu-result.txt` does not exist and its 26 cases plus the coverage guard are honestly red".
+  Left unedited: the spec is frozen and its one later write is the signoff itself, so amending it
+  is not a developer's write. The coordinator owns that line and #235's close.
+
+### Host cleanup and a disk change that was not mine
+
+- **What this run removed:** `~/miniforge3/bin/conda clean -a -y` only — 371 tarballs (4.55 GB), 1
+  index cache, 41 packages. Free space 11G → 15G. Nothing else was deleted by this run; neither
+  cuDF env nor `~/peacockdb-J/testdata` was touched.
+- **Something else freed ~28 GB at 17:48**, between the build and the test sweep: `~/peacockdb`
+  went 29G → 991M, losing `cpp/build`, `cpp/build26`, `cpp/install`, `target-cudf-rapids` and
+  `target-cudf-rapids-cuda-12.2`. `who` showed an interactive login on pts/0 from 24.4.100.58 at
+  17:48; this run never wrote outside `~/peacockdb-J` and `~/miniforge3`. Recorded because a
+  `verify-26.02` developer will find the #260 debug build gone and should not read that as rot.
+- **Disk at the end: 59G of 96G used, 37G free.** `~/peacockdb-J` is 22G, of which
+  `target-cudf-rapids-cuda-12.2` is 17G and `cpp/` 4.8G.
+
+### For the next person
+
+- **Nothing on this task is outstanding.** The two recorded files are uncommitted in the working
+  tree and are the whole of the change; they are new files, so a `git add -u` misses them.
+- **The device answers agree with DuckDB on all 26 cells**, so this branch files no new ticket and
+  the `duckdb_oracle` census in `build-test.md` (93 exact / 15 approx / 4 fingerprint / 4 none / 4
+  divergent) is unchanged.
+- **Re-recording is cheap**: ~10 s of device time once the build is warm. Any later task that
+  turns a device cell on or off must re-run the cycle — the writer prunes a cell the registry no
+  longer enables, so the coverage guard goes red until it does.
+- **Float cells move between runs.** Nothing compares this file with its previous version, so a
+  future `git diff` over it that moves only float digits is expected; a moved *section* is not.
