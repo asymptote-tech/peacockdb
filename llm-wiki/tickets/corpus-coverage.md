@@ -15,7 +15,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#199 — a global aggregate over no arrival drops its identity row](#t199)
   - [#55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast](#t55)
   - [#65 — the device's grouping-set id is not DataFusion's value or width](#t65)
-  - [#62 — a DISTINCT beside an avg or a count is refused at planning](#t62)
 - [Sort / Limit](#sort--limit)
   - [#202 — a descending sort key puts its nulls on the wrong end on the device](#t202)
   - [#217 — a sort with `fetch 0` keeps every row on the device](#t217)
@@ -264,62 +263,6 @@ pins flip and `grouping_sets_as_exported` goes; a rollup contract case on both e
 test running the query above; the exec model's fold (`scripts/exec_model/operators/aggregates.py`)
 and its three pins, `{0, 2, 3}` to `{0, 1, 3}`. Cleaner after #189's fix, which stops hashing the
 id; independent of it.
-
-<a id="t62"></a>
-### #62 — a DISTINCT beside an avg or a count is refused at planning
-
-`avg(x), count(x), count(DISTINCT x)` does not plan: the translator refuses any aggregate that
-carries DataFusion's DISTINCT flag, on both backends.
-
-DataFusion's `SingleDistinctToGroupBy` removes the flag only when every other aggregate is `sum`,
-`min` or `max`: its outer level re-applies the same function, and `avg` and `count` are not their
-own merge. So q16, q94 and q95 plan, and q28 keeps the flag. `decompose`
-(`planner/translator/aggregate.rs`) refuses it with `DISTINCT inside … (#62)`. Pinned by
-`a_distinct_beside_a_companion_datafusion_cannot_rewrite_is_refused_naming_62`
-(`planner/tests/join_refusals.rs`); the plan golden reads `refused: … (#62)`.
-
-**Corpus queries:** `tpcds/q28`, six global `avg, count, count(DISTINCT ss_list_price)` blocks
-cross-joined. Refused at every mode on both engines (registry: cpu and gpu `na`). Next, per
-[`reports/corpus-fixes.md` fix 11](../reports/corpus-fixes.md#fix11) and unconfirmed: the cpu cells pass now that #163 has landed,
-and the device cells meet #152, the cross join copying its build side.
-
-**Fix proposed:** [fix 11 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix11), with `62-review.md`. The translator does
-the rewrite DataFusion declines, as two aggregate sequences in `aggregate_sequence`. It applies
-when every DISTINCT aggregate is a `count` of one shared argument `x`. The inner sequence groups
-by `(keys, x)` and runs the other aggregates' inits, shuffled on `(keys, x)` where lanes split;
-it emits state, no finalize. The outer sequence groups by `keys` over that state. Its init
-applies each state column's merge rule from `decomposition()` (`sum` over a count or a sum,
-`min`, `max`) plus `count(x)` for each DISTINCT, then merges and finalizes. The output is
-DataFusion's final schema, so nothing above changes. The DataFusion partial's DISTINCT state is
-ignored. Four traps, the first three still true in the code:
-- Pair the outer stage's state columns with `rule.state` by position, not by tag.
-  `declared_nullable` (`translator/aggregate.rs`) looks each up as `[tag]`, and this engine's own
-  names (`avg(…)$sum`, `$count`) do not match, so q28's `avg` would be refused as drifted.
-- Take each outer column's argument type from the inner stage's declared type at its position,
-  through `state_type(merge_func, …)`. `arg_type` reads `expressions().first()` off the raw input,
-  which in the outer stage is the wrong column or out of range.
-- A `count` companion merged by `sum` answers NULL over an empty keyless input, where SQL says 0.
-  Declare every from-state column nullable, and finalize a count companion as
-  `CASE WHEN o IS NULL THEN 0 ELSE o END`; `plan/aggregates.rs`'s count finalize is the bare
-  column today.
-- Refuse grouping sets under a DISTINCT. Also refused: a Welford state (`stddev`, `var`), which has
-  no plain merge, and a DISTINCT over two arguments (#144).
-
-Tests: the refusal pin becomes a plan test of the two sequences. An end-to-end case, red before
-the fix: `select count(ss_customer_sk), count(distinct ss_customer_sk) from store_sales where
-ss_quantity < 0;` (tpcds) answers `0, 0`.
-
-The wire's `AggregateFuncNode.distinct` goes in the same change, with the C++ guard that reads
-it (`aggregate.cpp`, "DISTINCT aggregate … see #62"). Nothing sets it, before or after this fix:
-the translator refuses DISTINCT and `PlanAgg` has no field for it; `aggregate_writer.rs` writes
-`false`; the three `CreateAggregateFuncNode` calls in `cpp/tests/gpu/test_plan_executor.cpp`
-pass `false`; every `peacock_executor_begin_plan` caller hands it `recipes.bytes()` from that
-writer. Mark the field `(deprecated)` in `gpu_plan.fbs`, so `alias` and the fields after it keep
-their slots and both generated sides lose the accessor. Delete the writer's `distinct: false`,
-the guard, and the argument in the three gtests. FlatBuffers omits a `false` at its default, so
-`recipe-payloads.txt` should not move; confirm with the payload test. The report prefers keeping
-the guard with a corrected comment (`hacks-audit.md` §10); deleting it is chosen here, since
-nothing can set the flag.
 
 ## Sort / Limit
 
@@ -998,8 +941,8 @@ Expected divergences, to declare or to normalize in the comparator:
 - **An empty answer.** `tpcds/q17` renders with no header on our side, the cpu emitting no batch
   (#205), so its column names and types go unchecked; DuckDB prints them. Equal as zero rows; a
   candidate ticket to render the declared schema.
-- **Queries only DuckDB answers** (18, tpcds): the window queries our planner refuses (#143),
-  q27 and q72 (#23), q28 (#62). Not compared.
+- **Queries only DuckDB answers** (17, tpcds): the window queries our planner refuses (#143),
+  q27 and q72 (#23). Not compared.
 - **Queries neither side checks** (10). Over the 262144-byte cap on both: tpch q16, anti-join,
   filter-project, semi-join. Not enabled on ours: tpch q11 and q22, tpcds q24 and q54 (#190);
   DuckDB answers them. **The spec for this ticket decides what to do about the over-cap
@@ -1010,7 +953,7 @@ Expected divergences, to declare or to normalize in the comparator:
 <a id="t262"></a>
 ### #262 — the DISTINCT lowering's device cells have never run
 
-The DISTINCT lowering (distinct-companions, chain K, closes [#62](#t62)) is built and proven on
+The DISTINCT lowering (distinct-companions, chain K, closes [#62](../archive/archived-tickets.md#t62)) is built and proven on
 the cpu only: chain K runs without a GPU so as not to contend with chain J for one. Its plans
 reach the wire — a two-stage aggregate whose outer init runs merge aggregators over state, a
 `__distinct_arg` key, a narrowed grouping id — and no device has run one. A device answer could

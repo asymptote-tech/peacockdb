@@ -110,10 +110,6 @@ instead of failing — the one decode in the file that is not exhaustive.
 Fix: narrow the name sets to what the writer emits, and make an unmatched name throw everywhere
 rather than in two of four functions.
 
-The `distinct` guard beside them, unreachable because the planner refuses DISTINCT and the writer
-always writes `false`, had its comment corrected 2026-09-28; its deletion with the field is
-[#62](../tickets/corpus-coverage.md#t62)'s.
-
 ### 12. Small ones, no fix needed beyond a line
 
 - `driver/scheduler.rs:26` keeps `lane_count` solely for a `debug_assert!`; in a release build

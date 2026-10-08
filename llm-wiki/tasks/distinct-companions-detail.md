@@ -247,3 +247,38 @@ Two things to carry into review:
 
 Noted and not filed: #65 is 44 lines against the 30-line cap for a deferred-fix ticket. It was over
 before this task added a clause, and trimming it here would be scope creep.
+
+### 2026-10-08 — review round 1: 0 blocking, 3 important, 5 nits
+
+The reviewer could not fault the lowering itself: every trap the spec names is built in
+structurally rather than advisorily, the inner/outer split holds for all five admissible
+companions, each stripped cast is injective (including the `Decimal128(p ≤ 15) → Float64`
+boundary, which it re-derived), the grouping-set bit order and the 8/16/32 width boundaries check
+out against DataFusion 45's `group_id_array` and `grouping_id_type`, and the inserted goldens'
+measured row counts and answers cross-check arithmetically — `distinct-functions`' `stddev` of
+1..50 is exactly `sqrt(10412.5/49)` and its `sum_distinct_qty` 1275.00 is 50·51/2.
+
+**Handled by me, all markdown or ticket work:**
+
+- **#62 archived.** Its body stated three things this branch made false, so it moved to
+  `archive/archived-tickets.md` as Done, trimmed of the now-implemented "Fix proposed" block and
+  carrying what closed it. The index bullet is gone, `tickets.md`'s corpus-coverage row is 32 with
+  #62 out of the list, and the header is 114 — every row's declared count still equals its list
+  and the column sums to the header. The three live links into the old anchor moved to the archive
+  (`complete-coverage.md`, the board). `distinct-companions.md:5`'s link is left alone: the spec is
+  frozen and the signoff is its one permitted later write.
+- `corpus-coverage.md`'s "Queries only DuckDB answers" list is 17 with q28 dropped, since q28 now
+  runs on the cpu at five modes.
+- `reports/hacks-audit.md` §10's closing paragraph, which deferred the `distinct` guard's deletion
+  to #62, is cut — the guard is gone in this branch.
+
+**Routed to the developer:** the `data_fusion_disabled` guard gap (a corpus line can take the
+keyword and get five green cells checking no answer, linked to the end-to-end case by a comment
+only), `corpus.rs`'s two doc blocks still counting three oracles and claiming the tier stops every
+wrong answer, and four nits — two over-cap in-body comments, two needlessly `pub(crate)` items, an
+unused `#[derive(Clone)]`, and the #144 refusal message, which a `Float32` argument reaches with
+wording about a second argument where the shape has one.
+
+Not changed, and deliberately: `keeps_distinct` does not admit `Float32 → Float64`. The cast is
+injective, but the spec's admitted list is frozen and does not name it, so widening the classifier
+is the human's call. The refusal message is what gets fixed.

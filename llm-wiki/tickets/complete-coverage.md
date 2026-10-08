@@ -71,7 +71,7 @@ planner refuses the shape at plan time.
 `stddev(y), count(DISTINCT x)` does not plan, on either backend. Every other companion of a
 DISTINCT does.
 
-distinct-companions (chain K, closes [#62](corpus-coverage.md#t62)) lowers a DISTINCT in two
+distinct-companions (chain K, closes [#62](../archive/archived-tickets.md#t62)) lowers a DISTINCT in two
 stages. The inner stage groups by `(x, keys)` and runs the companions' inits. The outer stage's
 first node reads two kinds of input: the DISTINCT aggregate reads values, and the companions
 read the inner stage's state. A node has one phase (`AggregateBody`'s `Phase`, the wire's
