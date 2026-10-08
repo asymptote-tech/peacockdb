@@ -212,3 +212,38 @@ red cells are an existing ticket's known shape, matched by signature.
 #65 runs to 44 lines against the 30-line cap for a deferred-fix ticket. It was already over
 before this task added one clause to it, and trimming it would be scope creep here — but it is
 the longest ticket in the file and the next reader of it pays for that.
+
+### 2026-10-08 — round 1 green, PR #171 open
+
+All seven plan tasks closed. `--lib` 616 passed / 2 ignored, `test_cpu_corpus` 567,
+`test_corpus_goldens` 26, `test_cost_model` 3, `test_ci_coverage` 9, `test_module_layout` 17,
+`test_golden_format` 26; the ffi rung 4 plus the payload test through `scripts/cargo-cudf.sh`;
+`scripts/build.sh` 20/20 with zero warnings and `ctest -L cpu` 1/1. Every test was watched red
+first, including the empty-keyless case, which failed with the `(#62)` refusal before the lowering
+existed.
+
+Committed as `d5c9fd7c`, pushed, PR #171 against `ENS-guard-checks` (base verified, 2 commits).
+
+Goldens: I audited the deletions mechanically rather than taking the report —
+`git diff <file> | grep -c '^-[^-]'` over every changed path under `testdata/` is 1 for each of the
+five `tpcds.sf1/*.plans.txt` (q28's refusal line) and 1 for `cost-registry.csv` (q28's row
+rewritten), and 0 everywhere else. `recipe-payloads.txt` does not appear in the diff at all; the
+developer also re-derived its sha256 after a forced `UPDATE_CANONICAL=1` regeneration and it did
+not move. The new `translator/aggregate/` directory holds exactly `distinct.rs` and `tests.rs`.
+
+Two things to carry into review:
+
+- Two deliberate divergences from the plan. `distinct.rs` uses `pub(crate)` rather than the plan's
+  `pub(super)`, since `coding-style.md` says `pub(super)` is never needed and the tree holds none.
+  And the plan's corpus steps are in the wrong order: `authoritative_mode` reads
+  `cost-registry.csv` rather than `corpus_cases.inc`, so with q28's cpu cells still `na` the result
+  sections are silently not written. The working order is registry → plan goldens →
+  `PCK_UPDATE_SECTIONS=1` corpus.
+- `rollup-distinct`'s three tp4 cpu cells are off on the existing #189, its signature matched
+  verbatim (`Unsupported data type in hasher: UInt8` out of the comet murmur3 hasher). No new
+  ticket; `189` stays on the registry row, as the spec directs.
+- The ffi rung needs `LD_LIBRARY_PATH` or it exits 127 on `libpeacock_gpu.so`, which reads like a
+  red test and is not. `build-test.md` documents it.
+
+Noted and not filed: #65 is 44 lines against the 30-line cap for a deferred-fix ticket. It was over
+before this task added a clause, and trimming it here would be scope creep.
