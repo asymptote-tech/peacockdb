@@ -234,7 +234,9 @@ plans on 45 as `CAST(__grouping_id AS Int32)` and answers the device's bits.
 `cudf::numeric_scalar<int32_t>`. DataFusion 45 folds `(acc << 1) | is_null`, first key highest
 (`aggregates/mod.rs`), at the width `Aggregate::grouping_id_type` picks: a two-key rollup is 0, 1,
 3 there and 0, 2, 3 here. The merge above only needs one id per set, so it is right; every other
-reader is not. The schema validator refuses the width. Pinned by four `bug_` cases — two in
+reader is not. `GROUPING(k1, …, kn)` over the full key list plans on 45 as
+`CAST(__grouping_id AS Int32)` and answers the device's bits, a silent wrong answer. The schema
+validator refuses the width. Pinned by four `bug_` cases — two in
 `gpu_tests/aggregate_cases.rs`, whose `grouping_sets_as_exported` swaps both the bits and the
 type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mod.rs`.
 `GROUPING()` over a subset or a reordering of the keys is refused on the device (#230). DataFusion
@@ -242,12 +244,15 @@ type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mo
 the device's id is doubled and at 8, 16 or 32 keys the project above the outer stage overflows
 the cast; the fix below covers both.
 
-**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`, tpcds q5,
-q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. All but q5 reach it on a device, all five
+**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`,
+`tpch/rollup-distinct`, tpcds q5, q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. All but q5 reach it on a device, all five
 device cells of each off here, the validator refusing the width at the first `GpuAggregate`; q5
 meets [#210](#t210) first. None is off on #189 or #206 any more: the shuffle stopped hashing the
 id and the kernel has its boolean arm. The value shows only through `GROUPING()`, and q70 and q86, its corpus users, are
-window queries that never run.
+window queries that never run. Simplest (from [`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14)):
+`select n_regionkey, n_nationkey, grouping(n_regionkey, n_nationkey) as g, count(*) from nation
+group by rollup (n_regionkey, n_nationkey);` (tpch): 31 rows with g in {0, 1, 3} on the cpu; the
+device answers the five subtotal rows with g = 2.
 
 **Fix proposed:** [fix 14 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix14), in C++ alone. A static
 `grouping_id_column(gid, nkeys, rows)` in `aggregate.cpp` folds `gid = (gid << 1) | masked` into a

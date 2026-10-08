@@ -429,3 +429,212 @@ The developer also repaired a pre-existing torn doc comment in `tests/test_cpu_c
 `each_declarations_two_oracles_suit_each_other`'s doc since `ddf3ca2c`, splitting one sentence
 across two declarations. It was rejoined rather than restored verbatim, since the original was
 already 14 lines against the 10-line cap.
+
+### 2026-10-08 — completeness reading (analyst, "what is missing")
+
+Read as `git diff ENS-guard-checks...ENS-distinct-companions`, against the spec's Scope,
+Restriction, Tests and Verification bar, `architecture.md` and `build-test.md`. No code built or
+run. **Three items: one test gap, two stale ticket bodies. Nothing blocking.**
+
+#### `architecture.md`: four sentences this branch falsified
+
+The three places Scope names are true as written. I checked each claim against the code: the
+widening-cast list matches `keeps_distinct`; the inner stage's `(x, keys)` with `x` first and
+unmasked in every set matches `inner_stage`; the by-position pairing, the two finalize duties and
+the two named refusals match `state_and_init`, `decompose` and `classify`; `grouping_id_type`'s
+8/16/32 boundaries match DataFusion 45 (`datafusion-expr-45/src/logical_plan/plan.rs:3223`); and
+the `(deprecated)` claim holds on both generated sides — the regenerated
+`target/debug/build/peacockdb-core-*/out/gpu_plan_generated.rs` contains the string `distinct`
+zero times. "Node display" is unaffected.
+
+Four sentences elsewhere are now false. Two are in sections Scope did not name, which is the
+fourth-section case the coordinator asked about.
+
+1. **"Grouping sets"** — a section the branch did edit, keeping this sentence and moving it into
+   its own paragraph:
+   > The gid's rendering is asymmetric on purpose — the init's `group_by` does not list it,
+   > because there it is a tag being synthesized, while every node above lists it as an ordinary
+   > key.
+
+   The outer stage's first node is an init and it *does* list the gid.
+   `tpch.sf1/tp1-single.plans.txt`, `== rollup-distinct`:
+   `GpuAggregate: group_by=[l_returnflag@1, l_linestatus@2, __grouping_id@3]`, whose recipe is
+   `execute_node(#4 CudfAggregate{Partial}, batch)`. The real rule is "the node that synthesizes
+   the gid does not list it; every node that reads it does" — the outer init reads it.
+
+2. **"The aggregate sequence"**:
+   > The shuffle is skipped only for one-lane inputs or keyless aggregates — skipping on small
+   > key cardinality needs estimators that do not exist (#141).
+
+   There is a third case now, and it is multi-lane and keyed: the outer stage takes
+   `Shuffle::None` because the inner's hash is on a subset of its keys.
+   `tp4-single-mini.cpu.txt`, `== distinct-functions`: the outer `GpuAggregate` is
+   `group_by=[l_returnflag@1], lanes=4, hashed_on=[l_returnflag@0]` with no `GpuEmitPartitions`
+   beneath it. The architecture's own DISTINCT section asserts the opposite of the "only".
+
+3. **"The aggregate sequence"**:
+   > **init** — aggregators over raw rows, emitting *state* columns.
+
+   The outer stage's init runs its aggregators over the inner stage's *state* columns
+   (`sum(avg(lineitem.l_quantity)$sum@4)` in a `CudfAggregate{Partial}`). #261's body states this
+   plainly; this line does not.
+
+4. **"What the Rust side puts in the flat buffers"**, the `CudfAggregate.mode` row — same fact as
+   3, lower confidence that it needs a word:
+   > the phase: `Partial` builds state from values, `Merge` merges state into state.
+
+   A `Partial` can now build state from another node's state.
+
+Judgement call I did **not** count as falsified: the decomposition table's `count` finalize `o`.
+The spec deliberately leaves `plan/aggregates.rs`'s finalize bare and wraps in the translator, and
+the DISTINCT section documents the `CASE` wrap, so the table still describes the registry.
+
+#### 1. (important) No test has a `sum`, `min` or `max` *companion* beside a DISTINCT
+
+Every DISTINCT test in the branch pairs with `count`, `count(*)` or `avg`: the four plan tests,
+the four DataFusion end-to-end cases, q28 (`avg, count`), `rollup-distinct` (`avg, count(*)`) and
+`distinct-functions` (`count(*), avg`). Every `sum` in them is a `sum(DISTINCT …)`, never a
+companion.
+
+That leaves one branch of `decompose` unentered by the suite — the spec's fifth trap, the one the
+review of the spec found:
+
+    if matches!(spec.func, AggFunc::Sum | AggFunc::Min | AggFunc::Max)
+        && state[0].data_type() != &out_type
+    { finished = Expr::Cast { … } }
+
+The shape is reachable: DataFusion's `single_distinct_to_groupby` declines a node as soon as one
+companion is outside `{sum, min, max}` (`is_single_distinct_agg`, verified in 45.0.0), so
+`sum(y), avg(z), count(DISTINCT x)` arrives with the flag and a `sum` companion. On a decimal the
+outer init's `sum` over a `Decimal128(25,2)` state declares `Decimal128(35,2)` where DataFusion
+declares `Decimal128(25,2)`, and only this cast reconciles them. Nothing proves the cast is there,
+and nothing would notice if it stopped being emitted.
+
+The spec's Tests section does not name this case, so the branch is letter-compliant; the gap is
+the contract's. Cheapest close: add `sum(l_extendedprice)` to
+`a_grouped_count_and_sum_distinct_beside_companions_answer_as_datafusion`
+(`src/tests/end_to_end.rs`), which buys the five-mode DataFusion oracle for free, or assert the
+narrowing cast in the existing `avg`-companion plan test.
+
+#### 2. (important) `#189`'s body went stale, and this branch is what staled it
+
+`llm-wiki/tickets/corpus-coverage.md`, #189. Two parts:
+
+- **Corpus queries.** "`tpch/rollup-over-join` and tpcds q5, q18, q22 and q80 … 15 cpu cells" is
+  now six queries and 18 cells: `rollup-distinct`'s three tp4 cpu cells are off on #189, as its
+  registry row says. `build-test.md` was updated for exactly this (`tpch/rollup-over-join` **and
+  `tpch/rollup-distinct`** three by #189); the ticket was not. "The 15 cpu cells turn on" in the
+  Fix proposed is short by three.
+- **Fix proposed**, which now points at code that does not exist: "In `aggregate_sequence`, before
+  `tree = match shuffle`, drop the id's ordinal from `Shuffle::ByHash`'s keys … `keys.retain(|k|
+  *k as usize != group.expr().len())`". `tree = match shuffle` moved to `sequence`
+  (`translator/aggregate.rs:556`), `group` is not in scope there, and the inner stage's id ordinal
+  is n + 1 rather than n. In `sequence` the id is simply the last `key_fields` entry, which covers
+  both stages. The spec foresaw the ordinal ("its `drop_grouping_id` lands in `sequence`, keyed on
+  each stage's own id ordinal (n + 1 in the inner stage)") but assigned only the registry half to
+  "whichever lands second". This task landed first, so the next developer on #189 reads an
+  accurate-looking one-liner against a function that moved.
+
+#### 3. (important) `#65`'s corpus-query line is short by one, and its closing claim is now false
+
+Same file, #65. The prose line the spec asked for landed. The line beneath it did not:
+
+> **Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join` and tpcds
+> q5, q14, q18, q22, q77, q80. None reaches it on the device yet: each cell is off first on #152,
+> #189 or #220.
+
+`tpch/rollup-distinct` is a new corpus plan with a grouping-set id and belongs in that list. And
+"off first on #152, #189 or #220" no longer holds: `rollup-distinct`'s two tp1 gpu cells are off
+on **#65 itself** (registry tickets `65 189`; #189 is tp4 only). #65 went from blocking no cell
+by itself to being the first blocker of two — which is what a rollout reads this line for. (#262
+sits behind it, per #262's own body, so #65's fix alone does not turn them on.)
+
+#### Checked and sound — not findings
+
+- **Every test the spec's Tests section names exists and asserts what the spec says.** Seven
+  plan-shape cases (`translator/tests.rs`: grouped at four lanes with `hash_keys == [1]` and the
+  co-located outer, keyless at four lanes, `x` already a key, the `avg` companion asserting
+  `Decimal128(35,2)`, `count` + `sum(DISTINCT)` on one inner key, the ROLLUP with `!mask[0]` in
+  every set *and* no narrowing cast, the eight-key ROLLUP with `UInt16` narrowed to `UInt8`); five
+  end-to-end cases at all five `MODES`, four against DataFusion and `distinct-functions` through
+  the new `sql_answers_match_oracle`; three `bug_` tests (#144 twice, #261); and the direct
+  `decompose` refusal in the new `aggregate/tests.rs`. The empty-keyless case uses the spec's
+  `ss_quantity + ss_item_sk < 0` predicate, not the prunable one.
+- **The three corpus lines and the registry rows match the spec cell for cell.** 123
+  `corpus_query!` lines expand to 563 cpu cells, exactly what `build-test.md` claims; q28 five cpu
+  cells enabled with `62` struck and `152` named, `rollup_distinct` tp1-only with `65 189`,
+  `distinct_functions` all five with `262`. Plan cells enabled in all three rows, which
+  `plan_goldens.rs` requires now that the sections hold plans (`declared == "enabled"` for a body
+  that does not open with `refused`). Result sections exist for all three hyphenated/new queries;
+  the tp4 cost files carry `skipped: not enabled at this mode` for `rollup-distinct`.
+- **`build-test.md` adds up.** 2362 = 1887 + 94 + 381; cpu 1215 = 619 + 567 + 26 + 3; the
+  `--lib` delta +15 = end-to-end +5, refusals +2, translator +7, the new aggregate module +1;
+  566 = 563 cells + 3 checks, and there are exactly four non-generated `#[test]`s in
+  `test_cpu_corpus.rs`. Golden file counts (tpch.sf1 39, tpcds.sf1 116) are unchanged, correctly:
+  the new queries are sections, not files, and only the 22/99 numbered queries carry a
+  `duckdb_cost.txt`.
+- **Ticket work.** #62 archived with a Done body; #65's line, #195's bullet, #261's pin all
+  landed; #262's body is accurate, including why q28's and `rollup-distinct`'s registry rows do
+  not name it ("carry it too once those close"). `every_refusal_names_a_ticket_that_exists` reads
+  the archive too, so the move is safe. No live wiki page still cites #62 as open;
+  `reports/corpus-fixes.md` and `reports/bugfix-proposals/*` do, and are snapshots ("read at
+  `188c23ce`"), while the live `reports/hacks-audit.md` §10 was correctly cut.
+- **Restriction honoured.** The only C++ change is the guard's deletion and the three gtest
+  arguments; no `cpu_backend/`, no device fix for #65; `recipe-payloads.txt` absent from the diff.
+
+#### Secondary notes, deliberately not raised as findings
+
+- `#228` (DF 55's duplicate ordinal) gains a second consumer of `grouping_id_type` with a +1 key
+  and a narrowing project. Its fix text says the width must come "from the plan's declared type
+  rather than from `nkeys`", which now has to be true in two places.
+- The lowering admits shapes no test reaches that cost nothing today: CUBE and GROUPING SETS
+  (same `group.groups()` path as the tested ROLLUP), a DISTINCT with **no** companion under a
+  grouping set (an inner stage with an empty `aggs` list — the `SELECT DISTINCT` shape, already
+  supported), and the argument being *also* a masked key under a rollup, which is the case
+  `__distinct_arg`'s own column exists for.
+- `count(DISTINCT a+b)` beside an `avg` now makes an expression inner group key with no `GROUP BY`
+  in the SQL, which `aggregate.cpp` refuses at run time ("only ColumnRef group exprs supported").
+  Pre-existing for any `GROUP BY <expr>`, untracked by any ticket, and masked by #262 while the
+  device cells are off.
+- The `corpus_cases.inc` comments name #262 for q28 and `rollup-distinct` where their registry
+  rows name only their own blockers. Consistent with #262's body; the comment is the looser of
+  the two.
+- No GPU run, every gpu cell off under #262, no `duckdb-result.txt` section owed, `rollup-distinct`
+  tp4 cpu off on #189 — all as the coordinator's context states, and none of them findings.
+
+### 2026-10-08 — completeness pass: 0 blocking, 7 important across the two readings
+
+The two readings never saw each other's list and converged on one gap, which is the finding worth
+reading twice: **the fifth trap's cast-back has no test.** The analyst found it as a missing
+companion shape, the reviewer as unreached code at `translator/aggregate.rs:309-318`. Nothing on
+the branch pairs a plain `sum`, `min` or `max` companion with a DISTINCT — q28, both new queries
+and all seven plan tests use `avg` and `count`, whose own finalize casts — so the only live arm,
+a decimal `sum` companion whose outer state widens to `Decimal128(35, 2)` against DataFusion's
+`(25, 2)`, is never entered. The shape is reachable: `is_single_distinct_agg` declines a node as
+soon as one companion is outside `{sum, min, max}`. The spec's Tests section never names it, so
+the branch is letter-compliant and the gap is the contract's. Routed to the developer.
+
+**Applied by me, the markdown and ticket half:**
+
+- `architecture.md`, four sentences the branch falsified. The three sections the spec's Scope names
+  were already true; these are the fourth-section cases. "Grouping sets": the gid asymmetry belongs
+  to the init that *synthesizes* the id, not to inits in general — the outer stage is an init and
+  lists it as a key. "The aggregate sequence", twice: the shuffle is skipped for a third case, a
+  stage already co-located on its keys, and an init reads the columns its stage is handed rather
+  than always raw rows. "What the Rust side puts in the flat buffers": a `Partial` over state
+  columns is how the outer init merges a companion, so the merge rule rides in the aggregator and
+  not in the mode.
+- #189: its corpus list is six queries and 18 cpu cells, and its Fix proposed pointed at code this
+  task moved — `tree = match shuffle` is in `sequence` now, `group` is out of scope there, and the
+  id's ordinal is the stage's own, one higher in the inner stage. The fix now says to read the
+  ordinal off the stage.
+- #65: `tpch/rollup-distinct` added to its corpus list, and its claim that no cell is off on #65
+  first corrected — `rollup-distinct`'s two tp1 gpu cells are. Its five-line enumeration of four
+  pin names became the three files that hold them, since the names are the code's.
+- #144's new paragraph was in the present tense and so contradicted itself: the Float32 arm *would*
+  answer the shape, and does not. Mood fixed.
+
+**Still over the ticket cap and left alone: #65 at 38 lines and #261 at 35, against 30 for a ticket
+carrying a deferred fix.** Both were over before this task. Trimming either means deciding which
+detail of a worked-out device fix to throw away, which is what the cap's own exception exists to
+protect, so it is the human's call rather than mine.
