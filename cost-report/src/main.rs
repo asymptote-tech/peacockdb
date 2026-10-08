@@ -2268,9 +2268,11 @@ mod tests {
         assert_eq!(labels, ["TPC-H", "TPC-DS", "pbench"]);
         let pbench = &datasets[2];
         assert!(!pbench.rows.is_empty(), "pbench has registry rows");
-        // A real ticket index: every pbench row names a ticket, and `ticket_link` exits the
-        // process on one it cannot resolve — which is also this test's second claim, that the
-        // tickets the new rows carry are anchored in the wiki.
+        // A real ticket index: `ticket_link` exits the process on a ticket it cannot resolve,
+        // so this is also the claim that the tickets these rows carry are anchored in the wiki.
+        // Most pbench rows name one; the three the device cycle left clean — `int8-key-group`,
+        // `sparse-probe-left`, `sparse-probe-semi` — name none, and `tickets_html` renders `—`
+        // for them without reaching `ticket_link` at all.
         let links = Links {
             repo: "o/r".into(),
             sha: None,

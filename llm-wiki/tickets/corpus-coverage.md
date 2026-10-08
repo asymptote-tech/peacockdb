@@ -230,19 +230,16 @@ the defect is live, and the throwing call names its phase.
 
 A ROLLUP, CUBE or GROUPING SETS init on the device numbers the id's bits from the other end, and
 holds it as `Int32` where DataFusion declares `UInt8` up to 8 keys, `UInt16` to 16, `UInt32` to
-32 and `UInt64` beyond. `GROUPING()` over the full key list reads the wrong value.
+32 and `UInt64` beyond. `GROUPING()` over the full key list reads the wrong value, silently: it
+plans on 45 as `CAST(__grouping_id AS Int32)` and answers the device's bits.
 
 `aggregate.cpp` sets bit `i` for masked key `i` and builds the column from a
 `cudf::numeric_scalar<int32_t>`. DataFusion 45 folds `(acc << 1) | is_null`, first key highest
 (`aggregates/mod.rs`), at the width `Aggregate::grouping_id_type` picks: a two-key rollup is 0, 1,
 3 there and 0, 2, 3 here. The merge above only needs one id per set, so it is right; every other
-reader is not. `GROUPING(k1, …, kn)` over the full key list plans on 45 as
-`CAST(__grouping_id AS Int32)` and answers the device's bits, a silent wrong answer. The schema
-validator refuses the width. Pinned by the two `bug_grouping_sets_…` cases in
-`gpu_tests/aggregate_cases.rs` (whose `grouping_sets_as_exported` swaps the bits and the type),
-`bug_grouping_sets_hold_an_int32_grouping_id_where_the_plan_declares_uint8`
-(`gpu_tests/aggregate_schema_cases.rs`) and
-`bug_a_rollup_partial_holds_an_int32_grouping_id_where_the_plan_says_uint8` (`wire/gpu_tests/mod.rs`).
+reader is not. The schema validator refuses the width. Pinned by four `bug_` cases — two in
+`gpu_tests/aggregate_cases.rs`, whose `grouping_sets_as_exported` swaps both the bits and the
+type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mod.rs`.
 `GROUPING()` over a subset or a reordering of the keys is refused on the device (#230). DataFusion
 55's duplicate ordinal is #228.
 
@@ -250,10 +247,7 @@ validator refuses the width. Pinned by the two `bug_grouping_sets_…` cases in
 q5, q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`, the one that reaches it on a device —
 its two tp1 cells are off here, the validator refusing the width. The rest are off first on #152,
 #189 or #220. The value shows only through `GROUPING()`, and q70 and q86, the corpus's users, are
-window queries that never run. Simplest (from [`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14)):
-`select n_regionkey, n_nationkey, grouping(n_regionkey, n_nationkey) as g, count(*) from nation
-group by rollup (n_regionkey, n_nationkey);` (tpch): 31 rows with g in {0, 1, 3} on the cpu; the
-device answers the five subtotal rows with g = 2.
+window queries that never run; the repro is fix 14's.
 
 **Fix proposed:** [fix 14 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix14), in C++ alone. A static
 `grouping_id_column(gid, nkeys, rows)` in `aggregate.cpp` folds `gid = (gid << 1) | masked` into a

@@ -169,6 +169,27 @@ fn line_builds_the_cli(line: &str) -> bool {
     after_ok && line.contains("cargo build")
 }
 
+/// Does this workflow line RUN `generate_pbench.sh --check`?
+///
+/// A comment is rejected because `fold_continuations` keeps comment lines verbatim, so a
+/// bare `contains` reads a commented-out invocation as coverage — and commenting a step out
+/// is the likelier way it stops running than deleting it.
+fn line_runs_the_pbench_check(line: &str) -> bool {
+    !line.trim_start().starts_with('#') && line.contains("generate_pbench.sh --check")
+}
+
+/// The matcher's own guard, pinning the mode a bare `contains` lets through.
+#[test]
+fn the_pbench_check_matcher_rejects_a_commented_out_invocation() {
+    let live = "          testdata/generate_pbench.sh --check";
+    assert!(line_runs_the_pbench_check(live));
+    let commented = "          # testdata/generate_pbench.sh --check";
+    assert!(
+        !line_runs_the_pbench_check(commented),
+        "a commented-out invocation does not run, and must not read as coverage"
+    );
+}
+
 pub(crate) const PIPELINE: &str = ".github/workflows/pipeline.yml";
 
 /// Does this workflow line actually RUN `--test <name>`?
@@ -665,7 +686,7 @@ fn each_rung_has_its_ci_line_and_the_cli_is_built() {
 fn the_pbench_determinism_check_is_named_by_a_ci_step() {
     let named = workflow_lines()
         .iter()
-        .any(|line| line.contains("generate_pbench.sh --check"));
+        .any(|line| line_runs_the_pbench_check(line));
     assert!(
         named,
         "no workflow line runs `testdata/generate_pbench.sh --check`. pbench's parquet is \

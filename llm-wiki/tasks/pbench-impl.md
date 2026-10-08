@@ -900,12 +900,17 @@ What a later task inherits:
   driver keeps their zero-row scatter output) and are #152/#220; `cross-projection` never reaches
   #207 and is #63's second arm; `exists-null-keys` and `finish-without-probe` are #220, not #152
   and #173; `rollup-small-keys` is the tree's first device cell to reach #65.
-- **`join-backend` inherits 60 cells** (#152 42, #220 18) and **`repartition-keys` 26** (#95 9,
-  #240 14, #206 3), plus #63's 7 and #65's 2.
+- **`join-backend` inherits 60 cells** (#152 42, #220 18) and **`repartition-keys` 29** (#240 17,
+  #95 9, #206 3), plus #63's 7 and #65's 2 — 98 in all.
 - **The comment cap is 63,339 bytes, 2,197 spare, about six rows**, of which #255's three are owed.
 - **The data changed**: `dim` carries `d_ts_ms` and `d_ts_ns`, so every `dim` ordinal from 10 up
   moved and all 17 earlier goldens were regenerated on the new parquet.
 - **Task 1's determinism check** is now guarded by
   `the_pbench_determinism_check_is_named_by_a_ci_step` (`test_ci_coverage.rs`): the shell check
-  still needs DuckDB 1.5.4 and so cannot be a Rust tier itself, but deleting its CI line is no
-  longer silent.
+  still needs DuckDB 1.5.4 and so cannot be a Rust tier itself, but neither deleting nor
+  commenting out its CI line is silent. `test_ci_coverage` is 11 cases: the review round added
+  `the_pbench_check_matcher_rejects_a_commented_out_invocation`, which pins the comment form.
+- **The `dim` guard compares `(name, arrow type)` over 15 key pairs**, excluding each table's row
+  id and measures rather than whitelisting a prefix, so a wrong timestamp unit or a dropped `d_dt`
+  goes red. Both proved red by mutating `gen.sql`; see the review round in
+  [`pbench-detail.md`](pbench-detail.md).

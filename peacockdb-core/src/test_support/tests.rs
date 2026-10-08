@@ -1,7 +1,7 @@
 //! The harness's own facts: the dataset list every other list reads, and the one knob a
 //! dataset moves.
 
-use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
+use datafusion::parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 use super::*;
 
@@ -53,43 +53,55 @@ fn every_corpus_dataset_has_its_data_queries_and_goldens() {
     }
 }
 
-/// `dim` carries a key column of every type `fact` does, which is what lets a join key be
-/// written on any of them. Read off the committed parquet: the data is the deliverable, so a
-/// regeneration that drops a column has to go red here rather than at the query somebody
-/// writes a year later. `d_ts_ms` and `d_ts_ns` were absent for exactly that reason.
+/// `dim` carries a key column of every type `fact` does, name and arrow type both.
+///
+/// Read off the committed parquet, because the data is the deliverable: a regeneration that
+/// drops a column or moves a timestamp unit has to go red here rather than at the query
+/// somebody writes a year later. `d_ts_ms` and `d_ts_ns` were absent for exactly that reason.
+/// The type is half the claim — a `d_ts_ms` written at microseconds keeps its name.
+///
+/// Each table's own columns are excluded by name rather than the shared ones listed, so a
+/// column added to one table and not the other goes red by default.
 #[test]
 fn pbenchs_dim_carries_a_key_column_of_every_type_fact_does() {
-    let keys = |table: &str, prefix: &str| -> BTreeSet<String> {
+    let keys = |table: &str, prefix: &str, own: &[&str]| -> BTreeSet<(String, String)> {
         let path = data_dir_for("pbench", "1").join(format!("{table}.parquet"));
         let file = std::fs::File::open(&path).expect("the committed parquet");
-        let reader = SerializedFileReader::new(file).expect("a parquet footer");
-        reader
-            .metadata()
-            .file_metadata()
-            .schema_descr()
-            .columns()
+        let schema = ParquetRecordBatchReaderBuilder::try_new(file)
+            .expect("a parquet footer")
+            .schema()
+            .clone();
+        schema
+            .fields()
             .iter()
-            .filter_map(|column| {
-                column
-                    .path()
-                    .string()
-                    .split('.')
-                    .next()
-                    .expect("a leading component")
+            .filter(|field| !own.contains(&field.name().as_str()))
+            .map(|field| {
+                let name = field
+                    .name()
                     .strip_prefix(prefix)
-                    .filter(|name| name.starts_with('k') || name.starts_with("ts_"))
-                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        panic!("{table}: {} does not start with {prefix}", field.name())
+                    })
+                    .to_string();
+                (name, field.data_type().to_string())
             })
             .collect()
     };
-    let fact = keys("fact", "f_");
-    let dim = keys("dim", "d_");
+    // The row id, and each table's measures: `fact` is priced in quantities and amounts,
+    // `dim` carries a weight and a name, and neither is a key.
+    let fact = keys("fact", "f_", &["f_id", "f_qty", "f_amount"]);
+    let dim = keys("dim", "d_", &["d_id", "d_w", "d_name"]);
     assert_eq!(
         fact,
         dim,
-        "pbench's fact and dim must carry the same key types: fact has {:?} that dim does \
-         not, dim has {:?} that fact does not",
+        "pbench's fact and dim must carry the same key columns at the same types: fact has \
+         {:?} that dim does not, dim has {:?} that fact does not",
         fact.difference(&dim).collect::<Vec<_>>(),
         dim.difference(&fact).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        fact.len(),
+        15,
+        "the key columns pbench.md's data table lists"
     );
 }

@@ -304,7 +304,7 @@ adaptive replanning existing at all.
 
 **Corpus queries:** the skew is in pbench's data — `fact.f_k` is 5% NULL — and shows in the
 goldens, not in an answer, so no registry row carries it. `pbench/inner-join-hot-keys` at the
-three `tp4` modes: probe lanes of 2160, 2413, 6538 and 8889 rows, the 1000 nulls in one of them.
+three `tp4` modes: probe lanes of 2160, 2413, 6538 and 8889 rows, the 1034 nulls in one of them.
 
 <a id="t159"></a>
 ### #159 — RightSemi/RightAnti with a residual filter has no cuDF path

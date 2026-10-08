@@ -1366,7 +1366,7 @@ committed parquet, and every one of the 17 goldens derives from it — including
 `gpu-result.txt` the cycle writes. So the data lands first, the goldens are regenerated on it, and
 only then does the device cycle run. Running the cycle first means running it twice.
 
-**Why a cell cannot just be "run".** `test_gpu_corpus.rs:28` expands a `none` gpu-modes line to
+**Why a cell cannot just be "run".** `test_gpu_corpus.rs:27` expands a `none` gpu-modes line to
 nothing at all, so there is no filter and no variable that reaches an off cell — the declaration is
 the only switch. A cycle therefore edits `corpus_cases.inc` to declare the cells it intends to
 measure, runs them, and then settles each line on what it measured. That is also why the last
@@ -1409,7 +1409,7 @@ the 30, and the merge writer drops the other 18 (`merged_cells`). The committed 
 
 ### What "running a cell" costs, measured
 
-`test_gpu_corpus.rs:28` expands a `none` gpu-modes line to nothing, so the declaration is the only
+`test_gpu_corpus.rs:27` expands a `none` gpu-modes line to nothing, so the declaration is the only
 switch — but there is a second, harder constraint nobody had named: **`every_device_cell_has_a_cpu_cell_at_the_same_mode`
 forbids a gpu cell whose cpu twin is off.** Of pbench's 300 gpu cells (60 rows × 5; it was 295
 before `int8-key-group`), 15 are `na` on the three commented-out float rows, and **157 of the
@@ -1455,9 +1455,10 @@ mode, so not declarable.
 | `uint-key-group` | on | on | — | — | — |
 | `uint-key-join` | on | 152 | — | — | — |
 
-Totals: **30 on, 98 off, 128 run.** By ticket, the 98: #152 42, #220 18, #95 9, #240 14 (9 at the
-hash kernel, 5 the wire refusal `timestamp-s-key-group` already declared in `NOT_RUNNABLE`), #63 7,
-#206 3, #65 2.
+Totals: **30 on, 98 off, 128 run.** By ticket, the 98, re-counted off the table above: #152 42,
+#220 18, #240 17 (12 at the hash kernel — the three `timestamp-*-key-group` rows and
+`ts-key-join`, three tp4 cells each — plus 5 the wire refusal `timestamp-s-key-group` already
+declared in `NOT_RUNNABLE`), #95 9, #63 7, #206 3, #65 2.
 
 The failure texts, one per class, so the next reader need not re-run anything:
 
@@ -1468,9 +1469,12 @@ The failure texts, one per class, so the next reader need not re-run anything:
   `exists-null-keys`'s cpu golden reads `batch_rows=[[0,0,0,0,0,0,0,0,0,0,0,1950]]` against the
   device's `[[1950]]`; `ts-key-join`'s reads `[[8192,8192,…]]` against `[[100000]]`. Where the rows
   happen to land in one cpu batch anyway the only trace is `output_bytes`: `inner-join-hot-keys` at
-  `tp1-single` is 553644 on the cpu against 553638 on the device, which is three extra validity
-  bytes per column over four cpu batches. That is why five of these cells look like a six-byte
-  disagreement and are the same defect.
+  `tp1-single` is 553644 on the cpu against 553638 on the device. Both are exactly
+  `16 × 34070 + 2 × validity`, two `Int64` columns at a validity byte per eight rows, and a
+  validity bitmap rounds up to a whole byte per batch: the cpu's eleven batches
+  (`batch_rows=[[3128,3156,3189,3695,3219,3104,3212,3141,3384,3403,1439]]`) need 4262 bytes per
+  column where the device's one batch needs 4259, and 2 × 3 is the gap. That is why five of these
+  cells look like a six-byte disagreement and are the same defect.
 - **#95 / #206 / #240 at the kernel** — `spark_hash_partition.cu:179: peacock spark_partition_ids:
   unsupported key column cuDF type_id=N`, with N 27 (decimal128), 11 (bool), 14/15/16 (timestamp
   ms/us/ns).
@@ -1505,9 +1509,9 @@ The whole return on the round. Each one is now a registry tag.
 6. **`rollup-small-keys` fails on #65, which the row did not carry.** It is the first corpus cell in
    the tree to reach #65 on a device; #65's text said none did. Tag `189` → `65 189`.
 
-Four more rows gained `220` at `tp1-single` on top of the ticket they already carried —
-`inner-join-hot-keys` (already had it), `not-not-in`, `not-or-not-in`, `right-join-null-keys`,
-`decimal15-key-join` and `ts-key-join`. #220's registry-row count went 82 → 97, which was already
+Five more rows gained `220` at `tp1-single` on top of the ticket they already carried —
+`not-not-in`, `not-or-not-in`, `right-join-null-keys`, `decimal15-key-join` and `ts-key-join`;
+`inner-join-hot-keys` carried it already. #220's registry-row count went 82 → 97, which was already
 drift (88 before this round) and is now measured.
 
 ### Every device answer the cycle recorded agrees with DuckDB
@@ -1573,8 +1577,9 @@ blocked at tp4.
   the spec's "not covered by a query" list and is missing from it — spec drift, reported, not
   fixable here because the spec is frozen. What the data shows, measured off
   `tp4-single-mini.cpu.txt`: `inner-join-hot-keys`'s probe lanes take 2160, 2413, 6538 and 8889 of
-  20,000 rows, carrying `fact.f_k`'s 1000 NULL-key rows into one lane for an Inner join that
-  discards them. No registry row carries `137`, and none should: nothing fails on it.
+  20,000 rows, carrying `fact.f_k`'s 1034 NULL-key rows into one lane for an Inner join that
+  discards them — 1034 and not 1000, because `gen.sql`'s `r1 < 0.05` is the intent and 1034 the
+  realization. No registry row carries `137`, and none should: nothing fails on it.
 - **8 — the determinism check.** `generate_pbench.sh --check` still cannot be a Rust test: it needs
   DuckDB 1.5.4, which no Rust tier has, and a test that skips when the binary is absent is not a
   guard. What was actually wrong was that deleting its one `run:` line was silent, so that is what
@@ -1655,3 +1660,120 @@ The spec's "Not covered by a query" paragraph lists #136, #145, #154, #197 and #
 list #137, by its own "change cost or tests, not answers" criterion. The spec is frozen and its one
 later write is spent on the signoff, so this is the human's. It rides naturally with the signoff
 rewrite the previous completeness pass already asked for.
+
+## Review round on the cycle (2026-10-08)
+
+0 blocking, 7 important, 5 nits. Six were mine; the reviewer confirmed every heavy claim
+independently, and found two beyond them: all 30 committed `gpu-result.txt` sections agree with
+DuckDB, and the 28 `golden_exact` ones match `mini.result.txt`.
+
+### I5 — the CI-step guard could not go red for the likeliest way the line stops running
+
+`fold_continuations` keeps comment lines verbatim, so a bare `contains` read a commented-out
+invocation as coverage: prefixing `pipeline.yml:183` with `# ` left the guard green. That is the
+false-coverage mode `build-test.md`'s own entry for this file names, and every other predicate here
+is hardened against its near-miss.
+
+The match is now a named predicate, `line_runs_the_pbench_check`, rejecting a line whose trimmed
+form starts with `#`, and it is pinned by a unit test of its own —
+`the_pbench_check_matcher_rejects_a_commented_out_invocation` — on the pattern
+`line_matcher_rejects_both_false_coverage_modes` already set, because a hardening proved once by
+hand is one the next refactor is free to undo. That test is why `test_ci_coverage` is 11 and not 10.
+
+Red-green, three ways: the new unit test failed before the predicate was hardened and passes after;
+commenting out `pipeline.yml:183` reddens
+`the_pbench_determinism_check_is_named_by_a_ci_step` and restoring it greens it; and deleting the
+line outright still reddens it, as the previous round proved.
+
+### I6 — the `dim` guard asserted names, not types, and skipped a key pair
+
+Two holes, both real. A `d_ts_ms` regenerated at the wrong *unit* keeps the name `ts_ms`, and a
+timestamp unit is the exact class of defect finding 7 was about. And the `k*`/`ts_*` prefix filter
+excluded `f_dt`/`d_dt`, which the spec's data table lists among the hashable key types and which
+`spark_hash_partition.cu:180` takes as `DATE32`.
+
+The set is now `(name, arrow type)` pairs read through `ParquetRecordBatchReaderBuilder`, so a unit
+shows as `Timestamp(Millisecond, None)` against `Timestamp(Microsecond, None)`. **The filter is
+gone and is an exclusion instead** — each table's row id and its own measures (`f_qty`, `f_amount`;
+`d_w`, `d_name`) — so "must match" is the default and a column added to one table and not the other
+goes red without anyone widening a whitelist. That takes the compared set from 13 pairs to **15**:
+`dt` and `s` join the thirteen, both agreeing in type, and a count assertion pins the 15 so the
+exclusion list cannot quietly swallow a pair. Nothing else needed excluding and no pair is
+special-cased.
+
+Red-green by mutating the generator, since the guard reads committed data and that is the only
+input it has:
+
+- `d_ts_ms` written `::TIMESTAMP` instead of `::TIMESTAMP_MS` → red, naming
+  `("ts_ms", "Timestamp(Millisecond, None)")` against `("ts_ms", "Timestamp(Microsecond, None)")`.
+  The old name-only guard was green on this.
+- `d_dt` deleted from `gen.sql` → red, naming `("dt", "Date32")`. The old filter never looked at it.
+
+`gen.sql` was restored from a backup taken before the first mutation, regenerated, and
+`dim.parquet` checked back to its committed sha256 (`4902c102…`) with `generate_pbench.sh --check`
+green after it.
+
+### The four record fixes
+
+- **I1** — the by-ticket distribution of the 98 summed to 95. `ts-key-join`'s three tp4 cells are
+  `240` in the table and the parenthetical did not reach them, so #240 is **17**, not 14, and
+  12 of those are the hash kernel (the three `timestamp-*-key-group` rows and `ts-key-join`, three
+  tp4 cells each) against 5 for the wire refusal. The same undercount made `repartition-keys`
+  inherit 26 where it inherits **29**; both files now add to 98.
+- **I4** — `fact.f_k` holds **1034** nulls, not 1000: `r1 < 0.05` is the intent, 1034 the
+  realization. The lane figures were exact.
+- **N1** — five rows gained `220` on top of what they carried, not four; `inner-join-hot-keys`
+  carried it already.
+- **N4** — the arm that expands `none` to nothing is `test_gpu_corpus.rs:27`.
+- **N5** — the six-byte gap is not "four cpu batches". Both figures are exactly
+  `16 × 34070 + 2 × validity`: eleven cpu batches round their validity bitmap up to 4262 bytes per
+  `Int64` column where the device's one batch needs 4259, and 2 × 3 is the gap. Derived and checked
+  against both committed numbers.
+
+## The review round, as the coordinator routed it (2026-10-08)
+
+**0 blocking, 7 important, 5 nits**, on the two commits `d7ecbc00..d64c1f9d`. The reviewer
+re-derived rather than read, which is the standard this branch has kept: it recomputed all 128
+`.cost.txt` sections from their sibling `.cpu.txt` and `cost_model.conf` with zero mismatches,
+re-summed every tier of `build-test.md` from the declarations, checked all eleven ticket-index rows
+against their files' anchors, and verified `gpu-result.txt`'s 30 sections against the enabled set in
+both directions. Beyond the claim it also found that **all 30 committed sections agree with
+DuckDB** and the 28 `golden_exact` ones match `mini.result.txt` exactly, so those cells pass their
+cpu comparison too.
+
+Split by whose file it was. Two code findings and the four record fixes went to the developer, whose
+section above records them. Six were mine:
+
+- **I2** — `build-test.md`'s enumeration of the 30 device cells described 31, `uint-key-join` being
+  at `tp1-single` alone and not both tp1 modes. Re-derived from the registry before fixing.
+- **I3** — the `Harness datasets` row moved to 4 and its prose still described three cases. The
+  fourth is now named.
+- **I4's wiki half** — #137's text said 1000 nulls where `fact.f_k` holds **1034**; confirmed with
+  pyarrow over the committed parquet before editing.
+- **N2** — #65 ran to 36 non-blank lines against the 30 a `Fix proposed:` block allows. Trimmed to
+  exactly 30 by saying the `GROUPING()` consequence once and naming the four `bug_` pins by file
+  rather than by test name. No anchor moved, so `ticket_is_open` reads the same set.
+- **N3** — `cost-report/src/main.rs`'s comment claimed every pbench row names a ticket. Three no
+  longer do; the comment now says which and why the test still exercises the index.
+- **The count I5 moved.** The developer's hardening carries its own pinning test, so
+  `test_ci_coverage` is **11**, not the 10 this round first measured. `build-test.md` re-summed:
+  CI guard row 11, second-table Rust 111, Rust **2353**, grand total **2851**, first table 2242.
+  Checked by script — every block header equals its rows and every total its parts.
+
+**I7 is deferred to the signoff, deliberately.** The spec's completeness signoff is false in six
+specifics — 580 KB, 56 corpus lines, 59 registry rows, 123 cpu cells, "every gpu cell off and not
+one run", and #259 still open. The measured figures are **588 KB, 57 active corpus lines (3
+commented out on #243), 60 registry rows, 128 cpu cells on, 30 gpu cells on of 128 run, 18 goldens,
+60 of the spec's 63 queries present**. The signoff is the spec's one later write and this is its
+slot, so it is replaced wholesale when the completeness pass closes rather than patched now. The
+#137 spec drift the developer reported — by the spec's own criterion it belongs in "Not covered by a
+query" and is absent — is named there too, the paragraph itself being frozen.
+
+**CI, read on `2907ed10`, the commit that carries the cycle.** Green on `Changed paths`, both cuDF
+legs, the GPU build, the cost report and the S3 check; `GPU Tests (remote)` red on
+`ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out`, which is the shad-gpu
+outage the override exempts and not a finding. The cost-report job passing is what settles the
+comment-cap risk: the PR comment fits. The board commit `d64c1f9d` has a run of its own and it is
+**vacuous** — documentation only, so `changes` answered `code=false` and every job skipped green in
+seconds having compiled nothing. Worth knowing before `done`, which asserts CI green on the PR: the
+run that counts is the last one over code.
