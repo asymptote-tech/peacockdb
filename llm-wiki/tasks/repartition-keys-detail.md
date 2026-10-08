@@ -293,3 +293,89 @@ can read a stale file and fail. It happened once here and a plain re-run was gre
 regen-time read/write race between libtest threads, not a CI flake — CI never sets the variable —
 so no ticket was filed, but a regen that fails only on that test should be re-run before being
 believed.
+
+## Review round 1 (2026-10-08)
+
+**1 blocking, 2 important, 6 nits.** The reviewer ran no project code; everything is text and
+arithmetic over committed artifacts, which it says per finding.
+
+### Blocking
+
+1. **The fbs append breaks a device-rung gtest written to catch exactly this.**
+   `cpp/tests/gpu/test_plan_executor.cpp:2124` asserts
+   `cases.size() == std::size(fb::EnumValuesDataType())` — its own comment says the list is a copy
+   of the enum so that it fails by count when the enum grows. `cases` holds 20; the fbs now
+   declares 24. No generated header is committed and `cpp/CMakeLists.txt:135` runs `flatc` with
+   `DEPENDS ${FBS_SCHEMA}`, so the very build that compiles the four new `fb_to_type_id` arms is
+   the build where that count is 24: `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot`
+   is red. Nothing in the rust-only loop can see it — the test is `cpp/tests/gpu/`, shad-gpu only,
+   and there is no Rust mirror. **This is a tripwire that fired and was not answered**, which is
+   the regression rule. Fix: four rows expecting a refusal naming the type. `build_scalar`
+   (`cpp/src/expr.cpp:445-483`) has no Timestamp arm and its default throws
+   `"unsupported scalar type: …"`, so a `NULL::TimestampX` literal must refuse today — which makes
+   those four rows a live gate on the new members rather than bookkeeping.
+
+### Important
+
+2. **`build-test.md:35`'s "149 of them running" is wrong and is mine** — I transcribed it from the
+   round's report. The same sentence says 176 lines and 33 out entirely, and 149 + 33 = 182. It is
+   **143**, unchanged by this round: all six queries already ran at the two tp1 modes, so the 18
+   cells are new *cells* on lines that already ran, not new running lines. Nothing asserts the
+   figure, so review is the only thing that catches it. Corrected, and the paragraph re-wrapped —
+   my edit had left two orphan lines.
+3. **`testdata/cost-registry.csv:185`: `pbench/rollup_small_keys`'s five off device cells now cite
+   a ticket that no longer explains them.** After the drop neither engine hashes the gid, so #189
+   is not what holds those cells — #65 is (the device's gid is `Int32` against the declared
+   `UInt8`, and that line is schema-validated) and #206 is (`hash=[f_k8@0, f_kb@1]`, and `f_kb` is
+   Boolean, for which there is no kernel arm). `registry.rs:242` asks only for *some* ticket, and
+   `cost-report/src/main.rs:475` resolves a registry ticket against the archive too, so the day
+   #189 is archived those five cells stay explained by a closed ticket and nothing goes red. The
+   same staleness, lower stakes, on the other five rows. Retag `185` to `65 206`.
+
+### Nits
+
+Process history in code comments at `corpus_cases.inc:81, 197, 225, 234-238` and
+`wire/expr_writer.rs:203` ("was the other, held off…", "#189 is fixed and q80 runs at every cpu
+mode"), against the rule that a comment states today's state and git holds the sequence. #189 says
+"24 cpu cells over seven queries" and it is eight. #189 is 35 lines, over the cap, and its "Fix
+proposed" paragraph now describes code that exists and can go. The new `Rollup's shuffle keys` row
+sits in `build-test.md`'s *subcomponent* group where `aggregate.rs` beside `aggregate/tests.rs` is
+the page's *module unit* pattern. And `serialize.rs:143` names the type twice in one message.
+
+### The positive half, which is most of the round
+
+The golden movement **holds, by three independent routes**: 69 sections moved, 0 added, 0 removed,
+split exactly as reported, and the six `.result.txt` sections changed one line each,
+`mode=tp1-rowgroup` → `mode=tp4-sized`. The author stamp is not decoration — `corpus.rs:466`
+compares body *and* `mode=` line, and only the authoritative mode writes — so the committed body
+is now tp4-sized's answer and is byte-identical to tp1-rowgroup's, over a comparison
+(`batches_to_sorted_str`) that makes it set equality rather than row-order luck. Independently,
+each cell checks the live answer against plain DataFusion at one partition, so tp1 and tp4 both
+green against the same oracle means tp4 equals tp1. And the top node's `output_rows` is identical
+across all five modes for all six queries and matches each committed table's row count.
+
+**No `__grouping_id` survives in any `hash=` or `hashed_on=` list** in any of the 15 plan goldens,
+while the `group_by=` and `schema=` mentions remain — the merge still groups on it, which is the
+correctness argument, and the validator permits it by subset rather than equality. **tpcds q14 is
+right not to have moved**: at all three tp4 modes its rollup is `lanes=1` with no
+`GpuEmitPartitions` at all. The five tpcds queries whose tp4 plans moved are exactly q5, q18, q22,
+q77 and q80.
+
+**Both held-back decisions were right.** Deleting the `NOT_RUNNABLE` step: the guard asserts
+`carried == MODES.len()` per declaration, so an absent query gives 0 and goes red; and both halves
+hold today, exactly one `not runnable` query across all 15 goldens and exactly that one entry in
+the list. Holding #201: `gpu_tests/` holds only `mod.rs` and `murmur_conformance.rs`, so there is
+no cpu-only substitute — a cpu-side murmur test would be a fourth copy of the rule, which is what
+#201 is about. **The other two fences hold, verified cell by cell**: exactly 18 registry changes,
+all `cpu_tp4_*` on the six named rows, no gpu cell or ticket column touched, and no lane-rule file
+in the diff at all.
+
+**`architecture.md` was already waiting for this** — its "the merge groups on keys + gid and the
+shuffle still hashes the keys alone" was false on the base and is true now. And every other count
+on `build-test.md` reconciles, "692 cells" recomputing exactly as 135×5 + 7×2 + 1×3.
+
+**For the signoff:** the spec's Registry says #189's "15 cpu cells" over five queries; 18 over six
+landed, `pbench/rollup-small-keys` being the sixth, which the frozen spec predates. Enabling it is
+right — comet hashes Boolean as i32, so the cpu shuffle takes `f_kb` — but it is more than the
+spec's paragraph says and the signoff should name it rather than let the arithmetic look wrong
+later.
