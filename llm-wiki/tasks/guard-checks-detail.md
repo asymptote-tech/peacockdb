@@ -119,3 +119,28 @@ Two things to carry into review:
 - `build-test.md` carried a second stale count the plan did not predict: `Recipes per join type`
   said 23 where `wire::tests` has 24. Fixed in place, which is why the page lands at Rust 1860 /
   grand 2335 / `--lib` 604 rather than the plan's 1859 / 2334 / 603.
+
+### 2026-10-08 — review round 1: 1 important, 2 nits, 0 blocking
+
+**important — the verification bar was not fully met.** The spec's bar says rust-only "`--lib`,
+every target green"; the round-1 evidence covers `--lib`, `test_ci_coverage` and
+`test_module_layout` but not `test_cpu_corpus` (555), `test_corpus_goldens` (26) or
+`test_cost_model` (3). `validate` is on the planner's hot path (`planner/pipeline.rs:38`, `:73`),
+so every corpus query runs the new refusal. Not suspected breakage — all seven pass-through
+constructors set `schema: input_schema(...)`, so the check cannot fire on a constructor-built
+tree, and #233 itself records that no planned tree has the shape. Bar compliance only.
+
+**nit** — `cpp/tests/cpu/test_executor.cpp:212-214`: the three-line comment that introduced the
+four old `ClampRowRange` tests now sits above the inserted `namespace {` holding the file reader,
+not above the test it describes.
+
+**nit** — `testdata/fixtures/README.md:3-4`: the reworded opening left "The numbers are a real q6
+section's shape, shortened." standing as a directory-wide claim when it is true of
+`sectioned-cost.txt` alone.
+
+The reviewer confirmed the three guards can all go red, re-implementing both fixture readers and
+both clamps over the committed table and six mutations (every mutation reds both sides on the same
+line number), enumerated the eight node kinds the #233 check reaches and found no remaining
+pass-through gap, reasoned the `MockUnload` redirection has bite from the committed code, read both
+GPU-host provisioning edits as correct, and summed every `build-test.md` header against its rows
+(all four exact).
