@@ -1268,7 +1268,7 @@ from `testdata/cost_model.conf`. Every real category is 1.0 today, so the total 
 record it. Three placeholder phases sit at 0.0 and one category names no node at all — kept
 because dropping a category rewrites the line list of every committed cost golden.
 
-**The DuckDB oracle** runs each query twice — a deterministic profile with join-filter
+**DuckDB's cost oracle** runs each query twice — a deterministic profile with join-filter
 pushdown off, then a pass reading only the dynamic-filter bounds — and combines them with
 parquet row-group statistics. `storage_read_total` is deliberately in the same units as a
 source node's `output_bytes`, decoded Arrow bytes of the surviving row groups' referenced

@@ -51,6 +51,8 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#235 — no independent oracle checks the result goldens](#t235)
   - [#262 — the DISTINCT lowering's device cells have never run](#t262)
   - [#281 — limits' and empty-sorts' device cells have never run](#t281)
+  - [#253 — the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
+  - [#254 — `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
 
 ## Welford aggregation
 
@@ -1027,3 +1029,54 @@ from the cpu's, and nothing would say so.
 **Fix proposed:** on a GPU host, once one is free: run the device test tier and those cells;
 each cell passing is enabled, each failing gets the ticket it fails on. Then this ticket drops
 from the registry rows and is archived.
+<a id="t253"></a>
+### #253 — the DuckDB oracle cannot record a divergence it finds on two of its paths
+
+`duckdb_divergent(<ticket>, <positions>)` is how a corpus line records a difference the oracle
+found and a ticket explains. It reaches the per-line cpu comparison and nothing else, so two
+paths can find a divergence and have no way to say so. Both block tasks already on chain J's
+board.
+
+**A device answer that differs from DuckDB while the cpu's matches.** One `duckdb_oracle` per
+line serves the cpu case and every `duckdb_gpu_<query>_<mode>` case, and the two values a
+developer has both go red: `duckdb_exact` fails the device case, and `duckdb_divergent` fails
+the cpu case, because `compare_sections` reports a named column that *agrees* as "stopped
+diverging". An empty position list does the same at the row level. So the only green options are
+to leave the device cell off or to change the harness. This is the shape `gpu-result.txt` is
+keyed by mode for in the first place — a lane split or a shuffle defect shows per mode — and
+[`stale-cells`](../tasks/stale-cells.md) is the next task that can produce one.
+
+**An over-cap section whose fingerprints differ.** `duckdb_fingerprint` takes no ticket and no
+column list, and `compare_sections` routes a fingerprinted section under `duckdb_divergent` to
+"declare `duckdb_fingerprint`" — the error text at `test_support/fingerprint.rs` says
+`duckdb_divergent does not reach this path`. So an over-cap answer is all or nothing: one
+SHA-256 over the rendered rows either matches or the line cannot be green at all.
+[`join-backend`](../tasks/join-backend.md) turns tpch q11's cpu cells on, and DuckDB's side of
+q11 is already a 27,604-row fingerprint with no approximate column, so that task is the first to
+hold a fingerprint nobody has compared.
+
+A third shape reaches the same door: the two writers classing one column differently — a decimal
+on our side against a double on DuckDB's, which the [`duckdb-oracle`](../tasks/duckdb-oracle.md)
+spec's step 3 asks to be approximate and which cannot be, since neither writer can see the
+other's declared type and a fingerprint no longer holds the rows to rehash. Today that is a hard
+error naming both classifiers. No committed section has the shape.
+
+**Fix proposed:** give `duckdb_divergent` a side — which of the cpu and the device diverges — and
+give `duckdb_fingerprint` the optional ticket and column list `duckdb_divergent` already has, so
+a triple or a per-column exemption can carry a known difference while `rows` and the remaining
+columns stay checked. Decide it before `stale-cells` builds rather than inside it.
+
+<a id="t254"></a>
+### #254 — `data_fusion_subset` is the one cpu oracle no test can show failing
+
+[#235](#t235)'s harness item was that the corpus helpers are proven to fail on a wrong answer,
+and `duckdb-oracle` delivered it for two of the three `CpuOracle` variants: `results_match` and
+`result_matches` were split out of their panicking wrappers and are driven by negative cases.
+`CpuOracle::DataFusionSubset` routes to `assert_subset_of_unlimited` (`test_support/corpus.rs`),
+which runs a live DataFusion query and takes no injectable answer, so nothing hands it a wrong
+one and `every_oracle_variant_is_named_by_some_line` is all that holds it.
+
+One corpus line uses it — `tpch/scan-limit`, an unordered `LIMIT` over lineitem whose row set is
+not determined — so the exposure is small and the fix is the same shape as the other two: split
+the comparison from the query, and hand the split a doctored answer that is not a subset.
+

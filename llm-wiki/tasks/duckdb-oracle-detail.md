@@ -1283,3 +1283,70 @@ Seven taken, one argued down, two were the coordinator's.
   places that go red, and they are the whole point of pinning it.
 - The `duckdb_gpu_*` cases over a `data_fusion_subset` line are still unwritten work, not a
   solved problem: the guard refuses the cells, and the failure message says what to build instead.
+
+## Completeness pass — the analyst's reading (2026-10-08)
+
+A fresh analyst over the branch at `6c92f6b7`, asking what is missing. It walked the spec's eight
+items, the Scope table, the Restriction and the Verification bar, and found items 1, 2, 5, 6 and 8
+met, the Restriction holding, and the rust-only bar met including the two cases the bar names by
+hand. Four things are not met.
+
+1. **Nothing holds "the committed `gpu-result.txt` is cuDF 25.02's"** — the file carries no
+   provenance at all. `merged_cells` rebuilds it from `== <query> mode=<mode>` sections and
+   `ordered_sections` drops any preamble, so a 26.02 cycle run with `PCK_WRITE_GPU_RESULT=1`
+   instead of `=26.02` writes the committed file and nothing can tell. Step 4's rule rests on the
+   operator typing the right value. The analyst argues for fixing this **inside the task**, on a
+   scheduling ground that is correct: the file does not exist yet, so stamping the version the
+   writer ran under costs nothing now and costs another whole device cycle once the file is
+   committed. Taken, and dispatched.
+2. **Step 7 is two thirds met.** The step says the cpu helper's negative tests run under each
+   `CpuOracle`; `CpuOracle::DataFusionSubset` routes to `assert_subset_of_unlimited`, which runs a
+   live DataFusion query and takes no injectable answer, so nothing can hand it a wrong one. One
+   corpus line uses it. Filed as **#254** rather than reopening the task, and named in the signoff.
+3. **Step 3's decimal clause is not implemented and the substitute has no escape**, which the
+   reviewer independently agreed is unachievable. The analyst's point is different and sharper:
+   the consequence blocks the next two tasks and was recorded only as a sentence in a file that is
+   deleted at merge. Filed as **#253** with the two other shapes that reach the same door.
+4. **The panic text under `PCK_GPU_RESULT_VERSION` tells the reader to overwrite the committed
+   file.** `duckdb_gpu_case` names the versioned path and then says "Run a cycle with
+   `PCK_WRITE_GPU_RESULT=1`", which is the one thing a verify-26.02 developer must not do. One
+   format string. Taken, and dispatched.
+
+**What chain J will trip over**, which is the part of this reading nothing else produces:
+
+- **`stale-cells`, the very next task, cannot express a device-only divergence** — the shape it
+  exists to produce. One `duckdb_oracle` serves the cpu case and every device case, and both
+  available values go red. #253's first half.
+- **`join-backend` meets a fingerprint nobody has compared.** `duckdb-result.txt` already holds
+  tpch q11 as `fingerprint: rows=27604`, both columns exact, no triple. When that task turns q11's
+  cpu cells on, `mini.result.txt` becomes a fingerprint too and the whole comparison is one
+  SHA-256 over 27,604 rendered `(ps_partkey, value)` rows — all or nothing, because
+  `duckdb_fingerprint` takes no ticket. Nobody has measured our rendering of `value`, since no
+  mode runs it. #253's second half.
+- **`pbench` hits a hardcoded dataset list.** `every_enabled_device_cell_has_its_gpu_result_section_and_no_other`
+  iterates a literal `[("tpch", "1"), ("tpcds", "1")]` instead of deriving the datasets from the
+  registry. pbench lands with its device cells off, so adding `("pbench", "1")` panics on a file
+  the writer will never create, and not adding it leaves pbench uncovered until join-backend turns
+  its cells on — which is exactly what this task is first in the chain to provide. Taken, and
+  dispatched: derive the list, and settle what a dataset with no enabled device cell has.
+  Separately `duckdb_result.py` pins `--dataset choices=["tpch","tpcds"]`, which pbench extends
+  before it can have an oracle at all.
+- **`verify-26.02` is in better shape than expected** — its impl plan already names
+  `PCK_GPU_RESULT_VERSION=26.02` with a `duckdb_gpu_` filter, which keeps the coverage guard out
+  of the run. It hits items 1 and 4 and nothing else.
+- **A routing fact for every later dispatch**: #252 means any task that runs its CPU tier on verda
+  sees `duckdb_tpcds_q17`, `q58`, `q61` and `q66` red for a reason unrelated to that task. Carry it
+  into the dispatch rather than leaving it in a ticket file.
+
+**`architecture.md`:** one sentence falsified, `:1271` — "**The DuckDB oracle** runs each query
+twice" claimed a uniqueness round 2 removed when it renamed the heading at :1259 for the two
+oracles the tree now has. Corrected to "**DuckDB's cost oracle**". The analyst offered `:1108` as
+a second, at low confidence and flagging it as possibly growth; declined on that ground — the
+sentence is not untrue, it merely names the weaker half of what would catch a column-order
+defect.
+
+Two bookkeeping notes from the same reading, neither a finding: the Scope table said "#235
+archived" and #235 is instead kept open with its body cut back to the device cycle, which is
+right given the ceiling and leaves the archival owed to whoever runs that cycle; and the spec's
+optional sixth variant `duckdb_columns` was looked for and not needed — no `duckdb_divergent` line
+is a LIMIT tie — which the spec asked the PR to say, so it is in the signoff.
