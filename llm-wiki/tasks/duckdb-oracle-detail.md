@@ -217,3 +217,25 @@ spec's rule wants.
   pair uniquely. The pairing block now sits on
   `each_declarations_two_oracles_suit_each_other` and the device-cell block on
   `every_device_cell_has_a_cpu_cell_at_the_same_mode`, which is what each describes.
+
+## Round 1 landed (2026-10-08)
+
+Commit `3a6c5343`, pushed, **PR #167** against master, 2 commits. The whole rust-only bar is green
+and the board reads `reviewing`; the developer's own report of what landed, the twelve deliberate
+deviations and the oracle decisions are above this line, written by it.
+
+**The device gap, which `reviewing` does not say.** The 27 `duckdb_gpu_*` cases and
+`every_enabled_device_cell_has_its_gpu_result_section_and_no_other` are red, on a
+`testdata/goldens/{tpch,tpcds}.sf1/gpu-result.txt` that no device has written. shad-gpu did not
+answer ssh at 00:25 or at 02:10 (`ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection
+timed out`); verda does not resolve either. One `PCK_WRITE_GPU_RESULT=1` cycle through
+`build-test-shadgpu.sh --all` plus `--pull-results` is the whole of what is left, and #235 stays
+open until it runs. So this task cannot reach `completeness approved` on a host that does not
+answer, whatever the review finds.
+
+Note for whoever runs that cycle: the device binaries were **never type-checked** on this
+workstation — there is no cuDF here (`~/data/miniforge3/envs/rapids` is absent), so
+`corpus_gpu.rs` and `test_gpu_corpus.rs` were only parsed. Expect to fix compile errors there
+before the cycle runs at all. That is why the device helper's comparison was moved into the
+ungated `device_answer.rs`: it shrinks the never-compiled surface to the live-cpu run, the schema
+check and the `gpu-result.txt` write.
