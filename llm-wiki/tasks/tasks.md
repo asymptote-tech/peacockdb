@@ -169,7 +169,7 @@ The validator checks a pass-through node's column count; the Rust and C++ row-ra
 one shared case table, `testdata/fixtures/row-range-clamp.txt`; the driver's mock calls the
 shipped clamp.
 
-### 2. [`distinct-companions.md`](distinct-companions.md) — closes [#62](../tickets/corpus-coverage.md#t62) — state: rebase needed(building) — PR #171
+### 2. [`distinct-companions.md`](distinct-companions.md) — closes [#62](../tickets/corpus-coverage.md#t62) — state: building
 
 A DISTINCT aggregate lowers to two aggregate sequences beside any per-column companion, with or
 without grouping sets; #144 and #261 refused by name; the wire's `distinct` field deprecated; q28,
