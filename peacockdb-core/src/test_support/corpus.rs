@@ -104,6 +104,9 @@ pub(crate) async fn assert_answer(
 ) {
     let what = format!("{dataset}/{query} at {}", mode.name);
     match cpu_oracle_mode(oracle) {
+        // Nothing to compare against: the query's answer is held by a test naming its own
+        // oracle, not by this session.
+        CpuOracle::DataFusionDisabled => {}
         CpuOracle::DataFusionSubset => {
             assert_subset_of_unlimited(dataset, sf, query, batches, &what).await
         }
@@ -496,10 +499,10 @@ pub(crate) fn result_matches(
 
 /// What a corpus case's answer is compared against.
 ///
-/// Every variant runs the same oracle — plain DataFusion at `target_partitions = 1` — and
-/// what differs is what is asked of it: the whole answer, the whole answer to a tolerance,
-/// or the count and the containment where the SQL determines no more than those. That is
-/// why it is an argument rather than a second kind of case.
+/// Every variant but the last runs the same oracle — plain DataFusion at
+/// `target_partitions = 1` — and what differs is what is asked of it: the whole answer, the
+/// whole answer to a tolerance, or the count and the containment where the SQL determines no
+/// more than those. That is why it is an argument rather than a second kind of case.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CpuOracle {
     /// Exact sorted-string equality. The default.
@@ -516,17 +519,21 @@ pub(crate) enum CpuOracle {
     /// are a sub-MULTISET of the unlimited answer, compared as a multiset because set
     /// membership passes a run that returned one row twice where the oracle has it once.
     DataFusionSubset,
+    /// No DataFusion compare: for a query DataFusion 45 answers wrong or refuses. Its
+    /// answer is held another way, which the line's comment names.
+    DataFusionDisabled,
 }
 
 impl CpuOracle {
-    /// The three, with the keyword each is written as below. One table:
+    /// The four, with the keyword each is written as below. One table:
     /// `every_oracle_variant_is_named_by_some_line` (`corpus/tests.rs`) holds it to the
     /// lines, so a variant nothing uses is deleted rather than kept, and `cpu_oracle_mode`
     /// decodes a keyword through it rather than spelling the set a second time.
-    pub(crate) const ALL: [CpuOracle; 3] = [
+    pub(crate) const ALL: [CpuOracle; 4] = [
         CpuOracle::DataFusionExact,
         CpuOracle::DataFusionApproximate,
         CpuOracle::DataFusionSubset,
+        CpuOracle::DataFusionDisabled,
     ];
 
     /// The keyword a `corpus_query!` line writes for this oracle.
@@ -535,13 +542,16 @@ impl CpuOracle {
             CpuOracle::DataFusionExact => "data_fusion_exact",
             CpuOracle::DataFusionApproximate => "data_fusion_approximate",
             CpuOracle::DataFusionSubset => "data_fusion_subset",
+            CpuOracle::DataFusionDisabled => "data_fusion_disabled",
         }
     }
 
     /// The `rel_tol` handed to the result compare. `None` = exact.
     pub(crate) fn rel_tol(self) -> Option<f64> {
         match self {
-            CpuOracle::DataFusionExact | CpuOracle::DataFusionSubset => None,
+            CpuOracle::DataFusionExact
+            | CpuOracle::DataFusionSubset
+            | CpuOracle::DataFusionDisabled => None,
             CpuOracle::DataFusionApproximate => Some(1e-12),
         }
     }

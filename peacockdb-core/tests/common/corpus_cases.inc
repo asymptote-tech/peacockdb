@@ -19,10 +19,11 @@ corpus_query!(tpch, 1, q1, all_modes, all_modes, duckdb_approx, data_fusion_exac
 corpus_query!(tpch, 1, q14, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q19, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q12, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-// THE DEVICE COLUMN. Every tpch line runs on the device wherever it runs on the cpu, but six:
+// THE DEVICE COLUMN. Every tpch line runs on the device wherever it runs on the cpu, but eight:
 // q11 and q22 at tp4 modes where a keyless merge meets a lane with no arrival (#199), the rollup
-// (#65), mixed-join (#168), nested-limits and scan-limit (#186). The joins' own blockers, #152's
-// side copies and #220's batch splits, went with the join session.
+// (#65), mixed-join (#168), nested-limits and scan-limit (#186), rollup-distinct and
+// distinct-functions (#262). The joins' own blockers, #152's side copies and #220's batch
+// splits, went with the join session.
 corpus_query!(tpch, 1, q13, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q15, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q17, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -99,11 +100,24 @@ corpus_query!(tpch, 1, q7, all_modes, all_modes, duckdb_exact, data_fusion_exact
 corpus_query!(tpch, 1, q8, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q2, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
+// distinct-companions (#62): a DISTINCT aggregate beside a companion DataFusion's own rewrite
+// declines. rollup-distinct puts one under a grouping set, which no other corpus query does; its
+// inner stage shuffles at tp4 on the keys alone, the grouping id dropped as rollup-over-join's is.
+// Both are off on the device at every mode: #262, the lowering's device cells have never run —
+// rollup-distinct on #65 as well. DataFusion 45 refuses stddev(DISTINCT) and answers a grouped
+// decimal avg(DISTINCT) as the plain average, so DataFusion is no oracle for distinct-functions:
+// DuckDB is, and end_to_end.rs's distinct_functions_answer_as_their_hand_lowered_form holds the
+// answer too. The avg columns are decimals ours renders shorter than DuckDB's floats, so both
+// lines' DuckDB compare is the approximate one.
+corpus_query!(tpch, 1, rollup_distinct, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, distinct_functions, all_modes, none, duckdb_approx, data_fusion_disabled, golden_exact, schema_validation_enabled);
+
 // --- tpcds --------------------------------------------------------------------
 // THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu, but
-// eleven: q32 at the tp4 modes (#199), q78 and q2 (#60's `round`), q14, q18, q22, q77 and q80
-// (#65's grouping id), q5 (#210's decimal literal), q17 and q39 (#225's Welford names). The
-// joins' own blockers, #152's side copies and #220's batch splits, went with the join session.
+// twelve: q32 at the tp4 modes (#199), q78 and q2 (#60's `round`), q14, q18, q22, q77 and q80
+// (#65's grouping id), q5 (#210's decimal literal), q17 and q39 (#225's Welford names), q28
+// (#262). The joins' own blockers, #152's side copies and #220's batch splits, went with the
+// join session.
 corpus_query!(tpcds, 1, q41, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q42, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q3, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -261,6 +275,11 @@ corpus_query!(tpcds, 1, q65, all_modes, all_modes, duckdb_exact, data_fusion_exa
 corpus_query!(tpcds, 1, q81, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q85, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q92, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+
+// distinct-companions (#62): q28 is six global `avg, count, count(DISTINCT ss_list_price)`
+// blocks cross-joined, and was refused at every mode until the lowering. Its device cells are off
+// on #262, the lowering's device cells never having run.
+corpus_query!(tpcds, 1, q28, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // --- pbench ------------------------------------------------------------------
 // What tpch and tpcds lack: one query per demonstrable ticket of chain J, planned with the

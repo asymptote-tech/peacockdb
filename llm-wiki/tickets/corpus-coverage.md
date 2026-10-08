@@ -239,7 +239,9 @@ reader is not. The schema validator refuses the width. Pinned by four `bug_` cas
 `gpu_tests/aggregate_cases.rs`, whose `grouping_sets_as_exported` swaps both the bits and the
 type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mod.rs`.
 `GROUPING()` over a subset or a reordering of the keys is refused on the device (#230). DataFusion
-55's duplicate ordinal is #228.
+55's duplicate ordinal is #228. Under a DISTINCT the inner stage carries one more key, so there
+the device's id is doubled and at 8, 16 or 32 keys the project above the outer stage overflows
+the cast; the fix below covers both.
 
 **Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`, tpcds q5,
 q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. All but q5 reach it on a device, all five

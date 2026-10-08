@@ -614,8 +614,7 @@ TEST(PlanExecutor, AggregateCount) {
   // Aggregate: count(*) with no group-by.
   auto func_name = fbb.CreateString("count");
   auto func_alias = fbb.CreateString("count(*)");
-  auto agg_func = fb::CreateAggregateFuncNode(fbb, func_name, /*args=*/0,
-                                               /*distinct=*/false, func_alias);
+  auto agg_func = fb::CreateAggregateFuncNode(fbb, func_name, /*args=*/0, func_alias);
   auto agg_funcs = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::AggregateFuncNode>>{agg_func});
 
@@ -653,8 +652,7 @@ TEST(PlanExecutor, AggregateGroupBy) {
 
   auto func_name = fbb.CreateString("count");
   auto func_alias = fbb.CreateString("nation_count");
-  auto agg_func = fb::CreateAggregateFuncNode(fbb, func_name, /*args=*/0,
-                                               /*distinct=*/false, func_alias);
+  auto agg_func = fb::CreateAggregateFuncNode(fbb, func_name, /*args=*/0, func_alias);
   auto agg_funcs = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::AggregateFuncNode>>{agg_func});
 
@@ -874,8 +872,7 @@ static flatbuffers::Offset<fb::PlanNode> nation_aggregate(
   auto args = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{arg});
   auto name = fbb.CreateString(func);
   auto alias = fbb.CreateString("state");
-  auto agg_func = fb::CreateAggregateFuncNode(fbb, name, args, /*distinct=*/false,
-                                              alias);
+  auto agg_func = fb::CreateAggregateFuncNode(fbb, name, args, alias);
   auto funcs = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::AggregateFuncNode>>{agg_func});
   fb::CudfAggregateBuilder builder(fbb);
