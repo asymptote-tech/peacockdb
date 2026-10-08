@@ -2118,6 +2118,13 @@ TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
       {fb::DataType_Date64, {}},
       // #210: the declared decimal comes back as a double on this path.
       {fb::DataType_Decimal128, id::FLOAT64},
+      // The four units carry a timestamp column's type, and fb_to_type_id maps them, but
+      // build_scalar has no timestamp arm beyond Date32 — so a literal refuses, as Date64's
+      // does. A row flips to an answer with that arm, not with a wider column type.
+      {fb::DataType_TimestampSecond, {}},
+      {fb::DataType_TimestampMillisecond, {}},
+      {fb::DataType_TimestampMicrosecond, {}},
+      {fb::DataType_TimestampNanosecond, {}},
   };
   // The list is a copy of the enum; this is what makes it fail by count when the enum
   // grows, which is enough to send the next reader here.

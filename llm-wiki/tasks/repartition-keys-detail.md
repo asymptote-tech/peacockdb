@@ -294,6 +294,133 @@ regen-time read/write race between libtest threads, not a CI flake — CI never 
 so no ticket was filed, but a regen that fails only on that test should be re-run before being
 believed.
 
+### Round 2, review round 1's findings
+
+The blocking one, the important one and the three nits in code. Nothing else moved: no device ran,
+no device cell was enabled, no ticket was archived, no golden changed.
+
+**Blocking — the fbs append broke `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot`.**
+The finding is right, and the red is arithmetic rather than a guess: the generated header in this
+box's cmake tree declares `inline const DataType (&EnumValuesDataType())[24]` (line 159), `cases`
+held 20 rows, so `ASSERT_EQ(cases.size(), std::size(fb::EnumValuesDataType()))` is `20 != 24`.
+The count assertion was not weakened. Four rows were added, one per unit, each `{}` — meaning a
+refusal that names the type — and `cases` is 24 again.
+
+- **What the rows assert, and why that is today's truth.** A bare `NULL::T` project reaches
+  `build_column`'s literal branch (`expr.cpp:825`), which calls `build_scalar` directly rather
+  than going through the AST. `build_scalar` (`expr.cpp:445-483`) has arms for Boolean, Int8-64,
+  Float32-64, Utf8, LargeUtf8, Date32 and Decimal128, and a default that throws
+  `"unsupported scalar type: " + fb::EnumNameDataType(sv->type())` — the same function the test's
+  refusal branch searches `e.what()` for, so the name matches by construction. **Date64 is the
+  precedent two rows above**: `fb_to_type_id` maps it to `TIMESTAMP_MILLISECONDS` and
+  `build_scalar` has no arm, so its row is `{}` as well. Mapping a type for a column schema and
+  being able to build a scalar of it are separate, and only the first landed here. That makes the
+  four rows a live gate: the day `build_scalar` gains a timestamp arm they go red and get an
+  answer, which is the right place to notice it.
+- **Compiled, not run.** `make tests/gpu/test_plan_executor.o` in the native cmake tree at
+  `target-cudf-rapids-cuda-12.2/debug/build/peacockdb-ffi-b2c7b0edb10b4476/out/build` (g++-12,
+  `cudf_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2`, Unix Makefiles, `CMAKE_HOME_DIRECTORY` this
+  worktree's `cpp`). The object was deleted and rebuilt: exit 0, no warnings, against that tree's
+  24-member `gpu_plan_generated.h`. There is no card, so the case was not run.
+- **What the first run on a card has to confirm**: that the case passes — the count at 24, and
+  each of the four `NULL::TimestampX` projects throwing — and that the throw is `build_scalar`'s
+  default rather than an earlier refusal that happens to carry the name, since the assertion is a
+  substring search and not an equality. Plan Task 5b's `PlanExecutor.CastTimestampMicrosToSeconds`
+  is still unwritten and still owed.
+
+**Nothing else enumerates that enum.** `EnumValuesDataType`, `EnumNamesDataType`, `MIN_DataType`
+and `MAX_DataType` appear in the C++ at that one assertion and nowhere else. In Rust the only
+`ENUM_VALUES` reader is `wire/tests.rs:956`, over `PlanNodeKind`, and it iterates the generated
+array instead of copying it, so a new kind is covered rather than miscounted. The one other
+hand-maintained count is `plan/tests/layout_injection.rs:53`'s 18, over plan node kinds, which
+this branch does not touch. `serialize.rs`'s `convert_data_type` and `test_support/device_schema.rs`'s
+`device_type_of` are keyed on the *arrow* enum and refuse or panic on an unmapped type, so neither
+can go stale by a count.
+
+**Important — six registry rows cited `189` for cells it no longer explains.** `registry.rs:242`'s
+rule is that a cell turned off names the ticket that explains it, and after the drop neither engine
+hashes the gid, so `189` explains nothing on a row whose cpu cells are all on. The reviewer is
+right that deferring this to the device half is what makes it rot: `cost-report/src/main.rs:475`
+resolves a registry ticket against the archive too, so an archived `189` would keep resolving.
+
+| row | query | before | after |
+|--:|---|---|---|
+| 6 | `tpcds/q5` | `65 152 189` | `65 152` |
+| 19 | `tpcds/q18` | `65 189 220` | `65 220` |
+| 23 | `tpcds/q22` | `65 189 220` | `65 220` |
+| 81 | `tpcds/q80` | `65 152 189 220` | `65 152 220` |
+| 134 | `tpch/rollup_over_join` | `152 189 220` | `152 220` |
+| 185 | `pbench/rollup_small_keys` | `189` | `65 206` |
+
+Row 185 needed the substitution because dropping `189` would have left it with no ticket at all,
+and both replacements were checked against the golden: `tp4-single.plans.txt`'s
+`rollup-small-keys` section declares `__grouping_id:UInt8` and the case line is
+`schema_validation_enabled`, which is #65's refusal; its `GpuEmitPartitions: hash=[f_k8@0, f_kb@1]`
+takes `f_kb:Boolean`, which the kernel's type switch has no arm for, which is #206. On the other
+five, every remaining ticket still explains an off cell: #65 the four tpcds rows (the device's
+`Int32` gid against the declared `UInt8`, schema-validated), #152 q5, q80 and `rollup-over-join`
+(the build handle a streamed probe erases), #220 q18, q22, q80 and `rollup-over-join` (the cpu's
+several batches per join call). So none of the five needed a ticket added.
+
+**Rows 197 and 198 keep `189`** — `pbench`'s `uint-key-group` and `uint-key-join`, whose three
+`cpu_tp4_*` cells are off and whose blocker is the unsigned arm itself. That is the ticket's own
+"6 are still off", and the registry now says exactly what the ticket says.
+
+**Two ticket-file sentences this falsifies**, both markdown and so not mine to edit:
+
+- **#65's "Corpus queries" paragraph** omits `pbench/rollup-small-keys`, which now carries `65`,
+  and says each cell is "off first on #152, #189 or #220". After the retag no device cell anywhere
+  rests on #189; the eight queries' device cells are held by #152, #206, #212 and #220.
+- **#206's "Corpus queries" paragraph** names `pbench/float64-key-group` and `bool-key-group`.
+  `rollup-small-keys` is a third: it hashes `f_kb` beside `f_k8`.
+
+**Nits.** Process history left four comment blocks, each rewritten to today's state:
+`corpus_cases.inc:78` (q22 alone is cut on the cpu now, so "two of the five" and the "was the
+other … now hashes" clause go), `:196` (q5's rollup sentence goes entirely — its cpu cells are
+ordinary), `:222` (q77's three tp4 cells rest on #212, and its rollup "does not meet" #189 rather
+than "no longer meets" it), `:234` (q80 and q77 are one shape with different fates, which is the
+standing point; the #189-versus-#212 race is not). `expr_writer.rs:203` loses the clause about the
+timestamps having had a number of their own. `serialize.rs:143` names the type once — the format
+is now `column {}: {why} (#249)`, since `{why}`'s `{other:?}` already carries it, and
+`bug_a_schema_holding_an_interval_is_refused_at_plan_time` still proves both halves are in the
+message (`why.contains("iv") && why.contains("Interval")`).
+
+**Measured counts.** Each with a `timeout`, plain `cargo test --features rust-only` into `./target`.
+
+| command | result |
+|---|---|
+| `test_cpu_corpus` | 877 passed, **27 failed**, 904 total — 26 `duckdb_gpu_*` plus `every_enabled_device_cell_has_its_gpu_result_section_and_no_other`, the carried set in count and membership |
+| `--lib` | 682 passed, 0 failed, 2 ignored |
+| `test_corpus_goldens` | 26 passed |
+| `test_cost_model` | 3 passed |
+| `test_golden_format` | 43 passed |
+| `test_module_layout` | 18 passed |
+| `test_ci_coverage` | 9 passed |
+| `cargo test -p cost-report` | 39 passed |
+| `python3 testdata/test_duckdb_result.py` | 20 passed |
+| `testdata/generate_pbench.sh --check` | `pbench.sf1 matches gen.sql` |
+| device type-check | `CUDF_ROOT=… scripts/cargo-cudf.sh check -p peacockdb-core --tests --features gpu` exit 0 |
+| gtest TU | `make tests/gpu/test_plan_executor.o` exit 0 from a deleted object, no warnings |
+
+No golden moved, which is the expected shape: the diff is four comment blocks, one message format,
+one registry column and one C++ case list. `rustfmt --check --config skip_children=true` is clean
+on both touched Rust files, and `corpus_cases.inc` is not a rustfmt input.
+
+**Deviations.**
+
+1. **`git clang-format`'s reflow of the case list was declined.** Inserting into the braced
+   initializer makes clang-format want all 18 pre-existing rows one-per-line; it proposed no change
+   to the four rows added, which are already in its shape. `coding-style.md` says to format the
+   lines changed and never whole files, and the reflow is 18 lines of unrelated churn around an
+   8-line addition.
+2. **The impl plan's Task 5c step 3 snippet still carries `"column {} of type {}: {why} (#249)"`**,
+   which is where the duplicated type came from. The step is closed and the shipped format is the
+   one above; recorded here rather than by editing a checked-off plan step.
+3. **One pre-existing warning each side.** `unused import: AsArray`
+   (`gpu_tests/aggregate_dimension_cases.rs:9`) under the device check, and
+   `function sha_links is never used` under `cargo test -p cost-report`. Both are on `ENS-pbench`
+   and neither file is in this branch's diff.
+
 ## Review round 1 (2026-10-08)
 
 **1 blocking, 2 important, 6 nits.** The reviewer ran no project code; everything is text and

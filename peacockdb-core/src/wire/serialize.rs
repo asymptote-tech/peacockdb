@@ -140,13 +140,8 @@ pub(crate) fn serialize_schema<'a>(
 ) -> Result<WIPOffset<fb::Schema<'a>>, PlanError> {
     let mut fields = Vec::with_capacity(schema.fields().len());
     for f in schema.fields() {
-        let dt = convert_data_type(f.data_type()).map_err(|why| {
-            PlanError::Unsupported(format!(
-                "column {} of type {}: {why} (#249)",
-                f.name(),
-                f.data_type()
-            ))
-        })?;
+        let dt = convert_data_type(f.data_type())
+            .map_err(|why| PlanError::Unsupported(format!("column {}: {why} (#249)", f.name())))?;
         let name = b.create_string(f.name());
         let (decimal_precision, decimal_scale) = match f.data_type() {
             ArrowDataType::Decimal128(p, s) => (*p, *s),

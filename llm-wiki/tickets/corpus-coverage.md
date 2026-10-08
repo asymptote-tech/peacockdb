@@ -243,11 +243,12 @@ type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mo
 `GROUPING()` over a subset or a reordering of the keys is refused on the device (#230). DataFusion
 55's duplicate ordinal is #228.
 
-**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`, tpcds
-q5, q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`, the one that reaches it on a device —
-its two tp1 cells are off here, the validator refusing the width. The rest are off first on #152,
-#189 or #220. The value shows only through `GROUPING()`, and q70 and q86, the corpus's users, are
-window queries that never run; the repro is fix 14's.
+**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`, tpcds q5,
+q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`, the one that reaches it on a device — its
+two tp1 cells off here on the width, its three tp4 cells on #206. The rest are off first on #152,
+#206, #212 or #220, and no longer on #189: once the shuffle stopped hashing the id, that ticket
+stopped explaining any device cell. The value shows only through `GROUPING()`, and q70 and q86, the
+corpus's users, are window queries that never run; the repro is fix 14's.
 
 **Fix proposed:** [fix 14 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix14), in C++ alone. A static
 `grouping_id_column(gid, nkeys, rows)` in `aggregate.cpp` folds `gid = (gid << 1) | masked` into a
@@ -690,10 +691,11 @@ refusal. Any `GROUP BY` or join key of either type at more than one lane reaches
 `bug_a_float_key_is_refused_on_the_device` and `bug_a_boolean_key_is_refused_on_the_device`
 (`gpu_tests/emit_cases.rs`).
 
-**Corpus queries:** `pbench/float64-key-group` and `pbench/bool-key-group`. `tp4-single.plans.txt`
-hashes both — `GpuEmitPartitions: hash=[f_kf64@0], lanes=4` and `hash=[f_kb@0], lanes=4` — so the
-shape this ticket is about is now in a plan golden, which it was not while tpch and tpcds were the
-only datasets (neither has a float column).
+**Corpus queries:** `pbench`'s `float64-key-group`, `bool-key-group` and `rollup-small-keys`.
+`tp4-single.plans.txt` hashes all three — `GpuEmitPartitions: hash=[f_kf64@0], lanes=4`,
+`hash=[f_kb@0], lanes=4`, and `hash=[f_k8@0, f_kb@1]` for the rollup — so the shape this ticket is
+about is now in a plan golden, which it was not while tpch and tpcds were the only datasets
+(neither has a float column).
 (tpch).
 
 <a id="t240"></a>
