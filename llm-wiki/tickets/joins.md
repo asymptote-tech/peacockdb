@@ -146,6 +146,10 @@ does apply it. On the device every ordinal above the join then reads one column 
 (`gpu_tests/nested_cases.rs`) and, read at the handle, by `nested_schema_cases.rs`'s
 `bug_a_cross_join_with_a_projection_holds_every_column_on_the_device`.
 
+**Corpus queries:** none. `pbench/cross-projection` was written for this ticket and does not reach
+it: the planner narrows by projecting the scans, so the cross join carries no projection to drop.
+Its device cells are off on [#63](#t63), its zero-column build side; its cpu cells pass.
+
 <a id="t190"></a>
 ### #190 — the CPU backend drops a nested-loop join's projection
 
@@ -195,7 +199,8 @@ since nothing between device nodes checks a column count ([#164](corpus-coverage
 seven `GpuProject: exprs=[]` (`tpcds.sf1/tp1-single.plans.txt`), and `pbench`'s
 `scalar-subquery-cross`, which is that shape by construction and carries this ticket. All five of
 q9's gpu cells are off and registry row 10 tags `63` alone. Only tp1-single has run on a device (`corpus_cases.inc:257`);
-the other four may meet [#152](#t152) next.
+the other four may meet [#152](#t152) next. `pbench/cross-projection` is the second arm, measured:
+a scan projected to no columns, which cuDF's cross join refuses at all five modes.
 
 **Fix proposed:** fix 4 of `reports/corpus-fixes.md`. Give the placeholder one name in
 `cpp/src/peacock/operators.h`: `row_count_table(rows)` and `is_row_count_only(t)`, and have
@@ -216,13 +221,15 @@ The scatter route to this is gone: `driver/partitioned.rs` keeps a zero-row scat
 where the join above owes rows ([#175](archive/archived-tickets.md#t175)), and the join then computes the answer. What
 remains is an upstream that emits nothing at all. Two shapes reach it. A limit that skips
 everything: `(SELECT ... FROM nation OFFSET 100) n RIGHT JOIN region r` plans
-`GpuCoalesceAllBatches <- GpuLimit skip=100` under the build side, at every mode. And tpcds
-q77 at the three tp4 modes: its Right outer's build side is a grouped aggregate over an Inner
-join, the Inner join's empty scatter lane drops as it should, its lane emits nothing, and the
-aggregate emits nothing where nothing arrived. Pinned by
-`bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti siblings
-(`gpu_tests/join_cases.rs`); on the driver, only its propagation, by
+`GpuCoalesceAllBatches <- GpuLimit skip=100` under the build side, at every mode. And tpcds q77 at
+the three tp4 modes, whose Right outer builds on a grouped aggregate over an Inner join: that
+join's empty scatter lane drops as it should, so the aggregate emits nothing. Pinned by
+`bug_right_with_no_build_batch_is_refused_on_both` and its two siblings
+(`gpu_tests/join_cases.rs`), and on the driver by
 `a_join_that_owes_its_probe_side_without_a_build_side_is_refused` (`driver/tests/flow.rs`).
+
+**Corpus queries:** `tpcds/q77` alone. pbench's three `sparse-build-*` rows were written for this
+ticket and do not reach it — the scatter above feeds their build side — so, measured, they are off on #152 and #220.
 
 <a id="t173"></a>
 ### #173 — a finish whose probe produced no keys refuses what it could answer from the build side
@@ -295,6 +302,10 @@ Two halves are out of scope deliberately. Scattering null-keyed rows on placemen
 corpus query exercises it. The adaptive form — insert the filter at replan time — waits on
 adaptive replanning existing at all.
 
+**Corpus queries:** the skew is in pbench's data — `fact.f_k` is 5% NULL — and shows in the
+goldens, not in an answer, so no registry row carries it. `pbench/inner-join-hot-keys` at the
+three `tp4` modes: probe lanes of 2160, 2413, 6538 and 8889 rows, the 1000 nulls in one of them.
+
 <a id="t159"></a>
 ### #159 — RightSemi/RightAnti with a residual filter has no cuDF path
 The mixed_* family evaluates a residual during the join, and no swapped variant exists — so a
@@ -344,10 +355,10 @@ first differing line, and the merge renders above the join. `in_rows` is the dri
 batches a node takes, the same code for both engines. These were the first cells where the device
 completed a plan and only the golden caught the difference.
 
-**Corpus queries:** 82 registry rows carry `220`, its cause at `tp1-single`, where the device gets
+**Corpus queries:** 97 registry rows carry `220`, its cause at `tp1-single`, where the device gets
 past #152. The first ones seen: `tpcds` q93 q96 q38 q48 q4 q18, `tpch` q3 q4 q14 q15. Plus
-`tpch/hash-join`, `cross-join`, `nested-loop-left-join`, `anti-join` and `semi-join`. Every
-device cell through a join lands here once #152 clears.
+`tpch/hash-join`, `cross-join`, `nested-loop-left-join`, `anti-join` and `semi-join`, and the ten
+pbench rows its device cycle measured here. Every device cell through a join lands here once #152 clears.
 
 **Fix proposed:** on the cpu. `declared` in `cpu_backend/join.rs` returns one batch: each chunk
 through `declared_as`, then `concat_batches`. No chunks gives `RecordBatch::new_empty(schema)`,

@@ -128,7 +128,7 @@ GpuUnload
   GpuFilter: predicate=(d_w@1 = 0) OR mark@2, projection=[d_id@0], lanes=1, batches=multiple, schema=[d_id:Int64]
     GpuHashJoin: join_type=LeftMark, on=[(d_k@1, t_k@1)], projection=[d_id@0, d_w@2, Int64(1)@3], lanes=1, batches=multiple, schema=[d_id:Int64, d_w:Int32, mark:Boolean]
       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_k:Int32, d_w:Int32]
-        GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@14], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32, d_w:Int32]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@16], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32, d_w:Int32]
       GpuProject: exprs=[1 as Int64(1), t_k@0], lanes=1, batches=multiple, schema=[Int64(1):Int64, t_k:Int32]
         GpuLoadParquet: table=tiny, projections=[t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_k:Int32]
 --- recipes ---
@@ -255,6 +255,25 @@ GpuUnload: estimated_max_resident_size=28000
       GpuCoalesceAllBatches: estimated_max_resident_size=28000
         GpuLoadParquet: estimated_max_resident_size=24131, source_bytes=24131, target_batch_bytes=24131, amplification=1.0
       GpuLoadParquet: estimated_max_resident_size=239101, source_bytes=239101, target_batch_bytes=239101, amplification=1.0
+== int8-key-group
+GpuUnload
+  GpuProject: exprs=[f_k8@0, count(*)@1 as n], lanes=1, batches=single, schema=[f_k8:Int8, n:Int64]
+    GpuAggregateBatches: group_by=[f_k8@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[f_k8:Int8, count(*):Int64]
+      GpuAggregate: group_by=[f_k8@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[f_k8:Int8, count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_k8@2], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_k8:Int8]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=220000, certain=0
+GpuUnload: estimated_max_resident_size=220000
+  GpuProject: estimated_max_resident_size=220000
+    GpuAggregateBatches: estimated_max_resident_size=220000
+      GpuAggregate: estimated_max_resident_size=441534
+        GpuLoadParquet: estimated_max_resident_size=80279, source_bytes=80279, target_batch_bytes=80279, amplification=5.5
 == left-join-null-keys
 GpuUnload
   GpuHashJoin: join_type=Left, on=[(d_k@1, f_k@1)], projection=[d_id@0, d_k@1, f_id@2], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32, f_id:Int64]
@@ -282,7 +301,7 @@ GpuUnload
     GpuNestedLoopJoin: join_type=Inner, filter=d_name@probe:1 LIKE t_pat@build:1, projection=[t_id@0, d_id@2], lanes=1, batches=multiple, schema=[t_id:Int32, d_id:Int64]
       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_id:Int32, t_pat:Utf8]
         GpuLoadParquet: table=tiny, projections=[t_id@0, t_pat@3], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_id:Int32, t_pat:Utf8]
-      GpuLoadParquet: table=dim, projections=[d_id@0, d_name@15], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_name:Utf8]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_name@17], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_name:Utf8]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
@@ -531,7 +550,7 @@ GpuUnload
         GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
           GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
             GpuFilter: predicate=d_w@0 >= 0, lanes=1, batches=multiple, schema=[d_w:Int32]
-              GpuLoadParquet: table=dim, projections=[d_w@14], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_w:Int32]
+              GpuLoadParquet: table=dim, projections=[d_w@16], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_w:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=1, per batch: execute_node(#37 CudfProject, batch)
@@ -772,7 +791,7 @@ GpuUnload
   GpuProject: exprs=[f_id@1, d_id@0], lanes=1, batches=multiple, schema=[f_id:Int64, d_id:Int64]
     GpuHashJoin: join_type=Inner, on=[(d_ts_us@1, f_ts_us@1)], projection=[d_id@0, f_id@2], lanes=1, batches=multiple, schema=[d_id:Int64, f_id:Int64]
       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_ts_us:Timestamp(Microsecond, None)]
-        GpuLoadParquet: table=dim, projections=[d_id@0, d_ts_us@9], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_ts_us:Timestamp(Microsecond, None)]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_ts_us@10], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_ts_us:Timestamp(Microsecond, None)]
       GpuLoadParquet: table=fact, projections=[f_id@0, f_ts_us@10], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_ts_us:Timestamp(Microsecond, None)]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
@@ -813,7 +832,7 @@ GpuUnload
   GpuProject: exprs=[f_id@1, d_id@0], lanes=1, batches=multiple, schema=[f_id:Int64, d_id:Int64]
     GpuHashJoin: join_type=Inner, on=[(d_ku32@1, f_ku32@1)], projection=[d_id@0, f_id@2], lanes=1, batches=multiple, schema=[d_id:Int64, f_id:Int64]
       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_ku32:UInt32]
-        GpuLoadParquet: table=dim, projections=[d_id@0, d_ku32@12], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_ku32:UInt32]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_ku32@14], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_ku32:UInt32]
       GpuLoadParquet: table=fact, projections=[f_id@0, f_ku32@14], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_ku32:UInt32]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)

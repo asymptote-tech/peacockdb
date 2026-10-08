@@ -42,7 +42,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 - [Performance](#performance)
   - [#154 — every operator exit path deep-copies its output into a fresh table](#t154)
 - [Testing](#testing)
-  - [#259 — pbench landed with every device cell off, and nothing owns running them](#t259)
   - [#227 Check schema nullability in tests](#t227)
   - [#164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
   - [#201 — the murmur gate proves a copy of the lane rule, not the rule](#t201)
@@ -247,8 +246,9 @@ validator refuses the width. Pinned by the two `bug_grouping_sets_…` cases in
 `GROUPING()` over a subset or a reordering of the keys is refused on the device (#230). DataFusion
 55's duplicate ordinal is #228.
 
-**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join` and tpcds
-q5, q14, q18, q22, q77, q80. None reaches it on the device yet: each cell is off first on #152,
+**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`, tpcds
+q5, q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`, the one that reaches it on a device —
+its two tp1 cells are off here, the validator refusing the width. The rest are off first on #152,
 #189 or #220. The value shows only through `GROUPING()`, and q70 and q86, the corpus's users, are
 window queries that never run. Simplest (from [`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14)):
 `select n_regionkey, n_nationkey, grouping(n_regionkey, n_nationkey) as g, count(*) from nation
@@ -790,8 +790,8 @@ hasher takes the decimal, so the shape is a refusal on one side. Pinned by
 q10 (`c_acctbal`), q15 (`total_revenue`, precision 38), q18 (`o_totalprice`); tpcds q24, q37,
 q82 (`i_current_price`), q75 (`sales_amt`, precision 31); and `pbench`'s `decimal15-key-group`,
 `decimal38-key-group` and `decimal15-key-join`, which are the three written for this ticket
-rather than meeting it by accident. Their `tp4` device cells are off, on blockers that refuse
-first (#152); q15, q75 and `decimal38-key-group` need the >18 path.
+rather than meeting it by accident. Their `tp4` device cells were run and are off on this ticket
+itself, the kernel naming `type_id=27`; q15, q75 and `decimal38-key-group` need the >18 path.
 
 <a id="t197"></a>
 ### #197 — the repartition arm still concatenates a child it can only be handed one of
@@ -842,37 +842,6 @@ separate cost — one kernel per node, which only fusion (JIT, or stitching back
 removes — and not this ticket's.
 
 ## Testing
-
-<a id="t259"></a>
-### #259 — pbench landed with every device cell off, and nothing owns running them
-
-[`pbench`](../tasks/pbench.md) committed a third dataset and 56 corpus lines with **no gpu cell
-enabled and not one run** — correct at the time, because shad-gpu was off the network for the whole
-task and the plan isolated the device work into a step that never happened. What is missing is an
-owner for that step. The recipe lives in `pbench-impl.md` and `pbench-detail.md`, and the archive
-rule deletes both at merge, so without this ticket it goes with them.
-
-Three pieces, and the first is the one that otherwise never lands:
-
-- **`int8-key-group` does not exist at all** — no `.sql`, no registry row, no corpus line, no
-  ticket. It was held back because it is the one row the table expects to pass, so landing it with
-  its cells off would have had to name a ticket that does not exist (the registry requires one for
-  an off cell). It arrives with the cycle that proves it.
-- **16 tp1 gpu cells nobody turns on.** [`repartition-keys`](../tasks/repartition-keys.md) says
-  "pbench's key-type rows' **tp4** device cells turn on where they pass", so the tp1 cells of
-  `bool-key-group`, `decimal15-key-group`, `decimal38-key-group`, the three `timestamp-*-key-group`
-  rows, `rollup-small-keys` and `uint-key-group` sit off under a tag that task will leave in place.
-  That is exactly the condition [`stale-cells`](../tasks/stale-cells.md) exists to clear, recreated
-  behind it.
-- **The rest of the gpu cells**, which the later tasks do own: `join-backend` for the join rows,
-  `repartition-keys` for the key-type rows at tp4.
-
-**Fix proposed:** one `build-test-shadgpu.sh` cycle filtered to `gpu_pbench_`, plus
-`PCK_WRITE_GPU_RESULT=1` so the answers reach `gpu-result.txt` and meet DuckDB. Each cell is then
-enabled if it passes, or carries the ticket it fails on. The same card closes
-[#235](../archive/archived-tickets.md#t235)'s last step and [`stale-cells`](../tasks/stale-cells.md)'s 16 cells, so one visit
-settles three things. The record that nothing was run is durable in the section comment at the head
-of pbench's block in `corpus_cases.inc`; this ticket is the part that says whose job it is.
 
 <a id="t227"></a>
 ### #227 Check schema nullability in tests

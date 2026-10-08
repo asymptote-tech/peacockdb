@@ -876,3 +876,36 @@ task has to do:
 - **The PR comment went 13.8 KB over GitHub's 65,536-byte cap** with pbench's rows in it. Three
   cuts brought it to 63,038 with 2,498 spare — about 7 rows, of which this chain still owes 4.
   Step 4 of Task 6b's "note the margin" is that number, and it is now a constraint on the chain.
+
+## Task 8 status — done (2026-10-08)
+
+**Task 8, the device cycle, is run.** 128 of pbench's 300 gpu cells were runnable — the other 157
+declarable ones have no cpu cell at their mode, which
+`every_device_cell_has_a_cpu_cell_at_the_same_mode` forbids, and 15 are `na` on the commented-out
+float rows. All 128 ran on nebius-gpu's L40S under cuDF 25.02; **30 are enabled, 98 carry the
+ticket they were measured to fail on**, and `testdata/goldens/pbench.sf1/gpu-result.txt` is the
+eighteenth golden with a section for exactly the 30. Every one of the 48 answers the recorder
+captured agrees with DuckDB.
+
+`int8-key-group` landed with it — query file, registry row, corpus line, goldens — and passes at
+all five modes with no ticket, which is what the spec's table predicted and what held it back
+until a cycle could prove it.
+
+The per-cell table, the failure text per ticket class, and the six measurements that disagreed with
+the spec's prediction are in [`pbench-detail.md`](pbench-detail.md) under "The device cycle, run".
+What a later task inherits:
+
+- **The tags are measurements now, not predictions.** `sparse-probe-left` and `sparse-probe-semi`
+  pass everywhere and carry no ticket; the three `sparse-build-*` rows never reach #212 (the shared
+  driver keeps their zero-row scatter output) and are #152/#220; `cross-projection` never reaches
+  #207 and is #63's second arm; `exists-null-keys` and `finish-without-probe` are #220, not #152
+  and #173; `rollup-small-keys` is the tree's first device cell to reach #65.
+- **`join-backend` inherits 60 cells** (#152 42, #220 18) and **`repartition-keys` 26** (#95 9,
+  #240 14, #206 3), plus #63's 7 and #65's 2.
+- **The comment cap is 63,339 bytes, 2,197 spare, about six rows**, of which #255's three are owed.
+- **The data changed**: `dim` carries `d_ts_ms` and `d_ts_ns`, so every `dim` ordinal from 10 up
+  moved and all 17 earlier goldens were regenerated on the new parquet.
+- **Task 1's determinism check** is now guarded by
+  `the_pbench_determinism_check_is_named_by_a_ci_step` (`test_ci_coverage.rs`): the shell check
+  still needs DuckDB 1.5.4 and so cannot be a Rust tier itself, but deleting its CI line is no
+  longer silent.

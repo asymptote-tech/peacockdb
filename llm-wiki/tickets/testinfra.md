@@ -38,14 +38,14 @@ that made the wiki an input.
 <a id="t258"></a>
 ### #258 — the PR comment has about seven corpus rows of headroom left
 `the_pr_comment_fits_under_the_body_cap` holds the cost widget's comment under GitHub's
-65,536-byte body limit. pbench's 59 rows took it to 79,352, and three cuts in the pbench task
-brought it back to **63,038** — the fully-enabled tick made one character wider, a 7-character sha
+65,536-byte body limit. pbench's 60 rows took it to 79,352, and three cuts in the pbench task
+brought it back to **63,339** — the fully-enabled tick made one character wider, a 7-character sha
 in the comment's query links (the archived page keeps the full one), and no `<sub>` on the three
 mode cells. None of the three lost information.
 
-That leaves **2,498 bytes, about seven corpus rows**, and chain J already owes four of them:
-`int8-key-group` when its task runs the device cycle, and the three queries
-[#255](complete-coverage.md#t255) blocks. So the next task after those to add a corpus query goes
+That leaves **2,197 bytes, about six corpus rows**, and chain J already owes three of them: the
+queries [#255](complete-coverage.md#t255) blocks. `int8-key-group` spent the fourth when pbench's
+device cycle landed it. So the next task after those to add a corpus query goes
 red here, and the lever left is a choice about what a PR comment is for rather than another byte
 cut.
 

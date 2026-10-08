@@ -90,7 +90,7 @@ GpuUnload: output_rows=53, output_bytes=431
       in_rows=[[2000],[8]] batch_rows=[[0,2000]] batch_bytes=[[0,25000]]
       GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=32750
         in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[32750]]
-        GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@14], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=32750
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@16], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=32750
           in_rows=[] batch_rows=[[2000]] batch_bytes=[[32750]]
       GpuProject: exprs=[1 as Int64(1), t_k@0], lanes=1, batches=multiple, output_rows=8, output_bytes=98
         in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[98]]
@@ -128,6 +128,18 @@ GpuUnload: output_rows=34070, output_bytes=553644
           in_rows=[] batch_rows=[[2000]] batch_bytes=[[24500]]
       GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
         in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== int8-key-group
+early_exit=none
+GpuUnload: output_rows=200, output_bytes=1850
+  in_rows=[[200]] batch_rows=[[200]] batch_bytes=[[1850]]
+  GpuProject: exprs=[f_k8@0, count(*)@1 as n], lanes=1, batches=single, output_rows=200, output_bytes=1850
+    in_rows=[[200]] batch_rows=[[200]] batch_bytes=[[1850]]
+    GpuAggregateBatches: group_by=[f_k8@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, output_rows=200, output_bytes=1850
+      in_rows=[[200]] batch_rows=[[200]] batch_bytes=[[1850]]
+      GpuAggregate: group_by=[f_k8@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=200, output_bytes=1850
+        in_rows=[[20000]] batch_rows=[[200]] batch_bytes=[[1850]]
+        GpuLoadParquet: table=fact, projections=[f_k8@2], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=22500
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[22500]]
 == left-join-null-keys
 early_exit=none
 GpuUnload: output_rows=34120, output_bytes=695207
@@ -296,7 +308,7 @@ GpuUnload: output_rows=1, output_bytes=26
             in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[0]]
             GpuFilter: predicate=d_w@0 >= 0, lanes=1, batches=multiple, output_rows=2000, output_bytes=8250
               in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[8250]]
-              GpuLoadParquet: table=dim, projections=[d_w@14], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=8250
+              GpuLoadParquet: table=dim, projections=[d_w@16], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=8250
                 in_rows=[] batch_rows=[[2000]] batch_bytes=[[8250]]
 == sparse-build-anti
 early_exit=none
@@ -418,7 +430,7 @@ GpuUnload: output_rows=100000, output_bytes=1625000
       in_rows=[[2000],[20000]] batch_rows=[[8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,1696]] batch_bytes=[[133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,27560]]
       GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=32500
         in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[32500]]
-        GpuLoadParquet: table=dim, projections=[d_id@0, d_ts_us@9], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=32500
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_ts_us@10], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=32500
           in_rows=[] batch_rows=[[2000]] batch_bytes=[[32500]]
       GpuLoadParquet: table=fact, projections=[f_id@0, f_ts_us@10], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=325000
         in_rows=[] batch_rows=[[20000]] batch_bytes=[[325000]]
@@ -444,7 +456,7 @@ GpuUnload: output_rows=1984, output_bytes=32240
       in_rows=[[2000],[20000]] batch_rows=[[1984]] batch_bytes=[[32240]]
       GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=24500
         in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[24500]]
-        GpuLoadParquet: table=dim, projections=[d_id@0, d_ku32@12], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_ku32@14], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
           in_rows=[] batch_rows=[[2000]] batch_bytes=[[24500]]
       GpuLoadParquet: table=fact, projections=[f_id@0, f_ku32@14], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
         in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]

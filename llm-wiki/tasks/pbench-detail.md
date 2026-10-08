@@ -1176,7 +1176,7 @@ pbench added two of them in round 2 and the prose never grew — so it now names
 - **Nsight captures** (`create_nsys_profile.sh`) and any H200 timing.
 - **The spec's "one shad-gpu cycle"** over the pbench rows, replaced by the override with a build
   and the device binaries. pbench's gpu cells are all off, so there was no recording cycle and no
-  `gpu-result.txt` to write. [#259](../tickets/corpus-coverage.md#t259) still owns turning them on
+  `gpu-result.txt` to write. [#259](../archive/archived-tickets.md#t259) still owns turning them on
   and is unchanged by this run.
 - **`scripts/exec_model/tests`** not re-run: nothing here touches `scripts/`.
 - **A local `ctest -L cpu`**: there is no local C++ build dir, and nothing in this change is C++.
@@ -1378,3 +1378,280 @@ queries spend four of them.
 
 Dispatched to one developer with: finding 7 first (the two absent `dim` columns, its own commit),
 then the cycle, then findings 5, 6 and 8, which touch neither the data nor the device.
+
+## The device cycle, run (2026-10-08)
+
+The work list was the three sections above, item for item. Everything here is measured; nothing is
+read off a plan golden.
+
+**Where it ran.** nebius-gpu, `dmitry@89.169.109.150`, one L40S, card idle, cuDF 25.02 from
+`~/data/miniforge3/envs/rapids-cuda-12.2`. Built with `./scripts/build-test-shadgpu.sh --build`
+after an uncommitted `rsync -a --delete-after --exclude=.git --filter=':- .gitignore'`, three
+times (once per tree state), each staged binary run directly — never `--run`, never
+`--pull-results`, both of which ssh to shad-gpu. `gpu-result.txt` came home by plain `scp`.
+verda could not be probed: `scripts/list_verda_instances.sh` exits `VERDA_CLIENT_ID is not set`
+and the name resolves nowhere, so every CPU run was local. No disk was cleaned; `/` went from
+37 GB free to 36 GB.
+
+### The order, and why there were two device runs
+
+Finding 7 first, in its own commit's worth of changes: `dim` gained `d_ts_ms` and `d_ts_ns`, the
+parquet was regenerated and every golden that moved was regenerated on it. Only then the cycle,
+because `gpu-result.txt` derives from the same parquet and running the cycle first means running
+it twice.
+
+The cycle itself is two runs, and that is not avoidable either. Run 1 declares every runnable cell
+and measures it; the recorder writes a section *before* the comparisons assert, so the file then
+holds a section for every cell that reached an answer — 48 of them, 30 that passed and 18 that
+failed only on the cpu-shape comparison. Run 2 is the recording pass with the registry settled to
+the 30, and the merge writer drops the other 18 (`merged_cells`). The committed file holds exactly
+30 sections, which is what the coverage guard demands in both directions.
+
+### What "running a cell" costs, measured
+
+`test_gpu_corpus.rs:28` expands a `none` gpu-modes line to nothing, so the declaration is the only
+switch — but there is a second, harder constraint nobody had named: **`every_device_cell_has_a_cpu_cell_at_the_same_mode`
+forbids a gpu cell whose cpu twin is off.** Of pbench's 300 gpu cells (60 rows × 5; it was 295
+before `int8-key-group`), 15 are `na` on the three commented-out float rows, and **157 of the
+remaining 285 have no cpu cell at their mode and so cannot be declared at all.** 128 were runnable
+and all 128 were run. So "295 cells, how many did you run" has the answer 128 of the 285 that a
+declaration can reach, and the other 157 are a consequence of a rule rather than of a ticket —
+they are the 24 shapes the planner refuses, the 5 narrowed by #190, and the tp4 modes of the four
+rows whose cpu cells stop at tp1.
+
+### The per-cell outcome
+
+`on` = enabled; a number = the ticket the cell was measured to fail on; `—` = no cpu cell at that
+mode, so not declarable.
+
+| query | tp1-single | tp1-rowgroup | tp4-single | tp4-rowgroup | tp4-sized |
+|---|---|---|---|---|---|
+| `bool-key-group` | on | on | 206 | 206 | 206 |
+| `cross-projection` | 63 | 63 | 63 | 63 | 63 |
+| `decimal15-key-group` | on | on | 95 | 95 | 95 |
+| `decimal15-key-join` | 220 | 152 | 95 | 95 | 95 |
+| `decimal38-key-group` | on | on | 95 | 95 | 95 |
+| `exists-null-keys` | 220 | 220 | 220 | 220 | 220 |
+| `finish-without-probe` | 220 | 220 | 220 | 220 | 220 |
+| `full-join-null-keys` | 152 | 152 | 152 | 152 | 152 |
+| `inner-join-hot-keys` | 220 | 152 | 152 | 152 | 152 |
+| `int8-key-group` | on | on | on | on | on |
+| `left-join-null-keys` | 152 | 152 | 152 | 152 | 152 |
+| `not-not-in` | 220 | 152 | 152 | 152 | 152 |
+| `not-or-not-in` | 220 | 152 | 152 | 152 | 152 |
+| `right-join-null-keys` | 220 | 152 | 152 | 152 | 152 |
+| `rollup-small-keys` | 65 | 65 | — | — | — |
+| `scalar-subquery-cross` | 63 | 63 | — | — | — |
+| `sparse-build-anti` | 220 | 152 | 152 | 152 | 152 |
+| `sparse-build-full` | 152 | 152 | 152 | 152 | 152 |
+| `sparse-build-right` | 220 | 152 | 152 | 152 | 152 |
+| `sparse-probe-left` | on | on | on | on | on |
+| `sparse-probe-semi` | on | on | on | on | on |
+| `timestamp-ms-key-group` | on | on | 240 | 240 | 240 |
+| `timestamp-ns-key-group` | on | on | 240 | 240 | 240 |
+| `timestamp-s-key-group` | 240 | 240 | 240 | 240 | 240 |
+| `timestamp-us-key-group` | on | on | 240 | 240 | 240 |
+| `ts-key-join` | 220 | 152 | 240 | 240 | 240 |
+| `uint-key-group` | on | on | — | — | — |
+| `uint-key-join` | on | 152 | — | — | — |
+
+Totals: **30 on, 98 off, 128 run.** By ticket, the 98: #152 42, #220 18, #95 9, #240 14 (9 at the
+hash kernel, 5 the wire refusal `timestamp-s-key-group` already declared in `NOT_RUNNABLE`), #63 7,
+#206 3, #65 2.
+
+The failure texts, one per class, so the next reader need not re-run anything:
+
+- **#152** — `GpuHashJoin lane 0: this join's recipe copies its build side per probe batch and the
+  ABI has no copy: probe batch 2 has no build side left, since the call for batch 1 erased it`, and
+  for Left/Full the probe-batch variant of the same message.
+- **#220** — the `.cpu.txt` section comparison, at `corpus_golden.rs:202`. Two shapes.
+  `exists-null-keys`'s cpu golden reads `batch_rows=[[0,0,0,0,0,0,0,0,0,0,0,1950]]` against the
+  device's `[[1950]]`; `ts-key-join`'s reads `[[8192,8192,…]]` against `[[100000]]`. Where the rows
+  happen to land in one cpu batch anyway the only trace is `output_bytes`: `inner-join-hot-keys` at
+  `tp1-single` is 553644 on the cpu against 553638 on the device, which is three extra validity
+  bytes per column over four cpu batches. That is why five of these cells look like a six-byte
+  disagreement and are the same defect.
+- **#95 / #206 / #240 at the kernel** — `spark_hash_partition.cu:179: peacock spark_partition_ids:
+  unsupported key column cuDF type_id=N`, with N 27 (decimal128), 11 (bool), 14/15/16 (timestamp
+  ms/us/ns).
+- **#63** — two arms, both of them. `scalar-subquery-cross`: `GpuProject lane 0: the output hook
+  refused a batch: 0 columns declared, 1 held`, the `__rowcount__` placeholder. `cross-projection`:
+  `CudfCrossJoin … cross_join.cu:45: Left table is empty`, a scan projected to no columns — which
+  is the second arm #63's own fix proposal names.
+- **#65** — `GpuAggregate lane 0: the output hook refused a batch: 2 __grouping_id: UInt8 vs INT32`.
+
+### Six measurements that disagreed with the spec's prediction
+
+The whole return on the round. Each one is now a registry tag.
+
+1. **`sparse-probe-left` and `sparse-probe-semi` pass at all five modes**, where the table expected
+   #152 (`gpu tp4` and `gpu` respectively). The `152` tag is gone from both rows; neither carries a
+   ticket now.
+2. **`exists-null-keys` fails on #220, not #152.** #152's own text says only the semi family
+   streams, and this is a LeftSemi: the join completes and only the batching differs. Tag `152` →
+   `220`.
+3. **`finish-without-probe` fails on #220, not #173.** The completeness pass had already corrected
+   #173's claim to "none" from the plan side; the cycle confirms it from the device side. Tag
+   `173` → `220`.
+4. **The three `sparse-build-*` rows never meet #212** (finding 5, confirmed). `sparse-build-full`
+   is #152 at all five; `-right` and `-anti` are #220 at `tp1-single` and #152 at the other four.
+   The cause is the one the completeness pass predicted from `driver/partitioned.rs:430`: the
+   scatter's zero-row output is kept where the join owes its probe side, so `without_build` is
+   never called. Tags `212` → `152` / `152 220`.
+5. **`cross-projection` never meets #207, and fails on #63.** The planner narrows this query by
+   projecting the *scans* — `GpuLoadParquet: table=tiny, projections=[], schema=[]` — so the
+   `GpuCrossJoin` carries no projection for either backend to drop. Tag `207` → `63`, and #207 now
+   has no corpus query at all.
+6. **`rollup-small-keys` fails on #65, which the row did not carry.** It is the first corpus cell in
+   the tree to reach #65 on a device; #65's text said none did. Tag `189` → `65 189`.
+
+Four more rows gained `220` at `tp1-single` on top of the ticket they already carried —
+`inner-join-hot-keys` (already had it), `not-not-in`, `not-or-not-in`, `right-join-null-keys`,
+`decimal15-key-join` and `ts-key-join`. #220's registry-row count went 82 → 97, which was already
+drift (88 before this round) and is now measured.
+
+### Every device answer the cycle recorded agrees with DuckDB
+
+Run 1's file held 48 sections and all 48 `duckdb_gpu_pbench_*` cases pass — the 30 enabled cells
+and, as a free measurement, the 18 that fail only the cpu-shape comparison. So nothing in pbench
+hits #253's first half (a device answer diverging while the cpu's matches), which that ticket
+counted 27 pbench rows as being "in reach" of. The device's answers are right; what #220 moves is
+the shape.
+
+### gpu-result.txt, the eighteenth golden
+
+`testdata/goldens/pbench.sf1/gpu-result.txt`, 325 KB, `cudf=25.02` on its first line, 30 sections,
+one per enabled cell. Written under `PCK_WRITE_GPU_RESULT=1` ahead of both comparisons, which
+`test_module_layout`'s `the_device_case_records_its_answer_before_it_compares_with_the_cpu` pins.
+Nothing compares it with a previous version — it had none.
+
+**tpch's and tpcds's copies were deliberately not pulled.** Run 2 was unfiltered, so it rewrote
+them on the host too. tpcds's came back byte-identical; tpch's differs in six lines, all of them
+float digits in `shuffle-stddev`'s stddev and variance columns, which is the run-to-run spread
+build-test.md documents. No cell of either dataset moved and no code under them changed, so pulling
+them would have committed noise. Their committed copies are untouched.
+
+### The data change, and the golden churn it cost
+
+`dim` gained `d_ts_ms` (TIMESTAMP_MS) and `d_ts_ns` (TIMESTAMP_NS), mirroring `fact`'s order, so
+`d_ts_us` moved from source ordinal 9 to 10 and everything after it by two. Only `dim.parquet`
+changed (57,197 → 64,739 bytes); `fact`, `sub`, `tiny` and `empty` came back byte-identical, which
+is itself a determinism check. The churn was five lines per `.plans.txt` and two to four per
+`-mini.cpu.txt`, every one of them a `projections=[… @N]` renumbering with the `output_bytes`
+unchanged — the mapping prices only the projected columns, so two unread columns cost nothing.
+`.cost.txt` did not move at all before `int8-key-group` landed, because ordinals are not in it.
+`recipe-payloads.txt` did not move: its payload subset is tpch and tpcds only.
+
+Section counts before and after, read for a vanished section (#213): every `-mini.cpu.txt`,
+`-mini.cost.txt` and `mini.result.txt` went 56 → 56 on the data change and 56 → 57 with
+`int8-key-group`; `duckdb-result.txt` 59 → 60. Nothing disappeared, so `PCK_UPDATE_SECTIONS=1
+--exact` was not needed.
+
+Regeneration used `PCK_UPDATE_SECTIONS=1` with a `cpu_pbench_` filter rather than
+`UPDATE_CANONICAL=1`, because the latter prunes and a filtered prune would delete the sections the
+filter did not run.
+
+### `int8-key-group`
+
+`testdata/pbench-queries/int8-key-group.sql` is `SELECT f_k8, count(*) AS n FROM fact GROUP BY
+f_k8`; 200 groups, no NULL (`f_k8` is `(i % 200) - 100`). It lands `all_modes, all_modes,
+duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled`, a registry row with no
+ticket, and it is the only pbench row enabled on the device at every mode — the table said "every
+cell on if it passes", and every cell passes. Its plan at tp4 shuffles an `Int8` key, which the
+kernel takes (`INT8` is in the supported list), which is why it is the one key-type row that is not
+blocked at tp4.
+
+#255's other three queries stay absent: adding them is a planner fix, which the Restriction forbids.
+
+### Findings 5, 6 and 8
+
+- **5** — see outcome 4 above. `architecture.md:643-647` needed no edit; the three tags did, and
+  #212 gained a `Corpus queries:` line saying q77 is its only one.
+- **6 — #137's skew.** Ticket and spec disagreed and neither pointed at the data; the ticket is the
+  one that was wrong, and it is now right. The skew is a *cost* property, so by the spec's own
+  criterion ("#136, #145, #154, #197 and #201 change cost or tests, not answers") #137 belongs in
+  the spec's "not covered by a query" list and is missing from it — spec drift, reported, not
+  fixable here because the spec is frozen. What the data shows, measured off
+  `tp4-single-mini.cpu.txt`: `inner-join-hot-keys`'s probe lanes take 2160, 2413, 6538 and 8889 of
+  20,000 rows, carrying `fact.f_k`'s 1000 NULL-key rows into one lane for an Inner join that
+  discards them. No registry row carries `137`, and none should: nothing fails on it.
+- **8 — the determinism check.** `generate_pbench.sh --check` still cannot be a Rust test: it needs
+  DuckDB 1.5.4, which no Rust tier has, and a test that skips when the binary is absent is not a
+  guard. What was actually wrong was that deleting its one `run:` line was silent, so that is what
+  is now red: `the_pbench_determinism_check_is_named_by_a_ci_step` in `test_ci_coverage.rs`, which
+  reads the folded workflow lines like every other case there. Red-green proved by deleting
+  `pipeline.yml:183` and watching it fail with its own message, then restoring it. The bar asks for
+  the check itself in `rust-only`; what landed is the guard that the check runs, in the same tier
+  the other CI-wiring assertions live in, and the difference is worth stating rather than papering
+  over.
+
+### The two stale records
+
+`corpus_cases.inc`'s pbench section comment no longer says shad-gpu was down or points at
+`pbench.md`'s Task 8 (a section that only ever existed in `-impl.md`). It now says what the tree
+holds: every runnable cell run once on an L40S under 25.02, 30 on, 157 never runnable, three
+queries absent on #255. Ten lines, at the cap.
+
+**#259 is closed** and moved to `archive/archived-tickets.md`'s Done section with a dated closing
+paragraph. All three of its pieces are discharged: `int8-key-group` exists and passes, fourteen of
+its sixteen orphan tp1 cells are on (the two of `rollup-small-keys` are off on #65, a measured
+ticket rather than a prediction), and the rest belong to `join-backend` (#152, #220, #63) and
+`repartition-keys` (#95, #206, #240, #189) as it said. `tickets.md`'s index is re-summed: 121 open,
+corpus-coverage 34.
+
+### The bar, measured again
+
+Local, `cargo test --features rust-only -p peacockdb-core -- --test-threads=2`, exit 0:
+
+| tier | expected | measured |
+|---|--:|--:|
+| `--lib` | 677 | **678** (676 pass + 2 `#[ignore]` on #182) |
+| `test_cpu_corpus` | 886 | **922** |
+| `test_corpus_goldens` | 26 | 26 |
+| `test_cost_model` | 3 | 3 |
+| `test_golden_format` | 43 | 43 |
+| `test_module_layout` | 18 | 18 |
+| `test_ci_coverage` | 9 | **10** |
+| `cost-report` | 39 | 39 |
+| `test_duckdb_result.py` | 20 | 20 |
+| `test_duckdb_cost.py` | 41 | 41 |
+
+Device, on nebius-gpu, each binary run directly with `--test-threads=1`, all green:
+
+| binary | expected | measured |
+|---|--:|--:|
+| `peacock_gpu_tests` | 4 | 4 |
+| `peacock_plan_tests` | 56 | 56 |
+| `test_gpu_corpus` | 28 | **58** |
+| `test_node_timing` | 1 | 1 |
+| `peacockdb_core_gpu_lib gpu_tests::` | 536 | 536 |
+| `peacock_gpu_benchmarks --skip bench_` | 8 of 11 | 8 of 11 |
+
+Three numbers moved and all three are intended: `--lib` +1 is the new `dim` schema case,
+`test_ci_coverage` +1 the new CI-step case, `test_gpu_corpus` +30 the enabled cells.
+`test_cpu_corpus` +36 is 5 cpu cells and 1 DuckDB case for `int8-key-group` plus 30
+`duckdb_gpu_pbench_*` cases that did not exist while every pbench device cell was off.
+
+### build-test.md, re-summed rather than eyeballed
+
+Derived from `corpus_cases.inc` and the registry, not from the old figures: 177 lines, 679 cpu
+cells, 144 lines running at the modes each is correct at, 33 out entirely, oracles
+110/16/14/33/4, the DuckDB tier 177 + 56 + 3 = 236, and so the `Corpus, cpu` row 679 + 6 + 236 =
+921, which is the measured 922 less its registry case. Then every header it rolls into: cpu block
+1592 → 1629, gpu block 576 → 606, the CI guard 9 → 10, Rust 2284 → 2352, grand total 2782 → 2850.
+The golden count for `pbench.sf1` is 17 → 18, `gpu-result.txt` now sits in all three sf1 dirs, and
+the dataset row reads 588 KB.
+
+### Deferred by the override, and recorded as deferred
+
+The sf40 pair (`peacock_tpch_tests`, `peacock_tpchv_tests` — 69 GiB against the L40S's 46 GB, and
+no `tpch.sf40` on the host), `--run-benchmarks` and the three `bench_` cases, Nsight captures, and
+any H200 timing. None of them was run and none of them blocks this task. A `test_gpu_corpus` pass
+on sf1 is not on that list, which is what this round existed to settle.
+
+### Drift found and not fixable here
+
+The spec's "Not covered by a query" paragraph lists #136, #145, #154, #197 and #201 and should also
+list #137, by its own "change cost or tests, not answers" criterion. The spec is frozen and its one
+later write is spent on the signoff, so this is the human's. It rides naturally with the signoff
+rewrite the previous completeness pass already asked for.

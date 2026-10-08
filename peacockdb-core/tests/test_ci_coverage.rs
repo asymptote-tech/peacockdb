@@ -1,4 +1,5 @@
-//! Asserts every integration-test target is actually NAMED by a CI workflow step.
+//! Asserts every integration-test target, build rung and scripted guard is actually NAMED
+//! by a CI workflow step.
 //!
 //! Why this exists. CI does not sweep Rust test targets as a set — pipeline.yml lists
 //! each `cargo test ... --test <name>` by hand. So a new `tests/test_*.rs` is invisible
@@ -649,5 +650,27 @@ fn each_rung_has_its_ci_line_and_the_cli_is_built() {
          and the driver from outside the crate, and it has no test target, so nothing \
          else compiles it. Add `cargo build --features rust-only -p peacockdb` to \
          dataset-matrix."
+    );
+}
+
+/// The step that proves pbench's committed parquet is what `gen.sql` makes.
+///
+/// `generate_pbench.sh --check` is a shell guard, not a cargo target, so the sweep above
+/// cannot see it and its one caller is one line of a `run:` block. Delete that line and the
+/// only thing holding the committed bytes to the generator is gone with nothing red — the
+/// same silence the target sweep exists to break, one language over. The data is committed
+/// precisely so the values in it cannot move without a diff, and this is what keeps the
+/// diff honest.
+#[test]
+fn the_pbench_determinism_check_is_named_by_a_ci_step() {
+    let named = workflow_lines()
+        .iter()
+        .any(|line| line.contains("generate_pbench.sh --check"));
+    assert!(
+        named,
+        "no workflow line runs `testdata/generate_pbench.sh --check`. pbench's parquet is \
+         committed and nothing regenerates it, so without that step a gen.sql change — or a \
+         hand-edited parquet — passes every tier. Add it to dataset-matrix's generation step, \
+         beside the two `generate_testdata.sh` calls."
     );
 }
