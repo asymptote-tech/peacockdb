@@ -101,7 +101,6 @@ fn declared_nullable(
 }
 
 /// Where one aggregate's init reads from.
-#[derive(Clone)]
 enum InitFrom {
     /// The values it was written over: every aggregate but the two below.
     Values,
@@ -144,6 +143,11 @@ struct Decomposed {
 /// The three `InitFrom` arms differ only here: an ordinary aggregate reads its own values,
 /// a DISTINCT in the outer stage reads the deduplicated argument, and a companion there
 /// reads the inner stage's state through its own merge rule.
+///
+/// The arms also pair with the decomposition differently. The first two pair by TAG, through
+/// `declared_nullable`: DataFusion declares avg as [count, sum] and this table reads
+/// [sum, count]. A companion pairs by POSITION, because our state names (`avg(…)$sum`) carry
+/// none of DataFusion's `[sum]` tags and the tag lookup would read as drift.
 fn state_and_init(
     aggregate: &AggregateFunctionExpr,
     from: &InitFrom,
@@ -156,9 +160,7 @@ fn state_and_init(
         InitFrom::State(cols) => {
             // The outer stage's init runs each state column's merge rule as an ordinary
             // aggregator over the inner stage's state, so its output type is that
-            // aggregator's over the inner's — a decimal sum widens again. Paired by
-            // POSITION: our state names (`avg(…)$sum`) carry none of DataFusion's
-            // `[sum]` tags, so `declared_nullable`'s lookup would read as drift.
+            // aggregator's over the inner's — a decimal sum widens again.
             let Merge::PerColumn(funcs) = rule.merge else {
                 return Err(PlanError::Invalid(format!(
                     "{}: its state merges in one call, which an init cannot run",
@@ -194,8 +196,7 @@ fn state_and_init(
             // The state names are ours and the types are `state_type`'s — the aggregator
             // that produces each column, which DataFusion's `state_fields` (its own
             // accumulator's layout, not the one this engine runs) supplies arity and
-            // nullability for. Paired by tag: DataFusion declares avg as [count, sum]
-            // and this table reads [sum, count].
+            // nullability for.
             let (args, arg_type, declared) = match from {
                 // A DISTINCT's declared state is DataFusion's list of values, which
                 // nothing here runs, so its arity and nullability say nothing about the

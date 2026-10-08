@@ -106,9 +106,11 @@ corpus_query!(tpch, 1, q2, all_modes, all_modes, duckdb_exact, data_fusion_exact
 // Both are off on the device at every mode: #262, the lowering's device cells have never run —
 // rollup-distinct on #65 as well. DataFusion 45 refuses stddev(DISTINCT) and answers a grouped
 // decimal avg(DISTINCT) as the plain average, so DataFusion is no oracle for distinct-functions:
-// DuckDB is, and end_to_end.rs's distinct_functions_answer_as_their_hand_lowered_form holds the
-// answer too. The avg columns are decimals ours renders shorter than DuckDB's floats, so both
-// lines' DuckDB compare is the approximate one.
+// DuckDB is, and a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb in
+// test_cpu_corpus.rs holds the line to an oracle that compares; end_to_end.rs's
+// distinct_functions_answer_as_their_hand_lowered_form holds the answer too. The avg columns
+// are decimals ours renders shorter than DuckDB's floats, so both lines' DuckDB compare is the
+// approximate one.
 corpus_query!(tpch, 1, rollup_distinct, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, distinct_functions, all_modes, none, duckdb_approx, data_fusion_disabled, golden_exact, schema_validation_enabled);
 

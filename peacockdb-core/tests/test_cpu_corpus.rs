@@ -169,6 +169,41 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
     assert_eq!(checked, load_csv().len() * MODES.len());
 }
 
+/// A line that asks DataFusion nothing compares its answer with DuckDB's.
+///
+/// `data_fusion_disabled` makes `assert_answer` return without comparing, so the line's cpu
+/// cells check the plan, the run and the goldens and no answer. What holds the answer is the
+/// line's `duckdb_<q>` case, which reads the committed authority section against DuckDB's, and
+/// every mode's run is held to that section. So its oracle must compare the whole answer: a
+/// `duckdb_none` or a `duckdb_divergent` would give the next line to copy the keyword unchecked
+/// modes and an unverified first golden, with nothing red. The exact count makes growing the
+/// set a decision rather than a copy.
+#[test]
+fn a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb() {
+    let mut checked = 0;
+    for declared in inventory::iter::<CorpusDeclaration> {
+        if declared.cpu_oracle != "data_fusion_disabled" {
+            continue;
+        }
+        checked += 1;
+        assert!(
+            matches!(
+                DuckdbOracle::parse(declared.duckdb_oracle),
+                DuckdbOracle::Exact | DuckdbOracle::Approx | DuckdbOracle::Fingerprint
+            ),
+            "{}/{}: data_fusion_disabled compares no cpu answer, and its duckdb_oracle {} \
+             compares no whole answer either, so nothing holds it",
+            declared.dataset,
+            stem(declared.query),
+            declared.duckdb_oracle
+        );
+    }
+    assert_eq!(
+        checked, 1,
+        "tpch distinct-functions is the only line DataFusion cannot answer"
+    );
+}
+
 /// The two oracles of one line have to suit each other, and both directions are asserted
 /// rather than trusted.
 ///
