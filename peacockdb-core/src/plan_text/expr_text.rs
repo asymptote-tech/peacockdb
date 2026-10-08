@@ -124,6 +124,8 @@ fn literal_text(value: &ScalarValue) -> String {
             unscaled.to_string().parse::<i128>().unwrap_or_default(),
             *scale,
         ),
+        // `Display` prints a null decimal as its `None,p,s` triple; every other null is `NULL`.
+        ScalarValue::Decimal128(None, ..) | ScalarValue::Decimal256(None, ..) => "NULL".to_string(),
         ScalarValue::IntervalYearMonth(Some(months)) => interval_text(*months, 0, 0),
         ScalarValue::IntervalDayTime(Some(interval)) => {
             interval_text(0, interval.days, interval.milliseconds as i64 * 1_000_000)

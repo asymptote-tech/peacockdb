@@ -28,6 +28,15 @@ fn a_decimal_literal_prints_as_a_value_rather_than_its_parts() {
 }
 
 #[test]
+fn a_null_decimal_literal_prints_as_null_at_either_width() {
+    // #236: `Display` spells a null decimal as its `None,p,s` triple.
+    let narrow = Expr::Literal(ScalarValue::Decimal128(None, 23, 8));
+    assert_eq!(expr_text(&narrow), "NULL");
+    let wide = Expr::Literal(ScalarValue::Decimal256(None, 76, 10));
+    assert_eq!(expr_text(&wide), "NULL");
+}
+
+#[test]
 fn every_expression_form_renders_readably() {
     use crate::plan::{BinaryOp, UnaryOp};
     let column = Expr::column(2, "s");
