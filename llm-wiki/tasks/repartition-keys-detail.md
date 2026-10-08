@@ -506,3 +506,42 @@ landed, `pbench/rollup-small-keys` being the sixth, which the frozen spec predat
 right — comet hashes Boolean as i32, so the cpu shuffle takes `f_kb` — but it is more than the
 spec's paragraph says and the signoff should name it rather than let the arithmetic look wrong
 later.
+
+## Blocked at reviewing (2026-10-08)
+
+The device-free half landed, was reviewed and is answered: plan Tasks 2, 5b (minus its gtest), 5c
+(minus the deleted step 4) and 9 step 1, on PR #169 against `ENS-pbench`. Review round 1's one
+blocking finding and both importants are closed.
+
+**The task stops here rather than going to `completing`, because it is half built and not finished
+with shortcuts.** A completeness signoff now would assert that the task was solved under its
+constraints, and it was not attempted under them: shad-gpu has been off the network all day and
+`verda` resolves nowhere, so the spec's device bar was never in scope for this run. The state is
+`blocked(reviewing)`, and only the human or the helper clears it.
+
+### What the device half still owes
+
+- **Plan Task 1 — #201's murmur gate**, which is the whole of that ticket. Its module is declared
+  `#[cfg(all(test, feature = "gpu"))]`, so the gate runs on the device rung alone and its proof is
+  the seed-mutation red-green cycle on it. Nothing here substitutes.
+- **Plan Tasks 3, 4, 6, 6b and 7** — the float, boolean, timestamp and decimal keys on the device,
+  the NaN canonicalisation, the decimal cast, and the unsigned widening. Each is one half of a
+  two-engine rule whose only proof is a device gate, which is why none of their cpu halves is in
+  this branch.
+- **Plan Task 5b's gtest** — `PlanExecutor.CastTimestampMicrosToSeconds` is unwritten and still
+  owed; and the four rows added to `cpp/tests/gpu/test_plan_executor.cpp`'s literal matrix were
+  compiled here and never run. The first run on a card must confirm the count is 24, that each of
+  the four `NULL::TimestampX` projects throws, and that the throw is `build_scalar`'s default
+  rather than an earlier refusal that happens to carry the type name — the assertion is a substring
+  search.
+- **Plan Task 8 and Task 9 step 2** — every gpu cell, none of which this round enabled.
+- **Plan Task 10** — the archival of #95, #189, #201, #206 and #240, which must not happen until
+  the cells those tickets hold off are actually run. #189 in particular still holds 6 cpu cells,
+  the `uint-key-group` and `uint-key-join` ones that want comet's unsigned arm.
+
+### One thing the device half must not forget
+
+`pbench/rollup-small-keys`' device cells now cite #65 and #206 rather than #189, and rows 197 and
+198 keep #189 for the unsigned half. A device cycle that turns a cell on must drop the tag that
+held it, and a cell that fails must carry the ticket it actually failed on — the registry rule asks
+only for *some* ticket, so it will not catch a tag that has stopped explaining anything.
