@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2330 test cases — Rust 1852, C++ 97, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2334 test cases — Rust 1856, C++ 97, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1185 cases: `--lib` 601, `test_cpu_corpus` 555, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1189 cases: `--lib` 605, `test_cpu_corpus` 555, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -178,6 +178,13 @@ the message a user sees
 the registry and the goldens agree both ways; every mode has a golden and every golden a mode;
 every refusal in a golden names a ticket that exists and carries no host path
 
+| Join projection names | [every_join_projection_in_a_golden_names_the_column_its_ordinal_selects](../peacockdb-core/src/planner/tests/join_projection_names.rs) | 1 |
+|---|---|--:|
+
+every `name@ordinal` in a join's projection, over the ten goldens, names the column the ordinal
+selects from what that join type emits — rebuilt from the children's schemas, not from the
+renderer — and every join type the corpus projects is among them
+
 | Recipe plan structure | [every_published_seq_addresses_the_kind_its_recipe_claims](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 4 |
 |---|---|--:|
 
@@ -206,13 +213,14 @@ registry emitting the writer's stub and no recipe, which is how a hand-built nod
 recipe with no plan. The trivial kinds are not here — the plan goldens run them over every
 corpus query
 
-| Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 13 |
+| Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 15 |
 |---|---|--:|
 
 the renderer against what the planner emits from real SQL: every column reference prints name
 at ordinal, every node carrying a fetch prints it, a join prints its keys and projection by
-name, a source prints its mapping verbatim, a name that is not a token is backquoted, and no
-node name carries an exec suffix
+name — a mark join's mark among them — a null decimal prints as `NULL`, a source prints its
+mapping verbatim, a name that is not a token is backquoted, and no node name carries an exec
+suffix
 
 | One driver, two backends | [one_generic_driver_serves_two_backends_with_different_batch_types](../peacockdb-core/src/executor/tests.rs) | 1 |
 |---|---|--:|
@@ -366,10 +374,11 @@ type, the four unaries one for one; from parquet metadata, rows and bytes are th
 groups' own totals over the projected columns, a scan over several files is refused, and the
 lanes deal the survivors as the mapping says
 
-| Expression text | [plan_text::expr_text::tests](../peacockdb-core/src/plan_text/expr_text/tests.rs) | 3 |
+| Expression text | [plan_text::expr_text::tests](../peacockdb-core/src/plan_text/expr_text/tests.rs) | 4 |
 |---|---|--:|
 
-an interval prints the parts that are not zero, a decimal as a value, every form readably
+an interval prints the parts that are not zero, a decimal as a value and a null one as `NULL`,
+every form readably
 
 | Expression writer | [wire::expr_writer::tests](../peacockdb-core/src/wire/expr_writer/tests.rs) | 16 |
 |---|---|--:|
