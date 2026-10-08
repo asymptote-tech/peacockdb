@@ -3,6 +3,38 @@
 
 Tests, CI, hosts, testdata etc
 
+<a id="t262"></a>
+### #262 — a tickets-only commit can turn the rust tier red while CI skips the pipeline
+`ticket_is_open` (`test_support/duckdb_oracle.rs`) reads `llm-wiki/tickets/` at test run time, so
+the open-ticket set is now a test input. `pipeline.yml`'s two skip layers both still class the
+whole of `llm-wiki/` and every `.md` as inert: `paths-ignore` at the top, and the `changes` job's
+`grep -qvE '(\.md$|^llm-wiki/)'`. The file's own comment states the condition this breaks — "a doc
+file that ever becomes an input has to come off this list".
+
+So a commit that only moves a ticket between `llm-wiki/tickets/` and
+`llm-wiki/archive/archived-tickets.md` can break `--lib` and no run reports it. Two cases are live:
+`an_archived_ticket_is_not_open_and_a_listed_one_is` asserts `ticket_is_open(205)` and
+`ticket_is_open(251)` directly, and every `duckdb_divergent(<n>)` line goes red when `<n>` is
+archived. #205 is on the archival path already — `corpus-coverage.md` names its fix. The helper's
+post-merge protocol guarantees the shape: it archives task specs in a master-only commit carrying
+nothing else. Master then goes red on the next unrelated code push, with the cause several commits
+back.
+
+Not [#252](#t252), though they share a cause. That one is a staged binary not receiving the
+checkout on a remote CPU host; this one is CI declining to run at all.
+
+**Two fixes, and the choice is a cost decision rather than a technical one.** Excepting
+`llm-wiki/tickets/` is not expressible in `paths-ignore` — GitHub Actions has no negation there —
+so the first shape is to drop the doc patterns from `paths-ignore` and let the `changes` job carry
+the whole rule, where a grep can hold the exception. That costs a `changes` job per docs commit,
+and the job currently answers "run everything" for any `push` event, so the push trigger needs the
+same logic before it is safe. The second shape is to move the open-ticket set out of the docs tree,
+which ends the class and also closes #252. Until one lands, `build-test.md`'s CI section says to
+run `--lib` by hand after a tickets-only commit.
+
+Found by the completeness analyst on the `duckdb-oracle` branch, 2026-10-08, which is the branch
+that made the wiki an input.
+
 <a id="t252"></a>
 ### #252 — six corpus cases read the checkout, which a remote CPU run never ships
 `ticket_is_open` (`test_support/duckdb_oracle.rs`) resolves `llm-wiki/tickets/` through

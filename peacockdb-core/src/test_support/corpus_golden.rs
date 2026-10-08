@@ -41,8 +41,9 @@ pub(crate) fn duckdb_golden(dataset: &str, sf: &str) -> PathBuf {
 }
 
 /// `gpu-result.txt` — the device's own answers, one section per (query, mode), written only
-/// under `PCK_WRITE_GPU_RESULT` and pulled home from shad-gpu. A record, never an authority.
-/// `version` names a cuDF other than shad-gpu's 25.02, whose file is gitignored beside it.
+/// under `PCK_WRITE_GPU_RESULT` and brought home from whichever host held the card. A record,
+/// never an authority. `version` names a cuDF other than the committed 25.02, whose file is
+/// gitignored beside it.
 pub(crate) fn gpu_result_golden(dataset: &str, sf: &str, version: Option<&str>) -> PathBuf {
     let name = match version {
         None => "gpu-result.txt".to_string(),

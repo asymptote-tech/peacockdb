@@ -470,7 +470,8 @@ fn registry_datasets() -> BTreeSet<(String, String)> {
         .collect()
 }
 
-/// The committed `gpu-result.txt` holds cuDF 25.02's answers — shad-gpu's — and carries the
+/// The committed `gpu-result.txt` holds cuDF 25.02's answers, recorded on nebius-gpu's L40S
+/// while shad-gpu was down, and carries the
 /// version it was recorded under on its first line, so a 26.02 cycle that recorded over it is
 /// a test failure rather than a diff nobody read. Step 4's "one version per file".
 ///

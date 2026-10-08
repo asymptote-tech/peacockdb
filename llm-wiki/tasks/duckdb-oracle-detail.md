@@ -1979,3 +1979,82 @@ appears nowhere else in `testdata/`. On the rebase: `tickets.md`'s every row now
 `<a id="tNN">` anchors in its file, `build-test-shadgpu.sh` orphans nothing (all eight flags the
 deleted `/.dockerenv` guard summed keep a live read, `PULL_RESULTS` four of them), and master's
 non-conflicting edits survived intact.
+
+## Completeness pass, second time round (2026-10-08)
+
+Two readings of the whole branch at `b1946ef4`, dispatched together and neither seeing the other's
+list. **0 blocking from both, three important each, and no overlap at all** — which is the pass
+working as intended rather than a coincidence: one was asked what is wrong and the other what is
+missing. Every one of the six is a documentation or comment correction, and all six are applied
+here. None needed a developer, a build or a card.
+
+Both agents re-derived the branch's central claim instead of reading the test results. Each
+independently reimplemented the comparator in Python over the committed goldens, and each derived
+the enabled device-cell set from source — one from `cost-registry.csv`, one from
+`corpus_cases.inc` with `all_modes` expanded — and got the same 26 with zero missing and zero
+extra. The reviewer went further and checked every differing numeric cell in both the cpu and
+device goldens against both tolerance bounds: the only cells failing both are exactly the declared
+`duckdb_divergent(251, …)` columns on tpcds q58/q61/q66. So the green is the answers being right,
+not the comparator declining.
+
+### The reviewer's three, all applied
+
+1. **`build-test.md`'s golden-file counts, falsified by this branch.** `tpch.sf1` 39 → 40 and
+   `tpcds.sf1` 116 → 117, counted with `git ls-tree` on both revisions rather than taken. The
+   accounting clause no longer closed either — `22 + 16 + duckdb-result.txt = 39` was the whole of
+   the old number — so it now names the two files per sf1 dir that sit outside the per-mode bucket,
+   one per engine that answers. Every other count on the page was already right.
+2. **The python CI step's justification was the one this branch replaced.** The page still said
+   "the extractor test is one file"; the branch moved that step to a glob over
+   `testdata/test_*.py`, and the step's own comment says why. Corrected to say both steps glob.
+3. **A doc block in `result_text.rs` reassigned by an insertion** — `split_cells`' paragraph had
+   drifted onto `rendered_width`, which is the shape `coding-style.md` names, and `split_cells`
+   had no doc at all. Split and reattached. The branch had fixed the identical shape in
+   `test_cpu_corpus.rs`, so the rule was applied unevenly rather than unknown.
+
+### The analyst's three, all applied
+
+4. **`llm-wiki/tickets/` became a test input and CI still treats every `.md` as inert.** Filed as
+   [#262](../tickets/testinfra.md#t262) rather than fixed, and this is the one shortcut the signoff
+   names. The hole is real and the branch made it: `ticket_is_open` reads that directory at run
+   time, so a commit that only archives a ticket can turn `--lib` red while both of `pipeline.yml`'s
+   skip layers decline to run. It already happened twice on this branch — `96b53f9b` and `b1946ef4`
+   ran zero Rust jobs. It is not fixed here because the fix is a cost decision, not a technical
+   one: `paths-ignore` cannot express the exception (GitHub has no negation there), so either the
+   doc patterns come off it and every docs commit pays a `changes` job — which also needs the push
+   trigger reworked, since it answers "run everything" for a push today — or the open-ticket set
+   moves out of the docs tree, which ends the class and closes #252 with it. That is the human's
+   call. The interim is a line in `build-test.md`: run `--lib` by hand after a tickets-only commit.
+5. **The committed `gpu-result.txt` is nebius-gpu's and five places said shad-gpu's.** The stamp
+   records the cuDF and not the card, and the detail file is deleted at merge, so without this the
+   next regenerator has nothing saying the baseline card moved. Corrected at `build-test.md:714`
+   and in four code comments. Measured headroom first, and it is comfortable — the one genuine
+   float cell sits ~200x inside its bound — so this was a provenance gap, not a latent red.
+6. **`stale-cells-detail.md`, written by this branch, contradicted the board this branch wrote.**
+   It said blocked, named shad-gpu as what would unblock it, and claimed `duckdb-oracle`'s cycle
+   could carry its 16 cells. The board here says `approved to build`, the card is nebius-gpu, and
+   the cycle recorded exactly the 26 then-enabled cells and no more. Corrected, including the last
+   point, which now says explicitly that the chance has passed and the task owns its own cycle —
+   `stale-cells` is the next task dispatched and that file is what its coordinator reads.
+
+### Dropped, and why
+
+The reviewer left two severity calls to me and both are dropped. **#253 is 36 lines against the
+30-line ceiling** — real, and cosmetic: nothing behaves wrongly because a ticket is long, and
+rewriting a ticket this task filed to save six lines is the padding this pass exists to avoid. A
+handful of **1-2 line comment-cap overruns** in changed files, two of which predate the branch.
+Both are recorded here so the next reader knows they were seen rather than missed.
+
+`architecture.md`: **nothing newly falsified.** The analyst read the page against the whole branch
+and proposed no edit, and re-examined the one sentence the first pass had offered at low confidence
+— `:1103-1108`, on divergence surfacing at the root — reaching the same decline independently. The
+qualifier covers more queries now; the sentence is not false, and the branch adds no per-node
+column check.
+
+### CI, for the `done` transition
+
+`23d87b6d` is the last code-bearing commit, and it is green on both cuDF legs, the GPU build, the
+cost report and the S3 check. `GPU Tests (remote)` is red with
+`ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out` — shad-gpu, which the
+override exempts by name. The two commits after it are `llm-wiki/`-only and ran nothing, which is
+#262 rather than a gap in the evidence.

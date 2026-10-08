@@ -13,6 +13,7 @@ standard=12GiB).
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
 New tickets take the next free number (currently 284), one ID space across every file. 264–279
 are left to chain J, whose branches number from 263 on their own boards.
+New tickets take the next free number (currently 263), one ID space across every file.
 Finished and lapsed tickets move to `archive/archived-tickets.md` (Done / Stale). Numbers
 are never reused, so an old reference still resolves there.
 
@@ -29,6 +30,7 @@ are never reused, so an old reference still resolves there.
 | [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 33 | #225 #216 #94 #199 #55 #65 #62 #202 #217 #204 #214 #205 #168 #210 #57 #56 #60 #251 #186 #206 #240 #189 #145 #95 #197 #154 #227 #164 #201 #174 #233 #234 #235 |
 | [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 35 | #225 #216 #94 #199 #55 #65 #62 #202 #217 #204 #214 #205 #168 #210 #57 #56 #60 #251 #186 #206 #240 #189 #145 #95 #197 #154 #227 #164 #201 #174 #233 #234 #235 #253 #254 |
 116 open tickets, in file order.
+117 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
@@ -42,4 +44,4 @@ are never reused, so an old reference still resolves there.
 | [`performance.md`](tickets/performance.md) | The pre-production performance path | 7 | #150 #149 #148 #231 #232 #242 #248 |
 | [`benchmarks.md`](tickets/benchmarks.md) | Wall-time benchmarks | 2 | #226 #69 |
 | [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 6 | #13 #196 #169 #128 #244 #260 |
-| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 4 | #252 #178 #176 #129 |
+| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 5 | #262 #252 #178 #176 #129 |

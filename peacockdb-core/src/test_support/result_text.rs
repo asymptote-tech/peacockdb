@@ -355,9 +355,6 @@ pub(crate) fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
     }
 }
 
-/// One rendered line's cells, trimmed of the padding Arrow sized them to. Not the borders:
-/// Arrow widens a column to its widest printed cell, so the ascii art encodes the values a
-/// tolerant comparison exists not to compare bit for bit.
 /// A rendered table's column count, read off its header rather than its data: an answer of
 /// no rows still has one. A header with NO pipe has no cells either — a zero-column answer
 /// renders as `++`, and `split_cells` reads a pipeless line as one cell (tpcds q17).
@@ -368,6 +365,9 @@ pub(crate) fn rendered_width(table: &str) -> usize {
     }
 }
 
+/// One rendered line's cells, trimmed of the padding Arrow sized them to. Not the borders:
+/// Arrow widens a column to its widest printed cell, so the ascii art encodes the values a
+/// tolerant comparison exists not to compare bit for bit.
 pub(crate) fn split_cells(line: &str) -> Vec<String> {
     let parts: Vec<&str> = line.split('|').collect();
     if parts.len() < 2 {

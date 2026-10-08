@@ -3,10 +3,15 @@
 Working notes. The spec is [`stale-cells.md`](stale-cells.md) (frozen); the plan is
 [`stale-cells-impl.md`](stale-cells-impl.md).
 
-## Blocked before it started (2026-10-08)
+## Blocked before it started, and unblocked the same day (2026-10-08)
 
-No branch exists. The task was never dispatched, because a fresh analyst's reading of it says
-there is nothing a developer could do that would not be guessing at results.
+No branch exists yet. The task was never dispatched, because a fresh analyst's reading of it said
+there was nothing a developer could do that would not be guessing at results — every step needs a
+card and no card answered. **That is no longer true**: the human's host override moved chain J to
+nebius-gpu, the board here says `approved to build`, and `duckdb-oracle` has since run its device
+cycle on that card. Dispatch this task; do not re-block it on shad-gpu.
+
+The reasoning below is kept because its first half still holds and is the trap in this task.
 
 - **Step 1 is the device cycle, and steps 2 and 3 are arithmetic over its 16 outcomes.** The one
   device-free edit in the plan is Task 1 Step 1 — flip the four lines' `gpu_modes` to `all_modes`
@@ -14,10 +19,12 @@ there is nothing a developer could do that would not be guessing at results.
   `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` fails on an absent
   `gpu-result.txt` wherever a cell is enabled, and committing it would assert that 16 cells are
   proven which have never run. That is the false-coverage shape a reviewer is told to hunt.
-- **Hosts, probed 2026-10-08:** shad-gpu times out on :22 and :443 while DNS resolves and the host
-  key is intact, so it is the host; `verda` resolves nowhere and no `VERDA_*` credentials exist
-  here. This workstation builds and links the device targets against cuDF 25.02 at
-  `~/data/miniforge3/envs/rapids-cuda-12.2` but has no card.
+- **Hosts, as of the override.** shad-gpu is still down — it timed out on :22 and :443 with DNS
+  resolving and the host key intact, so it is the host, and CI's `GPU Tests (remote)` job fails
+  the same way. `verda` resolves nowhere. The card to use is **nebius-gpu**, `dmitry@89.169.109.150`,
+  an L40S at cuDF 25.02; the override at the top of the chain J section of `tasks.md` carries the
+  recipe, and `duckdb-oracle-detail.md` has a worked run of it. This workstation still builds and
+  links the device targets but has no card, so the CPU half stays local.
 
 ## #253 does not block this task, which is worth recording because it looks as though it should
 
@@ -46,8 +53,13 @@ above the join batch, whose rows do keep `183` — tpch q4, q15, `anti_join`, `c
 plan's Task 3 checkbox about that comment is decidable today and the answer is **leave it**. Both
 citations are corrected in the plan.
 
-## What unblocks it
+## What it needs now
 
-One `build-test-shadgpu.sh` cycle under a corpus filter for the four rows, on a shad-gpu that
-answers. The same cycle that `duckdb-oracle` waits on can carry this task's 16 cells, so whoever
-gets a card should run both rather than queueing them.
+One `build-test-shadgpu.sh --build` and a filtered device run for the four rows, on nebius-gpu
+under the override — never `--run` or `--pull-results`, both of which ssh to shad-gpu.
+
+The earlier note here said `duckdb-oracle`'s cycle could carry these 16 cells too. **It did not**,
+and the chance has passed: that cycle recorded exactly the 26 cells enabled at the time, and the
+completeness pass verified the recorded set has zero extras. So this task owns its own cycle, and
+its first act is still the Task 1 Step 1 edit above — which is why the cycle and the enablement
+have to land together rather than in either order.

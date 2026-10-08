@@ -713,10 +713,12 @@ sha256 matches local). Notes on the rows above:
 
 ## Golden files
 
-All goldens are committed, under `testdata/goldens/`: `tpch.sf1` (39 files), `tpcds.sf1`
-(116), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top, the recipe payloads with
+All goldens are committed, under `testdata/goldens/`: `tpch.sf1` (40 files), `tpcds.sf1`
+(117), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top, the recipe payloads with
 a digest each. Most of each sf1 count is the per-query DuckDB cost oracle (22 + 99); the
-engine's own are 16 apiece, one plan and one execution set per mode. The committed DuckDB
+engine's own are 16 apiece, one plan and one execution set per mode. Two files per sf1 dir
+sit outside that bucket, one per engine that answers: `duckdb-result.txt` and
+`gpu-result.txt`. The committed DuckDB
 profile inputs live beside them in `testdata/duckdb-profiles/{tpch,tpcds}` (22 + 99) and
 `testdata/duckdb-dynfilters/{tpch,tpcds}` (22 + 99).
 
@@ -731,7 +733,7 @@ The generator scripts live in `testdata/`.
 | `<tier>.result.txt` | the last mode a query declares, under either variable; a run without that mode leaves the section alone. Over the 262144-byte cap the section holds a **fingerprint** instead of its rows | sf1 parquet; one section per query, its `mode=` line naming the author | the corpus cpu tier; the device tier where `gpu_oracle` names a golden (`golden_exact`, `golden_approx_std`, `live_cpu`); the DuckDB `duckdb_<ds>_<q>` cases |
 | `<q>.duckdb_cost.txt` | `gen_duckdb_cost.sh --gen`<br>(DuckDB 1.5.4, `threads=1`, pyarrow 19.0.1) | committed pass-1 profiles ∩ pass-2 dynamic-filter bounds ∩ parquet row-group stats | the cost-report widget (directional signal, not a test) |
 | `duckdb-result.txt` | `testdata/duckdb_result.py`<br>(DuckDB 1.5.4, `threads=1`); timestamps rendered as arrow-rs prints them, and a **fingerprint** over the cap | sf1 parquet, the query text in `<bench>-queries/` | `test_cpu_corpus`'s `duckdb_<ds>_<q>` cases, per the line's `duckdb_oracle` |
-| `gpu-result.txt` | the corpus **device** tier under `PCK_WRITE_GPU_RESULT=1`, **before** it asserts, so an answer the cpu rejects is still recorded; one section per (query, mode), a fingerprint over the cap; `--pull-results` brings it home. A record, never an authority | sf1 parquet, the device's cuDF — the committed file is shad-gpu's 25.02 and says so in a `cudf=` first line, read from `$CUDF_ROOT`'s `version_config.hpp` at build time. `PCK_WRITE_GPU_RESULT=<v>` writes `gpu-result-<v>.txt` beside it, gitignored | the `duckdb_gpu_<ds>_<q>_<mode>` cases and `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` |
+| `gpu-result.txt` | the corpus **device** tier under `PCK_WRITE_GPU_RESULT=1`, **before** it asserts, so an answer the cpu rejects is still recorded; one section per (query, mode), a fingerprint over the cap; `--pull-results` brings it home. A record, never an authority | sf1 parquet, the device's cuDF — the committed file holds cuDF 25.02's answers and says so in a `cudf=` first line, read from `$CUDF_ROOT`'s `version_config.hpp` at build time. It was recorded on nebius-gpu's L40S, not shad-gpu, which was down; the stamp carries the cuDF and not the card, so a regenerator on a third card has only this sentence to tell it the baseline moved. `PCK_WRITE_GPU_RESULT=<v>` writes `gpu-result-<v>.txt` beside it, gitignored | the `duckdb_gpu_<ds>_<q>_<mode>` cases and `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` |
 | `tpch.sf40/duckdb_<q>.csv`, `.count.csv` | `gen_duckdb_goldens.sh --sf 40`<br>on shad-gpu | sf40 parquet, query text from `tpch_query_sql.sh` | `peacock_tpch_tests` / `peacock_tpchv_tests` |
 
 How they hang together — parquet at the top, goldens derived left to right:
@@ -889,11 +891,15 @@ What the arrows are there to make checkable:
 ## CI structure (`.github/workflows/pipeline.yml`)
 
 `pipeline.yml` runs on pushes to master and on every PR, but not on documentation —
-`**.md` and `llm-wiki/**`, which nothing builds, tests or reads. It takes two layers:
-`paths-ignore` skips a wholly-documentation diff, and the **changes** job skips a
-documentation-only push to a PR that carries code, which `paths-ignore` cannot see because
-it judges the whole PR diff. Both fail open, and a doc file that ever becomes an input to
-something has to come off both lists.
+`**.md` and `llm-wiki/**`. It takes two layers: `paths-ignore` skips a wholly-documentation
+diff, and the **changes** job skips a documentation-only push to a PR that carries code,
+which `paths-ignore` cannot see because it judges the whole PR diff. Both fail open.
+
+**One doc file is now an input, and neither list excepts it** ([#262](tickets/testinfra.md#t262)).
+`duckdb_oracle.rs`'s `ticket_is_open` reads `llm-wiki/tickets/` at test run time, so a
+commit that only moves a ticket can turn the rust tier red while both layers skip the
+pipeline. The helper's post-merge archival commit is exactly that shape. Until #262 is
+settled, run `--lib` by hand after a tickets-only commit.
 
 Five independent job chains:
 
@@ -980,9 +986,9 @@ prototype has to hold across that boundary, unpinned on purpose.
 
 Which Rust targets run where is not folklore — `test_ci_coverage` fails when a target
 exists that no workflow step names. Doctests are the one class outside that guard (#128).
-The two python steps need no such guard because neither names files: the extractor test is
-one file, and the prototype step globs `test_*.py` and errors when the glob matches
-nothing. Inside a prototype file the equivalent hole — a test defined below the
+The two python steps need no such guard because neither names files: both glob —
+`testdata/test_*.py` and the prototype step's own pattern — and each errors when its glob
+matches nothing. Inside a prototype file the equivalent hole — a test defined below the
 `__main__` footer, which pytest collects and direct execution would not — is closed by
 `tests/harness.py`, which reads the source back and fails naming what it missed.
 

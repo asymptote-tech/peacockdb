@@ -602,7 +602,8 @@ pub const DUCKDB_FLOAT_TOLERANCE: f64 = 1e-11;
 /// reader scanning a file sees the same word wherever a section is not a run.
 pub const SKIPPED: &str = "skipped: ";
 
-/// The cuDF the COMMITTED `gpu-result.txt` holds the answers of — shad-gpu's. One version per
+/// The cuDF the COMMITTED `gpu-result.txt` holds the answers of. Recorded on nebius-gpu's
+/// L40S, shad-gpu being down; the stamp carries the cuDF and not the card. One version per
 /// file: any other cuDF records `gpu-result-<version>.txt` beside it, which
 /// `testdata/.gitignore` lists. The writer and every reader check a file against this one
 /// line, so moving the committed file to another cuDF is one edit.
@@ -645,7 +646,7 @@ pub fn duckdb_golden(dataset: &str, sf: &str) -> PathBuf {
 }
 
 /// `gpu-result.txt` — the device's own answers, one section per (query, mode). `version`
-/// names a cuDF other than shad-gpu's, whose file is gitignored beside it.
+/// names a cuDF other than the committed one, whose file is gitignored beside it.
 pub fn gpu_result_golden(dataset: &str, sf: &str, version: Option<&str>) -> PathBuf {
     corpus_golden::gpu_result_golden(dataset, sf, version)
 }

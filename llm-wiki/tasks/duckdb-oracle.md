@@ -166,13 +166,13 @@ read the golden section from).
 ## Completeness signoff (2026-10-08, revised after the device cycle)
 
 Solved under its constraints, on both engines. Every corpus line names a `duckdb_oracle`, a case
-per line compares our answer with DuckDB's, four over-cap sections compare by fingerprint and
-agree byte for byte across the two writers, and both corpus helpers are shown failing. The device
-half ran last, on nebius-gpu under the host override: 26 sections recorded at cuDF 25.02, every
-comparison green and none declining to compare, so no divergence is owed a ticket.
+per line compares our answer with DuckDB's, four over-cap sections agree by fingerprint across the
+two writers, and both corpus helpers are shown failing. The device half ran last, on nebius-gpu
+under the host override: 26 sections at cuDF 25.02, every comparison green and none declining.
 
-No bandaid, no assertion weakened. Three shortfalls, named rather than papered over: a decimal
-column against DuckDB's double cannot be approximate on both sides, so a class disagreement is a
-named failure instead (#253, with the two other paths that cannot record one); the negative tests
-reach two of three `CpuOracle` variants, not `data_fusion_subset` (#254); `duckdb_columns` was
-looked for and not needed, no `duckdb_divergent` line being a LIMIT tie.
+No bandaid, no assertion weakened. One shortcut: making the wiki a test input left CI able to pass
+a tickets-only commit that reddens the rust tier, and the fix is a cost decision the human owns, so
+it is [#262](../tickets/testinfra.md#t262) with a by-hand interim. Three shortfalls stand as named:
+a decimal column against DuckDB's double cannot be approximate on both sides (#253, with the two
+other paths that cannot record a divergence); the negative tests miss `data_fusion_subset` (#254);
+`duckdb_columns` was looked for and not needed, no `duckdb_divergent` line being a LIMIT tie.

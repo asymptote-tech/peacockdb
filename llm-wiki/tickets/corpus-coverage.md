@@ -1079,4 +1079,3 @@ one and `every_oracle_variant_is_named_by_some_line` is all that holds it.
 One corpus line uses it — `tpch/scan-limit`, an unordered `LIMIT` over lineitem whose row set is
 not determined — so the exposure is small and the fix is the same shape as the other two: split
 the comparison from the query, and hand the split a doctored answer that is not a subset.
-
