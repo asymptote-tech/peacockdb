@@ -1349,3 +1349,32 @@ Back to **`building`**, with the device cycle as the work. Not dispatched by thi
 of window rather than out of options — the next coordinator should dispatch it straight from the
 list above. Nothing here is waiting on the human except the signoff rewrite, which can ride along
 with the cycle.
+
+## The device cycle, dispatched (2026-10-08)
+
+A fresh coordinator, taking the task the completeness pass reopened. Nothing was re-derived: the
+work list is the section above, item for item.
+
+**Probed before the dispatch.** nebius-gpu answers, L40S, **card idle (0 MiB of 46068 used)**, 37 GB
+free on `/`. verda could not be probed at all — `scripts/list_verda_instances.sh` exits
+`VERDA_CLIENT_ID is not set`, and `verda` resolves nowhere, so there is no address to try; CPU runs
+are local, which is what the last two rounds did anyway. Branch `ENS-pbench` at `12d44d81`, clean
+tree, PR #168 **MERGEABLE** against `ENS-duckdb-oracle`.
+
+**The order is not free, and it is the one thing this dispatch decides.** Finding 7 changes the
+committed parquet, and every one of the 17 goldens derives from it — including the
+`gpu-result.txt` the cycle writes. So the data lands first, the goldens are regenerated on it, and
+only then does the device cycle run. Running the cycle first means running it twice.
+
+**Why a cell cannot just be "run".** `test_gpu_corpus.rs:28` expands a `none` gpu-modes line to
+nothing at all, so there is no filter and no variable that reaches an off cell — the declaration is
+the only switch. A cycle therefore edits `corpus_cases.inc` to declare the cells it intends to
+measure, runs them, and then settles each line on what it measured. That is also why the last
+re-prove's `test_gpu_corpus` ran 28 cases and none of them pbench's.
+
+**The budget the cycle spends.** The cost-report PR comment sits at 63,038 bytes against
+`COMMENT_MAX_BYTES` 65,536 — about seven rows of headroom, and `int8-key-group` plus #255's three
+queries spend four of them.
+
+Dispatched to one developer with: finding 7 first (the two absent `dim` columns, its own commit),
+then the cycle, then findings 5, 6 and 8, which touch neither the data nor the device.
