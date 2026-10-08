@@ -6,7 +6,7 @@ Working notes. The spec is [`pbench.md`](pbench.md) (frozen); the plan the devel
 ## Branch and PR
 
 - Branch `ENS-pbench`, forked off `ENS-duckdb-oracle` at `410111cf`.
-- Task 3 of chain J, so its PR targets **`ENS-duckdb-oracle`**, not master.
+- Task 3 of chain J, so its PR targets **`ENS-duckdb-oracle`**, not master. **PR #168**, opened at `87b8feb1`; base verified with `gh pr view 168 --json baseRefName`.
 - **Task 2 (`stale-cells`) is `blocked(approved to build)` and has no branch**, so pbench forks off
   task 1's branch rather than task 2's. The content dependency is nil — disjoint corpus lines,
   disjoint registry rows, overlapping only in `build-test.md`'s counts and the CSV — so this is a
