@@ -1917,3 +1917,65 @@ Each skipped on purpose, none blocking:
   longer enables, so the coverage guard goes red until it does.
 - **Float cells move between runs.** Nothing compares this file with its previous version, so a
   future `git diff` over it that moves only float digits is expected; a moved *section* is not.
+
+## Review round 6 (2026-10-08) — the device cycle alone
+
+A fresh reviewer over the three commits the resumed chain added, told not to re-review rounds 1-5.
+**0 blocking, 1 important, 3 nits.** It verified rather than read: it reimplemented the comparator
+in Python over the committed goldens, and it derived the enabled-cell set twice independently —
+from `cost-registry.csv`'s `gpu_*` columns and from `corpus_cases.inc`'s `gpu_modes` with
+`all_modes` expanded — rather than trusting the guards that are supposed to assert it. Both
+derivations give the same 26, with zero missing and zero extra in each file.
+
+### Important 1 — #235 said the cycle had never run, in the branch where it had
+
+Fixed here. The ticket's "what remains is one device cycle" paragraph was the sentence holding
+#235 open, and the revised signoff had already removed its counterpart. `#235` is now in
+`llm-wiki/archive/archived-tickets.md` under Done, marked done by this task against PR #167 and
+awaiting merge, with the paragraph rewritten to say the cycle ran on nebius-gpu rather than
+shad-gpu and brought its files home by `rsync` rather than `--pull-results`. Dropped from
+`corpus-coverage.md`'s contents; its five inbound links repointed at the archive, each by the
+relative path that actually resolves from the file holding it. `tickets.md`: the corpus-coverage
+row 35 → 34 and the total 117 → 116, which is again the sum of the Open column.
+
+### The nits, and what became of them
+
+- **The signoff ran to 14 lines against the ten-line cap.** Rewritten to 10. Nothing was dropped
+  but words.
+- **The `duckdb_gpu_*` row comparison was never witnessed red on a wrong recorded row.** True, and
+  left open deliberately. The developer's host experiment showed the ordering claim and the two
+  formerly-vacuous guards red, and `judge`/`compare_sections` — the code this path would exercise
+  — is pinned by `a_wrong_row_fails_exact` and 20 sibling cases in
+  `test_support/duckdb_oracle/tests.rs`. What is unwitnessed is the panic at `duckdb_oracle.rs:356`
+  on a device cell, which a later device-touching task will reach for free. A nit on a task at the
+  end of its life buys a dispatch's worth of nothing.
+- **The reviewer's fourth note is about the rebases still ahead**, and it is kept here rather than
+  in `pbench-detail.md` or `repartition-keys-detail.md` — those files exist only on their own
+  branches, so a copy written here would have met the real one as a conflict. `ENS-pbench` and
+  `ENS-repartition-keys` each still carry, on their own board, the state the host override
+  replaces: `completeness approved` and `blocked(reviewing)`. Both are in the range the ownership
+  rule for a `tasks.md` conflict gives to the child's side — "your branch's side for `building`
+  through `done`" — so resolving by that rule alone would keep the stale state and silently drop
+  the `rebase needed(building)` written here. **Resolve those two by the override instead**: each
+  goes to `building`, and stays there until a developer re-runs its proving commands on nebius-gpu
+  and reports green. The ownership rule is the right default for a conflict nobody has an opinion
+  about; here the human has one.
+
+### What it checked and found clean
+
+Worth keeping, because it is what makes the green mean something. Both recorded files read in
+full: one `cudf=25.02` preamble line each, 26 well-formed sections, no duplicate (query, mode), no
+empty or truncated section, section order matching the writer's promise, every section's rows
+sorted. The one over-cap section (`filter-project`, 2,402,187 rows) is a fingerprint and nothing
+under the cap is. The oracle census is 13 `duckdb_exact`, 12 `duckdb_approx`, 1
+`duckdb_fingerprint`, 0 `duckdb_none`, 0 `duckdb_divergent` — so no cell passed by declining to
+compare, which is the failure mode this task exists to prevent. The tightest approx margin is
+tpch `q1`/`shuffle-additive-avg` `avg_qty` at 9.21e-7 against a 1e-6 decimal bound; `avg_price`
+needs the decimal branch at all, since 2.37e-11 relative would fail the float bound — the
+declared-kind design is load-bearing rather than decorative. Pairing cannot succeed by accident:
+every approx section's non-numeric key columns are unique per row. The recorded answers are not a
+copy of a committed file — `shuffle-stddev` differs from the cpu golden in its last digits and
+appears nowhere else in `testdata/`. On the rebase: `tickets.md`'s every row now equals the
+`<a id="tNN">` anchors in its file, `build-test-shadgpu.sh` orphans nothing (all eight flags the
+deleted `/.dockerenv` guard summed keep a live read, `PULL_RESULTS` four of them), and master's
+non-conflicting edits survived intact.

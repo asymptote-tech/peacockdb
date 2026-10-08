@@ -1069,7 +1069,7 @@ columns stay checked. Decide it before `stale-cells` builds rather than inside i
 <a id="t254"></a>
 ### #254 — `data_fusion_subset` is the one cpu oracle no test can show failing
 
-[#235](#t235)'s harness item was that the corpus helpers are proven to fail on a wrong answer,
+[#235](../archive/archived-tickets.md#t235)'s harness item was that the corpus helpers are proven to fail on a wrong answer,
 and `duckdb-oracle` delivered it for two of the three `CpuOracle` variants: `results_match` and
 `result_matches` were split out of their panicking wrappers and are driven by negative cases.
 `CpuOracle::DataFusionSubset` routes to `assert_subset_of_unlimited` (`test_support/corpus.rs`),

@@ -55,7 +55,7 @@ undetermined line's rows are compared only against committed files, and `all_mod
 expanding to the same cells as the five spelled out
 
 Then the DuckDB tier, 149 of the count and the only independent oracle over the answers
-([#235](tickets/corpus-coverage.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
+([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
 `mini.result.txt` with `duckdb-result.txt` by column position under the line's
 `duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
 for `gpu-result.txt`. Today 93 lines are `duckdb_exact`, 15 `duckdb_approx`, 4

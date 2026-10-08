@@ -2,7 +2,7 @@
 
 Kind: production
 
-**This task closes [#235](../tickets/corpus-coverage.md#t235)** (no independent oracle checks the
+**This task closes [#235](../archive/archived-tickets.md#t235)** (no independent oracle checks the
 result goldens), whole. First of the join-rewrite chain, so
 every later task's newly enabled cell meets DuckDB inside that task's own verification.
 
@@ -167,16 +167,12 @@ read the golden section from).
 
 Solved under its constraints, on both engines. Every corpus line names a `duckdb_oracle`, a case
 per line compares our answer with DuckDB's, four over-cap sections compare by fingerprint and
-agree byte for byte across the two writers, and both corpus helpers are shown failing — verified
-twice by an independent reimplementation of the comparator over the committed goldens. The device
-half ran on nebius-gpu under the host override, not shad-gpu: one cycle recorded 26 sections into
-two `gpu-result.txt` files at cuDF 25.02, and every comparison is green, so no divergence is owed
-a ticket. The 27 formerly red cases pass.
+agree byte for byte across the two writers, and both corpus helpers are shown failing. The device
+half ran last, on nebius-gpu under the host override: 26 sections recorded at cuDF 25.02, every
+comparison green and none declining to compare, so no divergence is owed a ticket.
 
-No bandaid, no divergence fixed, no assertion weakened. Three shortfalls, each named rather than
-papered over: step 3's decimal-on-ours-against-double-on-DuckDB's column cannot be approximate on
-both sides — two independent per-side writers and one row-pairing hash make it unachievable — so a
-class disagreement is a named failure instead, filed with the two other paths that cannot record a
-divergence as #253; step 7's negative tests reach two of the three `CpuOracle` variants, not
-`data_fusion_subset`, filed as #254; and the optional `duckdb_columns` variant was looked for and
-not needed, since no `duckdb_divergent` line is a LIMIT tie.
+No bandaid, no assertion weakened. Three shortfalls, named rather than papered over: a decimal
+column against DuckDB's double cannot be approximate on both sides, so a class disagreement is a
+named failure instead (#253, with the two other paths that cannot record one); the negative tests
+reach two of three `CpuOracle` variants, not `data_fusion_subset` (#254); `duckdb_columns` was
+looked for and not needed, no `duckdb_divergent` line being a LIMIT tie.
