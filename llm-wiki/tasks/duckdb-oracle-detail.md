@@ -630,3 +630,62 @@ empty string from NULL on either side — the same on both, so it compares corre
 rendering is the only common ground the two engines have. And tpcds q66's twelve declared-divergent
 columns clear their tolerance by only about 30%, so a small change on either side flips them to
 "stopped diverging"; worth knowing when #251 is worked, not worth pre-empting.
+
+## Round 3, recovered from a second dead dispatch (2026-10-08)
+
+The run that dispatched the developer on review round 2's list died at 04:19, ten minutes after
+the dispatch began (board commit `357c155b` at 04:06, status written 04:08, the developer's files
+last written 04:18). Nothing reached this file, so the reconstruction below is read off the
+uncommitted diff — 11 files, +179/−28 — and off which findings have no diff at all. Hosts
+re-probed at 04:20: shad-gpu `connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed
+out`, `verda` still resolves nowhere and no `VERDA_*` credentials are set. The ceiling is
+unchanged.
+
+### What the dead dispatch left, finding by finding
+
+- **Blocking 1 (empty `PCK_WRITE_GPU_RESULT`) — done, and it looks right.** A three-armed
+  `GpuRecording { No, Committed, Versioned(String) }` in `test_support/mod.rs`, read by
+  `device_answer::gpu_recording_asked(Option<&str>)` so the rule is testable without an env
+  var; `None | Some("")` is `No`. `corpus_gpu.rs:record_gpu_result` matches on it,
+  `test_gpu_corpus.rs:85` replaces its unreachable `var_os(...).is_none()` with
+  `gpu_recording() == GpuRecording::No`, and `build-test-shadgpu.sh:415`'s false comment now
+  says empty is what a non-recording cycle sends. Case:
+  `an_empty_recording_variable_is_not_a_version`.
+- **Important 2 (NaN waved through a triple) — done at all three sites.**
+  `result_text::nan_settles(a, b) -> Option<bool>` is the shared rule (`Some(true)` two NaNs,
+  `Some(false)` exactly one, `None` defer to the caller's tolerance), called from
+  `fingerprint.rs:296`, `result_text.rs:317` and `device_answer.rs:206`. Three cases, one per
+  site: `a_nan_in_a_triple_is_compared_and_not_waved_through`,
+  `the_tolerant_oracle_fails_on_a_nan_against_a_number`,
+  `the_device_comparison_fails_on_a_nan_against_a_number`.
+- **Important 3 (the two writers class a column from different evidence) — half-written and
+  currently broken.** `testdata/test_duckdb_result.py` was rewritten for a three-argument
+  `dr.fingerprint(names, types, rows)` and gained two cases
+  (`test_a_decimal_is_hashed_and_a_double_is_summed`,
+  `test_an_all_null_double_column_is_approximate_by_its_declaration`), but
+  **`testdata/duckdb_result.py` itself was never touched** — its `fingerprint(names, rows)` still
+  classes by `isinstance(value, float)` over the rows. Two further defects in what was written:
+  the new cases say bare `TYPES` where the class attribute is `self.TYPES`, a `NameError`; and the
+  all-null case expects `sum=0.00000000000000000e0 min=nan max=nan`, which the Python writer
+  cannot produce today — `ordered[0]` raises `IndexError` on an empty column. So that file is
+  red as it stands, and `fingerprint.rs`'s module doc still says `isinstance(value, float)`
+  describes the other side.
+- **Important 4 (`build-test.md:686`) — closed by the coordinator at `357c155b`.**
+- **Important 5 (nothing prunes `gpu-result.txt`) — not started.** No diff in
+  `corpus_golden.rs` or `test_cpu_corpus.rs`.
+- **Important 6 (tpch scan-limit is `duckdb_exact` over an undetermined row set) — not
+  started.** No diff in `corpus_cases.inc` or in `each_declarations_two_oracles_suit_each_other`.
+- **The 11 nits — two done, the rest not started.** `corpus_gpu.rs:67` is now 9 doc lines
+  (was 11) and `test_gpu_corpus.rs:79` is 4 body lines (was 5). Still over
+  `coding-style.md`'s caps: `fingerprint.rs:1` at 16 against 10, `test_cpu_corpus.rs:16` at 12,
+  `duckdb_oracle.rs:107` at 5 against 4. Untouched as well: `duckdb_oracle.rs:248`'s unchecked
+  `row[column]`, `duckdb_oracle/tests.rs:277`'s `ticket_is_open(235)`, `judge`'s dead `at`
+  argument at `duckdb_oracle.rs:382`, and `macro_invocations` (`corpus.rs:575`) having dropped
+  the file path from its panics.
+
+### Nothing in the uncommitted diff has been run
+
+No `cargo` or `python3` output survived the dispatch, and `testdata/test_duckdb_result.py` is
+provably red (the `NameError` above), so the whole diff is unverified. The coordinator did not
+commit it: committing an unverified half-finished round is how a later run mistakes it for a
+closed one.
