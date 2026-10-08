@@ -1085,6 +1085,29 @@ fingerprint lines from 4 to 14, ten of the new ones its own rows whose device co
 while the cpu's matches — now has 27 pbench rows in reach, all of them DuckDB-green on the cpu
 already, in a dataset that exists to make the device differ.
 
+**Decided, 2026-10-08, so that whoever implements it need not re-litigate it.** Two changes, both
+additive, neither touching a line that is green today:
+
+- **`duckdb_divergent` gains a side**, written as a third component: `duckdb_divergent(<ticket>,
+  <positions>, <side>)` where the side is `both` (today's meaning, and the default a line keeps by
+  writing two components), `cpu` or `device`. The named columns must still differ **on the side
+  named** and must still agree on the other, so a cell that stops diverging on the device fails
+  exactly as one that stops diverging on the cpu does today. That is what makes the variant worth
+  having: it narrows the claim rather than waiving it.
+- **`duckdb_fingerprint` gains the optional ticket and column list** `duckdb_divergent` already
+  carries: `duckdb_fingerprint(<ticket>, <positions>)`. `rows` and every column not named stay
+  checked — the `nonnull` counts, the triples, and the hash recomputed over the exact columns the
+  line does not except. A hash cannot be recomputed from a fingerprint, so an excepted column
+  means both writers must leave it out of their hash, which makes the exception a property of the
+  section rather than of the comparison: the writers read the line's exceptions. That is the part
+  that costs work, and it is why this is a ticket and not a line edit.
+
+Rejected: a tenth `corpus_query!` argument for a separate device oracle. It doubles the oracle
+column on all 176 lines to express something four or five of them need, and a line's coverage
+stops reading off the line. Also rejected: classing every decimal approximate so the fingerprint
+needs no exception — it takes 1.5M rows of `o_totalprice` out of row-for-row checking, which is
+the thing the fingerprint exists to do.
+
 <a id="t254"></a>
 ### #254 — `data_fusion_subset` is the one cpu oracle no test can show failing
 
