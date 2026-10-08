@@ -30,6 +30,14 @@ keep `!Clone` so the cost stays visible at call sites) or a C++-side non-consumi
 refcounted handle. Interacts with #136's persistent-build option, which would solve both
 at once.
 
+**Corpus queries:** the cost is visible in pbench's `tp4-single` plan goldens, where the
+small-table rule is off so `fact` really does hold four lanes. Three joins collapse all four to
+one, each by a different route, and `pbench_shows_three_kinds_of_join_collapsing_four_lanes_to_one`
+(`planner/tests/plan_goldens.rs`) counts the `GpuMergePartitions` that do it: `nl-inner` because a
+keyless join merges both sides, `cross-projection` the same, and `sparse-probe-left` because
+DataFusion plans it `CollectLeft`, which this engine merges rather than broadcasts — the shape
+this ticket removes.
+
 <a id="t170"></a>
 ### #170 — a source whose lanes each hold one batch could say so, and three shortcuts would fire
 

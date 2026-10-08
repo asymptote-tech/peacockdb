@@ -74,14 +74,21 @@ gtest with a filtered Left join. The same commit drops the prototype's deliberat
 `NOT IN` with any NULL in the build side must yield the empty set; neither
 `null_equality::EQUAL` nor `UNEQUAL` implements that, so ANTI/mark joins stay hardcoded
 EQUAL (`cpp/src/operators/join.cpp`). Needs a planner/serializer flag distinguishing
-NOT IN from NOT EXISTS, a nullable-anti-key test (no corpus query exercises it), and a
+NOT IN from NOT EXISTS, a nullable-anti-key test, and a
 DuckDB final-result oracle, now [#235](../archive/archived-tickets.md#t235) — today's validation is circular
 (goldens vs DataFusion, GPU vs CPU). Semi half done (q33; semi honors per-join `null_equals_null`).
+
+**Corpus queries:** pbench's seven, shared with [#59](#t59) — `not-in-uncorrelated`,
+`not-in-correlated`, `not-in-under-or`, `not-exists-null-keys`, `exists-or-mark`,
+`anti-null-preserved-condition` and `mark-cross-residual`. All refused at all five modes, by a
+message naming both tickets, with DuckDB's answers committed beside them: `not-in-uncorrelated`
+answers 0 rows where a two-valued engine answers 13,964.
 
 <a id="t59"></a>
 ### #59 — Nullable-key semantics for semi/anti/mark joins
 Anti/mark keep `null_equality::EQUAL` deliberately; a blind UNEQUAL flip is wrong for
-`NOT IN`. No enabled query has a nullable anti/mark key. Wants a dedicated analysis plus
+`NOT IN`. The seven pbench rows [#80](#t80) lists are the shape, refused at all five modes rather
+than enabled, so nothing runs it end to end yet. Wants a dedicated analysis plus
 expr/join goldens covering nullable IN / NOT IN / EXISTS before defaults change. Anti
 remainder overlaps #80.
 
@@ -109,6 +116,10 @@ rows an outer form owes, which is #160's argument for refusing the other types a
 this shape is the one the planner lets through. Pinned by
 `bug_a_left_nested_loop_join_with_a_decimal_predicate_is_refused_on_the_device` and its
 projected neighbour (`gpu_tests/nested_cases.rs`). Numbered past #214.
+
+**Corpus queries:** pbench's `nl-left-decimal`, which carries this ticket and [#190](#t190). #190
+fires first — the cpu drops the nested loop's projection and refuses — so the shape above is
+reached by the hand-built cases alone and this row's device cells have never run.
 
 <a id="t208"></a>
 ### #208 — the cpu's cross join answers nothing over a zero-row build side
@@ -153,30 +164,21 @@ Its device cells are off on [#63](#t63), its zero-column build side; its cpu cel
 <a id="t190"></a>
 ### #190 — the CPU backend drops a nested-loop join's projection
 
-`tpch/q11` at all five modes: `the node declares Schema { … 2 fields } and DataFusion answered with
-Schema { … 3 fields }`. The extra column is the build side's scalar, which the node's projection
-drops.
+`tpch/q11` at all five modes: `the node declares Schema { … 2 fields } and DataFusion answered
+with Schema { … 3 fields }`. The extra column is the build side's scalar, which the node's
+projection drops.
 
-`cpu_backend/join.rs:140` builds `NestedLoopJoinExec::try_new(build, probe, Some(filter),
-&join_type, None)` — that last argument is DataFusion's projection, passed `None`. Forty lines
-down, the hash-join path at :302 reads `node.projection` and passes it. One join family applies the
-projection the plan declares and the other ignores it.
+`cpu_backend/join.rs:140` passes `None` as `NestedLoopJoinExec::try_new`'s projection argument,
+while the hash-join path at :302 reads `node.projection` and passes it: one join family applies
+the projection the plan declares and the other ignores it. The projection is not missing from the
+plan — `check_projection` validates it and the node's declared schema derives from it. It refuses
+rather than answering wrongly only because `declared_as` compares counts first; a projection that
+reordered columns would be a wrong answer with matching shapes.
 
-The projection is not missing from the plan: `check_projection` validates it, the plan golden
-carries it, and the node's declared schema is derived from it. Only the executor ignores it.
-
-**It refuses rather than answering wrongly by luck.** `declared_as` compares column counts before
-anything reads a value, so a projection that drops a column changes the count and is caught. A
-projection that reorders columns, or drops one and leaves the same count, would have produced a
-wrong answer with matching shapes and nothing to catch it.
-
-Why the corpus took until T19's sixth batch to reach it: `q11` is the first query whose nested-loop
-join projects at all. `nested-loop-join`, `nested-loop-left-join` and `cross-join` are `SELECT *`,
-so their projection is `None` and passing `None` is correct for every one of them.
-
-Device half untested — the CPU refuses first, as with [#189](corpus-coverage.md#t189).
-`aggregate-state-types`'s rollout, 2026-09-17, added `tpch/q22` and `tpcds/q24` at every mode —
-four registry rows with `tpch/q11` and `tpcds/q54`.
+**Corpus queries:** nine registry rows, 45 cpu cells, all off at all five modes — `tpch/q11`,
+`tpch/q22`, `tpcds/q24`, `tpcds/q54`, and pbench's `nl-inner`, `nl-left`, `nl-projection`,
+`nl-left-decimal` and `like-column-pattern`. Their device cells have never run and cannot until
+the cpu answers: a gpu cell needs a cpu cell at the same mode.
 
 <a id="t63"></a>
 ### #63 — a zero-column placeholder survives the cross join and shifts every ordinal above it
@@ -318,6 +320,10 @@ so this is not a shape only a constructor produces. Pinned by the refusal test i
 join stays a Left form and the existing `mixed_left_*` applies, which is a planner change; or
 a swapped `mixed_*` in cuDF, which is not ours. The first is cheap and has not been costed.
 
+**Corpus queries:** pbench's `probe-exists-residual` and `probe-not-exists-residual`, this
+ticket's only tag on either, refused at all five modes — so it is a measured corpus shape now and
+not only the constructed one above.
+
 <a id="t160"></a>
 ### #160 — nested-loop join supports Inner and Left only
 `execute_nested_loop_join` handles Inner and Left; every other type is refused at plan time
@@ -433,7 +439,10 @@ cuDF's `strings::like` takes a scalar pattern; a column of patterns needs a per-
 `like` per distinct pattern, scattered back, or a regex per row).
 
 **Corpus queries:** none in tpch or tpcds. pbench's `like-column-pattern`
-(`SELECT d_id, t_id FROM dim JOIN tiny ON d_name LIKE t_pat`), its device cells off on this ticket.
+(`SELECT d_id, t_id FROM dim JOIN tiny ON d_name LIKE t_pat`) is the shape, but the cpu does not
+answer it either: its nested loop carries `projection=[t_id@0, d_id@2]`, so
+[#190](#t190) refuses it first and all five cpu cells are off. Its device cells therefore carry
+this ticket unmeasured — a gpu cell needs a cpu cell, so none of them has ever run.
 
 <a id="t250"></a>
 ### #250 — an `IN` subquery whose NULL answer is read is refused when its data holds NULLs

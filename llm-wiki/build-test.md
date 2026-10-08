@@ -100,7 +100,7 @@ handed, and the record's preamble is what `record_header()` writes
 
 SQL in, rows out: 17 queries planned and run at all five modes against DataFusion on the same
 SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back
-to zero and holds equal releases at the end of every run — and ten cases no query list can
+to zero and holds equal releases at the end of every run — and eleven cases no query list can
 carry: that DataFusion's partial aggregate does not skip grouping here, the call and pull
 counts a limit makes, the smallest budget a query fits in completing where the byte below it
 trips, and that boundary under a drained lane, the model compared against what the calls
@@ -108,10 +108,12 @@ measured, an answer under the wrong column names not being the same answer, the 
 keeping the shapes only one query has, and a degenerate hash under a Right outer and under a
 RightAnti answering like the oracle from the empty build lanes it leaves
 ([#175](archive/archived-tickets.md#t175)), and the schema validator as the driver's output
-hook — `tpch/q6` at every mode passing under it, and an index over the same tree with one
-project's field retyped refused naming the field. Two of the 29 are `#[ignore]`d against
+hook — `tpch/q6` at every mode passing under it, an index over the same tree with one
+project's field retyped refused naming the field, and the same tree with a field declared
+non-nullable over a column holding NULLs refused naming the nulls and their count
+([#227](tickets/corpus-coverage.md#t227)). Two of the 30 are `#[ignore]`d against
 [#182](tickets/memory.md#t182) — the budget boundary and the rebatcher's peak, both
-properties that pricing a batch from the plan's schema took away — so 27 run. The first tier
+properties that pricing a batch from the plan's schema took away — so 28 run. The first tier
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 
@@ -797,7 +799,8 @@ testdata/{tpch,tpcds}-queries/*.sql        testdata/pbench/gen.sql
                  ▼                                         ▼
         tpch.sf1 / tpcds.sf1   (parquet, gitignored)   pbench.sf1  (parquet, committed)
           │
-          │   both feed every branch below
+          │   all three feed every branch below, except the duckdb_cost
+          │   one: pbench's queries are named rather than qN
           │
           ├── planner::tests::plan_goldens (--lib), UPDATE_CANONICAL=1
           │     ├──► <mode>.plans.txt

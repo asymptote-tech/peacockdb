@@ -305,8 +305,9 @@ corpus_query!(tpcds, 1, q92, all_modes, none, duckdb_exact, data_fusion_exact, g
 //
 // Every runnable gpu cell was run once on an L40S under cuDF 25.02 and settled on what it
 // measured: 30 are on, and an off cell carries the ticket it failed on. 157 could not be run —
-// a gpu cell needs a cpu cell at its mode — and a row with no cpu cell at all is refused by our
-// planner, citing its ticket on the golden's `refused:` line. Three queries are absent, on #255.
+// a gpu cell needs a cpu cell at its mode. Of the 29 rows with no cpu cell, 24 are refused by
+// the planner, 21 of them citing their ticket on the golden's `refused:` line; the other 5 plan
+// fine and the cpu backend refuses them at run time, on #190. Three queries are absent, on #255.
 corpus_query!(pbench, 1, anti_null_preserved_condition, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, bool_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, cross_empty_build, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);

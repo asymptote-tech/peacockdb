@@ -1777,3 +1777,148 @@ comment-cap risk: the PR comment fits. The board commit `d64c1f9d` has a run of 
 **vacuous** — documentation only, so `changes` answered `code=false` and every job skipped green in
 seconds having compiled nothing. Worth knowing before `done`, which asserts CI green on the PR: the
 run that counts is the last one over code.
+
+## Completeness pass — the second analyst reading (2026-10-08)
+
+Mechanical verification off the committed artifacts, so the signoff need not re-derive it. Nothing
+here was built or run; the parquet was read with pyarrow and duckdb 1.5.4's python module, the
+goldens and the registry with text comparison.
+
+### The spec's data table against the parquet
+
+Every promise in `pbench.md`'s table holds except one. `fact` 20,000 rows / 10 row groups; `dim`
+2,000 / 1; `sub` 200 / 1; `tiny` 8 / 1. `f_k` 1,034 NULL (5.17%) with 10,058 rows on keys 0–2 and
+1,001 distinct values over 0–1000. `f_kf64`: +NaN 199, −NaN 204, −0.0 191, 0.0 563, NULL 182;
+`f_kf32` the same NaN and −0.0 counts. `d_kf64`: +NaN 10, −NaN 8, −0.0 8; `d_kf32` +NaN 10, −0.0 8
+— so `fact` carries NaN of both signs and `dim` carries −0.0 and NaN, which is what work item 1
+asks for. `f_ku32` 9,920 values past `i32::MAX`, 153 NULL. `f_ts_s` and `d_ts_s` hold no
+sub-second value. `f_kstruct` ↔ `d_kstruct` and `f_ku32` ↔ `d_ku32` both join non-empty. `sub.s_y`
+8 of 200 NULL. `tiny.t_k` two keys, four rows each; seven of its eight `t_pat` patterns match at
+least one `d_name`. `empty` carries `tiny`'s four columns.
+
+**The one unmet cell: `empty.parquet` has 0 row groups where the table says 1.** Already recorded
+at the head of this file and on #256, and it is what makes `cross-empty-build` a #256 refusal
+rather than the #208 demonstration it was written for.
+
+One soft spot, not a defect: `dim`'s "every key twice" is 950 keys twice and 50 once — the 1-in-40
+NULL overwrites one copy of 50 keys. The many-to-many property holds.
+
+### The oracle agreement, checked without a device
+
+- All 17 pbench `duckdb_exact` corpus lines: `mini.result.txt`'s rendered rows equal
+  `duckdb-result.txt`'s as multisets. No differences.
+- All 28 `duckdb_exact` sections of `gpu-result.txt`: the same against `duckdb-result.txt`. No
+  differences.
+- `uint-key-group`'s fingerprint is byte-identical across `duckdb-result.txt`,
+  `mini.result.txt` and both `gpu-result.txt` sections, hash included.
+- `duckdb-result.txt` holds 60 sections and 0 `error` sections; `gpu-result.txt` 30, one per
+  enabled gpu cell; `mini.result.txt` 57, one per live corpus line.
+
+### The registry arithmetic
+
+60 rows; 57 live corpus lines and 3 commented out on #243. 300 cells per engine, 15 `na`, 285
+declarable. cpu: 128 on, 157 off. gpu: 30 on, 98 off with a ticket, 157 undeclarable because the
+cpu twin is off. The 98 by ticket — #152 42, #220 18, #240 17, #95 9, #63 7, #206 3, #65 2 —
+reproduce the per-cell table above. No row with an `off` or `na` cell lacks a ticket, across the
+whole file and not just pbench. Corpus-wide oracle counts match `build-test.md` exactly: 177 lines,
+110 `duckdb_exact`, 16 `duckdb_approx`, 14 `duckdb_fingerprint`, 33 `duckdb_none`, 4
+`duckdb_divergent`.
+
+### `generate_pbench.sh --check`, the half that needs no regeneration
+
+Its hardcoded `FACT_SPECIALS` (`199 204 191 563 199 204 191`), `DIM_SPECIALS` (`10 8 8 10 8`) and
+10-row-group assertion all match the committed parquet, re-derived independently. The regeneration
+half was not run: it needs the duckdb CLI and would write outside this reading's permitted path.
+
+### A fourth query cannot go missing silently
+
+Three guards close the loop in different directions, so the absence of the #255 three is asserted
+rather than tolerated and a fourth disappearance is loud. Deleting a `.sql` makes
+`plan_goldens::pbench_*` re-render without that section and go red against the committed golden.
+A registry row with no golden section, or a section with no row, is
+`the_registry_matches_the_goldens_in_both_directions`. A `duckdb-result.txt` section with no row,
+or a row with no section, is this branch's new
+`every_duckdb_result_section_has_a_registry_row_and_every_row_a_section`. And adding one of the
+three turns `testdata/test_duckdb_result.py:165` red in the cost-report job.
+
+#255's own citations check out: `common.rs:41-68` panics on any arm it has no deterministic width
+for, and `planner/memory_estimation.rs:171` and `:276` call it through `logical_size_from_schema`
+at plan time, so a Struct or Interval column in any node's output schema aborts the process.
+
+### The 157-cell bound: where it lives after the merge
+
+Recorded in two places the archive keeps — `corpus_cases.inc:307` (the pbench section header) and
+#259's closing note at `archive/archived-tickets.md:64` — plus this file, which the merge deletes.
+No later task plans work the bound forbids: `repartition-keys` and `join-backend` each turn on the
+cpu side of every row whose gpu cells they claim, in the same task.
+
+## Completeness pass, third time round — and it closes (2026-10-08)
+
+Two readings at `008c777d`, dispatched together, neither seeing the other's list. **The reviewer
+found 0 blocking and 5 important; the analyst 0 blocking and 5 important.** The analyst's own
+section is above. Both independently found the same thing — **#190** — which is the strongest
+signal this pass produced and is why it is the first fix below.
+
+Everything load-bearing was confirmed by one or both, and the agreement is worth recording because
+it is what makes the signoff defensible: the Restriction holds (the branch's only non-test
+production sources are `cpu_backend/mod.rs` and `wire/expr_writer.rs`, exactly the two the spec
+permits); #227's cpu half cannot change an answer, since `declared_as` ends in
+`RecordBatch::try_new`, which refuses the same NULL itself, so the check only re-words a refusal
+arrow already raises; the 98 off tags are consistent with the capability matrix mode by mode; the
+three `sparse-build-*` rows are tagged right, `plan/join.rs:461` making `without_build`
+unreachable for Right, Full and RightAnti at every mode; `gpu-result.txt` is held as a record and
+never an authority; no golden contradicts itself, Σ `batch_rows` equalling `output_rows` at every
+node of all five `.cpu.txt` files; and no coverage regressed — 25 cells went `disabled` → `enabled`
+and nothing went the other way.
+
+### The nine fixes, all mine, all prose
+
+**#190 was the one ticket this branch left false, and both readings found it.** Its text said "four
+registry rows with `tpch/q11` and `tpcds/q54`". Nine rows carry `190` now and 45 cpu cells are off
+on it — pbench's `nl-inner`, `nl-left`, `nl-projection`, `nl-left-decimal` and
+`like-column-pattern` joined the four. I re-derived that from the registry before editing. The
+ticket now carries the live list and the fact that makes it matter: those rows' device cells have
+never run and cannot until the cpu answers, because a gpu cell needs a cpu cell at the same mode.
+Trimmed to 14 lines from 20 while doing it, since it was over the cap before this branch touched it.
+
+The rest:
+
+- **#80 and #59** both still said no corpus query exercised a nullable anti/mark key. Seven pbench
+  rows do — the same seven on each — refused at all five modes by a message naming both tickets,
+  with DuckDB's answers committed. #80 carries the list; #59 points at it and says plainly that
+  they are refused rather than enabled, which is why "no enabled query" was true and misleading.
+- **#246 claimed "the cpu answers"** its corpus row. It does not: `like-column-pattern`'s nested
+  loop carries `projection=[t_id@0, d_id@2]`, read off `tp1-single.plans.txt`, so #190 refuses it
+  first and all five cpu cells are off. Its device cells therefore carry #246 unmeasured.
+- **#159 and #215** gained the corpus lines their text implied they lacked — #159's "not a shape
+  only a constructor produces" is now two measured rows, and #215's row is refused by #190 first.
+- **#140 had nothing at all**, despite a whole spec section ("#140's cost, made visible") and three
+  delivered readings. It now names them and the test that counts the merges.
+- **`build-test.md`'s "End to end" row** said 30 in its N column and "ten cases ... two of the 29
+  ... so 27 run" in its prose; the branch bumped the number and not the sentence. Eleven, two of
+  30, 28 run, with the nullability case named in the enumeration. The golden-flow diagram's spine
+  said "both feed every branch below" where three datasets feed it.
+- **`corpus_cases.inc`'s section comment** said a row with no cpu cell is refused by the planner.
+  Of the 29 such rows, 24 are, 21 of those citing their ticket on the `refused:` line, and the
+  other 5 plan fine and the cpu backend refuses them at run time on #190. Verified by parsing the
+  plan golden: 24 refusals, 3 citing no ticket.
+- **`repartition-keys-impl.md`'s Task 5c Step 4 was a step that cannot execute.** It told its
+  developer to put three pbench queries into `NOT_RUNNABLE`; all three `.sql` files are absent
+  until #255 closes, `test_duckdb_result.py:165` asserts their absence, and `NOT_RUNNABLE` is
+  checked both ways, so the step goes red on contact. Now deferred in place, citing #255.
+- **`join-backend.md` counts 23 cpu cells from an estimate that is now 48**, and that spec is
+  frozen. Fixed where the authority is: `reports/join-rewrite-cell-estimate.md` names the move in a
+  dated note beside its own row, its original figures left as taken — an estimate rewritten after
+  the fact records nothing — and #190 carries the live list a reader will reach first.
+
+Ticket caps re-checked after every edit: the six joins.md tickets I touched are all within theirs,
+#140 lands at exactly 15, and the five still over (#173, #220, #243, #250, #256) were over before
+this branch and are the house condition both readings scored as a nit.
+
+### What neither reading could verify
+
+The cycle's own measurements — which cell passed, which ticket each of the 98 failed on, and the
+device suite counts. Both checked the tags for consistency against the plan goldens, the capability
+matrix and each ticket's own text and found no contradiction, but the runs themselves rest on the
+record in this file. That is the standing limit of a reading without a card, and it is why the
+device half is recorded here in the detail a re-run would need.
