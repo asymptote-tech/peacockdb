@@ -249,3 +249,20 @@ original rule, kept for the record.
 Chain K runs without a GPU, so it does not contend with chain J for nebius-gpu. No device run,
 no GPU cycle. This task reaches `done` when every CI job but the GPU tests is green; the GPU jobs
 are not waited on. The C++ changes are built, not run on a device.
+
+## Completeness signoff
+
+Solved under its constraints. A DISTINCT aggregate lowers to two sequences beside any companion the
+engine decomposes, with or without grouping sets; the five traps are built in structurally rather
+than asserted in prose; #261 and #144 are refused by name and #62 is archived; the wire's
+`distinct` field is deprecated with no slot moved and `recipe-payloads.txt` byte-identical; q28,
+`tpch/rollup-distinct` and `tpch/distinct-functions` run on the cpu corpus.
+
+One shortcut, and it is the chain's: no GPU. The C++ change — the guard that read `distinct`, plus
+three gtest arguments — is compiled and not run, and every new gpu cell is off under #262. The
+decimal `sum` companion's cast-back is therefore pinned by a plan test alone: the cpu backend's
+`declared_as` casts a widened decimal back per batch, so no cpu run can observe the cast-back's
+absence, and the device that can has not run. No other shortcut or bandaid.
+
+Owed at merge: nothing for #62. `keeps_distinct` does not admit `Float32 → Float64`, an injective
+cast the spec's frozen list omits; the subcase and its cheaper fix are recorded on #144.
