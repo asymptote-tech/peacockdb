@@ -210,14 +210,9 @@ fn the_fingerprint_oracle_needs_a_fingerprinted_section() {
 /// than failing to parse the other.
 #[test]
 fn one_side_fingerprinted_near_the_cap_is_fingerprinted_here_too() {
-    let ours_as_fingerprint = crate::test_support::fingerprint_of_rendered(OURS);
+    let as_fingerprint = crate::test_support::fingerprint_of_rendered(OURS, &[false, false]);
     assert_eq!(
-        compare(
-            &DuckdbOracle::Fingerprint,
-            OURS,
-            &ours_as_fingerprint,
-            &KINDS
-        ),
+        compare(&DuckdbOracle::Fingerprint, OURS, &as_fingerprint, &KINDS),
         Ok(())
     );
 }

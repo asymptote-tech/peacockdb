@@ -3,16 +3,20 @@
 //! Written by both result writers — this one and `testdata/duckdb_result.py` — so an answer
 //! too large to commit is still an answer DuckDB can be held to. A column goes into the hash
 //! when it renders identically on both engines and into an approximate triple when it does
-//! not, and the class is read off the RENDERED cells rather than off either engine's
-//! declared type: ours answers a decimal where DuckDB answers a double, and only the
-//! rendering is common ground.
+//! not, and only a FLOAT is the second: each engine prints a float to its own precision,
+//! while a decimal renders at its declared scale on both sides and so does an integer, a
+//! string, a date, a boolean and a timestamp. So an over-cap join of them is checked row for
+//! row and not by its sums. The class comes from the declared type — [`is_approximate`] here,
+//! `isinstance(value, float)` there — because a rendered `31.00` does not say whether it was
+//! a decimal or a double.
 //!
-//! The two passes over the rows are what keeps the memory bounded: the first classifies and
-//! holds nothing, the second collects only the approximate columns' values and the exact
-//! columns' text. Rendering twice costs cpu and no memory, which is the right way round for
-//! a 1.2-million-row answer.
+//! One pass over the rows, and the memory it holds is bounded by what the two sides compare:
+//! the approximate columns' values and the exact columns' row text, never a rendered table.
+//! The side that stayed under the cap is fingerprinted from its rendering instead, under the
+//! classes the other side declares ([`compare_over_cap`]).
 
 use datafusion::arrow::array::RecordBatch;
+use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
 use sha2::{Digest, Sha256};
 
@@ -52,21 +56,51 @@ pub(crate) fn section_holds_rows(section: &str) -> bool {
 }
 
 pub(crate) fn fingerprint_of(batches: &[RecordBatch]) -> String {
-    let width = batches.first().map_or(0, RecordBatch::num_columns);
-    fingerprint(width, &|visit| rows_of_batches(batches, visit))
+    let approximate: Vec<bool> = batches.first().map_or_else(Vec::new, |batch| {
+        batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| is_approximate(field.data_type()))
+            .collect()
+    });
+    fingerprint(&approximate, &|visit| rows_of_batches(batches, visit))
+}
+
+/// A column whose cells do NOT render identically on the two engines, so it leaves the hash
+/// and compares by its triple instead: a float, which each side prints to its own precision.
+///
+/// A decimal renders at its declared scale on both sides, and so do an integer, a string, a
+/// date, a boolean and a timestamp — all hashed row by row, which is what makes an over-cap
+/// join of them checked row for row rather than by its sums. Where the two sides declare
+/// different types for one column, a decimal here against a double there, their classes
+/// disagree and [`compare_fingerprints`] names it.
+fn is_approximate(declared: &DataType) -> bool {
+    matches!(
+        declared,
+        DataType::Float16 | DataType::Float32 | DataType::Float64
+    )
 }
 
 /// The same fingerprint over a rendered table, for the side that stayed under the cap while
-/// the other crossed it. The cells are the ones the table prints, trimmed of its padding.
-pub(crate) fn fingerprint_of_rendered(table: &str) -> String {
-    let width = data_lines(table)
-        .next()
-        .map_or(0, |line| result_text::split_cells(line).len());
-    fingerprint(width, &|visit| {
+/// the other crossed it. The cells are the ones the table prints, trimmed of its padding; the
+/// classes come from the fingerprinted side, because a rendering no longer says whether a
+/// numeric column was a decimal or a double.
+pub(crate) fn fingerprint_of_rendered(table: &str, approximate: &[bool]) -> String {
+    fingerprint(approximate, &|visit| {
         for line in data_lines(table) {
             visit(&result_text::split_cells(line));
         }
     })
+}
+
+/// A rendered table's column count, read off its header rather than its data: an answer of
+/// no rows still has one.
+fn rendered_width(table: &str) -> usize {
+    table
+        .lines()
+        .nth(1)
+        .map_or(0, |header| result_text::split_cells(header).len())
 }
 
 /// A rendered table's data lines: everything between the header's border and the last one.
@@ -99,34 +133,32 @@ fn rows_of_batches(batches: &[RecordBatch], visit: &mut dyn FnMut(&[String])) {
     }
 }
 
-/// The section text, from two passes over the rows: classify, then collect.
-fn fingerprint(width: usize, each_row: &dyn Fn(&mut dyn FnMut(&[String]))) -> String {
+/// The section text, in one pass: the classes are decided before it starts, so every cell
+/// goes straight to its column's value list or to the row's hashed text.
+fn fingerprint(approximate: &[bool], each_row: &dyn Fn(&mut dyn FnMut(&[String]))) -> String {
+    let width = approximate.len();
     let mut nonnull = vec![0usize; width];
-    let mut approximate = vec![false; width];
-    let mut numeric = vec![true; width];
+    let mut values: Vec<Vec<f64>> = vec![Vec::new(); width];
+    let mut hashed: Vec<String> = Vec::new();
     let mut rows = 0usize;
     each_row(&mut |row| {
         rows += 1;
-        for (at, cell) in row.iter().enumerate() {
-            if cell.is_empty() {
-                continue;
-            }
-            nonnull[at] += 1;
-            approximate[at] |= reads_as_inexact(cell);
-            numeric[at] &= cell.parse::<f64>().is_ok();
-        }
-    });
-    let approximate: Vec<bool> = (0..width)
-        .map(|at| approximate[at] && numeric[at])
-        .collect();
-
-    let mut values: Vec<Vec<f64>> = vec![Vec::new(); width];
-    let mut hashed: Vec<String> = Vec::new();
-    each_row(&mut |row| {
+        assert_eq!(
+            row.len(),
+            width,
+            "a row of {} cells under {width} classes",
+            row.len()
+        );
         let mut exact = String::new();
         for (at, cell) in row.iter().enumerate() {
+            if !cell.is_empty() {
+                nonnull[at] += 1;
+            }
             match approximate[at] {
-                true if !cell.is_empty() => values[at].push(cell.parse().expect("a numeric cell")),
+                true if !cell.is_empty() => values[at].push(
+                    cell.parse()
+                        .unwrap_or_else(|_| panic!("column {at} is a float and renders `{cell}`")),
+                ),
                 true => {}
                 false => {
                     exact.push_str(cell);
@@ -153,15 +185,6 @@ fn fingerprint(width: usize, each_row: &dyn Fn(&mut dyn FnMut(&[String]))) -> St
     }
     out.push_str(&format!("hash: {}\n", hash_of(&mut hashed)));
     out
-}
-
-/// A cell whose rendering is the engine's own choice rather than common ground: a fraction,
-/// an exponent, or a non-finite value. An integer, a string, a date and a boolean are not.
-fn reads_as_inexact(cell: &str) -> bool {
-    cell.contains('.')
-        || cell.contains('e')
-        || cell.contains('E')
-        || matches!(cell, "inf" | "-inf" | "NaN" | "nan" | "Inf" | "-Inf")
 }
 
 /// `(sum, min, max)` with the sum taken IN VALUE ORDER, so the two sides add in one
@@ -203,6 +226,41 @@ fn number(x: f64) -> String {
         };
     }
     format!("{x:.17e}")
+}
+
+/// Two over-cap sections compared, where at least one holds a fingerprint.
+///
+/// Near the cap one writer rendered what the other fingerprinted — DuckDB's `repr` prints
+/// longer floats than arrow-rs, so its rendering crosses the cap where ours does not. The
+/// FINGERPRINTED side declares the column classes and the rendered side is fingerprinted
+/// under them: a rendering no longer says whether a numeric column was a decimal or a
+/// double, so classing it again from its cells would call a decimal approximate here and
+/// exact there, and the two would be incomparable for a reason neither side is wrong about.
+pub(crate) fn compare_over_cap(ours: &str, duckdb: &str, tol: f64) -> Result<(), String> {
+    let (ours, duckdb) = match (is_fingerprint(ours), is_fingerprint(duckdb)) {
+        (true, true) => (ours.to_string(), duckdb.to_string()),
+        (true, false) => (ours.to_string(), under_the_classes_of(duckdb, ours)?),
+        (false, true) => (under_the_classes_of(ours, duckdb)?, duckdb.to_string()),
+        (false, false) => return Err("neither side is fingerprinted".to_string()),
+    };
+    compare_fingerprints(&ours, &duckdb, tol)
+}
+
+/// A rendered table fingerprinted under the classes `fingerprinted` declares.
+fn under_the_classes_of(table: &str, fingerprinted: &str) -> Result<String, String> {
+    let classes: Vec<bool> = parse(fingerprinted)?
+        .columns
+        .iter()
+        .map(|column| column.triple.is_some())
+        .collect();
+    let width = rendered_width(table);
+    if width != classes.len() {
+        return Err(format!(
+            "the rendered side has {width} columns against {} in the fingerprinted one's",
+            classes.len()
+        ));
+    }
+    Ok(fingerprint_of_rendered(table, &classes))
 }
 
 /// What the two sides are held to: the row count, each column's `nonnull` and class, the

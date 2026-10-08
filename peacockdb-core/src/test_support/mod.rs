@@ -492,9 +492,16 @@ pub fn fingerprint_of(batches: &[RecordBatch]) -> String {
 }
 
 /// The same fingerprint over a RENDERED table, for the side that stayed under the cap while
-/// the other crossed it.
-pub fn fingerprint_of_rendered(table: &str) -> String {
-    fingerprint::fingerprint_of_rendered(table)
+/// the other crossed it. `approximate[i]` says whether column `i` leaves the hash, since a
+/// rendering no longer carries the declared types that decide it.
+pub fn fingerprint_of_rendered(table: &str, approximate: &[bool]) -> String {
+    fingerprint::fingerprint_of_rendered(table, approximate)
+}
+
+/// Two over-cap sections compared, where at least one holds a fingerprint. The fingerprinted
+/// side declares the column classes and the rendered side is fingerprinted under them.
+pub fn compare_over_cap(ours: &str, duckdb: &str, tol: f64) -> Result<(), String> {
+    fingerprint::compare_over_cap(ours, duckdb, tol)
 }
 
 pub fn is_fingerprint(section: &str) -> bool {

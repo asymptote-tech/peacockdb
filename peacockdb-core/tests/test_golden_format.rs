@@ -7,12 +7,14 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Float64Array, Int64Array, RecordBatch, StringArray};
+use datafusion::arrow::array::{
+    Decimal128Array, Float64Array, Int64Array, RecordBatch, StringArray,
+};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use peacockdb_core::test_support::{
     DUCKDB_FLOAT_TOLERANCE, MemoryLimit, batches_to_sorted_str, compare_fingerprints,
-    fingerprint_of, fingerprint_of_rendered, is_fingerprint, ordered_sections, parse_node_line,
-    section_differences, section_holds_rows,
+    compare_over_cap, fingerprint_of, fingerprint_of_rendered, is_fingerprint, ordered_sections,
+    parse_node_line, section_differences, section_holds_rows,
 };
 
 // --- the section comparator --------------------------------------------------
@@ -637,9 +639,81 @@ fn a_fingerprint_and_a_marker_both_read_as_holding_no_rows() {
 #[test]
 fn a_rendered_table_fingerprints_to_what_its_batches_do() {
     let rows = three_rows();
+    let classes = [false, false, true];
     assert_eq!(
         fingerprint_of(&[rows.clone()]),
-        fingerprint_of_rendered(&batches_to_sorted_str(&[rows]))
+        fingerprint_of_rendered(&batches_to_sorted_str(&[rows]), &classes)
+    );
+}
+
+/// A decimal column is HASHED, not summed: both engines print it at its declared scale, so
+/// it renders identically on the two sides and belongs in the hash. Classed approximate it
+/// would leave the hash, and two rows with their decimal cells swapped would then pass —
+/// which is the pairing failure the hash exists to catch.
+#[test]
+fn a_decimal_column_is_hashed_and_a_swap_within_it_fails() {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("k", DataType::Int64, false),
+        Field::new("d", DataType::Decimal128(15, 2), false),
+    ]));
+    let paired = |cents: Vec<i128>| -> RecordBatch {
+        RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(vec![1i64, 2])),
+                Arc::new(
+                    Decimal128Array::from(cents)
+                        .with_precision_and_scale(15, 2)
+                        .expect("a decimal column"),
+                ),
+            ],
+        )
+        .expect("a batch")
+    };
+    let fp = fingerprint_of(&[paired(vec![3100, 5000])]);
+    assert!(
+        fp.contains("col 1: nonnull=2\n"),
+        "a decimal carries no triple: {fp}"
+    );
+    let swapped = fingerprint_of(&[paired(vec![5000, 3100])]);
+    let said = compare_fingerprints(&fp, &swapped, DUCKDB_FLOAT_TOLERANCE)
+        .expect_err("the same cells paired into different rows is a different answer");
+    assert!(said.contains("hash"), "{said}");
+}
+
+/// The rendered side is fingerprinted under the OTHER side's classes. On its own a rendered
+/// `31.00` is indistinguishable from a double, so classing it again from its cells would
+/// call one column approximate here and exact there and compare nothing.
+#[test]
+fn a_rendered_side_is_fingerprinted_under_the_fingerprinted_sides_classes() {
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "d",
+        DataType::Decimal128(15, 2),
+        false,
+    )]));
+    let decimals = RecordBatch::try_new(
+        schema,
+        vec![Arc::new(
+            Decimal128Array::from(vec![3100i128, 5000])
+                .with_precision_and_scale(15, 2)
+                .expect("a decimal column"),
+        )],
+    )
+    .expect("a batch");
+    let decimals = [decimals];
+    let fp = fingerprint_of(&decimals);
+    let rendered = batches_to_sorted_str(&decimals);
+    assert_eq!(
+        compare_over_cap(&fp, &rendered, DUCKDB_FLOAT_TOLERANCE),
+        Ok(())
+    );
+    assert_eq!(
+        compare_over_cap(&rendered, &fp, DUCKDB_FLOAT_TOLERANCE),
+        Ok(())
+    );
+    assert!(
+        compare_over_cap(&rendered, &rendered, DUCKDB_FLOAT_TOLERANCE).is_err(),
+        "neither side fingerprinted is nothing to compare"
     );
 }
 

@@ -423,3 +423,129 @@ the judge of whether anything else on the original list is still open.
 - **The last push was documentation only, so the whole pipeline skipped** and PR #167's checks
   read `skipping` across the board. The 677-passed/27-failed tally is from the `3a6c5343` push.
   The next push carries code and will run for real.
+
+## Round 2 result (2026-10-08)
+
+The dead dispatch's work is verified and complete. Every command below was run locally on
+this workstation; neither remote host answered, so the device half is untouched.
+
+### Case counts, measured
+
+| target | round 1 | round 2 |
+|---|--:|--:|
+| `--lib` (rust-only) | 636 | 643 — 641 passed, 2 ignored |
+| `test_cpu_corpus` | 704 | 704 — 677 passed, 27 failed |
+| `test_golden_format` | 36 | 38 |
+| `test_corpus_goldens` | 26 | 26 |
+| `test_cost_model` | 3 | 3 |
+| `test_module_layout` | 17 | 17 |
+| `test_ci_coverage` | 9 | 9 |
+| `testdata/test_duckdb_result.py` | 9 | 9 |
+| `test_gpu_corpus` under `--features gpu` | never compiled | 28 cases, built and linked |
+
+`--lib` gains 7 from the new `test_support/result_text/tests.rs`; `test_golden_format` gains 2
+from the decimal-hash cases the dead dispatch wrote. The 27 red are the 26 `duckdb_gpu_*` and
+`every_enabled_device_cell_has_its_gpu_result_section_and_no_other`, unchanged, every one of
+them carrying the "gpu-result.txt does not exist" message and nothing else.
+
+### The device files compile — round 1's biggest risk is closed
+
+`CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/cargo-cudf.sh test -p peacockdb-core
+--test test_gpu_corpus --features gpu --no-run` exits 0 and links the binary. Cold it took 6m30s
+and 7.9 GB in `target-cudf-rapids-cuda-12.2`; warm, 14 seconds. `cargo-cudf.sh check -p
+peacockdb-core --tests --features gpu` covers the `lib test` target, which is where
+`corpus_gpu.rs` and the `gpu_tests` modules live, and also exits 0. So `test_gpu_corpus.rs` and
+`corpus_gpu.rs` have now been type-checked and linked on this box, and the 28 cases are in the
+binary — `a_device_run_under_a_regeneration_writes_no_golden` among them. Nothing was run: there
+is no card here.
+
+**Disk, after that build: 7 GiB free on `/`.** `target/` is 19 GB and
+`target-cudf-rapids-cuda-12.2` 7.9 GB. The cudf dir is the warm cache
+`build-test-shadgpu.sh --build` shares, so it is kept rather than deleted; but a device cycle
+also builds C++ into `cpp/build`, which is empty today, and 7 GiB may not hold it. Free space
+before that cycle.
+
+One warning the gpu shape shows and the rust-only shape cannot: `unused import: AsArray` in
+`src/tests/gpu_tests/aggregate_dimension_cases.rs:9`. Pre-existing, outside this task's files,
+left alone.
+
+### The regeneration is reproducible, not hand-edited
+
+Both writers were re-run and both produced the committed bytes exactly.
+
+- Rust: the four over-cap cases under `UPDATE_CANONICAL=1 PCK_UPDATE_SECTIONS=1` at one thread,
+  5.4 seconds. `mini.result.txt` came back byte for byte.
+- Python: `python3 testdata/duckdb_result.py`, both datasets, duckdb 1.5.4, about 7 minutes.
+  Both `duckdb-result.txt` came back byte for byte, no `failed:` section in either.
+
+Seven fingerprint sections exist across the three files and all seven are consistent. tpch
+`duckdb-result.txt` holds five — q11, q16, anti-join, filter-project, semi-join — and
+`mini.result.txt` the four of them our side answers; the four shared sections carry the same
+`hash:` on both writers. tpcds `duckdb-result.txt` holds q98 alone and tpcds
+`mini.result.txt` holds none. Every triple that remains is a real float: q98's col 6
+(`revenueratio`, a double). Every decimal lost its triple and joined the hash — q11 col 1,
+anti-join and semi-join col 3, filter-project col 1, q98 cols 4 and 5. q16 never had one: its
+four columns are two strings and two integers.
+
+### Changed beyond what the dead dispatch left
+
+1. **`rustfmt` on `fingerprint.rs` and `test_golden_format.rs`.** Two over-long lines, the
+   `assert_eq!(row.len(), width, …)` and two `assert_eq!(compare_over_cap(…), Ok(()))`. No other
+   touched file moved, so the diff stays readable.
+2. **`fingerprint.rs`'s module doc was stale and now says what the code does.** It still claimed
+   the class is read off the rendered cells and that there are two passes over the rows. Finding
+   2 reversed both. **This supersedes deviation 6 of round 1**, which recorded the old rule.
+3. **One clippy warning the new test introduced**, `cloned_ref_to_slice_refs` at
+   `test_golden_format.rs:703`. Fixed by binding the batch into a one-element array. The three
+   clippy warnings left in the touched files are all present at `3a6c5343`:
+   `type_complexity` on `fingerprint`'s `each_row` argument, `cloned_ref_to_slice_refs` at
+   `test_golden_format.rs:644`, and a constant assertion in `duckdb_oracle/tests.rs:123`.
+4. **`test_support/result_text/tests.rs` is new, seven cases.** Finding 4 split
+   `results_match` out of `assert_results_match` so a wrong answer could be shown failing
+   without a run, but nothing drove the new `Err`. A split no test reaches buys nothing, so
+   these drive it: the tolerant arm accepting a reassociated float and failing past its
+   tolerance, on a row the oracle does not have, on a missing row and on a duplicated one; the
+   exact arm failing on the drift the tolerant one accepts; and the panicking wrapper still
+   naming its query. Proved by mutation — a `return Ok(())` at the top of `results_match` turns
+   six of the seven red, and restoring it turns them green.
+
+### The findings list, as round 2 leaves it
+
+All five are answered and all five are now exercised by a case.
+
+1. The deferred `duckdb` import is proven both ways. `testdata/test_duckdb_result.py` runs 9/9
+   green with `duckdb` blocked from `sys.meta_path`, and `HEAD:testdata/duckdb_result.py`
+   imported under the same block still raises `ModuleNotFoundError`. That is the CI red, and it
+   is gone.
+2. The decimal-in-the-hash change is proven by
+   `a_decimal_column_is_hashed_and_a_swap_within_it_fails` and by the regenerated goldens
+   agreeing across the two writers.
+3. The rendered side under the other side's classes is proven by
+   `a_rendered_side_is_fingerprinted_under_the_fingerprinted_sides_classes`.
+4. The `results_match` split now has the seven cases above.
+5. The recording-cycle guard reads `PCK_WRITE_GPU_RESULT` before it sets anything, and the file
+   it edits compiles and links under `--features gpu`. It cannot be run without a card.
+
+### What the next person needs
+
+- **`compare_over_cap`'s `(false, false)` arm is unreachable from production.**
+  `compare_sections` rejects "neither side fingerprinted" upstream with a message naming
+  `duckdb_fingerprint`, so no corpus line can reach the arm. It is reachable from the public
+  `test_support::compare_over_cap`, and the third assertion of
+  `a_rendered_side_is_fingerprinted_under_the_fingerprinted_sides_classes` drives it. Left in
+  place, named here rather than deleted — deviation 1 is the precedent for retiring a
+  defensive arm, and it does not apply: this arm has a caller and a case.
+- **The two writers class an all-null float column differently.** Ours reads the declared type,
+  so a `Float64` column of nothing but nulls is approximate with an empty triple; DuckDB's reads
+  `isinstance(value, float)` over the rows, finds no float and hashes the column instead.
+  `compare_fingerprints` then fails naming the column — loudly, not silently — and no over-cap
+  section has such a column today. The fix, if one is ever wanted, is `cursor.description`'s
+  type codes in `fingerprint`'s signature. Not done: no line needs it.
+- **`rendered_width` reads the header line, not the first data line**, so a zero-row answer
+  still gives its width. The one degenerate case is tpcds q17's `++\n++`, which has no schema to
+  take a header from (#205) and reads as width 1; it is `duckdb_divergent(205)` and never
+  reaches the fingerprint path.
+- The device gap is unchanged, and it is the whole of what is left. One
+  `PCK_WRITE_GPU_RESULT=1` cycle through `build-test-shadgpu.sh --all` with `--pull-results`.
+  #235 stays open until it runs, and `build-test.md`'s `goldens/` file counts need +1 per
+  dataset in the round that commits `gpu-result.txt`.

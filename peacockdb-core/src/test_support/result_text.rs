@@ -10,6 +10,9 @@
 //! politeness — a CI log drops a line past a thousand characters, so a half-gigabyte diff
 //! spends the memory and produces something nobody can read.
 
+#[cfg(test)]
+mod tests;
+
 use std::hash::{Hash, Hasher};
 
 use datafusion::arrow::array::RecordBatch;
@@ -202,16 +205,28 @@ pub(crate) fn assert_results_match(
     rel_tol: Option<f64>,
     query: &str,
 ) {
+    results_match(expected, actual, rel_tol).unwrap_or_else(|said| panic!("{query}: {said}"));
+}
+
+/// The same comparison, `Err(how they differ)` rather than a panic, so a doctored answer can
+/// show it failing without a run behind it. What `assert_answer`'s two whole-answer oracles
+/// reach, and what `CpuOracle`'s negative tests drive.
+pub(crate) fn results_match(
+    expected: &[RecordBatch],
+    actual: &[RecordBatch],
+    rel_tol: Option<f64>,
+) -> Result<(), String> {
     let Some(tol) = rel_tol else {
         // Digests rather than two rendered tables: `assert_eq!` evaluates both arguments
         // before comparing a byte, so the exact arm materialized the whole answer twice to
         // answer yes or no. The excerpt is built only where the answer is no.
-        assert!(
-            results_agree(expected, actual),
-            "result for {query} differs from oracle (exact compare)\n{}",
-            first_difference(expected, actual)
-        );
-        return;
+        if !results_agree(expected, actual) {
+            return Err(format!(
+                "differs from the oracle (exact compare)\n{}",
+                first_difference(expected, actual)
+            ));
+        }
+        return Ok(());
     };
 
     use std::collections::HashMap;
@@ -266,22 +281,20 @@ pub(crate) fn assert_results_match(
     }
 
     let (mut em, am) = (index(expected), index(actual));
-    assert_eq!(
-        em.len(),
-        am.len(),
-        "approx compare: distinct non-float row keys differ for {query} (expected {}, actual {})",
-        em.len(),
-        am.len()
-    );
+    if em.len() != am.len() {
+        return Err(format!(
+            "approx compare: distinct non-float row keys differ (expected {}, actual {})",
+            em.len(),
+            am.len()
+        ));
+    }
     for (key, mut avs) in am {
-        let mut evs = em.remove(&key).unwrap_or_else(|| {
-            panic!("approx compare: actual row key absent from expected for {query}")
-        });
-        assert_eq!(
-            evs.len(),
-            avs.len(),
-            "approx compare: row multiplicity differs for a key in {query}"
-        );
+        let mut evs = em
+            .remove(&key)
+            .ok_or("approx compare: an actual row key is absent from the expected answer")?;
+        if evs.len() != avs.len() {
+            return Err("approx compare: row multiplicity differs for a key".to_string());
+        }
         evs.sort_by(|a, b| tuple_cmp(a, b));
         avs.sort_by(|a, b| tuple_cmp(a, b));
         for (ev, av) in evs.iter().zip(&avs) {
@@ -291,13 +304,16 @@ pub(crate) fn assert_results_match(
                 }
                 let d = (e - a).abs();
                 let rel = if *e != 0.0 { d / e.abs() } else { d };
-                assert!(
-                    rel <= tol,
-                    "approx compare: float cell rel diff {rel:.3e} > tol {tol:.0e} for {query} (expected={e}, actual={a})"
-                );
+                if rel > tol {
+                    return Err(format!(
+                        "approx compare: float cell rel diff {rel:.3e} > tol {tol:.0e} \
+                         (expected={e}, actual={a})"
+                    ));
+                }
             }
         }
     }
+    Ok(())
 }
 
 /// Pretty-print batches with the data rows sorted, for order-independent compares. Unlike

@@ -85,17 +85,7 @@ pub(crate) fn compare_sections(
                         .to_string(),
                 );
             }
-            // Near the cap one writer rendered what the other fingerprinted, DuckDB's repr
-            // printing longer floats than arrow-rs. Fingerprint the rendered side too.
-            let fingerprint_of = |text: &str, held: bool| match held {
-                true => text.to_string(),
-                false => fingerprint::fingerprint_of_rendered(text),
-            };
-            return fingerprint::compare_fingerprints(
-                &fingerprint_of(ours, ours_fp),
-                &fingerprint_of(duckdb, duck_fp),
-                DUCKDB_FLOAT_TOLERANCE,
-            );
+            return fingerprint::compare_over_cap(ours, duckdb, DUCKDB_FLOAT_TOLERANCE);
         }
         DuckdbOracle::None => {
             return Err(

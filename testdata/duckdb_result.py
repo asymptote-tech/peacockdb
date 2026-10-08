@@ -27,8 +27,6 @@ import hashlib
 import pathlib
 import sys
 
-import duckdb
-
 ROOT = pathlib.Path(__file__).resolve().parent
 CAP = 262144
 PINNED = "1.5.4"
@@ -75,41 +73,31 @@ def approx_number(x):
     return f"{mantissa}e{int(exponent)}"
 
 
-def reads_as_inexact(text):
-    """A cell whose rendering is the engine's own choice rather than common ground."""
-    return "." in text or "e" in text or "E" in text or text in INEXACT
-
-
-INEXACT = {"inf", "-inf", "NaN", "nan", "Inf", "-Inf"}
-
-
 def fingerprint(names, rows):
     """What a section holds instead of its rows when the rendering reached the cap.
 
-    The same text `test_support/fingerprint.rs` writes, byte for byte: a column goes into
-    the hash when it renders identically on both engines and into an approximate triple when
-    it does not, and the class is read off the RENDERED cells, since our decimal meets
-    DuckDB's double and only the rendering is common ground.
+    The same text `test_support/fingerprint.rs` writes, byte for byte. A column leaves the
+    hash and compares by its triple only when its values are FLOATS, which each engine prints
+    to its own precision; a DECIMAL renders at its declared scale on both sides, so it is
+    hashed row by row like an integer or a string. That is what makes an over-cap join
+    checked row for row rather than by its sums.
     """
     cells = [[cell(v) for v in row] for row in rows]
     width = len(names)
-    nonnull = [0] * width
     approximate = [False] * width
-    numeric = [True] * width
-    for row in cells:
-        for at, text in enumerate(row):
-            if not text:
-                continue
-            nonnull[at] += 1
-            approximate[at] = approximate[at] or reads_as_inexact(text)
-            numeric[at] = numeric[at] and parses_as_float(text)
-    approximate = [approximate[at] and numeric[at] for at in range(width)]
+    for row in rows:
+        for at, value in enumerate(row):
+            if isinstance(value, float):
+                approximate[at] = True
 
+    nonnull = [0] * width
     values = [[] for _ in range(width)]
     hashed = []
     for row in cells:
         exact = ""
         for at, text in enumerate(row):
+            if text:
+                nonnull[at] += 1
             if approximate[at]:
                 if text:
                     values[at].append(float(text))
@@ -137,14 +125,6 @@ def fingerprint(names, rows):
     return "\n".join(out) + "\n"
 
 
-def parses_as_float(text):
-    try:
-        float(text)
-        return True
-    except ValueError:
-        return False
-
-
 def render(names, rows):
     cells = [[cell(v) for v in row] for row in rows]
     widths = [len(n) for n in names]
@@ -165,6 +145,12 @@ def query_order(path):
 
 
 def generate(dataset, only):
+    # DuckDB imported here rather than at the top, the way duckdb_cost.py defers
+    # pyarrow.parquet: test_duckdb_result.py imports this module to check `cell` and
+    # `fingerprint`, neither of which asks DuckDB anything, and the CI job that runs it
+    # installs no duckdb wheel. A top-level import makes that test die before its first case.
+    import duckdb
+
     data = ROOT / f"{dataset}.sf1"
     queries = sorted((ROOT / f"{dataset}-queries").glob("*.sql"), key=query_order)
     if only:
@@ -202,6 +188,8 @@ def main():
     parser.add_argument("--dataset", choices=["tpch", "tpcds"], action="append")
     parser.add_argument("--only", help="comma-separated query stems")
     args = parser.parse_args()
+    import duckdb  # deferred for the reason `generate` gives
+
     if duckdb.__version__ != PINNED:
         sys.exit(f"duckdb {duckdb.__version__}; the oracle is pinned at {PINNED}")
     only = set(args.only.split(",")) if args.only else None

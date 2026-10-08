@@ -855,13 +855,13 @@ fingerprint: rows=1196041
 col 0: nonnull=1196041
 col 1: nonnull=1196041
 col 2: nonnull=1196041
-col 3: nonnull=1196041 sum=1.80922548921111877e11 min=8.66899999999999977e2 max=5.44089089999999967e5
+col 3: nonnull=1196041
 col 4: nonnull=1196041
 col 5: nonnull=1196041
 col 6: nonnull=1196041
 col 7: nonnull=1196041
 col 8: nonnull=1196041
-hash: 62d1fe6120a2e6dd23126dbfe0d3301c3951ce3586647021bb7145d3243c1d8d
+hash: 1bcfcf1b09d54ad6f56af97b491a6253ec7cc8a91080ffbb47ab00be6db0d75b
 mode=tp4-sized
 == cross-join
 mode=tp4-sized
@@ -997,8 +997,8 @@ mode=tp4-sized
 == filter-project
 fingerprint: rows=2402187
 col 0: nonnull=2402187
-col 1: nonnull=2402187 sum=9.72734950000000000e7 min=3.10000000000000000e1 max=5.00000000000000000e1
-hash: 613733a9c856d8ebed8bdb77c26d1d757b27dedad0304d771baf7bb3e5acbeb2
+col 1: nonnull=2402187
+hash: 94b852a10e398eb270f03dd1b0d3e5a2bc501a99224696595e4734cf1895fc49
 mode=tp4-sized
 == hash-join
 mode=tp4-sized
@@ -1369,13 +1369,13 @@ fingerprint: rows=303959
 col 0: nonnull=303959
 col 1: nonnull=303959
 col 2: nonnull=303959
-col 3: nonnull=303959 sum=4.59067575263498993e10 min=8.57710000000000036e2 max=5.55285160000000033e5
+col 3: nonnull=303959
 col 4: nonnull=303959
 col 5: nonnull=303959
 col 6: nonnull=303959
 col 7: nonnull=303959
 col 8: nonnull=303959
-hash: 67f02d3ea85b68825ad621f54ade310d985c9d9875614bee7aef55c60f3ada14
+hash: 81404e1a8a711e3883dd135e883352263bdb1a03d70cb6933dd0eda77e6e6ca3
 mode=tp4-sized
 == shuffle-additive
 mode=tp4-sized

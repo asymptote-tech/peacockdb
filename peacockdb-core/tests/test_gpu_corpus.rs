@@ -57,14 +57,14 @@ macro_rules! corpus_query {
 
 include!("common/corpus_cases.inc");
 
-/// The device does not write a golden, asserted on the real path rather than left to the
-/// fact that nothing on it happens to call the write.
+/// The device does not write a CPU golden, asserted on the real path rather than left to
+/// the fact that nothing on it happens to call the write.
 ///
 /// This binary links the write path through `test_support` exactly like the cpu one, and the
 /// whole tier rests on the device being held to what the cpu wrote: a device that can author
 /// its own golden proves nothing against it. So both regeneration variables are set, one
-/// real device case runs, and the three files it could have touched must come back byte for
-/// byte.
+/// real device case runs, and the three cpu files it could have touched must come back byte
+/// for byte.
 ///
 /// Setting the environment is safe here and only here: the gpu job runs this binary with
 /// `--test-threads=1`, since cuDF and RMM share one process-wide pool.
@@ -76,10 +76,13 @@ fn a_device_run_under_a_regeneration_writes_no_golden() {
         cost_golden(dataset, sf, "tp1-single"),
         result_golden(dataset, sf),
     ];
-    // The device's OWN record, which only `PCK_WRITE_GPU_RESULT` writes and this run does
-    // not set — so the two regeneration variables must leave it alone as well.
+    // `gpu-result.txt` is the one file a device run MAY write, and only under
+    // `PCK_WRITE_GPU_RESULT` — which the gate script exports into every binary, this one
+    // included. So it joins the snapshot only on a run that is not recording: on a recording
+    // cycle the `gpu_case` below rewrites it between the snapshot and the comparison, and a
+    // device answer is not bit-reproducible anyway.
     let recorded = gpu_result_golden(dataset, sf, None);
-    if recorded.exists() {
+    if std::env::var_os("PCK_WRITE_GPU_RESULT").is_none() && recorded.exists() {
         files.push(recorded);
     }
     let before: Vec<Vec<u8>> = files
