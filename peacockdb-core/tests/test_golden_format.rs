@@ -5,8 +5,14 @@
 //! `planner/tests/plan_goldens.rs` with the code they cover; the node-line cases are new
 //! with the fields the corpus tiers put on that line.
 
+use std::sync::Arc;
+
+use datafusion::arrow::array::{Float64Array, Int64Array, RecordBatch, StringArray};
+use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use peacockdb_core::test_support::{
-    MemoryLimit, ordered_sections, parse_node_line, section_differences,
+    DUCKDB_FLOAT_TOLERANCE, MemoryLimit, batches_to_sorted_str, compare_fingerprints,
+    fingerprint_of, fingerprint_of_rendered, is_fingerprint, ordered_sections, parse_node_line,
+    section_differences, section_holds_rows,
 };
 
 // --- the section comparator --------------------------------------------------
@@ -492,4 +498,194 @@ fn tiers_are_strictly_increasing() {
     assert!(MemoryLimit::Micro.bytes() < MemoryLimit::Mini.bytes());
     assert!(MemoryLimit::Mini.bytes() < MemoryLimit::Standard.bytes());
     assert!(MemoryLimit::Standard.bytes() < MemoryLimit::Full.bytes());
+}
+
+// --- the over-cap fingerprint ------------------------------------------------
+
+/// Three columns, one of each class the fingerprint tells apart: an integer and a string
+/// render identically on both engines and go into the hash, a float does not and gets the
+/// approximate triple instead.
+fn batch(ids: Vec<i64>, names: Vec<&str>, x: Vec<f64>) -> RecordBatch {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("s", DataType::Utf8, false),
+        Field::new("x", DataType::Float64, false),
+    ]));
+    RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(Int64Array::from(ids)),
+            Arc::new(StringArray::from(names)),
+            Arc::new(Float64Array::from(x)),
+        ],
+    )
+    .expect("a batch")
+}
+
+fn three_rows() -> RecordBatch {
+    batch(vec![1, 2], vec!["a", "b"], vec![1.5, 2.5])
+}
+
+#[test]
+fn a_fingerprint_does_not_depend_on_row_order_or_batching() {
+    let one = fingerprint_of(&[batch(vec![1, 2], vec!["a", "b"], vec![1.5, 2.5])]);
+    let split = fingerprint_of(&[
+        batch(vec![2], vec!["b"], vec![2.5]),
+        batch(vec![1], vec!["a"], vec![1.5]),
+    ]);
+    assert_eq!(one, split);
+}
+
+#[test]
+fn an_exact_column_is_hashed_and_an_approximate_one_is_summed() {
+    let fp = fingerprint_of(&[three_rows()]);
+    assert!(fp.starts_with("fingerprint: rows=2\n"), "{fp}");
+    assert!(fp.contains("\ncol 0: nonnull=2\n"), "{fp}");
+    assert!(fp.contains("\ncol 1: nonnull=2\n"), "{fp}");
+    assert!(
+        fp.contains(
+            "\ncol 2: nonnull=2 sum=4.00000000000000000e0 min=1.50000000000000000e0 \
+             max=2.50000000000000000e0\n"
+        ),
+        "{fp}"
+    );
+    assert!(fp.contains("\nhash: "), "{fp}");
+}
+
+/// A mis-paired join: the same ids and the same names, paired differently. The sums and the
+/// counts are identical, so only the hash over the exact columns can tell them apart — which
+/// is why an all-integer over-cap join is not checked by its sums alone.
+#[test]
+fn rows_paired_differently_differ_in_the_hash_and_nowhere_else() {
+    let fp = fingerprint_of(&[three_rows()]);
+    let swapped = fingerprint_of(&[batch(vec![1, 2], vec!["b", "a"], vec![1.5, 2.5])]);
+    let said = compare_fingerprints(&fp, &swapped, DUCKDB_FLOAT_TOLERANCE)
+        .expect_err("a different pairing is a different answer");
+    assert!(said.contains("hash"), "{said}");
+}
+
+#[test]
+fn a_sum_off_in_the_thirteenth_digit_passes_and_in_the_third_fails() {
+    let fp = fingerprint_of(&[batch(vec![1], vec!["a"], vec![1.0])]);
+    let near = fp.replace("sum=1.00000000000000000e0", "sum=1.00000000000100000e0");
+    let far = fp.replace("sum=1.00000000000000000e0", "sum=1.01000000000000000e0");
+    assert_ne!(fp, near);
+    assert_ne!(fp, far);
+    assert!(compare_fingerprints(&fp, &near, DUCKDB_FLOAT_TOLERANCE).is_ok());
+    let said = compare_fingerprints(&fp, &far, DUCKDB_FLOAT_TOLERANCE)
+        .expect_err("1% is not a reassociation");
+    assert!(said.contains("col 2"), "{said}");
+}
+
+#[test]
+fn a_row_count_or_a_nonnull_count_that_moved_says_which() {
+    let fp = fingerprint_of(&[three_rows()]);
+    let fewer = fp.replace("rows=2", "rows=1");
+    assert!(
+        compare_fingerprints(&fp, &fewer, DUCKDB_FLOAT_TOLERANCE)
+            .expect_err("a lost row")
+            .contains("rows"),
+    );
+    let nulled = fp.replace("col 0: nonnull=2", "col 0: nonnull=1");
+    assert!(
+        compare_fingerprints(&fp, &nulled, DUCKDB_FLOAT_TOLERANCE)
+            .expect_err("a column that lost a value")
+            .contains("col 0"),
+    );
+}
+
+/// One side calls a column exact and the other approximate — DuckDB answering a double where
+/// we answer a decimal of a different scale. The two then hash different column sets, so the
+/// mismatch is named rather than read as a hash difference nobody can place.
+#[test]
+fn a_column_classed_differently_on_the_two_sides_names_it() {
+    let fp = fingerprint_of(&[three_rows()]);
+    let exact = fp
+        .lines()
+        .map(|line| match line.starts_with("col 2:") {
+            true => "col 2: nonnull=2".to_string(),
+            false => line.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let said = compare_fingerprints(&fp, &exact, DUCKDB_FLOAT_TOLERANCE)
+        .expect_err("a column of two classes");
+    assert!(said.contains("col 2"), "{said}");
+}
+
+/// The two ways a section stands in for its rows, and the one way it holds them. Both
+/// stand-ins keep first position, so the predicate reads the first line and nothing else.
+#[test]
+fn a_fingerprint_and_a_marker_both_read_as_holding_no_rows() {
+    let fp = fingerprint_of(&[three_rows()]);
+    assert!(is_fingerprint(&fp));
+    assert!(!section_holds_rows(&fp));
+    assert!(!section_holds_rows("skipped: not enabled at any mode\n"));
+    assert!(!is_fingerprint("skipped: not enabled at any mode\n"));
+    assert!(section_holds_rows(
+        "mode=tp4-sized\n+---+\n| a |\n+---+\n| 1 |\n+---+\n"
+    ));
+    assert!(!is_fingerprint(
+        "mode=tp4-sized\n+---+\n| a |\n+---+\n| 1 |\n+---+\n"
+    ));
+}
+
+/// Near the cap one writer renders what the other fingerprints — DuckDB's `repr` prints
+/// longer floats than arrow-rs, so its rendering crosses the cap where ours does not. The
+/// comparator fingerprints the rendered side itself, which only works if the two paths agree.
+#[test]
+fn a_rendered_table_fingerprints_to_what_its_batches_do() {
+    let rows = three_rows();
+    assert_eq!(
+        fingerprint_of(&[rows.clone()]),
+        fingerprint_of_rendered(&batches_to_sorted_str(&[rows]))
+    );
+}
+
+/// A NULL is not a value: it leaves `nonnull` short and stays out of the sum, and an empty
+/// cell is what both writers render it as.
+#[test]
+fn a_null_is_counted_out_of_its_column() {
+    let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Float64, true)]));
+    let with_null = RecordBatch::try_new(
+        schema,
+        vec![Arc::new(Float64Array::from(vec![
+            Some(1.5),
+            None,
+            Some(2.5),
+        ]))],
+    )
+    .expect("a batch");
+    let fp = fingerprint_of(&[with_null]);
+    assert!(fp.starts_with("fingerprint: rows=3\n"), "{fp}");
+    assert!(
+        fp.contains("\ncol 0: nonnull=2 sum=4.00000000000000000e0 min=1.50000000000000000e0 max=2.50000000000000000e0\n"),
+        "{fp}"
+    );
+}
+
+/// The triple's number format, pinned at the values the two writers are likeliest to
+/// disagree on. `testdata/test_duckdb_result.py` asserts the same strings, which is what
+/// makes the Python writer's fingerprint comparable with this one byte for byte.
+#[test]
+fn an_approximate_triple_writes_its_numbers_as_python_does() {
+    for (value, written) in [
+        (0.0f64, "0.00000000000000000e0"),
+        (-1.5, "-1.50000000000000000e0"),
+        (1e17, "1.00000000000000000e17"),
+        (1.23e-5, "1.23000000000000008e-5"),
+        (1.0 / 3.0, "3.33333333333333315e-1"),
+        (1e308, "1.00000000000000001e308"),
+        (5e-324, "4.94065645841246544e-324"),
+    ] {
+        let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Float64, false)]));
+        let one = RecordBatch::try_new(schema, vec![Arc::new(Float64Array::from(vec![value]))])
+            .expect("a batch");
+        let fp = fingerprint_of(&[one]);
+        assert!(
+            fp.contains(&format!("min={written} max={written}\n")),
+            "{value:e}: {fp}"
+        );
+    }
 }

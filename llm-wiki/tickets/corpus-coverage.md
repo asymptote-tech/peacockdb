@@ -28,6 +28,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#57 — the device refuses a value-form CASE](#t57)
   - [#56 — q2: CASE-over-string-equality inside a partial-phase sum](#t56)
   - [#60 — `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
+  - [#251 — a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
 - [Source](#source)
   - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
   - [#282 — a scan with no surviving row groups is refused at planning](#t282)
@@ -580,6 +581,27 @@ untouched; no golden moves. Test: a walk test `ROUND_PLACES` running the query a
 `ONE_LANE`, red on two rows today; `scripts/exec_model/operators/expressions.py`'s docstring.
 Registry: q78's row drops `60`. `round` over Float32 is #221.
 
+<a id="t251"></a>
+### #251 — a decimal quotient truncates at its own scale and later arithmetic carries the error up
+
+DataFusion cuts a decimal division at the scale it declared for the result rather than rounding,
+and we follow it. The truncated value then feeds the rest of the expression, so the answer is
+wrong in digits it printed.
+
+Two shapes, measured against DuckDB by #235's comparison. `(x / y) * 100` multiplies the
+truncation by a hundred: tpcds q58's `ss_dev` is `103.719200` against `103.71926462…`, and q61's
+ratio `51.82319100` against `51.82319145…` — 45 to 97 units in our last rendered place.
+`sum(x / y)` adds one truncation per row: q66's twelve `*_per_sq_foot` columns are 1 to 2 units
+short. A quotient nothing consumes stays inside its scale — tpch q1's `avg_qty` is `25.522005`
+against `25.522005853…` — so it is the expression around the division that loses the digits.
+
+**Corpus queries:** `tpcds/q58` (columns 2, 4, 6), `tpcds/q61` (column 2) and `tpcds/q66`
+(columns 20-31), each `duckdb_divergent(251, ...)` in `corpus_cases.inc`.
+
+**Fix proposed:** round the quotient at its declared scale, or widen the scale a division
+declares so the next operand has digits to spend. Either departs from DataFusion's convention,
+so the decision comes before the code.
+
 ## Source
 
 <a id="t186"></a>
@@ -935,8 +957,13 @@ engine's corpus.
 queries, 8 of them skipped (4 over the 262144-byte cap, 4 not enabled).
 
 **Fix proposed:** a DuckDB golden beside each result golden, and a Rust test comparing them.
-The generator and both `duckdb-result.txt` files landed 2026-09-28; the comparison test, the
-`duckdb_oracle` argument and the enum consts are what remain.
+Built by [`duckdb-oracle`](../tasks/duckdb-oracle.md): the generator and both
+`duckdb-result.txt` files landed 2026-09-28, and the `duckdb_oracle` argument, the comparator,
+the over-cap fingerprint, the helpers' negative tests and the three `ALL` tests landed with
+that task. **What remains is one device cycle**: `gpu-result.txt` has never been written, so
+its 26 `duckdb_gpu_*` cases and the coverage test are red, and both hosts were down when the
+task was built. One `PCK_WRITE_GPU_RESULT=1` cycle on shad-gpu plus `--pull-results` closes
+this ticket.
 - A Python generator (`testdata/duckdb_result.py`, beside `duckdb_cost.py`) runs each query of
   `testdata/{tpch,tpcds}-queries/` over the same sf1 parquet with the DuckDB 1.5.4 CLI CI already
   pins for `generate_testdata.sh`, binding the parquet as views the way `gen_duckdb_goldens.sh`
@@ -985,24 +1012,22 @@ Expected divergences, to declare or to normalize in the comparator:
 - **Column names** (18 queries). DataFusion names an unaliased expression by its qualified text
   (`sum(lineitem.l_quantity)`), DuckDB by its own (`sum(l_quantity)`). Compared by position.
 - **Decimal `avg` and division truncate at a fixed scale.** We follow DataFusion's rule, a decimal
-  cut (not rounded) at its declared scale; DuckDB answers a double. On its own it is formatting:
-  tpch q1's `avg_qty` is `25.522005` against `25.522005853…`. Inside an expression the truncated
-  intermediates compound: tpcds q58's `ss_dev` is right to about four places, and q66 answers
-  `9.282779` where truncating the true `9.2827805…` gives `9.282780` — up to 1e-6 relative. A
-  candidate ticket of its own: whether to round, or declare it (tpch q1, q8,
-  shuffle-additive-avg; tpcds q7, q9, q13, q18, q26, q58, q59, q61, q66, q75, q85, q90).
+  cut (not rounded) at its declared scale; DuckDB answers a double. On its own it is formatting
+  and `duckdb_approx` covers it — tpch q1's `avg_qty` is `25.522005` against `25.522005853…`.
+  Inside an expression the truncated intermediates compound past that tolerance, which is
+  **#251**: tpcds q58, q61 and q66, each a `duckdb_divergent(251, …)` line.
 - **Float last digits.** Floating sums and Welford `stddev`/`var` reassociate: tpch q14 and
   shuffle-stddev, tpcds q39, below 1e-13.
 - **An empty answer.** `tpcds/q17` renders with no header on our side, the cpu emitting no batch
-  (#205), so its column names and types go unchecked; DuckDB prints them. Equal as zero rows; a
-  candidate ticket to render the declared schema.
+  (#205), so its column names and types go unchecked; DuckDB prints them. Equal as zero rows, so
+  the line is `duckdb_divergent(205)` — no positions, a row-level divergence — and it goes back
+  to `duckdb_exact` when #205 clears.
 - **Queries only DuckDB answers** (18, tpcds): the window queries our planner refuses (#143),
   q27 and q72 (#23), q28 (#62). Not compared.
-- **Queries neither side checks** (10). Over the 262144-byte cap on both: tpch q16, anti-join,
-  filter-project, semi-join. Not enabled on ours: tpch q11 and q22, tpcds q24 and q54 (#190);
-  DuckDB answers them. **The spec for this ticket decides what to do about the over-cap
-  queries**: raise the cap, compare a digest of the normalized rows on both sides, or leave them
-  unchecked and say so.
+- **Queries over the cap on both sides** (4): tpch q16, anti-join, filter-project, semi-join.
+  Both writers hold a fingerprint instead of the rows and the line says `duckdb_fingerprint`;
+  measured identical on both sides, hash included. **Not enabled on ours**: tpch q11 and q22,
+  tpcds q24 and q54 (#190), each `duckdb_none` until the task that turns their cells on.
 - **A real divergence** is a ticket, and its line in the declared list names it.
 
 <a id="t262"></a>

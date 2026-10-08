@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::golden_text::{line_difference, ordered_sections};
-use super::{Regeneration, SKIPPED, TIER, golden_dir_for, registry};
+use super::{MODES, Regeneration, SKIPPED, TIER, golden_dir_for, registry};
 
 #[cfg(test)]
 mod tests;
@@ -30,6 +30,23 @@ pub(crate) fn cost_golden(dataset: &str, sf: &str, mode: &str) -> PathBuf {
 /// is in the others': a second tier would be a second file rather than a silent overwrite.
 pub(crate) fn result_golden(dataset: &str, sf: &str) -> PathBuf {
     golden_dir_for(dataset, sf).join(format!("{}.result.txt", TIER.label()))
+}
+
+/// `duckdb-result.txt` — DuckDB's answer to every query of this dataset, one section each,
+/// written by `testdata/duckdb_result.py`. No `mode=` line: DuckDB has no planning modes.
+pub(crate) fn duckdb_golden(dataset: &str, sf: &str) -> PathBuf {
+    golden_dir_for(dataset, sf).join("duckdb-result.txt")
+}
+
+/// `gpu-result.txt` — the device's own answers, one section per (query, mode), written only
+/// under `PCK_WRITE_GPU_RESULT` and pulled home from shad-gpu. A record, never an authority.
+/// `version` names a cuDF other than shad-gpu's 25.02, whose file is gitignored beside it.
+pub(crate) fn gpu_result_golden(dataset: &str, sf: &str, version: Option<&str>) -> PathBuf {
+    let name = match version {
+        None => "gpu-result.txt".to_string(),
+        Some(version) => format!("gpu-result-{version}.txt"),
+    };
+    golden_dir_for(dataset, sf).join(name)
 }
 
 pub(crate) fn regeneration() -> Regeneration {
@@ -130,6 +147,95 @@ pub(crate) fn merge_section(
     publish(path, &merged);
     // Explicit rather than left to the drop, so the unlock is ordered after the rename.
     let _ = lock.unlock();
+}
+
+/// Merge one `== <query> mode=<mode>` section into a file keyed by BOTH header fields, and
+/// publish by rename under the same directory lock `merge_section` takes.
+///
+/// `gpu-result.txt`'s shape. One section per device cell, so a cycle that reran one cell
+/// replaces that cell and no other; and the file is written in the registry's row order and
+/// then the mode sequence, because the device cases run in whatever order libtest gives them
+/// and a file ordered by that is a reordering to read on every pull home.
+///
+/// Its only caller outside this module's tests is the device corpus tier, which a rust-only
+/// build does not compile.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+pub(crate) fn merge_mode_section(
+    path: &Path,
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    mode: &str,
+    body: &str,
+) {
+    let dir = path.parent().expect("a golden directory");
+    std::fs::create_dir_all(dir).expect("the directory");
+    let lock = std::fs::File::open(dir)
+        .unwrap_or_else(|e| panic!("cannot open {} to lock: {e}", dir.display()));
+    lock.lock()
+        .unwrap_or_else(|e| panic!("cannot lock {}: {e}", dir.display()));
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => panic!("cannot read {}: {e}", path.display()),
+    };
+    publish(path, &merged_cells(&text, dataset, sf, query, mode, body));
+    // Explicit rather than left to the drop, so the unlock is ordered after the rename.
+    let _ = lock.unlock();
+}
+
+/// The file as it will be written: this cell's section replaced or added, every other kept,
+/// and the whole sorted by the registry's row order and then the mode sequence.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+fn merged_cells(
+    text: &str,
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    mode: &str,
+    body: &str,
+) -> String {
+    let header = format!("{query} mode={mode}");
+    let mut held: Vec<(String, String)> = ordered_sections(text);
+    match held.iter_mut().find(|(name, _)| *name == header) {
+        Some(section) => section.1 = body.to_string(),
+        None => held.push((header, body.to_string())),
+    }
+    let rows: Vec<String> = registry::load_csv()
+        .into_iter()
+        .filter(|row| row.dataset == dataset && row.sf == sf)
+        .map(|row| registry::stem(&row.query))
+        .collect();
+    let at = |name: &str| -> (usize, usize) {
+        let (query, mode) = name.split_once(" mode=").unwrap_or((name, ""));
+        (
+            rows.iter()
+                .position(|row| row == query)
+                .unwrap_or(rows.len()),
+            MODES
+                .iter()
+                .position(|m| m.name == mode)
+                .unwrap_or(MODES.len()),
+        )
+    };
+    held.sort_by_key(|(name, _)| at(name));
+    let mut out = String::new();
+    for (name, body) in &held {
+        push_section(&mut out, name, body);
+    }
+    out
+}
+
+/// Merge one section into a file whose skeleton is the registry's declared queries.
+pub(crate) fn merge_declared(
+    path: &Path,
+    dataset: &str,
+    sf: &str,
+    columns: &[&str],
+    query: &str,
+    body: &str,
+) {
+    merge(path, dataset, sf, columns, query, body, regeneration());
 }
 
 fn merge(

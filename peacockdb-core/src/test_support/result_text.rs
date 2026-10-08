@@ -317,3 +317,17 @@ pub(crate) fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
         formatted
     }
 }
+
+/// One rendered line's cells, trimmed of the padding Arrow sized them to. Not the borders:
+/// Arrow widens a column to its widest printed cell, so the ascii art encodes the values a
+/// tolerant comparison exists not to compare bit for bit.
+pub(crate) fn split_cells(line: &str) -> Vec<String> {
+    let parts: Vec<&str> = line.split('|').collect();
+    if parts.len() < 2 {
+        return vec![line.trim().to_string()];
+    }
+    parts[1..parts.len() - 1]
+        .iter()
+        .map(|cell| cell.trim().to_string())
+        .collect()
+}

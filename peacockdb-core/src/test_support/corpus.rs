@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use datafusion::arrow::array::RecordBatch;
+use datafusion::arrow::datatypes::DataType;
 use datafusion::execution::context::SessionContext;
 
 use crate::executor::{CpuBackend, RunReport, run};
@@ -17,9 +18,13 @@ use crate::plan_text::render_run;
 use crate::planner;
 
 use super::{
-    CostModel, MODES, Mode, ResultDigest, SKIPPED, assert_results_match, batches_to_sorted_str,
-    corpus_golden, data_dir_for, mode_named, queries_dir_for, registry, result_text, total_rows,
+    CellKind, CostModel, MODES, Mode, Regeneration, ResultDigest, assert_results_match,
+    batches_to_sorted_str, corpus_golden, data_dir_for, fingerprint, mode_named, queries_dir_for,
+    registry, result_text, total_rows,
 };
+
+#[cfg(test)]
+mod tests;
 
 /// Max rendered size for a committed `.result.txt` golden. Above this the golden is
 /// NOT written (full-result text doesn't scale — e.g. tpch anti-join renders ~240
@@ -406,27 +411,34 @@ pub(crate) fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option
     })
 }
 
-/// Why a result has no section, and which mode decided it. The size is named where it is
-/// known — where the lower bound tripped, the run stopped counting on purpose and says so
-/// rather than finishing the sum to put a number in a marker.
+/// An answer as a result section holds it: the rendered table, or the fingerprint an answer
+/// over the cap leaves, with `true` for the second. The caller puts the `mode=` line where
+/// its own file wants it.
 ///
-/// The marker keeps first position and `mode=` follows it: `corpus_gpu` reads a leading
-/// SKIPPED as "this section holds no rows", so a mode line ahead of it would let a
-/// `golden_exact` declaration pass against a section with nothing to compare.
-pub(crate) fn over_cap(bytes: Option<usize>, mode: &Mode) -> String {
-    let size = match bytes {
-        Some(bytes) => format!("is {bytes} bytes, at or above"),
-        None => "is at or above".to_string(),
-    };
-    format!(
-        "{}the result {size} the {RESULT_GOLDEN_MAX_BYTES}-byte cap\nmode={}\n",
-        SKIPPED, mode.name
-    )
+/// Sized before it is built, and the cells alone are a lower bound on the table: an answer
+/// far above the cap is never rendered into one string, sorted and then discarded for being
+/// too large. Under the bound it is rendered once and measured exactly, so the cap still
+/// means the same bytes it always did. The fingerprint reads the cells and never the padded
+/// table, so it costs the cells either way.
+pub(crate) fn rendered_or_fingerprint(batches: &[RecordBatch]) -> (String, bool) {
+    if result_text::exceeds_rendered_size(batches, RESULT_GOLDEN_MAX_BYTES) {
+        return (fingerprint::fingerprint_of(batches), true);
+    }
+    let rendered = batches_to_sorted_str(batches);
+    match rendered.len() >= RESULT_GOLDEN_MAX_BYTES {
+        true => (fingerprint::fingerprint_of(batches), true),
+        false => (format!("{rendered}\n"), false),
+    }
 }
 
 /// The one entry this query has, and the mode that wrote it. A result at or above the cap
-/// keeps its section and says why rather than being deleted: absent and not-applicable read
-/// alike, and only one of them is a regression.
+/// keeps its section and holds its fingerprint rather than being deleted: absent and
+/// not-applicable read alike, and only one of them is a regression.
+///
+/// Either stand-in for the rows keeps FIRST position and `mode=` follows it: several readers
+/// take a section's first line as "does this hold rows", so a mode line ahead of the
+/// fingerprint would let a `golden_exact` declaration pass against a section with nothing to
+/// compare.
 fn assert_result_section(
     dataset: &str,
     sf: &str,
@@ -434,30 +446,47 @@ fn assert_result_section(
     mode: &Mode,
     batches: &[RecordBatch],
 ) {
-    // Sized before it is built, and the cells alone are a lower bound on the table: an
-    // answer far above the cap costs one row of memory rather than being rendered whole,
-    // sorted, and then discarded for being too large. Under the bound it is rendered once
-    // and measured exactly, so the cap still means the same bytes it always did.
-    let body = match result_text::exceeds_rendered_size(batches, RESULT_GOLDEN_MAX_BYTES) {
-        true => over_cap(None, mode),
-        false => {
-            let rendered = batches_to_sorted_str(batches);
-            match rendered.len() >= RESULT_GOLDEN_MAX_BYTES {
-                true => over_cap(Some(rendered.len()), mode),
-                false => format!("mode={}\n{rendered}\n", mode.name),
-            }
-        }
-    };
-    let columns: Vec<String> = MODES.iter().map(cpu_column).collect();
-    let columns: Vec<&str> = columns.iter().map(String::as_str).collect();
-    corpus_golden::assert_or_merge(
-        &corpus_golden::result_golden(dataset, sf),
-        dataset,
-        sf,
-        &columns,
-        query,
-        &body,
-    );
+    let path = corpus_golden::result_golden(dataset, sf);
+    if corpus_golden::regeneration() != Regeneration::No {
+        let columns: Vec<String> = MODES.iter().map(cpu_column).collect();
+        let columns: Vec<&str> = columns.iter().map(String::as_str).collect();
+        corpus_golden::merge_declared(
+            &path,
+            dataset,
+            sf,
+            &columns,
+            query,
+            &result_section_body(batches, mode),
+        );
+        return;
+    }
+    // Verified through the comparison the negative tests drive, so what they prove failing
+    // on a wrong answer is the code this case runs.
+    result_matches(&corpus_golden::section_of(&path, query), mode, batches)
+        .unwrap_or_else(|said| panic!("{}: `{query}`'s result moved — {said}", path.display()));
+}
+
+/// A result section as this tier writes it: the mode that wrote it, and the rows — or the
+/// fingerprint an answer over the cap leaves, with the author after it.
+pub(crate) fn result_section_body(batches: &[RecordBatch], mode: &Mode) -> String {
+    match rendered_or_fingerprint(batches) {
+        (fingerprint, true) => format!("{fingerprint}mode={}\n", mode.name),
+        (rendered, false) => format!("mode={}\n{rendered}", mode.name),
+    }
+}
+
+/// The answer against a committed result section. `Err(what moved)` rather than a panic, so
+/// a doctored section can show the comparison failing without a file to doctor.
+pub(crate) fn result_matches(
+    section: &str,
+    mode: &Mode,
+    batches: &[RecordBatch],
+) -> Result<(), String> {
+    let body = result_section_body(batches, mode);
+    match section == body {
+        true => Ok(()),
+        false => Err(super::line_difference(section, &body)),
+    }
 }
 
 /// What a corpus case's answer is compared against.
@@ -485,6 +514,25 @@ pub(crate) enum CpuOracle {
 }
 
 impl CpuOracle {
+    /// The three, with the keyword each is written as below. One table:
+    /// `every_oracle_variant_is_named_by_some_line` (`corpus/tests.rs`) holds it to the
+    /// lines, so a variant nothing uses is deleted rather than kept, and `cpu_oracle_mode`
+    /// decodes a keyword through it rather than spelling the set a second time.
+    pub(crate) const ALL: [CpuOracle; 3] = [
+        CpuOracle::DataFusionExact,
+        CpuOracle::DataFusionApproximate,
+        CpuOracle::DataFusionSubset,
+    ];
+
+    /// The keyword a `corpus_query!` line writes for this oracle.
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            CpuOracle::DataFusionExact => "data_fusion_exact",
+            CpuOracle::DataFusionApproximate => "data_fusion_approximate",
+            CpuOracle::DataFusionSubset => "data_fusion_subset",
+        }
+    }
+
     /// The `rel_tol` handed to the result compare. `None` = exact.
     pub(crate) fn rel_tol(self) -> Option<f64> {
         match self {
@@ -496,15 +544,116 @@ impl CpuOracle {
 
 /// Map a `corpus_query!` oracle keyword to its [`CpuOracle`]. An unknown keyword panics
 /// naming the accepted set rather than falling through to the exact compare, which would
-/// make a typo read as the strictest oracle and pass.
-pub(crate) fn cpu_oracle_mode(s: &str) -> CpuOracle {
-    match s {
-        "data_fusion_exact" => CpuOracle::DataFusionExact,
-        "data_fusion_approximate" => CpuOracle::DataFusionApproximate,
-        "data_fusion_subset" => CpuOracle::DataFusionSubset,
-        other => panic!(
-            "cpu result test: unknown oracle keyword '{other}' \
-             (expected data_fusion_exact|data_fusion_approximate|data_fusion_subset)"
-        ),
+/// make a typo read as the strictest oracle and pass. Decoded through
+/// [`CpuOracle::ALL`], so the accepted set and the list the `ALL` test holds are one.
+pub(crate) fn cpu_oracle_mode(keyword: &str) -> CpuOracle {
+    CpuOracle::ALL
+        .into_iter()
+        .find(|oracle| oracle.keyword() == keyword)
+        .unwrap_or_else(|| {
+            let known: Vec<&str> = CpuOracle::ALL.iter().map(|o| o.keyword()).collect();
+            panic!(
+                "cpu result test: unknown oracle keyword '{keyword}' (expected {})",
+                known.join("|")
+            )
+        })
+}
+
+/// The arguments of every `name(…)` invocation in a case list, one vector per line.
+///
+/// The include is expanded only by the two corpus binaries, so every other reader of a
+/// line's coverage — the benchmark list's agreement check, the oracle `ALL` tests — reads it
+/// as text through here rather than growing a parser of its own.
+pub(crate) fn macro_invocations(text: &str, name: &str) -> Vec<Vec<String>> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let Some(rest) = line.trim().strip_prefix(name) else {
+            continue;
+        };
+        let opened = rest
+            .strip_prefix('(')
+            .unwrap_or_else(|| panic!("{line:?} does not open"));
+        // The last `)` rather than the first, with the tail asserted: a line may end in a
+        // comment naming its ticket, which is not a second invocation.
+        let (arguments, tail) = opened
+            .rsplit_once(')')
+            .unwrap_or_else(|| panic!("{line:?} does not close"));
+        let tail = tail.split_once("//").map_or(tail, |(before, _)| before);
+        assert_eq!(
+            tail.trim(),
+            ";",
+            "{line:?} carries more than one invocation"
+        );
+        out.push(split_arguments(arguments));
     }
+    out
+}
+
+/// An argument list split at the commas OUTSIDE parentheses, so `duckdb_divergent(243, 1)`
+/// stays one argument. A plain `split(',')` reads it as two and shifts every argument after
+/// it, which is how a reader of the include starts naming the wrong column.
+fn split_arguments(list: &str) -> Vec<String> {
+    let mut out = vec![String::new()];
+    let mut depth = 0usize;
+    for c in list.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(String::new());
+                continue;
+            }
+            _ => {}
+        }
+        out.last_mut()
+            .expect("an argument under construction")
+            .push(c);
+    }
+    out.iter().map(|a| a.trim().to_string()).collect()
+}
+
+/// The `corpus_query!` lines of `tests/common/corpus_cases.inc`, the file both corpus
+/// binaries include.
+pub(crate) fn corpus_lines() -> Vec<Vec<String>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(CORPUS_CASES);
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    macro_invocations(&text, "corpus_query!")
+}
+
+/// Where the declaration list lives, relative to the crate: one spelling for every reader.
+pub(crate) const CORPUS_CASES: &str = "tests/common/corpus_cases.inc";
+
+/// Our DECLARED output type per column, as the DuckDB comparison's cell kinds.
+///
+/// The LOGICAL plan alone — no physical plan, no mode, no run — so a query no mode can
+/// execute still yields the classes its committed section is compared under, and a case that
+/// only reads two files stays as cheap as reading them. Held per query: six cases share one
+/// query's schema and registering the tables is the whole cost.
+pub(crate) async fn output_kinds(dataset: &str, sf: &str, query: &str) -> Vec<CellKind> {
+    static KINDS: OnceLock<Mutex<HashMap<String, Vec<CellKind>>>> = OnceLock::new();
+    let held = KINDS.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = format!("{dataset}/{sf}/{query}");
+    if let Some(kinds) = held.lock().expect("the schema cache").get(&key) {
+        return kinds.clone();
+    }
+    let ctx = session_for(dataset, sf, 1).await;
+    let kinds: Vec<CellKind> = ctx
+        .sql(&query_text(dataset, query))
+        .await
+        .unwrap_or_else(|e| panic!("{key}: the query does not plan: {e}"))
+        .schema()
+        .fields()
+        .iter()
+        .map(|field| match field.data_type() {
+            DataType::Float16 | DataType::Float32 | DataType::Float64 => CellKind::Float,
+            DataType::Decimal128(_, scale) | DataType::Decimal256(_, scale) => {
+                CellKind::Decimal(*scale)
+            }
+            _ => CellKind::Exact,
+        })
+        .collect();
+    held.lock()
+        .expect("the schema cache")
+        .insert(key, kinds.clone());
+    kinds
 }

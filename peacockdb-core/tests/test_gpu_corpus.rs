@@ -6,16 +6,26 @@
 #![cfg(not(feature = "rust-only"))]
 
 use peacockdb_core::test_support::{
-    RegistryEntry, assert_registry_matches_csv, cost_golden, cpu_golden, gpu_case, result_golden,
+    RegistryEntry, assert_registry_matches_csv, cost_golden, cpu_golden, gpu_case,
+    gpu_result_golden, result_golden,
 };
 
 /// The device's reading of a declaration: one test and one registration per enabled gpu
-/// mode, and nothing at all for `none`. The cpu arguments are consumed and dropped, which
-/// is what makes one list serve both binaries. The last argument says whether the run holds
-/// every batch to its node's declared schema; `gpu_case` decodes it.
+/// mode, and nothing at all for `none`. The cpu arguments and the DuckDB oracle are
+/// consumed and dropped, which is what makes one list serve both binaries — the DuckDB
+/// comparison is a rust-only case in the cpu binary. The last argument says whether the run
+/// holds every batch to its node's declared schema; `gpu_case` decodes it.
 macro_rules! corpus_query {
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, none, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {};
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, all_modes, $($rest:tt)*) => {
+        corpus_query!($dataset, $sf, $query,
+            tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
+    };
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, all_modes, $($rest:tt)*) => {
+        corpus_query!($dataset, $sf, $query, $($cpu)|+,
+            tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
+    };
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, none, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {};
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
         $(
             paste::paste! {
                 #[tokio::test]
@@ -61,11 +71,17 @@ include!("common/corpus_cases.inc");
 #[test]
 fn a_device_run_under_a_regeneration_writes_no_golden() {
     let (dataset, sf, query, mode) = ("tpch", "1", "q6", "tp1_single");
-    let files = [
+    let mut files = vec![
         cpu_golden(dataset, sf, "tp1-single"),
         cost_golden(dataset, sf, "tp1-single"),
         result_golden(dataset, sf),
     ];
+    // The device's OWN record, which only `PCK_WRITE_GPU_RESULT` writes and this run does
+    // not set — so the two regeneration variables must leave it alone as well.
+    let recorded = gpu_result_golden(dataset, sf, None);
+    if recorded.exists() {
+        files.push(recorded);
+    }
     let before: Vec<Vec<u8>> = files
         .iter()
         .map(|path| std::fs::read(path).expect("a committed golden"))

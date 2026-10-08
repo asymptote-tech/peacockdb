@@ -457,7 +457,12 @@ mode=tp4-sized
 | 8449      | Supplier#000008449 | 5BXWsJERA2mP5OyO4 | 20-469-856-8873 | 1772627.2087  |
 +-----------+--------------------+-------------------+-----------------+---------------+
 == q16
-skipped: the result is at or above the 262144-byte cap
+fingerprint: rows=18314
+col 0: nonnull=18314
+col 1: nonnull=18314
+col 2: nonnull=18314
+col 3: nonnull=18314
+hash: 55f4e37d567b6c9ac94a9047df8193e6a8b9457b11f65db0dec045557ad5308d
 mode=tp4-sized
 == q17
 mode=tp4-sized
@@ -846,7 +851,17 @@ mode=tp4-sized
 | R            | 37719753.00              |
 +--------------+--------------------------+
 == anti-join
-skipped: the result is at or above the 262144-byte cap
+fingerprint: rows=1196041
+col 0: nonnull=1196041
+col 1: nonnull=1196041
+col 2: nonnull=1196041
+col 3: nonnull=1196041 sum=1.80922548921111877e11 min=8.66899999999999977e2 max=5.44089089999999967e5
+col 4: nonnull=1196041
+col 5: nonnull=1196041
+col 6: nonnull=1196041
+col 7: nonnull=1196041
+col 8: nonnull=1196041
+hash: 62d1fe6120a2e6dd23126dbfe0d3301c3951ce3586647021bb7145d3243c1d8d
 mode=tp4-sized
 == cross-join
 mode=tp4-sized
@@ -980,7 +995,10 @@ mode=tp4-sized
 | 4           | MIDDLE EAST |  foxes boost furiously along the carefully dogged tithes. slyly regular orbits according to the special epit        | 9           | INDONESIA      | 2           | d deposits sleep quickly according to the dogged, regular dolphins. special excuses haggle furiously special reque |
 +-------------+-------------+---------------------------------------------------------------------------------------------------------------------+-------------+----------------+-------------+--------------------------------------------------------------------------------------------------------------------+
 == filter-project
-skipped: the result is at or above the 262144-byte cap
+fingerprint: rows=2402187
+col 0: nonnull=2402187
+col 1: nonnull=2402187 sum=9.72734950000000000e7 min=3.10000000000000000e1 max=5.00000000000000000e1
+hash: 613733a9c856d8ebed8bdb77c26d1d757b27dedad0304d771baf7bb3e5acbeb2
 mode=tp4-sized
 == hash-join
 mode=tp4-sized
@@ -1347,7 +1365,17 @@ mode=tp4-sized
 | 990147     | 154290    | 4291      | 1            | 6.00       | 8065.74         | 0.10       | 0.01  | R            | F            | 1992-01-02 | 1992-03-01   | 1992-01-15    | NONE              | REG AIR    | thely after the regular dep               |
 +------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------------+
 == semi-join
-skipped: the result is at or above the 262144-byte cap
+fingerprint: rows=303959
+col 0: nonnull=303959
+col 1: nonnull=303959
+col 2: nonnull=303959
+col 3: nonnull=303959 sum=4.59067575263498993e10 min=8.57710000000000036e2 max=5.55285160000000033e5
+col 4: nonnull=303959
+col 5: nonnull=303959
+col 6: nonnull=303959
+col 7: nonnull=303959
+col 8: nonnull=303959
+hash: 67f02d3ea85b68825ad621f54ade310d985c9d9875614bee7aef55c60f3ada14
 mode=tp4-sized
 == shuffle-additive
 mode=tp4-sized

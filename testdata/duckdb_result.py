@@ -23,6 +23,7 @@ Usage (DuckDB 1.5.4, the version CI pins for generate_testdata.sh):
 import argparse
 import datetime
 import decimal
+import hashlib
 import pathlib
 import sys
 
@@ -42,9 +43,106 @@ def cell(value):
         return repr(value)
     if isinstance(value, decimal.Decimal):
         return format(value, "f")
-    if isinstance(value, (datetime.date, datetime.datetime)):
+    # datetime before date, which it subclasses. arrow-rs prints NaiveDateTime's Debug: a
+    # 'T', and the fraction in groups of three digits with none at all when it is zero —
+    # where isoformat() always prints six, which would be a divergence on every timestamp.
+    if isinstance(value, datetime.datetime):
+        base = value.strftime("%Y-%m-%dT%H:%M:%S")
+        us = value.microsecond
+        if us == 0:
+            return base
+        if us % 1000 == 0:
+            return f"{base}.{us // 1000:03d}"
+        return f"{base}.{us:06d}"
+    if isinstance(value, datetime.date):
         return value.isoformat()
     return str(value)
+
+
+def approx_number(x):
+    """Rust's `{:.17e}`: the exponent plain, with no sign and no padding.
+
+    A shortest-round-trip form would not do — Rust's and Python's notations differ — and the
+    two writers' fingerprints are compared byte for byte.
+    """
+    if x != x:
+        return "nan"
+    if x == float("inf"):
+        return "inf"
+    if x == float("-inf"):
+        return "-inf"
+    mantissa, exponent = f"{x:.17e}".split("e")
+    return f"{mantissa}e{int(exponent)}"
+
+
+def reads_as_inexact(text):
+    """A cell whose rendering is the engine's own choice rather than common ground."""
+    return "." in text or "e" in text or "E" in text or text in INEXACT
+
+
+INEXACT = {"inf", "-inf", "NaN", "nan", "Inf", "-Inf"}
+
+
+def fingerprint(names, rows):
+    """What a section holds instead of its rows when the rendering reached the cap.
+
+    The same text `test_support/fingerprint.rs` writes, byte for byte: a column goes into
+    the hash when it renders identically on both engines and into an approximate triple when
+    it does not, and the class is read off the RENDERED cells, since our decimal meets
+    DuckDB's double and only the rendering is common ground.
+    """
+    cells = [[cell(v) for v in row] for row in rows]
+    width = len(names)
+    nonnull = [0] * width
+    approximate = [False] * width
+    numeric = [True] * width
+    for row in cells:
+        for at, text in enumerate(row):
+            if not text:
+                continue
+            nonnull[at] += 1
+            approximate[at] = approximate[at] or reads_as_inexact(text)
+            numeric[at] = numeric[at] and parses_as_float(text)
+    approximate = [approximate[at] and numeric[at] for at in range(width)]
+
+    values = [[] for _ in range(width)]
+    hashed = []
+    for row in cells:
+        exact = ""
+        for at, text in enumerate(row):
+            if approximate[at]:
+                if text:
+                    values[at].append(float(text))
+            else:
+                exact += text + "|"
+        hashed.append(exact)
+
+    out = [f"fingerprint: rows={len(cells)}"]
+    for at in range(width):
+        line = f"col {at}: nonnull={nonnull[at]}"
+        if approximate[at]:
+            # Summed IN VALUE ORDER, so the two sides add in one sequence and float
+            # reassociation cannot move the digits the comparison reads.
+            ordered = sorted(values[at])
+            total = 0.0
+            for v in ordered:
+                total += v
+            line += (
+                f" sum={approx_number(total)} min={approx_number(ordered[0])}"
+                f" max={approx_number(ordered[-1])}"
+            )
+        out.append(line)
+    hashed.sort()
+    out.append("hash: " + hashlib.sha256("\n".join(hashed).encode()).hexdigest())
+    return "\n".join(out) + "\n"
+
+
+def parses_as_float(text):
+    try:
+        float(text)
+        return True
+    except ValueError:
+        return False
 
 
 def render(names, rows):
@@ -90,7 +188,7 @@ def generate(dataset, only):
             continue
         table = render(names, rows)
         if len(table.encode()) >= CAP:
-            out.append(f"skipped: the result is at or above the {CAP}-byte cap\n")
+            out.append(fingerprint(names, rows))
         else:
             out.append(table)
         print(f"{dataset}/{query.stem}: {len(rows)} rows", file=sys.stderr)

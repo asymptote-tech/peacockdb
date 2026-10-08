@@ -2,6 +2,9 @@
 
 > **For agentic workers:** the chain coordinator dispatches this plan to a developer, task by
 > task; steps use checkbox (`- [ ]`) syntax. Commits at most 10 lines; device cycles foreground.
+> `- [~]` marks a step the developer does not own: the commits, which the coordinator makes,
+> and the device cycle, which needs a shad-gpu that answers. Deviations from a step as
+> written are recorded in [`duckdb-oracle-detail.md`](duckdb-oracle-detail.md).
 
 **Goal:** every corpus answer — the cpu's `mini.result.txt` and the device's new
 `gpu-result.txt` — is compared with DuckDB's `duckdb-result.txt` under an oracle each
@@ -98,7 +101,7 @@ shad-gpu script.
   `DuckdbOracle::parse(&str) -> DuckdbOracle` (panics naming the accepted set);
   `DuckdbOracle::ALL: [&'static str; 5]`; `DuckdbOracle::name(&self) -> &'static str`.
 
-- [ ] **Step 1: The failing tests** (module tests at the bottom of the new file):
+- [x] **Step 1: The failing tests** (module tests at the bottom of the new file):
 
 ```rust
 #[cfg(test)]
@@ -131,9 +134,9 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run red.** `cargo test --features rust-only -p peacockdb-core --lib test_support::duckdb_oracle`
+- [x] **Step 2: Run red.** `cargo test --features rust-only -p peacockdb-core --lib test_support::duckdb_oracle`
   — fails to compile (`DuckdbOracle` undefined).
-- [ ] **Step 3: The enum.**
+- [x] **Step 3: The enum.**
 
 ```rust
 //! What a corpus line asks of DuckDB's answer (#235). One argument per line, explicit on each.
@@ -212,8 +215,8 @@ impl DuckdbOracle {
 }
 ```
 
-- [ ] **Step 4: Run green**, same command.
-- [ ] **Step 5: Commit.** `git commit -m "#235: DuckdbOracle, its five spellings and ALL"`.
+- [x] **Step 4: Run green**, same command.
+- [~] **Step 5: Commit.** `git commit -m "#235: DuckdbOracle, its five spellings and ALL"`.
 
 ### Task 2: The macro's new argument and `all_modes`
 
@@ -229,7 +232,7 @@ impl DuckdbOracle {
 - Produces: `CorpusDeclaration { dataset, sf, query, duckdb_oracle, cpu_oracle, gpu_oracle }`, with
   `duckdb_oracle` the `stringify!` of the line's argument (e.g. `"duckdb_divergent (243)"`).
 
-- [ ] **Step 1: The cpu macro.** Two sugar arms first, then the two existing arms with the new
+- [x] **Step 1: The cpu macro.** Two sugar arms first, then the two existing arms with the new
   argument. `$duck` is an ident with an optional parenthesized list:
 
 ```rust
@@ -256,7 +259,7 @@ macro_rules! corpus_query {
   `declare_corpus_query!` takes `$duck:expr` and submits `duckdb_oracle: $duck`. The device
   macro gets the same two sugar arms and the new argument in both of its arms, consumed and
   dropped as the cpu oracle is.
-- [ ] **Step 2: Every line.** One script, run once, committed with the change:
+- [x] **Step 2: Every line.** One script, run once, committed with the change:
 
 ```bash
 python3 - <<'EOF'
@@ -277,7 +280,7 @@ EOF
   `duckdb_none` is the provisional value only; Task 6 sets every line from the first run, and
   Task 5's case fails a `duckdb_none` over two sections that both exist, so none can stay
   wrong. The header comment (`:1-10`) shows the new signature and `all_modes`.
-- [ ] **Step 3: The sugar's own test** (Review Focus 5), in `test_cpu_corpus.rs`: a declaration
+- [x] **Step 3: The sugar's own test** (Review Focus 5), in `test_cpu_corpus.rs`: a declaration
   `corpus_query!(tpch, 1, q6_sugar_probe, ...)` would add a registry row, so instead assert on
   what the include already holds — every line whose cpu or gpu modes were the five now
   registers five cells:
@@ -322,13 +325,13 @@ fn modes(argument: &str) -> BTreeSet<String> {
   and taught the same; each is named in the commit.
 
   (`tpch/q14` — `all_modes, none` — covers the other order through `the_registry_matches_the_cpu_corpus_in_both_directions`.)
-- [ ] **Step 4: Run.** `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- --list | wc -l`
+- [x] **Step 4: Run.** `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- --list | wc -l`
   equals the count before plus one (the new test); `the_registry_matches_the_cpu_corpus_in_both_directions`
   and `all_modes_expands_to_the_five_in_either_position` green; `cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens benchmark`
   green (the `modes()` change). The device binary compiles:
   `CUDF_ROOT=~/data/miniforge3/envs/rapids scripts/cargo-cudf.sh test -p peacockdb-core --test test_gpu_corpus --no-run`
   in a workspace, never the primary checkout.
-- [ ] **Step 5: Commit.** `git commit -m "#235: corpus_query! names its DuckDB oracle first; all_modes"`.
+- [~] **Step 5: Commit.** `git commit -m "#235: corpus_query! names its DuckDB oracle first; all_modes"`.
 
 ### Task 3: The fingerprint, on both writers
 
@@ -348,7 +351,7 @@ fn modes(argument: &str) -> BTreeSet<String> {
   `pub fn compare_fingerprints(ours: &str, duckdb: &str, tol: f64) -> Result<(), String>`;
   `pub fn is_over_cap(section: &str) -> bool` (a `SKIPPED` marker naming the cap, or a fingerprint).
 
-- [ ] **Step 1: The format**, written identically by Rust and Python:
+- [x] **Step 1: The format**, written identically by Rust and Python:
 
 ```
 fingerprint: rows=<n>
@@ -369,7 +372,7 @@ hash: <hex sha256>
   one order; `sum`/`min`/`max` print as `{:e}` (Rust) / `'{:e}'.format` (Python), the same text.
   `hash` is SHA-256 of each row's **exact** cells joined by `|`, rows sorted as byte strings and
   joined by `\n` — so an over-cap join of integer columns is checked row by row, not by sums alone.
-- [ ] **Step 2: Failing tests** (`test_golden_format.rs`):
+- [x] **Step 2: Failing tests** (`test_golden_format.rs`):
 
 ```rust
 use datafusion::arrow::array::{Float64Array, Int64Array, StringArray};
@@ -449,9 +452,9 @@ class Cells(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 ```
-- [ ] **Step 3: Run red**, `cargo test --features rust-only -p peacockdb-core --test test_golden_format`
+- [x] **Step 3: Run red**, `cargo test --features rust-only -p peacockdb-core --test test_golden_format`
   and `python3 testdata/test_duckdb_result.py`.
-- [ ] **Step 4: Implement** `fingerprint.rs`; in `assert_result_section` the two `over_cap(...)`
+- [x] **Step 4: Implement** `fingerprint.rs`; in `assert_result_section` the two `over_cap(...)`
   arms become `format!("{}mode={}\n", fingerprint_of(batches), mode.name)` — the fingerprint is
   computed from the batches without rendering the table, so the size bound at `:440` still spares
   memory. Replace `section.starts_with(SKIPPED)` at the two over-cap reads with
@@ -485,11 +488,11 @@ def cell(value):
 ```
 
   `datetime.datetime` is checked before `datetime.date` because it is a subclass of it.
-- [ ] **Step 5: Run green**; then `UPDATE_CANONICAL=1 PCK_UPDATE_SECTIONS=1 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- filter_project q16 anti_join semi_join q11 q98`
+- [x] **Step 5: Run green**; then `UPDATE_CANONICAL=1 PCK_UPDATE_SECTIONS=1 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- filter_project q16 anti_join semi_join q11 q98`
   regenerates the six over-cap sections in `mini.result.txt` (the others must not move — `git diff --stat`
   shows only those sections), and `python3 testdata/duckdb_result.py` (DuckDB 1.5.4) rewrites both
   `duckdb-result.txt`; only the six sections move.
-- [ ] **Step 6: Commit.** `git commit -m "#235: over-cap sections hold a fingerprint on both writers"`.
+- [~] **Step 6: Commit.** `git commit -m "#235: over-cap sections hold a fingerprint on both writers"`.
 
 ### Task 4: The section comparator
 
@@ -504,7 +507,7 @@ def cell(value):
   the caller), `duckdb` the `duckdb-result.txt` body, and `kinds[i]` column `i`'s class from our
   declared output schema (Task 5 plans the query to get it).
 
-- [ ] **Step 1: The failing tests**, doctored sections, one per variant and per Review Focus 1–3:
+- [x] **Step 1: The failing tests**, doctored sections, one per variant and per Review Focus 1–3:
 
 ```rust
 const OURS: &str = "+---+-----+\n| a | b   |\n+---+-----+\n| 1 | x   |\n| 2 | 1.5 |\n+---+-----+";
@@ -567,8 +570,8 @@ fn div(ticket: u32, columns: Vec<usize>) -> DuckdbOracle { DuckdbOracle::Diverge
 }
 ```
 
-- [ ] **Step 2: Run red**, `cargo test --features rust-only -p peacockdb-core --lib test_support::duckdb_oracle`.
-- [ ] **Step 3: The comparator.** `fingerprint.rs` gains `pub fn fingerprint_of_rendered(table: &str) -> String`,
+- [x] **Step 2: Run red**, `cargo test --features rust-only -p peacockdb-core --lib test_support::duckdb_oracle`.
+- [x] **Step 3: The comparator.** `fingerprint.rs` gains `pub fn fingerprint_of_rendered(table: &str) -> String`,
   the same fingerprint computed from a rendered table's cells (Task 3's rules read cells anyway).
   Parse a rendered table into `(width, rows: Vec<Vec<String>>)` with
   the cell split `assert_sorted_str_approx`'s `split_cells` uses (`corpus_gpu.rs:186-196`) — lift
@@ -650,8 +653,8 @@ fn cell_equal(kind: CellKind, ours: &str, duck: &str) -> bool {
   {a}, DuckDB {b}")` — never a panic, so `Divergent` can use it as a predicate. `tickets_open` in production reads `llm-wiki/tickets/*.md` for
   `<a id="t{N}">` (`env!("CARGO_MANIFEST_DIR")/../llm-wiki/tickets`); an archived ticket lives in
   `archive/archived-tickets.md`, which is not read.
-- [ ] **Step 4: Run green.**
-- [ ] **Step 5: Commit.** `git commit -m "#235: the DuckDB section comparator, by position"`.
+- [x] **Step 4: Run green.**
+- [~] **Step 5: Commit.** `git commit -m "#235: the DuckDB section comparator, by position"`.
 
 ### Task 5: One case per line, for each engine's file
 
@@ -664,7 +667,7 @@ fn cell_equal(kind: CellKind, ours: &str, duck: &str) -> bool {
 - Produces: `pub fn duckdb_case(dataset: &str, sf: &str, query: &str, oracle: &str, engine: Engine)`,
   `pub enum Engine { Cpu, Device }`.
 
-- [ ] **Step 1:** In both arms of the cpu macro, after `declare_corpus_query!`:
+- [x] **Step 1:** In both arms of the cpu macro, after `declare_corpus_query!`:
 
 ```rust
 paste::paste! {
@@ -692,7 +695,7 @@ paste::paste! {
   output field mapped `Float16|Float32|Float64 → CellKind::Float`, `Decimal128(_, s) →
   CellKind::Decimal(s)`, anything else `CellKind::Exact`. Planning only, no execution, so the case
   stays rust-only and fast.
-- [ ] **Step 2: The `ALL` test**:
+- [x] **Step 2: The `ALL` test**:
 
 ```rust
 #[test]
@@ -711,10 +714,10 @@ fn every_duckdb_oracle_is_named_by_some_line() {
   needed — in which case that variant is deleted from the enum and `ALL` with the reason in the
   commit, as the spec's rule wants. Task 5's red cases and this test
   land in the same PR as Task 6, which turns them green; Task 5's commit message says so.
-- [ ] **Step 3: Run** `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus duckdb_ 2>&1 | tee /tmp/duckdb-first-run.txt`
+- [x] **Step 3: Run** `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus duckdb_ 2>&1 | tee /tmp/duckdb-first-run.txt`
   — every line is `duckdb_none` from Task 2, so every case that has two answers fails with
   "duckdb_none over two sections that both exist". That output is Task 6's worklist.
-- [ ] **Step 4: No commit yet.** The first run's red cases are what Task 6 reads to set every
+- [x] **Step 4: No commit yet.** The first run's red cases are what Task 6 reads to set every
   line's oracle; this task's code is committed together with Task 6's line changes, so no commit is
   red: `git commit -m "#235: a DuckDB case per corpus line, cpu and device, and every line's oracle"`
   is Task 6's Step 4.
@@ -725,7 +728,7 @@ fn every_duckdb_oracle_is_named_by_some_line() {
 - Modify: `peacockdb-core/tests/common/corpus_cases.inc`
 - Modify: `llm-wiki/tickets/*.md` (new tickets for real divergences)
 
-- [ ] **Step 1:** For each failing `duckdb_tpch_*`/`duckdb_tpcds_*` case, set the line's oracle by
+- [x] **Step 1:** For each failing `duckdb_tpch_*`/`duckdb_tpcds_*` case, set the line's oracle by
   trying in order and keeping the first that passes: `duckdb_exact`; `duckdb_approx` (#235's digit
   rows: tpch q1, q8, q14, shuffle-stddev, shuffle-additive-avg; tpcds q7, q9, q13, q18, q26, q39,
   q58, q59, q61, q66, q75, q85, q90); `duckdb_fingerprint` (five today: tpch q16, anti-join,
@@ -738,7 +741,7 @@ fn every_duckdb_oracle_is_named_by_some_line() {
   q1, q8, shuffle-additive-avg; tpcds q7, q26, q58, q61, q66, q90) pass `duckdb_approx` under the
   one-unit-in-the-last-place rule — they are not divergences. A decimal row that misses by more
   than one unit is a real divergence and gets its ticket.
-- [ ] **Step 2: Only if a tie is found.** A row that differs only because a LIMIT window's cutoff
+- [x] **Step 2: Only if a tie is found.** A row that differs only because a LIMIT window's cutoff
   ties (both engines keep valid, different rows), confirmed by reading the query and both sections
   by hand, is the one case that adds `duckdb_columns`. If no line needs it, skip this step: the
   variant is not added. If one does, add it in this commit:
@@ -768,10 +771,10 @@ fn every_duckdb_oracle_is_named_by_some_line() {
 }
 ```
   The line says `duckdb_columns(<the ORDER BY positions>)`; the commit message names the query and the tie.
-- [ ] **Step 3: Run** `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus` —
+- [x] **Step 3: Run** `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus` —
   all green, `every_duckdb_oracle_is_named_by_some_line` included (or the unused variant deleted,
   Task 5 Step 2). The `duckdb_gpu_*` cases pass vacuously until Task 7 writes `gpu-result.txt`.
-- [ ] **Step 4: Commit** Task 5's code with these line changes, green:
+- [~] **Step 4: Commit** Task 5's code with these line changes, green:
   `git commit -m "#235: a DuckDB case per corpus line, cpu and device, and every line's oracle"`.
 
 ### Task 7: `gpu-result.txt`
@@ -786,7 +789,7 @@ fn every_duckdb_oracle_is_named_by_some_line() {
 - Produces: `testdata/goldens/<dataset>.sf1/gpu-result.txt`, sections as `mini.result.txt`'s
   (`mode=<name>` then the table, or the fingerprint), written only when `PCK_WRITE_GPU_RESULT=1`.
 
-- [ ] **Step 1:** In `gpu_case`, **before** `assert_result` runs — so a device answer the cpu
+- [x] **Step 1:** In `gpu_case`, **before** `assert_result` runs — so a device answer the cpu
   rejects is still recorded, which is exactly where DuckDB says which engine is right (#243) —
   when `std::env::var("PCK_WRITE_GPU_RESULT").as_deref() == Ok("1")`,
   render the device's batches as `assert_result_section` does (fingerprint over the cap) and
@@ -799,7 +802,7 @@ fn every_duckdb_oracle_is_named_by_some_line() {
   the existing no-golden test sets those two and must still see the three cpu files unchanged; add
   `gpu-result.txt` to its `files` list only if it exists, and assert it unchanged too (that run does
   not set `PCK_WRITE_GPU_RESULT`).
-- [ ] **Step 1b: The coverage guard**, in `test_cpu_corpus` (rust-only, so CI runs it):
+- [x] **Step 1b: The coverage guard**, in `test_cpu_corpus` (rust-only, so CI runs it):
 
 ```rust
 #[test]
@@ -821,25 +824,25 @@ fn every_enabled_device_cell_has_its_gpu_result_section_and_no_other() {
   (`registry_rows` and `enabled_gpu_modes` read `cost-registry.csv` as the registry tests do;
   `gpu_result_sections` parses the `== <query> mode=<mode>` headers. pbench joins the list in its
   own task.)
-- [ ] **Step 2:** `build-test-shadgpu.sh`: `PCK_WRITE_GPU_RESULT` joins the forwarded knobs in
+- [x] **Step 2:** `build-test-shadgpu.sh`: `PCK_WRITE_GPU_RESULT` joins the forwarded knobs in
   `remote_gate_script` (`:375-385`, beside `PEACOCK_GPU_DEBUG`); `--pull-results` copies
   `testdata/goldens/*/gpu-result.txt` home with the same `pull_one` the benchmark pull uses
   (`:638-690`), refusing while a detached run is going.
-- [ ] **Step 3: Device cycle** (foreground):
+- [~] **Step 3: Device cycle** (foreground):
   `PCK_WRITE_GPU_RESULT=1 PCK_TEST_FILTER=gpu_ ./scripts/build-test-shadgpu.sh --all`, then
   `./scripts/build-test-shadgpu.sh --pull-results`. Locally:
   `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus duckdb_gpu_` — each
   failing case is a device divergence from DuckDB: a ticket, and if the cpu agrees with DuckDB it is
   the device's (the line's oracle stays as Task 6 set it; the device's ticket goes on the registry
   row's gpu cells).
-- [ ] **Step 3b: `build-test.md`.** In the device section, beside the regeneration variables:
+- [x] **Step 3b: `build-test.md`.** In the device section, beside the regeneration variables:
   "**`gpu-result.txt` is regenerated whenever a device answer might move.** After a device code
   change, a cell turned on, or a cuDF update, run a cycle with `PCK_WRITE_GPU_RESULT=1`, then
   `--pull-results`, and read `git diff testdata/goldens/*/gpu-result.txt` before committing it. A
   moved section the change did not intend is a finding, not a regeneration. Float cells move a
   little from run to run (GPU reductions are not reproducible), which is why nothing compares the
   file with its previous version; the DuckDB cases and the coverage test are what CI checks."
-- [ ] **Step 4: Commit** the pulled `gpu-result.txt` files with the code:
+- [~] **Step 4: Commit** the pulled `gpu-result.txt` files with the code:
   `git commit -m "#235: the device's answers recorded, and compared with DuckDB"`.
 
 ### Task 7b: The helpers fail on a wrong answer (#235)
@@ -855,7 +858,7 @@ the device helper there cannot run in the rust-only tier. The comparison the dev
 pure Rust over batches and a section, so it moves out of the gated module; `assert_result` keeps
 the device-only parts (the live-cpu run) and calls it.
 
-- [ ] **Step 1: The seam.** In `corpus.rs`, ungated:
+- [x] **Step 1: The seam.** In `corpus.rs`, ungated:
 
 ```rust
 /// The device's answer against a golden section, under a `gpu_oracle` keyword. Pure: no device,
@@ -876,7 +879,7 @@ pub(crate) fn device_answer_matches(section: &str, gpu_oracle: &str, batches: &[
   helper does today (`golden_section(dataset, sf, query, "mini.result.txt")`) and pass it.
   `assert_result` becomes `panic!` on `device_answer_matches(..)`'s `Err` for the golden modes.
   No behaviour changes: `test_cpu_corpus` green, `test_gpu_corpus` builds (`--no-run`).
-- [ ] **Step 2: The failing-on-purpose tests**, in `corpus.rs`'s test module (rust-only):
+- [x] **Step 2: The failing-on-purpose tests**, in `corpus.rs`'s test module (rust-only):
 
 ```rust
 fn answer() -> Vec<RecordBatch> {
@@ -920,10 +923,10 @@ fn the_device_comparison_accepts_the_right_answer() {
 ```
   The `expected` text is `assert_result_section`'s failure message prefix; read it off the helper
   and use it exactly.
-- [ ] **Step 3: Run.** `scripts/cargo-cudf.sh test --features rust-only -p peacockdb-core --lib test_support::corpus`
+- [x] **Step 3: Run.** `scripts/cargo-cudf.sh test --features rust-only -p peacockdb-core --lib test_support::corpus`
   → green; then break each comparison by hand (return early) and see each negative test go red —
   record in the detail file.
-- [ ] **Step 4: Commit.** `git commit -m "#235: the corpus helpers take their section, and are shown failing on a wrong answer"`.
+- [~] **Step 4: Commit.** `git commit -m "#235: the corpus helpers take their section, and are shown failing on a wrong answer"`.
 
 ### Task 7c: Every oracle enum is held to its lines (#235)
 
@@ -935,10 +938,10 @@ The test lives in the library, where `CpuOracle` and `GpuResultMode` are visible
 and nothing is gated; it reads the corpus lines from `tests/common/corpus_cases.inc` as text, the
 file both corpus binaries include.
 
-- [ ] **Step 1: Delete the unused variants.** `GpuResultMode::Skip` and `GpuResultMode::GoldenApprox`
+- [x] **Step 1: Delete the unused variants.** `GpuResultMode::Skip` and `GpuResultMode::GoldenApprox`
   and their keywords `skip`, `golden_approx` go, with their match arms; the panic text lists
   `golden_exact|golden_approx_std|live_cpu`.
-- [ ] **Step 2: The consts and the test.**
+- [x] **Step 2: The consts and the test.**
 
 ```rust
 impl CpuOracle {
@@ -979,16 +982,16 @@ fn every_oracle_variant_is_named_by_some_line() {
   (`GpuResultMode` gains `PartialEq, Eq, Debug` derives. A commented-out line — `// corpus_query!(`
   — is skipped by the `starts_with`.) Together with Task 1's `DuckdbOracle::ALL` test, the three
   enums are each held to the lines.
-- [ ] **Step 3: Run.** `scripts/cargo-cudf.sh test --features rust-only -p peacockdb-core --lib every_oracle_variant` green;
+- [x] **Step 3: Run.** `scripts/cargo-cudf.sh test --features rust-only -p peacockdb-core --lib every_oracle_variant` green;
   `test_gpu_corpus` builds (`--no-run` locally).
-- [ ] **Step 4: Commit.** `git commit -m "#235: every oracle enum lists its variants, and an unused one is deleted"`.
+- [~] **Step 4: Commit.** `git commit -m "#235: every oracle enum lists its variants, and an unused one is deleted"`.
 
 ### Task 7d: `build-test.md`'s goldens table and diagram
 
 **Files:**
 - Modify: `llm-wiki/build-test.md` (the goldens table, `:642-652`, and the diagram under it, `:656-697`)
 
-- [ ] **Step 1: The table.** `duckdb-result.txt`'s "Asserted by" becomes "`test_cpu_corpus`'s
+- [x] **Step 1: The table.** `duckdb-result.txt`'s "Asserted by" becomes "`test_cpu_corpus`'s
   `duckdb_<ds>_<q>` cases, per the line's `duckdb_oracle`"; its "Produced by" notes timestamps
   rendered as arrow-rs does and the fingerprint over the cap. A new row:
   `gpu-result.txt` — produced by the device corpus tier under `PCK_WRITE_GPU_RESULT=1`, before it
@@ -998,7 +1001,7 @@ fn every_oracle_variant_is_named_by_some_line() {
   section is a fingerprint, written and not asserted (the device reads it only as `live_cpu`).
   The device oracles listed are `golden_exact`, `golden_approx_std`, `live_cpu` (Task 7c deleted
   `skip` and `golden_approx`).
-- [ ] **Step 2: The diagram.** Replace the corpus-tier and `duckdb_result.py` branches with:
+- [x] **Step 2: The diagram.** Replace the corpus-tier and `duckdb_result.py` branches with:
 
 ```
           ├── the corpus cpu tier, UPDATE_CANONICAL=1   (the author of the cpu goldens)
@@ -1029,16 +1032,19 @@ fn every_oracle_variant_is_named_by_some_line() {
 ```
   and, beside the table, Task 7's paragraph on when to regenerate `gpu-result.txt` (a device change,
   a cell turned on, a cuDF update: `PCK_WRITE_GPU_RESULT=1`, `--pull-results`, read the diff).
-- [ ] **Step 3: Check.** The diagram's names match the code: the case prefixes `duckdb_` and
+- [x] **Step 3: Check.** The diagram's names match the code: the case prefixes `duckdb_` and
   `duckdb_gpu_`, the variable `PCK_WRITE_GPU_RESULT`, the flag `--pull-results`, the five oracle
   keywords; `test_ci_coverage`'s wiki checks (if any read `build-test.md`) green.
-- [ ] **Step 4: Commit.** `git commit -m "build-test.md: the DuckDB oracle and gpu-result.txt in the goldens table and diagram"`.
+- [~] **Step 4: Commit.** `git commit -m "build-test.md: the DuckDB oracle and gpu-result.txt in the goldens table and diagram"`.
 
 ### Task 8: The record
 
-- [ ] `build-test.md`: the DuckDB tier — `duckdb_*` and `duckdb_gpu_*` in `test_cpu_corpus`'s count
+- [x] `build-test.md`: the DuckDB tier — `duckdb_*` and `duckdb_gpu_*` in `test_cpu_corpus`'s count
   (twice the line count, plus the `ALL` and sugar tests), the `--lib` count (Tasks 1, 4), the
   `test_golden_format` count (Task 3); the run table's `PCK_WRITE_GPU_RESULT` and `--pull-results`.
-- [ ] `corpus-coverage.md` #235: moved to `archive/archived-tickets.md` (Done, with this task's PR),
-  the index row and open counts in `tickets.md` updated.
-- [ ] `git commit -m "duckdb-oracle: the tier recorded; #235 archived"`.
+- [~] `corpus-coverage.md` #235: **not archived.** The device cycle has not run, so its 26
+  `duckdb_gpu_*` cases and the coverage test are red and the ticket still names something not
+  done. Its text records what landed and that one `PCK_WRITE_GPU_RESULT=1` cycle closes it;
+  archive it in the round that runs the cycle, with the `tickets.md` row and open counts.
+  #251 (the decimal quotient, Task 6) was filed and indexed instead.
+- [~] `git commit -m "duckdb-oracle: the tier recorded; #235 archived"`.

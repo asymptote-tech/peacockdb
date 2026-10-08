@@ -16,7 +16,14 @@ mod corpus_golden;
 #[cfg(not(feature = "rust-only"))]
 mod corpus_gpu;
 mod cost_model;
+// The device corpus tier is its only caller outside its own tests, and a rust-only build
+// does not compile that tier — the comparison lives here precisely so the rung that cannot
+// run a device can still show it failing.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+mod device_answer;
 mod device_schema;
+mod duckdb_oracle;
+mod fingerprint;
 mod golden_text;
 #[cfg(not(feature = "rust-only"))]
 mod gpu_session;
@@ -304,13 +311,16 @@ inventory::collect!(RegistryEntry);
 /// [`RegistryEntry`], which is per enabled (query, mode): this is per QUERY, and it is
 /// submitted by the `none` arm too, so a declaration with no cases is still readable.
 ///
-/// What reads it is the pairing between the two oracles, which is a property of the line
-/// rather than of a run.
+/// What reads it is the pairing between the oracles, which is a property of the line
+/// rather than of a run, and the DuckDB comparison the line's first oracle names.
 #[derive(Debug)]
 pub struct CorpusDeclaration {
     pub dataset: &'static str,
     pub sf: &'static str,
     pub query: &'static str,
+    /// The keyword as written, `stringify!`'s spacing and all — [`DuckdbOracle::parse`]
+    /// decodes it, so a line carrying arguments stays one string here.
+    pub duckdb_oracle: &'static str,
     pub cpu_oracle: &'static str,
     pub gpu_oracle: &'static str,
 }
@@ -421,6 +431,146 @@ pub fn assert_results_match(
     result_text::assert_results_match(expected, actual, rel_tol, query)
 }
 
+// --- the DuckDB oracle ----------------------------------------------------------
+
+/// What a `corpus_query!` line asks of DuckDB's answer, written first among its oracles.
+///
+/// Every variant compares the line's section of `duckdb-result.txt` with the same query's
+/// section of `mini.result.txt` (the cpu) or `gpu-result.txt` (the device) BY COLUMN
+/// POSITION: the two engines name their output columns differently and a name is not an
+/// answer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DuckdbOracle {
+    /// Rows as a multiset, every cell equal as rendered.
+    Exact,
+    /// A decimal cell within one unit in our last rendered place, a float cell within
+    /// [`DUCKDB_FLOAT_TOLERANCE`] relative, every other cell exactly.
+    Approx,
+    /// `ticket` must be open and the named columns must still differ; the row count and
+    /// every column NOT named still compare as [`DuckdbOracle::Approx`] does. No columns
+    /// means a row-level divergence, where only the row count is checked.
+    Divergent { ticket: u32, columns: Vec<usize> },
+    /// Both sides are over the cap and hold a fingerprint instead of their rows.
+    Fingerprint,
+    /// Nothing to compare: one of the two does not answer this query.
+    None,
+}
+
+impl DuckdbOracle {
+    /// The five spellings a line may write. `every_duckdb_oracle_is_named_by_some_line`
+    /// holds the list to the lines, so a variant nothing uses is deleted rather than kept.
+    pub const ALL: [&'static str; 5] = [
+        "duckdb_exact",
+        "duckdb_approx",
+        "duckdb_divergent",
+        "duckdb_fingerprint",
+        "duckdb_none",
+    ];
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Exact => "duckdb_exact",
+            Self::Approx => "duckdb_approx",
+            Self::Divergent { .. } => "duckdb_divergent",
+            Self::Fingerprint => "duckdb_fingerprint",
+            Self::None => "duckdb_none",
+        }
+    }
+
+    /// The keyword as a line writes it. Exhaustive: an unknown spelling panics naming the
+    /// accepted set, rather than falling through to whichever comparison is laxest.
+    pub fn parse(spelled: &str) -> Self {
+        duckdb_oracle::parse(spelled)
+    }
+}
+
+/// What a result section holds instead of its rows when the rendering reached the cap:
+/// `rows=`, a line per column, and a hash. Both writers produce it — this harness and
+/// `testdata/duckdb_result.py` — byte for byte, so the two can be compared.
+pub fn fingerprint_of(batches: &[RecordBatch]) -> String {
+    fingerprint::fingerprint_of(batches)
+}
+
+/// The same fingerprint over a RENDERED table, for the side that stayed under the cap while
+/// the other crossed it.
+pub fn fingerprint_of_rendered(table: &str) -> String {
+    fingerprint::fingerprint_of_rendered(table)
+}
+
+pub fn is_fingerprint(section: &str) -> bool {
+    fingerprint::is_fingerprint(section)
+}
+
+/// Whether this section holds the query's rows, as against standing in for them — the
+/// `skipped:` marker, or the fingerprint an answer over the cap leaves.
+pub fn section_holds_rows(section: &str) -> bool {
+    fingerprint::section_holds_rows(section)
+}
+
+/// The row count, each column's `nonnull` and class, the approximate triples within `tol`
+/// relative, and the hash exactly. A mismatch names the column.
+pub fn compare_fingerprints(ours: &str, duckdb: &str, tol: f64) -> Result<(), String> {
+    fingerprint::compare_fingerprints(ours, duckdb, tol)
+}
+
+/// What a cell's tolerance is read from: our DECLARED output type for that column.
+///
+/// The rendering alone cannot say it. Ours truncates a decimal at its scale and DuckDB
+/// answers a double, so the two agree only to our last place — an absolute gap, where a
+/// float's is relative — and nothing in the two strings distinguishes the cases.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellKind {
+    /// Compared as text: an integer, a string, a date, a boolean, a timestamp.
+    Exact,
+    Float,
+    /// A decimal of this declared scale.
+    Decimal(i8),
+}
+
+/// Two rendered sections held to what a line's oracle asks of them, BY COLUMN POSITION —
+/// the two engines name an aggregate's output differently and a name is not an answer.
+/// `tickets_open` decides whether a declared divergence still names a ticket somebody reads.
+pub fn compare_sections(
+    oracle: &DuckdbOracle,
+    ours: &str,
+    duckdb: &str,
+    kinds: &[CellKind],
+    tickets_open: &dyn Fn(u32) -> bool,
+) -> Result<(), String> {
+    duckdb_oracle::compare_sections(oracle, ours, duckdb, kinds, tickets_open)
+}
+
+/// Whether `llm-wiki/tickets/` still holds this ticket. `llm-wiki/archive/` is not read: a
+/// divergence declared against an archived number excuses a defect no list holds.
+pub fn ticket_is_open(number: u32) -> bool {
+    duckdb_oracle::ticket_is_open(number)
+}
+
+/// The cpu's committed answer against DuckDB's, under the oracle the line names. One case
+/// per `corpus_query!` line, rust-only: two files read and compared, no run.
+pub async fn duckdb_case(dataset: &str, sf: &str, query: &str, oracle: &str) {
+    duckdb_oracle::duckdb_case(dataset, sf, query, oracle).await
+}
+
+/// The DEVICE's recorded answer at one mode against DuckDB's. One case per enabled device
+/// cell, so a mode-dependent device answer meets DuckDB rather than only the last mode's.
+pub async fn duckdb_gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, oracle: &str) {
+    duckdb_oracle::duckdb_gpu_case(dataset, sf, query, mode, oracle).await
+}
+
+/// The (query, mode) each section of `gpu-result.txt` records, in file order.
+pub fn gpu_result_cells(text: &str) -> Vec<(String, String)> {
+    duckdb_oracle::gpu_result_sections(text)
+        .into_iter()
+        .map(|section| (section.query, section.mode))
+        .collect()
+}
+
+/// `golden_approx_std`'s tolerance (`corpus_gpu.rs`), for FLOAT cells only. A decimal cell
+/// gets one unit in its declared scale's last place instead: measured cpu-vs-DuckDB decimal
+/// differences reach 1.2e-5 relative on tpch q1, so a relative bound cannot serve both.
+pub const DUCKDB_FLOAT_TOLERANCE: f64 = 1e-11;
+
 // --- the corpus goldens ---------------------------------------------------------
 
 /// What a section says when it holds no content. One prefix for every such reason, so a
@@ -456,6 +606,17 @@ pub fn cost_golden(dataset: &str, sf: &str, mode: &str) -> PathBuf {
 /// `<tier>.result.txt` — one entry per query, keyed by the query alone.
 pub fn result_golden(dataset: &str, sf: &str) -> PathBuf {
     corpus_golden::result_golden(dataset, sf)
+}
+
+/// `duckdb-result.txt` — DuckDB's answer to every query of this dataset, one section each.
+pub fn duckdb_golden(dataset: &str, sf: &str) -> PathBuf {
+    corpus_golden::duckdb_golden(dataset, sf)
+}
+
+/// `gpu-result.txt` — the device's own answers, one section per (query, mode). `version`
+/// names a cuDF other than shad-gpu's, whose file is gitignored beside it.
+pub fn gpu_result_golden(dataset: &str, sf: &str, version: Option<&str>) -> PathBuf {
+    corpus_golden::gpu_result_golden(dataset, sf, version)
 }
 
 /// Read this query's section, or panic naming what a reader has to do next.
@@ -649,9 +810,16 @@ pub fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'stat
     corpus::authoritative_mode(dataset, sf, query)
 }
 
-/// Why a result has no section, and which mode decided it.
-pub fn over_cap(bytes: Option<usize>, mode: &Mode) -> String {
-    corpus::over_cap(bytes, mode)
+/// The arguments of every `name(…)` invocation in a case list, one vector per line, split
+/// at the commas OUTSIDE parentheses so `duckdb_divergent(243, 1)` stays one argument.
+/// What every reader of `corpus_cases.inc` as text shares.
+pub fn macro_invocations(text: &str, name: &str) -> Vec<Vec<String>> {
+    corpus::macro_invocations(text, name)
+}
+
+/// The `corpus_query!` lines of the include both corpus binaries read.
+pub fn corpus_lines() -> Vec<Vec<String>> {
+    corpus::corpus_lines()
 }
 
 /// `max(0, min(n, |unlimited| - m))` for `LIMIT n OFFSET m`.

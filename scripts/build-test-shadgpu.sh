@@ -85,6 +85,7 @@ RUN_BENCH_ATTACHED=0
 BENCH_DETACH=0
 BENCH_STATUS=0
 PULL_BENCH=0
+PULL_RESULTS=0
 # Both spellings of each run set RUN/RUN_BENCH; the *_ATTACHED flags exist so the
 # contradiction between them is still visible after both have set it.
 
@@ -103,11 +104,14 @@ Usage: build-test-shadgpu.sh [flags]
   --run-benchmarks-detached   setsid on the host; poll with --benchmark-status
   --benchmark-status          read-only: still going / finished / log tail
   --pull-benchmarks           fetch testdata/benchmark-results/ and the calibration record
+  --pull-results              fetch testdata/goldens/*/gpu-result*.txt, the device's answers
 
   --all                       = --build --push-binaries --patch --run
 
 Knobs read from the environment, not flags:
   PCK_TEST_FILTER=<sub>       cargo-test name filter forwarded to the rust binaries
+  PCK_WRITE_GPU_RESULT=1      the device corpus tier records its answers in gpu-result.txt
+                              (any other value: gpu-result-<value>.txt, a non-25.02 cuDF)
 
 --all deliberately does not imply the benchmark phases: that is what keeps a
 measurement out of the merge gate.
@@ -135,6 +139,7 @@ while [ $# -gt 0 ]; do
     --run-benchmarks-detached) RUN_BENCH=1; BENCH_DETACH=1 ;;
     --benchmark-status) BENCH_STATUS=1 ;;
     --pull-benchmarks) PULL_BENCH=1 ;;
+    --pull-results) PULL_RESULTS=1 ;;
     --all) BUILD=1; RSYNC=1; PATCH=1; RUN=1; RUN_ATTACHED=1 ;;
     *) echo "Unknown flag: $1" >&2; usage ;;
   esac
@@ -158,6 +163,13 @@ if [ "$PULL_BENCH" -eq 1 ] && [ "$BENCH_DETACH" -eq 1 ]; then
   # returns a partial tree that looks like a completed measurement.
   die "--pull-benchmarks with --run-benchmarks-detached: the run has not finished yet.
      Poll with --benchmark-status, then --pull-benchmarks."
+fi
+if [ "$PULL_RESULTS" -eq 1 ] && [ "$RUN_DETACH" -eq 1 ]; then
+  # Reject rather than silently downgrade, as --pull-benchmarks does: the gate has not
+  # finished, so what is on the host is the answers of the cells that ran so far — which
+  # the coverage test would then read as cells that are not enabled.
+  die "--pull-results with --run-detached: the run has not finished yet.
+     Poll with --run-status, then --pull-results."
 fi
 if [ "$RUN_BENCH" -eq 1 ] && [ "$BUILD_BENCH" -eq 0 ] && [ ! -x "$BENCH_STAGING/$BENCH_TARGET" ]; then
   # Here rather than on the host: --push-binaries mirrors this directory with --delete, so
@@ -373,11 +385,14 @@ filter_q=$(printf '%q' "$PCK_TEST_FILTER")
 #                          src/expr.cpp, which localizes async errors
 #   PCK_TEST_FILTER=<sub>  cargo-test name filter forwarded to the rust binaries
 #   PCK_RUN_CPP=0          skip the C++ suites (default: run them)
+#   PCK_WRITE_GPU_RESULT=1 the device corpus tier writes gpu-result.txt; any other value
+#                          writes gpu-result-<value>.txt, for a cuDF that is not 25.02
 #
 # The heredoc marker is unquoted, so $VARS expand locally before the text is sent;
 # escape with \$ anything the remote shell should expand.
 remote_gate_script() {
   : "${PEACOCK_GPU_DEBUG:=}"
+  : "${PCK_WRITE_GPU_RESULT:=}"
   : "${PCK_RUN_CPP:=1}"
   cat <<EOF
     # Superset env, mirroring CI: every binary gets every variable it might need and
@@ -389,6 +404,10 @@ remote_gate_script() {
     export PEACOCK_TPCH_GOLDEN_DIR=$REMOTE_REPO/testdata/goldens/tpch.sf40
     export PEACOCK_TPCH_VEC_PARAMS=$REMOTE_REPO/testdata/tpch-vec-queries/query_params.jsonl
     export PEACOCK_GPU_DEBUG='$PEACOCK_GPU_DEBUG'
+    # The device's own answers, written beside the cpu's goldens before the device asserts
+    # against them, so an answer the cpu rejects is still recorded for DuckDB to judge.
+    # --pull-results brings the file home; an empty value writes nothing.
+    export PCK_WRITE_GPU_RESULT='$PCK_WRITE_GPU_RESULT'
     # cpp/install/lib first, so libpeacock_gpu.so resolves for the rust binaries: their
     # baked-in rpath points at the build host's cargo target. Applied per command and
     # never exported, which is why both loops below use shell builtins to read a log.
@@ -688,6 +707,29 @@ EOF
   if [ "$record_home" -eq 1 ]; then
     echo "      testdata/$BENCH_RECORD_REL ($(($(grep -vc '^#' "testdata/$BENCH_RECORD_REL") - 1)) rows)"
   fi
+fi
+
+if [ "$PULL_RESULTS" -eq 1 ]; then
+  # The device's own answers, which only a gate run under PCK_WRITE_GPU_RESULT writes.
+  # One file per dataset, keyed by (query, mode); the DuckDB cases in the cpu binary and
+  # the coverage test are what read them. Asked of the host before the transfer, for the
+  # reason the benchmark pull gives: the local tree holds the committed file, so counting
+  # it afterwards answers a question whose answer is yes whatever the pull did.
+  pulled=0
+  for rel in $(ssh "$REMOTE" \
+      "cd $REMOTE_REPO/testdata && ls goldens/*/gpu-result*.txt 2>/dev/null"); do
+    pull_one "$rel" "the device's answers ($rel)" && pulled=$((pulled + 1))
+  done
+  # An empty list makes the loop body vanish and the phase pass green, which reads exactly
+  # like a cycle that recorded everything. The two ways it happens are a gate run without
+  # PCK_WRITE_GPU_RESULT and a host tree someone cleared; both leave the caller with the
+  # committed file and no way to tell.
+  if [ "$pulled" -eq 0 ]; then
+    die "nothing came home: no goldens/*/gpu-result*.txt on $REMOTE. A gate run records
+     them only under PCK_WRITE_GPU_RESULT=1 — was the cycle run with it?"
+  fi
+  echo "==> $pulled device result file(s); read \`git diff testdata/goldens/*/gpu-result.txt\`"
+  echo "    before committing. A moved section the change did not intend is a finding."
 fi
 
 exit "$status_rc"

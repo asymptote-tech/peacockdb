@@ -5,26 +5,42 @@
 //! with the device binary so one line carries a query's coverage on both engines. What a
 //! case does lives in `peacockdb_core::test_support`, reached through `cpu_case` alone.
 
+use std::collections::BTreeSet;
+
 use peacockdb_core::test_support::{
-    CorpusDeclaration, MODES, RegistryEntry, SKIPPED, assert_registry_matches_csv,
-    authoritative_mode, cpu_case, load_csv, result_golden, section_of, stem,
+    CorpusDeclaration, DuckdbOracle, MODES, Mode, RegistryEntry, assert_registry_matches_csv,
+    authoritative_mode, corpus_lines, cpu_case, duckdb_case, duckdb_gpu_case, gpu_result_cells,
+    gpu_result_golden, load_csv, result_golden, section_holds_rows, section_of, stem,
 };
 
-/// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, cpu_oracle, gpu_oracle,
-/// schema_validation)` — one test and one registration per enabled cpu mode. The mode
-/// arguments read as a bitwise or and are matched as idents, which is what lets the
-/// expansion produce a case per mode rather than a case that decides at run time whether
-/// it is one: a disabled mode has no test to name and no registration to explain.
+/// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, duckdb_oracle, cpu_oracle,
+/// gpu_oracle, schema_validation)` — one test and one registration per enabled cpu mode.
+/// The mode arguments read as a bitwise or and are matched as idents, which is what lets
+/// the expansion produce a case per mode rather than a case that decides at run time
+/// whether it is one: a disabled mode has no test to name and no registration to explain.
+///
+/// `all_modes` is the five spelled out; two arms expand it in either position and recurse,
+/// so the sugar is a rewrite of the line rather than a value any later reader has to know.
 ///
 /// The device's three arguments — its modes, its oracle and its schema validation — are
 /// consumed and dropped here. That is the point of one list: this binary cannot silently
 /// disagree with the other about which query exists.
 macro_rules! corpus_query {
-    ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
-        declare_corpus_query!($dataset, $sf, $query, $cpu_oracle, $gpu_oracle);
+    ($dataset:ident, $sf:expr, $query:ident, all_modes, $($rest:tt)*) => {
+        corpus_query!($dataset, $sf, $query,
+            tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
     };
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
-        declare_corpus_query!($dataset, $sf, $query, $cpu_oracle, $gpu_oracle);
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, all_modes, $($rest:tt)*) => {
+        corpus_query!($dataset, $sf, $query, $($cpu)|+,
+            tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
+    };
+    ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
+        declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle);
+        duckdb_device_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
+    };
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
+        declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle);
+        duckdb_device_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
         $(
             paste::paste! {
                 #[tokio::test]
@@ -53,43 +69,70 @@ macro_rules! corpus_query {
     };
 }
 
-/// The line itself, submitted by both arms — a query with no enabled mode still declared
-/// two oracles, and the pairing between them is a property of the line rather than of a run.
+/// The line itself and its DuckDB case, submitted by both arms — a query with no enabled
+/// mode still declares three oracles, the pairing between them is a property of the line
+/// rather than of a run, and DuckDB answers whether or not we do.
 macro_rules! declare_corpus_query {
-    ($dataset:ident, $sf:expr, $query:ident, $cpu_oracle:ident, $gpu_oracle:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, $duck:expr, $cpu_oracle:ident, $gpu_oracle:ident) => {
         inventory::submit! {
             CorpusDeclaration {
                 dataset: stringify!($dataset),
                 sf: stringify!($sf),
                 query: stringify!($query),
+                duckdb_oracle: $duck,
                 cpu_oracle: stringify!($cpu_oracle),
                 gpu_oracle: stringify!($gpu_oracle),
+            }
+        }
+        paste::paste! {
+            #[tokio::test]
+            async fn [<duckdb_ $dataset _ $query>]() {
+                duckdb_case(
+                    stringify!($dataset),
+                    stringify!($sf),
+                    &stringify!($query).replace('_', "-"),
+                    $duck,
+                )
+                .await;
             }
         }
     };
 }
 
+/// One device case per ENABLED gpu mode, and none at all for `none`: `gpu-result.txt` is
+/// keyed by (query, mode), so every device cell meets DuckDB rather than only the last
+/// mode — a mode-dependent device answer shows nowhere else.
+macro_rules! duckdb_device_cases {
+    ($dataset:ident, $sf:expr, $query:ident, none, $duck:expr) => {};
+    ($dataset:ident, $sf:expr, $query:ident, $($gpu:ident)|+, $duck:expr) => {
+        $(
+            paste::paste! {
+                #[tokio::test]
+                async fn [<duckdb_gpu_ $dataset _ $query _ $gpu>]() {
+                    duckdb_gpu_case(
+                        stringify!($dataset),
+                        stringify!($sf),
+                        &stringify!($query).replace('_', "-"),
+                        stringify!($gpu),
+                        $duck,
+                    )
+                    .await;
+                }
+            }
+        )+
+    };
+}
+
 include!("common/corpus_cases.inc");
 
-/// The two oracles of one line have to suit each other, and both directions are asserted
-/// rather than trusted.
-///
-/// A `golden_exact` where no committed section can serve is a test that fails on correct
-/// behaviour: the result is over the cap and has a marker instead, or the query's rows are
-/// not determined across modes and one mode's answer cannot be the authority for five. A
-/// `live_cpu` where a section does serve spends a device-side cpu run on a comparison a
-/// committed file makes faster and harder.
-///
-/// Derivable is why a CHECK can exist here, never why either value would be absent from the
-/// line. Read off the declaration and the committed golden, so it needs no run — which is
 /// A device cell exists only where the cpu has one at the same mode.
 ///
 /// The device tier asserts read-only against the section the cpu authored AT THAT MODE, so a
-/// gpu cell whose cpu twin is off compares against a skipped marker and passes having checked
-/// nothing. Today it holds because a few device cells were hand-chosen, not because of a
-/// rule, and the moment [#152] clears somebody enables device modes in bulk.
+/// gpu cell whose cpu twin is off compares against a section holding no rows and passes
+/// having checked nothing. Today it holds because a few device cells were hand-chosen, not
+/// because of a rule, and the moment [#152] clears somebody enables device modes in bulk.
 ///
-/// Read off the registry rather than the declarations: `CorpusDeclaration` carries the two
+/// Read off the registry rather than the declarations: `CorpusDeclaration` carries the
 /// oracles and not the modes, and a disabled mode submits no registration to compare.
 #[test]
 fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
@@ -117,6 +160,17 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
     assert_eq!(checked, load_csv().len() * MODES.len());
 }
 
+/// The two oracles of one line have to suit each other, and both directions are asserted
+/// rather than trusted.
+///
+/// A `golden_exact` where no committed section can serve is a test that fails on correct
+/// behaviour: the result is over the cap and holds a fingerprint instead of its rows, or the
+/// query's rows are not determined across modes and one mode's answer cannot be the
+/// authority for five. A `live_cpu` where a section does serve spends a device-side cpu run
+/// on a comparison a committed file makes faster and harder.
+///
+/// Derivable is why a CHECK can exist here, never why either value would be absent from the
+/// line. Read off the declaration and the committed golden, so it needs no run — which is
 /// what makes it catch the first `live_cpu` query BEFORE the rollout that needs it, rather
 /// than during.
 #[test]
@@ -132,7 +186,9 @@ fn each_declarations_two_oracles_suit_each_other() {
         }
         let section = section_of(&result_golden(declared.dataset, declared.sf), &query);
         // The two conditions the entry names, read off what is committed and off the line.
-        let over_cap = section.starts_with(SKIPPED);
+        // The guard above excludes the query no mode enables, so a section standing in for
+        // its rows here stands in for them because the cap kept them out.
+        let over_cap = !section_holds_rows(&section);
         let undetermined = declared.cpu_oracle == "data_fusion_subset";
         let needs_live = over_cap || undetermined;
         let says_live = declared.gpu_oracle == "live_cpu";
@@ -179,11 +235,22 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
         }
         let row = rows
             .iter()
-            .find(|r| r.dataset == declared.dataset && r.sf == declared.sf && r.query == declared.query)
-            .unwrap_or_else(|| panic!("{}/{query}: declared and not in the registry", declared.dataset));
+            .find(|r| {
+                r.dataset == declared.dataset && r.sf == declared.sf && r.query == declared.query
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}/{query}: declared and not in the registry",
+                    declared.dataset
+                )
+            });
         // A query enabled at no mode has no authority to resolve, which is the same None for
         // an entirely different reason — the one this test exists to tell apart.
-        if !row.states.iter().any(|(col, state)| col.starts_with("cpu_") && state == "enabled") {
+        if !row
+            .states
+            .iter()
+            .any(|(col, state)| col.starts_with("cpu_") && state == "enabled")
+        {
             continue;
         }
         let authority = authoritative_mode(declared.dataset, declared.sf, &query);
@@ -208,11 +275,129 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
             rows.iter()
                 .find(|r| r.dataset == d.dataset && r.sf == d.sf && r.query == d.query)
                 .is_some_and(|r| {
-                    r.states.iter().any(|(col, state)| col.starts_with("cpu_") && state == "enabled")
+                    r.states
+                        .iter()
+                        .any(|(col, state)| col.starts_with("cpu_") && state == "enabled")
                 })
         })
         .count();
-    assert_eq!(checked, expected, "every enabled hyphenated query is checked, and only those");
+    assert_eq!(
+        checked, expected,
+        "every enabled hyphenated query is checked, and only those"
+    );
+}
+
+/// `all_modes` expands to the same cells as the five spelled out, in either position — and
+/// a line whose five cells are on says `all_modes` rather than respelling them.
+///
+/// Three places read the sugar: this binary's macro, the device binary's, and
+/// `benchmark.rs::modes()`, which parses the include as text. None of them writes
+/// `cost-registry.csv`, so the CSV is what the claim is checked against. For the cpu
+/// position the inventory is a third witness —
+/// `the_registry_matches_the_cpu_corpus_in_both_directions` ties what this binary actually
+/// expanded to the same CSV — and the gpu position is read off the CSV alone here, since
+/// `inventory` collects per linked binary and the device registrations are in the other one.
+#[test]
+fn all_modes_expands_to_the_five_in_either_position() {
+    let five: BTreeSet<String> = MODES.iter().map(Mode::ident).collect();
+    let rows = load_csv();
+    let mut checked = 0;
+    for line in corpus_lines() {
+        let (dataset, query) = (&line[0], &line[2]);
+        let row = rows
+            .iter()
+            .find(|row| &row.dataset == dataset && &row.query == query)
+            .unwrap_or_else(|| panic!("{dataset}/{query} is declared and not in the registry"));
+        for (position, prefix) in [(3, "cpu_"), (4, "gpu_")] {
+            let argument = &line[position];
+            let declared: BTreeSet<String> = match argument.as_str() {
+                "none" => BTreeSet::new(),
+                "all_modes" => five.clone(),
+                named => named.split('|').map(|m| m.trim().to_string()).collect(),
+            };
+            let live: BTreeSet<String> = MODES
+                .iter()
+                .map(Mode::ident)
+                .filter(|mode| {
+                    row.states
+                        .get(&format!("{prefix}{mode}"))
+                        .is_some_and(|state| state == "enabled" || state == "skip")
+                })
+                .collect();
+            assert_eq!(
+                declared, live,
+                "{dataset}/{query}: the line's {prefix}modes are {argument} and the registry \
+                 says {live:?}"
+            );
+            assert!(
+                live != five || argument == "all_modes",
+                "{dataset}/{query}: the line spells all five {prefix}modes out — say all_modes"
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(
+        checked,
+        corpus_lines().len() * 2,
+        "both positions of every line"
+    );
+}
+
+/// Every `DuckdbOracle` variant is named by some line, so a variant the corpus does not use
+/// is deleted rather than carried. The three oracle enums are each held to the lines this
+/// way — `every_oracle_variant_is_named_by_some_line` does the other two.
+#[test]
+fn every_duckdb_oracle_is_named_by_some_line() {
+    for name in DuckdbOracle::ALL {
+        assert!(
+            inventory::iter::<CorpusDeclaration>
+                .into_iter()
+                .any(|declared| DuckdbOracle::parse(declared.duckdb_oracle).name() == name),
+            "{name} is named by no corpus_query! line — delete it rather than keep it"
+        );
+    }
+}
+
+/// Every enabled device cell has its `gpu-result.txt` section and no section is any other
+/// cell's, in both directions.
+///
+/// A task that turns a device cell on or off without running the cycle that records its
+/// answer fails here, which is the whole reason the file is compared with DuckDB by (query,
+/// mode) rather than by query. An ABSENT file fails too: it means no cycle has written it
+/// since the cells moved, which is a gap in the branch and not a case with nothing to do.
+#[test]
+fn every_enabled_device_cell_has_its_gpu_result_section_and_no_other() {
+    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+        let path = gpu_result_golden(dataset, sf, None);
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+            panic!(
+                "{} does not exist, so no device answer is recorded for any cell. Run a cycle \
+                 with PCK_WRITE_GPU_RESULT=1 and bring it home with --pull-results.",
+                path.display()
+            )
+        });
+        let enabled: BTreeSet<(String, String)> = load_csv()
+            .iter()
+            .filter(|row| row.dataset == dataset && row.sf == sf)
+            .flat_map(|row| {
+                MODES.iter().filter_map(move |mode| {
+                    let state = row.states.get(&format!("gpu_{}", mode.ident()));
+                    state
+                        .is_some_and(|state| state == "enabled" || state == "skip")
+                        .then(|| (stem(&row.query), mode.name.to_string()))
+                })
+            })
+            .collect();
+        let written: BTreeSet<(String, String)> = gpu_result_cells(&text).into_iter().collect();
+        let missing: Vec<&(String, String)> = enabled.difference(&written).collect();
+        let extra: Vec<&(String, String)> = written.difference(&enabled).collect();
+        assert!(
+            missing.is_empty() && extra.is_empty(),
+            "{dataset}: regenerate {} (PCK_WRITE_GPU_RESULT=1, --pull-results) — missing \
+             {missing:?}, not an enabled cell {extra:?}",
+            path.display()
+        );
+    }
 }
 
 /// The five `cpu_` columns against what this binary declares, in both directions: a
