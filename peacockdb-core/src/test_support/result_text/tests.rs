@@ -112,3 +112,15 @@ fn the_panicking_wrapper_names_the_query() {
         .expect("the panic carries a message");
     assert!(said.starts_with("tpch/q1 at tp1-single: "), "{said}");
 }
+
+/// A NaN against a number is a difference. `NaN > tol` is false, so the magnitude test alone
+/// accepts it, and two NaNs are the same absent value and must still agree.
+#[test]
+fn the_tolerant_oracle_fails_on_a_nan_against_a_number() {
+    let oracle = answer(&[(1, 1.0), (2, 2.0)]);
+    let nan = answer(&[(1, f64::NAN), (2, 2.0)]);
+    let said = results_match(&oracle, &nan, tolerant()).expect_err("NaN is not 1.0");
+    assert!(said.contains("rel diff") || said.contains("NaN"), "{said}");
+    assert!(results_match(&nan, &oracle, tolerant()).is_err());
+    assert_eq!(results_match(&nan, &nan, tolerant()), Ok(()));
+}

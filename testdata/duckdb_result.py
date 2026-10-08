@@ -73,22 +73,49 @@ def approx_number(x):
     return f"{mantissa}e{int(exponent)}"
 
 
-def fingerprint(names, rows):
+# The column types whose cells leave the hash, and those that stay in it. A FLOAT is the
+# only approximate class: each engine prints a float to its own precision, while a DECIMAL
+# renders at its declared scale on both sides and so does everything else here.
+APPROXIMATE_TYPES = {"FLOAT", "REAL", "DOUBLE"}
+EXACT_TYPES = {
+    "BOOLEAN", "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT", "UTINYINT",
+    "USMALLINT", "UINTEGER", "UBIGINT", "UHUGEINT", "DECIMAL", "VARCHAR", "BLOB", "UUID",
+    "DATE", "TIME", "TIMESTAMP", "TIMESTAMP_S", "TIMESTAMP_MS", "TIMESTAMP_NS", "INTERVAL",
+}
+
+
+def is_approximate(declared):
+    """Whether column type `declared` leaves the hash, read off the DECLARATION.
+
+    `test_support/fingerprint.rs`'s `is_approximate` is the same rule over the arrow type.
+    Classing off the cells instead agreed with it only while some row carried a float, so an
+    all-NULL DOUBLE was exact here and approximate there and the section could never pass.
+
+    Exhaustive, with no default: a type nobody listed would be classed silently, and the two
+    writers would hash different columns with nothing going red.
+    """
+    name = str(declared).split("(")[0].upper()
+    if name in APPROXIMATE_TYPES:
+        return True
+    if name in EXACT_TYPES:
+        return False
+    raise ValueError(
+        f"duckdb_result.py: no fingerprint class for the column type {declared}. Add it to "
+        "APPROXIMATE_TYPES or EXACT_TYPES, to match test_support/fingerprint.rs."
+    )
+
+
+def fingerprint(names, types, rows):
     """What a section holds instead of its rows when the rendering reached the cap.
 
-    The same text `test_support/fingerprint.rs` writes, byte for byte. A column leaves the
-    hash and compares by its triple only when its values are FLOATS, which each engine prints
-    to its own precision; a DECIMAL renders at its declared scale on both sides, so it is
-    hashed row by row like an integer or a string. That is what makes an over-cap join
-    checked row for row rather than by its sums.
+    The same text `test_support/fingerprint.rs` writes, byte for byte. `types` are the
+    declared column types, `cursor.description`'s second field, and they alone decide which
+    column leaves the hash — a rendered `31.00` does not say whether it was a decimal or a
+    double, and a column holding no value at all says nothing either.
     """
     cells = [[cell(v) for v in row] for row in rows]
     width = len(names)
-    approximate = [False] * width
-    for row in rows:
-        for at, value in enumerate(row):
-            if isinstance(value, float):
-                approximate[at] = True
+    approximate = [is_approximate(t) for t in types]
 
     nonnull = [0] * width
     values = [[] for _ in range(width)]
@@ -110,15 +137,15 @@ def fingerprint(names, rows):
         line = f"col {at}: nonnull={nonnull[at]}"
         if approximate[at]:
             # Summed IN VALUE ORDER, so the two sides add in one sequence and float
-            # reassociation cannot move the digits the comparison reads.
+            # reassociation cannot move the digits the comparison reads. An empty column
+            # sums to zero with no min and no max, which is what `triple_of` leaves.
             ordered = sorted(values[at])
             total = 0.0
             for v in ordered:
                 total += v
-            line += (
-                f" sum={approx_number(total)} min={approx_number(ordered[0])}"
-                f" max={approx_number(ordered[-1])}"
-            )
+            low = approx_number(ordered[0]) if ordered else "nan"
+            high = approx_number(ordered[-1]) if ordered else "nan"
+            line += f" sum={approx_number(total)} min={low} max={high}"
         out.append(line)
     hashed.sort()
     out.append("hash: " + hashlib.sha256("\n".join(hashed).encode()).hexdigest())
@@ -167,6 +194,7 @@ def generate(dataset, only):
         try:
             cursor = con.execute(query.read_text())
             names = [d[0] for d in cursor.description]
+            types = [d[1] for d in cursor.description]
             rows = cursor.fetchall()
         except duckdb.Error as error:
             out.append(f"failed: {str(error).splitlines()[0]}\n")
@@ -174,7 +202,7 @@ def generate(dataset, only):
             continue
         table = render(names, rows)
         if len(table.encode()) >= CAP:
-            out.append(fingerprint(names, rows))
+            out.append(fingerprint(names, types, rows))
         else:
             out.append(table)
         print(f"{dataset}/{query.stem}: {len(rows)} rows", file=sys.stderr)

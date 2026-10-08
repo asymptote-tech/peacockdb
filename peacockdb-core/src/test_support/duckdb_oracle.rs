@@ -104,11 +104,10 @@ pub(crate) fn compare_sections(
     }
 
     let (ours, duck) = (table(ours), table(duckdb));
-    // A line declaring a ROW-LEVEL divergence — `duckdb_divergent(<ticket>)`, no positions —
-    // says the two answer different row sets, and the width is part of what differs: tpcds
-    // q17 renders no columns where DuckDB renders fifteen, both over zero rows (#205). Under
-    // every other oracle a width difference is an engine that dropped a column, and it fails
-    // before a row is read.
+    // A ROW-LEVEL divergence — `duckdb_divergent(<ticket>)`, no positions — says the two
+    // answer different row sets, and the width is part of what differs: tpcds q17 renders no
+    // columns where DuckDB renders fifteen, both over zero rows (#205). Under every other
+    // oracle a width difference is an engine that dropped a column.
     let row_level = matches!(oracle, DuckdbOracle::Divergent { columns, .. } if columns.is_empty());
     let same_width = ours.width == duck.width;
     if !row_level && !same_width {
@@ -125,6 +124,15 @@ pub(crate) fn compare_sections(
         ));
     }
     let every: Vec<usize> = (0..ours.width).collect();
+    if let DuckdbOracle::Divergent { ticket, columns } = oracle
+        && let Some(past) = columns.iter().find(|column| **column >= ours.width)
+    {
+        return Err(format!(
+            "duckdb_divergent(#{ticket}) names column {past} and the answer has {} — the \
+             positions are 0-based and this line's are out of range",
+            ours.width
+        ));
+    }
     let stopped = |what: String| {
         Err(format!(
             "declared divergent on #{} and {what} stopped diverging — the line is now \
@@ -301,7 +309,7 @@ pub(crate) async fn duckdb_case(dataset: &str, sf: &str, query: &str, oracle: &s
             super::section_holds_rows(section) || fingerprint::is_fingerprint(section)
         })
         .map(|section| without_mode_line(&section));
-    judge(dataset, sf, query, "the cpu", oracle, ours, None).await
+    judge(dataset, sf, query, oracle, ours, None).await
 }
 
 /// The DEVICE's recorded answer at one mode against DuckDB's. `gpu-result.txt` is keyed by
@@ -340,19 +348,18 @@ pub(crate) async fn duckdb_gpu_case(
                 path.display()
             )
         });
-    judge(dataset, sf, query, mode, oracle, Some(ours), Some(mode)).await
+    judge(dataset, sf, query, oracle, Some(ours), Some(mode)).await
 }
 
 /// The verdict both cases reach, with DuckDB's section read here so neither has to.
 ///
 /// `ours` is `None` where our side does not answer at all — the section is absent, or a
-/// `skipped:` marker. `at` names the side for a failure; `mode` is `Some` only for a device
-/// cell, which names its mode too.
+/// `skipped:` marker. `mode` is `Some` only for a device cell, and names the side as well as
+/// the mode: the cpu's answer has no mode, the cpu being the one that authors the section.
 async fn judge(
     dataset: &str,
     sf: &str,
     query: &str,
-    at: &str,
     oracle: &str,
     ours: Option<String>,
     mode: Option<&str>,
@@ -381,7 +388,7 @@ async fn judge(
     if let Err(said) = said {
         let at = match mode {
             Some(mode) => format!("the device at {mode}"),
-            None => at.to_string(),
+            None => "the cpu".to_string(),
         };
         panic!("{dataset}/{query} ({at}): {said}");
     }

@@ -111,7 +111,8 @@ Usage: build-test-shadgpu.sh [flags]
 Knobs read from the environment, not flags:
   PCK_TEST_FILTER=<sub>       cargo-test name filter forwarded to the rust binaries
   PCK_WRITE_GPU_RESULT=1      the device corpus tier records its answers in gpu-result.txt
-                              (any other value: gpu-result-<value>.txt, a non-25.02 cuDF)
+                              (any other NON-EMPTY value: gpu-result-<value>.txt, a
+                              non-25.02 cuDF; empty or unset records nothing)
 
 --all deliberately does not imply the benchmark phases: that is what keeps a
 measurement out of the merge gate.
@@ -385,8 +386,8 @@ filter_q=$(printf '%q' "$PCK_TEST_FILTER")
 #                          src/expr.cpp, which localizes async errors
 #   PCK_TEST_FILTER=<sub>  cargo-test name filter forwarded to the rust binaries
 #   PCK_RUN_CPP=0          skip the C++ suites (default: run them)
-#   PCK_WRITE_GPU_RESULT=1 the device corpus tier writes gpu-result.txt; any other value
-#                          writes gpu-result-<value>.txt, for a cuDF that is not 25.02
+#   PCK_WRITE_GPU_RESULT=1 the device corpus tier writes gpu-result.txt; any other NON-EMPTY
+#                          value writes gpu-result-<value>.txt, for a cuDF that is not 25.02
 #
 # The heredoc marker is unquoted, so $VARS expand locally before the text is sent;
 # escape with \$ anything the remote shell should expand.
@@ -406,7 +407,9 @@ remote_gate_script() {
     export PEACOCK_GPU_DEBUG='$PEACOCK_GPU_DEBUG'
     # The device's own answers, written beside the cpu's goldens before the device asserts
     # against them, so an answer the cpu rejects is still recorded for DuckDB to judge.
-    # --pull-results brings the file home; an empty value writes nothing.
+    # --pull-results brings the file home. Exported on EVERY cycle, per the superset rule
+    # above, so empty is what a cycle that is not recording sends and the reader treats it
+    # as absent (test_support::gpu_recording); do not read it as a version suffix.
     export PCK_WRITE_GPU_RESULT='$PCK_WRITE_GPU_RESULT'
     # cpp/install/lib first, so libpeacock_gpu.so resolves for the rust binaries: their
     # baked-in rpath points at the build host's cargo target. Applied per command and

@@ -6,6 +6,7 @@
 //! off one line per query rather than two lists that can disagree.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use datafusion::arrow::array::RecordBatch;
@@ -563,8 +564,11 @@ pub(crate) fn cpu_oracle_mode(keyword: &str) -> CpuOracle {
 ///
 /// The include is expanded only by the two corpus binaries, so every other reader of a
 /// line's coverage — the benchmark list's agreement check, the oracle `ALL` tests — reads it
-/// as text through here rather than growing a parser of its own.
-pub(crate) fn macro_invocations(text: &str, name: &str) -> Vec<Vec<String>> {
+/// as text through here rather than growing a parser of its own. By PATH, read here, because
+/// two case lists reach it and a malformed line has to say which file it is in.
+pub(crate) fn macro_invocations(path: &Path, name: &str) -> Vec<Vec<String>> {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let at = path.display();
     let mut out = Vec::new();
     for line in text.lines() {
         let Some(rest) = line.trim().strip_prefix(name) else {
@@ -572,17 +576,17 @@ pub(crate) fn macro_invocations(text: &str, name: &str) -> Vec<Vec<String>> {
         };
         let opened = rest
             .strip_prefix('(')
-            .unwrap_or_else(|| panic!("{line:?} does not open"));
+            .unwrap_or_else(|| panic!("{at}: {line:?} does not open"));
         // The last `)` rather than the first, with the tail asserted: a line may end in a
         // comment naming its ticket, which is not a second invocation.
         let (arguments, tail) = opened
             .rsplit_once(')')
-            .unwrap_or_else(|| panic!("{line:?} does not close"));
+            .unwrap_or_else(|| panic!("{at}: {line:?} does not close"));
         let tail = tail.split_once("//").map_or(tail, |(before, _)| before);
         assert_eq!(
             tail.trim(),
             ";",
-            "{line:?} carries more than one invocation"
+            "{at}: {line:?} carries more than one invocation"
         );
         out.push(split_arguments(arguments));
     }
@@ -615,9 +619,8 @@ fn split_arguments(list: &str) -> Vec<String> {
 /// The `corpus_query!` lines of `tests/common/corpus_cases.inc`, the file both corpus
 /// binaries include.
 pub(crate) fn corpus_lines() -> Vec<Vec<String>> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(CORPUS_CASES);
-    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    macro_invocations(&text, "corpus_query!")
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(CORPUS_CASES);
+    macro_invocations(&path, "corpus_query!")
 }
 
 /// Where the declaration list lives, relative to the crate: one spelling for every reader.

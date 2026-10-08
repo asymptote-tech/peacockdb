@@ -296,11 +296,11 @@ fn a_bare_calls_row_names_the_seq_it_was_handed() {
 #[test]
 fn every_timed_case_is_enabled_on_a_device() {
     let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common");
-    let timed = read_cases(
+    let timed = macro_invocations(
         &cases.join("corpus_benchmark_cases.inc"),
         "corpus_query_benchmark!",
     );
-    let corpus = read_cases(&cases.join("corpus_cases.inc"), "corpus_query!");
+    let corpus = macro_invocations(&cases.join("corpus_cases.inc"), "corpus_query!");
     assert!(!timed.is_empty(), "the benchmark list declares nothing");
 
     for args in &timed {
@@ -322,12 +322,6 @@ fn every_timed_case_is_enabled_on_a_device() {
             );
         }
     }
-}
-
-/// The arguments of every `name(…)` invocation in a case list, one vector per line.
-fn read_cases(path: &Path, name: &str) -> Vec<Vec<String>> {
-    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    macro_invocations(&text, name)
 }
 
 /// A `mode1 | mode2` argument as a set. `none` is the empty set, `all_modes` the five —

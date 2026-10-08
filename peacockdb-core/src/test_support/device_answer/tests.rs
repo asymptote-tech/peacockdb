@@ -94,3 +94,29 @@ fn live_cpu_is_not_a_section_comparison() {
 fn an_unknown_gpu_oracle_names_the_accepted_set() {
     let _ = device_answer_matches(&right(), "golden_approx", &answer());
 }
+
+/// An EMPTY `PCK_WRITE_GPU_RESULT` is not recording. `build-test-shadgpu.sh` exports the
+/// variable on every cycle, so empty is what an ordinary `--run` sends; read as a version it
+/// wrote `gpu-result-.txt` on every cycle, and `--pull-results` then found a file to bring
+/// home whether or not the operator asked to record.
+#[test]
+fn an_empty_recording_variable_is_not_a_version() {
+    use super::{GpuRecording, gpu_recording_asked};
+    assert_eq!(gpu_recording_asked(None), GpuRecording::No);
+    assert_eq!(gpu_recording_asked(Some("")), GpuRecording::No);
+    assert_eq!(gpu_recording_asked(Some("1")), GpuRecording::Committed);
+    assert_eq!(
+        gpu_recording_asked(Some("26.02")),
+        GpuRecording::Versioned("26.02".to_string())
+    );
+}
+
+/// A NaN against a number is a difference, under the tolerant oracle too. `NaN > tol` is
+/// false, so a bare magnitude test accepts a device cell that came back NaN where the golden
+/// holds a value — the shape a failed reduction has.
+#[test]
+fn the_device_comparison_fails_on_a_nan_against_a_number() {
+    let nan = section(&["| 1 | 0.5  |", "| 2 | NaN  |"]);
+    assert!(device_answer_matches(&nan, "golden_approx_std", &answer()).is_err());
+    assert!(device_answer_matches(&nan, "golden_exact", &answer()).is_err());
+}

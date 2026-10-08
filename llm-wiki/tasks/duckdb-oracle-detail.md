@@ -689,3 +689,248 @@ No `cargo` or `python3` output survived the dispatch, and `testdata/test_duckdb_
 provably red (the `NameError` above), so the whole diff is unverified. The coordinator did not
 commit it: committing an unverified half-finished round is how a later run mistakes it for a
 closed one.
+
+## Round 3 result (2026-10-08)
+
+Review round 2's list is closed. The dead dispatch's uncommitted diff was verified rather than
+trusted, two defects in it were fixed, a third defect it could not have known about was found,
+and the four untouched findings plus the nine remaining nits are done. Everything ran locally;
+both hosts were re-probed at the end of the round and are still down — shad-gpu
+`connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out`, `verda` `Could not
+resolve hostname`, zero `VERDA_*` in the environment. The device cycle is still the only thing
+left in the task.
+
+### Case counts, measured
+
+| target | before this round | after | delta |
+|---|---|---|---|
+| `--lib` (rust-only) | 644 passed, 2 ignored | **646 passed, 0 failed, 2 ignored** | +2 |
+| `test_cpu_corpus` | 704 cases | **705 cases: 678 passed, 27 failed, 0 ignored** | +1 |
+| `test_golden_format` | 39 | **41 passed** | +2 |
+| `test_corpus_goldens` | 26 | **26 passed** | — |
+| `test_cost_model` | 3 | **3 passed** | — |
+| `test_module_layout` | 17 | **17 passed** | — |
+| `test_ci_coverage` | 9 | **9 passed** | — |
+| `testdata/test_duckdb_result.py` | 11 (7 of them erroring) | **12, OK** | +1 |
+
+`test_cpu_corpus`'s 27 failures are the standing device gap and nothing else: the 26
+`duckdb_gpu_*` cases plus `every_enabled_device_cell_has_its_gpu_result_section_and_no_other`,
+each panicking with "…/gpu-result.txt does not exist, so no device answer is recorded… Run a
+cycle with PCK_WRITE_GPU_RESULT=1 and bring it home with --pull-results" — 27 of 27 messages
+checked, and `grep -v` over the failure list leaves 0 others. By family the file is 551 `cpu_`,
+120 `duckdb_<ds>_<q>`, 26 `duckdb_gpu_*`, 8 guards.
+
+Device targets type-check and link: `scripts/cargo-cudf.sh test --test test_gpu_corpus
+--features gpu --no-run` links the executable, and `scripts/cargo-cudf.sh check --tests
+--features gpu` finishes with one warning, `unused import: AsArray` at
+`src/tests/gpu_tests/aggregate_dimension_cases.rs:9`, in a file this branch does not touch.
+
+### What was wrong with the predecessor's diff
+
+The reconstruction at the head of "Round 3, recovered from a second dead dispatch" was accurate
+on every point. What it could not say, because nothing had been run:
+
+1. **The three NaN cases and the recording case had never been proved red.** Each was reverted
+   in turn and watched fail: `the_tolerant_oracle_fails_on_a_nan_against_a_number`,
+   `the_device_comparison_fails_on_a_nan_against_a_number` and
+   `an_empty_recording_variable_is_not_a_version` go red on `nan_settles`/`GpuRecording` reverted,
+   and `a_nan_in_a_triple_is_compared_and_not_waved_through` goes red only when
+   `fingerprint.rs`'s comparison is put back to its original `if (a - b).abs() > tol * …`. That
+   last one matters: `!(x > t)` and `x <= t` are *not* the same for NaN, so the predecessor's
+   flip of `>` to `<=` is half the fix and `nan_settles`'s `(true, true)` arm is the other half —
+   without the arm, two NaNs (an all-NULL float column against itself) would start failing.
+2. **`testdata/test_duckdb_result.py` was red**, as recorded: 7 errors of 11, `NameError: TYPES`.
+   Fixed to `self.TYPES`.
+3. **The all-NULL case expected the wrong bytes, and not for the reason the reconstruction
+   gave.** It is not just that `ordered[0]` raises `IndexError`. The Rust writer emits
+   `sum=-0.00000000000000000e0` for a float column with no value, because `Iterator::sum` for
+   `f64` folds from `-0.0` (measured in isolation: `rustc` over an empty `Vec<f64>`). The Python
+   writer folds from `0.0`. So even with the classes agreed, an all-NULL double column — or any
+   float column whose values are all negative zero — would have disagreed on the sign of a zero
+   and the section could never have passed. `triple_of` now folds from an explicit `0.0`, which
+   is also what the Python side does, and `an_all_null_float_column_keeps_its_class_and_carries_an_absent_triple`
+   pins the exact line both writers produce. No committed golden moves: the only approximate
+   column in any committed fingerprint is tpcds q98 col 6, whose min is `+0.0` already, and the
+   four tpch fingerprinted sections carry no triple at all.
+
+### Finding 3, both halves
+
+**The reachable half is closed.** `duckdb_result.py` classes from the declaration:
+`fingerprint(names, types, rows)`, `types` being `cursor.description`'s second field, read at the
+one call site. `is_approximate(declared)` strips any `(p,s)` suffix and looks the name up in
+`APPROXIMATE_TYPES = {FLOAT, REAL, DOUBLE}` or `EXACT_TYPES`, and **raises** on anything in
+neither — exhaustive rather than defaulted, per the antipattern about implicit behaviour switches.
+The corpus's whole output-type set was enumerated first (`con.sql(q).types` over all 138 queries
+of both datasets): BIGINT, INTEGER, HUGEINT, VARCHAR, DATE, DOUBLE, DECIMAL(15,2), DECIMAL(38,2),
+DECIMAL(38,4), DECIMAL(38,6), DECIMAL(5,2), DECIMAL(7,2) — no TIMESTAMP, no BOOLEAN, no FLOAT.
+Both `duckdb-result.txt` files were regenerated (`python3 testdata/duckdb_result.py`, ~7 min,
+duckdb 1.5.4, both "wrote" lines present, 138 query lines, no `failed:`) and are **byte-identical**
+to the committed ones: `git diff --stat testdata/goldens` and `git status --porcelain
+testdata/goldens` are both empty.
+
+**The residual half cannot be made to pass, and the spec's union rule cannot hold.** Each side's
+`hash:` is one SHA-256 over the joined text of *that side's* exact columns, and it has to be one
+hash rather than one per column because row *pairing* is what it exists to catch
+(`rows_paired_differently_differ_in_the_hash_and_nowhere_else`). So the two sides must agree on
+the exact column *set* at write time, and neither writer can see the other's declaration — ours
+knows only the arrow type, the Python one only DuckDB's. A fingerprint no longer holds the rows,
+so the hash cannot be recomputed under the other side's classes either; `compare_over_cap`'s
+`under_the_classes_of` works only while one side is still rendered. The only rule that *would*
+make the union hold is "approximate = any non-integer number", which moves decimals out of the
+hash and gives up exactly the row-for-row checking step 3 asks for. So:
+
+- `compare_fingerprints`' class-disagreement arm now names the column, which side called it
+  which, and the remedy: "ours renders it exactly and DuckDB's approximately, so the two hash
+  different columns and neither hash can be recomputed from a fingerprint. Class it alike on
+  both sides — `is_approximate` here, `duckdb_result.py`'s there; duckdb_divergent does not
+  reach this path." Case: `a_class_disagreement_names_the_column_and_the_remedy`, both
+  directions, built from a real decimal batch against a real double batch.
+- **For the coordinator:** the frozen spec's step 3 says "a decimal whose scale differs between
+  the sides (a decimal on ours, a double on DuckDB's) is **approximate**". That is not
+  achievable under two independent per-side writers and one row-pairing hash, and the branch
+  implements the next best thing — an explicit, named, actionable failure. The spec is frozen,
+  so this is a line for the signoff rather than an edit.
+- A second shape this does *not* catch, recorded for whoever meets it: a decimal on BOTH sides
+  at different scales. Both call it exact, both hash it, the rendered text differs, and the
+  failure is an opaque hash mismatch. No section has that shape today and the spec does not name
+  it.
+
+`fingerprint.rs`'s module doc no longer says `isinstance(value, float)` describes the other side,
+and is down from 16 lines to 10 — the two nits in one edit. Nothing load-bearing was dropped to
+the wiki: the memory note moved nowhere (it is already on `fn fingerprint`) and the
+rendered-side rule is already on `compare_over_cap` and `fingerprint_of_rendered`.
+
+### Finding 5, decided: the writer prunes, keyed on the registry
+
+`merged_cells` now drops a held section whose `(query, mode)` the registry no longer enables, and
+keeps every section it does — so the hazard the dispatch named is answered by construction. A
+filtered cycle (`PCK_TEST_FILTER`) restricts which cells *run*, not which cells are *enabled*, and
+the rule reads the CSV that `merged_cells` already loaded for its ordering. `skip` counts as
+enabled, matching the guard. `every_enabled_device_cell_has_its_gpu_result_section_and_no_other`'s
+"regenerate" is now true in both directions, so neither its message nor `build-test.md:742-750`
+needed changing; the guard's doc gained a line saying the writer is what makes it true.
+Case: `a_mode_keyed_merge_drops_a_cell_the_registry_no_longer_enables`, red before the fix with
+the stale `== q12 mode=tp1-single` section still in the file.
+
+### Finding 6, decided: `duckdb_exact` stays, with the reason written down
+
+The line is not a latent flake, and nothing weaker in the five variants would still check
+anything.
+
+- `duckdb_<ds>_<q>` compares two **committed** files — `mini.result.txt`'s authority section
+  against `duckdb-result.txt`'s — so it cannot vary run to run. Only a regeneration of either can
+  move it.
+- Both files hold `lineitem.parquet`'s first ten rows in file order. Measured: `select l_orderkey,
+  l_linenumber from read_parquet('testdata/tpch.sf1/lineitem.parquet') limit 10` returns exactly
+  the ten the committed sections carry.
+- Weakening is unavailable, not merely unattractive. `duckdb_approx` still wants the same
+  multiset. `duckdb_divergent` wants an open ticket — which a corpus-line property does not get —
+  *and* wants the named columns to really differ, so it fails on agreement. `duckdb_fingerprint`
+  wants an over-cap section and this one is ten rows. `duckdb_none` fails by construction while
+  both sides answer ("duckdb_none over two sections that both exist").
+
+So the reasoning is written where a reader meets it: four lines on the `corpus_cases.inc` block
+(which stays at the ten-line comment cap — two older sentences about #186's device side were
+folded into one to make room), a four-line comment at the `undetermined` derivation in
+`each_declarations_two_oracles_suit_each_other`, and a new case,
+`an_undetermined_lines_duckdb_oracle_is_still_one_that_compares_rows`, which holds every
+`data_fusion_subset` line to a DuckDB oracle that compares rows and asserts there is still
+exactly one such line — so a second one forces somebody to re-read this. Red-checked by flipping
+scan-limit to `duckdb_none`.
+
+### The nine nits
+
+All done. Comment caps: `fingerprint.rs:1` 16→10, `test_cpu_corpus.rs:16` 12→9,
+`duckdb_oracle.rs:107` 5→4. `duckdb_oracle.rs`'s unchecked `row[column]` is now a range check
+ahead of the comparison, with `a_declared_position_past_the_last_column_names_the_line`
+red-checked: without the guard it panics `index out of bounds: the len is 2 but the index is 99`,
+with it the message names #251 and position 99. `duckdb_oracle/tests.rs`'s `ticket_is_open(235)`
+is gone, with a comment saying why — #205 and #251 are what the corpus's divergent lines actually
+name, and both stay asserted. `judge`'s `at` argument is gone: it was read only when `mode` was
+`None`, and in that case it was always `"the cpu"`, which the body now says itself.
+`macro_invocations` takes the **path** and reads the file, so all three panics and the
+`assert_eq!` name it; `benchmark.rs`'s `read_cases` wrapper existed only to do that read and is
+deleted.
+
+### Deviations from the dispatch, and why
+
+1. **The Python writer's empty-column sum is `+0.0`, and the Rust writer was changed to match.**
+   The dispatch expected only the Python side to move for finding 3. The sign-of-zero disagreement
+   above is a genuine second defect in the reachable half; closing it on the Python side instead
+   (writing `-0.0`) would have put Rust's `Sum` identity into a committed file format, so the
+   Rust side moved. No golden byte moves either way.
+2. **A twelfth Python case, `test_a_column_type_neither_list_classes_is_refused`.** The dispatch
+   did not ask for it. A declaration-based classifier with a silent default is the implicit-switch
+   antipattern, and the raise needs a case or it is untested code.
+3. **Clippy: five warnings in the touched files, not four.** `corpus.rs:500` (`DataFusion`
+   prefix), `fingerprint.rs:132` (`type_complexity`), `benchmark.rs:108` (manual char comparison),
+   `test_golden_format.rs:666` (`cloned_ref_to_slice_refs`, recorded at `:644` before this round
+   added 82 lines above it), `duckdb_oracle/tests.rs:123` (constant assertion). All five were
+   checked against `git diff -U0`'s hunks and none falls in a changed line, so all five are
+   pre-existing; the round-2 record names three of them. One warning I did introduce,
+   `collapsible_if` on the new range check, is fixed with a let chain.
+4. **No wiki edit.** Four counts in `build-test.md` moved and are reported to the coordinator
+   rather than changed here.
+
+### Wiki lines the coordinator owns
+
+- `build-test.md:25` — "1376 cases: `--lib` 643, `test_cpu_corpus` 704, …". `test_cpu_corpus` is
+  **705**. `--lib` now reports 646 passed + 2 ignored; the `643` was already stale before this
+  round, so the total wants recomputing rather than bumping.
+- `build-test.md:46` — "the DuckDB tier, 148 of the count" is now **149**: 120
+  `duckdb_<ds>_<q>` + 26 `duckdb_gpu_*` + `every_duckdb_oracle_is_named_by_some_line` +
+  `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` +
+  `an_undetermined_lines_duckdb_oracle_is_still_one_that_compares_rows`.
+- `build-test.md:561` — the golden-format row's case count says 38; it is **41**.
+- `build-test.md:566` — the Python row's case count says 9; it is **12**.
+- `build-test.md:1114` — "Any other value (`PCK_WRITE_GPU_RESULT=26.02`) writes
+  `gpu-result-<value>.txt`" should read **any other non-empty value**, now that empty reads as
+  absent. The two script comments that said the same thing are fixed in this diff
+  (`build-test-shadgpu.sh:113-115`, `:394-395`).
+- Optional, `build-test.md:742-750`: the paragraph is true as written, and one clause would make
+  it more useful — a cell turned off loses its `gpu-result.txt` section on the next recording
+  cycle, because the writer keeps what the registry enables and drops what it does not.
+
+### For the next person
+
+- Nothing but the device cycle is outstanding. `PCK_WRITE_GPU_RESULT=1` through
+  `build-test-shadgpu.sh --all` with `--pull-results`, then the 27 red cases go green or each
+  failing section is a ticket.
+- The device file's writer now prunes, so the **first** recording cycle after this branch lands
+  will also clear any section for a cell that has since been turned off. Read
+  `git diff testdata/goldens/*/gpu-result.txt` for *disappearances* as well as for moved answers.
+- `testdata/duckdb_result.py`'s `EXACT_TYPES` is the list to extend when a corpus query first
+  returns a type nobody listed — the regeneration raises rather than guessing, naming the type.
+
+### The wiki counts, applied — and the DuckDB tier is 148, not 149
+
+A researcher recomputed the page's arithmetic rather than bumping the four numbers, because
+`build-test.md`'s grand total claims to be the sum of its own table rows and the four deltas do
+not land on rows that exist.
+
+**The tier count: the developer's 149 is wrong and the 148 already on the page is right.**
+`test_cpu_corpus` holds eight non-expanded cases, and round 3's
+`an_undetermined_lines_duckdb_oracle_is_still_one_that_compares_rows` is a declaration check, not
+a DuckDB one — it iterates `CorpusDeclaration`, holds a `data_fusion_subset` line to an oracle
+that compares rows, and reads no result file. The page's own prose arbitrates: the DuckDB tier's
+enumeration is closed at "one case per line, one per cell, and two more cases", while the
+declaration set is "checks that every declaration's oracles suit each other". So the tier stays
+120 + 26 + 2 = 148, and the declaration set goes from three checks to five — review round 2's
+total was right, though the guard it blamed was the wrong one.
+
+**The page was 175 cases low, and 170 of that is this branch.** Its rows summed to 2505 against
+a stated 2330; five cases of that predate the task (measured at the branch base `5a1eac45`), and
+the three committed rounds grew the rows by 170 without touching the total. Four of round 3's
+five new `--lib` cases had no row to land on, because the cpu block carried no row for
+`test_support::duckdb_oracle::tests`, `::result_text::tests`, `::device_answer::tests` or
+`::corpus::tests` — three of those modules are this task's own, so the omission is this task's to
+close. Applied: the four module-unit rows added, `Golden merge` renamed and 1 → 3, `Recipes per
+join type` 23 → 24 (pre-existing, unrelated), `Corpus, cpu` 703 → 704, the cpu header 1376 → 1382
+(`--lib` 648, `test_cpu_corpus` 705), the golden-format row 38 → 41, the Python result-rendering
+row 9 → 12, and the grand total 2330 → **2559** (Rust 2069, C++ 97, Python 393). The cpu block's
+rows now sum to its header exactly, and the three block headers plus the "Everything else" table
+sum to the grand total.
+
+Also taken: `build-test.md:1116`'s "any other value" is now "any other non-empty value" with the
+reason, and the `gpu-result.txt` regeneration paragraph gained a clause for the pruning the
+writer now does.

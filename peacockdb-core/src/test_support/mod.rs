@@ -626,6 +626,23 @@ pub fn gpu_result_golden(dataset: &str, sf: &str, version: Option<&str>) -> Path
     corpus_golden::gpu_result_golden(dataset, sf, version)
 }
 
+/// What `PCK_WRITE_GPU_RESULT` asks of a device run.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum GpuRecording {
+    /// Record nothing. The variable is unset, or empty — the gate script exports it on every
+    /// cycle, so empty is how a cycle that is not recording says so.
+    No,
+    /// `gpu-result.txt`, the committed cuDF 25.02 file.
+    Committed,
+    /// `gpu-result-<version>.txt` beside it, which `testdata/.gitignore` lists.
+    Versioned(String),
+}
+
+/// [`GpuRecording`] read off the process environment.
+pub fn gpu_recording() -> GpuRecording {
+    device_answer::gpu_recording()
+}
+
 /// Read this query's section, or panic naming what a reader has to do next.
 pub fn section_of(path: &Path, query: &str) -> String {
     corpus_golden::section_of(path, query)
@@ -820,8 +837,8 @@ pub fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'stat
 /// The arguments of every `name(…)` invocation in a case list, one vector per line, split
 /// at the commas OUTSIDE parentheses so `duckdb_divergent(243, 1)` stays one argument.
 /// What every reader of `corpus_cases.inc` as text shares.
-pub fn macro_invocations(text: &str, name: &str) -> Vec<Vec<String>> {
-    corpus::macro_invocations(text, name)
+pub fn macro_invocations(path: &Path, name: &str) -> Vec<Vec<String>> {
+    corpus::macro_invocations(path, name)
 }
 
 /// The `corpus_query!` lines of the include both corpus binaries read.

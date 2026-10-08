@@ -6,8 +6,8 @@
 #![cfg(not(feature = "rust-only"))]
 
 use peacockdb_core::test_support::{
-    RegistryEntry, assert_registry_matches_csv, cost_golden, cpu_golden, gpu_case,
-    gpu_result_golden, result_golden,
+    GpuRecording, RegistryEntry, assert_registry_matches_csv, cost_golden, cpu_golden, gpu_case,
+    gpu_recording, gpu_result_golden, result_golden,
 };
 
 /// The device's reading of a declaration: one test and one registration per enabled gpu
@@ -76,13 +76,12 @@ fn a_device_run_under_a_regeneration_writes_no_golden() {
         cost_golden(dataset, sf, "tp1-single"),
         result_golden(dataset, sf),
     ];
-    // `gpu-result.txt` is the one file a device run MAY write, and only under
-    // `PCK_WRITE_GPU_RESULT` — which the gate script exports into every binary, this one
-    // included. So it joins the snapshot only on a run that is not recording: on a recording
-    // cycle the `gpu_case` below rewrites it between the snapshot and the comparison, and a
-    // device answer is not bit-reproducible anyway.
+    // `gpu-result.txt` is the one file a device run MAY write, so it joins the snapshot only
+    // on a cycle that is not recording — the same `GpuRecording` predicate the writer reads,
+    // and not `var_os`: the gate script exports the variable into every binary, so on the
+    // only host that runs this `var_os` is always `Some`.
     let recorded = gpu_result_golden(dataset, sf, None);
-    if std::env::var_os("PCK_WRITE_GPU_RESULT").is_none() && recorded.exists() {
+    if gpu_recording() == GpuRecording::No && recorded.exists() {
         files.push(recorded);
     }
     let before: Vec<Vec<u8>> = files

@@ -75,3 +75,32 @@ fn a_mode_keyed_merge_replaces_one_cell_and_orders_the_file() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A device cell turned off loses its section on the next recording cycle, and a cell that
+/// merely did not run this time keeps its own.
+///
+/// `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` tells the reader to
+/// regenerate, so regenerating has to be what clears a stale section. The rule is the
+/// registry's enablement and never "what this run wrote": a filtered cycle writes a subset
+/// of the enabled cells, and dropping the rest would destroy a correct file.
+#[test]
+fn a_mode_keyed_merge_drops_a_cell_the_registry_no_longer_enables() {
+    let dir = std::env::temp_dir().join(format!("pck-mode-prune-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("the directory");
+    let path = dir.join("gpu-result.txt");
+    std::fs::write(
+        &path,
+        "== q1 mode=tp4-sized\nq1 at a cell nothing reran\n\
+         == q12 mode=tp1-single\nan answer from before the cell was turned off\n",
+    )
+    .expect("the file");
+    merge_mode_section(&path, "tpch", "1", "q6", "tp1-single", "q6's answer\n");
+    let text = std::fs::read_to_string(&path).expect("the merged file");
+    assert_eq!(
+        text,
+        "== q1 mode=tp4-sized\nq1 at a cell nothing reran\n\
+         == q6 mode=tp1-single\nq6's answer\n",
+        "tpch q12 has no enabled device cell and tpch q1 at tp4-sized has one"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

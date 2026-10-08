@@ -268,13 +268,28 @@ fn divergent_names_each_column_and_one_that_came_right_fails() {
     assert!(said.contains("stopped diverging"), "{said}");
 }
 
+/// A declared position past the answer's width names the line, rather than panicking on a
+/// slice index: `duckdb_divergent(251, 99)` is a line somebody mistyped, and a reader looking
+/// at `index out of bounds: the len is 2 but the index is 99` learns neither which line nor
+/// which position.
+#[test]
+fn a_declared_position_past_the_last_column_names_the_line() {
+    // Column 1 really does diverge here, so nothing short-circuits ahead of position 99.
+    let duck = "+---+-----+\n| a | sum |\n+---+-----+\n| 1 | y   |\n| 2 | 9.9 |\n+---+-----+\n";
+    let said = compare(&divergent(251, vec![1, 99]), OURS, duck, &KINDS)
+        .expect_err("column 99 of a two-column answer");
+    assert!(said.contains("99") && said.contains("251"), "{said}");
+    assert!(said.contains("out of range"), "{said}");
+}
+
 /// The ticket reader, both ways, over the committed files. An archived ticket must read as
 /// closed, or a `duckdb_divergent` line goes on excusing a divergence after the fix landed —
 /// which is the one thing the number on that line is there to prevent.
 #[test]
 fn an_archived_ticket_is_not_open_and_a_listed_one_is() {
     use crate::test_support::ticket_is_open;
-    assert!(ticket_is_open(235), "#235 is in llm-wiki/tickets/");
+    // Not #235: this task closes it, so a case asserting it is open goes red the day it is
+    // archived. #205 and #251 are what `corpus_cases.inc`'s divergent lines name.
     assert!(ticket_is_open(205), "#205 is in llm-wiki/tickets/");
     assert!(ticket_is_open(251), "#251 is in llm-wiki/tickets/");
     assert!(

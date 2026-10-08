@@ -579,6 +579,28 @@ fn a_sum_off_in_the_thirteenth_digit_passes_and_in_the_third_fails() {
     assert!(said.contains("col 2"), "{said}");
 }
 
+/// A NaN in a triple is not a free pass. `NaN > tol` is false, so a bare magnitude test
+/// accepts it — and an approximate column is out of the hash as well, so the column would
+/// then be checked by nothing at all. Our own writer produces it: `triple_of` emits
+/// `min=nan max=nan` for a float column with no non-null value.
+#[test]
+fn a_nan_in_a_triple_is_compared_and_not_waved_through() {
+    let fp = fingerprint_of(&[batch(vec![1], vec!["a"], vec![1.0])]);
+    let nan_sum = fp.replace("sum=1.00000000000000000e0", "sum=nan");
+    assert_ne!(fp, nan_sum);
+    let said = compare_fingerprints(&fp, &nan_sum, DUCKDB_FLOAT_TOLERANCE)
+        .expect_err("a number on one side and NaN on the other is a difference");
+    assert!(said.contains("col 2") && said.contains("sum"), "{said}");
+    let said = compare_fingerprints(&nan_sum, &fp, DUCKDB_FLOAT_TOLERANCE)
+        .expect_err("and the same the other way round");
+    assert!(said.contains("col 2"), "{said}");
+    // Two NaNs are the same absent value, which is what an all-null float column has.
+    assert_eq!(
+        compare_fingerprints(&nan_sum, &nan_sum, DUCKDB_FLOAT_TOLERANCE),
+        Ok(())
+    );
+}
+
 #[test]
 fn a_row_count_or_a_nonnull_count_that_moved_says_which() {
     let fp = fingerprint_of(&[three_rows()]);
@@ -737,6 +759,66 @@ fn a_null_is_counted_out_of_its_column() {
         fp.contains("\ncol 0: nonnull=2 sum=4.00000000000000000e0 min=1.50000000000000000e0 max=2.50000000000000000e0\n"),
         "{fp}"
     );
+}
+
+/// A float column holding no value at all is still approximate — its class is its declared
+/// type — and its triple is an empty sum with no min and no max. The exact text, because
+/// `testdata/test_duckdb_result.py` pins the same line for the Python writer: classed off
+/// the cells instead, DuckDB called such a column exact and the section could never pass.
+#[test]
+fn an_all_null_float_column_keeps_its_class_and_carries_an_absent_triple() {
+    let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Float64, true)]));
+    let nulls = RecordBatch::try_new(
+        schema,
+        vec![Arc::new(Float64Array::from(
+            vec![None, None] as Vec<Option<f64>>
+        ))],
+    )
+    .expect("a batch");
+    let fp = fingerprint_of(&[nulls]);
+    assert!(
+        fp.contains("\ncol 0: nonnull=0 sum=0.00000000000000000e0 min=nan max=nan\n"),
+        "{fp}"
+    );
+}
+
+/// Two sides that class one column differently cannot be compared at all, and the failure
+/// has to say so and say what to do: the hash is taken over the columns a side called exact,
+/// and a fingerprint no longer holds the rows to recompute it from. A decimal here against a
+/// double there is the shape — `avg` and division answer a fixed-scale decimal on our side
+/// and a double on DuckDB's.
+#[test]
+fn a_class_disagreement_names_the_column_and_the_remedy() {
+    let decimal = Arc::new(Schema::new(vec![Field::new(
+        "d",
+        DataType::Decimal128(15, 2),
+        false,
+    )]));
+    let ours = fingerprint_of(&[RecordBatch::try_new(
+        decimal,
+        vec![Arc::new(
+            Decimal128Array::from(vec![3100i128, 5000])
+                .with_precision_and_scale(15, 2)
+                .expect("a decimal column"),
+        )],
+    )
+    .expect("a batch")]);
+    let double = Arc::new(Schema::new(vec![Field::new("d", DataType::Float64, false)]));
+    let duck = fingerprint_of(&[RecordBatch::try_new(
+        double,
+        vec![Arc::new(Float64Array::from(vec![31.0, 50.0]))],
+    )
+    .expect("a batch")]);
+    for (a, b) in [(&ours, &duck), (&duck, &ours)] {
+        let said = compare_fingerprints(a, b, DUCKDB_FLOAT_TOLERANCE)
+            .expect_err("a decimal on one side and a double on the other hash different sets");
+        assert!(said.contains("col 0"), "{said}");
+        assert!(
+            said.contains("exactly") && said.contains("approximately"),
+            "{said}"
+        );
+        assert!(said.contains("duckdb_result.py"), "the remedy: {said}");
+    }
 }
 
 /// The triple's number format, pinned at the values the two writers are likeliest to

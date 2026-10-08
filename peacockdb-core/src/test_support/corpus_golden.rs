@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::golden_text::{line_difference, ordered_sections};
-use super::{MODES, Regeneration, SKIPPED, TIER, golden_dir_for, registry};
+use super::{CsvRow, MODES, Regeneration, SKIPPED, TIER, golden_dir_for, registry};
 
 #[cfg(test)]
 mod tests;
@@ -184,8 +184,15 @@ pub(crate) fn merge_mode_section(
     let _ = lock.unlock();
 }
 
-/// The file as it will be written: this cell's section replaced or added, every other kept,
-/// and the whole sorted by the registry's row order and then the mode sequence.
+/// The file as it will be written: this cell's section replaced or added, every other
+/// ENABLED cell's kept, a cell the registry no longer enables dropped, and the whole sorted
+/// by the registry's row order and then the mode sequence.
+///
+/// Dropped by enablement and never by "what this run wrote": a filtered cycle
+/// (`PCK_TEST_FILTER`) legitimately writes a subset of the enabled cells, so a writer that
+/// pruned whatever it had not just written would destroy a correct file. Pruning at all is
+/// what makes `every_enabled_device_cell_has_its_gpu_result_section_and_no_other`'s "regenerate"
+/// true for a cell turned off, which nothing but a hand edit used to clear.
 #[cfg_attr(feature = "rust-only", allow(dead_code))]
 fn merged_cells(
     text: &str,
@@ -196,22 +203,26 @@ fn merged_cells(
     body: &str,
 ) -> String {
     let header = format!("{query} mode={mode}");
-    let mut held: Vec<(String, String)> = ordered_sections(text);
+    let rows: Vec<CsvRow> = registry::load_csv()
+        .into_iter()
+        .filter(|row| row.dataset == dataset && row.sf == sf)
+        .collect();
+    let mut held: Vec<(String, String)> = ordered_sections(text)
+        .into_iter()
+        .filter(|(name, _)| name == &header || enables_gpu_cell(&rows, name))
+        .collect();
     match held.iter_mut().find(|(name, _)| *name == header) {
         Some(section) => section.1 = body.to_string(),
         None => held.push((header, body.to_string())),
     }
-    let rows: Vec<String> = registry::load_csv()
-        .into_iter()
-        .filter(|row| row.dataset == dataset && row.sf == sf)
-        .map(|row| registry::stem(&row.query))
-        .collect();
+    let order: Vec<String> = rows.iter().map(|row| registry::stem(&row.query)).collect();
     let at = |name: &str| -> (usize, usize) {
         let (query, mode) = name.split_once(" mode=").unwrap_or((name, ""));
         (
-            rows.iter()
+            order
+                .iter()
                 .position(|row| row == query)
-                .unwrap_or(rows.len()),
+                .unwrap_or(order.len()),
             MODES
                 .iter()
                 .position(|m| m.name == mode)
@@ -224,6 +235,26 @@ fn merged_cells(
         push_section(&mut out, name, body);
     }
     out
+}
+
+/// Whether `rows` still enable the device cell a `<query> mode=<mode>` header names. `skip`
+/// counts: the cell has a case, and that case writes its section.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+fn enables_gpu_cell(rows: &[CsvRow], header: &str) -> bool {
+    let Some((query, mode)) = header.split_once(" mode=") else {
+        return false;
+    };
+    let Some(mode) = MODES.iter().find(|m| m.name == mode) else {
+        return false;
+    };
+    let column = format!("gpu_{}", mode.ident());
+    rows.iter().any(|row| {
+        registry::stem(&row.query) == query
+            && row
+                .states
+                .get(&column)
+                .is_some_and(|state| matches!(state.as_str(), "enabled" | "skip"))
+    })
 }
 
 /// Merge one section into a file whose skeleton is the registry's declared queries.

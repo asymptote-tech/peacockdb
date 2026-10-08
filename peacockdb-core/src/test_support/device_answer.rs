@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use datafusion::arrow::array::RecordBatch;
 
-use super::{batches_to_sorted_str, result_text};
+use super::{GpuRecording, batches_to_sorted_str, result_text};
 
 #[cfg(test)]
 mod tests;
@@ -65,6 +65,26 @@ pub(crate) fn gpu_result_mode(keyword: &str) -> GpuResultMode {
                 known.join("|")
             )
         })
+}
+
+/// What the `PCK_WRITE_GPU_RESULT` value asks for, an EMPTY one reading as absent.
+///
+/// `build-test-shadgpu.sh` exports the variable on every cycle, empty when the operator did
+/// not ask to record — the superset-env idiom. So an empty value read as a version wrote
+/// `gpu-result-.txt` on every ordinary cycle, which `--pull-results` then found and brought
+/// home, leaving its "nothing came home" guard unable to fire. `cpp/src/expr.cpp`'s
+/// `v && v[0]` is the same rule.
+pub(crate) fn gpu_recording_asked(value: Option<&str>) -> GpuRecording {
+    match value {
+        None | Some("") => GpuRecording::No,
+        Some("1") => GpuRecording::Committed,
+        Some(version) => GpuRecording::Versioned(version.to_string()),
+    }
+}
+
+/// [`gpu_recording_asked`] over the process environment.
+pub(crate) fn gpu_recording() -> GpuRecording {
+    gpu_recording_asked(std::env::var("PCK_WRITE_GPU_RESULT").ok().as_deref())
 }
 
 /// The device's answer against `section` under `gpu_oracle`. `section` is a
@@ -183,6 +203,13 @@ fn sorted_str_approx(golden: &str, actual: &str, tol: f64) -> Result<(), String>
                 return Err("the numeric-cell count differs".to_string());
             }
             for (want, got) in want.iter().zip(got) {
+                match result_text::nan_settles(*want, *got) {
+                    Some(true) => continue,
+                    Some(false) => {
+                        return Err(format!("one side is NaN (golden={want}, the device={got})"));
+                    }
+                    None => {}
+                }
                 let difference = (want - got).abs();
                 let relative = match *want != 0.0 {
                     true => difference / want.abs(),

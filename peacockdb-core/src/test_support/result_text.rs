@@ -24,6 +24,21 @@ use super::ResultDigest;
 /// How many rows either side of the first difference a failure prints.
 const EXCERPT: usize = 3;
 
+/// Whether NaN alone settles whether two numeric cells agree: `Some(true)` for two NaNs,
+/// which are the same absent value, `Some(false)` where exactly one side is NaN, and `None`
+/// where the caller's own tolerance rule decides.
+///
+/// Explicit because NaN is unordered, so `NaN > tol` is false and a bare magnitude test
+/// accepts a NaN against a number. In a fingerprint that is worse than it sounds: an
+/// approximate column is out of the hash as well, so the column would be checked by nothing.
+pub(crate) fn nan_settles(a: f64, b: f64) -> Option<bool> {
+    match (a.is_nan(), b.is_nan()) {
+        (true, true) => Some(true),
+        (false, false) => None,
+        _ => Some(false),
+    }
+}
+
 /// One formatter per column, built once for the batch. Arrow's is cheap but not free, and
 /// the alternative is building one per cell — 1.2 million rows times sixteen columns.
 fn formatters(batch: &RecordBatch) -> Vec<ArrayFormatter<'_>> {
@@ -299,8 +314,14 @@ pub(crate) fn results_match(
         avs.sort_by(|a, b| tuple_cmp(a, b));
         for (ev, av) in evs.iter().zip(&avs) {
             for (e, a) in ev.iter().zip(av) {
-                if e.is_nan() && a.is_nan() {
-                    continue;
+                match nan_settles(*e, *a) {
+                    Some(true) => continue,
+                    Some(false) => {
+                        return Err(format!(
+                            "approx compare: one side is NaN (expected={e}, actual={a})"
+                        ));
+                    }
+                    None => {}
                 }
                 let d = (e - a).abs();
                 let rel = if *e != 0.0 { d / e.abs() } else { d };

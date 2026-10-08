@@ -45,6 +45,8 @@ class Cells(unittest.TestCase):
 class Fingerprint(unittest.TestCase):
     """The text `test_golden_format.rs` pins on the Rust side, byte for byte."""
 
+    TYPES = ["BIGINT", "VARCHAR", "DOUBLE"]
+
     RUST = (
         "fingerprint: rows=2\n"
         "col 0: nonnull=2\n"
@@ -56,19 +58,19 @@ class Fingerprint(unittest.TestCase):
 
     def test_both_writers_fingerprint_the_same_rows_the_same_way(self):
         rows = [(1, "a", 1.5), (2, "b", 2.5)]
-        self.assertEqual(dr.fingerprint(["id", "s", "x"], rows), self.RUST)
+        self.assertEqual(dr.fingerprint(["id", "s", "x"], self.TYPES, rows), self.RUST)
 
     def test_the_row_order_does_not_reach_the_fingerprint(self):
         rows = [(2, "b", 2.5), (1, "a", 1.5)]
-        self.assertEqual(dr.fingerprint(["id", "s", "x"], rows), self.RUST)
+        self.assertEqual(dr.fingerprint(["id", "s", "x"], self.TYPES, rows), self.RUST)
 
     def test_rows_paired_differently_differ_in_the_hash(self):
-        swapped = dr.fingerprint(["id", "s", "x"], [(1, "b", 1.5), (2, "a", 2.5)])
+        swapped = dr.fingerprint(["id", "s", "x"], self.TYPES, [(1, "b", 1.5), (2, "a", 2.5)])
         self.assertNotEqual(swapped, self.RUST)
         self.assertEqual(swapped.splitlines()[:4], self.RUST.splitlines()[:4])
 
     def test_a_null_is_counted_out_of_its_column(self):
-        text = dr.fingerprint(["x"], [(1.5,), (None,), (2.5,)])
+        text = dr.fingerprint(["x"], ["DOUBLE"], [(1.5,), (None,), (2.5,)])
         self.assertEqual(text.splitlines()[0], "fingerprint: rows=3")
         self.assertEqual(
             text.splitlines()[1],
@@ -77,8 +79,34 @@ class Fingerprint(unittest.TestCase):
         )
 
     def test_an_integer_column_is_hashed_and_not_summed(self):
-        text = dr.fingerprint(["n"], [(1,), (2,)])
+        text = dr.fingerprint(["n"], ["BIGINT"], [(1,), (2,)])
         self.assertEqual(text.splitlines()[1], "col 0: nonnull=2")
+
+    def test_a_decimal_is_hashed_and_a_double_is_summed(self):
+        """The declaration decides, not the value: both render with a point."""
+        rows = [(decimal.Decimal("1.50"), 1.5)]
+        text = dr.fingerprint(["d", "f"], ["DECIMAL(15,2)", "DOUBLE"], rows)
+        self.assertEqual(text.splitlines()[1], "col 0: nonnull=1")
+        self.assertTrue(text.splitlines()[2].startswith("col 1: nonnull=1 sum="))
+
+    def test_an_all_null_double_column_is_approximate_by_its_declaration(self):
+        """Classed off the rows it would be exact here and approximate on the Rust side,
+        which reads the arrow type, and no section could ever pass.
+
+        The text is what `triple_of` leaves for a float column holding no value: an empty
+        sum, and a min and max that are the absent value.
+        """
+        text = dr.fingerprint(["x"], ["DOUBLE"], [(None,), (None,)])
+        self.assertEqual(
+            text.splitlines()[1], "col 0: nonnull=0 sum=0.00000000000000000e0 min=nan max=nan"
+        )
+
+    def test_a_column_type_neither_list_classes_is_refused(self):
+        """Exhaustive rather than defaulted: a type classed silently by a fallback is a
+        column the two writers would hash differently with nothing going red."""
+        with self.assertRaises(ValueError) as caught:
+            dr.fingerprint(["x"], ["STRUCT(a INTEGER)"], [(None,)])
+        self.assertIn("STRUCT", str(caught.exception))
 
     def test_the_exponent_is_written_as_rust_writes_it(self):
         """Read off `format!("{x:.17e}")` for each value, including the two extremes."""

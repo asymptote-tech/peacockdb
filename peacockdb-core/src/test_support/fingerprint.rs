@@ -1,19 +1,13 @@
 //! The fingerprint a result section holds instead of its rows when it is over the cap.
 //!
-//! Written by both result writers — this one and `testdata/duckdb_result.py` — so an answer
+//! Both result writers produce it — this one and `testdata/duckdb_result.py` — so an answer
 //! too large to commit is still an answer DuckDB can be held to. A column goes into the hash
 //! when it renders identically on both engines and into an approximate triple when it does
-//! not, and only a FLOAT is the second: each engine prints a float to its own precision,
-//! while a decimal renders at its declared scale on both sides and so does an integer, a
-//! string, a date, a boolean and a timestamp. So an over-cap join of them is checked row for
-//! row and not by its sums. The class comes from the declared type — [`is_approximate`] here,
-//! `isinstance(value, float)` there — because a rendered `31.00` does not say whether it was
-//! a decimal or a double.
-//!
-//! One pass over the rows, and the memory it holds is bounded by what the two sides compare:
-//! the approximate columns' values and the exact columns' row text, never a rendered table.
-//! The side that stayed under the cap is fingerprinted from its rendering instead, under the
-//! classes the other side declares ([`compare_over_cap`]).
+//! not, and only a FLOAT is the second. Each side classes from its own DECLARED type and
+//! never from the cells ([`is_approximate`] here, `is_approximate` there): a rendered `31.00`
+//! does not say whether it was a decimal or a double, and a column holding no value says
+//! nothing at all. Two declarations that disagree are incomparable, and
+//! [`compare_fingerprints`] names the column and the remedy.
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::DataType;
@@ -189,9 +183,13 @@ fn fingerprint(approximate: &[bool], each_row: &dyn Fn(&mut dyn FnMut(&[String])
 
 /// `(sum, min, max)` with the sum taken IN VALUE ORDER, so the two sides add in one
 /// sequence and float reassociation cannot move the digits the comparison reads.
+///
+/// Folded from an explicit `0.0` rather than `Iterator::sum`, whose identity for `f64` is
+/// `-0.0` — which renders as `-0.00000000000000000e0` and so disagreed with the Python
+/// writer's `0.0` on every column that sums to zero, an all-NULL one among them.
 fn triple_of(values: &mut [f64]) -> (f64, f64, f64) {
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let sum = values.iter().sum();
+    let sum = values.iter().fold(0.0, |total, value| total + value);
     let first = values.first().copied().unwrap_or(f64::NAN);
     let last = values.last().copied().unwrap_or(f64::NAN);
     (sum, first, last)
@@ -293,15 +291,27 @@ pub(crate) fn compare_fingerprints(ours: &str, duckdb: &str, tol: f64) -> Result
                     ("min", ours.1, duck.1),
                     ("max", ours.2, duck.2),
                 ] {
-                    if (a - b).abs() > tol * a.abs().max(b.abs()) {
+                    let agree = result_text::nan_settles(a, b)
+                        .unwrap_or_else(|| (a - b).abs() <= tol * a.abs().max(b.abs()));
+                    if !agree {
                         return Err(format!("col {at}: {what} is {a} against DuckDB's {b}"));
                     }
                 }
             }
+            // Neither side is wrong: the declarations themselves differ, `avg` and division
+            // answering a fixed-scale decimal here and a double there. The hash is taken over
+            // whatever a side called exact and a fingerprint no longer holds the rows, so
+            // there is nothing to recompute it from and the remedy is at the writers.
             _ => {
+                let (ours, duck) = match ours.triple.is_some() {
+                    true => ("approximately", "exactly"),
+                    false => ("exactly", "approximately"),
+                };
                 return Err(format!(
-                    "col {at}: one side renders it approximately and the other exactly, so the \
-                     two hash different columns"
+                    "col {at}: ours renders it {ours} and DuckDB's {duck}, so the two hash \
+                     different columns and neither hash can be recomputed from a fingerprint. \
+                     Class it alike on both sides — `is_approximate` here, \
+                     `duckdb_result.py`'s there; duckdb_divergent does not reach this path"
                 ));
             }
         }

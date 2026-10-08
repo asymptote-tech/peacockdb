@@ -15,16 +15,13 @@ use peacockdb_core::test_support::{
 
 /// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, duckdb_oracle, cpu_oracle,
 /// gpu_oracle, schema_validation)` — one test and one registration per enabled cpu mode.
-/// The mode arguments read as a bitwise or and are matched as idents, which is what lets
-/// the expansion produce a case per mode rather than a case that decides at run time
-/// whether it is one: a disabled mode has no test to name and no registration to explain.
+/// The modes read as a bitwise or and are matched as idents, which is what lets the expansion
+/// produce a case per mode rather than one that decides at run time whether it is one: a
+/// disabled mode has no test to name and no registration to explain. `all_modes` is the five
+/// spelled out, expanded by two arms that recurse, so the sugar is a rewrite of the line.
 ///
-/// `all_modes` is the five spelled out; two arms expand it in either position and recurse,
-/// so the sugar is a rewrite of the line rather than a value any later reader has to know.
-///
-/// The device's three arguments — its modes, its oracle and its schema validation — are
-/// consumed and dropped here. That is the point of one list: this binary cannot silently
-/// disagree with the other about which query exists.
+/// The device's three arguments are consumed and dropped here. That is the point of one list:
+/// this binary cannot silently disagree with the other about which query exists.
 macro_rules! corpus_query {
     ($dataset:ident, $sf:expr, $query:ident, all_modes, $($rest:tt)*) => {
         corpus_query!($dataset, $sf, $query,
@@ -189,6 +186,10 @@ fn each_declarations_two_oracles_suit_each_other() {
         // The guard above excludes the query no mode enables, so a section standing in for
         // its rows here stands in for them because the cap kept them out.
         let over_cap = !section_holds_rows(&section);
+        // `data_fusion_subset` says the ENGINE is free to answer a different row set per run,
+        // which is why the device needs a live cpu. It does not reach the DuckDB oracle: that
+        // case compares two committed files, so only a regeneration can move it — see
+        // `an_undetermined_lines_duckdb_oracle_is_still_one_that_compares_rows`.
         let undetermined = declared.cpu_oracle == "data_fusion_subset";
         let needs_live = over_cap || undetermined;
         let says_live = declared.gpu_oracle == "live_cpu";
@@ -214,6 +215,37 @@ fn each_declarations_two_oracles_suit_each_other() {
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A line whose rows are undetermined still names a DuckDB oracle that compares them.
+///
+/// `data_fusion_subset` says the engine may answer a different ten rows per run, so
+/// `duckdb_exact` over it looks like a latent flake and is not one: the `duckdb_<q>` case
+/// reads the committed `mini.result.txt` authority against the committed `duckdb-result.txt`,
+/// and today both hold `lineitem`'s first ten rows in file order. A regeneration of either
+/// file is the only thing that can move it, and a red then means our ten rows moved — not
+/// that DuckDB disagrees. Weakening is not an option a reader should reach for: of the five
+/// oracles `duckdb_approx` still wants the same multiset, `duckdb_divergent` wants an open
+/// ticket and columns that really differ, `duckdb_fingerprint` wants an over-cap section, and
+/// `duckdb_none` fails by construction while both sides answer. This holds the line to that.
+#[test]
+fn an_undetermined_lines_duckdb_oracle_is_still_one_that_compares_rows() {
+    let mut checked = 0;
+    for declared in inventory::iter::<CorpusDeclaration> {
+        if declared.cpu_oracle != "data_fusion_subset" {
+            continue;
+        }
+        checked += 1;
+        assert!(
+            matches!(declared.duckdb_oracle, "duckdb_exact" | "duckdb_approx"),
+            "{}/{}: its rows are undetermined and its duckdb_oracle is {} — the comparison is \
+             against two committed files, so it compares rows or it compares nothing",
+            declared.dataset,
+            declared.query,
+            declared.duckdb_oracle
+        );
+    }
+    assert_eq!(checked, 1, "tpch scan-limit is the only undetermined line");
 }
 
 /// A hyphenated query resolves its authority, and that authority is what silence would cost.
@@ -365,6 +397,8 @@ fn every_duckdb_oracle_is_named_by_some_line() {
 /// answer fails here, which is the whole reason the file is compared with DuckDB by (query,
 /// mode) rather than by query. An ABSENT file fails too: it means no cycle has written it
 /// since the cells moved, which is a gap in the branch and not a case with nothing to do.
+/// Regenerating is what clears either failure in both directions: the writer keeps what the
+/// registry still enables and drops what it does not (`merged_cells`).
 #[test]
 fn every_enabled_device_cell_has_its_gpu_result_section_and_no_other() {
     for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {

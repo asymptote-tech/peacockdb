@@ -15,10 +15,11 @@ use crate::executor::{GpuBackend, PlanIndex, run_with_hook};
 use crate::plan_text::render_run;
 
 use super::corpus::{self, plan_at, run_cpu};
-use super::device_answer::{GpuResultMode, device_answer_matches, gpu_result_mode};
+use super::device_answer::{GpuResultMode, device_answer_matches, gpu_recording, gpu_result_mode};
 use super::gpu_session::Session;
 use super::{
-    Mode, assert_results_match, corpus_golden, gpu_schema_validator, mode_named, section_holds_rows,
+    GpuRecording, Mode, assert_results_match, corpus_golden, gpu_schema_validator, mode_named,
+    section_holds_rows,
 };
 
 /// The whole of a device corpus case: plan, run on the device with the schema validator
@@ -70,16 +71,15 @@ pub(crate) async fn gpu_case(
 /// nothing compares this file with its previous version — GPU float reductions are not
 /// reproducible run to run. What reads it is the DuckDB comparison in the cpu binary.
 ///
-/// `PCK_WRITE_GPU_RESULT=1` writes the committed file; any other value writes
-/// `gpu-result-<value>.txt` beside it, which `testdata/.gitignore` lists — a cuDF other than
-/// shad-gpu's is a record of a different engine and must not replace it. Never under
-/// `UPDATE_CANONICAL` or `PCK_UPDATE_SECTIONS` alone: those two own the cpu's goldens, and
-/// `a_device_run_under_a_regeneration_writes_no_golden` sets exactly them.
+/// Which file, if any, is [`GpuRecording`]'s — never `UPDATE_CANONICAL` or
+/// `PCK_UPDATE_SECTIONS`, which own the cpu's goldens and which
+/// `a_device_run_under_a_regeneration_writes_no_golden` sets exactly.
 fn record_gpu_result(dataset: &str, sf: &str, query: &str, mode: &Mode, batches: &[RecordBatch]) {
-    let Ok(asked) = std::env::var("PCK_WRITE_GPU_RESULT") else {
-        return;
+    let version = match gpu_recording() {
+        GpuRecording::No => return,
+        GpuRecording::Committed => None,
+        GpuRecording::Versioned(version) => Some(version),
     };
-    let version = (asked != "1").then_some(asked);
     let (body, _over_cap) = corpus::rendered_or_fingerprint(batches);
     corpus_golden::merge_mode_section(
         &corpus_golden::gpu_result_golden(dataset, sf, version.as_deref()),
