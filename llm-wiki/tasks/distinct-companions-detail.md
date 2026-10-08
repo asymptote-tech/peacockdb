@@ -794,3 +794,15 @@ nothing at plan time — what the device produces for it is held to the declarat
 test harness and the corpus's validator — and the C++ half is #164." A ticket would re-file a
 documented property, and nothing behaves wrongly for a user today. The `Float32` candidate stays
 recorded on #144.
+
+### 2026-10-08 — done
+
+CI run `37859319653` on head `a141b055`: Changed paths, both cuDF matrix legs, the 25.02 GPU
+build, the cost report and the S3 metadata check all green; Deploy pages skipped as a master-push
+job. The cost-report job's pass is worth naming, since it is what exercises #62's move to the
+archive — `TicketIndex` resolves a number to whichever file holds its anchor.
+`GPU Tests (remote)` failed on `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection
+timed out`, the same unreachable host as guard-checks saw, which chain K does not wait on.
+
+The task is terminal for the ensemble. The human merges; PR #171 targets `ENS-guard-checks`, so
+that one merges first.
