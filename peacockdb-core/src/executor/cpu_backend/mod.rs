@@ -356,12 +356,11 @@ fn declared_as(batch: RecordBatch, declared: &SchemaRef) -> Result<RecordBatch, 
 ///
 /// Every violating column rather than the first: a reader who fixes one and runs again to meet
 /// the next learns the same thing twice. Positional, and a declaration of another length is a
-/// different fault that `try_new` reports — so this says nothing at all there. At a differing
-/// count column *i* is not field *i*'s column, and a violation read off that pairing names a
-/// column the batch does not hold at that ordinal: precise, wrong, and in front of the fault
-/// that explains it. The relabelling loop above zips positionally too and is not guarded this
-/// way; its decimal refusal can still name the wrong field at a differing count, ahead of the
-/// count `try_new` then reports.
+/// different fault that `try_new` reports — so this says nothing there. At a differing count
+/// column *i* is not field *i*'s column, and a violation read off that pairing names a column
+/// the batch does not hold at that ordinal: precise, wrong, and in front of the fault that
+/// explains it. The relabelling loop above is not guarded this way, so its decimal refusal can
+/// still name the wrong field at a differing count, ahead of the count `try_new` reports.
 fn nulls_where_none_declared(columns: &[ArrayRef], declared: &SchemaRef) -> Option<String> {
     if columns.len() != declared.fields().len() {
         return None;

@@ -1089,9 +1089,12 @@ already, in a dataset that exists to make the device differ.
 **Decided, 2026-10-08, so that whoever implements it need not re-litigate it.** Two changes, both
 additive, neither touching a line that is green today:
 
-- **`duckdb_divergent` gains a side**, written as a third component: `duckdb_divergent(<ticket>,
-  <positions>, <side>)` where the side is `both` (today's meaning, and the default a line keeps by
-  writing two components), `cpu` or `device`. The named columns must still differ **on the side
+- **`duckdb_divergent` gains a side**, written as a trailing non-numeric component:
+  `duckdb_divergent(<ticket>, <positions…>[, <side>])` where the side is `both`, `cpu` or `device`.
+  Positions are variadic — `duckdb_oracle.rs`'s `divergent` maps all of `args[1..]` through
+  `number`, and `corpus_cases.inc:178` writes thirteen components — so the side cannot be the third
+  one. A last component that parses as a number, or no last component at all, means `both`, which
+  is today's meaning and leaves every existing line alone. The named columns must still differ **on the side
   named** and must still agree on the other, so a cell that stops diverging on the device fails
   exactly as one that stops diverging on the cpu does today. That is what makes the variant worth
   having: it narrows the claim rather than waiving it.

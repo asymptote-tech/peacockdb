@@ -128,8 +128,9 @@ Survivors split into `n` contiguous chunks balanced by row count — a chunk end
 the next group would land further from its share than stopping does, rather than where the
 share is first reached, which overshoots by a whole group. Within a chunk, consecutive row
 groups pack greedily into batches while bytes stay under target; a single row group over target
-is still its own batch, so the minimum granularity is one row group and the planner always
-produces a plan.
+is still its own batch, so the minimum granularity is one row group, and the planner produces a
+plan for any non-empty survivor list. An empty one is refused as an invalid plan
+([#256](tickets/joins.md#t256)): a zero-row-group file, or a filter that prunes every group.
 
 **The balance bound holds for uniform row groups, and contiguity is why it is not universal.**
 Max−min lane rows ≤ one row group is true of what a parquet writer emits — one group size per

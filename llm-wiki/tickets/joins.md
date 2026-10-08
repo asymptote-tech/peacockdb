@@ -240,7 +240,9 @@ accumulators are not here: a collapse of no handles and a merge of no runs answe
 Rust side before any call, on both engines. Pinned by
 `bug_…_finishing_with_no_probe_batch_is_refused_on_the_device` (`gpu_tests/join_cases.rs`).
 
-**Corpus queries:** `pbench/finish-without-probe`. Two further shapes reach it
+**Corpus queries:** none. `pbench/finish-without-probe` was written for this ticket and does not
+reach it: DataFusion plans it `CollectLeft` and #140 merges both sides, so it plans `lanes=1` at all
+five modes and one probe lane over `tiny`'s 8 rows always accumulates keys. Two further shapes reach it
 (`reports/corpus-fixes.md` fix 15), neither in tpch or tpcds: `select count(*) from orders where
 o_orderkey in (select case when l_quantity > 100 then l_orderkey end from lineitem);` (tpch) at the
 tp4 modes, where every probe key is NULL

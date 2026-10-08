@@ -1234,3 +1234,118 @@ NULL in a non-nullable column, so declining at a mismatch only changes which mes
 
 Not verifiable without a card, and said so: every measured pass count above. The arithmetic between
 them is self-consistent and the device list matches the host override item for item.
+
+## Completeness pass, second time round (2026-10-08) — and it reopens the task
+
+Two readings at `9195a39f`, dispatched together, neither seeing the other's list. The reviewer
+found the branch sound: **0 blocking, 1 important**. The analyst found **1 blocking** and five
+important. The blocking one is right, and it means this task is not finished.
+
+### Blocking — the device cycle was never run, and the override does not defer it
+
+Work item 5, the Registry rules and the Verification bar all ask for one device cycle over the
+pbench rows. The entry above files it under "Deferred by the override, not done", and that is
+**circular**: the cells are off *because* the cycle is what turns them on. The override defers a
+closed list — the sf40 binaries, `--run-benchmarks`, Nsight, H200 timing — and a `test_gpu_corpus`
+pass over 580 KB of sf1 parquet on an idle L40S is none of them. The override's own last line says
+the opposite: "The GPU halves those tasks deferred for want of a device are now runnable", which is
+why its resume list reset this task from `completeness approved` to `building`. I read that reset
+as a rebase re-verification and it was not; it was this.
+
+The re-prove did run `test_gpu_corpus`, and it executed 28 cases, none of them pbench's —
+`test_gpu_corpus.rs`'s macro expands a `none` gpu-modes line to nothing at all, so a filtered run
+over off cells is vacuous rather than empty. What is missing, measured:
+
+- `testdata/goldens/pbench.sf1/gpu-result.txt` does not exist. Work item 4 lists it as a required
+  golden; 17 landed and it is the 18th.
+- **`int8-key-group`** — one of the spec's 63 queries — has no `.sql`, no registry row and no corpus
+  line. It is held back precisely because it is the one row the table expects to pass, so it cannot
+  land with an off cell and no ticket. It arrives with the cycle.
+- 295 pbench gpu cells (280 `disabled`, 15 `na`) carry tickets that are **predictions read off a
+  plan golden, not measurements** — `corpus_cases.inc`'s own section comment says so. The Registry's
+  "a cell that fails on a ticket the table does not expect is a finding" rule cannot fire against a
+  cell nobody ran.
+- About 16 tp1 gpu cells the spec expects to pass are off, plus `int8-key-group`'s five.
+
+**#259 is now a ticket re-deferring work the override made runnable.** Its recipe is right — a
+`gpu_pbench_` filter with `PCK_WRITE_GPU_RESULT=1` — but its premise, "shad-gpu was off the network
+for the whole task", was superseded the same day and nothing revisited it once the card appeared.
+`corpus_cases.inc`'s committed comment still reads "shad-gpu was down" as the live reason and points
+at "pbench.md's Task 8", a section that exists only in `-impl.md`, which the archive deletes. Both
+want correcting by whoever runs the cycle. One budget note for them, which #259 does not mention:
+the PR comment sits at 63,038 bytes against a 65,536 cap, about seven rows of headroom, and
+`int8-key-group` plus #255's three queries spend four of them.
+
+### The important findings, and what became of each
+
+Applied here, all four being mine:
+
+1. **#253's new "Decided" block stated a grammar four live corpus lines contradict** (the reviewer's
+   one finding). It said the side is a third component; positions are variadic — `divergent` maps all
+   of `args[1..]` through `number`, and `corpus_cases.inc:178` writes thirteen components. A literal
+   third-component reading turns `21` into a side and reddens a test the block claims it does not
+   touch. Rewritten as a trailing non-numeric component, defaulting to `both` when the last
+   component parses as a number or is absent, which is implementable without touching any existing
+   line — the additivity the paragraph claims.
+2. **`architecture.md`'s one falsified sentence.** "the planner always produces a plan" is no longer
+   true: `scan_mapping::partition` refuses an empty survivor list, and `empty.parquet` has zero row
+   groups, so all five pbench plan goldens now carry that refusal for `cross-empty-build`. No tpch or
+   tpcds query reached it, which is why the sentence survived. Corrected to name the refusal and
+   #256. The analyst checked the rest of the page and found nothing else falsified.
+3. **#173's "Corpus queries: `pbench/finish-without-probe`" was false.** DataFusion plans it
+   `CollectLeft` and #140 merges both sides, so it is `lanes=1` at all five modes and one probe lane
+   over `tiny`'s 8 rows always accumulates keys — `finish_without_keys` is unreachable. Corrected to
+   "none", with the reason, which is the standard the branch already applied to #250 and #208.
+4. My own doc comment from the last round ran to 11 lines against the ten-line cap. Trimmed.
+
+Left for the developer who runs the cycle, because they are code or data:
+
+5. **The three `sparse-build-*` rows carry `212` as their only ticket and cannot prove it.** Their
+   build side reaches the join through a scatter, and `driver/partitioned.rs:430` keeps a zero-row
+   scatter output when the join owes its probe side, so `set_build` runs and `without_build` — which
+   is #212 — is never called. The keep/drop decision is in the **shared driver**, so the device will
+   behave identically; turning those cells on proves nothing about #212, and a red there will be
+   #152, which those rows do not carry. `architecture.md:643-647` already states the rule and needs
+   no edit — the tags do.
+6. **#137's skew is in the data and recorded nowhere.** No pbench registry row carries `137` and
+   joins.md's #137 names no pbench query, while the spec's "not covered by a query" paragraph lists
+   five tickets and not this one. Ticket and spec disagree and neither points at the data.
+7. **`dim` is missing `d_ts_ms` and `d_ts_ns`**, which the spec's data table says it carries. Nothing
+   is red, but the parquet is committed and all 17 goldens derive from it, so a millisecond or
+   nanosecond join key cannot be written without regenerating and moving every golden. Cheap now,
+   golden churn later, and it is the device half of #240's own subject.
+8. **The determinism check sits in no Rust tier**, against a bar that puts it in `rust-only`.
+   `generate_pbench.sh --check` has exactly one caller in the tree, `pipeline.yml:183`. Delete that
+   line and the only guard that the committed parquet is what `gen.sql` makes vanishes silently.
+   Named as a shortcut in the signoff with a defensible reason, but nobody deferred it.
+
+### Also owed, and not mine
+
+**The spec's signoff predates the rebase and the re-prove.** It opens "Solved on the cpu, untouched
+on the device", and since it was written the branch was re-proved on nebius-gpu and fixed a real
+regression in this task's own #227 check. The write discipline gives the spec one later write and it
+is spent, so correcting it is the human's call — but `-impl.md` and `-detail.md` are both deleted at
+merge, so as it stands that fix becomes invisible. It wants rewriting when the device cycle lands,
+which is the natural moment.
+
+### What both readings confirmed
+
+The bug fix is answer-neutral and correctly pinned: at a differing count the batch is refused either
+way and only the message changes, at equal counts nothing changed, and the fire condition is still
+reachable and still pinned by three cases. The validator half genuinely does not have the fault.
+`build-test.md` has **no drift** — both agents re-derived the corpus distribution from
+`corpus_cases.inc` (176 lines, 674 cpu cells, 109/16/14/33/4) and every tier sum and golden count
+independently, and all of it reconciles. Dead links: the class is closed, 121 on the parent and 121
+at HEAD, identical sets, all pre-existing in archive and report files. The rebase carried pbench's
+work intact — diffed outside `llm-wiki`, the only pbench-authored difference against the pre-rebase
+tip is the two files of the fix.
+
+CI on `9195a39f` is green on both cuDF legs, the GPU build, the cost report and the S3 check, with
+only `GPU Tests (remote)` red on the shad-gpu outage the override exempts.
+
+### State
+
+Back to **`building`**, with the device cycle as the work. Not dispatched by this run, which is out
+of window rather than out of options — the next coordinator should dispatch it straight from the
+list above. Nothing here is waiting on the human except the signoff rewrite, which can ride along
+with the cycle.
