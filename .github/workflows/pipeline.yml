@@ -505,6 +505,7 @@ jobs:
             testdata/tpch-vec-queries \
             testdata/generate_testdata.sh \
             testdata/cost-registry.csv \
+            testdata/fixtures \
             gpu:$REMOTE_DIR/testdata/
           # Ship the updated setup-glibc.sh so its patch_rust_dir step is
           # present on the host (not just the older /home/info/ copy).

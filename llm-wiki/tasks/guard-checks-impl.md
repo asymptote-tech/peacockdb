@@ -80,7 +80,7 @@ proves nothing. The case is a `GpuSort`: it falls to `declared_width`'s `_ => re
 Its constructor derives the schema from its input, so the test overrides the private `kind`
 field, which `plan::validate::tests` can reach as a descendant of `plan`.
 
-- [ ] **Step 1: Write the failing tests**, after `a_column_that_changes_type_across_an_edge_is_refused`:
+- [x] **Step 1: Write the failing tests**, after `a_column_that_changes_type_across_an_edge_is_refused`:
 
 ```rust
 /// A sort over a two-column source, declaring `declared` instead of the schema its
@@ -133,7 +133,7 @@ fn a_pass_through_node_declaring_its_inputs_columns_passes() {
   `"GpuSort"` (`plan/mod.rs`'s name table), match them; the message after the name is what
   matters.
 
-- [ ] **Step 2: Run them; the first two fail.**
+- [x] **Step 2: Run them; the first two fail.**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib -- plan::validate::tests::a_pass_through
@@ -143,7 +143,7 @@ cargo test --features rust-only -p peacockdb-core --lib -- plan::validate::tests
   passing case PASSES. If "fewer" or "more" passes here, the case reaches another check: stop
   and find which before going on.
 
-- [ ] **Step 3: Implement.** In `types_across_the_edge`, after `let (ours, theirs) = (…);` and
+- [x] **Step 3: Implement.** In `types_across_the_edge`, after `let (ours, theirs) = (…);` and
   before the zip:
 
 ```rust
@@ -160,7 +160,7 @@ cargo test --features rust-only -p peacockdb-core --lib -- plan::validate::tests
   the sentence in `declared_width`'s `_ => return Ok(())` arm that says the pairwise compare
   "does not check the count".
 
-- [ ] **Step 4: Run the validator tests and the plan goldens.**
+- [x] **Step 4: Run the validator tests and the plan goldens.**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib -- plan::validate planner::tests::plan_goldens
@@ -168,7 +168,7 @@ cargo test --features rust-only -p peacockdb-core --lib -- plan::validate planne
 
   Expected: all PASS — the planner never builds the refused shape, so no golden moves.
 
-- [ ] **Step 5: Commit.**
+- [ ] **Step 5: Commit.** (not the developer's: the human does all git operations)
 
 ```bash
 git add peacockdb-core/src/plan/validate.rs peacockdb-core/src/plan/validate/tests.rs
@@ -189,7 +189,7 @@ git commit -m "#233: the validator checks a pass-through node's column count"
   `offset length rows -> begin end`, fields separated by runs of spaces; `max` (= `u64::MAX`)
   allowed in `offset` and `length` only; `#` starts a comment line; blank lines ignored.
 
-- [ ] **Step 1: Write the fixture.**
+- [x] **Step 1: Write the fixture.**
 
 ```
 # The row-range clamp: offset length rows -> begin end
@@ -223,7 +223,7 @@ git commit -m "#233: the validator checks a pass-through node's column count"
 max  max   100   ->  100  100
 ```
 
-- [ ] **Step 2: The README.** Its opening line says the fixtures are "a format two crates read
+- [x] **Step 2: The README.** Its opening line says the fixtures are "a format two crates read
   independently"; this one is read by a crate and the C++ tests, so reword it to "a format two
   readers read independently". Then a paragraph after `two-row-registry.csv`'s:
 
@@ -234,7 +234,7 @@ never crosses the ABI. Each side's test reads this file and asserts its own clam
 here reaches both, and a drift fails the drifting side on the shared line.
 ```
 
-- [ ] **Step 3: Replace `row_range/tests.rs`** with a reader and one test. The old two tests'
+- [x] **Step 3: Replace `row_range/tests.rs`** with a reader and one test. The old two tests'
   four cases are lines of the table now, beside C++'s ten.
 
 ```rust
@@ -314,7 +314,7 @@ fn the_clamp_answers_every_case_in_the_shared_table() {
   build does not see `crate::test_support` under `rust-only`, check how
   `planner/tests/plan_goldens.rs` imports it (it does) and match.
 
-- [ ] **Step 4: Run it.**
+- [x] **Step 4: Run it.**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib -- executor::row_range
@@ -324,7 +324,7 @@ cargo test --features rust-only -p peacockdb-core --lib -- executor::row_range
   `3 max 4 -> 3 5`: FAIL naming `row-range-clamp.txt:<n>`. Then put `3 max` alone on a line:
   FAIL with "expected `offset length rows -> begin end`". Revert both.
 
-- [ ] **Step 5: Commit.**
+- [ ] **Step 5: Commit.** (not the developer's: the human does all git operations)
 
 ```bash
 git add testdata/fixtures/row-range-clamp.txt testdata/fixtures/README.md peacockdb-core/src/executor/row_range/tests.rs
@@ -343,7 +343,7 @@ git commit -m "#174: the Rust clamp reads the shared case table"
 **Interfaces:**
 - Consumes: Task 2's fixture format.
 
-- [ ] **Step 1: The compile definition.** After `target_link_libraries(peacock_cpu_tests …)`:
+- [x] **Step 1: The compile definition.** After `target_link_libraries(peacock_cpu_tests …)`:
 
 ```cmake
 # The fixtures the tests read; PEACOCK_TESTDATA_DIR in the environment overrides it, as for
@@ -356,7 +356,7 @@ target_compile_definitions(peacock_cpu_tests PRIVATE
   `PEACOCK_TESTDATA_DIR` is set at `cpp/CMakeLists.txt:175`, above this block. If it is set
   after it, move the block below.
 
-- [ ] **Step 2: Replace the four `ClampRowRange` tests** (`ToTheEndSentinel`,
+- [x] **Step 2: Replace the four `ClampRowRange` tests** (`ToTheEndSentinel`,
   `PastTheEndClamps`, `AtOrPastTheEndIsEmpty`, `TheSentinelDoesNotOverflow`) with a reader and
   one test. Keep the comment above them; add `<cstdlib> <fstream> <sstream> <string> <vector>`
   to the includes if missing.
@@ -433,7 +433,7 @@ TEST(ClampRowRange, AnswersEveryCaseInTheSharedTable) {
 
   Every malformed field fails through `ADD_FAILURE` naming the line; nothing throws.
 
-- [ ] **Step 3: Build and run.**
+- [x] **Step 3: Build and run.**
 
 ```bash
 scripts/build.sh --configure --build --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12
@@ -443,10 +443,10 @@ ctest --test-dir cpp/build -L cpu --output-on-failure
   Expected: PASS; `ClampRowRange.AnswersEveryCaseInTheSharedTable` is one test where four were.
   Drop `--configure` once `cpp/build` is configured in this workspace.
 
-- [ ] **Step 4: The same hand checks as Task 2, step 4** — a wrong `end`, then a short line —
+- [x] **Step 4: The same hand checks as Task 2, step 4** — a wrong `end`, then a short line —
   each FAILS naming the line. Revert.
 
-- [ ] **Step 5: Run with the override.**
+- [x] **Step 5: Run with the override.**
 
 ```bash
 PEACOCK_TESTDATA_DIR=$PWD/testdata ./cpp/build/peacock_cpu_tests --gtest_filter='ClampRowRange.*'
@@ -456,7 +456,7 @@ PEACOCK_TESTDATA_DIR=/nonexistent ./cpp/build/peacock_cpu_tests --gtest_filter='
   Expected: the first PASSES; the second FAILS with "cannot read /nonexistent/…" and "holds no
   case" — never a pass over zero cases.
 
-- [ ] **Step 6: Provisioning to the GPU host.** Both GPU runs install every
+- [x] **Step 6: Provisioning to the GPU host.** Both GPU runs install every
   `peacock_*_tests` binary and run them by glob (`build-test-shadgpu.sh:403`,
   `pipeline.yml:597`), `peacock_cpu_tests` included, against a remote testdata tree filled by
   hand-written lists that omit `testdata/fixtures`. A grep for the binary's name finds nothing:
@@ -473,7 +473,7 @@ PEACOCK_TESTDATA_DIR=/nonexistent ./cpp/build/peacock_cpu_tests --gtest_filter='
 
   The rust lib's row-range test runs on neither host: they run `--lib` with `gpu_tests::` only.
 
-- [ ] **Step 7: Commit.**
+- [ ] **Step 7: Commit.** (not the developer's: the human does all git operations)
 
 ```bash
 git add cpp/CMakeLists.txt cpp/tests/cpu/test_executor.cpp scripts/build-test-shadgpu.sh .github/workflows/pipeline.yml
@@ -488,7 +488,7 @@ git commit -m "#174: the C++ clamp reads the shared case table; the GPU host get
 - Modify: `peacockdb-core/src/executor/driver/tests/mock.rs` (`MockUnload::unload`, ~l.565)
 - Modify: `llm-wiki/build-test.md`
 
-- [ ] **Step 1: Replace the mock's arithmetic.**
+- [x] **Step 1: Replace the mock's arithmetic.**
 
 ```rust
 impl UnloadExecutor<Mock> for MockUnload {
@@ -500,7 +500,7 @@ impl UnloadExecutor<Mock> for MockUnload {
 }
 ```
 
-- [ ] **Step 2: Run the driver tests.**
+- [x] **Step 2: Run the driver tests.**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib -- executor::driver
@@ -508,7 +508,7 @@ cargo test --features rust-only -p peacockdb-core --lib -- executor::driver
 
   Expected: PASS, every count in `driver/tests/limit.rs` unchanged.
 
-- [ ] **Step 3: The counts in `build-test.md`.** The page is already 5 short before this task:
+- [x] **Step 3: The counts in `build-test.md`.** The page is already 5 short before this task:
   the Rust header (l.7) says 1852 and the tables sum to 1857. Recount every row this task touches
   from the code, then set the headers to the sums. Expected, from the review at dbf44bcc:
 
@@ -526,7 +526,7 @@ cargo test --features rust-only -p peacockdb-core --lib -- executor::driver
   (Plan types +3: Task 1's three validator cases.) Update the row-range rows' descriptions: the
   two clamps share a case table.
 
-- [ ] **Step 4: The full verification bar.**
+- [x] **Step 4: The full verification bar.**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib
@@ -535,7 +535,7 @@ ctest --test-dir cpp/build -L cpu --output-on-failure
 
   Expected: both green.
 
-- [ ] **Step 5: Commit.**
+- [ ] **Step 5: Commit.** (not the developer's: the human does all git operations)
 
 ```bash
 git add peacockdb-core/src/executor/driver/tests/mock.rs llm-wiki/build-test.md

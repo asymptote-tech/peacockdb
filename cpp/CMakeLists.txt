@@ -187,6 +187,11 @@ target_include_directories(peacock_cpu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 # cudf::cudf + flatbuffers for the host-only unit tests of plan_executor_internal.h
 # (decimal-scale / AST-routing helpers); no GPU is touched at runtime.
 target_link_libraries(peacock_cpu_tests PRIVATE peacock_gpu cudf::cudf flatbuffers GTest::gtest)
+# The fixtures the tests read; PEACOCK_TESTDATA_DIR in the environment overrides it, as for
+# peacock_plan_tests, so an installed binary on another host reads that host's tree.
+target_compile_definitions(peacock_cpu_tests PRIVATE
+  PEACOCK_TESTDATA_DIR="${PEACOCK_TESTDATA_DIR}"
+)
 set_target_properties(peacock_cpu_tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 add_test(NAME peacock_cpu_tests COMMAND peacock_cpu_tests)
 set_tests_properties(peacock_cpu_tests PROPERTIES LABELS "cpu")

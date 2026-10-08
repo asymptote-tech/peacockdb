@@ -248,8 +248,7 @@ fn declared_width(node: &dyn GpuNode) -> Result<(), PlanError> {
         ),
         NodeRef::Aggregate(aggregate) => aggregate_width(&aggregate.body),
         NodeRef::AggregateBatches(aggregate) => aggregate_width(&aggregate.body),
-        // The rest emit their input's columns. `types_across_the_edge` compares the fields
-        // the two share, pairwise, which does not check the count.
+        // The rest emit their input's columns, which `types_across_the_edge` checks.
         _ => return Ok(()),
     };
     if declared != emitted {
@@ -280,10 +279,10 @@ fn aggregate_width(body: &AggregateBody) -> (usize, &'static str) {
 }
 
 /// A node that moves rows rather than changing them emits its input's columns, so the two
-/// schemas must be the same fields and not merely the same count. Types are the half no
-/// name check and no per-node byte count can see: both engines derive their bytes from
-/// this same declaration, so a column that changed type across an edge costs the same on
-/// either and surfaces only in the answer.
+/// schemas must be the same fields: the count first, then the fields pairwise. Types are
+/// the half no name check and no per-node byte count can see: both engines derive their
+/// bytes from this same declaration, so a column that changed type across an edge costs
+/// the same on either and surfaces only in the answer.
 ///
 /// It covers the nodes that CARRY a column. An aggregate's state is derived from its
 /// producer where the plan is built (`PlanAgg::state_type`); a project's expression is
@@ -308,6 +307,15 @@ fn types_across_the_edge(node: &dyn GpuNode) -> Result<(), PlanError> {
         node.kind().schema().expect("not a sink"),
         carried.kind().schema().expect("a sink cannot be an input"),
     );
+    // Before the zip, which stops at the shorter list and so says nothing about a node
+    // that dropped or invented a column.
+    let (declared, carried_width) = (ours.fields.fields().len(), theirs.fields.fields().len());
+    if declared != carried_width {
+        return Err(PlanError::Invalid(format!(
+            "{}: it declares {declared} columns and its input produces {carried_width}",
+            node.name()
+        )));
+    }
     if let Some((ours, theirs)) = ours
         .fields
         .fields()

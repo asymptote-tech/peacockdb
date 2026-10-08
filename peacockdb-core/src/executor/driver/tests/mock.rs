@@ -15,12 +15,12 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use crate::executor::Batch;
 use crate::executor::CpuBatch;
 use crate::executor::forwarder_for;
-use crate::executor::{Backend, NodeExecutors};
 use crate::executor::{
     AbiCalls, BackendError, BatchAccumulatorExecutor, CallResult, CallStats, ExecExecutor,
     Executor, JoinExecutor, LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor,
     ProbingJoin, RowRange, SourceExecutor, SourceStep, UnloadExecutor,
 };
+use crate::executor::{Backend, NodeExecutors};
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::{ExecutorCategory, NodeRef, as_node_ref, category_of};
@@ -564,13 +564,9 @@ impl ProbingJoin<Mock> for MockProbing {
 
 impl UnloadExecutor<Mock> for MockUnload {
     fn unload(&mut self, batch: MockBatch, rows: RowRange) -> CallResult<CpuBatch> {
-        let start = (rows.offset as usize).min(batch.rows);
-        let taken = if rows.length == u64::MAX {
-            batch.rows - start
-        } else {
-            (rows.length as usize).min(batch.rows - start)
-        };
-        Ok((cpu_batch(taken), self.script.stats()))
+        // The shipped rule, so the driver's limit tests are facts about it.
+        let (_, taken) = rows.clamp(batch.rows as u64);
+        Ok((cpu_batch(taken as usize), self.script.stats()))
     }
 }
 
