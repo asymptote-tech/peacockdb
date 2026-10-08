@@ -4,7 +4,7 @@
 Tests, CI, hosts, testdata etc
 
 <a id="t252"></a>
-### #252 — four corpus cases read the checkout, which a remote CPU run never ships
+### #252 — six corpus cases read the checkout, which a remote CPU run never ships
 `ticket_is_open` (`test_support/duckdb_oracle.rs`) resolves `llm-wiki/tickets/` through
 `env!("CARGO_MANIFEST_DIR")` with no environment escape, so the four `duckdb_divergent` cases —
 `duckdb_tpcds_q17`, `q58`, `q61`, `q66` — look for the ticket files at the build host's path.
@@ -13,14 +13,22 @@ stages `test_cpu_corpus` among them, so those four go red on verda and pass loca
 
 `testdata.rs` states the rule the other goldens follow: the compile-time path is the fallback and
 `PEACOCK_TESTDATA_DIR` wins, because a binary is built on one host and run on another (#49).
-`ticket_is_open` has no equivalent. An escape variable nobody sets would be a no-op, so the fix is
-the push side — `--push-goldens` or a sibling flag carrying `llm-wiki/tickets/` — which is why this
-is a ticket and not a line in the task that found it.
+`ticket_is_open` has no equivalent, and an escape variable nobody sets would be a no-op.
 
-Pre-existing in kind: `test_module_layout` and `test_ci_coverage` read the source tree too, but
-`rust_only_targets` excludes both by its `repo_root` rule, so they never ship. These four are the
-first cases that both ship and read the checkout. Found in review round 3 of the duckdb-oracle
-task; measured, not inferred, by reading `rust_only_targets`.
+Six cases are in the class, not four. `all_modes_expands_to_the_five_in_either_position`
+(`tests/test_cpu_corpus.rs`) reads `tests/common/corpus_cases.inc` the same way, through
+`corpus::corpus_lines`, and panics in `macro_invocations`' `read_to_string`; and
+`every_timed_case_is_enabled_on_a_device` (`tests/test_corpus_goldens/benchmark.rs`) already did
+this before the oracle landed. `test_corpus_goldens` is staged too — `rust_only_targets`' second
+axis greps only the top-level `tests/*.rs` for `repo_root`, so a `CARGO_MANIFEST_DIR` read inside
+a submodule is invisible to it. `test_module_layout` and `test_ci_coverage` read the source tree
+as well and are the two that genuinely never ship, excluded by that same rule at the top level.
+
+**Fix proposed:** the push side, carrying both reads — `llm-wiki/tickets/` and
+`peacockdb-core/tests/common/` — which is why this is a ticket and not a line in the task that
+found it. Measured by reading `rust_only_targets` and its classifier, over
+the duckdb-oracle branch; the four `duckdb_divergent` cases were found in that task's review round
+3 and the other two in its completeness pass.
 
 <a id="t178"></a>
 ### #178 — shad-gpu is shared, and a pool that cannot be built is a neighbour's fault

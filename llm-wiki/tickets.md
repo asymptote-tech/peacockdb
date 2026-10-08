@@ -19,6 +19,7 @@ are never reused, so an old reference still resolves there.
 ## Contents
 
 119 open tickets, in file order.
+116 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|

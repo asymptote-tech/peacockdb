@@ -1350,3 +1350,294 @@ archived" and #235 is instead kept open with its body cut back to the device cyc
 right given the ceiling and leaves the archival owed to whoever runs that cycle; and the spec's
 optional sixth variant `duckdb_columns` was looked for and not needed — no `duckdb_divergent` line
 is a LIMIT tie — which the spec asked the PR to say, so it is in the signoff.
+
+## Round 5 result (2026-10-08)
+
+The analyst's three items, all three done. Everything ran locally; both hosts stayed down, so
+the device cycle is still the only thing outstanding in the task. No golden moved —
+`git diff testdata/goldens` is empty, and `gpu-result.txt` still does not exist, which is the
+whole scheduling reason item 1 was worth doing now.
+
+### Case counts, measured
+
+| target | round 4 | after | delta |
+|---|---|---|---|
+| `--lib` (rust-only) | 648 passed, 2 ignored | **657 passed, 0 failed, 2 ignored** | +9 |
+| `test_cpu_corpus` | 705 cases | **706: 679 passed, 27 failed** | +1 |
+| `test_golden_format` | 43 | **43 passed** | — |
+| `test_corpus_goldens` | 26 | **26 passed** | — |
+| `test_cost_model` | 3 | **3 passed** | — |
+| `test_module_layout` | 17 | **17 passed** | — |
+| `test_ci_coverage` | 9 | **9 passed** | — |
+| `testdata/test_duckdb_result.py` | 14 | **14, OK** | — |
+
+The +9 in `--lib`: `corpus_golden::tests` 3 → 9, `duckdb_oracle::tests` 24 → 26,
+`device_answer::tests` 8 → 9. The +1 in `test_cpu_corpus` is the committed-file stamp guard.
+
+**`test_cpu_corpus`'s 27 failures are the standing device gap and nothing else**, unchanged in
+count and in text: the 26 `duckdb_gpu_*` cases plus
+`every_enabled_device_cell_has_its_gpu_result_section_and_no_other`, 27 of 27 carrying "does not
+exist, so no device answer is recorded", counted over the whole log. The 26 read exactly as they
+did in round 4 — `…/gpu-result.txt does not exist, so no device answer is recorded for this
+cell. Run a cycle with PCK_WRITE_GPU_RESULT=1 and bring it home with --pull-results.` — because
+the knob is interpolated and `PCK_GPU_RESULT_VERSION` is unset in an ordinary run. One word moved
+in the 27th: the coverage guard's absent-file message now carries its dataset prefix
+(`tpcds: …/gpu-result.txt does not exist…`), since the message comes back from a function and the
+caller prefixes it the way the mismatch message was always prefixed.
+
+Device targets type-check and link: `scripts/cargo-cudf.sh check --tests --features gpu` is rc=0
+with the one pre-existing warning (`unused import: AsArray`,
+`src/tests/gpu_tests/aggregate_dimension_cases.rs:9`), and
+`scripts/cargo-cudf.sh test --test test_gpu_corpus --features gpu --no-run` links
+`test_gpu_corpus-5013741728a486dd`. Not optional this round and it earned its keep: the gpu
+target dir's `OUT_DIR/cudf-version-config.h` holds the real `CUDF_VERSION_MAJOR 25` /
+`MINOR 2`, which is the end-to-end proof that a 25.02 build stamps `25.02` without a card.
+
+### Item 1 — `gpu-result.txt` carries the cuDF it was recorded under
+
+**Where it goes: a file-level provenance line, `cudf=<version>`, as the file's first line.**
+The two reasons the per-section field lost. The rule the spec states is per FILE ("one version
+per file"), and a per-section field makes a mixed file *expressible*, after which the guard has
+to decide what a mixed file means; and the section bodies are exactly what the DuckDB comparison
+reads, so a field inside one would have to be stripped back out again in the one place that must
+not start guessing. `merged_cells` rewrites the whole file on every merge, so the line it writes
+itself cannot go stale — which is the answer to "keeps `merged_cells` honest".
+
+One consequence, and it is deliberate: **sections another cuDF recorded are dropped rather than
+carried under this cuDF's stamp.** Without that the preamble would be a lie about every section
+the merge did not write, which is worse than no stamp. So a 26.02 cycle that reaches the
+committed file leaves a file that says 26.02 and holds 26.02's answers alone; the coverage guard
+then reports the missing cells and the stamp guard reports the version.
+
+**What it says: the cuDF the binary is LINKED against, read at build time.** The device's
+`peacock_gpu_version()` was the dispatch's suggestion and it is not the cuDF version — it returns
+the ENGINE's `"0.1.0"`, pinned by `cpp/tests/cpu/test_executor.cpp:9`. `peacock_cudf_version()`
+is `verify-26.02`'s own step 2 and does not exist yet, and `libcudf.so` in the conda env carries
+no version in its soname, so there is **no runtime source today**. The best reachable thing is
+`$CUDF_ROOT/include/cudf/version_config.hpp`: `peacockdb-core/build.rs` copies it into `OUT_DIR`
+and `device_answer::cudf_version_of_config` parses `MAJOR`/`MINOR` into `25.02` — the minor
+padded to two digits, which is the one digit that matters and has a case.
+
+**How the guard is weaker than a runtime read, stated plainly:** it is the cuDF the binary was
+built against, not the one the loader bound. For this workflow they are the same thing —
+`build-test-shadgpu.sh` builds locally against `rapids-cuda-12.2` and pushes binaries — but a
+binary run against a different `libcudf.so` would stamp its build's version. **When
+`peacock_cudf_version()` lands, `cudf_version()` should read it instead**; the doc on that
+function says so at the site.
+
+The rule is held in three places, one rule each:
+
+- `cudf_a_path_promises(version)` — the cuDF a path's NAME promises: the suffix, or
+  `COMMITTED_CUDF_VERSION` (`"25.02"`, declared once in `test_support/mod.rs`).
+- **Read side**, `gpu_result_cudf_matches_path`: every reader of a `gpu-result` file checks the
+  line against the path. `duckdb_gpu_case` does it right after the read, and
+  `every_committed_gpu_result_file_carries_the_committed_cudfs_stamp` does it over the committed
+  files. Both directions fail: 26.02's answers in `gpu-result.txt`, and 25.02's answers in a file
+  named `gpu-result-26.02.txt`.
+- **Write side**, `recording_cudf_suits_the_path`: `record_gpu_result` refuses before it writes.
+  This is the half that takes the rule off the operator rather than detecting the breach
+  afterwards — `PCK_WRITE_GPU_RESULT=1` on a 26.02 build now fails at the first recorded cell
+  with "record with PCK_WRITE_GPU_RESULT=26.02 instead", so the committed file is never
+  overwritten in the first place. The dispatch asked for stamp + test; this is the one addition
+  beyond it, and the reason is that "the rule rests entirely on the operator typing the right
+  value" is cured by checking the value, not by reading a diff later.
+
+**Watched red, four ways.** (1) The parse: `cudf_version_of_config` red before it existed, then
+green over the real 25.02 header, a 26.02 one, a `MINOR 10` one, the empty file a rust-only build
+gets, and a header missing `MINOR`. (2) The writer: both merge cases red before the stamp
+existed (the expected text begins `cudf=25.02\n`), and the drop-on-version-change case red
+against a carried `== q1 mode=tp4-sized` section. (3) **The committed-file guard went red today
+on a doctored file**, which is the thing the dispatch insisted on: a hand-written
+`testdata/goldens/tpch.sf1/gpu-result.txt` holding `cudf=26.02` failed with
+"recorded under cuDF 26.02 and read as cuDF 25.02's. Restore this file (git checkout) and record
+26.02's answers with PCK_WRITE_GPU_RESULT=26.02 instead", and `duckdb_gpu_tpch_q6_tp1_single`
+failed on the same line before it compared anything. The file was removed and
+`git status testdata/` is clean. (4) Two `cudf=` lines panic rather than being read to the first
+— the "reader that stops at the first match" shape, since a second line could contradict the
+first unseen.
+
+### Item 2 — the panic text names the value that records the file it read
+
+`recording_knob(version)` is the only place `PCK_WRITE_GPU_RESULT=<value>` is spelled, and it
+lives in `corpus_golden.rs` beside `gpu_result_golden` because the value and the path are one
+choice. `duckdb_gpu_case`'s two messages interpolate it, as do the coverage guard's two and the
+two mismatch messages. Red first: the function was written returning the bug (`=1` always) and
+the case failed `left: "PCK_WRITE_GPU_RESULT=1", right: "PCK_WRITE_GPU_RESULT=26.02"`. Proven
+end to end by hand, which is the part a unit test cannot show:
+`PCK_GPU_RESULT_VERSION=26.02 cargo test … duckdb_gpu_tpch_q6` now says
+`…/gpu-result-26.02.txt does not exist … Run a cycle with PCK_WRITE_GPU_RESULT=26.02`.
+
+`build-test-shadgpu.sh`'s usage documents the read knob for the first time, and says the two
+things a reader of that block needs: it is **not forwarded to the host** (`test_cpu_corpus` is
+not staged there — `RUST_TESTS` is `test_gpu_corpus test_node_timing peacock_gpu_benchmarks`), so
+it is set on the local cargo run after `--pull-results`; and it must name the value recorded
+with. The write knob's entry gained the refusal. `bash -n` clean and the usage text rendered.
+
+### Item 3 — the coverage guard's datasets come from the registry
+
+`every_enabled_device_cell_has_its_gpu_result_section_and_no_other` loops
+`registry_datasets()` — every `(dataset, sf)` `load_csv()` holds — and the both-ways comparison
+moved into `duckdb_oracle::gpu_result_coverage(path, enabled, text)`, a function that takes the
+file's text as `Option<&str>` so the degenerate case has a test at all.
+
+**The degenerate case, settled:** a dataset with no enabled device cell has NO file, and that is
+`Ok`. The reason is the writer — `merge_mode_section` runs only from a device case, so zero
+enabled cells write zero sections — and it is how a dataset arrives: pbench lands with its
+device cells off. A stray section for a cell nothing enables still fails ("not an enabled cell"),
+so the pass is "no file and no cells", not "no file".
+
+**Proven live against the real registry**, not only in the unit tests: with the four `tpcds`
+`gpu_*` cells flipped to `disabled` in `testdata/cost-registry.csv`, the guard walked past tpcds
+in silence and failed on tpch, which still has 22 enabled cells and no file. Before this round
+the literal list made tpcds panic on a missing file whatever its enablement, which is exactly the
+pbench failure the analyst predicted. CSV restored, `git checkout` zero diff.
+
+`gpu_result_cells` in `test_support/mod.rs` had no caller left and is deleted;
+`gpu_result_coverage` replaces it in the harness API.
+
+**`testdata/duckdb_result.py`'s `--dataset choices` is NOT extended, and the one-word change is
+not free.** `choices=["tpch","tpcds"]` is at `:230` and the default list is spelled a second time
+at `:238`, so one word leaves them disagreeing; and `generate()` globs
+`testdata/pbench-queries/*.sql`, which is empty until pbench's own task lands, so
+`--dataset pbench` would write an EMPTY `duckdb-result.txt` rather than fail — a silent green
+no-op in place of argparse's "invalid choice". That is a worse error than the one it replaces, so
+pbench's task owns the choice, the queries and that guard together. Worth knowing before
+somebody tries the one-liner.
+
+### Deviations from the dispatch, and why
+
+1. **`peacockdb-core/build.rs` is outside the spec's `## Scope` table.** The stamp needs a value
+   from outside the Rust tree and there is no runtime source (above), so the build script copies
+   one header into `OUT_DIR`. It copies rather than parses, so the rule stays in one tested
+   function; it is skipped under `rust-only`, which must not start depending on `CUDF_ROOT` —
+   that would re-run the script and recompile the rust-only tree whenever the variable moves;
+   and a build with no `CUDF_ROOT` (`CUDF_BUILD_FROM_SOURCE=1` is a supported path in
+   `scripts/build.sh`) writes an empty file rather than failing, with the write path naming
+   `CUDF_ROOT` if it ever matters. No engine change, no component API change.
+2. **The write-side refusal is more than the dispatch asked for.** Argued above: detecting the
+   breach is not the same as not depending on the operator.
+3. **The committed-file stamp guard passes on an absent file.** The coverage guard owns absence
+   and already fails for it; two cases red for one reason would have made the 27 a 28 and bought
+   nothing. The rule itself is exercised today by the rust-only cases over doctored text, and by
+   the doctored real file above.
+4. **`cargo fmt -p peacockdb-core` is still not safe in this tree** (round 4's finding). Each
+   touched file was formatted with `rustfmt --edition 2024 <file>` and re-checked with
+   `--check`.
+5. **Wiki edited, not reported.** Round 4 handed its lines to the coordinator; this round the
+   counts and the `gpu-result.txt` prose are in `build-test.md` already, since a verify-26.02
+   developer reads that page and not this file. The edits are listed below.
+6. Clippy: the five warnings in touched files are the five round 3 proved pre-existing
+   (`corpus.rs:500`, `fingerprint.rs:135`, `benchmark.rs:108`, `test_golden_format.rs:708`, and
+   `duckdb_oracle/tests.rs:124` → now `:126`, moved by two import lines, same
+   `assert!(DUCKDB_FLOAT_TOLERANCE < 1e-10)`). No warning falls in any line this round wrote.
+
+### `build-test.md`, edited here
+
+Grand total 2565 → **2575**, Rust 2073 → **2083**. The cpu header 1384 → **1394**, `--lib` 650 →
+**659**, `test_cpu_corpus` 705 → **706**. The corpus-cpu row 704 → **705**; the DuckDB tier 148 →
+**149** and "Two more cases" → **three**, naming the stamp guard and the no-file dataset. Module
+units: Golden merge 3 → **9**, DuckDB oracle 24 → **26**, Device answer comparison 8 → **9**,
+each with its prose. The `gpu-result.txt` artifact row, the artifact diagram and the two
+`PCK_WRITE_GPU_RESULT` paragraphs now carry the `cudf=` line, the refusal and the read knob.
+
+### For the next person
+
+- **Still only the device cycle.** `PCK_WRITE_GPU_RESULT=1` through
+  `build-test-shadgpu.sh --all`, then `--pull-results`, then the 27 red cases go green or each
+  failing section is a ticket. The cycle will now also write a `cudf=25.02` first line, and the
+  28th case (the stamp guard) stops being vacuous the moment the file exists.
+- **For a `verify-26.02` developer**, four things. `PCK_WRITE_GPU_RESULT=26.02` is now *enforced*
+  rather than advised: `=1` on a 26.02 build panics at the first recorded cell and writes
+  nothing. `gpu-result-26.02.txt` must carry `cudf=26.02` or every reader of it fails — it will,
+  since the writer stamps what it is linked against. The `duckdb_gpu_` filter that task's impl
+  plan already uses keeps the coverage guard out of the run, and the stamp guard too (it reads
+  the committed file). And when `peacock_cudf_version()` lands, point
+  `device_answer::cudf_version()` at it and delete the `build.rs` copy: that is the stronger
+  source, and the doc at both sites says so.
+- **For a `pbench` developer:** the coverage guard and the stamp guard both derive their datasets
+  from `cost-registry.csv`, so a new dataset needs no edit in `test_cpu_corpus.rs`, and landing
+  with every `gpu_*` cell off is fine — no `gpu-result.txt` is expected or wanted. What you do
+  own is `duckdb_result.py`'s two dataset lists (`:230` and `:238`) and the empty-glob no-op
+  behind them, per the note above.
+- **If the committed file ever moves to another cuDF**, `COMMITTED_CUDF_VERSION` in
+  `test_support/mod.rs` is the one line, and `testdata/.gitignore`'s comment is the one piece of
+  prose beside it.
+
+## Completeness pass — the reviewer's reading (2026-10-08)
+
+A fresh reviewer over the branch at `6c92f6b7`, asking what is wrong, with no sight of the
+analyst's list. **0 blocking, 4 important.** It verified rather than read: it reimplemented
+`fingerprint.rs`'s algorithm independently in Python — declared-type classing, trimmed cells,
+`\u{1}` per exact cell, byte-sorted rows joined with `\n`, `{:.17e}` with a plain exponent, the sum
+in value order folded from `0.0` — ran it over DuckDB 1.5.4 and the committed sf1 parquet, and
+reproduced **all six committed fingerprints byte for byte**, tpch q11 and tpcds q98 included. So
+the cross-writer agreement is not a copied digest; it is what the algorithm produces from the data.
+It also re-derived all 120 lines and re-ran each line's comparison: every `duckdb_approx` line
+genuinely needs its tolerance (exact fails on all 15), every `duckdb_divergent` column really
+differs — measured in last-place units, q58 at 92-97, q61 at 45, q66's twelve at 1.31-1.79 — and
+19,892 golden data lines carry no `|` inside a cell. It found no coverage regression: no `#[test]`
+is removed anywhere in the diff, and the one renamed case has strictly stronger assertions.
+
+### Important
+
+1. **`tickets.md` carried two numbers the branch falsified**, and one caused a collision: line 14
+   said the next free number is 252 when #252 was taken, so the next agent to file would have
+   reused it against the same paragraph's "Numbers are never reused"; line 20 said 113 open
+   against its own table's 114. Both were right on master. Corrected, and recomputed after #253
+   and #254: next free **255**, open **116**, which matches the anchors in every file.
+2. **#252's enumeration was wrong in both directions**, so its remedy was incomplete. Two more
+   cases are in the class: `all_modes_expands_to_the_five_in_either_position` reads
+   `corpus_cases.inc` through `corpus_lines` the same way, and
+   `every_timed_case_is_enabled_on_a_device` in `test_corpus_goldens/benchmark.rs` already did
+   before this task — `rust_only_targets` stages that binary, because its second axis greps only
+   the top-level `tests/*.rs` for `repo_root` and cannot see a read inside a submodule. Six cases,
+   not four, and the fix has to carry `peacockdb-core/tests/common/` as well as
+   `llm-wiki/tickets/`. Ticket corrected.
+3. **`gpu_case` records the device's answer after an assertion against the cpu that panics first**
+   — `corpus_golden::assert_section(&cpu_golden(…), query, &render_run(…))` at `corpus_gpu.rs:52`,
+   twelve lines ahead of `record_gpu_result`. The spec's step 4 wants the section written before
+   the device asserts against the cpu precisely so a divergence is recorded, and names #243's lane
+   split as the case; `render_run` carries per-node lanes and batch lists, so that divergence
+   aborts the case before anything is written and DuckDB never sees the answer. Latent — #243
+   names no corpus query today — which is why three review rounds missed it. Handed to the
+   developer.
+4. **`build-test.md:992` named `over_cap`, which this branch deleted** (deviation 1 of round 1
+   retired it for `section_holds_rows`). Corrected to name `duckdb_case` and `duckdb_gpu_case`,
+   the two the branch actually added to that facade.
+
+### What it checked and found clean
+
+`build-test.md`'s arithmetic, all 79 rows summing to the grand total and each block header to its
+own rows; the three readings of `PCK_WRITE_GPU_RESULT` agreeing across `device_answer.rs`, the gate
+script and the page; `device_result_files`' shell, including that `declare -f`'s output is not
+re-expanded inside the unquoted heredoc, that an unmatched glob is caught, and that the freshness
+premise holds because the goldens push carries no `-t` so a pushed copy's mtime precedes the launch
+marker — with the one hole, a `--push-binaries` between the run and the pull, named in the comment
+rather than pretended away; `architecture.md`, whose only falsified sentence was the one already
+corrected; the gitignore's handling of `gpu-result-26.02.txt` against the tracked committed file;
+and that the regeneration was surgical, exactly four sections in one `mini.result.txt` and ten
+`hash:` lines across three files.
+
+### Nits it recorded and the pass drops
+
+Three comment-cap overruns (`fingerprint.rs:187` at 12, `test_cpu_corpus.rs:216` at 11,
+`test_golden_format.rs:554` at 5 in a body). One seam worth keeping in mind rather than fixing:
+`duckdb_result.py`'s `EXACT_TYPES` lists `TIME`, `INTERVAL`, `BLOB` and `UUID` as hashable while
+`cell()` falls through to `str(value)` for all four, which arrow-rs renders differently — the same
+class step 5 fixed for timestamps. No corpus query returns any of them, the failure mode is a hash
+mismatch rather than a false pass, and the exhaustive `is_approximate` raise is what keeps it from
+going silent. Likewise a one-byte asymmetry in the cap threshold, Rust measuring the rendering
+without its trailing newline and Python with it, whose only consequence is a red line.
+
+### One question it could not settle, and the answer
+
+It could not tell whether the page's `--lib` figure counts `#[ignore]`d cases, since the End-to-end
+row's prose counts 29 "two of which are ignored". It does: round 5's measured `--lib` is 657 passed
+plus 2 ignored and the page now says 659, so rows include ignored cases. The page is consistent.
+
+### A process note, and it is mine
+
+The reviewer found the working tree dirty under it mid-pass — #253 and #254 appeared while it was
+reading — and re-read every wiki fact from `git show 6c92f6b7:` rather than from the tree, which is
+the right instinct and should not have been necessary. A completeness reviewer reads a commit;
+commit the wiki work before dispatching it, or hold it until the pass returns.
