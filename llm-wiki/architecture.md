@@ -282,12 +282,18 @@ merge groups on keys + gid and the shuffle still hashes the keys alone. The rule
 that is `hashKeys ⊆ group columns` — subset, not equality — and equal group keys always carry
 equal user keys, so co-location holds.
 
-The gid is a real column: the expansion materializes a constant per set — the plan declares it
-`UInt8` and the cpu emits that; the device emits `Int32` ([#65](tickets/corpus-coverage.md#t65)) — and appends it
-after the group keys and before the aggregate outputs. Its rendering is asymmetric on purpose —
-the init's `group_by` does not list it, because there it is a tag being synthesized, while every
-node above lists it as an ordinary key. A projection over the final drops it again, without
-which the query returns a column it never asked for.
+The gid is a real column: the expansion materializes a constant per set — the plan declares the
+width `Aggregate::grouping_id_type` picks, `UInt8` up to 8 keys, and the cpu emits that; the
+device emits `Int32` ([#65](tickets/corpus-coverage.md#t65)) — and appends it after the group
+keys and before the aggregate outputs. One exception: an inner DISTINCT stage carries one more
+key than DataFusion's aggregate, so at exactly 8, 16 or 32 keys it declares the next width up,
+and a project above the outer stage casts the id back to DataFusion's. Not a cast in the
+`group_by`: a merge's co-location check reads plain column keys only.
+
+The gid's rendering is asymmetric on purpose — the init's `group_by` does not list it, because
+there it is a tag being synthesized, while every node above lists it as an ordinary key. A
+projection over the final drops it again, without which the query returns a column it never
+asked for.
 
 A masked column is a typed NULL rather than an absent one, so every set shares a schema and sits
 in one `cudf::table` distinguished by the gid. The ids are the bitmask of each set's **masked**
@@ -306,9 +312,11 @@ A rollup's last set masks every key, so those rows hash on nothing and land in t
 
 ### DISTINCT lowers to grouping
 
-`DISTINCT` is never a property of an aggregator: no `aggs` entry carries a flag and the wire's
-`distinct` field is never set. The state of a distinct aggregate is *the set of its distinct
-values*, and the only way this IR represents a set of values is as the rows of a grouped table.
+`DISTINCT` is never a property of an aggregator: no `aggs` entry carries a flag, and the wire's
+`distinct` field is `(deprecated)` — its slot stays so the fields after it keep theirs, and
+neither generated side has an accessor. The state of a distinct aggregate is *the set of its
+distinct values*, and the only way this IR represents a set of values is as the rows of a
+grouped table.
 So the distinct argument becomes an extra group key on an inner aggregate, and the aggregate
 that consumed it becomes an ordinary one over the deduplicated rows.
 
@@ -318,11 +326,46 @@ because dedup is idempotent and associative, so no finalize is needed either. On
 argument with `sum`/`min`/`max` companions arrives already rewritten by DataFusion's
 `SingleDistinctToGroupBy` as two aggregates, each decomposing as any other.
 
-Any other companion is refused at plan time ([#62](tickets/corpus-coverage.md#t62)). DataFusion refuses it too,
-and its reason is a limitation of its rewrite rather than of the shape: it re-applies *the same
-function* at the outer level, which is sound only where `f(f(x))` is `f(x)`. Our decomposition
-has already separated init from merge — a `count`'s merge aggregator *is* `sum` — so the
-restriction lifts, and closing #62 is a planner rewrite rather than a distinct-aware kernel.
+Any other companion lowers to **two aggregate sequences**
+(`planner/translator/aggregate/distinct.rs`). DataFusion refuses the shape, and its reason is a
+limitation of its rewrite rather than of the shape: it re-applies *the same function* at the
+outer level, which is sound only where `f(f(x))` is `f(x)`. Our decomposition already separates
+init from merge — a `count`'s merge aggregator *is* `sum` — so the outer level merges each
+companion's state instead.
+
+The node is classified before its input is translated, so the input is translated once. Every
+DISTINCT aggregate's argument must strip to the same expression under DataFusion's *widening*
+coercion casts — the ones that keep distinct values distinct: integer to a wider integer,
+integer to `Float64`, decimal to a wider decimal, a decimal of precision ≤ 15 to `Float64`.
+DataFusion casts `sum`'s and `avg`'s argument and not `count`'s, so
+`count(DISTINCT c), sum(DISTINCT c)` over an `Int32` column is one argument, not two.
+
+- The **inner stage** groups by `(x, keys)` and runs the companions' inits, emitting state. `x`
+  is always its own column, `__distinct_arg`, first and never masked — even where it is also a
+  group key, since a grouping set can mask a key to NULL. It is shuffled as DataFusion shuffles
+  the aggregate, one column right.
+- The **outer stage** groups by `keys` and takes no shuffle of its own: the inner's hash is on a
+  subset of these keys. Its first node is an init. Each DISTINCT aggregate runs there as its
+  non-distinct twin over the deduplicated `x`; each companion's state columns run that
+  companion's `Merge::PerColumn` rule as ordinary init aggregators — `sum` over a count or a
+  sum, `min`, `max` — paired with the rule **by position**, since our state names
+  (`avg(…)$sum`) carry none of DataFusion's `[sum]` tags. The outer stage then merges and
+  finalizes to DataFusion's schema, so nothing above the node changes.
+
+Two things the outer stage's finalize must do. A `sum`, `min` or `max` read off state the outer
+init widened again (`state_type` widens a decimal sum) is cast back to the type DataFusion
+declares. And every `count` there — companion or DISTINCT — finalizes as
+`CASE WHEN o IS NULL THEN 0 ELSE o END`: a count merged by `sum` answers NULL over an empty
+keyless input, where SQL says 0.
+
+Two shapes stay refused by name, before `decompose`. A `stddev` or `var` *companion*
+([#261](tickets/complete-coverage.md#t261)): its state merges as `Merge::Combined(MergeM2)`, a
+merge-phase aggregator, and the outer node is an init. A `stddev(DISTINCT x)` is not this and
+plans. And DISTINCT over two arguments, or over two different ones
+([#144](tickets/complete-coverage.md#t144)). Behind both, `decompose`'s own `is_distinct()`
+check refuses anything else still carrying the flag — a net for a shape the classifier does not
+recognise, which would otherwise be computed as non-distinct on both engines where the
+cpu-vs-device comparison cannot see it. It names no ticket: it is not a known wrong answer.
 
 Nulls fall out correctly in both directions, which is worth checking rather than assuming
 because the two cases want opposite things. `SELECT DISTINCT` keeps a null as a value, since the
@@ -872,7 +915,7 @@ field with no consumer reads as a knob (#132).
 | [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `limit`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `.columns(projected)`, `set_row_groups(...)` and `set_num_rows(limit)` set on `opts` first |
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — `cudf::compute_column(tv, predicate)` for the mask, then `cudf::apply_boolean_mask(tv, mask->view())` |
 | [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is a column copy, and LIKE/CASE/scalar functions take `build_column` instead |
-| [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale and `distinct`), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row |
+| [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row |
 | [`CudfHashJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::inner_join` / `left_join` / `full_join(left_keys, right_keys, kJoinNulls)`; semi/anti take [`left_semi_join` / `left_anti_join`](../cpp/src/operators/join.cpp), or their `mixed_*` forms when a residual filter must be evaluated during the join |
 | [`CudfCrossJoin`](../flatbuffers/gpu_plan.fbs) | nothing — the node is its two inputs | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::cross_join(ltv, rtv)` |
 | [`CudfNestedLoopJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `filter` + `filter_columns`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::conditional_inner_join` / `conditional_left_join` over the predicate as an AST; a predicate the AST cannot take is `cudf::cross_join`, then [`apply_boolean_mask`](../cpp/src/operators/join.cpp) over the filter evaluated on the crossed table, for Inner alone ([#215](tickets/joins.md#t215)) |

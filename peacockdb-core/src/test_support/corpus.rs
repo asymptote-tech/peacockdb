@@ -98,6 +98,9 @@ pub(crate) async fn assert_answer(
 ) {
     let what = format!("{dataset}/{query} at {}", mode.name);
     match cpu_oracle_mode(oracle) {
+        // Nothing to compare against: the query's answer is held by a test naming its own
+        // oracle, not by this session.
+        CpuOracle::DataFusionDisabled => {}
         CpuOracle::DataFusionSubset => {
             assert_subset_of_unlimited(dataset, sf, query, batches, &what).await
         }
@@ -482,13 +485,18 @@ pub(crate) enum CpuOracle {
     /// are a sub-MULTISET of the unlimited answer, compared as a multiset because set
     /// membership passes a run that returned one row twice where the oracle has it once.
     DataFusionSubset,
+    /// No DataFusion compare: for a query DataFusion 45 answers wrong or refuses. Its
+    /// answer is held another way, which the line's comment names.
+    DataFusionDisabled,
 }
 
 impl CpuOracle {
     /// The `rel_tol` handed to the result compare. `None` = exact.
     pub(crate) fn rel_tol(self) -> Option<f64> {
         match self {
-            CpuOracle::DataFusionExact | CpuOracle::DataFusionSubset => None,
+            CpuOracle::DataFusionExact
+            | CpuOracle::DataFusionSubset
+            | CpuOracle::DataFusionDisabled => None,
             CpuOracle::DataFusionApproximate => Some(1e-12),
         }
     }
@@ -502,9 +510,10 @@ pub(crate) fn cpu_oracle_mode(s: &str) -> CpuOracle {
         "data_fusion_exact" => CpuOracle::DataFusionExact,
         "data_fusion_approximate" => CpuOracle::DataFusionApproximate,
         "data_fusion_subset" => CpuOracle::DataFusionSubset,
+        "data_fusion_disabled" => CpuOracle::DataFusionDisabled,
         other => panic!(
-            "cpu result test: unknown oracle keyword '{other}' \
-             (expected data_fusion_exact|data_fusion_approximate|data_fusion_subset)"
+            "cpu result test: unknown oracle keyword '{other}' (expected data_fusion_exact|\
+             data_fusion_approximate|data_fusion_subset|data_fusion_disabled)"
         ),
     }
 }

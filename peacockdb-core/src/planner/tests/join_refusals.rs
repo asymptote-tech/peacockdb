@@ -99,17 +99,28 @@ async fn a_window_function_is_refused_naming_143() {
     );
 }
 
+// #144: a second DISTINCT argument needs a gid-multiplying expand.
 #[tokio::test]
-async fn a_distinct_beside_a_companion_datafusion_cannot_rewrite_is_refused_naming_62() {
-    let fixture = Fixture::new("refuse-distinct").await;
-    // DataFusion's SingleDistinctToGroupBy re-applies the same function at the outer
-    // level, so it only fires where f(f(x)) is f(x) — avg and count are not, which is
-    // tpcds q28's shape and why the flag survives to us.
+async fn bug_two_distinct_arguments_are_refused() {
+    let fixture = Fixture::new("refuse-two-distinct").await;
     let err = fixture
-        .refused("SELECT avg(v), count(v), count(DISTINCT v) FROM tiny")
+        .refused("SELECT count(DISTINCT k), count(DISTINCT v) FROM tiny")
         .await;
     assert!(
-        matches!(&err, PlanError::Unsupported(what) if what.contains("#62")),
+        matches!(&err, PlanError::Unsupported(what) if what.contains("#144")),
+        "{err}"
+    );
+}
+
+// #261: a Welford companion's state merges as one MERGE_M2 call, which an init cannot run.
+#[tokio::test]
+async fn bug_a_stddev_beside_a_distinct_is_refused() {
+    let fixture = Fixture::new("refuse-welford-companion").await;
+    let err = fixture
+        .refused("SELECT stddev(v), count(DISTINCT k) FROM tiny")
+        .await;
+    assert!(
+        matches!(&err, PlanError::Unsupported(what) if what.contains("#261")),
         "{err}"
     );
 }

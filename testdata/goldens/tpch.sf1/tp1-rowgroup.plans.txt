@@ -55,6 +55,28 @@ GpuUnload: estimated_max_resident_size=115
     GpuCoalesceAllBatches: estimated_max_resident_size=115
       GpuLoadParquet: estimated_max_resident_size=495, source_bytes=495, target_batch_bytes=495, amplification=1.0
     GpuLoadParquet: estimated_max_resident_size=2564, source_bytes=2564, target_batch_bytes=2564, amplification=1.0
+== distinct-functions
+GpuUnload
+  GpuProject: exprs=[l_returnflag@0, `count(DISTINCT lineitem.l_quantity)`@1 as distinct_qty, `sum(DISTINCT lineitem.l_quantity)`@2 as sum_distinct_qty, `avg(DISTINCT lineitem.l_quantity)`@3 as avg_distinct_qty, `stddev(DISTINCT lineitem.l_quantity)`@4 as stddev_distinct_qty, count(*)@5 as n, avg(lineitem.l_extendedprice)@6 as avg_price], lanes=1, batches=single, schema=[l_returnflag:Utf8, distinct_qty:Int64, sum_distinct_qty:Decimal128(25,2), avg_distinct_qty:Decimal128(19,6), stddev_distinct_qty:Float64, n:Int64, avg_price:Decimal128(19,6)]
+    GpuAggregate: group_by=[l_returnflag@1], aggs=[count(__distinct_arg@0) as `count(DISTINCT lineitem.l_quantity)`, sum(__distinct_arg@0) as `sum(DISTINCT lineitem.l_quantity)`, sum(__distinct_arg@0) as `avg(DISTINCT lineitem.l_quantity)$sum`, count(__distinct_arg@0) as `avg(DISTINCT lineitem.l_quantity)$count`, count(__distinct_arg@0) as `stddev(DISTINCT lineitem.l_quantity)$count`, mean(__distinct_arg@0) as `stddev(DISTINCT lineitem.l_quantity)$mean`, m2(__distinct_arg@0) as `stddev(DISTINCT lineitem.l_quantity)$m2`, sum(count(*)@2) as count(*), sum(avg(lineitem.l_extendedprice)$sum@3) as avg(lineitem.l_extendedprice)$sum, sum(avg(lineitem.l_extendedprice)$count@4) as avg(lineitem.l_extendedprice)$count], final=[CASE WHEN `count(DISTINCT lineitem.l_quantity)`@1 IS NULL THEN 0 ELSE `count(DISTINCT lineitem.l_quantity)`@1 END as `count(DISTINCT lineitem.l_quantity)`, `sum(DISTINCT lineitem.l_quantity)`@2, CAST(`avg(DISTINCT lineitem.l_quantity)$sum`@3 / CAST(`avg(DISTINCT lineitem.l_quantity)$count`@4 AS Decimal128(19,0)) AS Decimal128(19,6)) as `avg(DISTINCT lineitem.l_quantity)`, CASE WHEN (CAST(`stddev(DISTINCT lineitem.l_quantity)$count`@5 AS Float64) - 1) <= 0 THEN NULL ELSE sqrt(`stddev(DISTINCT lineitem.l_quantity)$m2`@7 / (CAST(`stddev(DISTINCT lineitem.l_quantity)$count`@5 AS Float64) - 1)) END as `stddev(DISTINCT lineitem.l_quantity)`, CASE WHEN count(*)@8 IS NULL THEN 0 ELSE count(*)@8 END as count(*), CAST(avg(lineitem.l_extendedprice)$sum@9 / CAST(avg(lineitem.l_extendedprice)$count@10 AS Decimal128(19,0)) AS Decimal128(19,6)) as avg(lineitem.l_extendedprice)], lanes=1, batches=single, schema=[l_returnflag:Utf8, `count(DISTINCT lineitem.l_quantity)`:Int64, `sum(DISTINCT lineitem.l_quantity)`:Decimal128(25,2), `avg(DISTINCT lineitem.l_quantity)`:Decimal128(19,6), `stddev(DISTINCT lineitem.l_quantity)`:Float64, count(*):Int64, avg(lineitem.l_extendedprice):Decimal128(19,6)]
+      GpuAggregateBatches: group_by=[__distinct_arg@0, l_returnflag@1], aggs=[sum(count(*)@2) as count(*), sum(avg(lineitem.l_extendedprice)$sum@3) as avg(lineitem.l_extendedprice)$sum, sum(avg(lineitem.l_extendedprice)$count@4) as avg(lineitem.l_extendedprice)$count], lanes=1, batches=single, schema=[__distinct_arg:Decimal128(15,2), l_returnflag:Utf8, count(*):Int64, avg(lineitem.l_extendedprice)$sum:Decimal128(25,2), avg(lineitem.l_extendedprice)$count:Int64]
+        GpuAggregate: group_by=[l_quantity@0, l_returnflag@2], aggs=[count(1) as count(*), sum(l_extendedprice@1) as avg(lineitem.l_extendedprice)$sum, count(l_extendedprice@1) as avg(lineitem.l_extendedprice)$count], lanes=1, batches=multiple, schema=[__distinct_arg:Decimal128(15,2), l_returnflag:Utf8, count(*):Int64, avg(lineitem.l_extendedprice)$sum:Decimal128(25,2), avg(lineitem.l_extendedprice)$count:Int64]
+          GpuLoadParquet: table=lineitem, projections=[l_quantity@4, l_extendedprice@5, l_returnflag@8], partition_groups=[[[0],[1],[2],[3],[4],[5],[6],[7],[8],[9],[10],[11],[12],[13],[14],[15],[16],[17],[18],[19],[20],[21],[22],[23],[24],[25],[26],[27],[28],[29],[30],[31],[32],[33],[34],[35],[36],[37],[38],[39],[40],[41],[42],[43],[44],[45],[46],[47],[48]]], lanes=1, batches=multiple, schema=[l_quantity:Decimal128(15,2), l_extendedprice:Decimal128(15,2), l_returnflag:Utf8]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#6 CudfProject, batch)
+    GpuAggregate: calling_lanes=1, per batch: execute_node(#4 CudfAggregate{Partial}, batch), execute_node(#5 CudfProject{finalize}, prior output)
+      GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
+        GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+          GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=366074115, certain=0
+GpuUnload: estimated_max_resident_size=522105705
+  GpuProject: estimated_max_resident_size=522105705
+    GpuAggregate: estimated_max_resident_size=522105705
+      GpuAggregateBatches: estimated_max_resident_size=366074115
+        GpuAggregate: estimated_max_resident_size=1571118
+          GpuLoadParquet: estimated_max_resident_size=1107510, source_bytes=53322028, target_batch_bytes=53322028, amplification=1.4
 == filter-project
 GpuUnload
   GpuFilter: predicate=l_quantity@1 > 30.00, lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_quantity:Decimal128(15,2)]
@@ -1603,6 +1625,28 @@ GpuUnload: estimated_max_resident_size=186037665
                                 GpuFilter: estimated_max_resident_size=2749756
                                   GpuLoadParquet: estimated_max_resident_size=5499512, source_bytes=8950348, target_batch_bytes=8950348, amplification=1.0
                               GpuLoadParquet: estimated_max_resident_size=3399929, source_bytes=166059244, target_batch_bytes=166059244, amplification=1.0
+== rollup-distinct
+GpuUnload
+  GpuProject: exprs=[l_returnflag@0, l_linestatus@1, `count(DISTINCT lineitem.l_suppkey)`@3, avg(lineitem.l_quantity)@4, count(*)@5], lanes=1, batches=single, schema=[l_returnflag:Utf8, l_linestatus:Utf8, `count(DISTINCT lineitem.l_suppkey)`:Int64, avg(lineitem.l_quantity):Decimal128(19,6), count(*):Int64]
+    GpuAggregate: group_by=[l_returnflag@1, l_linestatus@2, __grouping_id@3], aggs=[count(__distinct_arg@0) as `count(DISTINCT lineitem.l_suppkey)`, sum(avg(lineitem.l_quantity)$sum@4) as avg(lineitem.l_quantity)$sum, sum(avg(lineitem.l_quantity)$count@5) as avg(lineitem.l_quantity)$count, sum(count(*)@6) as count(*)], final=[CASE WHEN `count(DISTINCT lineitem.l_suppkey)`@3 IS NULL THEN 0 ELSE `count(DISTINCT lineitem.l_suppkey)`@3 END as `count(DISTINCT lineitem.l_suppkey)`, CAST(avg(lineitem.l_quantity)$sum@4 / CAST(avg(lineitem.l_quantity)$count@5 AS Decimal128(19,0)) AS Decimal128(19,6)) as avg(lineitem.l_quantity), CASE WHEN count(*)@6 IS NULL THEN 0 ELSE count(*)@6 END as count(*)], lanes=1, batches=single, schema=[l_returnflag:Utf8, l_linestatus:Utf8, __grouping_id:UInt8, `count(DISTINCT lineitem.l_suppkey)`:Int64, avg(lineitem.l_quantity):Decimal128(19,6), count(*):Int64]
+      GpuAggregateBatches: group_by=[__distinct_arg@0, l_returnflag@1, l_linestatus@2, __grouping_id@3], aggs=[sum(avg(lineitem.l_quantity)$sum@4) as avg(lineitem.l_quantity)$sum, sum(avg(lineitem.l_quantity)$count@5) as avg(lineitem.l_quantity)$count, sum(count(*)@6) as count(*)], lanes=1, batches=single, schema=[__distinct_arg:Int64, l_returnflag:Utf8, l_linestatus:Utf8, __grouping_id:UInt8, avg(lineitem.l_quantity)$sum:Decimal128(25,2), avg(lineitem.l_quantity)$count:Int64, count(*):Int64]
+        GpuAggregate: group_by=[l_suppkey@0, l_returnflag@2, l_linestatus@3], grouping_sets=[[l_suppkey@0], [l_suppkey@0, l_returnflag@2], [l_suppkey@0, l_returnflag@2, l_linestatus@3]], aggs=[sum(l_quantity@1) as avg(lineitem.l_quantity)$sum, count(l_quantity@1) as avg(lineitem.l_quantity)$count, count(1) as count(*)], lanes=1, batches=multiple, schema=[__distinct_arg:Int64, l_returnflag:Utf8, l_linestatus:Utf8, __grouping_id:UInt8, avg(lineitem.l_quantity)$sum:Decimal128(25,2), avg(lineitem.l_quantity)$count:Int64, count(*):Int64]
+          GpuLoadParquet: table=lineitem, projections=[l_suppkey@2, l_quantity@4, l_returnflag@8, l_linestatus@9], partition_groups=[[[0],[1],[2],[3],[4],[5],[6],[7],[8],[9],[10],[11],[12],[13],[14],[15],[16],[17],[18],[19],[20],[21],[22],[23],[24],[25],[26],[27],[28],[29],[30],[31],[32],[33],[34],[35],[36],[37],[38],[39],[40],[41],[42],[43],[44],[45],[46],[47],[48]]], lanes=1, batches=multiple, schema=[l_suppkey:Int64, l_quantity:Decimal128(15,2), l_returnflag:Utf8, l_linestatus:Utf8]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#6 CudfProject, batch)
+    GpuAggregate: calling_lanes=1, per batch: execute_node(#4 CudfAggregate{Partial}, batch), execute_node(#5 CudfProject{finalize}, prior output)
+      GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
+        GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+          GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=384077760, certain=0
+GpuUnload: estimated_max_resident_size=318064395
+  GpuProject: estimated_max_resident_size=318064395
+    GpuAggregate: estimated_max_resident_size=330066825
+      GpuAggregateBatches: estimated_max_resident_size=384077760
+        GpuAggregate: estimated_max_resident_size=610993
+          GpuLoadParquet: estimated_max_resident_size=420058, source_bytes=19761622, target_batch_bytes=19761622, amplification=1.5
 == rollup-over-join
 GpuUnload
   GpuProject: exprs=[c_nationkey@0, c_mktsegment@1, count(*)@3], lanes=1, batches=single, schema=[c_nationkey:Int32, c_mktsegment:Utf8, count(*):Int64]

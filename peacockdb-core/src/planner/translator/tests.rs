@@ -4,9 +4,12 @@
 
 use std::sync::Arc;
 
+use datafusion::arrow::datatypes::DataType;
+use datafusion::logical_expr::Aggregate;
 use datafusion::physical_plan::ExecutionPlan;
 
 use super::Translator;
+use crate::plan::AggregateBody;
 use crate::plan::Batching;
 use crate::plan::KeyDistribution;
 use crate::plan::PlanAgg;
@@ -692,5 +695,208 @@ async fn a_window_function_is_refused_at_plan_time() {
     assert!(
         matches!(&err, PlanError::Unsupported(what) if what.contains("#143")),
         "{err}"
+    );
+}
+
+/// Every aggregate node in the tree, parents first.
+fn aggregates_in(node: &dyn GpuNode) -> Vec<&dyn GpuNode> {
+    let mut found = match as_node_ref(node) {
+        NodeRef::Aggregate(_) | NodeRef::AggregateBatches(_) => vec![node],
+        _ => Vec::new(),
+    };
+    for child in node.children() {
+        found.extend(aggregates_in(child));
+    }
+    found
+}
+
+fn body_of(node: &dyn GpuNode) -> &AggregateBody {
+    match as_node_ref(node) {
+        NodeRef::Aggregate(aggregate) => &aggregate.body,
+        NodeRef::AggregateBatches(aggregate) => &aggregate.body,
+        _ => panic!("{} is not an aggregate", name_of(node)),
+    }
+}
+
+#[tokio::test]
+async fn a_distinct_beside_an_avg_lowers_to_an_inner_and_an_outer_stage() {
+    let tree = translated(
+        "SELECT c_nationkey, avg(c_acctbal), count(DISTINCT c_mktsegment) \
+         FROM customer GROUP BY c_nationkey",
+    )
+    .await;
+    validate_all(tree.as_ref());
+    let nodes = aggregates_in(tree.as_ref());
+    // The innermost is the inner init: the distinct argument, then the key; the avg's inits.
+    let inner_init = body_of(*nodes.last().expect("an inner init"));
+    assert_eq!(inner_init.group_by.len(), 2);
+    assert_eq!(
+        inner_init.aggs.iter().map(|a| a.func).collect::<Vec<_>>(),
+        vec![PlanAgg::Sum, PlanAgg::Count]
+    );
+    // The outer init sums the avg's two state columns and counts the deduplicated argument.
+    let outer_init = *nodes
+        .iter()
+        .rev()
+        .find(|node| body_of(**node).group_by.len() == 1)
+        .expect("an outer stage grouping on the key alone");
+    assert_eq!(
+        body_of(outer_init)
+            .aggs
+            .iter()
+            .map(|a| a.func)
+            .collect::<Vec<_>>(),
+        vec![PlanAgg::Sum, PlanAgg::Sum, PlanAgg::Count]
+    );
+    // Its avg sum is the inner Decimal128(25, 2) summed again: declared widened.
+    let sum_state = &body_of(outer_init).aggs[0].outputs[0];
+    assert_eq!(
+        sum_state.data_type(),
+        &DataType::Decimal128(35, 2),
+        "{sum_state:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_grouped_distinct_at_four_lanes_shuffles_once_on_the_keys_one_column_right() {
+    let tree = translated_at_tp4(
+        "SELECT c_nationkey, avg(c_acctbal), count(DISTINCT c_mktsegment) \
+         FROM customer GROUP BY c_nationkey",
+        0,
+    )
+    .await;
+    validate_all(tree.as_ref());
+    let emit = find(tree.as_ref(), &|node| {
+        matches!(as_node_ref(node), NodeRef::EmitPartitions(_))
+    })
+    .expect("the inner stage's shuffle");
+    let NodeRef::EmitPartitions(emit) = as_node_ref(emit) else {
+        unreachable!()
+    };
+    assert_eq!(emit.hash_keys, vec![1], "the key, after __distinct_arg");
+    assert_eq!(
+        shape(tree.as_ref()).matches("EmitPartitions").count(),
+        1,
+        "{}",
+        shape(tree.as_ref())
+    );
+    // The outer stage's finishing merge is co-located with no shuffle of its own.
+    let outer = *aggregates_in(tree.as_ref())
+        .first()
+        .expect("the outer finish");
+    let layout = outer.kind().layout().expect("a layout");
+    assert_eq!(layout.n, 4);
+    assert_eq!(
+        layout.key_distribution,
+        KeyDistribution::ByHash { hash_keys: vec![0] }
+    );
+}
+
+#[tokio::test]
+async fn a_keyless_distinct_at_four_lanes_collapses_only_the_inner_stage() {
+    let tree = translated_at_tp4(
+        "SELECT count(c_custkey), count(DISTINCT c_nationkey) FROM customer",
+        0,
+    )
+    .await;
+    validate_all(tree.as_ref());
+    assert_eq!(
+        shape(tree.as_ref()).matches("MergePartitions").count(),
+        1,
+        "{}",
+        shape(tree.as_ref())
+    );
+}
+
+#[tokio::test]
+async fn a_count_and_a_sum_distinct_of_one_int32_column_share_the_inner_key() {
+    // DataFusion casts sum's argument to Int64 and leaves count's: one column, two
+    // expressions. count(*) keeps DataFusion's own rewrite out of the way.
+    let tree = translated(
+        "SELECT count(DISTINCT c_nationkey), sum(DISTINCT c_nationkey), count(*) FROM customer",
+    )
+    .await;
+    validate_all(tree.as_ref());
+    let inner_init = body_of(*aggregates_in(tree.as_ref()).last().unwrap());
+    assert_eq!(
+        inner_init.group_by.len(),
+        1,
+        "one key: the stripped argument"
+    );
+}
+
+#[tokio::test]
+async fn a_distinct_argument_that_is_also_a_key_is_still_its_own_inner_key() {
+    let tree = translated(
+        "SELECT c_nationkey, count(DISTINCT c_nationkey), count(*) FROM customer \
+         GROUP BY c_nationkey",
+    )
+    .await;
+    validate_all(tree.as_ref());
+    assert_eq!(
+        body_of(*aggregates_in(tree.as_ref()).last().unwrap())
+            .group_by
+            .len(),
+        2
+    );
+}
+
+/// Whether some project casts an expression to `target`.
+fn project_casts_to(tree: &dyn GpuNode, target: &DataType) -> bool {
+    find(tree, &|node| match as_node_ref(node) {
+        NodeRef::Project(project) => project
+            .exprs
+            .iter()
+            .any(|named| matches!(&named.expr, Expr::Cast { target: t, .. } if t == target)),
+        _ => false,
+    })
+    .is_some()
+}
+
+#[tokio::test]
+async fn a_distinct_under_a_rollup_keeps_its_argument_unmasked_in_every_set() {
+    let tree = translated(
+        "SELECT c_nationkey, c_mktsegment, count(DISTINCT c_custkey), avg(c_acctbal) \
+         FROM customer GROUP BY ROLLUP(c_nationkey, c_mktsegment)",
+    )
+    .await;
+    validate_all(tree.as_ref());
+    let inner_init = body_of(*aggregates_in(tree.as_ref()).last().unwrap());
+    assert!(!inner_init.grouping_sets.is_empty());
+    assert!(
+        inner_init.grouping_sets.iter().all(|mask| !mask[0]),
+        "{:?}",
+        inner_init.grouping_sets
+    );
+    // Two keys and the argument make three: the id stays UInt8, and nothing narrows it.
+    assert!(
+        !project_casts_to(tree.as_ref(), &DataType::UInt8),
+        "{}",
+        shape(tree.as_ref())
+    );
+}
+
+#[tokio::test]
+async fn a_rollup_over_eight_keys_narrows_the_id_above_the_outer_stage() {
+    // Eight keys and the argument make nine: the inner id is UInt16 and DataFusion's UInt8.
+    let tree = translated(
+        "SELECT c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, \
+         c_comment, count(DISTINCT n_regionkey), count(*) \
+         FROM customer JOIN nation ON c_nationkey = n_nationkey \
+         GROUP BY ROLLUP(c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, \
+         c_mktsegment, c_comment)",
+    )
+    .await;
+    validate_all(tree.as_ref());
+    let inner = *aggregates_in(tree.as_ref()).last().unwrap();
+    let fields = &inner.kind().schema().unwrap().fields;
+    let id = fields
+        .field_with_name(Aggregate::INTERNAL_GROUPING_ID)
+        .expect("the inner id");
+    assert_eq!(id.data_type(), &DataType::UInt16);
+    assert!(
+        project_casts_to(tree.as_ref(), &DataType::UInt8),
+        "{}",
+        shape(tree.as_ref())
     );
 }

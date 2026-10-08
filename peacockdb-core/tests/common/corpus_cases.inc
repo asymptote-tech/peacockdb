@@ -108,6 +108,18 @@ corpus_query!(tpch, 1, q7, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup
 corpus_query!(tpch, 1, q8, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q2, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 
+// distinct-companions (#62): a DISTINCT aggregate beside a companion DataFusion's own rewrite
+// declines. rollup-distinct puts one under a grouping set, which no other corpus query does;
+// its tp4 cpu modes are off on #189, whose shuffle cannot hash the inner merge's
+// __grouping_id, as rollup-over-join's are. Both are off on the device at every mode: #262,
+// the lowering's device cells have never run — rollup-distinct on #65 and #189 as well.
+// DataFusion 45 refuses stddev(DISTINCT) and answers a grouped decimal avg(DISTINCT) as the
+// plain average, so DataFusion is no oracle for distinct-functions; end_to_end.rs's
+// distinct_functions_answer_as_their_hand_lowered_form holds the answer. DuckDB's answer is to
+// be its oracle once chain J's duckdb-oracle has merged.
+corpus_query!(tpch, 1, rollup_distinct, tp1_single | tp1_rowgroup, none, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, distinct_functions, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_disabled, golden_exact, schema_validation_enabled);
+
 // --- tpcds --------------------------------------------------------------------
 corpus_query!(tpcds, 1, q41, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q42, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -293,3 +305,8 @@ corpus_query!(tpcds, 1, q65, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgro
 corpus_query!(tpcds, 1, q81, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q85, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q92, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
+
+// distinct-companions (#62): q28 is six global `avg, count, count(DISTINCT ss_list_price)`
+// blocks cross-joined, and was refused at every mode until the lowering. Its device cells stay
+// off on #152, the cross join's build-side copy, and on #262 behind it.
+corpus_query!(tpcds, 1, q28, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);

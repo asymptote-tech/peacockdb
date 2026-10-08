@@ -67,13 +67,27 @@ async fn sql_answers_match_datafusion(
     tolerance: Option<f64>,
     coverage: Coverage,
 ) {
+    sql_answers_match_oracle(dataset, query, sql, sql, tolerance, coverage).await;
+}
+
+/// The same comparison against a different oracle query: for a query DataFusion answers
+/// wrong or refuses, an equivalent one it answers right. The engine runs `sql`; DataFusion
+/// runs `oracle_sql`, which must produce the same column names and types.
+async fn sql_answers_match_oracle(
+    dataset: &str,
+    query: &str,
+    sql: &str,
+    oracle_sql: &str,
+    tolerance: Option<f64>,
+    coverage: Coverage,
+) {
     let data_dir = data_dir_for(dataset, "1");
 
     let oracle_ctx = crate::register_tables_for(crate::build_session_state(1), &data_dir)
         .await
         .expect("register the tables");
     let expected = oracle_ctx
-        .sql(sql)
+        .sql(oracle_sql)
         .await
         .expect("the oracle plans the query")
         .collect()
@@ -414,6 +428,92 @@ async fn a_two_key_group_by_over_many_rows_does_not_emit_a_group_twice() {
         "two-key group by",
         "SELECT count(*) FROM (SELECT ss_customer_sk, ss_item_sk FROM store_sales GROUP BY 1, 2)",
         None,
+        Coverage::ModesOnly,
+    )
+    .await;
+}
+
+// ── a DISTINCT aggregate beside a companion (#62) ───────────────────────────
+
+#[tokio::test]
+async fn a_count_distinct_beside_an_avg_and_a_count_answers_as_datafusion() {
+    // q28's shape: DataFusion's own rewrite declines avg and count companions.
+    sql_answers_match_datafusion(
+        "tpcds",
+        "distinct beside avg",
+        "SELECT avg(ss_list_price), count(ss_list_price), count(DISTINCT ss_list_price) \
+         FROM store_sales WHERE ss_quantity BETWEEN 0 AND 5",
+        None,
+        Coverage::ModesOnly,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_grouped_count_and_sum_distinct_beside_companions_answer_as_datafusion() {
+    sql_answers_match_datafusion(
+        "tpch",
+        "count and sum distinct",
+        "SELECT l_returnflag, count(DISTINCT l_suppkey), sum(DISTINCT l_suppkey), count(*), \
+         avg(l_quantity) FROM lineitem GROUP BY l_returnflag",
+        None,
+        Coverage::ModesOnly,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_distinct_over_a_column_holding_nulls_does_not_count_the_null() {
+    // ss_customer_sk holds 129,392 NULLs at sf1.
+    sql_answers_match_datafusion(
+        "tpcds",
+        "distinct over nulls",
+        "SELECT ss_store_sk, count(DISTINCT ss_customer_sk), count(ss_customer_sk), count(*) \
+         FROM store_sales GROUP BY ss_store_sk",
+        None,
+        Coverage::ModesOnly,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_keyless_distinct_over_no_rows_answers_zero() {
+    // A predicate the row-group statistics cannot prune: `ss_quantity < 0` prunes every row
+    // group and the plan is refused before it runs. This one keeps them, and every lane gets
+    // zero-row batches.
+    sql_answers_match_datafusion(
+        "tpcds",
+        "distinct over nothing",
+        "SELECT count(ss_customer_sk), count(DISTINCT ss_customer_sk) \
+         FROM store_sales WHERE ss_quantity + ss_item_sk < 0",
+        None,
+        Coverage::ModesOnly,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn distinct_functions_answer_as_their_hand_lowered_form() {
+    // DataFusion 45 refuses stddev(DISTINCT) and answers a grouped decimal avg(DISTINCT) as
+    // the plain average, so its oracle is this file lowered by hand: the DISTINCT aggregates
+    // over the deduplicated values, joined on the key to the companions over every row.
+    let sql = std::fs::read_to_string(queries_dir_for("tpch").join("distinct-functions.sql"))
+        .expect("the corpus query");
+    sql_answers_match_oracle(
+        "tpch",
+        "distinct-functions",
+        &sql,
+        "SELECT d.l_returnflag, d.distinct_qty, d.sum_distinct_qty, d.avg_distinct_qty, \
+                d.stddev_distinct_qty, c.n, c.avg_price \
+         FROM (SELECT l_returnflag, count(l_quantity) AS distinct_qty, \
+                      sum(l_quantity) AS sum_distinct_qty, avg(l_quantity) AS avg_distinct_qty, \
+                      stddev(l_quantity) AS stddev_distinct_qty \
+               FROM (SELECT DISTINCT l_returnflag, l_quantity FROM lineitem) \
+               GROUP BY l_returnflag) d \
+         JOIN (SELECT l_returnflag, count(*) AS n, avg(l_extendedprice) AS avg_price \
+               FROM lineitem GROUP BY l_returnflag) c \
+         ON d.l_returnflag = c.l_returnflag",
+        Some(1e-12),
         Coverage::ModesOnly,
     )
     .await;

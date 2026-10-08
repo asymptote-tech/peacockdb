@@ -241,7 +241,9 @@ validator refuses the width. Pinned by the two `bug_grouping_sets_…` cases in
 (`gpu_tests/aggregate_schema_cases.rs`) and
 `bug_a_rollup_partial_holds_an_int32_grouping_id_where_the_plan_says_uint8` (`wire/gpu_tests/mod.rs`).
 `GROUPING()` over a subset or a reordering of the keys is refused on the device (#230). DataFusion
-55's duplicate ordinal is #228.
+55's duplicate ordinal is #228. Under a DISTINCT the inner stage carries one more key, so there
+the device's id is doubled and at 8, 16 or 32 keys the project above the outer stage overflows
+the cast; the fix below covers both.
 
 **Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join` and tpcds
 q5, q14, q18, q22, q77, q80. None reaches it on the device yet: each cell is off first on #152,

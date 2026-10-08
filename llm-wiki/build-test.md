@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2340 test cases — Rust 1865, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2366 test cases — Rust 1891, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,23 +22,29 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1192 cases: `--lib` 608, `test_cpu_corpus` 555, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1218 cases: `--lib` 622, `test_cpu_corpus` 567, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 554 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 566 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its two oracles and
 whether its device run is schema-validated, expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
-checked against plain DataFusion at `target_partitions = 1`. 116 queries at the modes each is
-correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
+checked against plain DataFusion at `target_partitions = 1` — `data_fusion_exact`,
+`data_fusion_approximate` to 1e-12, `data_fusion_subset` where the SQL does not determine the
+rows, or `data_fusion_disabled`, which skips the compare for a query DataFusion 45 answers wrong
+or refuses. `tpch/distinct-functions` is the one of those: DataFusion refuses
+`stddev(DISTINCT)` and answers a grouped decimal `avg(DISTINCT)` as the plain average, so its
+answer is held by `end_to_end.rs` against a hand-lowered oracle instead. 119 queries at the modes
+each is correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
 [#199](tickets/corpus-coverage.md#t199), `tpcds/q77` three by [#212](tickets/joins.md#t212),
-`tpcds/q80`, `tpcds/q18`, `tpcds/q22`, `tpcds/q5` and `tpch/rollup-over-join` three by
+`tpcds/q80`, `tpcds/q18`, `tpcds/q22`, `tpcds/q5`, `tpch/rollup-over-join` and
+`tpch/rollup-distinct` three by
 [#189](tickets/corpus-coverage.md#t189), `tpch/scan-limit` two by
 [#186](tickets/corpus-coverage.md#t186), and four queries are out entirely: `tpch/q11`,
 `tpch/q22` and `tpcds/q24` on
-[#190](tickets/joins.md#t190), and `tpcds/q54`. 551 cells, plus three checks
+[#190](tickets/joins.md#t190), and `tpcds/q54`. 563 cells, plus three checks
 that every declaration's two oracles suit each other and every device cell has a cpu cell
 
 | Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
@@ -67,12 +73,12 @@ handed, and the record's preamble is what `record_header()` writes
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 29 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 34 |
 |---|---|--:|
 
 SQL in, rows out: 17 queries planned and run at all five modes against DataFusion on the same
 SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back
-to zero and holds equal releases at the end of every run — and ten cases no query list can
+to zero and holds equal releases at the end of every run — and fifteen cases no query list can
 carry: that DataFusion's partial aggregate does not skip grouping here, the call and pull
 counts a limit makes, the smallest budget a query fits in completing where the byte below it
 trips, and that boundary under a drained lane, the model compared against what the calls
@@ -81,9 +87,13 @@ keeping the shapes only one query has, and a degenerate hash under a Right outer
 RightAnti answering like the oracle from the empty build lanes it leaves
 ([#175](archive/archived-tickets.md#t175)), and the schema validator as the driver's output
 hook — `tpch/q6` at every mode passing under it, and an index over the same tree with one
-project's field retyped refused naming the field. Two of the 29 are `#[ignore]`d against
+project's field retyped refused naming the field; and five on the DISTINCT lowering — a
+`count(DISTINCT)` beside an `avg` and a `count`, a grouped `count` and `sum` DISTINCT beside
+companions, a DISTINCT argument holding NULLs, an empty keyless input answering `0, 0`, and
+`tpch/distinct-functions` against a hand-lowered oracle through `sql_answers_match_oracle`,
+since DataFusion is no oracle for it. Two of the 34 are `#[ignore]`d against
 [#182](tickets/memory.md#t182) — the budget boundary and the rebatcher's peak, both
-properties that pricing a batch from the plan's schema took away — so 27 run. The first tier
+properties that pricing a batch from the plan's schema took away — so 32 run. The first tier
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 
@@ -140,11 +150,13 @@ null analysis both ways, and the session config's own registration path declarin
 every rule in the can-this-column-be-NULL pass, on hand-built nodes — a source declares a
 not-nullable column here, which no corpus fixture can
 
-| Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 10 |
+| Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 11 |
 |---|---|--:|
 
 every shape the planner refuses, from the SQL that provokes it; each asserts its ticket is in
-the message a user sees
+the message a user sees. Two are `bug_` tests rather than refusals the engine means to keep —
+two DISTINCT arguments ([#144](tickets/complete-coverage.md#t144)) and a `stddev` companion
+beside a DISTINCT ([#261](tickets/complete-coverage.md#t261))
 
 | Plan goldens, tp1-single | [tpch_tp1_single](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
 |---|---|--:|
@@ -271,7 +283,7 @@ fetch, coalesce, a merge with and without its finalize, a merge over state whose
 grouping id, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden,
 since co-partitioning is what every partitioned join rests on
 
-| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 29 |
+| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 36 |
 |---|---|--:|
 
 one test per node kind, per expression kind and per planner rule, each from the smallest plan
@@ -293,6 +305,14 @@ the accountant's formula, cache and two checks on plain figures; the plan index'
 per-lane slots and which lanes feed a build side that owes rows; the scheduler's corners
 enumerated and then a differential test against a naive rescan on randomized shapes; the lane
 state machine one call at a time with no tree around it
+
+| DISTINCT reaching decompose | [planner::translator::aggregate::tests](../peacockdb-core/src/planner/translator/aggregate/tests.rs) | 1 |
+|---|---|--:|
+
+`decompose` handed a distinct `AggregateFunctionExpr` directly. No SQL reaches it — the
+classifier lowers or refuses every DISTINCT it is shown — so this is the net under it, for a
+shape it is not shown, which would otherwise run as non-distinct on both engines where the
+cpu-vs-device comparison cannot see it
 
 | Aggregate state types | [plan::aggregates::tests](../peacockdb-core/src/plan/aggregates/tests.rs) | 9 |
 |---|---|--:|

@@ -26,7 +26,7 @@ tpcds,1,q24,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,d
 tpcds,1,q25,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,top_n,152 220
 tpcds,1,q26,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,avg top_n,220
 tpcds,1,q27,na,na,na,na,na,na,na,na,na,na,na,na,na,na,na,fail,avg top_n,23
-tpcds,1,q28,disabled,disabled,disabled,disabled,disabled,na,na,na,na,na,na,na,na,na,na,ok,avg count_distinct top_n,62
+tpcds,1,q28,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,avg count_distinct top_n,152
 tpcds,1,q29,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,top_n,152 220
 tpcds,1,q30,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,corr_subquery avg top_n,220
 tpcds,1,q31,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,corr_subquery,152 220
@@ -132,6 +132,8 @@ tpch,1,nested_limits,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ena
 tpch,1,nested_loop_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,ok,nested_loop_join,183
 tpch,1,nested_loop_left_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join outer_join,183 220
 tpch,1,rollup_over_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,rollup,152 189 220
+tpch,1,rollup_distinct,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,rollup count_distinct,65 189
+tpch,1,distinct_functions,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,count_distinct,262
 tpch,1,scan_limit,enabled,enabled,enabled,enabled,enabled,disabled,disabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,top_n,186
 tpch,1,semi_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join,152 183 220
 tpch,1,shuffle_additive,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,ok,,183

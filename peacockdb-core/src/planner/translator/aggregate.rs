@@ -5,7 +5,8 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::{DataType, Field, Fields, Schema as ArrowSchema};
+use datafusion::arrow::datatypes::{DataType, Field, Fields, Schema as ArrowSchema, SchemaRef};
+use datafusion::common::ScalarValue;
 use datafusion::physical_expr::aggregate::AggregateFunctionExpr;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode};
 use datafusion::physical_plan::coalesce_batches::CoalesceBatchesExec;
@@ -20,10 +21,16 @@ use super::nodes::{merged, node, shuffled};
 use crate::plan::BatchLayout;
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
-use crate::plan::{AggCall, Merge, PlanAgg, decomposition, finalize, resolve};
+use crate::plan::{AggCall, AggFunc, Decomposition, Merge, PlanAgg, UnaryOp};
 use crate::plan::{AggStateColumns, Schema};
 use crate::plan::{AggregateBody, GpuAggregate, GpuAggregateBatches};
 use crate::plan::{Expr, NamedExpr};
+use crate::plan::{decomposition, finalize, resolve};
+
+mod distinct;
+
+#[cfg(test)]
+mod tests;
 
 /// What sits between a partial aggregate and the final one: DataFusion spells a shuffle as
 /// a hash repartition and a lane collapse as a coalesce, and which one it chose is what
@@ -93,6 +100,34 @@ fn declared_nullable(
         })
 }
 
+/// Where one aggregate's init reads from.
+#[derive(Clone)]
+enum InitFrom {
+    /// The values it was written over: every aggregate but the two below.
+    Values,
+    /// A DISTINCT aggregate in the outer stage: its own argument rebuilt over the inner
+    /// stage's `__distinct_arg` (column 0), DataFusion's casts re-applied, and that
+    /// argument's type.
+    Deduplicated { arg: Expr, arg_type: DataType },
+    /// A companion in the outer stage: the state the inner stage left at these positions.
+    State(AggStateColumns),
+}
+
+/// Everything one aggregate sequence needs, from a DataFusion pair or built by the
+/// DISTINCT lowering.
+struct Stage {
+    input: Box<dyn GpuNode>,
+    input_schema: SchemaRef,
+    group_by: Vec<Expr>,
+    /// The output's key columns: the group keys, then `__grouping_id` under grouping sets.
+    key_fields: Vec<Field>,
+    grouping_sets: Vec<Vec<bool>>,
+    null_exprs: Vec<Expr>,
+    aggregates: Vec<(Arc<AggregateFunctionExpr>, InitFrom)>,
+    /// The finished output's schema, keys then one column per aggregate; `None` emits state.
+    finished: Option<SchemaRef>,
+}
+
 /// What one aggregate node's aggregates become in each position.
 struct Decomposed {
     init: Vec<AggCall>,
@@ -104,8 +139,121 @@ struct Decomposed {
     annotations: Vec<AggStateColumns>,
 }
 
+/// One aggregate's state columns and the init calls that produce them.
+///
+/// The three `InitFrom` arms differ only here: an ordinary aggregate reads its own values,
+/// a DISTINCT in the outer stage reads the deduplicated argument, and a companion there
+/// reads the inner stage's state through its own merge rule.
+fn state_and_init(
+    aggregate: &AggregateFunctionExpr,
+    from: &InitFrom,
+    rule: Decomposition,
+    input_schema: &ArrowSchema,
+) -> Result<(Vec<Field>, Vec<AggCall>), PlanError> {
+    let mut state = Vec::with_capacity(rule.state.len());
+    let mut init = Vec::with_capacity(rule.state.len());
+    match from {
+        InitFrom::State(cols) => {
+            // The outer stage's init runs each state column's merge rule as an ordinary
+            // aggregator over the inner stage's state, so its output type is that
+            // aggregator's over the inner's — a decimal sum widens again. Paired by
+            // POSITION: our state names (`avg(…)$sum`) carry none of DataFusion's
+            // `[sum]` tags, so `declared_nullable`'s lookup would read as drift.
+            let Merge::PerColumn(funcs) = rule.merge else {
+                return Err(PlanError::Invalid(format!(
+                    "{}: its state merges in one call, which an init cannot run",
+                    aggregate.name()
+                )));
+            };
+            if cols.positions.len() != rule.state.len() {
+                return Err(PlanError::Invalid(format!(
+                    "{}: the inner stage left {} state columns and this mode decomposes \
+                     into {}",
+                    aggregate.name(),
+                    cols.positions.len(),
+                    rule.state.len()
+                )));
+            }
+            for (index, (suffix, _)) in rule.state.iter().enumerate() {
+                let at = cols.positions[index] as usize;
+                let inner = input_schema.field(at);
+                let field = Field::new(
+                    format!("{}{suffix}", aggregate.name()),
+                    funcs[index].state_type(inner.data_type())?,
+                    true,
+                );
+                init.push(AggCall {
+                    func: funcs[index],
+                    args: vec![Expr::column(at as u32, inner.name())],
+                    outputs: vec![field.clone()],
+                });
+                state.push(field);
+            }
+        }
+        InitFrom::Values | InitFrom::Deduplicated { .. } => {
+            // The state names are ours and the types are `state_type`'s — the aggregator
+            // that produces each column, which DataFusion's `state_fields` (its own
+            // accumulator's layout, not the one this engine runs) supplies arity and
+            // nullability for. Paired by tag: DataFusion declares avg as [count, sum]
+            // and this table reads [sum, count].
+            let (args, arg_type, declared) = match from {
+                // A DISTINCT's declared state is DataFusion's list of values, which
+                // nothing here runs, so its arity and nullability say nothing about the
+                // twin this init is: every column it declares is nullable.
+                InitFrom::Deduplicated { arg, arg_type } => {
+                    (vec![arg.clone()], arg_type.clone(), None)
+                }
+                _ => {
+                    let declared = aggregate
+                        .state_fields()
+                        .map_err(|e| PlanError::Invalid(format!("{}: {e}", aggregate.name())))?;
+                    if declared.len() != rule.state.len() {
+                        return Err(PlanError::Invalid(format!(
+                            "{}: DataFusion declares {} state columns and this mode \
+                             decomposes into {}",
+                            aggregate.name(),
+                            declared.len(),
+                            rule.state.len()
+                        )));
+                    }
+                    let mut args = Vec::with_capacity(aggregate.expressions().len());
+                    for arg in aggregate.expressions() {
+                        args.push(translate_expr(&arg, input_schema)?);
+                    }
+                    let arg_type = match aggregate.expressions().first() {
+                        Some(arg) => arg.data_type(input_schema).map_err(|e| {
+                            PlanError::Invalid(format!("{}: {e}", aggregate.name()))
+                        })?,
+                        None => DataType::Null,
+                    };
+                    (args, arg_type, Some(declared))
+                }
+            };
+            for (suffix, func) in rule.state {
+                let nullable = match &declared {
+                    Some(declared) => declared_nullable(declared, *func, aggregate.name())?,
+                    None => true,
+                };
+                state.push(Field::new(
+                    format!("{}{suffix}", aggregate.name()),
+                    func.state_type(&arg_type)?,
+                    nullable,
+                ));
+            }
+            for ((_, func), field) in rule.state.iter().zip(state.iter()) {
+                init.push(AggCall {
+                    func: *func,
+                    args: args.clone(),
+                    outputs: vec![field.clone()],
+                });
+            }
+        }
+    }
+    Ok((state, init))
+}
+
 fn decompose(
-    aggregates: &[Arc<AggregateFunctionExpr>],
+    aggregates: &[(Arc<AggregateFunctionExpr>, InitFrom)],
     input_schema: &ArrowSchema,
     n_keys: usize,
 ) -> Result<Decomposed, PlanError> {
@@ -117,59 +265,18 @@ fn decompose(
         annotations: Vec::new(),
     };
 
-    for aggregate in aggregates {
-        if aggregate.is_distinct() {
+    for (aggregate, from) in aggregates {
+        if matches!(from, InitFrom::Values) && aggregate.is_distinct() {
             return Err(PlanError::Unsupported(format!(
-                "DISTINCT inside {} (#62)",
+                "DISTINCT inside {} in a shape the lowering does not handle",
                 aggregate.name()
             )));
         }
         let spec = resolve(aggregate.fun().name())?;
         let rule = decomposition(spec.func);
-        let declared = aggregate
-            .state_fields()
-            .map_err(|e| PlanError::Invalid(format!("{}: {e}", aggregate.name())))?;
-        if declared.len() != rule.state.len() {
-            return Err(PlanError::Invalid(format!(
-                "{}: DataFusion declares {} state columns and this mode decomposes into {}",
-                aggregate.name(),
-                declared.len(),
-                rule.state.len()
-            )));
-        }
-
-        let mut args = Vec::with_capacity(aggregate.expressions().len());
-        for arg in aggregate.expressions() {
-            args.push(translate_expr(&arg, input_schema)?);
-        }
-
-        // The state names are ours and the types are `state_type`'s — the aggregator that
-        // produces each column, which DataFusion's `state_fields` (its own accumulator's
-        // layout, not the one this engine runs) supplies arity and nullability for. Paired
-        // by tag: DataFusion declares avg as [count, sum] and this table reads [sum, count].
-        let arg_type = match aggregate.expressions().first() {
-            Some(arg) => arg
-                .data_type(input_schema)
-                .map_err(|e| PlanError::Invalid(format!("{}: {e}", aggregate.name())))?,
-            None => DataType::Null,
-        };
         let state_at = n_keys + decomposed.state.len();
-        let mut state = Vec::with_capacity(rule.state.len());
-        for (suffix, func) in rule.state {
-            state.push(Field::new(
-                format!("{}{suffix}", aggregate.name()),
-                func.state_type(&arg_type)?,
-                declared_nullable(&declared, *func, aggregate.name())?,
-            ));
-        }
-
-        for ((_, func), field) in rule.state.iter().zip(state.iter()) {
-            decomposed.init.push(AggCall {
-                func: *func,
-                args: args.clone(),
-                outputs: vec![field.clone()],
-            });
-        }
+        let (state, init) = state_and_init(aggregate, from, rule, input_schema)?;
+        decomposed.init.extend(init);
 
         let state_columns: Vec<Expr> = state
             .iter()
@@ -195,12 +302,32 @@ fn decompose(
             }),
         }
 
-        decomposed.finalize.push(finalize(
-            spec,
-            &state,
-            state_at as u32,
-            aggregate.field().data_type(),
-        ));
+        let out_type = aggregate.field().data_type().clone();
+        let mut finished = finalize(spec, &state, state_at as u32, &out_type);
+        if !matches!(from, InitFrom::Values) {
+            // A sum or min/max read off state the outer init widened is cast back to the
+            // type DataFusion declares: no executor changes a type the plan did not ask for.
+            if matches!(spec.func, AggFunc::Sum | AggFunc::Min | AggFunc::Max)
+                && state[0].data_type() != &out_type
+            {
+                finished = Expr::Cast {
+                    expr: Box::new(finished),
+                    target: out_type.clone(),
+                };
+            }
+            // A count merged by sum is NULL over an empty keyless input, where SQL says 0.
+            if spec.func == AggFunc::Count {
+                finished = Expr::Case {
+                    comparand: None,
+                    when_then: vec![(
+                        Expr::unary(UnaryOp::IsNull, finished.clone()),
+                        Expr::Literal(ScalarValue::Int64(Some(0))),
+                    )],
+                    else_expr: Some(Box::new(finished)),
+                };
+            }
+        }
+        decomposed.finalize.push(finished);
         decomposed.annotations.push(AggStateColumns {
             output: aggregate.name().to_string(),
             func: spec.func,
@@ -252,14 +379,33 @@ fn aggregate_sequence(
     finisher: Option<&AggregateExec>,
     shuffle: Shuffle,
 ) -> Result<Box<dyn GpuNode>, PlanError> {
-    let input = node(t, partial.input())?;
-    let input_schema = partial.input().schema();
-    let group = partial.group_expr();
     if partial.filter_expr().iter().any(Option::is_some) {
         return Err(PlanError::Unsupported(
             "a filtered aggregate (#161)".to_string(),
         ));
     }
+    if partial.aggr_expr().iter().any(|a| a.is_distinct()) {
+        match distinct::classify(
+            partial.aggr_expr(),
+            &partial.input().schema(),
+            finisher.is_some(),
+        ) {
+            distinct::Classified::Refuse(err) => return Err(err),
+            distinct::Classified::Lower { base } => {
+                return distinct::lower(
+                    t,
+                    partial,
+                    finisher.expect("classify saw a finisher"),
+                    shuffle,
+                    base,
+                );
+            }
+            distinct::Classified::NotOurs => {}
+        }
+    }
+    let input = node(t, partial.input())?;
+    let input_schema = partial.input().schema();
+    let group = partial.group_expr();
 
     let mut group_by = Vec::with_capacity(group.expr().len());
     for (expr, _) in group.expr().iter() {
@@ -282,7 +428,40 @@ fn aggregate_sequence(
         group.groups().to_vec()
     };
 
-    let decomposed = decompose(partial.aggr_expr(), &input_schema, key_fields.len())?;
+    sequence(
+        Stage {
+            input,
+            input_schema,
+            group_by,
+            key_fields,
+            grouping_sets,
+            null_exprs,
+            aggregates: partial
+                .aggr_expr()
+                .iter()
+                .map(|a| (a.clone(), InitFrom::Values))
+                .collect(),
+            finished: finisher.map(|finisher| finisher.schema()),
+        },
+        shuffle,
+    )
+}
+
+/// One sequence, from a stage: init per batch, a per-lane merge where a lane holds several
+/// batches, the shuffle, and the merge that finishes it.
+fn sequence(stage: Stage, shuffle: Shuffle) -> Result<Box<dyn GpuNode>, PlanError> {
+    let Stage {
+        input,
+        input_schema,
+        group_by,
+        key_fields,
+        grouping_sets,
+        null_exprs,
+        aggregates,
+        finished: finished_schema,
+    } = stage;
+
+    let decomposed = decompose(&aggregates, &input_schema, key_fields.len())?;
     let intermediate = Schema {
         fields: Arc::new(ArrowSchema::new(Fields::from(
             [key_fields.clone(), decomposed.state.clone()].concat(),
@@ -298,8 +477,7 @@ fn aggregate_sequence(
 
     // The output names are DataFusion's, so a finalized column lands where the plan
     // above it expects to read it.
-    let finished = finisher.map(|finisher| {
-        let names = finisher.schema();
+    let finished = finished_schema.map(|names| {
         let finalize: Vec<NamedExpr> = decomposed
             .finalize
             .iter()
@@ -312,7 +490,7 @@ fn aggregate_sequence(
         // finalized columns where the state was, so the keys are still annotated and
         // the state is gone.
         let output = Schema {
-            fields: finisher.schema(),
+            fields: names,
             group_keys: (0..key_fields.len() as u32).collect(),
             agg_state: Vec::new(),
         };
