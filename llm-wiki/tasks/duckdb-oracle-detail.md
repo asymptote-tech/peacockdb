@@ -549,3 +549,84 @@ All five are answered and all five are now exercised by a case.
   `PCK_WRITE_GPU_RESULT=1` cycle through `build-test-shadgpu.sh --all` with `--pull-results`.
   #235 stays open until it runs, and `build-test.md`'s `goldens/` file counts need +1 per
   dataset in the round that commits `gpu-result.txt`.
+
+## Review round 2 (2026-10-08)
+
+A fresh reviewer over `git diff master...HEAD` at `b579007d`. **1 blocking, 5 important, 11 nits.**
+It also checked the oracle positively, which is the part worth keeping: simulating
+`compare_sections` in Python over the committed goldens, all 93 `duckdb_exact` lines pass as exact
+multisets, all 15 `duckdb_approx` lines sit inside their tolerance (widest accepted gap 1.17e-5
+relative, tpch q1 col 8), every `duckdb_divergent` column still differs past its tolerance while
+every undeclared column of those lines agrees, and the only cases inspecting zero cells are the 4
+`duckdb_none` lines plus tpcds q17. 58,650 cells compared. `test_duckdb_result.py`'s pinned hash
+was recomputed from the documented algorithm by hand and matches.
+
+### Blocking
+
+1. **An empty `PCK_WRITE_GPU_RESULT` reads as "record a versioned file".**
+   `corpus_gpu.rs:79-85` takes `Ok(asked)` and treats anything but `"1"` as a version suffix, but
+   `build-test-shadgpu.sh:401,416` exports the variable unconditionally — so every ordinary
+   `--run`/`--all` cycle writes `goldens/*/gpu-result-.txt`. Three things follow. The script's own
+   comment at :415 and `build-test.md:1110-1112` say an empty value writes nothing, and both are
+   false. `test_gpu_corpus.rs:85`'s new `var_os(...).is_none()` arm is unreachable on the only host
+   that runs it. And `--pull-results`' `ls goldens/*/gpu-result*.txt` matches that file, so the
+   `die "nothing came home"` guard at :733 cannot fire for the operator who forgot the variable —
+   which is the one thing it exists to catch. The project's idiom for this is `cpp/src/expr.cpp:49`.
+
+### Important
+
+2. **`compare_fingerprints` passes vacuously on a NaN in a triple** (`fingerprint.rs:296`).
+   `NaN > tol` is false, so a column whose `sum`/`min`/`max` is NaN on either side is not compared
+   at all — and an approximate column is not in the hash either, so it goes wholly unchecked. This
+   is reachable from our own writer: `triple_of` emits `min=nan max=nan` for a float column with no
+   non-null value, and `number`/`float_of` round-trip `nan` deliberately. `cell_equal` handles NaN;
+   this does not. The same shape, pre-existing, at `result_text.rs:306` and `device_answer.rs:187`.
+3. **The two writers class a column from different evidence** (`fingerprint.rs:78` against
+   `duckdb_result.py:88-91`): ours from the declared arrow type, DuckDB's from
+   `isinstance(value, float)` over the rows. They agree unless no row carries a float, so an
+   all-NULL double column is approximate here and exact there and the section can never pass —
+   there is no `duckdb_divergent` on the fingerprint path. The same gap swallows the case the
+   frozen spec names in step 3: "a decimal whose scale differs between the sides (a decimal on
+   ours, a double on DuckDB's) is approximate". No section has either shape today.
+4. **`build-test.md:686` said the over-cap fingerprint is "written and never asserted"**, which
+   this branch's own `corpus.rs:462-467` falsifies — `assert_result_section` compares the committed
+   section text, hash included, against a freshly computed one on every over-cap case, and that is
+   the only thing pinning the Rust writer's hash to the goldens. Corrected by the coordinator.
+5. **Nothing prunes `gpu-result.txt`** (`corpus_golden.rs:190-227`). `merged_cells` replaces or
+   appends and never drops, so a device cell turned off keeps its section forever — while
+   `test_cpu_corpus.rs:392-399` tells the reader to regenerate the file, which will not clear it.
+   Only a hand edit will. `build-test.md:743-749` promises that turning a cell off and not
+   regenerating fails here.
+6. **tpch scan-limit declares its rows undetermined and then holds them to DuckDB exactly**
+   (`corpus_cases.inc:45`). Its own comment says an unordered `LIMIT` over lineitem fixes no row
+   set, which is why its cpu oracle is `data_fusion_subset`; `duckdb_exact` is the strictest oracle
+   there is. It passes today as a fact about parquet read order and 4-way scan scheduling, not
+   about the query. `each_declarations_two_oracles_suit_each_other` already derives `undetermined`
+   from the cpu oracle and constrains the gpu one with it; it does not constrain the DuckDB one.
+
+### Nits, and what became of them
+
+Kept as cheap work in code the round is touching anyway: the comment-length caps
+`coding-style.md` sets (`fingerprint.rs:1` 16 lines against 10, `corpus_gpu.rs:67` 11,
+`test_cpu_corpus.rs:16` 12, `duckdb_oracle.rs:107` 5 against 4, `test_gpu_corpus.rs:79` 5);
+`duckdb_oracle.rs:248`'s unchecked `row[column]`, so `duckdb_divergent(251, 99)` panics on an
+index rather than naming the line; `duckdb_oracle/tests.rs:277` asserting `ticket_is_open(235)`,
+the very ticket this task closes, so the case goes red the day it is archived; `judge`'s dead `at`
+argument at `duckdb_oracle.rs:382`; and `macro_invocations` (`corpus.rs:575`) having dropped the
+file path from its panics now that two case lists reach it.
+
+Taken by the coordinator: the two wiki counts (`build-test.md:46` said the DuckDB tier is 149 of
+the count and it is 148 — the third guard belongs to the declaration set) and
+`architecture.md:1259`, whose heading named "the DuckDB oracle" when there are now two and that
+section is the cost one.
+
+Recorded and deliberately not fixed, because the fix costs more than the input is worth:
+`fingerprint.rs:164` joins exact cells with `|` while `result_text.rs:341` splits rendered rows on
+`|`, so one pipe inside a cell would both break the rendered parse and let `("a|b","c")` and
+`("a","b|c")` hash alike — changing the separator moves every committed fingerprint, both writers
+and the pinned Python hash, for an input no dataset in the tree contains. Likewise
+`fingerprint.rs:155` counting `nonnull` as "the rendered cell is non-empty", which cannot tell an
+empty string from NULL on either side — the same on both, so it compares correctly, and the
+rendering is the only common ground the two engines have. And tpcds q66's twelve declared-divergent
+columns clear their tolerance by only about 30%, so a small change on either side flips them to
+"stopped diverging"; worth knowing when #251 is worked, not worth pre-empting.

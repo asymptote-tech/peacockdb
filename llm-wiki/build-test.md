@@ -45,7 +45,7 @@ correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
 that every declaration's oracles suit each other and every device cell has a cpu cell,
 and `all_modes` expanding to the same cells as the five spelled out
 
-Then the DuckDB tier, 149 of the count and the only independent oracle over the answers
+Then the DuckDB tier, 148 of the count and the only independent oracle over the answers
 ([#235](tickets/corpus-coverage.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
 `mini.result.txt` with `duckdb-result.txt` by column position under the line's
 `duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
@@ -694,7 +694,7 @@ testdata/{tpch,tpcds}-queries/*.sql
           │     ├──► <mode>-<tier>.cpu.txt        (a == <query> section each)
           │     │       └──× cost_model.conf ──► <mode>-<tier>.cost.txt
           │     └──► <tier>.result.txt   (one section per query, from its last mode; over
-          │               │               256 KB a fingerprint, written and never asserted)
+          │               │               256 KB a fingerprint, asserted like the rows it stands for)
           │               ▼  read-only, never written
           │     the corpus device tier (test_gpu_corpus, shad-gpu)
           │       ├── <mode>-<tier>.cpu.txt, .cost.txt ──► every device cell, per node

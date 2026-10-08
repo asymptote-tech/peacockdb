@@ -22,7 +22,7 @@ state stays resident, so the query fits a budget the table does not.
 [C++ executor layout](#c-executor-layout) · [Column indexing](#column-indexing) ·
 [cuDF options](#cudf-options) · [Node display](#node-display) ·
 [Multi-GPU notes](#multi-gpu-notes-cudf-2602) ·
-[Cost model and the DuckDB oracle](#cost-model-and-the-duckdb-oracle)
+[Cost model and DuckDB's cost oracle](#cost-model-and-duckdbs-cost-oracle)
 
 ## Planning
 
@@ -1256,7 +1256,7 @@ Hard-won constraints for the multi-GPU C++ path, which lives entirely in
 - Benchmarking several queries in one process is flaky at G≥2 (process-global cudf stream state
   across WorkerPool teardowns) — one query per process (see build-test.md).
 
-## Cost model and the DuckDB oracle
+## Cost model and DuckDB's cost oracle
 
 Both numbers the widget compares are bytes, and the point of the pairing is that they are the
 same bytes: how much data the query had to move. build-test.md has how each file is produced.
