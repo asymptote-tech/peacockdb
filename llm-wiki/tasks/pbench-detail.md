@@ -851,3 +851,67 @@ flavour passes `Unread` today.
 So the board heading says "closes half of #227" rather than "closes #227", and the signoff names
 the remaining half. #227's own text needs no change — it already reads "#227 closes when both
 checks land", which is exactly right.
+
+## Completeness pass — the analyst's reading (2026-10-08)
+
+A fresh analyst over `8431f317`, asking what is missing. Two blocking, three important, and a
+short `architecture.md` list. All of it is applied or filed; none of it reopened the task.
+
+1. **Blocking: the device half had no owner, and its recipe lived only in files the merge
+   deletes.** The spec's work item 5 and its device bar are carried by `pbench-impl.md`'s Task 8
+   and this file's "What the next person needs", and the archive rule deletes both. Three things
+   were therefore about to vanish: `int8-key-group`, which has no query, no registry row, no corpus
+   line and no ticket and would simply never land; 16 tp1 gpu cells that `repartition-keys` does
+   not claim (its text says the **tp4** cells turn on), recreating behind us the exact condition
+   `stale-cells` exists to clear; and the cycle itself. **Filed as #259**, which also names the
+   single card visit that settles it alongside #235's last step and `stale-cells`' 16 cells.
+2. **Blocking: #227 would have read as satisfied.** Its text asks only for the cpu half, which
+   shipped — and the claim that "#227's own text needs no change" was wrong, because the sentence
+   relied on ("#227 closes when both checks land") is in `pbench.md`, which the board retires, not
+   in the ticket. #227 now carries the device read, why cuDF has no count to give it, and the
+   `NullsHeld` shape already waiting for it.
+3. **Important: three more falsified ticket sentences**, all on later tasks' paths, which the
+   round that fixed nine of them missed: #240 said no corpus query exists when five pbench rows
+   carry it and it is `repartition-keys`' own ticket; #95's "eight hash a decimal key" is eleven;
+   #63 named `tpcds/q9` alone. Applied. The analyst also found **#208 had no corpus-queries line at
+   all** and no reference to #256, so a `join-backend` developer would look for its evidence and
+   find nothing — #208 now says its pbench query is refused earlier, on #256.
+4. **Important: the determinism check sits in no Rust tier.** `generate_pbench.sh --check` is
+   invoked from one line of `pipeline.yml` in dataset-matrix; no Rust target runs it, it is in none
+   of `build-test.md`'s case tables, and `test_ci_coverage` guards Rust targets only. Drop that
+   line and the only guard that the committed parquet is what `gen.sql` makes disappears silently.
+   Named in the signoff rather than fixed: wiring it to a Rust target would mean a Rust test
+   shelling out to duckdb, which is a bigger decision than this task should take.
+5. **Nothing in the tree asserts a count the four absent queries falsify** — checked: the Python
+   count is a floor for pbench, `PBENCH_JOINS` is a hand list, and `build-test.md`'s figures
+   reconcile exactly. One guard asserts the *absence*, which is deliberate and good, and #255 now
+   names it as the case to delete when it closes.
+
+**`architecture.md`:** two sentences, both applied. `:519` said "in the corpus every cross join
+pairs a one-row aggregate result with another", which pbench's `cross-projection` — a 20,000 × 8
+cartesian of two base tables — falsifies; and `:1278` said DuckDB's cost oracle "runs each query
+twice", which is false for 59 of 176 lines, pbench having no `qN.duckdb_cost.txt` at all. The
+capability matrix needed nothing: the analyst diffed pbench's plan goldens against tpch's and
+tpcds' and found no node kind, no join type and no refusal reason those two did not already carry.
+
+**What chain J will trip over**, the part only this reading produces:
+
+- **`repartition-keys` has a step it cannot execute.** Its Scope requires adding
+  `struct-key-join`, `struct-through-join` and `interval-through-join` to `NOT_RUNNABLE`, and
+  `every_query_that_cannot_cross_the_wire_is_declared_and_every_declaration_is_true` is
+  bidirectional — a declaration with no `not runnable:` line in all five goldens goes red. Those
+  three queries cannot exist until #255 lands. That task's spec is frozen, so this goes in its
+  detail file at dispatch time. (Its own text says "two" in one place and "three" in another; that
+  predates this branch.)
+- **`repartition-keys` owns the first over-cap fingerprint on pbench**, `uint-key-group` over a
+  19,848-row answer, and turns on both its cpu tp4 cells and its gpu cells — all-or-nothing under
+  #253.
+- **#253 got worse and sooner.** Fingerprint lines went 4 → 14, ten of them pbench rows whose
+  device comparison is `live_cpu`; and the device-diverges-while-the-cpu-matches half now has 27
+  pbench rows in reach, every one already DuckDB-green on the cpu, in a dataset built to make the
+  device differ. #253 updated: the decision is owed before `repartition-keys`, not before
+  `stale-cells`.
+- **What `join-backend` already owns is fine** — `collapse-not-in`, the `PBENCH_JOINS` hand-off,
+  `empty-side-left-join`, `indf-full-join` and the `sparse-build-*` lanes are all in its plan, and
+  #257 records the trap that `in-is-null` starts agreeing with DataFusion's wrong answer the moment
+  that task's `EmptyExec` arm lands. pbench does reach shad-gpu: all three ship paths carry it.
