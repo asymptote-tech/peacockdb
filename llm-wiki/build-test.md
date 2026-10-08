@@ -417,8 +417,9 @@ rather than `try_new`'s first; nullability is never a clause, since `try_new` do
 
 a NULL in a column the node declares non-nullable, which neither validator saw before: the cpu
 flavour hands the comparison real counts off the arrow batch, the device flavour says `Unread`
-because cuDF stores no nullability and nothing on that side has a count to read. Half of
-[#227](tickets/corpus-coverage.md#t227); the other half is a C++ entry point that does not exist
+because nothing exports the device's counts yet — cuDF holds them, the schema message does not
+carry them. Half of [#227](tickets/corpus-coverage.md#t227), which carries the two routes to the
+other half
 
 | Device schema projection | [test_support::device_schema::tests](../peacockdb-core/src/test_support/device_schema/tests.rs) | 16 |
 |---|---|--:|

@@ -744,9 +744,17 @@ shuffle`, drop the id's ordinal from `Shuffle::ByHash`'s keys when the aggregate
 `keys.retain(|k| *k as usize != group.expr().len())`, guarded on `!group.is_single()`. Every row of
 a user-key group then lands in one lane whatever its set, so each (keys, id) group stays whole.
 The rule the plan validates, hash keys a subset of the group columns, already allows it. No hasher
-arm and no C++. The tp4 plan goldens of the five queries change their emit's `hash=` and the
+arm and no C++. The tp4 plan goldens of the six queries change their emit's `hash=` and the
 merge's `hashed_on`, and the tpcds q5 payload's `hash_exprs` shrinks. A planner test pins
-`hash_keys == [0, 1]` for a two-key rollup at tp4. The 24 cpu cells turn on.
+`hash_keys == [0, 1]` for a two-key rollup at tp4.
+
+**That fix turns on 18 of the 24 cells, not all of them.** `pbench`'s `uint-key-group` and
+`uint-key-join` reach the same refusal by the other road: they hash a plain `UInt32` user key, and
+comet's murmur3 has no unsigned arm at any width. The grouping-id fix cannot help them —
+`uint-key-group` is a single grouping set, so `!group.is_single()` excludes it, and `uint-key-join`
+never enters `aggregate_sequence`. Their 6 tp4 cells want the unsigned arm itself, which is the
+second half of this ticket's own mechanism sentence and no part of the fix above. A task that
+enables all 24 on the strength of that paragraph turns 6 of them red.
 
 <a id="t145"></a>
 ### #145 — Refcounted handles: stop copying every partition out of a scatter
@@ -876,11 +884,15 @@ schema, check that every record batch produced does not have any nulls.
 `nulls_where_none_declared` sits beside `device_divergence` in `test_support/schema_validation.rs`
 and `held_to_declaration` runs both; which half runs is the explicit argument
 `NullsHeld::{Unread, PerColumn(&[usize])}`, the cpu flavour passing counts read off the arrow
-batch and the device flavour `Unread`. The device has no count for anything to read:
-`peacock_handle_schema` returns an IPC *schema* message and cuDF stores no nullability. So the rest
-of this ticket is a new C++ entry point over `table_for(handle)`'s `column_view::null_count()`,
-after which the device flavour passes `PerColumn` and nothing else changes. It cannot be
-type-checked without cuDF, so it wants a host with a card.
+batch and the device flavour `Unread`. Nothing exports the device's count today:
+`peacock_handle_schema` carries the schema message alone. cuDF does hold it —
+`column_view::null_count()` is a stored member, and this repo's C++ already reads it in
+`expr.cpp` and `aggregate.cpp` — so the rest of this ticket is plumbing, not a new capability.
+Two routes: a null-count entry point beside `peacock_handle_schema`, or materialising through
+the existing `peacock_result_from_handle` and counting in Rust. The first is worth the C++
+because the second copies a resident table to count its nulls, and the gpu hook already holds
+both arguments it would need. Either way the device flavour then passes `PerColumn` and nothing
+else changes. Not type-checkable without cuDF, so it wants a host with a card.
 
 <a id="t164"></a>
 ### #164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws

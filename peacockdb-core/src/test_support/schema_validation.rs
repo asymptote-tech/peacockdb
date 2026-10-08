@@ -23,9 +23,10 @@ mod tests;
 /// What a batch holds in NULLs per column, where the flavour can read it — stated at the
 /// call site rather than inferred, so which half of the comparison runs is visible there.
 ///
-/// `peacock_handle_schema` hands back a schema message and cuDF stores no nullability, so
-/// nothing reads a device handle's null counts today and the gpu flavour has none to offer.
-/// That is the half of #227 still open; see `llm-wiki/tasks/pbench-detail.md`.
+/// `peacock_handle_schema` hands back a schema message and nothing else exports a device
+/// handle's null counts, so the gpu flavour has none to offer yet. cuDF does hold them; it is
+/// the plumbing that is missing. That is the half of #227 still open, and the ticket carries
+/// the two routes to it.
 #[cfg_attr(feature = "rust-only", allow(dead_code))]
 enum NullsHeld<'a> {
     Unread,

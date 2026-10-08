@@ -915,3 +915,50 @@ tpcds' and found no node kind, no join type and no refusal reason those two did 
   `empty-side-left-join`, `indf-full-join` and the `sparse-build-*` lanes are all in its plan, and
   #257 records the trap that `in-is-null` starts agreeing with DataFusion's wrong answer the moment
   that task's `EmptyExec` arm lands. pbench does reach shad-gpu: all three ship paths carry it.
+
+## Completeness pass — the reviewer's reading (2026-10-08)
+
+**0 blocking, 3 important**, all of them text rather than code, and all applied. The reviewer
+confirmed the branch's substance by simulation: all 24 `PBENCH_JOINS` entries and the
+three-kinds collapse test reproduced against `tp4-single.plans.txt` with zero failures; the
+section-against-registry guard simulated over all three datasets both ways (59/59, 99/99, 39/39);
+`generate_pbench.sh`'s argument rejection **run** (`--chek`, `--check extra`, both exit 1 with the
+parquet untouched) and its hardcoded specials counts re-derived arithmetically from `gen.sql`'s
+moduli; the two engine changes shown to change no answer; and every number in `build-test.md`
+reconciled, 674 cells decomposing as tpch/tpcds's 551 plus pbench's 23×5 + 4×2. It also found no
+28th red, by simulating five registry-and-golden guards rather than running them. Two findings it
+had confirmed were closed by commit `c83de6be` while it was reading, which is the second time this
+has happened — commit the wiki work before dispatching a completeness reviewer.
+
+1. **#189 promised 24 cells its own proposed fix cannot turn on** — and the count was mine, added
+   two commits earlier. `uint-key-group` and `uint-key-join` reach #189's refusal by the other
+   road: they hash a plain `UInt32` user key, and comet's murmur3 has no unsigned arm at any
+   width. The grouping-id fix cannot reach them — `uint-key-group` is a single grouping set so
+   `!group.is_single()` excludes it, and `uint-key-join` never enters `aggregate_sequence`. So a
+   task implementing #189 from that paragraph would enable 24 cells and turn 6 red, which is the
+   "a later task will believe it" failure routed through a ticket instead of a query. Corrected:
+   18 from the grouping-id fix, 6 wanting the unsigned arm, which is the second half of #189's own
+   mechanism sentence and no part of its fix.
+2. **The reason given for #227's open half was false.** It said the device has no count for
+   anything to read and then named the accessor that returns it —
+   `column_view::null_count()` is a stored cuDF member this repo's own C++ already calls in
+   `expr.cpp` and `aggregate.cpp`. What is true is that nothing *exports* it:
+   `peacock_handle_schema` carries the schema message alone. And a C++ entry point is not the only
+   route — `peacock_result_from_handle` exists and the gpu hook already holds both its arguments,
+   so this is a cheap-against-correct trade rather than a missing capability. Corrected in #227,
+   in `build-test.md`, and in `schema_validation.rs`'s comment, which carried the same clause.
+3. **The branch adds the corpus's first planner refusals that name no ticket**, and
+   `every_refusal_names_a_ticket_that_exists` opens with a sentence wider than what it asserts —
+   its check is `!cited.is_empty() || !line.starts_with("not runnable")`, so a `refused:` line
+   citing nothing passes. Before this branch the only uncited refusals were
+   `refused by datafusion:` lines; `cross-empty-build`, `empty-side-left-join` and `in-is-null`
+   are the first from our own planner, in all five mode goldens. Their tickets are on the registry
+   rows, so the consequence is a reader landing on `plan node EmptyExec` with nowhere to go.
+   Citing them would be a third engine change the Restriction does not permit, so the doc sentence
+   is narrowed to what the test enforces and names the exemption; the citations belong to the task
+   that lifts #155.
+
+Nits it dropped, listed because they are real but not worth a round trip: #257's length, some
+capitals in `llm-wiki/`, a second hardcoded dataset list in `collect_cost_goldens` beside
+`all_datasets`' "one list" comment, `exec_model/tests/corpus.py`'s inert pbench entry, and two
+counts on #220 and #80 that were already stale on the base.

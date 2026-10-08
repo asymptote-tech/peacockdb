@@ -246,3 +246,23 @@ expect is a finding: the ticket it fails on goes on the row, or a new ticket is 
 ## Device workflow
 
 `build-test-shadgpu.sh`, one cycle for the gpu cells.
+
+## Completeness signoff (2026-10-08)
+
+Solved on the cpu, untouched on the device. Five committed tables of 580 KB, 56 corpus lines and
+59 registry rows; 123 cpu cells on, every gpu cell off and not one run. Both completeness readings
+confirmed the data bites — `not-in-uncorrelated` answers 0 rows where a two-valued engine answers
+13,964, `anti-null-preserved-condition` keeps 87 rows only because a key is NULL, and all 24
+refused rows cite their row's ticket at all five modes. The dataset found three real defects,
+#255, #256 and #257, the last a wrong answer our own cpu oracle agreed with and only DuckDB could
+catch — which is the first return on the previous task.
+
+Four shortcuts, all named rather than papered over. **#227 closes half**: the validator-side
+null-count check landed and is red-proved, and the device read needs plumbing that does not exist
+(#227 carries the two routes), so the board says "closes half of". **The device cells have never
+been run** and nothing owned running them, since the recipe sat only in files the merge deletes —
+filed as #259, with `int8-key-group`, which never landed at all, and 16 tp1 gpu cells no later
+task claims. **Four of the 63 queries are absent**: three behind #255, which now names the
+absence guard to delete, and `int8-key-group` behind #259. And **`generate_pbench.sh --check` sits
+in no Rust tier** — one line of `pipeline.yml` is the only thing that runs the guard that the
+committed parquet is what `gen.sql` makes, so dropping that line fails silently.

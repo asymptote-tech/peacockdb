@@ -918,9 +918,14 @@ fn absolute_path_in(line: &str) -> Option<usize> {
     })
 }
 
-/// A refusal names a blocker, and that blocker exists. The reason a query does not plan is
-/// the content of these files, and a ticket number that has been renumbered or never
-/// existed reads as an explanation while pointing at nothing.
+/// A ticket a refusal names exists. The reason a query does not plan is the content of these
+/// files, and a number that has been renumbered or never existed reads as an explanation while
+/// pointing at nothing.
+///
+/// It does not require that a refusal name one: `not runnable` must, a `refused:` line need
+/// not. Three pbench sections cite nothing (`plan node EmptyExec` twice, `no surviving row
+/// groups` once) and carry their tickets on the registry row instead; adding the citation is
+/// an engine change that task's spec did not allow.
 ///
 /// Both lists: a ticket keeps its number when it closes and moves to the archive, so
 /// reading only the open one would turn this red for a refusal whose blocker was fixed
