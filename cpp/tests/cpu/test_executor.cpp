@@ -209,9 +209,6 @@ TEST(NvtxRanges, ASecondPushReplacesTheFirstRatherThanNesting) {
   EXPECT_FALSE(peacock::harness_range_is_open());
 }
 
-// The row range every per-batch caller's bounds go through, on the tier that needs no
-// device: it is arithmetic, and reaching it through a scan on the GPU host is the long
-// way round to a case that cannot fail there for a reason worth knowing.
 namespace {
 
 std::string testdata_dir() {
@@ -270,6 +267,9 @@ std::vector<ClampCase> clamp_cases() {
 
 }  // namespace
 
+// The row range every per-batch caller's bounds go through, on the tier that needs no
+// device: it is arithmetic, and reaching it through a scan on the GPU host is the long
+// way round to a case that cannot fail there for a reason worth knowing.
 TEST(ClampRowRange, AnswersEveryCaseInTheSharedTable) {
   for (const auto& c : clamp_cases()) {
     const auto rows = static_cast<cudf::size_type>(c.rows);

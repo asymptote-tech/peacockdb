@@ -144,3 +144,56 @@ line number), enumerated the eight node kinds the #233 check reaches and found n
 pass-through gap, reasoned the `MockUnload` redirection has bite from the committed code, read both
 GPU-host provisioning edits as correct, and summed every `build-test.md` header against its rows
 (all four exact).
+
+### 2026-10-08 — round 2, developer: round-1 findings addressed
+
+All three findings closed. No production code changed in this round.
+
+**important — the full rust-only bar.** Every target that compiles under `--features rust-only`
+was run, not just the three the finding named. All nine compile (the device/ffi ones compile and
+gate their cases off at runtime), so "every target green" is nine runs:
+
+| target | result |
+|---|---|
+| `--lib` | 602 passed, 0 failed, 2 ignored (604 listed) |
+| `test_cpu_corpus` | **555 passed, 0 failed** |
+| `test_corpus_goldens` | **26 passed, 0 failed** |
+| `test_cost_model` | **3 passed, 0 failed** |
+| `test_golden_format` | **26 passed, 0 failed** |
+| `test_ci_coverage` | 9 passed, 0 failed |
+| `test_module_layout` | 17 passed, 0 failed |
+| `test_gpu_corpus` | 0 cases under `rust-only` (gated to the device rung) |
+| `test_node_timing` | 0 cases under `rust-only` (gated to the ffi rung) |
+| `peacock_gpu_benchmarks` (`--skip bench_`, as CI) | 0 cases under `rust-only` |
+
+The three corpus targets ran as one command with `-- --test-threads=2` per `build-test.md:989`,
+on a 31 GiB host; 284s wall, exit 0, no OOM. The reviewer's prediction held — the new refusal
+fires on no constructor-built tree, so all 555 corpus queries pass the hot-path `validate`
+unchanged.
+
+`test_golden_format` was worth adding to the list beyond the finding's three: it reads
+`testdata/fixtures/sectioned-cost.txt`, so it is the one target outside `--lib` that this task's
+`testdata/fixtures/` edits could have disturbed. It did not.
+
+Two incidental confirmations from these counts: 555 + 26 + 3 matches the cpu block header's
+per-binary figures exactly, and 1188 (cpu) + 26 + 9 + 17 = 1240 is every rust-only case in the
+crate — so `build-test.md`'s external-binary numbers are now checked against code too, not only
+its `--lib` rows.
+
+**nit — the reassigned comment.** The three lines moved to immediately above
+`TEST(ClampRowRange, AnswersEveryCaseInTheSharedTable)`. Worth naming the mechanism for the next
+reader: nothing read as missing, because the anonymous `namespace {` the reader lives in needs no
+comment of its own, so the block simply acquired a new owner. `coding-style.md`'s entry on this is
+exact — an insertion is contiguous and shows only in a diff.
+
+**nit — the README's opening.** The q6 sentence moved into `sectioned-cost.txt`'s own paragraph.
+The opening is now "Committed samples of a format, each read by the code under test rather than by
+a generator" — which also drops the "two readers read independently" claim the round-1 rewording
+had merely narrowed: it is true of `sectioned-cost.txt` and of `row-range-clamp.txt`, but
+`two-row-registry.csv` has the one reader `Registry::load`, so no two-reader phrasing covers all
+three. What the three actually share is that the fixture is parsed by the production reader rather
+than produced by one.
+
+**Re-verified after both nit edits:** C++ rebuilt clean with no warnings,
+`./cpp/build/peacock_cpu_tests` 12 passed, `ctest --test-dir cpp/build -L cpu` 1/1 passed,
+`git clang-format --diff` reports no change, and `--lib` 602 passed / 0 failed / 2 ignored.
