@@ -197,3 +197,20 @@ than produced by one.
 **Re-verified after both nit edits:** C++ rebuilt clean with no warnings,
 `./cpp/build/peacock_cpu_tests` 12 passed, `ctest --test-dir cpp/build -L cpu` 1/1 passed,
 `git clang-format --diff` reports no change, and `--lib` 602 passed / 0 failed / 2 ignored.
+
+### 2026-10-08 — round 1 findings closed, state completing
+
+Committed as `628a4298`. The full rust-only bar now stands in evidence: every one of the nine
+targets in `peacockdb-core/tests/` compiles under `--features rust-only`, and all of them ran —
+`test_cpu_corpus` 555, `test_corpus_goldens` 26, `test_cost_model` 3, `test_golden_format` 26,
+`--lib` 602 (2 ignored), `test_ci_coverage` 9, `test_module_layout` 17, with `test_gpu_corpus`,
+`test_node_timing` and `peacock_gpu_benchmarks` reporting zero cases because their rungs gate off.
+The three corpus targets ran as one command under `-- --test-threads=2`, 284s, exit 0.
+`test_golden_format` is the target worth remembering here: it reads
+`testdata/fixtures/sectioned-cost.txt`, so it is the one binary outside `--lib` this task's
+`testdata/fixtures/` edits could have disturbed.
+
+Both nits closed; the C++ side re-verified after the comment move (`peacock_cpu_tests` 12 passed,
+`ctest -L cpu` 1/1, `git clang-format --diff` clean) and `--lib` re-run at 602.
+
+No blocking or important finding outstanding, so the task moves to the completeness pass.
