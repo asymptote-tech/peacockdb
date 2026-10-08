@@ -239,3 +239,187 @@ workstation — there is no cuDF here (`~/data/miniforge3/envs/rapids` is absent
 before the cycle runs at all. That is why the device helper's comparison was moved into the
 ungated `device_answer.rs`: it shrinks the never-compiled surface to the live-cpu run, the schema
 check and the `gpu-result.txt` write.
+
+## Analyst reading of the device obstacle (2026-10-08)
+
+Probed from `peacockdb-alpha` on `ENS-duckdb-oracle`. Evidence, so a later run need not re-probe.
+
+### shad-gpu is genuinely off the network — not a key, not a config, not our egress
+
+| probe | result |
+|---|---|
+| `getent hosts llm-gpu0h200.velkerr.ru` | `89.169.176.82` — **DNS resolves** |
+| `ssh -o ConnectTimeout=10 shad-gpu` | `connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out` |
+| TCP connect to `89.169.176.82:22` | timeout |
+| TCP connect to `89.169.176.82:443` | timeout — **the whole IP is dark, not just sshd** |
+| TCP connect to `140.82.121.3:22` (github) | connects — our outbound 22 is not filtered |
+| `ssh-keygen -F llm-gpu0h200.velkerr.ru` | found, two keys (ed25519 + ecdsa), `known_hosts` lines 10–11 |
+
+The three local hypotheses are each excluded by the evidence, not by assumption:
+
+- **Changed host key on reprovision** (build-test.md:1070) would fail *after* a TCP connect, with
+  `REMOTE HOST IDENTIFICATION HAS CHANGED`. We never reach a TCP connect. `ssh-keygen -R` would
+  change nothing.
+- **ssh config / hostname drift**: `~/.ssh/config` carries `Host shad-gpu → llm-gpu0h200.velkerr.ru,
+  User info`, which matches `scripts/lib/shadgpu-env.sh` (`REMOTE=shad-gpu`,
+  `REMOTE_REPO=/home/info/peacockdb`) and `pipeline.yml`'s `GPU_HOST=info@llm-gpu0h200.velkerr.ru`.
+  The tree and the config agree.
+- **Proxy/VPN**: nothing in `scripts/` or `pipeline.yml` sets `ProxyJump`, `ProxyCommand` or any
+  proxy env; CI reaches the same hostname directly. There is no tunnel to restore.
+
+So: host down or dropped off its network. Human-side only.
+
+### `ssh verda` is a different failure, and does not mean verda is down
+
+`verda` has **no `Host` entry** in `~/.ssh/config` (only `shad-gpu` and `dev → localhost`), no
+`/etc/ssh/ssh_config.d/*.conf`, no `Include`, nothing in `/etc/hosts`. `getent hosts verda` is
+empty while `getent hosts github.com` answers, so DNS works and the name simply does not exist
+here. `scripts/build-test.sh:22` says the host is **not hardcoded** and its usage example is
+`--host dmitry@86.38.182.185` — verda is an ephemeral Verda/DataCrunch spot instance addressed by
+IP (`scripts/list_verda_instances.sh` is how its IP is found, needing `VERDA_CLIENT_ID/SECRET`).
+`ssh verda` can therefore never succeed on this box as configured, up or down.
+
+**Drift to fix, in build-test.md:1041/1078 and prompts.md:160**: both tell an agent to run
+`scripts/build-test.sh --host verda` and the coordinator to probe `ssh verda`, which presumes an
+alias that does not exist. A probe of a name that cannot resolve reads as "verda is down" every
+time, which is exactly what happened in Round 1. Either the human adds a `Host verda` stanza when
+the instance is up, or the wiki says to get the IP from `list_verda_instances.sh`.
+
+### This workstation DOES have cuDF — the Round 1 note checked the wrong env name
+
+`~/data/miniforge3/envs/rapids` is indeed absent, but `~/data/miniforge3` is a symlink to
+`~/miniforge3`, and that holds three envs:
+
+| env | libcudf | role |
+|---|---|---|
+| `rapids-cuda-12.2` | **25.02.02** (`conda-meta/libcudf-25.02.02-cuda12_…`) | the root `scripts/lib/shadgpu-env.sh:13` hardcodes — **shad-gpu's own version** |
+| `rapids-26.02` | 26.02.01 | 26.02 leg |
+| `rapids-26.02-cu12` | 26.02.01 (no nvcc) | — |
+
+All three carry `include/cudf`, `lib/libcudf.so` and `lib/cmake/cudf/cudf-config.cmake`;
+`rapids-cuda-12.2` carries `bin/nvcc`. `gcc-12`/`g++-12` (what `cargo-cudf.sh` pins for that root)
+are installed. `cargo check -p peacockdb-core --tests` fails only because the command set neither
+`--features rust-only` nor `CUDF_ROOT` — `peacockdb-ffi/build.rs` panics with
+`cudf not configured. Either: - Set CUDF_ROOT=…`. That is a missing variable, not a missing cuDF.
+
+The name that is stale is **`rapids`**: `scripts/build-test.sh:37` (`LOCAL_CUDF_ROOT`),
+`scripts/cargo-cudf.sh:23` (the `rapids)` gcc-14 arm) and `build-test.md:1005`'s one-off example all
+spell the local 26.02 root `…/envs/rapids`, which no longer exists (it is `rapids-26.02`). That
+spelling is what the Round 1 note checked.
+
+Direct evidence the local 25.02 device build works on this box: this worktree still holds
+`cpp/install/rust-tests/{test_gpu_corpus,test_node_timing,peacock_gpu_benchmarks,peacockdb_core_gpu_lib}`
+dated 2026-09-22 02:59 — a `build-test-shadgpu.sh --build` ran here. Its `target-cudf-rapids-cuda-12.2`
+has since been deleted (no such dir anywhere under `~`), so a repeat is a **cold** build.
+
+**Constraint on doing it**: `/` is at 90% — 16 GiB free on the only volume, with `target/`
+(rust-only) already 19 GiB. A cold `target-cudf-rapids-cuda-12.2` at opt-3 plus the C++/CUDA
+install plausibly exceeds that. Free space first, or expect a disk-full failure rather than a
+compile error.
+
+### No other path to a committable `gpu-result.txt`
+
+- **verda-gpu cannot produce it, for four independent reasons.** (1) It is cuDF **26.02**
+  (build-test.md:1042) and the spec's step 4 fixes the committed file as 25.02's; (2)
+  `testdata/.gitignore:28` ignores `/goldens/*/gpu-result-*.txt`, the file a correct 26.02 run
+  writes; (3) `scripts/build-test.sh`'s remote gate forwards only `$LD_ENV`, `$TESTDATA_ENV` and
+  `$UPDATE_CANON_ENV` — **`PCK_WRITE_GPU_RESULT` is not forwarded at all**, so that path cannot
+  write the file today without a script change (only `build-test-shadgpu.sh:416` forwards it); (4)
+  no `verda-gpu` host exists or resolves here either.
+  **Trap worth naming**: the version suffix is chosen by the operator's value, not detected from
+  the device — `corpus_gpu.rs:79-84` reads `PCK_WRITE_GPU_RESULT` and treats `"1"` as "the
+  committed file" whatever card ran. A 26.02 run invoked with `=1` *would* write and commit 26.02's
+  answers into 25.02's file and go green. Nothing in the tree catches that. It is forbidden by the
+  spec, not by a test.
+- **CI cannot produce it.** `pipeline.yml`'s `gpu-tests` job (:411) does not set
+  `PCK_WRITE_GPU_RESULT` anywhere, rsyncs `testdata/goldens` **to** the host only, pulls nothing
+  back, and ends with `rm -rf $REMOTE_DIR` (:681). `validate-large.yml` reaches shad-gpu but only
+  validates datasets. `exec-model-corpus.yml` is `ubuntu-latest`, CPU. Every device path in the
+  tree terminates at shad-gpu or verda-gpu; nothing else reaches a card.
+- **Synthesising it from `duckdb-result.txt` or `mini.result.txt` would be fabrication**: the
+  `duckdb_gpu_*` cases would then compare DuckDB with DuckDB and pass vacuously, which is the exact
+  failure deviation 4 in Round 1 was written to prevent.
+
+### The device files CAN be compiled before the cycle, and CI already does it
+
+Both never-compiled files are gated on `#[cfg(not(feature = "rust-only"))]`
+(`tests/test_gpu_corpus.rs:6`, `src/test_support/mod.rs:16`) — **not** on `feature = "gpu"`. So any
+non-rust-only build type-checks them. Two consequences:
+
+1. **`cpp-build-2502` already is that check.** `pipeline.yml:383-387` runs
+   `cargo test --no-run -p peacockdb-core --test test_gpu_corpus --features gpu` (and the lib), in
+   a `rapidsai/base:25.02` container on `ubuntu-latest` with `CUDF_ROOT=/opt/conda`. It compiles
+   **and links**. A type error in `test_gpu_corpus.rs` or `corpus_gpu.rs` fails that job with no
+   device involved. PR #167's CI run therefore already answers "do these two files compile?" —
+   read that job's log before anyone waits on a host.
+2. **Locally it is `./scripts/build-test-shadgpu.sh --build`** — phase-separated at
+   `build-test-shadgpu.sh:193-228`, pure local (`scripts/build.sh` + `stage_cargo_test_binary …
+   --features gpu`), **no ssh**; `--all` is `--build --push-binaries --patch --run` and only the
+   last three need the host. Cheaper still, the same compile without the C++ install:
+   `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/cargo-cudf.sh test -p peacockdb-core
+   --test test_gpu_corpus --features gpu --no-run` (disk permitting — see above).
+
+### What this means for how the task waits
+
+- CI on PR #167 **will be red** regardless of the host: `dataset-matrix` runs
+  `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus` (`pipeline.yml:293`),
+  which is where all 27 cases live. `done` requires CI green, so the task cannot reach `done`.
+- The count is **26 + 1**, not 27 + 1: `testdata/cost-registry.csv` has 26 cells at
+  `enabled|skip` across the five `gpu_*` columns (tpch 22, tpcds 4), so 26 `duckdb_gpu_*` cases
+  plus `every_enabled_device_cell_has_its_gpu_result_section_and_no_other`.
+- The coverage guard reads `gpu_result_golden(dataset, sf, **None**)`
+  (`tests/test_cpu_corpus.rs:372`) — it has no `PCK_GPU_RESULT_VERSION` override, unlike
+  `duckdb_gpu_case` (`test_support/duckdb_oracle.rs:331`). So a versioned file can exercise the
+  comparison but can never satisfy the guard. That asymmetry is deliberate and correct.
+
+## Round 2, recovered from a dispatch that died (2026-10-08)
+
+The coordinator run that opened round 2 was terminated while the developer was still working,
+and its window went with it. What survived is the work itself, uncommitted in the worktree, and
+this record of it. **The reviewer's round-1 list did not survive** — it was never written here,
+which is the mistake this section exists to not repeat. The status file carried only its shape:
+one blocking finding and four important ones.
+
+### The findings, reconstructed from the uncommitted diff
+
+Reconstructed, not quoted — read them as what the work addresses, and let round 2's reviewer be
+the judge of whether anything else on the original list is still open.
+
+1. **Blocking, and CI confirmed it**: `duckdb_result.py` imported `duckdb` at module top level,
+   so `test_duckdb_result.py` — which asks only about `cell` and `fingerprint` — died with
+   `ModuleNotFoundError` in a CI job that installs no duckdb wheel. Both import sites are now
+   deferred into `generate` and `main`, the way `duckdb_cost.py` defers `pyarrow.parquet`.
+2. **The fingerprint classed its columns from the rendered cells, so a decimal left the hash.**
+   `reads_as_inexact` called anything with a `.` approximate, which put every decimal column
+   into a sum/min/max triple instead of the row hash — and a triple cannot tell two rows whose
+   decimal cells are swapped from the right answer, which is the whole point of hashing an
+   over-cap join. Now a column is approximate only if its declared type is a float:
+   `is_approximate(&DataType)` on our side, `isinstance(value, float)` on DuckDB's. Six
+   fingerprint sections were regenerated on both sides and the two writers still agree byte for
+   byte (tpch anti-join, filter-project, semi-join carry the same `hash:` in
+   `duckdb-result.txt` and `mini.result.txt`).
+3. **The rendered side needed the other side's classes.** With the class no longer readable off a
+   rendering, fingerprinting the under-cap side on its own would call one column approximate here
+   and exact there. `compare_over_cap` now takes the classes from whichever side is fingerprinted
+   and renders the other under them; `fingerprint_of_rendered` takes `&[bool]`.
+4. **`assert_results_match` could only panic**, so the whole-answer oracles could not be shown
+   failing without a run. Split: `results_match -> Result<(), String>` holds the comparison and
+   `assert_results_match` panics on its `Err`.
+5. **`a_device_run_under_a_regeneration_writes_no_golden` would have failed its own recording
+   cycle.** It snapshotted `gpu-result.txt` and demanded it come back byte for byte, but
+   `build-test-shadgpu.sh` exports `PCK_WRITE_GPU_RESULT` into every binary — so on the one run
+   that writes the file the guard would go red for doing its job. The file now joins the snapshot
+   only when that variable is unset.
+
+### What is left before this task can move again
+
+- **None of it is verified.** No test run reached this record, nothing is committed, and the
+  reformatting a `rustfmt` pass will want has not happened. That is the next dispatch.
+- The task stays at `reviewing`: round 2's reviewer has not seen this work.
+- The device gap is unchanged. shad-gpu did not answer at 03:00 either
+  (`connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out`), and
+  `list_verda_instances.sh` cannot even look for verda's IP here —
+  `VERDA_CLIENT_ID is not set in the environment` — so CPU runs are local.
+- **The last push was documentation only, so the whole pipeline skipped** and PR #167's checks
+  read `skipping` across the board. The 677-passed/27-failed tally is from the `3a6c5343` push.
+  The next push carries code and will run for real.
