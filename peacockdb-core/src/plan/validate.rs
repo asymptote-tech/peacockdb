@@ -248,7 +248,8 @@ fn declared_width(node: &dyn GpuNode) -> Result<(), PlanError> {
         ),
         NodeRef::Aggregate(aggregate) => aggregate_width(&aggregate.body),
         NodeRef::AggregateBatches(aggregate) => aggregate_width(&aggregate.body),
-        // The rest emit their input's columns, which `types_across_the_edge` checks.
+        // The rest emit their input's columns: the one-input kinds are checked by
+        // `types_across_the_edge`, union and interleave by `union::check_branch_schemas`.
         _ => return Ok(()),
     };
     if declared != emitted {
