@@ -100,3 +100,22 @@ destination: each lands `<dest>/fixtures/row-range-clamp.txt`, which is the path
 from `PEACOCK_TESTDATA_DIR`. `shellcheck` is not installed on this host.
 `build-test.sh`'s `sync_fixtures` needed no edit — its `git ls-files --cached --others` sweep
 already lists the new fixture.
+
+### 2026-10-08 — round 1 green, PR #170 open
+
+The developer reported green: rust-only `--lib` 602 passed, `test_ci_coverage` 9, `test_module_layout`
+17, `ctest -L cpu` 12 (was 15 — four literal `ClampRowRange` tests became one table-driven test).
+Both #233 cases fail before the change; four malformed-fixture edits each fail both suites naming
+the line. The two clamps agree on all fourteen lines, so #174 produced no divergence ticket.
+
+Committed as `d33a95c4`, pushed, PR #170 against master (base verified, 2 commits).
+
+Two things to carry into review:
+
+- Two files sit outside the spec's scope table: `executor/mod.rs` and `executor/row_range.rs`,
+  comment-only. Each carried the sentence #174 quoted — that a divergence between the two clamps
+  is one no test of either alone could see — which this task falsifies, so leaving it would break
+  the code-comments-agree rule. Accepted.
+- `build-test.md` carried a second stale count the plan did not predict: `Recipes per join type`
+  said 23 where `wire::tests` has 24. Fixed in place, which is why the page lands at Rust 1860 /
+  grand 2335 / `--lib` 604 rather than the plan's 1859 / 2334 / 603.
