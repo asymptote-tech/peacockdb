@@ -17,7 +17,12 @@ fn pbench_alone_plans_with_the_small_table_rule_off() {
             mode.name
         );
         for other in ["tpch", "tpcds"] {
-            assert_eq!(mode.knobs_for(other), mode.knobs(), "{other} at {}", mode.name);
+            assert_eq!(
+                mode.knobs_for(other),
+                mode.knobs(),
+                "{other} at {}",
+                mode.name
+            );
         }
     }
 }
@@ -27,7 +32,10 @@ fn pbench_alone_plans_with_the_small_table_rule_off() {
 /// one edit instead of a dozen a reader has to find.
 #[test]
 fn the_corpus_datasets_are_the_three() {
-    let names: Vec<&str> = CORPUS_DATASETS.iter().map(|(dataset, _)| *dataset).collect();
+    let names: Vec<&str> = CORPUS_DATASETS
+        .iter()
+        .map(|(dataset, _)| *dataset)
+        .collect();
     assert_eq!(names, ["tpch", "tpcds", "pbench"]);
 }
 

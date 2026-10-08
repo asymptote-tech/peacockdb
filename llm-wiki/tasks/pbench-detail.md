@@ -654,3 +654,200 @@ PR #167's latest run reports every job `skipping`, because the last commits on
 decision, which is the one transition that asserts CI green, has to look at the last run that
 actually built something, not at the newest one. #167's real state is the earlier red: 27 cases
 on the missing `gpu-result.txt`.
+
+## Round 2 result (2026-10-08)
+
+The reviewer's one blocking finding, five importants and four nits, each with what was done and
+what was measured. No device, same as round 1: shad-gpu stayed down, every run below is plain
+`cargo test --features rust-only` into `./target`.
+
+### 1 (blocking) — #227's validator half landed; the device half did not, and why
+
+`nulls_where_none_declared(&ArrowSchema, &[usize])` is now in
+`test_support/schema_validation.rs` beside `device_divergence`, and `held_to_declaration` runs
+both comparisons and joins their findings. Which half runs is a stated argument rather than an
+inference: `NullsHeld::{Unread, PerColumn(&[usize])}`. `cpu_schema_validator` passes
+`PerColumn`, read off the arrow batch; `gpu_schema_validator` passes `Unread`.
+
+Proved red twice, in the shape that shipped:
+- the rule itself — three cases in `test_support/schema_validation/tests.rs`, written against a
+  function that did not exist;
+- through the hook — `a_declaration_with_one_field_non_nullable_is_refused_naming_the_nulls`
+  (`src/tests/end_to_end/schema_validation.rs`). pbench `bool-key-group` at tp1-single, whose
+  project emits the NULL `f_kb` group; the validator's index is built over a copy of the tree
+  with that field declared non-nullable, so the lie is told to the validator alone. With the
+  `NullsHeld::PerColumn` arm removed the case fails and the other two stay green.
+
+**What is left of #227, and why no card could be begged for it.** The device holds no null
+counts anywhere this side can read. `peacock_handle_schema` hands back an Arrow IPC *schema
+message* — no counts — and `cudf::to_arrow_schema` carries no usable nullability either, which
+is why `device_schema.rs`'s header says nullability is not in `DeviceSchema`. There is no
+`peacock_handle_null_counts`: closing the device half needs a new C++ entry point over
+`table_for(handle)`'s `column_view::null_count()`, and `peacock-ffi`'s `build.rs` runs cmake
+over cudf for any non-`rust-only` build, so that arm cannot even be type-checked here. **#227
+does not close with this task.** What closes it is one FFI read plus flipping `Unread` to
+`PerColumn` in `gpu_schema_validator` — the comparison is already written and already proved.
+
+The one line of `gpu_schema_validator` that changed is unbuildable locally for the same reason
+as every other device line in this branch.
+
+The cpu backend's own `nulls_where_none_declared` was left where it is rather than shared. The
+two take different inputs — arrays against counts, because a count is what a device read gives
+— and report into different error types; the shared part is the one-line predicate, which is
+not worth a `TEST_ONLY_ITEMS` entry point across a component wall.
+
+### 2 (important) — `--check` now reads the regeneration, and goes red when gen.sql drifts
+
+`generate_pbench.sh`'s specials and row-group queries read `$HERE/pbench.sf1/` — the committed
+fixture — in both modes, so only the `EXCEPT ALL` loop ever saw `$OUT`. They are now three
+functions over a directory argument, run over `$OUT` and the committed file in turn, each
+against the same literal; equal-to-the-same-literal is stricter than equal-to-each-other.
+
+Red-green, measured:
+- `DICTIONARY_SIZE_LIMIT 0` dropped from gen.sql's `fact` and `dim` COPYs, committed parquet
+  untouched. **The committed script at HEAD prints `pbench.sf1 matches gen.sql` and exits 0.**
+  The new one exits 1 with
+  `error: /tmp/tmp.XXXX/fact.parquet's float specials are '239 164 59 695 239 164 45', not
+  '199 204 191 563 199 204 191'` — naming the temp directory, so it is the regeneration that
+  failed. The `EXCEPT ALL` loop above it passed in both runs, which is the reviewer's point
+  about `-0.0` against `0.0` made twice.
+- gen.sql restored, `--check` green, parquet md5s unchanged.
+
+`pipeline.yml:180-182`'s claim ("including the float specials") is now true and needed no edit.
+
+### 3 (important) — every argument validated before the first side effect
+
+`MODE=${1:-write}` is replaced by an argument-count check and a `case` over `""` and `--check`.
+`write` is not an accepted literal: a flag whose only effect is the default is what
+`coding-style.md:32-38` forbids. Measured — `--chek`, `-c`, `--dry-run` and `--check extra` all
+exit 1 with a message and a usage line, and `md5sum -c` over `testdata/pbench.sf1/*.parquet`
+after all four shows every file unchanged. Write mode still rewrites byte-identical files.
+
+### 4 (important) — the three orphan sections dropped, and a guard both ways
+
+`every_duckdb_result_section_has_a_registry_row_and_every_row_a_section`, in
+`tests/test_cpu_corpus.rs` beside the `gpu-result.txt` guard, over `registry_datasets()`. The
+registry's rows and the golden's sections, both directions, the registry's `_` mapped through
+`stem`.
+
+Watched red before the drop: `pbench: duckdb-result.txt has sections with no registry row
+["interval-through-join", "struct-key-join", "struct-through-join"] and rows with no section []`.
+Then `python3 testdata/duckdb_result.py --dataset pbench`, and the regenerated file is the
+committed one **minus exactly those three sections and nothing else** — 2,036 lines and 53,044
+bytes removed, 136,635 → 134,599 lines, zero added lines in the diff. Green after.
+
+They were not kept for #255: their SQL is in the ticket, and `interval-through-join`'s section
+rendered `iv` as Python's `str(timedelta)` (`1 day, 0:00:00`), which is not how arrow-rs prints
+an interval, so the section would have had to be rewritten anyway. Measured on the other two
+datasets for the guard's cost: tpch 39 sections / 39 rows / 39 `.sql`, tpcds 99 / 99 / 99,
+pbench now 59 / 59 / 59.
+
+### 5 (important) — the stolen doc comment, and a second one the review missed
+
+`all_enabled` moved below `mode_cell_html`, with its own two lines. `mode_cell_html`'s block
+came back to it and was cut from 15 lines to 9: it had been a merge of two blocks and its counts
+contradicted each other and the code — "four execution-mode `<td>`s", "ONE `colspan=4`", "three
+mode cells", "Three cells rather than fifteen columns". The code emits three mode cells and
+`colspan="3"` (`main.rs:1024`, `:1135`), which is what it now says.
+
+**The same antipattern a second time, in the test module.** `the_pr_comment_fits_under_the_body_cap`
+had lost its four-line block to `the_widget_renders_a_pbench_section_beside_the_benchmarks`,
+inserted above it with no blank line — so the byte-cap guard, the one test in that file a later
+reader goes looking for, documented nothing. The three inserted tests moved below it.
+
+`test_golden_format`'s `no_declaration_carries_a_block_left_behind_by_a_split` cannot see either
+of these and says so in its own doc: it covers the SPLIT shape, where a blank line is left
+behind. Both of these were contiguous insertions. What would have caught both mechanically is a
+doc-block line-cap check (17 lines and 11 lines against the cap of 10) — not built here, because
+it goes red on pre-existing blocks across the tree and that is a task of its own.
+
+### Nits
+
+- **`na` counts as off in the registry's ticket rule** (`test_support/registry.rs`). Red-green:
+  with `pbench/float64_key_group`'s `tickets` blanked, `the_registry_matches_the_cpu_corpus_in_both_directions`
+  passed before and fails after with `cost-registry.csv:152: 10 cells off and no ticket`. Safe
+  over the whole CSV — measured: 21 rows carry an `na` cell and all 21 name a ticket; the only
+  three ticketless rows (tpch q1, q6, shuffle_additive_avg) are enabled at every cell.
+- **Comment caps.** `corpus_cases.inc`'s pbench header 22 lines → 10, and its #243 block 13 → 10
+  counting the three commented-out `corpus_query!` lines as part of the run. The detail those
+  two shed is in this file. `cpu_backend/mod.rs`'s `declared_as` comment 5 → 4 inside the body,
+  `plan_goldens.rs`'s NOT_RUNNABLE comment 5 → 4. Measured after: the only comment runs over 10
+  lines left in `corpus_cases.inc` are the file header (13) and the tpcds block at 241 (13),
+  both pre-existing.
+- **rustfmt.** The two files the review named are clean, and three more were not. `plan_goldens.rs`
+  (the 110-character use block), `tests/test_corpus_goldens.rs` (107), `test_support/tests.rs`
+  and `cpu_backend/tests/backend.rs` all run through `rustfmt --edition 2024`; every hunk in the
+  last two is this task's own code. `cpu_backend/mod.rs` was fixed **by hand** — it is a `mod.rs`,
+  so rustfmt follows its `mod` declarations and would have reformatted `expr_physical/tests.rs`,
+  `gpu_tests/murmur_conformance.rs`, `source.rs` and `tests/backend.rs` with it. For the same
+  reason `wire/expr_writer/tests.rs` was left alone: its seven divergences all sit outside the
+  lines this task added. `cost-report/src/main.rs` is not rustfmt-formatted at all and was not
+  touched by rustfmt; its new lines match the file's own idiom. Formatting
+  `tests/test_corpus_goldens.rs` carried four pre-existing hunks with it, which is the cost of
+  the rule as written.
+- **`plan_goldens.rs`'s `dim` sentence.** It said `fact` and `dim` are four lanes at tp4. They
+  both declare four; `fact`'s ten row groups spread over all four and `dim`'s one fills lane 0
+  and leaves three empty (`partition_groups=[[[0]],[],[],[]]`). Reworded; the test is unchanged.
+
+### One thing beyond the list
+
+The two e2e rebuilders — the retype and the nullability tightening — were one copy of 25 lines
+each, so they are one `with_a_project_lying_about_its_first_field` taking the edit as a closure,
+each call site asserting inside its own closure that the declaration it writes is not the true
+one.
+
+### Suite numbers, measured after the last edit
+
+| suite | round 1 | round 2 |
+|---|--:|--:|
+| `--lib` | 670 + 2 ignored | **674** + 2 ignored |
+| `test_cpu_corpus` | 858 pass / 27 fail | **859 pass / 27 fail** |
+| `test_corpus_goldens` | 26 | 26 |
+| `test_cost_model` | 3 | 3 |
+| `test_golden_format` | 43 | 43 |
+| `test_module_layout` | 18 | 18 |
+| `test_ci_coverage` | 9 | 9 |
+| `cargo test -p cost-report` | 39 | 39 |
+| `python3 testdata/test_duckdb_result.py` | 20 | 20 |
+
+`--lib` +4: three in `test_support::schema_validation::tests`, one in
+`tests::end_to_end::schema_validation`. `test_cpu_corpus` +1: the section-against-registry
+guard. `generate_pbench.sh --check` green and `generate_pbench.sh` (write) green, both after the
+red proofs above.
+
+**The red count is still exactly 27 and still the same 27 by name** — diffed against the list
+taken before this round's edits, identical. 26 `duckdb_gpu_<ds>_<q>_<mode>` (22 tpch, 4 tpcds)
+and `every_enabled_device_cell_has_its_gpu_result_section_and_no_other`; all 27 carry `does not
+exist, so no device answer is recorded`, grepped, 27 occurrences. No 28th.
+
+`cargo test --features rust-only -p peacockdb-core --no-run` emits zero warnings. `cost-report`
+still has its one pre-existing `sha_links is never used`. No workflow was edited this round.
+`scripts/exec_model/tests` was not re-run: nothing this round touches `scripts/`.
+
+### What the next person needs, on top of round 1's list
+
+- **#227 is half closed.** The signoff should say so. The rule and its two red-green cases are
+  in the tree; the device read is not, and it is a C++ entry point plus one word.
+- **The duckdb-result guard means a query file and a registry row now have to land together.**
+  `int8-key-group` in Task 8 and #255's three queries each need their `.sql`, their corpus line,
+  their registry row and a `duckdb_result.py` re-run in one change — a `.sql` alone now fails
+  `every_duckdb_result_section_has_a_registry_row_and_every_row_a_section` rather than passing
+  silently.
+- **`--check` is now a real guard over gen.sql**, so a change to the generator's COPY options
+  will go red on the regeneration's specials. The expected counts are literals at the bottom of
+  the script; a deliberate data change edits them, and should say why in the same commit.
+
+### The board's "closes #227" is now "closes half of"
+
+Round 2 landed the validator-side null-count check and proved it red two ways, and then established
+that the other half cannot land on this workstation or in this task: the device holds no null count
+for anything to read — `peacock_handle_schema` returns an IPC *schema* message and cuDF stores no
+nullability — so the remaining work is a new C++ entry point over `table_for(handle)`'s
+`column_view::null_count()`, and `peacockdb-ffi`'s `build.rs` runs cmake over cuDF for any build
+that is not `rust-only`, so that arm cannot even be type-checked here. The comparison is already
+shaped for it: `NullsHeld::{Unread, PerColumn(&[usize])}` is an explicit argument, and the device
+flavour passes `Unread` today.
+
+So the board heading says "closes half of #227" rather than "closes #227", and the signoff names
+the remaining half. #227's own text needs no change — it already reads "#227 closes when both
+checks land", which is exactly right.

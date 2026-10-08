@@ -307,11 +307,10 @@ impl CpuUnload {
 /// a column whose type is not the declared one is a state layout the engine and DataFusion
 /// disagree about, which is a wrong answer everywhere above rather than an error.
 fn declared_as(batch: RecordBatch, declared: &SchemaRef) -> Result<RecordBatch, BackendError> {
-    // #227, and ahead of the early return: the declaration is what the device is sent and what
-    // every node above reads, so a NULL in a column declared without one is a state the two
-    // engines disagree about, and the symptom shows up somewhere else as a wrong answer. Arrow
-    // catches it too where the schemas differ, in a message that dumps both schemas; this one
-    // names the column and the count.
+    // #227, and ahead of the early return: the declaration is what the device is sent and
+    // what every node above reads, so a NULL in a column declared without one shows up
+    // somewhere else as a wrong answer. Arrow catches it too where the schemas differ, in a
+    // message that dumps both; this one names the column and the count.
     if let Some(said) = nulls_where_none_declared(batch.columns(), declared) {
         return Err(BackendError::new(said));
     }
@@ -363,13 +362,7 @@ fn nulls_where_none_declared(columns: &[ArrayRef], declared: &SchemaRef) -> Opti
         .iter()
         .zip(declared.fields().iter())
         .filter(|(column, field)| !field.is_nullable() && column.null_count() > 0)
-        .map(|(column, field)| {
-            format!(
-                "{} holds {} NULL(s)",
-                field.name(),
-                column.null_count()
-            )
-        })
+        .map(|(column, field)| format!("{} holds {} NULL(s)", field.name(), column.null_count()))
         .collect();
     match broken.is_empty() {
         true => None,

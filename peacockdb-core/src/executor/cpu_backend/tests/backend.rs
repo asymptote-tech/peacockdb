@@ -432,13 +432,16 @@ fn the_nullability_rule_names_every_column_that_breaks_it_and_how_many() {
         Arc::new(Int32Array::from(vec![Some(1), None])),
         Arc::new(StringArray::from(vec![None, None] as Vec<Option<&str>>)),
     ];
-    let said = super::super::nulls_where_none_declared(&dirty, &declared)
-        .expect("two columns break it");
+    let said =
+        super::super::nulls_where_none_declared(&dirty, &declared).expect("two columns break it");
     // BOTH columns, with their counts: a message naming the first one found would have the
     // reader fix it and run again to meet the second.
     assert!(said.contains("k holds 1"), "{said}");
     assert!(said.contains("s holds 2"), "{said}");
-    assert!(!said.contains("ok holds"), "the nullable column is not named: {said}");
+    assert!(
+        !said.contains("ok holds"),
+        "the nullable column is not named: {said}"
+    );
     assert!(said.contains("#227"), "{said}");
 }
 

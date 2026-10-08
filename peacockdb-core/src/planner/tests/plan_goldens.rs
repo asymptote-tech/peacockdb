@@ -14,8 +14,8 @@ use crate::plan_text::{render_plan, render_plan_memory};
 use crate::planner;
 use crate::planner::PlanKnobs;
 use crate::test_support::{
-    CORPUS_DATASETS, MODES, Mode, data_dir_for, golden_dir_for, mode_named, ordered_sections, queries_dir_for,
-    section_differences, testdata_root,
+    CORPUS_DATASETS, MODES, Mode, data_dir_for, golden_dir_for, mode_named, ordered_sections,
+    queries_dir_for, section_differences, testdata_root,
 };
 use crate::wire::{Payloads, attach_recipes, check_seq_kinds, depth, render_plan_recipes};
 
@@ -302,7 +302,8 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
                 .create_physical_plan()
                 .await
                 .expect("the query plans");
-            let (tree, _) = planner::plan(&plan, mode.knobs_for(dataset)).expect("this mode runs it");
+            let (tree, _) =
+                planner::plan(&plan, mode.knobs_for(dataset)).expect("this mode runs it");
             let recipes = attach_recipes(tree.as_ref()).expect("a plan's recipes are structural");
             text.push_str(&format!("== {dataset} {name}\n"));
             text.push_str(&format!("sha256={}\n", digest_of(recipes.bytes())));
@@ -419,10 +420,9 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
          the shape has to split before it reaches the limit, not the limit be raised"
     );
     // Against NOT_RUNNABLE rather than a list of its own: that table is the declaration, and
-    // the test below holds each of its entries to the `not runnable` line in all five mode
-    // goldens. A second spelling here would have to be edited in step with it, and the one
-    // thing this adds — the set measured by PLANNING rather than read off a golden — is
-    // what makes the pair a check instead of a copy.
+    // the test below holds each entry to the `not runnable` line in all five mode goldens. A
+    // second spelling would have to be edited in step with it, and what this adds — the set
+    // measured by PLANNING rather than read off a golden — is what makes the pair a check.
     let mut declared: Vec<String> = NOT_RUNNABLE
         .iter()
         .map(|(dataset, query, _)| format!("{dataset} {query}"))
@@ -760,10 +760,11 @@ fn every_pbench_join_plans_as_its_spec_says() {
     }
 }
 
-/// pbench.md's "collapse to one lane": with the small-table rule off, `fact` and `dim` are four
-/// lanes at tp4, and a join the planner cannot shuffle merges both sides into one — #140's cost,
-/// which is invisible in tpch and tpcds because the small-table rule puts those tables in one
-/// lane to begin with.
+/// pbench.md's "collapse to one lane": with the small-table rule off, a pbench scan declares
+/// four lanes at tp4 — `fact`'s ten row groups spread over all four, `dim`'s one filling lane 0
+/// and leaving three empty — and a join the planner cannot shuffle merges both sides into one.
+/// That is #140's cost, invisible in tpch and tpcds because the small-table rule puts those
+/// tables in one lane to begin with.
 ///
 /// Three kinds, which is the whole point of reading it here rather than eyeballing one plan: a
 /// keyless nested-loop join, a cross join, and — the one the spec left open — a KEYED join

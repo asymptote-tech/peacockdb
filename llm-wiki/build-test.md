@@ -6,6 +6,7 @@ Code and tests are authoritative; this page maps them.
 
 **Grand total: 2581 test cases — Rust 2089, C++ 97, Python 395.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 **Grand total: 2776 test cases — Rust 2278, C++ 97, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2781 test cases — Rust 2283, C++ 97, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -25,10 +26,11 @@ unit (`foo.rs` beside `foo/tests.rs`).
 
 #### cpu — `--features rust-only`: no FFI, no device. 1398 cases: `--lib` 663, `test_cpu_corpus` 706, `test_corpus_goldens` 26, `test_cost_model` 3
 #### cpu — `--features rust-only`: no FFI, no device. 1586 cases: `--lib` 672, `test_cpu_corpus` 885, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1591 cases: `--lib` 676, `test_cpu_corpus` 886, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 884 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 885 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
@@ -44,11 +46,12 @@ the modes each is correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry 
 entirely** and they are exactly the 33 `duckdb_none` lines: `tpch/q11`, `tpch/q22` and `tpcds/q24`
 on [#190](tickets/joins.md#t190), `tpcds/q54`, and 29 of pbench's, which is what a dataset written
 to provoke open tickets looks like — 24 shapes our planner refuses, 5 narrowed by #190. 674 cells,
-plus five checks
+plus six checks
 that every declaration's oracles suit each other and every device cell has a cpu cell,
 that a hyphenated query resolves its authority and has its result section, that an
-undetermined line's rows are compared only against committed files, and `all_modes`
-expanding to the same cells as the five spelled out
+undetermined line's rows are compared only against committed files, that `duckdb-result.txt`'s
+sections are the registry's rows in both directions, and `all_modes` expanding to the same cells as
+the five spelled out
 
 Then the DuckDB tier, 205 of the count and the only independent oracle over the answers
 ([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
@@ -87,7 +90,7 @@ handed, and the record's preamble is what `record_header()` writes
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 29 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 30 |
 |---|---|--:|
 
 SQL in, rows out: 17 queries planned and run at all five modes against DataFusion on the same
@@ -408,6 +411,14 @@ being named by some corpus line
 what the sink says when the device's schema is not the declared one: every diverging column
 named with its index and both types, so a year and a narrow decimal read as two findings
 rather than `try_new`'s first; nullability is never a clause, since `try_new` does not check it
+
+| Schema validator null counts | [test_support::schema_validation::tests](../peacockdb-core/src/test_support/schema_validation/tests.rs) | 3 |
+|---|---|--:|
+
+a NULL in a column the node declares non-nullable, which neither validator saw before: the cpu
+flavour hands the comparison real counts off the arrow batch, the device flavour says `Unread`
+because cuDF stores no nullability and nothing on that side has a count to read. Half of
+[#227](tickets/corpus-coverage.md#t227); the other half is a C++ entry point that does not exist
 
 | Device schema projection | [test_support::device_schema::tests](../peacockdb-core/src/test_support/device_schema/tests.rs) | 16 |
 |---|---|--:|

@@ -298,27 +298,15 @@ corpus_query!(tpcds, 1, q85, all_modes, tp1_single, duckdb_approx, data_fusion_e
 corpus_query!(tpcds, 1, q92, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // --- pbench ------------------------------------------------------------------
-// The dataset whose data holds what tpch and tpcds lack (llm-wiki/tasks/pbench.md): one query
-// per demonstrable ticket of chain J, cells off where a ticket blocks them, and each later task
-// of the chain turns its own on. pbench plans with the small-table rule off
-// (test_support::small_table_bytes_for), so `fact` splits across four lanes at tp4 and the
-// one-row-group tables leave three lanes empty — the empty-lane shapes for free.
+// The dataset whose data holds what tpch and tpcds lack: one query per demonstrable ticket of
+// chain J, cells off where a ticket blocks them, each later task turning its own on. It plans
+// with the small-table rule off, so `fact` splits across four lanes at tp4 and the
+// one-row-group tables leave three empty. llm-wiki/tasks/pbench.md, and -detail.md beside it.
 //
-// EVERY gpu cell is off and NOT ONE HAS BEEN RUN: shad-gpu was down for the whole of this task,
-// so the ticket on a row is the blocker read off the plan and off pbench.md's "off on" column,
-// not off a cycle. pbench.md's Task 8 is the cycle that settles which modes actually pass, and
-// a row whose ticket turns out wrong there is a finding for it rather than a defect here.
-//
-// A row whose cpu cells are off is refused by OUR planner, and its ticket is the one its
-// `refused:` line cites — read them in testdata/goldens/pbench.sf1/*.plans.txt. The five
-// nested-loop joins that plan (nl-inner, nl-left, nl-left-decimal, nl-projection,
-// like-column-pattern) are all off on #190 at every mode: each narrows, and the cpu backend
-// passes `None` where DataFusion takes the projection, so none of them runs on either engine.
-//
-// Three queries of pbench.md are absent entirely, each recorded where its reason lives:
-// struct-key-join, struct-through-join and interval-through-join PANIC the planner (#255), so a
-// query file for one aborts all five plan goldens; and int8-key-group lands with Task 8's cycle,
-// being the one row pbench.md expects no ticket for.
+// EVERY gpu cell is off and NOT ONE HAS BEEN RUN — shad-gpu was down, so a row's ticket is the
+// blocker read off its plan golden rather than off a cycle, and pbench.md's Task 8 is that
+// cycle. A row with no cpu cell is refused by our planner, citing its ticket on the golden's
+// `refused:` line. Four queries are absent: #255 panics on three, int8-key-group waits.
 corpus_query!(pbench, 1, anti_null_preserved_condition, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, bool_key_group, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, cross_empty_build, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -378,14 +366,11 @@ corpus_query!(pbench, 1, uint_key_join, tp1_single | tp1_rowgroup, none, duckdb_
 
 // #243 — the cpu keys -0.0 and NaN by their BITS, so the three float rows land with their SQL,
 // their plan goldens and their DuckDB answers, and their lines commented out for the task that
-// fixes it to enable. MEASURED on this data: the cpu answers float64-key-group in 54 groups
-// against DuckDB's 52, splitting -0.0 from 0.0 (191 rows against 563) and -NaN from NaN (204
-// against 199) where SQL has one group for each pair; float32-key-group is the same shape and
-// float64-key-join joins on the same column. Two things the enabling task needs. The oracle is
-// duckdb_approx and not exact: arrow renders a NaN `NaN` and DuckDB renders it `nan`, and only
-// the float tolerance reads those as one value. And each row carries 243 with every cpu AND gpu
-// cell `na` rather than `disabled`: a commented line declares nothing, and a `disabled` cpu cell
-// is required to have a `skipped:` section in the mode golden that no declaration writes.
+// fixes it to enable. MEASURED: the cpu answers float64-key-group in 54 groups against DuckDB's
+// 52. The oracle is duckdb_approx and not exact because arrow renders a NaN `NaN` and DuckDB
+// renders it `nan`. Every cpu AND gpu cell is `na` rather than `disabled`: a commented line
+// declares nothing, and a `disabled` cpu cell wants a `skipped:` section in the mode golden
+// that no declaration writes. llm-wiki/tasks/pbench-detail.md carries the rest.
 // corpus_query!(pbench, 1, float32_key_group, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 // corpus_query!(pbench, 1, float64_key_group, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 // corpus_query!(pbench, 1, float64_key_join, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);

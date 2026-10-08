@@ -722,29 +722,15 @@ fn peacock_cell_md(value: Option<u64>, plan_url: Option<String>, cost_url: Optio
     }
 }
 
-/// The four execution-mode `<td>`s for a row — or ONE `colspan=4` cell when the
-/// query has no per-mode story to tell.
+/// One execution-mode `<td>`: five glyphs, one per mode, in the fixed sequence. A row carries
+/// three of these — plan, cpu, gpu — and the renderers replace all three with one `colspan=3`
+/// cell where the query does not plan at all, that being a fact about the whole row.
 ///
-/// Executable rows get the three mode cells. The other
-/// two kinds merge, because four repeated em-dashes read as "look for the
-/// difference" when the real statement is a single fact about the whole row: it
-/// plans but nothing runs it yet, or it does not plan at all.
-/// One cell: five glyphs, one per mode, in the fixed sequence. Three cells rather than
-/// fifteen columns of one glyph each, which would set their own min-content width and push
-/// the table into horizontal scroll.
-///
-/// An enabled glyph links to the file its mode's section lives in. A blob view cannot
-/// address a section by name, so the link lands on the file and the reader finds the
-/// `== <query>` header — which is also where a refusal is, so an enabled query and a
-/// refused one link to the same place and differ in what the reader lands on.
-/// Whether every one of the five modes is enabled for this group — the one state a reader
-/// scanning the widget wants to skip past, so it gets one mark instead of five.
-fn all_enabled(r: &Row, group: ModeGroup) -> bool {
-    MODES
-        .iter()
-        .all(|mode| r.state(&group.column(mode)) == "enabled")
-}
-
+/// Five glyphs in one cell rather than fifteen columns of one glyph each, which would set
+/// their own min-content width and push the table into horizontal scroll. An enabled glyph
+/// links to the file its mode's section lives in: a blob view cannot address a section by
+/// name, so the link lands on the file and the reader finds the `== <query>` header — which
+/// is also where a refusal is, so an enabled query and a refused one link to the same place.
 fn mode_cell_html(r: &Row, links: &Links, d: &Dataset, group: ModeGroup) -> String {
     if all_enabled(r, group) {
         // One heavier tick, linked at the first mode's golden as the five would have been.
@@ -783,6 +769,14 @@ fn mode_cell_html(r: &Row, links: &Links, d: &Dataset, group: ModeGroup) -> Stri
         })
         .collect();
     format!("<td class=\"mode\">{}</td>", glyphs.join(""))
+}
+
+/// Whether every one of the five modes is enabled for this group — the one state a reader
+/// scanning the widget wants to skip past, so it gets one mark instead of five.
+fn all_enabled(r: &Row, group: ModeGroup) -> bool {
+    MODES
+        .iter()
+        .all(|mode| r.state(&group.column(mode)) == "enabled")
 }
 
 fn mode_cell_md(r: &Row, group: ModeGroup) -> String {
@@ -2229,6 +2223,36 @@ mod tests {
     /// the four tables were 127 KB against the 65,536-byte cap before the legacy pair went.
     /// The run prints the margin as well as the verdict, since the number that matters is how
     /// many more queries fit. What is asserted is the thing GitHub checks — rendered bytes.
+    #[test]
+    fn the_pr_comment_fits_under_the_body_cap() {
+        let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
+        let registry = Registry::load(&testdata.join("cost-registry.csv"));
+        let links = Links {
+            repo: "asymptote-tech/peacockdb".into(),
+            sha: Some("0".repeat(40)),
+            tickets: TicketIndex::default(),
+        };
+        let datasets = all_datasets(&testdata, &registry);
+        let body = render_markdown(&datasets, "https://p/", false, &links, None);
+        // The margin, not just the verdict: the body grows by a row per query enabled, so
+        // the number a later reader needs is how many more fit — a guard that only says
+        // "green" is one nobody can plan against.
+        let margin = COMMENT_MAX_BYTES.saturating_sub(body.len());
+        let per_row = body.len() / datasets.iter().map(|d| d.rows.len()).sum::<usize>().max(1);
+        println!(
+            "{} bytes of {COMMENT_MAX_BYTES}, {margin} spare — about {} more queries at \
+             {per_row} bytes a row",
+            body.len(),
+            margin / per_row.max(1)
+        );
+        assert!(
+            body.len() <= COMMENT_MAX_BYTES,
+            "the comment is {} bytes against the {COMMENT_MAX_BYTES}-byte cap — GitHub refuses \
+             this with a 422 that reads as a permissions error",
+            body.len()
+        );
+    }
+
     /// The widget renders every corpus dataset, pbench included, and the three come from one
     /// constructor so `main` and the tests cannot disagree about which datasets exist.
     ///
@@ -2296,36 +2320,6 @@ mod tests {
         let html = mode_cell_html(&row, &no_links(), &sample_dataset(), ModeGroup::Plan);
         assert_eq!(html.matches('✓').count(), 4, "{html}");
         assert!(!html.contains("class=\"all\""), "{html}");
-    }
-
-    #[test]
-    fn the_pr_comment_fits_under_the_body_cap() {
-        let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
-        let registry = Registry::load(&testdata.join("cost-registry.csv"));
-        let links = Links {
-            repo: "asymptote-tech/peacockdb".into(),
-            sha: Some("0".repeat(40)),
-            tickets: TicketIndex::default(),
-        };
-        let datasets = all_datasets(&testdata, &registry);
-        let body = render_markdown(&datasets, "https://p/", false, &links, None);
-        // The margin, not just the verdict: the body grows by a row per query enabled, so
-        // the number a later reader needs is how many more fit — a guard that only says
-        // "green" is one nobody can plan against.
-        let margin = COMMENT_MAX_BYTES.saturating_sub(body.len());
-        let per_row = body.len() / datasets.iter().map(|d| d.rows.len()).sum::<usize>().max(1);
-        println!(
-            "{} bytes of {COMMENT_MAX_BYTES}, {margin} spare — about {} more queries at \
-             {per_row} bytes a row",
-            body.len(),
-            margin / per_row.max(1)
-        );
-        assert!(
-            body.len() <= COMMENT_MAX_BYTES,
-            "the comment is {} bytes against the {COMMENT_MAX_BYTES}-byte cap — GitHub refuses \
-             this with a 422 that reads as a permissions error",
-            body.len()
-        );
     }
 
     #[test]

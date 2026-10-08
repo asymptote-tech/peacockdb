@@ -20,11 +20,12 @@ use crate::tests::rebuild::{rebuild, schema_of};
 const RETYPED_TO: DataType = DataType::Int16;
 
 async fn planned(
+    dataset: &str,
     query: &str,
     mode: &crate::test_support::Mode,
 ) -> (datafusion::prelude::SessionContext, Box<dyn GpuNode>) {
-    let data_dir = data_dir_for("tpch", "1");
-    let sql = std::fs::read_to_string(queries_dir_for("tpch").join(format!("{query}.sql")))
+    let data_dir = data_dir_for(dataset, "1");
+    let sql = std::fs::read_to_string(queries_dir_for(dataset).join(format!("{query}.sql")))
         .expect("the query text");
     let ctx = crate::register_tables_for(
         crate::build_session_state(mode.target_partitions),
@@ -39,7 +40,7 @@ async fn planned(
         .create_physical_plan()
         .await
         .expect("the query has a physical plan");
-    let (tree, _memory) = planner::plan(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs_for(dataset))
         .unwrap_or_else(|error| panic!("{query} at {}: {error}", mode.name));
     (ctx, tree)
 }
@@ -47,7 +48,7 @@ async fn planned(
 #[tokio::test]
 async fn every_batch_of_a_small_query_matches_its_nodes_declaration() {
     for mode in &MODES {
-        let (ctx, tree) = planned("q6", mode).await;
+        let (ctx, tree) = planned("tpch", "q6", mode).await;
         let index = PlanIndex::build(tree.as_ref()).expect("the plan indexes");
         let report = run_with_hook::<CpuBackend>(
             tree.as_ref(),
@@ -67,9 +68,16 @@ async fn every_batch_of_a_small_query_matches_its_nodes_declaration() {
 #[tokio::test]
 async fn a_declaration_with_one_field_retyped_is_refused_naming_the_field() {
     let mode = &MODES[0];
-    let (ctx, tree) = planned("q6", mode).await;
+    let (ctx, tree) = planned("tpch", "q6", mode).await;
     let mut retyped = None;
-    let lying = with_a_project_retyped(tree.as_ref(), &mut retyped);
+    let lying = with_a_project_lying_about_its_first_field(tree.as_ref(), &mut retyped, &|field| {
+        assert_ne!(
+            field.data_type(),
+            &RETYPED_TO,
+            "the retype must change the type"
+        );
+        field.clone().with_data_type(RETYPED_TO)
+    });
     let field = retyped.expect("q6 carries a project");
     let index = PlanIndex::build(lying.as_ref()).expect("the retyped plan indexes");
     let said = match run_with_hook::<CpuBackend>(
@@ -91,16 +99,21 @@ async fn a_declaration_with_one_field_retyped_is_refused_naming_the_field() {
     );
 }
 
-/// The tree rebuilt with the first project met bottom-up declaring its first field as
-/// [`RETYPED_TO`]; `retyped` takes that field's name.
-fn with_a_project_retyped(node: &dyn GpuNode, retyped: &mut Option<String>) -> Box<dyn GpuNode> {
+/// The tree rebuilt with the first project met bottom-up declaring its first field as `lie`
+/// returns it; `lied_about` takes that field's name. The two lies below differ in one line,
+/// and each asserts inside its closure that the declaration it writes is not the true one.
+fn with_a_project_lying_about_its_first_field(
+    node: &dyn GpuNode,
+    lied_about: &mut Option<String>,
+    lie: &dyn Fn(&Field) -> Field,
+) -> Box<dyn GpuNode> {
     let children: Vec<Box<dyn GpuNode>> = node
         .children()
         .into_iter()
-        .map(|child| with_a_project_retyped(child, retyped))
+        .map(|child| with_a_project_lying_about_its_first_field(child, lied_about, lie))
         .collect();
     match as_node_ref(node) {
-        NodeRef::Project(project) if retyped.is_none() => {
+        NodeRef::Project(project) if lied_about.is_none() => {
             let declared = schema_of(node);
             let mut fields: Vec<Field> = declared
                 .fields
@@ -108,13 +121,8 @@ fn with_a_project_retyped(node: &dyn GpuNode, retyped: &mut Option<String>) -> B
                 .iter()
                 .map(|field| field.as_ref().clone())
                 .collect();
-            assert_ne!(
-                fields[0].data_type(),
-                &RETYPED_TO,
-                "the retype must change the type"
-            );
-            *retyped = Some(fields[0].name().clone());
-            fields[0] = fields[0].clone().with_data_type(RETYPED_TO);
+            *lied_about = Some(fields[0].name().clone());
+            fields[0] = lie(&fields[0]);
             let child = children.into_iter().next().expect("a project has a child");
             Box::new(GpuProject::new(
                 child,
@@ -124,4 +132,42 @@ fn with_a_project_retyped(node: &dyn GpuNode, retyped: &mut Option<String>) -> B
         }
         _ => rebuild(node, children),
     }
+}
+
+/// #227's null half, told to the validator alone like the retype above.
+///
+/// pbench's `f_kb` holds 1,177 NULLs, so `bool-key-group`'s project emits a NULL group key,
+/// and the declaration the validator reads says that column holds none. The CPU backend's
+/// own `declared_as` cannot be the place this is proved: arrow refuses a NULL in a
+/// non-nullable field at `RecordBatch::try_new`, so no batch reaching it can carry the
+/// violation, while a device handle can and the validator is what reads one.
+#[tokio::test]
+async fn a_declaration_with_one_field_non_nullable_is_refused_naming_the_nulls() {
+    let mode = &MODES[0];
+    let (ctx, tree) = planned("pbench", "bool-key-group", mode).await;
+    let mut tightened = None;
+    let lying =
+        with_a_project_lying_about_its_first_field(tree.as_ref(), &mut tightened, &|field| {
+            assert!(
+                field.is_nullable(),
+                "the tightening must change the declaration"
+            );
+            field.clone().with_nullable(false)
+        });
+    let field = tightened.expect("bool-key-group carries a project");
+    let index = PlanIndex::build(lying.as_ref()).expect("the tightened plan indexes");
+    let said = match run_with_hook::<CpuBackend>(
+        tree.as_ref(),
+        &ctx.task_ctx(),
+        None,
+        Some(cpu_schema_validator(&index)),
+    ) {
+        Err(RunError::CallFailed(said)) => said,
+        other => panic!("expected the validator's refusal, got {other:?}"),
+    };
+    assert!(
+        said.contains(&format!("{field}: 1 NULL(s)")),
+        "the refusal does not name `{field}` and its count: {said}"
+    );
+    assert!(said.contains("#227"), "the refusal cites no ticket: {said}");
 }
