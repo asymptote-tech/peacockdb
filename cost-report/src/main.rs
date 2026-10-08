@@ -382,6 +382,18 @@ impl Links {
         let sha = self.sha.as_ref()?;
         Some(format!("https://github.com/{}/blob/{sha}/{query_rel}/{stem}.sql", self.repo))
     }
+
+    /// The same link with the commit abbreviated, for the PR comment alone.
+    ///
+    /// GitHub resolves a 7-character sha in a blob path exactly as it resolves the full one, so
+    /// nothing is lost and 33 bytes a row are saved — and the comment is the one rendering with
+    /// a hard byte cap. The HTML page keeps the full sha: it is addressable and archived, and
+    /// has no cap to answer to. `freshness_line` abbreviates for display the same way.
+    fn query_url_short(&self, query_rel: &str, stem: &str) -> Option<String> {
+        let sha = self.sha.as_ref()?;
+        let short = &sha[..sha.len().min(7)];
+        Some(format!("https://github.com/{}/blob/{short}/{query_rel}/{stem}.sql", self.repo))
+    }
 }
 
 fn main() {
@@ -480,9 +492,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let tpch = build_dataset("TPC-H", "testdata/goldens/tpch.sf1", "testdata/tpch-queries", &testdata.join("goldens/tpch.sf1"), &registry, "tpch");
-    let tpcds = build_dataset("TPC-DS", "testdata/goldens/tpcds.sf1", "testdata/tpcds-queries", &testdata.join("goldens/tpcds.sf1"), &registry, "tpcds");
-    let datasets = [tpch, tpcds];
+    let datasets = all_datasets(&testdata, &registry);
 
     let freshness = freshness_line(links.sha.as_deref(), generated_at.as_deref());
 
@@ -508,6 +518,20 @@ fn main() {
         std::fs::write(&md_out, &md).unwrap_or_else(|e| panic!("write {md_out}: {e}"));
         eprintln!("wrote {md_out}");
     }
+}
+
+/// Every dataset the widget renders, in the order it renders them.
+///
+/// One list: `main` and the tests read this, so a dataset the page shows and the cap guard
+/// does not measure — or the other way round — cannot happen. The labels are the display
+/// names, which is why they are not `test_support::CORPUS_DATASETS`' keys: this crate does
+/// not link peacockdb-core.
+fn all_datasets(testdata: &Path, registry: &Registry) -> Vec<Dataset> {
+    vec![
+        build_dataset("TPC-H", "testdata/goldens/tpch.sf1", "testdata/tpch-queries", &testdata.join("goldens/tpch.sf1"), registry, "tpch"),
+        build_dataset("TPC-DS", "testdata/goldens/tpcds.sf1", "testdata/tpcds-queries", &testdata.join("goldens/tpcds.sf1"), registry, "tpcds"),
+        build_dataset("pbench", "testdata/goldens/pbench.sf1", "testdata/pbench-queries", &testdata.join("goldens/pbench.sf1"), registry, "pbench"),
+    ]
 }
 
 fn build_dataset(
@@ -713,7 +737,31 @@ fn peacock_cell_md(value: Option<u64>, plan_url: Option<String>, cost_url: Optio
 /// address a section by name, so the link lands on the file and the reader finds the
 /// `== <query>` header — which is also where a refusal is, so an enabled query and a
 /// refused one link to the same place and differ in what the reader lands on.
+/// Whether every one of the five modes is enabled for this group — the one state a reader
+/// scanning the widget wants to skip past, so it gets one mark instead of five.
+fn all_enabled(r: &Row, group: ModeGroup) -> bool {
+    MODES
+        .iter()
+        .all(|mode| r.state(&group.column(mode)) == "enabled")
+}
+
 fn mode_cell_html(r: &Row, links: &Links, d: &Dataset, group: ModeGroup) -> String {
+    if all_enabled(r, group) {
+        // One heavier tick, linked at the first mode's golden as the five would have been.
+        let first = MODES[0];
+        let stem = group.file(first);
+        let at = d
+            .section_lines
+            .get(&stem)
+            .and_then(|lines| lines.get(&r.stem()))
+            .map(|line| format!("#L{line}"))
+            .unwrap_or_default();
+        let tick = "<span class=\"all\" title=\"all five modes\">\u{2713}</span>";
+        return match links.golden_url(d.canon_rel, &stem, "txt") {
+            Some(url) => format!("<td class=\"mode\"><a href=\"{url}{at}\">{tick}</a></td>"),
+            None => format!("<td class=\"mode\">{tick}</td>"),
+        };
+    }
     let glyphs: Vec<String> = MODES
         .iter()
         .map(|mode| {
@@ -738,6 +786,11 @@ fn mode_cell_html(r: &Row, links: &Links, d: &Dataset, group: ModeGroup) -> Stri
 }
 
 fn mode_cell_md(r: &Row, group: ModeGroup) -> String {
+    if all_enabled(r, group) {
+        // A heavier mark rather than a larger one: the comment's HTML table strips font sizes,
+        // so the only way a cell can read differently is a different character.
+        return "\u{2714}".to_string();
+    }
     MODES
         .iter()
         .map(|mode| state_glyph(r.state(&group.column(mode))))
@@ -880,6 +933,7 @@ fn render_html(
          tr.green{background:#e9f7ee;}tr.red{background:#ffe0e0;}tr.grey{background:#f3f4f6;color:#57606a;}\
          .foot{margin-top:1.5rem;color:#57606a;font-size:.85rem;}\
          td.mode{text-align:center;white-space:nowrap;font-variant-numeric:normal;}\
+         td.mode .all{font-size:1.5em;line-height:1;}\
          /* The 4 mode headers are the widest thing in their columns by far — the \
             data cells below them are a single glyph — so they, not the data, set \
             those columns' min-content width and pushed the table into horizontal \
@@ -1086,8 +1140,12 @@ fn render_markdown(
             let modes = if r.plan_failed() {
                 "<td colspan=\"3\"><sub>plan ✗</sub></td>".to_string()
             } else {
+                // No `<sub>` on the three mode cells: eleven bytes a cell, thirty-three a row,
+                // and they are the content the comment exists for — a reader scans the glyphs
+                // and reads the rest only where they say to. The `<sub>` wrappers stay on the
+                // cells that carry a number.
                 format!(
-                    "<td><sub>{}</sub></td><td><sub>{}</sub></td><td><sub>{}</sub></td>",
+                    "<td>{}</td><td>{}</td><td>{}</td>",
                     mode_cell_md(r, ModeGroup::Plan),
                     mode_cell_md(r, ModeGroup::Cpu),
                     mode_cell_md(r, ModeGroup::Gpu)
@@ -1097,8 +1155,8 @@ fn render_markdown(
                 s,
                 "<tr><td>{}</td>{}<td><sub>{}</sub></td><td><sub>{}</sub></td><td>{}</td><td><sub>{}</sub></td><td>{}</td></tr>\n",
                 match r.n {
-                    None => format!("<sub>{}</sub>", query_cell_md(&r.query, links.query_url(d.query_rel, &stem))),
-                    Some(_) => query_cell_md(&r.query, links.query_url(d.query_rel, &stem)),
+                    None => format!("<sub>{}</sub>", query_cell_md(&r.query, links.query_url_short(d.query_rel, &stem))),
+                    Some(_) => query_cell_md(&r.query, links.query_url_short(d.query_rel, &stem)),
                 },
                 modes,
                 peacock_cell_md(cost, None, None),
@@ -1331,7 +1389,7 @@ struct CostEntry {
 /// number from an arbitrary query, rendered confidently, gating the build.
 fn collect_cost_goldens(testdata: &Path) -> Vec<CostEntry> {
     let mut out = Vec::new();
-    for sub in ["goldens/tpch.sf1", "goldens/tpcds.sf1"] {
+    for sub in ["goldens/tpch.sf1", "goldens/tpcds.sf1", "goldens/pbench.sf1"] {
         let dir = testdata.join(sub);
         let Ok(rd) = std::fs::read_dir(&dir) else { continue };
         for entry in rd.flatten() {
@@ -2171,6 +2229,75 @@ mod tests {
     /// the four tables were 127 KB against the 65,536-byte cap before the legacy pair went.
     /// The run prints the margin as well as the verdict, since the number that matters is how
     /// many more queries fit. What is asserted is the thing GitHub checks — rendered bytes.
+    /// The widget renders every corpus dataset, pbench included, and the three come from one
+    /// constructor so `main` and the tests cannot disagree about which datasets exist.
+    ///
+    /// pbench has no `qN.duckdb_cost.txt` — its queries are named, like tpch's `hash-join` —
+    /// so its rows render with no DuckDB cost, as those do. That is the state asserted here:
+    /// a section that exists and carries rows, not one that happens to be empty.
+    #[test]
+    fn the_widget_renders_a_pbench_section_beside_the_benchmarks() {
+        let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
+        let registry = Registry::load(&testdata.join("cost-registry.csv"));
+        let datasets = all_datasets(&testdata, &registry);
+        let labels: Vec<&str> = datasets.iter().map(|d| d.label).collect();
+        assert_eq!(labels, ["TPC-H", "TPC-DS", "pbench"]);
+        let pbench = &datasets[2];
+        assert!(!pbench.rows.is_empty(), "pbench has registry rows");
+        // A real ticket index: every pbench row names a ticket, and `ticket_link` exits the
+        // process on one it cannot resolve — which is also this test's second claim, that the
+        // tickets the new rows carry are anchored in the wiki.
+        let links = Links {
+            repo: "o/r".into(),
+            sha: None,
+            tickets: TicketIndex::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../llm-wiki")),
+        };
+        let html = render_html(&datasets, "https://p/", &links, None, None);
+        assert!(html.contains("pbench"), "the page names the section");
+    }
+
+    /// A row whose five modes are all enabled reads at a glance: one heavier tick instead of
+    /// five small ones. The widget is scanned for the rows that are NOT finished, and five
+    /// identical glyphs is the shape that costs the most to scan past.
+    #[test]
+    fn a_cell_with_all_five_modes_enabled_shows_one_larger_tick() {
+        let row = test_row(
+            "q1",
+            &MODES
+                .iter()
+                .map(|mode| (ModeGroup::Plan.column(mode), "enabled"))
+                .collect::<Vec<_>>()
+                .iter()
+                .map(|(column, state)| (column.as_str(), *state))
+                .collect::<Vec<_>>(),
+            None,
+        );
+        assert_eq!(mode_cell_md(&row, ModeGroup::Plan), "✔");
+        let html = mode_cell_html(&row, &no_links(), &sample_dataset(), ModeGroup::Plan);
+        assert_eq!(html.matches('✓').count(), 1, "{html}");
+        assert!(html.contains("class=\"all\""), "{html}");
+    }
+
+    /// And the other direction, which is what keeps the tick meaningful: one mode off and the
+    /// cell is five glyphs again, so the heavier mark cannot stand for "nearly all".
+    #[test]
+    fn a_cell_with_any_mode_off_keeps_five_glyphs() {
+        let mut columns: Vec<(String, &str)> = MODES
+            .iter()
+            .map(|mode| (ModeGroup::Plan.column(mode), "enabled"))
+            .collect();
+        columns[2].1 = "disabled";
+        let pairs: Vec<(&str, &str)> = columns
+            .iter()
+            .map(|(column, state)| (column.as_str(), *state))
+            .collect();
+        let row = test_row("q1", &pairs, None);
+        assert_eq!(mode_cell_md(&row, ModeGroup::Plan), "✓✓✗✓✓");
+        let html = mode_cell_html(&row, &no_links(), &sample_dataset(), ModeGroup::Plan);
+        assert_eq!(html.matches('✓').count(), 4, "{html}");
+        assert!(!html.contains("class=\"all\""), "{html}");
+    }
+
     #[test]
     fn the_pr_comment_fits_under_the_body_cap() {
         let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
@@ -2180,10 +2307,7 @@ mod tests {
             sha: Some("0".repeat(40)),
             tickets: TicketIndex::default(),
         };
-        let datasets = [
-            build_dataset("TPC-H", "testdata/goldens/tpch.sf1", "testdata/tpch-queries", &testdata.join("goldens/tpch.sf1"), &registry, "tpch"),
-            build_dataset("TPC-DS", "testdata/goldens/tpcds.sf1", "testdata/tpcds-queries", &testdata.join("goldens/tpcds.sf1"), &registry, "tpcds"),
-        ];
+        let datasets = all_datasets(&testdata, &registry);
         let body = render_markdown(&datasets, "https://p/", false, &links, None);
         // The margin, not just the verdict: the body grows by a row per query enabled, so
         // the number a later reader needs is how many more fit — a guard that only says
@@ -2327,11 +2451,17 @@ mod tests {
     fn query_cell_linked_with_sha_plain_without() {
         let linked = Links { repo: "o/r".into(), sha: Some("deadbeef".into()) , tickets: TicketIndex::default() };
         let url = "https://github.com/o/r/blob/deadbeef/testdata/tpch-queries/q1.sql";
+        // The comment abbreviates the commit and the page does not, which is the one place the
+        // two renderings differ by design: the comment has a 65,536-byte cap and 33 bytes a row
+        // is 7 KB over the whole corpus, while the page is archived per sha and addressable by
+        // it. Both URLs resolve on GitHub.
+        let short = "https://github.com/o/r/blob/deadbee/testdata/tpch-queries/q1.sql";
 
         let html = render_html(&[one_row_dataset()], "https://p/", &linked, None, None);
         assert!(html.contains(&format!("<a href=\"{url}\">q1</a>")));
         let md = render_markdown(&[one_row_dataset()], "https://p/", false, &linked, None);
-        assert!(md.contains(&format!("<a href=\"{url}\">q1</a>")));
+        assert!(md.contains(&format!("<a href=\"{short}\">q1</a>")), "{md}");
+        assert!(!md.contains(url), "the comment kept the full sha: {md}");
 
         // No sha → plain q1 cell, no query link.
         let html_plain = render_html(&[one_row_dataset()], "https://p/", &no_links(), None, None);
