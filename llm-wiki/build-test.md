@@ -766,7 +766,7 @@ testdata/{tpch,tpcds}-queries/*.sql        testdata/pbench/gen.sql
               (DuckDB, --embeddings                     (DuckDB; CI runs --check
                synthetic|external)                        and never regenerates)
                  ▼                                         ▼
-        tpch.sf1 / tpcds.sf1   (parquet, gitignored)   pbench.sf1  (parquet, COMMITTED)
+        tpch.sf1 / tpcds.sf1   (parquet, gitignored)   pbench.sf1  (parquet, committed)
           │
           │   both feed every branch below
           │

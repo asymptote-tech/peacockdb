@@ -565,3 +565,82 @@ carries the measurement, the three cuts and the two remaining levers, with the a
 the Features column out of the comment. It fits today with about seven rows spare, and the choice
 changes what every reviewer sees in every comment from then on, so it is the human's rather than
 this task's — which is also why it is filed where somebody will read it before the guard goes red.
+
+## Review round 1 (2026-10-08)
+
+A fresh reviewer over `git diff ENS-duckdb-oracle...HEAD`. **1 blocking, 6 important, 6 nits.** It
+ran duckdb 1.5.4 over the committed parquet, python over the goldens and the CSV, and read
+DataFusion 45's vendored source; it ran no cargo.
+
+**The positive half, which on a data task is worth as much as the findings.** The data bites on
+every property it was built for, measured: `sub.s_y` holds 8 NULLs, so `not-in-uncorrelated`'s
+right answer is 0 rows where a two-valued engine answers 13,964 — the sharpest discriminator in
+the set; `anti-null-preserved-condition` keeps 1,091 rows of which 87 are kept only because `d_kb`
+is NULL, which is the spec's stated point; `f_ku32` has 9,920 values past `i32::MAX` and
+`uint-key-join` still finds 1,984 matches; `full-join-null-keys` has 1,088 padded rows; `t_pat`'s
+eight patterns match 3,722 rows; every answer is non-degenerate except the two meant to be. All 24
+refused rows cite their row's ticket at all five modes, checked mechanically over 59 rows × 5
+modes. The small-table override is visible in the golden — `fact` at `lanes=4` with
+`partition_groups=[[[0,1]],[[2,3,4]],[[5,6]],[[7,8,9]]]`, `dim`/`sub`/`tiny` at one group over
+four declared lanes — so the #173 and #212 shapes come for free. 55 of 56 pbench result sections
+are byte-identical to DuckDB's; the 56th is `48.550000` against `48.55` and is correctly
+`duckdb_approx`. `build-test.md`'s recomputed numbers all check out, 884 = 674 + 5 + 205 included.
+
+**#257 is confirmed, and its explanation was wrong.** The reviewer reproduced DuckDB's 14,998 and
+decomposed it (1,034 NULL `f_k` plus 13,964 non-matching, with 8 NULLs in `sub.s_y`), then traced
+the mechanism in DataFusion 45: an `InSubquery` inside a larger expression becomes a LeftMark join
+plus a `mark` reference; the mark is declared non-nullable; `IsNull` over a non-nullable expression
+folds to `false`; `where false` becomes an `EmptyRelation` that propagates and takes both scans
+with it. So the ticket's guess at the cause was right but its claim that the logical plan still
+carried the filter was read off the *initial* plan. Corrected. #255 and #256 also hold, the first
+by reading and the second with the second way in confirmed.
+
+### Blocking
+
+1. **#227's device half never landed and the cpu half is a message, not a check.**
+   `test_support/schema_validation.rs` is not in the diff at all, and `device_schema::device_divergence`
+   compares column count, names and types with no nullability and no null counts — while the spec
+   names that file and both validators and says #227 closes when both checks land. The cpu half is
+   correct but inert as coverage: `declared_as` ends at `RecordBatch::try_new`, where arrow already
+   refuses the violation, which the round's own docstring says. **The card being down does not
+   explain it** — `cpu_schema_validator` is reachable in the rust-only tier by its own doc comment,
+   so the null-count check can be added and proven here. Handed to the developer; whatever is left
+   over goes in the signoff and the board stops claiming #227.
+
+### Important
+
+2. **`generate_pbench.sh --check` cannot go red for the thing CI says it proves.** It reads the
+   sign counts off the committed `pbench.sf1/`, not off the regeneration in `$OUT`, and `EXCEPT ALL`
+   is blind to `-0.0` against `0.0` — so a `gen.sql` that stopped producing the float specials
+   passes, which is the exact regression the round's own `DICTIONARY_SIZE_LIMIT 0` finding was
+   about. `pipeline.yml` claims the step proves them.
+3. **The script writes on any unrecognized argument.** `MODE=${1:-write}` then a single
+   `--check` test, so `--chek` or `--dry-run` overwrites the committed data, against
+   `coding-style.md`'s rule to validate arguments before the first side effect.
+4. **Eight ticket sentences the branch falsified** — the one kind of drift a dataset written against
+   open tickets guarantees. Taken by the coordinator: #206, #153, #160 and #173 now have queries;
+   #189's cell count 15 → 24 and #199's 9 → 12; #245's named query could not land behind #255 and
+   #250's lands on #155 instead, so both tickets now say so rather than naming a query that does
+   not do what they claim.
+5. **`duckdb-result.txt` holds three sections for queries that do not exist** —
+   `interval-through-join`, `struct-key-join`, `struct-through-join`, the three held back on #255.
+   The reviewer regenerated the golden and it is byte-identical except for exactly those three,
+   which a regeneration deletes; nothing enumerates this golden's sections against the registry,
+   where the plan goldens have that guard both ways. And the orphan is not usable: the interval
+   renders as Python's `str(timedelta)`, `1 day, 0:00:00`, which is not arrow-rs's form.
+6. **An insertion stole a doc comment** — `all_enabled` went in under `mode_cell_html`'s 13-line
+   block with no blank line, so the block documents a two-line predicate and the function it was
+   written for has none.
+7. **#258's heading said three rows of headroom where its body measured seven** — mine, and the
+   figure decides the conclusion, since chain J's four owed rows fit under seven and not under
+   three. Corrected.
+
+### Nits
+
+Taken by the coordinator: the capitals-for-emphasis this branch added under `llm-wiki/`
+(`PANICS`, `WIRE`, `RUN`, and the diagram's `COMMITTED`) — the ones left are in this file, which is
+a run record rather than a page read under pressure. Handed to the developer: `na` should count as
+off in the registry's ticket rule, where it filters on `disabled` alone and so lets a row of `na`
+cells carry no ticket; three comment-cap overruns; rustfmt on two touched files, which nothing in
+CI gates; and `plan_goldens.rs:787` saying `dim` is four lanes at tp4 when it is one row group over
+four declared lanes, three empty.

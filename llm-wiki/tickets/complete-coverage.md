@@ -142,7 +142,7 @@ set's. DataFusion is not the oracle for it; DuckDB is.
 
 
 <a id="t255"></a>
-### #255 — the planner PANICS on a Struct or Interval column instead of refusing it
+### #255 — the planner panics on a Struct or Interval column instead of refusing it
 `common::type_structural_size` has an arm per flat type and `panic!`s on everything else
 (`common.rs:66`, "add a deterministic arm"). The planner's memory estimation calls it for every
 field of every node's output schema (`logical_size_from_schema`, `common.rs:84`), so a query
@@ -153,7 +153,7 @@ Three queries show it, each a `SELECT` a user can write:
     SELECT d_id, d_kstruct FROM dim JOIN tiny ON d_k = t_k
     SELECT d_id, t.iv FROM dim LEFT JOIN (SELECT t_k, INTERVAL '1' DAY AS iv FROM tiny) t ON d_k = t_k
 
-Not [#249](#t249), which is the WIRE writing an unnamed type as `Null`: this fires first, in the
+Not [#249](#t249), which is the wire writing an unnamed type as `Null`: this fires first, in the
 planner, so the plan #249 describes is never built. Not [#245](joins.md#t245) either — that is the
 shuffle's hasher, and the second query above has no nested key at all.
 

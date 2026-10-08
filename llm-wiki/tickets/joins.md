@@ -457,7 +457,7 @@ What the mapping cannot express is "no partitions", because the wire reads an em
 unmapped partition — so the fix is a representation for an empty scan (a lane with an empty batch
 list, or a `GpuEmpty` the way [#155](#t155)'s `EmptyExec` arm will need one), not a laxer check.
 
-Not [#208](#t208), which is this shape at RUN time: the cpu's cross join emitting nothing where the
+Not [#208](#t208), which is this shape at run time: the cpu's cross join emitting nothing where the
 device emits a zero-row batch. #208 cannot be reached from the corpus until this closes, because
 the plan is refused before either backend sees it.
 
