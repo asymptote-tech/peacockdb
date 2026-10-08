@@ -172,7 +172,7 @@ under the host override: 26 sections at cuDF 25.02, every comparison green and n
 
 No bandaid, no assertion weakened. One shortcut: making the wiki a test input left CI able to pass
 a tickets-only commit that reddens the rust tier, and the fix is a cost decision the human owns, so
-it is [#262](../tickets/testinfra.md#t262) with a by-hand interim. Three shortfalls stand as named:
+it is [#263](../tickets/testinfra.md#t263) with a by-hand interim. Three shortfalls stand as named:
 a decimal column against DuckDB's double cannot be approximate on both sides (#253, with the two
 other paths that cannot record a divergence); the negative tests miss `data_fusion_subset` (#254);
 `duckdb_columns` was looked for and not needed, no `duckdb_divergent` line being a LIMIT tie.

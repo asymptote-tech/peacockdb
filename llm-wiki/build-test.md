@@ -895,10 +895,10 @@ What the arrows are there to make checkable:
 diff, and the **changes** job skips a documentation-only push to a PR that carries code,
 which `paths-ignore` cannot see because it judges the whole PR diff. Both fail open.
 
-**One doc file is now an input, and neither list excepts it** ([#262](tickets/testinfra.md#t262)).
+**One doc file is now an input, and neither list excepts it** ([#263](tickets/testinfra.md#t263)).
 `duckdb_oracle.rs`'s `ticket_is_open` reads `llm-wiki/tickets/` at test run time, so a
 commit that only moves a ticket can turn the rust tier red while both layers skip the
-pipeline. The helper's post-merge archival commit is exactly that shape. Until #262 is
+pipeline. The helper's post-merge archival commit is exactly that shape. Until #263 is
 settled, run `--lib` by hand after a tickets-only commit.
 
 Five independent job chains:

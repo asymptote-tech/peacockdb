@@ -2015,7 +2015,7 @@ not the comparator declining.
 ### The analyst's three, all applied
 
 4. **`llm-wiki/tickets/` became a test input and CI still treats every `.md` as inert.** Filed as
-   [#262](../tickets/testinfra.md#t262) rather than fixed, and this is the one shortcut the signoff
+   [#263](../tickets/testinfra.md#t263) rather than fixed, and this is the one shortcut the signoff
    names. The hole is real and the branch made it: `ticket_is_open` reads that directory at run
    time, so a commit that only archives a ticket can turn `--lib` red while both of `pipeline.yml`'s
    skip layers decline to run. It already happened twice on this branch — `96b53f9b` and `b1946ef4`
@@ -2057,4 +2057,60 @@ column check.
 cost report and the S3 check. `GPU Tests (remote)` is red with
 `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out` — shad-gpu, which the
 override exempts by name. The two commits after it are `llm-wiki/`-only and ran nothing, which is
-#262 rather than a gap in the evidence.
+#263 rather than a gap in the evidence.
+
+## Blocked at the last step: no CI run can be created (2026-10-08)
+
+The task is finished. `completeness approved` → `done` is the one transition that waits on CI, and
+CI cannot start.
+
+**Cause, found by a fresh analyst and not what it looked like.** PR #167 is merge-conflicted with
+master, so GitHub has no `refs/pull/167/merge` to check out and creates no `pull_request` run at
+all — not a failed run, no run. `pulls/167` reports `mergeable: false`, `mergeable_state: dirty`,
+`merge_commit_sha: null`, and `git ls-remote origin 'refs/pull/*/merge'` returns a merge ref for
+every open PR but this one.
+
+Master moved at 18:44 to `8806a3c3` ("Chain K approved to build"), eight files, all `llm-wiki/`,
+including the two this branch also rewrote — `tickets.md` and `tickets/corpus-coverage.md`. The
+previous head `b1946ef4` conflicts with the new master too, so the head's content is irrelevant:
+the base moved under the PR.
+
+Three things the analyst ruled out, so nobody repeats them: `paths-ignore` (the head changes four
+`.rs` files, so neither the push nor the PR diff is wholly documentation); the workflow file (its
+`on:` block is byte-identical to master's, and the branch's only edit to `pipeline.yml` is inside a
+`run:` script — same blob hash as the head that did get a run); and quota, settled by two runs
+created on `ENS-guard-checks` at 19:19Z, after the close/reopen of #167 at 19:17Z produced nothing.
+`repos/.../hooks` is empty, which is normal — Actions needs no webhook, so there is no delivery log.
+
+**The ID collision, resolved here rather than handed over.** Both sides read "next free number
+(currently 262)" and both filed one, minutes apart: master's #262 is chain K's DISTINCT device
+cells, in `corpus-coverage.md`; this branch's was the CI-skip hole, in `testinfra.md`. Master is the
+shared trunk and chain K's spec and plan already cite its #262, so **this branch's renumbers to
+[#263](../tickets/testinfra.md#t263)** — in `testinfra.md`, `tickets.md`, `build-test.md`, the
+signoff and here. `tickets.md`'s next-free goes to **264**, which counts master's 262 this branch
+cannot see yet; that is deliberate, and skipping a number costs nothing since none is ever reused.
+What is left for the rebase is therefore textual and mechanical, with no decision in it.
+
+**Two things whoever rebases must know.**
+
+- **It has to end in a force-push, not a merge.** `dbf44bcc` is already an ancestor here, so merging
+  `origin/master` brings only `8806a3c3`, which is `llm-wiki/`-only. The `changes` job would see a
+  clean append of documentation, answer `code=false`, and skip every job — green in seconds, having
+  compiled nothing. A rebase makes the old head to new head compare report `diverged` rather than
+  `ahead`, the classifier fails open with `code=true`, and the full pipeline runs. `pipeline.yml`
+  has no `workflow_dispatch`, so there is no other route to a real run on #167.
+- **No run has ever covered the four `.rs` files `a68cf8ec` changed** —
+  `test_support/{corpus_golden,mod,result_text}.rs` and `tests/test_cpu_corpus.rs`. They are
+  comment-only, verified by eye and by a column-width sweep, but unbuilt by anyone. The 18:35 run
+  predates them. This is the one gap in the task's evidence and it closes with the first real run.
+
+**Why this is not a rebase I perform.** "You never decide a rebase is needed; the human tells you
+through the control file." The `rebase` that started this run was consumed and cleared, and it
+brought the chain onto `dbf44bcc`; master has moved again since. The one exception — a finished
+task of mine reopening — does not apply.
+
+**What CI did prove.** `23d87b6d`, the last code-bearing commit before this one, is green on both
+cuDF legs, the GPU build, the cost report and the S3 check, with only `GPU Tests (remote)` red on
+`ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out` — shad-gpu, which the
+override exempts by name. The device evidence the override also requires is the nebius-gpu run
+recorded above: 576 passed, 0 failed.

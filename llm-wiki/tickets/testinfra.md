@@ -3,8 +3,8 @@
 
 Tests, CI, hosts, testdata etc
 
-<a id="t262"></a>
-### #262 — a tickets-only commit can turn the rust tier red while CI skips the pipeline
+<a id="t263"></a>
+### #263 — a tickets-only commit can turn the rust tier red while CI skips the pipeline
 `ticket_is_open` (`test_support/duckdb_oracle.rs`) reads `llm-wiki/tickets/` at test run time, so
 the open-ticket set is now a test input. `pipeline.yml`'s two skip layers both still class the
 whole of `llm-wiki/` and every `.md` as inert: `paths-ignore` at the top, and the `changes` job's

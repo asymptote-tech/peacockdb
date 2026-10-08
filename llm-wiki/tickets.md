@@ -14,6 +14,7 @@ A ticket carries a **Priority** line only when it is not medium; medium is the d
 New tickets take the next free number (currently 284), one ID space across every file. 264–279
 are left to chain J, whose branches number from 263 on their own boards.
 New tickets take the next free number (currently 263), one ID space across every file.
+New tickets take the next free number (currently 264), one ID space across every file.
 Finished and lapsed tickets move to `archive/archived-tickets.md` (Done / Stale). Numbers
 are never reused, so an old reference still resolves there.
 
@@ -44,4 +45,4 @@ are never reused, so an old reference still resolves there.
 | [`performance.md`](tickets/performance.md) | The pre-production performance path | 7 | #150 #149 #148 #231 #232 #242 #248 |
 | [`benchmarks.md`](tickets/benchmarks.md) | Wall-time benchmarks | 2 | #226 #69 |
 | [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 6 | #13 #196 #169 #128 #244 #260 |
-| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 5 | #262 #252 #178 #176 #129 |
+| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 5 | #263 #252 #178 #176 #129 |
