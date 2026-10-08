@@ -91,7 +91,7 @@ for sections over the 256 KB cap. First, so every cell a later task enables meet
 The 16 device cells four tpch rows keep off under closed tickets (#183, #187), never run since:
 run, enabled or ticketed, tags struck.
 
-### 3. [`pbench.md`](pbench.md) — closes half of [#227](../tickets/corpus-coverage.md#t227) — state: completeness approved — PR #168
+### 3. [`pbench.md`](pbench.md) — closes half of [#227](../tickets/corpus-coverage.md#t227) — state: building — PR #168
 
 A third dataset, sf1 only, committed: NULL keys on both sides, `NOT IN` over NULLs, every
 hashable key type, skew, empty sides. One query per demonstrable ticket of the chain, cells off;

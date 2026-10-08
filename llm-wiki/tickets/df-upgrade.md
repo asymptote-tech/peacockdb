@@ -174,7 +174,7 @@ Why it is ours and not only theirs: DataFusion at `target_partitions = 1` is the
 oracle (`corpus.rs::assert_answer`), so a query this reaches would be checked against the wrong
 answer and agree with it. Today the engine refuses the plan — `unsupported: plan node EmptyExec`,
 [#155](joins.md#t155) — so no wrong answer is served; the moment that arm lands, this one starts
-answering 0 rows to a user. The DuckDB oracle ([#235](corpus-coverage.md#t235)) is what caught it,
+answering 0 rows to a user. The DuckDB oracle ([#235](../archive/archived-tickets.md#t235)) is what caught it,
 and is the only thing that could have.
 
 **Corpus queries:** pbench's `in-is-null`. Its plan cells are disabled on `155`, the refusal it

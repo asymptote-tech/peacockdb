@@ -962,3 +962,40 @@ Nits it dropped, listed because they are real but not worth a round trip: #257's
 capitals in `llm-wiki/`, a second hardcoded dataset list in `collect_cost_goldens` beside
 `all_datasets`' "one list" comment, `exec_model/tests/corpus.py`'s inert pbench entry, and two
 counts on #220 and #80 that were already stale on the base.
+
+## Rebased onto the new ENS-duckdb-oracle, and dropped to building (2026-10-08)
+
+The second half of the `rebase` the control file ordered. `ENS-duckdb-oracle` moved first (onto
+master's `dbf44bcc`, then its device cycle), so this branch's twelve commits were replayed with
+`git rebase --onto ENS-duckdb-oracle 410111cf ENS-pbench`. The plain `git rebase ENS-duckdb-oracle`
+is wrong here and was aborted after it tried to replay the parent's own rewritten commits — it
+reported conflicts in `test_gpu_corpus.rs`, `duckdb_result.py` and three goldens, none of which
+were real. Anyone rebasing the next branch wants `--onto` and the old parent tip.
+
+**Every conflict was in the wiki or the board; none in code.** Resolved by union rather than by
+side, since both sides were adding:
+
+- `tasks.md` — the state lines, resolved per the note above by the override and not by the
+  ownership rule, which is what would have dropped the `rebase needed(building)` marks.
+- `build-test.md` — the DuckDB tier count takes this branch's 205 over the parent's 149, and the
+  parent's archived-#235 link over this branch's live one. The golden-file section needed both
+  halves: `tpch.sf1` 40 and `tpcds.sf1` 117 from the parent's device cycle, `pbench.sf1` 17 and its
+  explanation from here. The closing clause was rewritten rather than taken from either side —
+  `duckdb-result.txt` is in all three sf1 dirs and `gpu-result.txt` only in the two whose device
+  cells are on, which is true of neither side alone.
+- `tickets.md` twice, and `tickets/testinfra.md` — next-free is 264, which counts master's #262;
+  both #263 and #258 are kept; #235 stays archived while #259 and #255 come across. Re-audited
+  mechanically afterwards rather than by eye: every row's declared count equals both its listed
+  IDs and its file's `<a id="tNN">` anchors, and the total 122 is their sum.
+- One dead link the replay introduced: `df-upgrade.md:177` still pointed `#235` at
+  `corpus-coverage.md`, where it no longer lives. Repointed at the archive.
+
+**State is `building`, per the override, and it needs re-proving.** This rebase was not
+documentation-only — it carried the parent's two new `gpu-result.txt` goldens and master's
+retirement of the docker build, including the edits to `scripts/build-test-shadgpu.sh` and
+`scripts/lib/shadgpu-env.sh` that this task's own commands run through. So the state does not come
+back on its own: a developer re-runs the proving commands on nebius-gpu first.
+
+Worth knowing for whoever does: a later rebase of this branch onto master's `8806a3c3` will carry
+documentation alone, so it will re-verify nothing and this task will keep whatever state it then
+holds. The work below is not wasted by the rebase still owed to the human.
