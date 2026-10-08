@@ -157,10 +157,18 @@ bare `EmptyExec` — the whole query, both scans gone — and answers 0 rows. Du
 14,998 over the same parquet, which is the right answer: `sub.s_y` holds NULLs, so the `IN` is
 UNKNOWN for every `f_k` that matches nothing, and UNKNOWN `IS NULL` is true.
 
-The optimizer appears to read the `IN`'s result as non-nullable and fold `… IS NULL` to false, then
-prune the filter to an empty relation. Measured on the committed pbench sf1 data at four
-partitions; the logical plan still carries `Filter: fact.f_k IN (<subquery>) IS NULL`, so the loss
-is in physical planning or in a late simplification.
+The loss is in logical optimization, in four steps traced through DataFusion 45's source. An
+`InSubquery` inside a larger expression becomes a LeftMark join plus a reference to its `mark`
+column (`decorrelate_predicate_subquery.rs:147`); the mark is declared **non-nullable**
+(`logical_plan/builder.rs:1354`, and again at `joins/utils.rs:628`); `IsNull` over a non-nullable
+expression folds to `false` (`simplify_expressions/expr_simplifier.rs:1545`); and `where false`
+becomes an `EmptyRelation` that `propagate_empty_relation` then collapses, both scans with it, which
+physical planning renders as `EmptyExec`. `Expr::InSubquery::nullable` delegating to the inner
+expression (`expr_schema.rs:310`) is why the fold needs the mark join to happen first.
+
+So the optimized logical plan is already an `EmptyRelation` — an earlier note here said the logical
+plan still carried the filter and sent the reader to physical planning, which was read off the
+*initial* plan. Measured on the committed pbench sf1 data at four partitions.
 
 Why it is ours and not only theirs: DataFusion at `target_partitions = 1` is the corpus' cpu
 oracle (`corpus.rs::assert_answer`), so a query this reaches would be checked against the wrong

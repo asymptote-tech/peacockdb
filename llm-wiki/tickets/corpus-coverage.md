@@ -176,8 +176,9 @@ comparison cannot see it. A `GpuLimit` keeps its input's single-batch layout, so
 sort, merge or coalesce feeds it, and #214's dropped batch lands here. The rule for both sites is
 one: a keyless aggregate answers one row whatever arrived.
 
-**Corpus queries:** tpcds q96, q88 and q90 at `tp4-single`, `tp4-rowgroup` and `tp4-sized`: nine
-cpu cells refused on the NULL count, their device cells behind them. An empty lane comes from
+**Corpus queries:** tpcds q96, q88 and q90, and `pbench/scalar-subquery-cross`, at `tp4-single`,
+`tp4-rowgroup` and `tp4-sized`: twelve cpu cells refused on the NULL count, their device cells
+behind them. An empty lane comes from
 tp4-single cutting a one-row-group table into four, or from an Inner join with no build rows in a
 lane. Simplest, per the 2026-09-11 fix report and unconfirmed here: `select count(*) from store
 where s_store_name = 'ese';` (tpcds) at `tp4-single`. The device's dropped row and the shortcut
@@ -194,7 +195,7 @@ builder), so the init covers them all. The driver owes the done call to every la
 no batch included — today such a lane gets no call. Sources of nothing below the init (#214's
 limit, #205's sort, the joins) need no fix of their own for this; between init and merge a keyless
 sequence only collapses lanes, which keeps the one-row batch. The cpu's `!self.grouped` clause, which
-merges over nothing, goes, and the nine #180 cells turn on at the tp4 modes.
+merges over nothing, goes, and the twelve #180 cells turn on at the tp4 modes.
 
 <a id="t55"></a>
 ### #55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast
@@ -694,9 +695,10 @@ refusal. Any `GROUP BY` or join key of either type at more than one lane reaches
 `bug_a_float_key_is_refused_on_the_device` and `bug_a_boolean_key_is_refused_on_the_device`
 (`gpu_tests/emit_cases.rs`).
 
-**Corpus query:** none — no `tp4` plan golden hashes a Float64 or Boolean key, and the sf1 data
-has no float column. Simplest, at any `tp4` mode: `select cast(l_quantity as double) q, count(*)
-from lineitem group by q;` and `select l_quantity > 25 b, count(*) from lineitem group by b;`
+**Corpus queries:** `pbench/float64-key-group` and `pbench/bool-key-group`. `tp4-single.plans.txt`
+hashes both — `GpuEmitPartitions: hash=[f_kf64@0], lanes=4` and `hash=[f_kb@0], lanes=4` — so the
+shape this ticket is about is now in a plan golden, which it was not while tpch and tpcds were the
+only datasets (neither has a float column).
 (tpch).
 
 <a id="t240"></a>
@@ -728,8 +730,9 @@ keys, and those include `__grouping_id`, a `UInt8`. comet's murmur3 has no unsig
 the device's id differs from the cpu's in type and bits (#65), so the two engines would put
 a subtotal row in different lanes. A refusal, not a wrong answer.
 
-**Corpus queries:** `tpch/rollup-over-join` and tpcds q5, q18, q22 and q80 at `tp4-single`,
-`tp4-rowgroup` and `tp4-sized`: 15 cpu cells, their device cells behind them. tpcds q77 may meet it
+**Corpus queries:** `tpch/rollup-over-join`, tpcds q5, q18, q22 and q80, and `pbench`'s
+`rollup-small-keys`, `uint-key-group` and `uint-key-join`, at `tp4-single`, `tp4-rowgroup` and
+`tp4-sized`: 24 cpu cells, their device cells behind them. tpcds q77 may meet it
 too once #212 stops refusing it first. Simplest: `select l_returnflag, sum(l_quantity) from
 lineitem group by rollup (l_returnflag);` (tpch) at `tp4-single`.
 
@@ -740,7 +743,7 @@ a user-key group then lands in one lane whatever its set, so each (keys, id) gro
 The rule the plan validates, hash keys a subset of the group columns, already allows it. No hasher
 arm and no C++. The tp4 plan goldens of the five queries change their emit's `hash=` and the
 merge's `hashed_on`, and the tpcds q5 payload's `hash_exprs` shrinks. A planner test pins
-`hash_keys == [0, 1]` for a two-key rollup at tp4. The 15 cpu cells turn on.
+`hash_keys == [0, 1]` for a two-key rollup at tp4. The 24 cpu cells turn on.
 
 <a id="t145"></a>
 ### #145 — Refcounted handles: stop copying every partition out of a scatter

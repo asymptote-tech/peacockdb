@@ -63,7 +63,9 @@ predicate NULL, and a left row whose only matches fail is dropped rather than nu
 `execute_nested_loop_join` (~L453) refuses this exact shape with the argument written out, so
 the fix direction is settled here rather than proposed; that path is unaffected. Latent because
 DataFusion pushes an ON predicate reading one side below the join (tpch q13) — it needs one
-referencing both sides, which no corpus query has. Fix: evaluate the residual during the join
+referencing both sides, which `pbench`'s `left-join-residual`, `right-join-residual` and
+`full-join-residual` now have (`ON d_k = f_k AND f_qty > d_w`); all three are refused on this
+ticket at all five modes. Fix: evaluate the residual during the join
 (`mixed_*` covers Left, Right is its swap, Full needs inner-plus-re-add), plus a `PlanExecutor`
 gtest with a filtered Left join. The same commit drops the prototype's deliberate reproduction.
 
@@ -232,9 +234,10 @@ accumulators are not here: a collapse of no handles and a merge of no runs answe
 Rust side before any call, on both engines. Pinned by
 `bug_…_finishing_with_no_probe_batch_is_refused_on_the_device` (`gpu_tests/join_cases.rs`).
 
-**Corpus queries:** none carries `173`. Two shapes reach it (`reports/corpus-fixes.md` fix 15),
-neither in testdata: `select count(*) from orders where o_orderkey in (select case when l_quantity
-> 100 then l_orderkey end from lineitem);` (tpch) at the tp4 modes, where every probe key is NULL
+**Corpus queries:** `pbench/finish-without-probe`. Two further shapes reach it
+(`reports/corpus-fixes.md` fix 15), neither in tpch or tpcds: `select count(*) from orders where
+o_orderkey in (select case when l_quantity > 100 then l_orderkey end from lineitem);` (tpch) at the
+tp4 modes, where every probe key is NULL
 and lands in one lane, so three lanes refuse; expected 0. And `select count(*) from region r left
 join (select n_regionkey from nation limit 5 offset 100) n on r.r_regionkey = n.n_regionkey;`, where
 the limit emits nothing: the device refuses, the cpu answers 5.
@@ -305,7 +308,8 @@ rather than throwing in the executor.
 full cartesian and applies a mask, and a mask cannot re-emit the unmatched rows an outer form
 owes — the same argument [#153](#t153) makes for the equi path, which `join.cpp` already
 states in a comment beside the guard. Semi and anti forms would need the mask plus a
-distinct-on-the-preserved-side pass. No corpus query has one; the refusal is what keeps that
+distinct-on-the-preserved-side pass. `pbench`'s `nl-left-semi`, `nl-left-anti`, `nl-right-semi`,
+`nl-right-anti` and `nl-mark` are those forms, all refused; the refusal is what keeps the claim
 true rather than discovering it at run time.
 
 <a id="t220"></a>
@@ -395,8 +399,10 @@ The lane rule needs a definition for nested values that both engines share — h
 in order, as Spark does for a struct, with a list's elements in order — and the conformance gate
 extended to it.
 
-**Corpus queries:** none in tpch or tpcds. pbench's `struct-key-join`
-(`SELECT f_id, d_id FROM fact JOIN dim ON f_kstruct = d_kstruct`), its cells off on this ticket.
+**Corpus queries:** none. pbench's `struct-key-join`
+(`SELECT f_id, d_id FROM fact JOIN dim ON f_kstruct = d_kstruct`) was written for this ticket and
+could not land: the planner panics on a Struct column before it refuses, which is
+[#255](complete-coverage.md#t255). The query arrives with that ticket's fix.
 
 <a id="t246"></a>
 ### #246 — a `LIKE` whose pattern is a column is refused on the device
@@ -425,8 +431,12 @@ The fix is the three-valued rewrite: `CASE WHEN EXISTS (S AND y = x) THEN true W
 EXISTS (S)) OR EXISTS (S AND y IS NULL) THEN NULL ELSE false END`, planned as two mark joins and a
 count, or a nullable mark join type of our own.
 
-**Corpus queries:** none in tpch or tpcds. pbench's `in-is-null`
-(`SELECT f_id FROM fact WHERE (f_k IN (SELECT s_y FROM sub)) IS NULL`), refused on this ticket.
+**Corpus queries:** none yet. pbench's `in-is-null`
+(`SELECT f_id FROM fact WHERE (f_k IN (SELECT s_y FROM sub)) IS NULL`) was written for this ticket
+and does not reach it: DataFusion 45 folds the whole query to an `EmptyExec`
+([#257](df-upgrade.md#t257)), so our planner refuses `plan node EmptyExec` on
+[#155](#t155) and the `IN` never reaches a join. The row carries `155 250 257`, and this ticket
+cannot be demonstrated until #257 is fixed.
 
 
 <a id="t256"></a>

@@ -36,7 +36,7 @@ Found by the completeness analyst on the `duckdb-oracle` branch, 2026-10-08, whi
 that made the wiki an input.
 
 <a id="t258"></a>
-### #258 — the PR comment has about three corpus rows of headroom left
+### #258 — the PR comment has about seven corpus rows of headroom left
 `the_pr_comment_fits_under_the_body_cap` holds the cost widget's comment under GitHub's
 65,536-byte body limit. pbench's 59 rows took it to 79,352, and three cuts in the pbench task
 brought it back to **63,038** — the fully-enabled tick made one character wider, a 7-character sha
