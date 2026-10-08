@@ -76,6 +76,10 @@ _ROOT = pathlib.Path(__file__).resolve().parents[3] / "testdata"
 _DATASETS = {
     "tpch": ("tpch.sf1", "tpch.minimal"),
     "tpcds": ("tpcds.sf1",),
+    # Committed, so there is nothing to fall back to and nothing to generate. exec_model
+    # models no pbench query (`plans.py`'s BENCHES is unchanged); the loader only knows where
+    # the data is, which is what a later plan for one would ask it.
+    "pbench": ("pbench.sf1",),
 }
 
 

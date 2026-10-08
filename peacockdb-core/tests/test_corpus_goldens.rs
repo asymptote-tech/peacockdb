@@ -22,7 +22,7 @@ mod benchmark;
 use std::path::{Path, PathBuf};
 
 use peacockdb_core::test_support::{
-    MODES, Regeneration, SKIPPED, assert_section, cost_golden, cpu_golden, fingerprint_of,
+    CORPUS_DATASETS, MODES, Regeneration, SKIPPED, assert_section, cost_golden, cpu_golden, fingerprint_of,
     load_csv, merge_section, merged_text, mode_named, ordered_sections, parse_node_line,
     parse_run_section, result_golden, section_holds_rows, stem,
 };
@@ -189,7 +189,7 @@ fn an_over_cap_result_is_a_fingerprint_and_not_a_deletion() {
 
 fn corpus_files() -> Vec<(String, String, &'static str, PathBuf)> {
     let mut files = Vec::new();
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         for mode in &MODES {
             files.push((
                 dataset.to_string(),
@@ -364,7 +364,7 @@ fn lane_batch_counts(groups: &str) -> Vec<usize> {
 #[test]
 fn the_root_emitted_the_rows_the_result_golden_holds() {
     let mut checked = 0;
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         let results =
             std::fs::read_to_string(result_golden(dataset, sf)).expect("the result golden");
         for (query, result) in ordered_sections(&results) {
@@ -410,7 +410,7 @@ fn rendered_rows(result: &str) -> usize {
 /// them to the same set of queries.
 #[test]
 fn the_cost_golden_holds_the_same_queries_as_its_cpu_golden() {
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         for mode in &MODES {
             let cpu = std::fs::read_to_string(cpu_golden(dataset, sf, mode.name)).expect("cpu");
             let cost = std::fs::read_to_string(cost_golden(dataset, sf, mode.name)).expect("cost");
@@ -537,7 +537,7 @@ fn every_enabled_cell_has_a_section_with_content_and_every_disabled_one_a_marker
     let rows = load_csv();
     let mut wrong: Vec<String> = Vec::new();
     let mut checked = 0;
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         for mode in &MODES {
             let column = format!("cpu_{}", mode.ident());
             let text = std::fs::read_to_string(cpu_golden(dataset, sf, mode.name))
@@ -583,7 +583,7 @@ fn every_result_section_names_the_mode_that_would_author_it_now() {
     let rows = load_csv();
     let mut compared = 0;
     let mut markers = 0;
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         let path = result_golden(dataset, sf);
         let text = std::fs::read_to_string(&path).expect("the result golden");
         for (query, body) in ordered_sections(&text) {
@@ -617,7 +617,7 @@ fn every_result_section_names_the_mode_that_would_author_it_now() {
     // a guard over a whole corpus is most likely to have.
     let expected = rows
         .iter()
-        .filter(|r| ["tpch", "tpcds"].contains(&r.dataset.as_str()) && r.sf == "1")
+        .filter(|r| CORPUS_DATASETS.iter().any(|(d, s)| *d == r.dataset && *s == r.sf))
         .filter(|r| {
             MODES.iter().any(|mode| {
                 let column = format!("cpu_{}", mode.ident());
@@ -637,7 +637,7 @@ fn every_result_section_names_the_mode_that_would_author_it_now() {
 #[test]
 fn each_result_section_was_written_by_the_mode_entitled_to_write_it() {
     let rows = load_csv();
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         let text = std::fs::read_to_string(result_golden(dataset, sf)).expect("the result golden");
         for (query, body) in ordered_sections(&text) {
             let row = rows

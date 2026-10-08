@@ -849,3 +849,30 @@ fn an_equal_schema_is_still_checked_for_nulls() {
 - **Types.** `CORPUS_DATASETS`, `small_table_bytes_for`, `Mode::knobs_for`, `all_datasets`,
   `PBENCH_JOINS` are defined once and used with the same names.
 - **Review Focus.** Each of the five lines is pinned in the task it names.
+
+---
+
+## Round 1 status (2026-10-08)
+
+**Done:** Tasks 1, 2, 3, 4, 5, 6, 6b, 6c's cpu leg, 7. **Not done:** Task 8 (the device cycle —
+shad-gpu was down for the whole round), 6c's device leg (the two schema validators), and Task 9's
+two wiki files, whose lines are named in the round report for the human to apply.
+
+The step-by-step results, every measurement, and nine deviations from this plan are in
+[`pbench-detail.md`](pbench-detail.md) under "Round 1 result". The four that change what a later
+task has to do:
+
+- **59 queries landed, not 63.** `struct-key-join`, `struct-through-join` and
+  `interval-through-join` PANIC the planner (#255, filed) and cannot be in
+  `testdata/pbench-queries/` at all — one of them there aborts all five plan goldens.
+  `int8-key-group`'s query FILE is held back with its row, because a plan-golden section without a
+  registry row is red: this plan's "63 files, 62 rows" cannot both hold.
+- **The plan's `gen.sql` lost the float specials.** Parquet's dictionary dedupes by value, so
+  `-0.0` collapsed into `0.0` and `-NaN` into `NaN`, per row group. `DICTIONARY_SIZE_LIMIT 0` on
+  `fact` and `dim` fixes it, and `--check` now asserts the exact counts.
+- **Two more tickets**: #256 (an all-pruned scan is refused as an invalid plan, which is what
+  `cross-empty-build` meets instead of #208) and #257 (DataFusion 45 answers
+  `(x IN (subquery)) IS NULL` as nothing, which is what `in-is-null` meets instead of #250).
+- **The PR comment went 13.8 KB over GitHub's 65,536-byte cap** with pbench's rows in it. Three
+  cuts brought it to 63,038 with 2,498 spare — about 7 rows, of which this chain still owes 4.
+  Step 4 of Task 6b's "note the margin" is that number, and it is now a constraint on the chain.

@@ -1,0 +1,1 @@
+SELECT t_id FROM tiny WHERE NOT EXISTS (SELECT 1 FROM fact WHERE t_v > f_qty)

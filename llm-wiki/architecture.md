@@ -102,6 +102,13 @@ groups. Rows would misjudge it both ways: a narrow table of many rows reads less
 table of few, so the threshold is a property of the scan and the same table can be above it in
 one query and below it in another.
 
+The threshold is per dataset where the corpus plans. `test_support::small_table_bytes_for` gives
+pbench `0` and every other dataset `planner::SMALL_TABLE_BYTES`: pbench's five tables are all
+under 5 MB, so the rule as tpch and tpcds see it would plan every pbench scan as one lane — and
+pbench exists to show the multi-lane shapes those two cannot reach. With it off, `fact` splits
+across four lanes at tp4 and the one-row-group tables leave three of those four with no batch at
+all, which is the shape a lane rule is wrong about.
+
 Demoting a region changes the lowering, not a number, and the two halves of a shuffle answer to
 different things. The `GpuMergePartitions` goes, since there is nothing to merge. The
 `GpuEmitPartitions` stays whenever its consumer still wants n lanes hashed on its keys — a

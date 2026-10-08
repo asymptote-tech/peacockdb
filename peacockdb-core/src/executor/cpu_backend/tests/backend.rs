@@ -366,6 +366,82 @@ fn a_state_value_too_large_for_its_declared_precision_ends_the_query() {
     );
 }
 
+/// #227: a NULL where the node declares the column non-nullable is refused, naming the column
+/// and how many.
+///
+/// Arrow's own `try_new` already refuses this when the two schemas differ — which is how
+/// #199's `count(*)` surfaces — but it names the whole pair of schemas and buries the cause in
+/// a debug dump two hundred characters long. The declaration is what the device is sent and
+/// what every node above reads, so the message a reader gets for it is the one thing standing
+/// between "this column has a NULL it may not have" and a schema diff nobody finishes.
+#[test]
+fn a_null_in_a_column_declared_non_nullable_is_refused_by_name() {
+    use datafusion::arrow::array::Int32Array;
+    let declared = Arc::new(ArrowSchema::new(vec![Field::new(
+        "k",
+        DataType::Int32,
+        false,
+    )]));
+    let nullable = Arc::new(ArrowSchema::new(vec![Field::new(
+        "k",
+        DataType::Int32,
+        true,
+    )]));
+    let column: ArrayRef = Arc::new(Int32Array::from(vec![Some(1), None]));
+    let batch = RecordBatch::try_new(nullable, vec![column]).expect("one column");
+    let refused = super::super::declared_as(batch, &declared)
+        .expect_err("k is declared non-nullable and holds a NULL");
+    assert!(
+        refused.message.contains('k')
+            && refused.message.contains("non-nullable")
+            && refused.message.contains("#227"),
+        "{}",
+        refused.message
+    );
+}
+
+/// The rule itself, which is where the equal-schema case is reachable.
+///
+/// `declared_as` returns early when the batch's schema EQUALS the declaration, and that early
+/// return used to skip every check — but a batch whose schema says non-nullable cannot hold a
+/// NULL in the first place, because arrow validates that at construction. So the hole is not
+/// reachable through a `RecordBatch` at all, and testing it through one is impossible rather
+/// than merely awkward. The rule is a function over the columns and the declaration, checked
+/// here directly and called by `declared_as` AHEAD of its early return: the columns are what
+/// a kernel hands over, and the declaration is the claim being checked.
+#[test]
+fn the_nullability_rule_names_every_column_that_breaks_it_and_how_many() {
+    use datafusion::arrow::array::{Int32Array, StringArray};
+    let declared = Arc::new(ArrowSchema::new(vec![
+        Field::new("k", DataType::Int32, false),
+        Field::new("ok", DataType::Int32, true),
+        Field::new("s", DataType::Utf8, false),
+    ]));
+    let clean: Vec<ArrayRef> = vec![
+        Arc::new(Int32Array::from(vec![1, 2])),
+        Arc::new(Int32Array::from(vec![Some(1), None])),
+        Arc::new(StringArray::from(vec!["a", "b"])),
+    ];
+    assert_eq!(
+        super::super::nulls_where_none_declared(&clean, &declared),
+        None,
+        "a NULL in the column that declares one is not a violation"
+    );
+    let dirty: Vec<ArrayRef> = vec![
+        Arc::new(Int32Array::from(vec![Some(1), None])),
+        Arc::new(Int32Array::from(vec![Some(1), None])),
+        Arc::new(StringArray::from(vec![None, None] as Vec<Option<&str>>)),
+    ];
+    let said = super::super::nulls_where_none_declared(&dirty, &declared)
+        .expect("two columns break it");
+    // BOTH columns, with their counts: a message naming the first one found would have the
+    // reader fix it and run again to meet the second.
+    assert!(said.contains("k holds 1"), "{said}");
+    assert!(said.contains("s holds 2"), "{said}");
+    assert!(!said.contains("ok holds"), "the nullable column is not named: {said}");
+    assert!(said.contains("#227"), "{said}");
+}
+
 fn semi_join(join_type: JoinType) -> GpuHashJoin {
     let output = match join_type {
         JoinType::LeftSemi => columns(&GROUPED),

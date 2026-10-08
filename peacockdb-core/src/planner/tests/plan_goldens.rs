@@ -14,7 +14,7 @@ use crate::plan_text::{render_plan, render_plan_memory};
 use crate::planner;
 use crate::planner::PlanKnobs;
 use crate::test_support::{
-    MODES, Mode, data_dir_for, golden_dir_for, mode_named, ordered_sections, queries_dir_for,
+    CORPUS_DATASETS, MODES, Mode, data_dir_for, golden_dir_for, mode_named, ordered_sections, queries_dir_for,
     section_differences, testdata_root,
 };
 use crate::wire::{Payloads, attach_recipes, check_seq_kinds, depth, render_plan_recipes};
@@ -46,7 +46,7 @@ async fn render_bench(dataset: &str, sf: &str, mode: &Mode) -> String {
     for (name, path) in queries(dataset) {
         let sql = std::fs::read_to_string(&path).expect("the query text");
         text.push_str(&format!("== {name}\n"));
-        text.push_str(&render_query(&ctx, &sql, mode.knobs()).await);
+        text.push_str(&render_query(&ctx, &sql, mode.knobs_for(dataset)).await);
     }
     text
 }
@@ -270,6 +270,9 @@ fn digest_of(bytes: &[u8]) -> String {
 async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
     let mode = mode_named(PAYLOAD_MODE);
     let mut text = String::new();
+    // The two datasets PAYLOAD_QUERIES draws from, spelled out rather than read off
+    // CORPUS_DATASETS: this file is twenty chosen queries, and a dataset earns a place in it
+    // by covering a call shape no query here already carries.
     for dataset in ["tpch", "tpcds"] {
         let wanted: Vec<&str> = PAYLOAD_QUERIES
             .iter()
@@ -299,7 +302,7 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
                 .create_physical_plan()
                 .await
                 .expect("the query plans");
-            let (tree, _) = planner::plan(&plan, mode.knobs()).expect("this mode runs it");
+            let (tree, _) = planner::plan(&plan, mode.knobs_for(dataset)).expect("this mode runs it");
             let recipes = attach_recipes(tree.as_ref()).expect("a plan's recipes are structural");
             text.push_str(&format!("== {dataset} {name}\n"));
             text.push_str(&format!("sha256={}\n", digest_of(recipes.bytes())));
@@ -369,7 +372,7 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
     let mut faults: Vec<String> = Vec::new();
     let mut uncrossable: Vec<String> = Vec::new();
     let mut deepest = (0usize, String::new());
-    for dataset in ["tpch", "tpcds"] {
+    for &(dataset, _) in CORPUS_DATASETS {
         let ctx = crate::register_tables_for(
             crate::build_session_state(mode.knobs().target_partitions),
             &data_dir_for(dataset, "1"),
@@ -386,7 +389,7 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
             };
             // A query the engine refuses has no recipes to check; a query it plans has to
             // publish seqs that resolve.
-            let Ok((tree, _)) = planner::plan(&plan, mode.knobs()) else {
+            let Ok((tree, _)) = planner::plan(&plan, mode.knobs_for(dataset)) else {
                 continue;
             };
             match attach_recipes(tree.as_ref()) {
@@ -415,10 +418,21 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
         "{where_} builds a recipe plan {reached} deep against the verifier's 1024 (#169) — \
          the shape has to split before it reaches the limit, not the limit be raised"
     );
+    // Against NOT_RUNNABLE rather than a list of its own: that table is the declaration, and
+    // the test below holds each of its entries to the `not runnable` line in all five mode
+    // goldens. A second spelling here would have to be edited in step with it, and the one
+    // thing this adds — the set measured by PLANNING rather than read off a golden — is
+    // what makes the pair a check instead of a copy.
+    let mut declared: Vec<String> = NOT_RUNNABLE
+        .iter()
+        .map(|(dataset, query, _)| format!("{dataset} {query}"))
+        .collect();
+    declared.sort();
+    uncrossable.sort();
     assert_eq!(
-        uncrossable,
-        ["tpch mixed-join"],
-        "the queries this mode plans but cannot cross to the device are #168's, and only its"
+        uncrossable, declared,
+        "the queries this mode plans and cannot cross to the device are NOT_RUNNABLE's, and \
+         only those"
     );
     assert!(
         faults.is_empty(),
@@ -439,12 +453,18 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
 /// here with a ticket, and an entry that stops being true goes red until it is removed —
 /// which is the direction that matters when #168 closes, since a stale entry is how a
 /// declared set rots into a list nobody trusts.
-const NOT_RUNNABLE: &[(&str, &str, &str)] = &[("tpch", "mixed-join", "168")];
+const NOT_RUNNABLE: &[(&str, &str, &str)] = &[
+    ("tpch", "mixed-join", "168"),
+    // pbench's one cast to a second-unit timestamp. Parquet has no second unit, so this is the
+    // only query in the corpus that reaches `Timestamp(Second)` at all, and the fbs type table
+    // has no member for it until repartition-keys adds the timestamps.
+    ("pbench", "timestamp-s-key-group", "240"),
+];
 
 #[test]
 fn every_query_that_cannot_cross_the_wire_is_declared_and_every_declaration_is_true() {
     let mut found: Vec<(String, String)> = Vec::new();
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         for mode in &MODES {
             let name = mode.name;
             let path = golden_dir_for(dataset, sf).join(format!("{name}.plans.txt"));
@@ -553,7 +573,7 @@ fn the_payload_golden_covers_every_kind_and_call_shape_the_modes_produce() {
     let covered = call_shapes(&payloads);
 
     let mut wanted = std::collections::BTreeSet::new();
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         for mode in &MODES {
             let name = mode.name;
             let text = std::fs::read_to_string(
@@ -662,6 +682,123 @@ async fn tpcds_tp4_sized() {
     check("tpcds", "1", mode_named("tp4_sized")).await;
 }
 
+#[tokio::test]
+async fn pbench_tp1_single() {
+    check("pbench", "1", mode_named("tp1_single")).await;
+}
+
+#[tokio::test]
+async fn pbench_tp1_rowgroup() {
+    check("pbench", "1", mode_named("tp1_rowgroup")).await;
+}
+
+#[tokio::test]
+async fn pbench_tp4_single() {
+    check("pbench", "1", mode_named("tp4_single")).await;
+}
+
+#[tokio::test]
+async fn pbench_tp4_rowgroup() {
+    check("pbench", "1", mode_named("tp4_rowgroup")).await;
+}
+
+#[tokio::test]
+async fn pbench_tp4_sized() {
+    check("pbench", "1", mode_named("tp4_sized")).await;
+}
+
+/// Each pbench query shows one ticket THROUGH one join shape, and the shape is DataFusion's
+/// choice rather than ours. A DataFusion drift that planned one differently would leave the
+/// query in the corpus, green, and showing something else — so the shape is pinned here,
+/// against the same plan golden a reader would check by hand.
+///
+/// `pbench.md`'s "plans as" column, for the queries that plan today. The refused ones are
+/// absent: their sections are refusals until the chain lifts each, and the task that lifts one
+/// adds it here with the shape it then gets. Deliberately NOT derived from the golden — a check
+/// that reads its expectation out of the file it is checking passes on any drift.
+const PBENCH_JOINS: &[(&str, &str)] = &[
+    ("inner-join-hot-keys", "GpuHashJoin: join_type=Inner"),
+    ("left-join-null-keys", "GpuHashJoin: join_type=Left"),
+    ("full-join-null-keys", "GpuHashJoin: join_type=Full"),
+    ("right-join-null-keys", "GpuHashJoin: join_type=Right"),
+    ("exists-null-keys", "GpuHashJoin: join_type=LeftSemi"),
+    ("sparse-probe-left", "GpuHashJoin: join_type=Right"),
+    ("sparse-probe-semi", "GpuHashJoin: join_type=RightSemi"),
+    ("finish-without-probe", "GpuHashJoin: join_type=LeftMark"),
+    ("sparse-build-right", "GpuHashJoin: join_type=Right"),
+    ("sparse-build-full", "GpuHashJoin: join_type=Full"),
+    ("sparse-build-anti", "GpuHashJoin: join_type=RightAnti"),
+    ("decimal15-key-join", "GpuHashJoin: join_type=Inner"),
+    ("uint-key-join", "GpuHashJoin: join_type=Inner"),
+    ("ts-key-join", "GpuHashJoin: join_type=Inner"),
+    ("float64-key-join", "GpuHashJoin: join_type=Inner"),
+    // The two NNF folds. pbench.md expects a semi join for `f_k IN (...)` after the rewrite's
+    // fold, and that is what DataFusion 45 already plans — which is why these two rows run on
+    // the cpu where the spec expected them refused on #80.
+    ("not-not-in", "GpuHashJoin: join_type=RightSemi"),
+    ("not-or-not-in", "GpuHashJoin: join_type=RightSemi"),
+    ("nl-inner", "GpuNestedLoopJoin: join_type=Inner"),
+    ("nl-left", "GpuNestedLoopJoin: join_type=Left"),
+    ("nl-left-decimal", "GpuNestedLoopJoin: join_type=Left"),
+    ("nl-projection", "GpuNestedLoopJoin: join_type=Inner"),
+    ("like-column-pattern", "GpuNestedLoopJoin: join_type=Inner"),
+    ("cross-projection", "GpuCrossJoin"),
+    ("scalar-subquery-cross", "GpuCrossJoin"),
+];
+
+#[test]
+fn every_pbench_join_plans_as_its_spec_says() {
+    let sections = sections_of(&golden_dir_for("pbench", "1").join("tp4-single.plans.txt"));
+    for (query, join) in PBENCH_JOINS {
+        let body = sections
+            .get(&query.replace('-', "_"))
+            .unwrap_or_else(|| panic!("no section for {query}"));
+        assert!(
+            body.contains(join),
+            "{query} does not plan as `{join}`:\n{body}"
+        );
+    }
+}
+
+/// pbench.md's "collapse to one lane": with the small-table rule off, `fact` and `dim` are four
+/// lanes at tp4, and a join the planner cannot shuffle merges both sides into one — #140's cost,
+/// which is invisible in tpch and tpcds because the small-table rule puts those tables in one
+/// lane to begin with.
+///
+/// Three kinds, which is the whole point of reading it here rather than eyeballing one plan: a
+/// keyless nested-loop join, a cross join, and — the one the spec left open — a KEYED join
+/// DataFusion planned `CollectLeft`, which #140 merges rather than broadcasts. `sparse-probe-left`
+/// is that third kind: `on=[(t_k, d_k)]` at `lanes=1`, under a `GpuMergePartitions` on each side.
+#[test]
+fn pbench_shows_three_kinds_of_join_collapsing_four_lanes_to_one() {
+    let sections = sections_of(&golden_dir_for("pbench", "1").join("tp4-single.plans.txt"));
+    for (query, join) in [
+        ("nl-inner", "GpuNestedLoopJoin"),
+        ("cross-projection", "GpuCrossJoin"),
+        ("sparse-probe-left", "GpuHashJoin"),
+    ] {
+        // The TREE alone: the recipes and memory sections below it name every node again, so a
+        // count over the whole section counts each merge three times.
+        let whole = &sections[&query.replace('-', "_")];
+        let body = whole.split("--- recipes ---").next().expect("the tree");
+        let merges = body
+            .lines()
+            .filter(|line| line.trim_start().starts_with("GpuMergePartitions:"))
+            .count();
+        assert_eq!(merges, 2, "{query} does not merge both sides:\n{body}");
+        assert!(
+            body.lines()
+                .any(|line| line.contains("GpuLoadParquet") && line.contains("lanes=4")),
+            "{query} never had four lanes to collapse:\n{body}"
+        );
+        assert!(
+            body.lines()
+                .any(|line| line.trim_start().starts_with(join) && line.contains("lanes=1")),
+            "{query}'s {join} is not in one lane:\n{body}"
+        );
+    }
+}
+
 /// The registry's five plan columns against the goldens, in both directions: every cell
 /// says what its query's section says, and every section has a cell. Nothing registers
 /// these at link time — one golden holds every query — so the golden is what declares
@@ -669,7 +806,7 @@ async fn tpcds_tp4_sized() {
 #[test]
 fn the_registry_matches_the_goldens_in_both_directions() {
     let rows = crate::test_support::load_csv();
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         for mode in &MODES {
             let name = mode.name;
             let sections = sections_of(&golden(dataset, sf, &mode));
@@ -717,7 +854,7 @@ fn the_registry_matches_the_goldens_in_both_directions() {
 /// checked by nobody — and its file would silently not exist.
 #[test]
 fn every_mode_has_a_golden_and_every_golden_has_a_mode() {
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         let mut expected: Vec<String> = MODES
             .iter()
             .map(|mode| format!("{}.plans.txt", mode.name))
@@ -741,7 +878,7 @@ fn every_mode_has_a_golden_and_every_golden_has_a_mode() {
 /// the rendered text rather than on any one producer of it.
 #[test]
 fn no_refusal_in_a_golden_carries_a_host_path() {
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         for mode in &MODES {
             let name = mode.name;
             let path = golden_dir_for(dataset, sf).join(format!("{name}.plans.txt"));
@@ -806,7 +943,7 @@ fn every_refusal_names_a_ticket_that_exists() {
         .iter()
         .map(|path| std::fs::read_to_string(path).expect("a ticket file"))
         .collect::<String>();
-    for (dataset, sf) in [("tpch", "1"), ("tpcds", "1")] {
+    for &(dataset, sf) in CORPUS_DATASETS {
         for mode in &MODES {
             let name = mode.name;
             let text = std::fs::read_to_string(
@@ -886,7 +1023,7 @@ async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
     // mode whose trees branch most.
     let mode = mode_named("tp4_rowgroup");
     let mut checked = 0;
-    for dataset in ["tpch", "tpcds"] {
+    for &(dataset, _) in CORPUS_DATASETS {
         let ctx = crate::register_tables_for(
             crate::build_session_state(mode.knobs().target_partitions),
             &data_dir_for(dataset, "1"),
@@ -901,7 +1038,7 @@ async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
             let Ok(plan) = frame.create_physical_plan().await else {
                 continue;
             };
-            let Ok((tree, _)) = planner::plan(&plan, mode.knobs()) else {
+            let Ok((tree, _)) = planner::plan(&plan, mode.knobs_for(dataset)) else {
                 continue;
             };
             let Ok(recipes) = attach_recipes(tree.as_ref()) else {

@@ -137,3 +137,62 @@ tpch,1,semi_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled
 tpch,1,shuffle_additive,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,ok,,183
 tpch,1,shuffle_additive_avg,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,avg,
 tpch,1,shuffle_stddev,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,ok,stddev_var,183
+pbench,1,anti_null_preserved_condition,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,anti_join corr_subquery,59 80
+pbench,1,bool_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,206
+pbench,1,cross_empty_build,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,cross_join,208 256
+pbench,1,cross_projection,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,cross_join,207
+pbench,1,decimal15_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,95
+pbench,1,decimal15_key_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,95 152
+pbench,1,decimal38_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,95
+pbench,1,empty_side_left_join,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,155
+pbench,1,exists_null_keys,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join corr_subquery,152
+pbench,1,exists_or_mark,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join corr_subquery,59 80
+pbench,1,finish_without_probe,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join corr_subquery,173
+pbench,1,float32_key_group,enabled,enabled,enabled,enabled,enabled,na,na,na,na,na,na,na,na,na,na,ok,,243
+pbench,1,float64_key_group,enabled,enabled,enabled,enabled,enabled,na,na,na,na,na,na,na,na,na,na,ok,,243
+pbench,1,float64_key_join,enabled,enabled,enabled,enabled,enabled,na,na,na,na,na,na,na,na,na,na,ok,,243
+pbench,1,full_join_null_keys,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,152
+pbench,1,full_join_residual,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,153
+pbench,1,in_is_null,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join,155 250 257
+pbench,1,indf_full_join,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join nested_loop_join,155 160
+pbench,1,inner_join_hot_keys,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,152 220
+pbench,1,left_join_null_keys,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,152
+pbench,1,left_join_residual,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,153
+pbench,1,like_column_pattern,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join string_like,190 246
+pbench,1,mark_cross_residual,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join corr_subquery,59 80
+pbench,1,nl_full,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join outer_join,160
+pbench,1,nl_inner,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join,152 190
+pbench,1,nl_left,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join outer_join,152 190
+pbench,1,nl_left_anti,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join anti_join corr_subquery,160
+pbench,1,nl_left_decimal,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join outer_join,190 215
+pbench,1,nl_left_semi,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join semi_join corr_subquery,160
+pbench,1,nl_mark,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join semi_join corr_subquery,160
+pbench,1,nl_projection,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join,152 190
+pbench,1,nl_right,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join outer_join,160
+pbench,1,nl_right_anti,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join anti_join corr_subquery,160
+pbench,1,nl_right_semi,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join semi_join corr_subquery,160
+pbench,1,not_exists_null_keys,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,anti_join corr_subquery,59 80
+pbench,1,not_in_correlated,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,anti_join corr_subquery,59 80
+pbench,1,not_in_uncorrelated,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,anti_join,59 80
+pbench,1,not_in_under_or,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,anti_join corr_subquery,59 80
+pbench,1,not_not_in,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join,152
+pbench,1,not_or_not_in,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join,152
+pbench,1,outer_on_true_empty,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join outer_join,160
+pbench,1,probe_exists_residual,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join corr_subquery,159
+pbench,1,probe_not_exists_residual,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,anti_join corr_subquery,159
+pbench,1,right_join_null_keys,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,152
+pbench,1,right_join_residual,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,153
+pbench,1,rollup_small_keys,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,rollup,189
+pbench,1,scalar_subquery_cross,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,avg,63 199
+pbench,1,sparse_build_anti,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,anti_join corr_subquery,212
+pbench,1,sparse_build_full,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,212
+pbench,1,sparse_build_right,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,212
+pbench,1,sparse_probe_left,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,152
+pbench,1,sparse_probe_semi,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join,152
+pbench,1,timestamp_ms_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,240
+pbench,1,timestamp_ns_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,240
+pbench,1,timestamp_s_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,240
+pbench,1,timestamp_us_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,240
+pbench,1,ts_key_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,152 240
+pbench,1,uint_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,,189
+pbench,1,uint_key_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,,152 189

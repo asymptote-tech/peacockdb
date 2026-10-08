@@ -428,3 +428,28 @@ count, or a nullable mark join type of our own.
 **Corpus queries:** none in tpch or tpcds. pbench's `in-is-null`
 (`SELECT f_id FROM fact WHERE (f_k IN (SELECT s_y FROM sub)) IS NULL`), refused on this ticket.
 
+
+<a id="t256"></a>
+### #256 — a scan whose row groups all prune is refused as an invalid plan
+`scan_mapping::partition` returns `PlanError::Invalid` when the survivor list is empty
+(`partition.rs:27`): "no surviving row groups: what an empty scan means is the caller's decision,
+not an empty map". Nothing ever made that decision, so the caller gets a refusal where SQL has an
+answer — zero rows.
+
+Two ways in, and the second is the common one. A genuinely empty table: pbench's `empty.parquet`
+holds `tiny`'s schema and no rows, so DuckDB writes a file with zero row groups and
+`SELECT e.t_id, t.t_id FROM empty e, tiny t` is refused at plan time. And a filter that prunes
+every row group: `WHERE f_id > 1000000` over any parquet table reaches the same line, which is a
+selective query over real data rather than a corner.
+
+DataFusion plans both: `CrossJoinExec` over a `ParquetExec` of the empty file, answering zero rows.
+What the mapping cannot express is "no partitions", because the wire reads an empty map as one
+unmapped partition — so the fix is a representation for an empty scan (a lane with an empty batch
+list, or a `GpuEmpty` the way [#155](#t155)'s `EmptyExec` arm will need one), not a laxer check.
+
+Not [#208](#t208), which is this shape at RUN time: the cpu's cross join emitting nothing where the
+device emits a zero-row batch. #208 cannot be reached from the corpus until this closes, because
+the plan is refused before either backend sees it.
+
+**Corpus queries:** pbench's `cross-empty-build`, its plan cells disabled on this ticket. The row
+carries `208` as well, the ticket it is written for and will show once this lifts.

@@ -1,0 +1,1 @@
+SELECT CASE WHEN (SELECT count(*) FROM fact WHERE f_qty BETWEEN 1 AND 20) > 100 THEN (SELECT avg(f_amount) FROM fact WHERE f_qty BETWEEN 1 AND 20) ELSE (SELECT avg(f_amount) FROM fact WHERE f_qty BETWEEN 21 AND 40) END AS b1, (SELECT count(*) FROM dim WHERE d_w >= 0) AS b2 FROM tiny WHERE t_id = 1
