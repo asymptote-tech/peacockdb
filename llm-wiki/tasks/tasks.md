@@ -86,6 +86,12 @@ Every corpus line names its `duckdb_oracle`; a comparison case per line against
 for sections over the 256 KB cap. First, so every cell a later task enables meets DuckDB.
 
 ### 2. [`pbench.md`](pbench.md) — closes [#227](../tickets/corpus-coverage.md#t227) — state: rebase needed(done) — PR #168
+### 2. [`stale-cells.md`](stale-cells.md) — closes no ticket — state: approved to build
+
+The 16 device cells four tpch rows keep off under closed tickets (#183, #187), never run since:
+run, enabled or ticketed, tags struck.
+
+### 3. [`pbench.md`](pbench.md) — closes [#227](../tickets/corpus-coverage.md#t227) — state: building
 
 A third dataset, sf1 only, committed: NULL keys on both sides, `NOT IN` over NULLs, every
 hashable key type, skew, empty sides. One query per demonstrable ticket of the chain, cells off;
