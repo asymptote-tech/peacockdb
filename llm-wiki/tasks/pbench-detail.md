@@ -1922,3 +1922,25 @@ device suite counts. Both checked the tags for consistency against the plan gold
 matrix and each ticket's own text and found no contradiction, but the runs themselves rest on the
 record in this file. That is the standing limit of a reading without a card, and it is why the
 device half is recorded here in the detail a re-run would need.
+
+## Done (2026-10-08)
+
+CI on `e91e3377`, the commit carrying the completeness pass, is **green on every job but
+`GPU Tests (remote)`**: `Changed paths`, both cuDF legs, the GPU build, the cost report and the S3
+check. The one failure is `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed
+out` — the shad-gpu outage the override exempts, and the same message the chain has had all day.
+
+This run counts, which is the thing worth checking before trusting it: `Changed paths` answered
+`code=true` because the commit touches `corpus_cases.inc`, so both legs genuinely built and ran
+rather than skipping a documentation diff. The review round's own code commit `af217d73` has the
+same shape and the same result. The board-only commit `008c777d` in between has a vacuous run —
+every job skipped green in seconds — which is why `done` was read off a commit over code and not
+off the branch tip's most recent run.
+
+The cost report job passing is what settles the comment-cap risk the cycle carried: the PR comment
+fits under `COMMENT_MAX_BYTES`.
+
+The override's second condition is met too: the GPU tests passed on nebius-gpu, recorded above in
+"Re-proved after the rebase" and "The device cycle, run".
+
+**State: `done`.** Terminal for the ensemble; the human merges PR #168.
