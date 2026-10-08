@@ -114,9 +114,9 @@ corpus_query!(tpch, 1, q2, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup
 // __grouping_id, as rollup-over-join's are. Both are off on the device at every mode: #262,
 // the lowering's device cells have never run — rollup-distinct on #65 and #189 as well.
 // DataFusion 45 refuses stddev(DISTINCT) and answers a grouped decimal avg(DISTINCT) as the
-// plain average, so DataFusion is no oracle for distinct-functions; end_to_end.rs's
-// distinct_functions_answer_as_their_hand_lowered_form holds the answer. DuckDB's answer is to
-// be its oracle once chain J's duckdb-oracle has merged.
+// plain average, so DataFusion is no oracle for distinct-functions; what holds its answer
+// instead is ANSWER_HELD_ELSEWHERE in test_cpu_corpus.rs, which a test reads. DuckDB's answer
+// is to be its oracle once chain J's duckdb-oracle has merged.
 corpus_query!(tpch, 1, rollup_distinct, tp1_single | tp1_rowgroup, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, distinct_functions, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_disabled, golden_exact, schema_validation_enabled);
 

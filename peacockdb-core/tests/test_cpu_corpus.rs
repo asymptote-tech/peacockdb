@@ -5,6 +5,8 @@
 //! with the device binary so one line carries a query's coverage on both engines. What a
 //! case does lives in `peacockdb_core::test_support`, reached through `cpu_case` alone.
 
+use std::collections::BTreeSet;
+
 use peacockdb_core::test_support::{
     CorpusDeclaration, MODES, RegistryEntry, SKIPPED, assert_registry_matches_csv,
     authoritative_mode, cpu_case, load_csv, result_golden, section_of, stem,
@@ -71,17 +73,6 @@ macro_rules! declare_corpus_query {
 
 include!("common/corpus_cases.inc");
 
-/// The two oracles of one line have to suit each other, and both directions are asserted
-/// rather than trusted.
-///
-/// A `golden_exact` where no committed section can serve is a test that fails on correct
-/// behaviour: the result is over the cap and has a marker instead, or the query's rows are
-/// not determined across modes and one mode's answer cannot be the authority for five. A
-/// `live_cpu` where a section does serve spends a device-side cpu run on a comparison a
-/// committed file makes faster and harder.
-///
-/// Derivable is why a CHECK can exist here, never why either value would be absent from the
-/// line. Read off the declaration and the committed golden, so it needs no run — which is
 /// A device cell exists only where the cpu has one at the same mode.
 ///
 /// The device tier asserts read-only against the section the cpu authored AT THAT MODE, so a
@@ -117,10 +108,66 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
     assert_eq!(checked, load_csv().len() * MODES.len());
 }
 
-/// what makes it catch the first `live_cpu` query BEFORE the rollout that needs it, rather
-/// than during.
+/// Every `data_fusion_disabled` line, and what holds that query's answer instead.
+///
+/// The keyword makes `assert_answer` return without comparing, so the line's cpu cells run and
+/// check no answer at all. Something else has to hold it, and a comment on the line is not
+/// something a test can read: the next line to copy the keyword would get unchecked modes and
+/// an unverified first golden with nothing red. So the register is the decision to grow the
+/// set — `INTENTIONALLY_NOT_IN_CI` and `TEST_ONLY_ITEMS` are this shape — and the test below
+/// holds it to the declared set both ways. The third field is prose for the reader; what is
+/// checked is that somebody wrote it.
+const ANSWER_HELD_ELSEWHERE: &[(&str, &str, &str)] = &[(
+    "tpch",
+    "distinct-functions",
+    "src/tests/end_to_end.rs, distinct_functions_answer_as_their_hand_lowered_form: all five \
+     modes against the DISTINCT aggregates over `SELECT DISTINCT l_returnflag, l_quantity` \
+     joined on the key to the companions over lineitem. DataFusion 45 refuses \
+     stddev(DISTINCT) and answers a grouped decimal avg(DISTINCT) as the plain average.",
+)];
+
+/// The register against the lines carrying the keyword, both directions.
+///
+/// Its own assertions, and first: an unregistered line should be reported for being
+/// unregistered rather than for whatever its goldens do not hold yet.
+fn every_unchecked_answer_is_held_somewhere() {
+    let declared: BTreeSet<String> = inventory::iter::<CorpusDeclaration>
+        .into_iter()
+        .filter(|declared| declared.cpu_oracle == "data_fusion_disabled")
+        .map(|declared| format!("{}/{}", declared.dataset, stem(declared.query)))
+        .collect();
+    let registered: BTreeSet<String> = ANSWER_HELD_ELSEWHERE
+        .iter()
+        .map(|(dataset, query, _)| format!("{dataset}/{query}"))
+        .collect();
+    let unregistered: Vec<&String> = declared.difference(&registered).collect();
+    assert!(
+        unregistered.is_empty(),
+        "these lines declare data_fusion_disabled, so their cpu cells check no answer, and \
+         nothing says what holds it: {unregistered:?}. Add a row to ANSWER_HELD_ELSEWHERE \
+         naming the test that does, or give the line an oracle that compares."
+    );
+    let stale: Vec<&String> = registered.difference(&declared).collect();
+    assert!(
+        stale.is_empty(),
+        "these ANSWER_HELD_ELSEWHERE rows name no data_fusion_disabled line, so each has \
+         outlived its reason: {stale:?}"
+    );
+}
+
+/// The two oracles of one line have to suit each other, both directions asserted.
+///
+/// A `golden_exact` where no committed section can serve fails on correct behaviour: the
+/// result is over the cap and carries a marker, or its rows are not determined across modes
+/// and one mode cannot be the authority for five. A `live_cpu` where a section does serve
+/// spends a device-side cpu run on what a committed file says faster. Both are read off the
+/// declaration and the golden rather than a run, which is what catches the first `live_cpu`
+/// query BEFORE the rollout needing it. Derivable is why a CHECK can exist here, never why
+/// either value would be absent from the line. It also holds `ANSWER_HELD_ELSEWHERE` to the
+/// `data_fusion_disabled` lines: an oracle comparing nothing needs something else to compare.
 #[test]
 fn each_declarations_two_oracles_suit_each_other() {
+    every_unchecked_answer_is_held_somewhere();
     let mut wrong: Vec<String> = Vec::new();
     for declared in inventory::iter::<CorpusDeclaration> {
         let query = stem(declared.query);
@@ -179,11 +226,22 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
         }
         let row = rows
             .iter()
-            .find(|r| r.dataset == declared.dataset && r.sf == declared.sf && r.query == declared.query)
-            .unwrap_or_else(|| panic!("{}/{query}: declared and not in the registry", declared.dataset));
+            .find(|r| {
+                r.dataset == declared.dataset && r.sf == declared.sf && r.query == declared.query
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}/{query}: declared and not in the registry",
+                    declared.dataset
+                )
+            });
         // A query enabled at no mode has no authority to resolve, which is the same None for
         // an entirely different reason — the one this test exists to tell apart.
-        if !row.states.iter().any(|(col, state)| col.starts_with("cpu_") && state == "enabled") {
+        if !row
+            .states
+            .iter()
+            .any(|(col, state)| col.starts_with("cpu_") && state == "enabled")
+        {
             continue;
         }
         let authority = authoritative_mode(declared.dataset, declared.sf, &query);
@@ -208,11 +266,16 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
             rows.iter()
                 .find(|r| r.dataset == d.dataset && r.sf == d.sf && r.query == d.query)
                 .is_some_and(|r| {
-                    r.states.iter().any(|(col, state)| col.starts_with("cpu_") && state == "enabled")
+                    r.states
+                        .iter()
+                        .any(|(col, state)| col.starts_with("cpu_") && state == "enabled")
                 })
         })
         .count();
-    assert_eq!(checked, expected, "every enabled hyphenated query is checked, and only those");
+    assert_eq!(
+        checked, expected,
+        "every enabled hyphenated query is checked, and only those"
+    );
 }
 
 /// The five `cpu_` columns against what this binary declares, in both directions: a

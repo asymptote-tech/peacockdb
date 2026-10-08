@@ -28,7 +28,7 @@ use crate::plan::{Merge, decomposition, resolve};
 
 /// The inner stage's first key: the deduplicated argument, its own column even where it is
 /// also a group key, since a grouping set may mask a key to NULL and this never is.
-pub(crate) const DISTINCT_ARG: &str = "__distinct_arg";
+const DISTINCT_ARG: &str = "__distinct_arg";
 
 pub(crate) enum Classified {
     /// Every DISTINCT aggregate's argument strips to `base`, and every companion merges
@@ -65,7 +65,7 @@ fn keeps_distinct(from: &DataType, to: &DataType) -> bool {
 
 /// The argument under DataFusion's coercion casts that keep distinct values distinct, and
 /// those casts' targets, outermost first.
-pub(crate) fn stripped(
+fn stripped(
     expr: &Arc<dyn PhysicalExpr>,
     schema: &ArrowSchema,
 ) -> (Arc<dyn PhysicalExpr>, Vec<DataType>) {
@@ -108,9 +108,15 @@ pub(crate) fn classify(
         match &base {
             None => base = Some(this),
             Some(first) if first.as_ref() == this.as_ref() => {}
-            Some(_) => {
+            // Both are named, because the two ways here are not the same gap: either the
+            // query really does dedup two expressions, or it dedups one under a coercion
+            // cast `keeps_distinct` does not admit, and only the message can tell them apart.
+            Some(first) => {
                 return Classified::Refuse(PlanError::Unsupported(format!(
-                    "{}: a second DISTINCT argument (#144)",
+                    "{}: its DISTINCT argument is {this} where another's is {first} — the \
+                     lowering dedups one argument per node, and two that differ, whether \
+                     genuinely or under a coercion cast it cannot strip, need a \
+                     gid-multiplying expand (#144)",
                     aggregate.name()
                 )));
             }

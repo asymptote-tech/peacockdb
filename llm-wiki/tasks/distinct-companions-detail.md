@@ -282,3 +282,150 @@ wording about a second argument where the shape has one.
 Not changed, and deliberately: `keeps_distinct` does not admit `Float32 → Float64`. The cast is
 injective, but the spec's admitted list is frozen and does not name it, so widening the classifier
 is the human's call. The refusal message is what gets fixed.
+
+### 2026-10-08 — round 1 findings, developer's half
+
+All six routed items done, in the working tree, nothing committed. No golden moved
+(`git diff --name-only HEAD -- testdata/` is empty) and `recipe-payloads.txt` is still
+`b2f9cb2c…`.
+
+**important — `data_fusion_disabled` now has a register that can go red.** `ANSWER_HELD_ELSEWHERE`
+in `tests/test_cpu_corpus.rs` is `&[(dataset, query, what holds the answer)]`, one row today:
+`tpch/distinct-functions` → `distinct_functions_answer_as_their_hand_lowered_form`.
+`every_unchecked_answer_is_held_somewhere()` asserts it equal to the declared set **both ways** —
+an unregistered line, and a register row whose line is gone — and is called first from
+`each_declarations_two_oracles_suit_each_other`, so an unregistered line is reported for being
+unregistered rather than for whatever its goldens do not hold yet. A plain `fn` rather than a
+second `#[test]`, so `test_cpu_corpus`'s count does not move. The third field is prose; what is
+checked is that a human wrote it.
+
+**Red proved in both directions, by hand, reverted after each:**
+
+- switched `rollup_distinct`'s oracle to `data_fusion_disabled` in `corpus_cases.inc` →
+  `these lines declare data_fusion_disabled, so their cpu cells check no answer, and nothing
+  says what holds it: ["tpch/rollup-distinct"]. Add a row to ANSWER_HELD_ELSEWHERE naming the
+  test that does, or give the line an oracle that compares.`
+- added a `("tpch", "rollup-distinct", …)` row with the line left alone →
+  `these ANSWER_HELD_ELSEWHERE rows name no data_fusion_disabled line, so each has outlived its
+  reason: ["tpch/rollup-distinct"]`
+
+The `corpus_cases.inc` comment now points at the register instead of restating the link, so the
+answer lives in one place; `build-test.md` says the set is read off code rather than promised
+there.
+
+**important — `corpus.rs`'s two doc blocks.** `assert_answer`'s says four ways, and names the
+exception outright: it stops a wrong answer reaching a golden **for the three that compare**, and
+for `DataFusionDisabled` the answer is held by a test in `ANSWER_HELD_ELSEWHERE`. `CpuOracle`'s
+opens "Three variants run the same oracle … The fourth asks nothing of it, because for that query
+DataFusion is wrong". The variant's own doc now names the register rather than "the line's
+comment", and says what the cells still do check: the plan, the run and the goldens.
+
+**nit — the two over-cap in-body comments.** Both were 5 against the 4-line cap, counted
+mechanically rather than eyeballed. The by-tag/by-position contrast moved into
+`state_and_init`'s doc, which had room (5 of 10, now 9). Both bodies are 3 and 4 lines.
+A script over every comment block in the five files I touched now reports all within cap.
+
+**nit — visibility.** `DISTINCT_ARG` and `stripped` are private; `grep -rn` over
+`peacockdb-core/` found them named nowhere outside `distinct.rs`. `Classified`, `classify` and
+`lower` stay `pub(crate)` — `aggregate.rs` names all three.
+
+**nit — `#[derive(Clone)]` on `InitFrom`** deleted; the crate still compiles, which is the proof
+it was unused.
+
+**nit — the #144 message, and a bug it exposed.** The old `{name}: a second DISTINCT argument
+(#144)` was wrong about the shape for a one-argument query. Reproduced:
+`SELECT count(DISTINCT arrow_cast(v, 'Float32')), sum(DISTINCT arrow_cast(v, 'Float32')) FROM
+tiny` gave `sum(DISTINCT arrow_cast(tiny.v,Utf8("Float32"))): a second DISTINCT argument (#144)`.
+The message now names **both** stripped arguments and says the two ways they can differ —
+genuinely, or under a coercion cast the lowering cannot strip. `keeps_distinct` is **not**
+widened: `Float32 → Float64` is injective, but the spec's admitted list is frozen and does not
+name it.
+
+Two tests, red before the reword:
+
+- `bug_two_distinct_arguments_are_refused` now asserts the message names both arguments
+  (`k@`, `v@` — DataFusion's own `name@ordinal` rendering, so the ordinal is not pinned). Without
+  that it pinned only `#144`, which the Float32 shape also satisfies, so it no longer pinned
+  what it means to pin.
+- `bug_one_float32_distinct_argument_under_two_coercions_is_refused` pins the Float32 shape and
+  asserts the message does **not** say "a second DISTINCT argument". It goes red the day someone
+  widens `keeps_distinct`, which is the signal to delete it.
+
+**Found while fixing, repaired here: a doc comment torn by an insertion** —
+`coding-style.md`'s named antipattern, in `tests/test_cpu_corpus.rs` since `ddf3ca2c`, not from
+this branch (`git diff HEAD` on that file was empty before round 1).
+`every_device_cell_has_a_cpu_cell_at_the_same_mode` and its doc had been inserted into the
+middle of `each_declarations_two_oracles_suit_each_other`'s doc, splitting one sentence: "…so it
+needs no run — which is" sat above the wrong declaration and "what makes it catch the first
+`live_cpu` query BEFORE the rollout…" was left stranded above the right one. Rejoined, and
+brought from 17 lines to 10 — the original block was already 14 against the cap, so restoring it
+verbatim would have put an over-cap block in this diff. Documentation, so fixed here rather than
+filed (`coding-style.md`: a ticket is never about documentation). `test_golden_format`'s
+`no_declaration_carries_a_block_left_behind_by_a_split` guards the *split* shape; the *insertion*
+shape is contiguous and no guard sees it, exactly as the style page says.
+
+**Counts moved again** by the one new test: `join_refusals` 11 → **12**, `--lib` 618 → **619**,
+cpu block 1214 → **1215**, Rust 1886 → **1887**, grand 2361 → **2362**. The page was re-summed
+mechanically and the headers equal the row sums. The refusals row's prose says three `bug_` tests
+now and why the third is one.
+
+#### Round-1 verification, all from the finished tree
+
+| command | result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core --lib -- --test-threads=2` | 617 passed, 0 failed, 2 ignored |
+| `… --test test_cpu_corpus -- --test-threads=2` | 567 passed, 0 failed |
+| `… --test test_ci_coverage -- --test-threads=2` | 9 passed, 0 failed |
+| `… --test test_corpus_goldens -- --test-threads=2` | 26 passed, 0 failed |
+| `… --test test_cost_model -- --test-threads=2` | 3 passed, 0 failed |
+| `… --test test_module_layout -- --test-threads=2` | 17 passed, 0 failed |
+| `… --test test_golden_format -- --test-threads=2` | 26 passed, 0 failed |
+| `cargo build --features rust-only -p peacockdb-core` after `touch lib.rs` | 0 warnings |
+
+Not re-run, and why: the C++ build, `ctest -L cpu` and the two cudf-shape legs. Round 1 touched
+no `cpp/`, no `flatbuffers/` and no wire code — `git diff HEAD --stat` is seven files, all Rust
+test/planner code and markdown — and the payload golden's sha is unchanged.
+
+#### Ticket candidate for the human, not filed
+
+`count(DISTINCT f32), sum(DISTINCT f32)` is refused where the lowering could compute it: the
+`Float32 → Float64` coercion is injective, so deduplicating under it or over it is the same set.
+It is pinned by `bug_one_float32_distinct_argument_under_two_coercions_is_refused` and attributed
+to #144's number, which is the number the message carries — but it is not #144's shape, and #144
+is about an expand this does not need. Widening `keeps_distinct` by one arm would close it. Not
+filed because the reviewer called the widening the human's call and a permanent ticket ID is the
+same kind of decision; no corpus query reaches it (tpch and tpcds carry no `Float32` column).
+
+### 2026-10-08 — round 1 findings closed
+
+All six applied. `--lib` 617 passed / 2 ignored (the register's assertion is a plain `fn` called
+from an existing test, so `test_cpu_corpus` stays at 567), `test_ci_coverage` 9,
+`test_corpus_goldens` 26, `test_cost_model` 3, `test_module_layout` 17, `test_golden_format` 26,
+zero warnings. No golden moved in this round — `git diff --name-only HEAD -- testdata/` is empty —
+and `recipe-payloads.txt` is still `b2f9cb2c…`. The C++ build and `ctest -L cpu` were not re-run,
+correctly: this round touched no `cpp/`, no `flatbuffers/` and no wire code.
+
+The register, `ANSWER_HELD_ELSEWHERE` in `tests/test_cpu_corpus.rs`, is asserted equal to the
+declared `data_fusion_disabled` set in both directions, and both directions were proved red by hand
+and reverted: an unregistered line reports as unregistered, and a register row naming no line
+reports as outlived. It is checked before the per-line oracle assertions so the diagnosis is the
+right one.
+
+**The Float32 subcase is recorded on #144 rather than filed.** `count(DISTINCT f32),
+sum(DISTINCT f32)` is refused where the lowering could compute it, which would ordinarily be a
+ticket — but #144 already carries that refusal as its user-visible symptom, and #144's expand
+answers the shape correctly, just more expensively than the one `keeps_distinct` arm would. A
+second number for a cheaper path to an already-ticketed refusal would duplicate the symptom, so
+#144's body gains the subcase, the cheaper fix and the `bug_` test that pins it. `keeps_distinct`
+is not widened: the spec's admitted cast list is frozen.
+
+**Noted, not fixed: #65 is 44 lines against the 30-line cap** for a ticket carrying a deferred fix.
+It was 43 before this task added the clause the spec asked for. Trimming it means deciding which
+detail of a worked-out device fix to throw away, which is the thing the cap's own exception exists
+to protect, so it is left for the human.
+
+The developer also repaired a pre-existing torn doc comment in `tests/test_cpu_corpus.rs` —
+`every_device_cell_has_a_cpu_cell_at_the_same_mode` had been inserted into the middle of
+`each_declarations_two_oracles_suit_each_other`'s doc since `ddf3ca2c`, splitting one sentence
+across two declarations. It was rejoined rather than restored verbatim, since the original was
+already 14 lines against the 10-line cap.

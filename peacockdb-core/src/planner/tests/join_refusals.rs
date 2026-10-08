@@ -106,8 +106,35 @@ async fn bug_two_distinct_arguments_are_refused() {
     let err = fixture
         .refused("SELECT count(DISTINCT k), count(DISTINCT v) FROM tiny")
         .await;
+    // Both arguments are named — `name@ordinal`, DataFusion's own rendering — which is what
+    // separates this from the shape below: here they really are two columns, and a message
+    // that only said "#144" would pin either one.
     assert!(
-        matches!(&err, PlanError::Unsupported(what) if what.contains("#144")),
+        matches!(&err, PlanError::Unsupported(what)
+            if what.contains("#144") && what.contains("k@") && what.contains("v@")),
+        "{err}"
+    );
+}
+
+// #144's refusal, reached by a shape that is not #144: ONE argument under a cast the
+// lowering's frozen list does not admit. `avg`/`sum` coerce Float32 to Float64 with a real
+// CastExpr, and `keeps_distinct` takes integers to Float64 and not Float32, so the two
+// arguments strip to different expressions. The cast is injective, so widening the list would
+// make this plan — that is the human's call, and this goes red when somebody makes it.
+#[tokio::test]
+async fn bug_one_float32_distinct_argument_under_two_coercions_is_refused() {
+    let fixture = Fixture::new("refuse-f32-distinct").await;
+    let err = fixture
+        .refused(
+            "SELECT count(DISTINCT arrow_cast(v, 'Float32')), \
+             sum(DISTINCT arrow_cast(v, 'Float32')) FROM tiny",
+        )
+        .await;
+    // The message must describe the shape hit — two arguments that DIFFER — and not claim a
+    // second DISTINCT argument, which this query does not have.
+    assert!(
+        matches!(&err, PlanError::Unsupported(what)
+            if what.contains("#144") && !what.contains("a second DISTINCT argument")),
         "{err}"
     );
 }

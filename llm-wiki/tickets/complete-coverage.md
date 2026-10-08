@@ -64,6 +64,16 @@ node, which is why it is a ticket rather than a planner tweak. Not [#65](corpus-
 ROLLUP/CUBE `__grouping_id` — the two would coexist as separate columns. Until it lands the
 planner refuses the shape at plan time.
 
+**One subcase is cheaper than the expand, and the refusal covers it too.** Two arguments that are
+one expression under a coercion the lowering declines to strip — `count(DISTINCT f32),
+sum(DISTINCT f32)`, where `sum` coerces to `Float64` and `keeps_distinct` admits that only from an
+integer — reach this refusal, and the expand would answer them correctly as two arguments. But
+`Float32 → Float64` is injective, so one arm in `keeps_distinct`
+(`planner/translator/aggregate/distinct.rs`) answers that shape with the ordinary single-distinct
+lowering. Pinned by `bug_one_float32_distinct_argument_under_two_coercions_is_refused`
+(`planner/tests/join_refusals.rs`), which goes red the day the arm lands. No corpus query has a
+`Float32` column.
+
 <a id="t261"></a>
 ### #261 — a `stddev` or `var` beside a DISTINCT is refused at planning
 **Priority: low** — no query in either benchmark has this shape.

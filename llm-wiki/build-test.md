@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2366 test cases — Rust 1891, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2367 test cases — Rust 1892, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1218 cases: `--lib` 622, `test_cpu_corpus` 567, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1219 cases: `--lib` 623, `test_cpu_corpus` 567, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -34,7 +34,10 @@ whether its device run is schema-validated, expanded to a case per (query, mode)
 checked against plain DataFusion at `target_partitions = 1` — `data_fusion_exact`,
 `data_fusion_approximate` to 1e-12, `data_fusion_subset` where the SQL does not determine the
 rows, or `data_fusion_disabled`, which skips the compare for a query DataFusion 45 answers wrong
-or refuses. `tpch/distinct-functions` is the one of those: DataFusion refuses
+or refuses. A line taking that last one checks no answer, so it must appear in
+`ANSWER_HELD_ELSEWHERE` (`tests/test_cpu_corpus.rs`) naming the test that does; the register and
+the declared set are asserted equal both ways, so the set below is read off code rather than
+promised here. `tpch/distinct-functions` is its one member: DataFusion refuses
 `stddev(DISTINCT)` and answers a grouped decimal `avg(DISTINCT)` as the plain average, so its
 answer is held by `end_to_end.rs` against a hand-lowered oracle instead. 119 queries at the modes
 each is correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
@@ -150,13 +153,15 @@ null analysis both ways, and the session config's own registration path declarin
 every rule in the can-this-column-be-NULL pass, on hand-built nodes — a source declares a
 not-nullable column here, which no corpus fixture can
 
-| Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 11 |
+| Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 12 |
 |---|---|--:|
 
 every shape the planner refuses, from the SQL that provokes it; each asserts its ticket is in
-the message a user sees. Two are `bug_` tests rather than refusals the engine means to keep —
-two DISTINCT arguments ([#144](tickets/complete-coverage.md#t144)) and a `stddev` companion
-beside a DISTINCT ([#261](tickets/complete-coverage.md#t261))
+the message a user sees. Three are `bug_` tests rather than refusals the engine means to keep —
+two DISTINCT arguments ([#144](tickets/complete-coverage.md#t144)), a `stddev` companion
+beside a DISTINCT ([#261](tickets/complete-coverage.md#t261)), and one `Float32` argument that
+reaches #144's refusal because `keeps_distinct` admits `Float64` from an integer and not from a
+`Float32`, so widening that list turns the test red
 
 | Plan goldens, tp1-single | [tpch_tp1_single](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
 |---|---|--:|
