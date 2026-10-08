@@ -6,7 +6,7 @@ developer works in is [`repartition-keys-impl.md`](repartition-keys-impl.md).
 ## Branch and PR
 
 - Branch `ENS-repartition-keys`, forked off `ENS-pbench` at `badda3d5`.
-- Task 4 of chain J, so its PR targets **`ENS-pbench`**.
+- Task 4 of chain J, so its PR targets **`ENS-pbench`**. **PR #169**, base verified with `gh pr view 169 --json baseRefName`.
 - Task 2 (`stale-cells`) is blocked and has no branch, so the chain's branch order is
   `master → ENS-duckdb-oracle → ENS-pbench → ENS-repartition-keys`. A resequence for the human at
   merge, not a conflict: disjoint lines and rows.
