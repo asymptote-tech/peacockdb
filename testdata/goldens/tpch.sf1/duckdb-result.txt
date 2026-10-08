@@ -378,7 +378,7 @@
 fingerprint: rows=27604
 col 0: nonnull=27604
 col 1: nonnull=27604
-hash: d3620fef5d7f88f93f65ea81f9b95b52bef539289e198ae74fb1fc1009f6827b
+hash: 611d710768ecc851e134d0430658661485b5a19abf8647115b57648363a10c80
 == q12
 +------------+-----------------+----------------+
 | l_shipmode | high_line_count | low_line_count |
@@ -451,7 +451,7 @@ col 0: nonnull=18314
 col 1: nonnull=18314
 col 2: nonnull=18314
 col 3: nonnull=18314
-hash: 55f4e37d567b6c9ac94a9047df8193e6a8b9457b11f65db0dec045557ad5308d
+hash: e30e20cbe2ce222ff94f7137f5d2a0a3efb065116f1f392bfe5ca8bb5c1629a1
 == q17
 +-------------------+
 | avg_yearly        |
@@ -853,7 +853,7 @@ col 5: nonnull=1196041
 col 6: nonnull=1196041
 col 7: nonnull=1196041
 col 8: nonnull=1196041
-hash: 1bcfcf1b09d54ad6f56af97b491a6253ec7cc8a91080ffbb47ab00be6db0d75b
+hash: cad6a433cff8271f8872ce46b421d5a219bcb06374ef4195a959efd1aa132728
 == cross-join
 +-------------+-------------+---------------------------------------------------------------------------------------------------------------------+-------------+----------------+-------------+--------------------------------------------------------------------------------------------------------------------+
 | r_regionkey | r_name      | r_comment                                                                                                           | n_nationkey | n_name         | n_regionkey | n_comment                                                                                                          |
@@ -988,7 +988,7 @@ hash: 1bcfcf1b09d54ad6f56af97b491a6253ec7cc8a91080ffbb47ab00be6db0d75b
 fingerprint: rows=2402187
 col 0: nonnull=2402187
 col 1: nonnull=2402187
-hash: 94b852a10e398eb270f03dd1b0d3e5a2bc501a99224696595e4734cf1895fc49
+hash: db8ce65392f1ec58862d813d3b5d14920d624409d3c25e4733180e761bed9efa
 == hash-join
 +--------------+-------------------+---------------------+
 | count_star() | sum(l.l_quantity) | sum(o.o_totalprice) |
@@ -1355,7 +1355,7 @@ col 5: nonnull=303959
 col 6: nonnull=303959
 col 7: nonnull=303959
 col 8: nonnull=303959
-hash: 81404e1a8a711e3883dd135e883352263bdb1a03d70cb6933dd0eda77e6e6ca3
+hash: 47e84761266dc5f5832869ce2e48d1bf21ececd7fc61ae43f38583ddca89e404
 == shuffle-additive
 +--------------+--------------+---------+-------------+-----------------+
 | l_returnflag | l_linestatus | cnt     | sum_qty     | sum_base_price  |

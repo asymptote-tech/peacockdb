@@ -713,26 +713,50 @@ EOF
 fi
 
 if [ "$PULL_RESULTS" -eq 1 ]; then
-  # The device's own answers, which only a gate run under PCK_WRITE_GPU_RESULT writes.
-  # One file per dataset, keyed by (query, mode); the DuckDB cases in the cpu binary and
-  # the coverage test are what read them. Asked of the host before the transfer, for the
-  # reason the benchmark pull gives: the local tree holds the committed file, so counting
-  # it afterwards answers a question whose answer is yes whatever the pull did.
-  pulled=0
-  for rel in $(ssh "$REMOTE" \
-      "cd $REMOTE_REPO/testdata && ls goldens/*/gpu-result*.txt 2>/dev/null"); do
-    pull_one "$rel" "the device's answers ($rel)" && pulled=$((pulled + 1))
-  done
-  # An empty list makes the loop body vanish and the phase pass green, which reads exactly
-  # like a cycle that recorded everything. The two ways it happens are a gate run without
-  # PCK_WRITE_GPU_RESULT and a host tree someone cleared; both leave the caller with the
-  # committed file and no way to tell.
-  if [ "$pulled" -eq 0 ]; then
-    die "nothing came home: no goldens/*/gpu-result*.txt on $REMOTE. A gate run records
-     them only under PCK_WRITE_GPU_RESULT=1 — was the cycle run with it?"
+  # The device's own answers, which only a gate run under PCK_WRITE_GPU_RESULT writes. One
+  # file per dataset, keyed by (query, mode); the DuckDB cases in the cpu binary and the
+  # coverage test are what read them. Classified on the host and before the transfer: the
+  # local tree holds the committed file, and so does the host's, because --push-binaries
+  # mirrors testdata/goldens/ over on every deploy. So EXISTENCE answers yes on both sides
+  # whatever the cycle did, and what is asked instead is whether the gate run wrote it —
+  # see device_result_files. One hole left, named rather than closed: a --push-binaries
+  # between the run and the pull re-dates the pushed copies, and --all does neither in
+  # that order.
+  remote_state_paths gate
+  listing=$(ssh "$REMOTE" bash <<EOF
+$(declare -f device_result_files)
+device_result_files "$REMOTE_REPO/testdata" "$phase_id"
+EOF
+  )
+  if [ "$listing" = "no-marker" ]; then
+    die "no gate run has ever been launched on $REMOTE, so nothing dates its device
+     answers. Run the cycle first: --run with PCK_WRITE_GPU_RESULT=1 in the environment."
   fi
-  echo "==> $pulled device result file(s); read \`git diff testdata/goldens/*/gpu-result.txt\`"
-  echo "    before committing. A moved section the change did not intend is a finding."
+  pulled=0
+  stale=0
+  while read -r state rel; do
+    [ -n "${rel:-}" ] || continue
+    case "$state" in
+      fresh) pull_one "$rel" "the device's answers ($rel)" && pulled=$((pulled + 1)) ;;
+      stale)
+        stale=$((stale + 1))
+        echo "==> $rel predates the gate launch: the pushed committed copy, not a recording"
+        ;;
+      *) die "device_result_files answered '$state $rel', which this cannot read" ;;
+    esac
+  done <<< "$listing"
+  # Nothing fresh reads exactly like a cycle that recorded everything, and nothing compares
+  # the file against its previous version by design — so an empty `git diff` afterwards would
+  # read as "no device answer moved" when it means "nothing was recorded". The ways it
+  # happens: a gate run without PCK_WRITE_GPU_RESULT, and a host tree someone cleared.
+  if [ "$pulled" -eq 0 ]; then
+    die "nothing came home: $stale goldens/*/gpu-result*.txt on $REMOTE, none of them newer
+     than the gate launch, so this cycle recorded nothing. A gate run records only under
+     PCK_WRITE_GPU_RESULT=1 — was it run with it?"
+  fi
+  echo "==> $pulled device result file(s) refreshed, $stale left as pushed; read"
+  echo "    \`git diff testdata/goldens/*/gpu-result.txt\` before committing. A moved"
+  echo "    section the change did not intend is a finding."
 fi
 
 exit "$status_rc"

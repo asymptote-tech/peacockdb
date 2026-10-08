@@ -160,16 +160,13 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
 /// The two oracles of one line have to suit each other, and both directions are asserted
 /// rather than trusted.
 ///
-/// A `golden_exact` where no committed section can serve is a test that fails on correct
-/// behaviour: the result is over the cap and holds a fingerprint instead of its rows, or the
-/// query's rows are not determined across modes and one mode's answer cannot be the
-/// authority for five. A `live_cpu` where a section does serve spends a device-side cpu run
-/// on a comparison a committed file makes faster and harder.
-///
-/// Derivable is why a CHECK can exist here, never why either value would be absent from the
-/// line. Read off the declaration and the committed golden, so it needs no run — which is
-/// what makes it catch the first `live_cpu` query BEFORE the rollout that needs it, rather
-/// than during.
+/// A `golden_exact` where no committed section can serve fails on correct behaviour: the
+/// result is over the cap and holds a fingerprint instead of its rows, or its rows are not
+/// determined across modes and one mode's answer cannot be the authority for five. A
+/// `live_cpu` where a section does serve spends a device-side cpu run on a comparison a
+/// committed file makes faster and harder. Derivable is why a CHECK can exist here, never
+/// why either value would be absent from the line; read off the declaration and the golden,
+/// it needs no run, which is what catches the first `live_cpu` query before its rollout.
 #[test]
 fn each_declarations_two_oracles_suit_each_other() {
     let mut wrong: Vec<String> = Vec::new();
@@ -187,9 +184,8 @@ fn each_declarations_two_oracles_suit_each_other() {
         // its rows here stands in for them because the cap kept them out.
         let over_cap = !section_holds_rows(&section);
         // `data_fusion_subset` says the ENGINE is free to answer a different row set per run,
-        // which is why the device needs a live cpu. It does not reach the DuckDB oracle: that
-        // case compares two committed files, so only a regeneration can move it — see
-        // `an_undetermined_lines_duckdb_oracle_is_still_one_that_compares_rows`.
+        // which is why the device needs a live cpu. Its DuckDB oracle is a separate question —
+        // see `an_undetermined_lines_rows_are_compared_only_against_committed_files`.
         let undetermined = declared.cpu_oracle == "data_fusion_subset";
         let needs_live = over_cap || undetermined;
         let says_live = declared.gpu_oracle == "live_cpu";
@@ -217,31 +213,70 @@ fn each_declarations_two_oracles_suit_each_other() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// A line whose rows are undetermined still names a DuckDB oracle that compares them.
+/// A line whose rows are undetermined compares them against two COMMITTED files, and only
+/// there.
 ///
 /// `data_fusion_subset` says the engine may answer a different ten rows per run, so
-/// `duckdb_exact` over it looks like a latent flake and is not one: the `duckdb_<q>` case
-/// reads the committed `mini.result.txt` authority against the committed `duckdb-result.txt`,
-/// and today both hold `lineitem`'s first ten rows in file order. A regeneration of either
-/// file is the only thing that can move it, and a red then means our ten rows moved — not
-/// that DuckDB disagrees. Weakening is not an option a reader should reach for: of the five
-/// oracles `duckdb_approx` still wants the same multiset, `duckdb_divergent` wants an open
-/// ticket and columns that really differ, `duckdb_fingerprint` wants an over-cap section, and
-/// `duckdb_none` fails by construction while both sides answer. This holds the line to that.
+/// `duckdb_exact` over it looks like a latent flake and is not one — in the `duckdb_<q>`
+/// case, which reads the committed `mini.result.txt` authority against the committed
+/// `duckdb-result.txt`, both holding `lineitem`'s first ten rows in file order. Only a
+/// regeneration moves that. `duckdb_gpu_<q>_<mode>` is the other case and has no such
+/// footing: it applies the same oracle to the device's RECORDED answer, where ten unordered
+/// rows need not be the cpu's ten. So this holds such a line's device cells off, and the day
+/// [#186] turns them on it is what says to weaken the device-side comparison instead.
 #[test]
-fn an_undetermined_lines_duckdb_oracle_is_still_one_that_compares_rows() {
+fn an_undetermined_lines_rows_are_compared_only_against_committed_files() {
+    let rows = load_csv();
     let mut checked = 0;
     for declared in inventory::iter::<CorpusDeclaration> {
         if declared.cpu_oracle != "data_fusion_subset" {
             continue;
         }
         checked += 1;
+        // Weakening is not an option a reader should reach for: of the five oracles
+        // `duckdb_approx` still wants the same multiset, `duckdb_divergent` wants an open
+        // ticket and columns that really differ, `duckdb_fingerprint` wants an over-cap
+        // section, and `duckdb_none` fails by construction while both sides answer.
         assert!(
             matches!(declared.duckdb_oracle, "duckdb_exact" | "duckdb_approx"),
             "{}/{}: its rows are undetermined and its duckdb_oracle is {} — the comparison is \
              against two committed files, so it compares rows or it compares nothing",
             declared.dataset,
             declared.query,
+            declared.duckdb_oracle
+        );
+        // Off the registry, as the loop above reads it: a `CorpusDeclaration` carries the
+        // oracles and not the modes, and the `gpu_` columns are what `duckdb_device_cases!`
+        // expands from — held to that macro by the gpu binary's own registry check.
+        let row = rows
+            .iter()
+            .find(|r| {
+                r.dataset == declared.dataset && r.sf == declared.sf && r.query == declared.query
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}/{}: not in the registry",
+                    declared.dataset,
+                    stem(declared.query)
+                )
+            });
+        let live: Vec<&str> = MODES
+            .iter()
+            .filter(|mode| {
+                row.states
+                    .get(&format!("gpu_{}", mode.ident()))
+                    .is_some_and(|state| state == "enabled" || state == "skip")
+            })
+            .map(|mode| mode.name)
+            .collect();
+        assert!(
+            live.is_empty(),
+            "{}/{}: its rows are undetermined and its device cells at {live:?} are on, so \
+             duckdb_gpu_* holds the device's RECORDED answer to {} — ten unordered rows that \
+             need not be the ten the cpu committed. Compare the row count alone on the device \
+             side of such a line, or leave the cells off.",
+            declared.dataset,
+            stem(declared.query),
             declared.duckdb_oracle
         );
     }
@@ -380,7 +415,8 @@ fn all_modes_expands_to_the_five_in_either_position() {
 /// way — `every_oracle_variant_is_named_by_some_line` does the other two.
 #[test]
 fn every_duckdb_oracle_is_named_by_some_line() {
-    for name in DuckdbOracle::ALL {
+    for variant in DuckdbOracle::ALL {
+        let name = variant.name();
         assert!(
             inventory::iter::<CorpusDeclaration>
                 .into_iter()

@@ -9731,7 +9731,7 @@ col 3: nonnull=2519
 col 4: nonnull=2516
 col 5: nonnull=2514
 col 6: nonnull=2514 sum=4.90000000000000000e3 min=0.00000000000000000e0 max=6.69270740266887714e1
-hash: 721c95dc765dd799593c0e3c16e4d706863df0aff1ff44b8e4df0d9d706923d7
+hash: 00f8a0f39e98c78ebf0e98f347162d38c495050ee0fd51f423f71715c5f4b3a1
 == q99
 +----------------------+-----------+---------------+---------+------------+------------+-------------+-----------+
 | w_substr             | sm_type   | cc_name_lower | 30 days | 31-60 days | 61-90 days | 91-120 days | >120 days |

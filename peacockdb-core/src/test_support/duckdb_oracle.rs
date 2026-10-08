@@ -15,20 +15,25 @@ use super::{
 /// included, since `stringify!(duckdb_divergent(243, 1))` spaces its arguments out.
 pub(crate) fn parse(spelled: &str) -> DuckdbOracle {
     let tight: String = spelled.chars().filter(|c| !c.is_whitespace()).collect();
-    match tight.as_str() {
-        "duckdb_exact" => DuckdbOracle::Exact,
-        "duckdb_approx" => DuckdbOracle::Approx,
-        "duckdb_fingerprint" => DuckdbOracle::Fingerprint,
-        "duckdb_none" => DuckdbOracle::None,
-        _ => match arguments(&tight, "duckdb_divergent") {
-            Some(args) => divergent(spelled, &args),
-            None => panic!(
-                "corpus_query!: unknown duckdb_oracle '{spelled}' (expected \
-                 duckdb_exact|duckdb_approx|duckdb_divergent(<ticket>[, <positions>])|\
-                 duckdb_fingerprint|duckdb_none)"
-            ),
-        },
+    // Decoded through `ALL`, as `cpu_oracle_mode` and `gpu_result_mode` decode theirs: the
+    // accepted set and the list those tests hold to the corpus are then one list.
+    for variant in DuckdbOracle::ALL {
+        let name = variant.name();
+        let parameterized = matches!(variant, DuckdbOracle::Divergent { .. });
+        match (parameterized, arguments(&tight, name), tight == name) {
+            // The bare name reaches `divergent` too, for its "takes a ticket first".
+            (true, Some(args), _) => return divergent(spelled, &args),
+            (true, None, true) => return divergent(spelled, &[]),
+            (false, _, true) => return variant,
+            _ => {}
+        }
     }
+    let known: Vec<&str> = DuckdbOracle::ALL.iter().map(|o| o.name()).collect();
+    panic!(
+        "corpus_query!: unknown duckdb_oracle '{spelled}' (expected {}; duckdb_divergent \
+         takes (<ticket>[, <positions>]))",
+        known.join("|")
+    )
 }
 
 fn divergent(spelled: &str, args: &[&str]) -> DuckdbOracle {
@@ -199,10 +204,10 @@ fn table(rendered: &str) -> Table {
             .collect(),
         false => Vec::new(),
     };
-    let width = lines
-        .get(1)
-        .map_or(0, |header| result_text::split_cells(header).len());
-    Table { width, rows }
+    Table {
+        width: result_text::rendered_width(rendered),
+        rows,
+    }
 }
 
 /// The two row lists projected onto `columns` and paired, each kept column compared with
@@ -297,8 +302,11 @@ fn cell_equal(kind: CellKind, ours: &str, duck: &str) -> bool {
                 || (a - b).abs() <= DUCKDB_FLOAT_TOLERANCE * a.abs().max(b.abs())
         }
         // The last place itself, with a hair of room: the comparison is between a truncation
-        // and a rounding, so the gap reaches the whole unit and must not fail at it.
-        CellKind::Decimal(scale) => (a - b).abs() <= 10f64.powi(-(scale as i32)) * (1.0 + 1e-12),
+        // and a rounding, so the gap reaches the whole unit and must not fail at it. A
+        // negative scale is clamped — `10^|s|` is a tolerance, not a last place.
+        CellKind::Decimal(scale) => {
+            (a - b).abs() <= 10f64.powi(-(scale.max(0) as i32)) * (1.0 + 1e-12)
+        }
     }
 }
 

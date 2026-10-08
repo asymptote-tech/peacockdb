@@ -3,6 +3,25 @@
 
 Tests, CI, hosts, testdata etc
 
+<a id="t252"></a>
+### #252 — four corpus cases read the checkout, which a remote CPU run never ships
+`ticket_is_open` (`test_support/duckdb_oracle.rs`) resolves `llm-wiki/tickets/` through
+`env!("CARGO_MANIFEST_DIR")` with no environment escape, so the four `duckdb_divergent` cases —
+`duckdb_tpcds_q17`, `q58`, `q61`, `q66` — look for the ticket files at the build host's path.
+`scripts/build-test.sh` ships binaries, goldens and data and never source, and `rust_only_targets`
+stages `test_cpu_corpus` among them, so those four go red on verda and pass locally.
+
+`testdata.rs` states the rule the other goldens follow: the compile-time path is the fallback and
+`PEACOCK_TESTDATA_DIR` wins, because a binary is built on one host and run on another (#49).
+`ticket_is_open` has no equivalent. An escape variable nobody sets would be a no-op, so the fix is
+the push side — `--push-goldens` or a sibling flag carrying `llm-wiki/tickets/` — which is why this
+is a ticket and not a line in the task that found it.
+
+Pre-existing in kind: `test_module_layout` and `test_ci_coverage` read the source tree too, but
+`rust_only_targets` excludes both by its `repo_root` rule, so they never ship. These four are the
+first cases that both ship and read the checkout. Found in review round 3 of the duckdb-oracle
+task; measured, not inferred, by reading `rust_only_targets`.
+
 <a id="t178"></a>
 ### #178 — shad-gpu is shared, and a pool that cannot be built is a neighbour's fault
 Each gtest main reserves a fixed byte budget (`kPoolBytes` beside its `main()`, listed in

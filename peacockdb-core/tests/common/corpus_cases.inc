@@ -36,11 +36,11 @@ corpus_query!(tpch, 1, q10, all_modes, none, duckdb_exact, data_fusion_exact, go
 // scan-limit's rows are not determined — an unordered LIMIT over lineitem — so its modes
 // need not agree and the cpu oracle is the subset one; filter-project returns most of
 // lineitem, which is over the result cap. Both take a live cpu run on the device for that.
-// scan-limit keeps duckdb_exact even so, for the reason
-// `an_undetermined_lines_duckdb_oracle_is_still_one_that_compares_rows` states.
+// scan-limit keeps duckdb_exact even so, because that case compares two COMMITTED files; its
+// device cells, which the same oracle would judge against a RECORDED answer, are off on #186
+// anyway — `an_undetermined_lines_rows_are_compared_only_against_committed_files` holds both.
 // scan-limit runs at the tp4 modes only: at the two tp1 modes the planner puts the limit in
-// the scan alone and the cpu backend's reader does not apply it — six million rows where ten
-// were asked for, #186, which is also what its device cells are off against.
+// the scan alone and the cpu backend's reader does not apply it — six million rows for ten.
 // The other four run at tp1-single, bar cross-join, off on #220's join batching.
 corpus_query!(tpch, 1, scan_limit, tp4_single | tp4_rowgroup | tp4_sized, none, duckdb_exact, data_fusion_subset, live_cpu, schema_validation_enabled);
 corpus_query!(tpch, 1, filter_project, all_modes, tp1_single, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);

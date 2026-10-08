@@ -457,14 +457,23 @@ pub enum DuckdbOracle {
 }
 
 impl DuckdbOracle {
-    /// The five spellings a line may write. `every_duckdb_oracle_is_named_by_some_line`
-    /// holds the list to the lines, so a variant nothing uses is deleted rather than kept.
-    pub const ALL: [&'static str; 5] = [
-        "duckdb_exact",
-        "duckdb_approx",
-        "duckdb_divergent",
-        "duckdb_fingerprint",
-        "duckdb_none",
+    /// The five, each naming its own spelling below — variants rather than strings, as
+    /// [`CpuOracle::ALL`] and [`GpuResultMode::ALL`] are, and [`DuckdbOracle::parse`] decodes
+    /// THROUGH this list: a sixth variant left out of it is then a variant no line can name,
+    /// rather than one `every_duckdb_oracle_is_named_by_some_line` never sees. That test holds
+    /// the list to the lines, so a variant nothing uses is deleted rather than kept.
+    ///
+    /// `Divergent`'s ticket here is a placeholder nobody reads — the list is used for the
+    /// names, and a line's real ticket comes off its argument.
+    pub const ALL: [DuckdbOracle; 5] = [
+        Self::Exact,
+        Self::Approx,
+        Self::Divergent {
+            ticket: 0,
+            columns: Vec::new(),
+        },
+        Self::Fingerprint,
+        Self::None,
     ];
 
     pub fn name(&self) -> &'static str {

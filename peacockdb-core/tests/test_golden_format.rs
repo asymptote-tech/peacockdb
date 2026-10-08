@@ -551,7 +551,49 @@ fn an_exact_column_is_hashed_and_an_approximate_one_is_summed() {
         ),
         "{fp}"
     );
-    assert!(fp.contains("\nhash: "), "{fp}");
+    // The DIGEST, not just the line: it is the one field that carries the row pairing, and
+    // `testdata/test_duckdb_result.py` pins this same text for the Python writer. Asserting
+    // only that a hash is present left the separator, the sort and the join unpinned on this
+    // side, so a change to any of them went red in the dataset-bearing tier alone.
+    // `sha256("1\u{1}a\u{1}\n2\u{1}b\u{1}")`.
+    assert!(
+        fp.ends_with("\nhash: 55d02283b07cc29ea0d3abeea4a1938ba4843ad8966bf6ee14b61e8d4b9f18b3\n"),
+        "{fp}"
+    );
+}
+
+/// A cell holding the separator must not let two different answers hash alike.
+///
+/// `("a|b", "c")` and `("a", "b|c")` join to one string under a `|` separator and so hash to
+/// one digest — two different answers agreeing, on the comparison that has no second opinion
+/// behind it. `result_text`'s row rendering rejected a tab for exactly this and picked
+/// `\u{1}`, which cannot occur in a rendered cell. `o_comment` is 1.5M hashed rows in
+/// anti-join and semi-join, and `|` occurs in text.
+#[test]
+fn two_answers_a_separator_in_a_cell_would_merge_hash_differently() {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("l", DataType::Utf8, false),
+        Field::new("r", DataType::Utf8, false),
+    ]));
+    let pair = |l: &str, r: &str| -> RecordBatch {
+        RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(StringArray::from(vec![l])),
+                Arc::new(StringArray::from(vec![r])),
+            ],
+        )
+        .expect("a batch")
+    };
+    let split_left = fingerprint_of(&[pair("a|b", "c")]);
+    let split_right = fingerprint_of(&[pair("a", "b|c")]);
+    assert_ne!(
+        split_left, split_right,
+        "a pipe in a cell made two answers one"
+    );
+    let said = compare_fingerprints(&split_left, &split_right, DUCKDB_FLOAT_TOLERANCE)
+        .expect_err("two different answers");
+    assert!(said.contains("hash"), "{said}");
 }
 
 /// A mis-paired join: the same ids and the same names, paired differently. The sums and the
@@ -819,6 +861,33 @@ fn a_class_disagreement_names_the_column_and_the_remedy() {
         );
         assert!(said.contains("duckdb_result.py"), "the remedy: {said}");
     }
+}
+
+/// A NaN in an approximate column does not depend on which row carried it.
+///
+/// `partial_cmp(..).unwrap_or(Equal)` leaves a NaN wherever the rows put it, and Python's
+/// `sorted()` does the same, so min and max were whatever each side's row order made them —
+/// and the two engines return the same rows in different sequences. A NaN anywhere now makes
+/// the whole triple NaN on both writers, which is what `nan_settles` then reads as the absent
+/// value it is: two NaNs agree, a NaN against a number does not. No committed section has
+/// one; a float column reaching this is what it is for.
+#[test]
+fn a_nan_in_a_column_settles_its_triple_whatever_the_row_order() {
+    let column = |x: Vec<f64>| -> RecordBatch {
+        let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Float64, false)]));
+        RecordBatch::try_new(schema, vec![Arc::new(Float64Array::from(x))]).expect("a batch")
+    };
+    let one = fingerprint_of(&[column(vec![1.0, f64::NAN, 2.0])]);
+    let other = fingerprint_of(&[column(vec![f64::NAN, 2.0, 1.0])]);
+    assert_eq!(one, other, "the row order reached the triple");
+    assert!(
+        one.contains("\ncol 0: nonnull=3 sum=nan min=nan max=nan\n"),
+        "{one}"
+    );
+    assert_eq!(
+        compare_fingerprints(&one, &other, DUCKDB_FLOAT_TOLERANCE),
+        Ok(())
+    );
 }
 
 /// The triple's number format, pinned at the values the two writers are likeliest to

@@ -62,9 +62,8 @@ include!("common/corpus_cases.inc");
 ///
 /// This binary links the write path through `test_support` exactly like the cpu one, and the
 /// whole tier rests on the device being held to what the cpu wrote: a device that can author
-/// its own golden proves nothing against it. So both regeneration variables are set, one
-/// real device case runs, and the three cpu files it could have touched must come back byte
-/// for byte.
+/// its own golden proves nothing against it. So both regeneration variables are set, one real
+/// device case runs, and the three cpu files it could have touched come back byte for byte.
 ///
 /// Setting the environment is safe here and only here: the gpu job runs this binary with
 /// `--test-threads=1`, since cuDF and RMM share one process-wide pool.

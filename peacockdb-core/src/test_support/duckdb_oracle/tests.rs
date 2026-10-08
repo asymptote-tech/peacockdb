@@ -15,7 +15,8 @@ fn every_spelling_parses_and_names_itself() {
         DuckdbOracle::Fingerprint
     );
     assert_eq!(DuckdbOracle::parse("duckdb_none"), DuckdbOracle::None);
-    for name in DuckdbOracle::ALL {
+    for variant in DuckdbOracle::ALL {
+        let name = variant.name();
         let sample = match name {
             "duckdb_divergent" => "duckdb_divergent(1)",
             other => other,
@@ -138,6 +139,33 @@ fn approx_holds_a_decimal_to_one_unit_in_our_last_place() {
     assert!(compare(&DuckdbOracle::Approx, ours, &off, &[CellKind::Decimal(6)]).is_err());
     // The same cell under the float rule would be a divergence, which is the point.
     assert!(compare(&DuckdbOracle::Approx, ours, duck, &[CellKind::Float]).is_err());
+}
+
+/// A NEGATIVE declared scale does not widen the tolerance. `10^-s` with `s = -2` is a
+/// hundred, so a cell off by 50 would have passed; arrow allows the scale and the corpus has
+/// never produced one, which is why this is a case rather than a divergence somebody saw.
+#[test]
+fn a_negative_decimal_scale_does_not_buy_a_wider_tolerance() {
+    let ours = "+-------+\n| x     |\n+-------+\n| 100.0 |\n+-------+";
+    let off = "+-------+\n| x     |\n+-------+\n| 150.0 |\n+-------+\n";
+    assert!(compare(&DuckdbOracle::Approx, ours, off, &[CellKind::Decimal(-2)]).is_err());
+}
+
+/// A zero-column answer has a header with no pipes in it, and `split_cells` reads a pipeless
+/// line as one cell. tpcds q17 is the one such section — it renders `++` where DuckDB renders
+/// fifteen columns — and the width it reports is in the message the line's divergence prints.
+#[test]
+fn a_zero_column_answer_reports_no_columns() {
+    let none = "mode=tp4-sized\n++\n++\n";
+    let fifteen = format!(
+        "+{}\n|{}\n+{}\n",
+        "---+".repeat(15),
+        " a |".repeat(15),
+        "---+".repeat(15)
+    );
+    let said =
+        compare(&DuckdbOracle::Exact, none, &fifteen, &[]).expect_err("no columns against fifteen");
+    assert!(said.contains("0 columns against 15"), "{said}");
 }
 
 #[test]

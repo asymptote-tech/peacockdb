@@ -83,6 +83,12 @@ EXACT_TYPES = {
     "DATE", "TIME", "TIMESTAMP", "TIMESTAMP_S", "TIMESTAMP_MS", "TIMESTAMP_NS", "INTERVAL",
 }
 
+# What separates two cells inside one hashed row; `fingerprint.rs`'s CELL_SEPARATOR writes
+# the same byte. A separator that occurs in data makes ("a|b","c") and ("a","b|c") hash
+# alike — two different answers agreeing, on the comparison that has no second opinion
+# behind it — and `o_comment` is 1.5M hashed rows in anti-join and semi-join.
+CELL_SEPARATOR = "\x01"
+
 
 def is_approximate(declared):
     """Whether column type `declared` leaves the hash, read off the DECLARATION.
@@ -129,7 +135,7 @@ def fingerprint(names, types, rows):
                 if text:
                     values[at].append(float(text))
             else:
-                exact += text + "|"
+                exact += text + CELL_SEPARATOR
         hashed.append(exact)
 
     out = [f"fingerprint: rows={len(cells)}"]
@@ -137,15 +143,23 @@ def fingerprint(names, types, rows):
         line = f"col {at}: nonnull={nonnull[at]}"
         if approximate[at]:
             # Summed IN VALUE ORDER, so the two sides add in one sequence and float
-            # reassociation cannot move the digits the comparison reads. An empty column
-            # sums to zero with no min and no max, which is what `triple_of` leaves.
+            # reassociation cannot move the digits the comparison reads. An empty column sums
+            # to zero with no min and no max; a NaN among the values makes the whole triple
+            # NaN, since no sort places a NaN and min/max would follow the row order instead.
             ordered = sorted(values[at])
-            total = 0.0
-            for v in ordered:
-                total += v
-            low = approx_number(ordered[0]) if ordered else "nan"
-            high = approx_number(ordered[-1]) if ordered else "nan"
-            line += f" sum={approx_number(total)} min={low} max={high}"
+            nan = float("nan")
+            if any(v != v for v in ordered):
+                total, low, high = nan, nan, nan
+            else:
+                total = 0.0
+                for v in ordered:
+                    total += v
+                low = ordered[0] if ordered else nan
+                high = ordered[-1] if ordered else nan
+            line += (
+                f" sum={approx_number(total)} min={approx_number(low)}"
+                f" max={approx_number(high)}"
+            )
         out.append(line)
     hashed.sort()
     out.append("hash: " + hashlib.sha256("\n".join(hashed).encode()).hexdigest())

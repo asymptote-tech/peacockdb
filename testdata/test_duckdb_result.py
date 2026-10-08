@@ -4,7 +4,7 @@
 Two things only this side can get wrong. A timestamp: arrow-rs prints `NaiveDateTime`'s
 `Debug` form and `isoformat()` does not, so a millisecond timestamp would be a false
 divergence on every row that carries one. And the over-cap fingerprint, which both result
-writers produce: the expected text here is what `test_golden_format.rs`'s
+writers produce: the expected text here, the hash included, is what `test_golden_format.rs`'s
 `an_exact_column_is_hashed_and_an_approximate_one_is_summed` pins on the Rust side, so a
 change to either writer that does not reach the other goes red here.
 
@@ -43,7 +43,8 @@ class Cells(unittest.TestCase):
 
 
 class Fingerprint(unittest.TestCase):
-    """The text `test_golden_format.rs` pins on the Rust side, byte for byte."""
+    """The text `test_golden_format.rs` pins on the Rust side, byte for byte — the
+    `hash:` line included, which is the field carrying the row pairing."""
 
     TYPES = ["BIGINT", "VARCHAR", "DOUBLE"]
 
@@ -53,7 +54,7 @@ class Fingerprint(unittest.TestCase):
         "col 1: nonnull=2\n"
         "col 2: nonnull=2 sum=4.00000000000000000e0 min=1.50000000000000000e0"
         " max=2.50000000000000000e0\n"
-        "hash: a6005c86bd5307686acd561b309b2b6d5c670c935fe527ca4ad10023851dd239\n"
+        "hash: 55d02283b07cc29ea0d3abeea4a1938ba4843ad8966bf6ee14b61e8d4b9f18b3\n"
     )
 
     def test_both_writers_fingerprint_the_same_rows_the_same_way(self):
@@ -107,6 +108,27 @@ class Fingerprint(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             dr.fingerprint(["x"], ["STRUCT(a INTEGER)"], [(None,)])
         self.assertIn("STRUCT", str(caught.exception))
+
+    def test_two_answers_a_separator_in_a_cell_would_merge_hash_differently(self):
+        """`("a|b", "c")` and `("a", "b|c")` join to one string under a `|` separator and
+        so hash to one digest: two different answers agreeing, on the comparison that has
+        no second opinion behind it. `\x01` cannot occur in a rendered cell."""
+        names, types = ["l", "r"], ["VARCHAR", "VARCHAR"]
+        left = dr.fingerprint(names, types, [("a|b", "c")])
+        right = dr.fingerprint(names, types, [("a", "b|c")])
+        self.assertNotEqual(left, right)
+        self.assertEqual(left.splitlines()[:3], right.splitlines()[:3])
+
+    def test_a_nan_settles_the_triple_whatever_the_row_order(self):
+        """`sorted()` leaves a NaN wherever the rows put it and Rust's `partial_cmp` arm does
+        the same, so min and max were whatever each side's row order made them. A NaN
+        anywhere makes the whole triple NaN on both writers; `fingerprint.rs`'s `triple_of`
+        is the other half."""
+        nan = float("nan")
+        one = dr.fingerprint(["x"], ["DOUBLE"], [(1.0,), (nan,), (2.0,)])
+        other = dr.fingerprint(["x"], ["DOUBLE"], [(nan,), (2.0,), (1.0,)])
+        self.assertEqual(one, other)
+        self.assertEqual(one.splitlines()[1], "col 0: nonnull=3 sum=nan min=nan max=nan")
 
     def test_the_exponent_is_written_as_rust_writes_it(self):
         """Read off `format!("{x:.17e}")` for each value, including the two extremes."""

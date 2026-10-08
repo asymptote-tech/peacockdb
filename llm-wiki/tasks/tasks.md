@@ -79,7 +79,7 @@ its recipes. Shared design: [`join-rewrite-design.md`](join-rewrite-design.md). 
 refcounted-tables, whose scatter half is refcounted-scatter and whose join half the session makes
 unnecessary.
 
-### 1. [`duckdb-oracle.md`](duckdb-oracle.md) — closes [#235](../tickets/corpus-coverage.md#t235) — state: reviewing — PR #167
+### 1. [`duckdb-oracle.md`](duckdb-oracle.md) — closes [#235](../tickets/corpus-coverage.md#t235) — state: completing — PR #167
 
 Every corpus line names its `duckdb_oracle`; a comparison case per line against
 `duckdb-result.txt`, over `mini.result.txt` and the device's new `gpu-result.txt`; a fingerprint

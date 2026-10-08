@@ -20,6 +20,14 @@ use super::{SKIPPED, result_text};
 /// deciding whether a section holds rows looks at the first line.
 pub(crate) const FINGERPRINT: &str = "fingerprint: ";
 
+/// What separates two cells inside one hashed row, written the same by both writers.
+///
+/// `\u{1}`, as [`result_text`]'s row rendering and the tolerance arm's key already use. A
+/// separator that occurs in data makes `("a|b","c")` and `("a","b|c")` hash alike — two
+/// different answers agreeing, on the comparison that has no second opinion behind it — and
+/// `o_comment` is 1.5M hashed rows in anti-join and semi-join.
+const CELL_SEPARATOR: char = '\u{1}';
+
 /// One column's fingerprint: how many cells hold a value, and — where the column is
 /// approximate — the triple that stands in for them.
 #[derive(Debug, PartialEq)]
@@ -80,21 +88,16 @@ fn is_approximate(declared: &DataType) -> bool {
 /// the other crossed it. The cells are the ones the table prints, trimmed of its padding; the
 /// classes come from the fingerprinted side, because a rendering no longer says whether a
 /// numeric column was a decimal or a double.
+///
+/// Trimmed is why it agrees with [`fingerprint_of`], which takes its cells straight from
+/// `ArrayFormatter`: equal only for cells with no surrounding whitespace of their own, which
+/// is every cell either writer renders — the padding here is the table's, not the value's.
 pub(crate) fn fingerprint_of_rendered(table: &str, approximate: &[bool]) -> String {
     fingerprint(approximate, &|visit| {
         for line in data_lines(table) {
             visit(&result_text::split_cells(line));
         }
     })
-}
-
-/// A rendered table's column count, read off its header rather than its data: an answer of
-/// no rows still has one.
-fn rendered_width(table: &str) -> usize {
-    table
-        .lines()
-        .nth(1)
-        .map_or(0, |header| result_text::split_cells(header).len())
 }
 
 /// A rendered table's data lines: everything between the header's border and the last one.
@@ -156,7 +159,7 @@ fn fingerprint(approximate: &[bool], each_row: &dyn Fn(&mut dyn FnMut(&[String])
                 true => {}
                 false => {
                     exact.push_str(cell);
-                    exact.push('|');
+                    exact.push(CELL_SEPARATOR);
                 }
             }
         }
@@ -187,7 +190,16 @@ fn fingerprint(approximate: &[bool], each_row: &dyn Fn(&mut dyn FnMut(&[String])
 /// Folded from an explicit `0.0` rather than `Iterator::sum`, whose identity for `f64` is
 /// `-0.0` — which renders as `-0.00000000000000000e0` and so disagreed with the Python
 /// writer's `0.0` on every column that sums to zero, an all-NULL one among them.
+///
+/// A NaN among the values makes the WHOLE triple NaN, on both writers. Neither sort places a
+/// NaN: this one's comparator calls it equal to everything and Python's `sorted` leaves it
+/// where the rows put it, so min and max were a function of each side's row order — and the
+/// two engines return the same rows in different sequences. `nan_settles` then reads two NaN
+/// triples as the one absent value they are, and a NaN against a number as a difference.
 fn triple_of(values: &mut [f64]) -> (f64, f64, f64) {
+    if values.iter().any(|value| value.is_nan()) {
+        return (f64::NAN, f64::NAN, f64::NAN);
+    }
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let sum = values.iter().fold(0.0, |total, value| total + value);
     let first = values.first().copied().unwrap_or(f64::NAN);
@@ -251,7 +263,7 @@ fn under_the_classes_of(table: &str, fingerprinted: &str) -> Result<String, Stri
         .iter()
         .map(|column| column.triple.is_some())
         .collect();
-    let width = rendered_width(table);
+    let width = result_text::rendered_width(table);
     if width != classes.len() {
         return Err(format!(
             "the rendered side has {width} columns against {} in the fingerprinted one's",

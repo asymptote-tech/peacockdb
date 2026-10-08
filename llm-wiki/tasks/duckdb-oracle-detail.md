@@ -1041,3 +1041,245 @@ is pre-existing in kind.
   the coverage guard compares both directions, an empty or `skipped:` body would still redden, and
   none of the 26 device cells carries `duckdb_none`. The registry-keyed pruning cannot be
   destroyed by a `PCK_TEST_FILTER`ed cycle.
+
+## Round 4 result (2026-10-08)
+
+Review round 3's list is closed: 4 important and 8 nits, of which two nits were the
+coordinator's and one is argued down rather than done. Everything ran locally; both hosts were
+re-probed and are still down — shad-gpu `connect to host llm-gpu0h200.velkerr.ru port 22:
+Connection timed out`, `verda` `Could not resolve hostname`, zero `VERDA_*` in the environment.
+The device cycle is still the only thing left in the task.
+
+### Case counts, measured
+
+| target | before this round | after | delta |
+|---|---|---|---|
+| `--lib` (rust-only) | 646 passed, 2 ignored | **648 passed, 0 failed, 2 ignored** | +2 |
+| `test_cpu_corpus` | 705 cases | **705: 678 passed, 27 failed, 0 ignored** | — |
+| `test_golden_format` | 41 | **43 passed** | +2 |
+| `test_corpus_goldens` | 26 | **26 passed** | — |
+| `test_cost_model` | 3 | **3 passed** | — |
+| `test_module_layout` | 17 | **17 passed** | — |
+| `test_ci_coverage` | 9 | **9 passed** | — |
+| `testdata/test_duckdb_result.py` | 12 | **14, OK** | +2 |
+
+`test_cpu_corpus`'s 27 failures are the standing device gap and nothing else: the 26
+`duckdb_gpu_*` cases plus `every_enabled_device_cell_has_its_gpu_result_section_and_no_other`.
+**27 of 27** carry "…/gpu-result.txt does not exist, so no device answer is recorded for this
+cell. Run a cycle with PCK_WRITE_GPU_RESULT=1 and bring it home with --pull-results", counted
+over the whole log rather than its tail, and no failing thread is any other case. The case total
+is unchanged because finding 1 renamed and extended a test rather than adding one.
+
+Device targets type-check and link: `scripts/cargo-cudf.sh test --test test_gpu_corpus --features
+gpu --no-run` links `test_gpu_corpus-5013741728a486dd`, and `scripts/cargo-cudf.sh check --tests
+--features gpu` finishes with the one pre-existing warning, `unused import: AsArray` at
+`src/tests/gpu_tests/aggregate_dimension_cases.rs:9`, in a file this branch does not touch.
+
+### Finding 1 — the device side of an undetermined line
+
+`an_undetermined_lines_duckdb_oracle_is_still_one_that_compares_rows` is now
+`an_undetermined_lines_rows_are_compared_only_against_committed_files`, and holds every
+`data_fusion_subset` line to two things rather than one: its `duckdb_oracle` compares rows, AND
+no `gpu_*` cell of that line is enabled or `skip`. The second half is what ties the two facts
+the reviewer found untied — `duckdb_gpu_case` applies the same oracle to the device's *recorded*
+answer, and an unordered `LIMIT 10` over lineitem need not return the cpu's ten rows.
+
+- **The registry, not the declaration**, for the reason `every_device_cell_has_a_cpu_cell_at_the_same_mode`
+  gives and in the same shape: a `CorpusDeclaration` carries the oracles and not the modes. The
+  `gpu_` columns are what `duckdb_device_cases!` expands from, and the gpu binary's
+  `the_registry_matches_the_gpu_corpus_in_both_directions` is what holds the two together.
+- **Red-checked**: `gpu_tp1_single` flipped to `enabled` for `tpch,1,scan_limit` in
+  `testdata/cost-registry.csv`, the case goes red with "its rows are undetermined and its device
+  cells at [\"tp1-single\"] are on, so duckdb_gpu_* holds the device's RECORDED answer to
+  duckdb_exact — ten unordered rows that need not be the ten the cpu committed. Compare the row
+  count alone on the device side of such a line, or leave the cells off." CSV restored, zero diff.
+- **The written argument now names its case.** The doc says the `duckdb_<q>` case is the one the
+  "two committed files" argument is about and that `duckdb_gpu_<q>_<mode>` has no such footing;
+  the five-oracle "weakening is not available" enumeration moved into the body, at the assertion
+  it is about, to keep the doc at the ten-line cap. `corpus_cases.inc`'s scan-limit block says the
+  same in one sentence and names the test; it is back at exactly ten lines.
+- **It closes the family, not the instance**: the loop is over every `data_fusion_subset`
+  declaration, both halves apply to each, and `checked == 1` still forces a human to re-read when
+  a second such line appears. The guard fires the day [#186] turns those cells on, which is the
+  point — the remedy is in the message.
+
+### Finding 2 — `--pull-results` requires freshness, not existence
+
+`device_result_files <testdata dir> <marker>` in `scripts/lib/shadgpu-env.sh` classifies every
+`goldens/*/gpu-result*.txt` as `fresh <rel>` or `stale <rel>` by whether it is newer than the
+gate launch's run-id file, and answers `no-marker` where no gate has ever been launched. Shipped
+into the remote script with `declare -f`, the way `passed_count` already is. `--pull-results`
+pulls the fresh ones, names the stale ones on stdout, and dies when nothing is fresh.
+
+`launch_remote` writes `$REMOTE_STATE/gate.id` before the binaries run, so a file the cycle wrote
+is newer and the copy `--push-binaries` rsynced is older — both mtimes are the host's own clock
+(`resilient_rsync -r`, no `-t`, dates the destination at write time), so there is no skew to
+reason about.
+
+**Verified without a host, three ways.** (1) `bash -n` on both scripts. (2) The remote block
+rendered exactly as the heredoc sends it — `$(declare -f device_result_files)` expanded with the
+real `$REMOTE_REPO` and `$phase_id` — written to a file and `bash -n`'d. (3) The predicate run
+locally against four hand-made trees, with the committed copies dated before the marker and the
+recording after it: a stale-only tree gives two `stale` lines, a half-recorded tree gives one
+`stale` and one `fresh`, a tree with no marker gives `no-marker`, and an empty tree gives nothing.
+The **red** half is on the record too: the old `ls goldens/*/gpu-result*.txt` predicate lists two
+files on both the stale tree and the fresh one, so `pulled=2` either way and the guard cannot
+fire. The consuming loop was then exercised over all five listing shapes (stale-only, mixed,
+`no-marker`, empty, unparseable) with `pull_one` stubbed: `die` on four of them, rc=0 on the mixed
+one, and the unparseable line refused by name.
+
+**One hole named rather than closed**, in the comment: a `--push-binaries` between the run and the
+pull re-dates the pushed copies. `--all` does both in one invocation and in the other order, so
+reaching it takes two deliberate invocations in an order nothing recommends.
+
+### Findings 3 and 4 — `\u{1}` in the hash, and the digest pinned on both sides
+
+Done as one change, since finding 4 moves the digest finding 3 pins.
+
+- `fingerprint.rs` gained `const CELL_SEPARATOR: char = '\u{1}'` with the reason on it, and
+  `duckdb_result.py` `CELL_SEPARATOR = "\x01"` pointing at it. `result_text.rs:57-60`'s argument
+  is the one quoted: a separator that occurs in data makes `("a|b","c")` and `("a","b|c")` hash
+  alike.
+- **Red first, and the collision was demonstrated rather than argued.** Before the change both
+  writers hashed those two answers to the same digest,
+  `ca5b0a56d0a3a76d5d48ae8b12cec10343c5c6675ffe2508b70d085b031aff4d` — the same value on both
+  sides, which is incidental further evidence that the two writers are one algorithm. The cases
+  are `two_answers_a_separator_in_a_cell_would_merge_hash_differently` (Rust) and
+  `test_two_answers_a_separator_in_a_cell_would_merge_hash_differently` (Python).
+- **The digest is pinned on the Rust side.**
+  `an_exact_column_is_hashed_and_an_approximate_one_is_summed` now asserts the whole line,
+  `hash: 55d02283b07cc29ea0d3abeea4a1938ba4843ad8966bf6ee14b61e8d4b9f18b3` =
+  `sha256("1\u{1}a\u{1}\n2\u{1}b\u{1}")`, and the Python constant is the same text. Watched red at
+  the old `a6005c86bd5307686acd561b309b2b6d5c670c935fe527ca4ad10023851dd239`, which is the value
+  the reviewer computed — so the hashed text is understood the same way on both sides. The two
+  comments that claimed the pin (`test_duckdb_result.py:4-9`, the `Fingerprint` docstring) are now
+  true and say the hash line is included.
+
+### The regeneration, reproducible and bounded
+
+- **Rust**, `UPDATE_CANONICAL=1 PCK_UPDATE_SECTIONS=1 … --test-threads=1` over the four over-cap
+  cases: 5.41 s, four `hash:` lines in `mini.result.txt` and nothing else.
+- **Python**, `python3 testdata/duckdb_result.py`, duckdb 1.5.4, both datasets: both "wrote" lines
+  present, 138 query lines, no `failed:` in either file.
+- **`git diff --stat testdata/goldens` is 3 files, 10 insertions, 10 deletions, and every one of
+  the 20 changed lines is a `hash:` line** — counted, not eyeballed: `git diff -U0` minus the
+  `hash:` lines leaves 0.
+- **The four shared sections still agree byte for byte across the two writers**, hashes included:
+  q16, anti-join, filter-project, semi-join, compared as text after dropping the `mode=` line.
+  The new hashes are `e30e20cb…`, `cad6a433…`, `db8ce653…`, `47e84761…`.
+- **Ten hash lines moved, not five.** The dispatch said five; the files hold ten — tpch
+  `duckdb-result.txt` 5 (q11, q16, anti-join, filter-project, semi-join), tpcds
+  `duckdb-result.txt` 1 (q98), tpch `mini.result.txt` 4 — over six distinct digests, since the
+  four shared sections carry the same value on both writers. Every fingerprint with at least one
+  exact column and at least one row moves, and all ten have both.
+
+### The nits
+
+Seven taken, one argued down, two were the coordinator's.
+
+- **Comment caps.** `test_cpu_corpus.rs`'s `each_declarations_two_oracles_suit_each_other` 13 → 10
+  with all four of its ideas kept, the undetermined doc rewritten at 10, `test_gpu_corpus.rs:60`
+  11 → 10. `corpus_cases.inc`'s scan-limit block is 10 after finding 1 added a sentence, and
+  `duckdb_result.py`'s triple comment is 4 inside a body after the NaN rule went into it.
+- **`DuckdbOracle::ALL` is now `[DuckdbOracle; 5]`**, variants like `CpuOracle::ALL` and
+  `GpuResultMode::ALL`, and `parse` decodes THROUGH it rather than against a second hand-written
+  match — so a variant missing from `ALL` is a variant no line can name. `Divergent`'s entry
+  carries a placeholder ticket nothing reads, documented as such; the bare spelling still reaches
+  `divergent(spelled, &[])` so "takes a ticket first" stays one message in one place, and the
+  typo panic builds its accepted set from `ALL`. **Red-checked** by dropping `Self::None` from
+  `ALL`: `parse("duckdb_none")` then panics "unknown duckdb_oracle 'duckdb_none' (expected
+  duckdb_exact|duckdb_approx|duckdb_divergent|duckdb_fingerprint; …)". Worth recording for
+  whoever adds a sixth: the comparator's own matches are exhaustive over `&DuckdbOracle`, so a new
+  variant is already a compile error there (E0004) — what was missing was only the `ALL` half.
+- **`scale.max(0)`** at the decimal tolerance, with
+  `a_negative_decimal_scale_does_not_buy_a_wider_tolerance` red-checked: at scale −2 a cell off by
+  50 passed before and fails now.
+- **A zero-column answer reports no columns.** `rendered_width` moved out of `fingerprint.rs` into
+  `result_text.rs` beside `split_cells`, which is the function whose pipeless-line rule causes it,
+  and returns 0 for a header with no `|`. Both width readers now call it, so tpcds q17 says
+  "0 columns against 15". Case: `a_zero_column_answer_reports_no_columns`, red before at
+  "ours has 1 columns against 15 in DuckDB's".
+- **`fingerprint_of_rendered`'s doc** gained the clause: it agrees with `fingerprint_of` only for
+  cells with no surrounding whitespace of their own, the padding being the table's and not the
+  value's.
+- **`triple_of`'s NaN is now deterministic on both writers**, which was the choice rather than
+  documenting the limitation. A NaN among the values makes the WHOLE triple NaN on both sides —
+  no sort places a NaN (`partial_cmp(..).unwrap_or(Equal)` calls it equal to everything, Python's
+  `sorted` leaves it where the rows put it), so min and max were a function of each side's row
+  order and the two engines return the rows in different sequences. `nan_settles` then reads two
+  NaN triples as the one absent value they are. Red-checked on both sides at once, and the red was
+  the same on both: `min=1.00000000000000000e0` against `min=nan` for the same three values in two
+  orders, with identical hashes. No committed section has an approximate NaN, so no golden moves.
+- **`ticket_is_open`'s missing environment escape: not done, and the reason is not "cosmetic".**
+  An escape nobody sets is a no-op, and the complete fix is provisioning — `scripts/build-test.sh`
+  must push `llm-wiki/tickets/` and export the variable — which is outside this task's `## Scope`.
+  The reviewer's "pre-existing in kind" is understated and the correction matters: it is
+  pre-existing **in fact**. `rust_only_targets` (`scripts/build-test.sh:280`, run to confirm)
+  stages `test_corpus_goldens`, `test_cost_model`, `test_cpu_corpus` and `test_golden_format` to
+  verda, and excludes `test_module_layout`/`test_ci_coverage` by the `repo_root|\.github/workflows`
+  rule at :310. On master, `test_golden_format` and `test_corpus_goldens/benchmark.rs` already read
+  the checkout through `CARGO_MANIFEST_DIR` and are already staged, so a verda rust-only run
+  already has this class in two binaries. This branch adds a third (`corpus_lines` and
+  `ticket_is_open` in `test_cpu_corpus`) and does not change whether such a run is clean.
+  **For the coordinator: this wants a ticket in `llm-wiki/tickets/testinfra.md`** — "rust-only test
+  binaries read the checkout through `CARGO_MANIFEST_DIR`, so the remote CPU run cannot verify
+  them", naming the four staged targets and the two-part fix (an escape per reader plus the push).
+  Four cases of this branch's are in it: `duckdb_tpcds_q17`, `q58`, `q61`, `q66`, the only lines
+  that call `ticket_is_open`.
+
+### Deviations from the dispatch, and why
+
+1. **Ten hash lines, not five** (above). The dispatch's expectation was a miscount; the measured
+   diff is what the round delivers, and all of it is `hash:` lines.
+2. **The undetermined test was renamed, not added to.** The reviewer offered "an assertion that a
+   `data_fusion_subset` line declares `gpu_modes = none`, or a row-count-only comparison on the
+   device side". Two separate tests would have repeated the under-reading the reviewer flagged
+   twice, so both halves live in one case whose NAME states the whole property. The row-count-only
+   device comparison is the remedy the failure message prescribes, for the round that enables
+   those cells — writing it now would be an untested comparison for a case that cannot run.
+3. **`cargo fmt -p peacockdb-core` formats the whole package**, and reformatted 18 files this
+   branch does not touch. Reverted with `git checkout`, and the touched files were then formatted
+   one by one with `rustfmt --edition 2024 <file>`. Worth knowing: the package is not
+   rustfmt-clean, so the package-wide command is not safe in this tree.
+4. **One clippy warning I introduced and fixed**: `needless_borrow` at
+   `duckdb_oracle/tests.rs:151` in the new negative-scale case. The five warnings in touched files
+   are the five round 3 proved pre-existing — `corpus.rs:500`, `fingerprint.rs:135`,
+   `benchmark.rs:108`, `test_golden_format.rs:708`, `duckdb_oracle/tests.rs:124` — and each was
+   re-checked against `git diff -U0`'s hunks this round: none falls on a line this round changed.
+5. **No wiki edit.** Counts and two prose lines moved and are reported to the coordinator.
+
+### Wiki lines the coordinator owns
+
+- `build-test.md:7` — grand total **2559 → 2565**, Rust 2069 → 2073, Python 393 → 395.
+- `build-test.md:25` — the cpu header **1382 → 1384**, `--lib` 648 → **650** (648 passed + 2
+  ignored). `test_cpu_corpus` stays 705.
+- `build-test.md:45` — "that an undetermined line's DuckDB oracle is still one that compares rows"
+  is now **"that an undetermined line's rows are compared only against committed files"**: the
+  test is renamed and holds the device cells off as well.
+- `build-test.md:332` — the DuckDB-oracle module-unit row, 22 → **24**.
+- `build-test.md:600` — the golden-format row, 41 → **43**.
+- `build-test.md:605` — the Python result-rendering row, 12 → **14**. Its prose "the over-cap
+  fingerprint must be the text `test_golden_format.rs` pins, byte for byte" is now true of the
+  hash line too, which it was not before.
+- `build-test.md:782-791` and `:1154`, optional but useful: `--pull-results` now requires a file
+  to be NEWER than the gate launch, not merely present, because `--push-binaries` mirrors
+  `testdata/goldens/` to the host; stale files are named and left, and a cycle that recorded
+  nothing fails the phase.
+- The tier count is unaffected: 120 + 26 + 2 = 148 still, and the declaration set stays at five
+  checks — finding 1 renamed one of the five rather than adding a sixth.
+
+### For the next person
+
+- Nothing but the device cycle is outstanding. `PCK_WRITE_GPU_RESULT=1` through
+  `build-test-shadgpu.sh --all`, then `--pull-results`, then the 27 red cases go green or each
+  failing section is a ticket.
+- **`--pull-results` is stricter now.** It needs a gate launch to have happened (it reads
+  `$REMOTE_STATE/gate.id`) and it pulls only files newer than it. A stale file is reported and
+  left in place rather than brought home, so the local committed copy is not overwritten by the
+  copy the push put on the host.
+- **Both writers' separator is `\u{1}`.** Any change to it, to the row sort, or to the join moves
+  five digests in three goldens and must be made on both sides in one commit;
+  `test_golden_format.rs`'s pinned literal and `test_duckdb_result.py`'s constant are the two
+  places that go red, and they are the whole point of pinning it.
+- The `duckdb_gpu_*` cases over a `data_fusion_subset` line are still unwritten work, not a
+  solved problem: the guard refuses the cells, and the failure message says what to build instead.
