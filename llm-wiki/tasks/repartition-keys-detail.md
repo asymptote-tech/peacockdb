@@ -545,3 +545,78 @@ constraints, and it was not attempted under them: shad-gpu has been off the netw
 198 keep #189 for the unsigned half. A device cycle that turns a cell on must drop the tag that
 held it, and a cell that fails must carry the ticket it actually failed on — the registry rule asks
 only for *some* ticket, so it will not catch a tag that has stopped explaining anything.
+
+## Rebased onto the finished ENS-pbench (2026-10-08)
+
+pbench reached `done` first, per "work one branch to completion before you rebase the next", and
+this branch then moved onto it. Seven commits replayed with
+`git rebase --onto ENS-pbench badda3d5 ENS-repartition-keys`. **`--onto` and the old fork point are
+not optional**: `badda3d5` is an ancestor of this branch and not of the rebased ENS-pbench, so a
+plain `git rebase ENS-pbench` would replay pbench's own rewritten commits and invent conflicts.
+Verified both ways before running it. The pre-rebase tip was `9b52b6a0`, kept here in case anyone
+needs to diff against it.
+
+**This rebase is not documentation-only and the state does not come back on its own.** It carries
+pbench's device cycle: 30 newly enabled gpu cells, a new `gpu-result.txt`, a regenerated
+`dim.parquet` with two more columns, all 17 other pbench goldens, and `int8-key-group`. The board
+therefore still says `rebase needed(building)`, and a developer re-runs the proving commands before
+the parenthesised state is restored.
+
+### Every conflict, and how each was resolved
+
+Nothing conflicted in Rust or C++. Six files, and two of them needed deciding rather than picking.
+
+- **`llm-wiki/tasks/tasks.md`, four times** — the state line. Resolved by the override rather than
+  the ownership rule, which is the standing note for this chain: the rule would give the child's
+  side everything from `building` to `done` and so keep the stale state while silently dropping the
+  `rebase needed` mark. HEAD's side every time, which carries the mark and the real PR number.
+- **`testdata/cost-registry.csv`, twice, both the `rollup_small_keys` row** — resolved by intent,
+  not by side, after reading each replayed commit's own diff. The first time: this branch's cpu
+  columns (all five on, its #189 fix) with **pbench's measured `65` kept in the ticket column**.
+  The second time: `29dd7a10`'s own side, which already carried `65` and retired the now-stale
+  `189` for `206`. Taking either side wholesale would have dropped one run's measurement.
+- **`peacockdb-core/tests/common/corpus_cases.inc`** — the `sparse_probe_*` and `timestamp_*` block.
+  **HEAD's gpu columns are the cycle's measurements and had to survive**: `sparse-probe-left` and
+  `-semi` at every mode, the three `timestamp-*-key-group` at the two tp1 modes. The replayed side
+  had them all at `none`, which is what they were before any device ran. From this branch's side
+  only its deliberate edit was taken: the stale `// device: not runnable, #240` comment goes, since
+  this branch is what gave the wire its timestamp types.
+- **`llm-wiki/tickets/corpus-coverage.md`, #65's corpus paragraph** — both sides were right about
+  different things. HEAD's measurement stands (`rollup-small-keys` does reach #65 on a device, its
+  two tp1 cells off on the width), and this branch's correction stands too (#189 no longer explains
+  any device cell, the shuffle having stopped hashing the id). Merged, in the trimmed form the cap
+  needs, with the three tp4 cells now named on #206.
+- **`llm-wiki/tasks/repartition-keys-impl.md`, Task 5c Step 4** — worth recording, because the two
+  sides had independently found the same defect. pbench's completeness analyst found that the step
+  cannot execute (its three `.sql` files do not exist until #255 closes, and the `NOT_RUNNABLE`
+  guard is bidirectional, so it goes red on contact) and the coordinator deferred it on ENS-pbench.
+  This branch's own run had already found it and gone further, marking it `[~] DELETED, not
+  deferred`. This branch's decision and its checkbox states win, with the other side's file and line
+  citations folded in.
+- **`llm-wiki/build-test.md`, five hunks across three commits** — all counts, and both sides stale
+  against the merged tree. Taken to HEAD through the replay and **re-derived once at the end**, from
+  the declarations rather than by adding deltas. Re-deriving seven times would have been waste and
+  six of the seven answers would have been thrown away.
+
+### The counts, re-derived from the merged tree
+
+Mechanically, off `corpus_cases.inc` and `cost-registry.csv`: **177 active lines, 697 cpu cells, 56
+gpu cells**, 136 lines at all five cpu modes, 8 partial, 33 fully out, oracles 110/16/14/33/4. The
+cpu cells are pbench's 679 plus the 18 that #189's drop turns on. **Both directions agree** — the
+registry's enabled counts equal the declarations' at 697 and 56 — and no off gpu cell with a live
+cpu twin lacks a ticket, which is the rule a bad resolution here would have broken.
+
+Applied: `Corpus, cpu` 921 → **939** (697 + 6 + 236), `test_cpu_corpus` 922 → **940**, the DuckDB
+tier unchanged at 236, the cpu block 1629 → **1647**, Rust 2353 → **2371**, grand total 2851 →
+**2869**. Every block header equals its rows and every total its parts.
+
+**One figure is unmeasured and is the developer's first job.** `--lib` is carried at 678, pbench's
+measurement, because this branch's own tests may have moved it and a coordinator cannot build. If it
+is not 678, the cpu block, Rust and the grand total move with it.
+
+### What the re-prove owes
+
+Everything in the task's verification bar, on the new base, plus the two things this rebase makes
+specifically doubtful: that the registry ↔ corpus pair still agrees in both directions after six
+hand-resolved hunks, and that no pbench golden moved. Red drops the task to `building` with the
+failure recorded here; green restores `reviewing`.

@@ -5,6 +5,7 @@ Code and tests are authoritative; this page maps them.
 ## Test categories
 
 **Grand total: 2857 test cases — Rust 2359, C++ 97, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2869 test cases — Rust 2371, C++ 97, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -23,10 +24,11 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 unit (`foo.rs` beside `foo/tests.rs`).
 
 #### cpu — `--features rust-only`: no FFI, no device. 1633 cases: `--lib` 682, `test_cpu_corpus` 922, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1647 cases: `--lib` 678, `test_cpu_corpus` 940, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 921 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 939 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
@@ -39,7 +41,7 @@ the modes each is correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry 
 `uint-key-join` and `scalar-subquery-cross` running at the two tp1 modes only. **33 lines are out
 entirely** and they are exactly the 33 `duckdb_none` lines: `tpch/q11`, `tpch/q22` and `tpcds/q24`
 on [#190](tickets/joins.md#t190), `tpcds/q54`, and 29 of pbench's, which is what a dataset written
-to provoke open tickets looks like — 24 shapes our planner refuses, 5 narrowed by #190. 679 cells,
+to provoke open tickets looks like — 24 shapes our planner refuses, 5 narrowed by #190. 697 cells,
 plus six checks
 that every declaration's oracles suit each other and every device cell has a cpu cell,
 that a hyphenated query resolves its authority and has its result section, that an
