@@ -356,8 +356,14 @@ fn declared_as(batch: RecordBatch, declared: &SchemaRef) -> Result<RecordBatch, 
 ///
 /// Every violating column rather than the first: a reader who fixes one and runs again to meet
 /// the next learns the same thing twice. Positional, like the relabelling below it, and a
-/// declaration shorter than the batch is a different fault that `try_new` reports.
+/// declaration of another length is a different fault that `try_new` reports — so this says
+/// nothing at all there. At a differing count column *i* is not field *i*'s column, and a
+/// violation read off that pairing names a column the batch does not hold at that ordinal:
+/// precise, wrong, and in front of the fault that explains it.
 fn nulls_where_none_declared(columns: &[ArrayRef], declared: &SchemaRef) -> Option<String> {
+    if columns.len() != declared.fields().len() {
+        return None;
+    }
     let broken: Vec<String> = columns
         .iter()
         .zip(declared.fields().iter())

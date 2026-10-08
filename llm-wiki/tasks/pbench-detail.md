@@ -999,3 +999,194 @@ back on its own: a developer re-runs the proving commands on nebius-gpu first.
 Worth knowing for whoever does: a later rebase of this branch onto master's `8806a3c3` will carry
 documentation alone, so it will re-verify nothing and this task will keep whatever state it then
 holds. The work below is not wasted by the rebase still owed to the human.
+
+## Re-proved after the rebase, on nebius-gpu (2026-10-08)
+
+The re-proof the section above said the state needed. Everything was re-measured rather than
+carried over, and the device rung found a real failure that only a device build can see. Local
+CPU runs are plain `cargo test --features rust-only -p peacockdb-core` into `./target`,
+`--test-threads=2`; the device half is nebius-gpu's L40S under the host override.
+
+**The rebase itself broke nothing.** What it did was make the branch's own defect visible: the
+parent's two committed `gpu-result.txt` goldens turned the 27 carried-red cases green, and the
+parent's nebius recipe made the device rung runnable for the first time on this branch.
+
+### The 27 red cases are gone, and they were the only thing the rebase was owed
+
+`test_cpu_corpus` was **859 passed / 27 failed** at round 2 and is **886 passed / 0 failed** now.
+The 27 were the 26 `duckdb_gpu_<ds>_<q>_<mode>` cases and
+`every_enabled_device_cell_has_its_gpu_result_section_and_no_other`, all waiting on a file no
+device had written. `ENS-duckdb-oracle`'s device cycle wrote it, and the rebase carried it. 886 is
+what `build-test.md` states, so nothing drifted on that count.
+
+### A real regression, found by the device rung and fixed here
+
+`cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests::` came back **534 passed, 2 failed**
+where the parent measured 536. Both failures in `src/tests/gpu_tests/nested_cases.rs`:
+
+- `bug_an_inner_nested_loop_join_projection_is_dropped_on_the_cpu`
+- `bug_an_inner_nested_loop_join_with_a_decimal_predicate_and_a_projection_is_dropped_on_the_cpu`
+
+each panicking at `nested_cases.rs:209` — the `assert!` in `cpu_refuses_with` — with
+`p_id holds 7 NULL(s) where the node declares it non-nullable (#227)` instead of the
+`number of columns(16) must match number of fields(2) in schema` they pin.
+
+**Root cause: this task's own #227 check, and the order it runs in.**
+`nulls_where_none_declared` (`cpu_backend/mod.rs`) zips the batch's columns with the
+declaration's fields *positionally*, and `declared_as` calls it ahead of everything — which it
+must, since the spec requires the check to precede the equal-schema early return. But these two
+cases are the shape where the CPU **drops the join's projection** and answers with all 16 crossed
+columns against a 2- or 3-field declaration. At a differing count column *i* is not field *i*'s
+column, so the rule read a NULL off column 1 and reported it against field 1's name, `p_id` —
+whose own column is clean. A refusal that is precise, wrong, and standing in front of the fault
+that explains it. The two `bug_` cases pin the dropped projection (#207/#190), so the wrong
+message also hid what they exist to watch.
+
+Its own doc comment already stated the intended rule — "a declaration shorter than the batch is a
+different fault that `try_new` reports" — and the code order defeated it.
+
+**Fixed where the rule is, not where it fired**: `nulls_where_none_declared` returns `None` when
+the counts disagree, so `RecordBatch::try_new` reports the width, which is the one thing that can
+name it. The #227 requirement is untouched — at an equal count, which is every case the check
+exists for, nothing changed, and the early-return hole it was written to close stays closed.
+
+Red-green, in the rust-only tier where the fault is reproducible without a card:
+`a_batch_with_more_columns_than_the_declaration_is_refused_for_the_count`
+(`cpu_backend/tests/backend.rs`) — one declared non-nullable `p_id` against two columns, the
+batch's own `p_id` clean and the column at its ordinal holding a NULL. Watched fail with the
+device rung's exact message, `p_id holds 1 NULL(s) … (#227)`, then pass. The two `bug_` cases are
+**unchanged**: they pin what they always pinned, which is the point.
+
+**No ticket.** The defect and its fix land in the same change, so nothing is left behaving
+wrongly for anyone to track.
+
+**The validator half does not have this fault**, checked rather than assumed.
+`test_support/schema_validation.rs`'s `held_to_declaration` runs `device_divergence` *beside* the
+null rule and joins both findings, and `device_divergence` leads with `N columns declared, M held`
+— so the width is never hidden there, and its message carries the ordinal. Left alone.
+
+### The bar, measured
+
+Local, `--features rust-only -p peacockdb-core`, after the fix:
+
+| target | measured | `build-test.md` |
+|---|--:|--:|
+| `test_cpu_corpus` | **886 passed, 0 failed** | 886 |
+| `--lib` | **675 passed, 2 ignored** (677 listed) | 677 after this change, 676 before |
+| `test_corpus_goldens` | 26 | 26 |
+| `test_cost_model` | 3 | 3 |
+| `test_golden_format` | 43 | 43 |
+| `test_module_layout` | 18 | 18 |
+| `test_ci_coverage` | 9 | 9 |
+| `cargo test -p cost-report` | 39 (incl. `the_widget_renders_a_pbench_section_beside_the_benchmarks`) | 39 |
+| `python3 testdata/test_duckdb_result.py` | Ran 20, OK | 20 |
+| `python3 testdata/test_duckdb_cost.py` | Ran 41, OK | 41 |
+| `testdata/generate_pbench.sh --check` | `pbench.sf1 matches gen.sql`, exit 0 | — |
+
+`cargo test --features rust-only -p peacockdb-core --no-run`: **zero warnings**.
+
+Device, nebius-gpu's L40S (card idle, 37 GB free), `./scripts/build-test-shadgpu.sh --build`
+exit 0 and **0 warnings**, each binary run directly with
+`LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib`,
+`PEACOCK_TESTDATA_DIR=$PWD/testdata` and `--test-threads=1`:
+
+| binary | measured | `build-test.md` |
+|---|--:|--:|
+| `cpp/install/bin/peacock_gpu_tests` | 4 passed | 4 |
+| `cpp/install/bin/peacock_plan_tests` | 56 passed | 56 |
+| `cpp/install/rust-tests/test_gpu_corpus` | 28 passed | 28 |
+| `cpp/install/rust-tests/test_node_timing` | 1 passed | 1 |
+| `cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests::` | **536 passed** | 536 |
+| `cpp/install/rust-tests/peacock_gpu_benchmarks --skip bench_` | 8 passed, 3 filtered | 11 |
+| `cpp/install/bin/peacock_cpu_tests` (bonus; needs no card) | 15 passed | 15 |
+
+0 failed everywhere. 536 + 28 + 11 + 1 = 576, the gpu block exactly. The build ran through
+`scripts/build-test-shadgpu.sh` and `scripts/lib/shadgpu-env.sh` as master's docker retirement
+left them, and through a tree where `scripts/docker-build.sh` and `docker/` are gone — so that
+half of the rebase is exercised by this run and nothing misbehaved.
+
+**No golden moved.** `git status --short` is the two code files and nothing else;
+`testdata/goldens/{tpch,tpcds}.sf1/gpu-result.txt` are `sha256`-identical on both hosts; no
+`gpu-result-<v>.txt` was written; and no `pbench.sf1/gpu-result.txt` exists, which is correct.
+
+### The duckdb-oracle comparison over pbench
+
+56 `duckdb_pbench_*` cases, one per corpus line, all passing inside the 886. By oracle, counted
+off `corpus_cases.inc`'s own lines: **16 `duckdb_exact`**, 1 `duckdb_approx`, 10
+`duckdb_fingerprint`, 29 `duckdb_none`, 0 `duckdb_divergent`. So 27 pbench rows actually compare
+rows against DuckDB and all 27 pass; the 29 `duckdb_none` rows decline because the cpu does not
+answer them. Whole corpus: 109 / 16 / 14 / 33 / 4 over 176 lines, exactly the distribution
+`build-test.md` states.
+
+### The three-guard check, against the code as it stands
+
+duckdb-oracle's note to a pbench developer is **correct on every point**, verified in source and
+then in the running binary:
+
+- **Both guards derive their datasets from `cost-registry.csv`.** `registry_datasets()`
+  (`test_cpu_corpus.rs:499`) is `load_csv()` mapped to `(dataset, sf)`, and the coverage guard,
+  the cuDF-stamp guard and the `duckdb-result.txt` section guard all iterate it. A new dataset
+  needs no edit in `test_cpu_corpus.rs`, as its doc comment claims.
+- **Landing with every `gpu_*` cell off is fine, and no `gpu-result.txt` is wanted.** Measured
+  off the CSV: pbench's 59 rows hold **280 `disabled` and 15 `na` gpu cells and not one
+  `enabled` or `skip`** (123 cpu cells on). `gpu_result_coverage` returns `Ok(())` for
+  `text: None` when `enabled.is_empty()`, and the stamp guard `continue`s on an unreadable path.
+  Both pass today over a dataset with no file.
+- **`duckdb_result.py`'s two dataset lists are this task's and both carry pbench** — `choices`
+  and the default list. **Their line numbers in the note are stale**: they are `:274` and `:282`
+  now, not `:230` and `:238`; the file grew. And **the empty-glob no-op is gone** rather than
+  merely handled: `query_files` exits with
+  `duckdb_result.py: <dir> holds no .sql files`, and `--only` matching nothing exits saying
+  writing from an empty list would delete every section the golden holds.
+
+### The coordinator's four hand-merged counts: all four right
+
+Checked against source, not against each other.
+
+- **The DuckDB tier at 205.** Correct. `test_cpu_corpus --list` is 886 cases: 674 `cpu_*`, 202
+  `duckdb_*` and 10 named checks. The DuckDB tier is those 202 (176 `duckdb_<ds>_<q>` + 26
+  `duckdb_gpu_*`) plus the three the page names — every oracle used, the coverage guard, the cuDF
+  stamp — so **205**. The cpu tier is the other 674 + 6 checks = 680, and 680 + 205 = 885, the
+  `Corpus, cpu` row, + 1 for Registry ↔ CSV = 886.
+- **`tpch.sf1` 40, `tpcds.sf1` 117, `pbench.sf1` 17.** All three correct by `ls`. pbench's 17 are
+  exactly the five `.plans.txt`, five `-mini.cpu.txt`, five `-mini.cost.txt`, `mini.result.txt`
+  and `duckdb-result.txt`, as the page says.
+- **The closing clause.** Correct: `duckdb-result.txt` exists and is tracked in all three sf1
+  dirs; `gpu-result.txt` exists and is tracked in `tpch.sf1` and `tpcds.sf1` alone — the two with
+  enabled device cells (22 tpch, 4 tpcds) — and in neither case is there a stray file.
+- **The grand total, the subtotals and `test_cpu_corpus`'s own number.** All were internally
+  consistent as merged — 1591 / 7 / 576 each equalled the sum of its block's rows, Rust 2283 =
+  2174 + 109, C++ 97, Python 401, grand 2781 — and `test_cpu_corpus` 886 and `--lib` 676 both
+  matched measurement.
+
+### The one `build-test.md` edit this run owed, and it is not the coordinator's
+
+This change adds one case, so the page moved by one: `--lib` 676 → **677**, the cpu block
+1591 → **1592**, `CPU backend executors` 70 → **71**, Rust 2283 → **2284**, grand 2781 → **2782**.
+Re-summed mechanically afterwards: every block header equals its rows and every total its parts.
+The `CPU backend executors` row's prose also named none of `declared_as`'s declaration checks —
+pbench added two of them in round 2 and the prose never grew — so it now names all three.
+
+### Deferred by the override, not done
+
+- **the sf40 pair**, `peacock_tpch_tests` and `peacock_tpchv_tests`: out by the override, and
+  unrunnable here anyway — `testdata/tpch.sf40` does not exist on nebius-gpu and
+  `peacock_tpch_tests` reserves 69 GiB against the L40S's 46 GB.
+- **`--run-benchmarks`** and the three `bench_` cases inside `peacock_gpu_benchmarks`.
+- **Nsight captures** (`create_nsys_profile.sh`) and any H200 timing.
+- **The spec's "one shad-gpu cycle"** over the pbench rows, replaced by the override with a build
+  and the device binaries. pbench's gpu cells are all off, so there was no recording cycle and no
+  `gpu-result.txt` to write. [#259](../tickets/corpus-coverage.md#t259) still owns turning them on
+  and is unchanged by this run.
+- **`scripts/exec_model/tests`** not re-run: nothing here touches `scripts/`.
+- **A local `ctest -L cpu`**: there is no local C++ build dir, and nothing in this change is C++.
+  The same 15 cases ran from the host's freshly built `peacock_cpu_tests` instead, green.
+
+### Housekeeping
+
+No disk cleanup was needed on either host: nebius-gpu had 37 GB free throughout and the local
+workspace 66 GB. Nothing was removed anywhere.
+
+`rustfmt --edition 2024 --check` is clean on `cpu_backend/tests/backend.rs`. `cpu_backend/mod.rs`
+was edited by hand for the reason round 2 recorded — it is a `mod.rs`, so rustfmt would follow its
+`mod` declarations into four unrelated files.

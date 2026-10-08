@@ -7,6 +7,7 @@ Code and tests are authoritative; this page maps them.
 **Grand total: 2581 test cases — Rust 2089, C++ 97, Python 395.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 **Grand total: 2776 test cases — Rust 2278, C++ 97, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 **Grand total: 2781 test cases — Rust 2283, C++ 97, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2782 test cases — Rust 2284, C++ 97, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -27,6 +28,7 @@ unit (`foo.rs` beside `foo/tests.rs`).
 #### cpu — `--features rust-only`: no FFI, no device. 1398 cases: `--lib` 663, `test_cpu_corpus` 706, `test_corpus_goldens` 26, `test_cost_model` 3
 #### cpu — `--features rust-only`: no FFI, no device. 1586 cases: `--lib` 672, `test_cpu_corpus` 885, `test_corpus_goldens` 26, `test_cost_model` 3
 #### cpu — `--features rust-only`: no FFI, no device. 1591 cases: `--lib` 676, `test_cpu_corpus` 886, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1592 cases: `--lib` 677, `test_cpu_corpus` 886, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -279,7 +281,7 @@ entry unmeasured, the timing tree rendered with what each node cost, a call with
 a region without a call each refused, a region the clock rounded to nothing still counted as
 ran, and the recorded node index the post-order rather than the walk order
 
-| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 70 |
+| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 71 |
 |---|---|--:|
 
 one hand-built node per executor, one hand-written expected result: the exec executors, the
@@ -289,7 +291,11 @@ the file holds in another type rather than casting it — the scatter, the join 
 matrix run per mode, what `executors_for` builds and reports holding, every
 decomposition's init emitting exactly the state `PlanAgg::state_type` declares, an init
 declaring a narrower decimal than it produces refused, and a merge over a decimal sum
-DataFusion widens still building
+DataFusion widens still building. Then `declared_as` against its declaration: #227's NULL in a
+column declared without one refused by name and count, the rule itself over the columns, and a
+batch of another width refused for the width — at a differing count column *i* is not field
+*i*'s column, so a violation read off that pairing would name a NULL the batch does not hold
+there and hide the count that explains it
 
 | Executor contract, both engines | [executor::cpu_backend::tests::contract](../peacockdb-core/src/executor/cpu_backend/tests/contract.rs) | 1 |
 |---|---|--:|

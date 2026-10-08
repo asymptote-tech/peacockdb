@@ -445,6 +445,45 @@ fn the_nullability_rule_names_every_column_that_breaks_it_and_how_many() {
     assert!(said.contains("#227"), "{said}");
 }
 
+/// A batch holding more columns than the declaration names is refused for the count, not for a
+/// NULL — because at a differing count, column *i* is not field *i*'s column.
+///
+/// The rule is positional, so it reads a violation off a pairing that is not the declared one:
+/// here the batch's own `p_id` is clean and the column sitting at `p_id`'s ordinal is another
+/// column entirely. A refusal naming `p_id` would send a reader after a NULL that is not there
+/// and hide the fault that is — which is what the two nested-loop `bug_` cases in the device
+/// rung see, where the CPU drops a join's projection and answers with every column.
+#[test]
+fn a_batch_with_more_columns_than_the_declaration_is_refused_for_the_count() {
+    use datafusion::arrow::array::Int32Array;
+    let declared = Arc::new(ArrowSchema::new(vec![Field::new(
+        "p_id",
+        DataType::Int32,
+        false,
+    )]));
+    let wider = Arc::new(ArrowSchema::new(vec![
+        Field::new("dropped", DataType::Int32, true),
+        Field::new("p_id", DataType::Int32, false),
+    ]));
+    let columns: Vec<ArrayRef> = vec![
+        Arc::new(Int32Array::from(vec![Some(1), None])),
+        Arc::new(Int32Array::from(vec![1, 2])),
+    ];
+    let batch = RecordBatch::try_new(wider, columns).expect("two columns");
+    let refused = super::super::declared_as(batch, &declared)
+        .expect_err("one declared field against two columns");
+    assert!(
+        refused.message.contains("must match number of fields"),
+        "{}",
+        refused.message
+    );
+    assert!(
+        !refused.message.contains("#227"),
+        "the count is the fault, not a NULL: {}",
+        refused.message
+    );
+}
+
 fn semi_join(join_type: JoinType) -> GpuHashJoin {
     let output = match join_type {
         JoinType::LeftSemi => columns(&GROUPED),
