@@ -934,3 +934,110 @@ sum to the grand total.
 Also taken: `build-test.md:1116`'s "any other value" is now "any other non-empty value" with the
 reason, and the `gpu-result.txt` regeneration paragraph gained a clause for the pruning the
 writer now does.
+
+## Review round 3 (2026-10-08)
+
+A fresh reviewer over `git diff master...HEAD` at `bd245140`. **0 blocking, 4 important, 8 nits.**
+Everything it reports was verified by running Python over the committed artifacts; it ran no
+cargo.
+
+**The positive half, which is the part worth keeping.** It reimplemented `compare_sections`,
+`same_multiset`, `cell_equal`, `compare_over_cap`, `compare_fingerprints` and
+`fingerprint_of_rendered` in Python and ran them over all four committed goldens. All 120 lines
+pass under the oracle they declare, and the split is 93/15/4/4/4 as the page says. No line claims
+*less* agreement than it has: every `duckdb_approx` and `duckdb_divergent` line has a cell that
+really differs, and dropping any one named column from q58, q61 or q66 reddens the line. Four
+mutation classes bite — a flipped digit reddens 93 of 93 `duckdb_exact` lines, a dropped row 108
+of 108, a row-repairing swap 66 of 68 (the two misses are swaps between rows that differ only in
+the swapped column, so the multiset is unchanged and nothing moved), and a flipped hash byte, a
+`rows=` off by one or a `nonnull` off by one reddens all four over-cap sections. The tolerance is
+a tolerance: 3 units in our last rendered place is red and 0.3 passes, on 12 of the 15
+`duckdb_approx` lines (the other three are resolution-bound, in the safe direction). The four
+over-cap fingerprints agree byte for byte across the two writers, hashes included, over tpch q16
+(18,314 rows), semi-join (303,959), anti-join (1,196,041) and filter-project (2,402,187). No case
+inspects zero cells; 58,650 rendered cells plus four fingerprints. No data cell in any golden
+contains a `|`. And the spec's Restriction holds: master's `corpus_cases.inc` and HEAD's carry the
+same 120 lines with identical modes, cpu oracle, gpu oracle and schema validation, and
+`mini.result.txt`'s only change is four `skipped:` sections becoming fingerprints.
+
+It also confirmed this round's recomputed counts independently, by summing every numeric table row
+(2559) and every `#[test]` in the modules that gained rows, and says no line on `build-test.md` is
+wrong.
+
+### Important
+
+1. **`tpch/scan-limit`'s `duckdb_exact` argument is about the cpu case only, and the device case
+   is a latent red.** The argument written at `test_cpu_corpus.rs:220-248` is correct and is
+   entirely about `duckdb_<q>`, which compares two committed files. `duckdb_gpu_case`
+   (`duckdb_oracle.rs:322`) applies the same `duckdb_oracle` to the device's *recorded* answer,
+   and for an unordered `LIMIT 10` over lineitem the device's ten rows need not be the cpu's. It
+   cannot fire today only because `scan_limit`'s `gpu_modes` is `none`, and nothing in the branch
+   ties those two facts together — `each_declarations_two_oracles_suit_each_other` constrains
+   `gpu_oracle`, which `duckdb_gpu_case` does not read. The day #186 turns those cells on, three
+   `duckdb_gpu_tpch_scan_limit_*` cases are a coin flip.
+2. **`--pull-results`' "nothing came home" guard goes inert the moment `gpu-result.txt` is
+   committed.** `build-test-shadgpu.sh:258` pushes `testdata/goldens/` to the host on every
+   `--push-binaries`, which `--all` includes. So from the first commit of the file onward a
+   non-recording cycle leaves the pushed committed copy on the host, the glob at :736 matches it,
+   `pulled` becomes non-zero and the phase reports files having refreshed nothing. Nothing
+   compares the file against its previous version by design, so the operator then reads an empty
+   `git diff` as "no device answer moved" when it means "nothing was recorded". The guard needs
+   freshness, not existence.
+3. **The Rust writer's fingerprint hash is pinned nowhere, and a comment claims it is.**
+   `test_golden_format.rs:554` asserts only `fp.contains("\nhash: ")`, while
+   `test_duckdb_result.py:7-9` says the Python expectation is what that case pins on the Rust side
+   "byte for byte". True of the four `rows=`/`col`/`sum` lines, false of the `hash:` line — the one
+   that carries the row pairing. A Rust-side change to the separator, the sort or the join leaves
+   both tests green and is caught only by the dataset-bearing corpus tier.
+4. **The exact-column hash separates cells with `|`, and the same crate already rejected that
+   choice for this exact reason.** `fingerprint.rs:158-159` and `duckdb_result.py:132` join cells
+   with `|` and rows with `\n`; `result_text.rs:57-60` picks `\u{1}` instead and says why — with a
+   separator that occurs in data, `("a|b","c")` and `("a","b|c")` hash alike, "two different
+   answers agreeing, on the comparison that has no second opinion behind it". The fingerprint's
+   hash is exactly such a comparison, since an approximate column is out of the hash as well.
+   `fingerprint_of_rendered` would panic on its cell-count assertion rather than return a verdict.
+   **Round 2 recorded this and declined it**; round 3 reverses that, and the reasons are new: the
+   in-tree precedent two files away, the panic rather than a verdict, and 1.5M rows of
+   `o_comment` hashed in anti-join and semi-join. The cost is bounded and measured — five hashes
+   in two goldens, both writers, one pinned Python constant, and both regenerations are
+   reproducible (Rust 5s, Python 7m).
+
+### Nits
+
+Comment caps, new overruns against the 10-line declaration cap: `test_cpu_corpus.rs:160-172` at
+13 and `:220-230` at 11, `test_gpu_corpus.rs:60-70` at 11. `DuckdbOracle::ALL`
+(`mod.rs:462`) is an array of `&'static str` where `CpuOracle::ALL` and `GpuResultMode::ALL` are
+arrays of variants, so a sixth variant could be used by a line without appearing in `ALL`.
+`duckdb_oracle.rs:301` turns a negative declared decimal scale into a tolerance of `10^|s|`
+(`scale.max(0)` closes it; unreachable from the corpus). A zero-column header has no pipes, so
+`split_cells` reads its width as 1 and tpcds q17 reports "1 columns against 15" when it has none
+(`duckdb_oracle.rs:203-205`, `fingerprint.rs:93-97`) — message only. `fingerprint_of_rendered`
+trims cells through `split_cells` while `fingerprint_of` takes them straight from
+`ArrayFormatter`, so their equivalence case holds only for cells without surrounding whitespace —
+worth a clause in the doc. `triple_of` sorts with `partial_cmp(..).unwrap_or(Equal)` and Python
+uses `sorted()`, neither deterministic for a real NaN in an approximate column; untested on both
+sides, and no committed section has an approximate column. `build-test.md:343`'s new row says
+"the comparison every cpu corpus case runs", which is not true of `data_fusion_subset` —
+coordinator's. `ticket_is_open` reads `llm-wiki/tickets/` through `CARGO_MANIFEST_DIR` with no
+environment escape, against `testdata.rs:3-5`'s rule that the environment wins because a binary
+is built on one host and run on another (#49) — the reviewer read this rather than testing it,
+and `test_module_layout`, `test_ci_coverage` and `benchmark.rs` are already in that class, so it
+is pre-existing in kind.
+
+### For the signoff
+
+- The reviewer **agrees with the branch** on the spec's step 3: a writer cannot know the other
+  side's declared type, a fingerprint no longer holds the rows, and the reachable alternative
+  (class every decimal approximate) is strictly weaker — it would take `o_totalprice` out of
+  semi-join's and anti-join's row pairing and leave 1.5M rows to a float sum, against step 3's own
+  "an all-integer over-cap join is then checked row for row". It also confirmed the shape does not
+  occur: all four committed over-cap pairs have zero approximate columns, and tpch q11's DuckDB
+  fingerprint, the one #190 will add, is all-exact too.
+- **A consequence to name in the signoff, not a defect:** there is no way to record a *tolerated*
+  over-cap divergence. `duckdb_fingerprint` takes no ticket, and a fingerprinted section under
+  `duckdb_divergent` is routed to "declare duckdb_fingerprint". So the first genuine class
+  disagreement forces a decision at both writers rather than a line edit.
+- The 27 red cases are honest: both guards panic on an absent file with the regeneration recipe,
+  the coverage guard compares both directions, an empty or `skipped:` body would still redden, and
+  none of the 26 device cells carries `duckdb_none`. The registry-keyed pruning cannot be
+  destroyed by a `PCK_TEST_FILTER`ed cycle.
