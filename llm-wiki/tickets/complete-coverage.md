@@ -157,6 +157,8 @@ Not [#249](#t249), which is the wire writing an unnamed type as `Null`: this fir
 planner, so the plan #249 describes is never built. Not [#245](joins.md#t245) either — that is the
 shuffle's hasher, and the second query above has no nested key at all.
 
+**The guard to delete when this closes:** the three queries' absence is asserted, not merely tolerated — `testdata/test_duckdb_result.py`'s `test_the_queries_that_panic_the_planner_are_not_in_the_tree` goes red the moment a `.sql` appears. So adding the files turns every Rust tier green and then fails in a Python test in the cost-report job. Delete that case in the same commit, and add the three registry rows, corpus lines and `duckdb-result.txt` sections the absence guard currently stands in for.
+
 A panic is the wrong refusal in two ways. The engine's contract for a shape it cannot plan is
 `PlanError`, which renders as a `refused:` line a reader can act on; and a panic cannot be
 recorded, so these three queries cannot join the corpus at all — they take the whole plan golden

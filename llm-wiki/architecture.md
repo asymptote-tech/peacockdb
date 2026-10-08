@@ -516,9 +516,9 @@ Both are a join with no equality to hash, and which one DataFusion plans — and
 the translator meets — is decided by whether there is a predicate at all.
 
 - **No join predicate ⇒ `CrossJoinExec`.** `SELECT * FROM region, nation` — a full cartesian
-  product. In the corpus every case pairs a one-row aggregate result with another under no
+  product. In tpch and tpcds every case pairs a one-row aggregate result with another under no
   condition, e.g. tpcds q61 putting `sum(ss_ext_sales_price) as promotions` beside `total` so
-  it can divide them.
+  it can divide them; pbench's `cross-projection` is the plain cartesian of two base tables.
 - **A predicate that is not an equijoin ⇒ `NestedLoopJoinExec`**, carrying that predicate as
   its `filter`: `… WHERE a.r_regionkey < b.n_regionkey` becomes a `GpuNestedLoopJoin` with
   `filter=n_regionkey@1 > r_regionkey@0`.
@@ -1275,7 +1275,8 @@ from `testdata/cost_model.conf`. Every real category is 1.0 today, so the total 
 record it. Three placeholder phases sit at 0.0 and one category names no node at all — kept
 because dropping a category rewrites the line list of every committed cost golden.
 
-**DuckDB's cost oracle** runs each query twice — a deterministic profile with join-filter
+**DuckDB's cost oracle** runs each tpch and tpcds query twice — pbench has none, its queries
+being named rather than `qN` — a deterministic profile with join-filter
 pushdown off, then a pass reading only the dynamic-filter bounds — and combines them with
 parquet row-group statistics. `storage_read_total` is deliberately in the same units as a
 source node's `output_bytes`, decoded Arrow bytes of the surviving row groups' referenced

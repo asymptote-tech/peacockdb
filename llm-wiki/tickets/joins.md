@@ -125,6 +125,11 @@ batch are different arrivals downstream, as #205 says. Pinned by
 `bug_a_cross_join_over_a_zero_row_build_is_nothing_on_the_cpu` and its both-sides-empty neighbour
 (`gpu_tests/nested_cases.rs`).
 
+**Corpus queries:** `pbench/cross-empty-build` was written for this ticket and does not reach it.
+The planner refuses the query earlier, because a scan over a parquet file with no row groups is
+rejected as an invalid plan — [#256](#t256) — so its cells are off on `208 256` and this ticket
+has no corpus evidence until #256 clears.
+
 <a id="t207"></a>
 ### #207 — both backends drop a cross join's projection
 
@@ -187,8 +192,9 @@ since nothing between device nodes checks a column count ([#164](corpus-coverage
 
 **Corpus queries:** `tpcds/q9` — a CASE over fifteen scalar subqueries (a `count(*)` and two
 `avg`s per bucket) on `FROM reason WHERE r_reason_sk = 1`, planned as a chain of cross joins over
-seven `GpuProject: exprs=[]` (`tpcds.sf1/tp1-single.plans.txt`). All five gpu cells are off and
-registry row 10 tags `63` alone. Only tp1-single has run on a device (`corpus_cases.inc:257`);
+seven `GpuProject: exprs=[]` (`tpcds.sf1/tp1-single.plans.txt`), and `pbench`'s
+`scalar-subquery-cross`, which is that shape by construction and carries this ticket. All five of
+q9's gpu cells are off and registry row 10 tags `63` alone. Only tp1-single has run on a device (`corpus_cases.inc:257`);
 the other four may meet [#152](#t152) next.
 
 **Fix proposed:** fix 4 of `reports/corpus-fixes.md`. Give the placeholder one name in

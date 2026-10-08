@@ -714,7 +714,10 @@ own comment ("Timestamp-as-i64 → 8B") and [#95](#t95)'s text both say timestam
 the switch says otherwise. Any `GROUP BY` or join key of a timestamp type at more than one lane
 reaches it. Not gated by `murmur_conformance.rs`; no pin yet.
 
-**Corpus query:** none — tpch and tpcds use `Date32`. Simplest, at any `tp4` mode:
+**Corpus queries:** `pbench`'s `timestamp-s-key-group`, `timestamp-ms-key-group`,
+`timestamp-us-key-group`, `timestamp-ns-key-group` and `ts-key-join` all carry this ticket, and
+`timestamp-s-key-group` is the tree's one `NOT_RUNNABLE` entry on it. tpch and tpcds have nothing:
+they use `Date32`. Simplest, at any `tp4` mode:
 `select cast(o_orderdate as timestamp) t, count(*) from orders group by t;` (tpch).
 
 <a id="t189"></a>
@@ -774,10 +777,12 @@ which is what tpch q15 hits on `total_revenue`; #184 was filed for it and is arc
 hasher takes the decimal, so the shape is a refusal on one side. Pinned by
 `bug_a_decimal_key_is_refused_on_the_device` (`gpu_tests/emit_cases.rs`).
 
-**Corpus queries:** eight hash a decimal key at every `tp4` mode — tpch q2 (`ps_supplycost`),
+**Corpus queries:** eleven hash a decimal key at every `tp4` mode — tpch q2 (`ps_supplycost`),
 q10 (`c_acctbal`), q15 (`total_revenue`, precision 38), q18 (`o_totalprice`); tpcds q24, q37,
-q82 (`i_current_price`), q75 (`sales_amt`, precision 31). Their `tp4` device cells are off, on
-blockers that refuse first (#152); q15 and q75 need the >18 path.
+q82 (`i_current_price`), q75 (`sales_amt`, precision 31); and `pbench`'s `decimal15-key-group`,
+`decimal38-key-group` and `decimal15-key-join`, which are the three written for this ticket
+rather than meeting it by accident. Their `tp4` device cells are off, on blockers that refuse
+first (#152); q15, q75 and `decimal38-key-group` need the >18 path.
 
 <a id="t197"></a>
 ### #197 — the repartition arm still concatenates a child it can only be handed one of
@@ -829,12 +834,53 @@ removes — and not this ticket's.
 
 ## Testing
 
+<a id="t259"></a>
+### #259 — pbench landed with every device cell off, and nothing owns running them
+
+[`pbench`](../tasks/pbench.md) committed a third dataset and 56 corpus lines with **no gpu cell
+enabled and not one run** — correct at the time, because shad-gpu was off the network for the whole
+task and the plan isolated the device work into a step that never happened. What is missing is an
+owner for that step. The recipe lives in `pbench-impl.md` and `pbench-detail.md`, and the archive
+rule deletes both at merge, so without this ticket it goes with them.
+
+Three pieces, and the first is the one that otherwise never lands:
+
+- **`int8-key-group` does not exist at all** — no `.sql`, no registry row, no corpus line, no
+  ticket. It was held back because it is the one row the table expects to pass, so landing it with
+  its cells off would have had to name a ticket that does not exist (the registry requires one for
+  an off cell). It arrives with the cycle that proves it.
+- **16 tp1 gpu cells nobody turns on.** [`repartition-keys`](../tasks/repartition-keys.md) says
+  "pbench's key-type rows' **tp4** device cells turn on where they pass", so the tp1 cells of
+  `bool-key-group`, `decimal15-key-group`, `decimal38-key-group`, the three `timestamp-*-key-group`
+  rows, `rollup-small-keys` and `uint-key-group` sit off under a tag that task will leave in place.
+  That is exactly the condition [`stale-cells`](../tasks/stale-cells.md) exists to clear, recreated
+  behind it.
+- **The rest of the gpu cells**, which the later tasks do own: `join-backend` for the join rows,
+  `repartition-keys` for the key-type rows at tp4.
+
+**Fix proposed:** one `build-test-shadgpu.sh` cycle filtered to `gpu_pbench_`, plus
+`PCK_WRITE_GPU_RESULT=1` so the answers reach `gpu-result.txt` and meet DuckDB. Each cell is then
+enabled if it passes, or carries the ticket it fails on. The same card closes
+[#235](#t235)'s last step and [`stale-cells`](../tasks/stale-cells.md)'s 16 cells, so one visit
+settles three things. The record that nothing was run is durable in the section comment at the head
+of pbench's block in `corpus_cases.inc`; this ticket is the part that says whose job it is.
+
 <a id="t227"></a>
 ### #227 Check schema nullability in tests
 
 Column nullability is maintained tin node's output_schema, but not tested anywhere. Start testing
 it in the CPU engine, by adding this logic to declared_as() - if not null constraint is set in the
 schema, check that every record batch produced does not have any nulls.
+
+**Half landed in [`pbench`](../tasks/pbench.md), and the half that is left is the device's.**
+`nulls_where_none_declared` sits beside `device_divergence` in `test_support/schema_validation.rs`
+and `held_to_declaration` runs both; which half runs is the explicit argument
+`NullsHeld::{Unread, PerColumn(&[usize])}`, the cpu flavour passing counts read off the arrow
+batch and the device flavour `Unread`. The device has no count for anything to read:
+`peacock_handle_schema` returns an IPC *schema* message and cuDF stores no nullability. So the rest
+of this ticket is a new C++ entry point over `table_for(handle)`'s `column_view::null_count()`,
+after which the device flavour passes `PerColumn` and nothing else changes. It cannot be
+type-checked without cuDF, so it wants a host with a card.
 
 <a id="t164"></a>
 ### #164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws
@@ -1016,7 +1062,16 @@ error naming both classifiers. No committed section has the shape.
 **Fix proposed:** give `duckdb_divergent` a side — which of the cpu and the device diverges — and
 give `duckdb_fingerprint` the optional ticket and column list `duckdb_divergent` already has, so
 a triple or a per-column exemption can carry a known difference while `rows` and the remaining
-columns stay checked. Decide it before `stale-cells` builds rather than inside it.
+columns stay checked.
+
+**pbench moved the deadline, and widened both halves.** `stale-cells` is blocked, pbench landed
+ahead of it, and the next task to build is `repartition-keys` — which owns `uint-key-group`, a
+`duckdb_fingerprint` line over a 19,848-row answer whose cpu tp4 cells and gpu cells it both turns
+on. So the decision is owed before that task, not before `stale-cells`. pbench also took the
+fingerprint lines from 4 to 14, ten of the new ones its own rows whose device comparison is
+`live_cpu` because the answer is over the cap; and the first half — a device answer diverging
+while the cpu's matches — now has 27 pbench rows in reach, all of them DuckDB-green on the cpu
+already, in a dataset that exists to make the device differ.
 
 <a id="t254"></a>
 ### #254 — `data_fusion_subset` is the one cpu oracle no test can show failing
