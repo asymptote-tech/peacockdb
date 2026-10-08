@@ -277,3 +277,13 @@ The signoff is appended to the spec. CI: the GPU job failed on run `37831124809`
 `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out` — the host is
 unreachable, not an rmm pool problem, so not #178 and not a defect in the branch's edits. Chain K
 does not wait on that job. Every other job was green on that run.
+
+### 2026-10-08 — done
+
+CI run `37839490207` on head `d6c2176d`: Changed paths, both cuDF matrix legs, the 25.02 GPU
+build, the cost report and the S3 metadata check all green; Deploy pages skipped as it is a
+master-push job. `GPU Tests (remote)` failed on `ssh: connect to host
+llm-gpu0h200.velkerr.ru port 22: Connection timed out`, which chain K does not wait on — the host
+is unreachable rather than contended, so it is not #178 and not a defect in this branch.
+
+The task is terminal for the ensemble. The human merges; the archive list is in the signoff.
