@@ -1714,3 +1714,32 @@ this time, since `corpus_gpu.rs` compiles in no rust-only build. Clippy rc=0 wit
 warnings as before the round and none on a line it wrote. No golden moved.
 `build-test.md`: grand total 2575 → **2576**, Rust 2083 → **2084**, the module-layout row 17 →
 **18** with the new rule and its case named.
+
+## Chain resumed on nebius-gpu (2026-10-08)
+
+The control file said `rebase`, and master carried the human's host override into the chain.
+`ENS-duckdb-oracle` is rebased onto `dbf44bcc` (one master commit: docker build retired, chain J
+moved to nebius-gpu, #260 filed). Three conflicts, all mine:
+
+- `llm-wiki/tickets.md` twice, the next-free-number line — master's 262 wins over the branch's
+  252 and 255, since numbers are never reused. The contents table merged by union:
+  system-hardening gains master's #260, testinfra keeps the branch's #252. The total was stale on
+  both sides and is now 117.
+- `scripts/build-test-shadgpu.sh`, the `--run-benchmarks` staging check — master's side, which
+  retires the `scripts/docker-build.sh` hint and deletes the `/.dockerenv` guard the branch had
+  added `PULL_RESULTS` to. Nothing was carried forward: the guard's subject no longer exists.
+  `PULL_RESULTS` keeps its four other uses and `bash -n` passes. A code conflict is ordinarily a
+  developer's, and this one is resolved here because the resolution is master's hunk verbatim with
+  no new content; the developer proves it anyway, since the next build runs through this script.
+
+The board reset the override asks for, in the same commit. `pbench` and `repartition-keys` are
+written `rebase needed(building)` rather than plain `building`: their branches exist and still sit
+on the old base, and that mark is the only thing that says so if this run dies before it reaches
+them. The override's end state for both is `building`, which is what they return to once rebased
+and re-proven.
+
+`stale-cells` is unblocked to `approved to build`, by the override.
+
+nebius-gpu answered before this dispatch: `computeinstance-e00tnrse7ayntnzcyt`, NVIDIA L40S,
+46068 MiB, 0 MiB in use. Disk 86G of 96G used, 11G free — the override's cleanup paragraph is
+live, not hypothetical.
