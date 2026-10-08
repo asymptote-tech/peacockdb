@@ -163,7 +163,7 @@ Corpus-coverage tickets and #62, proved on the cpu first while chain J held the 
 GPU halves now run on nebius-gpu beside chain J. limits and empty-sorts were added after the chain
 started.
 
-### 1. [`guard-checks.md`](guard-checks.md) — closes [#233](../tickets/corpus-coverage.md#t233), [#174](../tickets/corpus-coverage.md#t174) — state: reviewing — PR #170
+### 1. [`guard-checks.md`](guard-checks.md) — closes [#233](../tickets/corpus-coverage.md#t233), [#174](../tickets/corpus-coverage.md#t174) — state: completing — PR #170
 
 The validator checks a pass-through node's column count; the Rust and C++ row-range clamps read
 one shared case table, `testdata/fixtures/row-range-clamp.txt`; the driver's mock calls the
