@@ -1541,7 +1541,35 @@ GpuUnload: output_rows=51, output_bytes=9477
       GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1, n_regionkey@2, n_comment@3], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=25, output_bytes=2458
         in_rows=[] batch_rows=[[25]] batch_bytes=[[2458]]
 == rollup-over-join
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=151, output_bytes=3617
+  in_rows=[[31,37,31,52]] batch_rows=[[31],[37],[31],[52]] batch_bytes=[[755],[872],[736],[1254]]
+  GpuProject: exprs=[c_nationkey@0, c_mktsegment@1, count(*)@3], lanes=4, batches=single, hashed_on=[c_nationkey@0, c_mktsegment@1], output_rows=151, output_bytes=3617
+    in_rows=[[31,37,31,52]] batch_rows=[[31],[37],[31],[52]] batch_bytes=[[755],[872],[736],[1254]]
+    GpuAggregateBatches: group_by=[c_nationkey@0, c_mktsegment@1, __grouping_id@2], aggs=[sum(count(*)@3) as count(*)], final=[count(*)@3], lanes=4, batches=single, hashed_on=[c_nationkey@0, c_mktsegment@1], output_rows=151, output_bytes=3788
+      in_rows=[[31,37,34,52]] batch_rows=[[31],[37],[31],[52]] batch_bytes=[[790],[914],[771],[1313]]
+      GpuEmitPartitions: hash=[c_nationkey@0, c_mktsegment@1], lanes=4, batches=multiple, hashed_on=[c_nationkey@0, c_mktsegment@1], output_rows=154, output_bytes=3843
+        in_rows=[[154]] batch_rows=[[31],[37],[34],[52]] batch_bytes=[[790],[914],[826],[1313]]
+        GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=154, output_bytes=3827
+          in_rows=[[154]] batch_rows=[[154]] batch_bytes=[[3827]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=154, output_bytes=3847
+            in_rows=[[25,49,31,49]] batch_rows=[[25,49,31,49]] batch_bytes=[[625,1225,772,1225]]
+            GpuAggregateBatches: group_by=[c_nationkey@0, c_mktsegment@1, __grouping_id@2], aggs=[sum(count(*)@3) as count(*)], lanes=4, batches=single, output_rows=154, output_bytes=3847
+              in_rows=[[100,343,124,343]] batch_rows=[[25],[49],[31],[49]] batch_bytes=[[625],[1225],[772],[1225]]
+              GpuAggregate: group_by=[c_nationkey@0, c_mktsegment@1], grouping_sets=[[], [c_nationkey@0], [c_nationkey@0, c_mktsegment@1]], aggs=[count(1) as count(*)], lanes=4, batches=multiple, output_rows=910, output_bytes=22738
+                in_rows=[[23997,48146,30033,47824]] batch_rows=[[25,25,25,25],[49,49,49,49,49,49,49],[31,31,31,31],[49,49,49,49,49,49,49]] batch_bytes=[[625,625,625,625],[1225,1225,1225,1225,1225,1225,1225],[772,772,772,772],[1225,1225,1225,1225,1225,1225,1225]]
+                GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@0)], projection=[c_nationkey@1, c_mktsegment@2], lanes=4, batches=multiple, hashed_on=[c_nationkey@0], output_rows=150000, output_bytes=2587208
+                  in_rows=[[4,8,5,8],[23997,48146,30033,47824]] batch_rows=[[8192,8192,3281,4332],[8192,8192,8192,8192,6657,8192,529],[8192,8192,8131,5518],[8192,8192,8192,8192,6507,8192,357]] batch_bytes=[[141295,141293,56609,74651],[141312,141299,141354,141386,114829,141310,9158],[141302,141299,140260,95107],[141232,141263,141377,141285,112189,141230,6168]]
+                  GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[n_nationkey@0], output_rows=25, output_bytes=104
+                    in_rows=[[4,8,5,8]] batch_rows=[[4],[8],[5],[8]] batch_bytes=[[17],[33],[21],[33]]
+                    GpuEmitPartitions: hash=[n_nationkey@0], lanes=4, batches=multiple, hashed_on=[n_nationkey@0], output_rows=25, output_bytes=104
+                      in_rows=[[25]] batch_rows=[[4],[8],[5],[8]] batch_bytes=[[17],[33],[21],[33]]
+                      GpuLoadParquet: table=nation, projections=[n_nationkey@0], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=25, output_bytes=104
+                        in_rows=[] batch_rows=[[25]] batch_bytes=[[104]]
+                  GpuEmitPartitions: hash=[c_nationkey@0], lanes=4, batches=multiple, hashed_on=[c_nationkey@0], output_rows=150000, output_bytes=2587152
+                    in_rows=[[150000]] batch_rows=[[19665,4332],[39425,8721],[24515,5518],[39275,8549]] batch_bytes=[[339189,74651],[680164,150464],[422853,95107],[677330,147394]]
+                    GpuLoadParquet: table=customer, projections=[c_nationkey@3, c_mktsegment@6], partition_groups=[[[0],[1]]], lanes=1, batches=multiple, output_rows=150000, output_bytes=2587118
+                      in_rows=[] batch_rows=[[122880,27120]] batch_bytes=[[2119518,467600]]
 == scan-limit
 early_exit=GpuUnload@1
 GpuUnload: skip=0, fetch=10, output_rows=10, output_bytes=1828

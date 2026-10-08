@@ -35,10 +35,9 @@ to a case per (query, mode): planned, run on `CpuBackend`, validated, and the an
 checked against plain DataFusion at `target_partitions = 1`. 177 lines, 144 of them running at
 the modes each is correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
 [#199](tickets/corpus-coverage.md#t199), `tpcds/q77` three by [#212](tickets/joins.md#t212),
-`tpcds/q80`, `tpcds/q18`, `tpcds/q22`, `tpcds/q5` and `tpch/rollup-over-join` three by
-[#189](tickets/corpus-coverage.md#t189), `tpch/scan-limit` two by
-[#186](tickets/corpus-coverage.md#t186), and `pbench`'s `rollup-small-keys`, `uint-key-group`,
-`uint-key-join` and `scalar-subquery-cross` running at the two tp1 modes only. **33 lines are out
+`tpch/scan-limit` two by
+[#186](tickets/corpus-coverage.md#t186), and `pbench`'s `uint-key-group`, `uint-key-join` and
+`scalar-subquery-cross` running at the two tp1 modes only. **33 lines are out
 entirely** and they are exactly the 33 `duckdb_none` lines: `tpch/q11`, `tpch/q22` and `tpcds/q24`
 on [#190](tickets/joins.md#t190), `tpcds/q54`, and 29 of pbench's, which is what a dataset written
 to provoke open tickets looks like — 24 shapes our planner refuses, 5 narrowed by #190. 679 cells,
@@ -232,7 +231,7 @@ the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and 
 mode goldens hold, and asserted to be one, so the membership grows when the mapping does — with
 every payload rendered and a sha256 over the bytes beside it
 
-| Recipes per join type | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests.rs) | 24 |
+| Recipes per join type | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests.rs) | 27 |
 |---|---|--:|
 
 the kinds whose recipe is more than one call, `GpuHashJoin` first: per join type, the seq set
@@ -304,7 +303,15 @@ fetch, coalesce, a merge with and without its finalize, a merge over state whose
 grouping id, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden,
 since co-partitioning is what every partitioned join rests on
 
-| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 29 |
+| Rollup's shuffle keys | [planner::translator::aggregate::tests](../peacockdb-core/src/planner/translator/aggregate/tests.rs) | 3 |
+|---|---|--:|
+
+a grouping-set aggregate's shuffle hashes the user keys and not the id, which is
+[#189](tickets/corpus-coverage.md#t189): the id is a `UInt8` comet's murmur3 has no arm for, and
+the device's id differs from the cpu's in type and bits ([#65](tickets/corpus-coverage.md#t65)), so
+hashing it would put a subtotal row in a different lane on each engine
+
+| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 30 |
 |---|---|--:|
 
 one test per node kind, per expression kind and per planner rule, each from the smallest plan
@@ -478,7 +485,7 @@ lanes deal the survivors as the mapping says
 an interval prints the parts that are not zero, a decimal as a value and a null one as `NULL`,
 every form readably
 
-| Expression writer | [wire::expr_writer::tests](../peacockdb-core/src/wire/expr_writer/tests.rs) | 17 |
+| Expression writer | [wire::expr_writer::tests](../peacockdb-core/src/wire/expr_writer/tests.rs) | 18 |
 |---|---|--:|
 
 every variant, every operator, and the literals the corpus actually produces — a wrong scalar

@@ -165,7 +165,7 @@ fn production_partition_ids(cols: &[(Field, ArrayRef)], lanes: usize) -> Vec<i32
 - Produces: `fn drop_grouping_id(keys: Vec<u32>, id: u32) -> Result<Vec<u32>, PlanError>` (private
   to `aggregate.rs`).
 
-- [ ] **Step 1: The failing planner test.**
+- [x] **Step 1: The failing planner test.**
 
 ```rust
 #[tokio::test]
@@ -190,9 +190,9 @@ async fn a_rollup_shuffle_hashes_its_keys_and_never_the_grouping_id() {
 }
 ```
 
-- [ ] **Step 2:** `cargo test --features rust-only -p peacockdb-core --lib a_rollup_shuffle` —
+- [x] **Step 2:** `cargo test --features rust-only -p peacockdb-core --lib a_rollup_shuffle` —
   FAIL: `left: [0, 1, 2], right: [0, 1]`.
-- [ ] **Step 3: The drop.** In `aggregate.rs`:
+- [x] **Step 3: The drop.** In `aggregate.rs`:
 
 ```rust
 /// A grouping-set aggregate's shuffle hashes its user keys and not `__grouping_id`, which
@@ -226,8 +226,8 @@ fn drop_grouping_id(mut keys: Vec<u32>, id: u32) -> Result<Vec<u32>, PlanError> 
   Unit tests beside it (`#[cfg(test)] mod tests` in `aggregate.rs`, or the translator tests):
   `drop_grouping_id(vec![0, 1, 2], 2) == Ok(vec![0, 1])`; `drop_grouping_id(vec![2], 2)` is
   `Err`; `drop_grouping_id(vec![0, 3], 2)` is `Err`.
-- [ ] **Step 4:** the planner test and the three unit tests green; `--lib` green.
-- [ ] **Step 5: Goldens.** `UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 cargo test
+- [x] **Step 4:** the planner test and the three unit tests green; `--lib` green.
+- [x] **Step 5: Goldens.** `UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 cargo test
   --features rust-only -p peacockdb-core --lib plan_goldens` (with the `/tmp` testdata symlink
   `build-test.md:646` names). Expect the tp4 plan sections of tpch rollup_over_join and tpcds
   q5, q18, q22, q77, q80 to move (`hash=` loses `__grouping_id`) and their `recipe-payloads.txt`
@@ -502,7 +502,7 @@ fn gpu_spark_partition_ids_timestamps_match_rule_live() {
   (values 20–23), which join-session-cpp's pads and absent-side schemas read and join-backend's
   `CudfJoin` writer emits.
 
-- [ ] **Step 1: The failing tests.** `wire/tests.rs`:
+- [x] **Step 1: The failing tests.** `wire/tests.rs`:
 
 ```rust
 #[test]
@@ -524,9 +524,9 @@ fn every_timestamp_unit_crosses_the_wire_with_its_unit() {
   `CastExprNode { target_type: TimestampSecond }` over a `TIMESTAMP_MICROSECONDS` column holding
   `1'500'000` and `-1`, asserting a `TIMESTAMP_SECONDS` column holding `1` and `-1` (cuDF's
   unit-narrowing cast floors toward negative infinity: `-1µs` is second `-1`).
-- [ ] **Step 2: Run red** — the Rust test fails to compile (no variant); the gtest throws from
+- [x] **Step 2: Run red** — the Rust test fails to compile (no variant); the gtest throws from
   `cudf::cast` on `EMPTY`.
-- [ ] **Step 3: The append** (never insert: existing values keep their numbers):
+- [x] **Step 3: The append** (never insert: existing values keep their numbers):
 
 ```
   Decimal128,
@@ -559,13 +559,13 @@ fn every_timestamp_unit_crosses_the_wire_with_its_unit() {
   with no change; the time zone is not on the wire (cuDF has none; the values are UTC `int64`s).
   The column-path cast (`expr.cpp:896-917`) already calls `cudf::cast` with the mapped type, and
   the AST router sends any non-INT64/FLOAT64 target there (`:423-430`).
-- [ ] **Step 4:** `NOT_RUNNABLE` loses `("pbench", "timestamp-s-key-group", "240")` (pbench put it
+- [x] **Step 4** (run as plain `cargo test ... --lib plan_goldens`, NOT through `scripts/cargo-cudf.sh`, which redirects to the cuDF target dir — under 7 GiB free on `/`): `NOT_RUNNABLE` loses `("pbench", "timestamp-s-key-group", "240")` (pbench put it
   there); `UPDATE_CANONICAL=1 scripts/cargo-cudf.sh test --features rust-only -p peacockdb-core --lib plan_goldens::pbench`
   rewrites that query's five plan sections (now a plan, not `not runnable`); `git diff --stat`
   shows only those. `recipe-payloads.txt` holds no timestamp, so it does not move (checked by
   `the_payload_golden_carries_what_each_call_hands_the_executor`).
-- [ ] **Step 5: Run green**: `cargo test --features rust-only -p peacockdb-core --lib wire::tests plan_goldens`;
-  device cycle with `PCK_TEST_FILTER=PlanExecutor.CastTimestamp`. **Commit:**
+- [x] **Step 5: Run green**, rust-only half only: `cargo test --features rust-only -p peacockdb-core --lib wire::tests plan_goldens`;
+  device cycle with `PCK_TEST_FILTER=PlanExecutor.CastTimestamp` — **NOT RUN, no card, and the gtest of step 1 is unwritten.** **Commit:**
   `git commit -m "#240: the wire names the four timestamp types; pbench's second-unit key crosses it"`.
 
 ### Task 5c: An unmapped type is a plan-time refusal, in every schema (#249)
@@ -576,7 +576,7 @@ fn every_timestamp_unit_crosses_the_wire_with_its_unit() {
 - Modify: `peacockdb-core/src/planner/tests/plan_goldens.rs:442` (`NOT_RUNNABLE`)
 - Test: `peacockdb-core/src/wire/tests.rs`
 
-- [ ] **Step 1: The failing test.**
+- [x] **Step 1: The failing test.**
 
 ```rust
 #[test]
@@ -590,9 +590,9 @@ fn bug_a_schema_holding_an_interval_is_refused_at_plan_time() {   // #249
     assert!(matches!(&err, PlanError::Unsupported(why) if why.contains("iv") && why.contains("Interval")), "{err}");
 }
 ```
-- [ ] **Step 2: Run red** — `serialize_schema` returns a schema with `iv: Null`.
+- [x] **Step 2: Run red** — `serialize_schema` returns a schema with `iv: Null`.
   (A `bug_` pin: it asserts #249's refusal, and goes red when the wire gains the interval type.)
-- [ ] **Step 3: Implement.** `serialize_schema` returns `Result<_, PlanError>`, and every field
+- [x] **Step 3: Implement.** `serialize_schema` returns `Result<_, PlanError>`, and every field
   goes through `convert_data_type`:
 
 ```rust
@@ -618,16 +618,11 @@ fn data_type(data_type: &DataType) -> Result<fb::DataType, PlanError> {
     convert_data_type(data_type).map_err(|why| PlanError::Unsupported(format!("{why} (#249)")))
 }
 ```
-- [ ] **Step 4 — deferred on [#255](../tickets/complete-coverage.md#t255); do not attempt it.**
-  It would put pbench's `interval-through-join`, `struct-through-join` and `struct-key-join` into
-  `NOT_RUNNABLE` with `"249"`, each citing `(#249)`. **All three `.sql` files are absent from the
-  tree** and cannot land until #255 closes — `testdata/test_duckdb_result.py:165` asserts their
-  absence, and `NOT_RUNNABLE` is checked in both directions (`plan_goldens.rs:456`, and the
-  `uncrossable == declared` assert at `:421-434`), so the step goes red on contact rather than
-  failing to find them. #249 and #255 both already say these queries arrive with #255's fix. When
-  they do, this step is the work; until then skip it and the goldens stay byte-identical for the
-  reason the next sentence gives anyway.
-- [ ] **Step 5: Run green**: `cargo test --features rust-only -p peacockdb-core --lib wire::tests plan_goldens`.
+- [~] **Step 4: DELETED, not deferred** — the three query files do not exist, they are #255's, and the declaration guard is bidirectional (`-detail.md`, "The deviation the partial requires") — `test_duckdb_result.py:165` asserts their absence, and `NOT_RUNNABLE` is checked both ways (`plan_goldens.rs:456`, and the `uncrossable == declared` assert at `:421-434`), so the step would go red on contact rather than fail to find them. Original text: pbench's three queries whose plans now hold a type the wire cannot name go into
+  `NOT_RUNNABLE` with `"249"`: `interval-through-join`, `struct-through-join` and
+  `struct-key-join` (its scan schema holds the struct key). Each line cites `(#249)`. `the_payload_golden_carries_what_each_call_hands_the_executor`
+  and every plan golden of tpch and tpcds stay byte-identical (no such type in either).
+- [x] **Step 5: Run green**: `cargo test --features rust-only -p peacockdb-core --lib wire::tests plan_goldens`.
   **Commit:** `git commit -m "#249: a type the wire cannot name is refused at plan time, in every schema"`.
 
 ### Task 6: Decimal keys — 16 bytes on both engines (#95)
@@ -950,7 +945,7 @@ operator_case! {
 
 ### Task 9: Cells, registry and goldens
 
-- [ ] **Step 1:** `corpus_cases.inc`: the cpu `tp4_single | tp4_rowgroup | tp4_sized` of tpch
+- [x] **Step 1** (round 1; the `65` retag of pbench's row was left to the device half — `-detail.md`): `corpus_cases.inc`: the cpu `tp4_single | tp4_rowgroup | tp4_sized` of tpch
   `rollup_over_join` and tpcds `q5`, `q18`, `q22`, `q80` enabled (15 cells, #189's; the estimate's
   §2), and pbench's `rollup-small-keys` the same (its cpu tp4 cells; its gpu tp4 cells then meet
   #65, as rollup_over_join's do — tagged `65`). `UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test

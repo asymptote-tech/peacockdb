@@ -499,7 +499,21 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=24740
 == rollup-over-join
-skipped: not enabled at this mode
+storage_read_bytes=2587218 # GpuLoadParquet
+cuda_filter_bytes=0 # GpuFilter
+cuda_hash_join_bytes=2587190 # GpuHashJoin
+cuda_aggregate_bytes=27298 # GpuAggregate, GpuAggregateBatches
+cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
+cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
+cuda_window_bytes=0 # (placeholder, no node mapping)
+cuda_limit_bytes=0 # GpuLimit
+cuda_shuffle_bytes=2594924 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
+cuda_passthrough_bytes=7548 # GpuProject, GpuCoalesceAllBatches
+vram_to_ram_bytes=3617 # GpuUnload
+ram_to_vram_bytes=0 # (placeholder, no node mapping)
+cuda_decompress_bytes=0 # (placeholder, no node mapping)
+cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
+peacockdb_cost=7807795
 == scan-limit
 storage_read_bytes=1048881054 # GpuLoadParquet
 cuda_filter_bytes=0 # GpuFilter

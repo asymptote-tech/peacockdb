@@ -71,7 +71,7 @@ pub(crate) fn aggregate<'a>(
     let null_names = b.create_vector(&null_names);
     let grouping_sets = b.create_vector(&masks);
     let funcs = b.create_vector(&funcs);
-    let input_schema = serialize_schema(b, &input.fields);
+    let input_schema = serialize_schema(b, &input.fields)?;
     let aggregate = fb::CudfAggregate::create(
         b,
         &fb::CudfAggregateArgs {

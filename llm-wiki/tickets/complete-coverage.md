@@ -103,19 +103,22 @@ case.
 
 <a id="t249"></a>
 ### #249 — the wire has no Time, Duration, Interval, Struct or List type, and writes such a field as `Null`
-The fbs `DataType` enum (`flatbuffers/gpu_plan.fbs:14-35`) stops at `Decimal128`, and
-`serialize_schema` maps any Arrow type it cannot name to `Null` without saying so
-(`wire/serialize.rs:136`). Most device nodes take a column's type from the data, so such a
+The fbs `DataType` enum (`flatbuffers/gpu_plan.fbs:14-39`) stops at the four `Timestamp`
+variants, and `serialize_schema` used to map any Arrow type it could not name to `Null` without
+saying so. Most device nodes take a column's type from the data, so such a
 column usually passes through unnoticed; where the device builds a column from the declared
 schema — a join's NULL pads and empty or absent sides, a typed NULL literal — it meets a `Null`
 field and either refuses at run time or builds the wrong type, depending on the mode and the data.
 
 Related: [#168](corpus-coverage.md#t168) (an interval literal cannot cross; proposes
 `DurationDays`), [#224](scalars.md#t224) (an integer-to-date cast needs a duration type), and
-[#245](joins.md#t245) (a nested key cannot cross a shuffle). The join-rewrite chain adds the four
-`Timestamp` variants (repartition-keys) and makes an unmapped type a `PlanError` in every schema,
-so the gap shows as a plan-time refusal naming the type rather than a wrong pad; the types
-themselves remain to add here.
+[#245](joins.md#t245) (a nested key cannot cross a shuffle).
+
+**Half done by [`repartition-keys`](../tasks/repartition-keys.md)**: the four `Timestamp` variants
+are in the fbs, and `serialize_schema` now returns a `PlanError` for a type it cannot name, so the
+gap shows as a plan-time refusal naming the type rather than as a wrong pad. `Timestamp` is off
+the list in this ticket's title; `Time`, `Duration`, `Interval`, `Struct` and `List` are what is
+left to add.
 
 **Corpus queries:** none in tpch or tpcds, and none in pbench yet. The two pbench queries
 written for this ticket — an interval column carried through a join

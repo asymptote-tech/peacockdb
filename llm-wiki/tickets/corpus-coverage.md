@@ -710,9 +710,13 @@ the switch says otherwise. Any `GROUP BY` or join key of a timestamp type at mor
 reaches it. Not gated by `murmur_conformance.rs`; no pin yet.
 
 **Corpus queries:** `pbench`'s `timestamp-s-key-group`, `timestamp-ms-key-group`,
-`timestamp-us-key-group`, `timestamp-ns-key-group` and `ts-key-join` all carry this ticket, and
-`timestamp-s-key-group` is the tree's one `NOT_RUNNABLE` entry on it. tpch and tpcds have nothing:
-they use `Date32`. Simplest, at any `tp4` mode:
+`timestamp-us-key-group`, `timestamp-ns-key-group` and `ts-key-join` all carry this ticket. tpch
+and tpcds have nothing: they use `Date32`.
+
+**The wire half landed in [`repartition-keys`](../tasks/repartition-keys.md)**: the fbs carries the
+four `Timestamp` variants, `convert_data_type` maps any zone, `fb_to_type_id` has its arms, and
+`timestamp-s-key-group` is no longer `NOT_RUNNABLE` — it plans and serializes. What remains is the
+kernel's arm, and nobody has run the C++ side on a card. Simplest, at any `tp4` mode:
 `select cast(o_orderdate as timestamp) t, count(*) from orders group by t;` (tpch).
 
 <a id="t189"></a>
@@ -728,11 +732,12 @@ keys, and those include `__grouping_id`, a `UInt8`. comet's murmur3 has no unsig
 the device's id differs from the cpu's in type and bits (#65), so the two engines would put
 a subtotal row in different lanes. A refusal, not a wrong answer.
 
-**Corpus queries:** `tpch/rollup-over-join`, tpcds q5, q18, q22 and q80, and `pbench`'s
-`rollup-small-keys`, `uint-key-group` and `uint-key-join`, at `tp4-single`, `tp4-rowgroup` and
-`tp4-sized`: 24 cpu cells, their device cells behind them. tpcds q77 may meet it
-too once #212 stops refusing it first. Simplest: `select l_returnflag, sum(l_quantity) from
-lineitem group by rollup (l_returnflag);` (tpch) at `tp4-single`.
+**Corpus queries:** 24 cpu cells over seven queries at `tp4-single`, `tp4-rowgroup` and
+`tp4-sized`. **18 of them are on**, landed by [`repartition-keys`](../tasks/repartition-keys.md):
+`tpch/rollup-over-join`, tpcds q5, q18, q22, q80 and `pbench/rollup-small-keys`. **6 are still
+off** — `pbench`'s `uint-key-group` and `uint-key-join`, which reach this refusal by the other road
+below. Their device cells are behind all of them. tpcds q77 is settled and does not meet this
+ticket: its plan moved with the rest of the drop and #212 is all that holds it.
 
 **Fix proposed:** hash the user keys and not the id. In `aggregate_sequence`, before `tree = match
 shuffle`, drop the id's ordinal from `Shuffle::ByHash`'s keys when the aggregate has grouping sets:
@@ -743,7 +748,7 @@ arm and no C++. The tp4 plan goldens of the six queries change their emit's `has
 merge's `hashed_on`, and the tpcds q5 payload's `hash_exprs` shrinks. A planner test pins
 `hash_keys == [0, 1]` for a two-key rollup at tp4.
 
-**That fix turns on 18 of the 24 cells, not all of them.** `pbench`'s `uint-key-group` and
+**That fix landed and turned on 18 of the 24 cells, not all of them.** `pbench`'s `uint-key-group` and
 `uint-key-join` reach the same refusal by the other road: they hash a plain `UInt32` user key, and
 comet's murmur3 has no unsigned arm at any width. The grouping-id fix cannot help them —
 `uint-key-group` is a single grouping set, so `!group.is_single()` excludes it, and `uint-key-join`

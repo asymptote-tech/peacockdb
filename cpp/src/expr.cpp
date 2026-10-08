@@ -92,6 +92,14 @@ cudf::type_id fb_to_type_id(fb::DataType dt) {
     case fb::DataType_Date32:     return cudf::type_id::TIMESTAMP_DAYS;
     case fb::DataType_Date64:     return cudf::type_id::TIMESTAMP_MILLISECONDS;
     case fb::DataType_Decimal128: return cudf::type_id::DECIMAL128;
+    case fb::DataType_TimestampSecond:
+      return cudf::type_id::TIMESTAMP_SECONDS;
+    case fb::DataType_TimestampMillisecond:
+      return cudf::type_id::TIMESTAMP_MILLISECONDS;
+    case fb::DataType_TimestampMicrosecond:
+      return cudf::type_id::TIMESTAMP_MICROSECONDS;
+    case fb::DataType_TimestampNanosecond:
+      return cudf::type_id::TIMESTAMP_NANOSECONDS;
     default:                      return cudf::type_id::EMPTY;
   }
 }
