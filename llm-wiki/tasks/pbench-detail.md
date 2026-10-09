@@ -2195,3 +2195,12 @@ the three test names this branch adds). The cause is worth keeping because it wi
 **the local `master` ref in this worktree is stale at `2ad302bf` and does not contain `f0a6ecbf`.**
 Any master-side figure read off `master` rather than `origin/master` is a pre-gate number. Read
 `origin/master`.
+
+### CI, for the `done` transition
+
+Run 37887741783 on `22814f92`: `Changed paths` answered code=true, so the force-push produced a
+real pipeline rather than the skip a merge would have given. cudf 25.02 pass (23m50s), cudf 26.02
+pass (23m52s), GPU build pass (6m50s), Cost report pass, S3 check pass, Pages skipped. The only red
+is `GPU Tests (remote)` on `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed
+out` — shad-gpu, which the host override exempts by name, and whose work the nebius-gpu run above
+did instead. So `rebase needed(done)` → `done`.
