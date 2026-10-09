@@ -821,3 +821,22 @@ do. The neighbouring `row_groups` comment protects itself with "reachable only f
 plan" and this one should say the same. Left alone deliberately: a `.fbs` comment is a codegen
 input, so the qualifier costs a regeneration round and a fresh proof that nothing but the doc line
 moved, and a nit does not buy that at a completeness pass. For whoever next edits that file.
+
+### 2026-10-09 — done, on the GPU half
+
+CI run [37989280042](https://github.com/asymptote-tech/peacockdb/actions/runs/37989280042) on
+`dbfc4079`, **the last code-carrying commit**. Every job green — changes, both dataset-matrix
+legs, cpp-build-2502, cost-report and s3-datasets; deploy-pages skipped as a master-push job.
+
+**The cost-report job is green, where it was red before the rebase.** Master's `bc9b6e2f` moved
+the gate to fail only past `REGRESSION_FAIL_PCT` (10%), and this branch's two accepted sections
+are +0.02%. They are still reported red in the PR comment, as intended. So the human's
+pre-acceptance in chain K's board note is no longer load-bearing for this task.
+
+GPU Tests failed at rsync with `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection
+timed out`, exit 255 — shad-gpu unreachable, so no pool was built: not
+[#178](../tickets/testinfra.md#t178) and not this branch. Chain K's rule exempts that job and asks
+instead for a recorded nebius-gpu pass, which is the section above.
+
+The four commits after `dbfc4079` are documentation-only and skipped every job behind the
+`changes` gate, so their green asserts nothing. Read the SHA before the conclusion.
