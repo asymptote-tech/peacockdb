@@ -1158,3 +1158,18 @@ nothing was cleaned.
 
 **To stage:** the 32 modified files plus the one new directory,
 `peacockdb-core/src/executor/cpu_backend/spark_partitioning/` (which holds `tests.rs`).
+
+## The rebase discharged, and the state restored past it (2026-10-09)
+
+The re-prove came back green, so the rebase is discharged: `test_cpu_corpus` 940/0 with the 27
+carried reds gone, the registry ↔ corpus pair agreeing in both directions by name, and no pbench
+golden moved that this branch did not move deliberately. The six hunks I resolved by hand hold.
+
+The parenthesised state was `building`, which is what a green re-prove restores. The same dispatch
+then built the device half and reported it green with evidence, which is the trigger for
+`reviewing` — so the board goes there rather than through `building` and straight back out. The
+distinction matters only if the re-prove had been red, and it was not.
+
+`--lib` was the one count I carried unmeasured at pbench's 678. It is **686** on this branch, and
+the page's own rows already summed to it: 1655 − 939 − 1 − 26 − 3 = 686, with `--list` agreeing
+independently. The rebase had re-derived the header alone. Corrected, with its three rollups.

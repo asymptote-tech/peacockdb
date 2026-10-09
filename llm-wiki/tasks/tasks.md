@@ -92,6 +92,7 @@ hashable key type, skew, empty sides. One query per demonstrable ticket of the c
 each later task turns its own on. Folds in #227: both engines check declared non-nullability.
 
 ### 3. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../tickets/corpus-coverage.md#t201), [#206](../tickets/corpus-coverage.md#t206), [#240](../tickets/corpus-coverage.md#t240), [#95](../tickets/corpus-coverage.md#t95), [#189](../tickets/corpus-coverage.md#t189) — state: rebase needed(blocked(completeness approved)) — PR #169
+### 4. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../tickets/corpus-coverage.md#t201), [#206](../tickets/corpus-coverage.md#t206), [#240](../tickets/corpus-coverage.md#t240), [#95](../tickets/corpus-coverage.md#t95), [#189](../tickets/corpus-coverage.md#t189) — state: reviewing — PR #169
 
 The murmur gate onto the production lane rule first; then float, boolean, timestamp and decimal
 keys on the device (decimals hashed as 16 bytes on both engines), and the rollup's grouping id
