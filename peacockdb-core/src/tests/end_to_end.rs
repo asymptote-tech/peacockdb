@@ -25,7 +25,7 @@ use super::injection::{
 };
 use crate::test_support::MODES;
 use crate::test_support::{
-    assert_results_match, batches_to_sorted_str, data_dir_for, queries_dir_for,
+    assert_results_match, batches_to_sorted_str, data_dir_for, oracle_answer, queries_dir_for,
 };
 
 mod accounting;
@@ -86,13 +86,7 @@ async fn sql_answers_match_oracle(
     let oracle_ctx = crate::register_tables_for(crate::build_session_state(1), &data_dir)
         .await
         .expect("register the tables");
-    let expected = oracle_ctx
-        .sql(oracle_sql)
-        .await
-        .expect("the oracle plans the query")
-        .collect()
-        .await
-        .expect("the oracle runs the query");
+    let expected = oracle_answer(&oracle_ctx, oracle_sql, &format!("{dataset}/{query}")).await;
 
     // Encoded once: `assert_results_match` renders both sides per call, so one oracle
     // against thirty runs is rendered thirty times, and on a million-row result that is
@@ -407,6 +401,106 @@ injected_queries!(
     tpcds / q2,
     tpch / nested_limits
 );
+
+// ── an answer with no rows ──────────────────────────────────────────────────
+
+/// Zero rows through an ordered query at every mode: the answer is one column named `n_name`,
+/// whether the sink received a zero-row batch or nothing at all. The predicate is one
+/// row-group statistics cannot rule out; `n_nationkey < 0` prunes the scan away, which is
+/// #282's refusal and not this case.
+#[tokio::test]
+async fn an_empty_ordered_answer_keeps_its_column() {
+    let sql = "select n_name from nation where n_nationkey + n_regionkey < 0 order by n_name;";
+    sql_answers_match_datafusion("tpch", "empty-ordered", sql, None, Coverage::ModesOnly).await;
+}
+
+/// What the answer cannot show, read off the run: the accumulating sort and the merge each
+/// emit one zero-row batch over zero-row batches. The driver answers zero rows under the
+/// columns whether they did or not, so the answer alone passes with either fix reverted.
+/// customer is two row groups, so the tp4 modes feed the merge two lanes that each sent a
+/// zero-row batch and two that sent nothing.
+#[tokio::test]
+async fn an_empty_sort_and_merge_each_emit_one_zero_row_batch() {
+    use crate::executor::CpuBackend;
+    use crate::plan::{GpuNode, NodeRef, as_node_ref};
+
+    fn preorder<'a>(node: &'a dyn GpuNode, out: &mut Vec<&'a dyn GpuNode>) {
+        out.push(node);
+        for child in node.children() {
+            preorder(child, out);
+        }
+    }
+
+    let sql = "select c_name from customer where c_custkey + c_nationkey < 0 order by c_name;";
+    sql_answers_match_datafusion("tpch", "empty-merge", sql, None, Coverage::ModesOnly).await;
+    let data_dir = data_dir_for("tpch", "1");
+    let (mut sorts_fed, mut merges_fed) = (0, 0);
+    for mode in &MODES {
+        let name = mode.name;
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.target_partitions),
+            &data_dir,
+        )
+        .await
+        .expect("register the tables");
+        let plan = ctx
+            .sql(sql)
+            .await
+            .expect("the query plans")
+            .create_physical_plan()
+            .await
+            .expect("the query has a physical plan");
+        let (tree, _memory) = planner::plan(&plan, mode.knobs())
+            .unwrap_or_else(|error| panic!("empty-merge at {name}: {error}"));
+        let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+            .unwrap_or_else(|error| panic!("empty-merge at {name}: {error}"));
+        let mut nodes = Vec::new();
+        preorder(tree.as_ref(), &mut nodes);
+        for (at, node) in nodes.iter().enumerate() {
+            let merges = match as_node_ref(*node) {
+                NodeRef::AccumulateBatchesAndSort(_) => false,
+                NodeRef::MergeSortedPartitions(_) => true,
+                _ => continue,
+            };
+            // Both have one child, which is the next node in preorder. A sort owes per lane;
+            // the merge owes once, on its one lane, if any input lane sent a batch.
+            let fed: Vec<bool> = report.emitted[at + 1]
+                .iter()
+                .map(|lane| !lane.is_empty())
+                .collect();
+            let owed: Vec<bool> = match merges {
+                true => vec![fed.iter().any(|sent| *sent)],
+                false => fed,
+            };
+            assert_eq!(
+                report.emitted[at].len(),
+                owed.len(),
+                "{} lanes",
+                node.name()
+            );
+            for (lane, (out, owes)) in report.emitted[at].iter().zip(&owed).enumerate() {
+                let rows: Vec<u64> = out.iter().map(|batch| batch.rows).collect();
+                let expected: Vec<u64> = if *owes { vec![0] } else { Vec::new() };
+                assert_eq!(
+                    rows,
+                    expected,
+                    "empty-merge at {name}: {} lane {lane}",
+                    node.name()
+                );
+            }
+            let fed_lanes = owed.iter().filter(|owes| **owes).count();
+            match merges {
+                true => merges_fed += fed_lanes,
+                false => sorts_fed += fed_lanes,
+            }
+        }
+    }
+    assert!(
+        sorts_fed > 0,
+        "no mode fed an accumulating sort a zero-row batch"
+    );
+    assert!(merges_fed > 0, "no mode fed a merge a zero-row batch");
+}
 
 // ── the aggregate that stops aggregating ────────────────────────────────────
 

@@ -629,3 +629,49 @@ fn an_early_exit_leaks_nothing_even_though_it_leaves_work_behind() {
     );
     assert_eq!(report.in_flight_bytes, 0);
 }
+
+/// A sink that received no batch still answers: one batch of zero rows under the columns its
+/// input declares. The driver makes it, so no node emitted it and no call moved it.
+#[test]
+fn a_sink_that_received_nothing_answers_one_zero_row_batch_under_its_inputs_columns() {
+    let script = Script::default().source("part", vec![vec![]]);
+    let report = run(unload(coalesce_all(source("part", 1))).as_ref(), &script);
+    assert_eq!(report.batches.len(), 1, "one batch, not none");
+    let answer = report.batches[0].record_batch();
+    assert_eq!(answer.num_rows(), 0);
+    assert_eq!(
+        answer.schema(),
+        schema().fields,
+        "the sink's input's columns"
+    );
+    assert_eq!(
+        count(&report, CallKind::Unload),
+        0,
+        "no unload call made it"
+    );
+    assert!(
+        report.emitted[crate::executor::ROOT]
+            .iter()
+            .all(Vec::is_empty),
+        "and the sink is not recorded as having emitted it"
+    );
+    assert_eq!(report.holds, report.releases);
+    assert_eq!(report.in_flight_bytes, 0);
+}
+
+/// Zero-row batches that reached the sink are the answer as they are, one per lane, and the
+/// driver adds none.
+#[test]
+fn zero_row_batches_that_reached_the_sink_are_the_answer_and_none_is_added() {
+    let script = Script::default()
+        .source("part", vec![vec![spec(10, 80)], vec![spec(10, 80)]])
+        .with_exec(ExecRule::Empty);
+    let report = run(unload(filter(source("part", 2))).as_ref(), &script);
+    assert_eq!(
+        report.batches.len(),
+        2,
+        "one per lane, as the sink unloaded them"
+    );
+    assert_eq!(rows_returned(&report), 0);
+    assert_eq!(count(&report, CallKind::Unload), 2);
+}

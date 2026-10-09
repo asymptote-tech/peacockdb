@@ -20,7 +20,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#217 — a sort with `fetch 0` keeps every row on the device](#t217)
   - [#204 — the device's sorted merge drops its fetch when it is handed one input](#t204)
   - [#214 — a limit drops a zero-row batch on both backends](#t214)
-  - [#205 — the cpu's accumulating sort and merge answer nothing over zero-row batches](#t205)
 - [Scalars](#scalars)
   - [#168 — interval type can not be represented in the fbs ScalarValue](#t168)
   - [#210 — a bare decimal literal on the AST path comes back as a Float64 column](#t210)
@@ -191,7 +190,9 @@ finalizes it (count 0, the rest NULL); a merge never meets no arrival, and its c
 not NULL. Every aggregate sequence starts with a `GpuAggregate` (`aggregate_sequence`, its only
 builder), so the init covers them all. The driver owes the done call to every lane, one that saw
 no batch included — today such a lane gets no call. Sources of nothing below the init (#214's
-limit, #205's sort, the joins) need no fix of their own for this; between init and merge a keyless
+limit and the joins; the cpu's sort and merge stopped being one with
+[#205](../archive/archived-tickets.md#t205)) need no fix of their own for this; between init and
+merge a keyless
 sequence only collapses lanes, which keeps the one-row batch. The cpu's `!self.grouped` clause, which
 merges over nothing, goes, and the nine #180 cells turn on at the tp4 modes.
 
@@ -342,7 +343,8 @@ A `GpuLimit` handed a batch of zero rows emits nothing for it, on the cpu and on
 Both `LimitStream`s take their cut from the one `RowInterval::range_of` (`plan/interval.rs`),
 which answers `None` when `start < stop` is false — and it is false for `n_rows == 0` whatever
 the interval — so the batch is released as if it lay outside the interval. Nothing and a zero-row
-batch are different arrivals downstream, as #205 says: a build side of `filter → limit → coalesce`
+batch are different arrivals downstream, as [#205](../archive/archived-tickets.md#t205) said: a
+build side of `filter → limit → coalesce`
 with zero survivors reaches `without_build` and #212's refusal for Right, Full and RightAnti,
 where the same filter without the limit pads and answers. Symmetric, so the harness's cpu-vs-device
 comparison is green by construction. Pinned by `bug_a_stream_of_one_zero_row_batch_is_dropped_on_both`
@@ -361,43 +363,6 @@ one-call forms make their call over zero rows — a hash LeftAnti/LeftMark with 
 (every build row, or every row marked false) and a nested-loop Left (the build rows padded); both
 answer nothing today, on both backends, unticketed. The keyless aggregate's same gap, both
 its sites, is #199's and deferred. Then this ticket drops with its three `bug_` pins.
-
-<a id="t205"></a>
-### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
-
-A `GpuAccumulateBatchesAndSort` or `GpuMergeSortedPartitions` whose only batches have zero rows
-emits no batch on the cpu, where the device emits one of zero rows.
-
-DataFusion's `SortExec` over zero rows yields no batch at all, and `SortedRuns::mark_done_and_fetch`
-and `CpuPartitionAccumulator::accumulate_and_fetch` (`cpu_backend/accumulate.rs`) hand that empty
-answer to `coalesce_or_nothing`, which reads it as the lane that received nothing. `CpuExec::exec` concatenates
-the same empty answer under the declared schema and gets zero rows, and the cpu coalesce does too, so
-the two cpu paths disagree with each other as well as with the device. Downstream, nothing and a
-zero-row batch are different arrivals: a global merge over nothing is #199's site. Pinned by
-`bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu` and its two neighbours
-(`gpu_tests/accumulate_cases.rs`). First corpus cell to reach it: `tpcds/q17` at `tp1-single`,
-which answers zero rows — 12 bytes at the device's unload against the cpu's 0 (2026-09-17).
-
-**Corpus queries:** `tpcds/q17` at `tp1-single`, the only enabled corpus query that answers zero
-rows (`mini.result.txt`). Its device cell is off on this ticket (`corpus_cases.inc`); the device
-never ran its other four modes. The 12 bytes are the device's one zero-row batch: three `Utf8`
-columns, one 4-byte offset each. Simplest shape, unconfirmed on a build:
-`select n_name from nation where n_nationkey < 0 order by n_name;` (tpch).
-
-**Fix proposed:** in `cpu_backend/accumulate.rs`, skip the sort when every held batch has zero
-rows. `SortedRuns::mark_done_and_fetch` and `CpuPartitionAccumulator::accumulate_and_fetch` at the
-last `Done` then pass the held batches to `coalesce_or_nothing`. It concatenates them into one
-zero-row batch under the schema, as the device answers. The fetch has no rows to cut. No arrival
-at all stays nothing, as now. The three `bug_` pins become green `same` cases, and `tpcds/q17`'s
-device cell turns on at `tp1-single`, its comment in `corpus_cases.inc` updated.
-
-An empty answer must still have a schema. A query that answers zero rows answers them under its
-declared columns, never as no batch at all: today `tpcds/q17`'s `mini.result.txt` section is a bare
-`++`/`++`, with no column names or types, so nothing checks them, and DuckDB's answer
-(`duckdb-result.txt`, #235) prints the header ours lacks. Beside the fix above, the unload answers a
-query whose root received nothing with one zero-row batch under the sink's declared schema, on both
-backends, so an answer's schema never depends on how its rows ran out. `q17`'s result section is
-then regenerated with its header, and #235's empty-answer divergence goes.
 
 ## Scalars
 

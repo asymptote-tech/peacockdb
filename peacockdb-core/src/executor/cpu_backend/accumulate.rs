@@ -204,18 +204,7 @@ impl SortedRuns {
     }
 
     fn mark_done_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
-        if self.held.is_empty() {
-            return Ok((Vec::new(), CallStats::default()));
-        }
-        let sorted = run_node(&self.sort, vec![self.held], &self.ctx)?;
-        let (ordered, _) = coalesce_or_nothing(&self.schema, &sorted)?;
-        Ok((
-            ordered
-                .into_iter()
-                .map(|batch| first_rows(batch, self.fetch))
-                .collect(),
-            CallStats::default(),
-        ))
+        sorted_and_cut(&self.sort, self.held, self.fetch, &self.schema, &self.ctx)
     }
 }
 
@@ -261,18 +250,13 @@ impl CpuPartitionAccumulator {
             .into_iter()
             .flatten()
             .collect();
-        if partition_major.is_empty() {
-            return Ok((Vec::new(), CallStats::default()));
-        }
-        let sorted = run_node(&self.sort, vec![partition_major], &self.ctx)?;
-        let (ordered, _) = coalesce_or_nothing(&self.schema, &sorted)?;
-        Ok((
-            ordered
-                .into_iter()
-                .map(|batch| first_rows(batch, self.fetch))
-                .collect(),
-            CallStats::default(),
-        ))
+        sorted_and_cut(
+            &self.sort,
+            partition_major,
+            self.fetch,
+            &self.schema,
+            &self.ctx,
+        )
     }
 }
 
@@ -284,6 +268,34 @@ fn first_rows(batch: CpuBatch, fetch: Option<usize>) -> CpuBatch {
         Some(fetch) if fetch < batch.num_rows() => CpuBatch::new(batch.slice(0, fetch)),
         _ => CpuBatch::new(batch),
     }
+}
+
+/// Every held batch as one ordered stream, cut to the fetch and answered as one batch, and
+/// nothing where nothing arrived.
+///
+/// Batches that arrived holding no row are concatenated, not sorted: DataFusion's sort
+/// answers zero rows with no batch at all, which [`coalesce_or_nothing`] would read as a lane
+/// that received nothing. The device answers one batch of zero rows there, as every other
+/// accumulator does. A fetch has no rows to cut.
+fn sorted_and_cut(
+    sort: &Arc<dyn ExecutionPlan>,
+    held: Vec<RecordBatch>,
+    fetch: Option<usize>,
+    schema: &SchemaRef,
+    ctx: &Arc<TaskContext>,
+) -> CallResult<Vec<CpuBatch>> {
+    if held.iter().all(|batch| batch.num_rows() == 0) {
+        return coalesce_or_nothing(schema, &held);
+    }
+    let sorted = run_node(sort, vec![held], ctx)?;
+    let (ordered, _) = coalesce_or_nothing(schema, &sorted)?;
+    Ok((
+        ordered
+            .into_iter()
+            .map(|batch| first_rows(batch, fetch))
+            .collect(),
+        CallStats::default(),
+    ))
 }
 
 /// Pre-aggregated state merged into pre-aggregated state, emitted at done.

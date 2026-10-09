@@ -28,6 +28,51 @@ one that goes nowhere.
 
 ## Done
 
+<a id="t205"></a>
+### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
+
+A `GpuAccumulateBatchesAndSort` or `GpuMergeSortedPartitions` whose only batches have zero rows
+emits no batch on the cpu, where the device emits one of zero rows.
+
+DataFusion's `SortExec` over zero rows yields no batch at all, and `SortedRuns::mark_done_and_fetch`
+and `CpuPartitionAccumulator::accumulate_and_fetch` (`cpu_backend/accumulate.rs`) hand that empty
+answer to `coalesce_or_nothing`, which reads it as the lane that received nothing. `CpuExec::exec` concatenates
+the same empty answer under the declared schema and gets zero rows, and the cpu coalesce does too, so
+the two cpu paths disagree with each other as well as with the device. Downstream, nothing and a
+zero-row batch are different arrivals: a global merge over nothing is #199's site. Pinned by
+`bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu` and its two neighbours
+(`gpu_tests/accumulate_cases.rs`). First corpus cell to reach it: `tpcds/q17` at `tp1-single`,
+which answers zero rows — 12 bytes at the device's unload against the cpu's 0 (2026-09-17).
+
+**Corpus queries:** `tpcds/q17` at `tp1-single`, the only enabled corpus query that answers zero
+rows (`mini.result.txt`). Its device cell is off on this ticket (`corpus_cases.inc`); the device
+never ran its other four modes. The 12 bytes are the device's one zero-row batch: three `Utf8`
+columns, one 4-byte offset each. Simplest shape, unconfirmed on a build:
+`select n_name from nation where n_nationkey < 0 order by n_name;` (tpch).
+
+**Fix proposed:** in `cpu_backend/accumulate.rs`, skip the sort when every held batch has zero
+rows. `SortedRuns::mark_done_and_fetch` and `CpuPartitionAccumulator::accumulate_and_fetch` at the
+last `Done` then pass the held batches to `coalesce_or_nothing`. It concatenates them into one
+zero-row batch under the schema, as the device answers. The fetch has no rows to cut. No arrival
+at all stays nothing, as now. The three `bug_` pins become green `same` cases, and `tpcds/q17`'s
+device cell turns on at `tp1-single`, its comment in `corpus_cases.inc` updated.
+
+An empty answer must still have a schema. A query that answers zero rows answers them under its
+declared columns, never as no batch at all: today `tpcds/q17`'s `mini.result.txt` section is a bare
+`++`/`++`, with no column names or types, so nothing checks them, and DuckDB's answer
+(`duckdb-result.txt`, #235) prints the header ours lacks. Beside the fix above, the unload answers a
+query whose root received nothing with one zero-row batch under the sink's declared schema, on both
+backends, so an answer's schema never depends on how its rows ran out. `q17`'s result section is
+then regenerated with its header, and #235's empty-answer divergence goes.
+
+> **Done.** The accumulating sort and merge answer held batches with no row as one zero-row
+> batch, unsorted (`sorted_and_cut`, `cpu_backend/accumulate.rs`). A query whose sink received
+> nothing answers one zero-row batch under the sink's input schema, made by the driver
+> (`Driver::answer`, `driver/partitioned.rs`). The corpus and end-to-end oracles give
+> DataFusion's empty answer its columns the same way. q17's result section carries its header.
+> The three `bug_` pins are agreement cases, and the mixed merge has one, built and not run
+> (#281).
+
 <a id="t186"></a>
 ### #186 — a limit pushed into the scan: the cpu ignores it, the device refuses it
 

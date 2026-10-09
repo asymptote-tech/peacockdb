@@ -169,7 +169,7 @@ So the result section's header comes from the driver's rule, not from the sort f
 &SessionContext, sql: &str, what: &str) -> Vec<RecordBatch>` (async, `pub(crate)`), for the corpus
 and the end-to-end tier. No signature changes.
 
-- [ ] **Step 1: Recheck which corpus queries answer zero rows.** Write the scan outside the tree:
+- [x] **Step 1: Recheck which corpus queries answer zero rows.** Write the scan outside the tree:
 
 ```bash
 mkdir -p /tmp/empty-sorts && cat > /tmp/empty-sorts/scan.awk <<'EOF'
@@ -204,7 +204,7 @@ testdata/goldens/tpcds.sf1/tp4-sized-mini.cpu.txt: q17: GpuUnload answered zero 
   Task 2 (add it to Task 2's Step 8 and Step 13 expectations). Write every extra line into
   `empty-sorts-detail.md`.
 
-- [ ] **Step 2: Write the driver cases.** At the end of `flow.rs` (it already imports `ExecRule`,
+- [x] **Step 2: Write the driver cases.** At the end of `flow.rs` (it already imports `ExecRule`,
   `Script`, `spec` and `plans::*`):
 
 ```rust
@@ -261,7 +261,7 @@ fn a_zero_fetch_answers_one_zero_row_batch_under_the_sinks_input_columns() {
   `assert_accounted` in the first case: no batch carries bytes, so its non-zero peak check is
   not about this.
 
-- [ ] **Step 3: Run them.**
+- [x] **Step 3: Run them.**
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- executor::driver::tests
@@ -270,7 +270,7 @@ timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- executor
   Expected: `a_sink_that_received_nothing…` and `a_zero_fetch_answers…` FAIL with `left: 0,
   right: 1`. `zero_row_batches_that_reached_the_sink…` PASSES: it guards against an added batch.
 
-- [ ] **Step 4: Implement.** In `partitioned.rs` add `use datafusion::arrow::array::RecordBatch;`
+- [x] **Step 4: Implement.** In `partitioned.rs` add `use datafusion::arrow::array::RecordBatch;`
   and, beside `report`:
 
 ```rust
@@ -304,7 +304,7 @@ timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- executor
     /// under the sink's input schema.
 ```
 
-- [ ] **Step 5: Run the driver tests; check the file budget.**
+- [x] **Step 5: Run the driver tests; check the file budget.**
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- executor::driver
@@ -315,7 +315,7 @@ wc -l peacockdb-core/src/executor/driver/partitioned.rs
   (`rows_returned`), and an added zero-row batch sums to nothing. `wc -l` prints under 1000; at
   1000 or more, cut `answer`'s doc to its first sentence.
 
-- [ ] **Step 6: Write the end-to-end case**, after the `end_to_end!` lines in `end_to_end.rs`:
+- [x] **Step 6: Write the end-to-end case**, after the `end_to_end!` lines in `end_to_end.rs`:
 
 ```rust
 /// Zero rows through an ordered query at every mode: the answer is one column named `n_name`,
@@ -329,7 +329,7 @@ async fn an_empty_ordered_answer_keeps_its_column() {
 }
 ```
 
-- [ ] **Step 7: Run it, and q17's cells.**
+- [x] **Step 7: Run it, and q17's cells.**
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- tests::end_to_end::an_empty_ordered_answer_keeps_its_column
@@ -342,7 +342,7 @@ timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_c
   — expected [], actual [...]`, the fifteen names. If the end-to-end case passes here, DataFusion
   answered this query with a zero-row batch; the q17 cells are then this step's red.
 
-- [ ] **Step 8: The oracle's empty answer.** In `corpus.rs`, `use std::sync::{Mutex, OnceLock};`
+- [x] **Step 8: The oracle's empty answer.** In `corpus.rs`, `use std::sync::{Mutex, OnceLock};`
   becomes `use std::sync::{Arc, Mutex, OnceLock};`, and `collect` is replaced by the following,
   its two callers (`oracle_rows`, `count_of`) calling `oracle_answer` instead:
 
@@ -396,7 +396,7 @@ pub(crate) async fn oracle_answer(
   `distinct_functions_answer_as_their_hand_lowered_form`'s engine SQL to DataFusion, which
   refuses `stddev(DISTINCT)`.
 
-- [ ] **Step 9: Run again.** The two commands of Step 7, then the oracle-variant case:
+- [x] **Step 9: Run again.** The two commands of Step 7, then the oracle-variant case:
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- tests::end_to_end::distinct_functions_answer_as_their_hand_lowered_form
@@ -407,21 +407,21 @@ timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- tests::e
   tp4-sized is the mode that authors it (`corpus.rs`, `authoritative_mode`), and the section now
   holds a header. The four others PASS: no `.cpu.txt` moved.
 
-- [ ] **Step 10: Regenerate q17's result section.**
+- [x] **Step 10: Regenerate q17's result section.**
 
 ```bash
 timeout 3600 env PCK_UPDATE_SECTIONS=1 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- cpu_tpcds_q17_ --test-threads=2
 git diff --stat testdata/
 ```
 
-- [ ] **Step 11: Read the diff.** Expected `--stat`: `testdata/goldens/tpcds.sf1/mini.result.txt`
+- [x] **Step 11: Read the diff.** Expected `--stat`: `testdata/goldens/tpcds.sf1/mini.result.txt`
   alone, q17's `++`/`++` becoming the bordered 15-column header (`i_item_id`, `i_item_desc`,
   `s_state`, then the twelve `store_sales_quantitycount` … `catalog_sales_quantitycov`), four
   lines under `mode=tp4-sized`. A `.cpu.txt` or `.cost.txt` in the list means the driver's batch
   reached `emitted`: go back to Step 4. A section missing from a file is #213's lost section:
   refill it with `PCK_UPDATE_SECTIONS=1` and `--exact`.
 
-- [ ] **Step 12: Verify.**
+- [x] **Step 12: Verify.**
 
 ```bash
 timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- tpcds_q17 registry --test-threads=2
@@ -440,7 +440,7 @@ git status --short
 
   Restore with `git checkout --` any file `git status` lists that this task did not touch.
 
-- [ ] **Step 13: Commit.**
+- [ ] **Step 13: Commit.** *(the coordinator commits; the developer leaves the work in the tree)*
 
 ```bash
 git add peacockdb-core/src/executor/driver/partitioned.rs peacockdb-core/src/executor/mod.rs peacockdb-core/src/executor/driver/tests/flow.rs peacockdb-core/src/executor/driver/tests/limit.rs peacockdb-core/src/test_support/corpus.rs peacockdb-core/src/test_support/mod.rs peacockdb-core/src/tests/end_to_end.rs testdata/goldens/tpcds.sf1/mini.result.txt
@@ -471,7 +471,7 @@ EOF
 
 **Interfaces:** none produced; `sorted_and_cut` is private to `accumulate`.
 
-- [ ] **Step 1: Write the sort cases** in `cpu_backend/tests/accumulate.rs`, after
+- [x] **Step 1: Write the sort cases** in `cpu_backend/tests/accumulate.rs`, after
   `a_fetch_keeps_the_rows_whose_keys_win_and_keeps_the_same_ones`:
 
 ```rust
@@ -528,7 +528,7 @@ fn a_zero_row_batch_among_rows_is_sorted_with_them() {
 }
 ```
 
-- [ ] **Step 2: Write the merge cases**, after `a_fetch_over_the_merge_keeps_the_top_of_every_lane_together`:
+- [x] **Step 2: Write the merge cases**, after `a_fetch_over_the_merge_keeps_the_top_of_every_lane_together`:
 
 ```rust
 /// Every lane's only arrival a zero-row batch: one zero-row batch at the last done, whatever
@@ -564,7 +564,7 @@ fn a_merge_whose_lanes_received_nothing_emits_nothing() {
 }
 ```
 
-- [ ] **Step 3: Write the integration case** in `end_to_end.rs`, after
+- [x] **Step 3: Write the integration case** in `end_to_end.rs`, after
   `an_empty_ordered_answer_keeps_its_column`. The nation query is one lane at every mode, and the
   answer cannot tell the sort fix from the driver's; customer is two row groups (lanes
   `[[0]],[[1]],[],[]` at tp4-single), so the tp4 modes feed the merge two lanes of zero-row
@@ -647,7 +647,7 @@ async fn an_empty_sort_and_merge_each_emit_one_zero_row_batch() {
 }
 ```
 
-- [ ] **Step 4: Run them.**
+- [x] **Step 4: Run them.**
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- executor::cpu_backend::tests::accumulate
@@ -665,7 +665,7 @@ timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- tests::e
   the tp4 plan text in the detail file and stop, since the merge half then has no integration
   case.
 
-- [ ] **Step 5: Implement.** In `accumulate.rs`, add the helper after `first_rows`:
+- [x] **Step 5: Implement.** In `accumulate.rs`, add the helper after `first_rows`:
 
 ```rust
 /// Every held batch as one ordered stream, cut to the fetch and answered as one batch, and
@@ -715,7 +715,7 @@ fn sorted_and_cut(
   The helper's `all` is vacuously true over no batch, so `coalesce_or_nothing` answers nothing
   there. That is why both `is_empty` early returns go.
 
-- [ ] **Step 6: Run the cpu backend and both end-to-end cases.**
+- [x] **Step 6: Run the cpu backend and both end-to-end cases.**
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- executor::cpu_backend
@@ -724,7 +724,7 @@ timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- tests::e
 
   Expected: PASS, the eight unit cases and both `an_empty…` cases included.
 
-- [ ] **Step 7: q17's tp1 cells.**
+- [x] **Step 7: q17's tp1 cells.**
 
 ```bash
 timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- cpu_tpcds_q17_ --test-threads=2
@@ -733,7 +733,7 @@ timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_c
   Expected: `cpu_tpcds_q17_tp1_single` and `cpu_tpcds_q17_tp1_rowgroup` FAIL on their `.cpu.txt`
   sections; the three tp4 cells PASS.
 
-- [ ] **Step 8: Regenerate them.**
+- [x] **Step 8: Regenerate them.**
 
 ```bash
 timeout 3600 env PCK_UPDATE_SECTIONS=1 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- cpu_tpcds_q17_tp1 --test-threads=2
@@ -744,7 +744,7 @@ git diff --stat testdata/
   `tp1-rowgroup-mini.cpu.txt` and `tp1-rowgroup-mini.cost.txt`, plus any section Task 1 Step 1
   added.
 
-- [ ] **Step 9: Read the diff.**
+- [x] **Step 9: Read the diff.**
   - `.cpu.txt`: q17's `GpuUnload` and `GpuAccumulateBatchesAndSort` stats lines go from
     `batch_rows=[[]] batch_bytes=[[]]` to `batch_rows=[[0]] batch_bytes=[[12]]`, and their
     `output_bytes` from 0 to 12, the byte size the `GpuSort` below already prints (three `Utf8`
@@ -753,14 +753,14 @@ git diff --stat testdata/
     (293556446 → 293556470 at tp1-single).
   - A tp4 file in the list means the merge changed what it emits over nothing: go back to Step 5.
 
-- [ ] **Step 10: The corpus line's comment and the registry.** In `corpus_cases.inc`, the T19
+- [x] **Step 10: The corpus line's comment and the registry.** In `corpus_cases.inc`, the T19
   batch 19 comment's clause `q17 answers zero rows, and the cpu's accumulating sort emits nothing
   where the device emits the zero-row batch (#205);` becomes `q17 (zero rows) waits on its first
   device run (#281);`. The line itself does not change: its device modes stay `none`. In
   `testdata/cost-registry.csv`, q17's tpcds row ends `…,ok,stddev_var avg top_n,281` (was `205`).
   A disabled cell must name a ticket (`registry.rs:236`), and #281 holds all five.
 
-- [ ] **Step 11: Verify.**
+- [x] **Step 11: Verify.**
 
 ```bash
 timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- tpcds_q17 registry --test-threads=2
@@ -773,7 +773,7 @@ git status --short
   Expected: PASS; the cpu registry test is green in both directions. Restore with
   `git checkout --` any file rustfmt touched that this task did not.
 
-- [ ] **Step 12: Commit.**
+- [ ] **Step 12: Commit.** *(the coordinator commits; the developer leaves the work in the tree)*
 
 ```bash
 git add peacockdb-core/src/executor/cpu_backend/accumulate.rs peacockdb-core/src/executor/cpu_backend/tests/accumulate.rs peacockdb-core/src/tests/end_to_end.rs testdata/goldens/tpcds.sf1 peacockdb-core/tests/common/corpus_cases.inc testdata/cost-registry.csv
@@ -788,7 +788,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
 
-- [ ] **Step 13: The cost gate, locally.** The same diff CI's `cost-report` job runs
+- [x] **Step 13: The cost gate, locally.** The same diff CI's `cost-report` job runs
   (`pipeline.yml:886-939`), against the PR's base, `ENS-limits`, with its outputs outside the
   tree (`--html` defaults to `cost_diff.html` in the working directory):
 
@@ -822,7 +822,7 @@ cat /tmp/empty-sorts/cost_diff.md
 
 These are device-tier tests. They are built here, not run, and their first run is #281's.
 
-- [ ] **Step 1: Replace the three `bug_` cases**, each with its `// #205 —` comment, in place.
+- [x] **Step 1: Replace the three `bug_` cases**, each with its `// #205 —` comment, in place.
   `bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu` becomes:
 
 ```rust
@@ -873,7 +873,7 @@ operator_case! {
   `each_answers` stays imported: `bug_a_fetch_over_one_sorted_batch_is_not_applied_on_the_device`
   (#204) and the descending-key `bug_` case still call it.
 
-- [ ] **Step 2: Build the device tier, no run.** `cpp/build` as limits left it; if it is absent,
+- [x] **Step 2: Build the device tier, no run.** `cpp/build` as limits left it; if it is absent,
   first `timeout 3600 scripts/build.sh --configure --build --cudf_ROOT
   ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12`.
 
@@ -886,7 +886,7 @@ grep -c 'bug_.*_on_the_cpu' peacockdb-core/src/tests/gpu_tests/accumulate_cases.
   Expected: both builds succeed with no new warning (the device corpus reads `report.batches`,
   whose type did not change). The grep prints `0`. rustfmt `accumulate_cases.rs` alone.
 
-- [ ] **Step 3: Commit.**
+- [ ] **Step 3: Commit.** *(the coordinator commits; the developer leaves the work in the tree)*
 
 ```bash
 git add peacockdb-core/src/tests/gpu_tests/accumulate_cases.rs
@@ -937,13 +937,13 @@ The list, as of `origin/ENS-duckdb-oracle` (0df60133); find each with
    `duckdb_tpcds_q17`, `q58`, `q61`, `q66`" → three, without q17, and its "Six cases are in the
    class, not four" → "Five …, not three".
 
-- [ ] **Step 1: Which case.**
+- [x] **Step 1: Which case.** **Answered `not-merged`** (2026-10-09, round 1): no `duckdb_oracle.rs` under `test_support/`. Step 2b taken; nothing touches DuckDB.
 
 ```bash
 test -f peacockdb-core/src/test_support/duckdb_oracle.rs && echo merged || echo not-merged
 ```
 
-- [ ] **Step 2a: `merged`.** Make the six edits above, then:
+- [~] **Step 2a: `merged`.** Make the six edits above, then: *(not taken: the condition is `not-merged`)*
 
 ```bash
 timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- duckdb_tpcds_q17 --test-threads=2
@@ -961,19 +961,27 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
 
-- [ ] **Step 2b: `not-merged`.** No code touches DuckDB, as the spec says. Nothing to commit here;
+- [x] **Step 2b: `not-merged`.** No code touches DuckDB, as the spec says. Nothing to commit here;
   Task 5 Step 5 writes the list into #235.
 
 ---
 
 ### Task 5: The wiki, #205 archived, and the full bar
 
+> **Ownership, round 1.** The dispatch reserves `llm-wiki/` to the coordinator except
+> `empty-sorts-impl.md`, `empty-sorts-detail.md` and `build-test.md`'s counts, which overrides
+> this plan's Steps 1, 3, 4 and 5 and the spec's Scope row for `architecture.md` and `tickets/`.
+> The developer wrote and verified those four steps, then reverted them; the exact text of each
+> is in `empty-sorts-detail.md` under "Round 1 evidence" → "Prepared but not applied", with the
+> saved diff at `/tmp/empty-sorts/wiki-coordinator.patch`. Step 2 (the counts) and Steps 6 and 7
+> (the bar and the cost gate) are done.
+
 **Files:**
 - Modify: `llm-wiki/architecture.md` (~l.647-650, ~l.779-781), `llm-wiki/build-test.md`,
   `llm-wiki/tickets.md`, `llm-wiki/tickets/corpus-coverage.md`, `llm-wiki/archive/archived-tickets.md`,
   `llm-wiki/tasks/empty-sorts-detail.md`
 
-- [ ] **Step 1: `architecture.md`.**
+- [ ] **(coordinator — see below)** **Step 1: `architecture.md`.**
   - "Zero-row batches change no answer", the last bullet becomes: "- A producer that drops a
     zero-row batch exposes the breaks above: the limit
     ([#214](tickets/corpus-coverage.md#t214))."
@@ -983,7 +991,7 @@ EOF
     `results`); the engine's answers one zero-row batch under the sink's input columns
     (`Driver::answer`)."
 
-- [ ] **Step 2: `build-test.md`.** Recount from the code as limits left it, then apply these
+- [x] **Step 2: `build-test.md`.** Recount from the code as limits left it, then apply these
   deltas:
 
 | row | delta | description change |
@@ -999,12 +1007,12 @@ EOF
   The device corpus row's "the device's own tickets (#57, #63, #205)" names #281 in place of
   #205, unless limits already added #281 there.
 
-- [ ] **Step 3: #281 names q17 at every device mode.** In `corpus-coverage.md`, #281's
+- [ ] **(coordinator — see below)** **Step 3: #281 names q17 at every device mode.** In `corpus-coverage.md`, #281's
   "**Corpus queries:** `tpch/scan-limit` and `tpch/nested-limits` at every device mode, and
   `tpcds/q17` at `tp1-single`" → "`tpch/scan-limit`, `tpch/nested-limits` and `tpcds/q17` at every
   device mode": q17's registry row names #281 alone (Task 2 Step 10), for all five device cells.
 
-- [ ] **Step 4: Archive #205.** Move its block, anchor included, from `corpus-coverage.md` to the
+- [ ] **(coordinator — see below)** **Step 4: Archive #205.** Move its block, anchor included, from `corpus-coverage.md` to the
   top of `archive/archived-tickets.md`'s `## Done`, and append:
 
   > **Done.** The accumulating sort and merge answer held batches with no row as one zero-row
@@ -1018,7 +1026,7 @@ EOF
   Remove #205 from `corpus-coverage.md`'s contents list (l.24) and from `tickets.md`'s
   corpus-coverage row. Decrement that row's count and the open total.
 
-- [ ] **Step 5: Sentences #205's fix falsified.**
+- [ ] **(coordinator — see below)** **Step 5: Sentences #205's fix falsified.**
   - `corpus-coverage.md`, #199's fix: "Sources of nothing below the init (#214's limit, #205's
     sort, the joins)" → "(#214's limit, the joins)".
   - `corpus-coverage.md`, #235's expected divergences, only if #235 is still open (Task 4 took
@@ -1037,7 +1045,7 @@ EOF
   - "as #205 says" in #214 (`corpus-coverage.md`) and the cross-join ticket (`joins.md`) stay as
     they are. The number resolves in the archive.
 
-- [ ] **Step 6: The full bar.**
+- [x] **Step 6: The full bar.**
 
 ```bash
 timeout 3600 cargo test --features rust-only -p peacockdb-core --lib -- --test-threads=2
@@ -1052,7 +1060,7 @@ git diff --stat "$(git merge-base HEAD ENS-limits)"..HEAD -- testdata/
   `mini.result.txt`, the four tp1 goldens and the registry row, plus any section Task 1 Step 1
   added. The device tier was built in Task 3 and is not run (#281).
 
-- [ ] **Step 7: The cost gate over the whole branch.** Step 13 of Task 2's command again:
+- [x] **Step 7: The cost gate over the whole branch.** Step 13 of Task 2's command again:
 
 ```bash
 base=$(git merge-base HEAD ENS-limits)
@@ -1062,7 +1070,7 @@ timeout 900 cargo run -q -p cost-report -- --cost-diff --base "$base" --html /tm
   Expected: the same 🔴 rows Task 2 Step 13 recorded and no other. A new row goes into
   `empty-sorts-detail.md` beside them, with the commit that moved it.
 
-- [ ] **Step 8: Commit.**
+- [ ] **Step 8: Commit.** *(the coordinator commits; the developer leaves the work in the tree)*
 
 ```bash
 git add llm-wiki
