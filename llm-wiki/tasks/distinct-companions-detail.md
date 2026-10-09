@@ -1279,3 +1279,71 @@ beyond what reopening this task was for. Nothing is wrong today — distinct-fun
 five modes, so its mask has no dead entry. **Whoever enables q28's or `rollup-distinct`'s device
 cells should read this paragraph first**, since those are the two lines a mask would next be
 written for.
+
+### Round 3: the mask's collateral — 2026-10-09
+
+Four items, all local; nothing reached the device, so the mask's device proof above still
+stands as taken.
+
+**The re-export, and the guard that could not spell it.** `test_support/mod.rs` reached the
+decoder with `pub(crate) use schema_validation::is_validated_at;` — the only re-export in
+`src/`, and `coding-style.md`'s Visibility section allows none. It is now the wrapper its two
+neighbours use, a `pub(crate) fn` whose body is one delegating call, carrying the same
+`#[cfg(not(feature = "rust-only"))]`.
+
+The guard that should have caught it tested `trim_start().starts_with("pub use ")`, so every
+restricted spelling walked through. It now reads `re_exports`, which strips the visibility —
+`pub`, `pub(crate)`, `pub(in …)` — with `test_code.rs`'s own `strip_visibility`, rather than
+carrying a second parser. Five near-miss cases went into
+`each_reader_sees_the_violation_and_not_its_near_miss`, including the plain `use` every file
+opens with and a restricted `fn`, which are the two shapes a widened reader could start
+mis-reading. The test is renamed `nothing_re_exports_a_child_through_its_parent`: it is no
+longer about one spelling.
+
+Shown going red, with the re-export put back and then reverted:
+
+    thread 'visibility::nothing_re_exports_with_pub_use' panicked at
+    peacockdb-core/tests/test_module_layout/visibility.rs:384:5:
+    a re-export is not allowed at any visibility — inline the declaration into mod.rs, or
+    into common.rs for what the implementation modules share; a sibling-reach item becomes a
+    `pub(crate) fn` whose body delegates:
+      test_support/mod.rs:621: pub(crate) use schema_validation::is_validated_at;
+
+**The `.inc` text reader.** `test_corpus_goldens/benchmark.rs` took the line's *last* `)` and
+justified it in a comment the mask falsified: "an argument list here carries no parentheses of
+its own". It does now. The parse still came out right by coincidence — the masked argument is
+last and the mask separates with `|` — but `// #225 (tp4 only)` on a line that already says
+`// #225` would have made `rsplit_once(')')` take the comment's bracket and die with "carries
+more than one invocation". The reader now drops the trailing comment first and takes the close
+as a suffix (`strip_suffix(");")`), with the two-invocations check kept as `!args.contains(");")`.
+`read_cases` keeps the path; `cases_in` is the same thing over text, which is what let the new
+case be a literal instead of a temp file.
+
+The new case holds both bracket shapes and was watched fail under the old reader:
+
+    assertion `left == right` failed: a line: "corpus_query!(… schema_validation_disabled(
+    tp4_single | tp4_sized)); // #225 (tp4 only)" carries more than one invocation
+      left: ""  right: ";"
+
+**The two nits.** The `.inc` top-of-file comment is back to ten lines, with the mask in the
+signature display as `schema_validation[(modes)]`. And both `cfg_attr`s in
+`schema_validation.rs` now say `feature = "rust-only"`, which is the condition the doc above
+them describes — `device_schema.rs`'s `from_ipc` is the precedent, with an identically gated
+caller. `not(test)` silenced nothing in a default build and would have hidden a real orphan.
+
+**Counts**, local only: `--lib` 628 passed / 2 ignored, `test_module_layout` 17,
+`test_corpus_goldens` 27 (the new case), `test_cpu_corpus` 567, `test_ci_coverage` 9,
+`test_cost_model` 3. No warnings, `rustfmt --check` clean on every file touched. `build-test.md`
+re-derived by summing both tables: first 1815, second's Rust rows 90 → Rust 1905, grand total
+2380.
+
+**On the declined nit, for whoever picks it up.** The paragraph above — a mask entry naming a
+mode its line does not run — was declined on the grounds that closing it needs the validation
+keyword on `CorpusDeclaration` and a cpu-side test over every line at five modes. That estimate
+is now too high, because this round made the text reader pure and gave it all eight fields:
+`cases_in` already hands back field 4, the line's gpu modes, beside field 7, the validation
+argument with its mask. The check is "every mask entry is one of this line's gpu modes" over
+`corpus_cases.inc`, in `benchmark.rs` beside the reader, with no declaration change and no
+device. It would also cover the `none` lines, which never reach the decoder at all. Left
+unbuilt deliberately — the decision was the coordinator's and it is still defensible — but the
+cheap route is on the table rather than the expensive one.

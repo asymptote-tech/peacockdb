@@ -591,24 +591,33 @@ pub(crate) fn cpu_oracle_mode(keyword: &str) -> CpuOracle {
 /// two case lists reach it and a malformed line has to say which file it is in.
 pub(crate) fn macro_invocations(path: &Path, name: &str) -> Vec<Vec<String>> {
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let at = path.display();
+    invocations_in(&text, name, &path.display().to_string())
+}
+
+/// The same over the text, so a line's shapes can be read without a file.
+///
+/// The trailing comment goes first and the close is the suffix, because neither end is a
+/// lone parenthesis: the last argument may carry a schema-validation mode mask's parens, and
+/// a comment naming a ticket may carry its own. Hunting the final `)` found whichever came
+/// last, which is the comment's as soon as one has a bracket in it.
+fn invocations_in(text: &str, name: &str, at: &str) -> Vec<Vec<String>> {
     let mut out = Vec::new();
     for line in text.lines() {
-        let Some(rest) = line.trim().strip_prefix(name) else {
+        let body = line.trim();
+        let body = body
+            .split_once("//")
+            .map_or(body, |(before, _)| before.trim());
+        let Some(rest) = body.strip_prefix(name) else {
             continue;
         };
         let opened = rest
             .strip_prefix('(')
             .unwrap_or_else(|| panic!("{at}: {line:?} does not open"));
-        // The last `)` rather than the first, with the tail asserted: a line may end in a
-        // comment naming its ticket, which is not a second invocation.
-        let (arguments, tail) = opened
-            .rsplit_once(')')
+        let arguments = opened
+            .strip_suffix(");")
             .unwrap_or_else(|| panic!("{at}: {line:?} does not close"));
-        let tail = tail.split_once("//").map_or(tail, |(before, _)| before);
-        assert_eq!(
-            tail.trim(),
-            ";",
+        assert!(
+            !arguments.contains(");"),
             "{at}: {line:?} carries more than one invocation"
         );
         out.push(split_arguments(arguments));
