@@ -95,3 +95,73 @@ four plan tasks before reporting leaves one commit nobody can bisect.
 Impl-plan tasks 1, 2, 3, 5 — the additive planner pieces, each green on today's executors —
 reporting after each for its own commit. Scoped before any executor change so the first review
 round can read the planner alone; tasks 6, 7 and 8 move both backends at once.
+
+#### Round 1, plan task 1 — one footer reader, and nullability on both trees
+
+Rust only; no device cycle and no fbs change, so the dispatch's fbs trap did not apply.
+
+**What shipped.** `planner/nulls.rs` → `planner/nullability.rs` (`mv`, unstaged — the whole
+rest of the file is byte-identical to the parent, so the only diff is the header, the imports
+and the new block). New `planner/parquet_nulls.rs`: `nulls_possible(Option<&Statistics>)`,
+the one "no statistic is not a promise of no nulls" rule, and `column_may_hold_null(path,
+column)` over every row group. `parquet_meta.rs` now calls `nulls_possible` instead of
+spelling the rule a second time. New `logical_can_be_null` + `join_can_be_null` +
+`scan_column_may_hold_null` in `nullability.rs`. New `planner/tests/logical_nullability.rs`,
+five cases. `url = "2"` in `peacockdb-core/Cargo.toml` (already pinned in `Cargo.lock`, so
+the lock moves by one line).
+
+**The plan's Join arm was wrong and its own test says so.** The sketch at
+`join-backend-impl.md` step 4 matched `LogicalPlan::Join(j) if j.join_type == JoinType::Inner`
+and let everything else fall to `_ => true`. Its own
+`an_outer_join_pads_and_so_nullable` asserts `!logical_can_be_null(c_custkey)` over a LEFT
+JOIN — the *preserved* side — which `_ => true` denies. Proved: with the arm restricted to
+Inner (`JoinType::Left => false` in the preserved match) that one assertion is the only
+failure. Shipped as `join_can_be_null`: the padded side is nullable whatever it holds, the
+preserved side answers from its own input, and a column name present on **both** sides
+returns `true` rather than picking the left one — an unqualified `Column` matches by name
+only (`DFSchema::index_of_column_by_name`), so guessing there is the false-negative shape the
+module's doc calls a wrong answer. The plan's sketch is corrected in place.
+
+**A fifth test, not in the plan.** `a_key_whose_row_groups_hold_a_null_is_nullable`, over
+tpcds `store_sales.ss_sold_date_sk` (129,850 NULLs at sf1 — the design §4.1 figure, measured
+and confirmed). The plan's four all assert over tpch, whose keys hold no NULLs, so a
+`nulls_possible` hardwired to `false` passes all four: without this case the footer reader's
+true direction is unproven. Proved red by that exact mutation — it was the only failure.
+
+**Red-green evidence, each mutation reverted and the revert read off `git diff`.**
+- Red before: `cargo test -p peacockdb-core --lib --features rust-only logical_nullability`
+  → `unresolved import crate::planner::nullability`.
+- Mutation A, `table_url.prefix()` in place of `Url::to_file_path` (the trap the plan names):
+  3 failed, 2 passed — the file never opens, `unwrap_or(true)` answers nullable.
+- Mutation B, `nulls_possible` → `false`: 1 failed (the tpcds case), 4 passed.
+- Mutation C, Left preserves nothing: 1 failed (`an_outer_join_pads_and_so_nullable`), 4 passed.
+- Green after: 5 passed.
+
+**Two things found, neither blocking.**
+- `parquet_meta/tests.rs`'s `a_column_can_be_null_only_where_a_surviving_row_group_holds_one`
+  passes with `nulls_possible` hardwired to `false`: tpch.minimal holds no NULLs anywhere, as
+  its own comment says, so it can only ever go red in one direction. Pre-existing and
+  deliberate; the other direction is now covered by the tpcds case above.
+- The installed rustfmt disagrees with the committed `nulls.rs` at three pre-existing sites
+  (the `meeting` closure, `NestedLoopJoinType::Left`, `Expr::Case`). Left alone per the
+  chain's "restrict formatting to the lines the task changed" rule, so
+  `rustfmt --check nullability.rs` still reports three hunks; none is on a line this round
+  touched. Only the two hunks on new lines were applied, by hand.
+
+**`#[cfg_attr(not(test), allow(dead_code))]` on `logical_can_be_null`.** Task 1 is additive
+and its production caller is task 2's `NOT IN` rule, so the lib build warns four times
+without it (the attribute covers the two private helpers and `column_may_hold_null` too,
+since they are reachable from it). The sanctioned form per `coding-style.md`; it leaves with
+that rule.
+
+**build-test.md needs a row (human's file).** `planner::tests::logical_nullability` is a new
+component-tier block of 5 cases, and `--lib` moves 696 → 701. That makes the cpu block
+1708 → 1713, the Rust total 2515 → 2520 and the grand total 3085 → 3090. Suggested row, to
+sit after "Null analysis rules":
+
+    | Logical-plan nullability | [a_key_whose_row_groups_hold_no_null_is_not_nullable](../peacockdb-core/src/planner/tests/logical_nullability.rs) | 5 |
+
+    whether a column of a DataFusion logical plan can hold a NULL, traced to the parquet
+    footers — what the `NOT IN` rewrite and #137's key filters ask before a physical plan
+    exists. Against real files, since every corpus column is declared nullable; the tpcds
+    case is the only one whose column really holds NULLs

@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 3085 test cases — Rust 2515, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 3090 test cases — Rust 2520, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1708 cases: `--lib` 696, `test_cpu_corpus` 983, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1713 cases: `--lib` 701, `test_cpu_corpus` 983, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -158,6 +158,14 @@ null analysis both ways, and the session config's own registration path declarin
 
 every rule in the can-this-column-be-NULL pass, on hand-built nodes — a source declares a
 not-nullable column here, which no corpus fixture can
+
+| Logical-plan nullability | [a_key_whose_row_groups_hold_no_null_is_not_nullable](../peacockdb-core/src/planner/tests/logical_nullability.rs) | 5 |
+|---|---|--:|
+
+whether a column of a DataFusion logical plan can hold a NULL, traced to the parquet footers —
+what the `NOT IN` rewrite and #137's key filters ask before a physical plan exists. Against real
+files, since every corpus column is declared nullable; the tpcds case is the only one whose column
+really holds NULLs
 
 | Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 10 |
 |---|---|--:|

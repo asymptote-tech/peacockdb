@@ -7,7 +7,8 @@
 //! `translator` and `memory_estimation` are subcomponents, so only this file may reach them;
 //! the four entry points below are what a test drives instead.
 mod memory_estimation;
-mod nulls;
+mod nullability;
+mod parquet_nulls;
 mod pipeline;
 mod translator;
 
@@ -110,7 +111,7 @@ pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, P
 /// plans: semi honours the flag, and `null_equals_null=true` is asking for the equality the
 /// executor hardcodes.
 pub(crate) fn refuse_null_unsafe_joins(root: &dyn GpuNode) -> Result<(), PlanError> {
-    nulls::refuse_null_unsafe_joins(root)
+    nullability::refuse_null_unsafe_joins(root)
 }
 
 /// A DataFusion physical plan as a node tree, without the pipeline around it: no

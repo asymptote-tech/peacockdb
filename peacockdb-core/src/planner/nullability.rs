@@ -1,16 +1,20 @@
-//! Which columns can be NULL, and the one join shape that has to be refused because of it.
+//! Which columns can be NULL, on either tree, and the join shape refused because of it.
 //!
-//! Three of the join types hardcode `cudf::null_equality::EQUAL` whatever the plan's flag
-//! says (`cpp/src/operators/join.cpp`), so a NULL key matches a NULL key there. That is
-//! what a set operation wants and what SQL's `NOT IN` does not, and the difference only
-//! shows where NULLs can meet — which is why the refusal reads the data rather than the
-//! declared types: every column in both benchmarks is declared nullable, keys included.
-//!
-//! Where the analysis cannot decide, a column is possibly-NULL. A false positive costs a
-//! refusal a reader can see; a false negative is the wrong answer this exists to prevent.
+//! Two analyses of one question: `can_be_null` reads a planned GpuNode tree, and the
+//! rewrites that run before one exists read a DataFusion `LogicalPlan` with
+//! `logical_can_be_null`. Both read the data, not the declared types — every column in both
+//! benchmarks is declared nullable, keys included. Three join types hardcode
+//! `cudf::null_equality::EQUAL` whatever the plan's flag says (`cpp/src/operators/join.cpp`),
+//! which is set semantics rather than SQL's, so a NULL that can meet a NULL there is refused.
+//! Where either analysis cannot decide, a column is possibly-NULL: a false positive costs a
+//! refusal or a rewrite a reader can see, a false negative is a wrong answer.
 
-use datafusion::common::JoinType;
+use datafusion::common::{Column, JoinType};
+use datafusion::datasource::listing::ListingTable;
+use datafusion::datasource::source_as_provider;
+use datafusion::logical_expr::{Expr as LogicalExpr, Join, LogicalPlan, TableScan};
 
+use super::parquet_nulls::column_may_hold_null;
 use crate::plan::Expr;
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
@@ -55,6 +59,87 @@ fn hardcodes_null_equality(join_type: JoinType) -> bool {
 
 fn nullable_at(columns: &[bool], ordinal: u32) -> bool {
     columns.get(ordinal as usize).copied().unwrap_or(true)
+}
+
+/// Whether `column` of `plan`'s output can hold a NULL, read off the data where the column
+/// traces to a parquet scan. Anything the trace cannot follow is possibly-NULL.
+///
+/// Its production caller is the `NOT IN` rewrite, which this lands ahead of; until then the
+/// tests are the only ones, so the attribute leaves with that rule.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn logical_can_be_null(plan: &LogicalPlan, column: &Column) -> bool {
+    match plan {
+        LogicalPlan::TableScan(scan) => {
+            scan_column_may_hold_null(scan, &column.name).unwrap_or(true)
+        }
+        LogicalPlan::Projection(project) => {
+            match project
+                .schema
+                .index_of_column(column)
+                .ok()
+                .map(|i| &project.expr[i])
+            {
+                Some(LogicalExpr::Column(inner)) => logical_can_be_null(&project.input, inner),
+                Some(LogicalExpr::Alias(alias)) => match alias.expr.as_ref() {
+                    LogicalExpr::Column(inner) => logical_can_be_null(&project.input, inner),
+                    _ => true,
+                },
+                _ => true,
+            }
+        }
+        LogicalPlan::Filter(filter) => logical_can_be_null(&filter.input, column),
+        LogicalPlan::Sort(sort) => logical_can_be_null(&sort.input, column),
+        LogicalPlan::Limit(limit) => logical_can_be_null(&limit.input, column),
+        // An alias renames the relation, not the column: the input answers for the bare name.
+        LogicalPlan::SubqueryAlias(aliased) => {
+            logical_can_be_null(&aliased.input, &Column::from_name(column.name.clone()))
+        }
+        LogicalPlan::Join(join) => join_can_be_null(join, column),
+        _ => true,
+    }
+}
+
+/// The side that answers for `column`, where the join preserves it. A side the join pads is
+/// nullable whatever it holds, and a name on both sides decides nothing.
+fn join_can_be_null(join: &Join, column: &Column) -> bool {
+    let (left, right) = (join.left.schema(), join.right.schema());
+    let on_left = match (left.has_column(column), right.has_column(column)) {
+        (true, false) => true,
+        (false, true) => false,
+        _ => return true,
+    };
+    let preserved = match join.join_type {
+        JoinType::Inner => true,
+        JoinType::Left | JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark => on_left,
+        JoinType::Right | JoinType::RightSemi | JoinType::RightAnti => !on_left,
+        JoinType::Full => false,
+    };
+    if !preserved {
+        return true;
+    }
+    let side = if on_left { &join.left } else { &join.right };
+    logical_can_be_null(side, column)
+}
+
+fn scan_column_may_hold_null(scan: &TableScan, name: &str) -> Result<bool, PlanError> {
+    let source = source_as_provider(&scan.source).map_err(|e| PlanError::Invalid(e.to_string()))?;
+    let listing = source
+        .as_any()
+        .downcast_ref::<ListingTable>()
+        .ok_or_else(|| PlanError::Unsupported("not a listing table".into()))?;
+    let mut any = false;
+    for table_url in listing.table_paths() {
+        // `prefix()` is an object-store `Path` with no leading '/', not a filesystem path;
+        // the URL (`file:///…`) is, through `Url::to_file_path`.
+        let path = url::Url::parse(table_url.as_str())
+            .ok()
+            .and_then(|url| url.to_file_path().ok())
+            .ok_or_else(|| {
+                PlanError::Unsupported(format!("not a local file: {}", table_url.as_str()))
+            })?;
+        any |= column_may_hold_null(&path.to_string_lossy(), name)?;
+    }
+    Ok(any)
 }
 
 /// Per output column of this node, whether it can be NULL.

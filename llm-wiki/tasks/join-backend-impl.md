@@ -101,7 +101,7 @@ Estimate: [`../reports/join-rewrite-cell-estimate.md`](../reports/join-rewrite-c
   (`parquet_nulls.rs`); `pub(crate) fn logical_can_be_null(plan: &LogicalPlan, column: &Column) -> bool`
   (`nullability.rs`); `can_be_null(node: &dyn GpuNode) -> Vec<bool>` unchanged.
 
-- [ ] **Step 1: The failing tests.** In `planner/tests/logical_nullability.rs`, over the tpch sf1
+- [x] **Step 1: The failing tests.** In `planner/tests/logical_nullability.rs`, over the tpch sf1
   session (`build_session_state(4)` + `register_tables_for`, the way `planner/tests/join_capability.rs`
   builds its fixture):
 
@@ -111,6 +111,16 @@ async fn a_key_whose_row_groups_hold_no_null_is_not_nullable() {
     let ctx = tpch_ctx().await;
     let plan = ctx.sql("SELECT o_custkey FROM orders").await.unwrap().into_optimized_plan().unwrap();
     assert!(!logical_can_be_null(&plan, &Column::from_name("o_custkey")));
+}
+
+// Added while building: without a column that really holds NULLs, a reader hardwired to
+// "no NULL" passes every other case here. tpcds `ss_sold_date_sk` holds 129,850 at sf1.
+#[tokio::test]
+async fn a_key_whose_row_groups_hold_a_null_is_nullable() {
+    let ctx = tpcds_ctx().await;
+    let plan = ctx.sql("SELECT ss_sold_date_sk FROM store_sales").await.unwrap()
+        .into_optimized_plan().unwrap();
+    assert!(logical_can_be_null(&plan, &Column::from_name("ss_sold_date_sk")));
 }
 
 #[tokio::test]
@@ -139,15 +149,15 @@ async fn an_outer_join_pads_and_so_nullable() {
 }
 ```
 
-- [ ] **Step 2: Run red.** `cargo test -p peacockdb-core --lib --features rust-only logical_nullability` —
+- [x] **Step 2: Run red.** `cargo test -p peacockdb-core --lib --features rust-only logical_nullability` —
   fails: `logical_can_be_null` not found.
-- [ ] **Step 3: The reader.** `parquet_nulls.rs` opens the file with `SerializedFileReader` (as
+- [x] **Step 3: The reader.** `parquet_nulls.rs` opens the file with `SerializedFileReader` (as
   `parquet_meta.rs:56-59` does), finds the column by name in the schema descriptor, and answers
   `true` if any row group's `statistics().and_then(|s| s.null_count_opt())` is `None` or `> 0` —
   the same rule as `parquet_meta.rs:95-97` ("no statistic is not a promise of no nulls").
   `parquet_meta.rs` keeps its per-group loop (it needs bytes too) but calls the same predicate
   helper `fn nulls_possible(stats: Option<&Statistics>) -> bool`, defined once in `parquet_nulls.rs`.
-- [ ] **Step 4: The tracer.** In `nullability.rs`:
+- [x] **Step 4: The tracer.** In `nullability.rs`:
 
 ```rust
 /// Whether `column` of `plan`'s output can hold a NULL, read off the data where the column
@@ -169,10 +179,11 @@ pub(crate) fn logical_can_be_null(plan: &LogicalPlan, column: &Column) -> bool {
         LogicalPlan::Limit(l) => logical_can_be_null(&l.input, column),
         // An alias renames the relation, not the column: the input answers for the bare name.
         LogicalPlan::SubqueryAlias(a) => logical_can_be_null(&a.input, &Column::from_name(column.name.clone())),
-        LogicalPlan::Join(j) if j.join_type == JoinType::Inner => {
-            let side = if j.left.schema().has_column(column) { &j.left } else { &j.right };
-            logical_can_be_null(side, column)
-        }
+        // Inner alone is not enough: `an_outer_join_pads_and_so_nullable` asserts the
+        // PRESERVED side of a Left join keeps its non-nullability, which `_ => true` denies.
+        // Shipped as `join_can_be_null`: the padded side is nullable whatever it holds, the
+        // preserved side answers from its own input, and a name on both sides decides nothing.
+        LogicalPlan::Join(j) => join_can_be_null(j, column),
         _ => true,
     }
 }
@@ -200,7 +211,7 @@ fn scan_column_may_hold_null(scan: &TableScan, name: &str) -> Result<bool, PlanE
   also the path's own: with `prefix()` the file never opens, `unwrap_or(true)` answers nullable,
   and it stays red. Re-export
   `can_be_null` from `nullability.rs` under the same name so the GpuNode callers do not move.
-- [ ] **Step 5: Run green**, then `cargo test -p peacockdb-core --lib --features rust-only null_analysis`
+- [x] **Step 5: Run green**, then `cargo test -p peacockdb-core --lib --features rust-only null_analysis`
   (the moved tests) green unchanged.
 - [ ] **Step 6: Commit.** `git commit -m "nullability: one footer reader, and a tracer over the logical plan"`.
 

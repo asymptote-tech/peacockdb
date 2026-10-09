@@ -22,7 +22,7 @@ use crate::plan::{
 };
 use crate::plan::{BinaryOp, Expr, NamedExpr};
 use crate::plan::{GpuNode, RowInterval};
-use crate::planner::nulls::can_be_null;
+use crate::planner::nullability::can_be_null;
 
 /// A source declaring exactly the nullability asked for. The leaf reads this off parquet
 /// statistics; here it is stated, which is the only way to get a NOT-nullable column at all.
