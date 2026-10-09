@@ -2,6 +2,38 @@
 
 Kind: production
 
+**The cpu mirrors the device, wherever they diverge.** This task makes the device's joins the
+reference: the session, one batch per call, the empty-side rules, the pads and the projections.
+Any divergence between the two engines that appears while it builds — batch boundaries, a
+zero-row batch against no batch, row order where a comparison reads it, intermediate column names,
+nullability or types, `in_rows` and call counts, execution or cost sections — is investigated, and
+where the device's answer is the designed one, the cpu backend is changed to mirror it rather than
+the device bent to the cpu or the comparison loosened. The peacockdb-analyst may be dispatched to
+find what the cpu backend has to change; each divergence found and its resolution goes in the
+detail file, and one that cannot be resolved here is a ticket naming both engines' output.
+
+**Risks found before building** ([`reports/join-backend-divergence.md`](../reports/join-backend-divergence.md),
+2026-10-08), and what to do about each:
+1. **The cost gate** fails the PR on any rise in cpu bytes per section, and #137's `IS NOT NULL`
+   filters (about 73 tpcds plans at three modes) and the row marker raise them. Run the local
+   `cargo run -q -p cost-report -- --cost-diff --base <base sha>` before the PR, list every rise in
+   the detail file, and ask the human to accept them on the board, as chain K's header does for its
+   two tasks; until then the task waits at `completeness approved`.
+2. **Task 6's interim adapter** changes the cpu's goldens for #220's rows (about 82) but the plan
+   regenerates them only in Task 8: regenerate them in Task 6's own commit, so it stays green.
+3. **Task 14** turns on about 428 device cells: regenerate `gpu-result.txt` there too, or
+   duckdb-oracle's coverage check goes red.
+4. **An order-dependent selection over a device join** — an unordered `LIMIT`, or a fetch that cuts
+   between tied rows whose strings differ, above a hash or nested-loop join — would flap: cuco and
+   cuDF write join output through an atomic cursor, so its order varies run to run. No corpus query
+   does this today. Add a check that refuses to enable a device cell on such a shape (or on a
+   `data_fusion_subset` line), and one harness case pinning the cross join's emitted order
+   (`Order::AsEmitted`), which `tpch/nested-limits` relies on.
+5. **The empty-build rule** is decided once: the cpu calls the same rule function the device does.
+6. **`architecture.md`'s "one plan run twice gives one answer, byte for byte"** does not hold on the
+   device's join order; reword it to what does hold (the same rows, the same batch structure).
+   Float sums reordered across a join (q39) already compare with a tolerance.
+
 **This task closes** [#155](../tickets/joins.md#t155) (umbrella: join execution through a wider C
 and FlatBuffers API), [#152](../tickets/joins.md#t152) (the build handle does not survive a
 streamed probe), [#173](../tickets/joins.md#t173) (a finish whose probe produced no keys refuses
