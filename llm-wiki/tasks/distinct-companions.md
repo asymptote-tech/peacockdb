@@ -252,10 +252,9 @@ are not waited on. The C++ changes are built, not run on a device.
 
 ## Completeness signoff
 
-Solved under its constraints. The lowering is as specified — two sequences beside any companion
-the engine decomposes, #261 and #144 refused by name, the wire's `distinct` deprecated with no
-slot moved — and `distinct-functions` now runs it on a device at five modes, the first such plan
-any device has run, the C++ change with it.
+Solved under its constraints. The lowering is as specified, and `distinct-functions` now runs it
+on a device at five modes — the first such plan any device has run, the C++ change with it. #261
+and #144 stay refused by name, and the wire's `distinct` is deprecated with no slot moved.
 
 Two shortcuts, both on #225 and both earned by a run: a schema-validation mask off at the three
 tp4 modes, where #225 refuses the outer init's Welford state, and `golden_approx_std` for one ULP
