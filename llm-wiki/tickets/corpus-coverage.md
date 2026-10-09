@@ -33,9 +33,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 - [Source](#source)
   - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
   - [#282 — a scan with no surviving row groups is refused at planning](#t282)
-- [Repartitioning](#repartitioning)
-  - [#145 — Refcounted handles: stop copying every partition out of a scatter](#t145)
-  - [#197 — the repartition arm still concatenates a child it can only be handed one of](#t197)
 - [Performance](#performance)
   - [#154 — every operator exit path deep-copies its output into a fresh table](#t154)
 - [Testing](#testing)
@@ -686,36 +683,6 @@ the joins they test. Simplest: `select count(*) from nation where n_nationkey < 
 make no call and the lane ends with nothing, the no-arrival case keyless-identity (chain L) makes
 every node answer right. In keyless-identity.
 
-## Repartitioning
-
-<a id="t145"></a>
-### #145 — Refcounted handles: stop copying every partition out of a scatter
-`spark_hash_partition` returns one table whose N partitions are already contiguous, and
-`node_session.cpp` (~L265-272) deep-copies each range out, because a handle owns its memory.
-
-So every shuffle copies its whole input a second time and peaks at twice the data — the concrete
-form of [#91](../archive/archived-tickets.md#t91)'s repartition spike, once per aggregate and once per join side. The change:
-`TableResult` (`plan_executor.h:13`) becomes a `shared_ptr<cudf::table> owner` plus a
-`cudf::table_view view`, and the scatter registers N handles sharing one owner. Mechanical but
-wide — 35 sites across 11 files touch `.table` / `->table`. **No ABI change**: a handle stays a
-`u64`. The cost to weigh: a slice pins its whole parent, so a skewed hash leaves one hot lane
-holding the pre-scatter table — the peak halves and the tail lengthens. Also unlocks
-[#140](optimizer.md#t140). Tests: the GPU tiers stay byte-identical, plus a gtest releasing N−1 handles and
-reading the survivor. A streamed join waits on it too: a handle is erased by its reader
-(`node_session.cpp:254`), so `Input::BuildSideCopy` has no build side after the first probe batch,
-and T16 refuses a second until this lands ([#152](joins.md#t152)).
-
-<a id="t197"></a>
-### #197 — the repartition arm still concatenates a child it can only be handed one of
-`node_session.cpp`'s Hash-repartition arm
-[concatenates](../../cpp/src/node_session.cpp#L538) `child[0]`'s handles before scattering, and
-the planner puts a `GpuCoalesceAllBatches` above the merge feeding an emit, so it gets one.
-
-The comment there said to retire the branch when the legacy modes retired. They have, so the
-condition is met and nothing left in the tree can hand this arm two handles — the concat is a
-copy of a single table on every call. Removing it needs a device run to prove, which is why it
-is a ticket rather than part of the rename that found it.
-
 ## Performance
 
 Tickets pulled ahead from the performance path to fix earlier
@@ -782,17 +749,14 @@ else changes. Not type-checkable without cuDF, so it wants a host with a card.
 The C++ half of [#135](../archive/archived-tickets.md#t135), which the planner
 closed on the Rust side by checking a reference's name against the field at its position.
 
-`TableResult` is a `cudf::table` plus a name vector with no invariant that the two are the same
-length, and the six sites indexing names use `operator[]`, so a short vector is undefined
-behaviour rather than an exception — `filter.cpp` ~L42 reads `fv.column(idx)` and
-`input.column_names[idx]` in one iteration and only the first is checked. Assert
-`num_columns() == column_names.size()` where `TableResult` is built. Separately `expr.cpp` ~L349
-returns `type_id::EMPTY` for an out-of-range `ColumnRef` instead of throwing, turning a bad
-ordinal into a confusing type error further along. The third closure #135 named is unstarted and
-belongs here too: a per-node type check in the GPU tiers, the only thing that would surface a
-wrong-order subtree before the root. 2026-09-17: chain B's `device-schema-harness` and
+`expr.cpp` ~L349 returns `type_id::EMPTY` for an out-of-range `ColumnRef` instead of throwing,
+turning a bad ordinal into a confusing type error further along. The third closure #135 named is
+unstarted and belongs here too: a per-node type check in the GPU tiers, the only thing that would
+surface a wrong-order subtree before the root. 2026-09-17: chain B's `device-schema-harness` and
 `driver-output-hook` are that check for the operator and corpus tiers — every device batch held
-to its node's names and `{type_id, scale}`; the two C++ items above stand.
+to its node's names and `{type_id, scale}`; the C++ item above stands. 2026-10-09: the name-count
+half is closed — `TableResult::owning` refuses a names vector that is not as long as the table's
+columns (`refcounted-scatter`).
 
 <a id="t174"></a>
 ### #174 — two clamps for one rule, and nothing compares them

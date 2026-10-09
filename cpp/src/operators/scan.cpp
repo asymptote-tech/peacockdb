@@ -109,7 +109,7 @@ TableResult execute_scan(const fb::CudfScan* scan,
     }
   }
 
-  return {std::make_unique<cudf::table>(std::move(cols)), std::move(col_names)};
+  return TableResult::owning(std::make_unique<cudf::table>(std::move(cols)), std::move(col_names));
 }
 
 }  // namespace peacock

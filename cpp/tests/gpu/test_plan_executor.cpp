@@ -2,6 +2,7 @@
 /// executes them against testdata/tpch.minimal/ Parquet files.
 
 #include "peacock_gpu.h"
+#include "peacock/partitioning.hpp"
 #include "plan_executor.h"
 #include "plan_executor_internal.h"
 #include "generated/gpu_plan_generated.h"
@@ -24,8 +25,10 @@
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -321,8 +324,8 @@ TEST(PlanExecutor, ScanNation) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 4);
-  EXPECT_EQ(result.table->num_rows(), 25);
+  ASSERT_EQ(result.num_columns(), 4);
+  EXPECT_EQ(result.num_rows(), 25);
   EXPECT_EQ(result.column_names[0], "n_nationkey");
   EXPECT_EQ(result.column_names[1], "n_name");
   EXPECT_EQ(result.column_names[2], "n_regionkey");
@@ -354,8 +357,8 @@ TEST(PlanExecutor, ScanNationProjected) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 2);
-  EXPECT_EQ(result.table->num_rows(), 25);
+  ASSERT_EQ(result.num_columns(), 2);
+  EXPECT_EQ(result.num_rows(), 25);
   EXPECT_EQ(result.column_names[0], "n_name");
   EXPECT_EQ(result.column_names[1], "n_regionkey");
 }
@@ -390,10 +393,10 @@ TEST(PlanExecutor, FilterNation) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 4);
+  ASSERT_EQ(result.num_columns(), 4);
   // Regions 3 and 4 hold five nations each. An exact count: a range that a wrong
   // literal also satisfies says nothing about the predicate.
-  EXPECT_EQ(result.table->num_rows(), 10);
+  EXPECT_EQ(result.num_rows(), 10);
 }
 
 TEST(PlanExecutor, HashJoinNationRegion) {
@@ -444,8 +447,8 @@ TEST(PlanExecutor, HashJoinNationRegion) {
   const auto& result = plan.result();
 
   // Every nation has exactly one region → 25 rows, 7 columns (4 + 3).
-  ASSERT_EQ(result.table->num_columns(), 7);
-  EXPECT_EQ(result.table->num_rows(), 25);
+  ASSERT_EQ(result.num_columns(), 7);
+  EXPECT_EQ(result.num_rows(), 25);
 }
 
 TEST(PlanExecutor, HashJoinWithProjection) {
@@ -501,8 +504,8 @@ TEST(PlanExecutor, HashJoinWithProjection) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 3);
-  EXPECT_EQ(result.table->num_rows(), 25);
+  ASSERT_EQ(result.num_columns(), 3);
+  EXPECT_EQ(result.num_rows(), 25);
   EXPECT_EQ(result.column_names[0], "n_name");
   EXPECT_EQ(result.column_names[1], "n_regionkey");
   EXPECT_EQ(result.column_names[2], "r_name");
@@ -542,13 +545,13 @@ TEST(PlanExecutor, SortNationByName) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 1);
-  EXPECT_EQ(result.table->num_rows(), 25);
+  ASSERT_EQ(result.num_columns(), 1);
+  EXPECT_EQ(result.num_rows(), 25);
   EXPECT_EQ(result.column_names[0], "n_name");
 
   // Sort order: ALGERIA first, VIETNAM last.
-  auto first = get_string_value(result.table->view().column(0), 0);
-  auto last = get_string_value(result.table->view().column(0), 24);
+  auto first = get_string_value(result.view().column(0), 0);
+  auto last = get_string_value(result.view().column(0), 24);
   EXPECT_EQ(first, "ALGERIA");
   EXPECT_EQ(last, "VIETNAM");
 }
@@ -586,7 +589,7 @@ TEST(PlanExecutor, SortWithFetch) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  EXPECT_EQ(result.table->num_rows(), 5);
+  EXPECT_EQ(result.num_rows(), 5);
 }
 
 TEST(PlanExecutor, AggregateCount) {
@@ -622,11 +625,11 @@ TEST(PlanExecutor, AggregateCount) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 1);
-  ASSERT_EQ(result.table->num_rows(), 1);
+  ASSERT_EQ(result.num_columns(), 1);
+  ASSERT_EQ(result.num_rows(), 1);
   EXPECT_EQ(result.column_names[0], "count(*)");
 
-  auto count = get_scalar_value<int64_t>(result.table->view().column(0), 0);
+  auto count = get_scalar_value<int64_t>(result.view().column(0), 0);
   EXPECT_EQ(count, 5);
 }
 
@@ -701,14 +704,14 @@ TEST(PlanExecutor, AggregateGroupBy) {
   const auto& result = plan.result();
 
   // 5 regions, each with 5 nations.
-  ASSERT_EQ(result.table->num_columns(), 2);
-  EXPECT_EQ(result.table->num_rows(), 5);
+  ASSERT_EQ(result.num_columns(), 2);
+  EXPECT_EQ(result.num_rows(), 5);
   EXPECT_EQ(result.column_names[0], "r_name");
   EXPECT_EQ(result.column_names[1], "nation_count");
 
   for (cudf::size_type i = 0; i < 5; ++i) {
     auto count =
-        get_scalar_value<int64_t>(result.table->view().column(1), i);
+        get_scalar_value<int64_t>(result.view().column(1), i);
     EXPECT_EQ(count, 5);
   }
 }
@@ -746,8 +749,8 @@ TEST(PlanExecutor, ProjectRename) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 2);
-  EXPECT_EQ(result.table->num_rows(), 5);
+  ASSERT_EQ(result.num_columns(), 2);
+  EXPECT_EQ(result.num_rows(), 5);
   EXPECT_EQ(result.column_names[0], "region_name");
   EXPECT_EQ(result.column_names[1], "key");
 }
@@ -790,9 +793,9 @@ TEST(PlanExecutor, ProjectSqrtThroughTheAst) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 1);
-  ASSERT_EQ(result.table->num_rows(), 5);
-  auto col = result.table->view().column(0);
+  ASSERT_EQ(result.num_columns(), 1);
+  ASSERT_EQ(result.num_rows(), 5);
+  auto col = result.view().column(0);
   ASSERT_EQ(col.type().id(), cudf::type_id::FLOAT64);
   // r_regionkey is 0..4 in tpch.minimal, so the roots are known exactly.
   for (cudf::size_type row = 0; row < 5; ++row) {
@@ -845,9 +848,9 @@ TEST(PlanExecutor, ProjectSqrtThroughTheColumnPath) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 1);
-  ASSERT_EQ(result.table->num_rows(), 5);
-  auto col = result.table->view().column(0);
+  ASSERT_EQ(result.num_columns(), 1);
+  ASSERT_EQ(result.num_rows(), 5);
+  auto col = result.view().column(0);
   ASSERT_EQ(col.type().id(), cudf::type_id::FLOAT64);
   for (cudf::size_type row = 0; row < 5; ++row) {
     EXPECT_NEAR(get_scalar_value<double>(col, row), std::sqrt(double(row)), 1e-12)
@@ -926,7 +929,7 @@ static flatbuffers::Offset<fb::PlanNode> nation_aggregate(
 static std::map<int32_t, std::vector<double>> by_group(
     const peacock::TableResult& result) {
   std::map<int32_t, std::vector<double>> rows;
-  auto view = result.table->view();
+  auto view = result.view();
   auto keys = view.column(0);
   for (cudf::size_type row = 0; row < view.num_rows(); ++row) {
     std::vector<double> values;
@@ -1012,7 +1015,7 @@ TEST(AggregateMerge, TheMergedCountIsWidenedSoASecondMergeReadsTheSameLayout) {
 
   WholePlan plan(buf);
   const auto& result = plan.result();
-  auto view = result.table->view();
+  auto view = result.view();
   ASSERT_EQ(view.num_columns(), 4) << "the key and the three state columns";
   EXPECT_EQ(view.column(1).type().id(), cudf::type_id::INT64);
   EXPECT_EQ(view.column(2).type().id(), cudf::type_id::FLOAT64);
@@ -1090,8 +1093,8 @@ static void expect_date_part_as_int32(const char* field, int32_t first, int32_t 
   WholePlan plan(date_part_over_a_made_date(fbb, field));
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 1) << field;
-  auto col = result.table->view().column(0);
+  ASSERT_EQ(result.num_columns(), 1) << field;
+  auto col = result.view().column(0);
   ASSERT_EQ(col.type().id(), cudf::type_id::INT32) << field;
   ASSERT_EQ(col.size(), 25) << field;
   EXPECT_EQ(get_scalar_value<int32_t>(col, 0), first) << field;
@@ -1132,8 +1135,8 @@ TEST(PlanExecutor, PassthroughNodes) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 3);
-  EXPECT_EQ(result.table->num_rows(), 5);
+  ASSERT_EQ(result.num_columns(), 3);
+  EXPECT_EQ(result.num_rows(), 5);
 }
 
 TEST(PlanExecutor, JoinProjectSort) {
@@ -1214,16 +1217,16 @@ TEST(PlanExecutor, JoinProjectSort) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 2);
-  EXPECT_EQ(result.table->num_rows(), 25);
+  ASSERT_EQ(result.num_columns(), 2);
+  EXPECT_EQ(result.num_rows(), 25);
   EXPECT_EQ(result.column_names[0], "n_name");
   EXPECT_EQ(result.column_names[1], "r_name");
 
   // First nation alphabetically: ALGERIA.
-  auto first_name = get_string_value(result.table->view().column(0), 0);
+  auto first_name = get_string_value(result.view().column(0), 0);
   EXPECT_EQ(first_name, "ALGERIA");
   // ALGERIA is in AFRICA.
-  auto first_region = get_string_value(result.table->view().column(1), 0);
+  auto first_region = get_string_value(result.view().column(1), 0);
   EXPECT_EQ(first_region, "AFRICA");
 }
 
@@ -1238,20 +1241,21 @@ TEST(PlanExecutor, JoinProjectSort) {
 /// customer.parquet projected to `projection` — two row groups (122880 + 27120), the
 /// only committed fixture with more than one. Column 0 is c_custkey, the narrow one to
 /// read back; column 1 is c_name, the one with content bytes to charge for.
+static const std::vector<std::pair<std::string, fb::DataType>>& customer_fields() {
+  static const std::vector<std::pair<std::string, fb::DataType>> fields{
+      {"c_custkey", fb::DataType_Int64},      {"c_name", fb::DataType_Utf8},
+      {"c_address", fb::DataType_Utf8},       {"c_nationkey", fb::DataType_Int32},
+      {"c_phone", fb::DataType_Utf8},         {"c_acctbal", fb::DataType_Decimal128},
+      {"c_mktsegment", fb::DataType_Utf8},    {"c_comment", fb::DataType_Utf8},
+  };
+  return fields;
+}
+
 static std::vector<uint8_t> customer_scan_plan(flatbuffers::FlatBufferBuilder& fbb,
                                                const std::vector<uint32_t>& projection) {
   auto path = fbb.CreateString(parquet_path("customer"));
   auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
-  auto schema = make_schema(fbb, {
-                                     {"c_custkey", fb::DataType_Int64},
-                                     {"c_name", fb::DataType_Utf8},
-                                     {"c_address", fb::DataType_Utf8},
-                                     {"c_nationkey", fb::DataType_Int32},
-                                     {"c_phone", fb::DataType_Utf8},
-                                     {"c_acctbal", fb::DataType_Decimal128},
-                                     {"c_mktsegment", fb::DataType_Utf8},
-                                     {"c_comment", fb::DataType_Utf8},
-                                 });
+  auto schema = make_schema(fbb, customer_fields());
   auto scan = fb::CreateCudfScan(fbb, paths, schema, fbb.CreateVector(projection));
   return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union()));
 }
@@ -1263,8 +1267,18 @@ static std::vector<int64_t> host_int64_column(const cudf::column_view& col) {
   return host;
 }
 
+/// A device INT64 column of `values`, for the handle cases that need a table no plan
+/// produces.
+static std::unique_ptr<cudf::column> int64_column(std::vector<int64_t> const& values) {
+  auto col = cudf::make_numeric_column(cudf::data_type{cudf::type_id::INT64},
+                                       static_cast<cudf::size_type>(values.size()));
+  cudaMemcpy(col->mutable_view().data<int64_t>(), values.data(), values.size() * sizeof(int64_t),
+             cudaMemcpyHostToDevice);
+  return col;
+}
+
 static std::vector<int64_t> keys_of(const peacock::TableResult& result) {
-  return host_int64_column(result.table->view().column(0));
+  return host_int64_column(result.view().column(0));
 }
 
 /// The C ABI over one loaded plan, released in the order the header requires.
@@ -1327,24 +1341,44 @@ struct RangesOn {
   ~RangesOn() { peacock::set_nvtx_ranges(false); }
 };
 
-/// A customer scan under a hash repartition into `lanes` — the one arm that answers a
-/// single call with several output partitions.
-static std::vector<uint8_t> scatter_plan(flatbuffers::FlatBufferBuilder& fbb, uint32_t lanes) {
-  auto path = fbb.CreateString(parquet_path("customer"));
+/// A scan of `table`'s `fields` under a hash repartition on field 0 into `lanes` — the one
+/// arm that answers a single call with several output partitions. A string field is what
+/// the varlen stats and the shared-slice cases need, and the first field is the hash key.
+static std::vector<uint8_t> scatter_plan(
+    flatbuffers::FlatBufferBuilder& fbb, uint32_t lanes, const std::string& table,
+    const std::vector<std::pair<std::string, fb::DataType>>& fields,
+    const std::vector<uint32_t>& projection) {
+  auto path = fbb.CreateString(parquet_path(table));
   auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
-  auto schema = make_schema(fbb, {{"c_custkey", fb::DataType_Int64}});
-  auto scan = fb::CreateCudfScan(fbb, paths, schema, fbb.CreateVector(std::vector<uint32_t>{0}));
+  auto schema = make_schema(fbb, fields);
+  auto scan = fb::CreateCudfScan(fbb, paths, schema, fbb.CreateVector(projection));
   auto scan_node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
   auto keys = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 0, "c_custkey")});
+      std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 0, fields[0].first.c_str())});
   auto rp = fb::CreateCudfRepartition(fbb, fb::PartitioningKind_Hash, lanes, keys, scan_node);
   return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfRepartition, rp.Union()));
+}
+
+/// customer's (c_custkey, c_name) into `lanes`: an int64 key to read back and a string
+/// column whose bytes a slice must count as its own.
+static std::vector<uint8_t> customer_scatter_plan(flatbuffers::FlatBufferBuilder& fbb,
+                                                  uint32_t lanes) {
+  return scatter_plan(fbb, lanes, "customer", customer_fields(), {0, 1});
+}
+
+/// customer's three fixed-width columns (c_custkey, c_nationkey, c_acctbal) into `lanes`:
+/// 28 bytes a row against the scatter's own 12, so the per-partition copies are what set
+/// the peak. A string column's gather costs cuDF more than the table itself, which hides
+/// them (see refcounted-scatter-detail.md).
+static std::vector<uint8_t> customer_fixed_scatter_plan(flatbuffers::FlatBufferBuilder& fbb,
+                                                        uint32_t lanes) {
+  return scatter_plan(fbb, lanes, "customer", customer_fields(), {0, 3, 5});
 }
 
 TEST(NodeRegions, EveryCallOpensOneRegionPerOutputPartition) {
   TimingOn timing;
   flatbuffers::FlatBufferBuilder fbb;
-  auto buf = scatter_plan(fbb, /*lanes=*/4);
+  auto buf = scatter_plan(fbb, /*lanes=*/4, "customer", customer_fields(), {0});
   peacock::NodeSession session(buf.data(), buf.size());
 
   std::vector<uint32_t> groups{0};
@@ -1573,9 +1607,10 @@ TEST(NodeRegions, AnAdoptedHandleCannotBeCharged) {
   peacock::NodeStats stats{};
   uint64_t handle = session.execute_scan_rowgroups(0, groups, &stats);
   const auto& produced = session.table_for(handle);
-  peacock::TableResult copy;
-  copy.column_names = produced.column_names;
-  copy.table = std::make_unique<cudf::table>(produced.table->view());
+  // An owning copy, because `adopt` is the harness's upload and this case needs a handle
+  // no node produced — a share of `produced` would be the same table under two handles.
+  auto copy = peacock::TableResult::owning(std::make_unique<cudf::table>(produced.view()),
+                                           produced.column_names);
   uint64_t adopted = session.adopt(std::move(copy));
 
   try {
@@ -1660,7 +1695,7 @@ TEST(ScanRowGroups, TheStatsCarryTheVarlenBytes) {
   peacock::NodeStats stats{};
   std::vector<uint32_t> groups{1};
   uint64_t handle = session.execute_scan_rowgroups(0, groups, &stats);
-  const auto& table = session.table_for(handle).table->view();
+  const auto& table = session.table_for(handle).view();
   EXPECT_EQ(stats.rows, static_cast<uint64_t>(table.num_rows()));
   EXPECT_EQ(table.num_columns(), 2);
   // c_name averages well over a byte per row, so any plausible reading clears the rows.
@@ -1937,18 +1972,18 @@ TEST(SliceHandle, ClampsAndEmpties) {
   std::vector<uint32_t> groups{1};
 
   uint64_t sized = session.execute_scan_rowgroups(0, groups, nullptr);
-  const uint64_t rows = session.table_for(sized).table->view().num_rows();
+  const uint64_t rows = session.table_for(sized).view().num_rows();
 
   uint64_t past = session.slice_handle(sized, rows, 10);
   // Empty but still a table: an empty slice keeps the columns, unlike the export,
   // which has a caller-visible "no bytes" convention instead.
-  EXPECT_EQ(session.table_for(past).table->view().num_rows(), 0);
-  EXPECT_EQ(session.table_for(past).table->view().num_columns(), 1);
+  EXPECT_EQ(session.table_for(past).view().num_rows(), 0);
+  EXPECT_EQ(session.table_for(past).view().num_columns(), 1);
   EXPECT_EQ(session.table_for(past).column_names[0], "c_custkey");
 
   uint64_t whole = session.execute_scan_rowgroups(0, groups, nullptr);
   uint64_t clamped = session.slice_handle(whole, rows - 10, 1000);
-  EXPECT_EQ(session.table_for(clamped).table->view().num_rows(), 10);
+  EXPECT_EQ(session.table_for(clamped).view().num_rows(), 10);
 }
 
 TEST(SliceHandle, AnUnknownHandleFails) {
@@ -1999,8 +2034,8 @@ TEST(Literals, ATypedNullInsideAnAstExpressionIsNullAndNotZero) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 1);
-  auto view = result.table->view().column(0);
+  ASSERT_EQ(result.num_columns(), 1);
+  auto view = result.view().column(0);
   ASSERT_EQ(view.size(), 25);
   // x + NULL is NULL for every x.
   EXPECT_EQ(view.null_count(), view.size());
@@ -2026,7 +2061,7 @@ TEST(Literals, AComparisonAgainstATypedNullKeepsNoRows) {
   // x = NULL is unknown for every x, so no row survives. Exactly zero: nation has a
   // key of 0, so a literal built as a zero keeps that one row, and "fewer than 25"
   // would pass on it.
-  EXPECT_EQ(result.table->num_rows(), 0);
+  EXPECT_EQ(result.num_rows(), 0);
 }
 
 /// A one-column project of `expr` over nation, aliased `name`.
@@ -2060,8 +2095,8 @@ TEST(Literals, ANullDecimalLiteralInAnAstExpressionIsNull) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 1);
-  auto view = result.table->view().column(0);
+  ASSERT_EQ(result.num_columns(), 1);
+  auto view = result.view().column(0);
   ASSERT_EQ(view.size(), 25);
   EXPECT_EQ(view.null_count(), view.size());
 }
@@ -2083,8 +2118,8 @@ TEST(Literals, ADecimalLiteralStillCarriesItsScaledValue) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 1);
-  auto view = result.table->view().column(0);
+  ASSERT_EQ(result.num_columns(), 1);
+  auto view = result.view().column(0);
   ASSERT_EQ(view.type().id(), cudf::type_id::FLOAT64);
   ASSERT_EQ(view.size(), 25);
   EXPECT_EQ(view.null_count(), 0);
@@ -2123,8 +2158,8 @@ TEST(PlanExecutor, CastTimestampMicrosToSeconds) {
   WholePlan plan(nation_project(fbb, seconds, "ts"));
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 1);
-  auto col = result.table->view().column(0);
+  ASSERT_EQ(result.num_columns(), 1);
+  auto col = result.view().column(0);
   ASSERT_EQ(col.type().id(), cudf::type_id::TIMESTAMP_SECONDS);
   ASSERT_EQ(col.size(), 25);
   EXPECT_EQ(col.null_count(), 0);
@@ -2139,8 +2174,8 @@ static void expect_timestamp_unit(fb::DataType unit, cudf::type_id id, int64_t p
   WholePlan plan(nation_project(fbb, made_timestamp(fbb, unit), "ts"));
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 1) << fb::EnumNameDataType(unit);
-  auto col = result.table->view().column(0);
+  ASSERT_EQ(result.num_columns(), 1) << fb::EnumNameDataType(unit);
+  auto col = result.view().column(0);
   ASSERT_EQ(col.type().id(), id) << fb::EnumNameDataType(unit);
   ASSERT_EQ(col.size(), 25) << fb::EnumNameDataType(unit);
   EXPECT_EQ(get_scalar_value<int64_t>(col, 0), 9204LL * 86400 * per_second)
@@ -2211,8 +2246,8 @@ TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
     }
     WholePlan plan(buf);
     const auto& result = plan.result();
-    ASSERT_EQ(result.table->num_columns(), 1) << name;
-    auto view = result.table->view().column(0);
+    ASSERT_EQ(result.num_columns(), 1) << name;
+    auto view = result.view().column(0);
     EXPECT_EQ(view.type().id(), *c.answer) << name;
     ASSERT_EQ(view.size(), 25) << name;
     EXPECT_EQ(view.null_count(), view.size()) << name;
@@ -2253,13 +2288,257 @@ TEST(Literals, ABareTypedNullIsStillNull) {
   WholePlan plan(buf);
   const auto& result = plan.result();
 
-  ASSERT_EQ(result.table->num_columns(), 1);
-  auto view = result.table->view().column(0);
+  ASSERT_EQ(result.num_columns(), 1);
+  auto view = result.view().column(0);
   // The type matters as much as the nulls: a typed null that comes back as some other
   // type is still wrong, and nothing downstream would notice on an all-null column.
   EXPECT_EQ(view.type().id(), cudf::type_id::INT64);
   ASSERT_EQ(view.size(), 25);
   EXPECT_EQ(view.null_count(), view.size());
+}
+
+TEST(TableResult, SlicesAndSelectionsShareTheirColumnsOwners) {
+  std::vector<std::unique_ptr<cudf::column>> cols;
+  cols.push_back(int64_column({1, 2, 3, 4}));
+  cols.push_back(int64_column({5, 6, 7, 8}));
+  auto t = peacock::TableResult::owning(std::make_unique<cudf::table>(std::move(cols)), {"a", "b"});
+  ASSERT_EQ(t.num_columns(), 2);
+  EXPECT_EQ(t.num_rows(), 4);
+
+  auto s = t.slice(1, 3);
+  EXPECT_EQ(s.num_rows(), 2);
+  EXPECT_EQ(host_int64_column(s.view().column(0)), (std::vector<int64_t>{2, 3}));
+  EXPECT_EQ(t.owners[0].use_count(), 2) << "the slice shares the column, it does not copy it";
+
+  auto twice = t.select({1, 1});
+  EXPECT_EQ(twice.owners[0], twice.owners[1]) << "a column selected twice is one owner";
+  EXPECT_EQ(twice.column_names, (std::vector<std::string>{"b", "b"}));
+
+  auto plus = t.with(int64_column({9, 9, 9, 9}), "c");
+  EXPECT_EQ(plus.num_columns(), 3);
+  EXPECT_EQ(plus.owners[0], t.owners[0]);
+  EXPECT_EQ(plus.column_names.back(), "c");
+}
+
+TEST(TableResult, ATableOfNoColumnsIsRefused) {
+  // A table_view of no columns reads as 0 rows whatever it held, which is why the plan
+  // carries an explicit placeholder column; constructing one is a planner defect.
+  EXPECT_THROW(peacock::TableResult::owning(std::make_unique<cudf::table>(), {}),
+               std::runtime_error);
+}
+
+TEST(TableResult, NamesMustMatchColumns) {
+  std::vector<std::unique_ptr<cudf::column>> cols;
+  cols.push_back(int64_column({1}));
+  EXPECT_THROW(peacock::TableResult::owning(std::make_unique<cudf::table>(std::move(cols)),
+                                            {"a", "b"}),
+               std::runtime_error);
+}
+
+TEST(VarlenBytes, ASliceCountsOnlyItsOwnRows) {
+  // chars_size reads the unsliced parent's last offset, so once a scatter partition is a
+  // slice every partition would report the whole table's string bytes and the accountant
+  // would price four batches at four times what they hold.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0, 1});
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> groups{1};
+  uint64_t handle = session.execute_scan_rowgroups(0, groups, nullptr);
+  const auto& whole = session.table_for(handle);
+  const auto n = whole.num_rows();
+  ASSERT_GT(n, 2);
+  auto all = peacock::varlen_content_bytes(whole.view());
+  auto first = peacock::varlen_content_bytes(whole.slice(0, n / 2).view());
+  auto second = peacock::varlen_content_bytes(whole.slice(n / 2, n).view());
+  EXPECT_LT(first, all);
+  EXPECT_EQ(first + second, all);
+  EXPECT_EQ(peacock::varlen_content_bytes(whole.slice(0, 0).view()), 0u);
+}
+
+TEST(Scatter, TwoInputHandlesAreRefusedNotConcatenated) {
+  // The emitter sends one batch a call (gpu_backend/emit.rs), so a second handle is a
+  // caller defect the arm names rather than a case it serves.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scatter_plan(fbb, 4);
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> g0{0}, g1{1};
+  uint64_t in[2] = {session.execute_scan_rowgroups(0, g0, nullptr),
+                    session.execute_scan_rowgroups(0, g1, nullptr)};
+  uint64_t counts[1] = {2};
+  uint64_t out[4] = {};
+  size_t produced = 0;
+  try {
+    session.execute_node(1, in, counts, 1, out, 4, &produced, nullptr);
+    FAIL() << "two handles were concatenated";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string(e.what()).find("exactly one handle"), std::string::npos) << e.what();
+  }
+}
+
+TEST(Scatter, EmptyLanesAreZeroRowSlices) {
+  // region's five rows into 64 lanes: 59 or more lanes get nothing, and each must still be
+  // a handle of zero rows and zero string bytes.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = scatter_plan(fbb, 64, "region",
+                          {{"r_regionkey", fb::DataType_Int32}, {"r_name", fb::DataType_Utf8}},
+                          {0, 1});
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> g{0};
+  peacock::NodeStats scan_stats{};
+  uint64_t in = session.execute_scan_rowgroups(0, g, &scan_stats);
+  uint64_t counts[1] = {1};
+  std::vector<uint64_t> out(64);
+  std::vector<peacock::NodeStats> stats(64);
+  size_t produced = 0;
+  session.execute_node(1, &in, counts, 1, out.data(), 64, &produced, stats.data());
+  ASSERT_EQ(produced, 64u);
+  uint64_t rows = 0, bytes = 0, empty = 0;
+  for (size_t p = 0; p < 64; ++p) {
+    rows += stats[p].rows;
+    bytes += stats[p].varlen_content_bytes;
+    if (stats[p].rows == 0) {
+      ++empty;
+      EXPECT_EQ(stats[p].varlen_content_bytes, 0u);
+      EXPECT_EQ(session.table_for(out[p]).num_rows(), 0);
+    }
+  }
+  EXPECT_GE(empty, 59u);
+  EXPECT_EQ(rows, scan_stats.rows);
+  EXPECT_EQ(bytes, scan_stats.varlen_content_bytes);
+}
+
+/// What `fn` allocated: the bytes it asked for in total, its high-water mark above where
+/// it started, and what it left allocated — from the statistics adaptor main() installs.
+struct Allocated {
+  int64_t total = 0, peak = 0, net = 0;
+};
+template <class F>
+static Allocated allocated_by(F&& fn) {
+  auto& mr = peacock::stats_mr();
+  if (!mr) {
+    ADD_FAILURE() << "main() installs the pool and its statistics adaptor";
+    return {};
+  }
+  mr->push_counters();
+  fn();
+  auto [bytes, calls] = mr->pop_counters();
+  return {bytes.total, bytes.peak, bytes.value};
+}
+
+TEST(Scatter, PartitionsShareTheirTableAndSurviveTheirSiblings) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scatter_plan(fbb, 4);
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> g{1};
+  uint64_t in = session.execute_scan_rowgroups(0, g, nullptr);
+  auto keys = keys_of(session.table_for(in));
+  uint64_t counts[1] = {1};
+  uint64_t out[4] = {};
+  size_t produced = 0;
+  session.execute_node(1, &in, counts, 1, out, 4, &produced, nullptr);
+  ASSERT_EQ(produced, 4u);
+  EXPECT_EQ(session.table_for(out[0]).owners[0].use_count(), 4)
+      << "four partitions, one partitioned column, no copies";
+  std::vector<int64_t> back;
+  for (auto h : out) {
+    auto part = keys_of(session.table_for(h));
+    back.insert(back.end(), part.begin(), part.end());
+  }
+  std::sort(back.begin(), back.end());
+  std::sort(keys.begin(), keys.end());
+  EXPECT_EQ(back, keys) << "the partitions concatenate back to the input";
+  auto survivor = keys_of(session.table_for(out[2]));
+  session.release(out[0]);
+  session.release(out[1]);
+  session.release(out[3]);
+  EXPECT_EQ(session.table_for(out[2]).owners[0].use_count(), 1);
+  EXPECT_EQ(keys_of(session.table_for(out[2])), survivor);
+}
+
+/// The partitioned table plus the scatter's own temporaries, measured rather than
+/// estimated: the same `spark_hash_partition` call the arm makes, in a scope of its own.
+/// Its result is freed at the end of the scope, so `peak` is the whole cost of
+/// partitioning `input` and nothing the arm does afterwards.
+static Allocated partition_alone(const peacock::TableResult& input, cudf::size_type lanes) {
+  return allocated_by([&] {
+    auto parted = peacock::partitioning::spark_hash_partition(input.view(), {0}, lanes);
+  });
+}
+
+static void report_scatter(const char* shape, int64_t rows, const Allocated& scan,
+                           const Allocated& probe, const Allocated& scatter) {
+  std::cout << "[scatter] " << shape << " rows " << rows << " input " << scan.net
+            << " | partition peak " << probe.peak << " total " << probe.total
+            << " | call peak " << scatter.peak << " total " << scatter.total << "\n";
+}
+
+TEST(Scatter, HoldsTheInputOnlyUntilTheTableIsPartitioned) {
+  // The input arrives allocated (outside this scope); inside it the scatter allocates the
+  // partitioned table and frees the input. Copying every partition out, with input and
+  // partitioned table both still held, put the peak a whole input higher.
+  //
+  // The bound is `partition_alone` — the partitioned table and the scatter's temporaries,
+  // measured on this very input — and nothing on top. A hand formula would not do: cuDF's
+  // temporaries for one column type are not a multiple of another's.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_fixed_scatter_plan(fbb, 4);
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> g{0};
+  uint64_t in = 0;
+  auto scan = allocated_by([&] { in = session.execute_scan_rowgroups(0, g, nullptr); });
+  ASSERT_GT(scan.net, 0);
+  const int64_t rows = session.table_for(in).num_rows();
+  auto probe = partition_alone(session.table_for(in), 4);
+  uint64_t counts[1] = {1};
+  uint64_t out[4] = {};
+  size_t produced = 0;
+  auto scatter = allocated_by(
+      [&] { session.execute_node(1, &in, counts, 1, out, 4, &produced, nullptr); });
+  report_scatter("fixed", rows, scan, probe, scatter);
+  const int64_t slack = int64_t{1} << 16;  // allocator rounding
+  EXPECT_LE(scatter.peak, probe.peak + slack)
+      << "the partitions add to the peak of partitioning alone";
+  EXPECT_LE(scatter.total, probe.total + slack)
+      << "the partitions ask the allocator for bytes of their own";
+}
+
+TEST(Scatter, AStringColumnsGatherCostsMoreThanTheCopiesDid) {
+  // The same measurement over a string column, where cuDF's gather inside
+  // `cudf::partition` peaks above the table it produces — so the copies never set the
+  // peak and removing them cannot lower it. Recorded rather than asserted away:
+  // llm-wiki/tasks/refcounted-scatter-detail.md carries the figures.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scatter_plan(fbb, 4);
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> g{0};
+  uint64_t in = 0;
+  auto scan = allocated_by([&] { in = session.execute_scan_rowgroups(0, g, nullptr); });
+  const int64_t rows = session.table_for(in).num_rows();
+  auto probe = partition_alone(session.table_for(in), 4);
+  uint64_t counts[1] = {1};
+  uint64_t out[4] = {};
+  size_t produced = 0;
+  auto scatter = allocated_by(
+      [&] { session.execute_node(1, &in, counts, 1, out, 4, &produced, nullptr); });
+  report_scatter("string", rows, scan, probe, scatter);
+  EXPECT_GT(probe.peak, scan.net * 2)
+      << "a string gather costing less than two inputs would make the copies the peak";
+  EXPECT_LE(scatter.peak, probe.peak + (int64_t{1} << 16));
+}
+
+TEST(Slice, OwnsItsRowsSoTheBatchCanGo) {
+  // slice_handle keeps its copy: a view would hold the whole batch for a tenth of its rows.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0, 1});
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> g{0};
+  uint64_t in = 0;
+  auto scan = allocated_by([&] { in = session.execute_scan_rowgroups(0, g, nullptr); });
+  const auto rows = static_cast<uint64_t>(session.table_for(in).num_rows());
+  uint64_t sliced = 0;
+  auto slice = allocated_by([&] { sliced = session.slice_handle(in, 0, rows / 10); });
+  EXPECT_LT(slice.net, -scan.net / 2) << "the batch is freed; only a tenth of it is held";
+  EXPECT_EQ(session.table_for(sliced).owners[0].use_count(), 1);
 }
 
 // Hand-built plans over tpch.minimal, 19 MB of parquet; measured peak 2.9 MiB

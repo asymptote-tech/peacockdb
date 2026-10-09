@@ -25,10 +25,10 @@ TableResult execute_union(const fb::CudfUnion* u, NodeInputs* in) {
 
   std::vector<cudf::table_view> views;
   views.reserve(inputs.size());
-  for (auto& in : inputs) views.push_back(in.table->view());
+  for (auto& in : inputs) views.push_back(in.view());
 
   auto out = cudf::concatenate(views);
-  return {std::move(out), std::move(inputs[0].column_names)};
+  return TableResult::owning(std::move(out), std::move(inputs[0].column_names));
 }
 
 

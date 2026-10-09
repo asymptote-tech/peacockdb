@@ -90,7 +90,7 @@ static TableResult run_op(const fb::PlanNode* node, NodeInputs* in) {
 
   debug_sync(kind);
   if (debug_enabled()) {
-    auto tv = result.table->view();
+    auto tv = result.view();
     PCK_TRACE("leave %s rows=%d cols=%d", kind, tv.num_rows(), tv.num_columns());
   }
   return result;

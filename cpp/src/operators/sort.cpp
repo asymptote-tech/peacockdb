@@ -16,7 +16,7 @@ namespace peacock {
 
 TableResult execute_sort(const fb::CudfSort* sort, NodeInputs* in) {
   auto input = take_input(in);
-  auto tv = input.table->view();
+  auto tv = input.view();
 
   if (!sort->exprs() || sort->exprs()->size() == 0)
     return std::move(input);
@@ -59,7 +59,7 @@ TableResult execute_sort(const fb::CudfSort* sort, NodeInputs* in) {
     result = std::make_unique<cudf::table>(sliced[0]);
   }
 
-  return {std::move(result), std::move(input.column_names)};
+  return TableResult::owning(std::move(result), std::move(input.column_names));
 }
 
 

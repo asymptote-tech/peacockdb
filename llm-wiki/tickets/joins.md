@@ -38,12 +38,13 @@ change. Land [#154](#t154) first, or the numbers are inflated by per-call copies
 
 [#136](#t136) assumes the table is there and so does the recipe mapping in
 `architecture.md`; neither says how. [#140](#t140) is the same constraint one
-axis over and [#145](#t145) is the mechanism both want.
+axis over, and the shared-owner handle ([#145](../archive/archived-tickets.md#t145)) is the
+mechanism both want: what is left is a second handle over the same owners.
 
 T16 confirmed both halves on a device. A build-side shape refuses its second probe batch, so only
 the semi family streams; and Left and Full outer have no device path at all, because their key
 project and their per-call join read the same probe batch and nothing copies it either. The finish
-pass's pad is proved on the CPU alone until #145.
+pass's pad is proved on the CPU alone until a handle can be read twice.
 
 Whether the copy is tolerable is answerable from the goldens: each join's two
 `GpuCoalescePartitionsExec` lines carry both sides' `output_bytes`, and B copies cost `B ×

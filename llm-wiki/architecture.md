@@ -358,8 +358,8 @@ answer for that shape, and `ResidentAccountant` is the backstop ([#142](tickets/
 L lanes' batches without concatenating, so without a `GpuCoalesceAllBatches` between the two the
 emit would scatter once per arriving batch and produce L×N of them. The reason is batch *shape*
 rather than residency — all L pre-shuffle batches are resident either way. What it buys is N
-batches at about G/N rows instead of L×N at G/(L·N), and one allocation per output lane instead
-of L ([#145](tickets/corpus-coverage.md#t145) removes those copies altogether); what it costs is a concat over
+batches at about G/N rows instead of L×N at G/(L·N), and one scatter per output lane
+instead of L; what it costs is a concat over
 the smallest data in the plan, this point being post-partial-aggregate. A join's probe-side
 shuffle is **not** coalesced: its input is unbounded, and streaming past the build side is the
 whole point.
@@ -842,8 +842,9 @@ Three facts about the C++ side are what make this drivable. `execute_node` is st
 — the only state is the handle registry (and, under timing, a count of calls per seq that names
 a region and changes nothing), inputs are consumed per call, outputs get fresh handles — so
 calling one seq once per batch is legal. The collapse arm concatenates whatever k handles
-it is passed, the merge arm merges any k>1 sorted handles, and the repartition arm scatters into
-the plan-declared N; none of them cross-checks handle counts against the plan tree. And stats
+it is passed, the merge arm merges any k>1 sorted handles, and the repartition arm takes exactly
+one handle and scatters it into the plan-declared N; none of them cross-checks handle counts
+against the plan tree. And stats
 come back per output handle per call, so a per-node figure is this side's fold over its calls.
 
 **Every aggregate merges as state and finalizes in a project**, so both engines evaluate the
@@ -914,9 +915,9 @@ below has a smallest unfreeze that removes it; deciding them together is
 
 | Cost | Why the surface causes it | The unfreeze | What that costs |
 |---|---|---|---|
-| **A build-side copy per probe batch** (#152) | `execute_node` erases the handles it reads and nothing duplicates one | [#145](tickets/corpus-coverage.md#t145): `TableResult` becomes a shared owner plus a view | no ABI change — a handle stays a `u64`; 35 call sites across 11 files |
+| **A build-side copy per probe batch** (#152) | `execute_node` erases the handles it reads and nothing duplicates one | a handle that can be read twice: `TableResult` already shares its columns, so a retained build side is a second handle over the same owners | no ABI change — a handle stays a `u64` |
 | **A probe-batch copy on Left/Full** (#152) | two consumers, one handle: the join needs the batch and the key project needs it too | the same refcount, or a node allowed to return its input beside its output | the second form is an fbs *semantics* change with no ABI change |
-| **The build side re-hashed per probe batch** (#136) | `CudfHashJoin` is stateless per call, so B batches means B builds; refcounting removes the copy and not this | a join session: begin, probe, finish, holding one `cudf::hash_join` | three symbols and session state keyed by id — the largest change here |
+| **The build side re-hashed per probe batch** (#136) | `CudfHashJoin` is stateless per call, so B batches means B builds; sharing removes the copy and not this | a join session: begin, probe, finish, holding one `cudf::hash_join` | three symbols and session state keyed by id — the largest change here |
 | **Probe keys held resident, plus an extra join at finish** (#136) | "which build rows matched" cannot cross an ABI that returns a table and row counts | a match bitmap out-param, or the join session above | the bitmap is a one-argument delta; either deletes the key accumulation and the finish join |
 | **A new symbol per runtime-varying parameter** | an fb node's fields are plan constants, so anything decided per call cannot ride the node | per-call overrides: one `execute_node` variant taking an override struct | one symbol instead of three, and the next such field costs nothing |
 
@@ -996,9 +997,24 @@ header exposes no cuDF internals; the handle registry lives in that `Impl` and i
 of its own (below).
 
 **[`TableResult` / `NodeStats`](../cpp/src/plan_executor.h)** — the two value types every C++
-path returns. `NodeStats` carries only what C++ alone can measure — rows and var-length
-content bytes. The byte formula itself lives in Rust (`src/common.rs`) so the two engines
-cannot drift, and C++ prices nothing.
+path returns. A `TableResult` is one `shared_ptr` owner and one `column_view` per column, plus
+the names: two handles may view one column, so a scatter's N partitions are row slices of one
+partitioned table and copy nothing. A column is freed when the last handle viewing it goes, and
+a slice pins its parent column rather than the whole table. Four constructors build every one of
+them — `owning` from a fresh `cudf::table`, `slice`, `select` and `with`
+([`table_result.cpp`](../cpp/src/table_result.cpp)) — and `owning` refuses a table of no columns
+and a name count that does not match. Consumers read `view()`; two sites copy on purpose and say
+why, the mid-plan limit's `slice_handle` and the sorted merge's fetch, because a view there would
+pin the whole batch, which is the memory those copies exist to give back. `NodeStats` carries only
+what C++ alone can measure — rows and var-length content bytes, the latter read from a column's
+own first and last offsets so that a slice counts its own rows and not its parent's. The byte
+formula itself lives in Rust (`src/common.rs`) so the two engines cannot drift, and C++ prices
+nothing.
+
+**What sharing costs.** A lane that does not drain keeps all of the partitioned table alive, not
+just its own rows, which is worse under skew than N copies were. And the driver prices each lane's
+batch alone, so a released lane's bytes leave the model while the device still holds them behind
+a sibling ([#265](tickets/memory.md#t265)).
 
 **[`NodeInputs` and the operator dispatch](../cpp/src/peacock/operators.h)** — the contract
 every operator translation unit shares: one `execute_*` per wire node kind, plus `take_input`
@@ -1028,7 +1044,8 @@ persistent stream, and work reaches a device only by `submit`.
 The C++ side keeps intermediates alive behind opaque `u64` handles, and that is not a class.
 It is two fields inside the private [`NodeSession::Impl`](../cpp/src/node_session.cpp) — an
 `unordered_map<uint64_t, TableResult>` and a monotonic `next_handle` — with allocation,
-lookup, consume-on-read and erase written inline at every site that touches them. Timing adds
+lookup, consume-on-read and erase written inline at every site that touches them. Erasing drops
+a reference rather than freeing a table: what the last handle over a column drops is freed. Timing adds
 a third map keyed by the same handles, `RegionSink`'s producer of each, written at every
 allocation site beside `next_handle++` and never erased; an adopted handle is filed there as
 produced by no node, so a slice or export of it under timing is refused rather than charged.
@@ -1127,11 +1144,11 @@ offsets and vectors are well formed and has no idea what an ordinal means.
 
 Two things nothing guards, and [#164](tickets/corpus-coverage.md#t164) carries the fixes.
 
-**Column names are a parallel array with no invariant.** `TableResult` is a `cudf::table` plus
-a `std::vector<std::string>` with no assertion that the two are the same length, and the eight
-sites indexing names use `operator[]` — so a short names vector is undefined behaviour rather
-than an exception. `filter.cpp` reads the checked `column(idx)` and the unchecked
-`column_names[idx]` in one loop iteration, and the checked read happening first is luck.
+**A column ordinal is still unchecked, though the name count is not.** `TableResult::owning`
+refuses a names vector that is not as long as the table's columns, so every handle carries one
+name per column; the sites indexing names with `operator[]` are bounded by that. What is left is
+the ordinal itself: `expr.cpp` answers `type_id::EMPTY` for an out-of-range `ColumnRef` instead of
+throwing, which turns a bad ordinal into a confusing type error further along.
 
 **Nothing checks that a child's column *order* is what the plan assumed.** The per-node golden
 records the node line, its lane and batch lists, rows and bytes — not the column list and not

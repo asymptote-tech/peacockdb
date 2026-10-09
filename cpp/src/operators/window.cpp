@@ -34,7 +34,7 @@ static std::unique_ptr<cudf::rolling_aggregation> make_rolling_agg(
 
 TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in) {
   auto input = take_input(in);
-  auto tv = input.table->view();
+  auto tv = input.view();
 
   // Output = all input columns (in order) followed by one column per window expr.
   // The input arrives pre-sorted by [partition_by, order_by] (DataFusion's
@@ -113,7 +113,7 @@ TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in) {
   }
 
   auto result = std::make_unique<cudf::table>(std::move(out_cols));
-  return {std::move(result), std::move(out_names)};
+  return TableResult::owning(std::move(result), std::move(out_names));
 }
 
 
