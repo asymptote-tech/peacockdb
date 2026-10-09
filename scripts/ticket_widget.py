@@ -153,6 +153,9 @@ def glyph_cells(glyphs: str, urls: list) -> str:
     def linked(g, url):
         return f'<a href="{html.escape(url)}">{g}</a>' if url else g
 
+    # An older cost-report writes ✓✓✓✓✓ where a newer one writes ✔; both are one cell.
+    if glyphs == "✓" * len(MODES):
+        glyphs = "✔"
     if len(glyphs) == 1:
         cls = "on" if glyphs == "✔" else GLYPH_CLASS.get(glyphs, "na")
         return (f'<td class="g {cls}" colspan="{len(MODES)}" title="every mode">'
