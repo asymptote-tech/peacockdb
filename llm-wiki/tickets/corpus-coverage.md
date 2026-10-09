@@ -10,6 +10,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#225 — the device names every Welford state column by the same alias](#t225)
   - [#216 — the device's global aggregate has no Welford arm](#t216)
   - [#94 — MERGE_M2 count-child type is cuDF-version-specific](#t94)
+  - [#280 — a `stddev` or `var` under a grouping set answers one column where the plan declares three](#t280)
 - [Aggregates](#aggregates)
   - [#199 — a global aggregate over no arrival drops its identity row](#t199)
   - [#55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast](#t55)
@@ -29,6 +30,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#60 — `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
 - [Source](#source)
   - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
+  - [#282 — a scan with no surviving row groups is refused at planning](#t282)
 - [Repartitioning](#repartitioning)
   - [#206 — a float or boolean partition key is refused on the device](#t206)
   - [#240 — a timestamp partition key is refused on the device](#t240)
@@ -46,6 +48,8 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
   - [#234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
   - [#235 — no independent oracle checks the result goldens](#t235)
+  - [#262 — the DISTINCT lowering's device cells have never run](#t262)
+  - [#281 — limits' and empty-sorts' device cells have never run](#t281)
 
 ## Welford aggregation
 
@@ -108,20 +112,43 @@ its tests can assert `holds_as_declared`.
 <a id="t94"></a>
 ### #94 — MERGE_M2 count-child type is cuDF-version-specific
 The stddev/var Merge arm (`cpp/src/operators/aggregate.cpp`, the `AggPhase::Merge` Welford
-branch) casts `valid_count` to INT32 for the 25.02 GPU runtime; 25.10 and later accept only
+branch) casts `valid_count` to INT32 for the 25.02 GPU runtime; 25.06 and later (cuDF PR #18546) accept only
 INT64 or FLOAT64 (`group_merge_m2.cu`). The Final arm casts the same way but never runs. The
 26.02 CI leg is build-only so it stays green — this bites at the next GPU-remote cuDF bump.
 Switch or version-gate the type then; the comment marks the site.
 
 The plan never sees this type: it declares every `$count` state `Int64`, and so do the columns
 between calls. The INT32 lives inside the Merge call alone — cast in before `MERGE_M2`, widened
-back to INT64 before it returns. On 25.10 and later the count stays INT64 throughout.
+back to INT64 before it returns. On 25.06 and later the count stays INT64 throughout.
 
 **Fix proposed:** gate at compile time. `cpp/CMakeLists.txt` passes `cudf_VERSION`'s major and
 minor as `PEACOCK_CUDF_VERSION_*` defines; `aggregate.cpp` picks one `constexpr` count type from
-them — INT32 before 25.10, INT64 after — and both `MERGE_M2` sites use it. No single type serves
+them — INT32 before 25.06, INT64 from 25.06 — and both `MERGE_M2` sites use it. No single type serves
 both versions, and each cuDF version is its own build, so no runtime probe. The gate goes when
 25.02 does.
+
+<a id="t280"></a>
+### #280 — a `stddev` or `var` under a grouping set answers one column where the plan declares three
+
+A `stddev` or `var` under `ROLLUP`, `CUBE` or `GROUPING SETS` is refused on the device; the cpu
+answers it.
+
+The wire folds the init's three Welford calls (`Count`, `Mean`, `M2`) into one
+`AggregateFuncNode` and sets `mergeable_agg_state`. `execute_aggregate`'s grouped path honours
+the flag and emits `[count, mean, m2]` (`aggregate.cpp:615-632`). Its grouping-set path
+(`:363-423`) predates it: one request per function node through `make_agg`, which for a stddev
+name is cuDF's `STD` and for a var name `VARIANCE`, one finished column per group. The plan
+declares three state columns, so the export against the declared schema refuses the node, or the
+finalize project above finds `ColumnRef index 2 out of range`; a function after it in the node
+reads a shifted column. Found by the 2026-10-08 column-indexing audit; no test reaches it.
+
+**Corpus query:** none: no tpch or tpcds query has the shape. Simplest: `select l_returnflag,
+l_linestatus, stddev_samp(l_quantity), var_pop(l_quantity) from lineitem group by rollup
+(l_returnflag, l_linestatus);` (tpch).
+
+**Fix proposed:** one request builder for the grouped and grouping-set paths, so the
+grouping-set path builds the Welford triple the grouped one does; the query above added as
+`tpch/rollup-stddev`. Both in aggregate-arms, chain L.
 
 ## Aggregates
 
@@ -607,6 +634,27 @@ group, from 371 MB at tp1-single. The tp4 unload keeps its own `skip=0, fetch=10
 cpu tp1 cells turn on. Its device cells then meet the decimal export (#187); nested-limits' meet
 the zero-column scan and the cross join's batching (#220).
 
+<a id="t282"></a>
+### #282 — a scan with no surviving row groups is refused at planning
+
+`SELECT count(*) FROM t WHERE <a predicate every row group's statistics rule out>` does not plan,
+on either backend; it should answer `0`. A parquet file with no row group at all does the same:
+DuckDB writes an empty table that way.
+
+`partition()` (`planner/translator/scan_mapping/partition.rs:26`) refuses an empty survivor list
+("no surviving row groups: what an empty scan means is the caller's decision, not an empty map"),
+because the wire reads an empty mapping as one unmapped partition, which reads the whole file.
+No caller decides, so the plan fails. Found 2026-10-08 planning keyless-identity; distinct-companions
+works around it (`ss_quantity + ss_item_sk < 0` rather than `ss_quantity < 0`).
+
+**Corpus queries:** none: no corpus filter prunes every row group. pbench's `empty` table (chain J)
+has none to begin with, so `cross-empty-build` and `outer-on-true-empty` are refused here before
+the joins they test. Simplest: `select count(*) from nation where n_nationkey < 0;` (tpch).
+
+**Fix proposed:** a scan with no survivors plans one lane that holds no batch, so its executors
+make no call and the lane ends with nothing, the no-arrival case keyless-identity (chain L) makes
+every node answer right. In keyless-identity.
+
 ## Repartitioning
 
 <a id="t206"></a>
@@ -974,3 +1022,19 @@ those close.
 device cells against the cpu golden; each one passing is enabled, each one failing gets the
 ticket it fails on. Then this ticket drops from the registry row and is archived. The same run
 takes q28's and rollup-distinct's cells when their own tickets have closed.
+
+<a id="t281"></a>
+### #281 — limits' and empty-sorts' device cells have never run
+
+limits and empty-sorts (chain K) run without a GPU, beside chain J, which holds the GPU host. Their
+device changes are built and not run: `scan.cpp` no longer applies a scan's limit, which a
+`GpuLimit` above the scan now does (#186), and the four `bug_` source cases and three `bug_`
+accumulate cases it turns into agreement cases have run on no device. A device answer could differ
+from the cpu's, and nothing would say so.
+
+**Corpus queries:** `tpch/scan-limit` and `tpch/nested-limits` at every device mode, and
+`tpcds/q17` at `tp1-single`, each off on this ticket once chain K has merged.
+
+**Fix proposed:** on a GPU host, once one is free: run the device test tier and those cells;
+each cell passing is enabled, each failing gets the ticket it fails on. Then this ticket drops
+from the registry rows and is archived.

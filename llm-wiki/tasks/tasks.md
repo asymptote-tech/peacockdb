@@ -122,10 +122,11 @@ the chain turned on, against 25.02; the evidence #244 waits on.
 >   the CPU tiers, `ctest -L cpu`, the C++ build against cuDF 25.02.
 > - **`done` when every CI job but the GPU tests is green.** The coordinator does not wait on the
 >   GPU jobs. guard-checks' edits to `build-test-shadgpu.sh` and to `pipeline.yml`'s GPU job go in
->   untested.
+>   untested, and so do limits' and empty-sorts' device changes (#281).
 
-Two corpus-coverage tickets and #62, all provable on the cpu, run beside chain J while it holds
-the GPU host.
+Corpus-coverage tickets and #62, all provable on the cpu, run beside chain J while it holds the
+GPU host. limits and empty-sorts were added after the chain started; their device changes go in
+built and not run, held by #281.
 
 ### 1. [`guard-checks.md`](guard-checks.md) — closes [#233](../tickets/corpus-coverage.md#t233), [#174](../tickets/corpus-coverage.md#t174) — state: approved to build
 
@@ -138,3 +139,52 @@ shipped clamp.
 A DISTINCT aggregate lowers to two aggregate sequences beside any per-column companion, with or
 without grouping sets; #144 and #261 refused by name; the wire's `distinct` field deprecated; q28,
 `tpch/rollup-distinct` and `tpch/distinct-functions` on the cpu corpus, their device cells off.
+
+### 3. [`limits.md`](limits.md) — closes [#186](../tickets/corpus-coverage.md#t186), [#234](../tickets/corpus-coverage.md#t234) — state: new
+
+A scan's limit becomes a `GpuLimit` above the scan and leaves both readers; the driver counts a
+limit's emitted rows rather than its input; scan-limit's tp1 cpu cells on.
+
+### 4. [`empty-sorts.md`](empty-sorts.md) — closes [#205](../tickets/corpus-coverage.md#t205) — state: new
+
+The cpu's accumulating sort and merge answer one zero-row batch over zero-row batches; an empty
+answer keeps its columns; q17's result section gains its header.
+
+## Chain L (base: master after chains J and K have both merged)
+
+> **Base: J and K merged, not master as it stands.** Branch the first task from master only once
+> both chains are on it. J closes #152, #220 and #189, which hold most of the device cells this
+> chain turns on, and adds pbench's `empty` table; K adds the DISTINCT lowering, whose device
+> cells (#262) and `tpch/rollup-distinct` this chain runs. Until both have merged, no task here
+> starts.
+>
+> **GPU host: nebius-gpu**, `dmitry@89.169.109.150`, cuDF 25.02, as chain J's header describes:
+> only what needs the GPU runs there, the working tree synced uncommitted into `~/peacockdb-L`
+> (its sf1 data copied from `~/peacockdb-J/testdata`), every CPU build and run local. Chain J will
+> have finished with it.
+
+The Welford and aggregate tickets of corpus-coverage, and the column references the device
+aggregate reads by counting.
+
+### 1. [`grouping-id.md`](grouping-id.md) — closes [#65](../tickets/corpus-coverage.md#t65), [#55](../tickets/corpus-coverage.md#t55), [#262](../tickets/corpus-coverage.md#t262) — state: new
+
+The device's grouping-set id folds and widens as DataFusion's; walk tests prove q66's quotient and
+the two-stage DISTINCT on a device; `tpch/rollup-grouping` added; the rollup, q66 and DISTINCT
+device cells run and enabled where they pass.
+
+### 2. [`keyless-identity.md`](keyless-identity.md) — closes [#199](../tickets/corpus-coverage.md#t199) — state: new
+
+`empty_state` beside `state_type`; every aggregate init a batch accumulator that skips zero-row
+batches and, through `AtDoneIfNothingOut`, answers what it owes over no rows; four pbench `empty-*`
+queries; the q96, q88 and q90 tp4 cells on.
+
+### 3. [`aggregate-arms.md`](aggregate-arms.md) — closes [#164](../tickets/corpus-coverage.md#t164), [#225](../tickets/corpus-coverage.md#t225), [#280](../tickets/corpus-coverage.md#t280) — state: new
+
+The device aggregate reads every state column through its `args` and names every column from the
+wire's `state_names`; one request builder; the dead arms go; `ColumnRef`s checked for bounds and
+name; the scan's names checked at plan time; `tpch/rollup-stddev` added.
+
+### 4. [`welford-device.md`](welford-device.md) — closes [#216](../tickets/corpus-coverage.md#t216), [#94](../tickets/corpus-coverage.md#t94) — state: new
+
+A keyless stddev or var on the device through the request builder on a constant key; a NULL-free
+Welford state; the `MERGE_M2` count type gated on the cuDF version; `tpch/global-stddev` added.
