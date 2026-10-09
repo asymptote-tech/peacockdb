@@ -447,11 +447,14 @@ above the scan. With nothing between the scan and the root, it is the unload's i
 composed with any root limit DataFusion kept for an offset. It slices the batch that straddles
 the cut, and its satisfaction holds the scan. No reader applies a limit.
 
-Where DataFusion could not push the cut into the scan — a filter, a join or an aggregate between
-them — there is no cut to trim and the scan maps every surviving row group, so the hold on the
-satisfied limit is the whole of the bound. It bounds calls rather than the first one: at the
-row-group modes it stops a 49-group scan after one batch, and at the single-batch modes a lane's
-one batch is already the whole mapping, so the table is read before the limit can be satisfied.
+Where DataFusion could not push the cut into the scan — a join or an aggregate between them —
+there is no cut to trim and the scan maps every surviving row group, so the hold on the satisfied
+limit is the whole of the bound. It bounds calls rather than the first one: measured on the
+aggregate shape, at the row-group modes it stops a 49-group scan after one batch, and at the
+single-batch modes a lane's one batch is already the whole mapping, so the table is read before
+the limit can be satisfied. A filter between them is the third shape and has no hold above one
+lane, because it has no plan: the limit feeds only the sink and the validator refuses it
+([#284](tickets/corpus-coverage.md#t284)).
 
 **Root-adjacent** — feeding only `GpuUnload`, the common case — **there is no limit node**: the
 interval becomes the unload's, which is where it belongs, since a limit over a stream about to

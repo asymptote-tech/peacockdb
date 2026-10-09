@@ -572,7 +572,12 @@ than limits, which only moved that scan's cut into that `GpuLimit`; the `set_num
 dropped was on the same zero-column read, and could not have made it answer five rows.
 
 **Corpus queries:** `tpch/nested-limits` at every device mode, off on this ticket, and the corpus's
-only scan declaring no column.
+only scan declaring no column. It is also the only corpus query carrying a mid-plan `GpuLimit` and
+the only one carrying an OFFSET, so while it is off **no device has run a mid-plan limit inside a
+driven plan** — the driver's hold of a satisfied one, two and three nested intervals on one path,
+and a limit carrying a skip. Those are device-covered at operator level only, by
+`harness_cases::limit_over` and `source_cases.rs`. Enabling these five cells is the first run of
+all three.
 
 **Fix proposed:** `scan()` writes the file's own column names into `file_schema` and the declared
 ones into `projection`, so "no projection" and "no column" stop being one wire value. That is the

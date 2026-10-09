@@ -762,6 +762,11 @@ Consequences worth knowing before you regenerate:
 - **A device never authors a golden.** The device tier reads the sections the cpu tier
   wrote, which is what makes a divergence a red test rather than a quietly rewritten
   expectation.
+- **`golden_exact` on a `data_fusion_subset` line is the extra claim that the query's own modes
+  return the same rows**, and only the device compare tests it — the cpu tier asserts the result
+  section at one mode, `authoritative_mode`'s. So that pairing is unchecked until a card runs,
+  which is worth knowing while the `gpu-tests` job is red. `tpch/scan-limit` is the only such line
+  and was measured on 2026-10-09.
 - **The byte-level golden needs a second, deliberate variable**
   (`PEACOCK_REWRITE_RECIPE_BYTES=1`). Under plain `UPDATE_CANONICAL=1` the test verifies
   instead of rewriting, and says so — a bulk regen that moved the wire format goes red
