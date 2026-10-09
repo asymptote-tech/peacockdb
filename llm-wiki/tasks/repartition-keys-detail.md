@@ -1219,3 +1219,72 @@ prove. And `build-test.md`'s own note on [#263](../tickets/testinfra.md#t263) sa
 only moves a ticket can turn the rust tier red while both CI layers skip the pipeline — which is
 the shape of an archival commit exactly, and the reason archival is ordinarily the helper's
 post-merge step rather than a task's.
+
+## Review round on the device half (2026-10-09)
+
+**6 blocking, 5 important, 5 nits.** The code half was found sound — #201 genuinely closed, the
+three divergences one rule each implemented on both engines with the cpu half really in this
+branch, D2's golden movement exactly the decimal cast's fingerprint, every `build-test.md` count
+re-summing, and the Restriction held. **Every blocking finding was in the prose**: four ticket
+bodies still described their own subject as open, one named a closed ticket as a live blocker, and
+one was a registry tag column that had gone stale.
+
+The reviewer also settled two things from source that this round had got wrong, and both matter
+more than the findings they correct:
+
+- **Archiving cannot make a ticket resolve nowhere.** `TicketIndex::load` searches
+  `archive/archived-tickets.md` as well as `tickets/`, so a move puts the anchor into a file that
+  is already read. The reason recorded in this file's previous section was wrong, and I had used it
+  to defer the archival. Measured over the committed tree: 34 distinct registry tags, zero
+  unresolved.
+- **The #263 hazard does not bite these five.** `ticket_is_open` reads only `tickets/`, so
+  archiving reddens a `duckdb_divergent(<n>)` — but the only tickets in a `duckdb_divergent` line
+  are #251 and #205. None of #95/#189/#201/#206/#240 is one.
+- What is left of my caution is the one real risk: **nothing checks the wiki's ticket links**, so a
+  retarget missed during an archival is silent.
+
+### The five blocking prose fixes, mine, all applied
+
+Each ticket body is rewritten to the state the registry actually records, verified cell by cell
+first rather than from the account.
+
+- **#206** read as fully open and named two `bug_` pins this branch deleted. Now: fixed, both arms
+  in the kernel under live gates, `bool-key-group` on at all five device modes, and the two float
+  rows commented out on #243 — which is the cpu's float equality, not this ticket.
+- **#95** was untouched and still prescribed the design D2 rejected: dispatch by logical precision
+  and thread precision through the partition FFI. That is the costliest of the four, because #95 is
+  the only one of the five still cited by registry rows, so it is the body a reader arrives at, and
+  it would have sent the next developer to build an argument deliberately not built. Now: the 16-byte
+  rule on both engines, with D2's reason, and the eight stale tags named.
+- **#240** said the kernel arm was outstanding and nobody had run the C++ side on a card. Both
+  halves are in; the three `timestamp-{ms,us,ns}-key-group` rows are on at all five device modes,
+  which is what proves the key itself hashes, and `timestamp-s-key-group` is off on #264.
+- **#189** warned that enabling all 24 cells would turn 6 of them red. All 24 are on: the unsigned
+  arm this branch added is the second fix the ticket said could not come from the grouping-id drop.
+  No registry row carries it.
+- **#65** named #206 as the live blocker of three tp4 cells. The registry says all five of
+  `rollup-small-keys`' device cells are #65's; `206` was struck from that row by the device half and
+  the sentence was not updated.
+
+Also mine and applied: `build-test.md`'s murmur row described the ten-test file and named a deleted
+test, where the file holds nineteen and two of them need no device; and `architecture.md`'s #201
+clause was written as "used to compare", which `coding-style.md` forbids on that page — restated as
+the invariant and what breaks it.
+
+### Left for the developer, with the reviewer's own reasoning
+
+**B6, and it is the one that needs care.** The spec asked that "#95's eight rows lose `95` where it
+is their last ticket on a cell" and they still carry it. The reviewer derived it cell by cell: on
+`tpcds/q75` and `tpch/q2`, `q10`, `q15`, `q18` every device cell including `gpu_tp1_single` is off,
+and tp1-single runs one lane and hashes nothing, so `95` could never have been the blocker there;
+on `tpcds/q24` all five cpu cells are off on #190 so no device cell is declarable; on `tpcds/q37`
+and `q82` the off cells are the shuffling modes, where `95` *was* live and is not now. Every one of
+the eight keeps another ticket, so `registry.rs`'s `off == 0 || !tickets.is_empty()` still passes
+after the drop and no cell has to move. Dropping the tag is **not** a claim that those cells pass —
+#152 still holds q37's and q82's.
+
+Then I4 (`wire/tests.rs` crossed 1000 lines; `wire/serialize/tests.rs` is both the fix and the
+shape this branch already used for `spark_partitioning/tests.rs`), I5 (a pin's comment states the
+opposite of what the test asserts), N1 (`drop_grouping_id` runs before the `lanes > 1` test, so its
+`Err` can refuse a one-lane plan for a shuffle never performed — unreachable today), N4 and N5, the
+two count slips in this file, and then the archival of all five tickets with a verification run.

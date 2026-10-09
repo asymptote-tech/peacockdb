@@ -641,9 +641,11 @@ aggregates' inner finalize and outer `max` — and one `bug_`: the rollup's grou
 | GPU↔comet murmur3 | [gpu_spark_partition_ids_match_rule_live](../peacockdb-core/src/executor/cpu_backend/gpu_tests/murmur_conformance.rs) | 19 |
 |---|---|--:|
 
-the linchpin gate: both sides place every row in the same partition, bit-exact. Three of the
-ten need no device — the comet call, `pmod` on a negative hash, the two-column CPU reference —
-and ride here anyway, because the module is the gate and splits nowhere
+the linchpin gate: both sides place every row in the same partition, bit-exact, over every key
+type the planner emits — and against production `rows_per_lane`, not a copy of the rule, which is
+what [#201](tickets/corpus-coverage.md#t201) was. Two of the nineteen need no device, the comet
+call and `pmod` on a negative hash, and ride here anyway, because the module is the gate and
+splits nowhere
 
 | Executors on a device | [an_aggregate_that_finalizes_runs_both_of_its_calls](../peacockdb-core/src/executor/gpu_backend/gpu_tests/exec.rs) | 32 |
 |---|---|--:|

@@ -1052,9 +1052,10 @@ So placement is identical by construction rather than by agreement. The CPU side
 `create_murmur3_hashes` (`executor/cpu_backend/spark_partitioning.rs`), the GPU side owns a
 bit-exact kernel (`spark_hash_partition.cu`) and reuses cuDF only for the scatter, and a live
 gate (`peacock_spark_partition_ids`, `cpu_backend/gpu_tests/murmur_conformance.rs`) proves the two
-agree over the same bytes. The gate calls production `rows_per_lane`, not a copy of the rule: it
-used to compare the kernel against its own reimplementation, which is why moving the seed left it
-green ([#201](tickets/corpus-coverage.md#t201)).
+agree over the same bytes. **The gate calls production `rows_per_lane`**, and that is the whole of
+its value: a gate that compares the kernel against a second copy of the rule stays green when the
+seed, the `pmod` or the lane arithmetic moves under it, and proves only that the two copies agree
+([#201](tickets/corpus-coverage.md#t201)).
 
 **Three key types agree with each other rather than with Spark**, which is a deliberate choice and
 the one thing to know before changing either side. Comet is the shared implementation of Spark's
