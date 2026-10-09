@@ -48,6 +48,7 @@ std::unique_ptr<cudf::column> build_column(const fb::Expr* expr,
 
 cudf::type_id fb_to_type_id(fb::DataType dt);
 
-// binop_output_type and cudf_ast_can_evaluate come from plan_executor_internal.h, above.
+// binop_output_type, cudf_ast_can_evaluate, EvaluatedColumn and evaluate_column come from
+// plan_executor_internal.h, above.
 
 }  // namespace peacock

@@ -34,7 +34,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
   - [#282 — a scan with no surviving row groups is refused at planning](#t282)
 - [Performance](#performance)
-  - [#154 — every operator exit path deep-copies its output into a fresh table](#t154)
+  - [#154 — join.cpp's exit paths deep-copy their output into a fresh table](#t154)
 - [Testing](#testing)
   - [#227 Check schema nullability in tests](#t227)
   - [#164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
@@ -692,37 +692,26 @@ every node answer right. In keyless-identity.
 Tickets pulled ahead from the performance path to fix earlier
 
 <a id="t154"></a>
-### #154 — every operator exit path deep-copies its output into a fresh table
-`std::make_unique<cudf::column>(view)` deep-copies the device buffer, and 21 sites under
-`cpp/src/` do it — 10 in `join.cpp`, 7 in `aggregate.cpp` — mostly to a table the same
-function just produced.
+### #154 — join.cpp's exit paths deep-copy their output into a fresh table
+`std::make_unique<cudf::column>(view)` deep-copies the device buffer, and ten sites in
+`join.cpp` still do it, mostly to a table the same function just produced. An engine running
+a node once per query would pay that once; this one pays it once per node per *batch*.
 
 `execute_hash_join` is worst per exit: `cudf::gather` returns an owning table, the code copies
 each column into `all_cols` (~L337, ~L342), then copies the kept ones again if the node projects
-(~L376). `release()` moves instead; `scan.cpp` L103 and `join.cpp` L254 are the pattern
-(`union.cpp`'s site went with its `output_schema` block in decimal-precision-at-export), and it
-is C++-internal — no header, fbs, Rust or golden moves. Five kinds: whole table
-freshly produced (`join.cpp` 202, 337, 342, 512, 515), mechanical; ordinal subset (`join.cpp`
-211, 270, 376, 525, `filter.cpp` 41), needing an assert the ordinals are distinct; a column of
-an **input** table kept in the output (`join.cpp` 259, `project.cpp` 44, `window.cpp` 46),
-changing who destroys what under `NodeInputs`; a temporary that only ever needed a view
-(`expr.cpp` 834, below); and `aggregate.cpp` 413, 642, 644, 678, 680, 759, 771, unresolved without
-reading. Traps: a view taken before the release dangles (`ftv` ~L372), and a repeated projection
-ordinal moves one column twice leaving a hole — a wrong answer, not a throw, which is why it
-needs the assert and not the observation. Land before [#155](joins.md#t155).
+(~L376). Three kinds: whole table freshly produced (202, 337, 342, 512, 515), which
+`release()` moves instead; ordinal subset (211, 270, 376, 525), which `TableResult::select`
+shares; and a column of an **input** table kept in the output (259), which shares the input's
+owner. Traps: a view taken before the release dangles (`ftv` ~L372), and a repeated projection
+ordinal moved twice leaves a hole — a wrong answer, not a throw. `join-session-cpp` rewrites
+this file and takes them; land before [#155](joins.md#t155).
 
-The `expr.cpp` site is the cheapest to fix and the most expensive to leave. `build_column`'s
-`ColumnRef` arm copies the whole column and the caller takes `->view()` of the copy one line
-later; every consumer (`cudf::binary_operation`, `unary_operation`, the function arms) takes
-a `column_view`, and the input table outlives the call. Returning `table.column(idx)` — or
-resolving `ColumnRef` leaves in `build_column_binary` before recursing — needs no ownership
-change. It fires once per `ColumnRef` leaf per batch on every predicate `cudf_ast_can_evaluate` rejects
-(a decimal operand, a string literal, LIKE, CASE): q6's filter copies five lineitem columns per
-batch (`l_shipdate` ×2, `l_discount` ×2, `l_quantity`), and q19's copies string columns, offsets
-and chars. The sf40 HBM reading puts it at ~46 of the 107 GB q19's lineitem filter moves, and
-17× the useful traffic at its part filter. The `And` chain's intermediate bool columns are a
-separate cost — one kernel per node, which only fusion (JIT, or stitching back into the AST)
-removes — and not this ticket's.
+The other eleven sites are gone or justified, by [`exit-copies`](../tasks/exit-copies.md): six
+lost their copy — `expr.cpp`'s `ColumnRef` arm (now `evaluate_column`, a view of the input's own
+column), `filter.cpp`'s fused projection, `project.cpp`'s and `window.cpp`'s input columns, and
+`aggregate.cpp`'s two groupby key tables — and five keep it, the four Welford struct members
+because `cudf::make_structs_column` owns its children, and the merged-state child because up to
+three builds read one struct, a child each.
 
 ## Testing
 

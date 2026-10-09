@@ -29,7 +29,7 @@ matrix in `architecture.md`); open is what running it there costs.
 
 Each follows from a handle being consumed by its reader, or an fb node's fields being plan
 constants, and they overlap. The session subsumes the bitmap; the top two rows need no ABI
-change. Land [#154](#t154) first, or the numbers are inflated by per-call copies.
+change. Land [#154](corpus-coverage.md#t154) first, or the numbers are inflated by per-call copies.
 
 <a id="t152"></a>
 ### #152 — GpuHashJoin: the build handle does not survive a streamed probe

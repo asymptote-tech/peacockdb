@@ -1,5 +1,7 @@
-// TableResult's four constructors (plan_executor.h): every handle's table is built by one
-// of these, so the owner-per-column rule and its refusals live in one place.
+// TableResult's four constructors (plan_executor.h). A handle's table is built by one of these
+// or assembled through the public fields, which `project.cpp` does because a project reorders
+// and renames and no constructor has that shape; `register_handle` is the single check either
+// way, so the owner-per-column rule has one enforcement point rather than one per route.
 
 #include "plan_executor.h"
 
@@ -41,6 +43,8 @@ TableResult TableResult::slice(cudf::size_type begin, cudf::size_type end) const
   return out;
 }
 
+/// An ordinal may repeat: the two entries share one owner and both read the same column,
+/// which is why an operator's fused projection selects rather than moving a column twice.
 TableResult TableResult::select(std::vector<cudf::size_type> const& ordinals) const {
   TableResult out;
   for (auto i : ordinals) {
