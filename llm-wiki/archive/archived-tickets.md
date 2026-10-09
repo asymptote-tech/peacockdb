@@ -21,10 +21,9 @@ recorded here and nowhere else, so the counter never walks back over it:
   (`scripts/exec_model/README.md`). Named by commit 4c89d91.
 
 Archiving or moving a ticket the registry names is safe: the cost widget resolves a number to
-whichever ticket file holds its `<a id="tNN">` anchor — `tickets.md`, any `tickets/*.md`,
-`tasks/active-tickets.md` or this archive (`TicketIndex::load` in `cost-report/src/main.rs`). It
-refuses to render a link for a number in none of them, failing the report rather than emitting
-one that goes nowhere.
+whichever ticket file holds its `<a id="tNN">` anchor — `tickets.md`, any `tickets/*.md`, or this
+archive (`TicketIndex::load` in `cost-report/src/main.rs`). It refuses to render a link for a
+number in none of them, failing the report rather than emitting one that goes nowhere.
 
 ## Done
 
@@ -87,8 +86,8 @@ query whose root received nothing with one zero-row batch under the sink's decla
 backends, so an answer's schema never depends on how its rows ran out. `q17`'s result section is
 then regenerated with its header, and #235's empty-answer divergence goes.
 
-**Closed by empty-sorts (chain K), as proposed.** The accumulating sort and merge answer held
-batches with no row as one zero-row batch, unsorted (`sorted_and_cut`,
+**Closed by empty-sorts (chain K), except q17's device cell.** The accumulating sort and merge
+answer held batches with no row as one zero-row batch, unsorted (`sorted_and_cut`,
 `cpu_backend/accumulate.rs`), and the test is on the held batches rather than on the sort's
 output, which cannot tell "every batch empty" from "no batch" once DataFusion has eaten it. A
 query whose sink received nothing answers one zero-row batch under the sink's input schema, made
@@ -96,7 +95,9 @@ by the driver (`Driver::answer`, `driver/partitioned.rs`) and not recorded as an
 so the execution goldens moved only where the rows did. The corpus and end-to-end oracles give
 DataFusion's own empty answer its columns the same way. q17's result section carries its header.
 The three `bug_` pins are agreement cases and the mixed merge has one; all four pass on a
-device ([#281](#t281)).
+device ([#281](#t281)). The cell did not turn on: all five modes ran 2026-10-09 and all five
+stay off, on #225 at the two tp1 modes, #220 under a masked hook at tp1-single, and #152 at the
+three tp4 modes.
 
 <a id="t186"></a>
 ### #186 — a limit pushed into the scan: the cpu ignores it, the device refuses it

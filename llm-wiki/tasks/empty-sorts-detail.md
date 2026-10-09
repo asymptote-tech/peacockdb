@@ -1056,3 +1056,89 @@ sentences the branch falsified, which are the analyst's reading at `completing`.
 CI at dispatch: `Changed paths` and `S3 datasets metadata check` green, the three pipeline legs
 and `cost-report` still pending on run 38004462130. Not waited on — the only wait is
 `completeness approved` → `done`.
+
+### 2026-10-09 — review round 2: 0 blocking, 0 important, 7 nits; `completing`
+
+The reviewer read the whole branch and found **nothing blocking and nothing important**, so the
+board goes to `completing`. The control file then said `stop`, so the completeness pass was not
+dispatched and the run ends here.
+
+**What it verified, so nobody re-derives it.** The composition claim this round rested on holds:
+`same_slot` returns `Ok` for `(None, None)`, so the four device cases are relative only — but
+`run_both` drives the production `CpuBackend`, `sorted_and_cut`'s new arm is insensitive to fetch,
+direction and schema, and `assert_one_empty_batch` pins the cpu side absolutely over the same four
+shapes, so device-only, cpu-only and joint regressions are each caught by one half. q17's
+declaration is byte-identical between `ENS-limits` and HEAD (only its group comment grew a line).
+The registry row satisfies `off == 0 || !tickets.is_empty()`, both directions, and no row names
+`205` or `281` any more. `path_for("214")` has teeth: `<a id="t214">` occurs exactly once in the
+tree, in `tickets/corpus-coverage.md`, and `add`'s first-wins order cannot shadow it. Every count
+re-checked arithmetically: `tickets.md` 116 open, #220's 88 rows, `build-test.md`'s 2414 with the
+per-row deltas matching the diff. The rebase lost none of limits' edits. q17's new result section
+is byte-identical to `duckdb-result.txt`'s, so the signoff's claim is true. `partitioned.rs` is
+996 lines, under the impl plan's 1000 cap.
+
+**Two nits applied here**, both markdown, both a false sentence rather than a preference:
+
+1. **#205's closing note said "as proposed"** and the preserved *Fix proposed* block ends "and
+   `tpcds/q17`'s device cell turns on at `tp1-single`" — so a reader of #205 alone concluded the
+   cell is enabled. Now "except q17's device cell", with the three measured causes, taking #186's
+   established `and again not as proposed` form from the same file.
+2. **The archive header named a file that does not exist** — `tasks/active-tickets.md`, among the
+   files `TicketIndex::load` reads. It reads three classes (`main.rs:341-343`), and that path is
+   absent from the tree. Dropped. It is the sentence describing the mechanism this branch
+   exercised twice, which is why it was worth the edit.
+
+**Five nits left, with the reviewer's fixes, for the next run.** None is blocking or important, and
+the completeness pass drops nits — but these were found at a findings round, so they are recorded
+rather than dropped, and the first one is not a nit's worth of consequence:
+
+3. **`cost-report/src/main.rs:1728` repeats the red this round just paid for.** The companion
+   assertion is `path_for("152")`, and **#152 is on chain J's join-backend closes list**
+   (`tasks.md:119`, `approved to build`) — verified, not taken on trust. So archiving #152 at that
+   merge turns `cargo test -p cost-report` red exactly as archiving #205 did, and no task's
+   verification bar runs that crate. The assertion is also redundant for class coverage: #214 on
+   the line above already covers `tickets/*.md`. **This is a test body, so it is the developer's,
+   not the coordinator's.** Fix: swap `152` for #243, #245, #246 or #250 — all four verified in
+   `tickets/joins.md` and on no chain's closes list — or drop the line as redundant.
+4. `corpus_cases.inc:284-285` — q17's new clause sits inside the sentence "On the device at
+   tp1-single, the other modes never run:" while itself saying all five were measured, so one
+   sentence asserts both. Fix: take q17 out of the colon-list and give it its own sentence, as the
+   q64/q88 group at `:260-262` already does. Comment-only in a code file, so the coordinator's.
+5. `accumulate_cases.rs:181` — the four cases' comment should name the cpu-side absolute pin they
+   compose with, since deleting `assert_one_empty_batch` would make all four silently vacuous and
+   neither file names the other. One clause. Comment-only, so the coordinator's.
+6. Wrap drift left by the re-wraps: `tickets/corpus-coverage.md:72` at 105 columns against the
+   file's ~98, `:195-197`'s orphan `merge a keyless`, and `tickets/joins.md:122-123` leaving
+   `Pinned by` alone on a line. `accumulate_cases.rs:202` at 101 columns is inside an
+   `operator_case!` body rustfmt does not enter, and the file already carries two such lines.
+7. Ticket length against coding-style's 15-line cap: #225 33, #199 42, #220 43, #235 86. Every one
+   was already over before this branch, which adds 2-5 lines to each. The one compressible thing
+   the reviewer named is #225's new three lines saying the same thing twice.
+
+#### CI on the code head, and the cost gate is green as predicted
+
+Run **38004462130** on `9f491834`, the last commit that carries code. `conclusion: failure`, and
+the only failing job is the one the chain's note excludes:
+
+| job | result |
+|---|---|
+| Changed paths | success |
+| S3 datasets metadata check | success |
+| CI Pipeline (cudf 25.02) | success |
+| CI Pipeline (cudf 26.02) | success |
+| CI Pipeline (build 25.02 for GPU) | success |
+| **Cost report (coverage + ratio)** | **success** |
+| Deploy cost report to Pages | skipped (master pushes only) |
+| **GPU Tests (remote)** | **failure** — `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out` |
+
+**The cost gate is green, so the board's pre-acceptance was indeed not load-bearing** — the
+local `rc=0` prediction held, and a red `cost-report` is a finding again from here on. The
+`gpu-tests` red is shad-gpu being unreachable at the rsync step, exit 255, before any binary ran:
+not a test failure, and no finding. The device evidence stays the nebius-gpu run recorded above.
+
+So **CI is already satisfied in the chain's `done` terms.** What is left between here and `done`
+is the completeness pass and the signoff rewrite, not a wait on a pipeline.
+
+Later runs on this branch are documentation-only pushes and the `changes` job skips every job
+under them by design (`pipeline.yml`'s two layers). A restarted coordinator reading `skipping`
+across the board should read the newest run that carries code, not the newest run.
