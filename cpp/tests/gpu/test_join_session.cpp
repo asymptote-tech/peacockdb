@@ -3,6 +3,17 @@
 #include "peacock_gpu.h"
 #include "peacock/rmm_pool.hpp"
 #include "plan_executor_internal.h"
+
+#if __has_include(<cudf/join/hash_join.hpp>)
+#include <cudf/join/hash_join.hpp>
+#else
+#include <cudf/join.hpp>
+#endif
+#include <cudf/copying.hpp>
+#include <cudf/filling.hpp>
+#include <cudf/scalar/scalar.hpp>
+#include <cudf/table/table.hpp>
+#include <cudf/table/table_view.hpp>
 #include "generated/gpu_plan_generated.h"
 
 #include <arrow/api.h>
@@ -172,6 +183,24 @@ static Rows sorted(Rows r) {
   return r;
 }
 
+/// What `fn` allocated: in total, at its peak above where it started, and still held after.
+struct Allocated {
+  int64_t total = 0, peak = 0, net = 0;
+};
+
+template <class F>
+static Allocated allocated_by(F&& fn) {
+  auto& mr = peacock::stats_mr();
+  if (!mr) {
+    ADD_FAILURE() << "main() installs the pool and its statistics adaptor";
+    return {};
+  }
+  mr->push_counters();
+  fn();
+  auto [bytes, calls] = mr->pop_counters();
+  return {bytes.total, bytes.peak, bytes.value};
+}
+
 /// One field of a side's schema: the pad types a join answers with before a batch arrived.
 struct SField {
   std::string name;
@@ -303,22 +332,41 @@ TEST(JoinSession, AnUnknownJoinIdIsRefusedWithoutEndingTheQuery) {
   EXPECT_EQ(s.rows(h).size(), 1u);  // the session is still standing
 }
 
+/// A build side big enough to measure what releasing it gives back: a session holds its
+/// build table, its hash table and its matched column across every call, so it is the one
+/// place in the tree where a leak is invisible to any allocation bound.
+static JoinSpec inner_on_i64() {
+  return {.type = fb::JoinType_Inner,
+          .keys = {{0, 0}},
+          .build_schema = {{"b_k", fb::DataType_Int64}, {"b_v", fb::DataType_Int64}},
+          .probe_schema = {{"p_k", fb::DataType_Int64}, {"p_v", fb::DataType_Int64}}};
+}
+
 TEST(JoinSession, ReleaseWithoutFinishAndEndPlanFreeTheSession) {
-  Session s(make_plan(inner_on_k()));
-  uint64_t a = 0, b = 0;
-  ASSERT_EQ(
-      peacock_join_build(s.exec(), 0, s.upload({i32("b_k", {1}), utf8("b_v", {"a"})}), &a, nullptr),
-      0)
-      << s.error();
-  ASSERT_EQ(
-      peacock_join_build(s.exec(), 0, s.upload({i32("b_k", {2}), utf8("b_v", {"b"})}), &b, nullptr),
-      0)
-      << s.error();
-  peacock_join_release(s.exec(), a);
+  constexpr int64_t n = 1 << 18;
+  std::vector<std::optional<int64_t>> k(n), v(n);
+  for (int64_t i = 0; i < n; ++i) {
+    k[i] = i;
+    v[i] = i * 3;
+  }
+  Session s(make_plan(inner_on_i64()));
+  uint64_t a = 0, b = 0, ha = 0, hb = 0;
+  auto up_a = allocated_by([&] { ha = s.upload({i64("b_k", k), i64("b_v", v)}); });
+  ASSERT_EQ(peacock_join_build(s.exec(), 0, ha, &a, nullptr), 0) << s.error();
+  auto released = allocated_by([&] { peacock_join_release(s.exec(), a); });
+  std::cout << "[join release] build " << up_a.net << " | release net " << released.net << "\n";
+  EXPECT_LE(released.net, -(up_a.net - up_a.net / 16))
+      << "release gave back " << -released.net << " of the build side's own " << up_a.net;
   peacock_join_release(s.exec(), a);  // idempotent, as handle release is
   uint64_t out = 0;
   EXPECT_NE(peacock_join_finish(s.exec(), a, &out, nullptr), 0);
-  peacock_executor_end_plan(s.exec());  // b is freed with the plan
+
+  // A second session, freed with the plan rather than by hand.
+  auto up_b = allocated_by([&] { hb = s.upload({i64("b_k", k), i64("b_v", v)}); });
+  ASSERT_EQ(peacock_join_build(s.exec(), 0, hb, &b, nullptr), 0) << s.error();
+  auto ended = allocated_by([&] { peacock_executor_end_plan(s.exec()); });
+  EXPECT_LE(ended.net, -(up_b.net - up_b.net / 16))
+      << "end_plan gave back " << -ended.net << " of the live session's build side";
 }
 
 // --- Task 3: Left, Right, Full and the finish -------------------------------
@@ -387,23 +435,29 @@ TEST(JoinSession, FullNeverReemitsAnUnmatchedBuildRowAcrossThreeBatches) {
 }
 
 TEST(JoinSession, NullEqualsNullMatchesNullKeysForEveryOuterType) {
-  auto spec = typed(fb::JoinType_Full);
-  spec.null_equals_null = true;
-  Session s(make_plan(spec));
-  uint64_t j = 0, out = 0;
-  ASSERT_EQ(
-      peacock_join_build(s.exec(), 0, s.upload({i32("b_k", {std::nullopt}), utf8("b_v", {"n"})}),
-                         &j, nullptr),
-      0)
-      << s.error();
-  ASSERT_EQ(
-      peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {std::nullopt}), i64("p_w", {99})}),
-                         &out, nullptr),
-      0)
-      << s.error();
-  EXPECT_EQ(s.rows(out), sorted({"NULL|n|NULL|99"}));
-  ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
-  EXPECT_TRUE(s.rows(out).empty());
+  for (auto t : {fb::JoinType_Inner, fb::JoinType_Left, fb::JoinType_Right, fb::JoinType_Full}) {
+    auto spec = typed(t);
+    spec.null_equals_null = true;
+    Session s(make_plan(spec));
+    uint64_t j = 0, out = 0;
+    ASSERT_EQ(
+        peacock_join_build(s.exec(), 0, s.upload({i32("b_k", {std::nullopt}), utf8("b_v", {"n"})}),
+                           &j, nullptr),
+        0)
+        << s.error();
+    ASSERT_EQ(
+        peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {std::nullopt}), i64("p_w", {99})}),
+                           &out, nullptr),
+        0)
+        << s.error();
+    EXPECT_EQ(s.rows(out), sorted({"NULL|n|NULL|99"})) << fb::EnumNameJoinType(t);
+    ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
+    // The one build row matched, so the two finishing types have nothing left to pad.
+    if (t == fb::JoinType_Left || t == fb::JoinType_Full)
+      EXPECT_TRUE(s.rows(out).empty()) << fb::EnumNameJoinType(t);
+    else
+      EXPECT_EQ(out, 0u) << fb::EnumNameJoinType(t);
+  }
 }
 
 TEST(JoinSession, AProjectionCrossingSidesKeepsOnlyItsColumns) {
@@ -909,7 +963,8 @@ static JoinSpec unconditional(fb::JoinType t) {
              .build_schema = {{"b_id", fb::DataType_Int32}},
              .probe_schema = {{"p_v", fb::DataType_Int32}}};
   s.filter = [](auto& f) { return lit_bool(f, true); };
-  s.filter_columns = {{fb::JoinSide_Left, 0}};
+  // No filter_columns: the literal names no column, so there are no ordinals to map, and
+  // this is the encoding a predicate-free join carries (design §1.1, §3.6, §4.1).
   return s;
 }
 
@@ -935,6 +990,30 @@ TEST(JoinSession, APredicateFreeNestedLoopOverAnEmptySide) {
         << b.error();
     EXPECT_EQ(b.rows(out2), t == fb::JoinType_Left ? Rows{} : sorted({"NULL|7"}))
         << fb::EnumNameJoinType(t);
+  }
+}
+
+// Design §4.1's own example, which the old recipe answers with zero rows because it makes
+// every predicate-free nested loop a cross join: `tiny LEFT JOIN empty ON true` owes the
+// eight padded rows, not none. The filter carries no filter_columns, which is what the
+// planner will write for it.
+TEST(JoinSession, APredicateFreeLeftNestedLoopOverAnEmptyBuildOwesItsPaddedRows) {
+  std::vector<std::optional<int32_t>> tiny(8);
+  for (int i = 0; i < 8; ++i) tiny[i] = i + 1;
+  for (bool absent_probe : {true, false}) {
+    Session s(make_plan(unconditional(fb::JoinType_Left)));
+    uint64_t j = 0, out = 0;
+    ASSERT_EQ(peacock_join_build(s.exec(), 0, s.upload({i32("b_id", tiny)}), &j, nullptr), 0)
+        << s.error();
+    if (!absent_probe) {
+      ASSERT_EQ(peacock_join_probe(s.exec(), j, s.upload({i32("p_v", {})}), &out, nullptr), 0)
+          << s.error();
+      EXPECT_TRUE(s.rows(out).empty()) << "the empty side pairs with nothing";
+    }
+    ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
+    EXPECT_EQ(s.rows(out), sorted({"1|NULL", "2|NULL", "3|NULL", "4|NULL", "5|NULL", "6|NULL",
+                                   "7|NULL", "8|NULL"}))
+        << "absent_probe=" << absent_probe;
   }
 }
 
@@ -1100,14 +1179,18 @@ TEST(JoinSession, ANestedLoopWhoseHoistedComparisonIsStillRefusedTakesTheCross) 
                                  &j, nullptr),
               0)
         << s.error();
+    // Three probe rows, so a small budget cuts the cross of indices into ranges rather than
+    // making one of it: `chunks` caps the range count at the probe's row count. 12.00 is
+    // above both build values and 4.00 below both.
     ASSERT_EQ(
-        peacock_join_probe(s.exec(), j, s.upload({i32("p_id", {7}), dec("p_d", 15, 2, {700})}),
+        peacock_join_probe(s.exec(), j,
+                           s.upload({i32("p_id", {7, 8, 9}), dec("p_d", 15, 2, {700, 1200, 400})}),
                            &out, nullptr),
         0)
         << s.error();
-    EXPECT_EQ(s.rows(out), sorted({"2|7"})) << "chunk_bytes=" << chunk_bytes;
+    EXPECT_EQ(s.rows(out), sorted({"1|9", "2|7", "2|9"})) << "chunk_bytes=" << chunk_bytes;
     ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
-    EXPECT_EQ(s.rows(out), sorted({"1|NULL"})) << "chunk_bytes=" << chunk_bytes;
+    EXPECT_TRUE(s.rows(out).empty()) << "every build row matched, chunk_bytes=" << chunk_bytes;
   }
 }
 
@@ -1166,24 +1249,6 @@ TEST(JoinSession, AKeyedSemiJoinAnswersTheSameWithAHoistedConjunctOrThePairsPath
           << " chunk_bytes=" << form.chunk_bytes;
     }
   }
-}
-
-/// What `fn` allocated: in total, at its peak above where it started, and still held after.
-struct Allocated {
-  int64_t total = 0, peak = 0, net = 0;
-};
-
-template <class F>
-static Allocated allocated_by(F&& fn) {
-  auto& mr = peacock::stats_mr();
-  if (!mr) {
-    ADD_FAILURE() << "main() installs the pool and its statistics adaptor";
-    return {};
-  }
-  mr->push_counters();
-  fn();
-  auto [bytes, calls] = mr->pop_counters();
-  return {bytes.total, bytes.peak, bytes.value};
 }
 
 // Hoisting moves no row and changes no answer, so only what the call allocates can show it
@@ -1388,10 +1453,38 @@ TEST(JoinSession, EachJoinCallOpensOneRegionForItsNode) {
   ASSERT_EQ(peacock_set_node_timing(0), 0);
 }
 
+/// The bare cuDF a probe of this shape is: the sizer, the sized inner join and the two
+/// gathers, over tables of the same rows and types. The hash table is built outside the
+/// measured scope, as the session builds it in `join_build` and not in the probe.
+static Allocated bare_probe_of(int64_t n) {
+  cudf::numeric_scalar<int64_t> zero(0), one(1), three(3);
+  auto bk = cudf::sequence(static_cast<cudf::size_type>(n), zero, one);
+  auto bv = cudf::sequence(static_cast<cudf::size_type>(n), zero, three);
+  auto pk = cudf::sequence(static_cast<cudf::size_type>(n), zero, one);
+  auto pv = cudf::sequence(static_cast<cudf::size_type>(n), zero, three);
+  cudf::table_view build{{bk->view(), bv->view()}}, probe{{pk->view(), pv->view()}};
+  auto keys = build.select({0});
+  auto probe_keys = probe.select({0});
+  cudf::hash_join hj(keys, cudf::null_equality::UNEQUAL);
+  return allocated_by([&] {
+    auto size = hj.inner_join_size(probe_keys);
+    auto [pi, bi] = hj.inner_join(probe_keys, size);
+    auto idx = [](rmm::device_uvector<cudf::size_type> const& v) {
+      return cudf::column_view{cudf::data_type{cudf::type_id::INT32},
+                               static_cast<cudf::size_type>(v.size()), v.data(), nullptr, 0};
+    };
+    auto bg = cudf::gather(build, idx(*bi));
+    auto pg = cudf::gather(probe, idx(*pi));
+    EXPECT_EQ(bg->num_rows(), n);
+    EXPECT_EQ(pg->num_rows(), n);
+  });
+}
+
 // #154's join.cpp sites: the session moves its gathered columns into the output, so a deep
-// copy at the exit would show as a second output-sized allocation at the peak. Both bounds
-// are measured on this very input — the output is the two inputs' shape exactly, the two
-// index maps a quarter of it (INT32 beside INT64) — so no cuDF cost is baked into either.
+// copy at the exit would show as a second output-sized allocation at the peak. The peak is
+// bounded by the same cuDF calls on tables of the same shape rather than by a formula, and
+// `net` is bounded both ways — an upper bound is the only thing that can see the session
+// retaining the probe batch it was handed, which no peak would move.
 TEST(JoinSession, AProbeHandsItsGatheredColumnsOverWithoutACopy) {
   constexpr int64_t n = 1 << 20;  // 1:1 keys, one int64 payload a side
   std::vector<std::optional<int64_t>> k(n), v(n);
@@ -1410,13 +1503,18 @@ TEST(JoinSession, AProbeHandsItsGatheredColumnsOverWithoutACopy) {
   auto probe_up = allocated_by([&] { probe = s.upload({i64("p_k", k), i64("p_v", v)}); });
   auto got = allocated_by(
       [&] { ASSERT_EQ(peacock_join_probe(s.exec(), j, probe, &out, nullptr), 0) << s.error(); });
-  const int64_t inputs = build_up.net + probe_up.net;
-  std::cout << "[join exit] inputs " << inputs << " | probe peak " << got.peak << " total "
+  auto bare = bare_probe_of(n);
+  const int64_t slack = int64_t{1} << 16;  // allocator rounding
+  std::cout << "[join exit] build " << build_up.net << " probe " << probe_up.net << " | bare peak "
+            << bare.peak << " total " << bare.total << " | probe peak " << got.peak << " total "
             << got.total << " net " << got.net << "\n";
   EXPECT_GE(got.net, build_up.net - build_up.net / 16)
       << "the output is what the call leaves behind, the probe batch having gone with it";
-  EXPECT_LT(got.peak, inputs + inputs / 4 + inputs / 2)
-      << "peak " << got.peak << ": a deep copy at the exit would add a second " << inputs;
+  EXPECT_LT(got.net, build_up.net + slack)
+      << "net " << got.net << ": the session is still holding the probe batch it consumed";
+  EXPECT_LT(got.peak, bare.peak + slack)
+      << "peak " << got.peak << " against the same cuDF work's " << bare.peak
+      << ": a deep copy at the exit would add a second output";
 }
 
 // --- Task 11b: the rest of §5.6's named cases -------------------------------

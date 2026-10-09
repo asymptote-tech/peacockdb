@@ -19,7 +19,6 @@
 #include <cudf/copying.hpp>
 #include <cudf/filling.hpp>
 #include <cudf/reshape.hpp>
-#include <cudf/reshape.hpp>
 #include <cudf/stream_compaction.hpp>
 #include <cudf/table/table.hpp>
 
@@ -176,8 +175,10 @@ JoinSession::~JoinSession() = default;
 /// never needs the pairs at all (design §3.4's last rule).
 void JoinSession::split_residual() {
   const fb::CudfJoin* d = s_->d;
+  // An empty map is the right encoding of a filter that names no column -- the literal `true`
+  // every predicate-free non-Inner join carries (design §1.1, §3.6, §4.1). A filter that does
+  // name one and carries no map is refused where it is read, by ordinal and by name.
   s_->map = col_map_of(d->filter_columns());
-  if (s_->map.empty()) throw std::runtime_error("CudfJoin: a filter with no filter_columns map");
   std::vector<const fb::Expr*> parts;
   conjuncts_of(d->filter(), parts);
   // Only a keyed semi join pushes a one-side conjunct to its side: a nested loop evaluates

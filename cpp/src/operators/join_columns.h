@@ -72,5 +72,9 @@ bool is_probe_side_semi(fb::JoinType t);
 /// The four whose output is pairs of rows from both sides.
 bool emits_pairs(fb::JoinType t);
 
+// `fits_or_throw` and `cross_rows_or_throw`, the two size_type ceilings, are defined in
+// join_columns.cpp and declared in plan_executor_internal.h, which is the route a test
+// reaches them by; this header's includes make them visible to every consumer of it.
+
 }  // namespace join
 }  // namespace peacock

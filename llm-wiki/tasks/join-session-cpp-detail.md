@@ -291,3 +291,110 @@ they probe one row; `NullEqualsNullMatchesNullKeysForEveryOuterType` running `Fu
 task 8 writes against; a build-side ordinal overrun throwing unnamed where the probe side is named;
 `join_columns.h` silent on the two `plan_executor_internal.h` helpers it makes visible; and three
 `generated.rs` line counts the new union variant falsified.
+
+## Developer round 2, 2026-10-09 — review round 1 addressed
+
+The blocking finding and both important ones are fixed; all seven nits taken. **48 gtests,
+140 hand-counted cases** (was 47/135: looping `NullEqualsNullMatchesNullKeysForEveryOuterType`
+over its four types adds 3, and §4.1's own example adds a gtest of 2 shapes).
+
+### Blocking — the new union variant turned a Rust guard red
+
+`peacockdb-core/src/wire/read.rs` gained one arm, `fb::PlanNodeKind::CudfJoin => Vec::new()`,
+beside the other joins and commented as the leaf it is. Watched red first, locally:
+
+    thread 'wire::tests::the_child_walk_names_every_node_kind' panicked at
+      peacockdb-core/src/wire/tests.rs:974: CudfJoin is missing from the child walk
+
+**No sibling guard exists** — `wire/tests.rs:956` is the only `ENUM_VALUES` iterator in the
+tree, which the coordinator confirmed by its own grep. One match over `PlanNodeKind` does have
+the same *shape* without being a guard: `wire/fb_text.rs`'s `payload_text` ends in `_ => {}`,
+so a `CudfJoin` renders no fields in `recipe-payloads.txt`. Nothing is red, because nothing
+writes the node; **join-backend's writer is what makes that arm reachable**, and it will want
+one when its payload golden comes out empty. Left alone here deliberately: with no writer and
+no golden, which of the nine fields to print would be a guess.
+
+The lesson for the round record: this round ran `peacock_cpu_tests` and
+`cargo check -p peacockdb-ffi` and called the CPU side proved. A `cargo check` compiles; it runs
+no test. **An fbs change is a Rust change**, because `peacockdb-core/build.rs` regenerates the
+bindings on every build — so the rust-only tier is part of re-proving any `gpu_plan.fbs` edit,
+whatever the task's restriction says about Rust *behaviour*.
+
+### Important 1 — the `filter_columns` throw refused the shape the chain exists to fix
+
+`split_residual` threw on an empty filter-column map. Design §1.1 declares the map as
+"filter schema ordinal -> (side, column)", and the literal `true` that every predicate-free
+non-Inner join carries (§3.6, §4.1) has no column references and therefore no ordinals — so an
+empty map is the *correct* encoding, and the throw refused `tiny LEFT JOIN empty ON true`,
+§4.1's own example of the defect this chain removes. The throw is gone; `expr.h`'s comment was
+right as written and `col_map_of`'s null branch now has the live caller it claims.
+
+Checked path by path before dropping it, and nothing needs the map for such a filter:
+`sides_read` is reached only on the keyed-semi branch and returns at once for a literal;
+`cond_table` returns before touching the map when nothing is hoisted; `build_expr` never
+indexes it for a `LiteralExpr`; `filter_type_table` over an empty map is a zero-column table
+`cudf_ast_can_evaluate` only reads types from. A filter that *does* name a column with no map
+is still refused by name, from `build_expr`'s and `sides_read`'s own bounds checks.
+
+The test helper `unconditional()` now passes **no** `filter_columns`, so the two predicate-free
+cases prove the shape join-backend will emit rather than passing over an entry nothing reads;
+and `APredicateFreeLeftNestedLoopOverAnEmptyBuildOwesItsPaddedRows` pins §4.1's example with its
+own number — a build of 8 rows against an absent and a zero-row probe, owing 8 padded rows.
+No design text changed: it already said the right thing.
+
+### Important 2 — the allocation bounds now bound the release, and the peak is measured
+
+Three changes, each proved red by a deliberate leak on the device:
+
+| bound | leak that proves it | measured |
+|---|---|---|
+| `net` upper bound on a probe | the session pushes a copy of every batch into `State` | net 33,554,432 against 16,842,752 — **and the peak did not move**, which is why no peak could have caught it |
+| peak against the same cuDF work | a deep copy of every gathered column at the exit | peak 58,720,256 against the bare work's 41,943,040 |
+| release gives the build side back | `join_release` made a no-op | release net 0 against −3,932,160 |
+
+The peak bound was `inputs + inputs/4 + inputs/2`, a hand formula. It is now `bare_probe_of(n)`:
+the same four cuDF calls (`inner_join_size`, the sized `inner_join`, two `gather`s) over tables
+of the same rows and types, with the hash table built outside the measured scope exactly as the
+session builds it in `join_build`. Green, the two agree **to the byte**:
+
+    [join exit] build 16777216 probe 16777216 | bare peak 41943040 total 41943232
+                | probe peak 41943040 total 41943232 net 16777216
+    [join release] build 4194304 | release net -8389616
+
+`ReleaseWithoutFinishAndEndPlanFreeTheSession` now measures both halves §5.6 names: releasing a
+session gives back its build side (and its hash table — 8.4 MB against a 4 MB build), and
+`end_plan` under a live second session does the same.
+
+### Nits, all seven
+
+1. The duplicated `#include <cudf/reshape.hpp>` is gone.
+2. Three `chunk_bytes = 16` forms probed one row, and `chunks` caps the range count at the
+   probe's rows, so each ran identically to its unchunked sibling. All three now probe three
+   rows, with the extra rows chosen to leave the expected answers unchanged where that was
+   possible and recomputed by hand where it was not (the keyless decimal case now answers
+   three rows and an empty finish).
+3. `NullEqualsNullMatchesNullKeysForEveryOuterType` ran Full alone; it now loops the four and
+   the name is accurate.
+4. `gpu_plan.fbs` now says what `projection`'s ordinals index, which differs by type, and that
+   an empty `filter_columns` is what a filter naming no column carries. The fbs is what task 8
+   writes against, which is why both belong there rather than only in the C++ comment.
+5. `filter_type_table` names a build-side overrun as it already named a probe-side one.
+6. `join_columns.h` points at the two `size_type` ceilings it defines in its `.cpp`.
+7. The three "7,336 lines" counts now read **7,570**, the regenerated truth. Worth noting: the
+   number was already stale before this task — HEAD's fbs regenerates to 7,287, so the comment
+   was 49 lines out when the task started, and this corrects both drifts at once.
+
+### What round 2 ran
+
+- **Rust, locally** — the tier CI runs: `cargo test --features rust-only -p peacockdb-core --lib`
+  **694 passed**, 0 failed (CI's run 37960619791 on `46a2ab84` had 693 passed, 1 failed);
+  `--test test_module_layout` 18 passed; `--test test_ci_coverage` 11 passed;
+  `--test test_corpus_goldens` 26 passed, which is what proves an fbs comment changed no bytes.
+- **Device, nebius-gpu** — `cpp/install/bin/peacock_join_session_tests` **48 passed**.
+- **Local C++** — `peacock_cpu_tests` 15 passed; the build with 0 warnings; `clang-format`
+  clean on every file touched, `rustfmt --check` clean on `read.rs`.
+
+The existing gpu tier was **not** re-run, deliberately: nothing it can reach moved. This round
+touched `read.rs` (rust-only), `join_session.cpp`'s refusal path, `join_residual.cpp`'s refusal
+path, two headers' comments, the fbs's comments and the test file. `expr.cpp` and `join.cpp` —
+the only files round 1 changed that today's plans execute — were not touched at all.

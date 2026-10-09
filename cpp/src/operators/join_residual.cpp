@@ -8,6 +8,7 @@
 #include <cudf/utilities/traits.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -176,6 +177,10 @@ TypeTable filter_type_table(JoinFilterColMap map, cudf::table_view B,
   TypeTable tt;
   for (auto const& fc : map) {
     if (fc.side() == fb::JoinSide_Left) {
+      if (fc.index() >= static_cast<std::uint32_t>(B.num_columns()))
+        throw std::runtime_error("CudfJoin: a filter column names build column " +
+                                 std::to_string(fc.index()) + " of a build side of " +
+                                 std::to_string(B.num_columns()) + " columns");
       tt.cols.push_back(cudf::slice(B.column(fc.index()), {0, 0}).front());
       continue;
     }
