@@ -214,9 +214,7 @@ fn a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb() {
 /// result is over the cap and holds a fingerprint instead of its rows. A `live_cpu` where a
 /// section does serve spends a device-side cpu run on a comparison a committed file makes
 /// faster and harder. One question, asked both ways, and the same one `corpus_gpu`'s
-/// device-side check asks — whether a section serves. Whether one mode can be the authority
-/// for five is a different claim, and the golden compare is what tests it: the device goes red
-/// at the mode that disagrees and names the author. Derivable is why a CHECK can exist here,
+/// device-side check asks — whether a section serves. Derivable is why a CHECK can exist here,
 /// never why either value would be absent from the line; read off the declaration and the
 /// golden, it needs no run, which is what catches the first `live_cpu` query before its rollout.
 #[test]
@@ -231,10 +229,11 @@ fn each_declarations_two_oracles_suit_each_other() {
             continue;
         }
         let section = section_of(&result_golden(declared.dataset, declared.sf), &query);
-        // Read off what is committed, not off `cpu_oracle`: `data_fusion_subset` says
-        // DataFusion's pick and ours need not be the same rows, which is not our own five modes
-        // differing. `tpch/scan-limit` is both — undetermined against DataFusion, identical
-        // across the modes since #186 cut it on one lane over the covering prefix in order.
+        // Read off what is committed, not off `cpu_oracle`. A `golden_exact` on a
+        // `data_fusion_subset` line is the extra claim that our own five modes agree, which only
+        // the device golden compare tests. `tpch/scan-limit`'s do: #186 cut it on one lane over
+        // the covering prefix in order, so its five plans are identical. Measured 2026-10-09,
+        // before chain J's master; the next device run proves it again.
         // The guard above excludes the query no mode enables, so a section standing in for
         // its rows here stands in for them because the cap kept them out.
         let needs_live = !section_holds_rows(&section);
