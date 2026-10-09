@@ -53,8 +53,10 @@ The #235 edit is markdown, so the coordinator writes it rather than the develope
   `output_bytes` moved: the two rows above are rule 1's sort emission alone, and the three tp4
   q17 sections — where rule 2 supplies the whole answer — did not move at all.
 - **`RunReport::batches` is never empty.** A documented guarantee on a `pub` field the CLI reads
-  (`peacockdb/src/main.rs`), with no signature change; the spec's Scope says
-  "Component-level API: none" and does not mention it.
+  (`peacockdb/src/main.rs`), with no signature change. This is what the spec authorized rather
+  than something beyond it: its Scope says "Component-level API: `RunReport::batches`
+  (`executor/mod.rs`, public) is never empty for a query whose root received nothing; no
+  signature changes."
 
 ## Dispatch log
 
@@ -177,9 +179,10 @@ plan. What it contained, all of it still owing:
    #63, #281)". Left as `#205` because it is a ticket reference rather than a count.
 7. #235's empty-answer bullet, which the dispatch already assigns to the coordinator.
 
-`as #205 says` in #214 (`corpus-coverage.md`) and in the cross-join ticket (`joins.md`) stay as
-they are — the number resolves in the archive. No `.rs`, `.inc`, `.csv`, `.cpp` or `.py` file in
-the tree names #205 any more.
+`as #205 says` in #214 (`corpus-coverage.md`) and in the cross-join ticket (`joins.md`) were
+left for the coordinator, who repointed both at the archive in the past tense rather than relying
+on the bare number resolving there. No `.rs`, `.inc`, `.csv`, `.cpp` or `.py` file in the tree
+names #205 any more.
 
 **build-test.md's counts, every figure summed from the rows rather than from a delta.**
 Measured with `--list`: `--lib` 647, `test_cpu_corpus` 569, `test_corpus_goldens` 26,
@@ -229,6 +232,78 @@ link:
   (#57, #63, #205)". That cell is held by #281 now.
 - #199's body named "#205's sort" among the sources of nothing below a keyless init. The
   sentence's claim still holds; the ticket it names is closed, so it says so.
-- #214's body said "as #205 says". Repointed at the archive, past tense.
+- #214's body said "as #205 says", and the cross-join ticket in `joins.md` said it in the same
+  words. Both repointed at the archive, past tense, so the two parallel sentences keep one form.
 
 The board's link moved to the archive; the spec's did not, since the spec is frozen.
+
+### 2026-10-09 — review round 1: 0 blocking, 1 important, 5 nits
+
+The important finding was mine, and it was a spec deliverable, not a staleness nit: **#235's
+empty-answer bullet, wiki item 7, never got written.** The detail file recorded the resolution and
+the strike list and said the coordinator owns the edit; items 1 to 6 landed and 7 did not. All
+three of the bullet's claims had become false — q17 renders its header, the cpu emits a batch, and
+the "candidate ticket to render the declared schema" is this task. Now rewritten in the past tense
+with the four-item list the spec's work item 3 asks for, because #235 is where the duckdb-oracle
+merger looks and the spec is archived with the task.
+
+Three nits were markdown and went with it. The detail file misquoted the frozen spec as saying
+"Component-level API: none" where it in fact authorizes exactly the `RunReport::batches`
+guarantee this branch makes — a misquote that would have read, in the signoff, as the branch
+exceeding its declared API scope. The cross-join ticket's "as #205 says" is the twin of #214's
+and now takes the same form. And #205's closing note in the archive takes the chain's
+`Closed by <task> (chain K)` form instead of being the file's only blockquote, so a reader does
+not have to go to the board to learn which task closed it.
+
+Two nits are code and are left, with the reasons, since nothing blocking or important is
+outstanding and the chain is at its end:
+
+- `test_support/corpus.rs`'s `count_of` now routes through `oracle_answer`, which makes its
+  `expect("a count returns a row")` unreachable: a count that answered nothing would panic two
+  lines on with an arrow index message instead of that sentence. `count(*)` always returns a row,
+  so this is a worse message for a case that cannot arise — the one call site the rename reached
+  that had no use for the new behaviour.
+- `an_empty_sort_and_merge_each_emit_one_zero_row_batch` runs its query twice at all five modes,
+  once through `sql_answers_match_datafusion` and once to read `report.emitted`, because the
+  harness hands no report back. Ten runs of a `customer` scan where five would do.
+
+#### Checked and found right, so nobody re-checks it
+
+- **Rule 1's new branch is exactly equivalent to the two early returns it replaced.**
+  `held.iter().all(…)` is vacuously true over an empty `held`, and `coalesce_or_nothing`'s
+  `held.is_empty()` guard returns the same value and the same `CallStats` as both deleted returns.
+  `run_node` is now called on a strict subset of the old inputs, so no new sort runs.
+- **The new `concat_batches` over arrived batches is not a new strictness hazard**, though it is
+  the thing to worry about: arrow requires an exact schema match, and the all-zero-rows path never
+  reached it before. But every producer relabels to its declared schema before emitting
+  (`declared_as`, and `check_batch_schema` on the scan, which exists for exactly this), and
+  `Coalesce::mark_done_and_fetch` already concatenates raw arrivals under the declared schema on
+  every corpus query. Same assumption, already load-bearing.
+- **Rule 2's schema source is right in every shape, at field level and not just at names.**
+  `plan/validate.rs` refuses any root that is not a sink and `check_output_schema` reads the
+  schema from the same `root.children()[0].kind().schema()`, holding its names and types against
+  DataFusion's planned schema; a row-bearing answer's schema is the same `kind().schema().fields`
+  forced by `declared_as`. So "an answer's schema never depends on how its rows ran out" holds.
+- **Rule 2 cannot fire when it should not.** The error and budget-trip paths return `Err` and
+  never reach `report()`. `LIMIT 0` and an offset past the end are genuinely zero-row answers and
+  now carry their header. A dropped-answer bug is still caught: the schema half of the digest
+  matches, the row count does not.
+- **No caller can reach `answer()` with a non-sink root** — every driver-test root is an
+  `unload`, every other `run::<B>` caller feeds a planner-produced tree, and
+  `single_partition.rs` produces no `RunReport`, so the invariant has one owner.
+- **The mixed merge is right on a device**: `gpu_backend/accumulate.rs` guards on `held.is_empty()`
+  over the flattened lanes, so one zero-row batch plus one silent lane makes the call and emits
+  one batch, which is what the cpu now does. `merged(2, None)` sidesteps #204 and zero rows make
+  #217 moot.
+- **The new guards go red when reverted**, including the trap the oracle change exists to close:
+  without it both sides would be empty and `columns_of` would pass vacuously.
+- **The goldens moved exactly where the rows did**, and q17's three tp4 sections are correctly
+  untouched — there the merge's lanes receive nothing, which is rule 2's case, and rule 2's batch
+  is never recorded. The result section is authored at tp4-sized, the last declared mode, which is
+  why its header comes from rule 2 rather than rule 1.
+- **Exactly two cost regressions**, verified by extracting every `peacockdb_cost=` line from every
+  `.cost.txt` at both refs: 565 sections each side, 2 changed, both +24 on q17. Nothing moved
+  downward.
+- **The documented Python-model divergence is accurate**, and rule 1 moved the engine *toward* the
+  model rather than away: `operators/accumulators.py` already emits one empty batch
+  unconditionally.

@@ -1042,8 +1042,9 @@ EOF
     >   `assert!(ticket_is_open(205))` (`:322-323`); the DuckDB tier's counts in `build-test.md`;
     >   #205 in `testinfra.md`'s CI-skips-docs ticket and in #252. Lines as of 0df60133.
 
-  - "as #205 says" in #214 (`corpus-coverage.md`) and the cross-join ticket (`joins.md`) stay as
-    they are. The number resolves in the archive.
+  - "as #205 says" in #214 (`corpus-coverage.md`) and the cross-join ticket (`joins.md`): the
+    coordinator repointed both at the archive in the past tense, after the review noted that
+    leaving the bare number relies on a reader knowing where it went.
 
 - [x] **Step 6: The full bar.**
 

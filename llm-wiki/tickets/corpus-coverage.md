@@ -866,9 +866,14 @@ Expected divergences, to declare or to normalize in the comparator:
   shuffle-additive-avg; tpcds q7, q9, q13, q18, q26, q58, q59, q61, q66, q75, q85, q90).
 - **Float last digits.** Floating sums and Welford `stddev`/`var` reassociate: tpch q14 and
   shuffle-stddev, tpcds q39, below 1e-13.
-- **An empty answer.** `tpcds/q17` renders with no header on our side, the cpu emitting no batch
-  (#205), so its column names and types go unchecked; DuckDB prints them. Equal as zero rows; a
-  candidate ticket to render the declared schema.
+- **An empty answer, closed.** `tpcds/q17` rendered with no header on our side, the cpu emitting
+  no batch, so its column names and types went unchecked while DuckDB printed them. Fixed by
+  empty-sorts (chain K, [#205](../archive/archived-tickets.md#t205)): a query whose root received
+  nothing answers one zero-row batch under the sink's declared schema, and q17's result section
+  carries its header. **Whoever merges duckdb-oracle after chain K strikes four things that name
+  #205 there**, since the ticket is archived and the divergence is gone: q17's
+  `duckdb_divergent(205)`, the assertions that #205 is open at `duckdb_oracle/tests.rs:157-158`,
+  `:270-278` and `:322-323`, and the empty-answer branch at `duckdb_oracle.rs:113-115`.
 - **Queries only DuckDB answers** (17, tpcds): the window queries our planner refuses (#143),
   q27 and q72 (#23). Not compared.
 - **Queries neither side checks** (10). Over the 262144-byte cap on both: tpch q16, anti-join,

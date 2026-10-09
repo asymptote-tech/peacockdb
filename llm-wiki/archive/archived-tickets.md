@@ -65,13 +65,16 @@ query whose root received nothing with one zero-row batch under the sink's decla
 backends, so an answer's schema never depends on how its rows ran out. `q17`'s result section is
 then regenerated with its header, and #235's empty-answer divergence goes.
 
-> **Done.** The accumulating sort and merge answer held batches with no row as one zero-row
-> batch, unsorted (`sorted_and_cut`, `cpu_backend/accumulate.rs`). A query whose sink received
-> nothing answers one zero-row batch under the sink's input schema, made by the driver
-> (`Driver::answer`, `driver/partitioned.rs`). The corpus and end-to-end oracles give
-> DataFusion's empty answer its columns the same way. q17's result section carries its header.
-> The three `bug_` pins are agreement cases, and the mixed merge has one, built and not run
-> (#281).
+**Closed by empty-sorts (chain K), as proposed.** The accumulating sort and merge answer held
+batches with no row as one zero-row batch, unsorted (`sorted_and_cut`,
+`cpu_backend/accumulate.rs`), and the test is on the held batches rather than on the sort's
+output, which cannot tell "every batch empty" from "no batch" once DataFusion has eaten it. A
+query whose sink received nothing answers one zero-row batch under the sink's input schema, made
+by the driver (`Driver::answer`, `driver/partitioned.rs`) and not recorded as an emitted batch,
+so the execution goldens moved only where the rows did. The corpus and end-to-end oracles give
+DataFusion's own empty answer its columns the same way. q17's result section carries its header.
+The three `bug_` pins are agreement cases and the mixed merge has one, built and not run
+([#281](../tickets/corpus-coverage.md#t281)).
 
 <a id="t186"></a>
 ### #186 — a limit pushed into the scan: the cpu ignores it, the device refuses it

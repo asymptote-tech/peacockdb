@@ -119,7 +119,8 @@ DataFusion's `CrossJoinExec` ends its stream without a batch when its left side 
 empty answer up as the call producing nothing; `cudf::cross_join` over a zero-row left is a
 zero-row table. `NestedLoopJoinExec` over the same shape emits a zero-row batch, so the cpu's two
 predicate-free joins disagree with each other as well as with the device. Nothing and a zero-row
-batch are different arrivals downstream, as #205 says. Pinned by
+batch are different arrivals downstream, as [#205](../archive/archived-tickets.md#t205) said.
+Pinned by
 `bug_a_cross_join_over_a_zero_row_build_is_nothing_on_the_cpu` and its both-sides-empty neighbour
 (`gpu_tests/nested_cases.rs`).
 
