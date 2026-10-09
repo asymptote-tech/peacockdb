@@ -178,17 +178,11 @@ operator_case! {
     }
 }
 
-// #205 — DataFusion's sort over zero rows yields no batch, which the cpu accumulator reads
-// as a lane that received nothing; the device answers the zero-row batch it was given.
+// Zero rows: the lane received a batch, so both answer one batch of zero rows.
 operator_case! {
     GpuAccumulateBatchesAndSort,
-    fn bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu() {
-        let outcome = run_both(&sorted(None), Script::Accumulate(vec![synthetic(0, 1)]));
-        each_answers(
-            &outcome,
-            &[Vec::new(), Vec::new()],
-            &[Vec::new(), vec![synthetic(0, 1)]],
-        );
+    fn one_zero_row_batch_sorts_to_zero_rows_on_both() {
+        run_both(&sorted(None), Script::Accumulate(vec![synthetic(0, 1)])).same(Order::AsEmitted);
     }
 }
 
@@ -201,16 +195,11 @@ operator_case! {
     }
 }
 
-// #205 — the same with a fetch, which neither side has rows to apply.
+// The same with a fetch, which neither side has rows to apply.
 operator_case! {
     GpuAccumulateBatchesAndSort,
-    fn bug_a_fetch_over_zero_rows_is_nothing_on_the_cpu() {
-        let outcome = run_both(&sorted(Some(5)), Script::Accumulate(vec![synthetic(0, 1)]));
-        each_answers(
-            &outcome,
-            &[Vec::new(), Vec::new()],
-            &[Vec::new(), vec![synthetic(0, 1)]],
-        );
+    fn a_fetch_over_zero_rows_is_zero_rows_on_both() {
+        run_both(&sorted(Some(5)), Script::Accumulate(vec![synthetic(0, 1)])).same(Order::AsEmitted);
     }
 }
 
@@ -492,18 +481,22 @@ operator_case! {
     }
 }
 
-// #205 — the merge's sort over zero rows yields no batch on the cpu too; the device
-// answers zero rows at the last `Done`.
+// Every lane a zero-row batch: one zero-row batch at the last `Done` on both.
 operator_case! {
     GpuMergeSortedPartitions,
-    fn bug_every_lane_a_zero_row_batch_is_nothing_on_the_cpu() {
+    fn every_lane_a_zero_row_batch_merges_to_zero_rows_on_both() {
         let lanes = vec![vec![synthetic(0, 1)], vec![synthetic(0, 2)]];
-        let outcome = run_both(&merged(2, None), Script::Lanes(lanes));
-        each_answers(
-            &outcome,
-            &[Vec::new(), Vec::new(), Vec::new(), Vec::new()],
-            &[Vec::new(), Vec::new(), Vec::new(), vec![synthetic(0, 1)]],
-        );
+        run_both(&merged(2, None), Script::Lanes(lanes)).same(Order::AsEmitted);
+    }
+}
+
+// One lane a zero-row batch and the other nothing: something arrived, so both owe the batch.
+// The device holds one batch and merges it (`gpu_backend/accumulate.rs`, `held.is_empty()`).
+operator_case! {
+    GpuMergeSortedPartitions,
+    fn one_lane_a_zero_row_batch_and_one_nothing_merges_to_zero_rows_on_both() {
+        let lanes = vec![vec![synthetic(0, 1)], Vec::new()];
+        run_both(&merged(2, None), Script::Lanes(lanes)).same(Order::AsEmitted);
     }
 }
 

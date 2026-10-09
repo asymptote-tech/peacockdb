@@ -630,6 +630,10 @@ pub(crate) struct EmittedBatch {
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 pub struct RunReport {
+    /// The answer. Never empty: a query whose sink received no batch answers one of zero rows
+    /// under the sink's input schema. That batch is the driver's, so it appears in neither
+    /// `emitted` nor the accounting totals, and `batches.len()` no longer relates to the
+    /// unload's calls.
     pub batches: Vec<CpuBatch>,
     pub(crate) peak_bytes: usize,
     /// Zero at the end of any correct run: a batch was held and never released otherwise.

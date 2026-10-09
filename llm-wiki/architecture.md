@@ -712,7 +712,11 @@ changed. A naive rescan survives as a test-only oracle compared pick by pick, si
 incremental schedule that disagrees with it is wrong by definition. A Python model of these
 same rules — the scheduler, both drivers, the accountant, operators over pandas — is
 `scripts/exec_model/`, which is where a rule is cheapest to argue with; build-test.md says what
-it runs. One rule differs: the model still judges a mid-plan limit by its input
+it runs. Two things differ at the empty case: its driver answers nothing where the sink received
+nothing (`partitioned_driver.py`, `results`) and the engine's answers one zero-row batch under the
+sink's input columns (`Driver::answer`), and its accumulators emit one empty batch even over no
+arrival (`operators/accumulators.py`) where the engine keeps a lane that received nothing
+answering nothing. One rule differs: the model still judges a mid-plan limit by its input
 (`partitioned_driver.py`), where the driver now reads what the limit emitted (#234).
 
 The unit that becomes ready is not always an output lane: a `PartitionAccumulator` has one
@@ -851,11 +855,15 @@ The rule is not met yet. Known breaks:
   ([#173](tickets/joins.md#t173)). A hash LeftAnti or LeftMark with a residual filter and a
   nested-loop Left make no call over no probe batch, and answer nothing (no ticket yet).
 - Producers that drop a zero-row batch expose the breaks above: the limit
-  ([#214](tickets/corpus-coverage.md#t214)) and the cpu's accumulating sort and merge
-  ([#205](tickets/corpus-coverage.md#t205)).
+  ([#214](tickets/corpus-coverage.md#t214)), symmetric on the two engines, and the cpu's cross
+  join over a zero-row build side ([#208](tickets/joins.md#t208)), which is not.
 
 A new node meets the rule by construction: what it owes over an empty input, it owes over no
 input.
+
+A query's answer is the same rule one level up: a root that received nothing answers one zero-row
+batch under the sink's input schema, made by the driver (`Driver::answer`) and recorded as no
+node's emission, so an answer's schema never depends on how its rows ran out.
 
 ## The wire format
 

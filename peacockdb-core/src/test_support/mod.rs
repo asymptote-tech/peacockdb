@@ -398,6 +398,17 @@ pub fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
     result_text::batches_to_sorted_str(batches)
 }
 
+/// DataFusion's answer to `sql`, with its columns where it answers zero rows. Its only caller
+/// is the end-to-end tier, so a `test-support` build without `test` sees it as dead.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) async fn oracle_answer(
+    ctx: &datafusion::execution::context::SessionContext,
+    sql: &str,
+    what: &str,
+) -> Vec<RecordBatch> {
+    corpus::oracle_answer(ctx, sql, what).await
+}
+
 /// A lower bound on the rendered size, stopping the moment it passes `cap`.
 pub fn exceeds_rendered_size(batches: &[RecordBatch], cap: usize) -> bool {
     result_text::exceeds_rendered_size(batches, cap)

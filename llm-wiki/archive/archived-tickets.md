@@ -21,12 +21,83 @@ recorded here and nowhere else, so the counter never walks back over it:
   (`scripts/exec_model/README.md`). Named by commit 4c89d91.
 
 Archiving or moving a ticket the registry names is safe: the cost widget resolves a number to
-whichever ticket file holds its `<a id="tNN">` anchor — `tickets.md`, any `tickets/*.md`,
-`tasks/active-tickets.md` or this archive (`TicketIndex::load` in `cost-report/src/main.rs`). It
-refuses to render a link for a number in none of them, failing the report rather than emitting
-one that goes nowhere.
+whichever ticket file holds its `<a id="tNN">` anchor — `tickets.md`, any `tickets/*.md`, or this
+archive (`TicketIndex::load` in `cost-report/src/main.rs`). It refuses to render a link for a
+number in none of them, failing the report rather than emitting one that goes nowhere.
 
 ## Done
+
+<a id="t281"></a>
+### #281 — empty-sorts' device cells have never run
+
+empty-sorts and limits (chain K) were proved on the cpu while chain J held the GPU host. Their
+device changes were built and not run: `scan.cpp` without a scan's limit, the four `bug_` source
+cases and the three `bug_` accumulate cases their fixes turn into agreement cases, a fourth
+accumulate case empty-sorts adds —
+`one_lane_a_zero_row_batch_and_one_nothing_merges_to_zero_rows_on_both`, the first assertion
+anywhere about `gpu_backend/accumulate.rs`'s `held.is_empty()` arm over a mixed lane script — and
+`tpcds/q17`'s device cell. A device answer could differ from the cpu's, and nothing would say so.
+
+**Closed by limits and empty-sorts (chain K), measured on nebius-gpu 2026-10-09.** limits':
+`tpch/scan-limit`'s five device cells are enabled against the result golden, and
+`tpch/nested-limits`' five are off on [#285](../tickets/corpus-coverage.md#t285), which that run
+found. empty-sorts': all four accumulate cases pass, the new one included, so the cpu's
+accumulating sort and merge agree with the device over zero-row batches. `tpcds/q17`'s five cells
+ran and stay off, each cause measured rather than reasoned —
+[#225](../tickets/corpus-coverage.md#t225) at both tp1 modes with the schema hook on,
+[#152](../tickets/joins.md#t152) at the three tp4 modes, and [#220](../tickets/joins.md#t220) at
+tp1-single under a masked hook. Those three are what its registry row names now. Above the first
+divergence the two engines agreed at every node, the two this task rewrote among them.
+
+<a id="t205"></a>
+### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
+
+A `GpuAccumulateBatchesAndSort` or `GpuMergeSortedPartitions` whose only batches have zero rows
+emits no batch on the cpu, where the device emits one of zero rows.
+
+DataFusion's `SortExec` over zero rows yields no batch at all, and `SortedRuns::mark_done_and_fetch`
+and `CpuPartitionAccumulator::accumulate_and_fetch` (`cpu_backend/accumulate.rs`) hand that empty
+answer to `coalesce_or_nothing`, which reads it as the lane that received nothing. `CpuExec::exec` concatenates
+the same empty answer under the declared schema and gets zero rows, and the cpu coalesce does too, so
+the two cpu paths disagree with each other as well as with the device. Downstream, nothing and a
+zero-row batch are different arrivals: a global merge over nothing is #199's site. Pinned by
+`bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu` and its two neighbours
+(`gpu_tests/accumulate_cases.rs`). First corpus cell to reach it: `tpcds/q17` at `tp1-single`,
+which answers zero rows — 12 bytes at the device's unload against the cpu's 0 (2026-09-17).
+
+**Corpus queries:** `tpcds/q17` at `tp1-single`, the only enabled corpus query that answers zero
+rows (`mini.result.txt`). Its device cell is off on this ticket (`corpus_cases.inc`); the device
+never ran its other four modes. The 12 bytes are the device's one zero-row batch: three `Utf8`
+columns, one 4-byte offset each. Simplest shape, unconfirmed on a build:
+`select n_name from nation where n_nationkey < 0 order by n_name;` (tpch).
+
+**Fix proposed:** in `cpu_backend/accumulate.rs`, skip the sort when every held batch has zero
+rows. `SortedRuns::mark_done_and_fetch` and `CpuPartitionAccumulator::accumulate_and_fetch` at the
+last `Done` then pass the held batches to `coalesce_or_nothing`. It concatenates them into one
+zero-row batch under the schema, as the device answers. The fetch has no rows to cut. No arrival
+at all stays nothing, as now. The three `bug_` pins become green `same` cases, and `tpcds/q17`'s
+device cell turns on at `tp1-single`, its comment in `corpus_cases.inc` updated.
+
+An empty answer must still have a schema. A query that answers zero rows answers them under its
+declared columns, never as no batch at all: today `tpcds/q17`'s `mini.result.txt` section is a bare
+`++`/`++`, with no column names or types, so nothing checks them, and DuckDB's answer
+(`duckdb-result.txt`, #235) prints the header ours lacks. Beside the fix above, the unload answers a
+query whose root received nothing with one zero-row batch under the sink's declared schema, on both
+backends, so an answer's schema never depends on how its rows ran out. `q17`'s result section is
+then regenerated with its header, and #235's empty-answer divergence goes.
+
+**Closed by empty-sorts (chain K), except q17's device cell.** The accumulating sort and merge
+answer held batches with no row as one zero-row batch, unsorted (`sorted_and_cut`,
+`cpu_backend/accumulate.rs`), and the test is on the held batches rather than on the sort's
+output, which cannot tell "every batch empty" from "no batch" once DataFusion has eaten it. A
+query whose sink received nothing answers one zero-row batch under the sink's input schema, made
+by the driver (`Driver::answer`, `driver/partitioned.rs`) and not recorded as an emitted batch,
+so the execution goldens moved only where the rows did. The corpus and end-to-end oracles give
+DataFusion's own empty answer its columns the same way. q17's result section carries its header.
+The three `bug_` pins are agreement cases and the mixed merge has one; all four pass on a
+device ([#281](#t281)). The cell did not turn on: all five modes ran 2026-10-09 and all five
+stay off, on #225 at the two tp1 modes, #220 under a masked hook at tp1-single, and #152 at the
+three tp4 modes.
 
 <a id="t186"></a>
 ### #186 — a limit pushed into the scan: the cpu ignores it, the device refuses it

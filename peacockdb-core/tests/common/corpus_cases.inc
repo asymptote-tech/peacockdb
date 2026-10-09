@@ -282,9 +282,10 @@ corpus_query!(tpcds, 1, q14, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgro
 // at every cpu mode; q18 and q22 carry a rollup and run at the two tp1 modes, the three tp4 ones
 // being #189's UInt8 grouping-set id at the shuffle; q24's nested-loop join projects and the cpu
 // backend drops it (#190), at every mode. On the device at tp1-single, the other modes never run:
-// q17 answers zero rows, and the cpu's accumulating sort emits nothing where the device emits the
-// zero-row batch (#205); q18 and q30 are #220's join batching; q22, q26 and q32 are #220's
-// `in_rows`.
+// q17 is off at all five, each measured on a device 2026-10-09 — #225's Welford state names at
+// its GpuAggregate refuse the schema hook at both tp1 modes, under it tp1-single is #220's
+// zero-row batch per unmatched probe batch, and the other four are #152's build-side copy;
+// q18 and q30 are #220's join batching; q22, q26 and q32 are #220's `in_rows`.
 corpus_query!(tpcds, 1, q17, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q18, tp1_single | tp1_rowgroup, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q22, tp1_single | tp1_rowgroup, none, data_fusion_exact, golden_exact, schema_validation_enabled);

@@ -182,6 +182,61 @@ fn a_fetch_keeps_the_rows_whose_keys_win_and_keeps_the_same_ones() {
     assert_eq!(values, ordered_values(&again[0]));
 }
 
+/// One batch of zero rows under the columns the node declares — what the device answers
+/// there, and what a lane that received only zero-row batches owes.
+fn assert_one_empty_batch(out: &[CpuBatch]) {
+    assert_eq!(out.len(), 1, "one batch, not nothing");
+    assert_eq!(out[0].record_batch().num_rows(), 0);
+    assert_eq!(
+        out[0].record_batch().schema(),
+        columns(&GROUPED).fields,
+        "under the columns the node declares"
+    );
+}
+
+/// DataFusion's sort answers zero rows with no batch at all. The lane received a batch, so
+/// it owes one.
+#[test]
+fn an_accumulating_sort_over_one_zero_row_batch_answers_one_zero_row_batch() {
+    assert_one_empty_batch(&drive(accumulating_sort(true, None), vec![numbers(vec![])]));
+}
+
+#[test]
+fn an_accumulating_sort_over_two_zero_row_batches_answers_one() {
+    assert_one_empty_batch(&drive(
+        accumulating_sort(true, None),
+        vec![numbers(vec![]), numbers(vec![])],
+    ));
+}
+
+/// A fetch has no rows to cut, and cutting nothing is not answering nothing.
+#[test]
+fn a_fetch_over_zero_rows_answers_zero_rows() {
+    assert_one_empty_batch(&drive(
+        accumulating_sort(false, Some(2)),
+        vec![numbers(vec![])],
+    ));
+}
+
+/// No arrival at all is still nothing: the lane that received nothing, which a lane that
+/// received a zero-row batch is not.
+#[test]
+fn an_accumulating_sort_that_received_nothing_emits_nothing() {
+    assert!(drive(accumulating_sort(true, None), Vec::new()).is_empty());
+}
+
+/// A zero-row batch among rows takes the sort's path: the rows are ordered and cut, not
+/// skipped because one arrival was empty.
+#[test]
+fn a_zero_row_batch_among_rows_is_sorted_with_them() {
+    let out = drive(
+        accumulating_sort(true, Some(3)),
+        vec![numbers(vec![5, 2]), numbers(vec![]), numbers(vec![4, 1])],
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(values_of(&out[0]), vec![1, 2, 4]);
+}
+
 /// `[k, sum(v), count(v)]` — the state an avg decomposes into, which is what a merge reads.
 fn avg_state() -> Schema {
     state_of(
@@ -694,6 +749,38 @@ fn a_fetch_over_the_merge_keeps_the_top_of_every_lane_together() {
         ],
     );
     assert_eq!(values_of(&out[0]), vec![1, 2, 5]);
+}
+
+/// Every lane's only arrival a zero-row batch: one zero-row batch at the last done, whatever
+/// the fetch.
+#[test]
+fn a_merge_over_a_zero_row_batch_per_lane_answers_one_zero_row_batch() {
+    let out = drive_lanes(
+        merge_sorted(2, Some(3)),
+        vec![
+            (0, Some(numbers(vec![]))),
+            (1, Some(numbers(vec![]))),
+            (0, None),
+            (1, None),
+        ],
+    );
+    assert_one_empty_batch(&out);
+}
+
+/// One lane sent a zero-row batch and the other sent nothing. Something arrived, so the
+/// merge owes a batch.
+#[test]
+fn a_merge_over_one_zero_row_lane_and_one_empty_lane_answers_one_zero_row_batch() {
+    let out = drive_lanes(
+        merge_sorted(2, None),
+        vec![(0, Some(numbers(vec![]))), (0, None), (1, None)],
+    );
+    assert_one_empty_batch(&out);
+}
+
+#[test]
+fn a_merge_whose_lanes_received_nothing_emits_nothing() {
+    assert!(drive_lanes(merge_sorted(2, None), vec![(0, None), (1, None)]).is_empty());
 }
 
 /// A global aggregate's lane can be empty — a mid-plan limit that dropped every batch of

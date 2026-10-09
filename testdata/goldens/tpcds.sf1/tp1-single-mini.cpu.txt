@@ -1728,10 +1728,10 @@ GpuUnload: output_rows=1, output_bytes=43
                   in_rows=[] batch_rows=[[144067]] batch_bytes=[[1170545]]
 == q17
 early_exit=none
-GpuUnload: output_rows=0, output_bytes=0
-  in_rows=[[0]] batch_rows=[[]] batch_bytes=[[]]
-  GpuAccumulateBatchesAndSort: by=[i_item_id@0 asc nulls_first, i_item_desc@1 asc nulls_first, s_state@2 asc nulls_first], fetch=100, lanes=1, batches=single, sorted_on=[i_item_id@0 asc nulls_first, i_item_desc@1 asc nulls_first, s_state@2 asc nulls_first], output_rows=0, output_bytes=0
-    in_rows=[[0]] batch_rows=[[]] batch_bytes=[[]]
+GpuUnload: output_rows=0, output_bytes=12
+  in_rows=[[0]] batch_rows=[[0]] batch_bytes=[[12]]
+  GpuAccumulateBatchesAndSort: by=[i_item_id@0 asc nulls_first, i_item_desc@1 asc nulls_first, s_state@2 asc nulls_first], fetch=100, lanes=1, batches=single, sorted_on=[i_item_id@0 asc nulls_first, i_item_desc@1 asc nulls_first, s_state@2 asc nulls_first], output_rows=0, output_bytes=12
+    in_rows=[[0]] batch_rows=[[0]] batch_bytes=[[12]]
     GpuSort: by=[i_item_id@0 asc nulls_first, i_item_desc@1 asc nulls_first, s_state@2 asc nulls_first], fetch=100, lanes=1, batches=single, sorted_on=[i_item_id@0 asc nulls_first, i_item_desc@1 asc nulls_first, s_state@2 asc nulls_first], output_rows=0, output_bytes=12
       in_rows=[[0]] batch_rows=[[0]] batch_bytes=[[12]]
       GpuProject: exprs=[i_item_id@0, i_item_desc@1, s_state@2, count(store_sales.ss_quantity)@3 as store_sales_quantitycount, avg(store_sales.ss_quantity)@4 as store_sales_quantityave, stddev(store_sales.ss_quantity)@5 as store_sales_quantitystdev, stddev(store_sales.ss_quantity)@5 / avg(store_sales.ss_quantity)@4 as store_sales_quantitycov, count(store_returns.sr_return_quantity)@6 as store_returns_quantitycount, avg(store_returns.sr_return_quantity)@7 as store_returns_quantityave, stddev(store_returns.sr_return_quantity)@8 as store_returns_quantitystdev, stddev(store_returns.sr_return_quantity)@8 / avg(store_returns.sr_return_quantity)@7 as store_returns_quantitycov, count(catalog_sales.cs_quantity)@9 as catalog_sales_quantitycount, avg(catalog_sales.cs_quantity)@10 as catalog_sales_quantityave, stddev(catalog_sales.cs_quantity)@11 as catalog_sales_quantitystdev, stddev(catalog_sales.cs_quantity)@11 / avg(catalog_sales.cs_quantity)@10 as catalog_sales_quantitycov], lanes=1, batches=single, output_rows=0, output_bytes=12

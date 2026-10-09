@@ -147,7 +147,7 @@ the chain turned on, against 25.02; the evidence #244 waits on.
 > - **On resuming the chain, reset the board first, in one commit:** distinct-companions,
 >   limits and empty-sorts go from `done` to `building`. Their GPU halves are now runnable:
 >   distinct-companions' device cells ([#262](../tickets/corpus-coverage.md#t262)), and limits'
->   and empty-sorts' device changes and cases ([#281](../tickets/corpus-coverage.md#t281)). Each
+>   and empty-sorts' device changes and cases ([#281](../archive/archived-tickets.md#t281)). Each
 >   task runs its GPU tests, turns on the cells that pass, and tickets those that fail.
 >   guard-checks stays `done`: its GPU-side edits are to shad-gpu's script and CI job, which
 >   nebius-gpu cannot exercise.
@@ -182,7 +182,7 @@ A scan's limit becomes a `GpuLimit` above the scan and leaves both readers; the 
 limit's emitted rows rather than its input; scan-limit on at all five modes on both engines, and
 nested-limits off on the device under #285.
 
-### 4. [`empty-sorts.md`](empty-sorts.md) — closes [#205](../tickets/corpus-coverage.md#t205) — state: rebase needed(building) — PR #174
+### 4. [`empty-sorts.md`](empty-sorts.md) — closes [#205](../archive/archived-tickets.md#t205) — state: completing — PR #174
 
 The cpu's accumulating sort and merge answer one zero-row batch over zero-row batches; an empty
 answer keeps its columns; q17's result section gains its header.
