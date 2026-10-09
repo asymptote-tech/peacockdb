@@ -98,3 +98,16 @@ Chain K runs without a GPU, so it does not contend with chain J for nebius-gpu. 
 no GPU cycle. This task reaches `done` when every CI job but the GPU tests is green; the GPU jobs
 are not waited on. Its edits to `build-test-shadgpu.sh` and to `pipeline.yml`'s GPU job are not
 run here; the next GPU run after merge is the first to exercise them.
+
+## Completeness signoff
+
+Solved under its constraints. The validator refuses a pass-through width mismatch; both clamps
+and the driver's mock now answer to `testdata/fixtures/row-range-clamp.txt`; the fourteen cases
+are the exact union of the two sides' old literals, and the two clamps agree on every one, so
+#174 produced no divergence ticket.
+
+One shortcut, and it is the chain's: no GPU. The `build-test-shadgpu.sh` and `pipeline.yml`
+GPU-job provisioning edits ship verified by reading and a local rsync rehearsal, not by a run on
+the host. No other shortcut or bandaid.
+
+Owed at merge: archive #233 and #174, including `tickets.md`'s corpus-coverage count 33 → 31.

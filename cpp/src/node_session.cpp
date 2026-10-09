@@ -677,7 +677,8 @@ uint64_t NodeSession::execute_scan_rowgroups(uint64_t seq,
 // Shared by the export and the slice so the two cannot disagree. Its twin on the other
 // side of the ABI is `RowRange::clamp`, which the CPU backend applies to a batch that
 // never crosses it — the same rule in two languages, and the backends answering a limit
-// differently is what keeping them together prevents.
+// differently is what keeping them together prevents. Both sides' tests read one case
+// table, `testdata/fixtures/row-range-clamp.txt`, so a drift fails the drifting side.
 std::pair<cudf::size_type, cudf::size_type> clamp_row_range(uint64_t offset, uint64_t length,
                                                             cudf::size_type num_rows) {
   const uint64_t rows = static_cast<uint64_t>(num_rows);

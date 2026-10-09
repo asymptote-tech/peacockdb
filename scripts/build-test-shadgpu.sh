@@ -242,6 +242,8 @@ if [ "$RSYNC" -eq 1 ]; then
   # product fault. Every provisioning path names its files by hand, so a new fixture
   # has to be added to each one independently.
   resilient_rsync -a testdata/cost-registry.csv "$REMOTE:$REMOTE_REPO/testdata/"
+  # The fixtures the C++ cpu tests read (peacock_cpu_tests runs here by glob).
+  resilient_rsync -a testdata/fixtures "$REMOTE:$REMOTE_REPO/testdata/"
   # The query text every corpus case reads: a missing file is loud, a stale one silently runs old SQL.
   resilient_rsync -a testdata/tpch-queries testdata/tpcds-queries "$REMOTE:$REMOTE_REPO/testdata/"
   # Our setup-glibc.sh, so --patch uses the version that knows both rust dirs.

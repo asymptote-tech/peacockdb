@@ -366,8 +366,8 @@ impl RowRange {
     /// The rows of a batch this range actually names, as `(offset, length)`. The twin of
     /// C++'s `clamp_row_range` (`node_session.cpp`), which the export and the slice share
     /// so that the two cannot disagree — this is the same rule for the backend that never
-    /// crosses the ABI, and the two answering differently would be a divergence no test
-    /// of either one alone could see.
+    /// crosses the ABI. Both sides' tests read one case table,
+    /// `testdata/fixtures/row-range-clamp.txt`, so a drift fails the drifting side.
     pub(crate) fn clamp(&self, n_rows: u64) -> (u64, u64) {
         row_range::clamp(self, n_rows)
     }
