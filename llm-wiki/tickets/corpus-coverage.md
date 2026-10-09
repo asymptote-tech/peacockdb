@@ -16,6 +16,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast](#t55)
   - [#65 — the device's grouping-set id is not DataFusion's value or width](#t65)
   - [#62 — a DISTINCT beside an avg or a count is refused at planning](#t62)
+  - [#264 — the device refuses a group key that is not a bare column](#t264)
 - [Sort / Limit](#sort--limit)
   - [#202 — a descending sort key puts its nulls on the wrong end on the device](#t202)
   - [#217 — a sort with `fetch 0` keeps every row on the device](#t217)
@@ -316,6 +317,21 @@ the guard, and the argument in the three gtests. FlatBuffers omits a `false` at 
 `recipe-payloads.txt` should not move; confirm with the payload test. The report prefers keeping
 the guard with a corrected comment (`hacks-audit.md` §10); deleting it is chosen here, since
 nothing can set the flag.
+
+<a id="t264"></a>
+### #264 — the device refuses a group key that is not a bare column
+`CudfAggregate` throws `CudfAggregate: only ColumnRef group exprs supported`
+(`cpp/src/operators/aggregate.cpp:163`) for any group expression that is not a `ColumnRef`, so
+`GROUP BY` over a cast, an arithmetic expression or a function call is refused at run time on the
+device, at every mode. The cpu answers. The planner does not lower a group expression into a
+project below the aggregate, and the recipe hands the expression through as it stands — so the
+smallest fix is a planner one, and the device needs no new arm.
+
+**Corpus queries:** `pbench/timestamp-s-key-group`
+(`GROUP BY arrow_cast(f_ts_s, 'Timestamp(Second, None)')`), its five device cells off here. Not on
+[#240](#t240): the timestamp key itself hashes on both engines since `repartition-keys`, which the
+three `timestamp-{ms,ns,us}-key-group` rows demonstrate at all five modes. This row carried `240`
+until this ticket had a number.
 
 ## Sort / Limit
 

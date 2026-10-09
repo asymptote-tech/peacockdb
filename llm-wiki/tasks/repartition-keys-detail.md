@@ -1173,3 +1173,49 @@ distinction matters only if the re-prove had been red, and it was not.
 `--lib` was the one count I carried unmeasured at pbench's 678. It is **686** on this branch, and
 the page's own rows already summed to it: 1655 − 939 − 1 − 26 − 3 = 686, with `--list` agreeing
 independently. The rebase had re-derived the header alone. Corrected, with its three rollups.
+
+## The coordinator's half of Task 10, and the archival left undone (2026-10-09)
+
+**#264 filed**, in `corpus-coverage.md`'s Aggregates section, from the developer's proposed text:
+the device refuses a group key that is not a bare column, so `GROUP BY` over a cast is refused at
+run time at every mode while the cpu answers. `pbench/timestamp-s-key-group` is retagged from `240`
+to `264` — the timestamp key itself hashes on both engines now, which the three
+`timestamp-{ms,ns,us}-key-group` rows demonstrate at all five modes, so `240` had stopped
+explaining that cell and was only there for want of a number. Index re-summed: 122 open,
+corpus-coverage 35, next-free 265, and every row's declared count equal to both its listed IDs and
+its file's anchors, in the same order. Every registry tag resolves to a live or archived anchor.
+
+**`architecture.md`'s hash section gained the invariant this task created.** It said placement is
+identical by construction and named the gate; it now also says the gate calls production
+`rows_per_lane` rather than a copy of the rule (#201's whole point), and that three key types agree
+with each other rather than with Spark — decimals hashed as 16 bytes where Spark hashes 8 at
+precision ≤ 18, NaN canonicalized where comet hashes raw bits, and unsigned keys, which Spark has
+no type for, cast or reinterpreted to the next wider signed type. That is the fact a reader needs
+before touching either side, and it is the one thing neither engine's code says on its own.
+
+**#243 reworded to the cpu's equality alone**, as the Restriction directs, and trimmed from 27
+non-blank lines to 19 while doing it. The lane split it also described is fixed and is now named as
+out of scope rather than left reading as open.
+
+### The archival is not done, deliberately
+
+The spec's Scope ends "#95/#189/#201/#206/#240 archived" and I have not done it. Measured, by the
+only test that settles it — how many registry rows still tag each:
+
+- **#189, #201, #206: zero rows.** **#240: zero**, after the retag above.
+- **#95: eight rows** — `tpcds/q24`, `q37`, `q75`, `q82` and `tpch/q2`, `q10`, `q15`, `q18`.
+
+So #95 is not archivable on the evidence, and whether those eight tags have stopped explaining
+anything is precisely the judgement this round's own warning is about: the registry rule asks for
+*some* ticket, so it cannot catch a tag that has gone stale. Most of those rows wait on #152 too,
+which the spec predicted; a reviewer should decide whether `95` is still the live blocker on any
+cell or is now rot.
+
+Three reasons the other four are also left for a verified pass rather than done here. Each is
+linked from five to seven `llm-wiki` files including the board's own task heading, so archiving is
+a link migration and not a move. A coordinator cannot build, and
+`cost-report/src/main.rs:475` exits 1 on a ticket resolving nowhere, so the change needs a run to
+prove. And `build-test.md`'s own note on [#263](../tickets/testinfra.md#t263) says a commit that
+only moves a ticket can turn the rust tier red while both CI layers skip the pipeline — which is
+the shape of an archival commit exactly, and the reason archival is ordinarily the helper's
+post-merge step rather than a task's.

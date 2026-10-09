@@ -1051,8 +1051,22 @@ handling.
 So placement is identical by construction rather than by agreement. The CPU side calls comet's
 `create_murmur3_hashes` (`executor/cpu_backend/spark_partitioning.rs`), the GPU side owns a
 bit-exact kernel (`spark_hash_partition.cu`) and reuses cuDF only for the scatter, and a live
-gate (`peacock_spark_partition_ids`, `cpu_backend/gpu_tests/murmur_conformance.rs`) proves the two agree over the
-same bytes.
+gate (`peacock_spark_partition_ids`, `cpu_backend/gpu_tests/murmur_conformance.rs`) proves the two
+agree over the same bytes. The gate calls production `rows_per_lane`, not a copy of the rule: it
+used to compare the kernel against its own reimplementation, which is why moving the seed left it
+green ([#201](tickets/corpus-coverage.md#t201)).
+
+**Three key types agree with each other rather than with Spark**, which is a deliberate choice and
+the one thing to know before changing either side. Comet is the shared implementation of Spark's
+murmur3, not a promise of Spark's placement, and nothing outside this engine reads our lane
+numbers. So: a **decimal** key is cast to `Decimal128(38, s)` before comet sees it and hashed as 16
+little-endian bytes of the unscaled value on both sides, where Spark would hash 8 at precision ≤ 18;
+every **NaN** is canonicalized to one bit pattern before hashing, where comet hashes a NaN by its
+raw bits and would therefore put `NaN` and `-NaN` in different lanes at tp4 while tp1 equates them;
+and an **unsigned** key, which Spark has no type for at all, casts by value to the next wider signed
+type (`UInt8`/`UInt16` to `Int32`, `UInt32` to `Int64`) or, for `UInt64`, reinterprets its bits as
+`Int64`. Each rule is implemented twice, once per engine, and the gate above is what holds the two
+copies together.
 
 ## C++ executor layout
 
