@@ -473,7 +473,7 @@ Thirty-six cells today: `tpch/q6`, `tpch/q1`, `tpch/shuffle-additive-avg`,
 `tpch/filter-project`, `tpch/shuffle-additive`, `tpcds/q37`, `tpcds/q82` and `tpcds/q85` at
 `tp1-single`; the rest are off against [#152](tickets/joins.md#t152),
 [#95](tickets/corpus-coverage.md#t95),
-[#220](tickets/joins.md#t220) and the device's own tickets (#57, #63, #281). distinct-functions
+[#220](tickets/joins.md#t220) and the device's own tickets (#57, #63, #225). distinct-functions
 is the DISTINCT lowering's only device query; q28 and `tpch/rollup-distinct` wait on #152, #65
 and #189 ([#262](tickets/corpus-coverage.md#t262)). scan-limit is the only device cell whose cut is an
 unload's interval; `tpch/nested-limits`, the other one #186 touched, is off at every mode on

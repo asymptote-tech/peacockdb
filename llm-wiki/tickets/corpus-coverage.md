@@ -46,7 +46,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
   - [#235 — no independent oracle checks the result goldens](#t235)
   - [#262 — two DISTINCT corpus queries have no device cell](#t262)
-  - [#281 — empty-sorts' device cells have never run](#t281)
 
 ## Welford aggregation
 
@@ -68,7 +67,9 @@ in `gpu_tests/aggregate_schema_cases.rs`. 2026-09-17: the corpus's schema valida
 `schema_validation_disabled`; the cell stays enabled and its values match.
 
 **Corpus queries:** `tpch/shuffle-stddev` and `tpch/distinct-functions` (schema validation
-only). distinct-functions reaches this at its DISTINCT lowering's outer init, and only at the
+only), and `tpcds/q17`, whose two tp1 cells the hook refuses at its `GpuAggregate` over three
+Welford triples (measured 2026-10-09). q17's cell is the one a mask does not rescue: #220 and
+#152 sit under it. distinct-functions reaches this at its DISTINCT lowering's outer init, and only at the
 three tp4 modes — at the two tp1 modes that stage finalizes in one node and emits no state — so
 its line excuses those three by name and keeps the hook at the other two.
 
@@ -905,23 +906,3 @@ lowering's last unrun ones.
 
 **Fix proposed:** when #152, #65 and #189 have closed, run those cells and enable each one that
 passes. Then this ticket is archived. Chain L's grouping-id takes the rollup half.
-
-<a id="t281"></a>
-### #281 — empty-sorts' device cells have never run
-
-empty-sorts (chain K) was proved on the cpu while chain J held the GPU host. Its device changes
-are built and not run: the three `bug_` accumulate cases its fix turns into agreement cases, a
-fourth case it adds, and `tpcds/q17`'s device cell have run on no device. The fourth is
-`one_lane_a_zero_row_batch_and_one_nothing_merges_to_zero_rows_on_both`, the first assertion
-anywhere about `gpu_backend/accumulate.rs`'s `held.is_empty()` arm over a mixed lane script. A
-device answer could differ from the cpu's, and nothing would say so.
-
-limits' half of this is closed. Its four converted `bug_` source cases and its `scan.cpp` without
-`set_num_rows` ran on nebius-gpu 2026-10-09; `tpch/scan-limit`'s five device cells are enabled
-against the result golden, and `tpch/nested-limits`' five are off on #285, which that run found
-and which is not about a limit.
-
-**Corpus queries:** `tpcds/q17` at `tp1-single`, off on this ticket once chain K has merged.
-
-**Fix proposed:** on a GPU host: run the device test tier and that cell; it passing is enabled,
-failing gets the ticket it fails on. Then this ticket drops from the registry row and is archived.

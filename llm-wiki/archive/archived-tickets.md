@@ -28,6 +28,28 @@ one that goes nowhere.
 
 ## Done
 
+<a id="t281"></a>
+### #281 — empty-sorts' device cells have never run
+
+empty-sorts and limits (chain K) were proved on the cpu while chain J held the GPU host. Their
+device changes were built and not run: `scan.cpp` without a scan's limit, the four `bug_` source
+cases and the three `bug_` accumulate cases their fixes turn into agreement cases, a fourth
+accumulate case empty-sorts adds —
+`one_lane_a_zero_row_batch_and_one_nothing_merges_to_zero_rows_on_both`, the first assertion
+anywhere about `gpu_backend/accumulate.rs`'s `held.is_empty()` arm over a mixed lane script — and
+`tpcds/q17`'s device cell. A device answer could differ from the cpu's, and nothing would say so.
+
+**Closed by limits and empty-sorts (chain K), measured on nebius-gpu 2026-10-09.** limits':
+`tpch/scan-limit`'s five device cells are enabled against the result golden, and
+`tpch/nested-limits`' five are off on [#285](../tickets/corpus-coverage.md#t285), which that run
+found. empty-sorts': all four accumulate cases pass, the new one included, so the cpu's
+accumulating sort and merge agree with the device over zero-row batches. `tpcds/q17`'s five cells
+ran and stay off, each cause measured rather than reasoned —
+[#225](../tickets/corpus-coverage.md#t225) at both tp1 modes with the schema hook on,
+[#152](../tickets/joins.md#t152) at the three tp4 modes, and [#220](../tickets/joins.md#t220) at
+tp1-single under a masked hook. Those three are what its registry row names now. Above the first
+divergence the two engines agreed at every node, the two this task rewrote among them.
+
 <a id="t205"></a>
 ### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
 
@@ -73,8 +95,8 @@ query whose sink received nothing answers one zero-row batch under the sink's in
 by the driver (`Driver::answer`, `driver/partitioned.rs`) and not recorded as an emitted batch,
 so the execution goldens moved only where the rows did. The corpus and end-to-end oracles give
 DataFusion's own empty answer its columns the same way. q17's result section carries its header.
-The three `bug_` pins are agreement cases and the mixed merge has one, built and not run
-([#281](../tickets/corpus-coverage.md#t281)).
+The three `bug_` pins are agreement cases and the mixed merge has one; all four pass on a
+device ([#281](#t281)).
 
 <a id="t186"></a>
 ### #186 — a limit pushed into the scan: the cpu ignores it, the device refuses it

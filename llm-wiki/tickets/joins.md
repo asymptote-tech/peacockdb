@@ -336,10 +336,12 @@ first differing line, and the merge renders above the join. `in_rows` is the dri
 batches a node takes, the same code for both engines. These were the first cells where the device
 completed a plan and only the golden caught the difference.
 
-**Corpus queries:** 82 registry rows carry `220`, its cause at `tp1-single`, where the device gets
+**Corpus queries:** 88 registry rows carry `220`, its cause at `tp1-single`, where the device gets
 past #152. The first ones seen: `tpcds` q93 q96 q38 q48 q4 q18, `tpch` q3 q4 q14 q15. Plus
-`tpch/hash-join`, `cross-join`, `nested-loop-left-join`, `anti-join` and `semi-join`. Every
-device cell through a join lands here once #152 clears.
+`tpch/hash-join`, `cross-join`, `nested-loop-left-join`, `anti-join` and `semi-join`. `tpcds/q17`
+joined them 2026-10-09, measured on a device: the one cell where the divergence is over empty
+batches alone — both engines answer zero rows, and the goldens disagree on how many empty batches
+carried them. Every device cell through a join lands here once #152 clears.
 
 **Fix proposed:** on the cpu. `declared` in `cpu_backend/join.rs` returns one batch: each chunk
 through `declared_as`, then `concat_batches`. No chunks gives `RecordBatch::new_empty(schema)`,

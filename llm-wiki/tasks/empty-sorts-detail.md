@@ -521,3 +521,516 @@ was against `4581bca3`, which no longer exists in the chain.
 counts. The spec is frozen; its signoff is already written and will be rewritten by the
 coordinator when this round closes. Code, `.inc`, `.csv`, goldens and `.github/workflows/` are
 yours. You never look at CI.
+
+### 2026-10-09 — round 2: the cpu half re-proved, the GPU half run on nebius-gpu
+
+Written as the round ran, not after it, so a restarted coordinator reads measurements rather
+than intentions.
+
+#### Job 1 — the cpu half re-proved on the new base (`ENS-limits` = `3e306482`)
+
+Green, locally, `--features rust-only`, `-- --test-threads=2`. verda still does not resolve from
+this host, so every CPU run is local, as the dispatch said.
+
+| target | ran | passed | failed | ignored | filtered |
+|---|--:|--:|--:|--:|--:|
+| `--lib` | 651 | 651 | 0 | 2 (#182) | 0 |
+| `test_cpu_corpus` | 569 | 569 | 0 | 0 | 0 |
+| `test_corpus_goldens` | 29 | 29 | 0 | 0 | 0 |
+| `test_cost_model` | 3 | 3 | 0 | 0 | 0 |
+| `test_golden_format` | 26 | 26 | 0 | 0 | 0 |
+| `test_module_layout` | 17 | 17 | 0 | 0 | 0 |
+| `test_ci_coverage` | 9 | 9 | 0 | 0 | 0 |
+
+No binary ran zero tests. The two ignored `--lib` cases are the pre-existing #182 pair. **No
+warning of any kind** in the seven logs (`grep -h '^warning' *.log` empty), so the rebase
+introduced none. Logs: `/tmp/empty-sorts-r2/{lib,cpu_corpus,corpus_goldens,cost_model,golden_format,module_layout,ci_coverage}.log`.
+
+The rebase carried the code intact: nothing on this branch needed a fix to go green on the new
+base, and the new neighbours in the corpus binaries — limits' `tpch/scan-limit` at five modes and
+distinct-companions' `tpch/distinct-functions` — are green beside this task's cells.
+
+#### The cost gate against `ENS-limits`, and it is no longer red
+
+    cost-diff: 565 compared, 2 changed, 2 regression(s), 0 over 10%      rc=0
+
+| section | base | branch | Δ |
+|---|--:|--:|--:|
+| `tpcds.sf1/q17 tp1-single-mini` | 293556446 | 293556470 | +24 |
+| `tpcds.sf1/q17 tp1-rowgroup-mini` | 293557678 | 293557702 | +24 |
+
+Exactly the two rows the human pre-accepted, exactly +24 bytes each, read off the
+`peacockdb_cost=` lines at both refs. No third regression, 0 improvements, so nothing moved
+downward either. **`rc=0`, where round 1's run against `4581bca3` was `rc=1`** — master's gate
+now fails only past +10% (`REGRESSION_FAIL_PCT`), and the rebase brought that in. The two rows
+are +0.00% of a 280 MB Σout, so the `cost-report` job is expected **green** on this PR and the
+pre-acceptance is no longer load-bearing. Artifacts: `/tmp/empty-sorts-r2/cost_diff.{html,md}`.
+
+#### The GPU host, and the build proved by a literal rather than an exit code
+
+nebius-gpu, `dmitry@89.169.109.150`, `~/peacockdb-K`, cuDF 25.02. `df -h /` **21 GB free before
+the build and 21 GB after** — above the 20 GB floor, so chain J's cleanup rule was never reached
+and **nothing was deleted**. `nvidia-smi` 0 MiB of 46068 used before the run; chain J never
+contended for the card.
+
+Sync was the recipe in the dispatch, uncommitted, with no commit made to build:
+
+    rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ dmitry@89.169.109.150:peacockdb-K/
+
+257 files transferred, 0 deleted. **The rsync-mtime antipattern was checked, not assumed**: a
+second `rsync -ain` with the same filters listed nothing, so the host's content equals the
+worktree's; the 568 `*.rs`/`*.inc` files were `touch`ed on the host anyway before building.
+Build: `./scripts/build-test-shadgpu.sh --build`, detached, never `--run`. Log
+`~/K-logs/empty-sorts-build1.log`, **zero warnings in it**. All four Rust binaries staged.
+
+Three literals prove the staged tree is this branch rather than the previous build's:
+
+- `peacockdb_core_gpu_lib tests::gpu_tests::accumulate_cases --list` reports **37 tests** and
+  names all four of this task's cases — `one_zero_row_batch_sorts_to_zero_rows_on_both`,
+  `a_fetch_over_zero_rows_is_zero_rows_on_both`,
+  `every_lane_a_zero_row_batch_merges_to_zero_rows_on_both` and
+  `one_lane_a_zero_row_batch_and_one_nothing_merges_to_zero_rows_on_both`;
+- `strings … | grep -oE 'bug_[a-z_]*_on_the_cpu' | sort -u` finds **none of the three retired
+  names**; the five it does find are the cross-join and nested-loop projection pins in other case
+  files, pre-existing and untouched. (A bare `grep -c 'bug_.*_on_the_cpu'` prints 42 and means
+  nothing: `strings` emits long concatenated lines, so `.*` spans two unrelated symbols. Use
+  `-oE`.)
+- `nm -C cpp/install/lib/libpeacock_gpu.so | grep -c set_num_rows` is **0**, limits' marker, so
+  the staged C++ is at least that branch's `scan.cpp` and not distinct-companions'.
+
+#### Job 2, part 1 — the device tier is green, and the four accumulate cases pass
+
+Per binary, on the **final** tree (build 4), `--test-threads=1`, log
+`~/K-logs/empty-sorts-tier-final.log`:
+
+| binary | ran | passed | failed | filtered |
+|---|--:|--:|--:|--:|
+| `peacockdb_core_gpu_lib gpu_tests::` | 538 | 538 | 0 | 657 |
+| `test_gpu_corpus` | 38 | 38 | 0 | 0 |
+| `test_node_timing` | 1 | 1 | 0 | 0 |
+| `peacock_gpu_benchmarks --skip bench_` | 8 | 8 | 0 | 3 |
+| `cpp/install/bin/peacock_gpu_tests` | 4 | 4 | 0 | — |
+| `cpp/install/bin/peacock_plan_tests` | 56 | 56 | 0 | — |
+
+Every binary executed tests; none is a zero-test pass. The 657 filtered out of the lib binary
+are its cpu and ffi rungs — and that number is now checked rather than taken on trust:
+`--list` with no filter reports **1195**, and 653 (rust-only `--lib`) + 4 (`ffi_tests::`) + 538
+(`gpu_tests::`) = 1195, so the three rungs partition the binary exactly. The 3 filtered out of
+the benchmark binary are its `bench_` cases.
+
+**All four accumulate cases pass on a device**, named individually in the log:
+
+    tests::gpu_tests::accumulate_cases::one_zero_row_batch_sorts_to_zero_rows_on_both ... ok
+    tests::gpu_tests::accumulate_cases::a_fetch_over_zero_rows_is_zero_rows_on_both ... ok
+    tests::gpu_tests::accumulate_cases::every_lane_a_zero_row_batch_merges_to_zero_rows_on_both ... ok
+    tests::gpu_tests::accumulate_cases::one_lane_a_zero_row_batch_and_one_nothing_merges_to_zero_rows_on_both ... ok
+
+The fourth is the one no run had ever checked — `gpu_backend/accumulate.rs`'s `held.is_empty()`
+arm over one zero-row lane and one silent lane. It agrees.
+
+**The signoff's caveat is now closed by composition, not by one case.** Those four assert only
+cpu-device agreement, so alone they cannot tell "one zero-row batch on both" from "nothing on
+both". But `run_both` drives the production `CpuBackend` through `drive`, and the cpu side's
+*absolute* claim — one batch, zero rows, under the node's declared columns — is pinned by
+`assert_one_empty_batch` in `cpu_backend/tests/accumulate.rs` over the same four shapes, green
+locally. device == cpu and cpu == one zero-row batch, so the device emits one zero-row batch.
+
+**One invocation trap, paid for here.** The first tier run reported `lib` FAILED with 5 failures
+and `gpu_corpus`/`node_timing`/`benchmarks` at *0 tests passed*. Cause: `<binary> -- --test-threads=1`.
+A libtest binary parses `--` itself, so everything after it is a **positional filter** — the
+threads flag never applied (the lib ran parallel against a process-wide RMM pool, and 3 `abi`
+and 2 `accumulate` cases went red on it) and the three binaries with no filter of their own
+matched nothing and passed having run nothing. The shipped runner's order is flags first, filter
+last (`build-test-shadgpu.sh`: `"$t" --nocapture --test-threads=1 $skip "${args[@]}"`), and that
+is what the re-run used. Both logs are kept: `empty-sorts-tier1.log` is the wrong one,
+`empty-sorts-tier2.log` and `-tier-final.log` the right ones. **Trap 2 caught this** — the
+per-binary ran/passed/filtered table is what made a zero-test pass visible as one.
+
+#### Job 2, part 2 — q17's device cells: all five off, and each cause measured
+
+**The cell is not enabled.** It was run three ways rather than once, because the first failure
+masked the ones under it.
+
+| declaration | tp1-single | tp1-rowgroup | tp4-single | tp4-rowgroup | tp4-sized |
+|---|---|---|---|---|---|
+| all five on, hook on | **#225** | **#225** | **#152** | **#152** | **#152** |
+| two tp1 on, hook masked | **#220** | **#152** | — | — | — |
+
+1. **With the schema hook on, both tp1 cells refuse at `GpuAggregate`** on #225 — nine columns,
+   the three Welford triples named for their alias:
+
+       GpuAggregate lane 0: the output hook refused a batch: 6 stddev(store_sales.ss_quantity)$count:
+       Int64 vs stddev(store_sales.ss_quantity) INT64; 7 …$mean: Float64 vs … FLOAT64; 8 …$m2 …
+       (the same for store_returns.sr_return_quantity and catalog_sales.cs_quantity)
+
+   #225 verbatim: the plan declares `<out>$count`/`$mean`/`$m2`, the device holds all three under
+   `<out>`. q17's `features` is `stddev_var avg top_n`, so it was always going to meet this.
+2. **The three tp4 cells refuse at `GpuHashJoin`** on #152: *this join's recipe copies its build
+   side per probe batch and the ABI has no copy: probe batch 2 has no build side left, since the
+   call for batch 1 erased it (#152)*. Same message at tp4-single, tp4-rowgroup and tp4-sized.
+3. **Masking the hook at the two tp1 modes** (the mechanism `corpus_cases.inc`'s own header
+   documents, and the remedy #225's body records for `tpch/shuffle-stddev`) moved each cell to
+   the next cause: **tp1-rowgroup joins the other three on #152**, and **tp1-single reaches the
+   golden comparison and fails on #220.**
+
+**tp1-single's divergence is #220, and the cpu is the side that is wrong.** First differing line
+is q17's `GpuAggregate` node line in `tp1-single-mini.cpu.txt`:
+
+    expected  …batches=multiple, output_rows=0, output_bytes=312
+    actual    …batches=multiple, output_rows=0, output_bytes=12
+
+26 zero-row batches of 12 bytes against the device's one. The probe chain carries 26 batches from
+the deepest join down the plan, and q17 matches nothing, so the cpu's join hands back one empty
+batch per probe batch that matched nothing while the device answers one table per call. That is
+#220's text word for word, and #220 says which engine breaks the contract: *"`architecture.md`'s
+rule does [break]: no executor returns more than one batch per call per output lane. `CpuExec::exec`
+keeps that rule by concatenating."* So **the cpu is wrong and the device is right**; the fix is
+#220's, on the cpu, in `cpu_backend/join.rs`'s `declared`.
+
+**This divergence is not this task's, and the run is positive evidence the task's fix is right
+on a device.** `git diff ENS-limits..HEAD` on that golden touches exactly four lines — the
+`GpuUnload` and `GpuAccumulateBatchesAndSort` node lines and their stats — and the 312-byte
+`GpuProject`/`GpuAggregate` below the join is the base's. The differ prints the **first**
+differing line, so everything above it matched: `GpuUnload`, `GpuAccumulateBatchesAndSort`,
+`GpuSort`, `GpuProject` and `GpuAggregateBatches` with their stats lines, **the two lines this
+branch rewrote among them**. Before #205's fix the cpu's sort rendered `batch_rows=[[]]` where
+the device emits one zero-row batch, so that cell would have diverged at the sort as well. It no
+longer does. The device and the cpu now agree byte for byte at the two nodes this task changed,
+and disagree only below them, on a break that predates it.
+
+#### What the registry and the case list now say, and what the tickets must say
+
+Mine, and applied:
+
+- `corpus_cases.inc`: q17's declaration is **unchanged** (`none`, `schema_validation_enabled`) —
+  the mask and the enabled modes were measurements, reverted. The comment above the T19-batch-19
+  group replaces "q17 (zero rows) waits on its first device run (#281)" with the three measured
+  causes and the date.
+- `cost-registry.csv`, row `tpcds,1,q17`: tickets `281` → **`152 220 225`**. #281 has now run, so
+  it no longer explains the cells; these three do, and all five device cells stay `disabled`. The
+  registry's rule that a disabled cell names a ticket (`registry.rs`, `off == 0 || !tickets.is_empty()`)
+  is what makes the column load-bearing rather than decorative. The shape matches the
+  neighbours: q15, q16 and q19 carry `152 220` for the same reason.
+
+**No new ticket is needed** — the three that explain q17 all exist and all already describe this
+exact failure. What the coordinator owes in `tickets/`, as markdown:
+
+1. **#281 can be archived in full.** Both halves are measured: limits' closed on 2026-10-09, and
+   this round ran the four accumulate cases (all pass) and q17's device cell (off, reassigned).
+   Nothing is left that #281 holds. Its registry row reference is already gone.
+2. **#220 gains `tpcds/q17` at `tp1-single`.** Its "**Corpus queries:**" line says "82 registry
+   rows carry `220`" — 83 now. Worth naming q17 among "the first ones seen", since it is the
+   first cell where the divergence is *only* over zero-row batches: both engines answer zero
+   rows, and the goldens disagree on how many empty batches carried them.
+3. **#225 gains `tpcds/q17`.** Its corpus list is `tpch/shuffle-stddev` and
+   `tpch/distinct-functions` (schema validation only); q17 is a third, refusing at its
+   `GpuAggregate` on three Welford triples at both tp1 modes. Unlike those two, q17's cell cannot
+   be rescued by a mask — #220 and #152 sit under it — so it is listed as blocked rather than as
+   schema-validation-only.
+4. **#152** needs no edit: it carries no corpus-query list, and q17's row now names it.
+
+Also **prose drift for the coordinator** (`build-test.md` is the coordinator's except its
+counts): the *Corpus, device* row says the off cells are held by "#152, #95, #220 and the
+device's own tickets (#57, #63, #281)". #281 is no longer one of them.
+
+#### Job 3 — `build-test.md`'s counts, every figure measured and every header re-summed
+
+Measured with `--list` on the final tree, both shapes: rust-only locally, `gpu` from build 4's
+staged binaries on nebius-gpu. **Every figure on the page is right, including the one set by
+reasoning. The page needs no count change.**
+
+*Target totals, `--list`*
+
+| figure the page states | measured | |
+|---|--:|---|
+| cpu `--lib` 653 | 653 | ✓ |
+| cpu `test_cpu_corpus` 569 | 569 | ✓ |
+| cpu `test_corpus_goldens` 29 | 29 | ✓ |
+| cpu `test_cost_model` 3 | 3 | ✓ |
+| ffi `--lib -- ffi_tests::` 4 | 4 | ✓ |
+| ffi `peacockdb-ffi --test test_ffi` 3 | 3 | ✓ (three `#[test]`s; no ffi file in this diff) |
+| gpu `--lib -- gpu_tests::` 538 | 538 | ✓ |
+| gpu `test_gpu_corpus` 38 | 38 | ✓ (q17 stays off, so it does not become 39) |
+| gpu `peacock_gpu_benchmarks` 11 | 11 | ✓ |
+| gpu `test_node_timing` 1 | 1 | ✓ |
+| `test_golden_format` 26 | 26 | ✓ |
+| `test_ci_coverage` 9 | 9 | ✓ |
+| `test_module_layout` 17 | 17 | ✓ |
+| `cost-report` 38 | 38 | ✓ |
+| C++ cuDF GPU smoke 4 | 4 | ✓ (ran) |
+| C++ Plan-executor 56 | 56 | ✓ (ran) |
+
+*The **Operator harness** row, which the rebase left at 337 by reasoning.* **Measured 337.** The
+`gpu_tests::` list grouped by module, non-schema modules under `tests::gpu_tests::`:
+accumulate_cases 37 + aggregate_cases 20 + aggregate_dimension_cases 29 + coverage 1 +
+emit_cases 15 + exec_cases 57 + harness_cases 24 + join_cases 89 + join_dimension_cases 29 +
+nested_cases 24 + script 4 + source_cases 8 = **337**. The collapsed `+1` was real and the
+coordinator's arithmetic was right; nothing to correct.
+
+*The rest of the gpu block, same grouping* — schema modules (`*_schema_cases`) 7 + 32 + 6 + 33 +
+4 + 38 + 6 + 8 = **134**; `wire::gpu_tests` **21**;
+`executor::cpu_backend::gpu_tests::murmur_conformance` **10**;
+`executor::gpu_backend::gpu_tests::` less `abi` (11 + 2 + 1 + 12 + 6) = **32**; `abi` **4**. Sum
+337 + 134 + 21 + 10 + 32 + 4 = **538** = the block's `--lib` figure, and 538 + 38 + 11 + 1 =
+**588** = the block header. Both hold.
+
+*The cpu block's 45 rows, each against its module path* — all 45 match, and they sum to exactly
+**653**, so no row is double-counted and none is missing. The four rows whose row name does not
+name every module they cover, written down so nobody re-derives them: *End to end* 39 =
+`tests::end_to_end` 27 + accounting 3 + dimensions 3 + limits 4 + schema_validation 2;
+*Driver internals* 44 = `driver::accounting` 14 + `driver::index` 5 + `driver::scheduler` 15 +
+`driver::single_partition` 10; *Plan types* 41 = `plan::validate` 33 + `plan::aggregate` 4 +
+`plan::layout` 4; *Forwarders and row ranges* 4 = `executor::forwarder` 3 + `executor::row_range` 1.
+*Translator expressions and scan mapping* 27 = `translator::expr` 13 + `scan_mapping::partition` 8
++ `scan_mapping::parquet_meta` 6. *CPU backend executors* 76 is the `cpu_backend::tests::` modules
+less the 1 `contract` case, which the page counts in its own row.
+
+*Headers re-summed from the rows, not deltaed* — cpu rows 1254 = 653 + 569 + 29 + 3 = header;
+ffi 7 = 4 + 3; gpu rows 588; everything-else Rust 26 + 9 + 17 + 38 = 90; Rust 1254 + 7 + 588 + 90
+= **1939**; C++ 94; Python 381; grand total **2414**. Every one is what the page says.
+
+#### Warnings: one, pre-existing, and the build log cannot tell you
+
+`grep warning` over `empty-sorts-build[1-4].log` finds **nothing**, and that is not evidence.
+`--build` stages each binary through `cargo test --no-run --message-format=json | python3 …`, so
+every diagnostic leaves as a JSON object on **stdout** and is drained by the artifact reader; the
+log holds only cargo's stderr progress lines. Checked directly instead, with a plain
+`scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run`: **exactly one
+warning**, `unused import: AsArray`, `tests/gpu_tests/aggregate_dimension_cases.rs:9:42`. That is
+round 1's pre-existing one — the file is untouched by this branch and only a gpu-feature build
+sees it. Left as round 1 left it, cosmetic and unfiled. The rust-only logs carry no warning at
+all.
+
+#### Host state, and nothing deferred beyond the chain's standing exclusions
+
+Four builds and three tier runs on nebius-gpu. `df -h /` **21 GB free before and after every
+one**; `du` unchanged; nothing deleted, under `~/peacockdb-K` or anywhere else, and
+`~/peacockdb-J` never touched. `nvidia-smi` 0 MiB before and after every run — chain J never
+contended, so the shared-card rule was never exercised. No process left running on the host
+(`pgrep` for the runner and the build script: 0).
+
+Deferred, and only what the chain's note already excludes: the sf40 pair
+(`peacock_tpch_tests`, `peacock_tpchv_tests`), `--run-benchmarks` and Nsight captures. Nothing
+else was skipped. Logs on the host: `~/K-logs/empty-sorts-build[1-4].log`,
+`empty-sorts-tier{1,2,-final}.log`, `empty-sorts-q17-all5.log`, `empty-sorts-q17-masked.log`,
+`empty-sorts-warncheck.log`.
+
+#### A real red the spec's bar does not reach: `cargo test -p cost-report`
+
+**Found and fixed this round.** `cost-report`'s
+`tests::the_index_reads_the_anchors_of_every_wiki_file` was **red on this branch** and has been
+since round 1:
+
+    assertion `left == right` failed
+      left: Some("llm-wiki/archive/archived-tickets.md")
+     right: Some("llm-wiki/tickets/corpus-coverage.md")
+
+The test reads the **real wiki** and asserts three example ticket numbers resolve to three
+different files, so that `TicketIndex::load` is proved to read anchors from `tickets.md`,
+`tickets/*.md` and `archive/*.md`. Its corpus-coverage example was **#205** — which this task
+archived. Verified as the branch's own doing and not this round's edits: `git grep 'id="t205"'`
+finds it in `tickets/corpus-coverage.md` at `ENS-limits` and in `archive/archived-tickets.md` at
+`HEAD`, and the round's working-tree changes touch no cost-report file.
+
+The fix is the one the test's own doc comment prescribes — *"archiving the ticket named here turns
+this red, and the fix is to swap in a currently-open number rather than to look for a bug in
+`path_for`"*. Swapped **205 → 214**, chosen for durability: of the 33 anchors in
+`corpus-coverage.md`, only ten (56, 57, 60, 168, 202, 204, 210, 214, 217, 285) are not on any
+chain's closes list on the board, and #214 is the most legible of them — it is #205's sibling in
+`architecture.md`'s *Zero-row batches change no answer* bullet and nothing plans to close it.
+Red before (1 failed), green after (**38 passed**), and the assertion is not vacuous: #214's
+anchor really is in `corpus-coverage.md`, so a broken `path_for` still reddens it.
+
+**Why the bar missed it.** The spec's *Verification bar* is the four rust-only targets, and the
+dispatch adds the three repo guards. `cargo test -p cost-report` is in none of them — it is the
+`cost-report` CI job, which the branch's `done` section read only for its **gate** output. A
+round that archives a ticket must run this crate, because it is the one target that reads
+`llm-wiki/` as an input. Nothing else in the tree names `205` any more: a grep over `*.rs`,
+`*.inc`, `*.csv`, `*.cpp`, `*.h`, `*.py`, `*.yml` and `*.sh` is empty, which makes round 1's
+claim to that effect true *now* and false when it was written (it did not cover `cost-report/`).
+
+#### Everything else CI runs that this host can run, run because of the above
+
+| what | where | result |
+|---|---|---|
+| `cargo test -p cost-report` | local | 38 passed (after the fix) |
+| `--lib -- ffi_tests::` | nebius-gpu, staged gpu lib | 4 ran, 4 passed, 1191 filtered |
+| `peacockdb-ffi --test test_ffi` | nebius-gpu | 3 ran, 3 passed |
+| C++ `peacock_cpu_tests` (`ctest -L cpu`'s 12) | nebius-gpu | 12 passed, 7 suites |
+
+`test_ffi` reproduced `build-test.md`'s loader trap exactly: `cargo test -p peacockdb-ffi --test
+test_ffi` dies `libcudf.so: cannot open shared object file`, exit 127, because nothing puts the
+FFI crate's `OUT_DIR/lib` on the loader path. Run the built binary with
+`LD_LIBRARY_PATH=target-cudf-*/debug/build/peacockdb-ffi-*/out/lib:$CUDF_ROOT/lib` and it passes.
+
+**One pre-existing warning in `cost-report`**, left alone: `function sha_links is never used`
+(`cost-report/src/main.rs:1538`), an uncalled test helper. `git diff ENS-limits..HEAD -- cost-report/`
+is empty, so it predates the branch; this round's only edit to that file is the one-token ticket
+swap above. Deleting code whose caller's disappearance I did not investigate is the scope-creep
+the style guide names, so it is reported rather than silenced.
+
+#### Job 3, continued — the C++ and Python columns measured too
+
+Since one red hid outside the rust-only bar, the other two columns of the grand total were
+measured rather than carried over.
+
+*C++ 94*, by `--gtest_list_tests` on the staged binaries and by counting `TEST`/`TEST_F` in the
+five suites this host does not build: `peacock_cpu_tests` **12** (ran), `peacock_gpu_tests` **4**
+(ran), `peacock_plan_tests` **56** (ran), `peacock_tpch_tests` **4** and `peacock_tpchv_tests`
+**4** (listed, not run — sf40 is out of every chain-K task), `test_tpch_streamed` **4**,
+`test_cudf_nodes` **1**, `test_multi_gpu_tpch` **4**, `test_multi_gpu_tpchv` **4**,
+`test_basic_multi_gpu` **1** (manual / 2gpu, not built here). Sum **94** ✓.
+
+*Python 381*, by running the two CI python steps the way the workflow runs them — direct
+`python3 <file>`, not pytest, because the files carry a `__main__` footer and `tests/harness.py`
+reads the source back: `testdata/test_duckdb_cost.py` **41 passed**; the exec-model prototype set
+(the glob less the three the step names as running elsewhere) **216 passed** across ten files,
+summed from each file's own `N passed` line — 17 + 4 + 18 + 21 + 23 + 63 + 24 + 22 + 15 + 9;
+`scripts/exec_model/tests/test_tpch.py` **19 passed** (the dataset-matrix one, run locally
+against the committed sf1); the calibration set **9 passed** of 12, test_plot.py's **3** counted
+statically. Sum 41 + 216 + 19 + 93 + 12 = **381** ✓.
+
+The manual exec-model corpus figure **93** is measured rather than trusted: `test_tpch_corpus.py`
+has 22 `def test_` and `test_tpcds.py` has none of its own — it **generates** one per entry of
+`plans_tpcds.QUERIES`, which imports to **71**. 22 + 71 = 93.
+
+**Two things this host cannot run**, neither a code risk and neither in this diff:
+`scripts/calibration/tests/test_plot.py` (3 cases) imports `matplotlib`, which is absent both
+locally and on nebius-gpu — CI installs it, and the branch touches neither `plot.py` nor the
+test. And the sf40 / 2gpu C++ suites, excluded by the chain's note.
+
+**A scoping trap worth recording.** `pytest scripts/exec_model/tests/` sweeps
+`test_tpch_corpus.py` and `test_tpcds.py` — the 93-case manual set that `exec-model-corpus.yml`
+shards across three runners — and runs for tens of minutes. The `cost-report` job names those
+three files in an `elsewhere` array and skips them, with a `[ -f ]` check so a rename cannot
+silently drop one. Run the step's own loop, not the glob.
+
+#### Disk on nebius-gpu: an obstacle, recorded, and the named cleanup reclaims nothing
+
+`df -h /` was **21 GB free** before and after all four `--build` runs and all three tier runs. It
+is **15 GB free** at the end of the round. The 6 GB went on the two extra diagnostic builds this
+round added — the plain `cargo-cudf.sh … --features gpu --no-run` warning check and the
+`peacockdb-ffi --test test_ffi` build — both into `~/peacockdb-K/target-cudf-rapids-cuda-12.2`,
+now 12 GB.
+
+Chain J's cleanup rule was followed and **yields nothing**, measured rather than assumed:
+
+- `~/miniforge3/bin/conda clean -a --dry-run` → *no unused tarballs, no index caches, no unused
+  packages, no tempfiles, no logfiles*. The 13 GB in `~/miniforge3/pkgs` is hard-linked into the
+  live envs. This confirms limits' finding rather than re-deriving it.
+- the #260 debug build in `~/peacockdb` is **991 MB in total**, 847 MB of it `testdata/`, so
+  `cpp/build26` and `target-cudf-rapids` there are already gone or never existed.
+
+What is left is reclaimable but **costly or forbidden**, so nothing was deleted:
+
+- `~/peacockdb-J` 29 GB — chain J's, never to be touched;
+- `~/peacockdb-K/cpp/install/rust-tests` 4.6 GB — the four unstripped ~1.2 GB staged binaries. A
+  re-stage after deletion is a copy from the warm cache, so this is the cheapest 4.6 GB on the
+  host if the next round needs it;
+- two `target-cudf-*/debug/build/peacockdb-ffi-*/out` trees, 654 MB and 662 MB — one is stale,
+  and which one is live takes care to establish; deleting the live one forces a cmake
+  reconfigure of flatbuffers, gtest and `libpeacock_gpu.so`;
+- the 12 GB target dir itself is the warm DataFusion-at-opt-3 cache; deleting it costs the next
+  round a cold rebuild (#85).
+
+**For the next GPU build on this host:** 15 GB free is above the chain note's 10 GB "do not
+build" floor and below its 20 GB "clean first" one, and the named cleanup is already spent. The
+4.6 GB of staged binaries is the one safe lever.
+
+#### What this round changed, file by file
+
+| file | change |
+|---|---|
+| `peacockdb-core/tests/common/corpus_cases.inc` | the T19-batch-19 comment: q17's three measured device causes in place of "waits on its first device run (#281)". **The declaration is byte-identical to the committed one** — `none`, `schema_validation_enabled`. |
+| `testdata/cost-registry.csv` | row `tpcds,1,q17`: tickets `281` → `152 220 225`. No state cell moved; all five device cells stay `disabled`. |
+| `cost-report/src/main.rs` | `the_index_reads_the_anchors_of_every_wiki_file`: `path_for("205")` → `path_for("214")`, the fix the test's own doc prescribes for an archived example. One token. |
+| `llm-wiki/tasks/empty-sorts-detail.md` | this round's record. |
+
+**Deliberately not changed**, each with its reason:
+
+- **q17's device cells are not enabled.** All five were measured and all five fail on open
+  tickets that are other chains' work (#225 and #220 on the cpu/aggregate side, #152 on the
+  join). The spec names only `tp1-single`, and the brief's rule is pass → enable, fail → off
+  plus a ticket.
+- **No `schema_validation_disabled` mask was landed for q17**, though it was measured. It is the
+  mechanism `corpus_cases.inc`'s header documents and #225's body records for
+  `tpch/shuffle-stddev`, and it does move the cell past #225 — but only onto #220 and #152, so it
+  buys no coverage and would leave a cell unvalidated for nothing. Reverted after measuring.
+- **No new ticket written.** All three causes are open and already describe these failures
+  exactly; ticket markdown is the coordinator's in any case.
+- **No `llm-wiki/` prose touched beyond this file.** `build-test.md` needs no count change (every
+  figure measured correct) and its device-corpus ticket list is prose, so #281's removal from it
+  is reported rather than applied. `architecture.md`, `tickets.md` and `tickets/` untouched.
+- **The `AsArray` unused import** (`gpu_tests/aggregate_dimension_cases.rs:9`) and
+  **`cost-report`'s uncalled `sha_links`** both left: pre-existing, cosmetic, in files this task
+  has no other business in.
+- **`cost-report/src/main.rs` not rustfmt'd.** `rustfmt --check` reports **73 hunks at `HEAD` and
+  73 in this tree** — the file predates the installed rustfmt — and the `205` line was already
+  one of them, in exactly the same way `214` is. So the one-token change adds no violation, and
+  formatting the file would bury it under 73 hunks.
+- **sf40, `--run-benchmarks`, Nsight**: out of every chain-K task, deferred.
+
+#### What the coordinator still owes
+
+1. `tickets/`: archive **#281** in full (both halves measured); add `tpcds/q17` to **#220**'s
+   corpus list (82 → 83 registry rows) and to **#225**'s; **#152** needs no edit.
+2. `build-test.md`'s *Corpus, device* prose: "#57, #63, #281" no longer holds — q17's cell is
+   #152/#220/#225's now.
+3. The spec's **completeness signoff** is stale in its last paragraph: the device half is no
+   longer "built and not run", #281 no longer holds it, and the caveat that the four cases
+   "cannot tell one zero-row batch on both from nothing on both" is now answered by composition
+   with the cpu-side absolute pins.
+
+### 2026-10-09 — reviewing, and the control file said `stop`
+
+The developer's round 2 is green with evidence and committed, so the board is at `reviewing` on
+PR #174 (base `ENS-limits`, verified: 7 commits, 27 changed files, which is the task and not the
+chain). The control file carried `stop`, read after the dispatch returned, so the reviewer was
+not dispatched and the run ends here rather than at the end of the cycle. Nothing is running.
+
+**The ticket markdown the developer asked for, applied — it had to land in the same commit**, not
+in a later one: `cost-registry.csv`'s q17 row no longer names `281`, so leaving #281 open would
+have shipped a commit whose wiki and data disagree.
+
+1. **#281 archived in full**, both halves measured. Its block moved to `archive/archived-tickets.md`'s
+   `## Done` with a `Closed by …` note naming both tasks, the four passing accumulate cases and
+   q17's three measured causes. Dropped from `corpus-coverage.md` and from that file's contents
+   list. `tickets.md`: corpus-coverage 33 → 32, open 117 → 116, both re-summed from the rows, and
+   every row's count re-checked against the length of its own id list.
+2. **#205's closing note corrected** in the archive. It ended "the mixed merge has one, built and
+   not run (#281)" — false since this round, and the link pointed at a block that had just moved.
+   Now "all four pass on a device", linked within the archive.
+3. **#220 gains `tpcds/q17`**, named as the one cell whose divergence is over empty batches alone.
+   Its count went 82 → **88**, not 83: the figure was already stale by five before this branch, and
+   88 is measured — `awk -F, 'NR>1 && $NF ~ /(^| )220( |$)/'` over `cost-registry.csv` gives 87 at
+   `ENS-limits` and 88 with q17's row.
+4. **#225 gains `tpcds/q17`**, with the note that a mask does not rescue its cell because #220 and
+   #152 sit under it. **#152** needed no edit, as the developer said.
+5. **`build-test.md`'s device-corpus row** named #281 among "the device's own tickets"; it now names
+   **#225**, which is what actually holds q17's two tp1 cells as the file declares them.
+6. **The board's chain-K note** linked #281 at `../tickets/corpus-coverage.md#t281`; repointed at
+   the archive. The links in `limits.md`, `limits-impl.md` and `limits-detail.md` were left: a
+   frozen spec and the working records of a finished task. The cost widget resolves a number by
+   whichever file holds its anchor (`TicketIndex::load`), so none of them breaks the report.
+
+**What the next coordinator owes, in order.** The task is at `reviewing` with no finding
+outstanding, so the next step is the reviewer, then the completeness pass, then CI, then `done`.
+
+- **Dispatch the reviewer** on this branch — round 1's reviewer and analyst saw only the cpu half.
+  The new material is the GPU round: the three measured q17 declarations and the conclusion that
+  **the cpu is the wrong side under #220**, the `cost-report` test literal `205` → `214`, and the
+  ticket markdown above.
+- **The spec's completeness signoff is stale and must be rewritten** at `completeness approved`.
+  Its last paragraph still says the device half is "built and not run" and names #281 as holding
+  it; both are false now. The spec's one-later-write rule is already spent on the old signoff, so
+  this is a rewrite of that block, not a second append.
+- **The GPU half changed no `architecture.md` sentence that the branch had not already changed** —
+  but that is the analyst's reading to make, not this file's claim.
+- **CI**: the cost gate should now be **green**, not red-and-accepted. `--cost-diff` gives `rc=0`
+  on this base because master's +10% tolerance came across in the rebase, so the board's
+  pre-acceptance for this task is no longer load-bearing. A red `cost-report` is a finding again.
+  `gpu-tests` stays red on shad-gpu being unreachable; the device evidence is the nebius-gpu run
+  recorded above.
+- **The host has 15 GB free**, down from 21 across four builds, and the named cleanup reclaims
+  nothing. Above the chain note's 10 GB floor, so a build may still start, but the next one should
+  read `df -h /` first and expect to have to reclaim the 4.6 GB of staged binaries.
