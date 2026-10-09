@@ -63,3 +63,26 @@ and the chance has passed: that cycle recorded exactly the 26 cells enabled at t
 completeness pass verified the recorded set has zero extras. So this task owns its own cycle, and
 its first act is still the Task 1 Step 1 edit above — which is why the cycle and the enablement
 have to land together rather than in either order.
+
+## Dispatched, after the resequencing (2026-10-09)
+
+Branch `ENS-stale-cells`, forked off `ENS-refcounted-scatter` at `35c0f04b`. Tasks 1–4 are `done`.
+
+**This task moved.** It was task 2 and is now task 5, resequenced by the human in master's
+`f0a6ecbf` so that it branches off refcounted-scatter rather than forking the chain off
+duckdb-oracle. Nothing about its subject changed — none of its four rows has a join, so the three
+tasks that overtook it cannot have touched them — but two things under it did move while it waited:
+`tpch/q15` now reads `183 220` rather than `183`, and **#183 and #187 are both archived**, so the
+spec's description of them as "closed" is now also true of where they live.
+
+**One decision the coordinator owes it before it builds, and it is a refusal.**
+[#253](../tickets/corpus-coverage.md#t253) says the DuckDB oracle cannot record a divergence found
+on the device while the cpu agrees — one `duckdb_oracle` per line serves both, so `duckdb_exact`
+fails the device case and `duckdb_divergent` fails the cpu case — and it names this task as the
+first that can produce one, asking for the decision "before `stale-cells` builds rather than inside
+it". The decision: **the harness does not change here.** The spec's Restriction is the 16 cells and
+no fix to anything they show, and its step 2 already says what to do with a cell that cannot be
+green — it stays off under a ticket. So a device-only divergence from DuckDB is a cell that stays
+off under #253, recorded with its query and mode, and #253 gets the concrete instance it so far
+lacks. That is cheaper and more honest than widening the harness inside a task whose whole point is
+to measure, and it leaves #253 a decision for a task that can design it.
