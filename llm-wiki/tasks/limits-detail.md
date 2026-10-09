@@ -210,3 +210,119 @@ the divergence, so it is not drift. The reviewer enumerated skip 0–39 × fetch
 sizes: the two rules differ only at `fetch == 0` with `skip > 0`, and no prototype case sits
 there. Outside this task's Scope table, and the prototype is where a rule is argued with rather
 than where it is enforced.
+
+### 2026-10-09 — review round 1 addressed
+
+The markdown half (I1, the `hacks-audit.md` pruning, #281's new line) was done by the human. This
+developer closed I2, N3, N4 and N8. N5 and N6 stay as the review left them.
+
+#### I2 — the hold's effect, covered outside the mock tier
+
+New case: `a_limit_stops_a_scan_that_maps_every_row_group_at_every_mode`
+(`tests/end_to_end/limits.rs`). `SELECT count(l_quantity) FROM (SELECT * FROM lineitem WHERE
+l_quantity > 0 LIMIT 10)`. The `FilterExec` is what makes it bite: DataFusion pushes no limit
+through one, so `base_config().limit` is `None`, `source()` builds no cut and `covering_prefix`
+has nothing to trim. Measured at every mode: the loader's `partition_groups` cover all 49 of
+lineitem's row groups, `l_quantity`'s minimum keeps every group past pruning, and the answer is
+10. Batches offered against batches pulled: tp1-single 1/1, tp1-rowgroup **49/1**, tp4-single
+4/4, tp4-rowgroup **49/1**, tp4-sized 1/1. The test asserts 49 groups at every mode, `pulled <=
+target_partitions` at every mode, and `(49, 1)` for offered/pulled at the two rowgroup modes.
+
+**Proved by flipping the hold off**, not argued. `scheduler.rs`'s `satisfy` kept
+`satisfied[node] = true` and lost only the `limit_holds[held] += 1; refresh(held)` loop, so
+`report.satisfied` and the goldens' `early_exit=` stay populated — the reviewer's own
+construction. Under that, the full `--lib` was 611 passed / 21 failed / 2 ignored. The 21 are
+twenty in `executor::driver::scheduler::tests` and `executor::driver::tests::{budget, counts,
+limit, render}` — the mock tier — plus exactly one outside it: the new case. The other three
+`end_to_end::limits` tests stayed green, which is the gap the review named. The hold was then
+restored and all four are green.
+
+#### The reviewer's suggested query is refused at the tp4 modes, and was before this branch
+
+`SELECT * FROM lineitem WHERE l_quantity > 0 LIMIT 10` — the review's own wording — plans at the
+tp1 modes (offered/pulled 1/1 and 49/1, the unload carrying the interval) and is **refused** at
+tp4-single, tp4-rowgroup and tp4-sized:
+
+    invalid plan: GpuLimit: a limit feeding only the sink is not a node
+
+Above one partition DataFusion plans `GlobalLimitExec(0,10) → CoalescePartitionsExec →
+CoalesceBatchesExec(fetch=10) → FilterExec → ParquetExec`. `unload_input` descends a
+`CoalesceBatchesExec` only when it has **no** fetch, so the inner one becomes a `GpuLimit` whose
+only parent is the sink, and `plan/validate.rs` refuses it. Pre-existing: with `translate`'s body
+reverted to the base's (`node(self, &input)` instead of `unload_input`) the same three modes
+refuse with the same message, because base's `node()` reached the same `mid_plan_limit` arm.
+Measured, not reasoned.
+
+The fix is one arm — let `unload_input` pass a `CoalesceBatchesExec` *with* a fetch and compose
+the two intervals with `RowInterval::over`, which is on this branch already and is the identity
+here (outer `{0,10}` over inner `{0,10}`). It is a refusal of a legal query, so it is production
+behaviour and wants a ticket; it is outside this task's Restriction ("the scan's limit and the
+limit's count") and outside its Scope table, so it was not fixed here. **No ticket filed** — this
+developer does not write the ticket files; the coordinator was asked to file it.
+
+This also corrects the review's second "checked and found right" bullet, which ends "Anything else
+becomes a node and the limit lands legally beneath it." A fetch-carrying `CoalesceBatchesExec`
+becomes a node and the limit lands *illegally* beneath it. The descent set is the erasing set, as
+the bullet says; what does not follow is that everything outside it is safe.
+
+The new case puts its limit under an aggregate for this reason: there the `GpuLimit` is a node
+with a legal parent, it plans at all five modes, and both rowgroup modes show 49 offered for 1
+pulled rather than tp1-rowgroup alone.
+
+#### A stale code comment the measurement contradicted
+
+`translator/common.rs`'s `limit_interval` said its `CoalesceBatchesExec` arm was "Not reachable
+from today's planner". It is reachable, and it is what makes the query above plan at tp1: with one
+target partition DataFusion leaves no `GlobalLimitExec` above the coalesce it parked the fetch in,
+so `CoalesceBatchesExec(fetch=10)` is the root. Comment corrected in place, under the rule that a
+stale sentence is fixed in the commit that found it. `common.rs` is outside the Scope table; no
+code there changed.
+
+#### N3, N4, N8
+
+- **N3.** `settle_limit` (`driver/partitioned.rs`) matches `ExecutorCategory::BatchAccumulator`
+  explicitly and returns `RunError::Protocol` naming the node for any other category carrying an
+  interval. `settle_limit` and `seed` now return `Result<(), StepError>`; `drive` and
+  `driver/tests/mod.rs`'s `driver_with` propagate. The new arm is unreachable today and cannot be
+  tested without inventing a third `row_interval()` carrier — which is the condition it guards.
+- **N4.** Four lines on `covering_prefix` saying `can_be_null` stays ORed over the untrimmed
+  survivors, that `planner/nulls.rs` spends a false positive on a refusal and a false negative on
+  a wrong answer, and that the untrimmed claim is also what the scan made before the trim existed.
+  So the branch made no refusal more likely than the base does.
+- **N8.** `a_mid_plan_limit_is_satisfied_by_fetch_rows_emitted_whatever_its_skip` →
+  `a_mid_plan_limit_is_satisfied_by_fetch_alone_and_not_by_skip_plus_fetch`, and its comment now
+  says a real limit executor would need three pulls where the mock needs one.
+
+#### Round 2 evidence
+
+**Per-target counts, measured at the final tree.** rust-only `--lib` 632 passed, 2 ignored
+(#182), **634 cases** — one more than round 1's 633, the new end-to-end case;
+`test_cpu_corpus` 569; `test_corpus_goldens` 26; `test_cost_model` 3; `test_module_layout` 17;
+`test_golden_format` 26; `test_ci_coverage` 9; `cargo test -p cost-report` 36. All rc=0, no
+failures anywhere. `build-test.md` moved by exactly one: End to end 36 → 37, `--lib` 633 → 634,
+cpu block 1231 → 1232, Rust 1902 → 1903, grand total 2377 → 2378, each header re-summed against
+its own rows rather than deltaed. The row's prose enumeration said "seventeen cases no query list
+can carry" where the non-query cases numbered nineteen; it is now twenty and adds up (17 queries +
+20 = 37).
+
+**Nothing else moved.** `git diff --name-only` over round 2 names only `.rs` and `llm-wiki/`
+files: no golden, no `testdata/`, no `corpus_cases.inc`, no `cost-registry.csv`, no `cpp/` and no
+`flatbuffers/`. So the deletion audit by `git diff --numstat` has nothing to reconcile outside the
+files this round edited, and the cost gate's rows stand exactly as the `## Cost gate` section
+records them — the gate reads committed golden sections and none changed.
+
+**The device-only code.** No device ran. The gpu rung was rebuilt with
+`CUDF_ROOT=…/rapids-cuda-12.2 scripts/cargo-cudf.sh test -p peacockdb-core --features gpu
+--no-run` and the same with `--test test_gpu_corpus`, both rc=0, because `settle_limit`'s
+signature changed and the round-1 lesson was that a rust-only `--lib` cannot see a gpu-only
+caller. The staged lib binary's `--list` reports **536** `gpu_tests::` cases, unchanged.
+`the_registry_matches_the_gpu_corpus_in_both_directions` was run from the built
+`test_gpu_corpus` binary and passes, so both registry directions are covered this round.
+
+**C++.** No file under `cpp/` or `flatbuffers/` changed in round 2, so the 25.02 build was not
+redone from scratch; the ffi build script reused round 1's `libpeacock_gpu.so` during the gpu rung
+build above. `ctest -L cpu` re-run: 1/1 passed.
+
+**One pre-existing warning, unchanged.** The gpu rung still reports the unused `AsArray` import at
+`tests/gpu_tests/aggregate_dimension_cases.rs:9` — one warning, the same one round 1 recorded, and
+the only one either build emits.
