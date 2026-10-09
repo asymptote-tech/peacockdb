@@ -253,14 +253,14 @@ are not waited on. The C++ changes are built, not run on a device.
 ## Completeness signoff
 
 Solved under its constraints. The lowering is as specified — two sequences beside any companion
-the engine decomposes, grouping sets included, #261 and #144 refused by name, the wire's
-`distinct` deprecated with no slot moved — and `distinct-functions` now runs it on a device at
-five modes, the first plan from this lowering any device has run, the C++ change with it.
+the engine decomposes, #261 and #144 refused by name, the wire's `distinct` deprecated with no
+slot moved — and `distinct-functions` now runs it on a device at five modes, the first such plan
+any device has run, the C++ change with it.
 
 Two shortcuts, both on #225 and both earned by a run: a schema-validation mask off at the three
-tp4 modes, where #225 refuses the outer init's Welford state on its alias, and
-`golden_approx_std` for one ULP of `stddev`. The cast-back stays pinned by a plan test, for a
-better reason than first given — a device holds `{type_id, scale}`, not a precision. Nothing else.
+tp4 modes, where #225 refuses the outer init's Welford state, and `golden_approx_std` for one ULP
+of `stddev`. The cast-back stays pinned by a plan test, for a better reason than first given — a
+device holds `{type_id, scale}`, not a precision. Nothing else.
 
 Owed at merge: q28's and `rollup-distinct`'s device cells, off on #152, #65 and #189 with #262
 narrowed to that; #144's `Float32 → Float64` subcase; and two wiki edits nobody asked for, a
