@@ -2116,3 +2116,14 @@ The override asks for the regression to be named in the PR as well as here; that
 #169.
 
 So `blocked(completeness approved)` → `completeness approved`. What remains for `done` is CI.
+
+### CI, for the `done` transition
+
+Run 37895984701 on `4d62c197`: `Changed paths` answered code=true and the full pipeline ran. cudf
+25.02 pass (21m56s), cudf 26.02 pass (23m0s), GPU build pass (7m52s), **Cost report pass**, S3
+check pass, Pages skipped. The only red is `GPU Tests (remote)` on `ssh: connect to host
+llm-gpu0h200.velkerr.ru port 22: Connection timed out` — shad-gpu, which the override exempts by
+name and whose work the nebius-gpu run above did instead.
+
+The Cost report pass is the one that matters here: it is the job that blocked this task, and CI's
+own verdict now agrees with the local measurement. `completeness approved` → `done`.
