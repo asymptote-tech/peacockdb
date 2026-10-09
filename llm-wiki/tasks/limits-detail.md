@@ -444,3 +444,26 @@ the old reachable state. Corrected in place.
   columns). No third regression, five improvements.
 - The estimator does not treat the new node as an accumulator (`NodeRef::Limit` falls to
   `_ => None`), so it neither truncates the amplification walk nor comes off the budget.
+
+### 2026-10-09 — done
+
+CI run [37898744572](https://github.com/asymptote-tech/peacockdb/actions/runs/37898744572) on
+`34bd7f4c`. Green: changes, both dataset-matrix legs, cpp-build-2502, s3-datasets;
+deploy-pages skipped as a master-push job.
+
+Two jobs red, both of them the cases the board says not to wait on.
+
+**cost-report** — the gate, and it reports exactly what the human pre-accepted and nothing more:
+*5 improvements, 2 regressions*, the two being `tpch.sf1/nested-limits` at tp1-rowgroup-mini and
+tp4-rowgroup-mini, 976.44 KB → 976.66 KB each. That is the +228 bytes `## Cost gate` predicted
+from the local run, at the same two sections, with no third. The five improvements are
+nested-limits at the other three modes (−38.51%) and scan-limit at tp4-single and tp4-sized
+(−97.95%).
+
+**GPU Tests** — `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out`, at
+the rsync step. The host is unreachable, so no pool was built: not
+[#178](../tickets/testinfra.md#t178), not this branch, and the same failure both earlier chain K
+tasks saw today.
+
+Everything the chain can test is green, so the task is `done` and the human merges. `#281` holds
+the device half, and `#284` holds the refusal round 2 uncovered.
