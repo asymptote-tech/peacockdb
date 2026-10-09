@@ -287,3 +287,30 @@ llm-gpu0h200.velkerr.ru port 22: Connection timed out`, which chain K does not w
 is unreachable rather than contended, so it is not #178 and not a defect in this branch.
 
 The task is terminal for the ensemble. The human merges; the archive list is in the signoff.
+
+## Rebase onto master 31c56bea (2026-10-09)
+
+The human wrote `rebase` to `.claude/ensemble/K.control`. The branch moved from master
+8806a3c3 to 31c56bea, which carries three commits:
+
+- `64ced62e` plan_text: a null decimal prints as `NULL`, a join's projection names its own
+  output (#236, #237) — code under `peacockdb-core/src/plan_text/`, a new planner test
+  `planner/tests/join_projection_names.rs`, and the ten tpcds `tp*.plans.txt` /
+  `tp*-mini.cpu.txt` goldens it moved.
+- `0753f8c9` + `31c56bea` — chain L's specs and chain K's two new tasks, `limits` and
+  `empty-sorts`, at `approved to build`, plus ticket and build-test edits.
+
+So the rebase is **not** documentation-only and the task re-proves. This branch touches none
+of the files 64ced62e moved, so the only conflict was `build-test.md`'s two case-count lines.
+Resolved by summing both deltas against the common base 8806a3c3:
+
+| | base | master's delta | this branch's delta | resolved |
+|---|--:|--:|--:|--:|
+| grand total | 2330 | +4 | +8 −3 (C++) | 2339 |
+| Rust | 1852 | +4 | +8 | 1864 |
+| C++ | 97 | 0 | −3 | 94 |
+| cpu `--lib` | 601 | +4 | +3 | 608 |
+| cpu block | 1185 | +4 | +3 | 1192 |
+
+Arithmetic, not a count — the re-proving dispatch confirms it against
+`scripts/case-inventory.sh rust-only`.
