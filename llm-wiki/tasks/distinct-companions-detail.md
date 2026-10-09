@@ -850,3 +850,140 @@ Four conflicts, resolved by ownership:
   master's), this branch's side for #62 leaving corpus-coverage. 118 open, corpus-coverage 35.
 - `tasks.md` — master's side for tasks 3 and 4 (`limits` and `empty-sorts`, `approved to build`)
   and for the chain note's new cost-gate bullet; this branch's side for states 1 and 2.
+
+### 2026-10-09 — re-proved on the rebased base
+
+Head `a1e36716`, base `ENS-guard-checks` at `203bd92a` (master `31c56bea`). Nothing was
+edited: the whole bar ran green on the rebased tree as the rebase left it, and
+`git status` is clean after every run.
+
+#### The auto-merged goldens are what the tree produces
+
+This was the one open question, and it is closed three ways.
+
+- **Every plan golden tier green.** `planner::tests::plan_goldens` — all ten per-mode tiers
+  plus the six meta tests — 19 passed, 0 failed. The ten tpcds files master and this branch
+  both edited verify byte for byte against a fresh render.
+- **The cpu tier green.** `test_cpu_corpus` 567 passed, which is what reads and verifies the
+  `tp*-mini.cpu.txt` sections master rewrote (q10, q35, q45, q58, q83) and the ones this
+  branch inserted (q28). `test_cost_model` re-derived all three `.cost.txt` files.
+- **Every line master added survives verbatim.** Mechanical check, not a reading: for each of
+  the ten files, every line `64ced62e` added was looked up with `grep -qxF` in the merged
+  file. **117 master-added lines, 0 missing** — 12 per `plans.txt`, 12/12/11/11/11 in the
+  `cpu.txt` files.
+
+**No golden was red, so nothing was regenerated.** `UPDATE_CANONICAL=1` was never run and
+no golden byte moved.
+
+Why the merge was safe where it looked risky: q28's six `GpuCrossJoin` nodes carry **no**
+`projection=` field at all, so `projection_field` returns before master's rule can apply, and
+q28 has no null decimal literal. Master's two renderer changes and this branch's inserted
+sections touch disjoint text. That is the reason the patch arithmetic happened to be right —
+worth recording, because the next task that collides in these files will not necessarily be.
+
+#### The deletion audit
+
+`git diff 203bd92a HEAD -- <file> | grep -c '^-[^-]'` over every file in the diff, with the
+text of each deletion read:
+
+| file | deletions | what they are |
+|---|--:|---|
+| the five `tpcds.sf1/*.plans.txt` | 1 each | the `(#62)` refusal line, this branch's own |
+| `cost-registry.csv` | 1 | q28's row, rewritten |
+| every other file under `testdata/goldens/` | 0 | pure section insertion |
+| `recipe-payloads.txt` | — | absent from the diff; sha still `b2f9cb2c…`, equal to the base's |
+
+Six deletions, six accounted for. **Identical to the pre-rebase baseline** this file records
+under *Goldens that moved, and every one audited* — so the textual merge lost no section. A
+lost master section would have shown up here as a deletion, since reverting master's line is
+a deletion of it; there is none.
+
+#### The bar, all from the rebased tree
+
+| command | result |
+|---|---|
+| `cargo test --features rust-only -p peacockdb-core --lib -- --test-threads=2` | 622 passed, 0 failed, 2 ignored (#182) |
+| `… --test test_cpu_corpus -- --test-threads=2` | 567 passed, 0 failed |
+| `… --test test_corpus_goldens -- --test-threads=2` | 26 passed, 0 failed |
+| `… --test test_cost_model -- --test-threads=2` | 3 passed, 0 failed |
+| `… --test test_ci_coverage -- --test-threads=2` | 9 passed, 0 failed |
+| `… --test test_module_layout -- --test-threads=2` | 17 passed, 0 failed |
+| `… --test test_golden_format -- --test-threads=2` | 26 passed, 0 failed |
+| `CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib -- ffi_tests::` | 4 passed, 0 failed |
+| `CUDF_ROOT=… scripts/cargo-cudf.sh test -p peacockdb-core --lib -- the_payload_golden` | 2 passed, 0 failed |
+| `scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build` | exit 0, 0 warnings, `peacock_plan_tests` linked |
+| `ctest --test-dir cpp/build -L cpu` | 1/1 passed |
+| `cargo check --features rust-only -p peacockdb-core --all-targets` after `touch lib.rs` | exit 0, 0 warnings |
+| `cargo test -p cost-report` (for the count check) | 36 passed, 0 failed |
+
+The cudf rung again needed `LD_LIBRARY_PATH` — `$PWD/target-cudf-rapids-cuda-12.2/debug/build/peacockdb-ffi-c2ff8be8e892f44d/out/lib`
+and `~/data/miniforge3/envs/rapids-cuda-12.2/lib` prepended. Without it the command exits 127
+and reads like a red test.
+
+**The warning check was itself proved, because 1.2 s looked too fast to be real.**
+`--message-format=json` says `peacockdb_core (lib)` and all nine `--test` binaries came back
+`fresh: false` — rechecked — with every one of the 252 units above them fresh. Then an unused
+local was appended to `lib.rs`: the check reported `warning: unused variable`, the probe was
+removed, and the clean run was repeated. So the zero is a measured zero, not a skipped build.
+`cargo check` is metadata-only over 2.7 MB of source with warm deps; 1.2 s is its real cost.
+
+#### Counts: the page is right, nothing to correct
+
+`build-test.md`'s two count lines on this head are **2366 — Rust 1891, C++ 94, Python 381**
+and cpu `1220: --lib 624, test_cpu_corpus 567, test_corpus_goldens 26, test_cost_model 3`.
+Both reproduce from the tree. The human's four `ours + (theirs − base)` resolutions landed
+exactly right.
+
+From `scripts/case-inventory.sh rust-only`, i.e. off the compiled binaries:
+
+    --lib 624 · test_cpu_corpus 567 · test_corpus_goldens 26 · test_cost_model 3
+    test_ci_coverage 9 · test_module_layout 17 · test_golden_format 26
+    test_gpu_corpus 0 · test_node_timing 0   (compiled out under rust-only)
+
+624 + 567 + 26 + 3 = **1220**, the cpu block. Every figure also equals its test run's
+`test result:` line. Rust = 1220 (cpu) + 7 (ffi) + 576 (gpu) + 26 + 9 + 17 + 36 = **1891**.
+ffi 7 = 4 measured on the cudf rung + 3 in `peacockdb-ffi/tests/test_ffi.rs`. C++ 94 = 80 from
+`--gtest_list_tests` on the five binaries `cpp/build` builds (plan 56, cpu 12, gpu 4, tpch 4,
+tpchv 4) + 14 source-counted in the five manual/2gpu files it does not build. Python 381 =
+41 (`test_duckdb_cost.py`) + 328 (`exec_model`, of which `test_tpch.py` 19 and
+`test_tpcds.py` 71 + `test_tpch_corpus.py` 22 = 93 corpus) + 12 (calibration).
+
+The row sums were also diffed against the base's page. **The only rows that moved are this
+branch's own, and every delta is the spec's:**
+
+| row | base → head | why |
+|---|---|---|
+| Corpus, cpu | 554 → 566 | q28's 5 cpu modes + `rollup-distinct`'s 2 tp1 modes + `distinct-functions`' 5 |
+| End to end | 29 → 34 | the five DISTINCT-lowering cases |
+| Translator, one rule at a time | 29 → 37 | the plan tests of the two stages |
+| Planner join refusals | 10 → 12 | the two `bug_` tests for #261 and #144 |
+| DISTINCT reaching decompose | — → 1 | new row |
+
+ffi, gpu and the whole *Everything else* table are unchanged from the base, and neither this
+branch nor master's `64ced62e` touches any `gpu_tests` module or gpu `--test` binary — so
+gpu 576 carries over and is checked by row arithmetic alone, the `gpu` shape being a build
+this chain may not do. Three rows were spot-checked against the inventory's case names
+directly: End to end 34, Translator 37, Planner join refusals 12 — all exact. Note a bare
+`#[test]` grep undercounts End to end (18), because its per-query cases are macro-generated;
+the inventory is the authority.
+
+guard-checks' `Cost-report renderer (Rust)` correction holds: `cargo test -p cost-report`
+reports **36**, matching the row.
+
+#### One piece of wiki drift, pre-existing, not fixed here
+
+`build-test.md`'s grand-total sentence says "a target's own `--list` total is larger, because
+its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs
+to." Measured, no rust-only target behaves that way: for all seven the `--list` total **equals**
+its row sum (`test_cpu_corpus` 567 = 566 + 1, `--lib` 624 = 624, and so on), and the gpu
+block's `test_gpu_corpus` 28 = 27 + 1 likewise. The clause is on master `31c56bea` and on the
+base `203bd92a` unchanged, so it is not the rebase's doing and the numbers it guards are all
+correct. Left for the helper rather than edited here — it is the sentence that exists to stop
+false drift reports, and rewriting it is master's call, not this branch's.
+
+#### No GPU, as the chain requires
+
+No device run, no GPU cycle, no `--features gpu`, no shad-gpu, verda never attempted. The C++
+was built and `ctest -L cpu` run; `peacock_plan_tests` was linked and **not** executed. Every
+command carried an explicit `timeout`. Nothing in git was mutated — head still `a1e36716`,
+working tree clean, stash untouched.
