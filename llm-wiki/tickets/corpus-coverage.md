@@ -780,22 +780,24 @@ the range each call was handed, and the backends' `LimitStream` tests take a ran
 a running count.
 
 <a id="t262"></a>
-### #262 — the DISTINCT lowering's device cells have never run
+### #262 — two DISTINCT corpus queries have no device cell
 
-The DISTINCT lowering (distinct-companions, chain K, closes [#62](../archive/archived-tickets.md#t62)) is built and proven on
-the cpu only: chain K runs without a GPU so as not to contend with chain J for one. Its plans
-reach the wire — a two-stage aggregate whose outer init runs merge aggregators over state, a
-`__distinct_arg` key, a narrowed grouping id — and no device has run one. A device answer could
-differ from the cpu's there, and nothing would say so, because the cells are off.
+No device has run a DISTINCT under a grouping set, or one above a join: the two corpus queries
+carrying those shapes are off at every device mode, each on a ticket of its own.
 
-**Corpus queries:** `tpch/distinct-functions`, gpu cells off at all five modes on this ticket
-alone. tpcds q28 (off on #152) and `tpch/rollup-distinct` (off on #65, #189) carry it too once
-those close.
+The lowering itself is proven on a device. `tpch/distinct-functions` was enabled at all five
+modes on nebius-gpu on 2026-10-09 (distinct-companions, chain K, which closed
+[#62](../archive/archived-tickets.md#t62)): plan shape, per-node rows, batch lists and bytes
+match the cpu's sections exactly, and so does the answer bar one ULP of `stddev`. So an outer
+init running merge aggregators over state, a `__distinct_arg` key, and a decimal state widened
+to `Decimal128(35, 2)` and held as declared all work on the device.
 
-**Fix proposed:** on a GPU host, once chain J leaves one free: run distinct-functions' five
-device cells against the cpu golden; each one passing is enabled, each one failing gets the
-ticket it fails on. Then this ticket drops from the registry row and is archived. The same run
-takes q28's and rollup-distinct's cells when their own tickets have closed.
+**Corpus queries:** tpcds q28 (off on #152) and `tpch/rollup-distinct` (off on #65 and #189).
+Neither row names this ticket; it is the record that their device cells are the lowering's last
+unrun ones.
+
+**Fix proposed:** when #152, #65 and #189 have closed, run those cells and enable each one that
+passes. Then this ticket is archived. Chain L's grouping-id takes the rollup half.
 
 <a id="t281"></a>
 ### #281 — limits' and empty-sorts' device cells have never run

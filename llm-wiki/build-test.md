@@ -606,8 +606,9 @@ release is null-guarded on the executor
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
 device with every batch held to its node's declared schema through the driver's output hook
-(the line's `schema_validation_enabled`; `tpch/shuffle-stddev` says `disabled` against
-[#225](tickets/corpus-coverage.md#t225), its Welford state columns named for the alias), and asserts,
+(the line's `schema_validation_enabled`; `tpch/shuffle-stddev` and `tpch/distinct-functions`
+say `disabled` against [#225](tickets/corpus-coverage.md#t225), their Welford state columns
+named for the alias), and asserts,
 read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
 and the bytes — plus the result where `gpu_oracle` names a golden.
 763 cells today. From tpch, 171: every line at every mode, but for six. `q11` is off at the
