@@ -659,8 +659,9 @@ Its mapping becomes `partition_groups=[[[0]]]`, one row group reaching ten rows,
 is `[[[0,1,…,48]]]` at tp1-single and the tp4 modes and `[[[0],[1],…,[48]]]` at tp1-rowgroup.
 `batches=multiple` becomes `batches=single`, and the `--- memory ---` estimate falls to one row
 group, from 371 MB at tp1-single. The tp4 unload keeps its own `skip=0, fetch=10`. scan-limit's
-cpu tp1 cells turn on. Its device cells then meet the decimal export (#187); nested-limits' meet
-the zero-column scan and the cross join's batching (#220).
+cpu tp1 cells turn on. Its device cells no longer meet the decimal export — #187 is archived and
+`stale-cells` ran `filter_project`'s four cells green against it; nested-limits' still meet the
+zero-column scan and the cross join's batching (#220).
 
 <a id="t282"></a>
 ### #282 — a scan with no surviving row groups is refused at planning
