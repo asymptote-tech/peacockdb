@@ -324,6 +324,71 @@ fn every_timed_case_is_enabled_on_a_device() {
     }
 }
 
+/// Every schema-validation mask entry against its own line's device modes.
+///
+/// On the text side because the decoder cannot see this: `is_validated_at` is asked only
+/// about a mode a run actually reached, so an entry written for a cell that is off is never
+/// decoded, and arms itself the day that cell is enabled. q28 and `tpch/rollup-distinct` are
+/// the next two lines a mask will be written for and both are off at every device mode, so
+/// the shape is one ticket away. This reader sees every declaration either way.
+#[test]
+fn every_mask_entry_is_one_of_its_lines_device_modes() {
+    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common");
+    let corpus = read_cases(&cases.join("corpus_cases.inc"), "corpus_query!");
+    assert!(!corpus.is_empty(), "the corpus list declares nothing");
+    let dead: Vec<String> = corpus
+        .iter()
+        .flat_map(|args| {
+            dead_mask_entries(args)
+                .into_iter()
+                .map(move |entry| format!("  {}/{}: {entry}", args[0], args[2]))
+        })
+        .collect();
+    assert!(
+        dead.is_empty(),
+        "a schema validation mask names a mode its own line does not run on a device, so the \
+         exemption is dead until that cell is enabled and then arms itself unread:\n{}",
+        dead.join("\n")
+    );
+}
+
+/// The two shapes that reader has to call dead, and the two it must not.
+///
+/// The last two are what keep it from reading nothing at all: a mask whose entries are its
+/// own modes, and a keyword with no mask, which is most of the corpus.
+#[test]
+fn a_mask_entry_its_line_never_runs_on_a_device_is_dead() {
+    let read = |line: &str| dead_mask_entries(&cases_in(line, "corpus_query!", "a line")[0]);
+    let line = |gpu: &str, validation: &str| {
+        format!(
+            "corpus_query!(tpch, 1, distinct_functions, tp1_single, {gpu}, \
+             data_fusion_disabled, golden_approx_std, {validation});"
+        )
+    };
+    assert_eq!(
+        read(&line(
+            "tp1_single",
+            "schema_validation_disabled(tp4_single)"
+        )),
+        ["tp4_single"]
+    );
+    assert_eq!(
+        read(&line(
+            "none",
+            "schema_validation_disabled(tp4_single | tp1_single)"
+        )),
+        ["tp4_single", "tp1_single"]
+    );
+    assert!(
+        read(&line(
+            "tp1_single | tp4_single",
+            "schema_validation_disabled(tp4_single)"
+        ))
+        .is_empty()
+    );
+    assert!(read(&line("tp1_single", "schema_validation_enabled")).is_empty());
+}
+
 /// The two bracket shapes a declaration line can carry, read off one line each: a mask on
 /// the last argument, and a trailing comment with a parenthesis in it. The second is one
 /// `(tp4 only)` away on a line that already says `// #225`, and taking the line's final `)`
@@ -391,6 +456,23 @@ fn cases_in(text: &str, name: &str, what: &str) -> Vec<Vec<String>> {
         out.push(args.split(',').map(|a| a.trim().to_string()).collect());
     }
     out
+}
+
+/// The mask entries a declaration names that its own device modes do not include.
+///
+/// A keyword with no mask has none, and a `none` device column makes every entry one:
+/// there is no cell for the exemption to apply to. Whether an entry is a mode at all stays
+/// `mask_names`' check, at run time, where it protects a hand-built string too.
+fn dead_mask_entries(args: &[String]) -> Vec<String> {
+    let Some((_, mask)) = args[7].split_once('(') else {
+        return Vec::new();
+    };
+    let on_device = modes(&args[4]);
+    mask.trim_end_matches(')')
+        .split('|')
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !on_device.contains(entry))
+        .collect()
 }
 
 /// A `mode1 | mode2` argument as a set. `none` is the empty set.

@@ -1260,7 +1260,7 @@ The two nits: `262` is back on q28's and rollup_distinct's registry rows, which 
 `grouping-id-impl.md`'s grep for rows naming it reads; and `assert_sorted_str_approx`'s
 "(q14/q39)" parenthetical is gone rather than re-listed, since the declarations are the list.
 
-### Two notes the round left open rather than closed
+### Two notes for the human — the first still open, the second closed in round 4
 
 **`build-test.md` gained a bullet nobody asked for.** `## Antipatterns` now carries the
 `rsync -a` mtime trap that cost this round a wrong conclusion about the device. By the letter of
@@ -1269,16 +1269,14 @@ coordinator added it anyway because the alternative home is this file, which is 
 archive, and because the section's one prior entry is the same species of trap. **It is the
 human's to drop at merge** if they read that rule more strictly.
 
-**A schema-validation mask entry naming a mode the line does not run is unrefused.**
-`mask_names` checks an entry against the five modes, not against this line's own device modes,
-and a `none` line never reaches the decoder at all — so an exemption written for a cell that is
-off arms itself silently the day that cell is enabled. Declined for this task rather than
-overlooked: closing it means carrying the validation keyword on `CorpusDeclaration` and adding a
-cpu-side test that decodes every line at all five modes, which is harness machinery a second step
-beyond what reopening this task was for. Nothing is wrong today — distinct-functions runs all
-five modes, so its mask has no dead entry. **Whoever enables q28's or `rollup-distinct`'s device
-cells should read this paragraph first**, since those are the two lines a mask would next be
-written for.
+**A schema-validation mask entry naming a mode the line does not run — closed in round 4.**
+`mask_names` checks an entry against the five modes, not against the line's own device modes, and
+a `none` line never reaches the decoder at all, so an exemption written for a cell that is off
+would arm itself the day that cell was enabled. `every_mask_entry_is_one_of_its_lines_device_modes`
+refuses it on the text side now; the round 4 section below says why there and not in the decoder.
+**Whoever enables q28's or `rollup-distinct`'s device cells should still read this first**, since
+those are the two lines a mask will next be written for — the difference is that a dead entry now
+fails a cpu test by name instead of sitting unread.
 
 ### Round 3: the mask's collateral — 2026-10-09
 
@@ -1337,13 +1335,55 @@ caller. `not(test)` silenced nothing in a default build and would have hidden a 
 re-derived by summing both tables: first 1815, second's Rust rows 90 → Rust 1905, grand total
 2380.
 
-**On the declined nit, for whoever picks it up.** The paragraph above — a mask entry naming a
-mode its line does not run — was declined on the grounds that closing it needs the validation
-keyword on `CorpusDeclaration` and a cpu-side test over every line at five modes. That estimate
-is now too high, because this round made the text reader pure and gave it all eight fields:
-`cases_in` already hands back field 4, the line's gpu modes, beside field 7, the validation
-argument with its mask. The check is "every mask entry is one of this line's gpu modes" over
-`corpus_cases.inc`, in `benchmark.rs` beside the reader, with no declaration change and no
-device. It would also cover the `none` lines, which never reach the decoder at all. Left
-unbuilt deliberately — the decision was the coordinator's and it is still defensible — but the
-cheap route is on the table rather than the expensive one.
+**A dead mask entry is now refused, which closes the paragraph above.**
+`every_mask_entry_is_one_of_its_lines_device_modes` (`test_corpus_goldens/benchmark.rs`) reads
+`corpus_cases.inc` with the same `cases_in` and reports every mask entry the line's own device
+column does not contain. A `none` device column makes every entry one, so a mask on a line with
+no device cell is refused too — the shape the decoder never even reaches.
+
+It is on the text side and not in `is_validated_at` because the decoder is asked only about a
+mode a run reached: an entry for a cell that is off is never decoded, which is exactly why it
+could arm itself later. `mask_names` keeps its own run-time check that an entry is one of the
+five, since that one also protects a hand-built string.
+
+The estimate that had this declined — the validation keyword on `CorpusDeclaration` plus a
+cpu-side test over every line at five modes — stopped being right once `cases_in` became pure
+and handed back all eight fields, field 4 beside field 7. Shown red by narrowing
+distinct-functions' device column to its two tp1 modes and leaving the tp4 mask, which named
+all three dead entries.
+
+### Round 4: a dead mask entry is refused — 2026-10-09
+
+The last item, and the one the coordinator reversed on cost. `dead_mask_entries` reports every
+schema-validation mask entry its own line's device column does not contain, and
+`every_mask_entry_is_one_of_its_lines_device_modes` holds the whole of `corpus_cases.inc` to it.
+Both read the file through `cases_in`, which is what made the check cheap: field 4 is the line's
+device modes and field 7 is the validation argument with its mask, so no declaration carries the
+keyword and nothing new reaches a device.
+
+**Why the text side.** `is_validated_at` is only ever asked about a mode a run reached, so an
+entry written for a cell that is off is never decoded — which is the whole hazard, not a gap in
+the decoder. The text reader sees every declaration whether or not it has a device cell, which
+is also what catches the second shape: a mask on a `none` line, where `modes()` is the empty set
+and every entry is therefore dead. `mask_names` keeps its own run-time check that an entry is
+one of the five; the two live at different times, and the decoder's is the one that protects a
+hand-built string.
+
+**Shown red** by narrowing distinct-functions' device column to its two tp1 modes and leaving
+the tp4 mask in place — the exact shape q28 or `rollup-distinct` would produce:
+
+    a schema validation mask names a mode its own line does not run on a device, so the
+    exemption is dead until that cell is enabled and then arms itself unread:
+      tpch/distinct_functions: tp4_single
+      tpch/distinct_functions: tp4_rowgroup
+      tpch/distinct_functions: tp4_sized
+
+The second test, `a_mask_entry_its_line_never_runs_on_a_device_is_dead`, holds the reader to the
+two shapes it must call dead and the two it must not — a mask whose entries are its own modes,
+and a bare keyword, which is most of the corpus. Those two are what keep the guard from reading
+nothing and passing forever.
+
+**Counts.** `test_corpus_goldens` 29 (27 + these two), `--lib` 628 passed / 2 ignored,
+`test_cpu_corpus` 567. No warnings, `rustfmt --check` clean. `build-test.md` re-summed: first
+table 1817, second's Rust rows 90 → Rust 1907, grand total 2382. No device run: nothing here
+reaches one.
