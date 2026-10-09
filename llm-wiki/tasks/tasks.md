@@ -123,6 +123,11 @@ the chain turned on, against 25.02; the evidence #244 waits on.
 > - **`done` when every CI job but the GPU tests is green.** The coordinator does not wait on the
 >   GPU jobs. guard-checks' edits to `build-test-shadgpu.sh` and to `pipeline.yml`'s GPU job go in
 >   untested, and so do limits' and empty-sorts' device changes (#281).
+> - **The cost gate's expected rises are accepted** (the human, 2026-10-08). limits and
+>   empty-sorts are `done` when the cost-report job's only regressions are the sections their
+>   detail files list from the local `--cost-diff` run: nested-limits at tp1-rowgroup and
+>   tp4-rowgroup for limits (expected +228 bytes), q17 at tp1-single and tp1-rowgroup for
+>   empty-sorts (expected +24 bytes). Any other regression is a finding, as usual.
 
 Corpus-coverage tickets and #62, all provable on the cpu, run beside chain J while it holds the
 GPU host. limits and empty-sorts were added after the chain started; their device changes go in
@@ -140,12 +145,12 @@ A DISTINCT aggregate lowers to two aggregate sequences beside any per-column com
 without grouping sets; #144 and #261 refused by name; the wire's `distinct` field deprecated; q28,
 `tpch/rollup-distinct` and `tpch/distinct-functions` on the cpu corpus, their device cells off.
 
-### 3. [`limits.md`](limits.md) — closes [#186](../tickets/corpus-coverage.md#t186), [#234](../tickets/corpus-coverage.md#t234) — state: new
+### 3. [`limits.md`](limits.md) — closes [#186](../tickets/corpus-coverage.md#t186), [#234](../tickets/corpus-coverage.md#t234) — state: approved to build
 
 A scan's limit becomes a `GpuLimit` above the scan and leaves both readers; the driver counts a
 limit's emitted rows rather than its input; scan-limit's tp1 cpu cells on.
 
-### 4. [`empty-sorts.md`](empty-sorts.md) — closes [#205](../tickets/corpus-coverage.md#t205) — state: new
+### 4. [`empty-sorts.md`](empty-sorts.md) — closes [#205](../tickets/corpus-coverage.md#t205) — state: approved to build
 
 The cpu's accumulating sort and merge answer one zero-row batch over zero-row batches; an empty
 answer keeps its columns; q17's result section gains its header.
@@ -162,6 +167,17 @@ answer keeps its columns; q17's result section gains its header.
 > only what needs the GPU runs there, the working tree synced uncommitted into `~/peacockdb-L`
 > (its sf1 data copied from `~/peacockdb-J/testdata`), every CPU build and run local. Chain J will
 > have finished with it.
+>
+> - **One sync per plan task** (each numbered task of a `-impl.md`) to the host, with as many
+>   back-to-back builds as its red/green pairs need, the red build first. This overrides each spec's "one GPU cycle per round".
+> - **Large tests and benchmark measurements are out of every task**, as in chain J: the sf40
+>   binaries, `--run-benchmarks`, Nsight captures, any H200 timing. Record each skipped item in the
+>   task's detail file as deferred.
+> - **Done** means CI is green except the `gpu-tests` job, "GPU Tests (remote)", which runs on
+>   shad-gpu, and the task's device tests have passed on nebius-gpu, the run recorded in the
+>   detail file.
+> - **Ticket numbers:** take the next free number from master's `tickets.md` as it stands after
+>   J's merge, which reconciles J's 263–279 with K's 280 on.
 
 The Welford and aggregate tickets of corpus-coverage, and the column references the device
 aggregate reads by counting.
@@ -172,11 +188,12 @@ The device's grouping-set id folds and widens as DataFusion's; walk tests prove 
 the two-stage DISTINCT on a device; `tpch/rollup-grouping` added; the rollup, q66 and DISTINCT
 device cells run and enabled where they pass.
 
-### 2. [`keyless-identity.md`](keyless-identity.md) — closes [#199](../tickets/corpus-coverage.md#t199) — state: new
+### 2. [`keyless-identity.md`](keyless-identity.md) — closes [#199](../tickets/corpus-coverage.md#t199), [#282](../tickets/corpus-coverage.md#t282) — state: new
 
 `empty_state` beside `state_type`; every aggregate init a batch accumulator that skips zero-row
-batches and, through `AtDoneIfNothingOut`, answers what it owes over no rows; four pbench `empty-*`
-queries; the q96, q88 and q90 tp4 cells on.
+batches and, through `AtDoneIfNothingOut`, answers what it owes over no rows; a scan of no row
+group maps one lane with no batch; six pbench `empty-*` queries; the q96, q88 and q90 tp4 cells
+on.
 
 ### 3. [`aggregate-arms.md`](aggregate-arms.md) — closes [#164](../tickets/corpus-coverage.md#t164), [#225](../tickets/corpus-coverage.md#t225), [#280](../tickets/corpus-coverage.md#t280) — state: new
 

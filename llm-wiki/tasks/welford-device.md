@@ -48,10 +48,13 @@ or to poison.
    (`group_merge_m2.cu`, `is_valid = count > 0`, in 25.02 and 25.10 alike), so a per-lane merge
    would hand NULL children to the cross-lane one. The state is then DataFusion's at every step,
    and no `MERGE_M2` meets a NULL child. The zero-row row of 2 already holds `(0, 0.0, 0.0)`.
-4. **#94.** `cpp/CMakeLists.txt` passes `cudf_VERSION`'s major and minor as
-   `PEACOCK_CUDF_VERSION_MAJOR` and `PEACOCK_CUDF_VERSION_MINOR`. `aggregate.cpp` picks one
-   `constexpr` count type from them, `INT32` before 25.06 and `INT64` from 25.06, and the one
-   `MERGE_M2` site aggregate-arms leaves uses it. The widening back to `INT64` after the merge
+4. **#94.** `aggregate.cpp` picks one `constexpr` count type from cuDF's own
+   `CUDF_VERSION_MAJOR` and `CUDF_VERSION_MINOR` (`<cudf/version_config.hpp>`, shipped in 25.02 and
+   26.02 alike; no CMake define, which would be a second source of the version), `INT32` before
+   25.06 and `INT64` from 25.06, and the one `MERGE_M2` site aggregate-arms leaves uses it. Chain
+   J's verify-26.02 runs `shuffle-stddev` on 26.02 and may already have gated this site the same
+   way; if so, this item only confirms it covers the site aggregate-arms leaves, and #94 is
+   archived with verify-26.02 rather than here. The widening back to `INT64` after the merge
    stays, a no-op from 25.06. No runtime probe: each cuDF version is its own build. The gate goes
    when 25.02 does.
 
@@ -78,7 +81,7 @@ failing cell takes its ticket.
 
 | path | change |
 |---|---|
-| `cpp/src/operators/aggregate.cpp`, `cpp/CMakeLists.txt`, `cpp/tests/` | the keyless route, the zero-row row, the NULL replacement, the count type |
+| `cpp/src/operators/aggregate.cpp`, `cpp/tests/` | the keyless route, the zero-row row, the NULL replacement, the count type |
 | `peacockdb-core/src/tests/gpu_tests/aggregate_dimension_cases.rs`, `aggregate_schema_cases.rs`, a new `welford_cases.rs` (`aggregate_cases.rs` is near the 1000-line cap) | the #216 pins flip; the zero-row and all-NULL cases |
 | `testdata/tpch-queries/global-stddev.sql`, its goldens and sections, `corpus_cases.inc`, `testdata/cost-registry.csv` | the new query; the rows above |
 | `llm-wiki/architecture.md` (Welford), `build-test.md`, `tickets/` | as in the work; counts; #216 and #94 archived; #261's "after #216" line |
@@ -109,7 +112,7 @@ verify-26.02's and [#260](../tickets/system-hardening.md#t260)'s.
   no NULL, on the device as on the cpu. Across lanes: one lane holds a group's values and another
   only NULLs for it; the merged and finalized answer matches the cpu's. A group all NULL on every
   lane finalizes to NULL.
-- gtest: the count type is `INT32` under 25.02's defines (the 26.02 CI leg compiles the other
+- gtest: the count type is `INT32` under 25.02's `version_config.hpp` (the 26.02 CI leg compiles the other
   branch).
 
 ## Verification bar
@@ -123,4 +126,5 @@ verify-26.02's and [#260](../tickets/system-hardening.md#t260)'s.
 
 ## Device workflow
 
-One GPU cycle per round on the chain header's host, the working tree synced as the header says.
+As the chain header says: one sync per task to its host, with as many back-to-back builds as its
+red/green pairs need, the red build first.

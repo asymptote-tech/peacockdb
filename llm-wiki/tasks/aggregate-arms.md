@@ -49,12 +49,14 @@ it everywhere else.
    | function | Init (`Partial`) | Merge |
    |---|---|---|
    | `sum`, `min`, `max` | that aggregation over `args[0]` | that aggregation over `args[0]` |
-   | `count` | `COUNT` over `args[0]`, widened to `INT64` | never sent: the plan merges a count with `sum` |
+   | `count` | `COUNT` over `args[0]`, widened to `INT64` | refused: the plan merges a count with `sum` |
    | `stddev`, `stddev_pop`, `var`, `var_pop` | `COUNT`, `MEAN`, `M2` over `args[0]` cast to `FLOAT64` | `MERGE_M2` over the struct of `args[0..3]` |
 
    Every input is the `ColumnRef` its `args` carry; a node's state is never located by counting.
    A function node with no `args`, or an `args` of the wrong length for its function, is refused
-   naming the function. The grouping-set path, built on it, emits the Welford triple (#280). The
+   naming the function. The builder hands welford-device two readbacks to extend: the init's
+   `$mean` and `$m2`, and the moments a Merge reads out of `MERGE_M2`. A computed argument is
+   evaluated once per node, not once per grouping set. The grouping-set path, built on it, emits the Welford triple (#280). The
    keyless path keeps `cudf::reduce` for sum, min, max and count, its merge already reading `args`;
    its Welford arm stays as it is — a finished `stddev`, a refused `var` (#216, welford-device).
 2. **Names from the plan.** `AggregateFuncNode` (`flatbuffers/gpu_plan.fbs`) appends
@@ -84,8 +86,12 @@ it everywhere else.
 
    The name check is safe to turn on: the device corpus's schema validator already holds every
    batch a node emits to its node's declared names on every enabled cell, and the one known
-   exception, the Welford triple's (#225), is fixed in 2. A cell that the check refuses is a
-   wrong reference found, ticketed as such.
+   exception, the Welford triple's (#225), is fixed in 2. A union is a forwarder, which the
+   validator never sees run, and a branch whose names differ from the union's is refused at
+   planning today (`check_branch_schemas`, `plan/union.rs`); `cast_branch`
+   (`planner/translator/nodes.rs`) projects such a branch to the union's names, as it already does
+   one whose types differ, so the plan runs and the names the node above reads are the union's. A cell that the check
+   refuses is a wrong reference found, ticketed as such.
 5. **The scan's names, checked at plan time.** The device's scan reads parquet columns by name:
    the writer sends the declared output schema as `file_schema` and no `projection`
    (`wire/node_writer.rs`, `scan`), and `scan.cpp` asks cuDF's reader for those names. The cpu reads
@@ -125,6 +131,7 @@ corpus cell keeps its state: nothing else this task touches changes an answer.
 |---|---|
 | `flatbuffers/gpu_plan.fbs` | `state_names`, `ddof` appended; `alias`, `mergeable_agg_state` deprecated |
 | `peacockdb-core/src/plan/aggregate.rs`, `wire/aggregate_writer.rs`, `wire/fb_text.rs` | the fields filled, written and printed |
+| `peacockdb-core/src/planner/translator/nodes.rs` (`cast_branch`) | a union branch projected where its names differ |
 | `cpp/src/operators/aggregate.cpp` | the builder, the names, the dead arms gone |
 | `cpp/src/plan_executor.h`, `cpp/src/expr.cpp`, `cpp/src/operators/{project,sort,join,filter}.cpp`, `cpp/src/node_session.cpp`, and every `TableResult` construction | #164 |
 | `cpp/tests/` | the builder per function and phase; #164's refusals |
@@ -179,4 +186,5 @@ change. `__grouping_id` keeps its C++-built name, which is the plan's.
 
 ## Device workflow
 
-One GPU cycle per round on the chain header's host, the working tree synced as the header says.
+As the chain header says: one sync per task to its host, with as many back-to-back builds as its
+red/green pairs need, the red build first.

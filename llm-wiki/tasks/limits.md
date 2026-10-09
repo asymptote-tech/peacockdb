@@ -36,8 +36,12 @@ it needs, with no test to notice.
    never carries a skip. `lanes_for` keeps its limit arm: one lane, since rows from several
    lanes have no order a cut could follow. The scan's mapping is the mode's own: one batch, one per
    row group, or sized. The limit cuts the batch that straddles `n`, and once it is satisfied the
-   driver's hold on its subtree (`settle_limit` → `scheduler.satisfy`) stops the scan, so a small
-   limit reads one row group.
+   driver's hold on its subtree (`settle_limit` → `scheduler.satisfy`) stops the scan. That alone
+   bounds the read only where batches are small: at tp1-single, tp4-single and tp4-sized lineitem is
+   one batch of all 49 row groups, so `LIMIT 10` would still read the file. So `source()` also
+   trims a limited scan's survivors to the shortest prefix whose row counts (from the parquet
+   metadata it already holds) reach `n`, before mapping: a small limit reads one row group in every
+   mode.
 2. **#186, the readers lose their limit.** `GpuLoadParquet.limit` goes, and with it the plan
    text's `limit=` on a source (`plan_text/node_text.rs`). The wire's `CudfScan.limit` is
    deprecated, no slot moved, as chain K deprecated `AggregateFuncNode.distinct`; the writer stops
@@ -88,7 +92,11 @@ not change.
 
 - Translator: `select n_nationkey from nation limit 3;` (tpch) plans a one-lane scan carrying no
   limit under an unload whose interval is `fetch 3`, at every mode; a limited scan below a join or
-  a subquery plans a `GpuLimit` above it; a scan without a limit gains no node.
+  a subquery plans a `GpuLimit` above it; a scan without a limit gains no node; a limited scan maps
+  only the prefix of row groups that reaches `n`, at every mode.
+- End-to-end on the cpu, the five modes: `SELECT count(n_name) FROM (SELECT * FROM nation LIMIT 3)`
+  answers 3. Today it answers 25 at every mode: the limit sits in the scan under an aggregate, and
+  no reader applies it.
 - Driver (mock): a mid-plan limit is satisfied when the rows it emitted reach `fetch` and not
   before; an executor that emits fewer than its input's rows keeps the driver pulling; a limit with
   no `fetch` is never satisfied.

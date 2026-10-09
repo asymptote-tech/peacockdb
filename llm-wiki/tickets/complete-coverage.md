@@ -122,3 +122,19 @@ join (`SELECT d_id, t.iv FROM dim LEFT JOIN (SELECT t_k, INTERVAL '1' DAY AS iv 
 struct column carried through one (`SELECT d_id, d_kstruct FROM dim JOIN tiny ON d_k = t_k`),
 each declared not runnable on this ticket.
 
+<a id="t283"></a>
+### #283 — a ROLLUP or CUBE over no rows answers no grand-total row
+**Priority: low** — no query in either benchmark has an empty input under a rollup.
+
+`select a, count(*), sum(a) from (select 1 as a where false) t group by rollup(a)` answers one
+row, `NULL, 0, NULL`, in DuckDB 1.5.4: the grand-total set has no keys, so like a keyless aggregate
+it owes a row over nothing. DataFusion 45 answers none, and so do both engines: a grouping-set
+init over nothing emits no groups for any set, the empty one included. Found 2026-10-08 reviewing
+keyless-identity, which makes a keyless aggregate answer its row and leaves this one as it is.
+
+**Corpus query:** none. Simplest: the query above, or over a filtered `nation` (tpch).
+
+**Fix proposed:** after keyless-identity (chain L): an init with grouping sets, over no rows, emits
+the identity row for each set whose mask masks every key, its keys NULL and its grouping id the
+set's. DataFusion is not the oracle for it; DuckDB is.
+

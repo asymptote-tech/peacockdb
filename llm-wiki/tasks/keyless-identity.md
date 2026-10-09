@@ -107,14 +107,21 @@ wrong; the node's rows are.
    reading a pruned group. The memory estimate prices the lane at zero. The wire never sees an
    empty mapping: no call is made to carry one.
 8. **`architecture.md`.** "Zero-row batches change no answer" loses its first break; the
-   categories list the aggregate's init as a batch accumulator; the call patterns list the new one.
+   categories list the aggregate's init as a batch accumulator; the call patterns list the new one;
+   "a lane that receives nothing is never runnable" and "an empty lane emits no batch at all" are
+   corrected: such a lane gets its `MarkDone`, and a keyless init's emits its identity row. An empty
+   grouped answer reaches the sink as nothing, and chain K's empty-sorts (in this chain's base)
+   answers it with one zero-row batch under the sink's schema, so `empty-grouped-count` compares
+   with DuckDB exactly.
 
 ## Corpus
 
 Six pbench queries, in `testdata/pbench-queries/`, reaching the three ways an init meets nothing.
 The first four filter `tiny` with `t_id + t_v < 0`, which holds for no row and which no row-group
 statistic can prune: the scan reads `tiny`'s one row group and the filter hands the init a zero-row
-batch, on the one lane at tp1, and at tp4 on one lane with three left no batch. The last two scan
+batch, on the one lane at tp1, and at tp4-single on one lane with three left no batch (`tiny` is
+under the small-table size, so tp4-rowgroup and tp4-sized plan it one lane and reach the zero-row
+batch only). The last two scan
 nothing at all (#282): pbench's `empty` table has no row group, and `t_v < 0` prunes `tiny`'s one.
 Every answer checked with DuckDB 1.5 on 2026-10-08 (the first four over `empty`, which answers as
 the filter does):
@@ -187,7 +194,8 @@ finished `stddev`, a refused `var` (#216, welford-device).
 - A walk test with a lane that receives no batch: a keyless aggregate answers its identity row
   there and its one row elsewhere, matching DataFusion; a keyless walk over lanes with rows makes
   no done call.
-- gtest: `execute_aggregate` handed no input answers one row, typed as declared, for a keyless
+- gtest, in a new `cpp/tests/gpu/` file (`test_plan_executor.cpp` is past the 1000-line cap):
+  `execute_aggregate` handed no input answers one row, typed as declared, for a keyless
   node, and zero rows for a grouped one.
 
 ## Verification bar
@@ -195,9 +203,10 @@ finished `stddev`, a refused `var` (#216, welford-device).
 - rust-only: `--lib`, `test_cpu_corpus`, `test_corpus_goldens`, `test_cost_model`; the registry
   tests both ways.
 - C++: `ctest -L cpu` locally against cuDF 25.02.
-- device: `gpu_tests::`, the walk tests, and `test_gpu_corpus` over the `199` rows and the four
+- device: `gpu_tests::`, the walk tests, and `test_gpu_corpus` over the `199` and `282` rows and the six
   pbench queries, on the GPU host the chain header names.
 
 ## Device workflow
 
-One GPU cycle per round on the chain header's host, the working tree synced as the header says.
+As the chain header says: one sync per task to its host, with as many back-to-back builds as its
+red/green pairs need, the red build first.

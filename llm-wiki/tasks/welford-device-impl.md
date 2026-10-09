@@ -4,18 +4,21 @@
 
 **Goal:** A keyless `stddev` or `var` runs on the device, init and merge, beside any other
 aggregate and over zero rows (#216); the Welford state is NULL-free on the device as it is on the
-cpu, so an all-NULL group is `(0, 0.0, 0.0)` everywhere; `MERGE_M2`'s count type is chosen at
-compile time from the cuDF the build links (#94); `tpch/global-stddev` joins the corpus and
-pbench's `empty-dispersion-aggregates` runs on the device.
+cpu, so an all-NULL group is `(0, 0.0, 0.0)` at every init and every merge; `MERGE_M2`'s count
+type is chosen at compile time from cuDF's own version macros (#94, unless verify-26.02 already
+gated it); `tpch/global-stddev` joins the corpus and pbench's `empty-dispersion-aggregates` runs on
+the device.
 
 **Architecture:** All in `cpp/src/operators/aggregate.cpp`, on the one request builder
-aggregate-arms leaves. `execute_aggregate` sends a keyless node that holds a Welford function to
-`keyless_welford_aggregate`, which runs `grouped_aggregate` on one constant `INT32` key, drops
-it, and over zero rows answers `keyless_empty_state`'s one row. `StateReadback` gains
-`NullAsZero` for the init's mean and m2, and `MergedChild` zero-fills the merged moments too.
-`cpp/CMakeLists.txt` passes the cuDF major and minor as `PEACOCK_CUDF_VERSION_*`;
-`merge_m2_count_type(major, minor)` (`plan_executor_internal.h`, host-only so the cpu gtests
-reach it) picks the type `kMergeM2CountType` is defined from. No Rust production code changes.
+aggregate-arms leaves, plus one rule in `cpp/src/plan_executor_internal.h`. `execute_aggregate`
+sends a keyless node that holds a Welford function to `keyless_welford_aggregate`, which runs
+`grouped_aggregate` on one constant `INT32` key, drops it, and over zero rows answers
+`keyless_empty_state`'s one row. The two readbacks aggregate-arms names for welford-device — the
+init's `$mean`/`$m2`, and the moments a Merge reads out of `MERGE_M2` — replace NULL with `0.0`.
+`merge_m2_count_type(major, minor)` and `kMergeM2CountType` move to `plan_executor_internal.h`
+(host-only, so the cpu gtests reach them), the constant chosen from `CUDF_VERSION_MAJOR` /
+`CUDF_VERSION_MINOR` (`<cudf/version_config.hpp>`); no CMake change. No Rust production code
+changes.
 
 **Tech stack:** C++20 against cuDF 25.02 (`cpp/build`, local; nebius-gpu for the device) and
 26.02 (`cpp/build26`, a local compile of the other branch); gtest; Rust harness cases
@@ -23,72 +26,70 @@ reach it) picks the type `kMergeM2CountType` is defined from. No Rust production
 DuckDB 1.5.4 for the new query's oracle section.
 
 **Spec:** [`welford-device.md`](welford-device.md). Built on
-[`aggregate-arms-impl.md`](aggregate-arms-impl.md) (Task 6's *Interfaces*: `AggPhase`, `AggKind`,
+[`aggregate-arms-impl.md`](aggregate-arms-impl.md) (Task 6's *Interfaces*: `AggKind`,
 `StateReadback`, `StateColumn`, `AggregateRequests`, `add_requests`, `append_state_columns`,
-`merge_m2_input`, `kMergeM2CountType`, `grouped_aggregate`, `grouping_set_aggregate`;
-Task 5's `column_at`) and [`keyless-identity-impl.md`](keyless-identity-impl.md)
-(`empty_state`, `CallPattern::AtDoneIfNothingOut`, the init accumulators, `was_handed_nothing`,
-`zero_rows_of`, the identity cases). Format models: [`guard-checks-impl.md`](guard-checks-impl.md),
-[`distinct-companions-impl.md`](distinct-companions-impl.md).
-
-**Where this plan departs from the spec, and why** (each is in the reply to the human too):
-
-- **The count-type threshold is 25.06, not 25.10.** cuDF changed `MERGE_M2`'s count child to
-  `INT64`/`FLOAT64` in [rapidsai/cudf#18546](https://github.com/rapidsai/cudf/pull/18546)
-  (commit `88ec78a6ab`, 2025-04-23), which is on `branch-25.06` and not in `v25.04.00`
-  (`/media/data/repo/cudf`: `git merge-base --is-ancestor`). Gated at 25.10, a 25.06 or 25.08
-  build would cast to `INT32` and fail at run time. 25.02 and 26.02, the two builds there are,
-  pick the same type either way.
-- **The merge's moments are zero-filled too, not only the init's.** cuDF's `MERGE_M2` answers a
-  NULL mean and m2 for every group whose merged counts are all 0 (`group_merge_m2.cu`,
-  `is_valid = count > 0`, in 25.02 and 25.10 alike). So a per-lane merge of a group that was
-  all NULL on that lane hands the cross-lane merge NULL children, and its state is not
-  DataFusion's `(0, 0.0, 0.0)`. The spec's "no `MERGE_M2` meets a NULL child" holds only if the
-  merge's own output is replaced as well. No answer was ever wrong — cuDF reads a count-0
-  entry as `(0, 0, 0)` — but the state differs, which is what item 3 fixes.
-- **The new Rust cases go in a new file, `src/tests/gpu_tests/welford_cases.rs`**, beside the
-  three the spec names: `aggregate_cases.rs` is near the 1000-line cap after keyless-identity.
-  The flipped pins stay where they are.
+`merge_m2_input`, `kMergeM2CountType`, `grouped_aggregate`, `grouping_set_aggregate`; Task 5's
+`column_at`, which brings `plan_executor_internal.h` into `aggregate.cpp`) and
+[`keyless-identity-impl.md`](keyless-identity-impl.md) (`empty_state`,
+`CallPattern::AtDoneIfNothingOut`, the init accumulators, `was_handed_nothing`, `zero_rows_of`, the
+identity cases with `empty_state_row` and `at_done`). [`verify-26.02.md`](verify-26.02.md) (chain J)
+may already have gated the count type: *Before you start* says how to tell. Format models:
+[`guard-checks-impl.md`](guard-checks-impl.md), [`distinct-companions-impl.md`](distinct-companions-impl.md).
 
 ## Before you start: what will have moved
 
 This plan was written against master at 64ced62e, where `aggregate.cpp` is the 833-line file with
-the keyless `cudf::reduce` path at ~231-327, `make_reduce_agg` at ~117, the Merge/Final
-`MERGE_M2` arms at ~633-701, and `cpp/CMakeLists.txt`'s `find_package(cudf)` /
-`message(STATUS "Using host cudf: ${cudf_VERSION}")` at ~70-71. **None of that survives
-aggregate-arms**, which rewrites the file. Write against the code as aggregate-arms-impl.md
-Task 6 leaves it, and **re-locate every site by symbol, never by line**:
+the keyless `cudf::reduce` path at ~231-327, `make_reduce_agg` at ~117 and the Merge/Final
+`MERGE_M2` arms at ~633-701. **None of that survives aggregate-arms**, which rewrites the file.
+Write against the code as aggregate-arms-impl.md Task 6 leaves it, and **re-locate every site by
+symbol, never by line**:
 
 - **`aggregate.cpp` (aggregate-arms).** By symbol: `enum class AggKind`, `agg_kind`,
-  `check_shape`, `value_of`, `enum class StateReadback`, `struct StateColumn`,
-  `struct AggregateRequests`, `add_requests` (its `case AggKind::Welford:`), `as_int64_count`,
-  `append_state_columns` (its `case StateReadback::MergedChild:`), `kMergeM2CountType`,
-  `merge_m2_input`, `grouped_aggregate`, `grouping_set_aggregate`, `keyless_aggregate`
-  (its stddev arm, `make_std_aggregation<cudf::reduce_aggregation>(func->ddof())`), and
-  `execute_aggregate`'s `if (keys.empty()) return keyless_aggregate(…)`. If `is_stddev_name` /
-  `is_var_name` survived aggregate-arms, they go here (Task 3). If any of these names differs,
-  follow the code and say so in the detail file.
+  `check_shape`, `value_of`, `enum class StateReadback` (its two welford-device readbacks, below),
+  `struct StateColumn`, `struct AggregateRequests`, `add_requests`, `as_int64_count`,
+  `append_state_columns`, `kMergeM2CountType`, `merge_m2_input`, `grouped_aggregate`,
+  `grouping_set_aggregate`, `keyless_aggregate` (its stddev arm,
+  `make_std_aggregation<cudf::reduce_aggregation>(func->ddof())`), and `execute_aggregate`'s
+  `if (keys.empty()) return keyless_aggregate(…)`. A `count` at Merge is refused there (the plan
+  merges a count with `sum`), and a computed argument is evaluated once per node. If
+  `is_stddev_name` / `is_var_name` survived aggregate-arms, they go here (Task 3). If any of these
+  names differs, follow the code and say so in the detail file.
 - **`aggregate.cpp` (keyless-identity).** `execute_aggregate` builds its input as
   `was_handed_nothing(in) ? zero_rows_of(agg) : take_input(in)`: a done call reaches the routed
   path as a zero-row table, so this plan adds nothing for the no-input case.
 - **`TableResult` (refcounted-scatter, J).** `owning(table, names)`, `select(ordinals)` (shares
   owners), `view()`, `num_rows()`, `num_columns()`; built only through its constructors
   (aggregate-arms Task 1 makes the default constructor private).
-- **`MERGE_M2`'s count type may already be gated.** verify-26.02 (J's last task) fixes what fails
-  on 26.02, and `shuffle-stddev` is predicted to fail there on #94
-  (`reports/join-rewrite-cell-estimate.md`, R8). Before Task 1: `git log -S MERGE_M2 --oneline --
-  cpp/src/operators/aggregate.cpp` and `git grep -n 'INT32\|INT64' cpp/src/operators/aggregate.cpp`.
-  If a gate exists, Task 1 keeps its site, moves its rule into `merge_m2_count_type` with the
-  25.06 threshold, and adds the tests; say so in the detail file.
+- **`MERGE_M2`'s count type may already be gated (verify-26.02, J).** verify-26.02 runs
+  `shuffle-stddev` on 26.02, where it fails on #94 (`tickets/system-hardening.md`, #260), and its
+  fix rule is `CUDF_VERSION_MAJOR`/`CUDF_VERSION_MINOR` from `<cudf/version_config.hpp>`. Before
+  Task 1:
+
+```bash
+git log --oneline --grep='#94' -- cpp/src
+git grep -n 'CUDF_VERSION_MAJOR\|CUDF_VERSION_MINOR' -- cpp/src ':!cpp/src/gpu_executor.cpp'
+git grep -n 'kMergeM2CountType\|merge_m2_count_type' -- cpp
+grep -n '<a id="t94">' llm-wiki/tickets/*.md llm-wiki/archive/archived-tickets.md
+```
+
+  (`gpu_executor.cpp`'s `peacock_cudf_version()` reads the same macros for another reason.)
+  **No gate** — the log and the second grep print nothing, and `kMergeM2CountType` is
+  aggregate-arms' bare `INT32`: Task 1 as written; #94 closes here (Task 5 Step 4). **A gate** —
+  the count type is defined from those macros, or the log shows verify-26.02's #94 fix (even if
+  aggregate-arms' rewrite left a bare `INT32` behind it): Task 1 Step 0 instead. #94 is then
+  archived with verify-26.02, not here, and Task 5 makes no #94 or #260 edit. Record which in the
+  detail file; Task 2's commit carries it.
 - **gtests.** `cpp/tests/gpu/hand_tables.hpp` (`hand::column_of`, `values_of`, `table_of`,
   `ref`, `run`) and `cpp/tests/gpu/test_aggregate_builder.cpp` (anonymous-namespace `func`,
   `aggregate`, `rows`, `one`, `by_key`, `refusal`) are aggregate-arms'; this plan adds to both.
-  `test_plan_executor.cpp` is past the 1000-line cap: nothing new goes there.
+  `test_plan_executor.cpp` is past the 1000-line cap, and keyless-identity's `AggregateNoInput.*`
+  sit in their own file: nothing new goes in either.
 - **Harness (keyless-identity).** Every `GpuAggregate` case runs `Script::Accumulate`, not
   `Script::Exec`: an init over one batch answers its state at slot 0 and an empty done slot.
-  The identity cases (`DEVICE_IDENTITY`, `keyless_init`, `empty_state_row`, `at_done`) are in
-  `aggregate_cases.rs`, or in `aggregate_identity_cases.rs` if keyless-identity moved them there
-  for size; find them with `git grep -n DEVICE_IDENTITY peacockdb-core/src`.
+  The identity cases (`DEVICE_IDENTITY`, `keyless_init`, and the `pub(crate)` `empty_state_row`
+  and `at_done`) are in `aggregate_cases.rs`, or in `aggregate_identity_cases.rs` if
+  keyless-identity moved them there for size; find them with
+  `git grep -n DEVICE_IDENTITY peacockdb-core/src`.
 - **Harness (aggregate-arms).** `welford_answered` no longer borrows the device's names; the four
   #216 pins in `aggregate_dimension_cases.rs` carry moved messages (`global_stddev_finalize`'s is
   `column_at`'s `"is past the 1 columns its input has"`), and the schema pin's divergence lost
@@ -97,21 +98,25 @@ Task 6 leaves it, and **re-locate every site by symbol, never by line**:
   argument before the cpu oracle; `all_modes` exists. `tpch/rollup-stddev`'s line is
   aggregate-arms'; copy its shape. pbench's `empty_dispersion_aggregates` line is
   keyless-identity's, gpu modes `none`, with a `// device: #216` comment; its registry row's
-  tickets are `216`. **Build Task 5's row list from the registry as it stands**, not from this
+  tickets are `199 216`. **Build Task 5's row list from the registry as it stands**, not from this
   plan.
-- **The GPU host's directory.** keyless-identity's and grouping-id's plans use `~/peacockdb-L`,
-  aggregate-arms' uses `~/peacockdb-J`. Use the one `keyless-identity-detail.md` and
-  `aggregate-arms-detail.md` record as holding the warm build and the sf1 data; this plan writes
-  `DIR=peacockdb-L`.
+- **Scripts (verify-26.02, J).** If `scripts/build.sh` takes `--build-dir` (`grep -n -- --build-dir
+  scripts/build.sh`), verify-26.02's 26.02 mode landed, and Task 1 Step 5 uses it.
+- **The GPU host's directory.** All three upstream plans of chain L use `~/peacockdb-L`, as the
+  chain header says; so does this one.
 
 ## Global constraints
 
-- **Every commit green.** Device tests a task writes are compiled locally
-  (`peacock_plan_tests` built; `--features gpu --no-run`) and run in the round's one GPU cycle
-  (Task 5). A `bug_` test that a task's fix turns red is flipped in that task's commit to the
-  agreement case, under a name without `bug_` (`coding-style.md`, *Building around a bug*).
-  `global_stddev`'s and `empty_dispersion_aggregates`' device cells stay off under `216` until
-  the cycle that writes their `gpu-result.txt` sections (Task 5).
+- **Every commit green.** A `bug_` test that a task's fix turns red is flipped in that task's
+  commit to the agreement case, under a name without `bug_` (`coding-style.md`, *Building around
+  a bug*). `global_stddev`'s and `empty_dispersion_aggregates`' device cells stay off under `216`
+  until Task 5's run writes their `gpu-result.txt` sections.
+- **Device evidence, red first.** Tasks 2 and 3 each run their device tests on nebius-gpu before
+  they commit: one sync, a red build without the fix, a green build with it (*Device cycle*). A
+  predicted red that passes, or fails for another reason, stops the task until it is understood
+  (`superpowers:systematic-debugging`). Task 5 syncs once for the corpus. Tasks 1 and 4 have no
+  device step: on 25.02 Task 1 compiles the type the device already ran, which Tasks 2 and 3's
+  merges exercise, and Task 4's device cells stay off.
 - **No Rust production change, no wire change, no ABI or facade change.** `recipe-payloads.txt`
   and every existing `.plans.txt` section unchanged; the new query adds five sections.
 - **Out of scope, from the spec's Restriction.** The keyless `cudf::reduce` path for every node
@@ -124,19 +129,60 @@ Task 6 leaves it, and **re-locate every site by symbol, never by line**:
   `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/cargo-cudf.sh`. `cpp/build26` stays
   26.02. Work in a workspace, never the primary checkout; never share a cargo target dir across
   worktrees. The workspace needs the sf1 parquet under `testdata/` (gitignored): symlink it from
-  the primary checkout if absent.
+  the primary checkout if absent. Never pipe a build into `tail` without `set -o pipefail`: the
+  status would be `tail`'s.
 - **The C++ tests that need device memory run on nebius-gpu, not in `ctest -L cpu`.**
   `peacock_plan_tests` (where `test_aggregate_builder.cpp` links) is labelled `gpu`; only
   `peacock_cpu_tests` runs locally.
-- **Device** on nebius-gpu, `dmitry@89.169.109.150`, cuDF 25.02
-  (`~/data/miniforge3/envs/rapids-cuda-12.2`), as chain L's header says: the working tree
-  rsynced uncommitted, one GPU cycle per round, every CPU build and run local, every device
-  command in the foreground (a backgrounded build chain dies mid-build). If `ssh` seems dead
-  while the host answers a raw socket, the sandbox is blocking the client, not the host. Record
-  each run (host, tree, per-binary result) in `llm-wiki/tasks/welford-device-detail.md`.
+- **Done**, as chain L's header defines it: CI green except the `gpu-tests` job (shad-gpu), and
+  this task's device tests passed on nebius-gpu, each run recorded (host, tree, per-binary
+  result) in `llm-wiki/tasks/welford-device-detail.md`. The sf40 binaries, `--run-benchmarks`
+  and Nsight are out, recorded there as deferred.
 - Formatting on changed lines only: `git clang-format HEAD -- <files>`; `rustfmt --edition 2024
   --check <leaf>` on touched leaves, never a `mod.rs`. Files under 1000 lines, functions under
   150. Commit messages at most 10 lines, ending with the `Co-Authored-By` line shown.
+
+## Device cycle
+
+Chain L's header: **one sync per task** to nebius-gpu, with as many back-to-back builds as the
+task's red/green pairs need, the red build first. Tasks 2 and 3 have one pair each, run after the
+task's tests and fix are written and every local tier passes, and before its commit — the same
+mechanism as aggregate-arms': one sync carries the working tree and the fix's reverse; the red
+build is the tree with the fix reversed, the green build the tree as written. Each task names its
+`FIX` (the paths whose diff is the fix; never a test the red build must run), its red set and its
+green set. Every command in the foreground: a backgrounded build chain dies mid-build with no
+error. If `ssh` is refused at once while the host answers a raw socket, the sandbox is blocking
+the client, not the host.
+
+```bash
+GPU=dmitry@89.169.109.150   # nebius-gpu, as chain L's header names it
+DIR=peacockdb-L             # the header's directory
+# The 25.02 env's lib: chain J's header says ~/data/miniforge3, #260 says ~/miniforge3. Use the
+# one that exists in CUDF_LIB, and record it in the detail file.
+timeout 60 ssh "$GPU" 'ls -d ~/data/miniforge3/envs/rapids-cuda-12.2/lib ~/miniforge3/envs/rapids-cuda-12.2/lib'
+CUDF_LIB='$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib'
+B="cd ~/$DIR && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build"
+R="cd ~/$DIR && . ~/peacock-env.sh && export LD_LIBRARY_PATH=\$PWD/cpp/install/lib:$CUDF_LIB PEACOCK_TESTDATA_DIR=\$PWD/testdata &&"
+# The fix's reverse.
+timeout 60 git diff -R HEAD -- $FIX > /tmp/welford-device-red.patch
+# The one sync: the working tree, uncommitted, and the reverse beside it.
+timeout 1200 rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ "$GPU:$DIR/"
+timeout 300 rsync -a /tmp/welford-device-red.patch "$GPU:welford-device-red.patch"
+# Red build: the tests without the fix; then the task's red set, each as `timeout … ssh "$GPU" "$R …"`.
+timeout 300 ssh "$GPU" "cd ~/$DIR && patch -p1 < ~/welford-device-red.patch"
+timeout 10800 ssh "$GPU" "$B"
+# Green build: the fix back in; then the task's green set.
+timeout 300 ssh "$GPU" "cd ~/$DIR && patch -p1 -R < ~/welford-device-red.patch"
+timeout 10800 ssh "$GPU" "$B"
+```
+
+Every case the task names as red must fail, for the reason it names; a case red for another
+reason, or green where the task expects red, is a finding to settle before the fix
+(`superpowers:systematic-debugging`): a test that passes without its fix may assert nothing.
+Every case of the green set passes. One binary per `ssh`, so one red does not hide the next. A
+fresh `~/$DIR` has no sf1 parquet: copy it from chain J's `~/peacockdb-J/testdata`. Every Rust
+binary takes `--test-threads=1`. Not `peacock_cpu_tests` (local), not the sf40 pair, not
+`--run-benchmarks`.
 
 ## Review focus
 
@@ -163,19 +209,19 @@ Five input classes nothing tests today, most likely to bite, each pinned in its 
    `-0.0` has mean `0.0` (either sign) and m2 `0.0`. Task 2:
    `AggregateBuilder.ANaNAndANegativeZeroAreValuesNotNulls` and
    `a_nan_and_a_negative_zero_are_values_on_both`.
-5. **The 26.02 compile branch.** The `INT64` branch is compiled only by CI's "26.02" leg (a
-   25.10a image, #129) and never run. Expected: the rule picks `INT32` at 25.02 and 25.04,
-   `INT64` at 25.06 and later, and each build's defines are the cuDF its headers declare.
-   Task 1: `MergeM2CountType.*` in `peacock_cpu_tests`, run locally against both 25.02
-   (`cpp/build`) and 26.02 (`cpp/build26`).
+5. **The other cuDF's branch.** The `INT64` branch is compiled only by CI's "26.02" leg (a 25.10a
+   image, #129) and by Task 1's local 26.02 compile, and never run on a device. Expected: the rule
+   picks `INT32` at 25.02 and 25.04, `INT64` at 25.06 and later, and the constant the aggregate
+   casts to is the rule at the headers' own `CUDF_VERSION_MAJOR`/`_MINOR`. Task 1:
+   `MergeM2CountType.*` in `peacock_cpu_tests`, run locally against 25.02 (`cpp/build`) and 26.02
+   (`cpp/build26`).
 
 ## File structure
 
 | file | responsibility |
 |---|---|
-| `cpp/CMakeLists.txt` | `PEACOCK_CUDF_VERSION_MAJOR`/`_MINOR` on `peacock_gpu` (Task 1) |
-| `cpp/src/plan_executor_internal.h` | `merge_m2_count_type` (Task 1) |
-| `cpp/src/operators/aggregate.cpp` | `kMergeM2CountType` from the defines (Task 1); `NullAsZero`, the merged moments (Task 2); the keyless route and `keyless_empty_state`; the stddev reduce arm goes (Task 3) |
+| `cpp/src/plan_executor_internal.h` | `merge_m2_count_type`, `kMergeM2CountType` from `<cudf/version_config.hpp>` (Task 1) |
+| `cpp/src/operators/aggregate.cpp` | its own `kMergeM2CountType` goes (Task 1); the two readbacks zero-fill (Task 2); the keyless route and `keyless_empty_state`; the stddev reduce arm goes (Task 3) |
 | `cpp/tests/cpu/test_executor.cpp` | `MergeM2CountType.*` (Task 1) |
 | `cpp/tests/gpu/hand_tables.hpp` | `hand::nullable_column_of` (Task 2) |
 | `cpp/tests/gpu/test_aggregate_builder.cpp` | the all-NULL, NaN and merge gtests (Task 2); the keyless gtests (Task 3) |
@@ -183,57 +229,79 @@ Five input classes nothing tests today, most likely to bite, each pinned in its 
 | `peacockdb-core/src/tests/gpu_tests/aggregate_dimension_cases.rs`, `aggregate_schema_cases.rs`, `aggregate_cases.rs` (or `aggregate_identity_cases.rs`) | the #216 pins flip; `EVERY_FUNC` (Task 3) |
 | `testdata/tpch-queries/global-stddev.sql` (new), `testdata/goldens/tpch.sf1/`, `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv` | the new query (Task 4); its device cells, empty-dispersion's (Task 5) |
 | `testdata/goldens/{tpch,pbench}.sf1/gpu-result.txt` | the device's sections (Task 5) |
+| `llm-wiki/tasks/welford-device-detail.md` | every device run, the gate found or not, deferrals (Tasks 1-3, 5) |
 | `llm-wiki/architecture.md`, `build-test.md`, `tickets/{corpus-coverage,complete-coverage,system-hardening}.md` | docs, counts, ticket facts (Task 5) |
 
 ---
 
-### Task 1: `MERGE_M2`'s count type, chosen from the cuDF the build links (#94)
+### Task 1: `MERGE_M2`'s count type, chosen from cuDF's own version macros (#94)
 
 **Files:**
-- Modify: `cpp/CMakeLists.txt` (after the cuDF block that ends with `message(STATUS "Using host
-  cudf: …")`; after `target_link_libraries(peacock_gpu …)`)
 - Modify: `cpp/src/plan_executor_internal.h`, `cpp/src/operators/aggregate.cpp`
-  (`kMergeM2CountType`)
+  (`kMergeM2CountType`'s definition goes)
 - Test: `cpp/tests/cpu/test_executor.cpp`
 
 **Interfaces:**
 - Produces (`plan_executor_internal.h`, namespace `peacock`; host-only, so `peacock_cpu_tests`
-  reaches it):
+  reaches both):
 
 ```cpp
-// The type cuDF's MERGE_M2 takes its count child in: INT32 through 25.04, and INT64 from 25.06,
-// where cuDF #18546 widened it against overflow and refused INT32. A build links one cuDF, so
-// aggregate.cpp picks the type at compile time from the version CMake passes (#94).
+// The type cuDF's MERGE_M2 takes its count child in: INT32 before 25.06, and INT64 from 25.06,
+// where cuDF #18546 widened it against overflow and refused INT32 (#94).
 constexpr cudf::type_id merge_m2_count_type(int major, int minor) {
   return major < 25 || (major == 25 && minor < 6) ? cudf::type_id::INT32 : cudf::type_id::INT64;
 }
+
+// The linked cuDF's, from its own headers: each cuDF version is its own build, so no runtime
+// probe and no second source of the version. merge_m2_input casts to it; the gate goes when
+// 25.02 does.
+inline constexpr cudf::type_id kMergeM2CountType =
+    merge_m2_count_type(CUDF_VERSION_MAJOR, CUDF_VERSION_MINOR);
 ```
 
-- Produces (CMake, `PUBLIC` on `peacock_gpu`, so every target linking it is compiled with them):
-  `PEACOCK_CUDF_VERSION_MAJOR`, `PEACOCK_CUDF_VERSION_MINOR`, decimal integers.
-- Changes (aggregate-arms' ⟵ hook): `kMergeM2CountType` is
-  `merge_m2_count_type(PEACOCK_CUDF_VERSION_MAJOR, PEACOCK_CUDF_VERSION_MINOR)`.
+- Changes (aggregate-arms' ⟵ hook): `aggregate.cpp`'s own `constexpr cudf::type_id
+  kMergeM2CountType = cudf::type_id::INT32;` goes; `merge_m2_input` and `as_int64_count` read the
+  header's.
 
-- [ ] **Step 1: The rule's tests, failing.** `test_executor.cpp`, after the includes add
-  `#include <cudf/version_config.hpp>`, and at the end of the file:
+- [ ] **Step 0: Only if verify-26.02 already gated the site** (*Before you start*). Read the gate
+  and confirm three things, recording each in the detail file:
+  1. the type `merge_m2_input` casts the count to is the gated one, so it covers the one site
+     aggregate-arms leaves (aggregate-arms' rewrite did not put back a bare `INT32`);
+  2. it is `INT32` before 25.06 and `INT64` from 25.06, from `CUDF_VERSION_MAJOR` and
+     `CUDF_VERSION_MINOR`;
+  3. a `peacock_cpu_tests` case pins the type this build picks under 25.02's
+     `version_config.hpp`.
+
+  All three hold: Task 1 changes no file and makes no commit; go to Task 2. Where one fails,
+  make only that change with Steps 1-6: point `merge_m2_input` at the gate (1); set the boundary
+  to 25.06, which is when cuDF #18546 landed (2); add Step 1's tests, moving the gate's rule into
+  `plan_executor_internal.h` as *Interfaces* writes it, so the cpu gtests reach it (3). #94 stays
+  verify-26.02's either way: use Step 6's second message.
+
+- [ ] **Step 1: The rule's tests, failing.** In `test_executor.cpp`, `#include
+  <cudf/version_config.hpp>` beside its other includes (an `#if` over an undeclared macro reads
+  0 and would pick the wrong branch silently), and at the end of the file:
 
 ```cpp
-// #94: MERGE_M2 takes its count child as INT32 through cuDF 25.04 and as INT64 from 25.06
-// (cuDF #18546). Both CI legs run these, so each build checks the branch it compiled.
-TEST(MergeM2CountType, Int32ThroughCudf25_04AndInt64From25_06) {
+// #94: MERGE_M2 takes its count child as INT32 before cuDF 25.06 and as INT64 from 25.06
+// (cuDF #18546).
+TEST(MergeM2CountType, Int32Before25_06AndInt64From25_06) {
   EXPECT_EQ(peacock::merge_m2_count_type(25, 2), cudf::type_id::INT32) << "25.02, the GPU hosts'";
   EXPECT_EQ(peacock::merge_m2_count_type(25, 4), cudf::type_id::INT32);
   EXPECT_EQ(peacock::merge_m2_count_type(25, 6), cudf::type_id::INT64);
   EXPECT_EQ(peacock::merge_m2_count_type(25, 10), cudf::type_id::INT64);
-  EXPECT_EQ(peacock::merge_m2_count_type(26, 2), cudf::type_id::INT64) << "26.02, CI's other leg";
+  EXPECT_EQ(peacock::merge_m2_count_type(26, 2), cudf::type_id::INT64) << "26.02";
 }
 
-// The defines are what CMake read off cudf_VERSION (or the submodule's VERSION); the headers
-// say which cuDF this file actually compiled against. A parse that read "08" as octal, or a
-// stale cache, would pick the other branch here first.
-TEST(MergeM2CountType, TheBuildIsToldTheCudfItCompilesAgainst) {
-  EXPECT_EQ(PEACOCK_CUDF_VERSION_MAJOR, CUDF_VERSION_MAJOR);
-  EXPECT_EQ(PEACOCK_CUDF_VERSION_MINOR, CUDF_VERSION_MINOR);
+// The type the aggregate casts to, as this build's cuDF headers choose it. 25.02 is the GPU
+// hosts'; the other builds there are (CI's 25.10a leg, the workstation's 26.02) compile INT64.
+TEST(MergeM2CountType, TheLinkedCudfChoosesIt) {
+#if CUDF_VERSION_MAJOR == 25 && CUDF_VERSION_MINOR == 2
+  EXPECT_EQ(peacock::kMergeM2CountType, cudf::type_id::INT32) << "cuDF 25.02";
+#else
+  EXPECT_EQ(peacock::kMergeM2CountType, cudf::type_id::INT64)
+      << "cuDF " << CUDF_VERSION_MAJOR << "." << CUDF_VERSION_MINOR;
+#endif
 }
 ```
 
@@ -241,55 +309,22 @@ TEST(MergeM2CountType, TheBuildIsToldTheCudfItCompilesAgainst) {
 timeout 3600 scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build
 ```
 
-  Expected: FAIL to compile, `'merge_m2_count_type' is not a member of 'peacock'` (and
-  `PEACOCK_CUDF_VERSION_MAJOR` undeclared).
+  Expected: FAIL to compile, `'merge_m2_count_type' is not a member of 'peacock'` and the same
+  for `kMergeM2CountType`.
 
-- [ ] **Step 2: The defines.** `cpp/CMakeLists.txt`, directly after the cuDF block's `endif()`:
+- [ ] **Step 2: The rule and the constant.** In `plan_executor_internal.h`, add
+  `#include <cudf/version_config.hpp>` beside `<cudf/types.hpp>` and *Interfaces*' two
+  declarations after `cudf_ast_can_evaluate`. `<cudf/version_config.hpp>` ships in 25.02 and
+  26.02 alike (25.02's defines `25`/`2`, 26.02's `26`/`2`).
 
-```cmake
-# The cuDF this build compiles against, for call sites whose contract moved between releases
-# (aggregate.cpp's MERGE_M2 count type, #94). Built from source it is the submodule's VERSION,
-# which rapids_config.cmake read above; find_package, which sets cudf_VERSION, does not run.
-if(CUDF_BUILD_FROM_SOURCE)
-  set(PEACOCK_CUDF_VERSION "${RAPIDS_VERSION}")
-else()
-  set(PEACOCK_CUDF_VERSION "${cudf_VERSION}")
-endif()
-if(NOT PEACOCK_CUDF_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.")
-  message(FATAL_ERROR "cannot read major.minor from the cuDF version `${PEACOCK_CUDF_VERSION}`")
-endif()
-# math() reads 02 and 08 as decimal; written into the source as is, 08 is no C++ literal.
-math(EXPR PEACOCK_CUDF_VERSION_MAJOR "${CMAKE_MATCH_1}")
-math(EXPR PEACOCK_CUDF_VERSION_MINOR "${CMAKE_MATCH_2}")
-message(STATUS "peacock: cuDF ${PEACOCK_CUDF_VERSION_MAJOR}.${PEACOCK_CUDF_VERSION_MINOR}")
-```
-
-  and after `target_link_libraries(peacock_gpu PRIVATE cudf::cudf …)`:
-
-```cmake
-# PUBLIC: a test linking the library compiles against the same cuDF and checks the choice.
-target_compile_definitions(peacock_gpu PUBLIC
-  PEACOCK_CUDF_VERSION_MAJOR=${PEACOCK_CUDF_VERSION_MAJOR}
-  PEACOCK_CUDF_VERSION_MINOR=${PEACOCK_CUDF_VERSION_MINOR})
-```
-
-  (`peacockdb-ffi/build.rs` configures the same `cpp/CMakeLists.txt`, so the FFI's copy of the
-  library gets them too.)
-
-- [ ] **Step 3: The rule and the constant.** Add *Interfaces*' `merge_m2_count_type` to
-  `plan_executor_internal.h` (after `cudf_ast_can_evaluate`; `<cudf/types.hpp>` is already
-  included). In `aggregate.cpp` (`#include "plan_executor_internal.h"` if `column_at` did not
-  already bring it), replace aggregate-arms' `kMergeM2CountType` and its comment with:
+- [ ] **Step 3: The aggregate reads it.** In `aggregate.cpp` (which includes
+  `plan_executor_internal.h` for `column_at`), delete aggregate-arms' `kMergeM2CountType` and its
+  `⟵ welford-device` comment, and put above `merge_m2_input`:
 
 ```cpp
-#if !defined(PEACOCK_CUDF_VERSION_MAJOR) || !defined(PEACOCK_CUDF_VERSION_MINOR)
-#error "cpp/CMakeLists.txt passes the cuDF version: MERGE_M2's count type depends on it (#94)"
-#endif
-
-/// MERGE_M2's count child, in the type the linked cuDF takes. merge_m2_input casts to it and
-/// as_int64_count widens the merged count back to the wire's INT64, a no-op from 25.06.
-constexpr cudf::type_id kMergeM2CountType =
-    merge_m2_count_type(PEACOCK_CUDF_VERSION_MAJOR, PEACOCK_CUDF_VERSION_MINOR);
+// MERGE_M2's count child goes in as kMergeM2CountType (plan_executor_internal.h), the type the
+// linked cuDF takes; as_int64_count widens the merged count back to the wire's INT64, a no-op
+// from 25.06.
 ```
 
   Nothing else in `merge_m2_input` or `as_int64_count` changes.
@@ -297,17 +332,23 @@ constexpr cudf::type_id kMergeM2CountType =
 - [ ] **Step 4: Build and run against 25.02.**
 
 ```bash
-timeout 3600 scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --configure --build 2>&1 | tee /tmp/welford-build.log | tail -5
-grep -m1 'peacock: cuDF' /tmp/welford-build.log
+timeout 3600 scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build
 timeout 600 ctest --test-dir cpp/build -L cpu --output-on-failure
 ```
 
-  (`--configure` re-runs cmake so the new block takes effect.) Expected: the grep prints
-  `-- peacock: cuDF 25.2`; clean build; `-L cpu` PASS, both `MergeM2CountType` cases included.
+  Expected: clean build, no new warnings; `-L cpu` PASS, both `MergeM2CountType` cases included
+  (`TheLinkedCudfChoosesIt` at `INT32`).
 
-- [ ] **Step 5: Compile and run the other branch against 26.02, locally.** `cpp/build26` is the
-  26.02 dir (`build-test.md`); configure it the way `build-test.sh` does, build only the cpu
-  gtests and the library under them:
+- [ ] **Step 5: Compile and run the other branch against 26.02, locally.** If verify-26.02's
+  26.02 mode landed (*Before you start*):
+
+```bash
+timeout 5400 scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids --gcc-version 14 \
+  --build-dir cpp/build26 --install-dir cpp/build26/install --build
+```
+
+  Otherwise configure `cpp/build26` the way `build-test.sh` does and build only the cpu gtests and
+  the library under them:
 
 ```bash
 (
@@ -317,27 +358,44 @@ timeout 600 ctest --test-dir cpp/build -L cpu --output-on-failure
          LDFLAGS="-Wl,-rpath-link,$HOME/data/miniforge3/envs/rapids/lib"
   timeout 1800 cmake -S cpp -B cpp/build26 -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CUDA_ARCHITECTURES="80;90" "-DCMAKE_JOB_POOLS=link_pool=1" -DCMAKE_JOB_POOL_LINK=link_pool \
-    -Dcudf_ROOT=$HOME/data/miniforge3/envs/rapids
+    -Dcudf_ROOT=$HOME/data/miniforge3/envs/rapids &&
   timeout 5400 cmake --build cpp/build26 --target peacock_cpu_tests --parallel "$(nproc)"
 )
+```
+
+  Then, either way:
+
+```bash
 LD_LIBRARY_PATH=$HOME/data/miniforge3/envs/rapids/lib timeout 600 \
   ctest --test-dir cpp/build26 -L cpu --output-on-failure -R peacock_cpu_tests
 ```
 
-  Expected: the configure prints `peacock: cuDF 26.2`; `aggregate.cpp` compiles with
-  `kMergeM2CountType == INT64`; `MergeM2CountType.*` PASS. If the 26.02 configure fails for a
+  Expected: `aggregate.cpp` compiles with `kMergeM2CountType == INT64`; `MergeM2CountType.*`
+  PASS (`TheLinkedCudfChoosesIt` at `INT64`, `cuDF 26.2`). If the 26.02 configure fails for a
   reason outside this task (a fresh `cpp/build26` in the workspace fetches flatbuffers), record it
   in the detail file and rely on CI's leg; do not change the build scripts here.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 6: Commit.** `git status --short` lists only the three files.
 
 ```bash
 git clang-format HEAD -- cpp/src/plan_executor_internal.h cpp/src/operators/aggregate.cpp cpp/tests/cpu/test_executor.cpp
-git add cpp/CMakeLists.txt cpp/src/plan_executor_internal.h cpp/src/operators/aggregate.cpp cpp/tests/cpu/test_executor.cpp
-git commit -m "#94: MERGE_M2's count type chosen at compile time from the linked cuDF
+git add cpp/src/plan_executor_internal.h cpp/src/operators/aggregate.cpp cpp/tests/cpu/test_executor.cpp
+git commit -m "#94: MERGE_M2's count type chosen from cuDF's version macros
 
-INT32 through 25.04, INT64 from 25.06 (cuDF #18546). CMake passes the
-version; merge_m2_count_type is the rule, checked in both CI legs.
+INT32 before 25.06, INT64 from 25.06 (cuDF #18546), read from
+<cudf/version_config.hpp>; merge_m2_count_type is the rule, and a cpu
+gtest pins the type each build's headers pick.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+  Where Step 0 found verify-26.02's gate and completed it, the message keeps #94 verify-26.02's:
+
+```bash
+git commit -m "MERGE_M2's count type: verify-26.02's gate completed
+
+What Step 0 found missing (the site, the 25.06 boundary or the cpu
+gtest) is added; the gate, and #94, are verify-26.02's.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -352,15 +410,18 @@ no valid value, and `MERGE_M2` for a group whose merged counts are all 0. Both r
 it.
 
 **Files:**
-- Modify: `cpp/src/operators/aggregate.cpp` (`StateReadback`, `add_requests`'s Welford Partial
-  arm, `append_state_columns`; a static `zero_for_null`)
+- Modify: `cpp/src/operators/aggregate.cpp` (`StateReadback`, `add_requests`' Welford arm,
+  `append_state_columns`' `MergedChild` arm; a static `zero_for_null`)
 - Modify: `cpp/tests/gpu/hand_tables.hpp`; Test: `cpp/tests/gpu/test_aggregate_builder.cpp`
 - Create: `peacockdb-core/src/tests/gpu_tests/welford_cases.rs`; Modify: `gpu_tests/mod.rs`
 
 **Interfaces:**
-- Changes aggregate-arms' `StateReadback` (the ⟵ hook "a readback on the init's `$mean`/`$m2`"):
+- Extends aggregate-arms' two readbacks (its ⟵ hooks): the init's `$mean`/`$m2`, which
+  `add_requests`' Welford `Partial` arm reads `AsIs`, and the merged mean and m2 that
+  `append_state_columns`' `MergedChild` arm reads out of `MERGE_M2`'s struct (children 1 and 2):
 
 ```cpp
+/// How one state column is read back out of the groupby's results.
 enum class StateReadback {
   AsIs,
   CountToInt64,  // cuDF's COUNT answers INT32; every count on the wire is INT64
@@ -486,9 +547,12 @@ TEST(AggregateBuilder, ANaNAndANegativeZeroAreValuesNotNulls) {
 }
 ```
 
-  Red before Step 4, on the device: the init's k 2 mean and m2 are NULL, and so are the merge's
-  k 1 moments in `AMergeOfOnlyEmptyStatesIsZeroNotNull` (cuDF's `is_valid = count > 0`). The
-  other two pass before and after; they pin that the replacement adds nothing else.
+  Red on Step 6's red build: `AWelfordInitOverAnAllNullGroupIsZeroNotNull` (k 2's mean and m2
+  are NULL: cuDF's `SUM` has no valid value, `MEAN` inherits it, `M2` copies `MEAN`'s mask) and
+  `AMergeOfOnlyEmptyStatesIsZeroNotNull` (k 1's merged moments are NULL: `group_merge_m2.cu`'s
+  `is_valid = count > 0`). `AnEmptyStateMergedWithARealOneIsTheRealOne` and
+  `ANaNAndANegativeZeroAreValuesNotNulls` pass on both builds: they pin that the replacement adds
+  nothing else.
 
 - [ ] **Step 3: The harness cases, both engines.** Create
   `peacockdb-core/src/tests/gpu_tests/welford_cases.rs`, and declare `mod welford_cases;` after
@@ -633,8 +697,12 @@ operator_case! {
 CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run
 ```
 
-  Expected: compiles. Red on the device before Step 4: the all-NULL init and the merge cases
-  panic in `same_within_welford` on `cpu Some(0.0), device None`.
+  Expected: compiles. On Step 6's red build `an_all_null_group_inits_to_the_empty_triple_on_both`
+  and `a_group_with_values_on_one_lane_and_nulls_on_another_merges_as_the_cpu` panic in
+  `same_within_welford` on `cpu Some(0.0), device None`. `a_group_all_null_on_every_lane_finalizes_to_null_on_both`
+  and `a_nan_and_a_negative_zero_are_values_on_both` pass on both builds — the finalize answers
+  NULL for a count of 0 whatever the moments, and a NaN is no NULL — so they are pins the spec
+  asks for, not reds.
 
 - [ ] **Step 4: The readbacks.** `aggregate.cpp`: `#include <cudf/replace.hpp>`; the
   *Interfaces* `StateReadback`; above `append_state_columns`:
@@ -649,8 +717,8 @@ static std::unique_ptr<cudf::column> zero_for_null(std::unique_ptr<cudf::column>
 }
 ```
 
-  In `add_requests`' Welford Partial arm, the mean's and m2's state columns read back
-  `NullAsZero`:
+  In `add_requests`' Welford `Partial` arm, the mean's and m2's state columns read back
+  `NullAsZero`, in place of the two `AsIs` lines and their `⟵ welford-device` comment:
 
 ```cpp
         into.columns.push_back({state(0), r, 0, StateReadback::CountToInt64});
@@ -658,7 +726,9 @@ static std::unique_ptr<cudf::column> zero_for_null(std::unique_ptr<cudf::column>
         into.columns.push_back({state(2), r, 2, StateReadback::NullAsZero});
 ```
 
-  In `append_state_columns`, a new arm and the `MergedChild` arm:
+  In its `Merge` arm, the `⟵ welford-device` comment above the `MergedChild` loop becomes
+  `// Children 1 and 2, the merged moments, read back NullAsZero in append_state_columns.` In
+  `append_state_columns`, a new arm, and the `MergedChild` arm replaced:
 
 ```cpp
       case StateReadback::NullAsZero:
@@ -685,18 +755,42 @@ CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cud
 wc -l cpp/tests/gpu/test_aggregate_builder.cpp peacockdb-core/src/tests/gpu_tests/welford_cases.rs
 ```
 
-  Expected: clean build, no new warnings; PASS; both files under 1000 lines. The four gtests and
-  the four harness cases run in Task 5's cycle.
+  Expected: clean build, no new warnings; PASS; both files under 1000 lines.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 6: The device, red then green** (*Device cycle*, `FIX=cpp/src/operators/aggregate.cpp`:
+  the tests and `hand_tables.hpp` stay in both builds). The red build's runs:
+
+```bash
+timeout 1800 ssh "$GPU" "$R cpp/install/bin/peacock_plan_tests --gtest_filter='AggregateBuilder.*'"
+timeout 3600 ssh "$GPU" "$R cpp/install/rust-tests/peacockdb_core_gpu_lib welford_cases:: --test-threads=1"
+```
+
+  Expected red: the two gtests Step 2 names and the two harness cases Step 3 names, each on a
+  NULL moment; every other `AggregateBuilder.*` and `welford_cases::` case passes. The green
+  build's runs, the fix touching every grouped and grouping-set Welford:
+
+```bash
+timeout 1800 ssh "$GPU" "$R cpp/install/bin/peacock_gpu_tests"
+timeout 3600 ssh "$GPU" "$R cpp/install/bin/peacock_plan_tests"
+timeout 3600 ssh "$GPU" "$R cpp/install/bin/peacock_join_session_tests"
+timeout 7200 ssh "$GPU" "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+```
+
+  Expected: all green, the walk tests (`wire::gpu_tests::`) and the #216 `bug_` pins (still
+  asserting the bug until Task 3) included. Record both runs in `welford-device-detail.md`: the
+  host, the env path that held, the tree (`git rev-parse HEAD` plus "Task 2, uncommitted"), and
+  each binary's pass and fail counts with the red cases' messages.
+
+- [ ] **Step 7: Commit.**
 
 ```bash
 git clang-format HEAD -- cpp/src/operators/aggregate.cpp cpp/tests/gpu/hand_tables.hpp cpp/tests/gpu/test_aggregate_builder.cpp
-git add cpp/src/operators/aggregate.cpp cpp/tests/gpu peacockdb-core/src/tests/gpu_tests
+git add cpp/src/operators/aggregate.cpp cpp/tests/gpu peacockdb-core/src/tests/gpu_tests llm-wiki/tasks/welford-device-detail.md
 git commit -m "Welford state NULL-free on the device: all-NULL groups are (0, 0.0, 0.0)
 
 The init's mean and m2, and MERGE_M2's merged moments, read back with
-NULL replaced by 0.0, as DataFusion's state is.
+NULL replaced by 0.0, as DataFusion's state is. Red, then green, on
+nebius-gpu.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -728,7 +822,8 @@ static TableResult keyless_welford_aggregate(const fb::CudfAggregate* agg, AggPh
                                              std::vector<std::string> const& names);
 
 /// The one row a routed node owes over no rows, typed and named as the groupby's zero-row
-/// answer `no_groups`: a count 0, a Welford (0, 0.0, 0.0), anything else NULL.
+/// answer `no_groups`: a count 0 (Partial only: a count never reaches a Merge), a Welford
+/// (0, 0.0, 0.0), anything else NULL.
 static TableResult keyless_empty_state(const fb::CudfAggregate* agg,
                                        TableResult const& no_groups);
 ```
@@ -848,8 +943,9 @@ TEST(AggregateBuilder, AKeylessWelfordOverZeroRowsAnswersItsEmptyState) {
 }
 ```
 
-  Red before Step 3: the init answers one finished `STD` column, the `var` merge is refused as
-  `unsupported aggregate function: var`, and the zero-row case answers one column.
+  Red on Step 8's red build, all four: the reduce path answers one finished `STD` column for the
+  init and for the init beside a `count` and a `sum`, refuses the `var` merge as
+  `unsupported aggregate function: var`, and over zero rows answers one column.
 
 - [ ] **Step 2: The route.** `aggregate.cpp`, `#include <numeric>` (for `std::iota`), above
   `execute_aggregate`:
@@ -871,7 +967,7 @@ static TableResult keyless_empty_state(const fb::CudfAggregate* agg,
   std::vector<std::unique_ptr<cudf::column>> columns;
   for (auto const* func : *agg->aggr_funcs()) {
     switch (agg_kind(func->name()->str())) {
-      case AggKind::Count:
+      case AggKind::Count:  // Partial only: aggregate-arms refuses a count at Merge
         columns.push_back(one(cudf::numeric_scalar<int64_t>(0)));
         break;
       case AggKind::Welford:
@@ -928,10 +1024,12 @@ static TableResult keyless_welford_aggregate(const fb::CudfAggregate* agg, AggPh
   is `keyless_welford_aggregate`'s.
 
 ```bash
-git grep -n 'make_std_aggregation\|make_variance_aggregation\|is_stddev_name\|is_var_name\|#216' cpp/src
+git grep -n 'make_std_aggregation\|make_variance_aggregation\|is_stddev_name\|is_var_name\|#216\|ddof()' cpp/src
 ```
 
-  Expected: nothing but the new route's comment.
+  Expected: the new route's comment, and `ddof()` nowhere, or only where aggregate-arms' builder
+  checks it: the arm was its one device reader, since the finalize is a project. Task 5 says so
+  in `architecture.md`.
 
 - [ ] **Step 4: The #216 pins flip** (`coding-style.md`: a `bug_` test the fix turns red becomes
   the agreement case). In `aggregate_dimension_cases.rs`:
@@ -1038,10 +1136,13 @@ const EVERY_FUNC: [AggFunc; 7] = [
 
   and both loops (`a_keyless_init_over_no_input_answers_its_empty_state_on_both`,
   `a_keyless_shortcut_over_no_input_answers_count_0_and_nulls_on_both`) iterate `EVERY_FUNC`.
-  Make `empty_state_row` and `at_done` `pub(crate)`: Step 6 uses them.
+  Both already run over no batch and over two zero-row batches, init and shortcut, as the spec
+  asks.
+  `empty_state_row` and `at_done` are already `pub(crate)` (keyless-identity); Step 6 uses them.
 
 - [ ] **Step 6: The keyless cases.** Append to `welford_cases.rs` (extend the imports with
-  `datafusion::arrow::datatypes::DataType`; `super::aggregate_cases::{body, call, input,
+  `datafusion::arrow::array::ArrayRef`, `datafusion::arrow::datatypes::DataType`;
+  `super::aggregate_cases::{body, call, input,
   merge_over, welford_init_aggs}`; `at_done` and `empty_state_row` from wherever Step 5 found
   them (`aggregate_cases` or `aggregate_identity_cases`);
   `super::aggregate_dimension_cases::welford_init_global`; `super::script::each_answers`;
@@ -1050,9 +1151,10 @@ const EVERY_FUNC: [AggFunc; 7] = [
   `crate::tests::given::{Given, columns}`; `crate::tests::synthetic::{decimals, schema}`):
 
 ```rust
-/// `count(i32)`, `stddev(f64)` and `sum(i64)` with no key, as
-/// `SELECT count(i32), stddev(f64), sum(i64)` plans: a Welford beside what a keyless node
-/// reduces when it holds none.
+/// `count(i32)`, `stddev(f64)`, `sum(i64)`, `min(d)` and `max(s)` with no key, as
+/// `SELECT count(i32), stddev(f64), sum(i64), min(d), max(s)` plans: a Welford beside what a
+/// keyless node reduces when it holds none — a `Date32` and a `Utf8` among them, which the
+/// routed node takes to a groupby `MIN`/`MAX` and over nothing to a typed NULL.
 fn keyless_mixed_state() -> Schema {
     let mut state = columns(&[
         ("count(i32)", DataType::Int64),
@@ -1060,6 +1162,8 @@ fn keyless_mixed_state() -> Schema {
         ("stddev(f64)$mean", DataType::Float64),
         ("stddev(f64)$m2", DataType::Float64),
         ("sum(i64)", DataType::Int64),
+        ("min(d)", DataType::Date32),
+        ("max(s)", DataType::Utf8),
     ]);
     state.agg_state = vec![AggStateColumns {
         output: "stddev(f64)".to_string(),
@@ -1074,6 +1178,8 @@ fn keyless_mixed_init() -> GpuAggregate {
     let mut aggs = vec![call(PlanAgg::Count, Expr::column(2, "i32"), "count(i32)", DataType::Int64)];
     aggs.extend(welford_init_aggs());
     aggs.push(call(PlanAgg::Sum, Expr::column(3, "i64"), "sum(i64)", DataType::Int64));
+    aggs.push(call(PlanAgg::Min, Expr::column(6, "d"), "min(d)", DataType::Date32));
+    aggs.push(call(PlanAgg::Max, Expr::column(5, "s"), "max(s)", DataType::Utf8));
     let state = keyless_mixed_state();
     GpuAggregate::new(
         Given::of(Schema::new(schema()), BatchLayout::MultipleBatches),
@@ -1095,21 +1201,53 @@ fn keyless_mixed_merge() -> GpuAggregateBatches {
             outputs: (1..4usize).map(field).collect(),
         },
         call(PlanAgg::Sum, Expr::column(4, "sum(i64)"), "sum(i64)", DataType::Int64),
+        call(PlanAgg::Min, Expr::column(5, "min(d)"), "min(d)", DataType::Date32),
+        call(PlanAgg::Max, Expr::column(6, "max(s)"), "max(s)", DataType::Utf8),
     ];
     merge_over(state.clone(), body(Vec::new(), aggs, None), state)
 }
 
+/// `empty_state`'s row for the mixed init, each function at its own argument's type.
+fn keyless_mixed_empty_row(node: &GpuAggregate) -> RecordBatch {
+    let inputs = [
+        DataType::Int32,
+        DataType::Float64,
+        DataType::Float64,
+        DataType::Float64,
+        DataType::Int64,
+        DataType::Date32,
+        DataType::Utf8,
+    ];
+    let arrays: Vec<ArrayRef> = node
+        .body
+        .aggs
+        .iter()
+        .zip(&inputs)
+        .map(|(agg, input)| {
+            let value = agg.func.empty_state(input).expect("every init state is typed");
+            value.to_array().expect("one row")
+        })
+        .collect();
+    RecordBatch::try_new(node.intermediate().fields.clone(), arrays).expect("the state's columns")
+}
+
+// With rows, and over nothing: count 0, the triple (0, 0.0, 0.0), and the sum, min and max
+// NULL at their types — the Date32 and Utf8 NULLs default-constructed by keyless_empty_state.
 operator_case! {
     GpuAggregate,
-    fn a_keyless_stddev_beside_a_sum_and_a_count_agrees() {
-        let outcome = run_both(&keyless_mixed_init(), Script::Accumulate(vec![input()]));
+    fn a_keyless_stddev_beside_other_aggregates_agrees_over_rows_and_over_nothing() {
+        let node = keyless_mixed_init();
+        let outcome = run_both(&node, Script::Accumulate(vec![input()]));
         same_within_welford(cpu_slot(&outcome, 0), gpu_slot(&outcome, 0), false, &[2, 3]);
+        let over_nothing = run_both(&node, Script::Accumulate(Vec::new()));
+        let slots = at_done(0, keyless_mixed_empty_row(&node));
+        each_answers(&over_nothing, &slots, &slots);
     }
 }
 
 operator_case! {
     GpuAggregateBatches,
-    fn a_keyless_stddev_merge_beside_a_sum_and_a_count_agrees() {
+    fn a_keyless_stddev_merge_beside_other_aggregates_agrees() {
         let partial = |seed| {
             let init = run_both(&keyless_mixed_init(), Script::Accumulate(vec![synthetic(64, seed)]));
             cpu_slot(&init, 0).clone()
@@ -1253,9 +1391,14 @@ operator_case! {
 ```bash
 CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run
 git grep -n 'bug_a_global\|bug_a_keyless\|DEVICE_IDENTITY' peacockdb-core/src
+git grep -n '216' peacockdb-core/src cpp
 ```
 
-  Expected: compiles; the grep prints nothing.
+  Expected: compiles; the first grep prints nothing. The second prints only this task's route
+  comment in `aggregate.cpp` and `welford_cases.rs`' — no comment saying the keyless Welford is a
+  pin or missing on the device: rewrite any such (`aggregate_cases.rs`' "The Welford init's
+  global form is #216's pin, in `aggregate_dimension_cases.rs`" becomes "The Welford init's
+  global form is in `aggregate_dimension_cases.rs`").
 
 - [ ] **Step 7: Build and run what runs locally.**
 
@@ -1268,18 +1411,47 @@ wc -l cpp/src/operators/aggregate.cpp cpp/tests/gpu/test_aggregate_builder.cpp p
 ```
 
   Expected: clean, no new warnings; PASS (the cpu identity cases for `Stddev` and `Var`,
-  keyless-identity's, unchanged); every file under 1000 lines. The device half runs in Task 5.
+  keyless-identity's, unchanged); every file under 1000 lines.
 
-- [ ] **Step 8: Commit.**
+- [ ] **Step 8: The device, red then green** (*Device cycle*, `FIX=cpp/src/operators/aggregate.cpp`:
+  the route and the reduce arm's removal; every test compiles without them). The red build's
+  runs:
+
+```bash
+timeout 1800 ssh "$GPU" "$R cpp/install/bin/peacock_plan_tests --gtest_filter='AggregateBuilder.AKeyless*'"
+timeout 3600 ssh "$GPU" "$R cpp/install/rust-tests/peacockdb_core_gpu_lib welford_cases:: aggregate_dimension_cases:: aggregate_schema_cases:: aggregate_cases:: aggregate_identity_cases:: --test-threads=1"
+```
+
+  Expected red, every one on the reduce path's one column or its `var` refusal: the four
+  `AKeyless*` gtests; `a_global_welford_init_agrees`, `a_keyless_welford_merge_agrees`,
+  `a_global_stddev_finalize_agrees_within_welford`, `a_global_var_finalize_agrees_within_welford`,
+  `a_global_stddev_holds_its_declared_welford_state`,
+  `a_global_stddev_merge_holds_its_declared_welford_state`, both identity cases (at `Stddev`, the
+  loop's first Welford), and the five keyless cases of Step 6. Everything else in the filter
+  passes, Task 2's `welford_cases` included. The green build's runs:
+
+```bash
+timeout 1800 ssh "$GPU" "$R cpp/install/bin/peacock_gpu_tests"
+timeout 3600 ssh "$GPU" "$R cpp/install/bin/peacock_plan_tests"
+timeout 3600 ssh "$GPU" "$R cpp/install/bin/peacock_join_session_tests"
+timeout 7200 ssh "$GPU" "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+timeout 1800 ssh "$GPU" "$R cpp/install/rust-tests/test_node_timing --test-threads=1"
+```
+
+  Expected: all green, the walk tests (`wire::gpu_tests::`) included. Record both runs in
+  `welford-device-detail.md` as Task 2's are.
+
+- [ ] **Step 9: Commit.**
 
 ```bash
 git clang-format HEAD -- cpp/src/operators/aggregate.cpp cpp/tests/gpu/test_aggregate_builder.cpp
-git add cpp/src/operators/aggregate.cpp cpp/tests/gpu peacockdb-core/src/tests/gpu_tests
+git add cpp/src/operators/aggregate.cpp cpp/tests/gpu peacockdb-core/src/tests/gpu_tests llm-wiki/tasks/welford-device-detail.md
 git commit -m "#216: a keyless stddev or var runs through the grouped builder
 
 One constant INT32 key, dropped; over zero rows the node answers
 empty_state's row. The reduce path's stddev arm goes; the #216 pins
 become agreement cases, and the identity cases cover every AggFunc.
+Red, then green, on nebius-gpu.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1306,8 +1478,8 @@ SELECT stddev_samp(l_quantity) AS sd, var_samp(l_quantity) AS v FROM lineitem;
 
 ```
 // global-stddev is the keyless Welford, which no other query has: the device runs it through the
-// grouped request builder on one constant key (#216). Its device cells are turned on by the GPU
-// cycle that writes their gpu-result sections.
+// grouped request builder on one constant key (#216). Its device cells stay off until a device
+// run writes their gpu-result sections.
 corpus_query!(tpch, 1, global_stddev, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_enabled);
 ```
 
@@ -1324,12 +1496,15 @@ tpch,1,global_stddev,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ena
 ```bash
 UPDATE_CANONICAL=1 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_goldens
 UPDATE_CANONICAL=1 timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- global_stddev
-timeout 1800 python3 testdata/duckdb_result.py --dataset tpch
+[ -x /tmp/duckdb-1.5.4/bin/python ] || { python3 -m venv /tmp/duckdb-1.5.4 && /tmp/duckdb-1.5.4/bin/pip install duckdb==1.5.4; }
+timeout 1800 /tmp/duckdb-1.5.4/bin/python testdata/duckdb_result.py --dataset tpch
 git diff --stat testdata/
 git diff testdata/goldens/tpch.sf1/duckdb-result.txt | grep '^[-+][^-+]' | grep -v 'global-stddev' | head
 ```
 
-  Never `--only`: `duckdb_result.py` writes only the sections it ran. Expected: the five
+  The system `python3` has no `duckdb`, and the script refuses any version but 1.5.4: hence the
+  venv, outside the repo (grouping-id's recipe). Never `--only`: `duckdb_result.py` writes only
+  the sections it ran. Expected: the five
   `.plans.txt`, five `.cpu.txt`, five `.cost.txt` and `mini.result.txt` gain a `global-stddev`
   section each and nothing else moves; `duckdb-result.txt` gains one section of one row and the
   last command prints nothing. `recipe-payloads.txt` unchanged (the query is not in
@@ -1355,21 +1530,21 @@ CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cud
 
 ```bash
 git add testdata peacockdb-core/tests/common/corpus_cases.inc
-git commit -m "#216: tpch/global-stddev in the corpus, device cells off until the GPU cycle
+git commit -m "#216: tpch/global-stddev in the corpus, device cells off until their run
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 5: The device cycle, the cells, the docs
+### Task 5: The device corpus, the cells, the docs
 
 **Files:**
 - Modify: `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv`,
   `testdata/goldens/{tpch,pbench}.sf1/gpu-result.txt`
 - Modify: `llm-wiki/architecture.md`, `llm-wiki/build-test.md`,
-  `llm-wiki/tickets/corpus-coverage.md`, `tickets/complete-coverage.md`,
-  `tickets/system-hardening.md`; Create or append: `llm-wiki/tasks/welford-device-detail.md`
+  `llm-wiki/tickets/corpus-coverage.md`, `tickets/complete-coverage.md`, and
+  `tickets/system-hardening.md` only as Step 4 says; append: `llm-wiki/tasks/welford-device-detail.md`
 
 - [ ] **Step 1: The rows, and their device cells on, uncommitted.**
 
@@ -1382,41 +1557,29 @@ grep -n '216\|#94' peacockdb-core/tests/common/corpus_cases.inc
   and `tpch/global_stddev`. For each: its `corpus_query!` gpu modes become what its cpu modes
   are (`all_modes`, or the five spelled out), the `// device: #216` comment and the last
   sentence of `global_stddev`'s comment go; its registry row's five gpu cells `enabled`, `216`
-  and `94` struck from its tickets. Any other row a grep lists is run the same way.
+  and `94` struck from its tickets, and any archived number beside them (keyless-identity wrote
+  the dispersion row's as `199 216`) struck too, since no cell of it is off. Any other row a grep
+  lists is run the same way.
 
-- [ ] **Step 2: The GPU cycle**, the round's one, every command in the foreground:
+- [ ] **Step 2: The device corpus**, one sync and one build (*Device cycle* without the patch:
+  the code is committed, only the cells move):
 
 ```bash
-GPU=dmitry@89.169.109.150
-DIR=peacockdb-L   # see *Before you start*: the directory the chain's earlier cycles used
 timeout 1200 rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ "$GPU:$DIR/"
-timeout 10800 ssh "$GPU" "cd ~/$DIR && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build"
-R="cd ~/$DIR && . ~/peacock-env.sh && export LD_LIBRARY_PATH=\$PWD/cpp/install/lib:\$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib PEACOCK_TESTDATA_DIR=\$PWD/testdata &&"
-timeout 1800 ssh "$GPU" "$R cpp/install/bin/peacock_gpu_tests"
-timeout 3600 ssh "$GPU" "$R cpp/install/bin/peacock_plan_tests"
-timeout 3600 ssh "$GPU" "$R cpp/install/bin/peacock_join_session_tests"
-timeout 7200 ssh "$GPU" "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
-timeout 1800 ssh "$GPU" "$R cpp/install/rust-tests/test_node_timing --test-threads=1"
-timeout 7200 ssh "$GPU" "$R PCK_WRITE_GPU_RESULT=1 cpp/install/rust-tests/test_gpu_corpus --test-threads=1 global_stddev empty_dispersion shuffle_stddev rollup_stddev"
+timeout 10800 ssh "$GPU" "$B"
+timeout 7200 ssh "$GPU" "$R PCK_WRITE_GPU_RESULT=1 cpp/install/rust-tests/test_gpu_corpus --test-threads=1 global_stddev empty_dispersion"
+timeout 7200 ssh "$GPU" "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1 shuffle_stddev rollup_stddev"
 timeout 600 rsync -a "$GPU:$DIR/testdata/goldens/" testdata/goldens/ --include='*/' --include='gpu-result.txt' --exclude='*'
 git diff --stat testdata/goldens/
 ```
 
-  Add any other row Step 1 listed to the corpus filter. Not `peacock_cpu_tests` (local), not the
-  sf40 pair, not `--run-benchmarks`. A fresh `~/$DIR` without the sf1 parquet takes it from
-  `~/peacockdb-J/testdata`. Expected:
-  - every gtest green, among them `AggregateBuilder.*` (Task 2's four, Task 3's four, and
-    aggregate-arms' nine) — the reds Tasks 2 and 3 predicted are gone;
-  - `gpu_tests::` green, the walk tests included: the flipped #216 pins, the two schema cases,
-    `welford_cases::*`, and the identity cases over `EVERY_FUNC`;
-  - the corpus run green; `gpu-result.txt` gains `global-stddev`'s five sections (tpch) and
-    `empty-dispersion-aggregates`' five (pbench), and no other section moves. If the filtered
-    writer dropped other sections, re-run the corpus unfiltered with `PCK_WRITE_GPU_RESULT=1`.
-
-  Record the run in `welford-device-detail.md`. On a red: a gtest or harness case is this task's
-  to fix (`superpowers:systematic-debugging`), rebuild and rerun only what failed; a corpus cell
-  that fails on something else goes back off under the ticket it fails on (an open one, or a new
-  one with the query, mode and message), in the line and the registry.
+  Any other row Step 1 listed joins the first corpus filter. Only that run writes: the writer
+  merges per (query, mode) section, so `gpu-result.txt` gains `global-stddev`'s five sections
+  (tpch) and `empty-dispersion-aggregates`' five (pbench), and no other section moves; the second
+  run, the spec's `shuffle-stddev` and `rollup-stddev`, writes nothing, since a float cell's
+  digits move run to run. Expected: both runs green. A cell that fails goes back off under the
+  ticket it fails on (an open one, or a new one with the query, mode and message, at the next
+  free number), in the line and the registry. Record the run in `welford-device-detail.md`.
 
 - [ ] **Step 3: `architecture.md`.** Short sentences; each a current fact.
   - The aggregate sequence (re-locate by "on the device except the keyless Welford path"): the
@@ -1428,34 +1591,49 @@ git diff --stat testdata/goldens/
     keyless Welford path is the one exception"): that sentence goes.
   - The state types paragraph (re-locate by "the Welford moments are `Float64`"): the Welford
     state is never NULL on either engine; a group with no valid value is `(0, 0.0, 0.0)`,
-    DataFusion's own, which the device writes where cuDF answers NULL.
-  - "…stay in C++ with a reason" (re-locate by "cuDF counts in INT32"): add `MERGE_M2`'s count
-    child, cast to the type the linked cuDF takes (`INT32` through 25.04, `INT64` from 25.06,
-    `merge_m2_count_type`) and widened back to `INT64`. Fix the paragraph's count word.
+    DataFusion's own, which the device writes where cuDF answers NULL, at the init and after
+    every `MERGE_M2`.
+  - "…stay in C++ with a reason" (re-locate by "cuDF counts in INT32"), unless verify-26.02
+    already says it: add `MERGE_M2`'s count child, cast to the type the linked cuDF takes
+    (`INT32` before 25.06, `INT64` from 25.06, chosen by `kMergeM2CountType` from
+    `<cudf/version_config.hpp>`) and widened back to `INT64`. Fix the paragraph's count word.
   - The `CudfAggregate.mode` row of *What the Rust side puts in the flat buffers*: the clause
     "except on the keyless path, where a `stddev` name decides all three…" goes.
-- [ ] **Step 4: Tickets** (a ticket is about code; fix its facts here):
-  - `corpus-coverage.md` #94: "25.10 and later" → "25.06 and later (cuDF #18546)"; the site is
-    `merge_m2_input` through `kMergeM2CountType`, chosen by `merge_m2_count_type` from
-    `PEACOCK_CUDF_VERSION_*`. #216's text: the keyless path routes a Welford to
-    `keyless_welford_aggregate`. Both are archived at merge by the helper, as chain K's plans
-    leave theirs.
+  - The `AggregateFuncNode.ddof` row (aggregate-arms wrote it as the keyless stddev's divisor):
+    carried for the plan; no device code reads it, since the finalize is a project — or, if Task 3
+    Step 3's grep found the builder checking it, that it is checked and nothing else.
+  - The `CudfAggregate` row of the node table (re-locate by "`cudf::reduce`"): `cudf::reduce`
+    for a keyless node with no `stddev` or `var`; a keyless node holding one runs the groupby on
+    one constant key.
+- [ ] **Step 4: Tickets** (a ticket is about code; fix its facts here). #216 and, where this task
+  closes it, #94 are archived at merge by the helper, as chain K's plans leave theirs.
+  - `corpus-coverage.md` #216: the keyless path routes a node holding a Welford to
+    `keyless_welford_aggregate`.
+  - `corpus-coverage.md` #94, **only if Task 1 found no verify-26.02 gate**: the site is
+    `merge_m2_input`, the one `MERGE_M2` site, with no Final arm; its "Fix proposed" becomes the
+    fix as built — `kMergeM2CountType` (`plan_executor_internal.h`) is
+    `merge_m2_count_type(CUDF_VERSION_MAJOR, CUDF_VERSION_MINOR)` from
+    `<cudf/version_config.hpp>`, `INT32` before 25.06 and `INT64` from 25.06; no CMake define, no
+    runtime probe. With a gate, #94 is verify-26.02's and this task does not touch it.
   - `complete-coverage.md` #261, the paragraph starting "After [#216]": "The device runs a keyless
     Welford through the grouped request builder ([#216](corpus-coverage.md#t216)), so a keyless
     outer stage needs only the per-function phase above. The `bug_` test flips to a plan test
     and a cpu-vs-device case."
-  - `system-hardening.md` (#260), the sentence naming `gpu_tpch_shuffle_stddev_tp1_single`: its
-    26.02 failure is #94's count type, which `merge_m2_count_type` now gates at compile time;
-    not yet run on a 26.02 device.
+  - `system-hardening.md` #260, **only if Task 1 found no gate and #260 is still open there**
+    (`grep -n '<a id="t260">' llm-wiki/tickets/system-hardening.md`): the sentence naming
+    `gpu_tpch_shuffle_stddev_tp1_single` says its 26.02 failure is #94's count type, which
+    `kMergeM2CountType` now gates at compile time, not yet run on a 26.02 device. Otherwise no
+    edit: verify-26.02 settled it.
 - [ ] **Step 5: `build-test.md` counts.** Recount each row this task touches from the code (a
   `--list` per binary) and set every header and the grand total to the sums. This task's
-  deltas: C++ CPU/FFI unit +2 (`MergeM2CountType`; name the count type in the row's prose);
-  Plan-executor (C++) +8 (`AggregateBuilder`: Task 2's four, Task 3's four); the operator
-  harness +10 (`welford_cases.rs`: 4 + 6) and +1 (`a_global_stddev_merge_holds_its_declared_welford_state`),
-  the five flipped pins keep their count but leave the `bug_` list — the sentence "Five are
-  `bug_` pins: …" loses the keyless Welford's clause and its number is recounted; the cpu corpus
-  +5 cells and one query (`tpch/global-stddev`), and one DuckDB comparison case if duckdb-oracle
-  counts them per line; the device corpus +10 cells (`global_stddev`, `empty_dispersion_aggregates`).
+  deltas: C++ CPU/FFI unit +2 where Task 1 added `MergeM2CountType` (name the count type in the
+  row's prose); Plan-executor (C++) +8 (`AggregateBuilder`: Task 2's four, Task 3's four);
+  Operator harness +9 (`welford_cases.rs`: Task 2's four, Task 3's five; the five flipped pins
+  keep their count but leave the `bug_` list — the sentence naming the `bug_` pins loses the
+  keyless Welford's clause and its number is recounted); Operator harness, what the device holds
+  +1 (`a_global_stddev_merge_holds_its_declared_welford_state`); the cpu corpus +5 cells and one
+  query (`tpch/global-stddev`), and one DuckDB comparison case if duckdb-oracle counts them per
+  line; the device corpus +10 cells (`global_stddev`, `empty_dispersion_aggregates`).
 - [ ] **Step 6: The full verification bar, locally.**
 
 ```bash
@@ -1466,14 +1644,15 @@ timeout 1800 cargo test --features rust-only -p peacockdb-core --test test_cost_
 CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cudf.sh test -p peacockdb-core --lib -- ffi_tests:: planner::tests::plan_goldens::the_payload_golden
 timeout 3600 scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build
 timeout 600 ctest --test-dir cpp/build -L cpu --output-on-failure
-git grep -n '216\|#94' peacockdb-core/tests/common/corpus_cases.inc testdata/cost-registry.csv
+awk -F, 'NR > 1 && $NF ~ /(^| )(216|94)( |$)/ {print NR": "$1"/"$3": "$NF}' testdata/cost-registry.csv
+grep -n '216\|#94' peacockdb-core/tests/common/corpus_cases.inc
 git status --short testdata/goldens/recipe-payloads.txt
 ```
 
   Arm a monitor for the corpus run (progress every 2 minutes, matching
   `panicked|FAILED|error\[`). Expected: all green, the registry tests both ways and the
-  `gpu-result.txt` guard included; the grep prints nothing; `recipe-payloads.txt` unchanged.
-  The 26.02 build leg is CI's.
+  `gpu-result.txt` guard included; the awk and the grep print nothing but a cell Step 2 sent back
+  off under `216` or `94`; `recipe-payloads.txt` unchanged. The 26.02 build leg is CI's.
 
 - [ ] **Step 7: Commit.**
 
@@ -1481,11 +1660,14 @@ git status --short testdata/goldens/recipe-payloads.txt
 git add testdata peacockdb-core/tests/common/corpus_cases.inc llm-wiki
 git commit -m "#216, #94: global-stddev and empty-dispersion on the device; docs, counts
 
-Device cells on where the cycle passed, gpu-result sections written,
+Device cells on where the run passed, gpu-result sections written,
 216 struck from the registry.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
+
+  Where Task 1 found verify-26.02's gate, #94 is not this task's: the first line reads
+  `#216: global-stddev and empty-dispersion on the device; docs, counts`.
 
 ## Not changed, on purpose
 
@@ -1496,6 +1678,6 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   arm included: the spec's Restriction.
 - **`recipe-payloads.txt` and `PAYLOAD_QUERIES`.** `global-stddev` adds no fb kind or call shape;
   `shuffle-stddev` already covers the Welford payload.
-- **`<cudf/version_config.hpp>`** declares `CUDF_VERSION_MAJOR`/`_MINOR` in both 25.02 and 26.02
-  and would make the CMake defines unnecessary; the spec chose the defines, so they stay, and
-  `MergeM2CountType.TheBuildIsToldTheCudfItCompilesAgainst` holds them to the headers.
+- **`cpp/CMakeLists.txt`.** The count type reads cuDF's own `CUDF_VERSION_MAJOR`/`_MINOR`, which
+  `<cudf/version_config.hpp>` declares in 25.02 and 26.02 alike; a CMake define would be a second
+  source of the same fact.

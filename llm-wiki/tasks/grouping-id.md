@@ -97,7 +97,9 @@ rollup), window queries that never run (`32 143`); they stay off.
 **#262's rows:** `tpch/distinct-functions` (off at all five device modes on `262` alone; its
 oracle is DuckDB's, DataFusion's being `data_fusion_disabled`), tpcds q28 (`262` and `152`) and
 `tpch/rollup-distinct` (`262` once chain K has run, with `65 189`). `262` is struck when no off
-cell is left without another ticket.
+cell is left without another ticket. `distinct-functions` carries a `stddev(DISTINCT …)`, whose
+float digits differ across lanes as `shuffle-stddev`'s do, so its gpu oracle goes from
+`golden_exact` to `golden_approx_std`; `rollup-distinct` and q28 stay exact.
 
 **#55's row:** tpcds q66, tags `55 152 220`. Its five device cells are off; once chain J closes
 #152 and #220, `55` alone holds them.
@@ -169,5 +171,6 @@ id, the quotient or the DISTINCT lowering's device path is a ticket, not a fix h
 
 ## Device workflow
 
-One GPU cycle per round on the chain header's host, the working tree synced as the header says.
+As the chain header says: one sync per task to its host, with as many back-to-back builds as its
+red/green pairs need, the red build first.
 The corpus run is filtered to the rows above and `rollup-grouping`.

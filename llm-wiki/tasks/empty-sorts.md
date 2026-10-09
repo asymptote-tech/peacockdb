@@ -37,8 +37,10 @@ section is a bare `++`/`++`, with no names or types, so nothing checks them, and
 3. **DuckDB.** If chain J's duckdb-oracle has merged when this task builds, q17's empty-answer
    divergence against `duckdb-result.txt` goes with 2, and its line in that task's divergence list
    is struck. If not, nothing here touches DuckDB, and the helper merging duckdb-oracle after this
-   task strikes q17's `duckdb_divergent(205)` and the test asserting #205 open
-   (`duckdb_oracle/tests.rs`), since #205 is archived here.
+   task strikes what names #205 there, since #205 is archived here: q17's `duckdb_divergent(205)`,
+   the tests asserting #205 open (`duckdb_oracle/tests.rs:157-158`, `:270-278`, `:322-323`) and the
+   empty-answer branch in `duckdb_oracle.rs:113-115`. If duckdb-oracle has not merged when this task
+   lands, this list is also written into #235's empty-answer bullet.
 
 ## Corpus
 
@@ -58,7 +60,8 @@ gains its header. Its device cell at `tp1-single`, off on `205`, stays off under
 | `testdata/goldens/tpcds.sf1/*mini.result.txt`, q17's `tp1-single` and `tp1-rowgroup` `.cpu.txt` and `.cost.txt` sections, `corpus_cases.inc`, `testdata/cost-registry.csv` | q17 |
 | `llm-wiki/architecture.md` ("Zero-row batches change no answer"), `build-test.md`, `tickets/` | the break struck; counts; #205 archived |
 
-Component-level API: none.
+Component-level API: `RunReport::batches` (`executor/mod.rs`, public) is never empty for a query
+whose root received nothing; no signature changes.
 
 ## Restriction
 

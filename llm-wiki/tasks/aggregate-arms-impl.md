@@ -5,19 +5,22 @@
 **Goal:** The device aggregate reads every input through the `ColumnRef` its `args` carry and
 names every column from the wire's `state_names` (#225); one request builder serves the grouped
 and grouping-set paths, so a Welford under a grouping set is the triple the plan declares (#280);
-the Final, Single and `avg` arms go; every C++ `ColumnRef` reader checks the reference's bounds and
-name, and every `TableResult` is built through a checked constructor (#164); the scan's declared
+the Final, Single and `avg` arms go, and a `count` at `Merge` is refused; every C++ `ColumnRef`
+reader checks the reference's bounds and name, and every `TableResult` is built through a checked
+constructor (#164); a union branch named otherwise than its union is projected; the scan's declared
 names are checked against the file at plan time; `tpch/rollup-stddev` joins the corpus.
 
 **Architecture:** Two fields appended to `AggregateFuncNode` (`state_names`, `ddof`), filled by
 `state_funcs` and written by the recipe writer; two deprecated (`alias`, and
 `CudfAggregate.mergeable_agg_state`). In `aggregate.cpp`, `agg_phase` maps `Partial` and `Merge`
 and refuses the rest; one `add_requests` turns a function node into cuDF requests plus the state
-columns they fill, and `grouped_aggregate` / `grouping_set_aggregate` run it; the keyless path keeps
-`cudf::reduce`. One helper pair, `column_ordinal` / `column_at`, resolves a `ColumnRef` everywhere
-in `cpp/src`, threaded through `evaluate_column`, `build_column` and `cudf_ast_can_evaluate`.
-`survivor_metadata` refuses a scan whose declared field differs from the file's at a projected
-ordinal.
+columns they fill, built once per node, and `grouped_aggregate` / `grouping_set_aggregate` run them
+(every grouping set reuses the one set of requests, so a computed argument is evaluated once); the
+keyless path keeps `cudf::reduce`. One helper pair, `column_ordinal` / `column_at`
+(`cpp/src/column_refs.cpp`), resolves a `ColumnRef` everywhere in `cpp/src`, threaded through
+`evaluate_column`, `build_column` and `cudf_ast_can_evaluate`. `cast_branch` projects a union
+branch whose names differ from the union's. `survivor_metadata` refuses a scan whose declared field
+differs from the file's at a projected ordinal.
 
 **Tech stack:** C++20 against cuDF 25.02 (`cpp/build`, local; nebius-gpu for the device), gtest;
 FlatBuffers schema; Rust (`--features rust-only` for the cpu tier, `scripts/cargo-cudf.sh` for the
@@ -25,13 +28,15 @@ FFI rung and the device build).
 
 **Spec:** [`aggregate-arms.md`](aggregate-arms.md). Format models:
 [`guard-checks-impl.md`](guard-checks-impl.md), [`distinct-companions-impl.md`](distinct-companions-impl.md).
-Consumed by [`welford-device.md`](welford-device.md): it builds on the interfaces Task 6 states.
+Consumed by [`welford-device.md`](welford-device.md): it builds on the interfaces Task 6 states
+and Task 5's `column_at`.
 
 ## Before you start: what will have moved
 
-This plan was written against master at 8806a3c3. Chain L's base is master after chains J and K
-merge, and after chain L's grouping-id and keyless-identity. Every line number below is master's;
-**re-locate by symbol**, never by line. What moves, by the plan that moves it:
+This plan was written against master at 8806a3c3 and revised at 0753f8c9, against the spec as
+amended on 2026-10-08. Chain L's base is master after chains J and K merge, and after chain L's
+grouping-id and keyless-identity. Every line number below is master's; **re-locate by symbol**,
+never by line. What moves, by the plan that moves it:
 
 - **refcounted-scatter (J).** `TableResult` (`cpp/src/plan_executor.h`) is
   `{owners, columns, column_names}` with `view()`, `num_rows()`, `num_columns()` and four
@@ -65,25 +70,46 @@ merge, and after chain L's grouping-id and keyless-identity. Every line number b
   (#261), so no `Partial` node ever carries a three-argument `stddev`.
 - **guard-checks (K).** `peacock_cpu_tests` has `PEACOCK_TESTDATA_DIR`; build-test.md's counts were
   reconciled.
-- **grouping-id (L).** `static std::unique_ptr<cudf::column> grouping_id_column(mask, nkeys, rows)`
-  in `aggregate.cpp` builds the id; the grouping-set arm calls it, and so does Task 6's
-  `grouping_set_aggregate`. Its gtests (`GroupingIds`, a `grouping_sets_plan` helper in
-  `test_plan_executor.cpp`) build a `count` function node with `add_alias` and no `args`; Tasks 3,
-  4 and 6 update that helper. The `bug_` grouping-set pins are agreement cases and
-  `grouping_sets_as_exported` is gone, so a rollup's id compares exactly between the engines.
-- **keyless-identity (L).** `execute_aggregate` handed no input builds a zero-row table from
-  `aggr_input_schema` and runs as over any input; `GpuAggregate` is a `BatchAccumulator` with an
-  `AtDoneIfNothingOut` call, so recipes and the payload golden carry it. Keep its input acquisition
-  exactly; `agg_phase` goes above it (Task 4).
+- **grouping-id (L).** `static std::unique_ptr<cudf::column> grouping_id_column(const
+  flatbuffers::Vector<uint8_t>* mask, cudf::size_type nkeys, cudf::size_type rows)` in
+  `aggregate.cpp` builds the id; the grouping-set arm calls it, and so does Task 6's
+  `grouping_set_aggregate`. Its gtests, `GroupingId.*`, are in a new file,
+  `cpp/tests/gpu/test_grouping_id.cpp`, linked into `peacock_plan_tests` (`test_plan_executor.cpp`
+  is past the 1000-line cap), and grouping-id **creates `cpp/tests/gpu/hand_tables.hpp`**, the
+  shared header of `hand::` helpers (`column_of`, `values_of`, `table_of`, `ref`, `null_of`,
+  `run`) this plan's gtest files include; Task 1 adds whichever of them it lacks. If the file is
+  named otherwise, `git grep -l 'TEST(GroupingId' cpp/tests` finds it. Its `grouping_sets_plan`
+  helper builds a `count` function node with `add_alias`, as master's did with no `args`; Tasks 3,
+  4 and 6 update it. The `bug_`
+  grouping-set pins are agreement cases and `grouping_sets_as_exported` is gone, so a rollup's id
+  compares exactly between the engines.
+- **keyless-identity (L).** `execute_aggregate` starts
+  `auto input = was_handed_nothing(in) ? zero_rows_of(agg) : take_input(in);` — handed no input, it
+  builds a zero-row table from `aggr_input_schema` and runs as over any input. Keep that line
+  exactly; `agg_phase` goes above it (Task 4). `GpuAggregate` is a `BatchAccumulator` with an
+  `AtDoneIfNothingOut` call, so recipes and the payload golden carry it, and **every harness case
+  driving a `GpuAggregate` runs `Script::Accumulate`, never `Script::Exec`** (`run_both` asserts
+  the script's shape against the node's category); an init over one batch answers its state at
+  slot 0 and an empty done slot, so `cpu_slot(…, 0)` reads it as before. Its
+  `AggregateNoInput.*` gtests are in their own new file, `cpp/tests/gpu/test_aggregate_no_input.cpp`
+  (`git grep -l 'TEST(AggregateNoInput' cpp/tests` if named otherwise), on grouping-id's
+  `hand_tables.hpp`; their `func_over(fbb, func, arg, alias)` writes one argument and an
+  `add_alias`, and `unfed_aggregate` writes `count(*)` as the planner does, `count(1)`
+  (`int64_literal(fbb, 1)`). Tasks 3 and 4 update `func_over`; Task 6 checks every `count` there
+  carries its argument. Its recipe tests are in
+  `peacockdb-core/src/wire/tests/aggregate_init.rs` (`use super::*;`), where Task 2's wire test
+  goes: `wire/tests.rs` is at 980 lines.
 
 ## Global constraints
 
-- **Every commit green.** The name check would refuse every Welford merge on the device until the
-  state columns carry their declared names, so the names (Tasks 2-3) land before anything resolves
-  a reference by name (Tasks 6-7). Device tests written in a task run in the round's one GPU cycle
-  (Task 10); each task proves locally what can be proved locally and compiles the device tests
-  (`--features gpu --no-run`, `peacock_plan_tests` built). `rollup_stddev`'s device cells are
-  committed off (Task 9) and turned on with the cycle that writes their `gpu-result.txt` sections.
+- **Every commit green, device included.** The name check would refuse every Welford merge on the
+  device until the state columns carry their declared names, so the names (Tasks 2-3) land before
+  anything resolves a reference by name (Tasks 6 and 8), and the union's branches carry the union's
+  names (Task 7) before every reader checks them (Task 8). Each task proves locally what can be
+  proved locally, compiles the device tests (`--features gpu --no-run`, `peacock_plan_tests`
+  built), and a task with device tests runs them in its own *Device cycle* (below) before its
+  commit: Tasks 1, 3, 4, 6, 8 and 10. `rollup_stddev`'s device cells are turned on in Task 10 with
+  the run that writes their `gpu-result.txt` sections.
 - **Wire.** `AggregateFuncNode` appends `state_names: [string]` and `ddof: int8`;
   `AggregateFuncNode.alias` and `CudfAggregate.mergeable_agg_state` become `(deprecated)`. No slot
   moves, as chain K deprecated `distinct`. No facade, trait or C ABI symbol changes;
@@ -92,11 +118,20 @@ merge, and after chain L's grouping-id and keyless-identity. Every line number b
 - **No answer moves.** Every plan golden unchanged except `tpch/rollup-stddev`'s new sections;
   `recipe-payloads.txt` moves in Task 2 (the new fields) and Task 4 (the deprecated two), and in no
   other task. Every corpus cell keeps its state but `tpch/shuffle-stddev`'s schema validation
-  (Task 9).
+  (Task 10).
+- **A `count` never reaches a `Merge`.** The plan merges a count's state with `sum`
+  (`recipe-payloads.txt`: `count(*): sum(count(*)@1)`), and the cpu's `merge_aggregates` refuses a
+  `Count` at merge (`cpu_backend/mod.rs`). From Task 6 the device refuses it too, grouped,
+  grouping-set and keyless alike; no hand-built plan merges a count by `count`.
 - **Out of scope, from the spec's Restriction.** The keyless Welford (#216), the `MERGE_M2` count
   type (#94) and all-NULL Welford groups are welford-device's: the keyless `stddev` reduce arm stays,
   and the one `MERGE_M2` site keeps casting to `INT32` through a named constant. Dead code in
   `window.cpp`, `limit.cpp`, `union.cpp` stays, beyond the edits a changed signature forces.
+- **The 1000-line cap** (`coding-style.md`). `wire/tests.rs` (980 lines) takes nothing new: Task 2's
+  case goes in `wire/tests/aggregate_init.rs`. `expr.cpp` (934 on master) takes no new function:
+  the resolver is `cpp/src/column_refs.cpp` (Task 5), and Task 8 checks its length after threading
+  the names. `test_plan_executor.cpp` takes no new test: the new gtests go in
+  `test_column_refs.cpp` and `test_aggregate_builder.cpp`.
 - **A `bug_` test that goes red** is flipped in the same commit to the agreement case, under a name
   without `bug_` (`coding-style.md`, *Building around a bug*).
 - **Builds** as `build-test.md` documents them, each command under `timeout`: rust-only with
@@ -106,15 +141,60 @@ merge, and after chain L's grouping-id and keyless-identity. Every line number b
   `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/cargo-cudf.sh`. Work in a workspace,
   never the primary checkout; never share a cargo target dir across worktrees. The workspace needs
   the sf1 parquet under `testdata/` (gitignored): symlink it from the primary checkout if absent.
+  DuckDB's sections are written with DuckDB 1.5.4's Python module in a venv outside the repo
+  (`python3` here has no `duckdb`, and `duckdb_result.py` refuses any other version):
+  `[ -x /tmp/duckdb-1.5.4/bin/python ] || { python3 -m venv /tmp/duckdb-1.5.4 && /tmp/duckdb-1.5.4/bin/pip install duckdb==1.5.4; }`.
 - **Device** on nebius-gpu, `dmitry@89.169.109.150`, cuDF 25.02, as chain L's header says: the
-  working tree rsynced uncommitted, one GPU cycle per round, every CPU build and run local. Device
-  commands run in the foreground (a backgrounded build chain dies mid-build). If `ssh` seems dead
-  while the host answers a raw socket, the sandbox is blocking the client, not the host.
+  working tree synced uncommitted into `~/peacockdb-L` (its sf1 data copied from
+  `~/peacockdb-J/testdata`), **one sync per task with as many back-to-back builds as its red/green
+  pairs need, the red build first**, every CPU build and run local. Device commands run in the
+  foreground (a backgrounded build chain dies mid-build). If `ssh` seems dead while the host
+  answers a raw socket, the sandbox is blocking the client, not the host.
+- **Out of every task, as the header says:** the sf40 binaries, `--run-benchmarks`, Nsight
+  captures and any H200 timing, each recorded in `aggregate-arms-detail.md` as deferred. **Done**
+  is CI green except the `gpu-tests` job ("GPU Tests (remote)", shad-gpu), with every task's
+  device runs passed on nebius-gpu and recorded in the detail file.
+- New tickets take the next free number from master's `tickets.md` as it stands after J's merge.
 - Commit messages at most 10 lines, ending with the `Co-Authored-By` line shown in each task.
+
+## Device cycle
+
+Every task with device tests runs this once, after its tests and its fix are written and every
+local tier passes, and before its commit. One sync carries the whole working tree and the fix's
+reverse; the red build is the tree with the fix reversed, the green build the tree as written.
+Each task names its `FIX` (the paths whose diff is the fix, plus any test file that cannot compile
+without it; never a test the red build must run), its red set and its green set, each set a list
+of `ssh` commands written with `$H` and `$R` below. Run everything in the foreground.
+
+```bash
+H=dmitry@89.169.109.150
+R='cd ~/peacockdb-L && . ~/peacock-env.sh && export LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib PEACOCK_TESTDATA_DIR=$PWD/testdata &&'
+B='cd ~/peacockdb-L && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'
+# The fix's reverse (git add -N any new file among FIX first, so the diff carries it).
+git diff -R HEAD -- $FIX > /tmp/aggregate-arms-red.patch
+# The one sync.
+timeout 900 rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ $H:peacockdb-L/
+timeout 300 rsync -a /tmp/aggregate-arms-red.patch $H:aggregate-arms-red.patch
+# Red build: the tests without the fix; then the task's red set.
+timeout 300 ssh $H 'cd ~/peacockdb-L && patch -p1 < ~/aggregate-arms-red.patch'
+timeout 10800 ssh $H "$B"
+# Green build: the fix back in; then the task's green set.
+timeout 300 ssh $H 'cd ~/peacockdb-L && patch -p1 -R < ~/aggregate-arms-red.patch'
+timeout 10800 ssh $H "$B"
+```
+
+A task with no red build (it says why) skips the patch and the red lines. Every case the task
+names as red must fail, for the reason it names; a case red for another reason, or green where
+the task expects red, is a finding to settle before the fix — a test that passes without its fix
+may assert nothing. Every case of the green set passes. One binary per `ssh`, so one red does not
+hide the next. If the loader cannot find `libcudf`, the 25.02 env on that host is
+`~/miniforge3/envs/rapids-cuda-12.2` (#260 records that path): use whichever exists and say so in
+the detail file. Record each build (host, tree, command, pass and fail counts per binary) in
+`llm-wiki/tasks/aggregate-arms-detail.md`.
 
 ## Review focus
 
-Five input classes nothing tests today, most likely to bite, each pinned in its owning task:
+Six input classes nothing tests today, most likely to bite, each pinned in its owning task:
 
 1. **A merge whose state columns are not the next columns after the keys, or not in state
    order.** A cursor reads the wrong column and nothing fails; q17 interleaves count, avg and
@@ -132,11 +212,15 @@ Five input classes nothing tests today, most likely to bite, each pinned in its 
 4. **A `ColumnRef` resolved against a table the operator assembled**, not a handle: the join
    residual's filter-schema table (its names come from the two sides through `filter_columns`) and
    the grouping-set path's per-set keys. Expected: a residual reading the right names runs, and one
-   naming another column is refused. Task 7: `ColumnRefs.AJoinResidualResolvesThroughItsSidesNames`
+   naming another column is refused. Task 8: `ColumnRefs.AJoinResidualResolvesThroughItsSidesNames`
    in `test_join_session.cpp`.
-5. **A scan whose declared schema renames a column it does not read**, or reads under a
+5. **A union branch whose names differ from the union's and whose types match.** A forwarder hands
+   the node above each branch's batches as they are. Expected: the branch is renamed by a project
+   of bare references, and a branch already under the union's names is left alone. Task 7:
+   `a_union_branch_named_otherwise_is_renamed_by_a_project`.
+6. **A scan whose declared schema renames a column it does not read**, or reads under a
    projection. Expected: a rename at an unprojected ordinal plans; one at a projected ordinal is
-   refused naming the ordinal and both names. Task 8:
+   refused naming the ordinal and both names. Task 9:
    `a_rename_of_a_column_the_scan_does_not_read_plans` and the two refusals.
 
 ## File structure
@@ -146,38 +230,47 @@ Five input classes nothing tests today, most likely to bite, each pinned in its 
 | `cpp/src/plan_executor.h`, `cpp/src/table_result.cpp` | `TableResult::of`; the default constructor private (Task 1) |
 | `flatbuffers/gpu_plan.fbs` | `state_names`, `ddof` appended (Task 2); `alias`, `mergeable_agg_state` deprecated (Task 4) |
 | `peacockdb-core/src/plan/mod.rs`, `plan/aggregate.rs`, `plan/tests/aggregate.rs` | `StateFunc.state_names`, `.ddof`; `.welford` removed (Task 4) |
-| `peacockdb-core/src/wire/aggregate_writer.rs`, `wire/fb_text.rs`, `wire/tests.rs` | the fields written, printed, read back |
-| `cpp/src/operators/aggregate.cpp` | names (Task 3), phases and dead arms (Task 4), the builder (Task 6), `column_at` (Tasks 6-7) |
-| `cpp/src/plan_executor_internal.h`, `cpp/src/expr.cpp`, `cpp/src/peacock/expr.h` | `column_ordinal`, `column_at` (Task 5); names threaded (Task 7) |
-| `cpp/src/operators/{project,sort,filter,window,join_session}.cpp`, `cpp/src/node_session.cpp` | every other `ColumnRef` reader (Task 7) |
-| `cpp/tests/gpu/hand_tables.hpp` (new), `test_column_refs.cpp` (new), `test_aggregate_builder.cpp` (new), `test_plan_executor.cpp`, `test_join_session.cpp`, `cpp/tests/cpu/test_executor.cpp`, `cpp/CMakeLists.txt` | the gtests |
-| `peacockdb-core/src/planner/translator/scan_mapping/parquet_meta.rs`, `parquet_meta/tests.rs` | the scan's name check (Task 8) |
+| `peacockdb-core/src/wire/aggregate_writer.rs`, `wire/fb_text.rs`, `wire/tests/aggregate_init.rs` | the fields written, printed, read back |
+| `cpp/src/operators/aggregate.cpp` | names (Task 3), phases and dead arms (Task 4), the builder (Task 6), `column_at` (Tasks 6 and 8) |
+| `cpp/src/plan_executor_internal.h`, `cpp/src/column_refs.cpp` (new), `cpp/CMakeLists.txt` | `column_ordinal`, `column_at` (Task 5) |
+| `cpp/src/expr.cpp`, `cpp/src/peacock/expr.h` | names threaded (Task 8) |
+| `cpp/src/operators/{project,sort,filter,window,join_session}.cpp`, `cpp/src/node_session.cpp` | every other `ColumnRef` reader (Task 8) |
+| `cpp/tests/gpu/hand_tables.hpp` (grouping-id's; extended), `test_column_refs.cpp` (new), `test_aggregate_builder.cpp` (new), `test_plan_executor.cpp`, grouping-id's and keyless-identity's gtest files, `test_join_session.cpp`, `cpp/tests/cpu/test_executor.cpp`, `cpp/CMakeLists.txt` | the gtests |
+| `peacockdb-core/src/planner/translator/nodes.rs` (`cast_branch`), `planner/translator/schema_tests.rs` | a union branch named otherwise projected (Task 7) |
+| `peacockdb-core/src/planner/translator/scan_mapping/parquet_meta.rs`, `parquet_meta/tests.rs` | the scan's name check (Task 9) |
 | `peacockdb-core/src/tests/gpu_tests/aggregate_{cases,dimension_cases,schema_cases}.rs` | #225's pins flip; the rollup Welford cases |
-| `testdata/tpch-queries/rollup-stddev.sql`, `testdata/goldens/`, `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv` | the corpus (Task 9) |
-| `llm-wiki/architecture.md`, `build-test.md`, `tickets/corpus-coverage.md` | docs, counts, tickets citing moved code (Task 10) |
+| `testdata/tpch-queries/rollup-stddev.sql`, `testdata/goldens/`, `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv` | the corpus (Task 10) |
+| `llm-wiki/architecture.md`, `build-test.md`, `tickets/corpus-coverage.md` | docs, counts, tickets citing moved code (Task 11) |
+| `llm-wiki/tasks/aggregate-arms-detail.md` | every device run (Tasks 1, 3, 4, 6, 8, 10) |
 
 ---
 
 ### Task 1: Every `TableResult` is built through a checked constructor (#164)
 
-refcounted-scatter's `owning` already refuses a name count unequal to the column count. What #164
-still needs: nothing builds a `TableResult` around the four constructors, and every name list is
-indexed with `.at()`.
+#164's constructor is chain J's `TableResult::owning(table, names)`, which already refuses a name
+count unequal to the column count, and a table of no columns. What #164 still needs: the sites that
+assemble a `TableResult` from shared parts (a project sharing its input's owners, a join's emit)
+cannot hand `owning` a table without copying, so they get its parts form, `of`, with the same
+check; nothing builds a `TableResult` around the constructors; every name list is indexed with
+`.at()`.
 
 **Files:**
 - Modify: `cpp/src/plan_executor.h` (`TableResult`), `cpp/src/table_result.cpp`
 - Modify: every site the compiler names once the default constructor is private; every
   `names[...]` read the grep below lists
-- Create: `cpp/tests/gpu/hand_tables.hpp`, `cpp/tests/gpu/test_column_refs.cpp`
+- Modify: `cpp/tests/gpu/hand_tables.hpp` (grouping-id's: the helpers below it lacks)
+- Create: `cpp/tests/gpu/test_column_refs.cpp`
+- Test: `cpp/tests/cpu/test_executor.cpp`
 - Modify: `cpp/CMakeLists.txt` (`peacock_plan_tests`' sources)
 
 **Interfaces:**
-- Produces (Task 7 and every later C++ site build through these):
+- Produces (Task 8 and every later C++ site build through these):
 
 ```cpp
 // plan_executor.h, inside struct TableResult, after `with`:
-  /// The one constructor that takes parts. Refuses parts of different lengths, and no columns:
-  /// every reader indexes owners, columns and names by one ordinal.
+  /// owning's check over parts: the constructor for a table assembled from columns other
+  /// handles own. Refuses parts of different lengths, and no columns: every reader indexes
+  /// owners, columns and names by one ordinal.
   static TableResult of(std::vector<std::shared_ptr<cudf::column const>> owners,
                         std::vector<cudf::column_view> columns,
                         std::vector<std::string> column_names);
@@ -187,33 +280,27 @@ indexed with `.at()`.
   TableResult() = default;
 ```
 
-- Produces (test-only, `cpp/tests/gpu/hand_tables.hpp`, used by Tasks 5-7):
+- Consumes and extends (test-only, `cpp/tests/gpu/hand_tables.hpp`, which grouping-id created;
+  used by Tasks 6 and 8 and by welford-device). This plan's gtests use `hand::column_of`,
+  `values_of`, `table_of`, `ref`, `null_of` and `run`. Add to the header, inside its `namespace
+  hand`, each of these it does not already define with this meaning (one that exists under the
+  same name and signature is used as it is; one that exists with another signature keeps its
+  name, and this plan's calls are written to it), and the includes they need:
 
 ```cpp
-#pragma once
-// Hand-built inputs for operator gtests: device columns from host values and back, and the
-// flat-buffer pieces an operator reads. An operator runs through execute_one with these as its
-// resident inputs, as NodeSession hands them.
-
+// Includes the helpers below need, beside the header's own:
 #include "generated/gpu_plan_generated.h"
 #include "peacock/operators.h"
 #include "plan_executor.h"
-
 #include <cudf/column/column.hpp>
 #include <cudf/table/table.hpp>
 #include <cudf/utilities/default_stream.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 #include <rmm/device_buffer.hpp>
-
 #include <cuda_runtime.h>
 #include <flatbuffers/flatbuffers.h>
 
-#include <memory>
-#include <string>
-#include <vector>
-
-namespace hand {
-namespace fb = peacock::plan;
+namespace fb = peacock::plan;  // inside namespace hand, if the header has no such alias
 
 template <typename T>
 std::unique_ptr<cudf::column> column_of(std::vector<T> const& values) {
@@ -251,23 +338,45 @@ inline flatbuffers::Offset<fb::Expr> null_of(flatbuffers::FlatBufferBuilder& fbb
   return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, fb::CreateLiteralExpr(fbb, value).Union());
 }
 
-/// `node` as the root of `fbb`'s plan, run once over `inputs`.
+/// `node` as the root of `fbb`'s plan, run once over `inputs`, as NodeSession hands them.
 inline peacock::TableResult run(flatbuffers::FlatBufferBuilder& fbb,
                                 flatbuffers::Offset<fb::PlanNode> node,
                                 std::vector<peacock::TableResult> inputs) {
   fbb.Finish(fb::CreateGpuPlan(fbb, node));
   return peacock::execute_one(fb::GetGpuPlan(fbb.GetBufferPointer())->root(), std::move(inputs));
 }
-
-}  // namespace hand
 ```
 
-- [ ] **Step 1: The refusals, as gtests.** `cpp/tests/gpu/test_column_refs.cpp`:
+- [ ] **Step 1: The refusals, as gtests.** `of`'s refusals need no device memory (a
+  `column_view` of no rows over no buffer is `typed_col`'s, and an owner may be null when nothing
+  reads it), so they run in the cpu tier. In `cpp/tests/cpu/test_executor.cpp` (add
+  `#include "plan_executor.h"` if absent), after the anonymous namespace:
+
+```cpp
+// #164: a handle's owners, columns and names are one list read by one ordinal, so a
+// TableResult assembled from parts is refused unless the three agree, and refused empty.
+TEST(TableResultInvariant, PartsOfDifferentLengthsAreRefused) {
+  auto int64 = typed_col(cudf::data_type{cudf::type_id::INT64});
+  try {
+    peacock::TableResult::of({nullptr, nullptr}, {int64, int64}, {"a"});
+    FAIL() << "two columns took one name";
+  } catch (std::runtime_error const& e) {
+    EXPECT_STREQ(e.what(), "TableResult: 2 columns, 2 owners and 1 names");
+  }
+}
+
+TEST(TableResultInvariant, NoColumnsAreRefused) {
+  EXPECT_THROW(peacock::TableResult::of({}, {}, {}), std::runtime_error);
+}
+```
+
+  `owning`'s refusal needs a table on the device, so it is a device gtest, a pin of J's check in
+  #164's terms. `cpp/tests/gpu/test_column_refs.cpp`:
 
 ```cpp
 /// #164: a handle's columns and names are one list read by one ordinal, so every TableResult is
 /// built through a constructor that refuses a mismatch, and every ColumnRef reader checks the
-/// reference's bounds and name (Tasks 5 and 7 add those cases here).
+/// reference's bounds and name (Task 8 adds those cases here).
 
 #include "hand_tables.hpp"
 
@@ -283,34 +392,19 @@ TEST(TableResultInvariant, ThreeColumnsAndTwoNamesAreRefused) {
     hand::table_of(std::move(columns), {"a", "b"});
     FAIL() << "a table of three columns took two names";
   } catch (std::runtime_error const& e) {
-    EXPECT_NE(std::string(e.what()).find("2 names for 3 columns"), std::string::npos) << e.what();
-  }
-}
-
-TEST(TableResultInvariant, PartsOfDifferentLengthsAreRefused) {
-  auto table = hand::table_of(
-      [] {
-        std::vector<std::unique_ptr<cudf::column>> c;
-        c.push_back(hand::column_of<int64_t>({1}));
-        c.push_back(hand::column_of<int64_t>({2}));
-        return c;
-      }(),
-      {"a", "b"});
-  try {
-    peacock::TableResult::of(table.owners, table.columns, {"a"});
-    FAIL() << "two columns took one name";
-  } catch (std::runtime_error const& e) {
-    EXPECT_STREQ(e.what(), "TableResult: 2 columns, 2 owners and 1 names");
+    std::string what = e.what();
+    EXPECT_NE(what.find('3'), std::string::npos) << what;
+    EXPECT_NE(what.find('2'), std::string::npos) << what;
   }
 }
 ```
 
-  If refcounted-scatter's message for `owning` reads otherwise, assert its count words (`2`,
-  `3`) instead of the phrase; the refusal is what is pinned.
+  The pin asserts `owning`'s two counts, whatever refcounted-scatter's sentence around them.
 
-- [ ] **Step 2: Wire the files.** `cpp/CMakeLists.txt`: `add_executable(peacock_plan_tests
-  tests/gpu/test_plan_executor.cpp tests/gpu/test_column_refs.cpp)` (keep any source chain J added;
-  `main` stays in `test_plan_executor.cpp`). Build: it fails — `TableResult::of` does not exist.
+- [ ] **Step 2: Wire the files.** `cpp/CMakeLists.txt`: append `tests/gpu/test_column_refs.cpp` to
+  `peacock_plan_tests`' sources, keeping every source chain J, grouping-id and keyless-identity
+  added (`main` stays in `test_plan_executor.cpp`). Build: it fails — `TableResult::of` does not
+  exist.
 
 ```bash
 timeout 3600 scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build
@@ -371,16 +465,33 @@ git grep -nE '(names|column_names)\[' cpp/src
 ```bash
 timeout 3600 scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build
 timeout 600 ctest --test-dir cpp/build -L cpu --output-on-failure
+CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run
 ```
 
-  Expected: the build is clean (no new warnings) and `peacock_plan_tests` links; `-L cpu` PASS.
-  The two `TableResultInvariant` cases run in Task 10's device cycle.
+  Expected: the build is clean (no new warnings) and `peacock_plan_tests` links; `-L cpu` PASS,
+  the two `TableResultInvariant` cpu cases among them; the gpu lib compiles.
 
-- [ ] **Step 7: Commit.**
+- [ ] **Step 7: The device cycle**, green build only: the one device case pins `owning`'s refusal,
+  which J landed, and `of` cannot run before it exists (its red was Step 2's). The run is what
+  shows every construction site Step 4 moved still answers on the device. Green set:
 
 ```bash
-git add cpp/src cpp/tests/gpu/hand_tables.hpp cpp/tests/gpu/test_column_refs.cpp cpp/CMakeLists.txt
+timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests"
+timeout 1800 ssh $H "$R cpp/install/bin/peacock_gpu_tests"
+timeout 1800 ssh $H "$R cpp/install/bin/peacock_join_session_tests"
+timeout 7200 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+```
+
+  Expected: all green, `TableResultInvariant.ThreeColumnsAndTwoNamesAreRefused` among them; the
+  run recorded in `aggregate-arms-detail.md`.
+
+- [ ] **Step 8: Commit.**
+
+```bash
+git add cpp/src cpp/tests/gpu/hand_tables.hpp cpp/tests/gpu/test_column_refs.cpp cpp/tests/cpu/test_executor.cpp cpp/CMakeLists.txt llm-wiki/tasks/aggregate-arms-detail.md
 git commit -m "#164: every TableResult built through a checked constructor; names read with .at()
+
+owning (J) wraps a table; of applies its check to shared parts.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -394,7 +505,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `peacockdb-core/src/plan/mod.rs` (`struct StateFunc`), `plan/aggregate.rs` (`state_funcs`)
 - Modify: `peacockdb-core/src/wire/aggregate_writer.rs` (`state_funcs`, `named_func`),
   `wire/fb_text.rs` (the `CudfAggregate` arm)
-- Test: `peacockdb-core/src/plan/tests/aggregate.rs`, `peacockdb-core/src/wire/tests.rs`
+- Test: `peacockdb-core/src/plan/tests/aggregate.rs`, `peacockdb-core/src/wire/tests/aggregate_init.rs`
+  (keyless-identity's; `wire/tests.rs` is at the 1000-line cap)
 - Regenerate: `testdata/goldens/recipe-payloads.txt`
 
 **Interfaces:**
@@ -554,8 +666,10 @@ timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- plan::te
 
 - [ ] **Step 3: Run the rule's cases.** Same command. Expected: PASS.
 
-- [ ] **Step 4: The writer, failing first.** In `wire/tests.rs`, after
-  `a_finalize_project_emits_the_group_keys_the_finalize_list_leaves_out`:
+- [ ] **Step 4: The writer, failing first.** In `wire/tests/aggregate_init.rs`, at the end (the
+  child reaches `aggregate`, `Writer`, `Given`, `columns_of` and `node_at` through `use super::*`;
+  after keyless-identity an init's recipe carries a second call at done, and `recipe.seqs()[0]` is
+  still the init's seq):
 
 ```rust
 /// Every column the device emits is named on the wire, and a Welford's ddof rides beside its
@@ -640,10 +754,11 @@ fn an_init_writes_each_functions_state_names_and_a_welfords_ddof() {
 }
 ```
 
-  Add `AggFunc` and `AggStateColumns` to the file's `crate::plan` imports.
+  Add `use crate::plan::{AggFunc, AggStateColumns};` to the file if `super::*` does not bring
+  them (and `fb`, `flatbuffers` likewise, from `wire/tests.rs`' own imports).
 
 ```bash
-timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- wire::tests::an_init_writes
+timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- wire::tests::aggregate_init::an_init_writes
 ```
 
   Expected: FAIL — every `state_names` is empty and every `ddof` 0, since the writer does not
@@ -753,18 +868,20 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `cpp/src/operators/aggregate.cpp` (every name push; `make_agg`; `stddev_ddof` goes)
-- Modify: `cpp/tests/gpu/test_plan_executor.cpp` (every hand-built `AggregateFuncNode`)
-- Modify: `peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs`,
-  `aggregate_cases.rs` (`welford_answered`)
+- Modify: `cpp/tests/gpu/test_plan_executor.cpp`, grouping-id's `test_grouping_id.cpp` and
+  keyless-identity's `test_aggregate_no_input.cpp` (every hand-built `AggregateFuncNode`)
+- Modify: `peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs` (#225's pins; #216's
+  schema pin's message), `aggregate_cases.rs` (`welford_answered`)
 
 - [ ] **Step 1: Flip #225's pins** (red on the device until Step 3). In `aggregate_schema_cases.rs`,
-  delete `WELFORD_RENAMED` and its two `// #225` comments; the two cases become:
+  delete `WELFORD_RENAMED` and its two `// #225` comments; the two cases become (a `GpuAggregate`
+  runs `Script::Accumulate` since keyless-identity):
 
 ```rust
 operator_case! {
     GpuAggregate,
     fn stddev_holds_its_three_declared_state_names() {
-        assert_holds_as_declared(&welford_init(), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&welford_init(), Script::Accumulate(vec![input()]));
     }
 }
 
@@ -778,8 +895,8 @@ operator_case! {
 ```
 
   `bug_a_global_stddev_holds_one_finished_float64_where_the_plan_declares_the_welford_state` (#216,
-  welford-device's) keeps its name; the one column is now named from `state_names`, so its
-  divergence loses the second name:
+  welford-device's, in the same file) keeps its name and its `Script::Accumulate`; the one column
+  is now named from `state_names`, so its divergence loses the second name:
   `"3 columns declared, 1 held; 0 stddev(f64)$count: Int64 vs FLOAT64"`.
   In `aggregate_cases.rs`, `welford_answered` stops borrowing the device's names — the doc
   sentence about "a relabelling unobservable past the sink" goes with them:
@@ -837,9 +954,13 @@ static std::string state_name(const fb::AggregateFuncNode* func, flatbuffers::uo
   - `nation_aggregate`: `{"state"}` for `sum`, `count`, `avg`'s two `{"state$sum", "state$count"}`,
     `stddev`'s three `{"state$count", "state$mean", "state$m2"}` and `ddof` 1;
   - `AggregateCount`: `{"count(*)"}`; `AggregateGroupBy`: `{"nation_count"}`;
-  - grouping-id's `grouping_sets_plan`: `count.add_state_names(fbb.CreateVectorOfStrings({"n"}))`
-    (built before the builder opens);
-  - keyless-identity's no-input gtest: the names its node declares.
+  - grouping-id's `grouping_sets_plan` (`test_grouping_id.cpp`):
+    `auto count_states = fbb.CreateVectorOfStrings({"n"});` before the builder opens, and
+    `count.add_state_names(count_states);`;
+  - keyless-identity's `func_over` (`test_aggregate_no_input.cpp`): its node's one name,
+    `auto states = fbb.CreateVectorOfStrings({alias});` before the builder opens, and
+    `node.add_state_names(states);` — `AKeylessNodeAnswersOneRowTypedAsItsInputDeclares` asserts
+    the names `{"n", "sum(v)", "sum(amount)", "min(day)", "max(v)"}`, which are those aliases.
   Positional `CreateAggregateFuncNode` calls gain the two trailing arguments
   (`fbb.CreateVectorOfStrings(names)`, `ddof`).
 - [ ] **Step 5: Build and run what runs locally.**
@@ -848,16 +969,38 @@ static std::string state_name(const fb::AggregateFuncNode* func, flatbuffers::uo
 timeout 3600 scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build
 timeout 600 ctest --test-dir cpp/build -L cpu --output-on-failure
 CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cudf.sh test -p peacockdb-core --lib -- ffi_tests::
+CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run
 git grep -n 'stddev_ddof\|->alias()' cpp/src/operators/aggregate.cpp
 ```
 
-  Expected: clean; PASS; the grep prints nothing. The flipped pins and `AggregateMerge.*` run in
-  Task 10's device cycle.
+  Expected: clean; PASS; the grep prints nothing.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 6: The device cycle**, `FIX=cpp/src/operators/aggregate.cpp`. The red build is Steps 1
+  and 4's tests over the names from `alias`. Red set:
 
 ```bash
-git add cpp/src/operators/aggregate.cpp cpp/tests peacockdb-core/src/tests/gpu_tests
+timeout 3600 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 aggregate_schema_cases:: aggregate_cases::a_welford"
+```
+
+  Expected red, each for the name: `stddev_holds_its_three_declared_state_names` and
+  `stddev_merge_holds_its_three_declared_state_names` (three columns under one name),
+  `bug_a_global_stddev_holds_one_finished_float64_where_the_plan_declares_the_welford_state` (its
+  divergence still names `stddev(f64)`), and `a_welford_init_exports_its_count_as_int64` and
+  `a_welford_merge_exports_its_count_as_int64` (`welford_answered` now holds the names). Every other
+  case in the set passes. Green set:
+
+```bash
+timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests"
+timeout 7200 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+```
+
+  Expected: all green — `AggregateMerge.*`, `PlanExecutor.Aggregate*`, `GroupingId.*` and
+  `AggregateNoInput.*` among the gtests, the five red cases above among the Rust ones.
+
+- [ ] **Step 7: Commit.**
+
+```bash
+git add cpp/src/operators/aggregate.cpp cpp/tests peacockdb-core/src/tests/gpu_tests llm-wiki/tasks/aggregate-arms-detail.md
 git commit -m "#225: the device names every state column from state_names; ddof from the wire
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -880,7 +1023,8 @@ The payload golden, a cover of every kind and call shape, prints only `mode: Par
 - Modify: `cpp/src/operators/aggregate.cpp`
 - Modify: `flatbuffers/gpu_plan.fbs`, `peacockdb-core/src/plan/mod.rs`, `plan/aggregate.rs`,
   `wire/aggregate_writer.rs`, `wire/fb_text.rs`
-- Modify: `cpp/tests/cpu/test_executor.cpp`, `cpp/tests/gpu/test_plan_executor.cpp`
+- Modify: `cpp/tests/cpu/test_executor.cpp`, `cpp/tests/gpu/test_plan_executor.cpp`,
+  grouping-id's `test_grouping_id.cpp`, keyless-identity's `test_aggregate_no_input.cpp`
 - Regenerate: `testdata/goldens/recipe-payloads.txt`
 
 **Interfaces:**
@@ -961,7 +1105,8 @@ static AggPhase agg_phase(fb::AggregateMode mode) {
 
 - [ ] **Step 3: The dead arms go.** With `phase` two-valued and every Welford mergeable:
   - `make_agg(name, is_final, ddof)` → `make_agg(name, phase, ddof)`: `count` is `COUNT` at
-    `Partial`, `SUM` at `Merge`; `sum`, `min`, `max`; `var`/`stddev` names `VARIANCE`/`STD` with
+    `Partial`, `SUM` at `Merge` (an arm no plan reaches, refused in Task 6 with the builder that
+    replaces this function); `sum`, `min`, `max`; `var`/`stddev` names `VARIANCE`/`STD` with
     `ddof`, used by the grouping-set path alone until Task 6 (#280); the `avg` branch and its
     comment go;
   - `make_reduce_agg`'s `avg` branch goes; `is_avg_name` goes;
@@ -969,7 +1114,8 @@ static AggPhase agg_phase(fb::AggregateMode mode) {
     `arg_col(func)` (args[0] as a `ColumnRef` read or a `build_column`, the dummy column 0 where
     there are no args — Task 6 refuses that);
   - the keyless loop: the Final AVG/STDDEV guard, `is_avg`, the `count` `is_final` branch (a
-    `Merge` count is now `cudf::reduce` SUM to `INT64`, the `Partial` count `size − null_count`),
+    `Merge` count is now `cudf::reduce` SUM to `INT64` until Task 6 refuses it, the `Partial`
+    count `size − null_count`),
     the `avg` half of the decimal condition (`is_sum` alone), and the `is_std` arm's `is_final`
     MEAN go; the `is_std` arm keeps `make_std_aggregation(func->ddof())` (#216, welford-device's);
   - the grouped section: `OutBuild` keeps `name`, `req`, `res`, `count_cast`, `struct_child`;
@@ -1016,14 +1162,39 @@ static AggPhase agg_phase(fb::AggregateMode mode) {
   - `StateFunc.welford` goes (field, the two literals, its doc);
   - `fb_text.rs`: the `mergeable_agg_state` line goes;
   - `aggregate.cpp`: the generated accessors are gone, so the build lists any reader left.
-- [ ] **Step 5: The gtests.** `test_plan_executor.cpp`:
+- [ ] **Step 5: The gtests, in the plan's shapes.** `test_plan_executor.cpp`:
   - `nation_aggregate` loses its `mergeable` parameter and `add_mergeable_agg_state`, and so do
-    `partial_and_merged` and its callers; no function node sets an alias;
+    its callers; no function node sets an alias;
+  - `partial_and_merged(func, mergeable)` becomes `partial_and_merged(func, merge)`: the partials
+    run `func`, the merge runs `merge`, the function the plan merges `func`'s state with. Its doc
+    comment: "One partial of `func`, and the same partial unioned with itself and merged by
+    `merge` — `sum` for a `count`, which never reaches a Merge, and the function itself
+    otherwise." `WelfordStateComesBackAsStateAndNotAsAValue` calls
+    `partial_and_merged("stddev", "stddev")`;
+  - `AggregateMerge.AOneColumnAggregateMergesByItsOwnRule` merges a count as the plan does:
+
+```cpp
+TEST(AggregateMerge, AOneColumnAggregateMergesByItsOwnRule) {
+  // A sum's state merges by sum, and so does a count's: the plan writes a count's merge as
+  // `sum` (`count(*): sum(count(*)@1)`), so no count ever reaches a Merge.
+  for (auto [func, merge] : {std::pair{"sum", "sum"}, std::pair{"count", "sum"}}) {
+    auto [partial, merged] = partial_and_merged(func, merge);
+    ASSERT_EQ(partial.size(), 5u) << func;
+    for (auto& [key, state] : partial) {
+      ASSERT_EQ(state.size(), 1u) << func;
+      EXPECT_DOUBLE_EQ(merged.at(key)[0], state[0] * 2) << func << " group " << key;
+    }
+  }
+}
+```
+
   - `AggregateMerge.AnAvgsSumAndCountBothSurviveTheMerge` is deleted (no `avg` reaches a device;
     decomposition's `sum` and `count` are `AOneColumnAggregateMergesByItsOwnRule`'s);
   - `AggregateCount` and `AggregateGroupBy` run `AggregateMode_Partial`, their `count` over
     `make_col_ref(fbb, 0, "r_regionkey")` and `make_col_ref(fbb, 0, "r_name")` respectively;
-  - grouping-id's `grouping_sets_plan`: `count.add_alias(...)` goes.
+  - grouping-id's `grouping_sets_plan`: `count.add_alias(...)` and its `count_alias` string go;
+  - keyless-identity's `func_over`: `node.add_alias(out)` and its `out` string go (the generated
+    builder has no `add_alias` once the field is deprecated, so the compiler names every one left).
 - [ ] **Step 6: Build, run, regenerate.**
 
 ```bash
@@ -1042,10 +1213,23 @@ git diff --stat testdata/
   `Partial` and `Merge` only; the grep prints nothing; `recipe-payloads.txt` alone moved, its
   `mergeable_agg_state: true` lines gone and every aggregate digest changed.
 
-- [ ] **Step 7: Commit.**
+- [ ] **Step 7: The device cycle**, green build only: the arms this task deletes are the ones no
+  plan reaches, which is the claim the green run checks, and its one new refusal ran red in the
+  cpu tier at Step 1. Green set:
 
 ```bash
-git add cpp flatbuffers/gpu_plan.fbs peacockdb-core/src testdata/goldens/recipe-payloads.txt
+timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests"
+timeout 1800 ssh $H "$R cpp/install/bin/peacock_gpu_tests"
+timeout 7200 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+```
+
+  Expected: all green, `AggregateMerge.*` (three cases), `PlanExecutor.AggregateCount` and
+  `AggregateGroupBy` at `Partial`, `GroupingId.*` and `AggregateNoInput.*` among them.
+
+- [ ] **Step 8: Commit.**
+
+```bash
+git add cpp flatbuffers/gpu_plan.fbs peacockdb-core/src testdata/goldens/recipe-payloads.txt llm-wiki/tasks/aggregate-arms-detail.md
 git commit -m "aggregate: Partial and Merge only; Final, Single and avg arms go
 
 alias and mergeable_agg_state deprecated, no slot moved: the writer sends
@@ -1059,12 +1243,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 5: One resolver for a `ColumnRef` (#164)
 
 **Files:**
-- Modify: `cpp/src/plan_executor_internal.h`, `cpp/src/expr.cpp`
+- Modify: `cpp/src/plan_executor_internal.h`, `cpp/CMakeLists.txt` (`peacock_gpu`'s sources)
+- Create: `cpp/src/column_refs.cpp` (`expr.cpp` is near the 1000-line cap and Task 8 adds to it)
 - Test: `cpp/tests/cpu/test_executor.cpp`
 
 **Interfaces:**
-- Produces (`plan_executor_internal.h`, defined in `expr.cpp`; host-only, so the CPU tests reach
-  them as they reach `cudf_ast_can_evaluate`; every reader in Tasks 6-7 uses them):
+- Produces (`plan_executor_internal.h`, defined in `column_refs.cpp`; host-only, so the CPU tests
+  reach them as they reach `cudf_ast_can_evaluate`; every reader in Tasks 6 and 8 uses them, and
+  welford-device consumes `column_at`):
 
 ```cpp
 // The ordinal a ColumnRef names in a table whose columns are `names`, checked: an index past
@@ -1142,9 +1328,20 @@ TEST(ColumnRefs, ColumnAtBorrowsTheColumnTheRefNames) {
   Build: FAIL, `column_ordinal` is not declared.
 
 - [ ] **Step 2: The resolver.** Declare the *Interfaces* pair in `plan_executor_internal.h`
-  (after `cudf_ast_can_evaluate`); in `expr.cpp`, above `build_expr`:
+  (after `cudf_ast_can_evaluate`). Create `cpp/src/column_refs.cpp` and add `src/column_refs.cpp`
+  to `peacock_gpu`'s sources beside `src/expr.cpp`:
 
 ```cpp
+// A ColumnRef resolved against the table it reads (#164): by index AND name, as the planner's
+// own check does (expr_physical.rs). Every ColumnRef reader in cpp/src comes through here.
+
+#include "plan_executor_internal.h"
+
+#include <stdexcept>
+#include <string>
+
+namespace peacock {
+
 cudf::size_type column_ordinal(const fb::ColumnRef* ref, std::vector<std::string> const& names) {
   const auto index = ref->index();
   const std::string name = ref->name() ? ref->name()->str() : std::string();
@@ -1165,7 +1362,12 @@ cudf::column_view column_at(cudf::table_view const& table,
                             std::vector<std::string> const& names, const fb::ColumnRef* ref) {
   return table.column(column_ordinal(ref, names));
 }
+
+}  // namespace peacock
 ```
+
+  If `plan_executor_internal.h` names the flat-buffer namespace other than `fb` at file scope, use
+  the alias `expr.cpp` uses.
 
 - [ ] **Step 3: Run.**
 
@@ -1175,11 +1377,13 @@ timeout 600 ctest --test-dir cpp/build -L cpu --output-on-failure
 ```
 
   Expected: the five `ColumnRefs.*` PASS; nothing else moves (no reader calls the pair yet).
+  No device cycle: the pair is host code, its tests are the cpu tier's, and nothing on the device
+  calls it until Task 6.
 
 - [ ] **Step 4: Commit.**
 
 ```bash
-git add cpp/src/plan_executor_internal.h cpp/src/expr.cpp cpp/tests/cpu/test_executor.cpp
+git add cpp/src/plan_executor_internal.h cpp/src/column_refs.cpp cpp/CMakeLists.txt cpp/tests/cpu/test_executor.cpp
 git commit -m "#164: column_ordinal/column_at resolve a ColumnRef by index and name
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -1193,28 +1397,30 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `cpp/src/operators/aggregate.cpp` (the grouped and grouping-set paths rewritten; the
   keyless path's argument read)
 - Create: `cpp/tests/gpu/test_aggregate_builder.cpp`; Modify: `cpp/CMakeLists.txt`
-- Modify: `cpp/tests/gpu/test_plan_executor.cpp` (`nation_aggregate`'s merge args; grouping-id's
-  `count` args)
+- Modify: `cpp/tests/gpu/test_plan_executor.cpp` (`nation_aggregate`'s merge args), grouping-id's
+  `test_grouping_id.cpp` (`grouping_sets_plan`'s `count` args, if it has none)
 - Modify: `peacockdb-core/src/tests/gpu_tests/aggregate_dimension_cases.rs`,
   `aggregate_schema_cases.rs`
 
 **Interfaces:**
-- Produces (file-local in `aggregate.cpp`). welford-device consumes three extension points, marked
-  ⟵ below: a keyless Welford node routed through `grouped_aggregate` on one constant `INT32` key; a
-  readback replacing NULL with `0.0` on the Welford init's mean and m2; the count type at the one
-  `MERGE_M2` site.
+- Produces (file-local in `aggregate.cpp`). welford-device consumes four extension points, marked
+  ⟵ below: a keyless Welford node routed through `grouped_aggregate` on one constant `INT32` key;
+  **two readbacks** that replace a NULL moment with `0.0` — the init's `$mean` and `$m2` (today
+  `AsIs`, from `add_requests`' Welford `Partial` arm), and the moments a Merge reads out of
+  `MERGE_M2` (today `MergedChild` children 1 and 2); the count type at the one `MERGE_M2` site.
 
 ```cpp
 /// What a function node runs, by the name state_funcs gives it.
 enum class AggKind { Sum, Min, Max, Count, Welford };
 static AggKind agg_kind(std::string const& name);  // throws "unsupported aggregate function: <name>"
 
-/// How one state column is read back out of the groupby's results.  ⟵ welford-device adds a
-/// readback for the init's mean and m2 that replaces NULL with 0.0 (all-NULL groups).
+/// How one state column is read back out of the groupby's results. ⟵ welford-device extends two
+/// readbacks to replace a NULL moment with 0.0 (all-NULL groups): the Welford init's `$mean` and
+/// `$m2`, read AsIs here, and the merged mean and m2 MergedChild reads out of MERGE_M2's struct.
 enum class StateReadback {
   AsIs,
   CountToInt64,  // cuDF's COUNT answers INT32; every count on the wire is INT64
-  MergedChild,   // one child of MERGE_M2's struct, a count child widened to INT64
+  MergedChild,   // one child of MERGE_M2's struct: the count widened to INT64, a moment as is
 };
 
 struct StateColumn {
@@ -1233,9 +1439,11 @@ struct AggregateRequests {
   std::vector<std::unique_ptr<cudf::column>> owned;
 };
 
-/// Appends `func`'s requests and state columns to `into`. Every input is the column its `args`
-/// name in `input` (whose columns are `names`), never one located by counting; a function whose
-/// args or state_names have the wrong length for its kind and phase is refused naming it.
+/// Appends `func`'s requests and state columns to `into`, evaluating each computed argument (and
+/// a Welford's FLOAT64 cast, a merge's MERGE_M2 struct) into `into.owned` once. Every input is the
+/// column its `args` name in `input` (whose columns are `names`), never one located by counting;
+/// a function whose args or state_names have the wrong length for its kind and phase, or a
+/// `count` at Merge, is refused naming it.
 static void add_requests(const fb::AggregateFuncNode* func, AggPhase phase,
                          cudf::table_view input, std::vector<std::string> const& names,
                          AggregateRequests& into);
@@ -1263,8 +1471,9 @@ static TableResult grouped_aggregate(const fb::CudfAggregate* agg, AggPhase phas
                                      std::vector<std::string> key_names, cudf::table_view input,
                                      std::vector<std::string> const& names);
 
-/// One grouped_aggregate-shaped call per grouping set, NULL placeholders for the masked keys,
-/// grouping_id_column after the keys, concatenated.
+/// One groupby per grouping set over the one set of requests the node's functions build (so a
+/// computed argument is evaluated once per node, not once per set), NULL placeholders for the
+/// masked keys, grouping_id_column after the keys, concatenated.
 static TableResult grouping_set_aggregate(const fb::CudfAggregate* agg, AggPhase phase,
                                           std::vector<cudf::column_view> const& keys,
                                           std::vector<std::string> const& key_names,
@@ -1277,7 +1486,7 @@ static TableResult grouping_set_aggregate(const fb::CudfAggregate* agg, AggPhase
   | kind | `Partial` | `Merge` | args / state_names |
   |---|---|---|---|
   | `sum`, `min`, `max` | that aggregation over `args[0]` | the same | 1 / 1 |
-  | `count` | `COUNT` over `args[0]`, `CountToInt64` | `SUM` over `args[0]` | 1 / 1 |
+  | `count` | `COUNT` over `args[0]`, `CountToInt64` | refused: the plan merges a count with `sum` | 1 / 1 |
   | `stddev`, `stddev_pop`, `var`, `var_pop` | `COUNT`, `MEAN`, `M2` over `args[0]` cast to `FLOAT64` | `MERGE_M2` over `merge_m2_input(args[0], args[1], args[2])`, three `MergedChild` | 1 or 3 / 3 |
 
 - [ ] **Step 1: The builder's gtests, failing.** `cpp/tests/gpu/test_aggregate_builder.cpp`
@@ -1291,6 +1500,7 @@ static TableResult grouping_set_aggregate(const fb::CudfAggregate* agg, AggPhase
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -1411,8 +1621,8 @@ TEST(AggregateBuilder, AWelfordInitEmitsItsTripleUnderItsThreeNames) {
 }
 
 TEST(AggregateBuilder, AMergeReadsEachStateColumnWhereItsArgPoints) {
-  // [k, a, b], merged as sum(b) then count(a): the first function's state is not the column
-  // after the keys, so a cursor would hand sum the counts.
+  // [k, a, b], merged as sum(b) then max(a): the first function's state is not the column
+  // after the keys, so a cursor would hand sum the a's (3, 3) and max the b's (200, 300).
   std::vector<std::unique_ptr<cudf::column>> c;
   c.push_back(hand::column_of<int32_t>({1, 1, 2}));
   c.push_back(hand::column_of<int64_t>({1, 2, 3}));
@@ -1420,12 +1630,25 @@ TEST(AggregateBuilder, AMergeReadsEachStateColumnWhereItsArgPoints) {
   flatbuffers::FlatBufferBuilder fbb;
   auto node = aggregate(fbb, fb::AggregateMode_Merge, {hand::ref(fbb, 0, "k")}, {"k"},
                         {func(fbb, "sum", {hand::ref(fbb, 2, "b")}, {"b"}),
-                         func(fbb, "count", {hand::ref(fbb, 1, "a")}, {"a"})});
+                         func(fbb, "max", {hand::ref(fbb, 1, "a")}, {"a"})});
   auto out = hand::run(fbb, node, one(hand::table_of(std::move(c), {"k", "a", "b"})));
   EXPECT_EQ(out.column_names, (std::vector<std::string>{"k", "b", "a"}));
   EXPECT_EQ((by_key<int64_t>(out, 1)), (std::map<int32_t, int64_t>{{1, 300}, {2, 300}}));
-  EXPECT_EQ((by_key<int64_t>(out, 2)), (std::map<int32_t, int64_t>{{1, 3}, {2, 3}}))
-      << "a count merges by sum";
+  EXPECT_EQ((by_key<int64_t>(out, 2)), (std::map<int32_t, int64_t>{{1, 2}, {2, 3}}));
+}
+
+TEST(AggregateBuilder, ACountAtMergeIsRefused) {
+  // The plan merges a count's state with sum (`count(*): sum(count(*)@1)`), and the cpu's
+  // merge refuses a count: one at Merge is a hand-built plan, refused by name, keyed or not.
+  for (bool keyed : {true, false}) {
+    flatbuffers::FlatBufferBuilder fbb;
+    auto count = func(fbb, "count", {hand::ref(fbb, 1, "v")}, {"n"});
+    auto node = keyed ? aggregate(fbb, fb::AggregateMode_Merge, {hand::ref(fbb, 0, "k")}, {"k"},
+                                  {count})
+                      : aggregate(fbb, fb::AggregateMode_Merge, {}, {}, {count});
+    auto why = refusal(fbb, node, rows());
+    EXPECT_NE(why.find("`count` at Merge"), std::string::npos) << "keyed " << keyed << ": " << why;
+  }
 }
 
 TEST(AggregateBuilder, AWelfordMergeReadsTheTripleWhereItsArgsPoint) {
@@ -1464,9 +1687,12 @@ TEST(AggregateBuilder, AGroupingSetBuildsTheWelfordTripleAndWhatFollowsIt) {
   ASSERT_EQ(out.column_names, (std::vector<std::string>{"k", "__grouping_id", "s$count",
                                                         "s$mean", "s$m2", "sum(v)"}));
   ASSERT_EQ(out.num_rows(), 3) << "two keys and the grand total";
+  ASSERT_EQ(out.view().column(1).type().id(), cudf::type_id::UINT8) << "one key: a UInt8 id";
   auto ids = hand::values_of<uint8_t>(out.view().column(1));
   auto counts = hand::values_of<int64_t>(out.view().column(2));
   auto sums = hand::values_of<int64_t>(out.view().column(5));
+  ASSERT_EQ(std::count(ids.begin(), ids.end(), uint8_t{0}), 2) << "the set keyed on k: two groups";
+  ASSERT_EQ(std::count(ids.begin(), ids.end(), uint8_t{1}), 1) << "the grand total: one row";
   for (size_t row = 0; row < ids.size(); ++row) {
     if (ids[row] != 1) continue;
     EXPECT_EQ(counts[row], 5) << "the grand total counts every row";
@@ -1536,11 +1762,20 @@ TEST(AggregateBuilder, AKeylessNodeNamesItsColumnsFromItsStateNames) {
 }
 ```
 
-  Red before Step 3, on the device: the shuffled merges read by cursor, the grouping set answers
-  one `STD` column, and nothing refuses a wrong arity. They compile now; they run in Task 10.
+  Ten cases. They compile now and run in Step 6's device cycle. Red there before Step 3:
+  `AMergeReadsEachStateColumnWhereItsArgPoints` and `AWelfordMergeReadsTheTripleWhereItsArgsPoint`
+  (the cursor reads the columns after the keys in order), `ACountAtMergeIsRefused` (a count merges
+  by `SUM`, grouped and keyless), `AGroupingSetBuildsTheWelfordTripleAndWhatFollowsIt` (one `STD`
+  column, so four names where six are declared), `AFunctionGivenTheWrongNumberOfArgsIsRefusedByName`
+  (nothing checks an arity) and `AFunctionWhoseStateNamesDoNotMatchItsColumnsIsRefused` (Task 3's
+  `state_name` refuses with its own message). Green before Step 3 too, as pins of what the builder
+  keeps: `PlainFunctionsAreNamedFromTheirStateNames`, `AWelfordInitEmitsItsTripleUnderItsThreeNames`,
+  `AWelfordOverZeroRowsIsNoGroupsTypedAsDeclared` (its merge input is in state order) and
+  `AKeylessNodeNamesItsColumnsFromItsStateNames`.
 
-- [ ] **Step 2: The rollup Welford, both engines** (red on the device before Step 3: the grouping-set
-  path answers `[key, id, STD, VARIANCE, sum]`). In `aggregate_dimension_cases.rs`:
+- [ ] **Step 2: The rollup Welford, both engines.** Every `GpuAggregate` here runs
+  `Script::Accumulate` (keyless-identity made the init a batch accumulator; its state is slot 0).
+  In `aggregate_dimension_cases.rs`:
 
 ```rust
 /// One key under ROLLUP, then a `stddev(f64)`, a `var_pop(f64)` and a `sum(i64)` after them:
@@ -1631,7 +1866,7 @@ const ROLLUP_WELFORD_MOMENTS: [usize; 4] = [3, 4, 6, 7];
 operator_case! {
     GpuAggregate,
     fn a_rollup_with_a_stddev_a_var_and_a_sum_agrees() {
-        let outcome = run_both(&rollup_welford_init(), Script::Exec(vec![input()]));
+        let outcome = run_both(&rollup_welford_init(), Script::Accumulate(vec![input()]));
         same_within_welford(
             &by_set_then_key(cpu_slot(&outcome, 0)),
             &by_set_then_key(gpu_slot(&outcome, 0)),
@@ -1645,7 +1880,7 @@ operator_case! {
     GpuAggregateBatches,
     fn a_rollup_welford_merge_agrees() {
         let partial = |seed| {
-            let init = run_both(&rollup_welford_init(), Script::Exec(vec![synthetic(64, seed)]));
+            let init = run_both(&rollup_welford_init(), Script::Accumulate(vec![synthetic(64, seed)]));
             cpu_slot(&init, 0).clone()
         };
         let outcome = run_both(&rollup_welford_merge(), Script::Accumulate(vec![partial(1), partial(2)]));
@@ -1667,16 +1902,23 @@ operator_case! {
 operator_case! {
     GpuAggregate,
     fn a_rollup_with_a_stddev_a_var_and_a_sum_declares_the_state_the_device_holds() {
-        assert_holds_as_declared(&rollup_welford_init(), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&rollup_welford_init(), Script::Accumulate(vec![input()]));
     }
 }
 ```
 
 ```bash
 CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run
+git grep -n 'Script::Exec' peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs peacockdb-core/src/tests/gpu_tests/aggregate_dimension_cases.rs peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs
 ```
 
-  Expected: compiles.
+  Expected: compiles; the grep prints nothing (keyless-identity swept the three files, and nothing
+  here writes `Script::Exec` back). Red on the device before Step 3:
+  `a_rollup_with_a_stddev_a_var_and_a_sum_agrees` and
+  `a_rollup_with_a_stddev_a_var_and_a_sum_declares_the_state_the_device_holds` (the grouping-set
+  path answers `[key, id, STD, VARIANCE, sum]`). `a_rollup_welford_merge_agrees` is a pin, green
+  before and after: its node is a plain grouped merge, its partials are the cpu's, and the state
+  arrives in order, which the cursor read right.
 
 - [ ] **Step 3: The builder.** In `aggregate.cpp`, delete `make_agg`, `OutBuild`, `arg_col`, the
   grouped section and the grouping-set block, and write the *Interfaces* declarations with these
@@ -1697,6 +1939,9 @@ static AggKind agg_kind(std::string const& name) {
 // counting, so a function with an arity of its own would read or name the wrong columns.
 static void check_shape(const fb::AggregateFuncNode* func, std::string const& name, AggKind kind,
                         AggPhase phase) {
+  if (kind == AggKind::Count && phase == AggPhase::Merge)
+    throw std::runtime_error("CudfAggregate: `count` at Merge: the plan merges a count's state "
+                             "with `sum`, so no count reaches a Merge");
   const bool welford = kind == AggKind::Welford;
   const size_t want_args = welford && phase == AggPhase::Merge ? 3 : 1;
   const size_t args = func->args() ? func->args()->size() : 0;
@@ -1764,15 +2009,10 @@ static void add_requests(const fb::AggregateFuncNode* func, AggPhase phase,
       into.columns.push_back({state(0), r, 0, StateReadback::AsIs});
       break;
     case AggKind::Count:
+      // Partial only: check_shape refused a count at Merge, whose state the plan merges by sum.
       req.values = arg(0);
-      if (phase == AggPhase::Partial) {
-        req.aggregations.push_back(cudf::make_count_aggregation<cudf::groupby_aggregation>());
-        into.columns.push_back({state(0), r, 0, StateReadback::CountToInt64});
-      } else {
-        // A count merges by sum: the one place a merge is not its init's aggregation.
-        req.aggregations.push_back(cudf::make_sum_aggregation<cudf::groupby_aggregation>());
-        into.columns.push_back({state(0), r, 0, StateReadback::AsIs});
-      }
+      req.aggregations.push_back(cudf::make_count_aggregation<cudf::groupby_aggregation>());
+      into.columns.push_back({state(0), r, 0, StateReadback::CountToInt64});
       break;
     case AggKind::Welford:
       if (phase == AggPhase::Partial) {
@@ -1783,12 +2023,15 @@ static void add_requests(const fb::AggregateFuncNode* func, AggPhase phase,
         req.aggregations.push_back(cudf::make_mean_aggregation<cudf::groupby_aggregation>());
         req.aggregations.push_back(cudf::make_m2_aggregation<cudf::groupby_aggregation>());
         into.columns.push_back({state(0), r, 0, StateReadback::CountToInt64});
+        // ⟵ welford-device: the init's mean and m2, NULL for an all-NULL group, read back as 0.0.
         into.columns.push_back({state(1), r, 1, StateReadback::AsIs});
         into.columns.push_back({state(2), r, 2, StateReadback::AsIs});
       } else {
         into.owned.push_back(merge_m2_input(arg(0), arg(1), arg(2)));
         req.values = into.owned.back()->view();
         req.aggregations.push_back(cudf::make_merge_m2_aggregation<cudf::groupby_aggregation>());
+        // ⟵ welford-device: children 1 and 2, the merged mean and m2, NULL where every merged
+        // count is 0, read back as 0.0 (in append_state_columns' MergedChild arm).
         for (int child = 0; child < 3; ++child)
           into.columns.push_back({state(child), r, 0, StateReadback::MergedChild, child});
       }
@@ -1819,7 +2062,8 @@ static void append_state_columns(AggregateRequests& built,
                               : std::move(result));
         break;
       case StateReadback::MergedChild:
-        // Three columns read one struct, so by view; its count comes back as kMergeM2CountType.
+        // Three columns read one struct, so by view; its count comes back as kMergeM2CountType,
+        // and as_int64_count copies a moment as it is.
         columns.push_back(as_int64_count(result->view().child(state.child)));
         break;
     }
@@ -1857,6 +2101,12 @@ static TableResult grouping_set_aggregate(const fb::CudfAggregate* agg, AggPhase
   std::vector<std::unique_ptr<cudf::column>> placeholders;
   for (cudf::size_type i = 0; i < nkeys; ++i)
     placeholders.push_back(build_column(agg->null_exprs()->Get(i), input));
+  // groupby::aggregate reads its requests const, so the node's one set of requests serves every
+  // grouping set: each computed argument, Welford cast and MERGE_M2 struct is built once per node,
+  // not once per set (a CUBE over n keys has 2^n sets).
+  AggregateRequests built;
+  if (agg->aggr_funcs())
+    for (auto const* func : *agg->aggr_funcs()) add_requests(func, phase, input, names, built);
   std::vector<std::unique_ptr<cudf::table>> set_tables;
   std::vector<std::string> out_names;
   for (auto const* set : *sets) {
@@ -1866,10 +2116,6 @@ static TableResult grouping_set_aggregate(const fb::CudfAggregate* agg, AggPhase
     std::vector<cudf::column_view> set_keys;
     for (cudf::size_type i = 0; i < nkeys; ++i)
       set_keys.push_back(mask->Get(i) ? placeholders[i]->view() : keys[i]);
-    // A request owns its aggregations, so each set builds its own.
-    AggregateRequests built;
-    if (agg->aggr_funcs())
-      for (auto const* func : *agg->aggr_funcs()) add_requests(func, phase, input, names, built);
     cudf::groupby::groupby gb{cudf::table_view{set_keys}, cudf::null_policy::INCLUDE};
     auto [group_keys, results] = gb.aggregate(built.requests);
     const auto rows = group_keys->num_rows();
@@ -1886,18 +2132,23 @@ static TableResult grouping_set_aggregate(const fb::CudfAggregate* agg, AggPhase
 }
 ```
 
-  Use `grouping_id_column`'s signature as grouping-id landed it (`mask` may be a
-  `flatbuffers::Vector<uint8_t>*` or the bools' vector there; pass what it takes). The keyless loop
+  `grouping_id_column(mask, nkeys, rows)` takes the set's `const flatbuffers::Vector<uint8_t>*`,
+  as grouping-id landed it. `append_state_columns` moves each set's own results and only reads
+  `built.columns`, so calling it once per set over the one `built` is sound. The keyless loop
   reads each argument with `check_shape(func, name, agg_kind(name), phase)` then
-  `value_of(func->args()->Get(0), tv, input.column_names, owned)` in place of `arg_col` (its `var`
-  still falls to `make_reduce_agg`'s "unsupported aggregate function: var", which
-  `bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device` pins; its decimal `sum` uses
-  `cudf::make_sum_aggregation<cudf::groupby_aggregation>()` directly). `execute_aggregate` becomes:
+  `value_of(func->args()->Get(0), tv, input.column_names, owned)` in place of `arg_col`, and its
+  `count` `Merge` arm (the `cudf::reduce` SUM Task 4 left) goes: `check_shape` refuses a count at
+  Merge first. Its `var` still falls to `make_reduce_agg`'s "unsupported aggregate function: var",
+  which `bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device` pins; its decimal `sum`
+  uses `cudf::make_sum_aggregation<cudf::groupby_aggregation>()` directly. `execute_aggregate`
+  becomes:
 
 ```cpp
 TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
   const AggPhase phase = agg_phase(agg->mode());
-  auto input = take_input(in);  // keyless-identity's no-input arm stays exactly as it landed
+  // keyless-identity's no-input arm, exactly as it landed: a done call handed nothing
+  // aggregates the zero-row table of aggr_input_schema.
+  auto input = was_handed_nothing(in) ? zero_rows_of(agg) : take_input(in);
   auto tv = input.view();
   std::vector<cudf::column_view> keys;
   std::vector<std::string> key_names;
@@ -1931,10 +2182,28 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
 - [ ] **Step 4: The hand-built merges read by reference.** In `test_plan_executor.cpp`,
   `nation_aggregate`'s merge writes one `ColumnRef` per state column: `stddev` reads
   `{make_col_ref(fbb, 1, "state$count"), make_col_ref(fbb, 2, "state$mean"),
-  make_col_ref(fbb, 3, "state$m2")}`; `sum` and `count` read `make_col_ref(fbb, 1, "state")`; the
-  partial reads `make_col_ref(fbb, 0, "n_nationkey")` as before. Delete its comment that a merge
-  "reads its state columns positionally". grouping-id's `grouping_sets_plan`: its `count` gains
-  `args` = `{make_col_ref(fbb, 0, "n_nationkey")}`, built before the builder opens.
+  make_col_ref(fbb, 3, "state$m2")}`; a one-column merge (`sum`, which also merges a count's
+  state since Task 4) reads `make_col_ref(fbb, 1, "state")`; the partial reads
+  `make_col_ref(fbb, 0, "n_nationkey")` as before. Delete its comment that a merge "reads its state
+  columns positionally". The arity check refuses a function node with no `args`, so every
+  hand-built `count` carries one, as the planner writes `count(*)` — `count(1)`
+  (`recipe-payloads.txt`: `count(*): count(1)`):
+
+```bash
+git grep -nE '"count"' cpp/tests/gpu
+```
+
+  - grouping-id's `grouping_sets_plan` (`test_grouping_id.cpp`): if its `count` has no `args`, it
+    gains `{make_col_ref(fbb, 0, "n_nationkey")}` (or `hand::ref(fbb, 0, "n_nationkey")`, whichever
+    the file builds references with), built before the builder opens, and
+    `count.add_args(count_args);` — the ids it asserts do not depend on what is counted;
+  - keyless-identity's `unfed_aggregate` (`test_aggregate_no_input.cpp`) already writes
+    `func_over(fbb, "count", int64_literal(fbb, 1), "n")`; if the landed file still builds
+    `count(*)` with no argument, it takes that call. The expectations stand: `count(1)` over the
+    zero-row table counts 0 rows, keyless, and a grouped node has no groups.
+
+  Every other hit already passes one argument (`nation_aggregate`, `AggregateCount`,
+  `AggregateGroupBy` since Task 4, the builder file's).
 - [ ] **Step 5: Build and run what runs locally.**
 
 ```bash
@@ -1949,29 +2218,165 @@ wc -l cpp/src/operators/aggregate.cpp
   Expected: clean; PASS; the grep prints nothing; under 1000 lines. `git status --short testdata/`
   is clean: no wire change here.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 6: The device cycle**, `FIX=cpp/src/operators/aggregate.cpp`: the red build is the
+  ten gtests, the three rollup cases and Step 4's test edits over the aggregate Task 4 left (Task 5
+  did not touch it). Red set:
 
 ```bash
-git add cpp peacockdb-core/src/tests/gpu_tests
+timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests --gtest_filter='AggregateBuilder.*'"
+timeout 3600 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 a_rollup_with_a_stddev a_rollup_welford_merge"
+```
+
+  Expected: the six `AggregateBuilder` cases and two rollup cases Steps 1 and 2 name red, each for
+  the reason named there; the four builder pins and `a_rollup_welford_merge_agrees` green. Green
+  set (the builder is every grouped aggregate's path, so the whole device corpus runs, written
+  nowhere):
+
+```bash
+timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests"
+timeout 1800 ssh $H "$R cpp/install/bin/peacock_gpu_tests"
+timeout 7200 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+timeout 14400 ssh $H "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1"
+```
+
+  Expected: all green — the ten `AggregateBuilder`, `AggregateMerge.*`, `GroupingId.*` and
+  `AggregateNoInput.*` among the gtests; the three rollup cases among the Rust ones; every enabled
+  corpus cell as before.
+
+- [ ] **Step 7: Commit.**
+
+```bash
+git add cpp peacockdb-core/src/tests/gpu_tests llm-wiki/tasks/aggregate-arms-detail.md
 git commit -m "#280: one request builder for the grouped and grouping-set paths
 
-Every input read through args by column_at; a Welford under a grouping
-set is the declared triple.
+Every input read through args by column_at, once per node; a Welford
+under a grouping set is the declared triple; a count at Merge is refused.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 7: Every other `ColumnRef` reader resolves through `column_at` (#164)
+### Task 7: A union branch named otherwise is projected to the union's names
+
+The device's schema validator never runs at a forwarder: a union hands the node above each
+branch's batches as they are, and that node's references are named from the union's schema. So a
+branch whose names differ from the union's and whose types match would meet Task 8's name check
+under its own names. `cast_branch` already projects a branch whose types differ; it now projects
+one whose names differ, with bare references renamed. SQL never reaches the shape — DataFusion's
+union coercion aliases each branch to the union's names in a projection
+(`a_union_forwards_its_branches_into_one_lane_numbering`'s second branch is that `Project`), and no
+plan golden has a union whose branch names differ — so no golden moves, and the test builds the
+union by hand. Today such a tree is refused at planning by the union's own validator
+(`check_branch_schemas` holds names as well as types); after this task it plans.
+
+**Files:**
+- Modify: `peacockdb-core/src/planner/translator/nodes.rs` (`cast_branch`, `branches`' doc)
+- Test: `peacockdb-core/src/planner/translator/schema_tests.rs`
+
+- [ ] **Step 1: The case, failing.** In `schema_tests.rs`, after
+  `a_union_branch_is_cast_to_the_declared_output_by_a_project` (add
+  `use datafusion::physical_plan::ExecutionPlan;` and
+  `use datafusion::physical_plan::union::UnionExec;`):
+
+```rust
+#[tokio::test]
+async fn a_union_branch_named_otherwise_is_renamed_by_a_project() {
+    // SQL never reaches this shape — DataFusion aliases a union's branches to its names itself —
+    // so the union is built by hand: the second branch holds `n_regionkey` where the union
+    // declares `n_nationkey`, at the same type. A union forwards its branches' batches as they
+    // are, so the node above would meet the branch's name under a reference to the union's.
+    let union: Arc<dyn ExecutionPlan> = Arc::new(UnionExec::new(vec![
+        physical_plan_for("SELECT n_nationkey FROM nation", 1).await,
+        physical_plan_for("SELECT n_regionkey FROM nation", 1).await,
+    ]));
+    let tree = Translator::new(1, Batching::Off)
+        .translate(&union)
+        .expect("translate the plan");
+    let union = tree.children()[0];
+    let declared = types_of(union);
+    assert_eq!(declared, vec![("n_nationkey".to_string(), DataType::Int32)]);
+    let branches = union.children();
+    assert!(
+        !matches!(as_node_ref(branches[0]), NodeRef::Project(_)),
+        "a branch already under the union's names and types is left as it is"
+    );
+    let NodeRef::Project(project) = as_node_ref(branches[1]) else {
+        panic!("the branch named otherwise is renamed by a project");
+    };
+    assert_eq!(
+        project.exprs[0].expr,
+        Expr::column(0, "n_regionkey"),
+        "a bare reference: nothing to cast where the types agree"
+    );
+    assert_eq!(types_of(branches[1]), declared, "the project emits the union's names");
+    union
+        .validate_schemas_and_partitions()
+        .expect("every branch now declares the union's names");
+}
+```
+
+```bash
+timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- planner::translator::schema_tests::a_union_branch
+```
+
+  Expected: `a_union_branch_named_otherwise_is_renamed_by_a_project` FAILS with "the branch named
+  otherwise is renamed by a project" (the branch is the scan itself); the type case still passes.
+
+- [ ] **Step 2: Project on a name as on a type.** In `cast_branch` (`nodes.rs`), `differs` becomes:
+
+```rust
+    // A type that differs needs a cast, and a name that differs a rename: a union forwards its
+    // branches' batches as they are, and the node above reads them by the union's names.
+    let differs = schema
+        .fields()
+        .iter()
+        .zip(declared.fields().iter())
+        .any(|(field, out)| field.data_type() != out.data_type() || field.name() != out.name());
+```
+
+  The rest of the function already writes a bare `Expr::column` where the type agrees, named
+  `out.name()`. `branches`' doc comment gains: "A branch named otherwise than the union is projected
+  too, its references renamed: nothing re-checks a forwarder's names on the device."
+
+- [ ] **Step 3: Run, and every plan as before.**
+
+```bash
+timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- planner::translator planner::tests::plan_goldens
+timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- --test-threads=2
+git status --short testdata/
+```
+
+  Expected: PASS; `testdata/` clean — no corpus union has a branch named otherwise, so no plan
+  golden gains a project. No device cycle: the change is the planner's, and its effect on the
+  device is Task 8's (and its whole-corpus run's) to show.
+
+- [ ] **Step 4: Commit.**
+
+```bash
+git add peacockdb-core/src/planner/translator/nodes.rs peacockdb-core/src/planner/translator/schema_tests.rs
+git commit -m "planner: a union branch named otherwise is projected to the union's names
+
+A forwarder hands the node above each branch's batches as they are, so the
+names it reads must be the union's before every ColumnRef is checked (#164).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8: Every other `ColumnRef` reader resolves through `column_at` (#164)
 
 **Files:**
 - Modify: `cpp/src/plan_executor_internal.h`, `cpp/src/peacock/expr.h`, `cpp/src/expr.cpp`
 - Modify: `cpp/src/operators/{filter,project,sort,window,aggregate,join_session}.cpp`,
   `cpp/src/node_session.cpp`
-- Modify: `cpp/tests/cpu/test_executor.cpp`, `cpp/tests/gpu/test_plan_executor.cpp`,
-  `cpp/tests/gpu/test_join_session.cpp`, `cpp/tests/gpu/test_column_refs.cpp`
+- Modify: `cpp/tests/cpu/test_executor.cpp`, `cpp/tests/gpu/test_plan_executor.cpp` (and every
+  gtest file calling `make_col_ref`), `cpp/tests/gpu/test_join_session.cpp`,
+  `cpp/tests/gpu/test_column_refs.cpp`
 - Modify: `peacockdb-core/src/tests/gpu_tests/aggregate_dimension_cases.rs`
+- Modify, only if the device corpus refuses a cell: `peacockdb-core/tests/common/corpus_cases.inc`,
+  `testdata/cost-registry.csv`, `llm-wiki/tickets/`
 
 **Interfaces:**
 - Produces (the names are the table's, one per column; `cudf_ast_can_evaluate` resolves every
@@ -2136,7 +2541,8 @@ static std::vector<std::string> filter_schema_names(JoinFilterColMap columns,
     `build_expr`'s join arm keeps its bounds check against the map and reads no names.
   - Tests: `test_executor.cpp`'s `AstRouting.CudfAstCanEvaluate` passes `{"l", "r"}` and `{"c"}`.
     In `test_plan_executor.cpp`, remove `make_col_ref`'s `= nullptr` default; each call the compiler
-    then names takes the name of the column at that ordinal of its input (on master: the join keys
+    then names, in that file or any gtest file that shares the helper, takes the name of the column
+    at that ordinal of its input (on master: the join keys
     `n_regionkey` / `r_regionkey`, the sorts after nation's projection `n_name`, the project of
     region `r_name` / `r_regionkey`, the sqrt and CASE cases `r_regionkey`, the date_part early
     `n_nationkey` and its `d`). `test_join_session.cpp`'s harness writes its filter references with
@@ -2159,10 +2565,63 @@ git grep -nE 'node_as_ColumnRef\(\)->index\(\)' cpp/src
   only `column_ordinal` itself and `build_expr`'s two arms (the AST arm, guarded as Step 2 says,
   and the join-map arm).
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 6: `expr.cpp` under the cap.**
 
 ```bash
-git add cpp peacockdb-core/src/tests/gpu_tests
+wc -l cpp/src/expr.cpp
+```
+
+  Expected: at most 1000. If the names threaded through it took it past 1000, move
+  `build_column_scalar_fn` (its largest function, ~145 lines on master) into a new
+  `cpp/src/expr_scalar_fn.cpp` in `namespace peacock`, declared non-static in
+  `plan_executor_internal.h` beside `cudf_ast_can_evaluate`, with the includes it uses, and add
+  `src/expr_scalar_fn.cpp` to `peacock_gpu`'s sources; rebuild and rerun Step 5.
+
+- [ ] **Step 7: The device cycle**, `FIX="cpp/src cpp/tests/cpu/test_executor.cpp"` (the cpu
+  case calls the three-argument `cudf_ast_can_evaluate`, so it leaves the red build with the fix;
+  `git add -N cpp/src/expr_scalar_fn.cpp` first if Step 6 made it). The red build is the
+  `ColumnRefs` gtests, the join session's residual case and Step 4's message over the readers as
+  Task 6 left them. Red set:
+
+```bash
+timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests --gtest_filter='ColumnRefs.*'"
+timeout 1800 ssh $H "$R cpp/install/bin/peacock_join_session_tests --gtest_filter='ColumnRefs.*'"
+timeout 3600 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 bug_a_global_stddev_finalize"
+```
+
+  Expected red: `ASortKeyRefusesEachBadReference` and `AComputedKeyRefusesEachBadReferenceInsideIt`
+  (no reader checks a name, so the unnamed and misnamed keys sort, and the index past the width
+  fails with another message), `AJoinResidualResolvesThroughItsSidesNames` (its misnamed residual
+  runs) and `bug_a_global_stddev_finalize_is_refused_on_the_device` (the old out-of-range message).
+  `AWellNamedSortKeyStillSorts` green. Green set — the whole device bar, since the check touches
+  every node (Tasks 9 and 10 change no plan the device runs but `rollup-stddev`'s and
+  `shuffle-stddev`'s, which Task 10 runs):
+
+```bash
+timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests"
+timeout 1800 ssh $H "$R cpp/install/bin/peacock_gpu_tests"
+timeout 1800 ssh $H "$R cpp/install/bin/peacock_join_session_tests"
+timeout 7200 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+timeout 1800 ssh $H "$R cpp/install/rust-tests/test_node_timing --test-threads=1"
+timeout 3600 ssh $H "$R cpp/install/rust-tests/peacock_gpu_benchmarks --skip bench_ --test-threads=1"
+timeout 14400 ssh $H "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1"
+```
+
+  Expected: all green — every gtest (`ColumnRefs.*`, `TableResultInvariant.*`, `AggregateBuilder.*`,
+  `AggregateMerge.*`, `GroupingId.*`, `AggregateNoInput.*` and the join session's residual case
+  among them), `gpu_tests::` with the #216 pins at their moved messages, and every enabled corpus
+  cell, `shuffle_stddev` included. On a red: a corpus cell the name check refuses is a wrong
+  reference found — ticket it (query, mode, message) at the next free number and take the cell
+  off under it, in its line and its registry row (the spec's rule), then rerun that cell's test
+  to see it skipped; a harness case the check refuses because its uploaded batch is named
+  otherwise than the node declares is a test fixture to fix, never a check to weaken. Rebuild
+  and rerun only what failed.
+
+- [ ] **Step 8: Commit.**
+
+```bash
+git add cpp peacockdb-core/src/tests/gpu_tests llm-wiki/tasks/aggregate-arms-detail.md
+# and, only if Step 7 took a cell off: peacockdb-core/tests/common/corpus_cases.inc testdata/cost-registry.csv llm-wiki/tickets
 git commit -m "#164: every ColumnRef reader in cpp/src checks bounds and name via column_at
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -2170,7 +2629,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 8: The scan's names, checked at plan time
+### Task 9: The scan's names, checked at plan time
 
 **Files:**
 - Modify: `peacockdb-core/src/planner/translator/scan_mapping/parquet_meta.rs` (`survivor_metadata`)
@@ -2332,13 +2791,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 9: `tpch/rollup-stddev`, and `tpch/shuffle-stddev` validated
+### Task 10: `tpch/rollup-stddev`, and `tpch/shuffle-stddev` validated
 
 **Files:**
 - Create: `testdata/tpch-queries/rollup-stddev.sql`
 - Modify: `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv`
 - Modify: `testdata/goldens/tpch.sf1/*.plans.txt`, the cpu tier's `*-mini.cpu.txt`,
-  `*-mini.cost.txt`, `mini.result.txt`, `duckdb-result.txt` (and `gpu-result.txt` in Task 10)
+  `*-mini.cost.txt`, `mini.result.txt`, `duckdb-result.txt`, `gpu-result.txt`
 
 - [ ] **Step 1: The query**, as the spec gives it:
 
@@ -2349,18 +2808,18 @@ from lineitem
 group by rollup (l_returnflag, l_linestatus);
 ```
 
-- [ ] **Step 2: The corpus lines.** After `shuffle_stddev`'s line, in the shape the file's lines
-  have (duckdb-oracle's argument before the cpu oracle; copy `shuffle_stddev`'s):
+- [ ] **Step 2: The corpus lines, device cells off for now.** After `shuffle_stddev`'s line, in
+  the shape the file's lines have (duckdb-oracle's argument before the cpu oracle; copy
+  `shuffle_stddev`'s):
 
 ```
 // rollup-stddev puts a Welford under a grouping set, which neither benchmark has; the grouping-set
-// path builds the triple through the one request builder (#280). Its device cells are turned on
-// by the round's GPU cycle, which writes their gpu-result sections.
+// path builds the triple through the one request builder (#280).
 corpus_query!(tpch, 1, rollup_stddev, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_enabled);
 ```
 
-  The device cells stay off in this commit, under `280`: duckdb-oracle's guard holds every enabled
-  device cell to a `gpu-result.txt` section, which only a device run writes (Task 10). `280` is
+  The device cells stay off through Step 4, under `280`: duckdb-oracle's guard holds every enabled
+  device cell to a `gpu-result.txt` section, which only a device run writes (Step 5). `280` is
   open until the merge archives it. `shuffle_stddev`'s line ends `schema_validation_enabled);`
   with its `// #225` gone, and the comment block above it loses any sentence about #225. Registry,
   after `shuffle_stddev`'s row:
@@ -2371,20 +2830,22 @@ tpch,1,rollup_stddev,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ena
 
   (`225` is in no registry row: shuffle-stddev's tags are `183`. Its cells do not change.)
 
-- [ ] **Step 3: Write the sections.**
+- [ ] **Step 3: Write the cpu and DuckDB sections.**
 
 ```bash
 UPDATE_CANONICAL=1 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_goldens
 UPDATE_CANONICAL=1 timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- rollup_stddev
-timeout 1800 python3 testdata/duckdb_result.py --dataset tpch
+[ -x /tmp/duckdb-1.5.4/bin/python ] || { python3 -m venv /tmp/duckdb-1.5.4 && /tmp/duckdb-1.5.4/bin/pip install duckdb==1.5.4; }
+timeout 1800 /tmp/duckdb-1.5.4/bin/python testdata/duckdb_result.py --dataset tpch
 git diff --stat testdata/
 ```
 
   Expected: the five `.plans.txt`, five `.cpu.txt`/`.cost.txt` and `mini.result.txt` gain a
   `rollup-stddev` section each and nothing else moves; `duckdb-result.txt` gains one section (read
-  the diff: the script rewrites the whole file). `recipe-payloads.txt` unchanged (the query is not
-  in the payload set). A cpu mode that fails on an open ticket comes off the line and the registry
-  cell takes the ticket; an unknown failure is filed.
+  the diff: the script rewrites the whole file, and any other moved line is reverted with
+  `git checkout -p`). `recipe-payloads.txt` unchanged (the query is not in the payload set). A cpu
+  mode that fails on an open ticket comes off the line and the registry cell takes the ticket; an
+  unknown failure is filed at the next free number.
 
 - [ ] **Step 4: Verify without writing.**
 
@@ -2393,109 +2854,122 @@ timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_c
 timeout 1800 cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens
 timeout 1800 cargo test --features rust-only -p peacockdb-core --test test_cost_model
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_goldens
-CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cudf.sh test -p peacockdb-core --test test_gpu_corpus --features gpu --no-run
 ```
 
   Expected: PASS, the registry tests both ways and the `gpu-result.txt` guard included (no device
   cell of `rollup_stddev` is on yet).
 
-- [ ] **Step 5: Commit.**
+- [ ] **Step 5: The device cells on, and the device cycle.** In the working tree, uncommitted:
+  `rollup_stddev`'s line's gpu modes become `tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup |
+  tp4_sized`; its registry row's five gpu cells `enabled` and its tickets empty. Compile the
+  device corpus locally first:
 
 ```bash
-git add testdata peacockdb-core/tests/common/corpus_cases.inc
+CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cudf.sh test -p peacockdb-core --test test_gpu_corpus --features gpu --no-run
+```
+
+  Then the *Device cycle*, green build only: the cells test Task 6's fix, which ran red first
+  there, and no tree in this branch holds the query without the fix. Green set, the write
+  filtered to the new query so no other section's float digits move:
+
+```bash
+timeout 3600 ssh $H "$R PCK_WRITE_GPU_RESULT=1 cpp/install/rust-tests/test_gpu_corpus --test-threads=1 rollup_stddev"
+timeout 3600 ssh $H "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1 rollup_stddev shuffle_stddev"
+timeout 600 rsync -a $H:peacockdb-L/testdata/goldens/tpch.sf1/gpu-result.txt testdata/goldens/tpch.sf1/
+git diff --stat testdata/goldens/
+```
+
+  Expected: the five `rollup_stddev` cells and the five `shuffle_stddev` cells green, the latter
+  now schema-validated; `gpu-result.txt` gains `rollup-stddev`'s five sections and nothing else
+  moves (duckdb-oracle merges per `(query, mode)` section). A `rollup_stddev` cell that fails goes
+  back off under its ticket, in the line and the registry, its section not committed. Record the
+  run in `aggregate-arms-detail.md`.
+
+- [ ] **Step 6: The guard, with the cells on.**
+
+```bash
+timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- rollup_stddev registry
+timeout 1800 cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens
+```
+
+  Expected: PASS — every enabled device cell of `rollup_stddev` has its section; the registry
+  agrees with the line both ways.
+
+- [ ] **Step 7: Commit.**
+
+```bash
+git add testdata peacockdb-core/tests/common/corpus_cases.inc llm-wiki/tasks/aggregate-arms-detail.md
 git commit -m "#280: tpch/rollup-stddev in the corpus; shuffle-stddev schema-validated (#225)
+
+rollup-stddev's device sections written by a run filtered to it.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 10: The device cycle, the docs, the counts
+### Task 11: The docs, the counts, the tickets
 
 **Files:**
-- Modify: `testdata/goldens/tpch.sf1/gpu-result.txt` (and any cell the cycle turns off:
-  `corpus_cases.inc`, `cost-registry.csv`)
 - Modify: `llm-wiki/architecture.md`, `llm-wiki/build-test.md`, `llm-wiki/tickets/corpus-coverage.md`
 
-- [ ] **Step 1: Turn `rollup_stddev`'s device cells on, uncommitted.** Its `corpus_query!` line's
-  gpu modes become `tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized`; its
-  registry row's five gpu cells `enabled` and its tickets empty; the line's last comment sentence
-  goes. The cycle below is what decides them.
+No device cycle: Tasks 8 and 10 ran the spec's device bar on this tree — every `peacock_*_tests`
+gtest binary (`peacock_plan_tests`, `peacock_gpu_tests`, `peacock_join_session_tests`),
+`gpu_tests::`, the walk tests and the whole `test_gpu_corpus` at Task 8, whose name check touches
+every node; Tasks 9 and 10 change no plan the device runs but `rollup-stddev`'s (new) and
+`shuffle-stddev`'s (validated), both run in Task 10; and this task changes only docs. Point the
+detail file's device-bar line at those two runs.
 
-- [ ] **Step 2: The GPU cycle** — the round's one, foreground, on nebius-gpu in `~/peacockdb-L`
-  (the tree holding the sf1 data and warm build dirs; chain J is done with it — use another dir
-  only if chain L's header names one):
-
-```bash
-timeout 900 rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ dmitry@89.169.109.150:peacockdb-L/
-timeout 10800 ssh dmitry@89.169.109.150 'cd ~/peacockdb-L && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'
-```
-
-  Then each binary on its own, so one red does not hide the next (`ENV` below is
-  `export LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib PEACOCK_TESTDATA_DIR=$PWD/testdata`):
-
-```bash
-R='cd ~/peacockdb-L && . ~/peacock-env.sh && export LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib PEACOCK_TESTDATA_DIR=$PWD/testdata &&'
-timeout 1800 ssh dmitry@89.169.109.150 "$R cpp/install/bin/peacock_gpu_tests"
-timeout 3600 ssh dmitry@89.169.109.150 "$R cpp/install/bin/peacock_plan_tests"
-timeout 3600 ssh dmitry@89.169.109.150 "$R cpp/install/bin/peacock_join_session_tests"
-timeout 7200 ssh dmitry@89.169.109.150 "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
-timeout 1800 ssh dmitry@89.169.109.150 "$R cpp/install/rust-tests/test_node_timing --test-threads=1"
-timeout 14400 ssh dmitry@89.169.109.150 "$R PCK_WRITE_GPU_RESULT=1 cpp/install/rust-tests/test_gpu_corpus --test-threads=1"
-timeout 3600 ssh dmitry@89.169.109.150 "$R cpp/install/rust-tests/peacock_gpu_benchmarks --skip bench_ --test-threads=1"
-timeout 600 rsync -a dmitry@89.169.109.150:peacockdb-L/testdata/goldens/tpch.sf1/gpu-result.txt testdata/goldens/tpch.sf1/
-git diff --stat testdata/goldens/
-```
-
-  Not `peacock_cpu_tests` (local) nor the sf40 pair. Expected: every gtest green — the builder's
-  nine, `TableResultInvariant.*`, `ColumnRefs.*`, `AggregateMerge.*`, `GroupingIds.*` and the join
-  session's residual case among them; `gpu_tests::` green — `stddev_holds_its_three_declared_state_names`,
-  `stddev_merge_holds_its_three_declared_state_names`, the three rollup Welford cases, and the #216
-  pins with their moved messages; the whole `test_gpu_corpus` green, the name check having touched
-  every node, with `shuffle_stddev` validated; `gpu-result.txt` gains `rollup-stddev`'s sections
-  and nothing else moves. Record the run (host, commit, per-binary result) in
-  `aggregate-arms-detail.md`.
-
-  On a red: a corpus cell the name check refuses is a wrong reference found — ticket it with the
-  query, mode and message, and take the cell off under it (the spec's rule); a `rollup_stddev` cell
-  that fails goes back off under its ticket, in the line and the registry. A harness case the
-  check refuses because its uploaded batch is named otherwise than the node declares is a test
-  fixture to fix, never a check to weaken. Rebuild and rerun only what failed.
-
-- [ ] **Step 3: `architecture.md`.** Short sentences; each a current fact.
+- [ ] **Step 1: `architecture.md`.** Short sentences; each a current fact.
   - The aggregate sequence: the keyless Welford sentence stays (#216); add that the device names
-    every state column from the function's `state_names`.
+    every state column from the function's `state_names`, and that a `count` merges by `sum`, so a
+    `count` at `Merge` is refused on both engines.
   - The fbs table's `CudfAggregate` row: `mode` (Partial/Merge; the rest refused), `group_exprs`,
     `aggr_funcs` (each with `args`, `state_names`, `ddof`), `grouping_sets`, `aggr_input_schema`;
     `aggregate.cpp` — one request builder (`add_requests`) behind `grouped_aggregate` and
-    `grouping_set_aggregate`, inputs read through `args`; `cudf::reduce` for a keyless node.
+    `grouping_set_aggregate`, inputs read through `args`, built once per node and shared by every
+    grouping set; `cudf::reduce` for a keyless node.
   - *What the Rust side puts in the flat buffers*: rows for `AggregateFuncNode.state_names` and
     `.ddof` (`aggregate_writer.rs`, from `state_funcs` → the names every state column carries; the
-    keyless stddev's divisor); `CudfAggregate.mode`'s row says Final is refused.
-  - The ordinal table: `ColumnRef.index` is read by `column_at` / `column_ordinal` (`expr.cpp`),
-    which every reader uses; *What guards it* is rewritten: a reference is checked for its index
-    and its name, a `TableResult` is built only through its constructors, and a scan's declared
-    names are checked against the file at plan time. The "parallel array with no invariant"
-    paragraph and the Final-stage arity sentence go. Recount the `->index()` and `.column(…)`
-    figures or drop them.
+    divisor of a stddev or var, read by the keyless `stddev` arm); `CudfAggregate.mode`'s row says
+    Final is refused.
+  - The ordinal table: `ColumnRef.index` is read by `column_at` / `column_ordinal`
+    (`column_refs.cpp`), which every reader uses; *What guards it* is rewritten: a reference is
+    checked for its index and its name, a `TableResult` is built only through its constructors
+    (`owning`, and `of` for shared parts), a union branch named otherwise is projected to the
+    union's names (`cast_branch`), and a scan's declared names are checked against the file at
+    plan time. The "parallel array with no invariant" paragraph and the Final-stage arity sentence
+    go. Recount the `->index()` and `.column(…)` figures or drop them.
+  - The union row: a branch whose types or names differ from the union's gets a projecting
+    `GpuProject`.
   - The scan row: the device reads by declared name; `survivor_metadata` refuses a declared schema
     that renames or reorders a read column.
-- [ ] **Step 4: Tickets citing moved code** (a ticket is about code; fix its facts here):
+- [ ] **Step 2: Tickets citing moved code** (a ticket is about code; fix its facts here):
   - #216: `mergeable`, `is_stddev_name` and the `ColumnRef index 2 out of range (cols=1)` message
     are gone; the keyless arm tests the `stddev` names and reads `ddof` from the wire, and the
     finalize's refusal is `column_at`'s "is past the 1 columns its input has".
   - #94: the site is `merge_m2_input` and its constant `kMergeM2CountType`; there is no Final arm.
   - #164, #225 and #280 are archived at merge by the helper, as chain K's plans leave theirs.
-- [ ] **Step 5: `build-test.md` counts.** Every count moved with J, K and L: recount each row this
-  task touches from the code and set every header and the grand total to the sums. This task's
-  deltas: C++ CPU/FFI unit +7 (`AggregatePhase` 1, `ColumnRefs` 6); Plan-executor (C++) +16 and −1
-  (`AnAvgsSumAndCountBothSurviveTheMerge`): `TableResultInvariant` 2, `ColumnRefs` 3,
-  `AggregateBuilder` 9 (in two new files linked into `peacock_plan_tests`; say so in the row) and
-  the join session's residual case +1 in its own row; plan types +2 (`plan::tests::aggregate`);
-  wire recipes +1; scan mapping +3; gpu aggregate cases +3; the cpu corpus +5 cells and one query
-  (`tpch/rollup-stddev`); the device corpus +5 cells; the device corpus row's sentence about
-  `shuffle-stddev` saying `disabled` against #225 goes.
-- [ ] **Step 6: The full verification bar, locally.**
+- [ ] **Step 3: `build-test.md` counts.** Every count moved with J, K and L: recount each row this
+  plan touches from the code (`--list` for the Rust tiers, `--gtest_list_tests` for the gtest
+  binaries) and set every header and the grand total to the sums. This plan's deltas, to check
+  the recount against:
+  - C++ CPU/FFI unit (`peacock_cpu_tests`) +9: `TableResultInvariant` 2 (Task 1),
+    `AggregatePhase` 1 (Task 4), `ColumnRefs` 6 (Task 5's five, and Task 8's
+    `TheAstRouteResolvesAReferenceUnderAnOperator`) — 2 + 1 + 6 = 9;
+  - Plan-executor (`peacock_plan_tests`) +14 − 1 = +13: `TableResultInvariant` 1 (Task 1),
+    `AggregateBuilder` 10 (Task 6), `ColumnRefs` 3 (Task 8) — 1 + 10 + 3 = 14 — all in two new files
+    linked into the binary (say so in the row); − `AnAvgsSumAndCountBothSurviveTheMerge` (Task 4);
+  - the join session (`peacock_join_session_tests`) +1, in its own row
+    (`ColumnRefs.AJoinResidualResolvesThroughItsSidesNames`);
+  - plan types +2 (`plan::tests::aggregate`); wire recipes +1 (`wire::tests::aggregate_init`);
+    planner translator +1 (`a_union_branch_named_otherwise_is_renamed_by_a_project`); scan mapping
+    +3;
+  - gpu aggregate cases +3 (the three rollup Welford cases; the two #225 flips are renames);
+  - the cpu corpus +5 cells and one query (`tpch/rollup-stddev`); the device corpus +5 cells
+    (fewer by any Task 10 left off); the device corpus row's sentence about `shuffle-stddev` saying
+    `disabled` against #225 goes.
+- [ ] **Step 4: The full verification bar, locally.**
 
 ```bash
 timeout 3600 cargo test --features rust-only -p peacockdb-core --lib
@@ -2510,11 +2984,11 @@ timeout 600 ctest --test-dir cpp/build -L cpu --output-on-failure
   Expected: all green, the registry tests both ways and duckdb-oracle's `gpu-result.txt` guard
   included. The 26.02 build leg is CI's.
 
-- [ ] **Step 7: Commit.**
+- [ ] **Step 5: Commit.**
 
 ```bash
-git add testdata llm-wiki peacockdb-core/tests/common/corpus_cases.inc
-git commit -m "aggregate-arms: rollup-stddev's device sections; architecture, tickets, counts
+git add llm-wiki/architecture.md llm-wiki/build-test.md llm-wiki/tickets/corpus-coverage.md llm-wiki/tasks/aggregate-arms-detail.md
+git commit -m "aggregate-arms: architecture, tickets and counts
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```

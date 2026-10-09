@@ -8,9 +8,9 @@ joins the corpus; every device cell the three tickets hold is run, then enabled 
 
 **Architecture:** One static `grouping_id_column(mask, nkeys, rows)` in `aggregate.cpp` folds a
 set's mask into a `uint64_t`, first key highest, and builds the column at DataFusion's width. The
-exec model folds the same way. The rest is proof: gtests through a hand-built plan, the four `bug_`
-pins turned into agreement cases, a contract row both engines answer, walk tests against
-DataFusion, and the corpus run.
+exec model folds the same way. The rest is proof: gtests in a new `test_grouping_id.cpp` over
+hand-built tables from a new shared `hand_tables.hpp`, the four `bug_` pins turned into agreement
+cases, a contract row both engines answer, walk tests against DataFusion, and the corpus run.
 
 **Tech stack:** C++20 on cuDF 25.02 (`peacock_plan_tests`, a device binary); Rust: the rust-only
 cpu tier and the `--features gpu` device rung; the Python exec model; DuckDB 1.5.4 for the oracle
@@ -21,7 +21,8 @@ section.
 ## Before you start
 
 Chain L's base is master once chains J and K have both merged. This plan was written against
-8806a3c3, before either. Find every site below by its symbol, never by a line number. What moves:
+8806a3c3, before either, and revised against 0753f8c9. Find every site below by its symbol, never
+by a line number. What moves:
 
 - **`cpp/src/operators/aggregate.cpp`.** K (distinct-companions, its Task 5) deletes the
   `distinct` guard at the top of `execute_aggregate`. refcounted-scatter makes every `return {…}`
@@ -29,17 +30,23 @@ Chain L's base is master once chains J and K have both merged. This plan was wri
   releases groupby's keys in the loop that builds `cols`, right beside the `gid_s` lines. So read
   `gk->num_rows()` before anything releases `gk`. The arm is still the block under
   `// ---- ROLLUP / CUBE / GROUPING SETS ----`, holding `int32_t gid` and `numeric_scalar<int32_t> gid_s`.
-- **`cpp/tests/gpu/test_plan_executor.cpp`.** K drops the `/*distinct=*/false` argument from
-  `CreateAggregateFuncNode`. refcounted-scatter rewrites `.table->view()` to `.view()`.
-  join-backend moves the join cases onto the session. The gtests below use
-  `AggregateFuncNodeBuilder`, so K's change does not touch them. They read `result.view()`, so if
-  `TableResult` still has a `table` member, write `result.table->view()`.
+- **`cpp/tests/gpu/test_plan_executor.cpp`** (2203 lines, past the 1000-line cap) takes nothing
+  from this plan. K drops its `/*distinct=*/false` arguments; refcounted-scatter rewrites
+  `.table->view()` to `.view()`; join-backend moves its join cases onto the session. `main`, which
+  installs the RMM pool, stays there and serves every source of `peacock_plan_tests`.
+- **`TableResult`** (refcounted-scatter, J) is `{owners, columns, column_names}` with `view()`
+  and the constructor `owning(std::unique_ptr<cudf::table>, std::vector<std::string>)`, which
+  refuses a name count unequal to the column count. `hand_tables.hpp` builds on both.
+- **`cpp/CMakeLists.txt`.** join-session-cpp adds the `peacock_join_session_tests` binary
+  (`tests/gpu/test_join_session.cpp`). `peacock_plan_tests`' source list is
+  `tests/gpu/test_plan_executor.cpp` alone on master; append to it as it stands.
 - **`peacockdb-core/src/wire/gpu_tests/mod.rs`.** join-backend rewrites the join walker, `driven`
   and `PROVEN`. Nothing here depends on them. The aggregate walk tests, `held`, `after`, `times`,
-  `trail`, `TWO_LANES` and `ONE_LANE` keep their names.
+  `trail`, `TWO_LANES` and `ONE_LANE` keep their names. A `mod.rs` has no length cap.
 - **`peacockdb-core/tests/common/corpus_cases.inc`.** duckdb-oracle gives every line a ninth
   argument, `duckdb_oracle`, before `cpu_oracle`, and adds the `all_modes` sugar. pbench adds a
-  third dataset, with `pbench/rollup-small-keys`. Copy the shape of a neighbouring line.
+  third dataset, with `pbench/rollup-small-keys`. K adds `distinct_functions` with gpu oracle
+  `golden_exact`; Task 5 makes it `golden_approx_std`. Copy the shape of a neighbouring line.
 - **`testdata/cost-registry.csv`.** repartition-keys closes #189: the tp4 cpu cells of the rollup
   rows turn on, and their gpu tp4 cells take `65`, `pbench/rollup-small-keys`' among them
   (`repartition-keys-impl.md`, its corpus task). join-backend closes #152 and #220 and tags
@@ -55,8 +62,16 @@ Chain L's base is master once chains J and K have both merged. This plan was wri
   it over the whole dataset and read the diff. Check whether duckdb-oracle has changed this.
 - **`llm-wiki/build-test.md`.** Every count moves with J and K. Recount each row this plan touches
   from the code. The deltas below are this task's alone.
-- **After this task:** aggregate-arms, chain L's next task, rewrites how the grouping-set arm builds
-  its requests (#280). It keeps calling `grouping_id_column`. Do not reach into its scope.
+- **Ticket numbers.** `tickets.md` on 0753f8c9 leaves 264–279 to chain J's branches and has K's
+  280 on. A new ticket here takes the next free number from master's `tickets.md` as it stands
+  after J's merge, which reconciles the two; read its counter line, never a number from this plan.
+- **After this task:** keyless-identity's `AggregateNoInput.*` gtests and aggregate-arms'
+  `test_column_refs.cpp` and `test_aggregate_builder.cpp` go in their own files, appended to
+  `peacock_plan_tests`' sources, and include the `hand_tables.hpp` Task 2 creates; aggregate-arms
+  no longer creates it. aggregate-arms rewrites how the grouping-set arm builds its requests (#280)
+  and keeps calling `grouping_id_column`. Its arity check wants one argument per function, which
+  `grouping_sets_node`'s `count(k)` already has; its alias and `state_names` work updates that
+  node in `test_grouping_id.cpp`. The suite is `GroupingId`. Do not reach into their scope.
 
 ## Global constraints
 
@@ -73,47 +88,86 @@ Chain L's base is master once chains J and K have both merged. This plan was wri
   path gets a ticket, not a fix here.
 - A `bug_` test that goes red is deleted in the same change that fixed it, or here, turned into
   the agreement case under a name without `bug_` (`coding-style.md`, *Building around a bug*).
+- **The 1000-line cap** (`coding-style.md`). `test_plan_executor.cpp` takes no new test: the
+  `GroupingId.*` gtests go in a new `cpp/tests/gpu/test_grouping_id.cpp`, and Task 3's conditional
+  gtest in a new `test_summed_quotient.cpp`, each added to `peacock_plan_tests`' sources.
 - CPU builds and runs are local, as `build-test.md` describes them. Rust: `cargo test --features
   rust-only` into `target/`. C++: `cpp/build` against cuDF 25.02, `scripts/build.sh --cudf_ROOT
   ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build`, then
   `ctest --test-dir cpp/build -L cpu`. The cudf Rust shape goes through `scripts/cargo-cudf.sh`.
-- Device builds and runs happen on the host chain L's board header names (nebius-gpu,
-  `dmitry@89.169.109.150`), as the *Device cycle* below. The spec allows one cycle per round.
-  Where a task has a red run and a green run, they are two builds of that round's cycle, back to
-  back. Record every run (command, binaries, pass and fail counts) in
-  `llm-wiki/tasks/grouping-id-detail.md`.
-- Out of every task, as the header says: the sf40 binaries, `--run-benchmarks` and Nsight.
-- Formatting applies to changed lines only. For C++, `git clang-format HEAD -- <files>`. For
-  Rust, `rustfmt --edition 2024 --check <file>`, applied only where its diff stays inside the
-  lines this task wrote.
-- `test_plan_executor.cpp` is already past the 1000-line cap. Splitting it is out of scope: its
-  helpers are file-static, and other chain J tasks add to it too.
+  The workspace needs the sf1 parquet under `testdata/` (gitignored): symlink it from the primary
+  checkout if absent.
+- **Device** on nebius-gpu, `dmitry@89.169.109.150`, cuDF 25.02, in `~/peacockdb-L`, as chain L's
+  header says: **one sync per task, with as many back-to-back builds as its red/green pairs need,
+  the red build first.** Three tasks have device tests: Task 2 (a red build and a green build),
+  Task 3 (one build, plus a pair if #55 is live) and Task 5 (the trial build and the final build).
+  Each syncs once, as the *Device cycle* below, after its local tiers pass and before its commit;
+  a file written after the sync travels by name, never in a second sync. Record every build and
+  run (command, binaries, pass and fail counts per binary) in `llm-wiki/tasks/grouping-id-detail.md`,
+  committed with the task that ran it.
+- **Out of every task, as the header says:** the sf40 binaries (`peacock_tpch_tests`,
+  `peacock_tpchv_tests`), `--run-benchmarks`, Nsight captures and any H200 timing, each recorded in
+  the detail file as deferred. **Done** is CI green except the `gpu-tests` job ("GPU Tests
+  (remote)", shad-gpu), with every task's device runs passed on nebius-gpu and recorded in the
+  detail file.
+- Formatting applies to changed lines only. For C++, `git clang-format HEAD -- <files>`, and
+  `clang-format -i` on a new file, all of whose lines are this task's. For Rust,
+  `rustfmt --edition 2024 --check <file>`, applied only where its diff stays inside the lines this
+  task wrote.
 - No commit leaves a test red. Commit messages are at most 10 lines and end with
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Build in a workspace, and never
   share a cargo target dir across worktrees.
 
 ## Device cycle
 
-Every device step in this plan is these three commands, run in the foreground with their timeouts.
-A backgrounded chain dies mid-build with no error. If ssh is refused at once, the sandbox is
-blocking it, not the host.
+A task with device tests runs this once, after its tests and its fix are written and every local
+tier passes, and before its commit. The one sync carries the whole working tree, uncommitted. The
+red build is the tree with the task's `FIX` (the paths whose diff is the fix, never a test file)
+reversed by a patch; the green build is the tree as written. Run everything in the foreground: a
+backgrounded build chain dies mid-build with no error. If `ssh` seems dead while the host answers
+a raw socket, the sandbox is blocking the client, not the host.
 
 ```bash
-GPU=dmitry@89.169.109.150   # nebius-gpu, as chain L's header names it
-DIR=peacockdb-L              # the header's directory there; chain J's pattern gives this name
-# 1. sync the working tree, uncommitted, from the workspace root
-timeout 1200 rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ "$GPU:$DIR/"
-# 2. build there
-timeout 7200 ssh "$GPU" "cd ~/$DIR && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build"
-# 3. run what the step names, in place of RUN
-timeout 3600 ssh "$GPU" "cd ~/$DIR && . ~/peacock-env.sh && \
-  export LD_LIBRARY_PATH=\$PWD/cpp/install/lib:\$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib \
-         PEACOCK_TESTDATA_DIR=\$PWD/testdata && RUN"
+H=dmitry@89.169.109.150
+R='cd ~/peacockdb-L && . ~/peacock-env.sh && export LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib PEACOCK_TESTDATA_DIR=$PWD/testdata &&'
+B='cd ~/peacockdb-L && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'
+# The fix's reverse, for the red build.
+git diff -R HEAD -- $FIX > /tmp/grouping-id-red.patch
+# The task's one sync, from the workspace root.
+timeout 1200 rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ $H:peacockdb-L/
+timeout 300 rsync -a /tmp/grouping-id-red.patch $H:grouping-id-red.patch
+# Red build: the tests without the fix.
+timeout 300 ssh $H 'cd ~/peacockdb-L && patch -p1 < ~/grouping-id-red.patch'
+timeout 7200 ssh $H "$B"
+timeout 3600 ssh $H "$R $CMD"     # once per command of the red set
+# Green build: the fix back in.
+timeout 300 ssh $H 'cd ~/peacockdb-L && patch -p1 -R < ~/grouping-id-red.patch'
+timeout 7200 ssh $H "$B"
+timeout 3600 ssh $H "$R $CMD"     # once per command of the green set
 ```
 
-A fresh `~/$DIR` has no sf1 parquet. Copy it from the other chain's tree, or generate it with
-`testdata/generate_testdata.sh --bench tpch` and `--bench tpcds`, as the header says. pbench's data
-is committed. Every Rust binary takes `--test-threads=1`.
+A task with no red build (it says why) skips the patch and the red lines. A file changed after the
+sync, for a further red/green pair or a changed declaration, travels by name from the workspace
+root, then the next build runs back to back:
+
+```bash
+timeout 300 rsync -aR $PATHS $H:peacockdb-L/   # PATHS: each file changed since the sync
+```
+
+A fresh `~/peacockdb-L` has no sf1 parquet. After the first sync and before its first build, copy
+it from chain J's tree;
+it is gitignored, so later syncs leave it alone. pbench's data is committed.
+
+```bash
+timeout 1800 ssh $H 'cd ~/peacockdb-L/testdata && for d in tpch.sf1 tpcds.sf1; do [ -d $d ] || cp -a ~/peacockdb-J/testdata/$d .; done'
+```
+
+Every case a task names as red must fail, for the reason it names. A case red for another reason,
+or green where the task expects red, is a finding to settle before the fix: a test that passes
+without its fix may assert nothing. Every case of the green set passes. One binary per `ssh`, so
+one red does not hide the next. Every Rust binary takes `--test-threads=1`. If the loader cannot
+find `libcudf`, the 25.02 env on that host may be `~/miniforge3/envs/rapids-cuda-12.2` (#260
+records that path): use whichever exists and say so in the detail file.
 
 ## Review focus
 
@@ -134,7 +188,7 @@ is committed. Every Rust binary takes `--test-threads=1`.
 5. **A DISTINCT under an eight-key rollup.** The inner stage carries nine keys, so its id is
    `UInt16`, and a project narrows it to DataFusion's `UInt8`. Before the fix the device doubled
    that id, and at eight keys the cast overflowed (#65's note from distinct-companions). Expected:
-   both stages' inits hold `UInt16`, and the answer is DataFusion's. Task 3's
+   both stages' inits hold `UInt16`, and the answer is DataFusion's. Task 2's
    `a_distinct_under_an_eight_key_rollup_narrows_a_uint16_id_to_datafusions`.
 
 ## File structure
@@ -143,14 +197,15 @@ is committed. Every Rust binary takes `--test-threads=1`.
 |---|---|
 | `scripts/exec_model/operators/aggregates.py`, `tests/test_operators.py`, `tests/test_end_to_end.py` | the model's id |
 | `cpp/src/operators/aggregate.cpp` | `grouping_id_column`; the arm calls it |
-| `cpp/tests/gpu/test_plan_executor.cpp` | `GroupingId.*` |
+| `cpp/tests/gpu/hand_tables.hpp` (new) | hand-built device tables and plan pieces, shared by chain L's gtests |
+| `cpp/tests/gpu/test_grouping_id.cpp` (new), `cpp/CMakeLists.txt` | `GroupingId.*`, in `peacock_plan_tests` |
 | `peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs`, `aggregate_schema_cases.rs` | three `bug_` pins become agreement cases; `grouping_sets_as_exported` goes |
 | `peacockdb-core/src/tests/executor_cases.rs`, `executor/cpu_backend/tests/contract.rs`, `executor/gpu_backend/gpu_tests/contract.rs` | the rollup contract row, on both engines |
-| `peacockdb-core/src/wire/gpu_tests/mod.rs` | the fourth pin; the `GROUPING()`, quotient and DISTINCT walks |
+| `peacockdb-core/src/wire/gpu_tests/mod.rs` | the fourth pin; the `GROUPING()`, narrowed-id, quotient and DISTINCT walks |
 | `peacockdb-core/src/planner/translator/tests.rs` | one comment that names #65 |
 | `testdata/tpch-queries/rollup-grouping.sql` (new), `testdata/goldens/tpch.sf1/*` | the new query |
 | `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv`, `testdata/goldens/*/gpu-result.txt` | the cells |
-| `llm-wiki/architecture.md`, `build-test.md`, `tickets.md`, `tickets/`, `archive/archived-tickets.md` | the id described; counts; #65, #55, #262 |
+| `llm-wiki/architecture.md`, `build-test.md`, `tickets.md`, `tickets/`, `archive/archived-tickets.md`, `tasks/grouping-id-detail.md` | the id described; counts; #65, #55, #262; the device record |
 
 ---
 
@@ -248,7 +303,7 @@ DUCKDB=$(command -v duckdb || echo ~/.duckdb/cli/latest/duckdb) timeout 3600 pyt
   drop the id in their final project, so no answer moves.
 
 - [ ] **Step 5: Counts.** In `build-test.md`: *Exec-model prototype (Python)* +1 (216 at
-  8806a3c3); the header's Python +1 and the grand total +1.
+  0753f8c9); the header's Python +1 and the grand total +1.
 
 - [ ] **Step 6: Commit.**
 
@@ -270,7 +325,8 @@ EOF
 
 **Files:**
 - Modify: `cpp/src/operators/aggregate.cpp` (a static above `execute_aggregate`; the grouping-set arm)
-- Test: `cpp/tests/gpu/test_plan_executor.cpp` (a `GroupingId` section after the `AggregateMerge` cases)
+- Create: `cpp/tests/gpu/hand_tables.hpp`, `cpp/tests/gpu/test_grouping_id.cpp`
+- Modify: `cpp/CMakeLists.txt` (`peacock_plan_tests`' sources)
 - Modify: `peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs`, `aggregate_schema_cases.rs`
 - Modify: `peacockdb-core/src/tests/executor_cases.rs`, `peacockdb-core/src/executor/cpu_backend/tests/contract.rs`,
   `peacockdb-core/src/executor/gpu_backend/gpu_tests/contract.rs`
@@ -278,9 +334,10 @@ EOF
 - Modify: `peacockdb-core/src/planner/translator/tests.rs` (the comment in
   `grouping_sets_expand_at_the_init_and_group_on_the_id_above_it`)
 - Modify: `llm-wiki/architecture.md` (*Grouping sets*), `llm-wiki/build-test.md`, `llm-wiki/tickets/corpus-coverage.md` (#65)
+- Create: `llm-wiki/tasks/grouping-id-detail.md`
 
 **Interfaces:**
-- Produces (file-static, `aggregate.cpp`):
+- Produces (file-static, `aggregate.cpp`; aggregate-arms' `grouping_set_aggregate` calls it):
 
 ```cpp
 static std::unique_ptr<cudf::column> grouping_id_column(const flatbuffers::Vector<uint8_t>* mask,
@@ -288,29 +345,131 @@ static std::unique_ptr<cudf::column> grouping_id_column(const flatbuffers::Vecto
                                                         cudf::size_type rows);
 ```
 
+- Produces (test-only, `cpp/tests/gpu/hand_tables.hpp`; keyless-identity's and aggregate-arms'
+  gtest files include it): namespace `hand` with `column_of<T>(values)`, `values_of<T>(column)`,
+  `table_of(columns, names)`, `ref(fbb, index, name)`, `null_of(fbb, type)` and
+  `run(fbb, node, inputs)`, exactly as Step 1 writes them.
 - Produces (test-only, `src/tests/executor_cases.rs`): `Shape::SumOverRollup`, `ROLLUP_STATE`,
   `rollup_bodies()`, `rollup_rows(&RecordBatch)`.
 
-- [ ] **Step 1: The gtests.** In `test_plan_executor.cpp`, add `#include <set>`. After
-  `TEST(AggregateMerge, AOneColumnAggregateMergesByItsOwnRule)` and before
-  `date_part_over_a_made_date`, add:
+- [ ] **Step 1: The shared header.** `cpp/tests/gpu/hand_tables.hpp`:
 
 ```cpp
-// ---- the grouping-set id --------------------------------------------------------------
-//
-// DataFusion's `__grouping_id`: the masks fold in key order, the first key highest, at the
-// narrowest unsigned width with a bit per key. Every key here is nation's n_regionkey again,
-// so a set's groups are the five regions or, fully masked, one row; only the id is read.
+#pragma once
+// Hand-built inputs for operator gtests: device columns from host values and back, and the
+// flat-buffer pieces an operator reads. An operator runs through execute_one with these as its
+// resident inputs, as NodeSession hands them.
 
-/// A Partial over nation grouped on `nkeys` copies of n_regionkey under `masks`, with a count.
-static std::vector<uint8_t> grouping_sets_plan(flatbuffers::FlatBufferBuilder& fbb, int nkeys,
-                                               const std::vector<std::vector<bool>>& masks) {
-  auto input = nation_scan_node(fbb);
+#include "generated/gpu_plan_generated.h"
+#include "peacock/operators.h"
+#include "plan_executor.h"
+
+#include <cudf/column/column.hpp>
+#include <cudf/table/table.hpp>
+#include <cudf/utilities/default_stream.hpp>
+#include <cudf/utilities/type_dispatcher.hpp>
+#include <rmm/device_buffer.hpp>
+
+#include <cuda_runtime.h>
+#include <flatbuffers/flatbuffers.h>
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace hand {
+namespace fb = peacock::plan;
+
+template <typename T>
+std::unique_ptr<cudf::column> column_of(std::vector<T> const& values) {
+  rmm::device_buffer data(values.data(), values.size() * sizeof(T), cudf::get_default_stream());
+  return std::make_unique<cudf::column>(cudf::data_type{cudf::type_to_id<T>()},
+                                        static_cast<cudf::size_type>(values.size()),
+                                        std::move(data), rmm::device_buffer{}, 0);
+}
+
+template <typename T>
+std::vector<T> values_of(cudf::column_view const& column) {
+  std::vector<T> host(column.size());
+  cudaMemcpy(host.data(), column.data<T>(), host.size() * sizeof(T), cudaMemcpyDeviceToHost);
+  return host;
+}
+
+inline peacock::TableResult table_of(std::vector<std::unique_ptr<cudf::column>> columns,
+                                     std::vector<std::string> names) {
+  return peacock::TableResult::owning(std::make_unique<cudf::table>(std::move(columns)),
+                                      std::move(names));
+}
+
+/// A ColumnRef; `name` null writes none, which is what a hand-built plan used to do.
+inline flatbuffers::Offset<fb::Expr> ref(flatbuffers::FlatBufferBuilder& fbb, uint32_t index,
+                                         const char* name) {
+  auto text = name ? fbb.CreateString(name) : flatbuffers::Offset<flatbuffers::String>{};
+  return fb::CreateExpr(fbb, fb::ExprNode_ColumnRef, fb::CreateColumnRef(fbb, index, text).Union());
+}
+
+inline flatbuffers::Offset<fb::Expr> null_of(flatbuffers::FlatBufferBuilder& fbb, fb::DataType type) {
+  fb::ScalarValueBuilder sb(fbb);
+  sb.add_type(type);
+  sb.add_is_null(true);
+  auto value = sb.Finish();
+  return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, fb::CreateLiteralExpr(fbb, value).Union());
+}
+
+/// `node` as the root of `fbb`'s plan, run once over `inputs`.
+inline peacock::TableResult run(flatbuffers::FlatBufferBuilder& fbb,
+                                flatbuffers::Offset<fb::PlanNode> node,
+                                std::vector<peacock::TableResult> inputs) {
+  fbb.Finish(fb::CreateGpuPlan(fbb, node));
+  return peacock::execute_one(fb::GetGpuPlan(fbb.GetBufferPointer())->root(), std::move(inputs));
+}
+
+}  // namespace hand
+```
+
+  A node run this way has no `input` child: `execute_one` hands it the tables as resident inputs,
+  and the operator takes them with `take_input`, as `NodeSession` does.
+
+- [ ] **Step 2: The gtests.** `cpp/tests/gpu/test_grouping_id.cpp`:
+
+```cpp
+/// #65: the grouping-set id is DataFusion's `__grouping_id`. The masks fold in key order, the
+/// first key highest, at the narrowest unsigned width with a bit per key; past 64 keys refused.
+/// Every key is the one hand-built column `k` again, so a set's groups are k's two values or,
+/// fully masked, one row; only the id is read.
+
+#include "hand_tables.hpp"
+
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace {
+namespace fb = peacock::plan;
+
+/// The resident input: k = 1 1 2 2 2.
+std::vector<peacock::TableResult> the_keys() {
+  std::vector<std::unique_ptr<cudf::column>> columns;
+  columns.push_back(hand::column_of<int32_t>({1, 1, 2, 2, 2}));
+  std::vector<peacock::TableResult> inputs;
+  inputs.push_back(hand::table_of(std::move(columns), {"k"}));
+  return inputs;
+}
+
+/// A Partial grouped on `nkeys` copies of `k` under `masks`, with count(k).
+flatbuffers::Offset<fb::PlanNode> grouping_sets_node(flatbuffers::FlatBufferBuilder& fbb,
+                                                     int nkeys,
+                                                     const std::vector<std::vector<bool>>& masks) {
   std::vector<flatbuffers::Offset<fb::Expr>> keys, nulls;
   std::vector<flatbuffers::Offset<flatbuffers::String>> names;
   for (int i = 0; i < nkeys; ++i) {
-    keys.push_back(make_col_ref(fbb, 2, "n_regionkey"));
-    nulls.push_back(make_null_literal(fbb, fb::DataType_Int32));
+    keys.push_back(hand::ref(fbb, 0, "k"));
+    nulls.push_back(hand::null_of(fbb, fb::DataType_Int32));
     names.push_back(fbb.CreateString("k" + std::to_string(i)));
   }
   std::vector<flatbuffers::Offset<fb::GroupingSetMask>> sets;
@@ -321,8 +480,11 @@ static std::vector<uint8_t> grouping_sets_plan(flatbuffers::FlatBufferBuilder& f
   }
   auto count_name = fbb.CreateString("count");
   auto count_alias = fbb.CreateString("n");
+  auto count_arg = hand::ref(fbb, 0, "k");
+  auto count_args = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{count_arg});
   fb::AggregateFuncNodeBuilder count(fbb);
   count.add_name(count_name);
+  count.add_args(count_args);
   count.add_alias(count_alias);
   auto count_func = count.Finish();
   auto funcs =
@@ -337,41 +499,36 @@ static std::vector<uint8_t> grouping_sets_plan(flatbuffers::FlatBufferBuilder& f
   agg.add_group_exprs(key_vec);
   agg.add_group_names(name_vec);
   agg.add_aggr_funcs(funcs);
-  agg.add_input(input);
   agg.add_null_exprs(null_vec);
   agg.add_null_names(null_names);
   agg.add_grouping_sets(set_vec);
-  auto node = make_plan_node(fbb, fb::PlanNodeKind_CudfAggregate, agg.Finish().Union());
-  return finish_plan(fbb, node);
+  return fb::CreatePlanNode(fbb, fb::PlanNodeKind_CudfAggregate, agg.Finish().Union());
 }
 
-static std::vector<bool> none_masked(int nkeys) { return std::vector<bool>(nkeys, false); }
-static std::vector<bool> all_masked(int nkeys) { return std::vector<bool>(nkeys, true); }
+std::vector<bool> none_masked(int nkeys) { return std::vector<bool>(nkeys, false); }
+std::vector<bool> all_masked(int nkeys) { return std::vector<bool>(nkeys, true); }
 
 /// `nkeys` keys with only `position` masked.
-static std::vector<bool> masked_at(int nkeys, int position) {
+std::vector<bool> masked_at(int nkeys, int position) {
   auto mask = none_masked(nkeys);
   mask[position] = true;
   return mask;
 }
 
-/// The id a grouping-set Partial answers: its type, and the value each set carries.
-struct GroupingIds {
+/// The id column a grouping-set Partial answers: its type, and the value each set carries.
+struct IdColumn {
   cudf::type_id type;
   std::set<uint64_t> values;
 };
 
-static GroupingIds grouping_ids(int nkeys, const std::vector<std::vector<bool>>& masks) {
+IdColumn id_column(int nkeys, const std::vector<std::vector<bool>>& masks) {
   flatbuffers::FlatBufferBuilder fbb;
-  WholePlan plan(grouping_sets_plan(fbb, nkeys, masks));
-  const auto& result = plan.result();
-  EXPECT_EQ(result.column_names[nkeys], "__grouping_id");
+  auto result = hand::run(fbb, grouping_sets_node(fbb, nkeys, masks), the_keys());
+  EXPECT_EQ(result.column_names.at(nkeys), "__grouping_id");
   auto id = result.view().column(nkeys);
-  GroupingIds out{id.type().id(), {}};
+  IdColumn out{id.type().id(), {}};
   auto widen = [&](auto zero) {
-    using T = decltype(zero);
-    std::vector<T> host(id.size());
-    cudaMemcpy(host.data(), id.data<T>(), id.size() * sizeof(T), cudaMemcpyDeviceToHost);
+    auto host = hand::values_of<decltype(zero)>(id);
     out.values.insert(host.begin(), host.end());
   };
   switch (out.type) {
@@ -385,45 +542,47 @@ static GroupingIds grouping_ids(int nkeys, const std::vector<std::vector<bool>>&
   return out;
 }
 
+}  // namespace
+
 TEST(GroupingId, OneKeyIsUInt8) {
-  auto ids = grouping_ids(1, {none_masked(1), all_masked(1)});
+  auto ids = id_column(1, {none_masked(1), all_masked(1)});
   EXPECT_EQ(ids.type, cudf::type_id::UINT8);
   EXPECT_EQ(ids.values, (std::set<uint64_t>{0, 1}));
 }
 
 TEST(GroupingId, ATwoKeyRollupFoldsTheFirstKeyHighest) {
   // ROLLUP(a, b) is (a, b), (a), (): 0, 1, 3. Bit i for masked key i gave the middle set 2.
-  auto ids = grouping_ids(2, {none_masked(2), masked_at(2, 1), all_masked(2)});
+  auto ids = id_column(2, {none_masked(2), masked_at(2, 1), all_masked(2)});
   EXPECT_EQ(ids.type, cudf::type_id::UINT8);
   EXPECT_EQ(ids.values, (std::set<uint64_t>{0, 1, 3}));
 }
 
 TEST(GroupingId, EightKeysStayUInt8) {
-  auto ids = grouping_ids(8, {masked_at(8, 0), masked_at(8, 7), all_masked(8)});
+  auto ids = id_column(8, {masked_at(8, 0), masked_at(8, 7), all_masked(8)});
   EXPECT_EQ(ids.type, cudf::type_id::UINT8);
   EXPECT_EQ(ids.values, (std::set<uint64_t>{1, 128, 255}));
 }
 
 TEST(GroupingId, NineKeysAreUInt16) {
-  auto ids = grouping_ids(9, {masked_at(9, 0), all_masked(9)});
+  auto ids = id_column(9, {masked_at(9, 0), all_masked(9)});
   EXPECT_EQ(ids.type, cudf::type_id::UINT16);
   EXPECT_EQ(ids.values, (std::set<uint64_t>{256, 511}));
 }
 
 TEST(GroupingId, SeventeenKeysAreUInt32) {
-  auto ids = grouping_ids(17, {masked_at(17, 0), all_masked(17)});
+  auto ids = id_column(17, {masked_at(17, 0), all_masked(17)});
   EXPECT_EQ(ids.type, cudf::type_id::UINT32);
   EXPECT_EQ(ids.values, (std::set<uint64_t>{65536, 131071}));
 }
 
 TEST(GroupingId, ThirtyThreeKeysAreUInt64) {
-  auto ids = grouping_ids(33, {masked_at(33, 0), all_masked(33)});
+  auto ids = id_column(33, {masked_at(33, 0), all_masked(33)});
   EXPECT_EQ(ids.type, cudf::type_id::UINT64);
   EXPECT_EQ(ids.values, (std::set<uint64_t>{uint64_t{1} << 32, (uint64_t{1} << 33) - 1}));
 }
 
 TEST(GroupingId, SixtyFourKeysFillTheWord) {
-  auto ids = grouping_ids(64, {masked_at(64, 0), all_masked(64)});
+  auto ids = id_column(64, {masked_at(64, 0), all_masked(64)});
   EXPECT_EQ(ids.type, cudf::type_id::UINT64);
   EXPECT_EQ(ids.values, (std::set<uint64_t>{uint64_t{1} << 63, UINT64_MAX}));
 }
@@ -431,17 +590,28 @@ TEST(GroupingId, SixtyFourKeysFillTheWord) {
 TEST(GroupingId, SixtyFiveKeysAreRefusedByCount) {
   // DataFusion refuses past 64 keys; an id that wrapped would answer the wrong sets.
   flatbuffers::FlatBufferBuilder fbb;
-  auto buf = grouping_sets_plan(fbb, 65, {none_masked(65), all_masked(65)});
+  auto node = grouping_sets_node(fbb, 65, {none_masked(65), all_masked(65)});
   try {
-    WholePlan plan(buf);
+    hand::run(fbb, node, the_keys());
     FAIL() << "a grouping set over 65 keys answered";
-  } catch (const std::exception& e) {
+  } catch (const std::runtime_error& e) {
     EXPECT_NE(std::string(e.what()).find("65 keys"), std::string::npos) << e.what();
   }
 }
 ```
 
-- [ ] **Step 2: The four pins become agreement cases.** In `aggregate_cases.rs`, delete
+- [ ] **Step 3: Wire the file.** In `cpp/CMakeLists.txt`, append `tests/gpu/test_grouping_id.cpp`
+  to `add_executable(peacock_plan_tests …)`'s sources, keeping every source already there. On
+  master that line becomes:
+
+```cmake
+add_executable(peacock_plan_tests tests/gpu/test_plan_executor.cpp tests/gpu/test_grouping_id.cpp)
+```
+
+  The target's include directories (`include`, `src`, the generated dir's parent) already reach
+  `peacock/operators.h`, `plan_executor.h` and `generated/gpu_plan_generated.h`.
+
+- [ ] **Step 4: The four pins become agreement cases.** In `aggregate_cases.rs`, delete
   `grouping_sets_as_exported` and its doc comment. Replace the two `#65` cases, comments
   included:
 
@@ -505,13 +675,22 @@ async fn a_rollup_partial_holds_the_uint8_grouping_id_the_plan_declares() {
 }
 ```
 
-- [ ] **Step 3: `GROUPING()` on a walk.** In `wire/gpu_tests/mod.rs`, after `const ROLLUP`:
+- [ ] **Step 5: `GROUPING()` and a narrowed id on a walk.** In `wire/gpu_tests/mod.rs`, after
+  `const ROLLUP`:
 
 ```rust
 const ROLLUP_GROUPING: &str = "SELECT n_regionkey, n_nationkey, \
      grouping(n_regionkey, n_nationkey) AS g, count(*) FROM nation \
      GROUP BY ROLLUP (n_regionkey, n_nationkey)";
+const DISTINCT_UNDER_A_WIDE_ROLLUP: &str = "SELECT l_orderkey, l_partkey, l_linenumber, \
+     l_returnflag, l_linestatus, l_shipinstruct, l_shipmode, l_comment, \
+     count(DISTINCT l_suppkey), count(*) FROM lineitem WHERE l_orderkey <= 7 \
+     GROUP BY ROLLUP (l_orderkey, l_partkey, l_linenumber, l_returnflag, l_linestatus, \
+     l_shipinstruct, l_shipmode, l_comment)";
 ```
+
+  The wide rollup's keys are integers and strings only, the types the device already groups
+  under grouping sets, so a red there is the id or the lowering and not a key type.
 
   After `a_rollup_answers_with_every_grouping_set`:
 
@@ -524,13 +703,43 @@ async fn a_grouping_over_every_key_answers_datafusions_id() {
 }
 ```
 
-  Add `(ROLLUP_GROUPING, TWO_LANES),` to the list in
-  `the_kinds_a_device_has_run_are_the_kinds_this_file_claims`. Nation is under
-  `SMALL_TABLE_BYTES`, so its scan plans one lane. If the walk panics on an accumulator over a
-  lane that holds no handle (the walk has no empty-lane arm; a coalesce over nothing is refused),
-  the walk is the limit and the id is not. Then use `ONE_LANE` and say so in the detail file.
+  After `a_rollup_partial_holds_the_uint8_grouping_id_the_plan_declares`:
 
-- [ ] **Step 4: The contract row.** In `src/tests/executor_cases.rs`, add the imports
+```rust
+/// Eight keys and the DISTINCT argument make nine, so both stages carry a `UInt16` id where
+/// DataFusion's over the eight is `UInt8`, and a project narrows it above the outer stage.
+/// The argument is never masked, so its bit is 0 and the narrowed value is DataFusion's.
+#[tokio::test]
+async fn a_distinct_under_an_eight_key_rollup_narrows_a_uint16_id_to_datafusions() {
+    let held = held(DISTINCT_UNDER_A_WIDE_ROLLUP, ONE_LANE).await;
+    let ids: Vec<TypeId> = after(&held, PARTIAL)
+        .iter()
+        .map(|schema| {
+            schema
+                .0
+                .iter()
+                .find(|(name, _)| name == "__grouping_id")
+                .map(|(_, held)| held.id)
+                .expect("each stage's init carries the id")
+        })
+        .collect();
+    assert_eq!(ids, vec![TypeId::UInt16, TypeId::UInt16]);
+}
+```
+
+  Add `(ROLLUP_GROUPING, TWO_LANES),` and `(DISTINCT_UNDER_A_WIDE_ROLLUP, ONE_LANE),` to the list
+  in `the_kinds_a_device_has_run_are_the_kinds_this_file_claims`.
+
+  Nation's lanes at `TWO_LANES`: nation has one row group, but a walk's
+  `BatchSizing::OneBatchPerLane` is `Batching::Off`, for which `lanes_for`
+  (`planner/translator/nodes.rs`) plans `target_partitions` lanes whatever the table's size, so
+  `SMALL_TABLE_BYTES` never applies. Nation's scan therefore has two lanes, and the second holds no
+  batch. The init makes no call on that lane, and the repartition above it hands both merge lanes
+  a handle, so the rollup walks as `SUM_BY_FLAG` does. If the walk nonetheless fails on the empty
+  lane, that is not the id: diagnose it with `superpowers:systematic-debugging` and settle it with
+  the reviewer. The spec asks for `TWO_LANES`, so do not drop to `ONE_LANE`.
+
+- [ ] **Step 6: The contract row.** In `src/tests/executor_cases.rs`, add the imports
   `datafusion::arrow::array::RecordBatch`, `datafusion::arrow::datatypes::{DataType, Field}`,
   `datafusion::common::ScalarValue` and `crate::plan::{AggCall, AggregateBody, Expr, PlanAgg}`.
   Add a variant to `Shape`, after `SumByKeyAndGroupingId`:
@@ -737,7 +946,7 @@ fn merged_over(
         }
 ```
 
-- [ ] **Step 5: Local, before any device.**
+- [ ] **Step 7: Local, before the fix.**
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- executor::cpu_backend::tests::contract
@@ -747,27 +956,12 @@ CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 5400 scripts/cargo-cud
 ```
 
   Expected: the contract passes on the cpu, which was already right, new row included. The whole
-  `--lib` passes. `peacock_plan_tests` and the gpu lib compile. A `ScalarValue`
-  that renders NULL other than as `NULL` shows here as a cpu failure: fix the expectation from
-  the cpu's actual rows, then check them against DataFusion's convention by hand.
+  `--lib` passes. `peacock_plan_tests`, with `test_grouping_id.cpp` linked in, and the gpu lib
+  compile. A `ScalarValue` that renders NULL other than as `NULL` shows here as a cpu failure: fix
+  the expectation from the cpu's actual rows, then check them against DataFusion's convention by
+  hand. The device tests' red is seen in Step 10's red build.
 
-- [ ] **Step 6: Device cycle, red.** The tests, not yet the fix. RUN:
-
-```bash
-cpp/install/bin/peacock_plan_tests --gtest_filter='GroupingId.*'; \
-cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 \
-  tests::gpu_tests::aggregate_cases::grouping_sets tests::gpu_tests::aggregate_schema_cases::grouping_sets \
-  wire::gpu_tests:: executor::gpu_backend::gpu_tests::contract
-```
-
-  Expected: all eight `GroupingId` cases FAIL. Seven fail with "the id is not an unsigned integer:
-  type id 3" (INT32), and `SixtyFiveKeysAreRefusedByCount` fails with "answered". Six Rust tests
-  FAIL: both harness cases ("cpu and gpu differ"), the schema case (`2 __grouping_id: UInt8 vs
-  INT32`), the rollup partial (`Int32` at position 2), the `GROUPING()` walk (`g` 2 where the
-  oracle has 1) and the contract (the rollup row). Every other walk passes. A case red for
-  another reason is a finding to settle before the fix.
-
-- [ ] **Step 7: The fold.** In `aggregate.cpp`, above `execute_aggregate`:
+- [ ] **Step 8: The fold.** In `aggregate.cpp`, above `execute_aggregate`:
 
 ```cpp
 // DataFusion's `__grouping_id` (`group_id_array`, datafusion-physical-plan aggregates/mod.rs):
@@ -813,17 +1007,61 @@ static std::unique_ptr<cudf::column> grouping_id_column(const flatbuffers::Vecto
   In the arm's header comment, "tag rows with a distinct id" becomes "tag each set's rows with
   DataFusion's grouping id".
 
-- [ ] **Step 8: Device cycle, green.** RUN:
+- [ ] **Step 9: Format and the local bar.**
 
 ```bash
-cpp/install/bin/peacock_plan_tests && cpp/install/bin/peacock_gpu_tests && \
+git clang-format HEAD -- cpp/src/operators/aggregate.cpp
+clang-format -i cpp/tests/gpu/hand_tables.hpp cpp/tests/gpu/test_grouping_id.cpp
+rustfmt --edition 2024 --check peacockdb-core/src/tests/executor_cases.rs \
+  peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs \
+  peacockdb-core/src/executor/cpu_backend/tests/contract.rs peacockdb-core/src/executor/gpu_backend/gpu_tests/contract.rs
+timeout 5400 scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build
+timeout 1800 ctest --test-dir cpp/build -L cpu --output-on-failure
+timeout 3600 cargo test --features rust-only -p peacockdb-core --lib
+CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 5400 scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run
+```
+
+  Expected: green, with no new warning in either build. Check `wire/gpu_tests/mod.rs` by eye: it is
+  a `mod.rs`, so rustfmt would reach past it.
+
+- [ ] **Step 10: The device cycle.** `FIX=cpp/src/operators/aggregate.cpp`. One sync, a red build,
+  a green build, as *Device cycle* says.
+
+  Red set, one `ssh` each:
+
+```bash
+cpp/install/bin/peacock_plan_tests --gtest_filter='GroupingId.*'
+cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 \
+  tests::gpu_tests::aggregate_cases::grouping_sets tests::gpu_tests::aggregate_schema_cases::grouping_sets \
+  wire::gpu_tests:: executor::gpu_backend::gpu_tests::contract
+```
+
+  Expected red: all eight `GroupingId` cases FAIL. Seven fail with "the id is not an unsigned
+  integer: type id 3" (INT32), and `SixtyFiveKeysAreRefusedByCount` fails with "answered". Seven
+  Rust tests FAIL: both harness cases ("cpu and gpu differ"), the schema case (`2 __grouping_id:
+  UInt8 vs INT32`), the rollup partial (`Int32` at position 2), the `GROUPING()` walk (`g` 2 where
+  the oracle has 1), the narrowed-id walk (`Int32` where `UInt16` is expected, or the narrowing
+  project's cast refusing the doubled id) and the contract (the rollup row). Every other walk
+  passes.
+
+  Green set, one `ssh` each:
+
+```bash
+cpp/install/bin/peacock_plan_tests
+cpp/install/bin/peacock_gpu_tests
+cpp/install/bin/peacock_join_session_tests
 cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 gpu_tests::
 ```
 
-  Expected: every case passes, the eight `GroupingId` ones and the six Rust cases from step 6
-  among them, and nothing else moves. Fill the step 6 and step 8 counts into the detail file.
+  Expected green: every case passes, the eight `GroupingId` ones and the seven Rust cases above
+  among them. `peacock_plan_tests` runs whole, so K's `test_plan_executor.cpp` cases, built and
+  never run until now, run here (#262's gtest proof). A K case red here whose cause is the DISTINCT
+  lowering's device path is fixed here, red first, as its own pair of back-to-back builds, the test
+  and then the fix carried by name; any other cause is a finding to settle with the reviewer
+  before the commit. Create `llm-wiki/tasks/grouping-id-detail.md` with a *Device runs*
+  table (build, tree, command, pass and fail counts per binary), and fill in both builds.
 
-- [ ] **Step 9: The docs.**
+- [ ] **Step 11: The docs.**
   - `architecture.md`, *Grouping sets*. The paragraph that begins "The gid is a real column":
     replace the dash clause with "at the width DataFusion declares: `UInt8` up to 8 keys,
     `UInt16` to 16, `UInt32` to 32, `UInt64` to 64, and past 64 keys both engines refuse". Keep
@@ -835,51 +1073,43 @@ cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 gpu_tests::
   - `planner/translator/tests.rs`: the comment's second sentence becomes "The id's value and
     width are execution-side and not pinned here."
   - `tickets/corpus-coverage.md`, #65: one line above **Corpus queries**, "**Fixed by
-    grouping-id** (`grouping_id_column`, `aggregate.cpp`). Its cells run in that task's last step,
+    grouping-id** (`grouping_id_column`, `aggregate.cpp`). Its cells run in grouping-id's Task 5,
     which archives it." The ticket stays at 15 lines or fewer.
-  - `build-test.md`. *Plan-executor (C++)* +8 (56 at 8806a3c3), and its prose gains "the grouping
-    id's value and width from one key to sixty-four, and the refusal past them". The C++ header
-    +8. *Recipe walk on a device* +1 (21): its last clause becomes "and the rollup's partial
-    holding the `UInt8` id the plan declares", and `GROUPING()` over every key is named among the
-    walks. `--lib -- gpu_tests::`, the gpu block and the Rust header each +1. *Operator harness,
-    what the device holds*: recount its `bug_` pins and drop the #65 clause. *Executor contract,
-    both engines*: one row more, "a rollup's grouping id in value and type". The grand total +9.
+  - `build-test.md`. *Plan-executor (C++)* +8 (56 at 0753f8c9): its prose gains "the grouping id's
+    value and width from one key to sixty-four, and the refusal past them", and where the row
+    names its source files, `test_grouping_id.cpp` joins them. The C++ header +8. *Recipe walk on a
+    device* +2 (21 at 0753f8c9): its last clause becomes "and the rollup's partial holding the
+    `UInt8` id the plan declares", and `GROUPING()` over every key and the narrowed `UInt16` id
+    under an eight-key DISTINCT rollup are named among the walks. `--lib -- gpu_tests::`, the gpu
+    block and the Rust header each +2. *Operator harness, what the device holds*: recount its
+    `bug_` pins and drop the #65 clause. *Executor contract, both engines*: one row more, "a
+    rollup's grouping id in value and type". The grand total +10.
   - `rg -n '#65\b|t65\b' --glob '!llm-wiki/archive/**' --glob '!llm-wiki/tasks/**'`. Every hit
     left in code says something true.
 
-- [ ] **Step 10: Format and the cpu bar.**
+- [ ] **Step 12: Commit.**
 
 ```bash
-git clang-format HEAD -- cpp/src/operators/aggregate.cpp cpp/tests/gpu/test_plan_executor.cpp
-rustfmt --edition 2024 --check peacockdb-core/src/tests/executor_cases.rs \
-  peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs \
-  peacockdb-core/src/executor/cpu_backend/tests/contract.rs peacockdb-core/src/executor/gpu_backend/gpu_tests/contract.rs
-timeout 5400 scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build
-timeout 1800 ctest --test-dir cpp/build -L cpu --output-on-failure
-timeout 3600 cargo test --features rust-only -p peacockdb-core --lib
-```
-
-  Expected: green, with no new warning in either build. Check `wire/gpu_tests/mod.rs` by eye: it is
-  a `mod.rs`, so rustfmt would reach past it.
-
-- [ ] **Step 11: Commit.**
-
-```bash
-git add cpp/src/operators/aggregate.cpp cpp/tests/gpu/test_plan_executor.cpp \
-        peacockdb-core/src/tests peacockdb-core/src/executor/cpu_backend/tests/contract.rs \
+git add cpp/src/operators/aggregate.cpp cpp/tests/gpu/hand_tables.hpp cpp/tests/gpu/test_grouping_id.cpp \
+        cpp/CMakeLists.txt peacockdb-core/src/tests peacockdb-core/src/executor/cpu_backend/tests/contract.rs \
         peacockdb-core/src/executor/gpu_backend/gpu_tests/contract.rs peacockdb-core/src/wire/gpu_tests/mod.rs \
         peacockdb-core/src/planner/translator/tests.rs llm-wiki/architecture.md llm-wiki/build-test.md \
-        llm-wiki/tickets/corpus-coverage.md
+        llm-wiki/tickets/corpus-coverage.md llm-wiki/tasks/grouping-id-detail.md
+git status --short
 git commit -F - <<'EOF'
 #65: the device's grouping-set id is DataFusion's, in value and width
 
 grouping_id_column folds the mask first key highest into UInt8/16/32/64 and
-refuses past 64 keys. The four bug_ pins are agreement cases; a contract row and a
-GROUPING() walk hold both engines to it.
+refuses past 64 keys; GroupingId gtests in test_grouping_id.cpp over the new
+hand_tables.hpp. The four bug_ pins are agreement cases; a contract row, a
+GROUPING() walk and a narrowed-id walk hold both engines to it.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
+
+  If a K case needed a fix in Step 10, add its files, and the body gains one line naming that
+  case and its fix.
 
 ---
 
@@ -887,27 +1117,20 @@ EOF
 
 **Files:**
 - Modify: `peacockdb-core/src/wire/gpu_tests/mod.rs`
-- Modify, only if #55 is live: `cpp/src/operators/aggregate.cpp`, `cpp/tests/gpu/test_plan_executor.cpp`
-- Modify: `llm-wiki/build-test.md`, `llm-wiki/tickets/corpus-coverage.md` (#55)
+- Create and modify, only if #55 is live: `cpp/tests/gpu/test_summed_quotient.cpp`,
+  `cpp/CMakeLists.txt`, `cpp/src/operators/aggregate.cpp`
+- Modify: `llm-wiki/build-test.md`, `llm-wiki/tickets/corpus-coverage.md` (#55), `llm-wiki/tasks/grouping-id-detail.md`
 
 **Interfaces:** none.
 
-- [ ] **Step 1: The three queries**, beside the other consts:
+- [ ] **Step 1: The two queries**, beside the other consts:
 
 ```rust
 const SUM_OF_QUOTIENTS: &str = "SELECT sum(per_flag) FROM (SELECT l_returnflag, \
      sum(l_extendedprice / l_linenumber) AS per_flag FROM lineitem GROUP BY l_returnflag)";
 const DISTINCT_BESIDE_COMPANIONS: &str = "SELECT l_returnflag, count(DISTINCT l_suppkey), \
      avg(l_quantity), count(*) FROM lineitem GROUP BY l_returnflag";
-const DISTINCT_UNDER_A_WIDE_ROLLUP: &str = "SELECT l_orderkey, l_partkey, l_linenumber, \
-     l_returnflag, l_linestatus, l_shipinstruct, l_shipmode, l_comment, \
-     count(DISTINCT l_suppkey), count(*) FROM lineitem WHERE l_orderkey <= 7 \
-     GROUP BY ROLLUP (l_orderkey, l_partkey, l_linenumber, l_returnflag, l_linestatus, \
-     l_shipinstruct, l_shipmode, l_comment)";
 ```
-
-  The wide rollup's keys are integers and strings only, the types the device already groups
-  under grouping sets, so a red there is the lowering and not a key type.
 
 - [ ] **Step 2: The tests.** After `each_lane_merges_its_own_state_before_the_cross_lane_merge_folds_them`:
 
@@ -956,32 +1179,7 @@ async fn a_distinct_count_beside_its_companions_runs_both_stages_on_a_device() {
 }
 ```
 
-  After `a_rollup_partial_holds_the_uint8_grouping_id_the_plan_declares`:
-
-```rust
-/// Eight keys and the DISTINCT argument make nine, so both stages carry a `UInt16` id where
-/// DataFusion's over the eight is `UInt8`, and a project narrows it above the outer stage.
-/// The argument is never masked, so its bit is 0 and the narrowed value is DataFusion's.
-#[tokio::test]
-async fn a_distinct_under_an_eight_key_rollup_narrows_a_uint16_id_to_datafusions() {
-    let held = held(DISTINCT_UNDER_A_WIDE_ROLLUP, ONE_LANE).await;
-    let ids: Vec<TypeId> = after(&held, PARTIAL)
-        .iter()
-        .map(|schema| {
-            schema
-                .0
-                .iter()
-                .find(|(name, _)| name == "__grouping_id")
-                .map(|(_, held)| held.id)
-                .expect("each stage's init carries the id")
-        })
-        .collect();
-    assert_eq!(ids, vec![TypeId::UInt16, TypeId::UInt16]);
-}
-```
-
-  Add `(SUM_OF_QUOTIENTS, TWO_LANES)`, `(DISTINCT_BESIDE_COMPANIONS, TWO_LANES)` and
-  `(DISTINCT_UNDER_A_WIDE_ROLLUP, ONE_LANE)` to the list in
+  Add `(SUM_OF_QUOTIENTS, TWO_LANES)` and `(DISTINCT_BESIDE_COMPANIONS, TWO_LANES)` to the list in
   `the_kinds_a_device_has_run_are_the_kinds_this_file_claims`.
 
   The counts come from the plans' shapes at two lanes. The inner grouped sum is
@@ -992,64 +1190,84 @@ async fn a_distinct_under_an_eight_key_rollup_narrows_a_uint16_id_to_datafusions
   `wire::render_plan_recipes` from a throwaway rust-only test (never committed), and pin what the
   recipes say. A trail that disagrees with its own recipes is a finding.
 
-- [ ] **Step 3: Compile locally, then one device cycle.**
+- [ ] **Step 3: Compile locally, then the device cycle.**
 
 ```bash
 CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 5400 scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run
+timeout 3600 cargo test --features rust-only -p peacockdb-core --lib
 ```
 
-  RUN:
+  No red build: the two walks prove behaviour the spec believes right, so green on their first run
+  is the proof, and a red is the defect itself (Step 4 or Step 5 then makes its own pair). One sync
+  and one build, as *Device cycle* says. Green set, one `ssh` each:
 
 ```bash
-cpp/install/bin/peacock_gpu_tests && cpp/install/bin/peacock_plan_tests && \
+cpp/install/bin/peacock_plan_tests
+cpp/install/bin/peacock_gpu_tests
+cpp/install/bin/peacock_join_session_tests
 cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 wire::gpu_tests::
 ```
 
-  Expected: green. Both gtest binaries run whole, K's `test_plan_executor.cpp` included, built
-  until now and never run. A walk new to the device is red only if what it proves is broken, so
-  green on first run is the proof, and red is step 4.
+  Expected: green. Record the build in the detail file.
   - `a_summed_quotient…` green: #55 is stale.
-  - `a_distinct_count…` or `a_distinct_under…` red: read the trail. A failure in the lowering's
-    device path (an outer init's merge rule, the `__distinct_arg` key, the narrowing project) is
-    fixed here, red-first in a harness case. Anything else gets a ticket, and the test becomes a
-    `bug_` pin under it, with the number in a comment above.
+  - `a_summed_quotient…` red: Step 4.
+  - `a_distinct_count…` red: Step 5.
 
 - [ ] **Step 4 (only if `a_summed_quotient…` is red): the defect is live.** Use
   `superpowers:systematic-debugging`. The trail names the call, and the error names its phase.
-  If it is a `CudfAggregate{Merge}`, the merge evaluated the argument. Fix `execute_aggregate` so
-  that a merge reads each aggregate's state column by position, past the keys, as the Final
-  branch of `get_values_col` already does, and never evaluates `func->args()`. Write the gtest
-  first, beside `AggregateMerge.*`: customer from `tpch.minimal` (`customer_scan_plan`'s table),
-  a Partial `sum(c_acctbal / CAST(c_nationkey AS Decimal128(10, 0)))` grouped on `c_nationkey`,
-  unioned with itself and merged as `partial_and_merged` does. The merged sums must be twice the
-  partial's. Red before the fix, green after. Then the walk again.
+  If it is a `CudfAggregate{Merge}`, the merge evaluated the argument. The fix is in
+  `execute_aggregate`: a merge reads each aggregate's state column by position, past the keys, as
+  the Final branch of `get_values_col` already does, and never evaluates `func->args()`. The gtest
+  comes first, in a new `cpp/tests/gpu/test_summed_quotient.cpp` appended to `peacock_plan_tests`'
+  sources (`test_plan_executor.cpp` is past the cap), built from `hand_tables.hpp`: a
+  `CudfScan` of `tpch.minimal`'s customer (path from `PEACOCK_TESTDATA_DIR`, as
+  `test_plan_executor.cpp`'s `parquet_path` builds it) run alone through `hand::run` with no input;
+  a Partial `sum(c_acctbal / CAST(c_nationkey AS Decimal128(10, 0)))` grouped on `c_nationkey` run
+  over it, twice; a `CudfUnion` run over the two partials; and a Merge run over the union, whose
+  sums must be twice the partial's, read with `hand::values_of<__int128_t>` per key. Carry the
+  gtest file and `CMakeLists.txt` by name, build, run
+  `cpp/install/bin/peacock_plan_tests --gtest_filter='SummedQuotient.*'`: red. Carry the fix, build
+  back to back, run it and Step 3's green set: green.
 
-- [ ] **Step 5: Docs.**
+- [ ] **Step 5 (only if `a_distinct_count…` is red): read the trail.** A failure in the lowering's
+  device path (an outer init's merge rule, the `__distinct_arg` key) is fixed here, red first: a
+  harness case in `peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs` that reproduces it
+  without the walk, carried by name and built red, then the fix carried and built green, back to
+  back. Anything else gets a ticket (*Before you start*, ticket numbers), and the test becomes a
+  `bug_` pin under it, with the number in a comment above.
+
+- [ ] **Step 6: Docs.**
   - `tickets/corpus-coverage.md`, #55, one line above **Corpus queries**: "**Proven stale by
     grouping-id's** `a_summed_quotient_divides_once_in_the_partial_and_merges_by_reference`. q66's
-    cells run in that task's last step, which archives it." If step 4 ran, "stale" becomes "fixed",
-    naming the fix.
-  - `build-test.md`: *Recipe walk on a device* +3. Its prose names the summed quotient, the two
-    DISTINCT walks and the narrowed `UInt16` id. `--lib -- gpu_tests::`, the gpu block, the Rust
-    header and the grand total each +3. If step 4 ran, *Plan-executor (C++)* +1, with the C++
+    cells run in grouping-id's Task 5, which archives it." If Step 4 ran, the line reads
+    "**Fixed by grouping-id**: a merge reads its state by position and never evaluates the
+    argument (`execute_aggregate`); `a_summed_quotient_divides_once_in_the_partial_and_merges_by_reference`
+    and `SummedQuotient.*` hold it. q66's cells run in grouping-id's Task 5, which archives it."
+  - `build-test.md`: *Recipe walk on a device* +2. Its prose names the summed quotient and the
+    two-stage DISTINCT beside its companions. `--lib -- gpu_tests::`, the gpu block, the Rust
+    header and the grand total each +2. If Step 4 ran, *Plan-executor (C++)* +1, with the C++
     header and the total.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 7: Commit.**
 
 ```bash
-git add peacockdb-core/src/wire/gpu_tests/mod.rs llm-wiki/build-test.md llm-wiki/tickets/corpus-coverage.md
+git add peacockdb-core/src/wire/gpu_tests/mod.rs llm-wiki/build-test.md llm-wiki/tickets/corpus-coverage.md \
+        llm-wiki/tasks/grouping-id-detail.md
+git status --short
 git commit -F - <<'EOF'
 #55, #262: a summed quotient and the DISTINCT lowering walked on a device
 
-The quotient divides once in the partial and merges by reference; the two-stage
-DISTINCT and its narrowed UInt16 id under an eight-key rollup match DataFusion.
+The quotient divides once in the partial and merges by reference; a two-stage
+DISTINCT beside avg and count matches DataFusion at two lanes.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
 
-  If step 4 changed C++, add `cpp/src/operators/aggregate.cpp cpp/tests/gpu/test_plan_executor.cpp`,
-  and the subject says the merge's argument was fixed.
+  If Step 4 ran, also add `cpp/src/operators/aggregate.cpp cpp/tests/gpu/test_summed_quotient.cpp
+  cpp/CMakeLists.txt`, and the message's first line is "#55, #262: a merge reads its state by
+  position; the DISTINCT lowering walked on a device". If Step 5 fixed code, add its files and
+  name the fix in the body.
 
 ---
 
@@ -1069,7 +1287,7 @@ EOF
 
 ```
 // rollup-grouping is the one query reading the grouping id's value: GROUPING() over every key
-// plans as the id cast to Int32. Its device cells run in grouping-id's last step.
+// plans as the id cast to Int32. Its device cells run in grouping-id's last task.
 corpus_query!(tpch, 1, rollup_grouping, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 ```
 
@@ -1130,7 +1348,8 @@ timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_c
   `cpu_tpch_rollup_grouping_*` at all five modes pass against DataFusion. If the
   `duckdb_tpch_rollup_grouping` case is listed, it fails until step 5.
 
-- [ ] **Step 5: DuckDB's section.** DuckDB 1.5.4's Python module, in a venv outside the repo:
+- [ ] **Step 5: DuckDB's section.** DuckDB 1.5.4's Python module, in a venv outside the repo
+  (`python3` here has no `duckdb`, and `duckdb_result.py` refuses any other version):
 
 ```bash
 [ -x /tmp/duckdb-1.5.4/bin/python ] || { python3 -m venv /tmp/duckdb-1.5.4 && /tmp/duckdb-1.5.4/bin/pip install duckdb==1.5.4; }
@@ -1149,7 +1368,8 @@ timeout 1800 cargo test --features rust-only -p peacockdb-core --test test_cpu_c
 
   Expected: PASS, `duckdb_tpch_rollup_grouping` under `duckdb_exact` and the registry both ways
   among them. If the two answers differ only by column names, that is by position and not a
-  divergence. A real difference is a `duckdb_divergent(<ticket>, <positions>)` with a new ticket.
+  divergence. A real difference is a `duckdb_divergent(<ticket>, <positions>)` with a new ticket,
+  numbered as *Before you start* says.
 
 - [ ] **Step 6: The rest of the cpu bar.**
 
@@ -1188,9 +1408,13 @@ EOF
 - Modify: `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv`
 - Modify: `testdata/goldens/{tpch,tpcds,pbench}.sf1/gpu-result.txt`
 - Modify: `llm-wiki/build-test.md`, `llm-wiki/tickets.md`, `llm-wiki/tickets/*.md`,
-  `llm-wiki/archive/archived-tickets.md`
+  `llm-wiki/archive/archived-tickets.md`, `llm-wiki/tasks/grouping-id-detail.md`
 
 **Interfaces:** none.
+
+One sync, two builds back to back: the trial build runs every candidate cell, and the final build
+runs the whole device bar over the declaration as it is committed. No red build: the trial is the
+experiment, and a cell's verdict decides its state.
 
 - [ ] **Step 1: The rows.** From the registry as it stands, plus `rollup_over_join` whatever its
   tags:
@@ -1205,16 +1429,29 @@ awk -F, 'NR > 1 && ($NF ~ /(^| )(65|55|262)( |$)/ || $3 == "rollup_over_join")' 
   where the cpu mode of the same name is enabled. q67's cpu is `na` (window functions, #32 and
   #143), so it has none and stays as it is. Write the candidate list into the detail file.
 
-- [ ] **Step 2: Turn the candidates on in the declaration only.** Each row's `gpu_modes` in
-  `corpus_cases.inc` becomes every mode its cpu runs at. The registry stays as it is, so the
-  device's registry case fails on this trial run, and it is not run. Compile it locally:
+- [ ] **Step 2: The trial declaration.** Each candidate row's `gpu_modes` in `corpus_cases.inc`
+  becomes every mode its cpu runs at. In `distinct_functions`' line, the gpu oracle `golden_exact`
+  becomes `golden_approx_std`, and the line ends with this comment:
+
+```
+ // golden_approx_std: its stddev(DISTINCT)'s last digits move with the lanes, as shuffle-stddev's do
+```
+
+  Its `stddev(DISTINCT l_quantity)` is a Welford merge whose association order changes with the
+  lanes, which is why `shuffle_stddev` is approximate. `rollup_distinct` and q28 stay
+  `golden_exact`. The registry stays as it is, so the device's registry case fails on the trial
+  build, and it is not run there. Compile locally:
 
 ```bash
 CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 5400 scripts/cargo-cudf.sh test -p peacockdb-core --test test_gpu_corpus --no-run
+timeout 3600 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- distinct_functions
 ```
 
-- [ ] **Step 3: Device cycle, the trial run.** It writes each cell's answer before asserting.
-  RUN, with a filter per candidate row (the trailing `_` stops `q5` matching `q50`):
+  Expected: both green; the cpu cases do not read the gpu oracle.
+
+- [ ] **Step 3: The sync and the trial build.** One sync and one build, as *Device cycle* says, with
+  no red build. Then this one command (the trailing `_` stops `q5` matching `q50`), each cell
+  writing its answer before asserting:
 
 ```bash
 PCK_WRITE_GPU_RESULT=1 cpp/install/rust-tests/test_gpu_corpus --test-threads=1 \
@@ -1228,26 +1465,34 @@ grep -E '^test .* (ok|FAILED)$' /tmp/cells.log
 
 ```bash
 for d in tpch tpcds pbench; do
-  timeout 600 rsync -a "$GPU:$DIR/testdata/goldens/$d.sf1/gpu-result.txt" "testdata/goldens/$d.sf1/"
+  timeout 600 rsync -a "$H:peacockdb-L/testdata/goldens/$d.sf1/gpu-result.txt" "testdata/goldens/$d.sf1/"
 done
 ```
 
 - [ ] **Step 4: Each cell's verdict**, into the detail file as a table (cell, pass or the first
   line of its failure, ticket):
   - **Passes:** it stays enabled.
-  - **Fails on the id** (a `__grouping_id` width or value): fixed here, red-first, as Task 2's
-    cases are. Then rerun.
+  - **Fails on the id** (a `__grouping_id` width or value): fixed here, red first, as Task 2's
+    cases are: the case that reproduces it carried by name and built red, then the fix carried
+    and built green, back to back. Then the cell again on the green build.
   - **Fails on the quotient** (q66, a merge over the quotient's state) or **on the DISTINCT
     lowering's device path** (q28, `rollup_distinct`, `distinct_functions`: an outer init's
-    merge rule, `__distinct_arg`, the narrowing project): fixed here, red-first, in a harness case
-    or a walk. Then rerun.
+    merge rule, `__distinct_arg`, the narrowing project): fixed here the same way, red first in a
+    harness case or a walk. Then the cell again.
+  - **Differs only in a float's last digits under an exact oracle:** `distinct_functions` is the
+    one row whose oracle Step 2 loosened, and only its `stddev(DISTINCT …)` column may differ so.
+    The same miss on another row is a finding to settle with the reviewer, never a loosened oracle:
+    the spec keeps `rollup_distinct` and q28 exact.
   - **Fails on anything else:** the open ticket it fails on, if one says so in its words.
-    Otherwise a new ticket in the milestone file it blocks: the next free number from `tickets.md`,
+    Otherwise a new ticket in the milestone file it blocks, numbered as *Before you start* says,
     with the query, the mode and the first line of the error, at most 15 lines. The cell goes
     off, and the row's tags gain the number.
 
   A cell that passes against the cpu golden can still differ from DuckDB. That is the
-  `duckdb_gpu_*` case in step 6, and it is ticketed the same way.
+  `duckdb_gpu_*` case in Step 6, and it is ticketed the same way, with one exception: if
+  `duckdb_gpu_tpch_distinct_functions_*` misses only in the `stddev(DISTINCT …)` column, within
+  `1e-11` relative, under `duckdb_exact`, the line's DuckDB oracle becomes `duckdb_approx` (whose
+  float rule is that bound) and its trailing comment ends "; duckdb_approx for the same reason".
 
 - [ ] **Step 5: Declaration, registry and record agree.**
   - `corpus_cases.inc`: each row's `gpu_modes` are the cells that passed. Update the comments
@@ -1257,7 +1502,7 @@ done
     tickets.
   - `gpu-result.txt`: the trial run wrote a section for every candidate, failures included.
     Delete the section of each cell that stays off, from its `== <query> mode=<mode>` line to the
-    next `==`. The coverage guard in step 6 checks the rest, both ways.
+    next `==`. The coverage guard in Step 6 checks the rest, both ways.
 
 - [ ] **Step 6: The cpu bar.**
 
@@ -1270,36 +1515,45 @@ timeout 3600 cargo test --features rust-only -p peacockdb-core --lib
 
   Expected: PASS. That covers the registry against the cpu corpus both ways, the
   `gpu-result.txt` coverage guard, and a `duckdb_gpu_<dataset>_<query>_<mode>` case per enabled
-  cell. A `duckdb_gpu_*` red is ticketed as in step 4: the cell goes off and its section goes.
+  cell. A `duckdb_gpu_*` red is ticketed as in Step 4: the cell goes off and its section goes.
   Then this step runs again.
 
-- [ ] **Step 7: Device cycle, the whole device bar.** Sync and build again: the declaration has
-  changed. RUN:
+- [ ] **Step 7: The final build, back to back.** Carry the changed declaration, the registry and
+  any file a Step 4 fix touched, by name, not in a second sync:
 
 ```bash
-cpp/install/bin/peacock_gpu_tests && cpp/install/bin/peacock_plan_tests && \
-cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 gpu_tests:: && \
-cpp/install/rust-tests/test_gpu_corpus --test-threads=1 && \
-cpp/install/rust-tests/test_node_timing --test-threads=1 && \
+timeout 300 rsync -aR peacockdb-core/tests/common/corpus_cases.inc testdata/cost-registry.csv $H:peacockdb-L/
+```
+
+  Build (`$B`), then run each of these, one `ssh` each:
+
+```bash
+cpp/install/bin/peacock_gpu_tests
+cpp/install/bin/peacock_plan_tests
+cpp/install/bin/peacock_join_session_tests
+cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 gpu_tests::
+cpp/install/rust-tests/test_gpu_corpus --test-threads=1
+cpp/install/rust-tests/test_node_timing --test-threads=1
 cpp/install/rust-tests/peacock_gpu_benchmarks --test-threads=1 --skip bench_
 ```
 
   Expected: every binary green. `test_gpu_corpus` runs whole, every enabled cell plus its
   registry case, which now matches. No `PCK_WRITE_GPU_RESULT` this time, so no file moves. Record
-  the counts in the detail file.
+  both builds and their counts in the detail file, and the sf40 binaries, `--run-benchmarks` and
+  Nsight as deferred.
 
 - [ ] **Step 8: The tickets.** Move #65 and #262 to `archive/archived-tickets.md` under *Done*, and
-  #55 under *Stale or obsolete*, or under *Done* if Task 3's step 4 fixed it. Each keeps its text,
+  #55 under *Stale or obsolete*, or under *Done* if Task 3's Step 4 fixed it. Each keeps its text,
   plus one paragraph: closed by grouping-id, by what, the cells it turned on, and those left off
   under which tickets. Each ends "awaiting merge". In `tickets.md`, take the three numbers out of
   the corpus-coverage row, add the new tickets, and set the open count and the next free number.
   Run `rg -n '#(65|55|262)\b|t(65|55|262)\b' --glob '!llm-wiki/archive/**' --glob '!llm-wiki/tasks/**'`.
   Every link to the three now points at `archive/archived-tickets.md#tNN`.
 
-- [ ] **Step 9: Counts and prose.** `build-test.md`: `test_gpu_corpus` +E, where E is the cells
-  enabled; its row's prose names them, along with the gpu block and the Rust header.
-  `test_cpu_corpus` +E `duckdb_gpu_*` cases, the cpu block with them. The grand total by 2E.
-  Remove any mention of the three tickets as open.
+- [ ] **Step 9: Counts and prose.** `build-test.md`: `test_gpu_corpus` gains one case per cell
+  enabled here; its row's prose names them, along with the gpu block and the Rust header.
+  `test_cpu_corpus` gains one `duckdb_gpu_*` case per cell enabled, the cpu block with them. The
+  grand total by twice the cells enabled. Remove any mention of the three tickets as open.
 
 - [ ] **Step 10: Commit.**
 
@@ -1311,12 +1565,14 @@ git status --short
 git commit -F - <<'EOF'
 #65, #55, #262: their device cells run; the three archived
 
-<E> cells enabled against the cpu golden and DuckDB; <n> left off under <tickets>.
+Every candidate cell run on nebius-gpu against the cpu golden and DuckDB; the
+passing ones enabled, the rest off under the tickets their registry rows name.
+distinct-functions' gpu oracle is golden_approx_std, as shuffle-stddev's.
 Tags 65, 55 and 262 struck from the rows no off cell needs them on.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
 
-  Fill `<E>`, `<n>` and `<tickets>` from step 4's table before committing. If a step 4 fix
-  touched code, add its files and say so in the subject.
+  If a Step 4 fix touched code, add its files, and the body gains one line naming the fix and the
+  ticket it was under (the id, the quotient or the DISTINCT lowering).
