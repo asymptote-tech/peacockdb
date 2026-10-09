@@ -1,13 +1,15 @@
 //! `GpuLoadParquet` through the harness: both backends read one parquet the test wrote
 //! from a synthetic batch, one batch per row group, and a limit over the batches a scan
 //! emitted, which is what a scan's limit is.
-//! `write_parquet` puts the file under the temp dir and each case removes it. Every case
-//! here is green: #186 took the four `bug_` pins a scan's own limit used to earn.
+//! `write_parquet` puts the file under the temp dir and each case removes it. #186 took the
+//! four `bug_` pins a scan's own limit used to earn; the one left is #285's, a scan that
+//! declares no column at all.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
+use datafusion::arrow::record_batch::{RecordBatch, RecordBatchOptions};
 use datafusion::parquet::arrow::ArrowWriter;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
@@ -175,5 +177,33 @@ operator_case! {
     GpuLoadParquet,
     fn a_parquet_of_zero_rows_reads_as_nothing_on_both() {
         read_both("zero-rows", &synthetic(0, 1), 16).same(Order::AsEmitted);
+    }
+}
+
+/// `rows` rows of no columns — what a scan declaring no column answers, and the one batch
+/// shape whose row count is not a function of its columns.
+fn no_columns(rows: usize) -> RecordBatch {
+    RecordBatch::try_new_with_options(
+        Arc::new(ArrowSchema::empty()),
+        vec![],
+        &RecordBatchOptions::new().with_row_count(Some(rows)),
+    )
+    .expect("a batch of no columns carries its own row count")
+}
+
+// #285 — a scan declaring no column, as `tpch/nested-limits`' region scan is: the query wants
+// the file's row count and none of its columns. The wire's `file_schema` is that declaration,
+// `scan.cpp` reads an empty projection as every column OF IT, and so selects none; a cuDF
+// table of no columns reports no rows. The cpu's zero-column batch keeps the count.
+operator_case! {
+    GpuLoadParquet,
+    fn bug_a_scan_declaring_no_column_reads_no_rows_on_the_device() {
+        let path = write_parquet("zero-columns", &synthetic(64, 1), 64);
+        let outcome = run_both(
+            &scan(&path, Arc::new(ArrowSchema::empty())),
+            Script::Source { lane: 0 },
+        );
+        std::fs::remove_file(&path).expect("the file this case wrote");
+        each_answers(&outcome, &[vec![no_columns(64)]], &[vec![no_columns(0)]]);
     }
 }

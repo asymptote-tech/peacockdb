@@ -29,6 +29,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#60 — `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
 - [Source](#source)
   - [#282 — a scan with no surviving row groups is refused at planning](#t282)
+  - [#285 — a scan declaring no column reads no rows on the device](#t285)
 - [Repartitioning](#repartitioning)
   - [#206 — a float or boolean partition key is refused on the device](#t206)
   - [#240 — a timestamp partition key is refused on the device](#t240)
@@ -46,7 +47,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
   - [#235 — no independent oracle checks the result goldens](#t235)
   - [#262 — two DISTINCT corpus queries have no device cell](#t262)
-  - [#281 — limits' and empty-sorts' device cells have never run](#t281)
+  - [#281 — empty-sorts' device cells have never run](#t281)
 
 ## Welford aggregation
 
@@ -548,6 +549,38 @@ the joins they test. Simplest: `select count(*) from nation where n_nationkey < 
 make no call and the lane ends with nothing, the no-arrival case keyless-identity (chain L) makes
 every node answer right. In keyless-identity.
 
+<a id="t285"></a>
+### #285 — a scan declaring no column reads no rows on the device
+
+A scan whose output schema is empty — the query wants the file's row count and none of its
+columns — reads zero rows on the device where the cpu reads the file's. `tpch/nested-limits`
+answers nothing at every mode instead of its twenty rows, measured on nebius-gpu 2026-10-09.
+
+`CudfScan.file_schema` is the node's *declared* schema and `projection` is left empty
+(`wire/node_writer.rs::scan`), which `scan.cpp` reads as "every column of the schema I was given".
+With no column declared that selects none, and a cuDF table of no columns reports `num_rows() == 0`
+whatever the file holds, so `NodeStats.rows` crosses the ABI as 0. The cpu is right because an
+Arrow batch carries its row count beside its columns rather than in them. Pinned by
+`bug_a_scan_declaring_no_column_reads_no_rows_on_the_device` (`gpu_tests/source_cases.rs`), 64 rows
+against 0 over one parquet and no limit in it.
+
+The same root cause as [#63](joins.md#t63) — a cuDF table cannot hold rows without columns — at
+the scan rather than at a project, and `reports/corpus-fixes.md`'s unfiled "ticket 1". Nothing is
+refused, because nothing reaches `cudf::cross_join`: the zero-row batch is dropped by the
+`GpuLimit` above the scan ([#214](#t214)) and the join's build side gets no batch at all. Older
+than limits, which only moved that scan's cut into that `GpuLimit`; the `set_num_rows(23)` it
+dropped was on the same zero-column read, and could not have made it answer five rows.
+
+**Corpus queries:** `tpch/nested-limits` at every device mode, off on this ticket, and the corpus's
+only scan declaring no column.
+
+**Fix proposed:** #63's, whose `row_count_table(rows)` / `is_row_count_only(t)` helpers it names
+this arm as sharing. Or, closer to the cause, `scan()` writes the file's own column names into
+`file_schema` and the declared ones into `projection`, so "no projection" and "no column" stop
+being one wire value — the honest fix, since the field is named `file_schema` and holds something
+else, but it needs the file's full column list, which `scan()`'s doc says a plan node does
+not carry.
+
 ## Repartitioning
 
 <a id="t206"></a>
@@ -900,24 +933,19 @@ lowering's last unrun ones.
 passes. Then this ticket is archived. Chain L's grouping-id takes the rollup half.
 
 <a id="t281"></a>
-### #281 — limits' and empty-sorts' device cells have never run
+### #281 — empty-sorts' device cells have never run
 
-limits and empty-sorts (chain K) run without a GPU, beside chain J, which holds the GPU host. Their
-device changes are built and not run: `scan.cpp` no longer applies a scan's limit, which a
-`GpuLimit` above the scan, or the unload's interval where nothing sits between, now does (#186),
-and the four `bug_` source cases and three `bug_` accumulate cases it turns into agreement cases
-have run on no device. A device answer could differ from the cpu's, and nothing would say so.
+empty-sorts (chain K) was proved on the cpu while chain J held the GPU host. Its device changes
+are built and not run: the three `bug_` accumulate cases its fix turns into agreement cases have
+run on no device, and `tpcds/q17`'s device cell with them. A device answer could differ from the
+cpu's, and nothing would say so.
 
-**Corpus queries:** `tpch/scan-limit` and `tpch/nested-limits` at every device mode, and
-`tpcds/q17` at `tp1-single`, each off on this ticket once chain K has merged.
+limits' half of this is closed. Its four converted `bug_` source cases and its `scan.cpp` without
+`set_num_rows` ran on nebius-gpu 2026-10-09; `tpch/scan-limit`'s five device cells are enabled
+against the result golden, and `tpch/nested-limits`' five are off on #285, which that run found
+and which is not about a limit.
 
-One place to look first, found by the review of limits and not by a run.
-`nested-limits`' region loader carries `projections=[]` and an empty declared schema, and
-`scan.cpp` reads an empty projection as "read every column", so the device table there has three
-columns against a declared schema of none. The new `GpuLimit` above it never slices that stream —
-its five rows sit wholly inside `0..+23`, so `slice_handle` is not called — but it is the first
-node in that path that has to read a row count from it.
+**Corpus queries:** `tpcds/q17` at `tp1-single`, off on this ticket once chain K has merged.
 
-**Fix proposed:** on a GPU host, once one is free: run the device test tier and those cells;
-each cell passing is enabled, each failing gets the ticket it fails on. Then this ticket drops
-from the registry rows and is archived.
+**Fix proposed:** on a GPU host: run the device test tier and that cell; it passing is enabled,
+failing gets the ticket it fails on. Then this ticket drops from the registry row and is archived.

@@ -30,13 +30,14 @@ corpus_query!(tpch, 1, q3, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup
 corpus_query!(tpch, 1, q10, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 1, the five smallest tpch plans the rollout list carries.
-// scan-limit's rows are not determined — an unordered LIMIT over lineitem — so its modes
-// need not agree and the oracle is the subset one; filter-project returns most of lineitem,
-// which is over the result cap. Both take a live cpu run on the device for that reason.
-// aggregate-groupby, shuffle-additive and filter-project run at tp1-single; cross-join is off
-// on #220's join batching, and scan-limit on #281: its cut, the unload's interval, has not
-// run on a device.
-corpus_query!(tpch, 1, scan_limit, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_subset, live_cpu, schema_validation_enabled);
+// scan-limit's rows are not determined against DataFusion — an unordered LIMIT over lineitem
+// — so its cpu oracle is the subset one; filter-project returns most of lineitem, which is
+// over the result cap, so its device run takes a live cpu one. scan-limit's does not: #186
+// made its cut one lane over the covering prefix in index order, so its five modes answer the
+// same rows and the committed section serves them all — measured on a device 2026-10-09.
+// aggregate-groupby, shuffle-additive and filter-project run at tp1-single, scan-limit at all
+// five, and cross-join is off on #220's join batching.
+corpus_query!(tpch, 1, scan_limit, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, data_fusion_subset, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, filter_project, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(tpch, 1, aggregate_groupby, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, cross_join, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -61,7 +62,8 @@ corpus_query!(tpch, 1, nested_loop_join, tp1_single | tp1_rowgroup | tp4_single 
 // lane and so nothing to reassociate. The other four differ by ~3e-15 — the association order
 // of the Welford merge rather than its arithmetic, since a wrong merge would not come right at
 // one lane. shuffle-stddev runs at tp1-single on the device; nested-loop-left-join is off on
-// #220's join batching, nested-limits on #281 (the limits over its scans have not run on a device),
+// #220's join batching, nested-limits on #285 (its region scan declares no column, and a
+// zero-column cuDF table carries no row count, so the device reads it as empty),
 // and mixed-join's `none` means "cannot cross to a device" — #168's interval `ScalarValue`.
 corpus_query!(tpch, 1, shuffle_additive_avg, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, shuffle_stddev, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_approximate, golden_approx_std, schema_validation_disabled); // #225

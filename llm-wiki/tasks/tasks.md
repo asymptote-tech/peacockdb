@@ -176,10 +176,11 @@ without grouping sets; #144 and #261 refused by name; the wire's `distinct` fiel
 `tpch/rollup-distinct` and `tpch/distinct-functions` on the cpu corpus, and distinct-functions on
 the device at five modes.
 
-### 3. [`limits.md`](limits.md) — closes [#186](../archive/archived-tickets.md#t186), [#234](../archive/archived-tickets.md#t234) — state: building — PR #172
+### 3. [`limits.md`](limits.md) — closes [#186](../archive/archived-tickets.md#t186), [#234](../archive/archived-tickets.md#t234) — state: reviewing — PR #172
 
 A scan's limit becomes a `GpuLimit` above the scan and leaves both readers; the driver counts a
-limit's emitted rows rather than its input; scan-limit's tp1 cpu cells on.
+limit's emitted rows rather than its input; scan-limit on at all five modes on both engines, and
+nested-limits off on the device under #285.
 
 ### 4. [`empty-sorts.md`](empty-sorts.md) — closes [#205](../tickets/corpus-coverage.md#t205) — state: rebase needed(building) — PR #174
 

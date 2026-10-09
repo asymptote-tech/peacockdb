@@ -207,13 +207,15 @@ fn every_unchecked_answer_is_held_somewhere() {
 
 /// The two oracles of one line have to suit each other, both directions asserted.
 ///
-/// A `golden_exact` where no committed section can serve fails on correct behaviour: the
-/// result is over the cap and carries a marker, or its rows are not determined across modes
-/// and one mode cannot be the authority for five. A `live_cpu` where a section does serve
-/// spends a device-side cpu run on what a committed file says faster. Both are read off the
-/// declaration and the golden rather than a run, which is what catches the first `live_cpu`
-/// query BEFORE the rollout needing it. Derivable is why a CHECK can exist here, never why
-/// either value would be absent from the line. It also holds `ANSWER_HELD_ELSEWHERE` to the
+/// A `golden_exact` where no committed section can serve fails on correct behaviour: the result
+/// is over the cap and carries a marker. A `live_cpu` where a section does serve spends a
+/// device-side cpu run on what a committed file says faster. One question, asked both ways, and
+/// the same one `corpus_gpu`'s device-side check asks — whether a section serves. Whether one
+/// mode can be the authority for five is a different claim, and the golden compare is what tests
+/// it: the device goes red at the mode that disagrees and names the author. Read off the
+/// declaration and the golden rather than a run, which is what catches the first `live_cpu` query
+/// BEFORE the rollout needing it. Derivable is why a CHECK can exist here, never why either value
+/// would be absent from the line. It also holds `ANSWER_HELD_ELSEWHERE` to the
 /// `data_fusion_disabled` lines: an oracle comparing nothing needs something else to compare.
 #[test]
 fn each_declarations_two_oracles_suit_each_other() {
@@ -228,22 +230,17 @@ fn each_declarations_two_oracles_suit_each_other() {
             continue;
         }
         let section = section_of(&result_golden(declared.dataset, declared.sf), &query);
-        // The two conditions the entry names, read off what is committed and off the line.
-        let over_cap = section.starts_with(SKIPPED);
-        let undetermined = declared.cpu_oracle == "data_fusion_subset";
-        let needs_live = over_cap || undetermined;
+        // Read off what is committed, not off `cpu_oracle`: `data_fusion_subset` says
+        // DataFusion's pick and ours need not be the same rows, which is not our own five modes
+        // differing. `tpch/scan-limit` is both — undetermined against DataFusion, identical
+        // across the modes since #186 cut it on one lane over the covering prefix in order.
+        let needs_live = section.starts_with(SKIPPED);
         let says_live = declared.gpu_oracle == "live_cpu";
         if needs_live && !says_live {
             wrong.push(format!(
-                "{}/{query}: gpu_oracle is {} where no committed section can serve it ({}), \
+                "{}/{query}: gpu_oracle is {} where the committed section is a marker, \
                  so it fails on correct behaviour",
-                declared.dataset,
-                declared.gpu_oracle,
-                match (over_cap, undetermined) {
-                    (true, true) => "the result is over the cap AND its rows are undetermined",
-                    (true, false) => "the result is over the cap",
-                    _ => "cpu_oracle is data_fusion_subset, so the modes need not agree",
-                }
+                declared.dataset, declared.gpu_oracle,
             ));
         }
         if says_live && !needs_live {

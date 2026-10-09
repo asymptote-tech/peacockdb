@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2394 test cases — Rust 1919, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2400 test cases — Rust 1925, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -448,11 +448,11 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 581 cases: `--lib -- gpu_tests::` 536, `test_gpu_corpus` 33, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 587 cases: `--lib -- gpu_tests::` 537, `test_gpu_corpus` 38, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 32 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 37 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
@@ -463,16 +463,18 @@ device with every batch held to its node's declared schema through the driver's 
 only the tp4 modes emit — the mask is what keeps the hook at the two tp1 cells, where it is
 green), and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`,
 the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden.
-Thirty-one cells today: `tpch/q6`, `tpch/q1`, `tpch/shuffle-additive-avg` and
-`tpch/distinct-functions` at every mode, and
+Thirty-six cells today: `tpch/q6`, `tpch/q1`, `tpch/shuffle-additive-avg`,
+`tpch/distinct-functions` and `tpch/scan-limit` at every mode, and
 `q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggregate-groupby`,
 `tpch/filter-project`, `tpch/shuffle-additive`, `tpcds/q37`, `tpcds/q82` and `tpcds/q85` at
 `tp1-single`; the rest are off against [#152](tickets/joins.md#t152),
 [#95](tickets/corpus-coverage.md#t95),
 [#220](tickets/joins.md#t220) and the device's own tickets (#57, #63, #205). distinct-functions
 is the DISTINCT lowering's only device query; q28 and `tpch/rollup-distinct` wait on #152, #65
-and #189 ([#262](tickets/corpus-coverage.md#t262)). The thirty-second case is that a device run under a
-regeneration writes no golden
+and #189 ([#262](tickets/corpus-coverage.md#t262)). scan-limit is the only query whose cut is an
+unload's interval; `tpch/nested-limits`, the other one #186 touched, is off at every mode on
+[#285](tickets/corpus-coverage.md#t285) — its region scan declares no column. The
+thirty-seventh case is that a device run under a regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
 |---|---|--:|
@@ -502,7 +504,7 @@ from the sf40 run instead
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 335 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 336 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
