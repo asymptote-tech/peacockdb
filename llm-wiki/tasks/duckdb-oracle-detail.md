@@ -2184,3 +2184,41 @@ makes the compare report `diverged`, which fails open to `code=true` and runs th
 `pipeline.yml` has no `workflow_dispatch`, so there is no other route to a real run on #167. And no
 run has ever built the four comment-only `.rs` files in this task's `a68cf8ec`; the first real run
 closes that gap.
+
+## The rebase, executed (2026-10-09)
+
+The survey above is right about the destination and wrong about the cost. Measured before
+starting: the two sides touch **48 and 40 files and overlap in exactly five**, all of them
+`llm-wiki/`:
+
+    llm-wiki/archive/archived-tickets.md
+    llm-wiki/build-test.md
+    llm-wiki/tasks/tasks.md
+    llm-wiki/tickets.md
+    llm-wiki/tickets/corpus-coverage.md
+
+No `.rs`, no `.cpp`, no golden, no script is in the intersection. master's ten moved tpcds
+goldens are `tp1-*` and `tp4-*`; this branch's are `duckdb-result.txt`, `gpu-result.txt` and
+`mini.result.txt`. So the replay cannot produce a code conflict, and the whole conflict load is
+five markdown files I own outright.
+
+**How it is resolved, and why not by hand.** 23 commits (`dbf44bcc..ba4614eb` — two more than
+the survey counted, the board marks) times five files is the cost that stopped the last run. A
+worktree-local untracked `.gitattributes` giving those five `merge=union` makes git resolve every
+conflicting hunk by keeping **both** sides, so the replay runs to the end without stopping and
+**nothing is silently dropped** — which `-X theirs` cannot promise, and dropping is the failure
+the survey warns about for `tickets.md`. Union's cost is paid at the end instead: duplicated
+count lines, and any line this branch deleted that master also touched comes back. That is one
+reconciliation pass over five files against a known 250-line master-side diff, and it is
+checkable — `git diff origin/master HEAD -- <file>` must show this branch's intended change to
+that file and nothing else.
+
+Fork points, re-measured (the survey's table had pbench's head as its child's fork point):
+
+    master               2ad302bf
+    ENS-duckdb-oracle    ba4614eb   forks from master at            dbf44bcc   23 commits
+    ENS-pbench           6ddb6dcc   forks from ENS-duckdb-oracle at 0df60133   25 commits
+    ENS-repartition-keys 1556b819   forks from ENS-pbench at        d39fdded   18 commits
+
+Order, per the protocol: this branch all the way back to `completeness approved` and through CI,
+then pbench, then repartition-keys. Delete the `.gitattributes` before committing anything.
