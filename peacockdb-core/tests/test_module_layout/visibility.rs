@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use crate::privacy::pub_fields;
-use crate::test_code::{declares_mod, split_attributes};
+use crate::test_code::{declares_mod, split_attributes, strip_visibility};
 use crate::tree::{read, sources};
 use crate::walls::TEST_DIRS;
 
@@ -366,16 +366,26 @@ pub(crate) fn is_bare_pub_item(line: &str) -> bool {
     KINDS.iter().any(|k| rest.starts_with(k))
 }
 
-/// `pub use` re-exports a child through its parent, which is the one shape that makes the
+/// A re-export at any visibility, `pub(crate) use` included. The restriction does not change
+/// what the shape costs: a `pub use ` prefix test is what let one through, so the reader
+/// strips the visibility instead.
+pub(crate) fn re_exports(line: &str) -> bool {
+    let rest = split_attributes(line).1;
+    let stripped = strip_visibility(rest);
+    stripped.len() < rest.len() && stripped.starts_with("use ")
+}
+
+/// A re-export passes a child through its parent, which is the one shape that makes the
 /// facade a lie: the item is declared in one place and named from another, so a reader of
 /// `mod.rs` cannot see what the component offers.
 #[test]
-fn nothing_re_exports_with_pub_use() {
-    let found = lines_matching(|l| l.trim_start().starts_with("pub use "));
+fn nothing_re_exports_a_child_through_its_parent() {
+    let found = lines_matching(re_exports);
     assert!(
         found.is_empty(),
-        "`pub use` is not allowed — inline the declaration into mod.rs, or into common.rs \
-         for what the implementation modules share:\n{}",
+        "a re-export is not allowed at any visibility — inline the declaration into mod.rs, \
+         or into common.rs for what the implementation modules share; a sibling-reach item \
+         becomes a `pub(crate) fn` whose body delegates:\n{}",
         found.join("\n")
     );
 }

@@ -126,7 +126,7 @@ fn decompose(
 ) -> Result<Decomposed, PlanError>;
 ```
 
-- [ ] **Step 1: Baseline.**
+- [x] **Step 1: Baseline.**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib -- planner::
@@ -134,7 +134,7 @@ cargo test --features rust-only -p peacockdb-core --lib -- planner::
 
   Expected: PASS.
 
-- [ ] **Step 2: Move the body.** `aggregate_sequence(t, partial, finisher, shuffle)` keeps its
+- [x] **Step 2: Move the body.** `aggregate_sequence(t, partial, finisher, shuffle)` keeps its
   signature. Its order becomes: the filter refusal first (today's l.258-262), then
   `let input = node(t, partial.input())?` — so Task 2 can route before the translation. It
   builds a `Stage` from the partial exactly as l.256-283 do today (`input_schema`, `group_by`,
@@ -143,10 +143,10 @@ cargo test --features rust-only -p peacockdb-core --lib -- planner::
   `finished: finisher.map(|f| f.schema())`, and calls `sequence(stage, shuffle)`. `sequence`
   holds l.285-395, reading the stage's fields; the `finished` closure reads names and the output
   schema from `stage.finished` where it read `finisher.schema()`.
-- [ ] **Step 3: `decompose` takes `(aggregate, InitFrom)` pairs.** Only `InitFrom::Values` is
+- [x] **Step 3: `decompose` takes `(aggregate, InitFrom)` pairs.** Only `InitFrom::Values` is
   built in this task; match the other two arms with
   `unreachable!("the DISTINCT lowering is Task 3")` — Task 3 replaces both.
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib -- planner::
@@ -156,7 +156,7 @@ git status --short testdata/
 
   Expected: PASS; `testdata/` clean.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add peacockdb-core/src/planner/translator/aggregate.rs
@@ -202,7 +202,7 @@ pub(super) fn classify(
 ) -> Classified;
 ```
 
-- [ ] **Step 1: Write the failing tests** in `join_refusals.rs`, beside the #62 pin (which stays
+- [x] **Step 1: Write the failing tests** in `join_refusals.rs`, beside the #62 pin (which stays
   until Task 3):
 
 ```rust
@@ -269,14 +269,14 @@ fn a_distinct_aggregate_reaching_decompose_is_refused() {
 }
 ```
 
-- [ ] **Step 2: Run them; all three fail** (the two `bug_` tests see `#62`; the direct one sees
+- [x] **Step 2: Run them; all three fail** (the two `bug_` tests see `#62`; the direct one sees
   the old wording).
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib -- bug_two_distinct bug_a_stddev_beside a_distinct_aggregate_reaching
 ```
 
-- [ ] **Step 3: Implement `stripped` and `classify`** in `distinct.rs`.
+- [x] **Step 3: Implement `stripped` and `classify`** in `distinct.rs`.
 
 ```rust
 /// A cast that keeps distinct values distinct, so deduplicating under it or over it is
@@ -374,7 +374,7 @@ pub(super) fn classify(
   `datafusion::physical_expr::expressions::CastExpr`; `crate::plan::{Merge, PlanError,
   decomposition, resolve}`. The analyst confirmed `dyn PhysicalExpr: PartialEq` in DataFusion 45.
 
-- [ ] **Step 4: Route, before the input is translated, and the net.** In `aggregate_sequence`,
+- [x] **Step 4: Route, before the input is translated, and the net.** In `aggregate_sequence`,
   between the filter refusal and `node(t, partial.input())`:
 
 ```rust
@@ -408,7 +408,7 @@ pub(super) fn classify(
             )));
 ```
 
-- [ ] **Step 5: Run.** The three new tests PASS; the #62 pin still PASSES; the plan goldens
+- [x] **Step 5: Run.** The three new tests PASS; the #62 pin still PASSES; the plan goldens
   unchanged (q28's `== q28` sections still read `DISTINCT inside count(DISTINCT
   store_sales.ss_list_price) (#62)`).
 
@@ -417,7 +417,7 @@ cargo test --features rust-only -p peacockdb-core --lib -- planner:: translator:
 git status --short testdata/
 ```
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add peacockdb-core/src/planner/translator/aggregate.rs peacockdb-core/src/planner/translator/aggregate/ peacockdb-core/src/planner/tests/join_refusals.rs
@@ -441,7 +441,7 @@ git commit -m "#62: classify a DISTINCT node; #144, #261 and the unknown refused
   `stripped`.
 - Produces: `distinct::lower(t, partial, finisher, shuffle, base) -> Result<Box<dyn GpuNode>, PlanError>`.
 
-- [ ] **Step 1: Write the failing plan tests** in `translator/tests.rs` (minimal dataset:
+- [x] **Step 1: Write the failing plan tests** in `translator/tests.rs` (minimal dataset:
   `customer` has `c_custkey` Int64, `c_nationkey` Int32, `c_mktsegment`, `c_acctbal`
   `Decimal128(15, 2)`). Add `use crate::plan::{AggregateBody, KeyDistribution};` as needed.
 
@@ -558,7 +558,7 @@ async fn a_distinct_argument_that_is_also_a_key_is_still_its_own_inner_key() {
   `c_acctbal` is not `Decimal128(15, 2)`, assert the type `PlanAgg::Sum.state_type` gives twice
   over it.
 
-- [ ] **Step 2: Write the failing end-to-end cases** in `tests/end_to_end.rs`, beside
+- [x] **Step 2: Write the failing end-to-end cases** in `tests/end_to_end.rs`, beside
   `a_two_key_group_by_over_many_rows_does_not_emit_a_group_twice`. DataFusion answers `count`
   and `sum` DISTINCT right, so these use the same-SQL oracle:
 
@@ -621,13 +621,13 @@ async fn a_keyless_distinct_over_no_rows_answers_zero() {
 }
 ```
 
-- [ ] **Step 3: Run; all fail** with the temporary `#62` refusal.
+- [x] **Step 3: Run; all fail** with the temporary `#62` refusal.
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib -- distinct translator::
 ```
 
-- [ ] **Step 4: `decompose`'s two arms.** Inside the per-aggregate loop, branch on `from`:
+- [x] **Step 4: `decompose`'s two arms.** Inside the per-aggregate loop, branch on `from`:
 
   - `InitFrom::Values`: as today.
   - `InitFrom::Deduplicated { arg, arg_type }`: skip DataFusion's `state_fields` arity check (a
@@ -691,7 +691,7 @@ cargo test --features rust-only -p peacockdb-core --lib -- distinct translator::
   Imports in `aggregate.rs`: `crate::plan::{AggFunc, UnaryOp}`,
   `datafusion::common::ScalarValue`, `datafusion::arrow::datatypes::SchemaRef`.
 
-- [ ] **Step 5: `lower`, grouping sets refused for now** (Task 4 adds them; until then return
+- [x] **Step 5: `lower`, grouping sets refused for now** (Task 4 adds them; until then return
   `PlanError::Unsupported("a DISTINCT under grouping sets (#62)".into())` when
   `!group.is_single()`). In `distinct.rs`:
 
@@ -805,7 +805,7 @@ fn inner_shuffle(shuffle: Shuffle) -> Shuffle {
   `crate::plan::{Expr, GpuNode}`, `datafusion::arrow::datatypes::Field`,
   `datafusion::physical_plan::aggregates::AggregateExec`.
 
-- [ ] **Step 6: Run the new tests.**
+- [x] **Step 6: Run the new tests.**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib -- distinct translator::
@@ -813,11 +813,11 @@ cargo test --features rust-only -p peacockdb-core --lib -- distinct translator::
 
   Expected: PASS at every mode, tp4-sized included (the input is translated once).
 
-- [ ] **Step 7: The #62 pin goes**: delete
+- [x] **Step 7: The #62 pin goes**: delete
   `a_distinct_beside_a_companion_datafusion_cannot_rewrite_is_refused_naming_62` from
   `join_refusals.rs`; its shape is now `a_distinct_beside_an_avg_lowers_…`.
 
-- [ ] **Step 8: q28's plan goldens, and its registry plan cells in the same commit.**
+- [x] **Step 8: q28's plan goldens, and its registry plan cells in the same commit.**
 
 ```bash
 UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_goldens
@@ -830,7 +830,7 @@ git diff --stat testdata/goldens/
   (`the_registry_matches_the_goldens_in_both_directions` maps a non-refused section to
   `enabled`); its cpu cells stay `na` until Task 6.
 
-- [ ] **Step 9: Run the planner and the cpu corpus.**
+- [x] **Step 9: Run the planner and the cpu corpus.**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib
@@ -839,7 +839,7 @@ cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus
 
   Expected: PASS.
 
-- [ ] **Step 10: Commit.**
+- [x] **Step 10: Commit.**
 
 ```bash
 git add peacockdb-core/src testdata/goldens/tpcds.sf1 testdata/cost-registry.csv
@@ -862,7 +862,7 @@ git commit -m "#62: a DISTINCT lowers to two stages beside any per-column compan
   repartition-keys lands. The answer against DataFusion comes from Task 6's
   `tpch/rollup-distinct`, whose tp1 cpu cells compare with DataFusion (`data_fusion_exact`).
 
-- [ ] **Step 1: Write the failing tests** in `translator/tests.rs`:
+- [x] **Step 1: Write the failing tests** in `translator/tests.rs`:
 
 ```rust
 /// Whether some project casts an expression to `target`.
@@ -921,8 +921,8 @@ async fn a_rollup_over_eight_keys_narrows_the_id_above_the_outer_stage() {
   whose id width does not move gets no narrowing cast, so the positive one is not DataFusion's
   own projection over every rollup.
 
-- [ ] **Step 2: Run; both fail** with Task 3's temporary grouping-sets refusal.
-- [ ] **Step 3: Implement.** In `lower`, `key_fields` is `let mut`; under `!group.is_single()`:
+- [x] **Step 2: Run; both fail** with Task 3's temporary grouping-sets refusal.
+- [x] **Step 3: Implement.** In `lower`, `key_fields` is `let mut`; under `!group.is_single()`:
 
 ```rust
     let sets = !group.is_single();
@@ -1001,7 +1001,7 @@ async fn a_rollup_over_eight_keys_narrows_the_id_above_the_outer_stage() {
   Imports: `datafusion::logical_expr::Aggregate`, `datafusion::common::ScalarValue`,
   `crate::plan::{GpuProject, NamedExpr, Schema}`.
 
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib -- distinct rollup translator::
@@ -1010,7 +1010,7 @@ cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_
 
   Expected: PASS; no golden moves.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add peacockdb-core/src
@@ -1027,14 +1027,14 @@ git commit -m "#62: a DISTINCT under grouping sets; the id narrowed above the ou
 - Modify: `cpp/src/operators/aggregate.cpp:~140-155`
 - Modify: `cpp/tests/gpu/test_plan_executor.cpp:610,688,909`
 
-- [ ] **Step 1: The schema.** `distinct: bool;` becomes `distinct: bool (deprecated);`, with a
+- [x] **Step 1: The schema.** `distinct: bool;` becomes `distinct: bool (deprecated);`, with a
   comment: never set — the planner lowers a DISTINCT before the wire. The slot stays.
-- [ ] **Step 2: The writer.** Delete `distinct: false,` in `aggregate_writer.rs`. The Rust side
+- [x] **Step 2: The writer.** Delete `distinct: false,` in `aggregate_writer.rs`. The Rust side
   is generated at build time; nothing generated is committed.
-- [ ] **Step 3: The C++.** Delete the guard block in `aggregate.cpp` (the comment from "make_agg
+- [x] **Step 3: The C++.** Delete the guard block in `aggregate.cpp` (the comment from "make_agg
   would silently compute" through the loop's closing brace) and the `/*distinct=*/false`
   argument at the three `CreateAggregateFuncNode` calls; the generated signature loses it.
-- [ ] **Step 4: Build and run**, as `build-test.md`'s workflow table says:
+- [x] **Step 4: Build and run**, as `build-test.md`'s workflow table says:
 
 ```bash
 scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build
@@ -1049,7 +1049,7 @@ git status --short testdata/goldens/recipe-payloads.txt
   `force_defaults`. If it moved, stop: a payload changed. Read `scripts/cargo-cudf.sh`'s header
   for its exact arguments if they differ.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add flatbuffers/gpu_plan.fbs peacockdb-core/src/wire/aggregate_writer.rs cpp/src/operators/aggregate.cpp cpp/tests/gpu/test_plan_executor.cpp
@@ -1068,7 +1068,7 @@ git commit -m "#62: AggregateFuncNode.distinct deprecated; its writer, guard and
 - Modify: `testdata/goldens/tpch.sf1/*.plans.txt`, the cpu tier's `*.cpu.txt`, `*.cost.txt`,
   `*.result.txt` sections for the three queries
 
-- [ ] **Step 1: The query files**, as the spec gives them:
+- [x] **Step 1: The query files**, as the spec gives them:
 
 ```sql
 -- A DISTINCT aggregate under a grouping set. DataFusion's SingleDistinctToGroupBy declines
@@ -1093,7 +1093,7 @@ FROM lineitem
 GROUP BY l_returnflag;
 ```
 
-- [ ] **Step 2: The end-to-end oracle variant**, failing first. In `tests/end_to_end.rs`,
+- [x] **Step 2: The end-to-end oracle variant**, failing first. In `tests/end_to_end.rs`,
   `sql_answers_match_datafusion`'s body moves into:
 
 ```rust
@@ -1148,7 +1148,7 @@ async fn distinct_functions_answer_as_their_hand_lowered_form() {
   with a `CAST`, not the engine; if the tolerance argument is not a relative tolerance, use the
   form `shuffle-stddev`'s comparison uses.
 
-- [ ] **Step 3: The cpu oracle keyword.** In `test_support/corpus.rs`:
+- [x] **Step 3: The cpu oracle keyword.** In `test_support/corpus.rs`:
 
 ```rust
     /// No DataFusion compare: for a query DataFusion 45 answers wrong or refuses. Its
@@ -1161,7 +1161,7 @@ async fn distinct_functions_answer_as_their_hand_lowered_form() {
   the other keywords' names (`rg data_fusion_subset peacockdb-core`) and add the new one
   wherever the set is listed.
 
-- [ ] **Step 4: The corpus lines**, in each dataset's place in `corpus_cases.inc`, in the shape
+- [x] **Step 4: The corpus lines**, in each dataset's place in `corpus_cases.inc`, in the shape
   the file's lines have when this task builds (chain J's duckdb-oracle adds a field; copy a
   neighbour's). First with every cpu mode:
 
@@ -1180,7 +1180,7 @@ corpus_query!(tpch, 1, distinct_functions, tp1_single | tp1_rowgroup | tp4_singl
   `duckdb-oracle-impl.md` does for every tpch query) and turn their DuckDB oracle on; the comment
   then says DuckDB is the oracle.
 
-- [ ] **Step 5: Write and run.**
+- [x] **Step 5: Write and run.**
 
 ```bash
 UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_goldens
@@ -1193,7 +1193,7 @@ cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- q28 
   green; tp4 red on #189. distinct-functions: all five green. Drop each red mode from its line,
   then run once more without `UPDATE_CANONICAL`.
 
-- [ ] **Step 6: The registry.**
+- [x] **Step 6: The registry.**
   - Row 29 (q28): the cpu cells as run, gpu `disabled` × 5; tickets: `62` struck, `152` (the
     cross join, join-backend) and any ticket a cpu mode failed on.
   - New tpch rows after `rollup_over_join`, adjusted to what step 5 ran:
@@ -1215,7 +1215,7 @@ cargo test --features rust-only -p peacockdb-core --lib -- distinct_functions
 
   Expected: PASS.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git add testdata peacockdb-core/tests/common/corpus_cases.inc peacockdb-core/src/test_support/corpus.rs peacockdb-core/src/tests/end_to_end.rs
@@ -1230,9 +1230,9 @@ git commit -m "#62: q28, rollup-distinct and distinct-functions on the cpu corpu
 - Modify: `peacockdb-core/src/plan/mod.rs:~53`, `llm-wiki/architecture.md`, `llm-wiki/build-test.md`,
   `llm-wiki/tickets/corpus-coverage.md` (#65), `llm-wiki/tickets/complete-coverage.md` (#195, #261)
 
-- [ ] **Step 1: `PlanError::Unsupported`'s doc** drops "a mixed distinct (#62)"; name another
+- [x] **Step 1: `PlanError::Unsupported`'s doc** drops "a mixed distinct (#62)"; name another
   live refusal in its place (#144).
-- [ ] **Step 2: `architecture.md`.**
+- [x] **Step 2: `architecture.md`.**
   - "DISTINCT lowers to grouping": replace the paragraph "Any other companion is refused at plan
     time (#62)…" with the lowering as built — two stages; the argument stripped of DataFusion's
     widening casts, first and never masked; the outer init running each companion's per-column
@@ -1245,19 +1245,19 @@ git commit -m "#62: q28, rollup-distinct and distinct-functions on the cpu corpu
   - One sentence where the corpus oracles are described: `data_fusion_disabled`, and why
     DataFusion 45 is no oracle for `avg`/`stddev(DISTINCT)` beside a companion.
   Short sentences: this page is read for one fact at a time.
-- [ ] **Step 3: Tickets.** #65 gains one line: under a DISTINCT the inner id carries one more
+- [x] **Step 3: Tickets.** #65 gains one line: under a DISTINCT the inner id carries one more
   key, so on the device it is doubled, and at 8, 16 or 32 keys the outer project's cast
   overflows it — the fix covers both. #195's bullet "#144 has no refusal of its own" is
   reworded: it has one now, pinned by `bug_two_distinct_arguments_are_refused`. #261: "Pinned,
   once distinct-companions lands, by a `bug_` test" names
   `bug_a_stddev_beside_a_distinct_is_refused` in `planner/tests/join_refusals.rs`. #62 is
   archived at merge by the helper, not here.
-- [ ] **Step 4: `build-test.md` counts**: the translator's (+7 plan tests), the refusals' (one
+- [x] **Step 4: `build-test.md` counts**: the translator's (+7 plan tests), the refusals' (one
   pin out, two `bug_` in), the aggregate module's new test, the end-to-end's (+5), the corpus
   rows (+3 queries; their cpu cells), the oracle keyword's description. Recount each row from
   the code; set every header the rows sum into and the grand total to the sums, so the page adds
   up (guard-checks fixes its pre-existing 5-test drift first).
-- [ ] **Step 5: The full verification bar.**
+- [x] **Step 5: The full verification bar.**
 
 ```bash
 cargo test --features rust-only -p peacockdb-core --lib
@@ -1271,7 +1271,7 @@ ctest --test-dir cpp/build -L cpu
 
   Expected: all green.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add peacockdb-core/src/plan/mod.rs llm-wiki

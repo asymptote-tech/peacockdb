@@ -2,12 +2,12 @@
 // `cpu_modes`, the device's `gpu_modes`, so one declaration covers both engines:
 //
 //   corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, cpu_oracle, gpu_oracle,
-//                 schema_validation)
+//                 schema_validation[(modes)])
 //
 // Modes are the five planning modes or'd together, or `none`; every argument is written, so
 // a query's whole coverage reads off the line. The last is the device run's schema validation;
-// a cell red on schema alone says `schema_validation_disabled` with its ticket on the line.
-// The first twenty are the smallest plans carrying no ticket; the rest of the corpus is T19.
+// a cell red on schema alone says `schema_validation_disabled(modes)` with its ticket on the
+// line. The first twenty are the smallest plans carrying no ticket; the rest is T19.
 
 // --- tpch ---------------------------------------------------------------------
 corpus_query!(tpch, 1, q6, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -107,6 +107,19 @@ corpus_query!(tpch, 1, q21, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgrou
 corpus_query!(tpch, 1, q7, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q8, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q2, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
+
+// distinct-companions (#62): a DISTINCT aggregate beside a companion DataFusion's own rewrite
+// declines. rollup-distinct puts one under a grouping set; its tp4 cpu modes are off on #189,
+// as rollup-over-join's are, and its device cells on #65 and #189. distinct-functions runs on
+// the device at every mode — the first plan from the lowering a device has run (#262) — under
+// shuffle-stddev's Welford tolerance oracle, its stddev one ULP from the cpu's in two groups.
+// Its mask excuses the three tp4 modes on #225 and only those: the Welford state named three
+// times for the alias is in the outer init, which the tp1 modes fold into their finalizing
+// node and never emit. DataFusion 45 refuses stddev(DISTINCT) and averages a grouped decimal
+// avg(DISTINCT) plainly, so its answer is held by ANSWER_HELD_ELSEWHERE in test_cpu_corpus.rs;
+// DuckDB is to be its oracle once chain J's duckdb-oracle has merged.
+corpus_query!(tpch, 1, rollup_distinct, tp1_single | tp1_rowgroup, none, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, distinct_functions, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, data_fusion_disabled, golden_approx_std, schema_validation_disabled(tp4_single | tp4_rowgroup | tp4_sized)); // #225
 
 // --- tpcds --------------------------------------------------------------------
 corpus_query!(tpcds, 1, q41, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -293,3 +306,8 @@ corpus_query!(tpcds, 1, q65, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgro
 corpus_query!(tpcds, 1, q81, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q85, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q92, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
+
+// distinct-companions (#62): q28 is six global `avg, count, count(DISTINCT ss_list_price)`
+// blocks cross-joined, and was refused at every mode until the lowering. Its device cells stay
+// off on #152, the cross join's build-side copy, and on #262 behind it.
+corpus_query!(tpcds, 1, q28, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);

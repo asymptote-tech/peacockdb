@@ -138,21 +138,6 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
   bool is_final = (agg->mode() == fb::AggregateMode_Final ||
                    agg->mode() == fb::AggregateMode_FinalPartitioned);
 
-  // make_agg would silently compute the NON-distinct value for a DISTINCT
-  // aggregate (needs cuDF nunique/distinct, unimplemented), while the CPU oracle
-  // honours the flag — a silent divergence, so fail loudly. Unreachable: the
-  // planner refuses a DISTINCT aggregate (translator/aggregate.rs, #62) and the
-  // wire writer always writes distinct=false, so this guards a hand-built plan only.
-  if (agg->aggr_funcs()) {
-    for (flatbuffers::uoffset_t i = 0; i < agg->aggr_funcs()->size(); ++i) {
-      if (agg->aggr_funcs()->Get(i)->distinct())
-        throw std::runtime_error(
-            "DISTINCT aggregate (e.g. count(DISTINCT)) is not supported on the "
-            "GPU; the planner refuses it and the wire writer never sets the flag, "
-            "so this plan was built by hand — see #62");
-    }
-  }
-
   // Build group-by keys.
   std::vector<cudf::size_type> key_indices;
   std::vector<std::string> key_names;

@@ -30,8 +30,8 @@ tables, no new dataset, plus the engine work it needs.
 - a join on a nullable key: [#59](#t59), [#80](#t80) and [#137](#t137) rest on there being none.
 - a shuffle keyed on a decimal: not a query but [#95](#t95)'s kernel work, and the murmur3
   conformance gate extended to cover it.
-- two `DISTINCT` args over different expressions: [#144](#t144) has no refusal of its own, and
-  `count_distinct` marks queries this mode handles, so a grep for one finds the wrong two.
+- two `DISTINCT` args over different expressions: [#144](#t144) has a refusal of its own now,
+  pinned by `bug_two_distinct_arguments_are_refused`, but still no query.
 - a wide `SELECT DISTINCT`: dedup whose state is the whole row, the compaction worst case.
 
 <a id="t161"></a>
@@ -64,6 +64,17 @@ node, which is why it is a ticket rather than a planner tweak. Not [#65](corpus-
 ROLLUP/CUBE `__grouping_id` — the two would coexist as separate columns. Until it lands the
 planner refuses the shape at plan time.
 
+**One subcase is cheaper than the expand, and the refusal covers it too.** Two arguments that are
+one expression under a coercion the lowering declines to strip — `count(DISTINCT f32),
+sum(DISTINCT f32)`, where `sum` coerces to `Float64` and `keeps_distinct` admits that only from an
+integer — reach this refusal, and the expand would answer them correctly as two arguments. But
+`Float32 → Float64` is injective, so one arm in `keeps_distinct`
+(`planner/translator/aggregate/distinct.rs`) would answer that shape with the ordinary
+single-distinct lowering instead, and widening the admitted list is the human's call. Pinned by
+`bug_one_float32_distinct_argument_under_two_coercions_is_refused`
+(`planner/tests/join_refusals.rs`), which goes red the day the arm lands. No corpus query has a
+`Float32` column.
+
 <a id="t261"></a>
 ### #261 — a `stddev` or `var` beside a DISTINCT is refused at planning
 **Priority: low** — no query in either benchmark has this shape.
@@ -71,7 +82,7 @@ planner refuses the shape at plan time.
 `stddev(y), count(DISTINCT x)` does not plan, on either backend. Every other companion of a
 DISTINCT does.
 
-distinct-companions (chain K, closes [#62](corpus-coverage.md#t62)) lowers a DISTINCT in two
+distinct-companions (chain K, closes [#62](../archive/archived-tickets.md#t62)) lowers a DISTINCT in two
 stages. The inner stage groups by `(x, keys)` and runs the companions' inits. The outer stage's
 first node reads two kinds of input: the DISTINCT aggregate reads values, and the companions
 read the inner stage's state. A node has one phase (`AggregateBody`'s `Phase`, the wire's
@@ -80,8 +91,8 @@ read the inner stage's state. A node has one phase (`AggregateBody`'s `Phase`, t
 merges as `Merge::Combined(MergeM2)`: the `[count, mean, m2]` triple merges together, and
 `MERGE_M2` exists only as a merge (cuDF's groupby `MERGE_M2`, `cpu_backend/merge_m2.rs`). So the
 translator refuses a Welford companion beside a DISTINCT. A `stddev(DISTINCT x)` is not this
-ticket: it reads values and plans. Pinned, once distinct-companions lands, by a `bug_` test in
-`planner/tests/`.
+ticket: it reads values and plans. Pinned by `bug_a_stddev_beside_a_distinct_is_refused`
+(`planner/tests/join_refusals.rs`).
 
 **Corpus query:** none. Simplest: `select l_returnflag, stddev(l_quantity), count(distinct
 l_partkey) from lineitem group by l_returnflag;` (tpch).

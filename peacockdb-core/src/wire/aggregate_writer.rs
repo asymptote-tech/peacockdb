@@ -174,7 +174,6 @@ fn named_func<'a>(
         &fb::AggregateFuncNodeArgs {
             name: Some(name),
             args: Some(args),
-            distinct: false,
             alias: Some(alias),
             out_decimal_precision: 0,
             out_decimal_scale: 0,

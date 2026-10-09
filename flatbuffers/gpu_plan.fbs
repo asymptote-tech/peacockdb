@@ -150,7 +150,10 @@ table AggregateFuncNode {
   /// Function name: "count", "sum", "min", "max", "avg", etc.
   name: string;
   args: [Expr];
-  distinct: bool;
+  /// Never set: the planner lowers a DISTINCT aggregate into two aggregate stages before
+  /// anything reaches the wire (translator/aggregate/distinct.rs). The slot stays so
+  /// `alias` and every later field keep theirs.
+  distinct: bool (deprecated);
   /// Output column alias (e.g. "count(*)"). If absent, defaults to name.
   alias: string;
   /// DataFusion's declared decimal output type for this aggregate (the *final*

@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2340 test cases — Rust 1865, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2382 test cases — Rust 1907, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,23 +22,32 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1192 cases: `--lib` 608, `test_cpu_corpus` 555, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1229 cases: `--lib` 630, `test_cpu_corpus` 567, `test_corpus_goldens` 29, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 554 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 566 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its two oracles and
 whether its device run is schema-validated, expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
-checked against plain DataFusion at `target_partitions = 1`. 116 queries at the modes each is
-correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
+checked against plain DataFusion at `target_partitions = 1` — `data_fusion_exact`,
+`data_fusion_approximate` to 1e-12, `data_fusion_subset` where the SQL does not determine the
+rows, or `data_fusion_disabled`, which skips the compare for a query DataFusion 45 answers wrong
+or refuses. A line taking that last one checks no answer, so it must appear in
+`ANSWER_HELD_ELSEWHERE` (`tests/test_cpu_corpus.rs`) naming the test that does; the register and
+the declared set are asserted equal both ways, so the set below is read off code rather than
+promised here. `tpch/distinct-functions` is its one member: DataFusion refuses
+`stddev(DISTINCT)` and answers a grouped decimal `avg(DISTINCT)` as the plain average, so its
+answer is held by `end_to_end.rs` against a hand-lowered oracle instead. 119 queries at the modes
+each is correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
 [#199](tickets/corpus-coverage.md#t199), `tpcds/q77` three by [#212](tickets/joins.md#t212),
-`tpcds/q80`, `tpcds/q18`, `tpcds/q22`, `tpcds/q5` and `tpch/rollup-over-join` three by
+`tpcds/q80`, `tpcds/q18`, `tpcds/q22`, `tpcds/q5`, `tpch/rollup-over-join` and
+`tpch/rollup-distinct` three by
 [#189](tickets/corpus-coverage.md#t189), `tpch/scan-limit` two by
 [#186](tickets/corpus-coverage.md#t186), and four queries are out entirely: `tpch/q11`,
 `tpch/q22` and `tpcds/q24` on
-[#190](tickets/joins.md#t190), and `tpcds/q54`. 551 cells, plus three checks
+[#190](tickets/joins.md#t190), and `tpcds/q54`. 563 cells, plus three checks
 that every declaration's two oracles suit each other and every device cell has a cpu cell
 
 | Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
@@ -47,7 +56,7 @@ that every declaration's two oracles suit each other and every device cell has a
 the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
 one binary per engine, since `inventory` collects per linked binary
 
-| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs) | 26 |
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs) | 29 |
 |---|---|--:|
 
 the committed sections against their own arithmetic, with no dataset and no run: `consumed +
@@ -58,7 +67,12 @@ that contradicts itself is the only witness to a renderer that is wrong. The ben
 the record get the same reading: every `total_us` is the sum of the `time_us` beside it, every
 committed tree reports a release build, every timed (query, mode) is enabled on a device in
 `corpus_cases.inc`, a row that lost a cell is refused, a bare `calls` row names the seq it was
-handed, and the record's preamble is what `record_header()` writes
+handed, and the record's preamble is what `record_header()` writes. That device check reads
+`corpus_cases.inc` as text, and two more read it with the same reader: every schema-validation
+mask entry is one of its own line's device modes — the decoder is asked only about a mode a run
+reached, so an entry for a cell that is off is never decoded and arms itself when that cell is
+enabled — and one case holds the reader to the two bracket shapes a declaration line carries, a
+mode mask on the last argument and a trailing comment with a parenthesis in it
 
 | Cost-model goldens | [cost_goldens_match_and_total_is_byte_identical](../peacockdb-core/tests/test_cost_model.rs) | 3 |
 |---|---|--:|
@@ -67,12 +81,12 @@ handed, and the record's preamble is what `record_header()` writes
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 29 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 34 |
 |---|---|--:|
 
 SQL in, rows out: 17 queries planned and run at all five modes against DataFusion on the same
 SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back
-to zero and holds equal releases at the end of every run — and ten cases no query list can
+to zero and holds equal releases at the end of every run — and fifteen cases no query list can
 carry: that DataFusion's partial aggregate does not skip grouping here, the call and pull
 counts a limit makes, the smallest budget a query fits in completing where the byte below it
 trips, and that boundary under a drained lane, the model compared against what the calls
@@ -81,9 +95,13 @@ keeping the shapes only one query has, and a degenerate hash under a Right outer
 RightAnti answering like the oracle from the empty build lanes it leaves
 ([#175](archive/archived-tickets.md#t175)), and the schema validator as the driver's output
 hook — `tpch/q6` at every mode passing under it, and an index over the same tree with one
-project's field retyped refused naming the field. Two of the 29 are `#[ignore]`d against
+project's field retyped refused naming the field; and five on the DISTINCT lowering — a
+`count(DISTINCT)` beside an `avg` and a `count`, a grouped `count` and `sum` DISTINCT beside
+companions, a DISTINCT argument holding NULLs, an empty keyless input answering `0, 0`, and
+`tpch/distinct-functions` against a hand-lowered oracle through `sql_answers_match_oracle`,
+since DataFusion is no oracle for it. Two of the 34 are `#[ignore]`d against
 [#182](tickets/memory.md#t182) — the budget boundary and the rebatcher's peak, both
-properties that pricing a batch from the plan's schema took away — so 27 run. The first tier
+properties that pricing a batch from the plan's schema took away — so 32 run. The first tier
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 
@@ -140,11 +158,15 @@ null analysis both ways, and the session config's own registration path declarin
 every rule in the can-this-column-be-NULL pass, on hand-built nodes — a source declares a
 not-nullable column here, which no corpus fixture can
 
-| Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 10 |
+| Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 12 |
 |---|---|--:|
 
 every shape the planner refuses, from the SQL that provokes it; each asserts its ticket is in
-the message a user sees
+the message a user sees. Three are `bug_` tests rather than refusals the engine means to keep —
+two DISTINCT arguments ([#144](tickets/complete-coverage.md#t144)), a `stddev` companion
+beside a DISTINCT ([#261](tickets/complete-coverage.md#t261)), and one `Float32` argument that
+reaches #144's refusal because `keeps_distinct` admits `Float64` from an integer and not from a
+`Float32`, so widening that list turns the test red
 
 | Plan goldens, tp1-single | [tpch_tp1_single](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 2 |
 |---|---|--:|
@@ -271,7 +293,7 @@ fetch, coalesce, a merge with and without its finalize, a merge over state whose
 grouping id, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden,
 since co-partitioning is what every partitioned join rests on
 
-| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 29 |
+| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 37 |
 |---|---|--:|
 
 one test per node kind, per expression kind and per planner rule, each from the smallest plan
@@ -293,6 +315,14 @@ the accountant's formula, cache and two checks on plain figures; the plan index'
 per-lane slots and which lanes feed a build side that owes rows; the scheduler's corners
 enumerated and then a differential test against a naive rescan on randomized shapes; the lane
 state machine one call at a time with no tree around it
+
+| DISTINCT reaching decompose | [planner::translator::aggregate::tests](../peacockdb-core/src/planner/translator/aggregate/tests.rs) | 1 |
+|---|---|--:|
+
+`decompose` handed a distinct `AggregateFunctionExpr` directly. No SQL reaches it — the
+classifier lowers or refuses every DISTINCT it is shown — so this is the net under it, for a
+shape it is not shown, which would otherwise run as non-distinct on both engines where the
+cpu-vs-device comparison cannot see it
 
 | Aggregate state types | [plan::aggregates::tests](../peacockdb-core/src/plan/aggregates/tests.rs) | 9 |
 |---|---|--:|
@@ -336,6 +366,15 @@ own interop table for the types the wire admits, a type outside it a panic by na
 comparator over it: every diverging column in the sink's spelling, a renamed one and a width
 mismatch each a finding, precision and nullability never one; the schema-only IPC stream
 `peacock_handle_schema` answers, decoded with no device
+
+| Schema validation, declared | [test_support::schema_validation::tests](../peacockdb-core/src/test_support/schema_validation/tests.rs) | 6 |
+|---|---|--:|
+
+the last `corpus_query!` argument decoded against the mode being run: the hook on at every
+mode, off at every mode, and off at only the modes a `schema_validation_disabled(…)` mask
+names — plus the three refusals that keep a mask honest, since a misspelled keyword, a mask on
+the enabled form and a mask entry that is not one of the five would each read as a legal line
+and run a cell unvalidated
 
 | Forwarders and row ranges | [interleave_serves_lane_p_from_lane_p_of_every_child](../peacockdb-core/src/executor/forwarder/tests.rs) | 4 |
 |---|---|--:|
@@ -406,25 +445,30 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 576 cases: `--lib -- gpu_tests::` 536, `test_gpu_corpus` 28, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 581 cases: `--lib -- gpu_tests::` 536, `test_gpu_corpus` 33, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 27 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 32 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
 device with every batch held to its node's declared schema through the driver's output hook
-(the line's `schema_validation_enabled`; `tpch/shuffle-stddev` says `disabled` against
-[#225](tickets/corpus-coverage.md#t225), its Welford state columns named for the alias), and asserts,
-read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
-and the bytes — plus the result where `gpu_oracle` names a golden.
-Twenty-six cells today: `tpch/q6`, `tpch/q1` and `tpch/shuffle-additive-avg` at every mode,
-and `q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggregate-groupby`,
+(the line's `schema_validation_enabled`; `tpch/shuffle-stddev` says `disabled` and
+`tpch/distinct-functions` `disabled(tp4_single | tp4_rowgroup | tp4_sized)` against
+[#225](tickets/corpus-coverage.md#t225), whose Welford columns named for the alias sit in a node
+only the tp4 modes emit — the mask is what keeps the hook at the two tp1 cells, where it is
+green), and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`,
+the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden.
+Thirty-one cells today: `tpch/q6`, `tpch/q1`, `tpch/shuffle-additive-avg` and
+`tpch/distinct-functions` at every mode, and
+`q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggregate-groupby`,
 `tpch/filter-project`, `tpch/shuffle-additive`, `tpcds/q37`, `tpcds/q82` and `tpcds/q85` at
 `tp1-single`; the rest are off against [#152](tickets/joins.md#t152),
 [#95](tickets/corpus-coverage.md#t95),
-[#220](tickets/joins.md#t220) and the device's own tickets (#57, #63, #205). The twenty-seventh case is that a device run under a
+[#220](tickets/joins.md#t220) and the device's own tickets (#57, #63, #205). distinct-functions
+is the DISTINCT lowering's only device query; q28 and `tpch/rollup-distinct` wait on #152, #65
+and #189 ([#262](tickets/corpus-coverage.md#t262)). The thirty-second case is that a device run under a
 regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
@@ -1217,3 +1261,10 @@ Wall-time runs are manual; the protocol: `PEACOCK_BENCHMARK=1`
   do sleep 15; done'` can never exit: the wrapper's own command line contains the pattern, so
   `pgrep -f` finds the waiter and the loop waits for itself. It ends only when the timeout
   fires. Where a pattern is unavoidable, exclude the waiter's own pid.
+- **A synced source older than the binary built from it.** `rsync -a` preserves mtimes, so
+  pushing the tree over a host-side edit can restore a *younger* file as an *older* one. Cargo
+  then sees nothing newer and skips the rebuild, and the run reports the previous build's
+  behaviour as the current one — a green that belongs to code the host no longer holds. Never
+  edit sources on a remote host; where one has been edited, `touch` the synced files before
+  building. Confirm which binary you are about to trust with `strings` on it when the change is
+  a literal the test reads.

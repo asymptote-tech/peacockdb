@@ -86,8 +86,11 @@ pub(crate) async fn run_cpu(dataset: &str, sf: &str, query: &str, mode: &Mode) -
 }
 
 /// The answer against plain DataFusion at `target_partitions = 1`, asked whichever of the
-/// three ways this query's declaration names. Runs on every case, regenerating or not: a
-/// wrong answer must not reach a golden, and this is the check that stops it.
+/// four ways this query's declaration names. Runs on every case, regenerating or not: a
+/// wrong answer must not reach a golden, and this is the check that stops it — for the three
+/// that compare. `DataFusionDisabled` compares nothing and stops nothing, so for a query
+/// declaring it the answer is held by a test named in `ANSWER_HELD_ELSEWHERE`
+/// (`tests/test_cpu_corpus.rs`), which is asserted to name every such line.
 pub(crate) async fn assert_answer(
     dataset: &str,
     sf: &str,
@@ -98,6 +101,9 @@ pub(crate) async fn assert_answer(
 ) {
     let what = format!("{dataset}/{query} at {}", mode.name);
     match cpu_oracle_mode(oracle) {
+        // Nothing to compare against: the query's answer is held by a test naming its own
+        // oracle, not by this session.
+        CpuOracle::DataFusionDisabled => {}
         CpuOracle::DataFusionSubset => {
             assert_subset_of_unlimited(dataset, sf, query, batches, &what).await
         }
@@ -462,10 +468,12 @@ fn assert_result_section(
 
 /// What a corpus case's answer is compared against.
 ///
-/// Every variant runs the same oracle — plain DataFusion at `target_partitions = 1` — and
+/// Three variants run the same oracle — plain DataFusion at `target_partitions = 1` — and
 /// what differs is what is asked of it: the whole answer, the whole answer to a tolerance,
 /// or the count and the containment where the SQL determines no more than those. That is
-/// why it is an argument rather than a second kind of case.
+/// why it is an argument rather than a second kind of case. The fourth asks nothing of it,
+/// because for that query DataFusion is wrong; it belongs here for the same reason, and what
+/// holds the answer in its place is a register entry rather than this file.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CpuOracle {
     /// Exact sorted-string equality. The default.
@@ -482,13 +490,20 @@ pub(crate) enum CpuOracle {
     /// are a sub-MULTISET of the unlimited answer, compared as a multiset because set
     /// membership passes a run that returned one row twice where the oracle has it once.
     DataFusionSubset,
+    /// No compare at all: for a query DataFusion 45 answers wrong or refuses, so there is no
+    /// oracle to ask. What holds the answer instead is `ANSWER_HELD_ELSEWHERE`
+    /// (`tests/test_cpu_corpus.rs`), which every line declaring this must appear in — the
+    /// cells still check the plan, the run and the goldens, and the answer alone elsewhere.
+    DataFusionDisabled,
 }
 
 impl CpuOracle {
     /// The `rel_tol` handed to the result compare. `None` = exact.
     pub(crate) fn rel_tol(self) -> Option<f64> {
         match self {
-            CpuOracle::DataFusionExact | CpuOracle::DataFusionSubset => None,
+            CpuOracle::DataFusionExact
+            | CpuOracle::DataFusionSubset
+            | CpuOracle::DataFusionDisabled => None,
             CpuOracle::DataFusionApproximate => Some(1e-12),
         }
     }
@@ -502,9 +517,10 @@ pub(crate) fn cpu_oracle_mode(s: &str) -> CpuOracle {
         "data_fusion_exact" => CpuOracle::DataFusionExact,
         "data_fusion_approximate" => CpuOracle::DataFusionApproximate,
         "data_fusion_subset" => CpuOracle::DataFusionSubset,
+        "data_fusion_disabled" => CpuOracle::DataFusionDisabled,
         other => panic!(
-            "cpu result test: unknown oracle keyword '{other}' \
-             (expected data_fusion_exact|data_fusion_approximate|data_fusion_subset)"
+            "cpu result test: unknown oracle keyword '{other}' (expected data_fusion_exact|\
+             data_fusion_approximate|data_fusion_subset|data_fusion_disabled)"
         ),
     }
 }
