@@ -1565,3 +1565,44 @@ guard enforces the wide reading. But it is a project-wide rule edited on a page 
 `## Scope` does not name, so it is recorded here beside the `build-test.md` bullet rather than
 left for someone to find. Narrowing it means narrowing `re_exports` in
 `tests/test_module_layout/visibility.rs` back with it.
+
+### The recorded device pass, re-run at `91a59466` — 2026-10-09
+
+Chain K's board note makes a recorded nebius-gpu pass a condition of `done`, and the pass
+recorded above was taken at `5e2e068f`. Five commits of source the gpu tier compiles moved after
+it — `test_support/mod.rs` (the re-export became the `is_validated_at` wrapper that
+`corpus_gpu::gpu_case` now resolves to), `schema_validation.rs`'s two `cfg_attr` conditions,
+`corpus_cases.inc`, `test_corpus_goldens/benchmark.rs` and three `test_module_layout` files. The
+delta is inert on a device and was compile-checked under `--features gpu`, and neither of those
+is a recorded pass. This round's own lesson was a green belonging to code the host no longer
+held, so the tier was run again at the head.
+
+**Head: `91a59466`**, working tree clean at sync time. `git diff --name-only 91a59466..HEAD`
+returns nothing but `.md` paths, checked here rather than taken on trust, so this run stands for
+the final tree: the only commits after it rewrite the spec's signoff and this file.
+
+Host state: card idle at 0 MiB with no compute apps, 21 GB free on `/` before the build and 21
+after — above the note's 20 GB line but with no slack left to reclaim, since `conda clean -a`
+has none. Build `rc=0`, zero warnings. Every staged binary's mtime is later than the touched
+sources (`corpus_cases.inc` 18:48:25; binaries 18:48:38-18:51:20), and
+`strings cpp/install/rust-tests/test_gpu_corpus` carries
+`schema_validation_disabled (tp4_single | tp4_rowgroup | tp4_sized)` — the committed mask, not a
+previous build's. Both checks exist because this round was once misled by neither.
+
+`TIERDONE rc=0`. Ran and filtered, so a binary that executed can be told from one that filtered
+itself empty:
+
+| binary | ran | passed | filtered out |
+|---|--:|--:|--:|
+| `test_gpu_corpus` | 33 | 33 | 0 |
+| `peacockdb_core_gpu_lib gpu_tests::` | 536 | 536 | 634 |
+| `test_node_timing` | 1 | 1 | 0 |
+| `peacock_gpu_benchmarks --skip bench_` | 8 | 8 | 3 (the `bench_` cases) |
+| `cpp/install/bin/peacock_gpu_tests` | 4 | 4 | — (gtest, 2 suites) |
+| `cpp/install/bin/peacock_plan_tests` | 56 | 56 | — (gtest, 11 suites) |
+
+The 634 filtered in the lib binary is the whole of the cpu and ffi rungs, which a `gpu` build
+compiles too; 536 + 634 = 1170 is that binary's own total and is not a tier count. All five
+`tpch/distinct-functions` cells passed by name, with
+`the_registry_matches_the_gpu_corpus_in_both_directions` and
+`a_device_run_under_a_regeneration_writes_no_golden` beside them.
