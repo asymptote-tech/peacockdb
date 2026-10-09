@@ -5,17 +5,18 @@
 - Third of chain K, branch `ENS-limits` off `ENS-distinct-companions`, PR will target that
   branch. Closes [#186](../archive/archived-tickets.md#t186) and
   [#234](../archive/archived-tickets.md#t234).
-- **Chain K runs without a GPU.** No device build, no device run, no GPU cycle. Every build and
-  run is local — verda does not resolve from this host (checked again at this dispatch). The
-  `scan.cpp` edit and the four `gpu_tests/source_cases.rs` cases are built, not run; #281 holds
-  them. The task reaches `done` when every CI job but the GPU tests is green.
-- **The cost gate's rises are pre-accepted by the human** (2026-10-08, on the board): this task
-  is `done` when the cost-report job's only regressions are the sections this file lists from a
-  local `--cost-diff` run — expected `nested-limits` at tp1-rowgroup and tp4-rowgroup, +228
-  bytes. Any other regression is an ordinary finding. So the local `--cost-diff` output has to
-  land in this file before CI is read, or there is nothing to compare the job against.
-- The chain's base is master `31c56bea`. Both tasks below this one were rebased onto it and
-  re-proved today; `guard-checks-detail.md` records what master brought across. Nothing in this
+- **The GPU half is done, on nebius-gpu** (`dmitry@89.169.109.150`, `~/peacockdb-K`, cuDF 25.02),
+  under chain K's board note; the last section of this file is its record. CPU builds and runs
+  stay local — verda does not resolve from this host. `done` is CI green except the `gpu-tests`
+  job, which runs on the unreachable shad-gpu. The no-GPU rule the rounds below were worked under
+  is superseded; #281 no longer holds anything of this task's.
+- **The cost gate passes on its own now.** The human pre-accepted the two `nested-limits`
+  rowgroup rises (+228 bytes, 2026-10-08, on the board), but master `bc9b6e2f` moved the gate to
+  fail only past +10% and they are +0.02%, so the job is green and the acceptance is no longer
+  load-bearing. The local `--cost-diff` against the current merge-base is in the last section.
+- The chain's base is master `bc9b6e2f` after the second rebase (`31c56bea` before it); the
+  merge-base with `ENS-distinct-companions` is `8a831978`, which is what `--cost-diff` compares
+  against. `guard-checks-detail.md` records what the first rebase brought across. Nothing in this
   task's scope overlaps master's `64ced62e`, which touched `plan_text` and the join-projection
   rendering.
 
@@ -512,3 +513,224 @@ this task's. Measure it rather than assuming either way.
 `scan-limit`'s device oracle is `live_cpu`, not a golden: its result section is skipped, so the
 device answer is compared against a fresh cpu run at the same mode. `nested-limits` is
 `golden_exact`.
+
+### 2026-10-09 — the GPU half ran on nebius-gpu
+
+Everything #281 held for this task is now measured. The device tier is green at 537 + 38 + 1 + 8
++ 4 + 56 cases, `tpch/scan-limit`'s five device cells are **enabled**, `tpch/nested-limits`' five
+are **off on [#285](../tickets/corpus-coverage.md#t285)** — a defect the run found that is not
+about a limit — and #281 narrows to empty-sorts' half alone.
+
+**Host and commands.** nebius-gpu, `dmitry@89.169.109.150`, `~/peacockdb-K`, cuDF 25.02, card
+free the whole time (`nvidia-smi` 0 MiB; chain J never contended). `df -h /` 21 GB free before
+each of four builds and unchanged after, so chain J's cleanup rule was never reached and nothing
+was deleted. Each build: `rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./
+dmitry@89.169.109.150:peacockdb-K/`, then `find … \( -name '*.rs' -o -name '*.inc' \) | xargs
+touch` on the host, then `./scripts/build-test-shadgpu.sh --build` detached, never `--run`. Runs
+are the staged binaries directly under `LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib`,
+`PEACOCK_TESTDATA_DIR=$PWD/testdata`, `--test-threads=1`. Logs in `~/K-logs/limits-build[1-4].log`
+and `limits-tier{,2}.log` on the host.
+
+**The rsync-mtime antipattern was checked, not assumed.** After the first sync a second
+`rsync -ain` with the same filters listed nothing, so the host's content equalled the worktree's;
+the sources were `touch`ed before every build anyway. Each build was then confirmed by a literal
+the test reads rather than by its exit code: `nm -C cpp/install/lib/libpeacock_gpu.so | grep
+set_num_rows` went from `U cudf::io::parquet_reader_options::set_num_rows(int)` (the base's call
+site, still staged from distinct-companions' build) to **nothing**, which is the proof that the
+staged C++ is this branch's `scan.cpp`; and `--list` on the staged Rust binaries named the four
+converted cases and then the new `bug_` one.
+
+#### Per-binary counts, final run (`~/K-logs/limits-tier2.log`)
+
+| binary | ran | passed | filtered |
+|---|--:|--:|--:|
+| `peacockdb_core_gpu_lib gpu_tests::` | 537 | 537 | 644 |
+| `test_gpu_corpus` | 38 | 38 | 0 |
+| `test_node_timing` | 1 | 1 | 0 |
+| `peacock_gpu_benchmarks --skip bench_` | 8 | 8 | 3 |
+| `cpp/install/bin/peacock_gpu_tests` | 4 | 4 | — |
+| `cpp/install/bin/peacock_plan_tests` | 56 | 56 | — |
+
+Every one of them executed tests; none is a zero-test pass. The 644 filtered out of the lib
+binary are its cpu and ffi rungs, which `gpu_tests::` excludes by design; the 3 filtered out of
+the benchmark binary are its `bench_` cases, which `--skip bench_` is there to drop.
+
+#### scan-limit: five cells enabled, and its oracle was wrong
+
+All five pass, and they pass against the **result golden**, not a live cpu run. The committed
+declaration said `live_cpu`, and that is refused the moment a device cell runs:
+
+    tpch/scan-limit at tp1-single on a device: gpu_oracle is live_cpu and `.result.txt` holds
+    this query's rows — a device-side cpu run for a comparison the committed section already makes
+
+`mini.result.txt` has held a real `== scan-limit` section at `mode=tp4-sized` all along — the
+brief for this round, and `corpus_gpu.rs`'s own doc, both say that section is skipped, and it is
+not. So `live_cpu` → `golden_exact`, which is strictly more coverage: the device's answer at each
+of the five modes is now compared to the cpu-authored tp4-sized rows, and all five passing is the
+first measurement of the completeness pass's analyst finding 6 — that #186 made a scan-pushed
+root-adjacent LIMIT return the same rows at every mode, one lane over the covering prefix in
+index order. Nothing on the cpu tests that: `authoritative_mode` asserts the result section at
+the **last enabled mode only**, so before this the four other modes' answers were compared to
+nothing but DataFusion's subset.
+
+That edit then reddened a cpu guard, `each_declarations_two_oracles_suit_each_other`:
+
+    tpch/scan-limit: gpu_oracle is golden_exact where no committed section can serve it
+    (cpu_oracle is data_fusion_subset, so the modes need not agree), so it fails on correct behaviour
+
+**The guard conflated two claims, and `build-test.md` was already right about which one matters.**
+Its `needs_live` was `over_cap || cpu_oracle == "data_fusion_subset"`. But `data_fusion_subset`
+says *DataFusion's pick and ours need not be the same rows* — `build-test.md:35` says exactly
+that — which is not the same as *our own five modes differing*. scan-limit is both: undetermined
+against DataFusion, identical across the modes since #186. `build-test.md:737` already states the
+device-side rule keyed on the right thing ("live_cpu … for a query whose section is skipped"), and
+`corpus_gpu.rs`'s check keys on it too; only the cpu guard used the proxy. So the term is gone and
+both guards now ask the one question they are both about — whether a committed section serves.
+Code-vs-wiki drift with the wiki in the right, so it was fixed rather than filed.
+
+**The guard still goes red both ways, constructed rather than argued.** scan-limit
+`golden_exact` → `live_cpu` with its frozen section reddens the second branch; `filter-project`
+`live_cpu` → `golden_exact` with its over-cap marker reddens the first. Both reverted, and the
+guard is green on the final tree. It has no unit cases of its own, which is why this was done by
+construction. `data_fusion_subset` is on exactly one line (scan-limit), and the other four
+`live_cpu` lines — filter-project, semi-join, anti-join, q16 — all rest on `over_cap` alone and
+keep the same verdict, checked against their sections.
+
+#### nested-limits: five cells off, and the cause is not a limit
+
+Red at all five modes, every one at the same place — the cpu golden's section, not the answer:
+
+    tp1-single-mini.cpu.txt: `nested-limits` moved — line 1, column 14 —
+    expected `early_exit=GpuUnload@8,GpuLimit@5,GpuLimit@4`
+    actual   `early_exit=GpuLimit@5,GpuLimit@4` (+10 more lines)
+
+`line_difference` shows one line, so the device's whole rendering was dumped under a temporary
+`PCK_DUMP_RUN` hook in `corpus_gpu.rs` (added, used, reverted; the final tree has no diff there).
+It says everything:
+
+    GpuUnload: skip=3, fetch=20, output_rows=0 … in_rows=[[0]] batch_rows=[[]]
+      GpuCrossJoin: in_rows=[[0],[23]] batch_rows=[[]]
+        GpuCoalesceAllBatches: output_rows=0, batch_rows=[[]]
+          GpuLimit: skip=0, fetch=23, output_rows=0, in_rows=[[0]] batch_rows=[[]]
+            GpuLoadParquet: table=region, projections=[], output_rows=0, batch_rows=[[0]]
+        GpuProject … GpuLimit 5..+23 in_rows=[[28]] → 23 … GpuLimit 0..+28 in_rows=[[122880]] → 28
+
+**The part side is perfect** — 122,880 → 28 → 23, both of this branch's new limits over a scan
+doing exactly what the cpu golden says. **The region scan reads 0 rows where the cpu reads 5**,
+and everything after follows: the `GpuLimit` drops the zero-row batch (#214, which this task's
+Restriction left alone), the coalesce has nothing, the cross join's build side is empty, the
+unload never reaches `skip + fetch = 23` and so never satisfies, and the query answers nothing
+instead of twenty rows. **The expected #152 outcome did not happen**: the cross join's build-side
+copy is not in play at any mode, because there is nothing to copy. Nothing refused and nothing
+warned.
+
+The root cause is **#285**, filed: `CudfScan.file_schema` is the node's *declared* schema and
+`projection` is left empty (`wire/node_writer.rs::scan`), which `scan.cpp` reads as every column
+of the schema it was given — and region's declared schema is `schema=[]`, so it selects none, and
+a cuDF table of no columns reports `num_rows() == 0`. Pinned at the operator level by
+`bug_a_scan_declaring_no_column_reads_no_rows_on_the_device` (`gpu_tests/source_cases.rs`), which
+has no limit in it at all: 64 rows on the cpu against 0 on the device, over one parquet. That pin
+is what makes the diagnosis independent of this query — and its red step was watched first, as
+an agreement case, before it was turned into the pin.
+
+**It predates this branch**, and the branch only changed the symptom. `region`'s declared schema
+is `schema=[]` at the base too (`git show 8a831978:…/tp1-single.plans.txt`), and the
+`set_num_rows(23)` the branch dropped was on the same zero-column read, where it could not have
+made cuDF answer five rows. What the branch did change is that the new `GpuLimit` above the scan
+now swallows the zero-row batch, so nothing reaches `cudf::cross_join` — which is why the symptom
+is a silent empty answer rather than the "Left table is empty" refusal #63 predicted for this arm.
+The base's device behaviour for this query is **not measured**: its cells were off.
+
+**#285 is the report's unfiled ticket, not a duplicate.** `reports/corpus-fixes.md`'s "Tickets to
+file" item 1 is this defect, predicted at `188c23ce` and never filed; the same report's coverage
+table says "nested_limits' first device run after this fails at the `region` scan — ticket 1, not
+a new one", and `join-rewrite-cell-estimate.md`'s R4 names the zero-column scan too. #63 owns the
+same root cause at a *project* and names this arm only inside its fix paragraph, with tpcds/q9 as
+its query and no corpus query or pin for the scan. So #285 was filed with the measurement, the
+corpus query and the pin, cross-referenced to #63 both ways, and #63's closing sentence corrected
+— measured, the scan arm answers empty rather than refusing. The two share one fix.
+
+#### What the four converted cases proved about dropping `set_num_rows`
+
+All four ran on the card and passed:
+`both_backends_read_the_same_batches_per_row_group`,
+`a_scan_of_one_row_group_reads_it_whole_on_both`,
+`a_limit_over_a_scan_of_one_row_group_keeps_its_first_rows_on_both`,
+`a_limit_inside_the_first_of_four_scanned_row_groups_drops_the_rest_on_both`,
+`a_limit_across_a_scanned_row_group_boundary_slices_the_second_group_on_both`
+(the first two of the scan, the last three of a `GpuLimit` over the batches a scan emitted).
+
+Together with scan-limit's five corpus cells that closes #186's device half: a scan with its
+limit removed reads its row groups whole on a device, byte for byte as the cpu does, and the cut
+is made above it — by a `GpuLimit` in the harness cases, and by the unload's interval in
+scan-limit, whose section matches the cpu's `early_exit=GpuUnload@1` and `in_rows=[[122880]]` at
+all five modes. Where it is *not* proved: a zero-column scan, which never worked and is #285.
+Note that the harness cases could not have caught #285 before — every one of them declares the
+file's own schema, so none selects no column.
+
+#### CPU, re-proved locally on master `bc9b6e2f`
+
+| target | result |
+|---|---|
+| rust-only `--lib` | 638 passed, 2 ignored (#182) = 640 cases |
+| `--test test_cpu_corpus` | 569 |
+| `--test test_corpus_goldens` | 29 |
+| `--test test_cost_model` | 3 |
+| `--test test_ci_coverage` | 9 |
+| `--test test_module_layout` | 17 |
+| `--test test_golden_format` | 26 |
+| `cargo test -p cost-report` | 38 |
+| C++ `scripts/build.sh --build` (cuDF 25.02, g++-12) | rc=0, 20 ninja steps, no warning |
+| `ctest -L cpu` | 1/1 |
+
+All rc=0. The registry tests both ways are inside these:
+`the_registry_matches_the_cpu_corpus_in_both_directions` in `test_cpu_corpus` and
+`the_registry_matches_the_gpu_corpus_in_both_directions` in `test_gpu_corpus` on the device —
+both green, which is what holds the ten `cost-registry.csv` gpu cells to the `corpus_query!`
+lines in both directions.
+
+**Warnings.** Neither build adds one. The device build logs zero. The local cpu side logs exactly
+one, `function sha_links is never used` at `cost-report/src/main.rs:1538` — master's, present
+verbatim in `bc9b6e2f` and in no file this branch touches. Cosmetic, so no ticket. The gpu rung's
+old unused-`AsArray` warning at `aggregate_dimension_cases.rs:9` is **gone**: master's rebase
+carried the fix.
+
+#### The cost gate is green now, not red
+
+`cargo run -q -p cost-report -- --cost-diff --base 8a831978` (the new merge-base after the second
+rebase): **563 compared, 7 changed, 2 regressions, 0 over 10%, rc=0.** The two are exactly the
+pre-accepted ones — `tpch.sf1/nested-limits` at tp1-rowgroup-mini and tp4-rowgroup-mini,
+976.44 KB → 976.66 KB, +0.02% each, the +228 bytes `## Cost gate` predicted — with no third, and
+five improvements (nested-limits at the other three modes −38.51%, scan-limit at tp4-single and
+tp4-sized −97.95%). **The job will pass**: master `bc9b6e2f` moved the gate to fail only past
++10%, so the human's pre-acceptance is no longer load-bearing for `done`. Nothing this round
+touched a golden, a `.cpu.txt` or a `.cost.txt`, so these rows are the committed sections'.
+
+#### Counts moved in `build-test.md`
+
+gpu block 581 → **587**: `--lib -- gpu_tests::` 536 → 537 (the #285 pin), `test_gpu_corpus`
+33 → 38 (scan-limit's five cells). Rows re-summed rather than deltaed — the block's ten rows sum
+to 587, "Corpus, device" 32 → 37 and "Operator harness" 335 → 336 — and the page's three top
+figures moved by the same six: Rust 1919 → **1925**, grand total 2394 → **2400**, with all 77
+table rows on the page summing to 2400 and C++ and Python untouched. The "Corpus, device" prose
+now says thirty-six cells, names scan-limit at every mode, and sends nested-limits to #285.
+
+#### Deferred, and nothing else
+
+As the board's host override requires: `peacock_tpch_tests` and `peacock_tpchv_tests` (sf40),
+`--run-benchmarks`, and any Nsight capture — not run, not attempted. `peacock_cpu_tests` stayed
+local. Nothing else was skipped, and no test was disabled.
+
+#### For whoever is next
+
+- **`#285` is the one thing standing between `tpch/nested-limits` and five device cells**, and it
+  is a two-line C++ or wire change away. When it closes, those five cells go on in the same two
+  coordinated edits (`corpus_cases.inc`'s gpu modes and the registry's `gpu_*` columns) and #63's
+  q9 cells come with it. `#214` is the second node in that chain but not a blocker: with a scan
+  that reads its rows, the limit has a non-empty batch and never reaches its zero-row arm.
+- **#281 now means empty-sorts only.** Its title, body and index entry were rewritten; it has no
+  registry row on this branch any more, and `tpcds/q17`'s row (on `ENS-empty-sorts`) is its last.
+- **A device cell can be red on its declaration rather than on the engine**, and both of the ways
+  that happened here were invisible until a card ran: `corpus_gpu`'s oracle check and the cpu
+  guard's pairing rule disagreed about scan-limit for as long as its cells were off. Anyone
+  turning on a first device cell for a query should read both before building.

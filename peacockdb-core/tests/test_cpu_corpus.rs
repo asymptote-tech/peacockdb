@@ -211,12 +211,14 @@ fn a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb() {
 /// rather than trusted.
 ///
 /// A `golden_exact` where no committed section can serve fails on correct behaviour: the
-/// result is over the cap and holds a fingerprint instead of its rows, or its rows are not
-/// determined across modes and one mode's answer cannot be the authority for five. A
-/// `live_cpu` where a section does serve spends a device-side cpu run on a comparison a
-/// committed file makes faster and harder. Derivable is why a CHECK can exist here, never
-/// why either value would be absent from the line; read off the declaration and the golden,
-/// it needs no run, which is what catches the first `live_cpu` query before its rollout.
+/// result is over the cap and holds a fingerprint instead of its rows. A `live_cpu` where a
+/// section does serve spends a device-side cpu run on a comparison a committed file makes
+/// faster and harder. One question, asked both ways, and the same one `corpus_gpu`'s
+/// device-side check asks — whether a section serves. Whether one mode can be the authority
+/// for five is a different claim, and the golden compare is what tests it: the device goes red
+/// at the mode that disagrees and names the author. Derivable is why a CHECK can exist here,
+/// never why either value would be absent from the line; read off the declaration and the
+/// golden, it needs no run, which is what catches the first `live_cpu` query before its rollout.
 #[test]
 fn each_declarations_two_oracles_suit_each_other() {
     let mut wrong: Vec<String> = Vec::new();
@@ -229,27 +231,19 @@ fn each_declarations_two_oracles_suit_each_other() {
             continue;
         }
         let section = section_of(&result_golden(declared.dataset, declared.sf), &query);
-        // The two conditions the entry names, read off what is committed and off the line.
+        // Read off what is committed, not off `cpu_oracle`: `data_fusion_subset` says
+        // DataFusion's pick and ours need not be the same rows, which is not our own five modes
+        // differing. `tpch/scan-limit` is both — undetermined against DataFusion, identical
+        // across the modes since #186 cut it on one lane over the covering prefix in order.
         // The guard above excludes the query no mode enables, so a section standing in for
         // its rows here stands in for them because the cap kept them out.
-        let over_cap = !section_holds_rows(&section);
-        // `data_fusion_subset` says the ENGINE is free to answer a different row set per run,
-        // which is why the device needs a live cpu. Its DuckDB oracle is a separate question —
-        // see `an_undetermined_lines_rows_are_compared_only_against_committed_files`.
-        let undetermined = declared.cpu_oracle == "data_fusion_subset";
-        let needs_live = over_cap || undetermined;
+        let needs_live = !section_holds_rows(&section);
         let says_live = declared.gpu_oracle == "live_cpu";
         if needs_live && !says_live {
             wrong.push(format!(
-                "{}/{query}: gpu_oracle is {} where no committed section can serve it ({}), \
+                "{}/{query}: gpu_oracle is {} where the committed section is a marker, \
                  so it fails on correct behaviour",
-                declared.dataset,
-                declared.gpu_oracle,
-                match (over_cap, undetermined) {
-                    (true, true) => "the result is over the cap AND its rows are undetermined",
-                    (true, false) => "the result is over the cap",
-                    _ => "cpu_oracle is data_fusion_subset, so the modes need not agree",
-                }
+                declared.dataset, declared.gpu_oracle,
             ));
         }
         if says_live && !needs_live {
@@ -263,17 +257,18 @@ fn each_declarations_two_oracles_suit_each_other() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// A line whose rows are undetermined compares them against two COMMITTED files, and only
-/// there.
+/// A line whose rows are undetermined compares them against COMMITTED files, and only there.
 ///
-/// `data_fusion_subset` says the engine may answer a different ten rows per run, so
+/// `data_fusion_subset` says DataFusion may answer a different ten rows per run, so
 /// `duckdb_exact` over it looks like a latent flake and is not one — in the `duckdb_<q>`
 /// case, which reads the committed `mini.result.txt` authority against the committed
 /// `duckdb-result.txt`, both holding `lineitem`'s first ten rows in file order. Only a
-/// regeneration moves that. `duckdb_gpu_<q>_<mode>` is the other case and has no such
-/// footing: it applies the same oracle to the device's RECORDED answer, where ten unordered
-/// rows need not be the cpu's ten. So this holds such a line's device cells off, and the day
-/// #281 turns them on it is what says to weaken the device-side comparison instead.
+/// regeneration moves that. `duckdb_gpu_<q>_<mode>` applies the same oracle to the device's
+/// RECORDED answer, which has that footing only where the line is `golden_exact`: the device
+/// case then holds the recorded rows to the committed section at every mode, so the answer
+/// DuckDB judges is the committed one again. Since #186 our five modes cut scan-limit on one
+/// lane over the covering prefix in order, which is what lets its device cells be on. A line
+/// whose device side needed a live cpu would hand DuckDB ten rows no committed file pins.
 #[test]
 fn an_undetermined_lines_rows_are_compared_only_against_committed_files() {
     let rows = load_csv();
@@ -320,13 +315,14 @@ fn an_undetermined_lines_rows_are_compared_only_against_committed_files() {
             .map(|mode| mode.name)
             .collect();
         assert!(
-            live.is_empty(),
-            "{}/{}: its rows are undetermined and its device cells at {live:?} are on, so \
-             duckdb_gpu_* holds the device's RECORDED answer to {} — ten unordered rows that \
-             need not be the ten the cpu committed. Compare the row count alone on the device \
-             side of such a line, or leave the cells off.",
+            live.is_empty() || declared.gpu_oracle == "golden_exact",
+            "{}/{}: its rows are undetermined, its device cells at {live:?} are on and its \
+             gpu_oracle is {}, so duckdb_gpu_* holds the device's RECORDED answer to {} — ten \
+             unordered rows no committed section pins. Hold the device to the committed \
+             section with golden_exact, compare the row count alone, or leave the cells off.",
             declared.dataset,
             stem(declared.query),
+            declared.gpu_oracle,
             declared.duckdb_oracle
         );
     }

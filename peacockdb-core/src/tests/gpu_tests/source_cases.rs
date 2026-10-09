@@ -93,7 +93,10 @@ fn rows_only_scan(path: &Path, schema: SchemaRef) -> GpuLoadParquet {
 fn rows_only_both(name: &str) -> Outcome {
     let batch = synthetic(64, 1);
     let path = write_parquet(name, &batch, 16);
-    let outcome = run_both(&rows_only_scan(&path, batch.schema()), Script::Source { lane: 0 });
+    let outcome = run_both(
+        &rows_only_scan(&path, batch.schema()),
+        Script::Source { lane: 0 },
+    );
     std::fs::remove_file(&path).expect("the file this case wrote");
     outcome
 }

@@ -725,23 +725,20 @@ since it is the record that its device cells are the lowering's last unrun ones.
 ticket is archived. grouping-id, later in chain K, takes it.
 
 <a id="t281"></a>
-### #281 — limits' and empty-sorts' device cells have never run
+### #281 — empty-sorts' device cells have never run
 
-limits and empty-sorts (chain K) run without a GPU, beside chain J, which holds the GPU host. Their
-device changes are built and not run: `scan.cpp` no longer applies a scan's limit, which a
-`GpuLimit` above the scan, or the unload's interval where nothing sits between, now does (#186),
-and the four `bug_` source cases and three `bug_` accumulate cases it turns into agreement cases
-have run on no device. A device answer could differ from the cpu's, and nothing would say so.
+empty-sorts (chain K) was proved on the cpu while chain J held the GPU host. Its device changes
+are built and not run: the three `bug_` accumulate cases its fix turns into agreement cases have
+run on no device, and `tpcds/q17`'s device cell with them. A device answer could differ from the
+cpu's, and nothing would say so.
 
-**Corpus queries:** `tpch/scan-limit` and `tpch/nested-limits` at every device mode, and
-`tpcds/q17` at `tp1-single`, each off on this ticket once chain K has merged.
+limits' half of this is closed. Its four converted `bug_` source cases and its `scan.cpp` without
+`set_num_rows` ran on nebius-gpu 2026-10-09; `tpch/scan-limit`'s five device cells are enabled
+against the result golden. `tpch/nested-limits`' five failed then: its region scan declares no
+column, and the device read it as zero rows. master's `CudfScan.rows_only` now builds such a
+scan's rows from the footer, so those cells are re-run on the rebased branch.
 
-One place to look first, found by the review of limits and not by a run.
-`nested-limits`' region loader carries `projections=[]` and an empty declared schema, and
-`scan.cpp` reads an empty projection as "read every column", so the device table there has three
-columns against a declared schema of none. The new `GpuLimit` above it never slices that stream —
-its five rows sit wholly inside `0..+23`, so `slice_handle` is not called — but it is the first
-node in that path that has to read a row count from it.
+**Corpus queries:** `tpcds/q17` at `tp1-single`, off on this ticket once chain K has merged.
 
 **Fix proposed:** on a GPU host, once one is free: run the device test tier and those cells;
 each cell passing is enabled, each failing gets the ticket it fails on. Then this ticket drops
