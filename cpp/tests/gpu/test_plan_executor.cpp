@@ -2095,6 +2095,70 @@ TEST(Literals, ADecimalLiteralStillCarriesItsScaledValue) {
   }
 }
 
+// --- a cast whose target is one of the wire's timestamp types -----------------
+//
+// repartition-keys gave the wire TimestampSecond..TimestampNanosecond, so fb_to_type_id maps
+// them and a cast can name one. tpch.minimal has no timestamp column and cudf::cast makes no
+// timestamp from a number ("Timestamps cannot be converted to numeric without converting it
+// to a duration", measured), so the source is a Date32 CASE: 1995-03-15 for the first ten
+// nations, 1969-12-31 for the rest, which gives a negative instant as well as a positive one.
+
+/// A TIMESTAMP_DAYS column from two Date32 literals, cast up to `unit`.
+static flatbuffers::Offset<fb::Expr> made_timestamp(flatbuffers::FlatBufferBuilder& fbb,
+                                                    fb::DataType unit) {
+  auto early =
+      make_binary_expr(fbb, make_col_ref(fbb, 0), fb::BinaryOp_Lt, make_int64_literal(fbb, 10));
+  auto arm = fb::CreateCaseWhenThen(fbb, early, make_date32_literal(fbb, 9204));
+  auto arms = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::CaseWhenThen>>{arm});
+  auto made = fb::CreateCaseExprNode(fbb, /*expr=*/flatbuffers::Offset<fb::Expr>{}, arms,
+                                     make_date32_literal(fbb, -1));
+  auto days = fb::CreateExpr(fbb, fb::ExprNode_CaseExprNode, made.Union());
+  return make_cast_expr(fbb, days, unit);
+}
+
+TEST(PlanExecutor, CastTimestampMicrosToSeconds) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto seconds = make_cast_expr(fbb, made_timestamp(fbb, fb::DataType_TimestampMicrosecond),
+                                fb::DataType_TimestampSecond);
+  WholePlan plan(nation_project(fbb, seconds, "ts"));
+  const auto& result = plan.result();
+
+  ASSERT_EQ(result.table->num_columns(), 1);
+  auto col = result.table->view().column(0);
+  ASSERT_EQ(col.type().id(), cudf::type_id::TIMESTAMP_SECONDS);
+  ASSERT_EQ(col.size(), 25);
+  EXPECT_EQ(col.null_count(), 0);
+  // 9204 days and -1 day, divided down from microseconds by 1'000'000.
+  EXPECT_EQ(get_scalar_value<int64_t>(col, 0), 9204LL * 86400);
+  EXPECT_EQ(get_scalar_value<int64_t>(col, 24), -86400);
+}
+
+/// Each wire unit maps to its cuDF type and counts the same instant in its own unit.
+static void expect_timestamp_unit(fb::DataType unit, cudf::type_id id, int64_t per_second) {
+  flatbuffers::FlatBufferBuilder fbb;
+  WholePlan plan(nation_project(fbb, made_timestamp(fbb, unit), "ts"));
+  const auto& result = plan.result();
+
+  ASSERT_EQ(result.table->num_columns(), 1) << fb::EnumNameDataType(unit);
+  auto col = result.table->view().column(0);
+  ASSERT_EQ(col.type().id(), id) << fb::EnumNameDataType(unit);
+  ASSERT_EQ(col.size(), 25) << fb::EnumNameDataType(unit);
+  EXPECT_EQ(get_scalar_value<int64_t>(col, 0), 9204LL * 86400 * per_second)
+      << fb::EnumNameDataType(unit);
+  EXPECT_EQ(get_scalar_value<int64_t>(col, 24), -86400LL * per_second)
+      << fb::EnumNameDataType(unit);
+}
+
+TEST(PlanExecutor, CastToEveryWireTimestampUnit) {
+  expect_timestamp_unit(fb::DataType_TimestampSecond, cudf::type_id::TIMESTAMP_SECONDS, 1);
+  expect_timestamp_unit(fb::DataType_TimestampMillisecond, cudf::type_id::TIMESTAMP_MILLISECONDS,
+                        1000);
+  expect_timestamp_unit(fb::DataType_TimestampMicrosecond, cudf::type_id::TIMESTAMP_MICROSECONDS,
+                        1000000);
+  expect_timestamp_unit(fb::DataType_TimestampNanosecond, cudf::type_id::TIMESTAMP_NANOSECONDS,
+                        1000000000);
+}
+
 TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
   // One row per fb::DataType, each a bare `NULL::T` project. `answer` is the cuDF type of
   // the null column that comes back (a decimal crosses as a scaled double, so FLOAT64;
@@ -2118,6 +2182,13 @@ TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
       {fb::DataType_Date64, {}},
       // #210: the declared decimal comes back as a double on this path.
       {fb::DataType_Decimal128, id::FLOAT64},
+      // The four units carry a timestamp column's type, and fb_to_type_id maps them, but
+      // build_scalar has no timestamp arm beyond Date32 — so a literal refuses, as Date64's
+      // does. A row flips to an answer with that arm, not with a wider column type.
+      {fb::DataType_TimestampSecond, {}},
+      {fb::DataType_TimestampMillisecond, {}},
+      {fb::DataType_TimestampMicrosecond, {}},
+      {fb::DataType_TimestampNanosecond, {}},
   };
   // The list is a copy of the enum; this is what makes it fail by count when the enum
   // grows, which is enough to send the next reader here.

@@ -375,7 +375,16 @@ fn aggregate_sequence(
     }
 
     tree = match shuffle {
-        Shuffle::ByHash { keys, n } if lanes(tree.as_ref()) > 1 => shuffled(tree, keys, n),
+        // The grouping-id drop runs only for the shuffle that is emitted: its refusal
+        // must not reject a one-lane plan, which hashes nothing.
+        Shuffle::ByHash { keys, n } if lanes(tree.as_ref()) > 1 => {
+            let keys = if group.is_single() {
+                keys
+            } else {
+                drop_grouping_id(keys, group.expr().len() as u32)?
+            };
+            shuffled(tree, keys, n)
+        }
         // One lane holds every group already: v1 skips the shuffle for a one-lane
         // input exactly as it does for a keyless aggregate.
         Shuffle::ByHash { .. } => tree,
@@ -394,3 +403,21 @@ fn aggregate_sequence(
         output,
     )))
 }
+
+/// A grouping-set aggregate's shuffle hashes its user keys and not `__grouping_id`, which
+/// sits right after them (`id`). A subset of the Final's group columns still lands every row
+/// of a group in one lane (`plan/aggregate.rs`'s subset rule); the id itself is unhashable on
+/// the cpu (comet has no unsigned arm) and differs on the device (#65).
+fn drop_grouping_id(mut keys: Vec<u32>, id: u32) -> Result<Vec<u32>, PlanError> {
+    keys.retain(|k| *k != id);
+    if keys.is_empty() || keys.iter().any(|k| *k > id) {
+        return Err(PlanError::Invalid(format!(
+            "a grouping-set shuffle over keys {keys:?}: after dropping the grouping id at {id} \
+             every key must be a user key below it, and one must remain"
+        )));
+    }
+    Ok(keys)
+}
+
+#[cfg(test)]
+mod tests;

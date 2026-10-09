@@ -5,11 +5,12 @@
 //! carries beside it — because a second one drifts silently: the payload verifies, the
 //! bytes differ, and the digest golden is the only thing that ever says so.
 
-use datafusion::arrow::datatypes::{DataType as ArrowDataType, SchemaRef};
+use datafusion::arrow::datatypes::{DataType as ArrowDataType, SchemaRef, TimeUnit};
 use datafusion::common::ScalarValue as DfScalarValue;
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
 use super::generated::peacock::plan as fb;
+use crate::plan::PlanError;
 
 pub(crate) fn serialize_scalar_value<'a>(
     b: &mut FlatBufferBuilder<'a>,
@@ -120,41 +121,51 @@ pub(crate) fn convert_data_type(dt: &ArrowDataType) -> Result<fb::DataType, Stri
         ArrowDataType::Date32 => fb::DataType::Date32,
         ArrowDataType::Date64 => fb::DataType::Date64,
         ArrowDataType::Decimal128(_, _) => fb::DataType::Decimal128,
+        // The zone is not on the wire: cuDF's `data_type` has none and the values are UTC
+        // int64s, so a zoned timestamp and a naive one of the same unit are one member.
+        ArrowDataType::Timestamp(TimeUnit::Second, _) => fb::DataType::TimestampSecond,
+        ArrowDataType::Timestamp(TimeUnit::Millisecond, _) => fb::DataType::TimestampMillisecond,
+        ArrowDataType::Timestamp(TimeUnit::Microsecond, _) => fb::DataType::TimestampMicrosecond,
+        ArrowDataType::Timestamp(TimeUnit::Nanosecond, _) => fb::DataType::TimestampNanosecond,
         other => return Err(format!("unsupported Arrow data type: {other:?}")),
     })
 }
 
+/// A type the wire cannot name is refused here rather than carried as `Null`, which the
+/// device would read as a column of no type (#249). The column is named, since a schema is
+/// the one place the offending type has no expression to point at.
 pub(crate) fn serialize_schema<'a>(
     b: &mut FlatBufferBuilder<'a>,
     schema: &SchemaRef,
-) -> WIPOffset<fb::Schema<'a>> {
-    let fields: Vec<_> = schema
-        .fields()
-        .iter()
-        .map(|f| {
-            let name = b.create_string(f.name());
-            let dt = convert_data_type(f.data_type()).unwrap_or(fb::DataType::Null);
-            let (decimal_precision, decimal_scale) = match f.data_type() {
-                ArrowDataType::Decimal128(p, s) => (*p, *s),
-                _ => (0, 0),
-            };
-            fb::Field::create(
-                b,
-                &fb::FieldArgs {
-                    name: Some(name),
-                    data_type: dt,
-                    nullable: f.is_nullable(),
-                    decimal_precision,
-                    decimal_scale,
-                },
-            )
-        })
-        .collect();
+) -> Result<WIPOffset<fb::Schema<'a>>, PlanError> {
+    let mut fields = Vec::with_capacity(schema.fields().len());
+    for f in schema.fields() {
+        let dt = convert_data_type(f.data_type())
+            .map_err(|why| PlanError::Unsupported(format!("column {}: {why} (#249)", f.name())))?;
+        let name = b.create_string(f.name());
+        let (decimal_precision, decimal_scale) = match f.data_type() {
+            ArrowDataType::Decimal128(p, s) => (*p, *s),
+            _ => (0, 0),
+        };
+        fields.push(fb::Field::create(
+            b,
+            &fb::FieldArgs {
+                name: Some(name),
+                data_type: dt,
+                nullable: f.is_nullable(),
+                decimal_precision,
+                decimal_scale,
+            },
+        ));
+    }
     let fields_vec = b.create_vector(&fields);
-    fb::Schema::create(
+    Ok(fb::Schema::create(
         b,
         &fb::SchemaArgs {
             fields: Some(fields_vec),
         },
-    )
+    ))
 }
+
+#[cfg(test)]
+mod tests;

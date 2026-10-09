@@ -625,6 +625,12 @@ All five modes, both backends; refused by `planner::plan` at `:119` today. Not i
 <a id="fix12"></a>
 ### 12. A decimal shuffle key hashes as comet does, by declared precision — M
 
+**Superseded. `repartition-keys` closed #95 and #184 on 2026-10-09 by the shape D2 calls
+"neither": both engines hash 16 bytes of the unscaled value, so no fbs field, no
+`partitioning.hpp` signature and no FFI argument carries a precision, and a decimal's lane no
+longer matches Spark's at precision ≤ 18. Everything below is the design that was not taken —
+read it for the issue statement, not for the plan.**
+
 **Closes:** #184 (misdiagnosed: the shuffle key is a decimal and the kernel has no decimal arm
 — #95 reached by a corpus query; the 1→N shape is routine) and #95 together. The fbs shape is
 D2.
@@ -1125,14 +1131,20 @@ taken gates most of the gpu column past step 10. Minimum query: `tpch/filter_pro
 the unload refuses "expected Decimal128(15, 2) but found Decimal128(38, 2)". Sums that declare
 (38,4) pass by coincidence (q6, q19).
 
-### D2 — #184/#95 (fix 12): which fbs append carries the decimal key's precision
+### D2 — #184/#95 (fix 12): which fbs append carries the decimal key's precision — **decided, and
+neither append was taken**
 
-Fix 12 stays a fix — both shapes close it — but the shape is the human's: `hash_key_precisions:
-[uint8]` appended to `CudfRepartition` (recommended: it carries exactly the fact the kernel
-cannot compute), or `PlanNode.output_schema` for the emit node (the proposal's shape, and the
-mechanism `wire-schema.md` was rejected for), or neither (drop comet-exactness on decimal keys
-and change the conformance gate on both sides). Both appends move `recipe-payloads.txt` for
-every shuffle query. Cells at stake: q15 × tp4 (3 gpu) and the seven latent decimal-keyed rows.
+**Settled by `repartition-keys` (2026-10-09), which closed #95.** Three shapes were open: a
+`hash_key_precisions: [uint8]` append to `CudfRepartition`, `PlanNode.output_schema` on the emit
+node, or neither — dropping comet-exactness on decimal keys and changing the conformance gate on
+both sides. **The third was taken.** Both engines now hash 16 little-endian bytes of the unscaled
+value: `rows_per_lane` casts every decimal key to `Decimal128(38, s)` before calling comet, and the
+kernel hashes the same 16 bytes of the `__int128_t`. So no fbs field carries precision, no append
+moves `recipe-payloads.txt`, and `partitioning.hpp` and the FFI are unchanged. The cost is the one
+the third shape names: a decimal's lane no longer matches Spark's at precision ≤ 18, which is
+acceptable because nothing outside this engine reads our lane numbers. The gate changed on both
+sides, as that shape requires, and `architecture.md`'s "Rehash and the comet hash" is where the
+rule now lives.
 Details in fix 12.
 
 ## Not fixes

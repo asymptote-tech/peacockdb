@@ -21,10 +21,11 @@ corpus_query!(tpch, 1, q14, all_modes, none, duckdb_approx, data_fusion_exact, g
 corpus_query!(tpch, 1, q19, all_modes, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q12, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 // THE DEVICE COLUMN. q6 runs at all five modes and q19 at tp1-single; every other device
-// cell is off against a ticket. The causes: #152 refuses a join whose recipe copies a side
-// the ABI cannot copy (by name rather than by crash), #95 is the hash scatter refusing a
-// decimal key, #220 is the cpu splitting a join's output into more batches than the device, seen
-// first at the aggregate merge's in_rows above it.
+// cell is off against a ticket. The two causes that hold almost all of them: #152 refuses a join
+// whose recipe copies a side the ABI cannot copy (by name rather than by crash), and #220 is the
+// cpu splitting a join's output into more batches than the device, seen first at the aggregate
+// merge's in_rows above it. #95, the hash scatter refusing a decimal key, was a third until
+// repartition-keys closed it; no row carries it now.
 // T19 is where the rest are settled query by query.
 corpus_query!(tpch, 1, q13, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q15, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -76,14 +77,12 @@ corpus_query!(tpch, 1, nested_loop_left_join, all_modes, none, duckdb_exact, dat
 corpus_query!(tpch, 1, nested_limits, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 5, the tpch list from here being aggregates over joins, and the cpu is where it
-// showed. Two of the five are cut before a device ever sees them: q22's nested-loop join
-// projects and the cpu backend drops the projection — #190, at every mode; rollup-over-join
-// runs at the two tp1 modes and not at the three tp4 ones, which is the shuffle rather than
-// the query — #189, whose grouping-set id is UInt8 and whose hasher has no arm for it.
+// showed. One of the five is cut before a device ever sees it: q22's nested-loop join projects
+// and the cpu backend drops the projection — #190, at every mode.
 // On the device every query here aggregates over a join: #152's build-side copy where the join
 // sees several probe batches, and at tp1-single, which reaches past it, the golden's `in_rows`
 // at the merge for q16, the rollup and q18, and q4's join itself — all #220's batching.
-corpus_query!(tpch, 1, rollup_over_join, tp1_single | tp1_rowgroup, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, rollup_over_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q4, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q16, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(tpch, 1, q18, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -192,15 +191,13 @@ corpus_query!(tpcds, 1, q90, tp1_single | tp1_rowgroup, none, duckdb_approx, dat
 corpus_query!(tpcds, 1, q2, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q59, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 
-// T19 batch 13, by expected calls, and both of the rollout's cpu-side tickets get a second query.
-// q5 carries a rollup, so #189's UInt8 grouping-set id meets the hasher at the three tp4 modes and
-// the two tp1 ones are clean — mode-scoped exactly as rollup-over-join was. q54's nested-loop join
-// projects, so #190 drops it and the node declares three columns against DataFusion's four.
+// T19 batch 13, by expected calls. q54's nested-loop join projects, so #190 drops it at every
+// mode and the node declares three columns against DataFusion's four.
 // On the device, q38 is the third cell in the rollout where the device RAN and the golden caught
 // it rather than the run refusing — #220 again, in_rows 11788 against the cpu's 12446 at the
 // merge, the cpu's join having split its output.
 corpus_query!(tpcds, 1, q78, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpcds, 1, q5, tp1_single | tp1_rowgroup, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpcds, 1, q5, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q54, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q95, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q38, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -220,8 +217,8 @@ corpus_query!(tpcds, 1, q10, all_modes, none, duckdb_exact, data_fusion_exact, g
 // T19 batch 15, the expensive end of the pool: four semi-joins and a rollup over an outer join.
 // q77 runs at the two tp1 modes only: its Right outer's build side is a grouped aggregate over
 // an Inner join whose empty scatter lane drops as it should, so the outer gets no build batch at
-// all — #212, the route #175's fix does not reach. Whether its rollup would also meet #189 at
-// those modes is unknown — #212 refuses first, and a disabled cell cannot show the ordering.
+// all — #212, the route #175's fix does not reach, and all that holds its three tp4 cells. Its
+// rollup does not meet #189: the shuffle hashes the user keys and never the grouping id.
 corpus_query!(tpcds, 1, q33, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q56, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q60, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -229,12 +226,11 @@ corpus_query!(tpcds, 1, q69, all_modes, none, duckdb_exact, data_fusion_exact, g
 corpus_query!(tpcds, 1, q77, tp1_single | tp1_rowgroup, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 16, the top of the cost ranking. q80 is q77's shape — a rollup over an outer join —
-// and it refuses at the three tp4 modes on #189's UInt8 grouping-set id rather than on #212's
-// missing build batch, which is the ticket that took q77 there. Same two candidates, opposite winner,
-// so which one a query meets is a property of the query and not of the shape.
+// and it runs at every cpu mode, where q77's three tp4 cells wait on #212's missing build batch:
+// which ticket a query meets is a property of the query and not of the shape.
 corpus_query!(tpcds, 1, q74, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q58, all_modes, none, duckdb_divergent(251, 2, 4, 6), data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpcds, 1, q80, tp1_single | tp1_rowgroup, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpcds, 1, q80, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q4, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q31, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
@@ -270,15 +266,16 @@ corpus_query!(tpcds, 1, q13, all_modes, none, duckdb_approx, data_fusion_exact, 
 corpus_query!(tpcds, 1, q14, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 19, the first seven of the thirteen `avg` queries, run rather than declared. Four run
-// at every cpu mode; q18 and q22 carry a rollup and run at the two tp1 modes, the three tp4 ones
-// being #189's UInt8 grouping-set id at the shuffle; q24's nested-loop join projects and the cpu
-// backend drops it (#190), at every mode. On the device at tp1-single, the other modes never run:
+// at every cpu mode; q18 and q22 carry a rollup, which held them off the three tp4 modes on
+// #189's UInt8 grouping-set id at the shuffle until it stopped being hashed; q24's nested-loop
+// join projects and the cpu backend drops it (#190), at every mode. On the device at tp1-single,
+// the other modes never run:
 // q17 answers zero rows, and the cpu's accumulating sort emits nothing where the device emits the
 // zero-row batch (#205); q18 and q30 are #220's join batching; q22, q26 and q32 are #220's
 // `in_rows`.
 corpus_query!(tpcds, 1, q17, all_modes, none, duckdb_divergent(205), data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpcds, 1, q18, tp1_single | tp1_rowgroup, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpcds, 1, q22, tp1_single | tp1_rowgroup, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpcds, 1, q18, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpcds, 1, q22, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q24, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q26, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q30, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -309,12 +306,12 @@ corpus_query!(tpcds, 1, q92, all_modes, none, duckdb_exact, data_fusion_exact, g
 // the planner, 21 of them citing their ticket on the golden's `refused:` line; the other 5 plan
 // fine and the cpu backend refuses them at run time, on #190. Three queries are absent, on #255.
 corpus_query!(pbench, 1, anti_null_preserved_condition, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, bool_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, bool_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, cross_empty_build, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, cross_projection, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, decimal15_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, decimal15_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, decimal15_key_join, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, decimal38_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, decimal38_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, empty_side_left_join, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, exists_null_keys, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, exists_or_mark, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -351,20 +348,20 @@ corpus_query!(pbench, 1, probe_exists_residual, none, none, duckdb_none, data_fu
 corpus_query!(pbench, 1, probe_not_exists_residual, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, right_join_null_keys, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, right_join_residual, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, rollup_small_keys, tp1_single | tp1_rowgroup, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, rollup_small_keys, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, scalar_subquery_cross, tp1_single | tp1_rowgroup, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_build_anti, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_build_full, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_build_right, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_probe_left, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_probe_semi, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, timestamp_ms_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, timestamp_ns_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, timestamp_s_key_group, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled); // device: not runnable, #240
-corpus_query!(pbench, 1, timestamp_us_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, timestamp_ms_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, timestamp_ns_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, timestamp_s_key_group, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled); // device: #264, a cast group key
+corpus_query!(pbench, 1, timestamp_us_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, ts_key_join, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, uint_key_group, tp1_single | tp1_rowgroup, tp1_single | tp1_rowgroup, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, uint_key_join, tp1_single | tp1_rowgroup, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, uint_key_group, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, uint_key_join, all_modes, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // #243 — the cpu keys -0.0 and NaN by their BITS, so the three float rows land with their SQL,
 // their plan goldens and their DuckDB answers, and their lines commented out for the task that

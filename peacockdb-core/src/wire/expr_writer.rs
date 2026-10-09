@@ -200,16 +200,9 @@ fn decimal_parts(data_type: &DataType) -> (u8, i8) {
 /// device renders a `not runnable` line in its plan golden, and
 /// `every_refusal_names_a_ticket_that_exists` requires every one of those to cite a ticket in
 /// parentheses — so a type with no word on the wire has to say who is going to give it one.
-/// The timestamps are a separate number because they are separately promised: repartition-keys
-/// adds the fbs timestamp types, and everything else unnamed waits on #249.
+/// Everything still unnamed waits on #249.
 fn data_type(data_type: &DataType) -> Result<fb::DataType, PlanError> {
-    convert_data_type(data_type).map_err(|why| {
-        let ticket = match data_type {
-            DataType::Timestamp(..) => "#240",
-            _ => "#249",
-        };
-        PlanError::Unsupported(format!("{why} ({ticket})"))
-    })
+    convert_data_type(data_type).map_err(|why| PlanError::Unsupported(format!("{why} (#249)")))
 }
 
 fn binary_op(op: BinaryOp) -> fb::BinaryOp {

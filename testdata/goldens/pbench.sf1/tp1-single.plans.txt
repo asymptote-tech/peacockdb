@@ -759,7 +759,11 @@ GpuUnload
       GpuAggregate: group_by=[CAST(f_ts_s@0 AS Timestamp(Second, None))], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[`arrow_cast(fact.f_ts_s,Utf8("Timestamp(Second, None)"))`:Timestamp(Second, None), count(*):Int64]
         GpuLoadParquet: table=fact, projections=[f_ts_s@8], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_ts_s:Timestamp(Microsecond, None)]
 --- recipes ---
-not runnable: unsupported: unsupported Arrow data type: Timestamp(Second, None) (#240) at #1
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=360000, certain=0
 GpuUnload: estimated_max_resident_size=360000

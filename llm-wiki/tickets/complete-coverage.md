@@ -28,8 +28,9 @@ tables, no new dataset, plus the engine work it needs.
   half is synthetic-only; shape it away from [#166](#t166)'s two droppers.
 - `min`/`max` over a string or date column: zero uses, and the merge is a string reduce.
 - a join on a nullable key: [#59](#t59), [#80](#t80) and [#137](#t137) rest on there being none.
-- a shuffle keyed on a decimal: not a query but [#95](#t95)'s kernel work, and the murmur3
-  conformance gate extended to cover it.
+- a shuffle keyed on a decimal: delivered by `repartition-keys`, which closed
+  [#95](../archive/archived-tickets.md#t95) — two pbench decimal rows run at all five device modes
+  and the gate carries both precisions and a decimal-then-string composite.
 - two `DISTINCT` args over different expressions: [#144](#t144) has no refusal of its own, and
   `count_distinct` marks queries this mode handles, so a grep for one finds the wrong two.
 - a wide `SELECT DISTINCT`: dedup whose state is the whole row, the compaction worst case.
@@ -102,20 +103,23 @@ device's missing keyless Welford arm. The `bug_` test flips to a plan test and a
 case.
 
 <a id="t249"></a>
-### #249 — the wire has no Time, Duration, Interval, Struct or List type, and writes such a field as `Null`
-The fbs `DataType` enum (`flatbuffers/gpu_plan.fbs:14-35`) stops at `Decimal128`, and
-`serialize_schema` maps any Arrow type it cannot name to `Null` without saying so
-(`wire/serialize.rs:136`). Most device nodes take a column's type from the data, so such a
+### #249 — the wire has no Time, Duration, Interval, Struct or List type
+The fbs `DataType` enum (`flatbuffers/gpu_plan.fbs:14-39`) stops at the four `Timestamp`
+variants, and `serialize_schema` used to map any Arrow type it could not name to `Null` without
+saying so. Most device nodes take a column's type from the data, so such a
 column usually passes through unnoticed; where the device builds a column from the declared
 schema — a join's NULL pads and empty or absent sides, a typed NULL literal — it meets a `Null`
 field and either refuses at run time or builds the wrong type, depending on the mode and the data.
 
 Related: [#168](corpus-coverage.md#t168) (an interval literal cannot cross; proposes
 `DurationDays`), [#224](scalars.md#t224) (an integer-to-date cast needs a duration type), and
-[#245](joins.md#t245) (a nested key cannot cross a shuffle). The join-rewrite chain adds the four
-`Timestamp` variants (repartition-keys) and makes an unmapped type a `PlanError` in every schema,
-so the gap shows as a plan-time refusal naming the type rather than a wrong pad; the types
-themselves remain to add here.
+[#245](joins.md#t245) (a nested key cannot cross a shuffle).
+
+**Half done by [`repartition-keys`](../tasks/repartition-keys.md)**: the four `Timestamp` variants
+are in the fbs, and `serialize_schema` now returns a `PlanError` for a type it cannot name, so the
+gap shows as a plan-time refusal naming the type rather than as a wrong pad. `Timestamp` is off
+the list in this ticket's title; `Time`, `Duration`, `Interval`, `Struct` and `List` are what is
+left to add.
 
 **Corpus queries:** none in tpch or tpcds, and none in pbench yet. The two pbench queries
 written for this ticket — an interval column carried through a join

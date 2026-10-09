@@ -21,12 +21,112 @@ recorded here and nowhere else, so the counter never walks back over it:
   (`scripts/exec_model/README.md`). Named by commit 4c89d91.
 
 Archiving or moving a ticket the registry names is safe: the cost widget resolves a number to
-whichever ticket file holds its `<a id="tNN">` anchor — `tickets.md`, any `tickets/*.md`,
-`tasks/active-tickets.md` or this archive (`TicketIndex::load` in `cost-report/src/main.rs`). It
-refuses to render a link for a number in none of them, failing the report rather than emitting
-one that goes nowhere.
+whichever ticket file holds its `<a id="tNN">` anchor — `tickets.md`, any `tickets/*.md` or this
+archive (`TicketIndex::load` in `cost-report/src/main.rs`). It refuses to render a link for a
+number in none of them, failing the report rather than emitting one that goes nowhere.
 
 ## Done
+
+<a id="t201"></a>
+### #201 — the murmur gate proves a copy of the lane rule, not the rule
+**Done 2026-10-09 by [`repartition-keys`](../tasks/repartition-keys.md), PR #169; awaiting merge.**
+
+`murmur_conformance.rs` re-derived the lane rule (seed-42 pre-fill, comet murmur3, `pmod`) in its
+own `cpu_partition_ids`, so only that copy was ever held against the device. A drift in the
+production copy — a seed, a `%` for `pmod`, a key cast — left the gate green while every cpu lane
+assignment moved off the device's and the goldens'.
+
+The gate now calls production `rows_per_lane` (`production_partition_ids`) over the same columns
+and compares lane by lane, the local helper is gone, and `pmod_handles_negative_hashes` tests the
+production `pmod`. Every key type the task added was proved against the real rule, which is what
+made the three deliberate divergences safe to take. `architecture.md`'s "Rehash and the comet
+hash" carries the invariant and what breaks it.
+
+<a id="t206"></a>
+### #206 — a float or boolean partition key is refused on the device
+**Done 2026-10-09 by [`repartition-keys`](../tasks/repartition-keys.md), PR #169; awaiting merge.**
+
+`spark_hash_partition.cu`'s key switch took STRING, INT8-64 and DATE32 and failed at its `default`
+on everything else — `unsupported key column cuDF type_id=10` for a double, `11` for a boolean.
+Spark hashes a double as its long bits and a boolean as an int, and comet's
+`create_murmur3_hashes` does both, so the cpu's lane was defined and the device's was a refusal at
+every mode above one lane.
+
+The kernel now has both arms, each proved by a live gate red before it, and the float arm
+canonicalizes NaN on both engines rather than hashing its raw bits as comet does —
+`architecture.md`'s "Rehash and the comet hash" carries that rule and why.
+
+**Corpus queries:** `pbench/bool-key-group`, all five device cells on. The two float rows
+(`float64-key-group`, `float32-key-group`) are commented out on [#243](../tickets/joins.md#t243),
+which is the cpu's float equality and not this ticket. `pbench/rollup-small-keys` hashes a boolean
+second key and its device cells are off on [#65](../tickets/corpus-coverage.md#t65), the
+grouping-id width.
+
+<a id="t240"></a>
+### #240 — a timestamp partition key is refused on the device
+**Done 2026-10-09 by [`repartition-keys`](../tasks/repartition-keys.md), PR #169; awaiting merge.**
+
+`spark_hash_partition.cu`'s key switch had no
+`TIMESTAMP_{SECONDS,MILLISECONDS,MICROSECONDS,NANOSECONDS}` arm and failed at its `default`, while
+Spark and comet hash a timestamp as its `i64` value, so the cpu's lane was defined and the
+device's was a refusal. The kernel's own comment claimed timestamps were covered and the switch
+said otherwise.
+
+Both halves landed: the wire carries the four `Timestamp` variants (an fbs append) and the kernel
+bit-casts each unit to `INT64` under a live gate.
+
+**Corpus queries:** `pbench`'s `timestamp-ms-key-group`, `timestamp-us-key-group` and
+`timestamp-ns-key-group`, all five device cells on each — which is what proves the key itself
+hashes. `timestamp-s-key-group` is off on [#264](../tickets/corpus-coverage.md#t264): it reaches
+the aggregate through `arrow_cast`, and the device refuses a group key that is not a bare column.
+`ts-key-join` is off on [#152](../tickets/joins.md#t152) and [#220](../tickets/joins.md#t220).
+tpch and tpcds have nothing here; they use `Date32`.
+
+<a id="t95"></a>
+### #95 — a decimal partition key is refused on the device
+**Done 2026-10-09 by [`repartition-keys`](../tasks/repartition-keys.md), PR #169; awaiting merge.**
+
+`spark_hash_partition.cu`'s key switch failed with `unsupported key column cuDF type_id=27`, while
+the cpu's comet hasher took the decimal — a refusal on one side only.
+
+**The fix is not the one this ticket used to propose.** Threading logical precision through the
+partition FFI was rejected by decision D2: cuDF's `data_type` carries no precision and the loader
+widens every decimal to Decimal128, so the kernel cannot pick comet's width itself. Instead **both
+engines hash 16 little-endian bytes of the unscaled value** — `rows_per_lane` casts each decimal
+key to `Decimal128(38, s)` before calling comet, and the kernel hashes the same 16 bytes of the
+`__int128_t`. No wire field, no `partitioning.hpp` change, no FFI change, and a decimal's lane no
+longer matches Spark's at precision ≤ 18, deliberately.
+
+**Corpus queries:** `pbench/decimal15-key-group` and `decimal38-key-group`, all five device cells
+on; `decimal15-key-join` is off on [#152](../tickets/joins.md#t152) and
+[#220](../tickets/joins.md#t220), not on this. Eight tpch and tpcds rows carried `95` and no
+longer do — `tpcds/q24`, `q37`, `q75`, `q82` and `tpch/q2`, `q10`, `q15`, `q18`. On six of them
+`95` could never have been the blocker: `q24`'s cpu side is off on #190 so no device cell is
+declarable, and the other five have `gpu_tp1_single` off too, where one lane hashes nothing. On
+`tpcds/q37` and `q82` it was real, at the three tp4 modes — both group on a decimal
+`i_current_price` — and is not now. Every one of the eight keeps a ticket that does explain its
+off cells; dropping the tag is not a claim that any of them passes.
+
+<a id="t189"></a>
+### #189 — the shuffle cannot hash a rollup's grouping-set id
+**Done 2026-10-09 by [`repartition-keys`](../tasks/repartition-keys.md), PR #169; awaiting merge.**
+All 24 cells are on and no registry row carries this ticket.
+
+A ROLLUP, CUBE or GROUPING SETS aggregate that shuffled was refused on the cpu — `Unsupported data
+type in hasher: UInt8`; the tp1 modes do not shuffle and always passed. `shuffle_below` copied
+DataFusion's `FinalPartitioned` hash keys, `__grouping_id` among them, and comet's murmur3 had no
+unsigned arm. Hashing the id was wrong in itself: the two engines' ids differ in type and bits
+([#65](../tickets/corpus-coverage.md#t65)), so a subtotal row would have landed in different
+lanes.
+
+Two independent fixes, and the ticket needed both. `drop_grouping_id` takes the id's ordinal out
+of `Shuffle::ByHash`'s keys where the aggregate has grouping sets, so each (keys, id) group stays
+whole in one lane — hash keys a *subset* of the group columns, the merge still grouping on the id.
+That turned on 18 cells over `tpch/rollup-over-join`, tpcds q5, q18, q22, q80 and
+`pbench/rollup-small-keys`. The other 6, `pbench`'s `uint-key-group` and `uint-key-join`, reached
+the same refusal by a plain unsigned user key and wanted the unsigned arm itself, which the same
+task added. tpcds q77 never met this ticket: [#212](../tickets/joins.md#t212) is all that holds
+it.
 
 <a id="t259"></a>
 ### #259 — pbench landed with every device cell off, and nothing owns running them
@@ -752,10 +852,11 @@ establish.
 2026-09-12: the input carries something it will not take. Line 179 is the kernel's key-type
 switch, and q15's `#11 CudfRepartition{Hash, 1→4}` hashes `total_revenue@4`, a decimal
 (`recipe-payloads.txt`). `gpu_tests/emit_cases.rs` runs 1→4 and 1→64 green on int, string, date
-and composite keys and reaches this line only on a decimal, float or boolean: this is [#95](../tickets.md#t95).
+and composite keys and reaches this line only on a decimal, float or boolean: this is [#95](#t95).
 
-**Stale 2026-09-28.** A duplicate of [#95](../tickets/corpus-coverage.md#t95): the 1→4 shape was the
-symptom and the decimal key the cause, as the 2026-09-12 note found. q15's registry row carries #95.
+**Stale 2026-09-28.** A duplicate of [#95](#t95): the 1→4 shape was the
+symptom and the decimal key the cause, as the 2026-09-12 note found. q15's registry row carried
+#95 until `repartition-keys` fixed the decimal arm and dropped the tag.
 
 <a id="t118"></a>
 ### #118 — SortPreservingMerge concat fallback ignores fetch (LIMIT dropped)

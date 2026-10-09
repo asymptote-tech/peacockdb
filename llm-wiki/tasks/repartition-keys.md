@@ -2,11 +2,11 @@
 
 Kind: production
 
-**This task closes [#201](../tickets/corpus-coverage.md#t201) (the murmur gate proves a copy of
-the lane rule, not the rule), [#206](../tickets/corpus-coverage.md#t206) (a float or boolean
-partition key is refused on the device), [#240](../tickets/corpus-coverage.md#t240) (a timestamp
-partition key is refused on the device), [#95](../tickets/corpus-coverage.md#t95) (a decimal
-partition key is refused on the device) and [#189](../tickets/corpus-coverage.md#t189) (the
+**This task closes [#201](../archive/archived-tickets.md#t201) (the murmur gate proves a copy of
+the lane rule, not the rule), [#206](../archive/archived-tickets.md#t206) (a float or boolean
+partition key is refused on the device), [#240](../archive/archived-tickets.md#t240) (a timestamp
+partition key is refused on the device), [#95](../archive/archived-tickets.md#t95) (a decimal
+partition key is refused on the device) and [#189](../archive/archived-tickets.md#t189) (the
 shuffle cannot hash a rollup's grouping-set id).** It also makes unsigned keys shuffle on both
 engines (the review's row 11; no ticket). Fourth of the join-rewrite chain: the joins
 that follow shuffle on keys of these types.
@@ -131,3 +131,16 @@ on where they pass; `uint-key-group` and `uint-key-join` turn on at tp4 on both 
 
 `build-test-shadgpu.sh`; a cycle per arm group (bool and float, timestamp, decimal), then one for
 the corpus cells.
+
+## Completeness signoff (2026-10-09)
+
+Solved under its constraints, on both engines, and **no shortcut or bandaid**: #201, #206, #240, #95 and
+#189 are closed and archived, every kernel arm landed red-first under a live gate, 21 device and 24 cpu
+cells are on, and the 24 left off carry a measured ticket each. #201 was the one worth having — the gate
+passed with production's seed moved, because it compared the kernel against a second copy of the rule.
+Three key types now depart from a counterparty by design: decimals from Spark, NaN from comet (which
+restores Spark), unsigned from both; `architecture.md` carries which from which. Two Registry claims are
+undelivered — the three #249 queries did not enter `NOT_RUNNABLE`, their `.sql` files being #255's, so
+that step was deleted, and `uint-key-join` turned on at tp4 on the cpu only, its four device cells
+measured as #152. One thing is not self-policing: nothing fails by count when `convert_data_type` gains
+a member, so the next key type can land unproven on both engines; a refusal, not a wrong answer.

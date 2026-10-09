@@ -32,6 +32,10 @@ enum DataType : byte {
   Date32,
   Date64,
   Decimal128,
+  TimestampSecond,
+  TimestampMillisecond,
+  TimestampMicrosecond,
+  TimestampNanosecond,
 }
 
 // =========================================================================

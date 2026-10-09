@@ -687,6 +687,27 @@ async fn grouping_sets_expand_at_the_init_and_group_on_the_id_above_it() {
 }
 
 #[tokio::test]
+async fn a_rollup_shuffle_hashes_its_keys_and_never_the_grouping_id() {
+    // #189: comet has no UInt8 arm, and the id is #65's — the device holds INT32. The Final
+    // groups on keys plus the id; hashing the keys alone still lands each group in one lane.
+    let tree = translated_at_tp4(
+        "SELECT c_nationkey, c_mktsegment, count(*) FROM customer \
+         GROUP BY ROLLUP(c_nationkey, c_mktsegment)",
+        0,
+    )
+    .await;
+    let emit = find(tree.as_ref(), &|node| {
+        matches!(as_node_ref(node), NodeRef::EmitPartitions(_))
+    })
+    .unwrap_or_else(|| panic!("no shuffle in {}", shape(tree.as_ref())));
+    let NodeRef::EmitPartitions(emit) = as_node_ref(emit) else {
+        unreachable!()
+    };
+    assert_eq!(emit.hash_keys, vec![0, 1]);
+    validate_all(tree.as_ref());
+}
+
+#[tokio::test]
 async fn a_window_function_is_refused_at_plan_time() {
     let err = refused("SELECT sum(n_regionkey) OVER () FROM nation").await;
     assert!(

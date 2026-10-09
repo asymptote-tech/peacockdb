@@ -1,7 +1,8 @@
 //! `GpuEmitPartitions` through the harness: one batch in, N lanes out, each lane a slot of
 //! its own — so a row the two engines put in different lanes is a wrong slot, not a passing
-//! multiset. Every case is one lane in and N out, the shape q15 fails in (#95). Every case is green
-//! or a `bug_` test with its ticket above it; nothing here repairs.
+//! multiset. One case per key type the planner can emit, over `key_types`, since a key type
+//! with no case is a key type no two-engine run has agreed on. Every case is green or a
+//! `bug_` test with its ticket above it; nothing here repairs.
 
 use std::sync::Arc;
 
@@ -9,11 +10,11 @@ use datafusion::arrow::array::{ArrayRef, Int32Array, new_null_array};
 use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::record_batch::RecordBatch;
 
-use super::script::{Outcome, Script, run_both};
+use super::script::{Script, run_both};
 use crate::plan::{BatchLayout, GpuEmitPartitions, GpuNode, Schema};
 use crate::tests::compare::Order;
 use crate::tests::given::Given;
-use crate::tests::synthetic::{decimals, schema, synthetic};
+use crate::tests::synthetic::{key_types, key_types_schema, schema, synthetic};
 
 fn input() -> RecordBatch {
     synthetic(64, 1)
@@ -25,17 +26,6 @@ fn given() -> Box<dyn GpuNode> {
 
 pub(crate) fn emit(keys: Vec<u32>, lanes: usize) -> GpuEmitPartitions {
     GpuEmitPartitions::new(given(), keys, lanes)
-}
-
-/// A `bug_` test's assertion: the device refused at the kernel's key-type switch, naming
-/// this cuDF `type_id`, and the cpu answered.
-fn refused_key_type(outcome: &Outcome, type_id: u32) {
-    let why = outcome.gpu_refuses();
-    assert!(
-        why.contains("spark_hash_partition.cu")
-            && why.contains(&format!("unsupported key column cuDF type_id={type_id}")),
-        "{why}"
-    );
 }
 
 /// `input()` with its `key` column replaced.
@@ -115,46 +105,11 @@ operator_case! {
     }
 }
 
-// #206 — the kernel's type switch has no arm for a double (cuDF `FLOAT64`, 10); comet
-// hashes it on the cpu.
-operator_case! {
-    GpuEmitPartitions,
-    fn bug_a_float_key_is_refused_on_the_device() {
-        let outcome = run_both(&emit(vec![4], 4), Script::Emit(vec![input()]));
-        refused_key_type(&outcome, 10);
-    }
-}
-
-// #206 — nor for a boolean (`BOOL8`, 11).
-operator_case! {
-    GpuEmitPartitions,
-    fn bug_a_boolean_key_is_refused_on_the_device() {
-        let outcome = run_both(&emit(vec![7], 4), Script::Emit(vec![input()]));
-        refused_key_type(&outcome, 11);
-    }
-}
-
 operator_case! {
     GpuEmitPartitions,
     fn each_batch_is_scattered_on_its_own() {
         let stream = vec![synthetic(16, 1), synthetic(16, 3)];
         run_both(&emit(vec![1], 4), Script::Emit(stream)).same(Order::Any);
-    }
-}
-
-// #95 — a decimal key (`DECIMAL128`, 27) is refused at the same switch; tpch q15's `total_revenue`
-// is this shape. The refusal comes before any export, so #187 is not reached.
-operator_case! {
-    GpuEmitPartitions,
-    fn bug_a_decimal_key_is_refused_on_the_device() {
-        let dec = decimals(64, 1);
-        let node = GpuEmitPartitions::new(
-            Given::of(Schema::new(dec.schema()), BatchLayout::MultipleBatches),
-            vec![1],
-            8,
-        );
-        let outcome = run_both(&node, Script::Emit(vec![dec]));
-        refused_key_type(&outcome, 27);
     }
 }
 
@@ -193,5 +148,171 @@ operator_case! {
     fn a_stream_of_zero_row_rows_zero_row_is_scattered_per_batch() {
         let stream = vec![synthetic(0, 1), synthetic(16, 2), synthetic(0, 3)];
         run_both(&emit(vec![1], 4), Script::Emit(stream)).same(Order::Any);
+    }
+}
+
+// --- one case per key type -----------------------------------------------------
+//
+// `key_types`' column order is the ordinal each case names; the batch carries a null in every
+// key column, both zeros and both NaN signs in the floats, values past the signed maximum in
+// the unsigned pair, and values past i64 in `dec38`.
+
+fn key_types_given() -> Box<dyn GpuNode> {
+    Given::of(
+        Schema::new(key_types_schema()),
+        BatchLayout::MultipleBatches,
+    )
+}
+
+pub(crate) fn key_types_emit(keys: Vec<u32>, lanes: usize) -> GpuEmitPartitions {
+    GpuEmitPartitions::new(key_types_given(), keys, lanes)
+}
+
+/// Both engines put every row of a scatter on `key` in the same lane.
+fn every_row_in_the_same_lane_on(key: u32) {
+    run_both(
+        &key_types_emit(vec![key], 4),
+        Script::Emit(vec![key_types(96, 5)]),
+    )
+    .same(Order::Any);
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn an_int8_key_places_every_row_the_same() { every_row_in_the_same_lane_on(1) }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn an_int16_key_places_every_row_the_same() { every_row_in_the_same_lane_on(2) }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn an_int32_key_places_every_row_the_same() { every_row_in_the_same_lane_on(3) }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn an_int64_key_in_the_key_type_set_places_every_row_the_same() {
+        every_row_in_the_same_lane_on(4)
+    }
+}
+
+// #206, and the one place the rule departs from comet: every NaN is canonicalized to a single
+// bit pattern before hashing, where comet hashes a float's raw bytes. That restores Spark, whose
+// doubleToLongBits already collapses NaNs. -0.0 hashing as +0.0 is comet's rule and Spark's, and
+// is not a departure.
+operator_case! {
+    GpuEmitPartitions,
+    fn a_float32_key_places_every_row_the_same() { every_row_in_the_same_lane_on(5) }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn a_float64_key_places_every_row_the_same() { every_row_in_the_same_lane_on(6) }
+}
+
+// #206 — a boolean hashes as comet's i32, 0 or 1.
+operator_case! {
+    GpuEmitPartitions,
+    fn a_boolean_key_places_every_row_the_same() { every_row_in_the_same_lane_on(7) }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn a_date32_key_in_the_key_type_set_places_every_row_the_same() {
+        every_row_in_the_same_lane_on(8)
+    }
+}
+
+// #240 — every unit as its i64, which is the same bytes, so the unit cannot change a lane.
+operator_case! {
+    GpuEmitPartitions,
+    fn a_timestamp_second_key_places_every_row_the_same() { every_row_in_the_same_lane_on(9) }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn a_timestamp_millisecond_key_places_every_row_the_same() {
+        every_row_in_the_same_lane_on(10)
+    }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn a_timestamp_microsecond_key_places_every_row_the_same() {
+        every_row_in_the_same_lane_on(11)
+    }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn a_timestamp_nanosecond_key_places_every_row_the_same() {
+        every_row_in_the_same_lane_on(12)
+    }
+}
+
+// #95 — 16 bytes on both engines at either precision, the cpu widening to (38, s) first.
+operator_case! {
+    GpuEmitPartitions,
+    fn a_narrow_decimal_key_places_every_row_the_same() { every_row_in_the_same_lane_on(13) }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn a_wide_decimal_key_places_every_row_the_same() { every_row_in_the_same_lane_on(14) }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn a_utf8_key_in_the_key_type_set_places_every_row_the_same() {
+        every_row_in_the_same_lane_on(15)
+    }
+}
+
+// Spark has no unsigned types, so the widening is our rule on both engines: u8/u16 to i32,
+// u32 to i64 by value, u64 to i64 by its bits.
+operator_case! {
+    GpuEmitPartitions,
+    fn a_uint8_key_places_every_row_the_same() { every_row_in_the_same_lane_on(16) }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn a_uint16_key_places_every_row_the_same() { every_row_in_the_same_lane_on(17) }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn a_uint32_key_places_every_row_the_same() { every_row_in_the_same_lane_on(18) }
+}
+
+operator_case! {
+    GpuEmitPartitions,
+    fn a_uint64_key_places_every_row_the_same() { every_row_in_the_same_lane_on(19) }
+}
+
+// A float, a wide decimal, a string and a date in one key: the running seed has to chain
+// across four different encodings, which no single-type case can show.
+operator_case! {
+    GpuEmitPartitions,
+    fn a_mixed_composite_key_places_every_row_the_same() {
+        let node = key_types_emit(vec![6, 14, 15, 8], 4);
+        run_both(&node, Script::Emit(vec![key_types(96, 5)])).same(Order::Any);
+    }
+}
+
+// The normalizing cast runs on zero rows for bool, every timestamp unit, the decimals and
+// the unsigned four, and the scatter still answers N empty lanes.
+operator_case! {
+    GpuEmitPartitions,
+    fn a_zero_row_batch_scatters_on_every_key_type() {
+        for key in 1..20 {
+            let node = key_types_emit(vec![key], 4);
+            let outcome = run_both(&node, Script::Emit(vec![key_types(0, 1)]));
+            outcome.same(Order::Any);
+            assert_eq!(outcome.cpu.as_ref().expect("the cpu answers").len(), 4, "key {key}");
+        }
     }
 }

@@ -91,7 +91,7 @@ A third dataset, sf1 only, committed: NULL keys on both sides, `NOT IN` over NUL
 hashable key type, skew, empty sides. One query per demonstrable ticket of the chain, cells off;
 each later task turns its own on. Folds in #227: both engines check declared non-nullability.
 
-### 3. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../tickets/corpus-coverage.md#t201), [#206](../tickets/corpus-coverage.md#t206), [#240](../tickets/corpus-coverage.md#t240), [#95](../tickets/corpus-coverage.md#t95), [#189](../tickets/corpus-coverage.md#t189) — state: rebase needed(blocked(completeness approved)) — PR #169
+### 3. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../archive/archived-tickets.md#t201), [#206](../archive/archived-tickets.md#t206), [#240](../archive/archived-tickets.md#t240), [#95](../archive/archived-tickets.md#t95), [#189](../archive/archived-tickets.md#t189) — state: done — PR #169
 
 The murmur gate onto the production lane rule first; then float, boolean, timestamp and decimal
 keys on the device (decimals hashed as 16 bytes on both engines), and the rollup's grouping id
