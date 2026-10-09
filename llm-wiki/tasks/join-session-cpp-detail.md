@@ -736,3 +736,19 @@ claim), and two of the five patches in this round silently failed their own `ass
 clang-format had rewrapped the text between writing the patch and running it. The cheap habit
 is `git diff <base> -- <file>` read hunk by hunk after every patch run, never a formatter's
 verdict and never the exit code of the script that wrote it.
+
+## Done, 2026-10-09 — the run that decides
+
+**Run 37972967421 built `48eaaa99`**, the last commit touching anything but `**.md` and
+`llm-wiki/**`, and is green on everything the override requires: both cuDF legs, `cpp-build-2502`,
+cost-report (no regression, though the board pre-accepted one for this task), S3.
+`Deploy cost report to Pages` is skipped, as it is on every PR. The one failure is
+`GPU Tests (remote)`, at `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed
+out` — shad-gpu down, which the override exempts. The device evidence the override asks for instead
+is `cpp/install/bin/peacock_join_session_tests`, 53 passed on nebius-gpu's L40S at cuDF 25.02.
+
+**The changes-job trap fired three times on this PR.** Runs on `9c8187b5`, `8182bf09` and
+`212ae720` each reacted to a documentation push, skipped every job and reported success, so the PR
+reads green from a run that built nothing. The run above is the one that means anything. Whoever
+merges should check the same way: find the last non-documentation commit and confirm a run built it
+or later.
