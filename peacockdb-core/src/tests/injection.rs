@@ -104,9 +104,11 @@ pub(crate) struct InjectedContext {
     pub empties: Empties,
     pub hash: Hash,
     pub seed: u64,
-    /// What the sources actually did, counted where it happens. A seed under which no call
-    /// fires is possible, the answer is unchanged either way, and the run would pass having
-    /// injected nothing — so the wrapper counts and the caller asserts.
+    /// What the sources actually did, counted where it happens. `Empties::Sometimes` now
+    /// fires every source's first call, so under it the count cannot be zero and the
+    /// caller's assertion holds by construction rather than by luck of the seed. The count
+    /// stays because it is what makes that structural claim observable, and because a
+    /// future rule that is probabilistic again would need it.
     emitted: Arc<AtomicUsize>,
 }
 

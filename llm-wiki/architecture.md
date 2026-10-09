@@ -458,6 +458,12 @@ above the scan. With nothing between the scan and the root, it is the unload's i
 composed with any root limit DataFusion kept for an offset. It slices the batch that straddles
 the cut, and its satisfaction holds the scan. No reader applies a limit.
 
+Where DataFusion could not push the cut into the scan — a filter, a join or an aggregate between
+them — there is no cut to trim and the scan maps every surviving row group, so the hold on the
+satisfied limit is the whole of the bound. It bounds calls rather than the first one: at the
+row-group modes it stops a 49-group scan after one batch, and at the single-batch modes a lane's
+one batch is already the whole mapping, so the table is read before the limit can be satisfied.
+
 **Root-adjacent** — feeding only `GpuUnload`, the common case — **there is no limit node**: the
 interval becomes the unload's, which is where it belongs, since a limit over a stream about to
 leave the device is a statement about which rows are worth moving across the boundary. The
@@ -474,12 +480,14 @@ join would read the whole table to answer for a hundred rows. It streams and hol
 outside the interval a batch is released uncalled, inside it is forwarded untouched, and only
 the two straddling batches are sliced.
 
-**Intervals nest.** Two on one root-to-leaf path are legal, and each counts the stream it is
-handed. DataFusion's `combine_limit` merges the adjacent form. Two intervals reach this layer
-only in two cases. One is a limited subquery under a join or under a root limit. The other is a
-scan's pushed cut under the limit DataFusion keeps for an offset: `tpch/nested-limits` runs a
-`GpuLimit` 5..+23 over the part scan's own 0..+28. Where that scan sits directly under the root,
-the two fold into the unload's one interval.
+**Intervals nest, and nothing bounds the depth.** Each counts the stream it is handed.
+DataFusion's `combine_limit` merges the adjacent form, so an interval reaches this layer only
+from a limited subquery under a join or under a root limit, or from a scan's pushed cut under the
+limit DataFusion keeps for an offset. One path can carry both: `tpch/nested-limits` runs the
+unload's 3..+20 over a `GpuLimit` 5..+23 over the part scan's own 0..+28, three deep. Where a
+limited scan sits directly under the root, its cut folds into the unload's interval instead of
+becoming a node. No rule caps the count — the validator checks a limit's lane count and its
+parent, the driver counts per node — so a reader must not derive one from the corpus.
 
 ## Joins
 
