@@ -3,8 +3,8 @@
 ## Standing facts
 
 - Third of chain K, branch `ENS-limits` off `ENS-distinct-companions`, PR will target that
-  branch. Closes [#186](../tickets/corpus-coverage.md#t186) and
-  [#234](../tickets/corpus-coverage.md#t234).
+  branch. Closes [#186](../archive/archived-tickets.md#t186) and
+  [#234](../archive/archived-tickets.md#t234).
 - **Chain K runs without a GPU.** No device build, no device run, no GPU cycle. Every build and
   run is local — verda does not resolve from this host (checked again at this dispatch). The
   `scan.cpp` edit and the four `gpu_tests/source_cases.rs` cases are built, not run; #281 holds
@@ -131,3 +131,82 @@ Outside this task's scope and deliberately not fixed: an unused `AsArray` import
 alone and so invisible to every CPU build and to CI. Pre-existing from `0e7804ef`, cosmetic,
 nothing behaves wrongly — no ticket under the house rule. Worth fixing by whoever is next in
 that file.
+
+### 2026-10-09 — review round 1: 0 blocking, 2 important, 6 nits
+
+The reviewer could not construct an input on which the branch answers wrongly, and most of the
+report is that negative result. Four things it checked and found right, recorded so nobody
+re-checks them:
+
+- **`RowInterval::over` is correct, and no golden can test it.** DataFusion computes a scan's
+  limit as `global_fetch + global_skip` from the same requirements that produced the limit node
+  it kept, so `inner.fetch ≥ outer.skip` always and `over` is the identity on the root interval
+  for every shape DF45 can produce. The unit case `an_interval_over_another_keeps_the_rows_both_keep`
+  is the only cover there is, which is what the branch wrote.
+- **`unload_input`'s descent set is exactly `node()`'s erasing set.** Read arm by arm: a
+  fetch-less `CoalesceBatchesExec`, a round-robin `RepartitionExec` and a one-lane
+  `CoalescePartitionsExec`, none of which can change a row count in DF45. Two of the three are
+  unreachable with a pushed cut, so defensive, but harmlessly — they are `node()`'s behaviour
+  either way. Anything else becomes a node and the limit lands legally beneath it.
+- **The prefix trim holds under pruning** because the engine never applies a predicate inside
+  the scan: `parquet.predicate()` feeds row-group pruning only, `pushdown_filters` is never
+  enabled, and a surviving group's rows are all returned. Bigger-than-the-table keeps every
+  group; `n == 0` keeps one so `partition` has something to address, and never reads it. No
+  interaction with the small-table rule: `lanes_for`'s limit arm returns 1 before the byte
+  threshold is consulted.
+- **#234 cannot change an answer.** `emitted = clamp(seen − skip, 0, fetch)`, so
+  `emitted ≥ fetch ⟺ seen ≥ skip + fetch`, and the two rules diverge only at `fetch == 0` with
+  `skip > 0` — the case the spec names and a test pins. The unload's path is untouched:
+  `rows_emitted` cannot reach it, because an unload's outputs are `LaneOutputs::Host`.
+- The wire deprecation leaves vtable slot 12 empty, `VT_ROW_GROUPS` at 14 and `VT_BATCHES` at
+  16, read off the branch's own regenerated `gpu_plan_generated.h`. No C++ caller passes an
+  argument at or past `limit`'s old position.
+
+#### The two important findings
+
+**I1, mine — #186 and #234 were still open tickets.** The spec's Scope row says they are
+archived here and carries no "on merge" qualifier, and the chain's precedent is in-branch:
+distinct-companions archived #62. Done in the commit that carries this section: both bodies moved
+to `archive/archived-tickets.md` with a `Closed by limits (chain K)` paragraph that says what
+landed instead of what each ticket proposed — neither was fixed the way it argued for, which is
+the part a later reader needs. Dropped from `corpus-coverage.md`'s index, `tickets.md` to 116
+open and corpus-coverage to 33. The board's and the working docs' links repointed at the
+archive; the spec's are left, since the spec is frozen.
+
+Three resolved findings also left `reports/hacks-audit.md`, under the pruning rule its own
+preamble states — §2 (`Some(0)` and `None` are one scan limit on the wire: the field is gone from
+both writer and reader), §8 (two live counters of one mid-plan limit), and the tests section's
+`GpuLoadParquet.limit` entry. Numbers are not renumbered, since tickets cite them; the section's
+own "only two things here behave wrongly" is now one.
+
+**I2, the developer's — the hold's effect is no longer covered outside the mock tier.** Only its
+detection is. `most_offered > 2` went and `assert_eq!(offered, pulled)` took its place, which is
+a different and weaker claim, and the test is called
+`a_limit_slices_at_most_two_batches_and_stops_the_scan`. The reviewer proved it rather than
+asserting it: across all ten `*-mini.cpu.txt` goldens only `nested-limits` and `scan-limit` carry
+an `early_exit` at all, and in both, at every mode, every mapped batch is pulled — so making the
+subtree hold a no-op reddens nothing outside `driver/tests/limit.rs`. Before the branch, part
+mapped two row groups at the rowgroup modes and one was pulled, which is what the old assertion
+pinned.
+
+#### N7, mine — a line for #281
+
+`nested-limits`' region loader carries `projections=[]` and an empty declared schema while
+`scan.cpp` reads an empty projection as "read every column", so the device table there has three
+columns against a schema of none, and the new `GpuLimit` is the first node in that path that must
+read a row count from it. Added to #281, which is where whoever runs the device tier will look.
+
+#### N5, mine to carry into the signoff
+
+`Empties::fires` firing every source's first call is outside the spec's Scope table. The
+reasoning is measured and the change strengthens the dimension assertion rather than weakening
+it, but it changes behaviour for every injected-layout run rather than only the limit ones, so it
+belongs in the signoff's list of shortcuts and deviations.
+
+#### N6, not acted on
+
+`scripts/exec_model/partitioned_driver.py:190` keeps the old rule. `architecture.md` now records
+the divergence, so it is not drift. The reviewer enumerated skip 0–39 × fetch 0–39 at three batch
+sizes: the two rules differ only at `fetch == 0` with `skip > 0`, and no prototype case sits
+there. Outside this task's Scope table, and the prototype is where a rule is argued with rather
+than where it is enforced.

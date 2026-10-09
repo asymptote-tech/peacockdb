@@ -24,8 +24,8 @@ a new `rows_emitted` for a mid-plan limit and keeps `rows_seen` for the unload a
 FlatBuffers schema; C++ against cuDF 25.02, built and `ctest -L cpu` only; the gpu-feature Rust
 lib built, never run.
 
-**Spec:** [`limits.md`](limits.md). Tickets: [#186](../tickets/corpus-coverage.md#t186),
-[#234](../tickets/corpus-coverage.md#t234), [#281](../tickets/corpus-coverage.md#t281).
+**Spec:** [`limits.md`](limits.md). Tickets: [#186](../archive/archived-tickets.md#t186),
+[#234](../archive/archived-tickets.md#t234), [#281](../tickets/corpus-coverage.md#t281).
 
 ## Global constraints
 
