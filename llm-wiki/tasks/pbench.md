@@ -246,3 +246,16 @@ expect is a finding: the ticket it fails on goes on the row, or a new ticket is 
 ## Device workflow
 
 `build-test-shadgpu.sh`, one cycle for the gpu cells.
+
+## Completeness signoff (2026-10-08, replacing the pre-cycle one)
+
+Solved under its constraints, on both engines: 588 KB committed, 57 corpus lines, 60 registry rows, 128
+cpu cells on, and the device cycle run on an L40S at cuDF 25.02 — 128 of 285 declarable gpu cells
+measured, 30 enabled, 98 off on a measured ticket, `gpu-result.txt` golden 18 of 18 with its 30 sections
+all agreeing with DuckDB. Five shortcuts. #227 closes half: the device null-count read has no plumbing.
+The determinism check sits in no Rust tier; this task's guard proves only that its `pipeline.yml` line
+exists. Three of the 63 queries are absent behind #255, leaving #245 and #249 no declared cell. Three of
+the 24 refusals cite no ticket, and citing them is a third engine change the Restriction forbids.
+`empty.parquet` holds zero row groups where the data table says one, so `cross-empty-build` is refused
+on #256 instead of reaching #208. Two claims this frozen text cannot correct: a query per demonstrable
+ticket misses eight, each now saying so on itself, and "Not covered by a query" omits #137.

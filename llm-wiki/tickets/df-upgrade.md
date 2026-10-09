@@ -149,3 +149,34 @@ against DataFusion 45's source by the chain-J review (2026-10-07); pbench tables
 
 **Corpus queries:** none. Each line above is the test once an upgrade lands.
 
+
+<a id="t257"></a>
+### #257 — DataFusion 45 answers `(x IN (subquery)) IS NULL` as nothing at all
+`SELECT f_id FROM fact WHERE (f_k IN (SELECT s_y FROM sub)) IS NULL` plans, in DataFusion 45, to a
+bare `EmptyExec` — the whole query, both scans gone — and answers 0 rows. DuckDB 1.5.4 answers
+14,998 over the same parquet, which is the right answer: `sub.s_y` holds NULLs, so the `IN` is
+UNKNOWN for every `f_k` that matches nothing, and UNKNOWN `IS NULL` is true.
+
+The loss is in logical optimization, in four steps traced through DataFusion 45's source. An
+`InSubquery` inside a larger expression becomes a LeftMark join plus a reference to its `mark`
+column (`decorrelate_predicate_subquery.rs:147`); the mark is declared **non-nullable**
+(`logical_plan/builder.rs:1354`, and again at `joins/utils.rs:628`); `IsNull` over a non-nullable
+expression folds to `false` (`simplify_expressions/expr_simplifier.rs:1545`); and `where false`
+becomes an `EmptyRelation` that `propagate_empty_relation` then collapses, both scans with it, which
+physical planning renders as `EmptyExec`. `Expr::InSubquery::nullable` delegating to the inner
+expression (`expr_schema.rs:310`) is why the fold needs the mark join to happen first.
+
+So the optimized logical plan is already an `EmptyRelation` — an earlier note here said the logical
+plan still carried the filter and sent the reader to physical planning, which was read off the
+*initial* plan. Measured on the committed pbench sf1 data at four partitions.
+
+Why it is ours and not only theirs: DataFusion at `target_partitions = 1` is the corpus' cpu
+oracle (`corpus.rs::assert_answer`), so a query this reaches would be checked against the wrong
+answer and agree with it. Today the engine refuses the plan — `unsupported: plan node EmptyExec`,
+[#155](joins.md#t155) — so no wrong answer is served; the moment that arm lands, this one starts
+answering 0 rows to a user. The DuckDB oracle ([#235](../archive/archived-tickets.md#t235)) is what caught it,
+and is the only thing that could have.
+
+**Corpus queries:** pbench's `in-is-null`. Its plan cells are disabled on `155`, the refusal it
+actually meets, and the row carries this ticket and `250` beside it — `250` is the ticket it was
+WRITTEN for (the `IN`'s NULL is read) and cannot demonstrate while the answer is empty.

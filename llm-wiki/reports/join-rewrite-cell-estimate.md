@@ -70,8 +70,14 @@ Today (verified, registry = inc, 0 mismatches): cpu 551 on / 49 off; gpu 26 on /
 | refcounted-scatter | 0 | 0 | — | 6 gpu cells: tpch q1 and shuffle-additive-avg at 4s/4r/4z (§5 R1) |
 | exit-copies | 0 | 0 | — | 2 gpu cells: tpcds q84, q85 at 1s (§5 R2) |
 | join-session-cpp | 0 | 0 | — | none: C++ only, nothing in Rust calls the four symbols until join-backend |
-| join-backend | 23 (#190 ×20, #212 ×3) | 428 (+3 for q15 if repartition-keys did not run them) | NEXT: rollup-over-join #65 ×5, q78 #60 ×5, q32 #199 ×3 | 7 gpu join cells on today (§5 R3); cpu golden churn everywhere a join is; tpch nested-limits' zero-column scan (§5 R4) |
+| join-backend | 23 as estimated; **48 since pbench landed** (#190 ×45, #212 ×3) — see the note under this table | 428 (+3 for q15 if repartition-keys did not run them) | NEXT: rollup-over-join #65 ×5, q78 #60 ×5, q32 #199 ×3 | 7 gpu join cells on today (§5 R3); cpu golden churn everywhere a join is; tpch nested-limits' zero-column scan (§5 R4) |
 | verify-26.02 | 0 | 0 | #94 on 26.02: tpch shuffle-stddev 1s runs a `MERGE_M2` whose count child is cast to INT32 (`cpp/src/operators/aggregate.cpp`, #94); 26.02 accepts only INT64/FLOAT64 | none to the 25.02 registry |
+
+**One figure moved after this estimate was taken (2026-10-08).** pbench added five rows carrying
+`190` — `nl-inner`, `nl-left`, `nl-projection`, `nl-left-decimal` and `like-column-pattern` — so
+#190 is nine registry rows and 45 cpu cells rather than four rows and 20, and join-backend flips 48
+rather than 23. [#190](../tickets/joins.md#t190) carries the live list; the estimate's own numbers
+are left as they were taken, since an estimate rewritten after the fact records nothing.
 
 ## 3. NEXT ISSUE — evidence
 

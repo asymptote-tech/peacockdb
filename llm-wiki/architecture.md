@@ -102,6 +102,13 @@ groups. Rows would misjudge it both ways: a narrow table of many rows reads less
 table of few, so the threshold is a property of the scan and the same table can be above it in
 one query and below it in another.
 
+The threshold is per dataset where the corpus plans. `test_support::small_table_bytes_for` gives
+pbench `0` and every other dataset `planner::SMALL_TABLE_BYTES`: pbench's five tables are all
+under 5 MB, so the rule as tpch and tpcds see it would plan every pbench scan as one lane — and
+pbench exists to show the multi-lane shapes those two cannot reach. With it off, `fact` splits
+across four lanes at tp4 and the one-row-group tables leave three of those four with no batch at
+all, which is the shape a lane rule is wrong about.
+
 Demoting a region changes the lowering, not a number, and the two halves of a shuffle answer to
 different things. The `GpuMergePartitions` goes, since there is nothing to merge. The
 `GpuEmitPartitions` stays whenever its consumer still wants n lanes hashed on its keys — a
@@ -121,8 +128,9 @@ Survivors split into `n` contiguous chunks balanced by row count — a chunk end
 the next group would land further from its share than stopping does, rather than where the
 share is first reached, which overshoots by a whole group. Within a chunk, consecutive row
 groups pack greedily into batches while bytes stay under target; a single row group over target
-is still its own batch, so the minimum granularity is one row group and the planner always
-produces a plan.
+is still its own batch, so the minimum granularity is one row group, and the planner produces a
+plan for any non-empty survivor list. An empty one is refused as an invalid plan
+([#256](tickets/joins.md#t256)): a zero-row-group file, or a filter that prunes every group.
 
 **The balance bound holds for uniform row groups, and contiguity is why it is not universal.**
 Max−min lane rows ≤ one row group is true of what a parquet writer emits — one group size per
@@ -509,9 +517,9 @@ Both are a join with no equality to hash, and which one DataFusion plans — and
 the translator meets — is decided by whether there is a predicate at all.
 
 - **No join predicate ⇒ `CrossJoinExec`.** `SELECT * FROM region, nation` — a full cartesian
-  product. In the corpus every case pairs a one-row aggregate result with another under no
+  product. In tpch and tpcds every case pairs a one-row aggregate result with another under no
   condition, e.g. tpcds q61 putting `sum(ss_ext_sales_price) as promotions` beside `total` so
-  it can divide them.
+  it can divide them; pbench's `cross-projection` is the plain cartesian of two base tables.
 - **A predicate that is not an equijoin ⇒ `NestedLoopJoinExec`**, carrying that predicate as
   its `filter`: `… WHERE a.r_regionkey < b.n_regionkey` becomes a `GpuNestedLoopJoin` with
   `filter=n_regionkey@1 > r_regionkey@0`.
@@ -1268,7 +1276,8 @@ from `testdata/cost_model.conf`. Every real category is 1.0 today, so the total 
 record it. Three placeholder phases sit at 0.0 and one category names no node at all — kept
 because dropping a category rewrites the line list of every committed cost golden.
 
-**DuckDB's cost oracle** runs each query twice — a deterministic profile with join-filter
+**DuckDB's cost oracle** runs each tpch and tpcds query twice — pbench has none, its queries
+being named rather than `qN` — a deterministic profile with join-filter
 pushdown off, then a pass reading only the dynamic-filter bounds — and combines them with
 parquet row-group statistics. `storage_read_total` is deliberately in the same units as a
 source node's `output_bytes`, decoded Arrow bytes of the surviving row groups' referenced

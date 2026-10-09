@@ -176,8 +176,9 @@ comparison cannot see it. A `GpuLimit` keeps its input's single-batch layout, so
 sort, merge or coalesce feeds it, and #214's dropped batch lands here. The rule for both sites is
 one: a keyless aggregate answers one row whatever arrived.
 
-**Corpus queries:** tpcds q96, q88 and q90 at `tp4-single`, `tp4-rowgroup` and `tp4-sized`: nine
-cpu cells refused on the NULL count, their device cells behind them. An empty lane comes from
+**Corpus queries:** tpcds q96, q88 and q90, and `pbench/scalar-subquery-cross`, at `tp4-single`,
+`tp4-rowgroup` and `tp4-sized`: twelve cpu cells refused on the NULL count, their device cells
+behind them. An empty lane comes from
 tp4-single cutting a one-row-group table into four, or from an Inner join with no build rows in a
 lane. Simplest, per the 2026-09-11 fix report and unconfirmed here: `select count(*) from store
 where s_store_name = 'ese';` (tpcds) at `tp4-single`. The device's dropped row and the shortcut
@@ -194,7 +195,7 @@ builder), so the init covers them all. The driver owes the done call to every la
 no batch included — today such a lane gets no call. Sources of nothing below the init (#214's
 limit, #205's sort, the joins) need no fix of their own for this; between init and merge a keyless
 sequence only collapses lanes, which keeps the one-row batch. The cpu's `!self.grouped` clause, which
-merges over nothing, goes, and the nine #180 cells turn on at the tp4 modes.
+merges over nothing, goes, and the twelve #180 cells turn on at the tp4 modes.
 
 <a id="t55"></a>
 ### #55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast
@@ -229,29 +230,24 @@ the defect is live, and the throwing call names its phase.
 
 A ROLLUP, CUBE or GROUPING SETS init on the device numbers the id's bits from the other end, and
 holds it as `Int32` where DataFusion declares `UInt8` up to 8 keys, `UInt16` to 16, `UInt32` to
-32 and `UInt64` beyond. `GROUPING()` over the full key list reads the wrong value.
+32 and `UInt64` beyond. `GROUPING()` over the full key list reads the wrong value, silently: it
+plans on 45 as `CAST(__grouping_id AS Int32)` and answers the device's bits.
 
 `aggregate.cpp` sets bit `i` for masked key `i` and builds the column from a
 `cudf::numeric_scalar<int32_t>`. DataFusion 45 folds `(acc << 1) | is_null`, first key highest
 (`aggregates/mod.rs`), at the width `Aggregate::grouping_id_type` picks: a two-key rollup is 0, 1,
 3 there and 0, 2, 3 here. The merge above only needs one id per set, so it is right; every other
-reader is not. `GROUPING(k1, …, kn)` over the full key list plans on 45 as
-`CAST(__grouping_id AS Int32)` and answers the device's bits, a silent wrong answer. The schema
-validator refuses the width. Pinned by the two `bug_grouping_sets_…` cases in
-`gpu_tests/aggregate_cases.rs` (whose `grouping_sets_as_exported` swaps the bits and the type),
-`bug_grouping_sets_hold_an_int32_grouping_id_where_the_plan_declares_uint8`
-(`gpu_tests/aggregate_schema_cases.rs`) and
-`bug_a_rollup_partial_holds_an_int32_grouping_id_where_the_plan_says_uint8` (`wire/gpu_tests/mod.rs`).
+reader is not. The schema validator refuses the width. Pinned by four `bug_` cases — two in
+`gpu_tests/aggregate_cases.rs`, whose `grouping_sets_as_exported` swaps both the bits and the
+type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mod.rs`.
 `GROUPING()` over a subset or a reordering of the keys is refused on the device (#230). DataFusion
 55's duplicate ordinal is #228.
 
-**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join` and tpcds
-q5, q14, q18, q22, q77, q80. None reaches it on the device yet: each cell is off first on #152,
+**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`, tpcds
+q5, q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`, the one that reaches it on a device —
+its two tp1 cells are off here, the validator refusing the width. The rest are off first on #152,
 #189 or #220. The value shows only through `GROUPING()`, and q70 and q86, the corpus's users, are
-window queries that never run. Simplest (from [`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14)):
-`select n_regionkey, n_nationkey, grouping(n_regionkey, n_nationkey) as g, count(*) from nation
-group by rollup (n_regionkey, n_nationkey);` (tpch): 31 rows with g in {0, 1, 3} on the cpu; the
-device answers the five subtotal rows with g = 2.
+window queries that never run; the repro is fix 14's.
 
 **Fix proposed:** [fix 14 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix14), in C++ alone. A static
 `grouping_id_column(gid, nkeys, rows)` in `aggregate.cpp` folds `gid = (gid << 1) | masked` into a
@@ -694,9 +690,10 @@ refusal. Any `GROUP BY` or join key of either type at more than one lane reaches
 `bug_a_float_key_is_refused_on_the_device` and `bug_a_boolean_key_is_refused_on_the_device`
 (`gpu_tests/emit_cases.rs`).
 
-**Corpus query:** none — no `tp4` plan golden hashes a Float64 or Boolean key, and the sf1 data
-has no float column. Simplest, at any `tp4` mode: `select cast(l_quantity as double) q, count(*)
-from lineitem group by q;` and `select l_quantity > 25 b, count(*) from lineitem group by b;`
+**Corpus queries:** `pbench/float64-key-group` and `pbench/bool-key-group`. `tp4-single.plans.txt`
+hashes both — `GpuEmitPartitions: hash=[f_kf64@0], lanes=4` and `hash=[f_kb@0], lanes=4` — so the
+shape this ticket is about is now in a plan golden, which it was not while tpch and tpcds were the
+only datasets (neither has a float column).
 (tpch).
 
 <a id="t240"></a>
@@ -712,7 +709,10 @@ own comment ("Timestamp-as-i64 → 8B") and [#95](#t95)'s text both say timestam
 the switch says otherwise. Any `GROUP BY` or join key of a timestamp type at more than one lane
 reaches it. Not gated by `murmur_conformance.rs`; no pin yet.
 
-**Corpus query:** none — tpch and tpcds use `Date32`. Simplest, at any `tp4` mode:
+**Corpus queries:** `pbench`'s `timestamp-s-key-group`, `timestamp-ms-key-group`,
+`timestamp-us-key-group`, `timestamp-ns-key-group` and `ts-key-join` all carry this ticket, and
+`timestamp-s-key-group` is the tree's one `NOT_RUNNABLE` entry on it. tpch and tpcds have nothing:
+they use `Date32`. Simplest, at any `tp4` mode:
 `select cast(o_orderdate as timestamp) t, count(*) from orders group by t;` (tpch).
 
 <a id="t189"></a>
@@ -728,8 +728,9 @@ keys, and those include `__grouping_id`, a `UInt8`. comet's murmur3 has no unsig
 the device's id differs from the cpu's in type and bits (#65), so the two engines would put
 a subtotal row in different lanes. A refusal, not a wrong answer.
 
-**Corpus queries:** `tpch/rollup-over-join` and tpcds q5, q18, q22 and q80 at `tp4-single`,
-`tp4-rowgroup` and `tp4-sized`: 15 cpu cells, their device cells behind them. tpcds q77 may meet it
+**Corpus queries:** `tpch/rollup-over-join`, tpcds q5, q18, q22 and q80, and `pbench`'s
+`rollup-small-keys`, `uint-key-group` and `uint-key-join`, at `tp4-single`, `tp4-rowgroup` and
+`tp4-sized`: 24 cpu cells, their device cells behind them. tpcds q77 may meet it
 too once #212 stops refusing it first. Simplest: `select l_returnflag, sum(l_quantity) from
 lineitem group by rollup (l_returnflag);` (tpch) at `tp4-single`.
 
@@ -738,9 +739,17 @@ shuffle`, drop the id's ordinal from `Shuffle::ByHash`'s keys when the aggregate
 `keys.retain(|k| *k as usize != group.expr().len())`, guarded on `!group.is_single()`. Every row of
 a user-key group then lands in one lane whatever its set, so each (keys, id) group stays whole.
 The rule the plan validates, hash keys a subset of the group columns, already allows it. No hasher
-arm and no C++. The tp4 plan goldens of the five queries change their emit's `hash=` and the
+arm and no C++. The tp4 plan goldens of the six queries change their emit's `hash=` and the
 merge's `hashed_on`, and the tpcds q5 payload's `hash_exprs` shrinks. A planner test pins
-`hash_keys == [0, 1]` for a two-key rollup at tp4. The 15 cpu cells turn on.
+`hash_keys == [0, 1]` for a two-key rollup at tp4.
+
+**That fix turns on 18 of the 24 cells, not all of them.** `pbench`'s `uint-key-group` and
+`uint-key-join` reach the same refusal by the other road: they hash a plain `UInt32` user key, and
+comet's murmur3 has no unsigned arm at any width. The grouping-id fix cannot help them —
+`uint-key-group` is a single grouping set, so `!group.is_single()` excludes it, and `uint-key-join`
+never enters `aggregate_sequence`. Their 6 tp4 cells want the unsigned arm itself, which is the
+second half of this ticket's own mechanism sentence and no part of the fix above. A task that
+enables all 24 on the strength of that paragraph turns 6 of them red.
 
 <a id="t145"></a>
 ### #145 — Refcounted handles: stop copying every partition out of a scatter
@@ -771,10 +780,12 @@ which is what tpch q15 hits on `total_revenue`; #184 was filed for it and is arc
 hasher takes the decimal, so the shape is a refusal on one side. Pinned by
 `bug_a_decimal_key_is_refused_on_the_device` (`gpu_tests/emit_cases.rs`).
 
-**Corpus queries:** eight hash a decimal key at every `tp4` mode — tpch q2 (`ps_supplycost`),
+**Corpus queries:** eleven hash a decimal key at every `tp4` mode — tpch q2 (`ps_supplycost`),
 q10 (`c_acctbal`), q15 (`total_revenue`, precision 38), q18 (`o_totalprice`); tpcds q24, q37,
-q82 (`i_current_price`), q75 (`sales_amt`, precision 31). Their `tp4` device cells are off, on
-blockers that refuse first (#152); q15 and q75 need the >18 path.
+q82 (`i_current_price`), q75 (`sales_amt`, precision 31); and `pbench`'s `decimal15-key-group`,
+`decimal38-key-group` and `decimal15-key-join`, which are the three written for this ticket
+rather than meeting it by accident. Their `tp4` device cells were run and are off on this ticket
+itself, the kernel naming `type_id=27`; q15, q75 and `decimal38-key-group` need the >18 path.
 
 <a id="t197"></a>
 ### #197 — the repartition arm still concatenates a child it can only be handed one of
@@ -832,6 +843,20 @@ removes — and not this ticket's.
 Column nullability is maintained tin node's output_schema, but not tested anywhere. Start testing
 it in the CPU engine, by adding this logic to declared_as() - if not null constraint is set in the
 schema, check that every record batch produced does not have any nulls.
+
+**Half landed in [`pbench`](../tasks/pbench.md), and the half that is left is the device's.**
+`nulls_where_none_declared` sits beside `device_divergence` in `test_support/schema_validation.rs`
+and `held_to_declaration` runs both; which half runs is the explicit argument
+`NullsHeld::{Unread, PerColumn(&[usize])}`, the cpu flavour passing counts read off the arrow
+batch and the device flavour `Unread`. Nothing exports the device's count today:
+`peacock_handle_schema` carries the schema message alone. cuDF does hold it —
+`column_view::null_count()` is a stored member, and this repo's C++ already reads it in
+`expr.cpp` and `aggregate.cpp` — so the rest of this ticket is plumbing, not a new capability.
+Two routes: a null-count entry point beside `peacock_handle_schema`, or materialising through
+the existing `peacock_result_from_handle` and counting in Rust. The first is worth the C++
+because the second copies a resident table to count its nulls, and the gpu hook already holds
+both arguments it would need. Either way the device flavour then passes `PerColumn` and nothing
+else changes. Not type-checkable without cuDF, so it wants a host with a card.
 
 <a id="t164"></a>
 ### #164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws
@@ -1013,7 +1038,42 @@ error naming both classifiers. No committed section has the shape.
 **Fix proposed:** give `duckdb_divergent` a side — which of the cpu and the device diverges — and
 give `duckdb_fingerprint` the optional ticket and column list `duckdb_divergent` already has, so
 a triple or a per-column exemption can carry a known difference while `rows` and the remaining
-columns stay checked. Decide it before `stale-cells` builds rather than inside it.
+columns stay checked.
+
+**pbench moved the deadline, and widened both halves.** `stale-cells` is blocked, pbench landed
+ahead of it, and the next task to build is `repartition-keys` — which owns `uint-key-group`, a
+`duckdb_fingerprint` line over a 19,848-row answer whose cpu tp4 cells and gpu cells it both turns
+on. So the decision is owed before that task, not before `stale-cells`. pbench also took the
+fingerprint lines from 4 to 14, ten of the new ones its own rows whose device comparison is
+`live_cpu` because the answer is over the cap; and the first half — a device answer diverging
+while the cpu's matches — now has 27 pbench rows in reach, all of them DuckDB-green on the cpu
+already, in a dataset that exists to make the device differ.
+
+**Decided, 2026-10-08, so that whoever implements it need not re-litigate it.** Two changes, both
+additive, neither touching a line that is green today:
+
+- **`duckdb_divergent` gains a side**, written as a trailing non-numeric component:
+  `duckdb_divergent(<ticket>, <positions…>[, <side>])` where the side is `both`, `cpu` or `device`.
+  Positions are variadic — `duckdb_oracle.rs`'s `divergent` maps all of `args[1..]` through
+  `number`, and `corpus_cases.inc:178` writes thirteen components — so the side cannot be the third
+  one. A last component that parses as a number, or no last component at all, means `both`, which
+  is today's meaning and leaves every existing line alone. The named columns must still differ **on the side
+  named** and must still agree on the other, so a cell that stops diverging on the device fails
+  exactly as one that stops diverging on the cpu does today. That is what makes the variant worth
+  having: it narrows the claim rather than waiving it.
+- **`duckdb_fingerprint` gains the optional ticket and column list** `duckdb_divergent` already
+  carries: `duckdb_fingerprint(<ticket>, <positions>)`. `rows` and every column not named stay
+  checked — the `nonnull` counts, the triples, and the hash recomputed over the exact columns the
+  line does not except. A hash cannot be recomputed from a fingerprint, so an excepted column
+  means both writers must leave it out of their hash, which makes the exception a property of the
+  section rather than of the comparison: the writers read the line's exceptions. That is the part
+  that costs work, and it is why this is a ticket and not a line edit.
+
+Rejected: a tenth `corpus_query!` argument for a separate device oracle. It doubles the oracle
+column on all 176 lines to express something four or five of them need, and a line's coverage
+stops reading off the line. Also rejected: classing every decimal approximate so the fingerprint
+needs no exception — it takes 1.5M rows of `o_totalprice` out of row-for-row checking, which is
+the thing the fingerprint exists to do.
 
 <a id="t254"></a>
 ### #254 — `data_fusion_subset` is the one cpu oracle no test can show failing

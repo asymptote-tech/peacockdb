@@ -227,14 +227,20 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
         }
         // A cell turned off names the ticket that explains it. Bulk disablement is what a
         // rollout does, and a row that says only "not here" is one nobody can act on or
-        // close — the ticket is what makes it findable when the blocker clears.
+        // close — the ticket is what makes it findable when the blocker clears. `na` counts
+        // as off: it is what a row whose case is commented out writes, so reading `disabled`
+        // alone let a whole row go unexplained.
         let off = COLUMNS
             .iter()
-            .filter(|col| states.get(**col).is_some_and(|state| state == "disabled"))
+            .filter(|col| {
+                states
+                    .get(**col)
+                    .is_some_and(|state| state == "disabled" || state == "na")
+            })
             .count();
         assert!(
             off == 0 || !tickets.is_empty(),
-            "{}:{}: {off} disabled cells and no ticket — name the one that explains them",
+            "{}:{}: {off} cells off and no ticket — name the one that explains them",
             path.display(),
             i + 2
         );

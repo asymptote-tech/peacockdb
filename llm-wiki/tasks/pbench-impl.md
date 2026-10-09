@@ -849,3 +849,68 @@ fn an_equal_schema_is_still_checked_for_nulls() {
 - **Types.** `CORPUS_DATASETS`, `small_table_bytes_for`, `Mode::knobs_for`, `all_datasets`,
   `PBENCH_JOINS` are defined once and used with the same names.
 - **Review Focus.** Each of the five lines is pinned in the task it names.
+
+---
+
+## Round 1 status (2026-10-08)
+
+**Done:** Tasks 1, 2, 3, 4, 5, 6, 6b, 6c's cpu leg, 7. **Not done:** Task 8 (the device cycle —
+shad-gpu was down for the whole round), 6c's device leg (the two schema validators), and Task 9's
+two wiki files, whose lines are named in the round report for the human to apply.
+
+The step-by-step results, every measurement, and nine deviations from this plan are in
+[`pbench-detail.md`](pbench-detail.md) under "Round 1 result". The four that change what a later
+task has to do:
+
+- **59 queries landed, not 63.** `struct-key-join`, `struct-through-join` and
+  `interval-through-join` PANIC the planner (#255, filed) and cannot be in
+  `testdata/pbench-queries/` at all — one of them there aborts all five plan goldens.
+  `int8-key-group`'s query FILE is held back with its row, because a plan-golden section without a
+  registry row is red: this plan's "63 files, 62 rows" cannot both hold.
+- **The plan's `gen.sql` lost the float specials.** Parquet's dictionary dedupes by value, so
+  `-0.0` collapsed into `0.0` and `-NaN` into `NaN`, per row group. `DICTIONARY_SIZE_LIMIT 0` on
+  `fact` and `dim` fixes it, and `--check` now asserts the exact counts.
+- **Two more tickets**: #256 (an all-pruned scan is refused as an invalid plan, which is what
+  `cross-empty-build` meets instead of #208) and #257 (DataFusion 45 answers
+  `(x IN (subquery)) IS NULL` as nothing, which is what `in-is-null` meets instead of #250).
+- **The PR comment went 13.8 KB over GitHub's 65,536-byte cap** with pbench's rows in it. Three
+  cuts brought it to 63,038 with 2,498 spare — about 7 rows, of which this chain still owes 4.
+  Step 4 of Task 6b's "note the margin" is that number, and it is now a constraint on the chain.
+
+## Task 8 status — done (2026-10-08)
+
+**Task 8, the device cycle, is run.** 128 of pbench's 300 gpu cells were runnable — the other 157
+declarable ones have no cpu cell at their mode, which
+`every_device_cell_has_a_cpu_cell_at_the_same_mode` forbids, and 15 are `na` on the commented-out
+float rows. All 128 ran on nebius-gpu's L40S under cuDF 25.02; **30 are enabled, 98 carry the
+ticket they were measured to fail on**, and `testdata/goldens/pbench.sf1/gpu-result.txt` is the
+eighteenth golden with a section for exactly the 30. Every one of the 48 answers the recorder
+captured agrees with DuckDB.
+
+`int8-key-group` landed with it — query file, registry row, corpus line, goldens — and passes at
+all five modes with no ticket, which is what the spec's table predicted and what held it back
+until a cycle could prove it.
+
+The per-cell table, the failure text per ticket class, and the six measurements that disagreed with
+the spec's prediction are in [`pbench-detail.md`](pbench-detail.md) under "The device cycle, run".
+What a later task inherits:
+
+- **The tags are measurements now, not predictions.** `sparse-probe-left` and `sparse-probe-semi`
+  pass everywhere and carry no ticket; the three `sparse-build-*` rows never reach #212 (the shared
+  driver keeps their zero-row scatter output) and are #152/#220; `cross-projection` never reaches
+  #207 and is #63's second arm; `exists-null-keys` and `finish-without-probe` are #220, not #152
+  and #173; `rollup-small-keys` is the tree's first device cell to reach #65.
+- **`join-backend` inherits 60 cells** (#152 42, #220 18) and **`repartition-keys` 29** (#240 17,
+  #95 9, #206 3), plus #63's 7 and #65's 2 — 98 in all.
+- **The comment cap is 63,339 bytes, 2,197 spare, about six rows**, of which #255's three are owed.
+- **The data changed**: `dim` carries `d_ts_ms` and `d_ts_ns`, so every `dim` ordinal from 10 up
+  moved and all 17 earlier goldens were regenerated on the new parquet.
+- **Task 1's determinism check** is now guarded by
+  `the_pbench_determinism_check_is_named_by_a_ci_step` (`test_ci_coverage.rs`): the shell check
+  still needs DuckDB 1.5.4 and so cannot be a Rust tier itself, but neither deleting nor
+  commenting out its CI line is silent. `test_ci_coverage` is 11 cases: the review round added
+  `the_pbench_check_matcher_rejects_a_commented_out_invocation`, which pins the comment form.
+- **The `dim` guard compares `(name, arrow type)` over 15 key pairs**, excluding each table's row
+  id and measures rather than whitelisting a prefix, so a wrong timestamp unit or a dropped `d_dt`
+  goes red. Both proved red by mutating `gen.sql`; see the review round in
+  [`pbench-detail.md`](pbench-detail.md).

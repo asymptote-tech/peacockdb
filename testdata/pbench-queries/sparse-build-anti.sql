@@ -1,0 +1,1 @@
+SELECT f_id FROM fact WHERE NOT EXISTS (SELECT 1 FROM tiny WHERE t_k = f_k)

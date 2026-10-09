@@ -1,4 +1,5 @@
-//! Asserts every integration-test target is actually NAMED by a CI workflow step.
+//! Asserts every integration-test target, build rung and scripted guard is actually NAMED
+//! by a CI workflow step.
 //!
 //! Why this exists. CI does not sweep Rust test targets as a set — pipeline.yml lists
 //! each `cargo test ... --test <name>` by hand. So a new `tests/test_*.rs` is invisible
@@ -166,6 +167,27 @@ fn line_builds_the_cli(line: &str) -> bool {
         .next()
         .is_none_or(char::is_whitespace);
     after_ok && line.contains("cargo build")
+}
+
+/// Does this workflow line RUN `generate_pbench.sh --check`?
+///
+/// A comment is rejected because `fold_continuations` keeps comment lines verbatim, so a
+/// bare `contains` reads a commented-out invocation as coverage — and commenting a step out
+/// is the likelier way it stops running than deleting it.
+fn line_runs_the_pbench_check(line: &str) -> bool {
+    !line.trim_start().starts_with('#') && line.contains("generate_pbench.sh --check")
+}
+
+/// The matcher's own guard, pinning the mode a bare `contains` lets through.
+#[test]
+fn the_pbench_check_matcher_rejects_a_commented_out_invocation() {
+    let live = "          testdata/generate_pbench.sh --check";
+    assert!(line_runs_the_pbench_check(live));
+    let commented = "          # testdata/generate_pbench.sh --check";
+    assert!(
+        !line_runs_the_pbench_check(commented),
+        "a commented-out invocation does not run, and must not read as coverage"
+    );
 }
 
 pub(crate) const PIPELINE: &str = ".github/workflows/pipeline.yml";
@@ -649,5 +671,27 @@ fn each_rung_has_its_ci_line_and_the_cli_is_built() {
          and the driver from outside the crate, and it has no test target, so nothing \
          else compiles it. Add `cargo build --features rust-only -p peacockdb` to \
          dataset-matrix."
+    );
+}
+
+/// The step that proves pbench's committed parquet is what `gen.sql` makes.
+///
+/// `generate_pbench.sh --check` is a shell guard, not a cargo target, so the sweep above
+/// cannot see it and its one caller is one line of a `run:` block. Delete that line and the
+/// only thing holding the committed bytes to the generator is gone with nothing red — the
+/// same silence the target sweep exists to break, one language over. The data is committed
+/// precisely so the values in it cannot move without a diff, and this is what keeps the
+/// diff honest.
+#[test]
+fn the_pbench_determinism_check_is_named_by_a_ci_step() {
+    let named = workflow_lines()
+        .iter()
+        .any(|line| line_runs_the_pbench_check(line));
+    assert!(
+        named,
+        "no workflow line runs `testdata/generate_pbench.sh --check`. pbench's parquet is \
+         committed and nothing regenerates it, so without that step a gen.sql change — or a \
+         hand-edited parquet — passes every tier. Add it to dataset-matrix's generation step, \
+         beside the two `generate_testdata.sh` calls."
     );
 }

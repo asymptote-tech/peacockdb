@@ -63,7 +63,9 @@ predicate NULL, and a left row whose only matches fail is dropped rather than nu
 `execute_nested_loop_join` (~L453) refuses this exact shape with the argument written out, so
 the fix direction is settled here rather than proposed; that path is unaffected. Latent because
 DataFusion pushes an ON predicate reading one side below the join (tpch q13) — it needs one
-referencing both sides, which no corpus query has. Fix: evaluate the residual during the join
+referencing both sides, which `pbench`'s `left-join-residual`, `right-join-residual` and
+`full-join-residual` now have (`ON d_k = f_k AND f_qty > d_w`); all three are refused on this
+ticket at all five modes. Fix: evaluate the residual during the join
 (`mixed_*` covers Left, Right is its swap, Full needs inner-plus-re-add), plus a `PlanExecutor`
 gtest with a filtered Left join. The same commit drops the prototype's deliberate reproduction.
 
@@ -72,14 +74,21 @@ gtest with a filtered Left join. The same commit drops the prototype's deliberat
 `NOT IN` with any NULL in the build side must yield the empty set; neither
 `null_equality::EQUAL` nor `UNEQUAL` implements that, so ANTI/mark joins stay hardcoded
 EQUAL (`cpp/src/operators/join.cpp`). Needs a planner/serializer flag distinguishing
-NOT IN from NOT EXISTS, a nullable-anti-key test (no corpus query exercises it), and a
+NOT IN from NOT EXISTS, a nullable-anti-key test, and a
 DuckDB final-result oracle, now [#235](../archive/archived-tickets.md#t235) — today's validation is circular
 (goldens vs DataFusion, GPU vs CPU). Semi half done (q33; semi honors per-join `null_equals_null`).
+
+**Corpus queries:** pbench's seven, shared with [#59](#t59) — `not-in-uncorrelated`,
+`not-in-correlated`, `not-in-under-or`, `not-exists-null-keys`, `exists-or-mark`,
+`anti-null-preserved-condition` and `mark-cross-residual`. All refused at all five modes, by a
+message naming both tickets, with DuckDB's answers committed beside them: `not-in-uncorrelated`
+answers 0 rows where a two-valued engine answers 13,964.
 
 <a id="t59"></a>
 ### #59 — Nullable-key semantics for semi/anti/mark joins
 Anti/mark keep `null_equality::EQUAL` deliberately; a blind UNEQUAL flip is wrong for
-`NOT IN`. No enabled query has a nullable anti/mark key. Wants a dedicated analysis plus
+`NOT IN`. The seven pbench rows [#80](#t80) lists are the shape, refused at all five modes rather
+than enabled, so nothing runs it end to end yet. Wants a dedicated analysis plus
 expr/join goldens covering nullable IN / NOT IN / EXISTS before defaults change. Anti
 remainder overlaps #80.
 
@@ -108,6 +117,10 @@ this shape is the one the planner lets through. Pinned by
 `bug_a_left_nested_loop_join_with_a_decimal_predicate_is_refused_on_the_device` and its
 projected neighbour (`gpu_tests/nested_cases.rs`). Numbered past #214.
 
+**Corpus queries:** pbench's `nl-left-decimal`, which carries this ticket and [#190](#t190). #190
+fires first — the cpu drops the nested loop's projection and refuses — so the shape above is
+reached by the hand-built cases alone and this row's device cells have never run.
+
 <a id="t208"></a>
 ### #208 — the cpu's cross join answers nothing over a zero-row build side
 
@@ -122,6 +135,11 @@ predicate-free joins disagree with each other as well as with the device. Nothin
 batch are different arrivals downstream, as #205 says. Pinned by
 `bug_a_cross_join_over_a_zero_row_build_is_nothing_on_the_cpu` and its both-sides-empty neighbour
 (`gpu_tests/nested_cases.rs`).
+
+**Corpus queries:** `pbench/cross-empty-build` was written for this ticket and does not reach it.
+The planner refuses the query earlier, because a scan over a parquet file with no row groups is
+rejected as an invalid plan — [#256](#t256) — so its cells are off on `208 256` and this ticket
+has no corpus evidence until #256 clears.
 
 <a id="t207"></a>
 ### #207 — both backends drop a cross join's projection
@@ -139,33 +157,28 @@ does apply it. On the device every ordinal above the join then reads one column 
 (`gpu_tests/nested_cases.rs`) and, read at the handle, by `nested_schema_cases.rs`'s
 `bug_a_cross_join_with_a_projection_holds_every_column_on_the_device`.
 
+**Corpus queries:** none. `pbench/cross-projection` was written for this ticket and does not reach
+it: the planner narrows by projecting the scans, so the cross join carries no projection to drop.
+Its device cells are off on [#63](#t63), its zero-column build side; its cpu cells pass.
+
 <a id="t190"></a>
 ### #190 — the CPU backend drops a nested-loop join's projection
 
-`tpch/q11` at all five modes: `the node declares Schema { … 2 fields } and DataFusion answered with
-Schema { … 3 fields }`. The extra column is the build side's scalar, which the node's projection
-drops.
+`tpch/q11` at all five modes: `the node declares Schema { … 2 fields } and DataFusion answered
+with Schema { … 3 fields }`. The extra column is the build side's scalar, which the node's
+projection drops.
 
-`cpu_backend/join.rs:140` builds `NestedLoopJoinExec::try_new(build, probe, Some(filter),
-&join_type, None)` — that last argument is DataFusion's projection, passed `None`. Forty lines
-down, the hash-join path at :302 reads `node.projection` and passes it. One join family applies the
-projection the plan declares and the other ignores it.
+`cpu_backend/join.rs:140` passes `None` as `NestedLoopJoinExec::try_new`'s projection argument,
+while the hash-join path at :302 reads `node.projection` and passes it: one join family applies
+the projection the plan declares and the other ignores it. The projection is not missing from the
+plan — `check_projection` validates it and the node's declared schema derives from it. It refuses
+rather than answering wrongly only because `declared_as` compares counts first; a projection that
+reordered columns would be a wrong answer with matching shapes.
 
-The projection is not missing from the plan: `check_projection` validates it, the plan golden
-carries it, and the node's declared schema is derived from it. Only the executor ignores it.
-
-**It refuses rather than answering wrongly by luck.** `declared_as` compares column counts before
-anything reads a value, so a projection that drops a column changes the count and is caught. A
-projection that reorders columns, or drops one and leaves the same count, would have produced a
-wrong answer with matching shapes and nothing to catch it.
-
-Why the corpus took until T19's sixth batch to reach it: `q11` is the first query whose nested-loop
-join projects at all. `nested-loop-join`, `nested-loop-left-join` and `cross-join` are `SELECT *`,
-so their projection is `None` and passing `None` is correct for every one of them.
-
-Device half untested — the CPU refuses first, as with [#189](corpus-coverage.md#t189).
-`aggregate-state-types`'s rollout, 2026-09-17, added `tpch/q22` and `tpcds/q24` at every mode —
-four registry rows with `tpch/q11` and `tpcds/q54`.
+**Corpus queries:** nine registry rows, 45 cpu cells, all off at all five modes — `tpch/q11`,
+`tpch/q22`, `tpcds/q24`, `tpcds/q54`, and pbench's `nl-inner`, `nl-left`, `nl-projection`,
+`nl-left-decimal` and `like-column-pattern`. Their device cells have never run and cannot until
+the cpu answers: a gpu cell needs a cpu cell at the same mode.
 
 <a id="t63"></a>
 ### #63 — a zero-column placeholder survives the cross join and shifts every ordinal above it
@@ -185,9 +198,11 @@ since nothing between device nodes checks a column count ([#164](corpus-coverage
 
 **Corpus queries:** `tpcds/q9` — a CASE over fifteen scalar subqueries (a `count(*)` and two
 `avg`s per bucket) on `FROM reason WHERE r_reason_sk = 1`, planned as a chain of cross joins over
-seven `GpuProject: exprs=[]` (`tpcds.sf1/tp1-single.plans.txt`). All five gpu cells are off and
-registry row 10 tags `63` alone. Only tp1-single has run on a device (`corpus_cases.inc:257`);
-the other four may meet [#152](#t152) next.
+seven `GpuProject: exprs=[]` (`tpcds.sf1/tp1-single.plans.txt`), and `pbench`'s
+`scalar-subquery-cross`, which is that shape by construction and carries this ticket. All five of
+q9's gpu cells are off and registry row 10 tags `63` alone. Only tp1-single has run on a device (`corpus_cases.inc:257`);
+the other four may meet [#152](#t152) next. `pbench/cross-projection` is the second arm, measured:
+a scan projected to no columns, which cuDF's cross join refuses at all five modes.
 
 **Fix proposed:** fix 4 of `reports/corpus-fixes.md`. Give the placeholder one name in
 `cpp/src/peacock/operators.h`: `row_count_table(rows)` and `is_row_count_only(t)`, and have
@@ -208,13 +223,15 @@ The scatter route to this is gone: `driver/partitioned.rs` keeps a zero-row scat
 where the join above owes rows ([#175](archive/archived-tickets.md#t175)), and the join then computes the answer. What
 remains is an upstream that emits nothing at all. Two shapes reach it. A limit that skips
 everything: `(SELECT ... FROM nation OFFSET 100) n RIGHT JOIN region r` plans
-`GpuCoalesceAllBatches <- GpuLimit skip=100` under the build side, at every mode. And tpcds
-q77 at the three tp4 modes: its Right outer's build side is a grouped aggregate over an Inner
-join, the Inner join's empty scatter lane drops as it should, its lane emits nothing, and the
-aggregate emits nothing where nothing arrived. Pinned by
-`bug_right_with_no_build_batch_is_refused_on_both` and its Full and RightAnti siblings
-(`gpu_tests/join_cases.rs`); on the driver, only its propagation, by
+`GpuCoalesceAllBatches <- GpuLimit skip=100` under the build side, at every mode. And tpcds q77 at
+the three tp4 modes, whose Right outer builds on a grouped aggregate over an Inner join: that
+join's empty scatter lane drops as it should, so the aggregate emits nothing. Pinned by
+`bug_right_with_no_build_batch_is_refused_on_both` and its two siblings
+(`gpu_tests/join_cases.rs`), and on the driver by
 `a_join_that_owes_its_probe_side_without_a_build_side_is_refused` (`driver/tests/flow.rs`).
+
+**Corpus queries:** `tpcds/q77` alone. pbench's three `sparse-build-*` rows were written for this
+ticket and do not reach it — the scatter above feeds their build side — so, measured, they are off on #152 and #220.
 
 <a id="t173"></a>
 ### #173 — a finish whose probe produced no keys refuses what it could answer from the build side
@@ -232,9 +249,12 @@ accumulators are not here: a collapse of no handles and a merge of no runs answe
 Rust side before any call, on both engines. Pinned by
 `bug_…_finishing_with_no_probe_batch_is_refused_on_the_device` (`gpu_tests/join_cases.rs`).
 
-**Corpus queries:** none carries `173`. Two shapes reach it (`reports/corpus-fixes.md` fix 15),
-neither in testdata: `select count(*) from orders where o_orderkey in (select case when l_quantity
-> 100 then l_orderkey end from lineitem);` (tpch) at the tp4 modes, where every probe key is NULL
+**Corpus queries:** none. `pbench/finish-without-probe` was written for this ticket and does not
+reach it: DataFusion plans it `CollectLeft` and #140 merges both sides, so it plans `lanes=1` at all
+five modes and one probe lane over `tiny`'s 8 rows always accumulates keys. Two further shapes reach it
+(`reports/corpus-fixes.md` fix 15), neither in tpch or tpcds: `select count(*) from orders where
+o_orderkey in (select case when l_quantity > 100 then l_orderkey end from lineitem);` (tpch) at the
+tp4 modes, where every probe key is NULL
 and lands in one lane, so three lanes refuse; expected 0. And `select count(*) from region r left
 join (select n_regionkey from nation limit 5 offset 100) n on r.r_regionkey = n.n_regionkey;`, where
 the limit emits nothing: the device refuses, the cpu answers 5.
@@ -284,6 +304,10 @@ Two halves are out of scope deliberately. Scattering null-keyed rows on placemen
 corpus query exercises it. The adaptive form — insert the filter at replan time — waits on
 adaptive replanning existing at all.
 
+**Corpus queries:** the skew is in pbench's data — `fact.f_k` is 5% NULL — and shows in the
+goldens, not in an answer, so no registry row carries it. `pbench/inner-join-hot-keys` at the
+three `tp4` modes: probe lanes of 2160, 2413, 6538 and 8889 rows, the 1034 nulls in one of them.
+
 <a id="t159"></a>
 ### #159 — RightSemi/RightAnti with a residual filter has no cuDF path
 The mixed_* family evaluates a residual during the join, and no swapped variant exists — so a
@@ -296,6 +320,10 @@ so this is not a shape only a constructor produces. Pinned by the refusal test i
 join stays a Left form and the existing `mixed_left_*` applies, which is a planner change; or
 a swapped `mixed_*` in cuDF, which is not ours. The first is cheap and has not been costed.
 
+**Corpus queries:** pbench's `probe-exists-residual` and `probe-not-exists-residual`, this
+ticket's only tag on either, refused at all five modes — so it is a measured corpus shape now and
+not only the constructed one above.
+
 <a id="t160"></a>
 ### #160 — nested-loop join supports Inner and Left only
 `execute_nested_loop_join` handles Inner and Left; every other type is refused at plan time
@@ -305,7 +333,8 @@ rather than throwing in the executor.
 full cartesian and applies a mask, and a mask cannot re-emit the unmatched rows an outer form
 owes — the same argument [#153](#t153) makes for the equi path, which `join.cpp` already
 states in a comment beside the guard. Semi and anti forms would need the mask plus a
-distinct-on-the-preserved-side pass. No corpus query has one; the refusal is what keeps that
+distinct-on-the-preserved-side pass. `pbench`'s `nl-left-semi`, `nl-left-anti`, `nl-right-semi`,
+`nl-right-anti` and `nl-mark` are those forms, all refused; the refusal is what keeps the claim
 true rather than discovering it at run time.
 
 <a id="t220"></a>
@@ -332,10 +361,10 @@ first differing line, and the merge renders above the join. `in_rows` is the dri
 batches a node takes, the same code for both engines. These were the first cells where the device
 completed a plan and only the golden caught the difference.
 
-**Corpus queries:** 82 registry rows carry `220`, its cause at `tp1-single`, where the device gets
+**Corpus queries:** 97 registry rows carry `220`, its cause at `tp1-single`, where the device gets
 past #152. The first ones seen: `tpcds` q93 q96 q38 q48 q4 q18, `tpch` q3 q4 q14 q15. Plus
-`tpch/hash-join`, `cross-join`, `nested-loop-left-join`, `anti-join` and `semi-join`. Every
-device cell through a join lands here once #152 clears.
+`tpch/hash-join`, `cross-join`, `nested-loop-left-join`, `anti-join` and `semi-join`, and the ten
+pbench rows its device cycle measured here. Every device cell through a join lands here once #152 clears.
 
 **Fix proposed:** on the cpu. `declared` in `cpu_backend/join.rs` returns one batch: each chunk
 through `declared_as`, then `concat_batches`. No chunks gives `RecordBatch::new_empty(schema)`,
@@ -395,8 +424,10 @@ The lane rule needs a definition for nested values that both engines share — h
 in order, as Spark does for a struct, with a list's elements in order — and the conformance gate
 extended to it.
 
-**Corpus queries:** none in tpch or tpcds. pbench's `struct-key-join`
-(`SELECT f_id, d_id FROM fact JOIN dim ON f_kstruct = d_kstruct`), its cells off on this ticket.
+**Corpus queries:** none. pbench's `struct-key-join`
+(`SELECT f_id, d_id FROM fact JOIN dim ON f_kstruct = d_kstruct`) was written for this ticket and
+could not land: the planner panics on a Struct column before it refuses, which is
+[#255](complete-coverage.md#t255). The query arrives with that ticket's fix.
 
 <a id="t246"></a>
 ### #246 — a `LIKE` whose pattern is a column is refused on the device
@@ -408,7 +439,10 @@ cuDF's `strings::like` takes a scalar pattern; a column of patterns needs a per-
 `like` per distinct pattern, scattered back, or a regex per row).
 
 **Corpus queries:** none in tpch or tpcds. pbench's `like-column-pattern`
-(`SELECT d_id, t_id FROM dim JOIN tiny ON d_name LIKE t_pat`), its device cells off on this ticket.
+(`SELECT d_id, t_id FROM dim JOIN tiny ON d_name LIKE t_pat`) is the shape, but the cpu does not
+answer it either: its nested loop carries `projection=[t_id@0, d_id@2]`, so
+[#190](#t190) refuses it first and all five cpu cells are off. Its device cells therefore carry
+this ticket unmeasured — a gpu cell needs a cpu cell, so none of them has ever run.
 
 <a id="t250"></a>
 ### #250 — an `IN` subquery whose NULL answer is read is refused when its data holds NULLs
@@ -425,6 +459,35 @@ The fix is the three-valued rewrite: `CASE WHEN EXISTS (S AND y = x) THEN true W
 EXISTS (S)) OR EXISTS (S AND y IS NULL) THEN NULL ELSE false END`, planned as two mark joins and a
 count, or a nullable mark join type of our own.
 
-**Corpus queries:** none in tpch or tpcds. pbench's `in-is-null`
-(`SELECT f_id FROM fact WHERE (f_k IN (SELECT s_y FROM sub)) IS NULL`), refused on this ticket.
+**Corpus queries:** none yet. pbench's `in-is-null`
+(`SELECT f_id FROM fact WHERE (f_k IN (SELECT s_y FROM sub)) IS NULL`) was written for this ticket
+and does not reach it: DataFusion 45 folds the whole query to an `EmptyExec`
+([#257](df-upgrade.md#t257)), so our planner refuses `plan node EmptyExec` on
+[#155](#t155) and the `IN` never reaches a join. The row carries `155 250 257`, and this ticket
+cannot be demonstrated until #257 is fixed.
 
+
+<a id="t256"></a>
+### #256 — a scan whose row groups all prune is refused as an invalid plan
+`scan_mapping::partition` returns `PlanError::Invalid` when the survivor list is empty
+(`partition.rs:27`): "no surviving row groups: what an empty scan means is the caller's decision,
+not an empty map". Nothing ever made that decision, so the caller gets a refusal where SQL has an
+answer — zero rows.
+
+Two ways in, and the second is the common one. A genuinely empty table: pbench's `empty.parquet`
+holds `tiny`'s schema and no rows, so DuckDB writes a file with zero row groups and
+`SELECT e.t_id, t.t_id FROM empty e, tiny t` is refused at plan time. And a filter that prunes
+every row group: `WHERE f_id > 1000000` over any parquet table reaches the same line, which is a
+selective query over real data rather than a corner.
+
+DataFusion plans both: `CrossJoinExec` over a `ParquetExec` of the empty file, answering zero rows.
+What the mapping cannot express is "no partitions", because the wire reads an empty map as one
+unmapped partition — so the fix is a representation for an empty scan (a lane with an empty batch
+list, or a `GpuEmpty` the way [#155](#t155)'s `EmptyExec` arm will need one), not a laxer check.
+
+Not [#208](#t208), which is this shape at run time: the cpu's cross join emitting nothing where the
+device emits a zero-row batch. #208 cannot be reached from the corpus until this closes, because
+the plan is refused before either backend sees it.
+
+**Corpus queries:** pbench's `cross-empty-build`, its plan cells disabled on this ticket. The row
+carries `208` as well, the ticket it is written for and will show once this lifts.

@@ -1,0 +1,1 @@
+SELECT f_id, t_id FROM fact RIGHT JOIN tiny ON CAST(t_v AS DECIMAL(20,0)) > CAST(f_qty AS DECIMAL(20,0))

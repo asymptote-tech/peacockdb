@@ -59,7 +59,7 @@ pub(crate) async fn plan_at(
         .create_physical_plan()
         .await
         .unwrap_or_else(|e| panic!("{what}: no physical plan: {e}"));
-    let (tree, _memory) = planner::plan(&plan, mode.knobs())
+    let (tree, _memory) = planner::plan(&plan, mode.knobs_for(dataset))
         .unwrap_or_else(|e| panic!("{what}: this mode refuses it: {e}"));
     // The planner's own check, made again: the driver asks only for canonical form, so a
     // tree that met neither would run and answer.

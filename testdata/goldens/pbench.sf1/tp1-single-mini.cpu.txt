@@ -1,0 +1,462 @@
+== anti-null-preserved-condition
+skipped: not enabled at this mode
+== bool-key-group
+early_exit=none
+GpuUnload: output_rows=3, output_bytes=27
+  in_rows=[[3]] batch_rows=[[3]] batch_bytes=[[27]]
+  GpuProject: exprs=[f_kb@0, count(*)@1 as n], lanes=1, batches=single, output_rows=3, output_bytes=27
+    in_rows=[[3]] batch_rows=[[3]] batch_bytes=[[27]]
+    GpuAggregateBatches: group_by=[f_kb@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, output_rows=3, output_bytes=27
+      in_rows=[[3]] batch_rows=[[3]] batch_bytes=[[27]]
+      GpuAggregate: group_by=[f_kb@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=3, output_bytes=27
+        in_rows=[[20000]] batch_rows=[[3]] batch_bytes=[[27]]
+        GpuLoadParquet: table=fact, projections=[f_kb@3], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=5000
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[5000]]
+== cross-empty-build
+skipped: not enabled at this mode
+== cross-projection
+early_exit=none
+GpuUnload: output_rows=160000, output_bytes=1300000
+  in_rows=[[160000]] batch_rows=[[20000,20000,20000,20000,20000,20000,20000,20000]] batch_bytes=[[162500,162500,162500,162500,162500,162500,162500,162500]]
+  GpuCrossJoin: lanes=1, batches=multiple, output_rows=160000, output_bytes=1300000
+    in_rows=[[8],[20000]] batch_rows=[[20000,20000,20000,20000,20000,20000,20000,20000]] batch_bytes=[[162500,162500,162500,162500,162500,162500,162500,162500]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=0
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[0]]
+      GpuLoadParquet: table=tiny, projections=[], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=8, output_bytes=0
+        in_rows=[] batch_rows=[[8]] batch_bytes=[[0]]
+    GpuLoadParquet: table=fact, projections=[f_id@0], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=162500
+      in_rows=[] batch_rows=[[20000]] batch_bytes=[[162500]]
+== decimal15-key-group
+early_exit=none
+GpuUnload: output_rows=301, output_bytes=7300
+  in_rows=[[301]] batch_rows=[[301]] batch_bytes=[[7300]]
+  GpuProject: exprs=[f_kdec15@0, count(*)@1 as n], lanes=1, batches=single, output_rows=301, output_bytes=7300
+    in_rows=[[301]] batch_rows=[[301]] batch_bytes=[[7300]]
+    GpuAggregateBatches: group_by=[f_kdec15@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, output_rows=301, output_bytes=7300
+      in_rows=[[301]] batch_rows=[[301]] batch_bytes=[[7300]]
+      GpuAggregate: group_by=[f_kdec15@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=301, output_bytes=7300
+        in_rows=[[20000]] batch_rows=[[301]] batch_bytes=[[7300]]
+        GpuLoadParquet: table=fact, projections=[f_kdec15@6], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=322500
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[322500]]
+== decimal15-key-join
+early_exit=none
+GpuUnload: output_rows=132216, output_bytes=2148510
+  in_rows=[[132216]] batch_rows=[[8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,1144]] batch_bytes=[[133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,18590]]
+  GpuProject: exprs=[f_id@1, d_id@0], lanes=1, batches=multiple, output_rows=132216, output_bytes=2148510
+    in_rows=[[132216]] batch_rows=[[8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,1144]] batch_bytes=[[133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,18590]]
+    GpuHashJoin: join_type=Inner, on=[(d_kdec15@1, f_kdec15@1)], projection=[d_id@0, f_id@2], lanes=1, batches=multiple, output_rows=132216, output_bytes=2148510
+      in_rows=[[2000],[20000]] batch_rows=[[8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,1144]] batch_bytes=[[133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,18590]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=48500
+        in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[48500]]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_kdec15@6], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=48500
+          in_rows=[] batch_rows=[[2000]] batch_bytes=[[48500]]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_kdec15@6], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=485000
+        in_rows=[] batch_rows=[[20000]] batch_bytes=[[485000]]
+== decimal38-key-group
+early_exit=none
+GpuUnload: output_rows=301, output_bytes=7300
+  in_rows=[[301]] batch_rows=[[301]] batch_bytes=[[7300]]
+  GpuProject: exprs=[f_kdec38@0, count(*)@1 as n], lanes=1, batches=single, output_rows=301, output_bytes=7300
+    in_rows=[[301]] batch_rows=[[301]] batch_bytes=[[7300]]
+    GpuAggregateBatches: group_by=[f_kdec38@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, output_rows=301, output_bytes=7300
+      in_rows=[[301]] batch_rows=[[301]] batch_bytes=[[7300]]
+      GpuAggregate: group_by=[f_kdec38@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=301, output_bytes=7300
+        in_rows=[[20000]] batch_rows=[[301]] batch_bytes=[[7300]]
+        GpuLoadParquet: table=fact, projections=[f_kdec38@7], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=322500
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[322500]]
+== empty-side-left-join
+skipped: not enabled at this mode
+== exists-null-keys
+early_exit=none
+GpuUnload: output_rows=1950, output_bytes=15844
+  in_rows=[[1950]] batch_rows=[[0,0,0,0,0,0,0,0,0,0,0,1950]] batch_bytes=[[0,0,0,0,0,0,0,0,0,0,0,15844]]
+  GpuHashJoin: join_type=LeftSemi, on=[(d_k@1, f_k@0)], projection=[d_id@0], lanes=1, batches=multiple, output_rows=1950, output_bytes=15844
+    in_rows=[[2000],[20000]] batch_rows=[[0,0,0,0,0,0,0,0,0,0,0,1950]] batch_bytes=[[0,0,0,0,0,0,0,0,0,0,0,15844]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=24500
+      in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[24500]]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+        in_rows=[] batch_rows=[[2000]] batch_bytes=[[24500]]
+    GpuLoadParquet: table=fact, projections=[f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=82500
+      in_rows=[] batch_rows=[[20000]] batch_bytes=[[82500]]
+== exists-or-mark
+skipped: not enabled at this mode
+== finish-without-probe
+early_exit=none
+GpuUnload: output_rows=53, output_bytes=431
+  in_rows=[[53]] batch_rows=[[0,53]] batch_bytes=[[0,431]]
+  GpuFilter: predicate=(d_w@1 = 0) OR mark@2, projection=[d_id@0], lanes=1, batches=multiple, output_rows=53, output_bytes=431
+    in_rows=[[2000]] batch_rows=[[0,53]] batch_bytes=[[0,431]]
+    GpuHashJoin: join_type=LeftMark, on=[(d_k@1, t_k@1)], projection=[d_id@0, d_w@2, mark@3], lanes=1, batches=multiple, output_rows=2000, output_bytes=25000
+      in_rows=[[2000],[8]] batch_rows=[[0,2000]] batch_bytes=[[0,25000]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=32750
+        in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[32750]]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@16], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=32750
+          in_rows=[] batch_rows=[[2000]] batch_bytes=[[32750]]
+      GpuProject: exprs=[1 as Int64(1), t_k@0], lanes=1, batches=multiple, output_rows=8, output_bytes=98
+        in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[98]]
+        GpuLoadParquet: table=tiny, projections=[t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=8, output_bytes=33
+          in_rows=[] batch_rows=[[8]] batch_bytes=[[33]]
+== full-join-null-keys
+early_exit=none
+GpuUnload: output_rows=35158, output_bytes=716363
+  in_rows=[[35158]] batch_rows=[[3230,3257,3290,3785,3319,3206,3311,3243,3481,3498,1488,0,0,0,0,0,0,0,0,0,0,0,50]] batch_bytes=[[65812,66364,67036,77122,67625,65323,67462,66078,70928,71274,30318,0,0,0,0,0,0,0,0,0,0,0,1021]]
+  GpuHashJoin: join_type=Full, on=[(d_k@1, f_k@1)], projection=[d_id@0, d_k@1, f_id@2], lanes=1, batches=multiple, output_rows=35158, output_bytes=716363
+    in_rows=[[2000],[20000]] batch_rows=[[3230,3257,3290,3785,3319,3206,3311,3243,3481,3498,1488,0,0,0,0,0,0,0,0,0,0,0,50]] batch_bytes=[[65812,66364,67036,77122,67625,65323,67462,66078,70928,71274,30318,0,0,0,0,0,0,0,0,0,0,0,1021]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=24500
+      in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[24500]]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+        in_rows=[] batch_rows=[[2000]] batch_bytes=[[24500]]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+      in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== full-join-residual
+skipped: not enabled at this mode
+== in-is-null
+skipped: not enabled at this mode
+== indf-full-join
+skipped: not enabled at this mode
+== inner-join-hot-keys
+early_exit=none
+GpuUnload: output_rows=34070, output_bytes=553644
+  in_rows=[[34070]] batch_rows=[[3128,3156,3189,3695,3219,3104,3212,3141,3384,3403,1439]] batch_bytes=[[50830,51286,51822,60044,52310,50440,52196,51042,54990,55300,23384]]
+  GpuProject: exprs=[f_id@1, d_id@0], lanes=1, batches=multiple, output_rows=34070, output_bytes=553644
+    in_rows=[[34070]] batch_rows=[[3128,3156,3189,3695,3219,3104,3212,3141,3384,3403,1439]] batch_bytes=[[50830,51286,51822,60044,52310,50440,52196,51042,54990,55300,23384]]
+    GpuHashJoin: join_type=Inner, on=[(d_k@1, f_k@1)], projection=[d_id@0, f_id@2], lanes=1, batches=multiple, output_rows=34070, output_bytes=553644
+      in_rows=[[2000],[20000]] batch_rows=[[3128,3156,3189,3695,3219,3104,3212,3141,3384,3403,1439]] batch_bytes=[[50830,51286,51822,60044,52310,50440,52196,51042,54990,55300,23384]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=24500
+        in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[24500]]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+          in_rows=[] batch_rows=[[2000]] batch_bytes=[[24500]]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+        in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== int8-key-group
+early_exit=none
+GpuUnload: output_rows=200, output_bytes=1850
+  in_rows=[[200]] batch_rows=[[200]] batch_bytes=[[1850]]
+  GpuProject: exprs=[f_k8@0, count(*)@1 as n], lanes=1, batches=single, output_rows=200, output_bytes=1850
+    in_rows=[[200]] batch_rows=[[200]] batch_bytes=[[1850]]
+    GpuAggregateBatches: group_by=[f_k8@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, output_rows=200, output_bytes=1850
+      in_rows=[[200]] batch_rows=[[200]] batch_bytes=[[1850]]
+      GpuAggregate: group_by=[f_k8@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=200, output_bytes=1850
+        in_rows=[[20000]] batch_rows=[[200]] batch_bytes=[[1850]]
+        GpuLoadParquet: table=fact, projections=[f_k8@2], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=22500
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[22500]]
+== left-join-null-keys
+early_exit=none
+GpuUnload: output_rows=34120, output_bytes=695207
+  in_rows=[[34120]] batch_rows=[[3128,3156,3189,3695,3219,3104,3212,3141,3384,3403,1439,0,0,0,0,0,0,0,0,0,0,0,50]] batch_bytes=[[63733,64305,64977,75286,65589,63244,65446,63999,68949,69338,29320,0,0,0,0,0,0,0,0,0,0,0,1021]]
+  GpuHashJoin: join_type=Left, on=[(d_k@1, f_k@1)], projection=[d_id@0, d_k@1, f_id@2], lanes=1, batches=multiple, output_rows=34120, output_bytes=695207
+    in_rows=[[2000],[20000]] batch_rows=[[3128,3156,3189,3695,3219,3104,3212,3141,3384,3403,1439,0,0,0,0,0,0,0,0,0,0,0,50]] batch_bytes=[[63733,64305,64977,75286,65589,63244,65446,63999,68949,69338,29320,0,0,0,0,0,0,0,0,0,0,0,1021]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=24500
+      in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[24500]]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+        in_rows=[] batch_rows=[[2000]] batch_bytes=[[24500]]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+      in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== left-join-residual
+skipped: not enabled at this mode
+== like-column-pattern
+skipped: not enabled at this mode
+== mark-cross-residual
+skipped: not enabled at this mode
+== nl-full
+skipped: not enabled at this mode
+== nl-inner
+skipped: not enabled at this mode
+== nl-left
+skipped: not enabled at this mode
+== nl-left-anti
+skipped: not enabled at this mode
+== nl-left-decimal
+skipped: not enabled at this mode
+== nl-left-semi
+skipped: not enabled at this mode
+== nl-mark
+skipped: not enabled at this mode
+== nl-projection
+skipped: not enabled at this mode
+== nl-right
+skipped: not enabled at this mode
+== nl-right-anti
+skipped: not enabled at this mode
+== nl-right-semi
+skipped: not enabled at this mode
+== not-exists-null-keys
+skipped: not enabled at this mode
+== not-in-correlated
+skipped: not enabled at this mode
+== not-in-uncorrelated
+skipped: not enabled at this mode
+== not-in-under-or
+skipped: not enabled at this mode
+== not-not-in
+early_exit=none
+GpuUnload: output_rows=5002, output_bytes=40642
+  in_rows=[[5002]] batch_rows=[[3096,1906]] batch_bytes=[[25155,15487]]
+  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=1, batches=multiple, output_rows=5002, output_bytes=40642
+    in_rows=[[200],[20000]] batch_rows=[[3096,1906]] batch_bytes=[[25155,15487]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=200, output_bytes=825
+      in_rows=[[200]] batch_rows=[[200]] batch_bytes=[[825]]
+      GpuLoadParquet: table=sub, projections=[s_y@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=200, output_bytes=825
+        in_rows=[] batch_rows=[[200]] batch_bytes=[[825]]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+      in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== not-or-not-in
+early_exit=none
+GpuUnload: output_rows=4915, output_bytes=39936
+  in_rows=[[4915]] batch_rows=[[3090,1825]] batch_bytes=[[25107,14829]]
+  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=1, batches=multiple, output_rows=4915, output_bytes=39936
+    in_rows=[[200],[19600]] batch_rows=[[3090,1825]] batch_bytes=[[25107,14829]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=200, output_bytes=825
+      in_rows=[[200]] batch_rows=[[200]] batch_bytes=[[825]]
+      GpuLoadParquet: table=sub, projections=[s_y@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=200, output_bytes=825
+        in_rows=[] batch_rows=[[200]] batch_bytes=[[825]]
+    GpuFilter: predicate=f_qty@2 != 0, projection=[f_id@0, f_k@1], lanes=1, batches=multiple, output_rows=19600, output_bytes=240100
+      in_rows=[[20000]] batch_rows=[[19600]] batch_bytes=[[240100]]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=327500
+        in_rows=[] batch_rows=[[20000]] batch_bytes=[[327500]]
+== outer-on-true-empty
+skipped: not enabled at this mode
+== probe-exists-residual
+skipped: not enabled at this mode
+== probe-not-exists-residual
+skipped: not enabled at this mode
+== right-join-null-keys
+early_exit=none
+GpuUnload: output_rows=35108, output_bytes=715342
+  in_rows=[[35108]] batch_rows=[[3230,3257,3290,3785,3319,3206,3311,3243,3481,3498,1488]] batch_bytes=[[65812,66364,67036,77122,67625,65323,67462,66078,70928,71274,30318]]
+  GpuHashJoin: join_type=Right, on=[(d_k@1, f_k@1)], projection=[d_id@0, f_id@2, f_k@3], lanes=1, batches=multiple, output_rows=35108, output_bytes=715342
+    in_rows=[[2000],[20000]] batch_rows=[[3230,3257,3290,3785,3319,3206,3311,3243,3481,3498,1488]] batch_bytes=[[65812,66364,67036,77122,67625,65323,67462,66078,70928,71274,30318]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=24500
+      in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[24500]]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+        in_rows=[] batch_rows=[[2000]] batch_bytes=[[24500]]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+      in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== right-join-residual
+skipped: not enabled at this mode
+== rollup-small-keys
+early_exit=none
+GpuUnload: output_rows=601, output_bytes=5713
+  in_rows=[[601]] batch_rows=[[601]] batch_bytes=[[5713]]
+  GpuProject: exprs=[f_k8@0, f_kb@1, sum(fact.f_qty)@3 as q], lanes=1, batches=single, output_rows=601, output_bytes=5713
+    in_rows=[[601]] batch_rows=[[601]] batch_bytes=[[5713]]
+    GpuAggregateBatches: group_by=[f_k8@0, f_kb@1, __grouping_id@2], aggs=[sum(sum(fact.f_qty)@3) as sum(fact.f_qty)], final=[sum(fact.f_qty)@3], lanes=1, batches=single, output_rows=601, output_bytes=6390
+      in_rows=[[601]] batch_rows=[[601]] batch_bytes=[[6390]]
+      GpuAggregate: group_by=[f_k8@0, f_kb@1], grouping_sets=[[], [f_k8@0], [f_k8@0, f_kb@1]], aggs=[sum(CAST(f_qty@2 AS Int64)) as sum(fact.f_qty)], lanes=1, batches=multiple, output_rows=601, output_bytes=6390
+        in_rows=[[20000]] batch_rows=[[601]] batch_bytes=[[6390]]
+        GpuLoadParquet: table=fact, projections=[f_k8@2, f_kb@3, f_qty@16], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=110000
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[110000]]
+== scalar-subquery-cross
+early_exit=none
+GpuUnload: output_rows=1, output_bytes=26
+  in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[26]]
+  GpuProject: exprs=[CASE WHEN count(*)@0 > 100 THEN avg(fact.f_amount)@1 ELSE avg(fact.f_amount)@2 END as b1, count(*)@3 as b2], lanes=1, batches=multiple, output_rows=1, output_bytes=26
+    in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[26]]
+    GpuCrossJoin: lanes=1, batches=multiple, output_rows=1, output_bytes=52
+      in_rows=[[1],[1]] batch_rows=[[1]] batch_bytes=[[52]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1, output_bytes=43
+        in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[43]]
+        GpuCrossJoin: lanes=1, batches=multiple, output_rows=1, output_bytes=43
+          in_rows=[[1],[1]] batch_rows=[[1]] batch_bytes=[[43]]
+          GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1, output_bytes=26
+            in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[26]]
+            GpuCrossJoin: lanes=1, batches=multiple, output_rows=1, output_bytes=26
+              in_rows=[[1],[1]] batch_rows=[[1]] batch_bytes=[[26]]
+              GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1, output_bytes=9
+                in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[9]]
+                GpuCrossJoin: lanes=1, batches=multiple, output_rows=1, output_bytes=9
+                  in_rows=[[1],[1]] batch_rows=[[1]] batch_bytes=[[9]]
+                  GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1, output_bytes=0
+                    in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[0]]
+                    GpuProject: exprs=[], lanes=1, batches=multiple, output_rows=1, output_bytes=0
+                      in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[0]]
+                      GpuFilter: predicate=t_id@0 = 1, lanes=1, batches=multiple, output_rows=1, output_bytes=5
+                        in_rows=[[8]] batch_rows=[[1]] batch_bytes=[[5]]
+                        GpuLoadParquet: table=tiny, projections=[t_id@0], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=8, output_bytes=33
+                          in_rows=[] batch_rows=[[8]] batch_bytes=[[33]]
+                  GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, output_rows=1, output_bytes=9
+                    in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[9]]
+                    GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=1, output_bytes=9
+                      in_rows=[[8000]] batch_rows=[[1]] batch_bytes=[[9]]
+                      GpuProject: exprs=[], lanes=1, batches=multiple, output_rows=8000, output_bytes=0
+                        in_rows=[[8000]] batch_rows=[[8000]] batch_bytes=[[0]]
+                        GpuFilter: predicate=(f_qty@0 >= 1) AND (f_qty@0 <= 20), lanes=1, batches=multiple, output_rows=8000, output_bytes=33000
+                          in_rows=[[20000]] batch_rows=[[8000]] batch_bytes=[[33000]]
+                          GpuLoadParquet: table=fact, projections=[f_qty@16], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=82500
+                            in_rows=[] batch_rows=[[20000]] batch_bytes=[[82500]]
+              GpuAggregateBatches: group_by=[], aggs=[sum(avg(fact.f_amount)$sum@0) as avg(fact.f_amount)$sum, sum(avg(fact.f_amount)$count@1) as avg(fact.f_amount)$count], final=[CAST(avg(fact.f_amount)$sum@0 / CAST(avg(fact.f_amount)$count@1 AS Decimal128(19,0)) AS Decimal128(19,6)) as avg(fact.f_amount)], lanes=1, batches=single, output_rows=1, output_bytes=17
+                in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[17]]
+                GpuAggregate: group_by=[], aggs=[sum(f_amount@0) as avg(fact.f_amount)$sum, count(f_amount@0) as avg(fact.f_amount)$count], lanes=1, batches=multiple, output_rows=1, output_bytes=26
+                  in_rows=[[8000]] batch_rows=[[1]] batch_bytes=[[26]]
+                  GpuFilter: predicate=(f_qty@0 >= 1) AND (f_qty@0 <= 20), projection=[f_amount@1], lanes=1, batches=multiple, output_rows=8000, output_bytes=129000
+                    in_rows=[[20000]] batch_rows=[[8000]] batch_bytes=[[129000]]
+                    GpuLoadParquet: table=fact, projections=[f_qty@16, f_amount@17], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=405000
+                      in_rows=[] batch_rows=[[20000]] batch_bytes=[[405000]]
+          GpuAggregateBatches: group_by=[], aggs=[sum(avg(fact.f_amount)$sum@0) as avg(fact.f_amount)$sum, sum(avg(fact.f_amount)$count@1) as avg(fact.f_amount)$count], final=[CAST(avg(fact.f_amount)$sum@0 / CAST(avg(fact.f_amount)$count@1 AS Decimal128(19,0)) AS Decimal128(19,6)) as avg(fact.f_amount)], lanes=1, batches=single, output_rows=1, output_bytes=17
+            in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[17]]
+            GpuAggregate: group_by=[], aggs=[sum(f_amount@0) as avg(fact.f_amount)$sum, count(f_amount@0) as avg(fact.f_amount)$count], lanes=1, batches=multiple, output_rows=1, output_bytes=26
+              in_rows=[[8000]] batch_rows=[[1]] batch_bytes=[[26]]
+              GpuFilter: predicate=(f_qty@0 >= 21) AND (f_qty@0 <= 40), projection=[f_amount@1], lanes=1, batches=multiple, output_rows=8000, output_bytes=129000
+                in_rows=[[20000]] batch_rows=[[8000]] batch_bytes=[[129000]]
+                GpuLoadParquet: table=fact, projections=[f_qty@16, f_amount@17], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=405000
+                  in_rows=[] batch_rows=[[20000]] batch_bytes=[[405000]]
+      GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, output_rows=1, output_bytes=9
+        in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[9]]
+        GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=1, output_bytes=9
+          in_rows=[[2000]] batch_rows=[[1]] batch_bytes=[[9]]
+          GpuProject: exprs=[], lanes=1, batches=multiple, output_rows=2000, output_bytes=0
+            in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[0]]
+            GpuFilter: predicate=d_w@0 >= 0, lanes=1, batches=multiple, output_rows=2000, output_bytes=8250
+              in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[8250]]
+              GpuLoadParquet: table=dim, projections=[d_w@16], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=8250
+                in_rows=[] batch_rows=[[2000]] batch_bytes=[[8250]]
+== sparse-build-anti
+early_exit=none
+GpuUnload: output_rows=13257, output_bytes=107715
+  in_rows=[[13257]] batch_rows=[[3939,4171,3979,1168]] batch_bytes=[[32005,33890,32330,9490]]
+  GpuHashJoin: join_type=RightAnti, on=[(t_k@0, f_k@1)], projection=[f_id@0], lanes=1, batches=multiple, output_rows=13257, output_bytes=107715
+    in_rows=[[8],[20000]] batch_rows=[[3939,4171,3979,1168]] batch_bytes=[[32005,33890,32330,9490]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=33
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[33]]
+      GpuLoadParquet: table=tiny, projections=[t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=8, output_bytes=33
+        in_rows=[] batch_rows=[[8]] batch_bytes=[[33]]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+      in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== sparse-build-full
+early_exit=none
+GpuUnload: output_rows=40229, output_bytes=492810
+  in_rows=[[40229]] batch_rows=[[12131,12363,12171,3564,0,0,0,0,0]] batch_bytes=[[148606,151448,149096,43660,0,0,0,0,0]]
+  GpuHashJoin: join_type=Full, on=[(t_k@1, f_k@1)], projection=[t_id@0, f_id@2], lanes=1, batches=multiple, output_rows=40229, output_bytes=492810
+    in_rows=[[8],[20000]] batch_rows=[[12131,12363,12171,3564,0,0,0,0,0]] batch_bytes=[[148606,151448,149096,43660,0,0,0,0,0]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=66
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[66]]
+      GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=8, output_bytes=66
+        in_rows=[] batch_rows=[[8]] batch_bytes=[[66]]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+      in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== sparse-build-right
+early_exit=none
+GpuUnload: output_rows=40229, output_bytes=492810
+  in_rows=[[40229]] batch_rows=[[12131,12363,12171,3564]] batch_bytes=[[148606,151448,149096,43660]]
+  GpuHashJoin: join_type=Right, on=[(t_k@1, f_k@1)], projection=[t_id@0, f_id@2], lanes=1, batches=multiple, output_rows=40229, output_bytes=492810
+    in_rows=[[8],[20000]] batch_rows=[[12131,12363,12171,3564]] batch_bytes=[[148606,151448,149096,43660]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=66
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[66]]
+      GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=8, output_bytes=66
+        in_rows=[] batch_rows=[[8]] batch_bytes=[[66]]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+      in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== sparse-probe-left
+early_exit=none
+GpuUnload: output_rows=2009, output_bytes=24612
+  in_rows=[[2009]] batch_rows=[[2009]] batch_bytes=[[24612]]
+  GpuProject: exprs=[d_id@1, t_id@0], lanes=1, batches=multiple, output_rows=2009, output_bytes=24612
+    in_rows=[[2009]] batch_rows=[[2009]] batch_bytes=[[24612]]
+    GpuHashJoin: join_type=Right, on=[(t_k@1, d_k@1)], projection=[t_id@0, d_id@2], lanes=1, batches=multiple, output_rows=2009, output_bytes=24612
+      in_rows=[[8],[2000]] batch_rows=[[2009]] batch_bytes=[[24612]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=66
+        in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[66]]
+        GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=8, output_bytes=66
+          in_rows=[] batch_rows=[[8]] batch_bytes=[[66]]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+        in_rows=[] batch_rows=[[2000]] batch_bytes=[[24500]]
+== sparse-probe-semi
+early_exit=none
+GpuUnload: output_rows=3, output_bytes=25
+  in_rows=[[3]] batch_rows=[[3]] batch_bytes=[[25]]
+  GpuHashJoin: join_type=RightSemi, on=[(t_k@0, d_k@1)], projection=[d_id@0], lanes=1, batches=multiple, output_rows=3, output_bytes=25
+    in_rows=[[8],[2000]] batch_rows=[[3]] batch_bytes=[[25]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=33
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[33]]
+      GpuLoadParquet: table=tiny, projections=[t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=8, output_bytes=33
+        in_rows=[] batch_rows=[[8]] batch_bytes=[[33]]
+    GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+      in_rows=[] batch_rows=[[2000]] batch_bytes=[[24500]]
+== timestamp-ms-key-group
+early_exit=none
+GpuUnload: output_rows=400, output_bytes=6500
+  in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+  GpuProject: exprs=[f_ts_ms@0, count(*)@1 as n], lanes=1, batches=single, output_rows=400, output_bytes=6500
+    in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+    GpuAggregateBatches: group_by=[f_ts_ms@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, output_rows=400, output_bytes=6500
+      in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+      GpuAggregate: group_by=[f_ts_ms@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=400, output_bytes=6500
+        in_rows=[[20000]] batch_rows=[[400]] batch_bytes=[[6500]]
+        GpuLoadParquet: table=fact, projections=[f_ts_ms@9], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=162500
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[162500]]
+== timestamp-ns-key-group
+early_exit=none
+GpuUnload: output_rows=400, output_bytes=6500
+  in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+  GpuProject: exprs=[f_ts_ns@0, count(*)@1 as n], lanes=1, batches=single, output_rows=400, output_bytes=6500
+    in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+    GpuAggregateBatches: group_by=[f_ts_ns@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, output_rows=400, output_bytes=6500
+      in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+      GpuAggregate: group_by=[f_ts_ns@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=400, output_bytes=6500
+        in_rows=[[20000]] batch_rows=[[400]] batch_bytes=[[6500]]
+        GpuLoadParquet: table=fact, projections=[f_ts_ns@11], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=162500
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[162500]]
+== timestamp-s-key-group
+early_exit=none
+GpuUnload: output_rows=400, output_bytes=6500
+  in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+  GpuProject: exprs=[`arrow_cast(fact.f_ts_s,Utf8("Timestamp(Second, None)"))`@0 as ts, count(*)@1 as n], lanes=1, batches=single, output_rows=400, output_bytes=6500
+    in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+    GpuAggregateBatches: group_by=[`arrow_cast(fact.f_ts_s,Utf8("Timestamp(Second, None)"))`@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, output_rows=400, output_bytes=6500
+      in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+      GpuAggregate: group_by=[CAST(f_ts_s@0 AS Timestamp(Second, None))], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=400, output_bytes=6500
+        in_rows=[[20000]] batch_rows=[[400]] batch_bytes=[[6500]]
+        GpuLoadParquet: table=fact, projections=[f_ts_s@8], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=162500
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[162500]]
+== timestamp-us-key-group
+early_exit=none
+GpuUnload: output_rows=400, output_bytes=6500
+  in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+  GpuProject: exprs=[f_ts_us@0, count(*)@1 as n], lanes=1, batches=single, output_rows=400, output_bytes=6500
+    in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+    GpuAggregateBatches: group_by=[f_ts_us@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, output_rows=400, output_bytes=6500
+      in_rows=[[400]] batch_rows=[[400]] batch_bytes=[[6500]]
+      GpuAggregate: group_by=[f_ts_us@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=400, output_bytes=6500
+        in_rows=[[20000]] batch_rows=[[400]] batch_bytes=[[6500]]
+        GpuLoadParquet: table=fact, projections=[f_ts_us@10], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=162500
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[162500]]
+== ts-key-join
+early_exit=none
+GpuUnload: output_rows=100000, output_bytes=1625000
+  in_rows=[[100000]] batch_rows=[[8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,1696]] batch_bytes=[[133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,27560]]
+  GpuProject: exprs=[f_id@1, d_id@0], lanes=1, batches=multiple, output_rows=100000, output_bytes=1625000
+    in_rows=[[100000]] batch_rows=[[8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,1696]] batch_bytes=[[133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,27560]]
+    GpuHashJoin: join_type=Inner, on=[(d_ts_us@1, f_ts_us@1)], projection=[d_id@0, f_id@2], lanes=1, batches=multiple, output_rows=100000, output_bytes=1625000
+      in_rows=[[2000],[20000]] batch_rows=[[8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,8192,1696]] batch_bytes=[[133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,133120,27560]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=32500
+        in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[32500]]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_ts_us@10], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=32500
+          in_rows=[] batch_rows=[[2000]] batch_bytes=[[32500]]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_ts_us@10], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=325000
+        in_rows=[] batch_rows=[[20000]] batch_bytes=[[325000]]
+== uint-key-group
+early_exit=none
+GpuUnload: output_rows=19848, output_bytes=243138
+  in_rows=[[19848]] batch_rows=[[19848]] batch_bytes=[[243138]]
+  GpuProject: exprs=[f_ku32@0, count(*)@1 as n], lanes=1, batches=single, output_rows=19848, output_bytes=243138
+    in_rows=[[19848]] batch_rows=[[19848]] batch_bytes=[[243138]]
+    GpuAggregateBatches: group_by=[f_ku32@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, output_rows=19848, output_bytes=243138
+      in_rows=[[19848]] batch_rows=[[19848]] batch_bytes=[[243138]]
+      GpuAggregate: group_by=[f_ku32@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=19848, output_bytes=243138
+        in_rows=[[20000]] batch_rows=[[19848]] batch_bytes=[[243138]]
+        GpuLoadParquet: table=fact, projections=[f_ku32@14], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=82500
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[82500]]
+== uint-key-join
+early_exit=none
+GpuUnload: output_rows=1984, output_bytes=32240
+  in_rows=[[1984]] batch_rows=[[1984]] batch_bytes=[[32240]]
+  GpuProject: exprs=[f_id@1, d_id@0], lanes=1, batches=multiple, output_rows=1984, output_bytes=32240
+    in_rows=[[1984]] batch_rows=[[1984]] batch_bytes=[[32240]]
+    GpuHashJoin: join_type=Inner, on=[(d_ku32@1, f_ku32@1)], projection=[d_id@0, f_id@2], lanes=1, batches=multiple, output_rows=1984, output_bytes=32240
+      in_rows=[[2000],[20000]] batch_rows=[[1984]] batch_bytes=[[32240]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=24500
+        in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[24500]]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_ku32@14], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+          in_rows=[] batch_rows=[[2000]] batch_bytes=[[24500]]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_ku32@14], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+        in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]

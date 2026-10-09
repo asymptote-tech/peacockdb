@@ -177,6 +177,10 @@ jobs:
           "$DUCKDB" --version
           testdata/generate_testdata.sh --bench tpch
           testdata/generate_testdata.sh --bench tpcds
+          # pbench is COMMITTED, not generated: this proves the committed parquet is what
+          # gen.sql makes under this exact DuckDB, including the float specials a dictionary
+          # page would silently canonicalize (llm-wiki/tasks/pbench.md).
+          testdata/generate_pbench.sh --check
 
       # Tier A: structural validation of the freshly generated sf1 data. Runs in the
       # rapids container (matrix leg). CI generates SYNTHETIC embeddings (no fetch), so
@@ -503,6 +507,7 @@ jobs:
           rsync_retry testdata/tpch-queries testdata/tpcds-queries testdata/tpch.minimal \
             testdata/goldens \
             testdata/tpch-vec-queries \
+            testdata/pbench-queries testdata/pbench.sf1 \
             testdata/generate_testdata.sh \
             testdata/cost-registry.csv \
             gpu:$REMOTE_DIR/testdata/

@@ -117,10 +117,12 @@ Related: [#168](corpus-coverage.md#t168) (an interval literal cannot cross; prop
 so the gap shows as a plan-time refusal naming the type rather than a wrong pad; the types
 themselves remain to add here.
 
-**Corpus queries:** none in tpch or tpcds. pbench: a time or interval column carried through a
-join (`SELECT d_id, t.iv FROM dim LEFT JOIN (SELECT t_k, INTERVAL '1' DAY AS iv FROM tiny) t ON d_k = t_k`) and a
-struct column carried through one (`SELECT d_id, d_kstruct FROM dim JOIN tiny ON d_k = t_k`),
-each declared not runnable on this ticket.
+**Corpus queries:** none in tpch or tpcds, and none in pbench yet. The two pbench queries
+written for this ticket — an interval column carried through a join
+(`SELECT d_id, t.iv FROM dim LEFT JOIN (SELECT t_k, INTERVAL '1' DAY AS iv FROM tiny) t ON d_k = t_k`)
+and a struct column carried through one (`SELECT d_id, d_kstruct FROM dim JOIN tiny ON d_k = t_k`)
+— cannot reach the wire at all: the planner panics on either column before a plan exists
+([#255](#t255)). They land with that fix, and are declared not runnable on this one then.
 
 <a id="t283"></a>
 ### #283 — a ROLLUP or CUBE over no rows answers no grand-total row
@@ -138,3 +140,35 @@ keyless-identity, which makes a keyless aggregate answer its row and leaves this
 the identity row for each set whose mask masks every key, its keys NULL and its grouping id the
 set's. DataFusion is not the oracle for it; DuckDB is.
 
+<a id="t255"></a>
+### #255 — the planner panics on a Struct or Interval column instead of refusing it
+`common::type_structural_size` has an arm per flat type and `panic!`s on everything else
+(`common.rs:66`, "add a deterministic arm"). The planner's memory estimation calls it for every
+field of every node's output schema (`logical_size_from_schema`, `common.rs:84`), so a query
+carrying a `Struct` or an `Interval` column through any node aborts the process at plan time.
+Three queries show it, each a `SELECT` a user can write:
+
+    SELECT f_id, d_id FROM fact JOIN dim ON f_kstruct = d_kstruct
+    SELECT d_id, d_kstruct FROM dim JOIN tiny ON d_k = t_k
+    SELECT d_id, t.iv FROM dim LEFT JOIN (SELECT t_k, INTERVAL '1' DAY AS iv FROM tiny) t ON d_k = t_k
+
+Not [#249](#t249), which is the wire writing an unnamed type as `Null`: this fires first, in the
+planner, so the plan #249 describes is never built. Not [#245](joins.md#t245) either — that is the
+shuffle's hasher, and the second query above has no nested key at all.
+
+**The guard to delete when this closes:** the three queries' absence is asserted, not merely tolerated — `testdata/test_duckdb_result.py`'s `test_the_queries_that_panic_the_planner_are_not_in_the_tree` goes red the moment a `.sql` appears. So adding the files turns every Rust tier green and then fails in a Python test in the cost-report job. Delete that case in the same commit, and add the three registry rows, corpus lines and `duckdb-result.txt` sections the absence guard currently stands in for.
+
+A panic is the wrong refusal in two ways. The engine's contract for a shape it cannot plan is
+`PlanError`, which renders as a `refused:` line a reader can act on; and a panic cannot be
+recorded, so these three queries cannot join the corpus at all — they take the whole plan golden
+down with them rather than landing with a ticket on their row. The fix is an estimator that
+refuses a type it has no deterministic width for, through the same `PlanError` path the rest of
+the planner uses. A nested type's width cannot be derived from the parent row count (the panic's
+own comment says so), so the arm wanted is a refusal, not a number.
+
+**Corpus queries:** pbench's `struct-key-join`, `struct-through-join` and
+`interval-through-join`, whose SQL is above. They are NOT in `testdata/pbench-queries/`: a query
+file there is read by every plan-golden renderer, so one of these in the directory aborts all five
+of pbench's plan goldens and the dataset cannot land at all. They arrive with the fix. pbench's
+own task (`pbench.md`) could not land them — its Restriction forbids fixing what a query
+shows — and recorded the hold in `pbench-detail.md`.
