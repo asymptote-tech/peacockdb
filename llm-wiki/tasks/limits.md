@@ -125,15 +125,18 @@ cases are built, not run; #281 holds them.
 
 ## Completeness signoff
 
-Solved under its constraints. Both tickets are closed by the shape the page already described
-rather than by the fix either ticket proposed, the corpus cells named turned on, and every line
-of the Tests list exists and tests what it says — one through the DataFusion oracle rather than a
-literal `== 3`, which is stronger. Two readings, 0 blocking and 7 important between them, all
-seven prose or comment: four sentences in `architecture.md`, two ticket bodies in `memory.md`
-whose rebatcher half this branch left with no candidate query, #166's claim that a coalesce arm is
-unreachable (it is reachable, measured), and a `can_be_null` doc that disagreed with `survivors`.
-Shortcuts and deviations, three, each outside the Scope table and each recorded: `Empties::fires`
-now fires every source's first call, which changes every injected-layout run rather than only the
-limited ones; a comment correction in `translator/common.rs`; and the device half — `scan.cpp` and
-four `gpu_tests` cases — built and not run, held by #281 under the chain's no-GPU rule. #284 was
-filed, not fixed: a limit over a filter is refused above one lane, and it predates this branch.
+Solved under its constraints, by the shape the page already described rather than by the fix
+either ticket proposed, and the device half has run on nebius-gpu: the four converted
+`source_cases.rs` cases green, and `tpch/scan-limit` enabled at all five device modes — which
+corrected its `gpu_oracle` to `golden_exact`, its result section having always served.
+
+Six deviations outside the Scope table, each recorded in `limits-detail.md`: `Empties::fires` now
+fires every source's first call; a comment in `translator/common.rs`; that oracle change and the
+guard term it forced in `test_cpu_corpus.rs`; `gpu_plan.fbs`'s two field docs, which stated the
+model #285 is made of; and a fifth `source_cases.rs` case pinning #285. The spec's `## No GPU` and
+its "device: none" bar are superseded by chain K's board note.
+
+Filed, not fixed: **#284**, and **#285**, whose zero-column scan keeps `tpch/nested-limits` off at
+every device mode — not a limit defect, older than this branch, and #281 narrowed to empty-sorts'
+half. One device gap is named on #285: nested-limits carries the corpus's only mid-plan limit, so
+no device has run one.

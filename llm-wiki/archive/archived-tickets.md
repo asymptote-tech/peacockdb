@@ -50,8 +50,11 @@ interval, so the validator's refusal of a limit whose only parent is the sink is
 A limited scan's survivors are trimmed to the shortest row-group prefix reaching `n`, because
 satisfying the limit stops the scan being scheduled but at tp1-single, tp4-single and tp4-sized
 lineitem is one batch of all 49 groups. `GpuLoadParquet.limit` is gone and `CudfScan.limit` is
-`(deprecated)` with no slot moved. The four `bug_` cases became agreement cases; they are built
-and not yet run, which is [#281](../tickets/corpus-coverage.md#t281).
+`(deprecated)` with no slot moved. The four `bug_` cases became agreement cases and passed on
+nebius-gpu 2026-10-09, and `tpch/scan-limit`'s five device cells are enabled against the result
+golden. `tpch/nested-limits`' five stay off on
+[#285](../tickets/corpus-coverage.md#t285), which is a zero-column scan rather than a limit
+defect.
 
 <a id="t234"></a>
 ### #234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them
