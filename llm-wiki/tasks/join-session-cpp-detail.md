@@ -254,3 +254,40 @@ and its harness are one unit, and a second translation unit in the same target w
 harness in a header of its own. The three production files are each under 600 lines, which is
 where the limit does its work. If this file is ever split, the seam is the harness (`Session`,
 `JoinSpec`, `make_plan`) against the cases.
+
+## Review round 1, 2026-10-09 — 1 blocking, 2 important, 7 nits
+
+The reviewer traced the keyed pairs path, the nested-loop trio, the empty-build arms, the chunk
+loop and every cuDF join object's lifetime against §3 and the vendored 26.02 headers, and found no
+wrong answer in the session itself. All three of the developer's self-reported claims held up under
+independent check, and so did the `plan_executor_internal.h` placement. What it found instead:
+
+- **Blocking — the new wire kind turns a Rust guard red.** `CudfJoin` in `union PlanNodeKind`
+  regenerates `fb::PlanNodeKind::ENUM_VALUES`, and `wire/read.rs`'s `children` has no arm for it,
+  so it falls to the catch-all. `wire::tests::the_child_walk_names_every_node_kind` iterates
+  `ENUM_VALUES` asserting `walked.is_ok()`, and exists for exactly this. Rust-only tier, so every
+  CI leg runs it. It was green in the record because the round ran `peacock_cpu_tests` and
+  `cargo check -p peacockdb-ffi` — no Rust test suite. One arm, mirroring the C++ twin already
+  added at `node_session.cpp:324-327`; `read.rs` is not the wire writer, so the spec's restriction
+  holds.
+- **Important — a literal `true` filter with no `filter_columns` is refused**, and the comment this
+  branch added at `expr.h:44-46` says the opposite. §4.1 and §3.6 make every predicate-free
+  non-Inner join arrive with the literal `true`, so `tiny LEFT JOIN empty ON true` throws at
+  `join_build`. Nothing in the session needs the map for such a filter — the reviewer checked
+  `sides_read`, `cond_table`, `cross_ast` and `filter_type_table` one at a time. The test helper
+  hides it: `unconditional()` supplies an entry nothing reads.
+- **Important — the one allocation check bounds the allocation but not the release**, and its peak
+  bound is a hand formula. Measured `inputs 33554432 | peak 41943040 | net 16777216`: a session
+  that retained the probe batch would move `net` to 32 MB and `peak` not at all, and both
+  assertions stay green. That is exit-copies' round-1 mode exactly. A session is the one operator
+  holding state across calls, so it is the highest-value place in the tree for a release bound.
+  `ReleaseWithoutFinishAndEndPlanFreeTheSession`, which §5.6 names as "release frees everything",
+  measures nothing.
+
+Nits worth taking while the developer is in the code: a duplicate `<cudf/reshape.hpp>`; three
+`chunk_bytes = 16` forms that cannot chunk because `chunks()` caps `k` at the probe's row count and
+they probe one row; `NullEqualsNullMatchesNullKeysForEveryOuterType` running `Full` alone; the fbs
+`projection` comment not saying what the ordinals index, which differs per join type and is what
+task 8 writes against; a build-side ordinal overrun throwing unnamed where the probe side is named;
+`join_columns.h` silent on the two `plan_executor_internal.h` helpers it makes visible; and three
+`generated.rs` line counts the new union variant falsified.
