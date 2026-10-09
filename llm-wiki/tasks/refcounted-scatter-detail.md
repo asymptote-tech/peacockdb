@@ -287,3 +287,12 @@ the registration path sits under all 79 — `test_node_timing` 1/0,
 `peacockdb_core_gpu_lib gpu_tests::` 580/0, `peacock_gpu_benchmarks --skip bench_` 8/0. No golden
 moved (`7a8b50b8…` both sides). Handle numbering is unchanged on the success path: the refusals
 throw before `next_handle++`.
+
+## CI, for the `done` transition (2026-10-09)
+
+Run 37918173680 on `ef9d3476`: cudf 25.02 pass (20m9s), cudf 26.02 pass (24m28s) — so the handle
+compiles and the whole Rust side passes against both cuDF legs, which no local run covers — GPU
+build pass, Cost report pass, S3 check pass, Pages skipped. The only red is `GPU Tests (remote)`
+on `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out`, which is shad-gpu
+and which the host override exempts by name; its work was done on nebius-gpu and is recorded above.
+`completeness approved` → `done`.
