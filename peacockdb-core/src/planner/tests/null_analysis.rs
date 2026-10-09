@@ -47,7 +47,6 @@ fn source(nullable: &[bool]) -> Box<dyn GpuNode> {
         (0..nullable.len() as u32).collect(),
         vec![vec![vec![0]]],
         &scan,
-        None,
         schema,
     ))
 }
@@ -240,7 +239,6 @@ fn rowmarker_source() -> Box<dyn GpuNode> {
         Vec::new(),
         vec![vec![vec![0]]],
         &scan,
-        None,
         Schema::rowmarker(),
     ))
 }

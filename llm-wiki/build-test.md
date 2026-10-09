@@ -336,7 +336,8 @@ flow, backpressure, limits and accounting, asserted on calls rather than rows â€
 queue bounds, batch release, the trace, the output hook (called once per batch a node queues
 as its own and not at a forwarder, a refusal failing the run at that node and lane with the
 hook's words, and `None` leaving the report as `run` makes it): the schedule and the two holds, both limit lowerings by
-the calls not made, what each node emitted and consumed (the two records the corpus goldens
+the calls not made and a mid-plan limit judged by the rows it emitted, never its input, what
+each node emitted and consumed (the two records the corpus goldens
 read), the accountant through the drivers, a backend failure stopping the query with the
 accounting still reconciling, the execution golden's text with every number chosen by the
 script, every empty scatter lane dropped while a lane that owes its probe reaches `SetBuild` with no

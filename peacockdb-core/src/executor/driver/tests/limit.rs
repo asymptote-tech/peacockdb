@@ -2,7 +2,7 @@
 //! rows returned passes just as well when the whole input was read and trimmed at the end,
 //! which is the thing this lowering exists to avoid.
 
-use super::mock::{Script, spec};
+use super::mock::{AccRule, Script, spec};
 use super::plans::*;
 use super::*;
 
@@ -165,8 +165,8 @@ fn the_early_exit_reaches_through_a_shuffle() {
 
 #[test]
 fn a_mid_plan_limit_stops_its_own_subtree_and_holds_nothing() {
-    // The mid-plan node is an accumulator by category and streams: the driver counts the
-    // rows going past it, and satisfaction stops the scan the same way it does at a sink.
+    // The mid-plan node is an accumulator by category and streams: the driver reads the
+    // rows it emitted, and satisfaction stops the scan the same way it does at a sink.
     let plan = unload(filter(limit(merge(source("part", 1)), 0, Some(12))));
     let script = Script::default().source("part", vec![vec![spec(10, 80); 6]]);
     let report = run(plan.as_ref(), &script);
@@ -174,7 +174,7 @@ fn a_mid_plan_limit_stops_its_own_subtree_and_holds_nothing() {
     assert_eq!(
         count(&report, CallKind::NextBatch),
         2,
-        "the scan stopped once twelve rows had gone past the limit"
+        "the scan stopped once twelve rows had left the limit"
     );
     let limit_node = 2;
     assert!(
@@ -207,6 +207,66 @@ fn a_satisfied_limit_reports_done_so_the_node_above_it_can_finish() {
         20,
         "the count reached the root instead of the query answering nothing"
     );
+}
+
+/// A mid-plan limit over the six ten-row batches, its executor following `rule`.
+fn mid_plan(skip: u64, fetch: Option<u64>, rule: AccRule) -> RunReport {
+    let plan = unload(filter(limit(merge(source("part", 1)), skip, fetch)));
+    run(plan.as_ref(), &six_batches().with_limit(rule))
+}
+
+#[test]
+fn a_mid_plan_limit_is_satisfied_by_fetch_rows_emitted_whatever_its_skip() {
+    // The mock forwards each batch whole, so ten rows leave the limit with the first one.
+    // Judged by what it emitted, a limit wanting five is done after one pull; judged by its
+    // input against skip + fetch it would read three batches.
+    let report = mid_plan(25, Some(5), AccRule::Streaming);
+    assert!(!report.satisfied.is_empty());
+    assert_eq!(
+        count(&report, CallKind::NextBatch),
+        1,
+        "the limit's own output reached its fetch with the first batch"
+    );
+    assert_accounted(&report);
+}
+
+#[test]
+fn a_limit_emitting_fewer_rows_than_it_read_keeps_the_driver_pulling() {
+    // Four rows out of every ten: twelve have left the limit after the third batch and not
+    // before, where its input reached twelve after the second.
+    let report = mid_plan(0, Some(12), AccRule::Trimming(4));
+    assert!(!report.satisfied.is_empty());
+    assert_eq!(
+        count(&report, CallKind::NextBatch),
+        3,
+        "the driver stopped on rows the limit never let through"
+    );
+    assert_accounted(&report);
+}
+
+#[test]
+fn a_mid_plan_limit_with_no_fetch_is_never_satisfied() {
+    let report = mid_plan(5, None, AccRule::Streaming);
+    assert!(
+        report.satisfied.is_empty(),
+        "no count of rows emitted determines a pure offset"
+    );
+    assert_eq!(
+        count(&report, CallKind::NextBatch),
+        6,
+        "every batch was read"
+    );
+    assert_accounted(&report);
+}
+
+#[test]
+fn a_mid_plan_limit_of_no_rows_is_satisfied_before_any_pull_whatever_its_skip() {
+    // With a skip of 0 the old rule held at the seed too; the skip is what made it pull.
+    let report = mid_plan(5, Some(0), AccRule::Streaming);
+    assert!(!report.satisfied.is_empty(), "satisfied at the seed");
+    assert_eq!(count(&report, CallKind::NextBatch), 0);
+    assert_eq!(rows_returned(&report), 0);
+    assert_eq!(report.in_flight_bytes, 0);
 }
 
 #[test]

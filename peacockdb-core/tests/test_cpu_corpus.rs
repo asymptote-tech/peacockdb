@@ -273,7 +273,7 @@ fn each_declarations_two_oracles_suit_each_other() {
 /// regeneration moves that. `duckdb_gpu_<q>_<mode>` is the other case and has no such
 /// footing: it applies the same oracle to the device's RECORDED answer, where ten unordered
 /// rows need not be the cpu's ten. So this holds such a line's device cells off, and the day
-/// [#186] turns them on it is what says to weaken the device-side comparison instead.
+/// #281 turns them on it is what says to weaken the device-side comparison instead.
 #[test]
 fn an_undetermined_lines_rows_are_compared_only_against_committed_files() {
     let rows = load_csv();

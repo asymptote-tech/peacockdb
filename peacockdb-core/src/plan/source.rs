@@ -66,7 +66,6 @@ pub(crate) fn new_load_parquet(
     projection: Vec<u32>,
     partition_groups: Vec<Vec<Vec<u32>>>,
     scan: &ScanMetadata,
-    limit: Option<usize>,
     schema: Schema,
 ) -> GpuLoadParquet {
     // Batching off still declares MultipleBatches: no downstream phase may assume a
@@ -90,7 +89,6 @@ pub(crate) fn new_load_parquet(
         partition_groups,
         survivors: scan.groups.clone(),
         can_be_null,
-        limit,
     }
 }
 
