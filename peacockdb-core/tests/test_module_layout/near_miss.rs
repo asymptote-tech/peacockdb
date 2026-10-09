@@ -11,7 +11,8 @@ use crate::test_code::{
     test_gates,
 };
 use crate::visibility::{
-    bare_pub_name, gated_pub_mods, is_bare_pub_item, pub_mod_declarations, visible_mod_declarations,
+    bare_pub_name, gated_pub_mods, is_bare_pub_item, pub_mod_declarations, re_exports,
+    visible_mod_declarations,
 };
 use crate::walls::{super_chains, supers_that_stay_inside, uses_module};
 
@@ -64,6 +65,17 @@ fn each_reader_sees_the_violation_and_not_its_near_miss() {
         bare_pub_name("    pub batches: Vec<CpuBatch>,").as_deref(),
         Some("batches")
     );
+
+    // A re-export is one at every visibility: the restriction is what a `pub use ` prefix
+    // test walks past, and `pub(crate) use` is the same lie about where an item lives. The
+    // near-misses are the plain `use` every file opens with and a restricted `fn`.
+    assert!(re_exports("pub use crate::plan::Expr;"));
+    assert!(re_exports(
+        "pub(crate) use schema_validation::is_validated_at;"
+    ));
+    assert!(re_exports("#[cfg(test)] pub(in crate::executor) use a::b;"));
+    assert!(!re_exports("use crate::plan::Expr;"));
+    assert!(!re_exports("pub(crate) fn is_validated_at() -> bool {}"));
 
     // `pub(crate)` and a `pub` field are not items the facade has to declare.
     assert!(is_bare_pub_item("pub fn run() {}"));

@@ -178,7 +178,7 @@ pub(crate) fn split_attributes(line: &str) -> (Vec<&str>, &str) {
 }
 
 /// `pub`, `pub(crate)`, `pub(in …)` and nothing else removed from the front of a line.
-fn strip_visibility(t: &str) -> &str {
+pub(crate) fn strip_visibility(t: &str) -> &str {
     let Some(rest) = t.strip_prefix("pub") else {
         return t;
     };

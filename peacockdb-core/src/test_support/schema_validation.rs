@@ -49,9 +49,9 @@ pub(crate) fn cpu_schema_validator<'a>(index: &'a PlanIndex<'a>) -> OutputHook<'
 /// schema at some modes keeps the hook at the rest. Exhaustive on both halves, since a
 /// misspelling of either reads as a legal line and runs a cell unvalidated.
 ///
-/// Its only caller is the device corpus, which `rust-only` compiles out, so that lib
-/// build sees this and `mask_names` as dead.
-#[cfg_attr(not(test), allow(dead_code))]
+/// Its one caller is the device corpus, which `rust-only` compiles out; the unit tests are
+/// what keep this and `mask_names` in that build.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
 pub(crate) fn is_validated_at(declared: &str, mode: &Mode, what: &str) -> bool {
     let (keyword, mask) = match declared.split_once('(') {
         Some((keyword, rest)) => (keyword.trim(), Some(rest.trim().trim_end_matches(')'))),
@@ -75,7 +75,7 @@ pub(crate) fn is_validated_at(declared: &str, mode: &Mode, what: &str) -> bool {
 /// Whether a disabled mask names this mode. Every entry has to be one of the five: a
 /// misspelled one would otherwise read as "some other mode" and leave the hook on at the
 /// mode the line meant to excuse, which is a red cell blamed on the engine.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
 fn mask_names(mask: &str, mode: &Mode, what: &str) -> bool {
     let mut names = false;
     for entry in mask.split('|') {

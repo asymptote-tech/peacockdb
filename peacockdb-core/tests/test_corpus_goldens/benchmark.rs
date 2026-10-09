@@ -324,29 +324,69 @@ fn every_timed_case_is_enabled_on_a_device() {
     }
 }
 
+/// The two bracket shapes a declaration line can carry, read off one line each: a mask on
+/// the last argument, and a trailing comment with a parenthesis in it. The second is one
+/// `(tp4 only)` away on a line that already says `// #225`, and taking the line's final `)`
+/// read the comment's — reporting a second invocation on a line that has one.
+#[test]
+fn a_mask_and_a_comments_parenthesis_are_not_the_invocations_close() {
+    let masked = "corpus_query!(tpch, 1, distinct_functions, tp1_single, tp1_single, \
+                  data_fusion_disabled, golden_approx_std, \
+                  schema_validation_disabled(tp4_single | tp4_sized)); // #225 (tp4 only)";
+    assert_eq!(
+        cases_in(masked, "corpus_query!", "a line"),
+        vec![vec![
+            "tpch",
+            "1",
+            "distinct_functions",
+            "tp1_single",
+            "tp1_single",
+            "data_fusion_disabled",
+            "golden_approx_std",
+            "schema_validation_disabled(tp4_single | tp4_sized)",
+        ]]
+    );
+    let bare = "corpus_query!(tpch, 1, q6, tp1_single, none, data_fusion_exact, \
+                golden_exact, schema_validation_enabled);";
+    assert_eq!(
+        cases_in(bare, "corpus_query!", "a line")
+            .remove(0)
+            .remove(7),
+        "schema_validation_enabled"
+    );
+}
+
 /// The arguments of every `name(…)` invocation in a case list, one vector per line.
 fn read_cases(path: &Path, name: &str) -> Vec<Vec<String>> {
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    cases_in(&text, name, &path.display().to_string())
+}
+
+/// The same over the text, so the shapes above can be read without a file.
+///
+/// The trailing comment goes first and the close is the suffix, because neither end is a
+/// lone parenthesis any more: the last argument carries a schema-validation mode mask's
+/// parens, and a comment naming a ticket may carry its own. Hunting the final `)` found
+/// whichever came last, which is the comment's as soon as one has a bracket in it.
+fn cases_in(text: &str, name: &str, what: &str) -> Vec<Vec<String>> {
     let mut out = Vec::new();
     for line in text.lines() {
-        let Some(rest) = line.trim().strip_prefix(name) else {
+        let body = line.trim();
+        let body = body
+            .split_once("//")
+            .map_or(body, |(before, _)| before.trim());
+        let Some(rest) = body.strip_prefix(name) else {
             continue;
         };
         let args = rest
             .strip_prefix('(')
-            .unwrap_or_else(|| panic!("{}: {line:?} does not open", path.display()));
-        // The last `)` rather than the first, with the tail asserted: an argument list here
-        // carries no parentheses of its own, and that is what makes either end the same one.
-        // A line may end in a comment naming its ticket, which is not a second invocation.
-        let (args, tail) = args
-            .rsplit_once(')')
-            .unwrap_or_else(|| panic!("{}: {line:?} does not close", path.display()));
-        let tail = tail.split_once("//").map_or(tail, |(before, _)| before);
-        assert_eq!(
-            tail.trim(),
-            ";",
-            "{}: {line:?} carries more than one invocation",
-            path.display()
+            .unwrap_or_else(|| panic!("{what}: {line:?} does not open"));
+        let args = args
+            .strip_suffix(");")
+            .unwrap_or_else(|| panic!("{what}: {line:?} does not close"));
+        assert!(
+            !args.contains(");"),
+            "{what}: {line:?} carries more than one invocation"
         );
         out.push(args.split(',').map(|a| a.trim().to_string()).collect());
     }

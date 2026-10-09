@@ -616,9 +616,11 @@ pub(crate) fn cpu_schema_validator<'a>(index: &'a PlanIndex<'a>) -> OutputHook<'
 }
 
 /// The declaration that switches the hook on, decoded per mode. The device corpus is its
-/// only caller, so the re-export carries that caller's gate; its tests reach it directly.
+/// only caller, so it carries that caller's gate; the decoder's own tests reach it directly.
 #[cfg(not(feature = "rust-only"))]
-pub(crate) use schema_validation::is_validated_at;
+pub(crate) fn is_validated_at(declared: &str, mode: &Mode, what: &str) -> bool {
+    schema_validation::is_validated_at(declared, mode, what)
+}
 
 // --- a corpus case ----------------------------------------------------------------
 // What the two corpus binaries call, and all they call: dataset, scale factor, query, the

@@ -194,10 +194,12 @@ feature, with signatures free of engine types.
 - **Nesting may go three deep** where the innermost earns it — `planner/translator/scan_mapping/`
   is 720 lines behind three entry points — under the same `mod` rule at each level. A directory
   with a one-item facade and a hundred lines behind it is an implementation module wearing one.
-- `pub use` is not allowed: inline the declaration into `mod.rs`, or into `common.rs` for what
-  the implementation modules share. A child reaches into its parent; a parent never re-exports a
-  child. A body in `mod.rs` is one expression, and a struct keeps its production inherent
-  `impl` there; a test-only inherent `impl` is the carve-out above, in a `tests` module.
+- A re-export is not allowed, at any visibility: a restriction changes who can name the item,
+  not where it is declared. Inline the declaration into `mod.rs`, or into `common.rs` for what the
+  implementation modules share; where a sibling has to reach one, `mod.rs` carries a
+  `pub(crate) fn` whose body delegates. A child reaches into its parent; a parent never
+  re-exports a child. A body in `mod.rs` is one expression, and a struct keeps its production
+  inherent `impl` there; a test-only inherent `impl` is the carve-out above, in a `tests` module.
 - An implementation module may implement any trait for a type its component declares and define
   free functions the `mod.rs` delegates to. It may not declare the component's API.
 - Absolute `crate::` paths across a component boundary, `super::` only within one. `mod.rs` and

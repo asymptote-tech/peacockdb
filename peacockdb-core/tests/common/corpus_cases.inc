@@ -2,13 +2,12 @@
 // `cpu_modes`, the device's `gpu_modes`, so one declaration covers both engines:
 //
 //   corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, cpu_oracle, gpu_oracle,
-//                 schema_validation)
+//                 schema_validation[(modes)])
 //
 // Modes are the five planning modes or'd together, or `none`; every argument is written, so
 // a query's whole coverage reads off the line. The last is the device run's schema validation;
-// a cell red on schema alone says `schema_validation_disabled` with its ticket on the line,
-// naming the modes it excuses where the others stay green.
-// The first twenty are the smallest plans carrying no ticket; the rest of the corpus is T19.
+// a cell red on schema alone says `schema_validation_disabled(modes)` with its ticket on the
+// line. The first twenty are the smallest plans carrying no ticket; the rest is T19.
 
 // --- tpch ---------------------------------------------------------------------
 corpus_query!(tpch, 1, q6, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, data_fusion_exact, golden_exact, schema_validation_enabled);
