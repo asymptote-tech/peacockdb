@@ -4,7 +4,6 @@
 
 use super::{
     GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin, JoinCapability, JoinFilterColumn, JoinSide,
-    NestedLoopJoinType,
 };
 use std::any::Any;
 
@@ -67,15 +66,12 @@ impl GpuNode for GpuNestedLoopJoin {
         )?;
         check_projection(
             "GpuNestedLoopJoin",
-            match self.join_type {
-                NestedLoopJoinType::Inner => JoinType::Inner,
-                NestedLoopJoinType::Left => JoinType::Left,
-            },
+            self.join_type,
             self.projection.as_ref(),
             &input_schema(self.build.as_ref()),
             &input_schema(self.probe.as_ref()),
         )?;
-        if self.join_type == NestedLoopJoinType::Left
+        if self.join_type == JoinType::Left
             && input_layout(self.probe.as_ref()).batch_layout != BatchLayout::SingleBatch
         {
             return Err(PlanError::Invalid(

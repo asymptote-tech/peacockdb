@@ -29,7 +29,7 @@ use crate::plan::{
     GpuProject, GpuSort, GpuUnion, GpuUnload, NodeRef, as_node_ref,
 };
 use crate::plan::{Expr, NamedExpr};
-use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
+use crate::plan::{JoinFilterColumn, JoinSide};
 
 /// `node` rebuilt over `children`, which are the rewritten children in the order
 /// [`GpuNode::children`] reports them. Handed a node's own children back it is the
@@ -330,7 +330,7 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
         Box::new(GpuNestedLoopJoin::new(
             source(None),
             source(Some(7)),
-            NestedLoopJoinType::Left,
+            JoinType::Left,
             column(0, "f"),
             vec![JoinFilterColumn {
                 side: JoinSide::Probe,
@@ -342,7 +342,7 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
         Box::new(GpuNestedLoopJoin::new(
             other_source(),
             source(None),
-            NestedLoopJoinType::Inner,
+            JoinType::Inner,
             column(1, "f"),
             Vec::new(),
             None,

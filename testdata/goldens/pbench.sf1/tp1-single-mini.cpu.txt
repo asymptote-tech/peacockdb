@@ -249,23 +249,23 @@ GpuUnload: output_rows=601, output_bytes=5713
 == scalar-subquery-cross
 early_exit=none
 GpuUnload: output_rows=1, output_bytes=26
-  in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[26]]
+  in_rows=[[1]] batch_rows=[[1,0]] batch_bytes=[[26,0]]
   GpuProject: exprs=[CASE WHEN count(*)@0 > 100 THEN avg(fact.f_amount)@1 ELSE avg(fact.f_amount)@2 END as b1, count(*)@3 as b2], lanes=1, batches=multiple, output_rows=1, output_bytes=26
-    in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[26]]
-    GpuCrossJoin: lanes=1, batches=multiple, output_rows=1, output_bytes=52
-      in_rows=[[1],[1]] batch_rows=[[1]] batch_bytes=[[52]]
+    in_rows=[[1]] batch_rows=[[1,0]] batch_bytes=[[26,0]]
+    GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, output_rows=1, output_bytes=52
+      in_rows=[[1],[1]] batch_rows=[[1,0]] batch_bytes=[[52,0]]
       GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1, output_bytes=43
         in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[43]]
-        GpuCrossJoin: lanes=1, batches=multiple, output_rows=1, output_bytes=43
-          in_rows=[[1],[1]] batch_rows=[[1]] batch_bytes=[[43]]
+        GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, output_rows=1, output_bytes=43
+          in_rows=[[1],[1]] batch_rows=[[1,0]] batch_bytes=[[43,0]]
           GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1, output_bytes=26
             in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[26]]
-            GpuCrossJoin: lanes=1, batches=multiple, output_rows=1, output_bytes=26
-              in_rows=[[1],[1]] batch_rows=[[1]] batch_bytes=[[26]]
+            GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, output_rows=1, output_bytes=26
+              in_rows=[[1],[1]] batch_rows=[[1,0]] batch_bytes=[[26,0]]
               GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1, output_bytes=9
                 in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[9]]
-                GpuCrossJoin: lanes=1, batches=multiple, output_rows=1, output_bytes=9
-                  in_rows=[[1],[1]] batch_rows=[[1]] batch_bytes=[[9]]
+                GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, output_rows=1, output_bytes=9
+                  in_rows=[[1],[1]] batch_rows=[[1,0]] batch_bytes=[[9,0]]
                   GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1, output_bytes=0
                     in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[0]]
                     GpuProject: exprs=[], lanes=1, batches=multiple, output_rows=1, output_bytes=0

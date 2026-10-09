@@ -19706,35 +19706,35 @@ refused: unsupported: WindowAggExec: window functions (#143)
 == q9
 GpuUnload
   GpuProject: exprs=[CASE WHEN count(*)@0 > 74129 THEN avg(store_sales.ss_ext_discount_amt)@1 ELSE avg(store_sales.ss_net_paid)@2 END as bucket1, CASE WHEN count(*)@3 > 122840 THEN avg(store_sales.ss_ext_discount_amt)@4 ELSE avg(store_sales.ss_net_paid)@5 END as bucket2, CASE WHEN count(*)@6 > 56580 THEN avg(store_sales.ss_ext_discount_amt)@7 ELSE avg(store_sales.ss_net_paid)@8 END as bucket3, CASE WHEN count(*)@9 > 10097 THEN avg(store_sales.ss_ext_discount_amt)@10 ELSE avg(store_sales.ss_net_paid)@11 END as bucket4, CASE WHEN count(*)@12 > 165306 THEN avg(store_sales.ss_ext_discount_amt)@13 ELSE avg(store_sales.ss_net_paid)@14 END as bucket5], lanes=1, batches=multiple, schema=[bucket1:Decimal128(11,6), bucket2:Decimal128(11,6), bucket3:Decimal128(11,6), bucket4:Decimal128(11,6), bucket5:Decimal128(11,6)]
-    GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
+    GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
-        GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
+        GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
           GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
-            GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
+            GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
               GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
-                GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
+                GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
                   GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
-                    GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
+                    GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
                       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
-                        GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
+                        GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
                           GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
-                            GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
+                            GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
                               GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
-                                GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
+                                GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
                                   GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
-                                    GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
+                                    GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
                                       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
-                                        GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
+                                        GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
                                           GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
-                                            GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
+                                            GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
                                               GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
-                                                GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
+                                                GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6), count(*):Int64]
                                                   GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
-                                                    GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
+                                                    GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6), avg(store_sales.ss_net_paid):Decimal128(11,6)]
                                                       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
-                                                        GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
+                                                        GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
                                                           GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64]
-                                                            GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64]
+                                                            GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64]
                                                               GpuCoalesceAllBatches: lanes=1, batches=single, schema=[]
                                                                 GpuMergePartitions: lanes=1, batches=multiple, schema=[]
                                                                   GpuProject: exprs=[], lanes=4, batches=multiple, schema=[]
@@ -19838,35 +19838,35 @@ GpuUnload
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=1, per batch: execute_node(#158 CudfProject, batch)
-    GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#157 CudfCrossJoin, build copy, batch)
+    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#157 CudfNestedLoopJoin, build, batch)
       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#148 CudfCoalescePartitions, lane batches)
-        GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#147 CudfCrossJoin, build copy, batch)
+        GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#147 CudfNestedLoopJoin, build, batch)
           GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#138 CudfCoalescePartitions, lane batches)
-            GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#137 CudfCrossJoin, build copy, batch)
+            GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#137 CudfNestedLoopJoin, build, batch)
               GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#127 CudfCoalescePartitions, lane batches)
-                GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#126 CudfCrossJoin, build copy, batch)
+                GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#126 CudfNestedLoopJoin, build, batch)
                   GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#117 CudfCoalescePartitions, lane batches)
-                    GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#116 CudfCrossJoin, build copy, batch)
+                    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#116 CudfNestedLoopJoin, build, batch)
                       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#107 CudfCoalescePartitions, lane batches)
-                        GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#106 CudfCrossJoin, build copy, batch)
+                        GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#106 CudfNestedLoopJoin, build, batch)
                           GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#96 CudfCoalescePartitions, lane batches)
-                            GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#95 CudfCrossJoin, build copy, batch)
+                            GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#95 CudfNestedLoopJoin, build, batch)
                               GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#86 CudfCoalescePartitions, lane batches)
-                                GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#85 CudfCrossJoin, build copy, batch)
+                                GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#85 CudfNestedLoopJoin, build, batch)
                                   GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#76 CudfCoalescePartitions, lane batches)
-                                    GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#75 CudfCrossJoin, build copy, batch)
+                                    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#75 CudfNestedLoopJoin, build, batch)
                                       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#65 CudfCoalescePartitions, lane batches)
-                                        GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#64 CudfCrossJoin, build copy, batch)
+                                        GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#64 CudfNestedLoopJoin, build, batch)
                                           GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#55 CudfCoalescePartitions, lane batches)
-                                            GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#54 CudfCrossJoin, build copy, batch)
+                                            GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#54 CudfNestedLoopJoin, build, batch)
                                               GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#45 CudfCoalescePartitions, lane batches)
-                                                GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#44 CudfCrossJoin, build copy, batch)
+                                                GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#44 CudfNestedLoopJoin, build, batch)
                                                   GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#34 CudfCoalescePartitions, lane batches)
-                                                    GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#33 CudfCrossJoin, build copy, batch)
+                                                    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#33 CudfNestedLoopJoin, build, batch)
                                                       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#24 CudfCoalescePartitions, lane batches)
-                                                        GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#23 CudfCrossJoin, build copy, batch)
+                                                        GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#23 CudfNestedLoopJoin, build, batch)
                                                           GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#14 CudfCoalescePartitions, lane batches)
-                                                            GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#13 CudfCrossJoin, build copy, batch)
+                                                            GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#13 CudfNestedLoopJoin, build, batch)
                                                               GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
                                                                 GpuMergePartitions: none
                                                                   GpuProject: calling_lanes=4, per batch: execute_node(#2 CudfProject, batch)
@@ -19971,35 +19971,35 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
 budget=2147483648, accumulators=9937393870, certain=0
 GpuUnload: estimated_max_resident_size=225475344
   GpuProject: estimated_max_resident_size=225475345
-    GpuCrossJoin: estimated_max_resident_size=619286860
+    GpuNestedLoopJoin: estimated_max_resident_size=619286860
       GpuCoalesceAllBatches: estimated_max_resident_size=570319992
-        GpuCrossJoin: estimated_max_resident_size=570319992
+        GpuNestedLoopJoin: estimated_max_resident_size=570319992
           GpuCoalesceAllBatches: estimated_max_resident_size=521353124
-            GpuCrossJoin: estimated_max_resident_size=521353124
+            GpuNestedLoopJoin: estimated_max_resident_size=521353124
               GpuCoalesceAllBatches: estimated_max_resident_size=495429488
-                GpuCrossJoin: estimated_max_resident_size=495429488
+                GpuNestedLoopJoin: estimated_max_resident_size=495429488
                   GpuCoalesceAllBatches: estimated_max_resident_size=446462620
-                    GpuCrossJoin: estimated_max_resident_size=446462620
+                    GpuNestedLoopJoin: estimated_max_resident_size=446462620
                       GpuCoalesceAllBatches: estimated_max_resident_size=397495752
-                        GpuCrossJoin: estimated_max_resident_size=397495752
+                        GpuNestedLoopJoin: estimated_max_resident_size=397495752
                           GpuCoalesceAllBatches: estimated_max_resident_size=371572116
-                            GpuCrossJoin: estimated_max_resident_size=371572116
+                            GpuNestedLoopJoin: estimated_max_resident_size=371572116
                               GpuCoalesceAllBatches: estimated_max_resident_size=322605248
-                                GpuCrossJoin: estimated_max_resident_size=322605248
+                                GpuNestedLoopJoin: estimated_max_resident_size=322605248
                                   GpuCoalesceAllBatches: estimated_max_resident_size=273638380
-                                    GpuCrossJoin: estimated_max_resident_size=273638380
+                                    GpuNestedLoopJoin: estimated_max_resident_size=273638380
                                       GpuCoalesceAllBatches: estimated_max_resident_size=247714744
-                                        GpuCrossJoin: estimated_max_resident_size=247714744
+                                        GpuNestedLoopJoin: estimated_max_resident_size=247714744
                                           GpuCoalesceAllBatches: estimated_max_resident_size=198747876
-                                            GpuCrossJoin: estimated_max_resident_size=198747876
+                                            GpuNestedLoopJoin: estimated_max_resident_size=198747876
                                               GpuCoalesceAllBatches: estimated_max_resident_size=149781008
-                                                GpuCrossJoin: estimated_max_resident_size=149781008
+                                                GpuNestedLoopJoin: estimated_max_resident_size=149781008
                                                   GpuCoalesceAllBatches: estimated_max_resident_size=123857372
-                                                    GpuCrossJoin: estimated_max_resident_size=123857372
+                                                    GpuNestedLoopJoin: estimated_max_resident_size=123857372
                                                       GpuCoalesceAllBatches: estimated_max_resident_size=74890504
-                                                        GpuCrossJoin: estimated_max_resident_size=74890504
+                                                        GpuNestedLoopJoin: estimated_max_resident_size=74890504
                                                           GpuCoalesceAllBatches: estimated_max_resident_size=25923636
-                                                            GpuCrossJoin: estimated_max_resident_size=25923671
+                                                            GpuNestedLoopJoin: estimated_max_resident_size=25923671
                                                               GpuCoalesceAllBatches: estimated_max_resident_size=35
                                                                 GpuMergePartitions: estimated_max_resident_size=33
                                                                   GpuProject: estimated_max_resident_size=132

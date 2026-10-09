@@ -11,9 +11,9 @@ use crate::plan::Batching;
 use crate::plan::KeyDistribution;
 use crate::plan::PlanAgg;
 use crate::plan::PlanError;
+use crate::plan::capability;
 use crate::plan::{BinaryOp, Expr};
 use crate::plan::{GpuNode, RowInterval};
-use crate::plan::{NestedLoopJoinType, capability};
 use crate::plan::{NodeRef, as_node_ref};
 
 /// Plain DataFusion planning at tp1 over the committed minimal dataset — the engine
@@ -416,7 +416,7 @@ async fn a_non_equi_predicate_becomes_a_nested_loop_join() {
     let NodeRef::NestedLoopJoin(join) = as_node_ref(descend(tree.as_ref(), 2)) else {
         panic!("expected a nested-loop join");
     };
-    assert_eq!(join.join_type, NestedLoopJoinType::Inner);
+    assert_eq!(join.join_type, datafusion::common::JoinType::Inner);
     assert!(matches!(join.filter, Expr::Binary { .. }));
     validate_all(tree.as_ref());
 }
@@ -712,6 +712,68 @@ async fn a_window_function_is_refused_at_plan_time() {
     let err = refused("SELECT sum(n_regionkey) OVER () FROM nation").await;
     assert!(
         matches!(&err, PlanError::Unsupported(what) if what.contains("#143")),
+        "{err}"
+    );
+}
+
+/// A nested loop with no predicate over two scans, at whatever join type. Hand-built: no
+/// sql over this dataset reaches the shape for anything but Inner, and the point of the
+/// rule is what the other eight do.
+async fn predicate_free_nested_loop(
+    join_type: datafusion::common::JoinType,
+) -> Arc<dyn ExecutionPlan> {
+    use datafusion::physical_plan::joins::NestedLoopJoinExec;
+    let build = plan_at("SELECT r_regionkey FROM region", 4).await;
+    let probe = plan_at("SELECT c_nationkey FROM customer", 4).await;
+    Arc::new(
+        NestedLoopJoinExec::try_new(build, probe, None, &join_type, None)
+            .expect("a predicate-free nested loop"),
+    )
+}
+
+#[tokio::test]
+async fn a_predicate_free_left_nested_loop_is_not_a_cross_join() {
+    // Only Inner is a cross join by another name. A Left owes its unmatched build rows
+    // padded, which a cross join never emits — so the predicate becomes `true` and the node
+    // stays a nested loop. tpcds q9 pairs one-row aggregates this way, fifteen times.
+    use datafusion::common::JoinType;
+    use datafusion::common::ScalarValue;
+    let tree = translate_at_tp4(&predicate_free_nested_loop(JoinType::Left).await, 0);
+    let NodeRef::NestedLoopJoin(join) = as_node_ref(descend(tree.as_ref(), 1)) else {
+        panic!("expected a nested-loop join: {}", shape(tree.as_ref()));
+    };
+    assert_eq!(join.join_type, JoinType::Left);
+    assert_eq!(join.filter, Expr::Literal(ScalarValue::Boolean(Some(true))));
+    assert!(join.filter_columns.is_empty(), "{:?}", join.filter_columns);
+    validate_all(tree.as_ref());
+}
+
+#[tokio::test]
+async fn a_predicate_free_inner_nested_loop_merges_its_probe() {
+    // A cross join reads its probe as one stream, so the lanes are merged here rather than
+    // left for a node above to discover (design §4.1); today's arm does not merge.
+    use datafusion::common::JoinType;
+    let tree = translate_at_tp4(&predicate_free_nested_loop(JoinType::Inner).await, 0);
+    assert_eq!(
+        shape(tree.as_ref()),
+        "Unload(CrossJoin(CoalesceAllBatches(MergePartitions(LoadParquet)), MergePartitions(LoadParquet)))",
+        "{}",
+        shape(tree.as_ref())
+    );
+    validate_all(tree.as_ref());
+}
+
+// #160 — the executor rejects anything but Inner and Left, so a type switch that accepts
+// every JoinType does not make the rest run. Task 9 lifts this and flips the test.
+#[tokio::test]
+async fn bug_a_predicate_free_outer_nested_loop_is_refused() {
+    use datafusion::common::JoinType;
+    let plan = predicate_free_nested_loop(JoinType::Right).await;
+    let err = Translator::new(4, Batching::Off)
+        .translate(&plan)
+        .expect_err("this shape should not plan");
+    assert!(
+        matches!(&err, PlanError::Unsupported(what) if what.contains("#160")),
         "{err}"
     );
 }

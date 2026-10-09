@@ -400,3 +400,132 @@ Suggested row, after "`NOT IN` as SQL means it":
 
 The nine-way table itself is `plan::tests::joins::every_join_type_says_which_side_may_drop_a_null_key`,
 so that row's count moves from 23 to 24.
+
+#### Round 1, plan task 5 — a predicate-free nested loop is a cross join only when Inner
+
+Rust only; no device cycle. Wider in the tree than in the plan: a field type on a plan node
+changed, so every consumer moved with it.
+
+**What shipped.** `GpuNestedLoopJoin.join_type` is now DataFusion's `JoinType`, and
+`NestedLoopJoinType` is **deleted here rather than in task 15** — see below.
+`planner/translator/nodes.rs`'s `nested_loop_join` keeps the node for every type but Inner,
+joining over `Expr::Literal(Boolean(true))` with no filter columns, and the Inner arm now
+merges its probe. Three new cases in `planner/translator/tests.rs`, one in
+`planner/tests/null_analysis.rs`.
+
+**Every site the type change touched, and the one left alone.**
+
+| site | what it became |
+|---|---|
+| `plan/mod.rs` | the field, the constructor parameter, and `NestedLoopJoinType` gone |
+| `plan/join.rs` validation | `check_projection(self.join_type, …)` direct; the Left single-batch rule on `JoinType::Left` |
+| `wire/join.rs` | the build-handle rule keeps Inner/Left and returns a `PlanError` naming #160 for the rest; the fb mapping now calls the existing `wire_join_type`, which was already total over the nine |
+| `executor/cpu_backend/join.rs` | `&node.join_type` straight into `NestedLoopJoinExec::try_new` — the conversion match is gone |
+| `planner/nullability.rs` | the arm now shares the hash join's rule, below |
+| `plan_text/node_text.rs` | **not touched**: it renders `{:?}`, and both enums print `Inner`/`Left` identically, so no golden moved from the rename |
+| `executor/gpu_backend/backend.rs` | **not touched**: it routes on the node kind and never reads the type |
+| five rust-only test files | mechanical; `wire/tests.rs`'s two-arm match gained a panicking fallback |
+| `tests/gpu_tests/nested_cases.rs` | mechanical, **and not compiled** — see the risk note |
+
+**`NestedLoopJoinType` is deleted now, not in task 15.** After the switch nothing referenced
+it, so the alternatives were a dead-code warning or an `#[allow(dead_code)]` whose only reason
+is "a later task removes it" — process history in a comment, which `coding-style.md` forbids.
+Task 15's cleanup list has one fewer item. This is a smaller change than the plan expects, not
+a larger one.
+
+**The nullability arm became a shared rule, after my own tooling tripped over the duplicate.**
+Converting the arm to nine types made its body byte-identical to the hash join's arm —
+`joined_can_be_null(type, build, probe)` then narrow by projection. A mutation I aimed at the
+nested-loop arm landed on the hash join's instead, because `str.replace(…, 1)` takes the first
+match and the two blocks were the same text; I noticed only because the query that went red
+(tpch q15) has no nested loop in it. That is `coding-style.md`'s "a reader that stops at the
+first match", in a throwaway script, and the fix is not a better script: both arms now call one
+`join_output_can_be_null`, so there is one copy of the rule and nothing ambiguous to patch.
+
+That episode also found a real gap: with the arm bypassed entirely, **nothing in the suite went
+red** — no corpus query has a nested-loop join whose type or projection changes the answer. Closed
+with `null_analysis.rs`'s `a_nested_loop_join_pads_the_side_its_type_drops_and_then_projects`, a
+hand-built projected Left nested loop over two not-nullable sources, which asserts `[true, false]`
+and returns the 4-wide unpadded vector under the bypass. The old arm also ignored the projection;
+`NodeRef::CrossJoin` still does, which is harmless today — a wrongly-read flag can only skip a
+#137 filter (skew, not a wrong answer) or add one that removes nothing — and is not this task's.
+
+**Which golden kinds moved.**
+
+| kind | files | sections | change |
+|---|---|---|---|
+| `*.plans.txt` tpcds, all five modes | 5 | q9 | 15 joins × 3 sections |
+| `*.plans.txt` pbench, all five modes | 5 | scalar-subquery-cross | 4 joins × 3 sections |
+| `*.plans.txt` tpch | 0 | — | no predicate-free nested loop |
+| `*-mini.cpu.txt` tpcds tp1/tp4 ×5 | 5 | q9 | `GpuCrossJoin` 27→12, `GpuNestedLoopJoin` 3→18 |
+| `*-mini.cpu.txt` pbench tp1 ×2 | 2 | scalar-subquery-cross | `GpuCrossJoin` 5→1, nested loop 0→4 |
+| `*-mini.cost.txt` | **0** | — | cost is bytes, and no byte moved |
+| `*.result.txt` | **0** | — | the answers did not move |
+| `recipe-payloads.txt` | **0** | — | neither query is in the payload subset |
+
+Every changed line in every `.plans.txt` is a `GpuCrossJoin` → `GpuNestedLoopJoin` line, in the
+tree, the recipe (`CudfCrossJoin, build copy` → `CudfNestedLoopJoin, build`) and the memory
+section. Checked by grepping the whole plan-golden diff for anything that is not one of those two
+node names: nothing. No seq renumbered, no figure changed, no `IS NOT NULL` moved.
+
+**Two things the plan and the dispatch got wrong.**
+- **pbench's `scalar-subquery-cross` moves too**, which the dispatch asked to hear about before
+  the commit. It is the same shape as q9 — DataFusion plans a scalar subquery as a predicate-free
+  `Left` nested loop, and the query is four of them chained. Its name says cross because that is
+  what the engine used to make of it. `every_pbench_join_plans_as_its_spec_says` asserted
+  `GpuCrossJoin` for it; corrected, with the reason, in the same shape as the `not-not-in` row's
+  existing correction. The query name is now mildly misleading, and renaming it would move its
+  golden sections, its registry row, its corpus declaration and `gen.sql` — out of scope here.
+- **The cost goldens do not move.** The dispatch expected them to; `--cost-diff --base 4ef0e714`
+  reports 703 compared, 0 changed, 0 regressions. The change is a node name and a build-handle
+  rule, and the cost model prices bytes out per node.
+
+**One `.cpu.txt` change that is not just a node name, as asked.** q9's and
+`scalar-subquery-cross`'s `batch_rows` go from `[[1]]` to `[[1,0]]`: the cpu's Left
+`NestedLoopJoinExec` emits the matched rows and then the unmatched-build pass, two batches per
+call, where `CrossJoinExec` emitted one. Not new behaviour — the `nested-loop-left-join` golden
+has carried `batch_rows=[[50,1]]` all along — and not an answer change, since `.result.txt` did
+not move and the extra batch holds no rows. It is #220's shape (the cpu answers several batches
+per call) arriving at two more queries, and task 8's interim adapter folds it back into one.
+The device's `CudfNestedLoopJoin{Left}` is one call and one batch, so the two engines differ in
+batch structure here; q9's and `scalar-subquery-cross`'s gpu cells are all disabled today, so
+nothing compares them yet.
+
+**Red-green evidence. Seven mutations, every one reverted and the revert read off `git diff`.**
+- Red before: the Left case planned as `GpuCrossJoin`; the Inner case left its probe unmerged.
+- predicate-free Left treated as Inner: 11 failed —
+  `a_predicate_free_left_nested_loop_is_not_a_cross_join` and every pbench and tpcds plan golden.
+- the Inner arm not merging its probe: **1 failed**, the targeted case alone. No golden moves,
+  because no corpus query has a multi-lane probe under a predicate-free Inner nested loop — so
+  that case is the only guard the merge has.
+- the #160 refusal removed: 9 failed, including the `bug_` pin, `join_capability`'s and
+  `join_refusals`' existing refusal cases and pbench's five goldens.
+- the Left build handle copied instead of handed over: 17 failed, including
+  `wire::tests::a_nested_loop_join_copies_its_build_side_only_where_the_probe_streams`, every
+  plan golden and the payload golden.
+- the nullability arm ignoring the join type: 1 failed,
+  `join_capability::an_outer_join_makes_its_padded_side_nullable_for_the_join_above_it`.
+- the shared rule dropping its projection narrowing: 9 failed, tpch q15 among them — the hash
+  join's half of that rule is load-bearing on today's corpus.
+- the nested-loop arm bypassing the shared rule: **nothing red** before the new
+  `null_analysis.rs` case, 1 failed after it.
+- Green after: 727 passed, 2 ignored, 0 failed.
+
+**One risk I cannot retire: `tests/gpu_tests/nested_cases.rs` is edited and not compiled.**
+`--features gpu` makes `peacockdb-ffi` build the C++ side through cmake and needs `CUDF_ROOT`,
+which exists only on nebius-gpu, so there is no local way to typecheck the gpu rung — not even
+with a separate `CARGO_TARGET_DIR`. The edit is mechanical (an import, eleven enum paths, a
+signature, and one match that gained a panicking fallback) and the diff is in the round's record
+to be read, but the first thing task 7's device build does is prove or disprove it.
+
+**Pre-existing, not mine, and worth somebody's attention:**
+`planner/tests/plan_goldens.rs` is 1,113 lines, over `coding-style.md`'s 1,000-line cap. It was
+1,110 at task 3's commit and over the cap before this chain began — the coordinator's three-line
+comment in task 2 is the only thing either of us added. Splitting it is a refactor this task's
+restriction does not cover; task 10 is the round that touches the test files.
+
+**build-test.md counts (coordinator's file).** `--lib` moves 725 → 729 cases:
+`planner::translator`'s module unit block gains 3 and "Null analysis rules" goes 8 → 9. No new
+row.
+
+

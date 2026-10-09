@@ -48,7 +48,7 @@ fn a_join_filter_column_mapped_to_the_wrong_side_is_caught_at_plan_time() {
     let join = GpuNestedLoopJoin::new(
         build,
         probe,
-        NestedLoopJoinType::Inner,
+        datafusion::common::JoinType::Inner,
         filter,
         mapping,
         None,
@@ -256,7 +256,7 @@ fn a_left_nested_loop_join_streaming_its_probe_names_the_node_that_fixes_it() {
     let join = GpuNestedLoopJoin::new(
         Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
         Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
-        NestedLoopJoinType::Left,
+        datafusion::common::JoinType::Left,
         Expr::binary(
             Expr::column(0, "k"),
             BinaryOp::Lt,

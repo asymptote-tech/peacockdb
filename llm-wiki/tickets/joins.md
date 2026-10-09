@@ -356,7 +356,11 @@ The difference usually surfaces higher up, at the aggregate over the join. A per
 makes one partial per chunk, so the merge above it takes more rows on the cpu. `tpcds/q93`: the
 cpu's Right join emits 36 batches for one probe batch, and the merge's `in_rows` reads `[[7486]]`
 against the device's `[[7169]]`. A keyless one reads `[[34]]` against `[[1]]` (`tpcds/q96`), and
-`tpcds/q38` reads `[[12446]]` against `[[11788]]`. This was filed as #185, "the merge counts its
+`tpcds/q38` reads `[[12446]]` against `[[11788]]`. A Left nested loop over `true` does the same
+thing for its own reason: DataFusion's `NestedLoopJoinExec` emits the matched rows, then the
+unmatched-build pass, so `batch_rows` reads `[[n,0]]` where the device's one call reads `[[n]]`.
+join-backend's task 5 moved `tpcds/q9` and `pbench/scalar-subquery-cross` onto that path.
+This was filed as #185, "the merge counts its
 own output", because the golden comparison (`line_difference`, `golden_text.rs`) prints only the
 first differing line, and the merge renders above the join. `in_rows` is the driver's sum over the
 batches a node takes, the same code for both engines. These were the first cells where the device
@@ -365,7 +369,9 @@ completed a plan and only the golden caught the difference.
 **Corpus queries:** 97 registry rows carry `220`, its cause at `tp1-single`, where the device gets
 past #152. The first ones seen: `tpcds` q93 q96 q38 q48 q4 q18, `tpch` q3 q4 q14 q15. Plus
 `tpch/hash-join`, `cross-join`, `nested-loop-left-join`, `anti-join` and `semi-join`, and the ten
-pbench rows its device cycle measured here. Every device cell through a join lands here once #152 clears.
+pbench rows its device cycle measured here. `tpcds/q9` and `pbench/scalar-subquery-cross` joined
+them in join-backend's task 5, on the nested-loop shape above. Every device cell through a join
+lands here once #152 clears.
 
 **Fix proposed:** on the cpu. `declared` in `cpu_backend/join.rs` returns one batch: each chunk
 through `declared_as`, then `concat_batches`. No chunks gives `RecordBatch::new_empty(schema)`,

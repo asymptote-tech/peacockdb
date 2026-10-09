@@ -737,7 +737,10 @@ const PBENCH_JOINS: &[(&str, &str)] = &[
     ("nl-projection", "GpuNestedLoopJoin: join_type=Inner"),
     ("like-column-pattern", "GpuNestedLoopJoin: join_type=Inner"),
     ("cross-projection", "GpuCrossJoin"),
-    ("scalar-subquery-cross", "GpuCrossJoin"),
+    // The name says cross, but DataFusion plans a scalar subquery as a predicate-free LEFT
+    // join, and only an Inner is a cross join by another name — a Left owes its preserved
+    // side rows a cross join never emits. tpcds q9 is fifteen of the same shape.
+    ("scalar-subquery-cross", "GpuNestedLoopJoin: join_type=Left"),
 ];
 
 #[test]

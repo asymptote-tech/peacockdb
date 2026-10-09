@@ -18,7 +18,7 @@ use crate::plan::{
     GpuLimit, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin, GpuProject, GpuSort,
     GpuUnion, GpuUnload, NodeRef, as_node_ref, category_of,
 };
-use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
+use crate::plan::{JoinFilterColumn, JoinSide};
 use datafusion::common::JoinType;
 
 /// A stub input with a layout stated, since a join's two sides differ in exactly that.
@@ -113,7 +113,7 @@ fn every_kind() -> Vec<Box<dyn GpuNode>> {
         Box::new(GpuNestedLoopJoin::new(
             one_batch(),
             one_batch(),
-            NestedLoopJoinType::Inner,
+            JoinType::Inner,
             Expr::binary(
                 Expr::column(0, "v"),
                 BinaryOp::Gt,

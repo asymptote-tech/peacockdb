@@ -666,14 +666,6 @@ impl GpuAggregateBatches {
     }
 }
 
-/// DataFusion's join type, restricted to what a nested-loop join can run: the C++ rejects
-/// anything else outright.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NestedLoopJoinType {
-    Inner,
-    Left,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum JoinSide {
     Build,
@@ -724,7 +716,7 @@ impl GpuCrossJoin {
 #[derive(Debug)]
 pub(crate) struct GpuNestedLoopJoin {
     kind: NodeKind,
-    pub(crate) join_type: NestedLoopJoinType,
+    pub(crate) join_type: JoinType,
     pub(crate) filter: Expr,
     /// One entry per column the filter's own schema has, in its order.
     pub(crate) filter_columns: Vec<JoinFilterColumn>,
@@ -741,7 +733,7 @@ impl GpuNestedLoopJoin {
     pub(crate) fn new(
         build: Box<dyn GpuNode>,
         probe: Box<dyn GpuNode>,
-        join_type: NestedLoopJoinType,
+        join_type: JoinType,
         filter: Expr,
         filter_columns: Vec<JoinFilterColumn>,
         projection: Option<Vec<u32>>,

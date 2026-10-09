@@ -8,11 +8,12 @@ use std::sync::Arc;
 
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::common::JoinType;
 
 use super::script::{Outcome, Script, each_answers, run_both};
 use crate::plan::{
     BatchLayout, BinaryOp, Expr, GpuCrossJoin, GpuNestedLoopJoin, GpuNode, JoinFilterColumn,
-    JoinSide, NestedLoopJoinType, Schema,
+    JoinSide, Schema,
 };
 use crate::tests::compare::{Order, assert_same};
 use crate::tests::given::Given;
@@ -123,14 +124,15 @@ fn decimal_residual() -> (Expr, Vec<JoinFilterColumn>) {
 /// Inner streams its probe; Left takes one batch, since a predicate join has no keys for
 /// the finish trick to accumulate.
 fn nested_with(
-    join_type: NestedLoopJoinType,
+    join_type: JoinType,
     predicate: (Expr, Vec<JoinFilterColumn>),
     projection: Option<Vec<u32>>,
 ) -> GpuNestedLoopJoin {
     let (filter, filter_columns) = predicate;
     let (pads_probe, probe_batches) = match join_type {
-        NestedLoopJoinType::Inner => (false, BatchLayout::MultipleBatches),
-        NestedLoopJoinType::Left => (true, BatchLayout::SingleBatch),
+        JoinType::Inner => (false, BatchLayout::MultipleBatches),
+        JoinType::Left => (true, BatchLayout::SingleBatch),
+        other => panic!("the harness builds Inner and Left nested loops, not {other:?}"),
     };
     let output = output(joined(pads_probe), &projection);
     GpuNestedLoopJoin::new(
@@ -144,16 +146,16 @@ fn nested_with(
     )
 }
 
-fn nested(join_type: NestedLoopJoinType, projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
+fn nested(join_type: JoinType, projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
     nested_with(join_type, residual(), projection)
 }
 
 pub(crate) fn inner(projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
-    nested(NestedLoopJoinType::Inner, projection)
+    nested(JoinType::Inner, projection)
 }
 
 pub(crate) fn left(projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
-    nested(NestedLoopJoinType::Left, projection)
+    nested(JoinType::Left, projection)
 }
 
 fn script(build: Option<RecordBatch>, probe: Vec<RecordBatch>) -> Script {
@@ -400,7 +402,7 @@ operator_case! {
 operator_case! {
     GpuNestedLoopJoin,
     fn an_inner_nested_loop_join_with_a_decimal_predicate_agrees() {
-        let node = nested_with(NestedLoopJoinType::Inner, decimal_residual(), None);
+        let node = nested_with(JoinType::Inner, decimal_residual(), None);
         run_both(&node, one_probe()).same(Order::Any);
     }
 }
@@ -410,10 +412,10 @@ operator_case! {
 operator_case! {
     GpuNestedLoopJoin,
     fn bug_an_inner_nested_loop_join_with_a_decimal_predicate_and_a_projection_is_dropped_on_the_cpu() {
-        let node = nested_with(NestedLoopJoinType::Inner, decimal_residual(), Some(vec![13, 4, 8]));
+        let node = nested_with(JoinType::Inner, decimal_residual(), Some(vec![13, 4, 8]));
         let outcome = run_both(&node, one_probe());
         cpu_refuses_with(&outcome, THREE_OF_SIXTEEN);
-        let unprojected = nested_with(NestedLoopJoinType::Inner, decimal_residual(), None);
+        let unprojected = nested_with(JoinType::Inner, decimal_residual(), None);
         assert_same(
             &cpu_projected(&unprojected, one_probe(), &[13, 4, 8]),
             outcome.gpu.as_ref().expect("the device answers"),
@@ -427,7 +429,7 @@ operator_case! {
 operator_case! {
     GpuNestedLoopJoin,
     fn bug_a_left_nested_loop_join_with_a_decimal_predicate_is_refused_on_the_device() {
-        let node = nested_with(NestedLoopJoinType::Left, decimal_residual(), None);
+        let node = nested_with(JoinType::Left, decimal_residual(), None);
         gpu_refuses_with(&run_both(&node, one_probe()), INNER_ONLY);
     }
 }
@@ -436,7 +438,7 @@ operator_case! {
 operator_case! {
     GpuNestedLoopJoin,
     fn bug_a_left_nested_loop_join_with_a_decimal_predicate_and_a_projection_is_refused_on_both() {
-        let node = nested_with(NestedLoopJoinType::Left, decimal_residual(), Some(vec![13, 4, 8]));
+        let node = nested_with(JoinType::Left, decimal_residual(), Some(vec![13, 4, 8]));
         let outcome = run_both(&node, one_probe());
         let cpu = &outcome.cpu.as_ref().expect_err("the cpu drops the projection").message;
         assert!(cpu.contains(THREE_OF_SIXTEEN), "{cpu}");
@@ -450,7 +452,7 @@ operator_case! {
 operator_case! {
     GpuNestedLoopJoin,
     fn an_inner_nested_loop_join_with_a_decimal_predicate_over_an_empty_build_answers_nothing() {
-        let node = nested_with(NestedLoopJoinType::Inner, decimal_residual(), None);
+        let node = nested_with(JoinType::Inner, decimal_residual(), None);
         run_both(&node, empty_build()).same(Order::Any);
     }
 }
@@ -458,7 +460,7 @@ operator_case! {
 operator_case! {
     GpuNestedLoopJoin,
     fn an_inner_nested_loop_join_with_a_decimal_predicate_over_an_empty_probe_answers_nothing() {
-        let node = nested_with(NestedLoopJoinType::Inner, decimal_residual(), None);
+        let node = nested_with(JoinType::Inner, decimal_residual(), None);
         run_both(&node, empty_probe()).same(Order::Any);
     }
 }

@@ -18,7 +18,7 @@ use crate::plan::ScanMetadata;
 use crate::plan::Schema;
 use crate::plan::{
     AggregateBody, GpuAggregate, GpuFilter, GpuLimit, GpuLoadParquet, GpuMergePartitions,
-    GpuProject, GpuSort, GpuUnion,
+    GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion,
 };
 use crate::plan::{BinaryOp, Expr, NamedExpr};
 use crate::plan::{GpuNode, RowInterval};
@@ -202,4 +202,24 @@ fn a_filter_that_projects_answers_for_the_columns_it_keeps() {
         one_column(),
     );
     assert_eq!(can_be_null(&filter), vec![false]);
+}
+
+#[test]
+fn a_nested_loop_join_pads_the_side_its_type_drops_and_then_projects() {
+    // Hand-built because no corpus query makes the difference visible: a Left nested loop
+    // pads its probe, and the projection's ordinals index the padded table rather than
+    // either side, so reading them off the unpadded concatenation reads the wrong columns.
+    let join = GpuNestedLoopJoin::new(
+        source(&[false, false]),
+        source(&[false, false]),
+        datafusion::common::JoinType::Left,
+        Expr::Literal(ScalarValue::Boolean(Some(true))),
+        Vec::new(),
+        Some(vec![2, 0]),
+        Schema::new(Arc::new(ArrowSchema::new(vec![
+            Field::new("p0", DataType::Int64, true),
+            Field::new("b0", DataType::Int64, true),
+        ]))),
+    );
+    assert_eq!(can_be_null(&join), vec![true, false]);
 }

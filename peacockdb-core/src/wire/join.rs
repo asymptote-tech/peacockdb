@@ -22,9 +22,7 @@ use crate::plan::Expr;
 use crate::plan::PlanError;
 use crate::plan::Schema;
 use crate::plan::{GpuHashJoin, GpuNestedLoopJoin};
-use crate::plan::{
-    JoinFilterColumn, JoinSide, NestedLoopJoinType, finish_join_type, per_call_join_type,
-};
+use crate::plan::{JoinFilterColumn, JoinSide, finish_join_type, per_call_join_type};
 
 pub(crate) fn hash_join(
     node: &GpuHashJoin,
@@ -346,8 +344,14 @@ pub(crate) fn nested_loop_join(
     writer: &mut Writer,
 ) -> Result<Option<Recipe>, PlanError> {
     let build = match node.join_type {
-        NestedLoopJoinType::Inner => Input::BuildSideCopy,
-        NestedLoopJoinType::Left => Input::BuildSide,
+        JoinType::Inner => Input::BuildSideCopy,
+        JoinType::Left => Input::BuildSide,
+        // The planner refuses the rest (#160), so there is no handle rule to pick here.
+        other => {
+            return Err(PlanError::Unsupported(format!(
+                "nested-loop join type {other:?} has no build-handle rule (#160)"
+            )));
+        }
     };
     let seq = writer.node(2, |b, kids| {
         let filter = write_expr(b, &node.filter)?;
@@ -361,10 +365,7 @@ pub(crate) fn nested_loop_join(
         let join = fb::CudfNestedLoopJoin::create(
             b,
             &fb::CudfNestedLoopJoinArgs {
-                join_type: match node.join_type {
-                    NestedLoopJoinType::Inner => fb::JoinType::Inner,
-                    NestedLoopJoinType::Left => fb::JoinType::Left,
-                },
+                join_type: wire_join_type(node.join_type),
                 filter: Some(filter),
                 filter_columns: Some(columns),
                 left: Some(kids[0]),

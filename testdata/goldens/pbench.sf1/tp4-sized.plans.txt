@@ -794,13 +794,13 @@ GpuUnload: estimated_max_resident_size=65000
 == scalar-subquery-cross
 GpuUnload
   GpuProject: exprs=[CASE WHEN count(*)@0 > 100 THEN avg(fact.f_amount)@1 ELSE avg(fact.f_amount)@2 END as b1, count(*)@3 as b2], lanes=1, batches=multiple, schema=[b1:Decimal128(19,6), b2:Int64]
-    GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6), avg(fact.f_amount):Decimal128(19,6), count(*):Int64]
+    GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6), avg(fact.f_amount):Decimal128(19,6), count(*):Int64]
       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6), avg(fact.f_amount):Decimal128(19,6)]
-        GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6), avg(fact.f_amount):Decimal128(19,6)]
+        GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6), avg(fact.f_amount):Decimal128(19,6)]
           GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6)]
-            GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6)]
+            GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6)]
               GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64]
-                GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64]
+                GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64]
                   GpuCoalesceAllBatches: lanes=1, batches=single, schema=[]
                     GpuMergePartitions: lanes=1, batches=multiple, schema=[]
                       GpuProject: exprs=[], lanes=4, batches=multiple, schema=[]
@@ -835,13 +835,13 @@ GpuUnload
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=1, per batch: execute_node(#45 CudfProject, batch)
-    GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#44 CudfCrossJoin, build copy, batch)
+    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#44 CudfNestedLoopJoin, build, batch)
       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#34 CudfCoalescePartitions, lane batches)
-        GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#33 CudfCrossJoin, build copy, batch)
+        GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#33 CudfNestedLoopJoin, build, batch)
           GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#24 CudfCoalescePartitions, lane batches)
-            GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#23 CudfCrossJoin, build copy, batch)
+            GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#23 CudfNestedLoopJoin, build, batch)
               GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#14 CudfCoalescePartitions, lane batches)
-                GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#13 CudfCrossJoin, build copy, batch)
+                GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#13 CudfNestedLoopJoin, build, batch)
                   GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
                     GpuMergePartitions: none
                       GpuProject: calling_lanes=4, per batch: execute_node(#2 CudfProject, batch)
@@ -877,13 +877,13 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
 budget=2147483648, accumulators=5236016, certain=0
 GpuUnload: estimated_max_resident_size=430000
   GpuProject: estimated_max_resident_size=430000
-    GpuCrossJoin: estimated_max_resident_size=878000
+    GpuNestedLoopJoin: estimated_max_resident_size=878000
       GpuCoalesceAllBatches: estimated_max_resident_size=860000
-        GpuCrossJoin: estimated_max_resident_size=860000
+        GpuNestedLoopJoin: estimated_max_resident_size=860000
           GpuCoalesceAllBatches: estimated_max_resident_size=520000
-            GpuCrossJoin: estimated_max_resident_size=520000
+            GpuNestedLoopJoin: estimated_max_resident_size=520000
               GpuCoalesceAllBatches: estimated_max_resident_size=180000
-                GpuCrossJoin: estimated_max_resident_size=180008
+                GpuNestedLoopJoin: estimated_max_resident_size=180008
                   GpuCoalesceAllBatches: estimated_max_resident_size=8
                     GpuMergePartitions: estimated_max_resident_size=11
                       GpuProject: estimated_max_resident_size=44

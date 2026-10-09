@@ -839,22 +839,44 @@ this earlier turns tpcds q9's five cpu cells — on today — red until then.
 - Produces: `GpuNestedLoopJoin.join_type: datafusion::common::JoinType` (replacing
   `NestedLoopJoinType`, deleted in task 15); `GpuNestedLoopJoin::new(build, probe, join_type, filter: Expr, filter_columns, projection, schema)`.
 
-- [ ] **Step 1: The failing tests:** tpcds q9's 15 predicate-free `Left` joins plan as
+- [x] **Step 1: The failing tests.** In `planner/translator/tests.rs`, over a hand-built
+  predicate-free `NestedLoopJoinExec` per join type, since no sql over `tpch.minimal` reaches
+  the shape for anything but Inner: `a_predicate_free_left_nested_loop_is_not_a_cross_join`,
+  `a_predicate_free_inner_nested_loop_merges_its_probe` and
+  `bug_a_predicate_free_outer_nested_loop_is_refused`. tpcds q9 is pinned by its plan golden
+  rather than by a case of its own — `translator/tests.rs` reads `tpch.minimal` only, and its
+  header says each case comes from the smallest plan that shows the rule.
+  Original text: tpcds q9's 15 predicate-free `Left` joins plan as
   `GpuNestedLoopJoin{Left, filter=true}` (not `GpuCrossJoin`); `tiny LEFT JOIN empty ON true`
   (pbench `outer-on-true-empty`, planned `Right` by DataFusion) is refused with `#160` until task
   9 — a `bug_` pin, `bug_a_predicate_free_outer_nested_loop_is_refused` (#160), flipped in Task 9
   Step 1 to `a_predicate_free_outer_nested_loop_pads_its_preserved_side`; an Inner predicate-free
   nested loop is still `GpuCrossJoin`.
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3:** In `nested_loop_join`, `let Some(filter) = join.filter() else { … }` becomes:
+- [x] **Step 2: Run red.** The type assertion is a compile error (the field is still
+  `NestedLoopJoinType`); with it written against today's type, 2 of 3 fail — the Left case
+  plans as `GpuCrossJoin`, the Inner case leaves its probe unmerged. The `bug_` pin passes
+  before and after, which is what a `bug_` pin is.
+- [x] **Step 3:** In `nested_loop_join`, `let Some(filter) = join.filter() else { … }` becomes:
   Inner → `GpuCrossJoin` with **merged** probe (`merged(node(t, join.right())?)` — today's arm
   does not merge, design §4.1); any other type → the nested-loop arm with
   `predicate = Expr::Literal(ScalarValue::Boolean(Some(true)))` and `filter_columns = vec![]`.
   The type switch accepts every `JoinType` but still refuses non-Inner/Left with `#160` until task 9.
-- [ ] **Step 4: Run green**; in the same commit, tpcds q9's plan, cpu per-node and cost goldens
+- [x] **Step 4: Run green**; in the same commit, tpcds q9's plan, cpu per-node and cost goldens
   (its Left nested loops over `true`; the answer, `mini.result.txt`, unchanged). Both engines run a
   Left nested loop over `true` today (the device's AST path, the cpu's `NestedLoopJoinExec`), so q9's
-  cells stay green.
+  cells stay green. Three corrections to this step:
+  - **q9 is not the only query that moves.** pbench's `scalar-subquery-cross` is the same shape —
+    DataFusion plans a scalar subquery as a predicate-free `Left` nested loop — and moves at all
+    five modes, four joins each. `every_pbench_join_plans_as_its_spec_says` claimed it plans as
+    `GpuCrossJoin`; corrected in place, with the reason.
+  - **The cost goldens do not move at all.** `cargo run -q -p cost-report -- --cost-diff` reports
+    703 compared, 0 changed. The cost is derived from bytes out per node, and the change is a node
+    name and a handle rule, not a byte.
+  - **`.cpu.txt` does move, by one batch per call.** The cpu's Left `NestedLoopJoinExec` emits the
+    matched rows and the unmatched-build pass as two batches where `CrossJoinExec` emitted one, so
+    q9's `batch_rows=[[1]]` becomes `[[1,0]]`. That is #220's shape, already visible in the
+    `nested-loop-left-join` golden, and task 8's adapter folds it back. `*.result.txt` does not
+    move, and no cell changes state.
 - [ ] **Step 5: Commit.** `git commit -m "a predicate-free nested loop is a cross join only when Inner"`.
 
 ### Task 6: The join traits, the driver, the mock and the harness

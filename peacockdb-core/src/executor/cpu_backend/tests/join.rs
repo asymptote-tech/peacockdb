@@ -8,7 +8,7 @@
 use super::*;
 use crate::executor::cpu_backend::CpuJoin;
 use crate::plan::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
-use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
+use crate::plan::{JoinFilterColumn, JoinSide};
 use datafusion::common::JoinType;
 
 const DIM: [(i64, &str); 3] = [(1, "a"), (2, "b"), (3, "c")];
@@ -358,7 +358,7 @@ fn a_nested_loop_inner_join_emits_the_pairs_its_predicate_keeps() {
     let node = GpuNestedLoopJoin::new(
         side(&dim_columns(), BatchLayout::SingleBatch),
         side(&fact_columns(), BatchLayout::MultipleBatches),
-        NestedLoopJoinType::Inner,
+        JoinType::Inner,
         filter,
         filter_columns,
         None,
@@ -383,7 +383,7 @@ fn a_nested_loop_left_join_pads_the_build_rows_no_pair_kept() {
     let node = GpuNestedLoopJoin::new(
         side(&dim_columns(), BatchLayout::SingleBatch),
         side(&fact_columns(), BatchLayout::SingleBatch),
-        NestedLoopJoinType::Left,
+        JoinType::Left,
         filter,
         filter_columns,
         None,

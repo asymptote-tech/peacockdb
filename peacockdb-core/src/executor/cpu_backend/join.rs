@@ -31,8 +31,7 @@ use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
 use crate::plan::{
-    JoinSide, NestedLoopJoinType, emits_both_sides, empty_build_answers_nothing, finish_join_type,
-    per_call_join_type,
+    JoinSide, emits_both_sides, empty_build_answers_nothing, finish_join_type, per_call_join_type,
 };
 
 /// What a join does per call, built once. The `Option`s are the capability matrix in the
@@ -128,15 +127,11 @@ impl CpuJoin {
             probe,
             ctx.as_ref(),
         )?;
-        let join_type = match node.join_type {
-            NestedLoopJoinType::Inner => JoinType::Inner,
-            NestedLoopJoinType::Left => JoinType::Left,
-        };
         let join = NestedLoopJoinExec::try_new(
             placeholder(build),
             placeholder(probe),
             Some(filter),
-            &join_type,
+            &node.join_type,
             None,
         )
         .map_err(|error| PlanError::Invalid(format!("GpuNestedLoopJoin: {error}")))?;

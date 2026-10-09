@@ -18,7 +18,7 @@ use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuFilter, GpuHashJoin,
     GpuLimit, GpuNestedLoopJoin,
 };
-use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
+use crate::plan::{JoinFilterColumn, JoinSide};
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::JoinType;
 use datafusion::common::ScalarValue;
@@ -314,8 +314,9 @@ fn a_nested_loop_join_copies_its_build_side_only_where_the_probe_streams() {
     let nested_loop = |join_type| {
         let build = Given::input(BatchLayout::SingleBatch, &["k"]);
         let batches = match join_type {
-            NestedLoopJoinType::Left => BatchLayout::SingleBatch,
-            NestedLoopJoinType::Inner => BatchLayout::MultipleBatches,
+            JoinType::Left => BatchLayout::SingleBatch,
+            JoinType::Inner => BatchLayout::MultipleBatches,
+            other => panic!("the nested loop runs Inner and Left, not {other:?}"),
         };
         let probe = Given::input(batches, &["fk"]);
         GpuNestedLoopJoin::new(
@@ -353,11 +354,11 @@ fn a_nested_loop_join_copies_its_build_side_only_where_the_probe_streams() {
             .clone()
     };
     assert_eq!(
-        inputs_of(NestedLoopJoinType::Inner),
+        inputs_of(JoinType::Inner),
         vec![Input::BuildSideCopy, Input::Batch]
     );
     assert_eq!(
-        inputs_of(NestedLoopJoinType::Left),
+        inputs_of(JoinType::Left),
         vec![Input::BuildSide, Input::Batch],
         "a single-batch probe is one call, so the build side is handed over"
     );

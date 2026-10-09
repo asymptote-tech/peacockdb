@@ -245,27 +245,37 @@ pub(crate) fn can_be_null(node: &dyn GpuNode) -> Vec<bool> {
             aggregate_can_be_null(&aggregate.body, &child(0), width)
         }
 
-        // An outer join null-pads the side it does not preserve. The projection is over the
-        // joined table, so the padding is read there and then narrowed.
-        NodeRef::Join(join) => {
-            let joined = joined_can_be_null(join.join_type, &child(0), &child(1));
-            match &join.projection {
-                Some(kept) => kept.iter().map(|c| nullable_at(&joined, *c)).collect(),
-                None => joined,
-            }
-        }
+        // Which side a type pads is a property of the type, not of how the rows were
+        // paired, so a hash join and a nested loop answer through the same rule.
+        NodeRef::Join(join) => join_output_can_be_null(
+            join.join_type,
+            join.projection.as_ref(),
+            &child(0),
+            &child(1),
+        ),
+        NodeRef::NestedLoopJoin(join) => join_output_can_be_null(
+            join.join_type,
+            join.projection.as_ref(),
+            &child(0),
+            &child(1),
+        ),
         NodeRef::CrossJoin(_) => [child(0), child(1)].concat(),
-        NodeRef::NestedLoopJoin(join) => {
-            use crate::plan::NestedLoopJoinType;
-            let (build, probe) = (child(0), child(1));
-            match join.join_type {
-                NestedLoopJoinType::Inner => [build, probe].concat(),
-                // Left keeps its build rows and pads the probe.
-                NestedLoopJoinType::Left => {
-                    [build, vec![true; probe.len()]].concat()
-                }
-            }
-        }
+    }
+}
+
+/// A join's output: the joined table the type produces, narrowed by the projection that
+/// selects from it. An outer join null-pads the side it does not preserve, and the
+/// projection's ordinals index the padded table rather than either side.
+fn join_output_can_be_null(
+    join_type: JoinType,
+    projection: Option<&Vec<u32>>,
+    build: &[bool],
+    probe: &[bool],
+) -> Vec<bool> {
+    let joined = joined_can_be_null(join_type, build, probe);
+    match projection {
+        Some(kept) => kept.iter().map(|c| nullable_at(&joined, *c)).collect(),
+        None => joined,
     }
 }
 

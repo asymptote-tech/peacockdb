@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
+use datafusion::common::ScalarValue;
 use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::Partitioning;
@@ -35,6 +36,7 @@ use super::scan_mapping::{parquet_table_name, partition, survivor_metadata};
 use crate::plan::BatchLayout;
 use crate::plan::PlanError;
 use crate::plan::Schema;
+use crate::plan::capability;
 use crate::plan::null_key_droppable;
 use crate::plan::{Batching, RowGroupMeta};
 use crate::plan::{BinaryOp, UnaryOp};
@@ -45,7 +47,6 @@ use crate::plan::{
     GpuMergeSortedPartitions, GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion,
 };
 use crate::plan::{GpuNode, RowInterval};
-use crate::plan::{NestedLoopJoinType, capability};
 use crate::planner::nullability::can_be_null;
 
 pub(crate) fn node(
@@ -527,41 +528,41 @@ pub(crate) fn nested_loop_join(
     join: &NestedLoopJoinExec,
 ) -> Result<Box<dyn GpuNode>, PlanError> {
     use datafusion::common::JoinType;
-    let join_type = match join.join_type() {
-        JoinType::Inner => NestedLoopJoinType::Inner,
-        JoinType::Left => NestedLoopJoinType::Left,
-        other => {
-            return Err(PlanError::Unsupported(format!(
-                "nested-loop join type {other:?} — the executor rejects anything but \
-                 Inner and Left (#160)"
+    let join_type = *join.join_type();
+    if !matches!(join_type, JoinType::Inner | JoinType::Left) {
+        return Err(PlanError::Unsupported(format!(
+            "nested-loop join type {join_type:?} — the executor rejects anything but \
+             Inner and Left (#160)"
+        )));
+    }
+    // DataFusion uses a nested-loop join with no predicate where the product itself is
+    // what the query asked for — tpcds q9 pairs one-row aggregates that way. Only an
+    // Inner is a cross join by another name: every other type owes its preserved side
+    // rows a cross join never emits, so it keeps the node and joins over `true`.
+    let (predicate, filter_columns) = match join.filter() {
+        None if join_type == JoinType::Inner => {
+            return Ok(Box::new(GpuCrossJoin::new(
+                build_side(t, join.left())?,
+                merged(node(t, join.right())?),
+                projected(join.projection()),
+                Schema::new(join.schema()),
             )));
         }
-    };
-    // DataFusion uses a nested-loop join with no predicate where the product itself is
-    // what the query asked for — tpcds q9 pairs one-row aggregates that way — and that
-    // is a cross join by any other name.
-    let Some(filter) = join.filter() else {
-        let build = build_side(t, join.left())?;
-        let probe = node(t, join.right())?;
-        return Ok(Box::new(GpuCrossJoin::new(
-            build,
-            probe,
-            projected(join.projection()),
-            Schema::new(join.schema()),
-        )));
+        None => (Expr::Literal(ScalarValue::Boolean(Some(true))), Vec::new()),
+        // The filter is written against a table of its own, so its ordinals travel with
+        // the map that says which side each of them came from.
+        Some(filter) => (
+            translate_expr(filter.expression(), filter.schema())?,
+            filter_column_map(filter)?,
+        ),
     };
     let build = build_side(t, join.left())?;
     let mut probe = merged(node(t, join.right())?);
     // A Left form emits its unmatched build rows in the same pass, so it cannot
     // stream: #136's finish trick accumulates keys and a predicate join has none.
-    if join_type == NestedLoopJoinType::Left && batches(probe.as_ref()) != BatchLayout::SingleBatch
-    {
+    if join_type == JoinType::Left && batches(probe.as_ref()) != BatchLayout::SingleBatch {
         probe = Box::new(GpuCoalesceAllBatches::new(probe));
     }
-    // The filter is written against a table of its own, so its ordinals travel with
-    // the map that says which side each of them came from.
-    let predicate = translate_expr(filter.expression(), filter.schema())?;
-    let filter_columns = filter_column_map(filter)?;
     Ok(Box::new(GpuNestedLoopJoin::new(
         build,
         probe,
