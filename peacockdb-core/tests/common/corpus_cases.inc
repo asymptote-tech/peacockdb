@@ -6,7 +6,8 @@
 //
 // Modes are the five planning modes or'd together, or `none`; every argument is written, so
 // a query's whole coverage reads off the line. The last is the device run's schema validation;
-// a cell red on schema alone says `schema_validation_disabled` with its ticket on the line.
+// a cell red on schema alone says `schema_validation_disabled` with its ticket on the line,
+// naming the modes it excuses where the others stay green.
 // The first twenty are the smallest plans carrying no ticket; the rest of the corpus is T19.
 
 // --- tpch ---------------------------------------------------------------------
@@ -109,17 +110,17 @@ corpus_query!(tpch, 1, q8, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup
 corpus_query!(tpch, 1, q2, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // distinct-companions (#62): a DISTINCT aggregate beside a companion DataFusion's own rewrite
-// declines. rollup-distinct puts one under a grouping set, which no other corpus query does;
-// its tp4 cpu modes are off on #189, as rollup-over-join's are, and its device cells on #65
-// and #189. distinct-functions runs on the device at every mode — the first plan from the
-// lowering a device has run (#262) — under shuffle-stddev's Welford tolerance oracle, its
-// stddev one ULP from the cpu's in two groups, and schema validation off on #225: the outer
-// init's Welford state reaches the device named three times for the alias. DataFusion 45
-// refuses stddev(DISTINCT) and averages a grouped decimal avg(DISTINCT) plainly, so its
-// answer is held by ANSWER_HELD_ELSEWHERE in test_cpu_corpus.rs; DuckDB is to be its oracle
-// once chain J's duckdb-oracle has merged.
+// declines. rollup-distinct puts one under a grouping set; its tp4 cpu modes are off on #189,
+// as rollup-over-join's are, and its device cells on #65 and #189. distinct-functions runs on
+// the device at every mode — the first plan from the lowering a device has run (#262) — under
+// shuffle-stddev's Welford tolerance oracle, its stddev one ULP from the cpu's in two groups.
+// Its mask excuses the three tp4 modes on #225 and only those: the Welford state named three
+// times for the alias is in the outer init, which the tp1 modes fold into their finalizing
+// node and never emit. DataFusion 45 refuses stddev(DISTINCT) and averages a grouped decimal
+// avg(DISTINCT) plainly, so its answer is held by ANSWER_HELD_ELSEWHERE in test_cpu_corpus.rs;
+// DuckDB is to be its oracle once chain J's duckdb-oracle has merged.
 corpus_query!(tpch, 1, rollup_distinct, tp1_single | tp1_rowgroup, none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, distinct_functions, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, data_fusion_disabled, golden_approx_std, schema_validation_disabled); // #225
+corpus_query!(tpch, 1, distinct_functions, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, data_fusion_disabled, golden_approx_std, schema_validation_disabled(tp4_single | tp4_rowgroup | tp4_sized)); // #225
 
 // --- tpcds --------------------------------------------------------------------
 corpus_query!(tpcds, 1, q41, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);

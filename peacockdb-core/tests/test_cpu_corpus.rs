@@ -22,10 +22,10 @@ use peacockdb_core::test_support::{
 /// consumed and dropped here. That is the point of one list: this binary cannot silently
 /// disagree with the other about which query exists.
 macro_rules! corpus_query {
-    ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident $(($($vmode:ident)|+))?) => {
         declare_corpus_query!($dataset, $sf, $query, $cpu_oracle, $gpu_oracle);
     };
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident $(($($vmode:ident)|+))?) => {
         declare_corpus_query!($dataset, $sf, $query, $cpu_oracle, $gpu_oracle);
         $(
             paste::paste! {

@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2373 test cases — Rust 1898, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2379 test cases — Rust 1904, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1220 cases: `--lib` 624, `test_cpu_corpus` 567, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1226 cases: `--lib` 630, `test_cpu_corpus` 567, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -362,6 +362,15 @@ comparator over it: every diverging column in the sink's spelling, a renamed one
 mismatch each a finding, precision and nullability never one; the schema-only IPC stream
 `peacock_handle_schema` answers, decoded with no device
 
+| Schema validation, declared | [test_support::schema_validation::tests](../peacockdb-core/src/test_support/schema_validation/tests.rs) | 6 |
+|---|---|--:|
+
+the last `corpus_query!` argument decoded against the mode being run: the hook on at every
+mode, off at every mode, and off at only the modes a `schema_validation_disabled(…)` mask
+names — plus the three refusals that keep a mask honest, since a misspelled keyword, a mask on
+the enabled form and a mask entry that is not one of the five would each read as a legal line
+and run a cell unvalidated
+
 | Forwarders and row ranges | [interleave_serves_lane_p_from_lane_p_of_every_child](../peacockdb-core/src/executor/forwarder/tests.rs) | 4 |
 |---|---|--:|
 
@@ -440,9 +449,11 @@ release is null-guarded on the executor
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
 device with every batch held to its node's declared schema through the driver's output hook
-(the line's `schema_validation_enabled`; `tpch/shuffle-stddev` and `tpch/distinct-functions` say
-`disabled` against [#225](tickets/corpus-coverage.md#t225), their Welford state columns named for
-the alias), and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`,
+(the line's `schema_validation_enabled`; `tpch/shuffle-stddev` says `disabled` and
+`tpch/distinct-functions` `disabled(tp4_single | tp4_rowgroup | tp4_sized)` against
+[#225](tickets/corpus-coverage.md#t225), whose Welford columns named for the alias sit in a node
+only the tp4 modes emit — the mask is what keeps the hook at the two tp1 cells, where it is
+green), and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`,
 the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden.
 Thirty-one cells today: `tpch/q6`, `tpch/q1`, `tpch/shuffle-additive-avg` and
 `tpch/distinct-functions` at every mode, and
@@ -1245,3 +1256,10 @@ Wall-time runs are manual; the protocol: `PEACOCK_BENCHMARK=1`
   do sleep 15; done'` can never exit: the wrapper's own command line contains the pattern, so
   `pgrep -f` finds the waiter and the loop waits for itself. It ends only when the timeout
   fires. Where a pattern is unavoidable, exclude the waiter's own pid.
+- **A synced source older than the binary built from it.** `rsync -a` preserves mtimes, so
+  pushing the tree over a host-side edit can restore a *younger* file as an *older* one. Cargo
+  then sees nothing newer and skips the rebuild, and the run reports the previous build's
+  behaviour as the current one — a green that belongs to code the host no longer holds. Never
+  edit sources on a remote host; where one has been edited, `touch` the synced files before
+  building. Confirm which binary you are about to trust with `strings` on it when the change is
+  a literal the test reads.

@@ -71,7 +71,8 @@ in `gpu_tests/aggregate_schema_cases.rs`. 2026-09-17: the corpus's schema valida
 
 **Corpus queries:** `tpch/shuffle-stddev` and `tpch/distinct-functions` (schema validation
 only). distinct-functions reaches this at its DISTINCT lowering's outer init, and only at the
-three tp4 modes: at the two tp1 modes that stage finalizes in one node and emits no state.
+three tp4 modes — at the two tp1 modes that stage finalizes in one node and emits no state — so
+its line excuses those three by name and keeps the hook at the other two.
 
 **Fix proposed:** add `state_names: [string]` to `AggregateFuncNode`. `state_funcs` fills it
 from the owner's `positions` in the state schema. `aggregate.cpp`'s Partial and Merge arms name

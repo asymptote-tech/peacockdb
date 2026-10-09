@@ -1072,11 +1072,10 @@ So the other eight held as declared, position 9 among them: the outer init's
 lowering introduces is device-correct.
 
 The two tp1 modes reached the result instead, because at one lane the outer stage is a single
-`GpuAggregate` that inits *and* finalizes, so no state batch is ever emitted. That asymmetry is
-why `schema_validation_disabled` costs something here and is still right: `corpus_cases.inc`'s
-own header says a cell red on schema alone takes that flag with its ticket on the line, and
-`tpch/shuffle-stddev` is the precedent. It comes back on when #225 lands (chain L's
-aggregate-arms).
+`GpuAggregate` that inits *and* finalizes, so no state batch is ever emitted. #225 is therefore
+reachable at three of the five modes, which is what the review round turned into a mode mask —
+see *The mask, and a stale binary* below. The whole line comes back to
+`schema_validation_enabled` when #225 lands (chain L's aggregate-arms).
 
 **Round 2, the answer.** With the hook off, all five modes answered identically, and the one
 cell that differs from the cpu golden is `stddev_distinct_qty`:
@@ -1186,3 +1185,76 @@ its statements are now false: "**#262's rows:** `tpch/distinct-functions` (off a
 modes on `262` alone…)", and its task 4, "**#262, the proof.** A walk test of a two-stage DISTINCT
 at `TWO_LANES`…". distinct-functions is on at all five device modes and #262 now covers q28 and
 `tpch/rollup-distinct` only. `grouping-id-impl.md` carries the same assumption in several places.
+
+### The mask, and a stale binary — review round, 2026-10-09
+
+The round's one real finding: `schema_validation_disabled` was line-wide, but #225 is reachable
+at three of the five modes, so the two tp1 cells were giving up a hook that would be green. The
+last `corpus_query!` argument now takes an optional mode mask, and distinct-functions reads
+`schema_validation_disabled(tp4_single | tp4_rowgroup | tp4_sized)`.
+
+What the two tp1 cells get back is exactly the lowering's new surface, off
+`testdata/goldens/tpch.sf1/tp1-single.plans.txt`: `__distinct_arg:Decimal128(15,2)` as a key
+column, `avg(lineitem.l_extendedprice)$sum:Decimal128(25,2)` in the inner state, and the final
+project's three decimal scales — `sum_distinct_qty:Decimal128(25,2)`,
+`avg_distinct_qty:Decimal128(19,6)`, `avg_price:Decimal128(19,6)`. That matters more than it
+looks, because `golden_approx_std` parses every numeric cell to `f64` and drops its printed
+form, so the result compare constrains no scale at all.
+
+**Where it went.** `is_validated_at` (moved to `test_support/schema_validation.rs`, beside the
+hook it switches, so its tests sit in the rust-only rung rather than behind the FFI gate) decodes
+the keyword and the mask against the mode being run. Six unit tests, written before it existed
+and watched fail: the hook on everywhere, off everywhere, off at only the masked modes, and three
+refusals — a misspelled keyword, a mask on the `enabled` form, and a mask entry that is not one of
+the five. The last is the one that matters: a misspelled mode would otherwise read as "some other
+mode" and leave the hook on at the mode the line meant to excuse.
+
+The gpu macro needed splitting into two arms with a `gpu_cases!` helper. A mask metavariable used
+inside the `$(…)+` over `$gpu` makes `macro_rules` try to zip the two:
+`meta-variable 'gpu' repeats 5 times, but 'vmode' repeats 0 times`. The helper takes the rendered
+string as one `:expr`, so the mask is spelled once per line rather than once per mode. The cpu
+macro drops the argument, so its two arms only needed the optional suffix. `shuffle-stddev`'s bare
+form still parses — `stringify!` renders the masked form with a space before the paren,
+`schema_validation_disabled (tp4_single | …)`, which the decoder trims.
+
+**Two things went red on the way, both worth keeping.**
+
+`test_corpus_goldens` refused a wrapped declaration:
+`corpus_query!(tpch, 1, distinct_functions, …` *does not close*. `test_corpus_goldens/benchmark.rs`
+reads `corpus_cases.inc` as text and needs one declaration per line, which is the file's own
+documented invariant. The line went back to one line, 293 characters. Fix the line, not the guard.
+
+And the device run contradicted the unit tests: with the tp4 mask in the source, the three tp4
+cells were still refused. `strings cpp/install/rust-tests/test_gpu_corpus` showed the staged
+binary carrying `schema_validation_disabled (tp1_single | tp1_rowgroup)` — the previous build's
+mask. **`rsync -a` preserves the source mtime, so a file whose content moves forward and whose
+mtime moves backward does not retrigger cargo.** The cause was editing `corpus_cases.inc` on the
+host for a negative control and then syncing the local copy over it. Two rules out of it: never
+edit sources on the host, and `touch` the synced sources before a build after any host-side edit.
+Confirming the mask with `strings` before trusting a cell run is cheap and is what caught it.
+
+**The red/green pair on the device**, each build's mask confirmed with `strings` first:
+
+| mask | tp1-single, tp1-rowgroup | tp4-single, tp4-rowgroup, tp4-sized |
+|---|---|---|
+| `(tp1_single \| tp1_rowgroup)` — control | pass, hook off | **refused**, hook on, #225's three columns |
+| `(tp4_single \| tp4_rowgroup \| tp4_sized)` — committed | **pass, hook on** | pass, hook off |
+
+So the hook ran under tp1-single and tp1-rowgroup in the committed configuration, and the control
+shows it is installed at exactly the modes the mask does not name — on a device, not only in the
+decoder's tests.
+
+**Counts**, from the last of the three tier runs this round, taken after the final sync with
+the staged binary's mask confirmed first. Device, all six binaries, `TIERDONE rc=0`:
+`test_gpu_corpus` 33 passed,
+`peacockdb_core_gpu_lib gpu_tests::` 536 passed (634 filtered), `test_node_timing` 1,
+`peacock_gpu_benchmarks --skip bench_` 8 (3 filtered), `peacock_gpu_tests` 4,
+`peacock_plan_tests` 56. Local: `--lib` 628 passed / 2 ignored (630 cases, the 6 new ones
+included), `test_cpu_corpus` 567, `test_corpus_goldens` 26, `test_cost_model` 3,
+`test_ci_coverage` 9, `test_module_layout` 17, `--lib -- ffi_tests::` 4, and
+`scripts/cargo-cudf.sh test … --test test_gpu_corpus --features gpu --no-run` clean. No warnings
+on either side.
+
+The two nits: `262` is back on q28's and rollup_distinct's registry rows, which is what
+`grouping-id-impl.md`'s grep for rows naming it reads; and `assert_sorted_str_approx`'s
+"(q14/q39)" parenthetical is gone rather than re-listed, since the declarations are the list.
