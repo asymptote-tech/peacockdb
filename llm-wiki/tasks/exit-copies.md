@@ -71,3 +71,24 @@ with a repeated projection ordinal answers both columns correctly. Every existin
 ## Device workflow
 
 `build-test-shadgpu.sh`, two cycles.
+
+## Completeness signoff (2026-10-09)
+
+Solved under its constraints. **Six of the eleven sites lose their copy, five keep it** — §4's
+prediction — and `join.cpp`'s ten are untouched for the next task. Item 3 landed by a different
+mechanism than the spec named: `project.cpp` assembles its handle through the public fields rather
+than `select`/`with`, because no constructor can rename a kept column, with `register_handle` as
+the shape check. The outcome is identical, repeated ordinals included.
+
+**The nine gtests are the whole of the evidence, and two of them exist because the other seven
+could not fail.** Seven bound an allocation, each against the same cuDF work on the same input
+rather than a formula, and all seven came out exactly equal; all nine were watched red first. The
+two added by the completeness pass bound a *release*, and the run that proved they were needed is
+the argument for them: with both operators deliberately over-retaining, 75 of 77 cases passed —
+every byte bound green at its exact figure — and only these two went red.
+
+**Deferred, by the human host override and not by this task:** the Verification bar's sf40 q6 and
+q19 benchmark before and after. sf40 lives only on shad-gpu, down throughout. So the saving at
+`expr.cpp`'s `ColumnRef` arm — about 46 of the 107 GB q19's lineitem filter moves at sf40 — is
+**never quantified at that scale**, and the gtest table at 122,880 rows stands in for it. That is
+the one gap in this task's evidence. No bandaid applied.

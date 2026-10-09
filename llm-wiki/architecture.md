@@ -946,10 +946,10 @@ semantics change with no ABI change at all.
 fresh table where a move would do ([#154](tickets/corpus-coverage.md#t154)) — for a join with a projection,
 twice over. An engine running a node once per query would pay that once per node; this one pays
 it once per node per *batch*, which is what makes it worth a ticket. Every other operator hands
-its columns over, bar five copies in `aggregate.cpp` that give their reason at the site: filter,
-project and window share their input's owners through `TableResult`,
-the aggregate releases groupby's key tables, and a bare `ColumnRef` evaluates to a view of the
-input's own column rather than a copy of it.
+its columns over, bar five copies in `aggregate.cpp` that give their reason at the site: project
+and window share their input's owners through `TableResult`, a filter's fused projection selects
+from the table it just filtered, the aggregate releases groupby's key tables, and a bare
+`ColumnRef` evaluates to a view of the input's own column rather than a copy of it.
 
 ## Interfaces
 
@@ -1005,20 +1005,20 @@ of its own (below).
 **[`TableResult` / `NodeStats`](../cpp/src/plan_executor.h)** — the two value types every C++
 path returns. A `TableResult` is one `shared_ptr` owner and one `column_view` per column, plus
 the names: two handles may view one column, so a scatter's N partitions are row slices of one
-partitioned table and copy nothing. A column is freed when the last handle viewing it goes, and
-a slice pins its parent column rather than the whole table. Four constructors build every one of
+partitioned table and copy nothing. A column is freed when the last handle viewing it goes, and a
+slice pins its parent column rather than the whole table. Four constructors build every one of
 them — `owning` from a fresh `cudf::table`, `slice`, `select` and `with`
-([`table_result.cpp`](../cpp/src/table_result.cpp)) — and the fields are public, so a consumer
-may assemble one. The check is therefore at the registry rather than in a constructor:
-`register_handle` is the only path to a handle number, and it refuses one of no columns or whose
-names or owners do not number its columns. `owning` refuses the same shapes earlier. Consumers read `view()`; four sites copy on purpose and say
-why — the session's `slice_handle` and sorted-merge fetch, and the limit and sort operators' own
-fetch slices — because a view there would pin the whole batch, which is the memory those copies
-exist to give back. `NodeStats` carries only
-what C++ alone can measure — rows and var-length content bytes, the latter read from a column's
-own first and last offsets so that a slice counts its own rows and not its parent's. The byte
-formula itself lives in Rust (`src/common.rs`) so the two engines cannot drift, and C++ prices
-nothing.
+([`table_result.cpp`](../cpp/src/table_result.cpp)) — or the public fields are pushed one owner,
+column and name at a time, which is what a project mixing kept and computed columns does. The
+check is therefore at the registry rather than in a constructor: `register_handle` is the only
+path to a handle number, and it refuses one of no columns or whose names or owners do not number
+its columns. `owning` refuses the same shapes earlier. Consumers read `view()`; four fetch sites
+copy on purpose and say why — the session's `slice_handle` and sorted-merge fetch, and the limit
+and sort operators' own fetch slices — because a view there would pin the whole batch, which is
+the memory those copies exist to give back. `NodeStats` carries only what C++ alone can measure —
+rows and var-length content bytes, the latter read from a column's own first and last offsets so
+that a slice counts its own rows and not its parent's. The byte formula itself lives in Rust
+(`src/common.rs`) so the two engines cannot drift, and C++ prices nothing.
 
 **What sharing costs.** A lane that does not drain keeps all of the partitioned table alive, not
 just its own rows, which is worse under skew than N copies were. And the driver prices each lane's

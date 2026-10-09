@@ -2784,6 +2784,53 @@ TEST(ExitCopies, AWindowPassesItsInputThroughUncopied) {
   EXPECT_EQ(t.owners[0], input.owners[0]) << "the input's own column, shared";
 }
 
+/// The other half of sharing, which no allocation bound can reach: an output that keeps an
+/// owner it should drop allocates **nothing new**, so every byte bound stays green to the byte
+/// and the corpus stays green because answers do not change. These two measure release, and
+/// they measure different things — one that a dropped column's bytes come back, one that a
+/// shared column is held once.
+TEST(ExitCopies, AFiltersUnselectedColumnIsFreedWithTheIntermediate) {
+  // Both calls filter the same two columns of the same row group. Only the one that drops
+  // c_name may give its bytes back, so the wider call is the bound and the dropped column's
+  // own size — measured on this very column — is the margin.
+  peacock::TableResult both;
+  auto whole = customer_filter_call({0, 1}, &both);
+  ASSERT_EQ(both.num_columns(), 2);
+  auto dropped = allocated_by([&] { auto copy = std::make_unique<cudf::column>(both.columns[1]); });
+  ASSERT_GT(dropped.total, 0);
+  auto narrowed = customer_filter_call({0}, nullptr);
+  std::cout << "[exit-copies] filter release whole net " << whole.net << " narrowed net "
+            << narrowed.net << " dropped column " << dropped.total << "\n";
+  EXPECT_LT(narrowed.net, whole.net - dropped.total / 2)
+      << "the unselected column was retained: " << narrowed.net << " against " << whole.net;
+}
+
+TEST(ExitCopies, AProjectHoldsItsSharedColumnOnceAndDropsTheRest) {
+  // nation's four columns in, one out. The shared owner must be held exactly once — the input
+  // handle is moved out of the registry and erased inside the call, and the input's own
+  // TableResult dies before it returns — and the three unprojected columns go with it.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto scan_node = nation_scan_node(fbb);
+  auto exprs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 1)});
+  auto aliases = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<flatbuffers::String>>{fbb.CreateString("name")});
+  auto proj = fb::CreateCudfProject(fbb, exprs, aliases, scan_node);
+  auto buf = finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfProject, proj.Union()));
+  peacock::NodeSession session(buf.data(), buf.size());
+  uint64_t counts[1] = {1}, in = 0, out = 0;
+  size_t produced = 0;
+  auto scan = allocated_by(
+      [&] { session.execute_node(0, nullptr, nullptr, 0, &in, 1, &produced, nullptr); });
+  auto got =
+      allocated_by([&] { session.execute_node(1, &in, counts, 1, &out, 1, &produced, nullptr); });
+  const auto& t = session.table_for(out);
+  ASSERT_EQ(t.num_columns(), 1);
+  std::cout << "[exit-copies] project release scan net " << scan.net << " call net " << got.net
+            << " holders " << t.owners[0].use_count() << "\n";
+  EXPECT_EQ(t.owners[0].use_count(), 1) << "the input handle is gone, so this is the only holder";
+  EXPECT_LT(got.net, 0) << "the three unprojected columns were retained: net " << got.net;
+}
+
 /// `GROUP BY c_custkey` with one count over customer's key. Every key is distinct, so
 /// groupby's key table is as large as the input's column and a copy of it shows.
 static std::vector<uint8_t> customer_count_by_key_plan(flatbuffers::FlatBufferBuilder& fbb) {

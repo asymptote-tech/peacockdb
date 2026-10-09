@@ -313,3 +313,91 @@ aggregate 5 874 832 = 5 874 832. `build-test.md` needs no further change.
 
 `git clang-format --diff HEAD` over the four files this round touched proposes nothing; the new
 test lines were formatted over their range as before.
+
+## Round 3 — completeness pass addressed (2026-10-09)
+
+Two items taken. One is the real gap: **nothing on this branch pinned that anything is
+*released*.** All seven earlier cases assert on `Allocated::total` or `== 0` plus owner
+identity; none touched `net` or `peak`. Retention is the one failure mode sharing introduces,
+and it was measured nowhere.
+
+**Why no existing test could have caught it, which is the whole argument for the case.** An
+operator that keeps an owner it should drop allocates **nothing new**. So every byte bound stays
+green *to the byte*, the corpus stays green because answers do not change, and the driver never
+notices because it prices from the plan schema. The only symptom is device residency at a scale
+no test runs. The red run below is the proof: with both operators deliberately over-retaining,
+**75 of 77 cases passed** — including all four byte bounds, at their exact round-1 figures.
+
+### The two new cases, and why both
+
+They are different claims, so both landed.
+
+| case | claim | how it fails |
+|---|---|---|
+| `AFiltersUnselectedColumnIsFreedWithTheIntermediate` | a dropped column's bytes come back | a filter that keeps the intermediate's owners alongside the selection |
+| `AProjectHoldsItsSharedColumnOnceAndDropsTheRest` | a shared column is held exactly once, and the unprojected columns go | anything that retains the input past the call — the handle not erased, the operator stashing it |
+
+The filter case runs the same plan twice over the same row group, `{0,1}` then `{0}`, and bounds
+the narrow call's `net` by the wide call's less the dropped column's own size — measured by
+copying that very column, so no cuDF cost is a constant. The project case takes nation's four
+columns to one and asserts `owners[0].use_count() == 1` and `net < 0`; `use_count` is the idiom
+`Scatter.PartitionsShareTheirTableAndSurviveTheirSiblings` already uses, and the negative `net`
+is `Slice.OwnsItsRowsSoTheBatchCanGo`'s.
+
+The measurement is possible inside the region the cases already wrap, which was checked rather
+than assumed: `execute_node` moves each input handle out of the registry and erases it
+(`node_session.cpp:647-654`), and the `inputs` vector dies when `execute_one` returns — both
+inside `allocated_by`. So the input batch's release is charged to the call.
+
+### Watched red, by an injected over-retention
+
+An allocation bound cannot produce this red, so it was driven by an edit: a function-local
+`static std::vector<TableResult>` in each of `execute_filter` and `execute_project`, stashing the
+intermediate and the input respectively. Reverted immediately after; `grep -rn leak_for_the_red
+cpp/` is empty.
+
+| | red (both operators over-retaining) | green (reverted) |
+|---|---|---|
+| filter: whole `net` / narrowed `net` | 0 / **0** | 0 / **−2 718 736** |
+| filter: dropped column, measured | 2 718 752 | 2 718 752 |
+| project: call `net` / holders | **0** / **2** | **−2 400** / **1** |
+| project: scan `net` | 2 768 | 2 768 |
+| whole binary | **75 passed, 2 failed** | **77 passed, 0 failed** |
+
+The narrowed filter gives back 2 718 736 bytes against a dropped column of 2 718 752 — the
+column and nothing else. The project call gives back 2 400 of the scan's 2 768, which is
+nation's three unprojected columns. Both reds carried the right message:
+`the unselected column was retained: 0 against 0` and `the three unprojected columns were
+retained: net 0`.
+
+### `table_result.cpp`'s file comment was false at the head
+
+It claimed "every handle's table is built by one of these, so the owner-per-column rule and its
+refusals live in one place". `project.cpp` is the first and only site in the tree that assembles
+a handle's table field by field — it reorders and renames, which no constructor has the shape
+for. The comment was true at `ENS-stale-cells` and this branch falsified it. It now says a
+handle's table is built by one of the four **or** assembled through the public fields, naming
+`project.cpp` and the reason, with `register_handle` as the single check either way. That
+matters for the next task: `join-rewrite-design.md` §3.0's `emit` combines columns from two
+gathered tables, which no single constructor can do, and the old wording pointed its author at
+adding a fifth constructor instead of at the hand-assembly route.
+
+### Re-run
+
+The coordinator's bar — a clean build plus the whole `peacock_plan_tests` binary — was right and
+nothing surprised me, so no corpus cycle was spent. The local C++ CPU run is in because the
+build is shared.
+
+| what | command | result |
+|---|---|---|
+| C++ build, local | `cmake --build /tmp/dkb-cppbuild --target peacock_gpu peacock_plan_tests peacock_cpu_tests -j 8` | rc=0, **no warnings** |
+| C++ CPU, local | `/tmp/dkb-cppbuild/peacock_cpu_tests` | **15 passed, 0 failed** |
+| device, red | `peacock_plan_tests`, both leaks injected | **75 passed, 2 failed** — only the two new cases |
+| device, green | `peacock_plan_tests`, leaks reverted | **77 passed, 0 failed** |
+| `--list` | `peacock_plan_tests --gtest_list_tests` | **77** cases, 16 suites |
+
+The four byte figures are unchanged from round 1, to the byte, in both the red and the green run.
+
+**`build-test.md` needs a count move: Plan-executor row 75 → 77, C++ total 114 → 116, grand
+total 3030 → 3032.** Left to the coordinator, who moves the row, the tier heading and the header
+together.
