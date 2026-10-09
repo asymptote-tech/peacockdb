@@ -467,3 +467,48 @@ tasks saw today.
 
 Everything the chain can test is green, so the task is `done` and the human merges. `#281` holds
 the device half, and `#284` holds the refusal round 2 uncovered.
+
+## The GPU half — reopened 2026-10-09
+
+The human reopened this task from `done` to `building`. The cpu work is closed and #186 and #234
+are archived; what is left is the half the chain could not run while it had no GPU, filed as
+[#281](../tickets/corpus-coverage.md#t281): **this task's device changes are built and have run on
+no device.** `scan.cpp` no longer calls `set_num_rows`, since a `GpuLimit` above the scan now
+makes the cut, and the four `bug_` cases in `gpu_tests/source_cases.rs` that the change turned into
+agreement cases — one of the scan, three of a `GpuLimit` over the scan's batches — have never
+executed on a card.
+
+### Second rebase, onto master bc9b6e2f through ENS-distinct-companions
+
+Nine commits replayed. Every conflict was bookkeeping, and two were resolved by ownership rather
+than by side:
+
+- `tasks.md`, once — this branch's own state progression, so the replayed side stands.
+- `testdata/cost-registry.csv`, once, on a hunk holding three rows. `rollup_distinct` and
+  `distinct_functions` are distinct-companions' and took the base's side (that task's GPU half
+  enabled five device cells and moved `262`); `scan_limit` is this task's and took the replayed
+  side. Taking either side wholesale would have reverted one task's work.
+- `build-test.md`'s grand total and its cpu block header, twice each. The replayed side is an
+  absolute computed off the old base, so each was resolved by applying the replayed commit's own
+  delta to the base's numbers. Checked afterwards the way the page says: the rows sum to Rust 1919,
+  C++ 94, Python 381, grand total **2394**, and the cpu block's 1241 is 640 + 569 + 29 + 3.
+
+No code, golden or test conflicted. Nine commits above `ENS-distinct-companions`, this task's own
+count, so the PR diff is still the task.
+
+### What the GPU run must do
+
+`tpch/scan-limit` and `tpch/nested-limits` each have all five device cells off on #281 alone
+(`cost-registry.csv` fields 14-18). Run them; each cell that passes is enabled, each that fails
+gets the ticket it fails on, and #281 narrows rather than closing — empty-sorts owns the rest of
+it. Then the device tier, which is where the four converted `source_cases.rs` cases live.
+
+**One outcome to expect rather than be surprised by.** `nested-limits` carries a cross join
+(`features` says `limit_offset cross_join`), and a `GpuCrossJoin` consumes its build side on the
+first call — [#152](../tickets/joins.md#t152). At `tp1-single` the probe is one batch and that is
+fine; at the row-group and sized modes it may not be, in which case those cells are #152's and not
+this task's. Measure it rather than assuming either way.
+
+`scan-limit`'s device oracle is `live_cpu`, not a golden: its result section is skipped, so the
+device answer is compared against a fresh cpu run at the same mode. `nested-limits` is
+`golden_exact`.
