@@ -182,7 +182,7 @@ A scan's limit becomes a `GpuLimit` above the scan and leaves both readers; the 
 limit's emitted rows rather than its input; scan-limit on at all five modes on both engines, and
 nested-limits off on the device under #285.
 
-### 4. [`empty-sorts.md`](empty-sorts.md) — closes [#205](../archive/archived-tickets.md#t205) — state: completeness approved — PR #174
+### 4. [`empty-sorts.md`](empty-sorts.md) — closes [#205](../archive/archived-tickets.md#t205) — state: done — PR #174
 
 The cpu's accumulating sort and merge answer one zero-row batch over zero-row batches; an empty
 answer keeps its columns; q17's result section gains its header.

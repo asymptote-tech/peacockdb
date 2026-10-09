@@ -374,3 +374,24 @@ lets a zero-fetch limit reach a plan would need that case first.
   on a device as it now does on the cpu. A `fetch` is moot there — `first_rows` over a zero-row
   batch is the identity — and the sort-order claim holds vacuously, `SortOrder` being a plan-level
   declaration that a zero-row batch satisfies.
+
+### 2026-10-09 — done
+
+CI run [37911463584](https://github.com/asymptote-tech/peacockdb/actions/runs/37911463584) on
+`dfae29b7`. Green: changes, both dataset-matrix legs, cpp-build-2502, s3-datasets; deploy-pages
+skipped as a master-push job.
+
+Two jobs red, both the cases the board says not to wait on.
+
+**cost-report** — the gate, reporting exactly what the human pre-accepted and nothing more: *2
+regressions*, `tpcds.sf1/q17` at tp1-rowgroup-mini and tp1-single-mini, the +24 bytes
+`## For the human` predicted from the local run. No third regression and nothing moved downward,
+which is also the check on rule 2: q17's three tp4 sections, where the driver's answer *is* the
+whole answer, did not move a byte, so the synthesized batch never reached `emitted`.
+
+**GPU Tests** — `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out`, at
+the rsync step, for the fourth time today. The host is unreachable, so no pool was built: not
+[#178](../tickets/testinfra.md#t178) and not this branch.
+
+Everything the chain can test is green, so the task is `done` and the human merges. #281 holds
+the device half, including the one case here that is a new assertion rather than a converted pin.
