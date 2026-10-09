@@ -406,3 +406,20 @@ runs neither.
 
 Non-golden files checked while in the page, all accurate: `testdata/goldens` 39 / 116 / 16 +
 `recipe-payloads.txt`, and `duckdb-profiles` / `duckdb-dynfilters` 22 + 99 each.
+
+### 2026-10-09 — done again on the rebased base
+
+CI run [37879061329](https://github.com/asymptote-tech/peacockdb/actions/runs/37879061329) on
+`71c1dac5`, the rebased code head. Every job green — changes, both dataset-matrix legs
+(25.02 and 26.02), cpp-build-2502, cost-report, s3-datasets; deploy-pages skipped as it is a
+master-push job.
+
+GPU Tests failed at its rsync step: `ssh: connect to host llm-gpu0h200.velkerr.ru port 22:
+Connection timed out`. The host is unreachable, so no pool was ever built — this is not
+[#178](../tickets/testinfra.md#t178), which is a contended pool, and not a defect in this
+branch. The same failure, from the same cause, as the run before the rebase. Chain K does not
+wait on that job, so the task is `done`.
+
+The two later commits on this branch are documentation only, so `paths-ignore` and the
+`changes` job both skip them and no run was started for them. The code-carrying run is the
+one above.
