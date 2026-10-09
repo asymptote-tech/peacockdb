@@ -60,11 +60,12 @@ rule still holds. §5's join half, §11 and one §12 bullet are under Joins.
 ### 4. An untested arm for a coalesce that carries a fetch at the root
 
 Folded into [#166](../tickets/df-upgrade.md#t166). `limit_interval` (`planner/translator/common.rs`)
-turns a root `CoalesceBatchesExec` carrying a fetch into the unload's interval, and says DataFusion
-45 never produces that shape; `nodes.rs` handles the same node mid-plan, which is live. The two
-comments are about different positions, so they do not contradict. The arm is right if it is ever
-reached — a coalesce's `fetch` is always a row limit, the batch size being the separate
-`target_batch_size` — so it stays as deliberate defence. What it lacks is a test that reaches it.
+turns a root `CoalesceBatchesExec` carrying a fetch into the unload's interval. **Half fixed
+2026-10-09**: the arm said DataFusion 45 never produces that shape, and limits (chain K) measured
+that it does — at one target partition `select * from lineitem where l_quantity > 0 limit 10;`
+has that coalesce as its root, and the comment is corrected. The open half is the same as before
+and worse for being live: nothing reaches the arm, because above one partition that query is
+refused ([#284](../tickets/complete-coverage.md#t284)) and at one partition no test asks for it.
 
 ### 5 (aggregate half). The executor derives ddof from the aggregate's name
 

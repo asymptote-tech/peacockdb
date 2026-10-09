@@ -122,3 +122,18 @@ original rule, kept for the record.
 Chain K runs without a GPU. No device run, no GPU cycle. This task reaches `done` when every CI
 job but the GPU tests is green; the GPU jobs are not waited on. Its `scan.cpp` edit and the device
 cases are built, not run; #281 holds them.
+
+## Completeness signoff
+
+Solved under its constraints. Both tickets are closed by the shape the page already described
+rather than by the fix either ticket proposed, the corpus cells named turned on, and every line
+of the Tests list exists and tests what it says — one through the DataFusion oracle rather than a
+literal `== 3`, which is stronger. Two readings, 0 blocking and 7 important between them, all
+seven prose or comment: four sentences in `architecture.md`, two ticket bodies in `memory.md`
+whose rebatcher half this branch left with no candidate query, #166's claim that a coalesce arm is
+unreachable (it is reachable, measured), and a `can_be_null` doc that disagreed with `survivors`.
+Shortcuts and deviations, three, each outside the Scope table and each recorded: `Empties::fires`
+now fires every source's first call, which changes every injected-layout run rather than only the
+limited ones; a comment correction in `translator/common.rs`; and the device half — `scan.cpp` and
+four `gpu_tests` cases — built and not run, held by #281 under the chain's no-GPU rule. #284 was
+filed, not fixed: a limit over a filter is refused above one lane, and it predates this branch.

@@ -363,3 +363,84 @@ This also corrects the review's own closing sentence, that anything outside the 
 the review says; what does not follow is that everything outside it is safe. A comment in
 `limit_interval` claiming its `CoalesceBatchesExec` arm is "not reachable from today's planner"
 went with it — it is reachable, and at one target partition it is what makes that query plan.
+
+### 2026-10-09 — completeness pass: 0 blocking, 7 important across the two readings
+
+Neither reading found a defect in the code. Both found prose the branch falsified, and they did
+not overlap — the reviewer on the one sentence that states a *count*, the analyst on three other
+sections and two ticket bodies. That convergence on a class rather than an item is the thing worth
+remembering: this branch's code was right twice over and its paper trail was wrong in seven places.
+
+**Reviewer's one (what is wrong).** `architecture.md`'s *Intervals nest* said two intervals on one
+root-to-leaf path and named `tpch/nested-limits` as the example two sentences later — and the
+branch makes that query carry three, from its own committed golden: the unload's 3..+20 over a
+`GpuLimit` 5..+23 over the part scan's 0..+28. No production consequence — nothing in the code
+caps the depth — but "at most two per path" is a wrong premise for a validator rule or an
+estimator assumption, which is what that page is read for. Rewritten to say three, to name the
+path, and to say explicitly that no rule caps the count. The same stale claim in
+`tests/end_to_end.rs`'s `nested-limits` comment went with it; the sibling comment in
+`end_to_end/limits.rs` had already been updated for exactly this and this one had not.
+
+**Analyst's six (what is missing).**
+
+1. `tickets/memory.md` #182 and #179 both pivot on nested-limits' `part` loader mapping two row
+   groups in one lane at tp4-rowgroup, and the trim made it one. #182's "fix proposed" repointed a
+   test pair at that query; #179's only positive example was that query, and its "1.63x" is
+   literally 1,600,062/983,071, the two-groups-to-one ratio. Both corrected to say the corpus now
+   has **no** candidate for the rebatcher half, so it wants a query written for it rather than one
+   repointed at, and #182's two `#[ignore]`d cases stay ignored until there is one. This is the
+   finding that would have cost a later agent the most: they would have implemented a fix that
+   cannot work.
+2. `tickets/df-upgrade.md` #166 said `limit_interval`'s root-coalesce arm is unreachable on
+   DataFusion 45 and "deliberately defensive". Round 2 measured the opposite, and corrected the
+   code comment but not the ticket or `hacks-audit.md` §4. Both corrected; #166's open half is now
+   "live and still untested", its proposed test is the real query rather than a hand-built node,
+   and it cross-references #284, which is the same arm from above one lane.
+3. `architecture.md`'s limit lowering rule described the trim and not its complement: where
+   DataFusion could not push the cut, there is nothing to trim and the driver's hold is the whole
+   bound. Added, with what the round-2 test measured — 49 groups offered and 1 pulled at the
+   row-group modes, and at the single-batch modes a lane's one batch already being the whole
+   mapping, so the table is read before the limit can be satisfied.
+4. `architecture.md`'s "`CudfLimit` (a limit is a row range on the export)" is now true only
+   root-adjacent; nested-limits alone has three limits driven by `slice_handle`. The parenthetical
+   states the real reason instead: a limit's bounds are runtime values.
+5. `plan/mod.rs`'s `can_be_null` doc said "the surviving row groups", which now means something
+   different from the `survivors` field three lines above it. The invariant was written, four good
+   lines, but a module away in `covering_prefix`. A clause on the field closes it.
+6. The new invariant nobody wrote down: a scan-pushed root-adjacent `LIMIT` returns the same rows
+   at every mode, by construction — one lane, the covering prefix in index order. *Determinism
+   rules* names an unordered `LIMIT` as its example of what may differ across plans, so it gains
+   the exception. The coverage consequence (scan-limit could carry a shared result golden instead
+   of a per-mode `live_cpu` run) is out of Scope and went into the signoff rather than the branch.
+
+Plus one observation the reviewer declined to file: the injector's `emitted` counter now guards a
+state that cannot happen, since `Empties::Sometimes` fires every first call. That is the
+legitimate way to retire a guard — make the property structural — but the comment still described
+the old reachable state. Corrected in place.
+
+#### Checked and found right, so nobody re-checks it
+
+- **`RowInterval::over` is correct for any pair, and unreachable with a non-identity inner.** The
+  reviewer traced DF45's `LimitPushdown`: the scan's limit is always `outer.skip + outer.fetch`
+  from the same requirements that produced the kept node, `CoalescePartitionsExec` has no `fetch`
+  field at all, and both other descent arms clear the pushdown state, so the inner is always
+  `{0, skip+fetch}` and the fold is the identity. One unit test is adequate cover for what is
+  reachable.
+- **The prefix trim is safe for a firmer reason than round 1 gave.** Not "`pushdown_filters` is
+  never enabled" but: a scan carrying a pushed limit can have no predicate at all, because the
+  only thing that gives `ParquetExec` one is a filter DataFusion kept above it, and a limit is
+  never pushed through a filter. With `with_row_groups` and no `RowSelection`, every row of an
+  opened group is returned, so `covering_prefix` cannot come up short.
+- **The `--- memory ---` sections moved correctly**, recomputed figure by figure rather than
+  accepted. The rowgroup modes' estimate *rose* (142 → 229) while the single modes' did not: the
+  old 137 was `983071 × 224/1,600,000`, an artifact of dividing the real batch by the untrimmed
+  row count. All five modes now agree at 229/224/5, which is the signature of a correct move.
+- **The estimator's second pass still addresses the same sources in the same order.**
+  `batching_for_source` is called once per `loader()`, no path reaches both callers for one
+  `ParquetExec`, and the trim depends only on `config.limit` and the parquet metadata — not on the
+  batch size — so it is byte-identical across the two passes.
+- **The cost gate's +228 is exactly accounted**: `cuda_limit_bytes` 187 → 415, where
+  415 = 187 (the 23-row offset limit) + 228 (the new 28-row cut over part) + 0 (region, zero
+  columns). No third regression, five improvements.
+- The estimator does not treat the new node as an accumulator (`NodeRef::Limit` falls to
+  `_ => None`), so it neither truncates the amplification walk nor comes off the budget.

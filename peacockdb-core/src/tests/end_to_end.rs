@@ -382,10 +382,10 @@ end_to_end!(tpcds, q87);
 // drops its empty lane as it should, so the outer is refused by name
 // ([#212](../../../llm-wiki/tickets/joins.md#t212)).
 // injected: tpcds/q2
-// Both row-interval lowerings on one root-to-leaf path — the root-adjacent one becoming
-// the unload's skip/fetch and the mid-plan one a limit over the scan — and the only
-// OFFSETs in either corpus. It is also where the matrix's cross join is covered: what
-// connects the two intervals has to be one, so the cell has no query of its own here.
+// Both row-interval lowerings on one root-to-leaf path, three intervals deep — the
+// unload's 3..+20 over a mid-plan 5..+23 over the part scan's own pushed 0..+28 — and the
+// only OFFSETs in either corpus. It is also where the matrix's cross join is covered: what
+// connects the intervals has to be one, so the cell has no query of its own here.
 // injected: tpch/nested-limits
 // A merge over state worth merging: the Welford init, both merges and the finalize
 // project. Every other aggregate here merges a sum.

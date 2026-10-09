@@ -901,8 +901,10 @@ pub(crate) struct GpuLoadParquet {
     /// the estimator price the batches this mapping actually produces rather than the ones
     /// a budget would have afforded.
     pub(crate) survivors: Vec<RowGroupMeta>,
-    /// Per projected column: whether the surviving row groups hold a NULL in it. The leaf
-    /// of the null analysis, and a statistic rather than a declaration.
+    /// Per projected column: whether the row groups that survived pruning hold a NULL in it.
+    /// Not `survivors`, which a limited scan trims to its covering prefix after this is
+    /// computed — see `covering_prefix`. The leaf of the null analysis, and a statistic
+    /// rather than a declaration.
     pub(crate) can_be_null: Vec<bool>,
 }
 
