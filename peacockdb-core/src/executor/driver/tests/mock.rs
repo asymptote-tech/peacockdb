@@ -68,6 +68,9 @@ pub(crate) enum AccRule {
     CoalesceAll,
     /// Emits each batch as it arrives and holds nothing — what a mid-plan limit does.
     Streaming,
+    /// Emits each batch cut to at most this many rows and holds nothing — a limit letting
+    /// through less than it was handed.
+    Trimming(usize),
     /// Emits this many batches at done, holding nothing. Zero and two are what a join's
     /// build side must never do.
     EmitAtDone(usize),
@@ -113,6 +116,10 @@ pub(crate) struct Script {
     pub sources: Vec<(String, Vec<Vec<Spec>>)>,
     pub exec: ExecRule,
     pub accumulate: AccRule,
+    /// What a `GpuLimit`'s executor does with each batch. Apart from `accumulate`, because a
+    /// limit streams whatever the other accumulators do, and the rows it lets through are
+    /// what the driver judges it by.
+    pub limit: AccRule,
     pub emit: EmitRule,
     pub join: JoinRule,
     /// What every call reports as measured scratch. `None` is an uninstrumented run.
@@ -145,6 +152,7 @@ impl Default for Script {
             sources: Vec::new(),
             exec: ExecRule::Identity,
             accumulate: AccRule::CoalesceAll,
+            limit: AccRule::Streaming,
             emit: EmitRule::RoundRobin,
             join: JoinRule {
                 empty_build_owes_its_probe: false,
@@ -173,10 +181,15 @@ impl Script {
         self
     }
 
-    /// The rule for accumulators that are not limits. A `GpuLimit` streams whatever is set
-    /// here, because that is what a limit is — see `executors_for`.
+    /// The rule for accumulators that are not limits. A `GpuLimit` follows `with_limit`
+    /// instead.
     pub(crate) fn with_accumulator(mut self, accumulate: AccRule) -> Self {
         self.accumulate = accumulate;
+        self
+    }
+
+    pub(crate) fn with_limit(mut self, limit: AccRule) -> Self {
+        self.limit = limit;
         self
     }
 
@@ -411,6 +424,13 @@ impl BatchAccumulatorExecutor<Mock> for MockAcc {
         let stats = self.script.stats();
         Ok(match self.script.accumulate {
             AccRule::Streaming => (vec![batch], stats),
+            AccRule::Trimming(most) => (
+                vec![MockBatch {
+                    rows: batch.rows.min(most),
+                    bytes: batch.bytes,
+                }],
+                stats,
+            ),
             _ => {
                 self.held_batches += 1;
                 self.held_rows += batch.rows;
@@ -424,7 +444,7 @@ impl BatchAccumulatorExecutor<Mock> for MockAcc {
         self.script.check(FailAt::MarkDone)?;
         let stats = self.script.stats();
         let out = match self.script.accumulate {
-            AccRule::Streaming => Vec::new(),
+            AccRule::Streaming | AccRule::Trimming(_) => Vec::new(),
             // Nothing at all where nothing arrived, as the backends answer: a lane the
             // scatter gave no batch is how a join comes to have no build side.
             AccRule::CoalesceAll if self.held_batches == 0 => Vec::new(),
@@ -628,13 +648,13 @@ impl Backend for Mock {
             }
             ExecutorCategory::Exec => NodeExecutors::Exec(MockExec { script }),
             ExecutorCategory::BatchAccumulator => {
-                // Per node, not per category: a limit streams and holds nothing whatever
-                // the script says, which is what lets a test put a coalescing parent above
-                // a streaming limit — the shape a script with one rule for the category
-                // cannot express.
+                // Per node, not per category: a limit follows the script's `limit` rule
+                // whatever the other accumulators do, which is what lets a test put a
+                // coalescing parent above a streaming limit — the shape a script with one
+                // rule for the category cannot express.
                 let mut script = script;
                 if matches!(as_node_ref(node), NodeRef::Limit(_)) {
-                    script.accumulate = AccRule::Streaming;
+                    script.accumulate = script.limit;
                 }
                 NodeExecutors::BatchAccumulator(MockAcc {
                     script,

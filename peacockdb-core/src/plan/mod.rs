@@ -901,11 +901,11 @@ pub(crate) struct GpuLoadParquet {
     /// the estimator price the batches this mapping actually produces rather than the ones
     /// a budget would have afforded.
     pub(crate) survivors: Vec<RowGroupMeta>,
-    /// Per projected column: whether the surviving row groups hold a NULL in it. The leaf
-    /// of the null analysis, and a statistic rather than a declaration.
+    /// Per projected column: whether the row groups that survived pruning hold a NULL in it.
+    /// Not `survivors`, which a limited scan trims to its covering prefix after this is
+    /// computed — see `covering_prefix`. The leaf of the null analysis, and a statistic
+    /// rather than a declaration.
     pub(crate) can_be_null: Vec<bool>,
-    /// A limit pushed into the scan by DataFusion, not one the engine derived.
-    pub(crate) limit: Option<usize>,
 }
 
 impl GpuLoadParquet {
@@ -914,10 +914,9 @@ impl GpuLoadParquet {
         projection: Vec<u32>,
         partition_groups: Vec<Vec<Vec<u32>>>,
         scan: &ScanMetadata,
-        limit: Option<usize>,
         schema: Schema,
     ) -> Self {
-        new_load_parquet(table, projection, partition_groups, scan, limit, schema)
+        new_load_parquet(table, projection, partition_groups, scan, schema)
     }
 }
 
@@ -1044,9 +1043,16 @@ impl RowInterval {
         self.fetch.map(|fetch| self.skip + fetch)
     }
 
-    /// True once no further row could change the answer — what `is_satisfied` asks.
+    /// True once `seen` rows of this node's input leave no later row able to change the
+    /// answer — what an unload is judged by.
     pub(crate) fn satisfied_by(&self, seen: u64) -> bool {
         self.stop().is_some_and(|stop| seen >= stop)
+    }
+
+    /// True once a limit has emitted `fetch` rows, whatever its skip: what it let through is
+    /// counted, never what it was handed. `None` is a pure offset and never satisfies.
+    pub(crate) fn satisfied_by_emitted(&self, emitted: u64) -> bool {
+        self.fetch.is_some_and(|fetch| emitted >= fetch)
     }
 
     /// Which rows of the next batch are wanted, or `None` to release it uncalled. `seen`
@@ -1054,6 +1060,13 @@ impl RowInterval {
     /// across lanes and therefore the driver's rather than an executor's.
     pub(crate) fn range_of(&self, seen: u64, n_rows: u64) -> Option<RowRange> {
         interval::range_of(self, seen, n_rows)
+    }
+
+    /// This interval applied to what `inner` emits, as one interval over `inner`'s input:
+    /// how a root limit and the cut DataFusion pushed into the scan beneath it become the
+    /// unload's one interval.
+    pub(crate) fn over(&self, inner: &RowInterval) -> RowInterval {
+        interval::over(self, inner)
     }
 }
 

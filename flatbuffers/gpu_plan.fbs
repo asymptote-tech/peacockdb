@@ -328,14 +328,17 @@ table CudfScan {
   /// be non-empty and begin with `/`; the consumer rejects relative paths
   /// rather than resolving them against an implicit root.
   file_paths: [string];
-  /// Schema of the files (before projection).
+  /// The node's PROJECTED schema, not the file's: the writer puts the declared columns
+  /// here, by name, because a plan node does not carry the file's own column list.
   file_schema: Schema;
-  /// Column indices to project (empty = all columns).
+  /// Indices into `file_schema`. No writer fills it; C++ reads empty as every column of
+  /// `file_schema`, not of the file — so a node declaring none selects none (#285).
   projection: [uint32];
   /// Number of rows per batch.
   batch_size: uint32;
-  /// Maximum rows to read (0 = unlimited).
-  limit: uint64;
+  /// Never written: a scan's limit is a `GpuLimit` above it, or the unload's interval
+  /// (#186). The slot stays, so no later field moves.
+  limit: uint64 (deprecated);
   /// Surviving parquet row-group indices (single-source case), computed at
   /// serialize time by the SAME DataFusion PruningPredicate that prunes the CPU
   /// path (static predicate on a clustered column). Passed to cuDF read_parquet's

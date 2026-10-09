@@ -600,7 +600,6 @@ fn filter_over_scan_with_an_interval() -> GpuFilter {
         vec![0],
         vec![vec![vec![0]]],
         &scan,
-        None,
         columns_of(&["o_orderdate"]),
     );
     let ninety_days = ScalarValue::IntervalMonthDayNano(Some(

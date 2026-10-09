@@ -179,7 +179,7 @@ Four limits on the number it produces.
 
 | Node | Category | Semantics |
 |---|---|---|
-| `GpuLoadParquet` | Source | reads survivor row groups per the mapping; `next_batch()`; declares a pushed-down limit, which the cpu ignores and the device refuses beside row groups ([#186](tickets/corpus-coverage.md#t186)) |
+| `GpuLoadParquet` | Source | reads survivor row groups per the mapping; `next_batch()`. Carries no limit: one DataFusion pushed into the scan is a `GpuLimit` above it, or the unload's interval, and the survivors are cut to the row groups it needs |
 | `GpuFilter`, `GpuProject` | Exec | 1:1 per batch. A filter also projects, and carries that projection |
 | `GpuSort` | Exec | sorts each batch independently, optional per-batch `fetch`; output `BatchSorted` |
 | `GpuAccumulateBatchesAndSort` | BatchAccumulator | accumulates sorted batches, one `cudf::merge` at done, `fetch` applied — except that the device's merge skips the slice when handed one batch ([#204](tickets/corpus-coverage.md#t204)); one batch out, stream-sorted. Ranged emission is [#138](tickets/optimizer.md#t138) |
@@ -192,7 +192,7 @@ Four limits on the number it produces.
 | `GpuHashJoin` | Join | the capability matrix below |
 | `GpuCrossJoin`, `GpuNestedLoopJoin` | Join | two inputs, both one lane; broadcast variants are [#140](tickets/optimizer.md#t140) |
 | `GpuUnion`, `GpuInterleave` | BatchForwarder | lane relabeling only. Union sums its inputs' lane counts and clears the hash; interleave takes output lane p from lane p of each input and so preserves it |
-| `GpuLimit` | BatchAccumulator, mid-plan only | an interval over a **one-lane** stream; streams and holds nothing |
+| `GpuLimit` | BatchAccumulator, mid-plan only | an interval over a **one-lane** stream; streams and holds nothing; satisfied once it has emitted `fetch` rows |
 | `GpuUnload` | Unload | `GpuBatch` in, `CpuBatch` out, over a row range the driver supplies; carries a root-adjacent limit's interval |
 
 ### The sort decomposition
@@ -437,12 +437,24 @@ A per-batch `GpuLimit` call cannot be correct: the wire node's skip/fetch are fr
 every batch would be truncated to the same bounds and the right bound for the last batch is a
 runtime value no frozen node can carry.
 
-**A scan carrying a pushed-down limit plans one lane and one batch.** Where DataFusion pushes
-the bound into the source it erases the limit node, and it is safe there because its scan is one
-partition. Our lane count is our own decision, so four lanes each honouring `limit=3` would
-answer with twelve rows — and `CudfScan.limit` becomes `set_num_rows` on every scan call, so B
-batches would answer with B × limit. One lane and one batch make the loader's own limit the
-whole answer.
+**A scan carrying a pushed-down limit plans one lane, over the row groups the cut needs, and
+the cut is a node.** DataFusion pushes `skip + fetch` into the scan and, over one partition,
+erases the limit node above it, so the scan's limit can be the whole cut. Rows from several
+lanes have no order a cut could follow, so the scan is one lane, under the mode's own mapping.
+Its survivors are first cut to the shortest prefix whose parquet-metadata row counts reach the
+limit, so a small limit reads one row group at every mode. The cut is a `GpuLimit` directly
+above the scan. With nothing between the scan and the root, it is the unload's interval instead,
+composed with any root limit DataFusion kept for an offset. It slices the batch that straddles
+the cut, and its satisfaction holds the scan. No reader applies a limit.
+
+Where DataFusion could not push the cut into the scan — a join or an aggregate between them —
+there is no cut to trim and the scan maps every surviving row group, so the hold on the satisfied
+limit is the whole of the bound. It bounds calls rather than the first one: measured on the
+aggregate shape, at the row-group modes it stops a 49-group scan after one batch, and at the
+single-batch modes a lane's one batch is already the whole mapping, so the table is read before
+the limit can be satisfied. A filter between them is the third shape and has no hold above one
+lane, because it has no plan: the limit feeds only the sink and the validator refuses it
+([#284](tickets/corpus-coverage.md#t284)).
 
 **Root-adjacent** — feeding only `GpuUnload`, the common case — **there is no limit node**: the
 interval becomes the unload's, which is where it belongs, since a limit over a stream about to
@@ -460,9 +472,14 @@ join would read the whole table to answer for a hundred rows. It streams and hol
 outside the interval a batch is released uncalled, inside it is forwarded untouched, and only
 the two straddling batches are sliced.
 
-**Intervals nest.** Two on one root-to-leaf path are legal, and each counts the stream it is
-handed. DataFusion's `combine_limit` merges the adjacent form, so only a limited subquery under
-a join, or a limit at the root, reaches this layer as two intervals.
+**Intervals nest, and nothing bounds the depth.** Each counts the stream it is handed.
+DataFusion's `combine_limit` merges the adjacent form, so an interval reaches this layer only
+from a limited subquery under a join or under a root limit, or from a scan's pushed cut under the
+limit DataFusion keeps for an offset. One path can carry both: `tpch/nested-limits` runs the
+unload's 3..+20 over a `GpuLimit` 5..+23 over the part scan's own 0..+28, three deep. Where a
+limited scan sits directly under the root, its cut folds into the unload's interval instead of
+becoming a node. No rule caps the count — the validator checks a limit's lane count and its
+parent, the driver counts per node — so a reader must not derive one from the corpus.
 
 ## Joins
 
@@ -695,7 +712,8 @@ changed. A naive rescan survives as a test-only oracle compared pick by pick, si
 incremental schedule that disagrees with it is wrong by definition. A Python model of these
 same rules — the scheduler, both drivers, the accountant, operators over pandas — is
 `scripts/exec_model/`, which is where a rule is cheapest to argue with; build-test.md says what
-it runs.
+it runs. One rule differs: the model still judges a mid-plan limit by its input
+(`partitioned_driver.py`), where the driver now reads what the limit emitted (#234).
 
 The unit that becomes ready is not always an output lane: a `PartitionAccumulator` has one
 output lane and becomes ready one *input* lane at a time, and an emitter reads a single input
@@ -704,7 +722,8 @@ merge's later lanes.
 
 ### Early exit at a limit
 
-A `GpuUnload` carrying a root-adjacent interval is the one node the driver special-cases. Its
+The driver holds the subtree of every satisfied interval. It keeps the count itself for one
+carrier, a `GpuUnload` with a root-adjacent interval. Its
 executor is per lane and the count is across lanes, so the count cannot live in the executor;
 and nothing can signal "done" from below, because satisfaction is a fact about rows that have
 already passed rather than about the next call.
@@ -713,6 +732,11 @@ The driver keeps one row count per such node, summed over every lane, and the no
 once it reaches `skip + fetch`; a pure offset has no such point and is never satisfied. A
 satisfied node makes its **whole subtree** non-runnable, transitively, so the scan stops being
 scheduled and pulls cease through merges and emits alike.
+
+A mid-plan `GpuLimit` is held the same way, but its input is one lane, so its executor keeps the
+only count of it and makes every cut. The driver counts the rows the limit emitted and holds it
+once they reach `fetch`. A second count of its input would be a second computation of one
+decision, free to drift from the first.
 
 That is a join's hold with the direction reversed — a join's lifts when the build completes, a
 limit's never lifts — so the two share a release path that drops every in-flight batch, which is
@@ -807,7 +831,9 @@ pinned.
 
 **These rules pin execution for a given plan, not across plans.** Two plans for one query may
 legitimately return different rows where the SQL does not determine them, which is what an
-unordered `LIMIT` is. Results are compared row-sorted, so emission order is not part of the
+unordered `LIMIT` is — except a limit DataFusion pushed into a scan, where one lane over the
+covering prefix of the row groups makes the rows the same at every mode, batching moving the
+batch boundaries and never which rows. Results are compared row-sorted, so emission order is not part of the
 contract; what must hold is that one plan run twice gives one answer, byte for byte.
 
 ### Zero-row batches change no answer
@@ -849,8 +875,9 @@ the C++ dispatches on, with `GpuPlan` as the root table wrapping them. A `Gpu` n
 `Cudf` is one of the engine's own plan nodes and never crosses.
 
 Three of the fifteen wire kinds have no writer: `CudfCoalesceBatches` (batching is the engine's
-own and needs no node), `CudfLimit` (a limit is a row range on the export) and `CudfWindow` (no
-window function here yet, #143). They stay because the kernels behind them do.
+own and needs no node), `CudfLimit` (a limit's bounds are runtime values: the export takes a row
+range, and a `GpuLimit` slices with `slice_handle`) and `CudfWindow` (no window function here
+yet, #143). They stay because the kernels behind them do.
 
 **Statement order is the wire format**: FlatBufferBuilder is a no-interning bump arena, so
 reordering writes changes bytes even with identical values, and
@@ -917,7 +944,7 @@ field with no consumer reads as a knob (#132).
 
 | Node | What steers it | The cuDF it becomes |
 |---|---|---|
-| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `limit`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `.columns(projected)`, `set_row_groups(...)` and `set_num_rows(limit)` set on `opts` first |
+| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths` and `file_schema`, which carries the node's *projected* columns and not the file's, so `projection` is left empty and C++ reads that as every column of the schema it was given — and a node declaring none selects none ([#285](tickets/corpus-coverage.md#t285)). The row groups every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132); `limit` is deprecated: a scan's limit is a `GpuLimit` or the unload's interval | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `.columns(projected)` and `set_row_groups(...)` set on `opts` first |
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — `cudf::compute_column(tv, predicate)` for the mask, then `cudf::apply_boolean_mask(tv, mask->view())` |
 | [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is a column copy, and LIKE/CASE/scalar functions take `build_column` instead |
 | [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row |
@@ -1164,7 +1191,7 @@ precisely so cuDF cannot infer something the CPU side did not.
 
 | Option | Set at | Value | What the default would do |
 |---|---|---|---|
-| `parquet_reader_options` | [`scan.cpp`](../cpp/src/operators/scan.cpp) | `.columns(projected)`, `set_row_groups(map ∥ pruned)`, `set_num_rows(limit)` | read every column and every row group; the row-group list is also how a partition reads only its own slice |
+| `parquet_reader_options` | [`scan.cpp`](../cpp/src/operators/scan.cpp) | `.columns(projected)`, `set_row_groups(map ∥ pruned)` | read every column and every row group; the row-group list is also how a partition reads only its own slice |
 | `cudf::order`, `cudf::null_order` | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp) | per key from the flat buffers's `asc` / `nulls_first` — both sites map `nulls_first` to `BEFORE` regardless of direction, and cuDF flips a descending key after applying it, so a descending key's nulls land on the wrong end ([#202](tickets/corpus-coverage.md#t202)) | cuDF has no notion of the query's ORDER BY; the two sites must agree or a k-way merge would order differently from a sort |
 | `cudf::null_equality` | [`join.cpp`](../cpp/src/operators/join.cpp) ×9 | see the table below | `EQUAL` — NULL keys match, inventing rows SQL excludes |
 | `cudf::out_of_bounds_policy` | [`join.cpp`](../cpp/src/operators/join.cpp) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
@@ -1194,17 +1221,18 @@ to it.
 | `BinaryExpr`<br>`.out_decimal_precision/scale` | `expr_writer.rs` | the expression's declared output type | the binop output type, and division pre-scales to hit it |
 | `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from the columns it reads, `Merge` merges state into state. A `Partial` over state columns is how the DISTINCT lowering's outer init merges a companion — the merge rule rides in the aggregator, not in the mode. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which cuDF aggregation runs, whether state columns are merged, and whether the result is state or a value — except on the keyless path, where a `stddev` name decides all three whatever the mode and a `var` name has no arm ([#216](tickets/corpus-coverage.md#t216)) |
 | `CudfRepartition.hash_exprs`,<br>`num_partitions` | `node_writer.rs` | the emit node's keys and lane count | key ordinals and N for<br>`spark_hash_partition` |
-| `CudfScan.limit` | `node_writer.rs` | the source's pushed-down limit | `parquet_reader_options::set_num_rows` |
 | `AggregateFuncNode`<br>`.out_decimal_precision/scale` | `aggregate_writer.rs`, at zero | nothing: decomposition means no `avg` reaches a device, so the scale rides the finalize divide's own pair | **nothing** here, deliberately, and the writer says why |
 | `CudfScan.batch_size`,<br>`CudfCoalesceBatches`<br>`.target_batch_size` | nobody | — | **nothing** — no C++ code reads either (#132) |
 | `CudfScan.row_groups`,<br>`.batches` | nobody | — | `set_row_groups`, but no plan reaches it: every load names its own groups per call |
+| `CudfScan.projection` | nobody | — | every column of `file_schema`, which is the node's projected schema — so a node declaring none selects none ([#285](tickets/corpus-coverage.md#t285)) |
 
 Three shapes are worth separating here. Most rows carry a value the GPU must not recompute —
 decimal scales above all, since cuDF derives its own per operation and DataFusion's is what
 the result is compared against. The last three rows are different: a field left at its
 default on purpose; a pair no writer sets and no reader reads, which is the wire-format
-surface #132 is about; and a pair the C++ still reads that no plan fills, because the row
-groups a batch loads are a per-call value and ride the call instead.
+surface #132 is about; and three the C++ still reads that no plan fills — the row groups a batch
+loads are a per-call value and ride the call instead, and an empty `projection` means the whole
+declared schema, which is #285.
 
 ### Join types and NULL key equality
 

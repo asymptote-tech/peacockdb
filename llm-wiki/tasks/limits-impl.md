@@ -18,14 +18,16 @@ through a new `unload_input`. It hands the pushed cut of a scan with nothing abo
 unload, composed with any root limit by `RowInterval::over`. The reason is the validator: it
 refuses a `GpuLimit` feeding only the sink (`plan/validate.rs:40-49`), and the spec puts that cut
 in the unload's interval. In the driver (`executor/driver/partitioned.rs`), `settle_limit` reads
-a new `rows_emitted` for a mid-plan limit and keeps `rows_seen` for the unload alone.
+a new `rows_emitted` for a mid-plan limit and keeps `rows_seen` for the unload alone; it matches
+the two carriers' categories explicitly and refuses any other node carrying an interval, so
+`seed` and `settle_limit` return a `Result`.
 
 **Tech stack:** Rust over DataFusion 45 physical plans, cpu tier (`--features rust-only`);
 FlatBuffers schema; C++ against cuDF 25.02, built and `ctest -L cpu` only; the gpu-feature Rust
 lib built, never run.
 
-**Spec:** [`limits.md`](limits.md). Tickets: [#186](../tickets/corpus-coverage.md#t186),
-[#234](../tickets/corpus-coverage.md#t234), [#281](../tickets/corpus-coverage.md#t281).
+**Spec:** [`limits.md`](limits.md). Tickets: [#186](../archive/archived-tickets.md#t186),
+[#234](../archive/archived-tickets.md#t234), [#281](../tickets/corpus-coverage.md#t281).
 
 ## Global constraints
 
@@ -105,8 +107,9 @@ lib built, never run.
    - The prefix is exact only because the readers return every row of a group they read. Nothing
      filters inside the scan (`pushdown_filters` is off), and DataFusion pushes a limit into a
      scan only with nothing filtering between.
-   - `can_be_null` stays computed over every survivor. A NULL in a group the prefix drops only
-     makes it conservative.
+   - `can_be_null` stays computed over every survivor, so a node's `survivors` and its
+     `can_be_null` describe different group sets. A NULL in a group the prefix drops only makes
+     it conservative, and `covering_prefix`'s doc states the invariant.
    - Task 2's prefix case covers this at every mode.
 3. **A mid-plan limit with a skip.** The driver must compare the rows the limit emitted with
    `fetch`, never with `skip + fetch`. The slip is reusing `satisfied_by` on the new count. The
@@ -157,7 +160,8 @@ satisfied at the same step under either count.
 **Files:**
 - Modify: `peacockdb-core/src/plan/mod.rs` (`impl RowInterval`, ~l.1040-1058)
 - Modify: `peacockdb-core/src/executor/driver/partitioned.rs` (module doc l.1-9, fields
-  ~l.69-73, `new` ~l.173, `run_lane_scoped` ~l.284-360, `settle_limit` ~l.613-625)
+  ~l.69-73, `new` ~l.173, `run_lane_scoped` ~l.284-360, `seed` ~l.218-226,
+  `settle_limit` ~l.625-654)
 - Modify: `peacockdb-core/src/executor/driver/tests/mock.rs` (`AccRule` ~l.65, `Script`
   ~l.111-165, `MockAcc` ~l.408-445, `executors_for` ~l.634-650)
 - Test: `peacockdb-core/src/executor/driver/tests/limit.rs`
@@ -166,7 +170,7 @@ satisfied at the same step under either count.
 - Produces: `RowInterval::satisfied_by_emitted(&self, emitted: u64) -> bool`;
   `Script::with_limit(self, AccRule) -> Script`; `AccRule::Trimming(usize)`.
 
-- [ ] **Step 1: Give the mock's limit a rule of its own.** In `mock.rs`, add a variant on
+- [x] **Step 1: Give the mock's limit a rule of its own.** In `mock.rs`, add a variant on
   `AccRule` after `Streaming`:
 
 ```rust
@@ -214,7 +218,7 @@ satisfied at the same step under either count.
     rule whatever the other accumulators do".
   - guard-checks edits `MockUnload` in this file, not these places. Find each by its text.
 
-- [ ] **Step 2: Write the failing tests** in `limit.rs`, after
+- [x] **Step 2: Write the failing tests** in `limit.rs`, after
   `a_satisfied_limit_reports_done_so_the_node_above_it_can_finish`. The file's import line
   becomes `use super::mock::{AccRule, Script, spec};`.
 
@@ -226,10 +230,11 @@ fn mid_plan(skip: u64, fetch: Option<u64>, rule: AccRule) -> RunReport {
 }
 
 #[test]
-fn a_mid_plan_limit_is_satisfied_by_fetch_rows_emitted_whatever_its_skip() {
-    // The mock forwards each batch whole, so ten rows leave the limit with the first one.
-    // Judged by what it emitted, a limit wanting five is done after one pull; judged by its
-    // input against skip + fetch it would read three batches.
+fn a_mid_plan_limit_is_satisfied_by_fetch_alone_and_not_by_skip_plus_fetch() {
+    // The mock forwards each batch whole and implements no skip, so a real limit executor
+    // would need three pulls here rather than one. The one pull is what tells the driver's
+    // rules apart: by rows emitted a limit wanting five is done with the first batch, by its
+    // input against skip + fetch it reads three.
     let report = mid_plan(25, Some(5), AccRule::Streaming);
     assert!(!report.satisfied.is_empty());
     assert_eq!(
@@ -283,7 +288,7 @@ fn a_mid_plan_limit_of_no_rows_is_satisfied_before_any_pull_whatever_its_skip() 
   - its assert message "once twelve rows had gone past the limit" becomes "once twelve rows had
     left the limit".
 
-- [ ] **Step 3: Run the tests and confirm three fail.**
+- [x] **Step 3: Run the tests and confirm three fail.**
 
 ```bash
 timeout 1200 cargo test --features rust-only -p peacockdb-core --lib -- executor::driver::tests::limit
@@ -296,7 +301,7 @@ timeout 1200 cargo test --features rust-only -p peacockdb-core --lib -- executor
   - `…with_no_fetch…` PASSES. It is the guard against a `None` read as `0`.
   - Every older case PASSES.
 
-- [ ] **Step 4: Add the predicate.** In `plan/mod.rs`, `satisfied_by`'s doc becomes "True once
+- [x] **Step 4: Add the predicate.** In `plan/mod.rs`, `satisfied_by`'s doc becomes "True once
   `seen` rows of this node's input leave no later row able to change the answer — what an
   unload is judged by." After it, add:
 
@@ -308,7 +313,7 @@ timeout 1200 cargo test --features rust-only -p peacockdb-core --lib -- executor
     }
 ```
 
-- [ ] **Step 5: Change the driver.** In `partitioned.rs`, the module doc's last clause, "along
+- [x] **Step 5: Change the driver.** In `partitioned.rs`, the module doc's last clause, "along
   with the one node the driver special-cases, a `GpuUnload` carrying a limit.", becomes:
 
 ```rust
@@ -361,21 +366,31 @@ timeout 1200 cargo test --features rust-only -p peacockdb-core --lib -- executor
     /// unload's input has reached `skip + fetch`, or a mid-plan limit has emitted `fetch`.
     /// It is marked done as it is held, or the hold would stop it reporting and strand its
     /// parent — `LIMIT 0` is the case that forces it.
-    fn settle_limit(&mut self, node: usize) {
+    fn settle_limit(&mut self, node: usize) -> Result<(), StepError> {
         let indexed = &self.index.nodes[node];
         let Some(interval) = indexed.interval else {
-            return;
+            return Ok(());
         };
-        let satisfied = match indexed.category {
+        let (category, lanes, name) = (indexed.category, indexed.lanes, indexed.node.name());
+        let satisfied = match category {
             ExecutorCategory::Unload => interval.satisfied_by(self.rows_seen[node]),
-            // The other interval carrier is a mid-plan limit.
-            _ => interval.satisfied_by_emitted(self.rows_emitted[node]),
+            ExecutorCategory::BatchAccumulator => {
+                interval.satisfied_by_emitted(self.rows_emitted[node])
+            }
+            // The two carriers are judged by different counts, so a third would be judged
+            // by whichever rule it fell into rather than by one written for it.
+            _ => {
+                return Err(StepError::Run(RunError::Protocol(format!(
+                    "{name}: a row interval on neither an unload nor a limit"
+                ))));
+            }
         };
         if !satisfied {
-            return;
+            return Ok(());
         }
         self.scheduler.satisfy(node);
-        self.states[node].out_done = vec![true; indexed.lanes];
+        self.states[node].out_done = vec![true; lanes];
+        Ok(())
     }
 ```
 
@@ -383,7 +398,7 @@ timeout 1200 cargo test --features rust-only -p peacockdb-core --lib -- executor
   `indexed.lanes` into a local first. Check the length with `wc -l
   peacockdb-core/src/executor/driver/partitioned.rs`: it must stay under 1000.
 
-- [ ] **Step 6: Run the driver tests and every corpus query with a mid-plan limit.** The tpcds
+- [x] **Step 6: Run the driver tests and every corpus query with a mid-plan limit.** The tpcds
   six carry `GpuLimit`s at `skip=0, fetch=100`. Under both rules such a limit is satisfied at
   the same step. Running them checks that claim instead of reasoning it.
 
@@ -429,7 +444,7 @@ git commit -m "#234: the driver judges a mid-plan limit by the rows it emitted" 
 - After this task no planned loader carries a limit. It is built with `None` until Task 3
   deletes the field, so plan text already prints no `limit=`.
 
-- [ ] **Step 1: Write the translator tests.** Replace `a_scan_carrying_a_pushed_down_limit_plans_one_lane`
+- [x] **Step 1: Write the translator tests.** Replace `a_scan_carrying_a_pushed_down_limit_plans_one_lane`
   (l.602-614) with:
 
 ```rust
@@ -589,7 +604,7 @@ fn an_interval_over_another_keeps_the_rows_both_keep() {
   `RowInterval`'s fields are `pub(crate)`, so the struct literals compile here; if rustfmt
   breaks them over lines, let it. `queries_dir_for` is `pub` in `test_support`.
 
-- [ ] **Step 2: Write the end-to-end cases** in `tests/end_to_end/limits.rs`. Add two new tests
+- [x] **Step 2: Write the end-to-end cases** in `tests/end_to_end/limits.rs`. Add two new tests
   after the existing one:
 
 ```rust
@@ -721,7 +736,7 @@ async fn a_limited_subquery_under_an_aggregate_counts_only_its_cut_at_every_mode
   its comment. The comment above `let pulled` changes. "the scan under it never reads a second
   one whatever the batching" becomes "and the scan under it maps no second one".
 
-- [ ] **Step 3: Run the tests and confirm they fail.**
+- [x] **Step 3: Run the tests and confirm they fail.**
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- planner::translator::tests tests::end_to_end::limits
@@ -738,7 +753,7 @@ timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- planner:
   - The nested-limits case FAILS at tp1-single, because `limits.len()` is 1.
   - The `over` table PASSES.
 
-- [ ] **Step 4: Add `RowInterval::over`.** In `plan/interval.rs`, the module doc becomes
+- [x] **Step 4: Add `RowInterval::over`.** In `plan/interval.rs`, the module doc becomes
   "[`RowInterval`](super::RowInterval)'s arithmetic: which rows of a batch it wants, and one
   interval over another's output." After `range_of`, add:
 
@@ -767,7 +782,7 @@ pub(crate) fn over(outer: &RowInterval, inner: &RowInterval) -> RowInterval {
     }
 ```
 
-- [ ] **Step 5: Change the translator.** In `nodes.rs`, `source` becomes four functions:
+- [x] **Step 5: Change the translator.** In `nodes.rs`, `source` becomes four functions:
 
 ```rust
 /// A scan, and above it the cut DataFusion pushed into it. The loader is one lane over the
@@ -908,7 +923,7 @@ pub(crate) fn unload_input(
   passes reach the same sources (`planner/pipeline.rs`). Both passes see the trimmed survivors,
   so the first pass sizes the batches the second maps.
 
-- [ ] **Step 6: Run the planner's own tests.**
+- [x] **Step 6: Run the planner's own tests.**
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- planner:: plan_text:: plan:: tests::end_to_end::limits
@@ -921,7 +936,7 @@ timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- planner:
     over nation's scan under the cross join, where DataFusion pushes the root limit into both
     sides; that limit is mid-plan and valid.
 
-- [ ] **Step 7: Regenerate the plan goldens.** First confirm that no other golden has a limited
+- [x] **Step 7: Regenerate the plan goldens.** First confirm that no other golden has a limited
   scan:
 
 ```bash
@@ -1004,7 +1019,7 @@ GpuUnload: skip=3, fetch=20
 
   `grep -c 'GpuLoadParquet.*limit=' testdata/goldens/tpch.sf1/*.plans.txt` prints `0` for each.
 
-- [ ] **Step 8: Regenerate the execution sections.** For a filtered run, merge only and never
+- [x] **Step 8: Regenerate the execution sections.** For a filtered run, merge only and never
   prune (`build-test.md`, Golden files):
 
 ```bash
@@ -1062,7 +1077,7 @@ grep '🔴' /tmp/limits-cost-diff.md
   regression this task did not expect: stop and find it. These goldens are uncommitted at this
   point, which is what the diff reads: the working tree against `$BASE`.
 
-- [ ] **Step 9: Run the tiers that read them.**
+- [x] **Step 9: Run the tiers that read them.**
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib -- planner:: tests::end_to_end
@@ -1107,14 +1122,14 @@ A removal: the compiler names every reader. No golden moves.
 - Produces: `GpuLoadParquet::new(table, projection, partition_groups, scan, schema)`;
   `tests::rebuild::source()` with no argument, and a private `second_source()`.
 
-- [ ] **Step 1: Delete the field.**
+- [x] **Step 1: Delete the field.**
   - `plan/mod.rs`: the `limit` field and its doc; the `limit` parameter of
     `GpuLoadParquet::new` and its forwarding.
   - `plan/source.rs`: the same parameter, and the `limit,` initializer.
   - `nodes.rs`'s `loader`: the `None,`.
   - `plan_text/node_text.rs`: the three-line `if let Some(limit) = load.limit { … }`.
 
-- [ ] **Step 2: Build, and fix every caller the compiler names.**
+- [x] **Step 2: Build, and fix every caller the compiler names.**
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib --no-run 2>&1 | grep -E '^error|-->' | head -40
@@ -1171,7 +1186,7 @@ fn source_named(table: &str) -> Box<dyn GpuNode> {
 
   In `tests/injection.rs`, the two `source(None)` become `source()`.
 
-- [ ] **Step 3: Change the wire.**
+- [x] **Step 3: Change the wire.**
   - In `node_writer.rs`, delete `limit: node.limit.unwrap_or(0) as u64,`.
   - In `fb_text.rs`, delete the `if scan.limit() > 0 { … }` block.
   - In `gpu_plan.fbs`:
@@ -1185,7 +1200,7 @@ fn source_named(table: &str) -> Box<dyn GpuNode> {
   flatc then generates neither the Rust accessor nor the `CudfScanArgs` field, so a reader
   left behind is a compile error.
 
-- [ ] **Step 4: Change the C++.** In `scan.cpp`, delete:
+- [x] **Step 4: Change the C++.** In `scan.cpp`, delete:
 
 ```cpp
   if (scan->limit() > 0) {
@@ -1197,7 +1212,7 @@ fn source_named(table: &str) -> Box<dyn GpuNode> {
   stops at the projection (`grep -n 'CreateCudfScan(' cpp/tests cpp/src -r`), so the generated
   signature losing a later parameter moves none of them.
 
-- [ ] **Step 5: Turn the four `bug_` device cases into agreement cases.** In
+- [x] **Step 5: Turn the four `bug_` device cases into agreement cases.** In
   `tests/gpu_tests/source_cases.rs`:
   - `scan` and `read_both` lose their `limit` parameter: `scan(path, schema)` and
     `read_both(name, batch, rows_per_group)`.
@@ -1302,7 +1317,7 @@ operator_case! {
   `harness_cases.rs`'s imports. These are built in Step 7 and **not run**: chain K has no GPU,
   and #281 runs them.
 
-- [ ] **Step 6: Run the rust-only tiers.**
+- [x] **Step 6: Run the rust-only tiers.**
 
 ```bash
 timeout 1800 cargo test --features rust-only -p peacockdb-core --lib
@@ -1315,7 +1330,7 @@ git status --short testdata
   `recipe-payloads.txt` is unchanged, since a scan's `limit` was `0` and unwritten in every
   payload.
 
-- [ ] **Step 7: Build the C++ and the FFI rungs locally against cuDF 25.02; never run the device.**
+- [x] **Step 7: Build the C++ and the FFI rungs locally against cuDF 25.02; never run the device.**
 
 ```bash
 timeout 3600 scripts/build.sh --configure --build --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12
@@ -1364,7 +1379,7 @@ git commit -m "#186: GpuLoadParquet.limit and set_num_rows go; CudfScan.limit de
   `tp1-rowgroup-mini.{cpu,cost}.txt` (the `scan-limit` sections)
 - Modify: `llm-wiki/tickets/corpus-coverage.md` (#281)
 
-- [ ] **Step 1: Turn on the corpus line.** Use the shape the file's lines have when this task
+- [x] **Step 1: Turn on the corpus line.** Use the shape the file's lines have when this task
   builds. distinct-companions, or chain J's duckdb-oracle, may have added a field; copy a
   neighbour's. scan-limit's line gains the two tp1 modes:
 
@@ -1379,7 +1394,7 @@ corpus_query!(tpch, 1, scan_limit, tp1_single | tp1_rowgroup | tp4_single | tp4_
   - At l.67, "nested-limits on #186 (two intervals on one path, scan-limit's refusal)" becomes
     "nested-limits on #281 (the limits over its scans have not run on a device)".
 
-- [ ] **Step 2: Run the two new cells and confirm they fail on a missing section.**
+- [x] **Step 2: Run the two new cells and confirm they fail on a missing section.**
 
 ```bash
 timeout 2400 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- cpu_tpch_scan_limit
@@ -1388,7 +1403,7 @@ timeout 2400 cargo test --features rust-only -p peacockdb-core --test test_cpu_c
   Expected: `cpu_tpch_scan_limit_tp1_single` and `…_tp1_rowgroup` FAIL, because their sections
   say `skipped: not enabled at this mode`. The tp4 three PASS.
 
-- [ ] **Step 3: Write the two sections.**
+- [x] **Step 3: Write the two sections.**
 
 ```bash
 PCK_UPDATE_SECTIONS=1 timeout 2400 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- cpu_tpch_scan_limit
@@ -1407,7 +1422,7 @@ git status --short testdata/goldens/tpch.sf1/mini.result.txt
   - Its loader maps `partition_groups=[[[0]]]`, with `batch_rows=[[122880]]`.
   - Each new `.cost.txt` section reads `peacockdb_cost=21476312`, as at the tp4 modes.
 
-- [ ] **Step 4: Update the registry.** In `cost-registry.csv`, `scan_limit`'s `cpu_tp1_single`
+- [x] **Step 4: Update the registry.** In `cost-registry.csv`, `scan_limit`'s `cpu_tp1_single`
   and `cpu_tp1_rowgroup` become `enabled`. In both rows, the `186` in `tickets` becomes `281`.
   At master's columns:
 
@@ -1419,7 +1434,7 @@ tpch,1,scan_limit,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enable
   If K or J changed the columns, edit those cells by header name. The gpu cells do not move,
   so the device registry test, which only the GPU job runs, cannot move either.
 
-- [ ] **Step 5: Run the tests and the cost gate.**
+- [x] **Step 5: Run the tests and the cost gate.**
 
 ```bash
 timeout 2400 cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- cpu_tpch_scan_limit cpu_tpch_nested_limits registry
@@ -1439,7 +1454,7 @@ grep '🔴' /tmp/limits-cost-diff.md
   - scan-limit's two new tp1 sections have a `skipped` base, so the gate omits them, never
     counting them as a regression.
 
-- [ ] **Step 6: Update #281.** Its "`scan.cpp` no longer applies a scan's limit, which a
+- [x] **Step 6: Update #281.** Its "`scan.cpp` no longer applies a scan's limit, which a
   `GpuLimit` above the scan now does (#186)" becomes "…which a `GpuLimit` above the scan, or
   the unload's interval where nothing sits between, now does (#186)". It already names
   scan-limit and nested-limits at every device mode.
@@ -1461,7 +1476,7 @@ git commit -m "#186: scan-limit's tp1 cpu cells on; its device cells and nested-
 - Modify: `llm-wiki/tasks/limits-detail.md` (a `## Cost gate` section; create the file if the
   coordinator has not)
 
-- [ ] **Step 1: Update `architecture.md`.** Use short sentences; this page is read for one fact
+- [x] **Step 1: Update `architecture.md`.** Use short sentences; this page is read for one fact
   at a time.
   - **The node table (l.182), `GpuLoadParquet`:** "reads survivor row groups per the mapping;
     `next_batch()`. Carries no limit: one DataFusion pushed into the scan is a `GpuLimit` above
@@ -1514,20 +1529,20 @@ git commit -m "#186: scan-limit's tp1 cpu cells on; its device cells and nested-
   Afterwards, run `grep -n 'pushed\|set_num_rows\|limit=\|special-cases' llm-wiki/architecture.md`.
   Every hit must still be true.
 
-- [ ] **Step 2: Fix the false header comment in nested-limits.sql.** In
+- [x] **Step 2: Fix the false header comment in nested-limits.sql.** In
   `testdata/tpch-queries/nested-limits.sql`, "the outer interval narrows the inner fetch to 23,
   and the scan reads 28 rows in all." becomes "the outer interval narrows the inner fetch to 23,
   and the part scan maps only its first row group, the one holding the 28 rows the cut needs."
   The SQL itself does not change. No golden carries the comment.
 
-- [ ] **Step 3: Update #229** (`tickets/memory.md` ~l.101-106).
+- [x] **Step 3: Update #229** (`tickets/memory.md` ~l.101-106).
   - "#186's fix caps the scan inside `scan.cpp` and leaves this path alone." becomes "Every
     limit DataFusion pushes into a scan below the root reaches it too, as a `GpuLimit` over
     the scan (#186)."
   - Its **Corpus queries** line becomes "`tpch/nested-limits` slices `part(p_partkey)`, an Int64,
     at both of its part-side limits."
 
-- [ ] **Step 4: Update the `build-test.md` counts.** Recount each row this task touches from the
+- [x] **Step 4: Update the `build-test.md` counts.** Recount each row this task touches from the
   code at the branch head. Then set every header the rows sum into, and the grand total, to the
   sums, so the page adds up. This task's deltas, against whatever the base says after
   guard-checks and distinct-companions:
@@ -1550,7 +1565,7 @@ git commit -m "#186: scan-limit's tp1 cpu cells on; its device cells and nested-
   - The driver row's "both limit lowerings by the calls not made" gains "and a mid-plan limit
     judged by the rows it emitted, never its input".
 
-- [ ] **Step 5: Run the full verification bar and the cost gate.**
+- [x] **Step 5: Run the full verification bar and the cost gate.**
 
 ```bash
 timeout 3600 cargo test --features rust-only -p peacockdb-core --lib -- --test-threads=2
@@ -1571,7 +1586,7 @@ cat /tmp/limits-cost-diff.md
   - The cost gate prints `rc=1` with the two 🔴 rows of Task 2 Step 8.
   - The device tier is not run: chain K has no GPU.
 
-- [ ] **Step 6: Record the gate's rows for the human.** Append to `llm-wiki/tasks/limits-detail.md`
+- [x] **Step 6: Record the gate's rows for the human.** Append to `llm-wiki/tasks/limits-detail.md`
   the section below, with the figures as `/tmp/limits-cost-diff.md` printed them. Put every 🔴
   row in the table, and list the 🟢 rows after it:
 
@@ -1602,3 +1617,47 @@ git commit -m "#186, #234: the limit lowering rule and the driver's limit count 
 
   The task's final message names the two 🔴 rows. CI's cost-report job is red on them, and the
   task waits at `completeness approved` until the human accepts them.
+
+## As built — round 1
+
+Every step is done except the five **Commit** steps: this developer does not mutate git state,
+so the work is left in the working tree for the coordinator. Three places where the plan and the
+tree disagreed, all recorded in [`limits-detail.md`](limits-detail.md#round-1-evidence):
+
+- **Task 4's Steps 3 and 4 run in the opposite order.** The `skipped: not enabled at this mode`
+  placeholder is written from `cost-registry.csv`, not from `corpus_cases.inc`, so with the
+  registry still `disabled` a `PCK_UPDATE_SECTIONS=1` run republishes the placeholder and the
+  cell passes against it — green, with the section never written. The registry edit goes first.
+- **`Empties::fires` needed one change** (`tests/injection.rs`, not in the plan's file list).
+  The injected empty-batch stamp is a function of the node's post-order, so the two new
+  `GpuLimit`s moved nested-limits' part source to a stamp under which none of its two calls
+  fired, and `run_and_check`'s `empty_batches() > 0` went red at
+  `tp1-single rebatch=sources/empties=50%`. `fires` now fires every source's first call, which
+  removes the class rather than this instance; the guard was shown red-green afterwards.
+- **`wire/generated.rs`'s line count was already stale.** The comment said 7,336; the base fbs
+  generates 7,268 and this branch's 7,252. Corrected to 7,252.
+
+One caller outside the plan's list: `executor/gpu_backend/gpu_tests/mod.rs:141`, which only the
+`--features gpu --no-run` build can see.
+
+## As built — round 2
+
+Four findings from review round 1, all in files the plan already lists. The round's narrative and
+the evidence are in [`limits-detail.md`](limits-detail.md).
+
+- **I2, a new end-to-end case.** `a_limit_stops_a_scan_that_maps_every_row_group_at_every_mode`
+  (`tests/end_to_end/limits.rs`). The prefix trim removed the branch's only non-mock cover of the
+  driver's subtree hold, so this adds a limit the trim cannot reach: `SELECT count(l_quantity)
+  FROM (SELECT * FROM lineitem WHERE l_quantity > 0 LIMIT 10)`. DataFusion pushes no limit
+  through a `FilterExec`, so the scan carries no cut and the loader maps all 49 row groups at
+  every mode; the hold is the only thing that bounds the read. At the rowgroup modes 49 batches
+  are offered and 1 is pulled. The limit sits under an aggregate rather than at the root because
+  the bare `SELECT * … WHERE … LIMIT 10` is refused at the tp4 modes — see the detail file.
+- **N3, `settle_limit` names its two carriers.** The `_` arm became an explicit
+  `ExecutorCategory::BatchAccumulator`, and anything else carrying an interval is a
+  `RunError::Protocol` naming the node. `settle_limit` and `seed` return `Result`.
+- **N4, one sentence in `covering_prefix`'s doc** saying `can_be_null` stays over the untrimmed
+  survivors and why that is safe.
+- **N8, the mock case renamed** to
+  `a_mid_plan_limit_is_satisfied_by_fetch_alone_and_not_by_skip_plus_fetch`, with the comment
+  saying what the mock's no-skip forwarding does and does not show.

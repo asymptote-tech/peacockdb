@@ -11,14 +11,14 @@ here; the scan-limit divergence in particular is #186 and is not repeated.
 
 Ordered worst first, by what it costs a reader who has to trust the code.
 
-**Pruned 2026-09-28 and 2026-10-08.** Findings fixed since, or made obsolete by later
+**Pruned 2026-09-28, 2026-10-08 and 2026-10-09.** Findings fixed since, or made obsolete by later
 work, are cut; a finding half fixed keeps only its open half. The numbers are the original
 ones, since tickets cite them. Line numbers are the audit's and have drifted; search by
 symbol.
 
 ## Production bugs
 
-Only two things here behave wrongly, and both are narrow.
+One thing here behaves wrongly, and it is narrow.
 
 ### 1. A sliced batch on the device is priced with no string bytes
 
@@ -52,15 +52,6 @@ Honest fix: read the slice's size the way every other batch is read. The ABI has
 scaling the input batch's measured var-length bytes by the row ratio, with the
 approximation named at the site.
 
-### 2. `Some(0)` and `None` are the same scan limit on the wire
-
-`wire/node_writer.rs:93` writes `limit: node.limit.unwrap_or(0)`, and `cpp/src/operators/
-scan.cpp` reads `if (scan->limit() > 0)`. A pushed-down `LIMIT 0` and no limit at all are
-one value.
-
-Recorded in [#186](../tickets/corpus-coverage.md#t186)'s fix. Unreachable: DataFusion's
-`EliminateLimit` turns a literal `LIMIT 0` into an empty relation before any scan exists.
-
 ## Shape problems
 
 Nothing below behaves wrongly today. Each one costs a reader who has to decide whether a
@@ -69,11 +60,12 @@ rule still holds. §5's join half, §11 and one §12 bullet are under Joins.
 ### 4. An untested arm for a coalesce that carries a fetch at the root
 
 Folded into [#166](../tickets/df-upgrade.md#t166). `limit_interval` (`planner/translator/common.rs`)
-turns a root `CoalesceBatchesExec` carrying a fetch into the unload's interval, and says DataFusion
-45 never produces that shape; `nodes.rs` handles the same node mid-plan, which is live. The two
-comments are about different positions, so they do not contradict. The arm is right if it is ever
-reached — a coalesce's `fetch` is always a row limit, the batch size being the separate
-`target_batch_size` — so it stays as deliberate defence. What it lacks is a test that reaches it.
+turns a root `CoalesceBatchesExec` carrying a fetch into the unload's interval. **Half fixed
+2026-10-09**: the arm said DataFusion 45 never produces that shape, and limits (chain K) measured
+that it does — at one target partition `select * from lineitem where l_quantity > 0 limit 10;`
+has that coalesce as its root, and the comment is corrected. The open half is the same as before
+and worse for being live: nothing reaches the arm, because above one partition that query is
+refused ([#284](../tickets/complete-coverage.md#t284)) and at one partition no test asks for it.
 
 ### 5 (aggregate half). The executor derives ddof from the aggregate's name
 
@@ -87,16 +79,6 @@ no ddof field, so the executor re-derives from a string what the planner already
 Antipattern: a model of what another component does where the answer could be read directly.
 
 Fix: send the ddof on the wire for `execute_aggregate` to read rather than parsing the name.
-
-### 8. Two live counters of one mid-plan limit, and nothing comparing them
-
-Ticketed as [#234](../tickets/corpus-coverage.md#t234). The driver keeps its own count
-(`rows_seen`, `driver/partitioned.rs`) and settles the limit from it; `LimitStream` counts the same
-rows again to decide its slice, on both backends. Both are used, and they agree today; nothing
-checks that they do. (The dead `seen()` accessors whose doc claimed the driver read them are
-gone.)
-
-Fix: one count — the driver hands the limit a `RowRange`, as it does an unload.
 
 ### 10. Aggregate name decoding in C++ is wider than the writer, and not exhaustive
 
@@ -133,11 +115,6 @@ rather than in two of four functions.
 ## The tests
 
 ### Tests that would not catch the bug they exist for
-
-**`GpuLoadParquet.limit` was covered on neither backend.** Ticketed as
-[#186](../tickets/corpus-coverage.md#t186). The four `bug_` cases in `gpu_tests/source_cases.rs`
-now pin today's behaviour on both backends; the tests that land with the fix are listed in the
-ticket.
 
 ### Assertions looser than the claim above them
 

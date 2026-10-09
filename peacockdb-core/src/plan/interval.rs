@@ -1,4 +1,5 @@
-//! [`RowInterval`](super::RowInterval)'s range, which is three statements rather than one.
+//! [`RowInterval`](super::RowInterval)'s arithmetic: which rows of a batch it wants, and one
+//! interval over another's output.
 
 use super::RowInterval;
 use crate::executor::RowRange;
@@ -15,4 +16,16 @@ pub(crate) fn range_of(interval: &RowInterval, seen: u64, n_rows: u64) -> Option
         offset: start,
         length: stop - start,
     })
+}
+
+pub(crate) fn over(outer: &RowInterval, inner: &RowInterval) -> RowInterval {
+    // What the inner cut leaves once the outer skip is spent in it; `None` is unbounded.
+    let left = inner.fetch.map(|fetch| fetch.saturating_sub(outer.skip));
+    RowInterval {
+        skip: inner.skip + outer.skip,
+        fetch: match (outer.fetch, left) {
+            (Some(outer), Some(left)) => Some(outer.min(left)),
+            (outer, left) => outer.or(left),
+        },
+    }
 }

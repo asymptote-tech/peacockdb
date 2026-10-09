@@ -1286,7 +1286,8 @@ Details in fix 12.
 
 Production behaviour only — a wrong answer, a crash, a refusal, a leak.
 
-1. **A scan projected to no columns reads a zero-column, zero-row table on the device**
+1. **A scan projected to no columns reads a zero-column, zero-row table on the device** — filed
+   2026-10-09 as #285, measured rather than predicted
    (`cpp/src/operators/scan.cpp:37-52` passes `.columns({})`; cuDF's `_columns` is
    `std::optional` and a present empty list selects nothing), and `cudf::cross_join` refuses
    "Left table is empty" (`cross_join.cu:45`). One ticket with two arms alongside #63's

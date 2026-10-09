@@ -30,10 +30,14 @@ whole lane before emitting one batch — both live at the emit, a rows fact logi
 `nested-loop-join` cannot show it: one batch per lane, so the rebatcher merges one into one, and
 its old 318-byte move was arrow reallocating a single batch.
 
-Fix: repoint the second pair at `tpch/nested-limits` at `tp4-rowgroup` (`MODES[3]`), whose
-`part` loader is `partition_groups=[[[0],[1]]]` — two batches in one lane — and is the plan's peak
-node at 983,071 estimated against 1,600,062 source bytes. Three milliseconds a run. It is already
-in the corpus and in the injected set, so nothing new is declared.
+Fix: the second pair needs a query whose loader maps two batches into one lane, and **the
+corpus no longer has one.** `tpch/nested-limits` was it — `part` mapped
+`partition_groups=[[[0],[1]]]` at `tp4-rowgroup`, 983,071 estimated against 1,600,062 source
+bytes — until limits (chain K, [#186](../archive/archived-tickets.md#t186)) trimmed a limited
+scan's survivors to the prefix the cut needs. That loader is `[[[0]]]` at every mode now, with
+`source_bytes` equal to its estimate, so the rebatcher would merge one into one, which is the
+same reason `nested-loop-join` cannot show it. So this half wants a query written for it rather
+than one repointed at, and the two `#[ignore]`d cases stay ignored until there is one.
 
 T17a's drain half is untouched: a drained lane changes rows per lane, so q16's 104.7 MB against
 77.9 MB stands.
@@ -47,10 +51,12 @@ candidates failed structurally rather than by accident, so this is about the mod
 `GpuCoalesceAllBatches` carries the largest estimate in none of the 120 `--- memory ---`
 sections at `tp4-rowgroup` — `GpuEmitPartitions` in 77, `GpuHashJoin` in 20, `GpuUnload` in 12 —
 so a rebatcher grows a node beside the binding one. `nested-loop-join`'s coalescer is 115 bytes
-against a 2,679-byte join. Of the two queries carrying their largest at a loader,
-`tpch/nested-limits` does move its peak under `Rebatch::AboveSources` (4,915,680 to 8,000,480,
-the 1.63x its goldens predict) while its budget is peak+1 both times: `limit=28` means the
-modelled megabytes are never the transient that binds.
+against a 2,679-byte join. `tpch/nested-limits` was the one positive example — its peak moved
+4,915,680 to 8,000,480 under `Rebatch::AboveSources`, the 1.63x its goldens predicted, which was
+exactly the ratio of its two mapped row groups to one — and limits (chain K) removed it by
+trimming that scan to one row group, so there is nothing left for the rebatcher to coalesce
+there. Its budget was peak+1 both times anyway: the 28-row cut, now a `GpuLimit` rather than the
+loader's own `limit=28`, means the modelled megabytes were never the transient that binds.
 
 A second thing falls out: `boundary()` in `src/tests/end_to_end/accounting.rs` searches upward from
 the observed peak, so a query whose trip is below it reports an untested floor — the trip assert
@@ -99,12 +105,12 @@ content. Every other device batch is priced through `produced()` (`gpu_backend/m
 ABI's `varlen_content_bytes`, but `peacock_executor_slice_handle` reports no stats. So a
 budgeted run can pass a boundary it should trip on, and `peak_bytes` in a golden is low. Holds
 and releases still reconcile, because `Held::of` reads the figure once, which is why nothing
-notices. Found by `reports/hacks-audit.md` (production bug 1). #186's fix caps the scan inside
-`scan.cpp` and leaves this path alone.
+notices. Found by `reports/hacks-audit.md` (production bug 1). Every limit DataFusion pushes into
+a scan below the root reaches it too, as a `GpuLimit` over the scan (#186).
 
-**Corpus queries:** none. The one mid-plan limit, `tpch/nested-limits`, slices `part(p_partkey)`,
-an Int64. Any `LIMIT` subquery over a string column reaches it, e.g. `select count(p_name) from
-(select p_name from part limit 10);` (tpch), unconfirmed.
+**Corpus queries:** `tpch/nested-limits` slices `part(p_partkey)`, an Int64, at both of its
+part-side limits. Any `LIMIT` subquery over a string column reaches it, e.g. `select
+count(p_name) from (select p_name from part limit 10);` (tpch), unconfirmed.
 
 **Fix proposed:** measure the slice the way every other batch is measured: `slice_handle`
 reports `NodeStats` as `execute_node` does, and the slice is priced through `produced()`. That

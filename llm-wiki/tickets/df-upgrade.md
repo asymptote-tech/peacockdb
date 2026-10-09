@@ -94,19 +94,23 @@ reshaped rather than canonized against it. Upstream
 above children that keep only a local one — and its fix landed after 45.0.0 and is in 46.0.0, so the
 upgrade is the experiment; a residual after it would need the logical limit set compared to the physical.
 
-A second limit shape rides on the upgrade too. `limit_interval` (`planner/translator/common.rs`)
-turns a root `CoalesceBatchesExec` carrying a fetch into the unload's interval, and says it is
-not reachable: at the root DataFusion 45 leaves a `GlobalLimitExec` and parks a coalesce's fetch
-only below it. The arm stays, deliberately defensive, so one query cannot get two plan shapes
-depending on where the fetch was parked; `nodes.rs` handles the same node mid-plan, which is
-live. What it lacks is a test. From `reports/hacks-audit.md` §4.
+A second limit shape rides on the upgrade too, and it is **live on DataFusion 45 rather than
+defensive**, which is the opposite of what this ticket said until 2026-10-09. `limit_interval`
+(`planner/translator/common.rs`) turns a root `CoalesceBatchesExec` carrying a fetch into the
+unload's interval. At one target partition DataFusion leaves no `GlobalLimitExec` at all and that
+coalesce *is* the root: `select * from lineitem where l_quantity > 0 limit 10;` plans
+`CoalesceBatchesExec(fetch=10) → FilterExec → ParquetExec`, measured by limits (chain K). The
+filter is what stops the limit being pushed into the scan — `FilterExec` is not in DataFusion
+45's `supports_limit_pushdown` set. Above one partition the same query is refused, which is
+[#284](complete-coverage.md#t284). What the arm lacks is a test: nothing in the tree reaches it,
+because the one query that would is refused at tp4 and, at tp1, no test asks for it.
 
 **Fix proposed** for the coalesce arm: a translator test in `planner/translator/tests.rs`, beside
-the hand-built `GlobalLimitExec` case that wraps a planned tree. Wrap a planned single-lane tree in
-`CoalesceBatchesExec::new(plan, 8192).with_fetch(Some(5))` at the root, translate it, and assert
-the unload carries `skip=0, fetch=5` and the coalesce leaves no node behind. Keep the arm. After
-the upgrade, re-read whether any plan golden gains a root coalesce with a fetch, which would make
-the arm live.
+the hand-built `GlobalLimitExec` case that wraps a planned tree — but over the real query above
+at one target partition rather than a hand-built wrapper, since the shape is reachable and a
+hand-built node would prove less. Assert the unload carries `skip=0, fetch=10` and the coalesce
+leaves no node behind. Keep the arm. #284 is the same arm from the other side and is worth fixing
+with it.
 
 <a id="t228"></a>
 ### #228 — DataFusion 55's grouping-set id packs a duplicate ordinal the device does not make

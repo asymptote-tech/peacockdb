@@ -372,10 +372,9 @@ pub(crate) fn batching_for_source(t: &Translator) -> Batching {
 /// target, and the nodes a one-lane region does not need are then never emitted. It
 /// bites only while batching is on, which is what makes the threshold mean anything.
 pub(crate) fn lanes_for(t: &Translator, survivors: &[RowGroupMeta], limit: Option<usize>) -> usize {
-    // A limit DataFusion pushed into the scan is the whole answer wherever it erased
-    // the limit node above it — `SELECT * FROM nation LIMIT 3` at tp4 plans as a bare
-    // scan carrying limit=3. Every lane would honour it, so N lanes would return N
-    // times the rows; one lane is what makes the loader's own limit the answer.
+    // A limit DataFusion pushed into the scan is a cut over the scan's rows in order, and
+    // rows from several lanes have no order a cut could follow: one lane, under the mode's
+    // own mapping. The `GpuLimit` above it, or the unload, makes the cut.
     if limit.is_some() {
         return 1;
     }
@@ -389,9 +388,25 @@ pub(crate) fn lanes_for(t: &Translator, survivors: &[RowGroupMeta], limit: Optio
     }
 }
 
+/// A scan, and above it the cut DataFusion pushed into it. The loader is one lane over the
+/// row groups the cut needs, under the mode's own mapping; the limit cuts the batch that
+/// straddles `n`, and once it is satisfied the driver's hold on its subtree stops the scan.
 pub(crate) fn source(t: &Translator, parquet: &ParquetExec) -> Result<Box<dyn GpuNode>, PlanError> {
+    let loader = loader(t, parquet)?;
+    Ok(match pushed_limit(parquet) {
+        Some(interval) => Box::new(GpuLimit::new(loader, interval)),
+        None => loader,
+    })
+}
+
+/// The loader alone, whatever DataFusion pushed into the scan: a limited scan's survivors
+/// cut to the prefix that reaches the limit, before the mapping sees them.
+fn loader(t: &Translator, parquet: &ParquetExec) -> Result<Box<dyn GpuNode>, PlanError> {
     let config = parquet.base_config();
-    let scan = survivor_metadata(parquet)?;
+    let mut scan = survivor_metadata(parquet)?;
+    if let Some(n) = config.limit {
+        scan.groups = covering_prefix(scan.groups, n as u64);
+    }
     let lanes = lanes_for(t, &scan.groups, config.limit);
     let partition_groups = partition(&scan.groups, lanes, batching_for_source(t))?;
 
@@ -404,9 +419,71 @@ pub(crate) fn source(t: &Translator, parquet: &ParquetExec) -> Result<Box<dyn Gp
         projection,
         partition_groups,
         &scan,
-        config.limit,
         Schema::new(parquet.schema()),
     )))
+}
+
+/// The shortest prefix of `groups` whose rows reach `n`, and never fewer than one group, so
+/// the mapping has a group to address when `n` is 0. A scan's cut is its first `n` rows,
+/// and the metadata says where they are; the readers return every row of a group they read,
+/// so the groups after the prefix hold none of them. Without this a single-batch mode reads
+/// the whole file for `LIMIT 10`.
+///
+/// The scan's `can_be_null` is not recomputed, so it stays ORed over every survivor and a
+/// column nullable only in a dropped group is still claimed nullable. That is the safe
+/// direction — `planner/nulls.rs` spends a false positive on a refusal and a false negative
+/// on a wrong answer — and it is also what the scan claimed before any trim existed.
+fn covering_prefix(mut groups: Vec<RowGroupMeta>, n: u64) -> Vec<RowGroupMeta> {
+    let mut rows = 0;
+    let keep = groups
+        .iter()
+        .position(|group| {
+            rows += group.rows;
+            rows >= n
+        })
+        .map_or(groups.len(), |last| last + 1);
+    groups.truncate(keep);
+    groups
+}
+
+/// The limit DataFusion pushed into the scan, as the cut it means: the first `n` rows. It
+/// pushes `skip + fetch` and keeps a limit node above for any skip, so the cut carries none.
+fn pushed_limit(parquet: &ParquetExec) -> Option<RowInterval> {
+    parquet.base_config().limit.map(|n| RowInterval {
+        skip: 0,
+        fetch: Some(n as u64),
+    })
+}
+
+/// What the unload reads, and the cut DataFusion pushed into a scan with nothing between it
+/// and the root. That cut is root-adjacent, so it is the unload's interval and not a node —
+/// a `GpuLimit` feeding only the sink is refused by the validator. The descent passes what
+/// `node` translates to no node above a one-lane scan: a `CoalescePartitionsExec`, a
+/// `CoalesceBatchesExec` without a fetch, and a round-robin `RepartitionExec`. Any other
+/// shape translates as usual.
+pub(crate) fn unload_input(
+    t: &Translator,
+    plan: &Arc<dyn ExecutionPlan>,
+) -> Result<(Box<dyn GpuNode>, Option<RowInterval>), PlanError> {
+    let any = plan.as_any();
+    if let Some(parquet) = any.downcast_ref::<ParquetExec>() {
+        return Ok((loader(t, parquet)?, pushed_limit(parquet)));
+    }
+    if let Some(coalesce) = any.downcast_ref::<CoalescePartitionsExec>() {
+        let (input, pushed) = unload_input(t, coalesce.input())?;
+        return Ok((merged(input), pushed));
+    }
+    if let Some(coalesce) = any.downcast_ref::<CoalesceBatchesExec>()
+        && coalesce.fetch().is_none()
+    {
+        return unload_input(t, coalesce.input());
+    }
+    if let Some(repartition) = any.downcast_ref::<RepartitionExec>()
+        && matches!(repartition.partitioning(), Partitioning::RoundRobinBatch(_))
+    {
+        return unload_input(t, repartition.input());
+    }
+    Ok((node(t, plan)?, None))
 }
 
 /// A sort becomes a per-batch sort plus the accumulator that makes the whole stream

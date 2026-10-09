@@ -7,7 +7,7 @@
 //! along by accident.
 
 use common::limit_interval;
-use nodes::node;
+use nodes::unload_input;
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -81,18 +81,23 @@ impl Translator {
 
     /// The root, with the limit lowering rule applied: a root-adjacent limit is not a
     /// node at all — its interval becomes the unload's, because a limit over a stream
-    /// about to leave the device is a statement about which rows are worth moving.
+    /// about to leave the device is a statement about which rows are worth moving. The cut
+    /// DataFusion pushed into a scan with nothing above it is root-adjacent too, and folds
+    /// into any limit DataFusion kept at the root for an offset.
     pub(crate) fn translate(
         &self,
         root: &Arc<dyn ExecutionPlan>,
     ) -> Result<Box<dyn GpuNode>, PlanError> {
-        match limit_interval(root) {
-            Some((input, interval)) => {
-                let input = node(self, &input)?;
-                Ok(Box::new(GpuUnload::new(input, Some(interval))))
-            }
-            None => Ok(Box::new(GpuUnload::new(node(self, root)?, None))),
-        }
+        let (input, interval) = match limit_interval(root) {
+            Some((input, interval)) => (input, Some(interval)),
+            None => (Arc::clone(root), None),
+        };
+        let (input, pushed) = unload_input(self, &input)?;
+        let interval = match (interval, pushed) {
+            (Some(root_limit), Some(pushed)) => Some(root_limit.over(&pushed)),
+            (root_limit, pushed) => root_limit.or(pushed),
+        };
+        Ok(Box::new(GpuUnload::new(input, interval)))
     }
 }
 

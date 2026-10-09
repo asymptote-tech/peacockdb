@@ -1,19 +1,25 @@
 //! `GpuLoadParquet` through the harness: both backends read one parquet the test wrote
-//! from a synthetic batch, one batch per row group, with and without a pushed-down limit.
-//! The one helper this task adds is `write_parquet`, under the temp dir and removed after
-//! each case. Every case is green or a `bug_` test with its ticket above it.
+//! from a synthetic batch, one batch per row group, and a limit over the batches a scan
+//! emitted, which is what a scan's limit is.
+//! `write_parquet` puts the file under the temp dir and each case removes it. #186 took the
+//! four `bug_` pins a scan's own limit used to earn; the one left is #285's, a scan that
+//! declares no column at all.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
+use datafusion::arrow::record_batch::{RecordBatch, RecordBatchOptions};
 use datafusion::parquet::arrow::ArrowWriter;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 
-use super::script::{Outcome, Script, run_both};
-use crate::plan::{GpuLoadParquet, RowGroupMeta, ScanMetadata, Schema};
-use crate::tests::compare::{Order, assert_same};
+use super::script::{Outcome, Script, each_answers, run_both};
+use crate::plan::{
+    BatchLayout, GpuLimit, GpuLoadParquet, RowGroupMeta, RowInterval, ScanMetadata, Schema,
+};
+use crate::tests::compare::Order;
+use crate::tests::given::Given;
 use crate::tests::synthetic::{decimals, synthetic};
 
 /// `batch` as a parquet file of `rows_per_group`-row row groups, under the temp dir and
@@ -36,7 +42,7 @@ pub(crate) fn write_parquet(name: &str, batch: &RecordBatch, rows_per_group: usi
 
 /// A one-lane scan of `path`, one batch per row group, every column projected, declaring
 /// `schema` — the batch's own, as the planner declares the file's.
-pub(crate) fn scan(path: &Path, schema: SchemaRef, limit: Option<usize>) -> GpuLoadParquet {
+pub(crate) fn scan(path: &Path, schema: SchemaRef) -> GpuLoadParquet {
     let file = std::fs::File::open(path).expect("the file just written");
     let reader = SerializedFileReader::new(file).expect("a parquet file");
     let groups: Vec<RowGroupMeta> = (0..reader.metadata().num_row_groups())
@@ -61,23 +67,14 @@ pub(crate) fn scan(path: &Path, schema: SchemaRef, limit: Option<usize>) -> GpuL
         (0..width as u32).collect(),
         vec![per_group],
         &scan,
-        limit,
         Schema::new(schema),
     )
 }
 
 /// Write, read on both, remove: the file is gone whether or not the comparison holds.
-fn read_both(
-    name: &str,
-    batch: &RecordBatch,
-    rows_per_group: usize,
-    limit: Option<usize>,
-) -> Outcome {
+fn read_both(name: &str, batch: &RecordBatch, rows_per_group: usize) -> Outcome {
     let path = write_parquet(name, batch, rows_per_group);
-    let outcome = run_both(
-        &scan(&path, batch.schema(), limit),
-        Script::Source { lane: 0 },
-    );
+    let outcome = run_both(&scan(&path, batch.schema()), Script::Source { lane: 0 });
     std::fs::remove_file(&path).expect("the file this case wrote");
     outcome
 }
@@ -85,70 +82,83 @@ fn read_both(
 operator_case! {
     GpuLoadParquet,
     fn both_backends_read_the_same_batches_per_row_group() {
-        read_both("per-group", &synthetic(64, 1), 16, None).same(Order::AsEmitted);
+        read_both("per-group", &synthetic(64, 1), 16).same(Order::AsEmitted);
     }
 }
 
-// The `bug_` assertions: the device's refusal pinned by the stable part of its message,
-// and each side pinned to hand-written slots.
+// A scan's limit is a `GpuLimit` over the batches the scan emits (#186): the reader reads
+// its row groups whole, and the limit cuts. Each limit case's stream is a real scan's
+// output — the file both backends just read, as the cpu emitted it — so the cut is over
+// what a scan hands it, not batches sliced by hand as `harness_cases::limit_over`'s are.
 
-fn gpu_refuses_with(outcome: &Outcome, message: &str) {
-    let why = outcome.gpu_refuses();
-    assert!(why.contains(message), "{why}");
-}
-
-fn cpu_answered(outcome: &Outcome, expected: &[Vec<RecordBatch>]) {
-    assert_same(
-        expected,
-        outcome.cpu.as_ref().expect("the cpu answers"),
-        Order::AsEmitted,
-    );
-}
-
-/// `synthetic(64, 1)` as the four 16-row batches a per-row-group read of it emits.
-fn four_sixteens() -> Vec<Vec<RecordBatch>> {
+/// `GpuLimit 0..+fetch` over the batches a per-row-group scan of `synthetic(64, 1)` in
+/// groups of `rows_per_group` emitted, once both backends were seen to emit the same ones.
+fn limit_over_scan(name: &str, fetch: u64, rows_per_group: usize) -> (GpuLimit, Vec<RecordBatch>) {
     let whole = synthetic(64, 1);
-    (0..4).map(|i| vec![whole.slice(i * 16, 16)]).collect()
+    let read = read_both(name, &whole, rows_per_group);
+    read.same(Order::AsEmitted);
+    let batches: Vec<RecordBatch> = read
+        .cpu
+        .expect("the cpu read the file")
+        .into_iter()
+        .flatten()
+        .collect();
+    assert_eq!(
+        batches.len(),
+        64 / rows_per_group,
+        "one batch per row group"
+    );
+    let node = GpuLimit::new(
+        Given::of(Schema::new(whole.schema()), BatchLayout::MultipleBatches),
+        RowInterval {
+            skip: 0,
+            fetch: Some(fetch),
+        },
+    );
+    (node, batches)
 }
 
-const GROUPS_AND_LIMIT: &str = "row_groups can't be set along with skip_rows and num_rows";
-
-// A pushed-down limit: the wire carries it as `num_rows`, and every batch is a row-group
-// read, so the two reach cuDF together — while the cpu never reads it. Both are #186.
-
-// #186 — even one row group and a limit is a row-group list beside `num_rows`.
 operator_case! {
     GpuLoadParquet,
-    fn bug_a_limit_over_one_row_group_is_refused_on_the_device() {
-        let outcome = read_both("limit-gpu", &synthetic(64, 1), 64, Some(10));
-        gpu_refuses_with(&outcome, GROUPS_AND_LIMIT);
+    fn a_scan_of_one_row_group_reads_it_whole_on_both() {
+        read_both("one-group", &synthetic(64, 1), 64).same(Order::AsEmitted);
     }
 }
 
-// #186 — `CpuSource::new` never reads `node.limit`: ten rows asked, sixty-four answered.
 operator_case! {
-    GpuLoadParquet,
-    fn bug_a_limit_over_one_row_group_is_ignored_on_the_cpu() {
-        let outcome = read_both("limit-cpu", &synthetic(64, 1), 64, Some(10));
-        cpu_answered(&outcome, &[vec![synthetic(64, 1)]]);
+    GpuLimit,
+    fn a_limit_over_a_scan_of_one_row_group_keeps_its_first_rows_on_both() {
+        let (node, batches) = limit_over_scan("limit-one-group", 10, 64);
+        // One slot for the batch, one for the finish.
+        let expected = [vec![batches[0].slice(0, 10)], vec![]];
+        let outcome = run_both(&node, Script::Accumulate(batches));
+        each_answers(&outcome, &expected, &expected);
     }
 }
 
-// #186 — the first batch's read is refused, so nothing of the four is answered.
 operator_case! {
-    GpuLoadParquet,
-    fn bug_row_groups_and_a_limit_together_are_refused_on_the_device() {
-        let outcome = read_both("groups-and-limit-gpu", &synthetic(64, 1), 16, Some(10));
-        gpu_refuses_with(&outcome, GROUPS_AND_LIMIT);
+    GpuLimit,
+    fn a_limit_inside_the_first_of_four_scanned_row_groups_drops_the_rest_on_both() {
+        let (node, batches) = limit_over_scan("limit-inside-first", 10, 16);
+        let expected = [vec![batches[0].slice(0, 10)], vec![], vec![], vec![], vec![]];
+        let outcome = run_both(&node, Script::Accumulate(batches));
+        each_answers(&outcome, &expected, &expected);
     }
 }
 
-// #186 — four row groups of sixteen, all four answered whole under a limit of ten.
 operator_case! {
-    GpuLoadParquet,
-    fn bug_row_groups_and_a_limit_together_are_read_whole_on_the_cpu() {
-        let outcome = read_both("groups-and-limit-cpu", &synthetic(64, 1), 16, Some(10));
-        cpu_answered(&outcome, &four_sixteens());
+    GpuLimit,
+    fn a_limit_across_a_scanned_row_group_boundary_slices_the_second_group_on_both() {
+        let (node, batches) = limit_over_scan("limit-across-groups", 20, 16);
+        let expected = [
+            vec![batches[0].clone()],
+            vec![batches[1].slice(0, 4)],
+            vec![],
+            vec![],
+            vec![],
+        ];
+        let outcome = run_both(&node, Script::Accumulate(batches));
+        each_answers(&outcome, &expected, &expected);
     }
 }
 
@@ -157,7 +167,7 @@ operator_case! {
 operator_case! {
     GpuLoadParquet,
     fn a_decimal_column_is_exported_at_its_declared_precision() {
-        read_both("decimals", &decimals(64, 1), 16, None).same(Order::AsEmitted);
+        read_both("decimals", &decimals(64, 1), 16).same(Order::AsEmitted);
     }
 }
 
@@ -166,6 +176,34 @@ operator_case! {
 operator_case! {
     GpuLoadParquet,
     fn a_parquet_of_zero_rows_reads_as_nothing_on_both() {
-        read_both("zero-rows", &synthetic(0, 1), 16, None).same(Order::AsEmitted);
+        read_both("zero-rows", &synthetic(0, 1), 16).same(Order::AsEmitted);
+    }
+}
+
+/// `rows` rows of no columns — what a scan declaring no column answers, and the one batch
+/// shape whose row count is not a function of its columns.
+fn no_columns(rows: usize) -> RecordBatch {
+    RecordBatch::try_new_with_options(
+        Arc::new(ArrowSchema::empty()),
+        vec![],
+        &RecordBatchOptions::new().with_row_count(Some(rows)),
+    )
+    .expect("a batch of no columns carries its own row count")
+}
+
+// #285 — a scan declaring no column, as `tpch/nested-limits`' region scan is: the query wants
+// the file's row count and none of its columns. The wire's `file_schema` is that declaration,
+// `scan.cpp` reads an empty projection as every column OF IT, and so selects none; a cuDF
+// table of no columns reports no rows. The cpu's zero-column batch keeps the count.
+operator_case! {
+    GpuLoadParquet,
+    fn bug_a_scan_declaring_no_column_reads_no_rows_on_the_device() {
+        let path = write_parquet("zero-columns", &synthetic(64, 1), 64);
+        let outcome = run_both(
+            &scan(&path, Arc::new(ArrowSchema::empty())),
+            Script::Source { lane: 0 },
+        );
+        std::fs::remove_file(&path).expect("the file this case wrote");
+        each_answers(&outcome, &[vec![no_columns(64)]], &[vec![no_columns(0)]]);
     }
 }
