@@ -324,3 +324,85 @@ same nine rust-only targets as round 2 above plus the C++ cpu side, re-run on th
 +1, `planner::tests::join_projection_names` +1) and so read 606 passed / 2 ignored / 608 listed;
 a different number means the build-test.md arithmetic above is wrong and the developer corrects
 it from `--list`.
+
+### 2026-10-09 — re-proved on master 31c56bea
+
+Everything local and CPU-only, as chain K requires: no device build, no device run, no
+`--features gpu`, no remote host. verda still does not resolve from this host.
+
+**Every target green, exit 0, no compiler warning on either side.**
+
+| target | command | result |
+|---|---|---|
+| `test_cpu_corpus` | one `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus --test test_corpus_goldens --test test_cost_model -- --test-threads=2`, 234s wall | **555 passed, 0 failed** |
+| `test_corpus_goldens` | same command | **26 passed, 0 failed** |
+| `test_cost_model` | same command | **3 passed, 0 failed** |
+| `--lib` | `cargo test --features rust-only -p peacockdb-core --lib`, 49s | 606 passed, 0 failed, 2 ignored (608 listed) |
+| `test_golden_format` | own run | 26 passed, 0 failed |
+| `test_ci_coverage` | own run | 9 passed, 0 failed |
+| `test_module_layout` | own run | 17 passed, 0 failed |
+| `test_gpu_corpus` | own run | 0 cases under `rust-only` (device rung gated off) |
+| `test_node_timing` | own run | 0 cases under `rust-only` (ffi rung gated off) |
+| `peacock_gpu_benchmarks` | own run, `-- --skip bench_` as CI | 0 cases under `rust-only` |
+
+`--lib` is exactly the 606/2/608 the dispatch predicted: master's `64ced62e` added
+`plan_text::tests` +2, `plan_text::expr_text::tests` +1 and
+`planner::tests::join_projection_names` +1 on top of round 2's 602/2/604. 234s for the three
+corpus targets against round 2's 284s.
+
+C++, 25.02 (`scripts/build.sh --configure --build --cudf_ROOT
+~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12`): configure reported
+`Using host cudf: 25.02.02`, 20 build steps, zero warnings, exit 0.
+`./cpp/build/peacock_cpu_tests` **12 tests from 7 suites, 12 passed**, including
+`ClampRowRange.AnswersEveryCaseInTheSharedTable`; `ctest --test-dir cpp/build -L cpu` 1/1
+passed. The rebase broke nothing: `64ced62e` touched `plan_text/`, a new planner test and ten
+tpcds goldens, none of which this task reads.
+
+Rust warning check is its own command, because the inventory build was warm and recompiled
+almost nothing: `touch peacockdb-core/src/lib.rs` then `cargo check --features rust-only -p
+peacockdb-core --all-targets` — exit 0, no warning.
+
+#### `build-test.md`: the two resolved lines are right, one unrelated row was not
+
+`scripts/case-inventory.sh rust-only` (the tool cannot see `peacock_gpu_benchmarks`, whose
+file is not `test_*.rs`; it was run and listed separately) lists exactly what the cpu block
+header claims: `--lib` **608**, `test_cpu_corpus` **555**, `test_corpus_goldens` **26**,
+`test_cost_model` **3** — so `1192 cases` and every per-binary figure on line 25 are correct
+as resolved, and no edit was owed there.
+
+The rebase arithmetic above also lands on the right header *total*, but the header it lands on
+was already one case high for a reason that predates this branch. Summing the N columns of both
+tables and checking every countable row against the tree:
+
+| row / block | page said | tree says |
+|---|--:|--:|
+| cpu block (4 binaries) | 1192 | 1192 ✓ |
+| Golden text format (Rust) | 26 | 26 ✓ |
+| CI wiring guard (Rust) | 9 | 9 ✓ |
+| Module layout rules (Rust) | 17 | 17 ✓ |
+| Cost-report renderer (Rust) | 37 | **36** |
+| C++ CPU/FFI unit | 12 | 12 ✓ |
+| DuckDB cost extraction (Python) | 41 | 41 ✓ |
+| Exec-model three rows (Python) | 216+19+93 | 328 collected ✓ |
+| Calibration scripts (Python) | 12 | 9 + 3 ✓ (`test_plot.py` needs matplotlib, absent here) |
+
+`cost-report` lists 36 cases and `main.rs` carries 36 `#[test]`. Master's `ddf3ca2c`
+(2026-09-29) deleted `a_rollout_ticket_links_into_the_rollout_file` with
+`tasks/active-tickets.md` and edited `build-test.md` without touching that row, so the row has
+been one high ever since, on master and on every branch off it. Corrected here to 36, and the
+grand-total header with it: **2338 — Rust 1863, C++ 94, Python 381**, which is again exactly
+the sum of the N columns. Nothing else in the page moved; a stale wiki number is not production
+behaviour, so no ticket.
+
+Worth recording for whoever next resolves this header: master's header has also been *below*
+its own row sum for a while — 1852 against rows of 1857 at base 8806a3c3, 1856 against 1861 at
+31c56bea. Round 2 of this task silently repaired that gap (header 1852 → 1860 against a row
+delta of +3), which is why summing header deltas across the rebase happened to give a
+row-consistent 1864 rather than compounding the error. Sum the rows, not the deltas.
+
+Two blocks stay unverified here and are the only thing the header still rests on faith for:
+the ffi block (7) needs an FFI cargo build and the gpu block (576) needs a device. Chain K
+runs neither.
+
+Non-golden files checked while in the page, all accurate: `testdata/goldens` 39 / 116 / 16 +
+`recipe-payloads.txt`, and `duckdb-profiles` / `duckdb-dynfilters` 22 + 99 each.
