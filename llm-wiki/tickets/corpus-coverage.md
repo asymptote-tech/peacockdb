@@ -34,18 +34,13 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
   - [#282 — a scan with no surviving row groups is refused at planning](#t282)
 - [Repartitioning](#repartitioning)
-  - [#206 — a float or boolean partition key is refused on the device](#t206)
-  - [#240 — a timestamp partition key is refused on the device](#t240)
-  - [#189 — the shuffle cannot hash a rollup's grouping-set id](#t189)
   - [#145 — Refcounted handles: stop copying every partition out of a scatter](#t145)
-  - [#95 — a decimal partition key is refused on the device](#t95)
   - [#197 — the repartition arm still concatenates a child it can only be handed one of](#t197)
 - [Performance](#performance)
   - [#154 — every operator exit path deep-copies its output into a fresh table](#t154)
 - [Testing](#testing)
   - [#227 Check schema nullability in tests](#t227)
   - [#164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
-  - [#201 — the murmur gate proves a copy of the lane rule, not the rule](#t201)
   - [#174 — two clamps for one rule, and nothing compares them](#t174)
   - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
   - [#234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
@@ -247,8 +242,9 @@ type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mo
 **Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`, tpcds q5,
 q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`, the one that reaches it on a device — all
 five of its device cells off here, the validator refusing the width. The rest are off first on #152,
-#206, #212 or #220, and no longer on #189: the shuffle stopped hashing the id. The value shows only
-through `GROUPING()`, and q70 and q86, its corpus users, are window queries that never run.
+#212 or #220, and no longer on #189 or #206: the shuffle stopped hashing the id and the kernel has
+its boolean arm. The value shows only through `GROUPING()`, and q70 and q86, its corpus users, are
+window queries that never run.
 
 **Fix proposed:** [fix 14 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix14), in C++ alone. A static
 `grouping_id_column(gid, nkeys, rows)` in `aggregate.cpp` folds `gid = (gid << 1) | masked` into a
@@ -329,7 +325,7 @@ smallest fix is a planner one, and the device needs no new arm.
 
 **Corpus queries:** `pbench/timestamp-s-key-group`
 (`GROUP BY arrow_cast(f_ts_s, 'Timestamp(Second, None)')`), its five device cells off here. Not on
-[#240](#t240): the timestamp key itself hashes on both engines since `repartition-keys`, which the
+[#240](../archive/archived-tickets.md#t240): the timestamp key itself hashes on both engines since `repartition-keys`, which the
 three `timestamp-{ms,ns,us}-key-group` rows demonstrate at all five modes. This row carried `240`
 until this ticket had a number.
 
@@ -692,63 +688,6 @@ every node answer right. In keyless-identity.
 
 ## Repartitioning
 
-<a id="t206"></a>
-### #206 — a float or boolean partition key is refused on the device
-**Fixed in [`repartition-keys`](../tasks/repartition-keys.md); ready to archive.**
-`spark_hash_partition.cu`'s key switch took STRING, INT8-64 and DATE32 and failed at its
-`default` on everything else — `unsupported key column cuDF type_id=10` for a double, `11` for a
-boolean. Spark hashes a double as its long bits and a boolean as an int, and comet's
-`create_murmur3_hashes` does both, so the cpu's lane was defined and the device's was a refusal at
-every mode above one lane.
-
-The kernel now has both arms, each proved by a live gate red before it, and the float arm
-canonicalizes NaN on both engines rather than hashing its raw bits as comet does —
-`architecture.md`'s "Rehash and the comet hash" carries that rule and why.
-
-**Corpus queries:** `pbench/bool-key-group`, all five device cells on. The two float rows
-(`float64-key-group`, `float32-key-group`) are commented out on
-[#243](joins.md#t243), which is the cpu's float equality and not this ticket.
-`pbench/rollup-small-keys` hashes a boolean second key and its device cells are off on
-[#65](#t65), the grouping-id width.
-
-<a id="t240"></a>
-### #240 — a timestamp partition key is refused on the device
-**Fixed in [`repartition-keys`](../tasks/repartition-keys.md); ready to archive.**
-`spark_hash_partition.cu`'s key switch had no
-`TIMESTAMP_{SECONDS,MILLISECONDS,MICROSECONDS,NANOSECONDS}` arm and failed at its `default`, while
-Spark and comet hash a timestamp as its `i64` value, so the cpu's lane was defined and the
-device's was a refusal. The kernel's own comment claimed timestamps were covered and the switch
-said otherwise.
-
-Both halves landed: the wire carries the four `Timestamp` variants (an fbs append) and the kernel
-bit-casts each unit to `INT64` under a live gate.
-
-**Corpus queries:** `pbench`'s `timestamp-ms-key-group`, `timestamp-us-key-group` and
-`timestamp-ns-key-group`, all five device cells on each — which is what proves the key itself
-hashes. `timestamp-s-key-group` is off on [#264](#t264): it reaches the aggregate through
-`arrow_cast`, and the device refuses a group key that is not a bare column. `ts-key-join` is off on
-[#152](joins.md#t152) and [#220](joins.md#t220). tpch and tpcds have nothing here; they use
-`Date32`.
-
-<a id="t189"></a>
-### #189 — the shuffle cannot hash a rollup's grouping-set id
-**Fixed in [`repartition-keys`](../tasks/repartition-keys.md); ready to archive.** All 24 cells are
-on and no registry row carries this ticket.
-
-A ROLLUP, CUBE or GROUPING SETS aggregate that shuffled was refused on the cpu —
-`Unsupported data type in hasher: UInt8`; the tp1 modes do not shuffle and always passed.
-`shuffle_below` copied DataFusion's `FinalPartitioned` hash keys, `__grouping_id` among them, and
-comet's murmur3 had no unsigned arm. Hashing the id was wrong in itself: the two engines' ids
-differ in type and bits ([#65](#t65)), so a subtotal row would have landed in different lanes.
-
-Two independent fixes, and the ticket needed both. `drop_grouping_id` takes the id's ordinal out
-of `Shuffle::ByHash`'s keys where the aggregate has grouping sets, so each (keys, id) group stays
-whole in one lane — hash keys a *subset* of the group columns, the merge still grouping on the id.
-That turned on 18 cells over `tpch/rollup-over-join`, tpcds q5, q18, q22, q80 and
-`pbench/rollup-small-keys`. The other 6, `pbench`'s `uint-key-group` and `uint-key-join`, reached
-the same refusal by a plain unsigned user key and wanted the unsigned arm itself, which the same
-task added. tpcds q77 never met this ticket: [#212](joins.md#t212) is all that holds it.
-
 <a id="t145"></a>
 ### #145 — Refcounted handles: stop copying every partition out of a scatter
 `spark_hash_partition` returns one table whose N partitions are already contiguous, and
@@ -765,26 +704,6 @@ holding the pre-scatter table — the peak halves and the tail lengthens. Also u
 reading the survivor. A streamed join waits on it too: a handle is erased by its reader
 (`node_session.cpp:254`), so `Input::BuildSideCopy` has no build side after the first probe batch,
 and T16 refuses a second until this lands ([#152](joins.md#t152)).
-
-
-<a id="t95"></a>
-### #95 — a decimal partition key is refused on the device
-**Fixed in [`repartition-keys`](../tasks/repartition-keys.md); archivable once the stale tags
-below are dropped.** `spark_hash_partition.cu`'s key switch failed with `unsupported key column
-cuDF type_id=27`, while the cpu's comet hasher took the decimal — a refusal on one side only.
-
-**The fix is not the one this ticket used to propose.** Threading logical precision through the
-partition FFI was rejected by decision D2: cuDF's `data_type` carries no precision and the loader
-widens every decimal to Decimal128, so the kernel cannot pick comet's width itself. Instead **both
-engines hash 16 little-endian bytes of the unscaled value** — `rows_per_lane` casts each decimal
-key to `Decimal128(38, s)` before calling comet, and the kernel hashes the same 16 bytes of the
-`__int128_t`. No wire field, no `partitioning.hpp` change, no FFI change, and a decimal's lane no
-longer matches Spark's at precision ≤ 18, deliberately.
-
-**Corpus queries:** `pbench/decimal15-key-group` and `decimal38-key-group`, all five device cells
-on; `decimal15-key-join` is off on [#152](joins.md#t152) and [#220](joins.md#t220), not on this.
-Eight tpch and tpcds rows still carry `95` and should not — at each, either no device cell was ever
-declarable or `gpu_tp1_single` is off too, and tp1-single hashes nothing.
 
 <a id="t197"></a>
 ### #197 — the repartition arm still concatenates a child it can only be handed one of
@@ -874,18 +793,6 @@ belongs here too: a per-node type check in the GPU tiers, the only thing that wo
 wrong-order subtree before the root. 2026-09-17: chain B's `device-schema-harness` and
 `driver-output-hook` are that check for the operator and corpus tiers — every device batch held
 to its node's names and `{type_id, scale}`; the two C++ items above stand.
-
-<a id="t201"></a>
-### #201 — the murmur gate proves a copy of the lane rule, not the rule
-`executor/cpu_backend/gpu_tests/murmur_conformance.rs` re-derives the lane rule (seed-42 pre-fill,
-comet murmur3, `pmod`) in its own `cpu_partition_ids`, so only that copy is held against the device.
-
-The production copy is `rows_per_lane` in `executor/cpu_backend/spark_partitioning.rs`, the one
-the CPU backend's repartition actually runs. A drift there — a seed, a `%` for `pmod`, a key
-cast — leaves the gate green while every CPU lane assignment moves off the device's and the
-goldens'. The fix is the gate calling `rows_per_lane` over the same columns and comparing lane
-by lane, and the local helper going; not done in the visibility task that found it, since a
-test whose subject changes is not a demotion.
 
 <a id="t174"></a>
 ### #174 — two clamps for one rule, and nothing compares them

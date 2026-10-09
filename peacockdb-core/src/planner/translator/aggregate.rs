@@ -374,16 +374,17 @@ fn aggregate_sequence(
         ));
     }
 
-    let shuffle = match shuffle {
-        Shuffle::ByHash { keys, n } if !group.is_single() => Shuffle::ByHash {
-            keys: drop_grouping_id(keys, group.expr().len() as u32)?,
-            n,
-        },
-        other => other,
-    };
-
     tree = match shuffle {
-        Shuffle::ByHash { keys, n } if lanes(tree.as_ref()) > 1 => shuffled(tree, keys, n),
+        // The grouping-id drop runs only for the shuffle that is emitted: its refusal
+        // must not reject a one-lane plan, which hashes nothing.
+        Shuffle::ByHash { keys, n } if lanes(tree.as_ref()) > 1 => {
+            let keys = if group.is_single() {
+                keys
+            } else {
+                drop_grouping_id(keys, group.expr().len() as u32)?
+            };
+            shuffled(tree, keys, n)
+        }
         // One lane holds every group already: v1 skips the shuffle for a one-lane
         // input exactly as it does for a keyless aggregate.
         Shuffle::ByHash { .. } => tree,

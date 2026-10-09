@@ -225,7 +225,8 @@ std::unique_ptr<cudf::column> spark_partition_ids(cudf::table_view const& input,
     if (n > 0) {
       // Dispatch by cuDF type id. Each column folds into the running (seed-chained)
       // hash in key order, so composite keys work for free. A type with no arm fails
-      // loudly below rather than hash a wrong encoding.
+      // loudly below rather than hash a wrong encoding — but only with rows to hash, so
+      // a zero-row table with an unsupported key type succeeds and says nothing.
       switch (col.type().id()) {
         case cudf::type_id::STRING:
           spark_hash_string_col_kernel<<<grid, block, 0, stream.value()>>>(

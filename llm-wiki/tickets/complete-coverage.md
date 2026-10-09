@@ -28,7 +28,7 @@ tables, no new dataset, plus the engine work it needs.
   half is synthetic-only; shape it away from [#166](#t166)'s two droppers.
 - `min`/`max` over a string or date column: zero uses, and the merge is a string reduce.
 - a join on a nullable key: [#59](#t59), [#80](#t80) and [#137](#t137) rest on there being none.
-- a shuffle keyed on a decimal: not a query but [#95](#t95)'s kernel work, and the murmur3
+- a shuffle keyed on a decimal: not a query but [#95](../archive/archived-tickets.md#t95)'s kernel work, and the murmur3
   conformance gate extended to cover it.
 - two `DISTINCT` args over different expressions: [#144](#t144) has no refusal of its own, and
   `count_distinct` marks queries this mode handles, so a grep for one finds the wrong two.

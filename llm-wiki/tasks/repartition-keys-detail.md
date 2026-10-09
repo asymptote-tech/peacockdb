@@ -90,7 +90,7 @@ changes its lanes, its committed sections fail. That is a real finding, not some
 - **Run the rust-only loop as plain `cargo test --features rust-only` into `./target`**, never
   through `scripts/cargo-cudf.sh`, which redirects to a cuDF target dir and would recompile the
   DataFusion stack with under 7 GiB free.
-- **[#259](../tickets/corpus-coverage.md#t259)** records that pbench's device cells have never been
+- **[#259](../archive/archived-tickets.md#t259)** records that pbench's device cells have never been
   run and that `int8-key-group` never landed; this task's own key-type rows are part of what that
   cycle will cover.
 
@@ -818,7 +818,7 @@ more coverage than the plan asked for. Its red-green cycle was watched in that t
 before `canonical_nans`, green after. `lanes_of` lives in that file instead, so
 `murmur_conformance.rs` gained no unused helper.
 
-#### The cpu goldens D2 moves: 30 sections, 6 queries, and not one answer
+#### The cpu goldens D2 moves: 18 `.cpu.txt` sections and 12 `.cost.txt`, 6 queries, not one answer
 
 The decimal cast changes which lane a decimal key lands in at p ≤ 18, so the cpu's own tp4
 goldens move. **That is decision D2's designed effect, not a regression** — the spec says "a
@@ -845,11 +845,11 @@ than by eye:
 
 | | |
 |---|--:|
-| sections moved | **30** |
+| `*-mini.cpu.txt` sections moved | **18** (6 queries × 3 tp4 modes) |
+| `*-mini.cost.txt` sections moved | **12** |
+| sections moved, both kinds | **30** |
 | sections added | **0** |
 | sections removed | **0** |
-| `*-mini.cpu.txt` | 18 (6 queries × 3 tp4 modes) |
-| `*-mini.cost.txt` | 12 |
 
 No `.plans.txt`, no `.result.txt` and not `recipe-payloads.txt` moved — correct, because the lane
 rule is not in the wire and does not change the answer. The 12 cost sections are the 18 minus
@@ -857,7 +857,8 @@ rule is not in the wire and does not change the answer. The 12 cost sections are
 of the same per-lane totals and the model sums across lanes; `test_cost_model` is green, which is
 the independent check that each `.cost.txt` still derives from its `.cpu.txt`.
 
-**The strongest single check: not one `output_rows=` value changed anywhere in the 30 sections.**
+**The strongest single check: not one `output_rows=` value changed anywhere in the 18 `.cpu.txt`
+sections**, which are the only ones that carry the field.
 Extracting every `output_rows=N` from the `-` side and the `+` side of the diff and sorting both
 gives byte-identical lists. Only the per-lane `in_rows` split and the `output_bytes` that follows
 from a different row mix moved.
@@ -968,7 +969,7 @@ Also: `UPDATE_CANONICAL=1` is the *whole-file* form and `PCK_UPDATE_SECTIONS=1` 
 cells, all green. These are the six #189 was still holding, and comet could not hash them before
 Task 6b's widening. #189 now reaches all 24 of its cells.
 
-#### The device side — 21 cells on, 20 left off with the ticket each actually failed on
+#### The device side — 21 cells on, 24 left off with the ticket each actually failed on
 
 Every candidate was enabled, run on the card, and then settled on the measurement. **21 on:**
 
@@ -1288,3 +1289,143 @@ shape this branch already used for `spark_partitioning/tests.rs`), I5 (a pin's c
 opposite of what the test asserts), N1 (`drop_grouping_id` runs before the `lanes > 1` test, so its
 `Err` can refuse a one-lane plan for a shuffle never performed — unreachable today), N4 and N5, the
 two count slips in this file, and then the archival of all five tickets with a verification run.
+
+## The review round's developer half, and the archival done (2026-10-09)
+
+B6, I4, I5, N1, N4, N5, the two count slips, and the archival of all five tickets. No device work:
+nothing in this round needed a card, and nothing in it changed a count.
+
+### B6 — the eight `95` tags, re-derived before anything was dropped
+
+The derivation is one fact plus a per-row check. The fact: **#95 is fixed on both engines**, so no
+cell anywhere is held by a decimal key the kernel cannot hash. The per-row check is whether `95`
+was ever the *live* blocker, and whether something else still explains the off cells:
+
+| row | cpu cells | device cells off | `95` could have been live? | tickets after |
+|---|---|---|---|---|
+| `tpcds/q24` | **all five off** on #190 | all five | no — no device cell is declarable at all | `190` |
+| `tpcds/q37` | all on | 4 (tp1-rowgroup + three tp4) | at tp4 only; the tp1-rowgroup cell is #152's | `152` |
+| `tpcds/q82` | all on | 4 (tp1-rowgroup + three tp4) | the same | `152` |
+| `tpcds/q75` | all on | **all five, `gpu_tp1_single` included** | no — tp1-single is one lane and hashes nothing | `152` |
+| `tpch/q2` | all on | all five | no, the same | `152 220` |
+| `tpch/q10` | all on | all five | no, the same | `152 220` |
+| `tpch/q15` | all on | all five | no, the same | `183 220` |
+| `tpch/q18` | all on | all five | no, the same | `152 220` |
+
+Where the reviewer's derivation and mine differ: on q37 and q82 the four off cells are **not** only
+the shuffling modes — `gpu_tp1_rowgroup` is off too, and that mode runs one lane. So on those two
+rows `95` was live at tp4 and could never have been live at tp1-rowgroup, where #152 (a second
+probe batch) is the whole of it. The conclusion is the same: `95` explains nothing now.
+
+Dropped from all eight rows; every one keeps another ticket, so `registry.rs:242`'s
+`off == 0 || !tickets.is_empty()` still holds — proved by running the tier, not by reading it
+(`test_cpu_corpus` 967/0, which includes the registry test). **Not a claim that those cells pass.**
+33 distinct registry tags remain, down from 34.
+
+One thing for `stale-cells`, not this task: `tpch/q15` now reads `183 220`, and **#183 is archived**
+— a closed ticket explaining five off cells. That is exactly the 16 cells task 2 exists to clear,
+and it was true before this round too.
+
+### I4 — `wire/serialize/tests.rs`
+
+980 lines left in `wire/tests.rs`. The three tests that reached `super::serialize::` moved to
+`wire/serialize/tests.rs`, the `foo.rs` + `foo/tests.rs` shape, and now reach `super::` directly.
+`--lib` stays **692** and `test_module_layout` **18**. `build-test.md` had to move with it, since
+its rows count cases per module: `Recipes per join type` 27 → **24** (back to the base's figure)
+and a new module-unit row `Arrow to the wire enum` at **3**. The cpu block still sums to 1688.
+
+### I5 — what the pin actually pins
+
+The `bug_` prefix is right and the comment was not. The test asserts a **refusal**, which is
+wrong-for-a-user and is what #249 still owes an arm for; the `Null` the comment described is the
+behaviour this branch deleted. The comment now says that, and the name needed no change — it
+already reads "is refused at plan time", which is the wrong behaviour being pinned.
+
+### N1 — the drop moved inside the `lanes > 1` arm
+
+**No red test was possible and that is worth stating.** `drop_grouping_id` errs only on keys that
+are empty after the retain or that sit past the id, and no plan the translator builds produces
+either; with well-formed keys the old order computed the dropped keys, discarded them in the
+one-lane arm, and planned the identical tree. So the reordering has no observable difference on any
+input the planner can reach, and a test that distinguished the two would have to inject a key list
+DataFusion never emits. Verified instead by the three `drop_grouping_id` unit tests (unchanged, they
+call it directly), the 138 `planner::` cases, and `test_cpu_corpus` 967.
+
+### N4, N5
+
+`corpus_cases.inc:359` regains a trailing `// device: #264, a cast group key` — the line is the one
+place that says why that column is `none` while its four siblings are `all_modes`. Do **not** run
+`git clang-format` over that file: it reads the `.inc` as C++ and rewraps `corpus_query!` lines.
+`spark_hash_partition.cu`'s dispatch comment now says the `default: CUDF_FAIL` sits inside
+`if (n > 0)`, so a zero-row table with an unsupported key type succeeds and says nothing.
+Comment only; pre-existing and harmless.
+
+### N2, N3 — both counts re-measured, not re-read
+
+N2: the device table sums to **24** off cells (5 + 4 + 5 + 5 + 5), not 20. "21 on" was right.
+N3: "30 sections" was two counts added together. Measured from the base
+(`d39fddede`) by parsing `== <section>` headers: **18** `*-mini.cpu.txt` sections moved (6 queries ×
+3 tp4 modes, all 18 of the 18 that exist) and **12** `*-mini.cost.txt` (12 of 18 — tpch/q18's and
+tpcds/q82's cost sections did not move, which is the permutation argument the section already made).
+`output_rows=` lives only in the `.cpu.txt` kind, so that invariant is over 18 sections, not 30;
+re-measured, 0 of the 18 changed its `output_rows` multiset.
+
+### The archival, and the link migration that is the actual work
+
+All five moved to `archived-tickets.md`'s Done, each carrying
+`**Done 2026-10-09 by repartition-keys, PR #169; awaiting merge.**`. Links repointed, by grep over
+both the `#tNN` and bare `#NN` spellings:
+
+| ticket | links repointed | files |
+|---|--:|---|
+| #95 | 4 | `build-test.md`, `tasks.md`, `repartition-keys.md`, `tickets/complete-coverage.md` |
+| #189 | 3 | `build-test.md`, `tasks.md`, `repartition-keys.md` |
+| #201 | 4 | `build-test.md`, `architecture.md:1058`, `tasks.md`, `repartition-keys.md` |
+| #206 | 2 | `tasks.md`, `repartition-keys.md` |
+| #240 | 3 | `tasks.md`, `repartition-keys.md`, `tickets/corpus-coverage.md` (#240's own cross-link from #264) |
+
+Plus two inside the archive that the move itself invalidated (#184's body cited #95 at its old
+path; now same-file `#t95`). 18 in all.
+
+`tickets.md` re-summed by script: corpus-coverage **35 → 30**, header **122 → 117**. Checked in
+three directions for every row, not just the one that moved — declared count equals its listed
+IDs, equals its file's `<a id>` anchors, in the same order, and each file's own Contents list
+matches its anchors; the total equals the header. 181 anchors across `tickets.md`, `tickets/*.md`
+and the archive, all distinct, each sitting above its own `### #NN` header, which is what
+`anchored_numbers` requires.
+
+**`cost-report` the binary, not only its tests** — the check the round was told to prize.
+`scripts/cost-report-preview.sh`, exit **0**: every one of the 33 registry tags resolves to an
+anchor. `#183` renders as `archive/archived-tickets.md#t183` in the output, which is the live proof
+that `TicketIndex::load` reads the archive — the fact the previous round got wrong and used to
+defer this work.
+
+### Two things the tree contradicted that were not on the list
+
+- **#201's body was never rewritten.** It was not among the five blocking prose fixes, and it still
+  said "The fix is the gate calling `rows_per_lane` … not done". Archiving it in that state is the
+  contradiction the round warned about for #95. Rewritten to the closed state from source:
+  `murmur_conformance.rs` has no `cpu_partition_ids`, imports production `pmod` and `rows_per_lane`,
+  and holds 19 tests of which two need no card.
+- **#65 still named #206 as a live blocker.** The fixed sentence settled `rollup-small-keys`; the
+  next sentence said the other rows "are off first on #152, **#206**, #212 or #220", and no registry
+  row carries `206` at all. Now `#152, #212 or #220`, with #189 and #206 named as no longer
+  blocking.
+
+Also fixed where found: the archive header listed `tasks/active-tickets.md` among the files
+`TicketIndex::load` reads, and the code reads `tickets.md`, `tickets/*.md` and the archive;
+#184's body said "q15's registry row carries #95", which B6 made false.
+
+### Left undone, deliberately
+
+- **`reports/corpus-fixes.md:1128`'s D2 is still written as an open decision**, and the shape it
+  recommends — `hash_key_precisions: [uint8]` appended to `CudfRepartition` — is the one D2
+  rejected. Its "Cells at stake: q15 × tp4 (3 gpu)" is also stale: q15's device cells are #183's
+  and #220's. `reports/` is the human's; the impl's Task 10 lists it as owed.
+- **145 dead ticket links in `archive/archived-tasks.md`** and 7 more in `archived-tickets.md`,
+  pointing at `active-tickets.md` (no such file) or `../tickets.md#tNN` (no anchors there). Five of
+  them name #95 or #189. All predate this round, and repointing five of 152 would leave the file
+  less consistent than it is. 176 broken ticket links wiki-wide, of 478.
+- The device half's log above still reads `timestamp-s-key-group … left at 240` in its table. That
+  was true when written; the retag to `264` is recorded in the section below it. Left as the dated
+  record it is.

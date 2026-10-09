@@ -971,23 +971,18 @@ operator_case! {
   cuDF-smoke row and the murmur row's example name moved with their counts, because both named a
   deleted symbol. **Owed, with the exact text in `-detail.md`:** `architecture.md`'s hash section
   (the decimal and NaN rules, the supported key list), `corpus-fixes.md`'s D2, #243's rewording,
-  `tickets.md`'s counts, and the archivals. **No ticket was archived** — see the next line.
-- [~] **The archival is not takeable yet, and #240 is why.** #95, #201 and #206 are ready: every
-  cell they held is run and on. #189 is ready: all 24 cells. **#240 is not** —
-  `pbench/timestamp-s-key-group`'s five device cells are still off, on a cause that is not #240
-  (the device refuses a non-`ColumnRef` group expr), and registry row 195 still tags `240` because
-  `cost-report` exits 1 on a ticket that resolves nowhere and the new ticket is not mine to file.
-  Archiving #240 now would leave five cells explained by a closed ticket, which is the exact rot
-  this task was told to avoid. File the proposed ticket, retag row 195, then archive.
-- [ ] `architecture.md`, "Rehash and the comet hash": the decimal rule (16 bytes on both engines,
-  the cpu's cast, not Spark's placement at p ≤ 18) and the supported key list. `build-test.md`:
-  the murmur gate's count and description (production rule, the new types), the emit cases'
-  count, the cuDF smoke row. Archive #95, #189, #201, #206, #240 to
-  `archive/archived-tickets.md` with "Done <date> by repartition-keys"; `tickets.md` counts;
-  `corpus-fixes.md` D2 marked decided (the cpu-side cast); #243 reworded to the cpu's equality
-  alone — "DataFusion compares and groups floats by their bits" — with its lane half struck as
-  fixed here (every NaN one lane, both zeros one lane) and its two pins named; `architecture.md`'s
-  hash section states the float rule; the flatbuffers table names the four timestamp types.
+  `tickets.md`'s counts, and the archivals — all but `corpus-fixes.md`'s D2 now in; see below.
+- [x] **The archival is done**, in the review round: #95, #189, #201, #206 and #240 are in
+  `archive/archived-tickets.md`'s Done, each with "Done 2026-10-09 by repartition-keys, PR #169".
+  #240 was blocked on `pbench/timestamp-s-key-group`'s five device cells resting on a cause that
+  is not #240; the coordinator filed [#264](../tickets/corpus-coverage.md#t264) and retagged the
+  row, which cleared it. #95 was blocked on eight stale `95` tags, dropped in the same round (B6).
+  18 wiki links repointed at the archive and `tickets.md` re-summed to 117; `cost-report`'s binary
+  run is the proof that every tag still resolves. Derivation and counts: `-detail.md`.
+- [x] `architecture.md`'s hash section, `build-test.md`'s counts (including this round's
+  `wire::serialize::tests` row), `tickets.md`'s counts, #243's rewording and the five ticket
+  bodies are all in. **Still owed, and the human's:** `reports/corpus-fixes.md`'s D2, which reads
+  as an open decision and recommends the shape D2 rejected.
 - [ ] **Commit:** `git commit -m "repartition-keys: wiki, tickets archived"`.
 
 ### Task 11: The record

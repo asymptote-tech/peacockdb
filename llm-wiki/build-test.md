@@ -234,7 +234,7 @@ the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and 
 mode goldens hold, and asserted to be one, so the membership grows when the mapping does — with
 every payload rendered and a sha256 over the bytes beside it
 
-| Recipes per join type | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests.rs) | 27 |
+| Recipes per join type | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests.rs) | 24 |
 |---|---|--:|
 
 the kinds whose recipe is more than one call, `GpuHashJoin` first: per join type, the seq set
@@ -333,9 +333,17 @@ state machine one call at a time with no tree around it
 |---|---|--:|
 
 a grouping-set aggregate's shuffle hashes the user keys and not the id, which is
-[#189](tickets/corpus-coverage.md#t189): the id is a `UInt8` comet's murmur3 has no arm for, and
+[#189](archive/archived-tickets.md#t189): the id is a `UInt8` comet's murmur3 has no arm for, and
 the device's id differs from the cpu's in type and bits ([#65](tickets/corpus-coverage.md#t65)), so
 hashing it would put a subtotal row in a different lane on each engine
+
+| Arrow to the wire enum | [wire::serialize::tests](../peacockdb-core/src/wire/serialize/tests.rs) | 3 |
+|---|---|--:|
+
+which fb `DataType` member each Arrow type maps to, over strings and one built buffer: every
+timestamp unit crosses as its own member, zoned or naive, and the name a payload golden would
+print is read back off the buffer. One `bug_`: a schema holding an `Interval` is refused at plan
+time naming the column, since the enum cannot name it ([#249](tickets/complete-coverage.md#t249))
 
 | The lane rule's own properties | [executor::cpu_backend::spark_partitioning::tests](../peacockdb-core/src/executor/cpu_backend/spark_partitioning/tests.rs) | 1 |
 |---|---|--:|
@@ -543,7 +551,7 @@ and `q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggre
 groups — `bool`, `decimal15`, `decimal38`, the three `timestamp-*` and `uint` — at the two tp1
 modes, where no shuffle hashes the key; and `uint-key-join` at `tp1-single` alone.
 The rest are off against [#152](tickets/joins.md#t152),
-[#95](tickets/corpus-coverage.md#t95),
+[#95](archive/archived-tickets.md#t95),
 [#220](tickets/joins.md#t220) and the device's own tickets (#57, #63, #65, #205, #206, #240). The fifty-seventh case is that a device run under a
 regeneration writes no golden
 
@@ -643,7 +651,7 @@ aggregates' inner finalize and outer `max` — and one `bug_`: the rollup's grou
 
 the linchpin gate: both sides place every row in the same partition, bit-exact, over every key
 type the planner emits — and against production `rows_per_lane`, not a copy of the rule, which is
-what [#201](tickets/corpus-coverage.md#t201) was. Two of the nineteen need no device, the comet
+what [#201](archive/archived-tickets.md#t201) was. Two of the nineteen need no device, the comet
 call and `pmod` on a negative hash, and ride here anyway, because the module is the gate and
 splits nowhere
 

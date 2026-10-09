@@ -2,11 +2,11 @@
 
 Kind: production
 
-**This task closes [#201](../tickets/corpus-coverage.md#t201) (the murmur gate proves a copy of
-the lane rule, not the rule), [#206](../tickets/corpus-coverage.md#t206) (a float or boolean
-partition key is refused on the device), [#240](../tickets/corpus-coverage.md#t240) (a timestamp
-partition key is refused on the device), [#95](../tickets/corpus-coverage.md#t95) (a decimal
-partition key is refused on the device) and [#189](../tickets/corpus-coverage.md#t189) (the
+**This task closes [#201](../archive/archived-tickets.md#t201) (the murmur gate proves a copy of
+the lane rule, not the rule), [#206](../archive/archived-tickets.md#t206) (a float or boolean
+partition key is refused on the device), [#240](../archive/archived-tickets.md#t240) (a timestamp
+partition key is refused on the device), [#95](../archive/archived-tickets.md#t95) (a decimal
+partition key is refused on the device) and [#189](../archive/archived-tickets.md#t189) (the
 shuffle cannot hash a rollup's grouping-set id).** It also makes unsigned keys shuffle on both
 engines (the review's row 11; no ticket). Fourth of the join-rewrite chain: the joins
 that follow shuffle on keys of these types.

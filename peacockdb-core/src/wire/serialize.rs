@@ -166,3 +166,6 @@ pub(crate) fn serialize_schema<'a>(
         },
     ))
 }
+
+#[cfg(test)]
+mod tests;
