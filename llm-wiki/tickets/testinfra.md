@@ -46,6 +46,13 @@ back.
 Not [#252](#t252), though they share a cause. That one is a staged binary not receiving the
 checkout on a remote CPU host; this one is CI declining to run at all.
 
+2026-10-09: an adjacent instance of the same mechanism, filed here rather than as its own ticket
+because the second fix below ends both. The `changes` job classifies the push it reacts to, not
+the pull request's diff, so a code commit followed by documentation pushes leaves the PR head
+unbuilt while GitHub reports the PR green. Found on PR #175, where four runs followed the code
+commit and all four skipped every job. A close and reopen forces a real run on a mergeable PR,
+which is the workaround until a fix lands.
+
 **Two fixes, and the choice is a cost decision rather than a technical one.** Excepting
 `llm-wiki/tickets/` is not expressible in `paths-ignore` — GitHub Actions has no negation there —
 so the first shape is to drop the doc patterns from `paths-ignore` and let the `changes` job carry

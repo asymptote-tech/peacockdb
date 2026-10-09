@@ -282,3 +282,28 @@ the macro expands only in the two corpus binaries. So a **comment** reflow in th
 edit shape that can reach a consumer no compiler would catch. `test_corpus_goldens` (26) is what
 covers it, and it is green. Anyone editing comments there should run the rust-only tier rather than
 reasoning that comments cannot matter.
+
+### The PR reported green on a run that built nothing, and how that was fixed
+
+Worth carrying, because every task in this chain ends the same way and the next coordinator will
+meet it. The runs on PR #175 were:
+
+    37925330989  39633693  the code commit — FULL BUILD, green but for shad-gpu
+    37925350783  3b931387  board only       — every job skipped
+    37928047761  a0051a69  comment + wiki   — every job skipped
+    37930237185  0dcc36ab  wiki only        — every job skipped
+
+The `changes` job classifies **the push it is reacting to**, not the pull request's diff. So a
+code change followed by documentation pushes leaves the head unbuilt while GitHub reports the PR
+green — and `000e7c61` reflowed a comment in `corpus_cases.inc`, a code file, so the head's code
+state had genuinely never been built when the task reached `completeness approved`.
+
+**A close and reopen forces a real run on the current head.** 37930362767 was created that way and
+its `changes` job answered `code=true`, building `0dcc36ab` in full. That contradicts
+`duckdb-oracle-detail.md`'s reading that a close/reopen "produced nothing" — there, PR #167 was
+merge-conflicted, so GitHub had no merge ref to check out and could create no run at all. With a
+mergeable PR the lever works, and it is the only one: `pipeline.yml` has no `workflow_dispatch`.
+
+**The rule, for `completeness approved` → `done`:** find the last commit that touched anything but
+`**.md` and `llm-wiki/**`, and check a run actually built *it or later*. The PR's own green is not
+that check. If the head is unbuilt, close and reopen.
