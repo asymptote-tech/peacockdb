@@ -2215,7 +2215,7 @@ that file and nothing else.
 
 Fork points, re-measured (the survey's table had pbench's head as its child's fork point):
 
-    master               2ad302bf
+    master               f0a6ecbf   (2ad302bf when the survey above was written)
     ENS-duckdb-oracle    ba4614eb   forks from master at            dbf44bcc   23 commits
     ENS-pbench           6ddb6dcc   forks from ENS-duckdb-oracle at 0df60133   25 commits
     ENS-repartition-keys 1556b819   forks from ENS-pbench at        d39fdded   18 commits
@@ -2269,3 +2269,292 @@ and the re-prove round below is testing master's new base, not a resolution of m
 
 **Still owed on the numbers.** Self-consistency is all a coordinator can prove — it cannot run
 `--list`. The four figures above are declarations to check against the suites in the re-prove round.
+
+## Re-proved on the new base (2026-10-09)
+
+The rebase's re-verification round. **Everything green, nothing regenerated, the working tree
+is unchanged.** `git status --short` is empty after every run below, so this round's whole
+output is this section.
+
+### The base is `f0a6ecbf`, and six master commits came across, not five
+
+`git merge-base HEAD origin/master` → `f0a6ecbf`, and `HEAD~25` is that same commit, so the
+branch sits directly on master's tip. `git rev-list --count dbf44bcc..f0a6ecbf` → **6**. The
+sixth, which the dispatch's list of five did not name, is `f0a6ecbf` itself — *Cost gate fails
+only past +10%; chain J resequenced* — and it **carries code**: `cost-report/src/main.rs` +78
+and `.github/workflows/pipeline.yml`. So two of the six touch code, not one. The cost-report
+tier below is what proves the second.
+
+### Why the renderer could not move a golden this branch owns, shown before it was run
+
+`64ced62e` changes two things in `plan_text`, and both are text:
+
+- `literal_text` gains a `Decimal128(None, ..) | Decimal256(None, ..)` arm printing `NULL`;
+- `projection_field` takes the node's **own** schema instead of build++probe, and names each
+  ordinal by `name_at(output, position)`.
+
+The second is a no-op wherever the join's pre-projection width equals build++probe, which is
+every join type but `LeftMark` (build + mark), `RightSemi` and `RightAnti` (probe only). For
+`LeftSemi` and `LeftAnti` the two readings agree by construction: the output schema is the build
+schema permuted by the projection, so `output[position] == build[projection[position]]` and the
+printed name is the same. master's ten moved goldens are all `tpcds`, and the moved lines are
+exactly `LeftMark` and `RightSemi` projections.
+
+`tpch`'s goldens carry `projection=` on three join lines and all three are `LeftSemi`/`LeftAnti`
+(`grep -ohE "join_type=(LeftMark|RightSemi|RightAnti|LeftSemi|LeftAnti), on=\[[^]]*\], projection=\[[^]]*\]"`
+over `tp1-single.plans.txt`), so master was right to leave `tpch` alone. And no golden in the
+tree holds a `None,p,s` triple (`grep -rlE "None,[0-9]+,[0-9]+" testdata/goldens/` is empty), so
+the null-decimal arm moves nothing either. This branch's three golden families —
+`duckdb-result.txt`, `gpu-result.txt`, `mini.result.txt` — hold result rows and no plan text, so
+the renderer cannot reach them at all. The runs below confirmed the prediction: **zero goldens
+regenerated.**
+
+### Local CPU, measured
+
+One command, every target the `rust-only` build compiles:
+`cargo test --features rust-only -p peacockdb-core -- --test-threads=2` → exit 0, **0 warnings,
+0 errors** in the whole log. Run twice, before and after this section was written, with identical
+counts both times — the second run is what proves a wiki edit moved nothing, the wiki being a
+test input (#263).
+
+| target | result |
+|---|--:|
+| `--lib` | 661 passed, 0 failed, 2 ignored |
+| `test_cpu_corpus` | **706 passed, 0 failed** |
+| `test_corpus_goldens` | 26 passed |
+| `test_cost_model` | 3 passed |
+| `test_golden_format` | 43 passed |
+| `test_ci_coverage` | 9 passed |
+| `test_module_layout` | 18 passed |
+| `test_gpu_corpus`, `test_node_timing`, `peacock_gpu_benchmarks` | 0 cases — compiled out under `rust-only`, as the page says |
+| doctests | 0 — the #128 gap, unchanged |
+
+`test_cpu_corpus` green at 706 is the load-bearing one twice over: it verifies master's ten
+regenerated `tpcds` `.cpu.txt` sections through *this* branch's comparator, and `test_cost_model`
+re-derives every `.cost.txt` section from those same `.cpu.txt` files — so master not
+regenerating the `.cost.txt` siblings was correct, and this run is the proof.
+
+**The cost-report tier.** `cargo test -p cost-report` → **38 passed, 0 failed**, which is
+`f0a6ecbf`'s new regression-gate code and matches master's updated row of 38. It builds with
+**one warning**, `function sha_links is never used` at `cost-report/src/main.rs:1538` — a test
+helper with no call site. It is not new and it is not either side's: `sha_links` occurs once, its
+own definition, at `dbf44bcc`, `2ad302bf`, `f0a6ecbf` and `HEAD` alike, so it predates the fork,
+and this branch changes no file under `cost-report/` (`git diff --name-only origin/master HEAD --
+cost-report/` is empty). Cosmetic, and no production behaviour is wrong because of it, so no
+ticket.
+
+**The C++ CPU tier, locally.** `ctest -L cpu` → `100% tests passed, 0 tests failed out of 1`;
+the binary itself reports **15 tests from 7 test suites ran, PASSED**. It could not be built in
+`cpp/build`: in this worktree that directory is an **empty root-owned** `drwxr-xr-x root root`
+dated Sep 22, left by the docker build master has since retired, and cmake cannot create
+`CMakeFiles/pkgRedirects` inside it. Removing it needs sudo, so the build was configured into
+`/tmp/dkb-cppbuild` with `build.sh`'s own flags (Release, Ninja, `80;90`, link pool of 1, ccache,
+`-Dcudf_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2`, gcc-12). Two warnings, both from the
+vendored `_deps/flatbuffers-src/src/reflection.cpp` through gcc-12's own `stl_algobase.h`
+(`-Wstringop-overflow` on `__builtin_memmove`) — third-party, pre-existing, and nothing this
+chain touched.
+
+**The Python half of the cost-report job**, enumerated the way `pipeline.yml` enumerates it
+(`testdata/test_*.py`, `scripts/exec_model/tests/test_*.py` minus the three run elsewhere,
+`scripts/calibration/tests/test_*.py`), every file's own exit code captured:
+
+| set | files | cases |
+|---|--:|--:|
+| `testdata/test_duckdb_cost.py` | 1 | 41 |
+| `testdata/test_duckdb_result.py` | 1 | 14 |
+| exec-model prototype | 10 | 216 |
+| calibration scripts | 3 | 12 |
+
+`PYTHON_COST_REPORT_TOTAL=283 STATUS=0`, every `rc=0`. `scripts/exec_model/tests/test_tpch.py`
+was run too, off-tier, to close the Python figure: **19 passed, 0 failed**.
+
+`matplotlib` is not installed on this workstation, and `test_plot.py` is a hard import of it, so
+it failed for want of the module on the first pass. `python3 -m venv` cannot bootstrap pip here
+either (no `python3-venv`). It was installed out of tree —
+`pip3 install --target /tmp/dkb-pylibs matplotlib` — and the file run under
+`PYTHONPATH=/tmp/dkb-pylibs`: **3 passed**. The user's Python environment was not modified. CI
+self-heals this with a plain `pip install`, so CI never saw the gap.
+
+### The device set on nebius-gpu, same host and override as the recording cycle
+
+Tree synced uncommitted from the workspace root, then built on the host:
+
+```
+rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ dmitry@89.169.109.150:peacockdb-J/
+# on the host, in ~/peacockdb-J, after . ~/peacock-env.sh
+./scripts/build-test-shadgpu.sh --build
+```
+
+Build exit 0. Every binary then run directly, `--test-threads=1` on every Rust one, with
+`LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib` and
+`PEACOCK_TESTDATA_DIR=$PWD/testdata`:
+
+| binary | result |
+|---|--:|
+| `cpp/install/bin/peacock_gpu_tests` | 4 passed |
+| `cpp/install/bin/peacock_plan_tests` | 56 passed |
+| `cpp/install/rust-tests/test_gpu_corpus` | 28 passed |
+| `cpp/install/rust-tests/test_node_timing` | 1 passed |
+| `cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests::` | 536 passed, 667 filtered |
+| `cpp/install/rust-tests/peacock_gpu_benchmarks --skip bench_` | 8 passed, 3 filtered |
+
+0 failed everywhere; 536 + 28 + (8+3) + 1 = 576, the page's gpu block exactly.
+
+`test_gpu_corpus` ran **without** `PCK_WRITE_GPU_RESULT`, which is the ordinary gate: the
+committed `gpu-result.txt` files are read-only inputs there. Both were `sha256sum`-ed and
+`stat`-ed before and after — `def4db82…` / `a70ad06f…`, 28868 and 3486 bytes, mtime
+`1791518771` — **identical on both sides of the run**, and no `gpu-result-<v>.txt` sandbox file
+appeared. So the 26 recorded device cells still agree with DuckDB on master's new base, and the
+record did not need re-cutting: no device code moved and the renderer cannot reach a result row.
+
+`peacock_cpu_tests` was also listed and run on the host (15 passed) before the local build
+existed, as a backstop; the local `ctest -L cpu` above is the tier's real proof.
+
+### The count figures, measured
+
+`--list` per target, which is what a coordinator could not do. The four declarations are
+**all right**:
+
+| declaration | measured | how |
+|---|---|---|
+| cpu tier **1398** | **1398** | 663 + 706 + 26 + 3 |
+| ‣ `--lib` **663** | **663** | `--lib -- --list` → 663 (661 run + 2 ignored) |
+| ‣ `test_cpu_corpus` **706** | **706** | `--test test_cpu_corpus -- --list` → 706 |
+| ‣ `test_corpus_goldens` 26 | 26 | `--list` |
+| ‣ `test_cost_model` 3 | 3 | `--list` |
+| gpu tier 576 | 576 | 536 + 28 + 11 + 1, each from the staged binary's `--list` |
+| ffi tier 7 | 4 of 7 | `peacockdb_core_gpu_lib ffi_tests:: --list` → 4; `test_ffi`'s 3 not run |
+| everything-else Rust 108 | 108 | 43 + 9 + 18 + 38 |
+| **Rust 2089** | **2086 of 2089** | 1398 + 7 + 576 + 108; only `test_ffi`'s 3 unmeasured |
+| **C++ 97** | **75 of 97** | 15 + 4 + 56; the sf40/manual/2gpu rows' 22 are out of scope |
+| **Python 395** | **302 of 395** | 283 + 19; the manual corpus's 93 is out of scope |
+| **grand total 2581** | **2463 of 2581** | the three above |
+
+One independent cross-check falls out of the staged lib: `peacockdb_core_gpu_lib --list` with no
+filter is **1203**, and 663 + 4 + 536 = 1203. One binary's listing confirms all three rung
+figures at once.
+
+The page's own tables were re-summed by script as well, since the rule is that a header equals
+the sum of the N columns: cpu rows → 1398, ffi rows → 7, gpu rows → 576, everything-else →
+Rust 108 / C++ 97 / Python 395. Rust 2089, grand total 2581. The three rows master's renderer
+commit touched were checked case by case against `--list` and none moved:
+`planner::tests::join_projection_names` 1, `plan_text::tests` 15,
+`plan_text::expr_text::tests` 4 — master's +166, +36 and +9 lines are assertions inside the
+counts the page already carried. **`build-test.md` needs no edit.**
+
+### `a68cf8ec`'s four files are compiled, and that gap is closed
+
+`peacockdb-core/src/test_support/{corpus_golden,mod,result_text}.rs` and
+`peacockdb-core/tests/test_cpu_corpus.rs` had never been through a compiler — no CI run, no local
+build. The local `rust-only` run above compiles all four (three in `--lib`, one in
+`test_cpu_corpus`) with **0 warnings and 0 errors**, and their tests are green inside the 663 and
+the 706. `git show a68cf8ec` over the four is doc-comment lines only, which is what the eye-check
+claimed; the compiler now agrees.
+
+### Skipped, and why
+
+- **The sf40 pair** (`peacock_tpch_tests`, `peacock_tpchv_tests`), **`--run-benchmarks`** and the
+  three `bench_` cases, **Nsight captures**, **any H200 timing** — out by the host override.
+  Deferred, not failing.
+- **`--run` and `--pull-results`** — both ssh to shad-gpu, which is down. Each staged binary was
+  run directly over ssh instead, and nothing needed pulling home: no file changed on the host.
+- **`peacockdb-ffi --test test_ffi`** (3 cases, the ffi rung's other half) — in neither the local
+  CPU tiers nor the override's device set, and it needs a cuDF FFI cargo build of its own. The
+  rung's other 4 were measured off the staged lib.
+- **`scripts/exec_model/tests/test_tpch_corpus.py` and `test_tpcds.py`** (93 cases) — manual
+  dispatch only, `exec-model-corpus.yml`.
+
+### Host state
+
+nebius-gpu: L40S, 46068 MiB, **0 MiB in use** before the run; `/` at 60G of 96G with **37G
+free** before and after. **Nothing was deleted and no cleanup was needed.**
+
+### For the next person
+
+- **The rebase cost this task nothing.** Not one golden moved, not one test turned red, and the
+  working tree is byte-identical to `ebc43cee`. The task is re-proved on `f0a6ecbf` and can go
+  back to `completeness approved`.
+- **`cpp/build` in the `peacockdb-alpha` worktree is root-owned and empty.** Any local C++ build
+  there fails at configure with cmake's `pkgRedirects` error, which does not name permissions as
+  the cause in its first line. Either `sudo rm -rf` it or configure elsewhere. `/tmp/dkb-cppbuild`
+  is this round's throwaway dir and holds a working Release build of `peacock_gpu` +
+  `peacock_cpu_tests`.
+- **`matplotlib` is missing on this workstation**, so `scripts/calibration/tests/test_plot.py`
+  fails locally for want of it while CI passes. `/tmp/dkb-pylibs` is a no-install workaround
+  (`PYTHONPATH`).
+- **The device record is a read-only input now.** Running `test_gpu_corpus` without
+  `PCK_WRITE_GPU_RESULT` leaves `gpu-result.txt` untouched — checked by hash and mtime this
+  round. Re-record only when a device cell is turned on or off, or device code moves.
+
+### Two corrections to the section above, both found by the re-prove round
+
+**The base is `f0a6ecbf`, and six commits came across, not five.** `origin/master` moved under this
+run between the survey command and the rebase — the worktrees share one ref store, so another
+session's fetch is enough — and the rebase landed on the newer tip, which is the right place to be
+but one commit further than the survey described. The extra commit is `f0a6ecbf`, "Cost gate fails
+only past +10%; chain J resequenced and three tasks' cost regressions accepted", and it **also
+carries code**: `cost-report/src/main.rs` (+78) and `.github/workflows/pipeline.yml`. So two of the
+six commits carry code, not one. It is also the commit that resequenced chain J and pre-authorised
+repartition-keys' cost regression, so everything the reconciliation above attributes to "master"
+is largely this commit.
+
+**The intersection was six files, not five, and `.github/workflows/pipeline.yml` is the sixth.**
+This branch rewrites the DuckDB generator unit-test step at line ~712; `f0a6ecbf` rewords the
+cost-gate error at line ~928. Git auto-merged them — they never touched — and the byte-identical
+check above held only because master's hunk sits *below* this branch's, so no line number moved.
+Verified directly rather than inferred: HEAD's `pipeline.yml` diffs against master's blob
+`9fe9cefb`, which is `f0a6ecbf`'s, and the only hunk is this branch's. **Master's pipeline and
+cost-report changes are both in HEAD.** The union driver never covered `pipeline.yml`, so a real
+conflict there would have stopped the replay; it did not stop.
+
+That also resolves the arithmetic oddity the reconciliation noticed. The "sixth case master added"
+to `build-test.md`'s drift is `f0a6ecbf`'s own: it took the cost-report renderer row from 37 to 38
+for its new gate tests and moved the header by the +4 that `2ad302bf` was owed, not by +5. The
+derived header stands.
+
+## Re-proved and done on the new base (2026-10-09)
+
+The round's own evidence is the section the developer wrote above. Summary and the two transitions:
+
+**Everything green, nothing regenerated, no code change needed.** Local CPU: `--lib` 661 passed /
+2 ignored, `test_cpu_corpus` **706**, `test_corpus_goldens` 26, `test_cost_model` 3,
+`test_golden_format` 43, `test_ci_coverage` 9, `test_module_layout` 18; C++ cpu 15 in 7 suites;
+`cost-report` 38; the Python half 283 across four files, every file rc=0. Device set on nebius-gpu
+at cuDF 25.02 after an uncommitted rsync and `--build`: 4 + 56 + 28 + 1 + 536 + 8, **576 with 0
+failed**, and `test_gpu_corpus` run read-only — both committed `gpu-result.txt` files were hashed
+before and after and are byte-identical, so the recording cycle did not need to run again.
+
+**No plan golden moved, and the reason is worth keeping**: master's `projection_field` change is a
+no-op unless a join's pre-projection width differs from build++probe, which is only
+`LeftMark`/`RightSemi`/`RightAnti`. The three `projection=` join lines in tpch's goldens are all
+`LeftSemi`/`LeftAnti`, where output-schema naming and build-side naming agree by construction — so
+master was right to regenerate tpcds alone, and `test_cpu_corpus` green at 706 checks master's ten
+regenerated tpcds sections through *this* branch's comparator.
+
+**`build-test.md` needed no edit.** All four re-derived figures measured right: cpu tier 1398 =
+663 + 706 + 26 + 3, gpu 576, and `peacockdb_core_gpu_lib --list` unfiltered is 1203 = 663 + 4 + 536,
+which confirms all three rung figures from one binary. The parts out of scope here are unchanged by
+this branch: the sf40 and manual C++ cases, `peacockdb-ffi --test test_ffi`'s 3, and the manual
+corpus's 93 Python queries.
+
+**CI, the thing the rebase was for.** Run 37882913193 on `ebc43cee`: `Changed paths` answered
+code=true and the full pipeline ran, so the force-push did what a merge could not. cudf 25.02 pass
+(21m40s), cudf 26.02 pass (19m42s), GPU build pass, Cost report pass, S3 check pass, Pages skipped.
+The only red is `GPU Tests (remote)` on `ssh: connect to host llm-gpu0h200.velkerr.ru port 22:
+Connection timed out` — shad-gpu, which the host override exempts by name. This run also closes the
+one gap in the task's evidence: the four comment-only files in `a68cf8ec` have now been compiled,
+locally and in CI.
+
+So `rebase needed(completeness approved)` → `completeness approved` on the re-prove, and
+`completeness approved` → `done` on the run above.
+
+### Two environment things for the human, neither of them a ticket
+
+- **`cpp/build` in this worktree is an empty root-owned directory**, left by the retired docker
+  build. cmake dies at configure with `Unable to (re)create the private pkgRedirects directory`,
+  which names the build directory and not the permissions, so it reads like a cmake fault. Removing
+  it needs sudo. The developer worked around it by configuring into `/tmp`.
+- **`matplotlib` is absent on this workstation** and `scripts/calibration/tests/test_plot.py`
+  imports it at module scope, so that file fails locally while CI has it. `python3 -m venv` cannot
+  bootstrap pip here either; the developer installed it to a `--target` directory outside the tree
+  and ran the file under `PYTHONPATH`, 3 passed, without touching the system environment.
