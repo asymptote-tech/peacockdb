@@ -2222,3 +2222,50 @@ Fork points, re-measured (the survey's table had pbench's head as its child's fo
 
 Order, per the protocol: this branch all the way back to `completeness approved` and through CI,
 then pbench, then repartition-keys. Delete the `.gitattributes` before committing anything.
+
+### How the five files were actually resolved
+
+The union replay left 24 commits' worth of duplicated lines, so the reconciliation was not a
+patch-up of that output. It was **one three-way merge per file** — base `dbf44bcc`, ours
+`origin/master`, theirs the pre-rebase head — which is the same merge the replay does, taken once
+instead of 24 times. Eleven conflict hunks in all, against something like a hundred across the
+replay.
+
+- **`archive/archived-tickets.md`** — one hunk, both sides appending at the head of **Done**.
+  Resolution is both, master first: the order is descending and master's new entries are #237 and
+  #236 to this branch's #235.
+- **`tasks.md`** — two hunks, and the one piece of news in the whole rebase. **master resequenced
+  chain J**: stale-cells moves from task 2 to task 5, after refcounted-scatter and branching from
+  it, so the chain no longer forks and the numbering is 1 duckdb-oracle, 2 pbench, 3
+  repartition-keys, 4 refcounted-scatter, 5 stale-cells. That is the decision the last run said it
+  could not make, made. Resolved by ownership exactly as the protocol says — master's side for
+  which tasks exist and how they are numbered, this branch's side for the three states — so the
+  file now differs from master in three heading lines and nothing else.
+- **`tickets.md`** — three hunks, and not resolved by side anywhere. Every row was **re-derived
+  from the ticket files' own `<a id="tNN">` anchors**, which is the only reading that satisfies the
+  rule that a row's count equal both its ID list and its file's anchors in the same order. 123 open
+  over 11 rows, checked by script: every row agrees with its file, and the header equals the sum.
+  Master's "next free 284" and this branch's "264" are both kept — master reserved 264–279 for this
+  chain and went on to 284 itself, so the branch's counter is right on the branch.
+- **`tickets/corpus-coverage.md`** — two hunks, the contents list and the bodies. master added #262
+  and #281, this branch added #253 and #254 and archived #235, so the answer is four entries and a
+  deletion, in both places, 38 anchors. The one thing that needed judgement rather than arithmetic:
+  #253's body said stale-cells "is the next task that can produce one", which master's resequencing
+  falsified. Now "a task".
+- **`build-test.md`** — three hunks, and the count lines are the reason the last run's note said to
+  derive them once at the end. Doing that turned up a **drift neither side introduced**: the page's
+  own rule is that the grand total is the sum of the N columns of its two tables, and at the fork
+  that sum was 1857 Rust against a header saying 1852. master carried the 5 across and added a
+  sixth (its cost-report row went 37→38 while its header moved +4). This branch had already made
+  its copy self-consistent at 2084. So the header is derived, not added: **2581 — Rust 2089, C++
+  97, Python 395**, and the three tier headings and their sub-breakdowns all sum to their rows.
+  The module-layout row is this branch's (18, the write-order rule); the cost-report row is
+  master's (38).
+
+**What the replay did not touch.** The 43 files outside the intersection came across byte for byte:
+`git diff` of the old branch against its fork and of the new branch against master are identical
+once the blob index lines are stripped. So no code, script, golden or `.yml` moved in the rebase,
+and the re-prove round below is testing master's new base, not a resolution of mine.
+
+**Still owed on the numbers.** Self-consistency is all a coordinator can prove — it cannot run
+`--list`. The four figures above are declarations to check against the suites in the re-prove round.

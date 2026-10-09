@@ -48,7 +48,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#174 — two clamps for one rule, and nothing compares them](#t174)
   - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
   - [#234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
-  - [#235 — no independent oracle checks the result goldens](#t235)
   - [#262 — the DISTINCT lowering's device cells have never run](#t262)
   - [#281 — limits' and empty-sorts' device cells have never run](#t281)
   - [#253 — the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
@@ -946,56 +945,6 @@ range never needs the ABI's clamp then covers the limit too. Tests: the driver's
 the range each call was handed, and the backends' `LimitStream` tests take a range rather than
 a running count.
 
-<a id="t235"></a>
-### #235 — no independent oracle checks the result goldens
-
-Every answer the corpus checks is checked against DataFusion or against our own goldens, which
-our cpu engine wrote. A defect DataFusion shares with us — a limit it drops (#166), `NOT IN` over
-NULLs (#80) — passes every tier. DuckDB answers exist only for the hand-written bare-cuDF
-gtests at sf40 (`testdata/gen_duckdb_goldens.sh`, `cpp/tests/gpu/test_tpch.cpp`), never for the
-engine's corpus.
-
-**Corpus queries:** every section of `testdata/goldens/{tpch,tpcds}.sf1/mini.result.txt`: 120
-queries, 4 of them a fingerprint over the 262144-byte cap and 4 not enabled.
-
-**What landed, and what is left:** a DuckDB golden beside each result golden, and a Rust test
-comparing them. Built by [`duckdb-oracle`](../tasks/duckdb-oracle.md): the generator and both
-`duckdb-result.txt` files landed 2026-09-28, and the `duckdb_oracle` argument, the comparator,
-the over-cap fingerprint, the helpers' negative tests and the three `ALL` tests landed with
-that task. **What remains is one device cycle**: `gpu-result.txt` has never been written, so
-its 26 `duckdb_gpu_*` cases and the coverage test are red, and both hosts were down when the
-task was built. One `PCK_WRITE_GPU_RESULT=1` cycle on shad-gpu plus `--pull-results` closes
-this ticket.
-
-Measured by the first run (2026-09-28), over every section both files hold: no row count, string
-or NULL differs. tpch 39 queries: 22 identical, 6 differ in column names only, 5 in float or decimal
-digits, 6 not compared. tpcds 99: 53 identical, 12 names only, 3 formatting only, 10 digits, 1
-empty answer, 2 not compared, 18 answered by DuckDB alone. `round(x, 2)` (q2) agrees on the cpu;
-no tie under a LIMIT and no NULL-order difference appeared; turning DuckDB's integer division off
-changes only the typing of two decimal divisions (q2, q61), no value.
-
-The divergences, and the oracle each line carries:
-- **Column names** (18 queries). DataFusion names an unaliased expression by its qualified text
-  (`sum(lineitem.l_quantity)`), DuckDB by its own (`sum(l_quantity)`). Compared by position.
-- **Decimal `avg` and division truncate at a fixed scale.** We follow DataFusion's rule, a decimal
-  cut (not rounded) at its declared scale; DuckDB answers a double. On its own it is formatting
-  and `duckdb_approx` covers it — tpch q1's `avg_qty` is `25.522005` against `25.522005853…`.
-  Inside an expression the truncated intermediates compound past that tolerance, which is
-  **#251**: tpcds q58, q61 and q66, each a `duckdb_divergent(251, …)` line.
-- **Float last digits.** Floating sums and Welford `stddev`/`var` reassociate: tpch q14 and
-  shuffle-stddev, tpcds q39, below 1e-13.
-- **An empty answer.** `tpcds/q17` renders with no header on our side, the cpu emitting no batch
-  (#205), so its column names and types go unchecked; DuckDB prints them. Equal as zero rows, so
-  the line is `duckdb_divergent(205)` — no positions, a row-level divergence — and it goes back
-  to `duckdb_exact` when #205 clears.
-- **Queries only DuckDB answers** (18, tpcds): the window queries our planner refuses (#143),
-  q27 and q72 (#23), q28 (#62). Not compared.
-- **Queries over the cap on both sides** (4): tpch q16, anti-join, filter-project, semi-join.
-  Both writers hold a fingerprint instead of the rows and the line says `duckdb_fingerprint`;
-  measured identical on both sides, hash included. **Not enabled on ours**: tpch q11 and q22,
-  tpcds q24 and q54 (#190), each `duckdb_none` until the task that turns their cells on.
-- **A real divergence** is a ticket, and its line in the declared list names it.
-
 <a id="t262"></a>
 ### #262 — the DISTINCT lowering's device cells have never run
 
@@ -1044,7 +993,7 @@ the cpu case, because `compare_sections` reports a named column that *agrees* as
 diverging". An empty position list does the same at the row level. So the only green options are
 to leave the device cell off or to change the harness. This is the shape `gpu-result.txt` is
 keyed by mode for in the first place — a lane split or a shuffle defect shows per mode — and
-[`stale-cells`](../tasks/stale-cells.md) is the next task that can produce one.
+[`stale-cells`](../tasks/stale-cells.md) is a task that can produce one.
 
 **An over-cap section whose fingerprints differ.** `duckdb_fingerprint` takes no ticket and no
 column list, and `compare_sections` routes a fingerprinted section under `duckdb_divergent` to

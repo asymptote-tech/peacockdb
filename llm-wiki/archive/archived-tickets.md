@@ -59,6 +59,7 @@ goldens. No answer is wrong; a reader of the text cannot tell the value is null.
 `cpu.txt` sections regenerated (q90). Pinned by
 `plan_text::expr_text::tests::a_null_decimal_literal_prints_as_null_at_either_width` and
 `plan_text::tests::a_null_decimal_literal_prints_as_null`.
+
 <a id="t235"></a>
 ### #235 — no independent oracle checks the result goldens
 
