@@ -105,3 +105,29 @@ part scan maps one row group, not two). scan-limit at tp4-single and tp4-sized, 
 21,476,312 (lineitem maps one row group, not 49). scan-limit's two new tp1 sections are new
 against a `skipped` base and the gate omits them; both read `peacockdb_cost=21476312`, as the
 tp4 modes do.
+
+### 2026-10-09 — round 1 green, PR #172 open
+
+Committed as `7fdaeb22`, pushed, PR #172 against `ENS-distinct-companions` — base verified,
+13 commits, so the diff under review is this task and not the chain.
+
+Three things from round 1 worth carrying forward rather than re-deriving:
+
+- **The deletion audit this chain has been running is unsound.** `git diff <file> | grep -c
+  '^-[^-]'` scores a deleted SQL or markdown comment as zero, because the line itself starts
+  with `--`. It read `testdata/tpch-queries/nested-limits.sql` as 0 deletions where it has 1.
+  Use `git diff --numstat`.
+- **The impl plan's Task 4 has steps 3 and 4 the wrong way round.** The `skipped: not enabled
+  at this mode` placeholder is written from `testdata/cost-registry.csv`, not from
+  `corpus_cases.inc`, so a `PCK_UPDATE_SECTIONS=1` run with the registry still `disabled`
+  republishes the placeholder and the cell passes against it — green with the section never
+  written. The registry edit has to come first. Fixed in `limits-impl.md`.
+- **The cost-report job on PR #172 will be red**, and that is the pre-accepted case: exactly
+  the two `nested-limits` rowgroup sections at exactly +228 bytes, with nothing else
+  regressed. `## Cost gate` above has the rows.
+
+Outside this task's scope and deliberately not fixed: an unused `AsArray` import at
+`peacockdb-core/src/tests/gpu_tests/aggregate_dimension_cases.rs:9`, a warning on the gpu rung
+alone and so invisible to every CPU build and to CI. Pre-existing from `0e7804ef`, cosmetic,
+nothing behaves wrongly — no ticket under the house rule. Worth fixing by whoever is next in
+that file.
