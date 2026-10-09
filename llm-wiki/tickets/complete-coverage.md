@@ -149,3 +149,38 @@ keyless-identity, which makes a keyless aggregate answer its row and leaves this
 the identity row for each set whose mask masks every key, its keys NULL and its grouping id the
 set's. DataFusion is not the oracle for it; DuckDB is.
 
+
+<a id="t284"></a>
+### #284 — a limit over a filter is refused above one lane
+**Priority: low** — no corpus query has this shape, and the one-lane modes answer it.
+
+`select * from lineitem where l_quantity > 0 limit 10;` is refused at `tp4-single`,
+`tp4-rowgroup` and `tp4-sized` with `invalid plan: GpuLimit: a limit feeding only the sink is
+not a node`. The tp1 modes answer it. A legal query, refused.
+
+Above one partition DataFusion plans
+`GlobalLimitExec(0,10) → CoalescePartitionsExec → CoalesceBatchesExec(fetch=10) → FilterExec →
+ParquetExec`. The inner `CoalesceBatchesExec` **carries a fetch**, and that is the whole of it:
+`limit_interval` (`planner/translator/common.rs`) reads the fetch as an interval and
+`unload_input` (`translator/nodes.rs`) descends a `CoalesceBatchesExec` only where it has none,
+so the inner fetch becomes a `GpuLimit` whose only parent is the sink — which `plan/validate.rs`
+refuses, correctly, since the interval belongs on the unload. The filter is only what stops
+DataFusion pushing the limit into the scan; `FilterExec` is not in DataFusion 45's
+`supports_limit_pushdown` set.
+
+**Predates limits (chain K)**, measured rather than reasoned: reverting `translate` to call
+`node()` as the base does gives the same refusal at the same three modes, because `node()`
+reaches the same `mid_plan_limit` arm. limits only made it visible, by writing the first test
+that asks a scan to map every row group under a limit.
+
+**Corpus query:** none. Simplest: the query above, at any tp4 mode. Wrapping the limit in an
+aggregate (`select count(l_quantity) from (…)`) plans at all five modes, which is what
+`a_limit_stops_a_scan_that_maps_every_row_group_at_every_mode`
+(`tests/end_to_end/limits.rs`) does.
+
+**Fix proposed:** one arm. `unload_input` passes a fetch-carrying `CoalesceBatchesExec` too,
+handing its interval back rather than wrapping it, and `translate` composes the two with
+`RowInterval::over` — which is the identity here, `{0,10}` over `{0,10}`. The composition is
+already written and already tested; what is missing is reaching it from this shape. Tests: the
+query above at every mode, and the refusal's own case retired to the shape that still earns it,
+a limit over a node that is not erasable.
