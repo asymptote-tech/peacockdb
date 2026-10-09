@@ -958,19 +958,22 @@ Expected divergences, to declare or to normalize in the comparator:
 <a id="t262"></a>
 ### #262 — two DISTINCT corpus queries have no device cell
 
-No device has run a DISTINCT under a grouping set, or one above a join: the two corpus queries
-carrying those shapes are off at every device mode, each on a ticket of its own.
+No device has run a DISTINCT under a grouping set, or a keyless one feeding a cross join: the
+two corpus queries carrying those shapes are off at every device mode, each on a ticket of its
+own.
 
 The lowering itself is proven on a device. `tpch/distinct-functions` was enabled at all five
 modes on nebius-gpu on 2026-10-09 (distinct-companions, chain K, which closed
 [#62](../archive/archived-tickets.md#t62)): plan shape, per-node rows, batch lists and bytes
 match the cpu's sections exactly, and so does the answer bar one ULP of `stddev`. So an outer
-init running merge aggregators over state, a `__distinct_arg` key, and a decimal state widened
-to `Decimal128(35, 2)` and held as declared all work on the device.
+init running merge aggregators over state and a `__distinct_arg` key work on a device, and the
+widened `avg(…)$sum` state reached it under the type id and scale the plan declares. Its
+*precision* is not part of that: a device holds `{type_id, scale}`, so the widening stays pinned
+by a plan test, which is the only reading of it there is.
 
 **Corpus queries:** tpcds q28 (off on #152) and `tpch/rollup-distinct` (off on #65 and #189).
-Neither row names this ticket; it is the record that their device cells are the lowering's last
-unrun ones.
+Both rows name this ticket beside those, since it is the record that their device cells are the
+lowering's last unrun ones.
 
 **Fix proposed:** when #152, #65 and #189 have closed, run those cells and enable each one that
 passes. Then this ticket is archived. Chain L's grouping-id takes the rollup half.

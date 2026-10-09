@@ -453,8 +453,9 @@ async fn a_count_distinct_beside_an_avg_and_a_count_answers_as_datafusion() {
 /// DISTINCT, so it is the only one whose outer init widens state a second time. What it
 /// checks is the VALUES, at five modes. The TYPE is a plan test's
 /// (`a_decimal_sum_companion_casts_its_finalize_back_to_the_declared_type`): the cpu
-/// backend's `declared_as` casts that same widening away per batch, so no cpu run can see
-/// the plan's declaration being wrong, and only the device would.
+/// backend's `declared_as` casts that same widening away per batch, and a device holds a
+/// decimal as `{type_id, scale}` and not its precision, so that plan test is the only
+/// reading there is.
 #[tokio::test]
 async fn a_grouped_count_and_sum_distinct_beside_companions_answer_as_datafusion() {
     sql_answers_match_datafusion(

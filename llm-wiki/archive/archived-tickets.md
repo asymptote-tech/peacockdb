@@ -50,8 +50,8 @@ merge, and [#144](../tickets/complete-coverage.md#t144) for a DISTINCT over two 
 arguments. The wire's `AggregateFuncNode.distinct` went with it, marked `(deprecated)` so no field
 slot moved. tpcds q28 runs on the cpu at five modes and `tpch/rollup-distinct` and
 `tpch/distinct-functions` joined the corpus; distinct-functions runs on the device at five modes
-too, and q28's and rollup-distinct's device cells wait on their own tickets, which is
-[#262](../tickets/corpus-coverage.md#t262).
+too, and q28's and rollup-distinct's device cells wait on #152, #65 and #189.
+[#262](../tickets/corpus-coverage.md#t262) records that those are the lowering's last unrun ones.
 
 <a id="t237"></a>
 ### #237 — a mark or right-semi join's projection prints under the wrong names

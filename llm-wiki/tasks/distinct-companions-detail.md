@@ -1086,7 +1086,7 @@ cell that differs from the cpu golden is `stddev_distinct_qty`:
 
 1.4e-16 relative — one ULP, in the two groups where the cpu's own value differs from its third.
 Welford association order, `tpch/shuffle-stddev`'s cause and `tpch/shuffle-stddev`'s remedy: the
-`golden_approx_std` oracle, whose 1e-11 is eleven orders above the difference. Not a ticket — a
+`golden_approx_std` oracle, whose 1e-11 is about five orders above the difference. Not a ticket — a
 ULP is not a wrong answer. Everything else matched to the digit at every mode, `sum_distinct_qty`
 `1275.00` and `avg_distinct_qty` `25.500000` and `avg_price` `38273.129734` included, and so did
 the plan shape, the per-node `in_rows`, the batch lists and the bytes: `assert_section` runs
@@ -1115,6 +1115,20 @@ reasons:
 
 So the plan test is not a stand-in for a device reading; it is the only reading there is. Nothing
 is owed here, and the signoff sentence is the thing to correct.
+
+**Four clauses of the signoff the GPU half falsified**, all of them to be rewritten at the
+completeness pass, since the signoff is the spec's one permitted later write:
+
+1. "One shortcut, and it is the chain's: no GPU" — the chain has one now, nebius-gpu.
+2. "The C++ change … is compiled and not run" — `peacock_gpu_tests` (4) and `peacock_plan_tests`
+   (56) ran green on nebius-gpu.
+3. "every new gpu cell is off under #262" — distinct-functions' five are on; q28's and
+   rollup-distinct's are still off, on their own tickets.
+4. "the device that can has not run" — a device has run, and the reason the plan test stands
+   alone is better than the one the signoff gives: no device reading can see a decimal's
+   precision at all.
+
+The conclusion survives: the cast-back is pinned by a plan test alone.
 
 ### What ran
 

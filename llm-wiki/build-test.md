@@ -440,14 +440,13 @@ release is null-guarded on the executor
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
 device with every batch held to its node's declared schema through the driver's output hook
-(the line's `schema_validation_enabled`; `tpch/shuffle-stddev` and `tpch/distinct-functions`
-say `disabled` against [#225](tickets/corpus-coverage.md#t225), their Welford state columns
-named for the alias), and asserts,
-read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
-and the bytes — plus the result where `gpu_oracle` names a golden.
+(the line's `schema_validation_enabled`; `tpch/shuffle-stddev` and `tpch/distinct-functions` say
+`disabled` against [#225](tickets/corpus-coverage.md#t225), their Welford state columns named for
+the alias), and asserts, read-only, against the section the cpu authored — plan shape, `in_rows`,
+the per-batch lists and the bytes — plus the result where `gpu_oracle` names a golden.
 Thirty-one cells today: `tpch/q6`, `tpch/q1`, `tpch/shuffle-additive-avg` and
-`tpch/distinct-functions` at every mode,
-and `q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggregate-groupby`,
+`tpch/distinct-functions` at every mode, and
+`q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggregate-groupby`,
 `tpch/filter-project`, `tpch/shuffle-additive`, `tpcds/q37`, `tpcds/q82` and `tpcds/q85` at
 `tp1-single`; the rest are off against [#152](tickets/joins.md#t152),
 [#95](tickets/corpus-coverage.md#t95),
