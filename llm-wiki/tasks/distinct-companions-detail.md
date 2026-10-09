@@ -806,3 +806,17 @@ timed out`, the same unreachable host as guard-checks saw, which chain K does no
 
 The task is terminal for the ensemble. The human merges; PR #171 targets `ENS-guard-checks`, so
 that one merges first.
+
+## Rebase needed: the chain is moving to master 31c56bea (2026-10-09)
+
+The human wrote `rebase` to `.claude/ensemble/K.control`. guard-checks has already been
+rebased onto master 31c56bea; this branch's base is therefore about to move and is marked
+before anything is fixed on the parent. `guard-checks-detail.md` carries what master
+brought across.
+
+This branch **will** conflict in code-adjacent files, unlike guard-checks: master's
+`64ced62e` and this branch both edit the same ten tpcds goldens —
+`tp{1,4}-{single,rowgroup,sized}.plans.txt` and `tp{1,4}-*-mini.cpu.txt`. The resolution is
+a regeneration by a developer, not a hand-merge: master changed how a join's projection and
+a null decimal render, this branch added q28's sections, and only a run can say what the
+combined text is.
