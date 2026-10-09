@@ -735,3 +735,70 @@ local. Nothing else was skipped, and no test was disabled.
   that happened here were invisible until a card ran: `corpus_gpu`'s oracle check and the cpu
   guard's pairing rule disagreed about scan-limit for as long as its cells were off. Anyone
   turning on a first device cell for a query should read both before building.
+
+### 2026-10-09 — review round 1 on the device half: the fbs contract
+
+One finding was mine, `flatbuffers/gpu_plan.fbs:331`. Both lines fixed:
+
+    /// The node's PROJECTED schema, not the file's: the writer puts the declared columns
+    /// here, by name, because a plan node does not carry the file's own column list.
+    file_schema: Schema;
+    /// Indices into `file_schema`. No writer fills it; C++ reads empty as every column of
+    /// `file_schema`, not of the file — so a node declaring none selects none (#285).
+    projection: [uint32];
+
+They replace "Schema of the files (before projection)" and "Column indices to project (empty =
+all columns)", which together stated the model #285 is made of. "No writer fills it" was checked
+rather than assumed: `CudfScanArgs` is constructed exactly once (`node_writer.rs:90`) and sets
+`file_paths` and `file_schema` only — the `projection` hits elsewhere in that file belong to
+`CudfFilter`. Four comment lines, two per field, against `coding-style.md`'s ten-above-a-
+declaration cap, counted; and reflowed to 88 bytes because the first draft's 94 was the only
+comment line in the whole schema over 90 (the file's own maximum is 89, measured).
+
+#### `.fbs` doc comments DO reach generated code — the byte-identical check fails, by design
+
+flatc 25.12.19 copies a field's `///` into the generated accessor in **both** languages. The
+premise that a comment-only `.fbs` edit leaves codegen untouched is false, and this is what moved:
+
+    gpu_plan_generated.rs:4021  and  gpu_plan_generated.h:2284   (file_schema's doc)
+    gpu_plan_generated.rs:4029  and  gpu_plan_generated.h:2288   (projection's doc)
+
+and **nothing else**. Measured three ways rather than read off the diff:
+
+- Both files regenerated from the base revision's schema and from this one, with the two vendored
+  `flatc` binaries directly (`flatc-fork`'s for `--rust`, `cpp/build/_deps/flatbuffers-build/flatc`
+  for `--cpp`, both 25.12.19). `diff` is exactly those four lines → four lines, twice.
+- **Comment lines stripped, the two outputs are byte-identical**: Rust
+  `6863f2f05718bc2b633720054cf07672` before and after, C++ `d03da32914cbf0829546bf770579da42`
+  before and after. Non-comment line counts unchanged at 6520 and 4101; totals +2 each.
+- `CudfScan`'s vtable slots are unchanged and still carry the branch's deprecation gap:
+  `VT_FILE_PATHS=4, VT_FILE_SCHEMA=6, VT_PROJECTION=8, VT_BATCH_SIZE=10, VT_ROW_GROUPS=14,
+  VT_BATCHES=16` — slot 12 absent, which is `limit (deprecated)`.
+
+So no accessor signature, builder, verifier, `VT_` constant or offset moved; the wire contract is
+untouched and only the prose flatc copies changed. The live artifacts were then confirmed to be
+that same output: `cpp/build/generated/gpu_plan_generated.h` (cmake regenerated it —
+`[1/20] Generating gpu_plan_generated.h from FlatBuffers schema`, then 20 targets rebuilt) and
+cargo's `OUT_DIR/gpu_plan_generated.rs` are both byte-identical to the independent regeneration,
+`ad1d566a…` and `fc1c66f0…`.
+
+**`testdata/goldens/recipe-payloads.txt` is untouched**, `dd51d58a4baf985d597792d211a46eb3` before
+and after, and `git diff --name-only testdata/` is empty — nothing under `testdata/` moved, so no
+digest was regenerated to silence anything.
+
+#### One code comment the edit falsified
+
+`peacockdb-core/src/wire/generated.rs:1` said flatc's output is "7,252 lines"; it is **7,254** now
+and says so. `limits-impl.md:1638` records a round already having to correct this number once, so
+it is a standing trap: **any `.fbs` edit that adds or removes a line moves it**, comments included.
+
+#### Counts after the round
+
+`--lib` 638 passed + 2 ignored = 640, unchanged. The payload goldens were run by their real path
+and **ran**: `planner::tests::plan_goldens::the_payload_golden_carries_what_each_call_hands_the_executor`
+and `…_covers_every_kind_and_call_shape_the_modes_produce`, 2 ran / 2 passed / 638 filtered. The
+first attempt at them, `--lib -- the_payload_golden_carries_… --exact`, reported
+**0 passed, 640 filtered out, rc=0** — the zero-test pass, caught by reading the counts rather
+than the exit code; the name needs its `planner::tests::plan_goldens::` prefix. C++
+`scripts/build.sh --build` rc=0 with the regenerated header, 20 targets, no warning, and
+`ctest -L cpu` 1/1. No device run: nothing here reaches one.
