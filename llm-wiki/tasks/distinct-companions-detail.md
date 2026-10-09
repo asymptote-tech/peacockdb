@@ -1606,3 +1606,20 @@ compiles too; 536 + 634 = 1170 is that binary's own total and is not a tier coun
 `tpch/distinct-functions` cells passed by name, with
 `the_registry_matches_the_gpu_corpus_in_both_directions` and
 `a_device_run_under_a_regeneration_writes_no_golden` beside them.
+
+### 2026-10-09 — done, on the GPU half
+
+CI run [37972210565](https://github.com/asymptote-tech/peacockdb/actions/runs/37972210565) on
+`8a5ca814`, **the last code-carrying commit**. Every job green — changes, both dataset-matrix
+legs, cpp-build-2502, cost-report and s3-datasets; deploy-pages skipped as a master-push job.
+
+The six runs after it are documentation-only and skipped every job behind the `changes` gate, so
+their green asserts nothing and is not what `done` rests on. Worth knowing in general: a
+doc-only run reports `success` having built nothing, so read the SHA before reading the
+conclusion.
+
+GPU Tests failed at rsync with `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection
+timed out`, exit 255 — shad-gpu unreachable, so no pool was built: not
+[#178](../tickets/testinfra.md#t178) and not this branch. Chain K's rule exempts that job and
+asks instead for a recorded nebius-gpu pass, which is the section above: six binaries, all green,
+re-run at `91a59466`.
