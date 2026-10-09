@@ -401,3 +401,19 @@ The four byte figures are unchanged from round 1, to the byte, in both the red a
 **`build-test.md` needs a count move: Plan-executor row 75 → 77, C++ total 114 → 116, grand
 total 3030 → 3032.** Left to the coordinator, who moves the row, the tier heading and the header
 together.
+
+### CI, for the `done` transition (2026-10-09)
+
+Run **37946551764** on `7d63d5ed`, which is the head and bears code, so the rule this chain learned
+on PR #175 is satisfied without a close-and-reopen: cudf 25.02 pass, cudf 26.02 pass, GPU build
+pass, Cost report pass, S3 check pass, Pages skipped, and `GPU Tests (remote)` red on `ssh: connect
+to host llm-gpu0h200.velkerr.ru port 22: Connection timed out` — shad-gpu, exempted by name, its
+work done on nebius-gpu above.
+
+**The 26.02 leg is worth more than usual here.** Nothing on the device side of this task ran at
+26.02 — nebius-gpu's 26.02 is red for reasons outside this chain — and the borrowed view through
+`evaluate_column` is a lifetime change that a different cuDF could in principle treat differently.
+The 26.02 leg builds and runs the cpu side of the whole tree against it, so `verify-26.02` (task 9)
+inherits this change already compiled and exercised there.
+
+`completeness approved` → `done`.
