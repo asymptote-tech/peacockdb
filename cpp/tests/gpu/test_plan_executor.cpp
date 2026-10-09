@@ -2,18 +2,26 @@
 /// executes them against testdata/tpch.minimal/ Parquet files.
 
 #include "peacock_gpu.h"
+#include "peacock/expr.h"
 #include "peacock/partitioning.hpp"
 #include "plan_executor.h"
 #include "plan_executor_internal.h"
 #include "generated/gpu_plan_generated.h"
 
+#include <cudf/aggregation.hpp>
+#include <cudf/binaryop.hpp>
 #include <cudf/column/column_factories.hpp>
 #include <cudf/column/column_view.hpp>
 #include <cudf/fixed_point/fixed_point.hpp>
+#include <cudf/groupby.hpp>
+#include <cudf/rolling.hpp>
 #include <cudf/scalar/scalar.hpp>
+#include <cudf/stream_compaction.hpp>
 #include <cudf/strings/strings_column_view.hpp>
+#include <cudf/table/table.hpp>
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
+#include <cudf/unary.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
 #include <arrow/buffer.h>
@@ -2559,6 +2567,271 @@ TEST(Slice, OwnsItsRowsSoTheBatchCanGo) {
   auto slice = allocated_by([&] { sliced = session.slice_handle(in, 0, rows / 10); });
   EXPECT_LT(slice.net, -scan.net / 2) << "the batch is freed; only a tenth of it is held";
   EXPECT_EQ(session.table_for(sliced).owners[0].use_count(), 1);
+}
+
+// --- #154's exit copies ------------------------------------------------------
+//
+// One case per operator family, each bounding the call by something measured on the same
+// input: a hand formula would bake a cuDF cost into a constant, and cuDF's temporaries for
+// one column type are not a multiple of another's. `slack` absorbs allocator rounding only
+// — every copy these cases forbid is a whole column, orders above it.
+constexpr int64_t kSlack = int64_t{1} << 16;
+
+/// A one-expression buffer: the Expr table is finished as the root, so a case can hand an
+/// `fb::Expr*` to the evaluator with no plan around it.
+static const fb::Expr* finished_expr(flatbuffers::FlatBufferBuilder& fbb,
+                                     flatbuffers::Offset<fb::Expr> e) {
+  fbb.Finish(e);
+  return flatbuffers::GetRoot<fb::Expr>(fbb.GetBufferPointer());
+}
+
+TEST(ExitCopies, ABareColumnRefIsBorrowedNotCopied) {
+  std::vector<std::unique_ptr<cudf::column>> cols;
+  cols.push_back(int64_column({1, 2, 3}));
+  cudf::table table(std::move(cols));
+  flatbuffers::FlatBufferBuilder fbb;
+  const fb::Expr* ref = finished_expr(fbb, make_col_ref(fbb, 0, "a"));
+  peacock::EvaluatedColumn got_column;
+  auto got = allocated_by([&] { got_column = peacock::evaluate_column(ref, table.view()); });
+  EXPECT_EQ(got.total, 0) << "a bare column reference allocates nothing";
+  EXPECT_EQ(got_column.owned, nullptr) << "and owns nothing";
+  EXPECT_EQ(got_column.view().data<int64_t>(), table.view().column(0).data<int64_t>())
+      << "the view is the input's own buffer";
+}
+
+/// customer's c_acctbal alone, filtered on `c_acctbal > 0.00`. A decimal comparison is one
+/// cudf's AST refuses, so the predicate runs through `build_column_binary`, whose
+/// `ColumnRef` operand was a whole-column copy per batch.
+static std::vector<uint8_t> acctbal_filter_plan(flatbuffers::FlatBufferBuilder& fbb) {
+  auto path = fbb.CreateString(parquet_path("customer"));
+  auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
+  auto schema = make_schema(fbb, customer_fields());
+  // An ordinal into the schema, which the scan resolves to the file's column by name; the
+  // predicate's ColumnRef then indexes the one-column table that comes back.
+  auto scan = fb::CreateCudfScan(fbb, paths, schema, fbb.CreateVector(std::vector<uint32_t>{5}));
+  auto scan_node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
+  auto pred = make_binary_expr(fbb, make_col_ref(fbb, 0, "c_acctbal"), fb::BinaryOp_Gt,
+                               make_decimal_literal(fbb, /*hi=*/0, /*lo=*/0,
+                                                    /*precision=*/15, /*scale=*/2));
+  auto filter = fb::CreateCudfFilter(fbb, pred, scan_node);
+  return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfFilter, filter.Union()));
+}
+
+TEST(ExitCopies, ANonAstPredicateDoesNotCopyTheColumnItReads) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = acctbal_filter_plan(fbb);
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> g{0};
+  uint64_t in = session.execute_scan_rowgroups(0, g, nullptr);
+  auto input = session.table_for(in);  // shares the owners, so it outlives the call
+  // The predicate and the filter run straight against cuDF, the scalar built at the
+  // literal's own scale as `build_scalar` builds it: everything the operator must allocate
+  // once its ColumnRef operand is a view.
+  auto probe = allocated_by([&] {
+    cudf::fixed_point_scalar<numeric::decimal128> zero(0, numeric::scale_type{-2}, true);
+    auto mask = cudf::binary_operation(input.columns[0], zero, cudf::binary_operator::GREATER,
+                                       cudf::data_type{cudf::type_id::BOOL8});
+    auto kept = cudf::apply_boolean_mask(input.view(), mask->view());
+  });
+  uint64_t counts[1] = {1}, out = 0;
+  size_t produced = 0;
+  auto got =
+      allocated_by([&] { session.execute_node(1, &in, counts, 1, &out, 1, &produced, nullptr); });
+  std::cout << "[exit-copies] non-AST predicate rows " << input.num_rows() << " call " << got.total
+            << " predicate+filter alone " << probe.total << "\n";
+  EXPECT_LE(got.total, probe.total + kSlack)
+      << "the operand was copied: " << got.total << " against " << probe.total;
+}
+
+/// customer's key and name, filtered on `c_custkey > 0` — true for every row, so the
+/// filtered table is the whole input and the only thing `projection` changes is the exit.
+static std::vector<uint8_t> customer_filter_plan(flatbuffers::FlatBufferBuilder& fbb,
+                                                 const std::vector<uint32_t>& projection) {
+  auto path = fbb.CreateString(parquet_path("customer"));
+  auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
+  auto schema = make_schema(fbb, customer_fields());
+  auto scan = fb::CreateCudfScan(fbb, paths, schema, fbb.CreateVector(std::vector<uint32_t>{0, 1}));
+  auto scan_node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
+  auto pred = make_binary_expr(fbb, make_col_ref(fbb, 0, "c_custkey"), fb::BinaryOp_Gt,
+                               make_int64_literal(fbb, 0));
+  auto proj = projection.empty() ? flatbuffers::Offset<flatbuffers::Vector<uint32_t>>{}
+                                 : fbb.CreateVector(projection);
+  auto filter = fb::CreateCudfFilter(fbb, pred, scan_node, proj);
+  return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfFilter, filter.Union()));
+}
+
+/// Run that filter over one row group and report what the filter node alone allocated.
+static Allocated customer_filter_call(const std::vector<uint32_t>& projection,
+                                      peacock::TableResult* out_table) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_filter_plan(fbb, projection);
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> g{0};
+  uint64_t in = session.execute_scan_rowgroups(0, g, nullptr);
+  uint64_t counts[1] = {1}, out = 0;
+  size_t produced = 0;
+  auto got =
+      allocated_by([&] { session.execute_node(1, &in, counts, 1, &out, 1, &produced, nullptr); });
+  if (out_table) *out_table = session.table_for(out);
+  return got;
+}
+
+TEST(ExitCopies, AFiltersProjectionCopiesNoColumnItKeeps) {
+  // The same predicate over the same input, so the whole-table call is the bound and the
+  // fused projection must add nothing of its own.
+  auto whole = customer_filter_call({}, nullptr);
+  auto narrowed = customer_filter_call({1, 0}, nullptr);
+  std::cout << "[exit-copies] filter projection whole " << whole.total << " narrowed "
+            << narrowed.total << "\n";
+  EXPECT_LE(narrowed.total, whole.total + kSlack)
+      << "the kept columns were copied: " << narrowed.total << " against " << whole.total;
+}
+
+TEST(ExitCopies, AFiltersRepeatedProjectionOrdinalAnswersBothColumns) {
+  // The trap a release would have sprung: one column moved twice leaves a hole. With an
+  // owner per column it is two entries over one owner, and both answer.
+  peacock::TableResult got;
+  customer_filter_call({1, 1}, &got);
+  ASSERT_EQ(got.num_columns(), 2);
+  EXPECT_EQ(got.owners[0], got.owners[1]) << "two entries over one owner, not two copies";
+  EXPECT_EQ(got.column_names, (std::vector<std::string>{"c_name", "c_name"}));
+  ASSERT_GT(got.num_rows(), 1000);
+  for (cudf::size_type row : {0, 17, 1000}) {
+    auto first = get_string_value(got.columns[0], row);
+    EXPECT_FALSE(first.empty()) << "row " << row;
+    EXPECT_EQ(first, get_string_value(got.columns[1], row)) << "row " << row;
+  }
+}
+
+TEST(ExitCopies, AProjectOfColumnRefsAllocatesNothing) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto scan_node = nation_scan_node(fbb);
+  auto exprs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{
+      make_col_ref(fbb, 1), make_col_ref(fbb, 0), make_col_ref(fbb, 1)});
+  auto aliases = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{
+      fbb.CreateString("name"), fbb.CreateString("key"), fbb.CreateString("name_again")});
+  auto proj = fb::CreateCudfProject(fbb, exprs, aliases, scan_node);
+  auto buf = finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfProject, proj.Union()));
+  peacock::NodeSession session(buf.data(), buf.size());
+  uint64_t counts[1] = {1}, in = 0, out = 0;
+  size_t produced = 0;
+  session.execute_node(0, nullptr, nullptr, 0, &in, 1, &produced, nullptr);
+  auto got =
+      allocated_by([&] { session.execute_node(1, &in, counts, 1, &out, 1, &produced, nullptr); });
+  EXPECT_EQ(got.total, 0) << "three column references and nothing computed";
+  const auto& t = session.table_for(out);
+  ASSERT_EQ(t.num_columns(), 3);
+  EXPECT_EQ(t.owners[0], t.owners[2]) << "q84's shape: one column projected twice, one owner";
+  EXPECT_EQ(t.column_names, (std::vector<std::string>{"name", "key", "name_again"}));
+  EXPECT_EQ(get_string_value(t.columns[0], 3), get_string_value(t.columns[2], 3));
+}
+
+/// `count(*) OVER (PARTITION BY c_nationkey)` over customer's key and nation key: one
+/// column computed, two passed through.
+static std::vector<uint8_t> customer_window_plan(flatbuffers::FlatBufferBuilder& fbb) {
+  auto path = fbb.CreateString(parquet_path("customer"));
+  auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
+  auto schema = make_schema(fbb, customer_fields());
+  auto scan = fb::CreateCudfScan(fbb, paths, schema, fbb.CreateVector(std::vector<uint32_t>{0, 3}));
+  auto scan_node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
+  auto func = fbb.CreateString("count");
+  auto parts = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 1, "c_nationkey")});
+  auto alias = fbb.CreateString("n");
+  fb::WindowExprNodeBuilder wb(fbb);
+  wb.add_func_name(func);
+  wb.add_partition_by(parts);
+  wb.add_frame_end(fb::WindowFrameBound_UnboundedFollowing);
+  wb.add_alias(alias);
+  auto we = wb.Finish();
+  auto win = fb::CreateCudfWindow(
+      fbb, fbb.CreateVector(std::vector<flatbuffers::Offset<fb::WindowExprNode>>{we}), scan_node);
+  return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfWindow, win.Union()));
+}
+
+TEST(ExitCopies, AWindowPassesItsInputThroughUncopied) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_window_plan(fbb);
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> g{0};
+  uint64_t in = session.execute_scan_rowgroups(0, g, nullptr);
+  auto input = session.table_for(in);
+  // The window column alone, from cuDF on this very input: what the operator must allocate
+  // once it shares the input columns it passes through and borrows the partition key.
+  auto probe = allocated_by([&] {
+    auto agg = cudf::make_count_aggregation<cudf::rolling_aggregation>(cudf::null_policy::INCLUDE);
+    auto col = cudf::grouped_rolling_window(cudf::table_view{{input.columns[1]}}, input.columns[0],
+                                            cudf::window_bounds::unbounded(),
+                                            cudf::window_bounds::unbounded(),
+                                            /*min_periods=*/1, *agg);
+  });
+  uint64_t counts[1] = {1}, out = 0;
+  size_t produced = 0;
+  auto got =
+      allocated_by([&] { session.execute_node(1, &in, counts, 1, &out, 1, &produced, nullptr); });
+  std::cout << "[exit-copies] window rows " << input.num_rows() << " call " << got.total
+            << " window column alone " << probe.total << "\n";
+  EXPECT_LE(got.total, probe.total + kSlack)
+      << "the input columns were copied: " << got.total << " against " << probe.total;
+  const auto& t = session.table_for(out);
+  ASSERT_EQ(t.num_columns(), 3);
+  EXPECT_EQ(t.column_names.back(), "n");
+  EXPECT_EQ(t.owners[0], input.owners[0]) << "the input's own column, shared";
+}
+
+/// `GROUP BY c_custkey` with one count over customer's key. Every key is distinct, so
+/// groupby's key table is as large as the input's column and a copy of it shows.
+static std::vector<uint8_t> customer_count_by_key_plan(flatbuffers::FlatBufferBuilder& fbb) {
+  auto path = fbb.CreateString(parquet_path("customer"));
+  auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
+  auto schema = make_schema(fbb, customer_fields());
+  auto scan = fb::CreateCudfScan(fbb, paths, schema, fbb.CreateVector(std::vector<uint32_t>{0}));
+  auto scan_node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
+  auto groups = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 0, "c_custkey")});
+  auto group_names = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<flatbuffers::String>>{fbb.CreateString("c_custkey")});
+  auto args = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 0, "c_custkey")});
+  auto func = fb::CreateAggregateFuncNode(fbb, fbb.CreateString("count"), args,
+                                          /*distinct=*/false, fbb.CreateString("n"));
+  auto funcs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::AggregateFuncNode>>{func});
+  fb::CudfAggregateBuilder ab(fbb);
+  ab.add_mode(fb::AggregateMode_Partial);
+  ab.add_group_exprs(groups);
+  ab.add_group_names(group_names);
+  ab.add_aggr_funcs(funcs);
+  ab.add_input(scan_node);
+  auto agg = ab.Finish();
+  return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfAggregate, agg.Union()));
+}
+
+TEST(ExitCopies, AnAggregateHandsGroupbysKeysOverUncopied) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_count_by_key_plan(fbb);
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> g{0};
+  uint64_t in = session.execute_scan_rowgroups(0, g, nullptr);
+  auto input = session.table_for(in);
+  // cuDF's own groupby over the same input, plus the count widening the operator must do:
+  // the bound is groupby's cost and nothing of the exit's.
+  auto probe = allocated_by([&] {
+    cudf::groupby::groupby gb(cudf::table_view{{input.columns[0]}}, cudf::null_policy::INCLUDE);
+    std::vector<cudf::groupby::aggregation_request> reqs(1);
+    reqs[0].values = input.columns[0];
+    reqs[0].aggregations.push_back(cudf::make_count_aggregation<cudf::groupby_aggregation>());
+    auto [keys, results] = gb.aggregate(reqs);
+    auto widened = cudf::cast(results[0].results[0]->view(), cudf::data_type{cudf::type_id::INT64});
+  });
+  uint64_t counts[1] = {1}, out = 0;
+  size_t produced = 0;
+  auto got =
+      allocated_by([&] { session.execute_node(1, &in, counts, 1, &out, 1, &produced, nullptr); });
+  std::cout << "[exit-copies] aggregate rows " << input.num_rows() << " call " << got.total
+            << " groupby alone " << probe.total << "\n";
+  EXPECT_LE(got.total, probe.total + kSlack)
+      << "the key column was copied: " << got.total << " against " << probe.total;
+  EXPECT_EQ(session.table_for(out).num_rows(), input.num_rows()) << "every key distinct";
 }
 
 // Hand-built plans over tpch.minimal, 19 MB of parquet; measured peak 2.9 MiB

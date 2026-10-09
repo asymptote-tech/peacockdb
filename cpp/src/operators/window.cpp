@@ -36,42 +36,41 @@ TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in) {
   auto input = take_input(in);
   auto tv = input.view();
 
-  // Output = all input columns (in order) followed by one column per window expr.
+  // Output = all input columns (in order) followed by one column per window expr. The
+  // input's columns are shared rather than copied, so the output views what it keeps and
+  // owns only what it computes (#154).
+  //
   // The input arrives pre-sorted by [partition_by, order_by] (DataFusion's
   // SortExec), so consecutive equal partition keys form one group, and
   // grouped_rolling_window preserves input row order.
-  std::vector<std::unique_ptr<cudf::column>> out_cols;
-  std::vector<std::string> out_names;
-  for (cudf::size_type i = 0; i < tv.num_columns(); ++i) {
-    out_cols.push_back(std::make_unique<cudf::column>(tv.column(i)));
-    out_names.push_back(input.column_names[i]);
-  }
+  TableResult out = input;
 
   if (win->window_exprs()) {
     for (flatbuffers::uoffset_t i = 0; i < win->window_exprs()->size(); ++i) {
       auto* we = win->window_exprs()->Get(i);
       std::string fname = we->func_name() ? we->func_name()->str() : "";
 
-      // Partition key table (the group keys). build_column handles ColumnRef and
-      // computed partition exprs (e.g. CASE in a ROLLUP grouping key).
-      std::vector<std::unique_ptr<cudf::column>> key_owned;
+      // Partition key table (the group keys). evaluate_column borrows a ColumnRef key
+      // and makes a computed one (e.g. CASE in a ROLLUP grouping key).
+      std::vector<EvaluatedColumn> key_owned;
       std::vector<cudf::column_view> key_views;
       if (we->partition_by()) {
         for (flatbuffers::uoffset_t k = 0; k < we->partition_by()->size(); ++k) {
-          key_owned.push_back(build_column(we->partition_by()->Get(k), tv));
-          key_views.push_back(key_owned.back()->view());
+          key_owned.push_back(evaluate_column(we->partition_by()->Get(k), tv));
+          key_views.push_back(key_owned.back().view());
         }
       }
       cudf::table_view keys{key_views};
 
       // Argument column. count() may have no args (COUNT(*)); use the first
       // column as a placeholder since COUNT(*) counts every row.
-      std::unique_ptr<cudf::column> arg_owned;
+      EvaluatedColumn arg;
+      std::unique_ptr<cudf::column> arg_cast;
       cudf::column_view arg_view;
       bool has_arg = we->args() && we->args()->size() > 0;
       if (has_arg) {
-        arg_owned = build_column(we->args()->Get(0), tv);
-        arg_view = arg_owned->view();
+        arg = evaluate_column(we->args()->Get(0), tv);
+        arg_view = arg.view();
       } else {
         arg_view = tv.column(0);
       }
@@ -85,9 +84,9 @@ TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in) {
           arg_view.type().id() == cudf::type_id::DECIMAL128) {
         int32_t want_exp = -static_cast<int32_t>(we->out_decimal_scale());
         if (arg_view.type().scale() != want_exp) {
-          arg_owned = cudf::cast(
+          arg_cast = cudf::cast(
               arg_view, cudf::data_type{cudf::type_id::DECIMAL128, want_exp});
-          arg_view = arg_owned->view();
+          arg_view = arg_cast->view();
         }
       }
 
@@ -106,14 +105,12 @@ TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in) {
       auto col = cudf::grouped_rolling_window(keys, arg_view, preceding, following,
                                               /*min_periods=*/1, *agg);
 
-      out_cols.push_back(std::move(col));
-      out_names.push_back(we->alias() ? we->alias()->str()
-                                      : ("window" + std::to_string(i)));
+      out = out.with(std::move(col),
+                     we->alias() ? we->alias()->str() : ("window" + std::to_string(i)));
     }
   }
 
-  auto result = std::make_unique<cudf::table>(std::move(out_cols));
-  return TableResult::owning(std::move(result), std::move(out_names));
+  return out;
 }
 
 

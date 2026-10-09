@@ -4,13 +4,15 @@
 
 **Goal:** The 11 operator exit copies outside `join.cpp` (#154) are gone or kept with a reason:
 `expr.cpp`'s `ColumnRef` copy, the filter's and project's and window's input-column copies, and
-the aggregate's key copies; the four Welford struct members and one merged-state child stay.
+the aggregate's two groupby key copies; the four Welford struct members and one merged-state
+child stay. **Done** — six gone, five kept, which is what §4 predicted.
 
 **Architecture:** `expr.cpp` gains `evaluate_column`, which borrows an input column for a bare
 `ColumnRef` and owns everything else; `build_column` becomes its owning wrapper and the
 view-only callers switch to it. Filter, project and window build their output through
-refcounted-scatter's `TableResult` (`owning`, `select`, public `owners`/`columns`), sharing the
-input's column owners instead of copying. The aggregate releases groupby's fresh key tables.
+refcounted-scatter's `TableResult` (`owning`, `select`, `with`, public `owners`/`columns`),
+sharing the input's column owners instead of copying. The aggregate releases groupby's fresh key
+tables.
 Assembling a handle through the public fields is fine and is why they are public, but
 `register_handle` — the only path to a handle number — refuses one of no columns or whose names
 or owners do not number its columns, so a hand-built handle has to be complete before it is
@@ -43,8 +45,11 @@ statistics adaptor `main()` installs.
 3. **A borrowed view outliving its table.** `evaluate_column`'s `ColumnRef` view is valid only
    while the input table lives; every converted caller uses it before returning. Expected: no
    site stores a borrowed view past its input — checked by Task 1's rule and the full tiers.
-4. **A filter on a bare boolean column** (`WHERE b`): the mask is the input's own column,
-   borrowed. Expected: the rows where `b` is true, NULL dropping the row. Pinned in Task 1.
+4. **A filter on a bare boolean column** (`WHERE b`): **not reachable, so not pinned.** A bare
+   `ColumnRef` is AST-able (`cudf_ast_can_evaluate`'s `default: return true`), so `filter.cpp`
+   takes `cudf::compute_column` for it and never reaches the column path. A borrowed mask would
+   need a predicate that is both a bare `ColumnRef` and AST-refused, and there is none.
+   `filter.cpp:27` was therefore left on `build_column`.
 5. **A window over a wide input.** Expected: every input column passed through without a copy,
    names and order unchanged. Pinned in Task 3.
 
@@ -55,7 +60,8 @@ statistics adaptor `main()` installs.
 | `cpp/src/peacock/expr.h:46-47`, `cpp/src/expr.cpp` | `EvaluatedColumn`, `evaluate_column`; the view-only callers |
 | `cpp/src/operators/filter.cpp` | mask by `evaluate_column`; projection by `select` |
 | `cpp/src/operators/project.cpp`, `window.cpp` | output sharing the input's owners |
-| `cpp/src/operators/sort.cpp`, `aggregate.cpp` | `evaluate_column` for keys and arguments; groupby keys released |
+| `cpp/src/operators/aggregate.cpp` | groupby's two fresh key tables released; the five kept copies' reasons |
+| `cpp/src/operators/sort.cpp` | **untouched** — its `ColumnRef` arm already borrows (`tv.column(idx)`), so there was no copy to remove |
 | `cpp/tests/gpu/test_plan_executor.cpp` | the allocation cases |
 | `llm-wiki/tickets/corpus-coverage.md`, `build-test.md` | #154 reworded to `join.cpp`'s sites; counts |
 
@@ -64,10 +70,16 @@ statistics adaptor `main()` installs.
 ### Task 1: A bare `ColumnRef` evaluates to a borrowed view
 
 **Files:**
-- Modify: `cpp/src/peacock/expr.h:45-47`, `cpp/src/expr.cpp:505` and `:801-904`
-- Modify: `cpp/src/operators/filter.cpp:27`, `sort.cpp:30-42`, `aggregate.cpp:203,354,452`,
-  `window.cpp:58-74`
+- Modify: `cpp/src/peacock/expr.h`, `cpp/src/expr.cpp` (today's `build_column` became
+  `static make_column`, with `evaluate_column` and a `build_column` wrapper after it)
+- Modify: `cpp/src/operators/window.cpp`
 - Test: `cpp/tests/gpu/test_plan_executor.cpp`
+
+**What landed differs from the sketches below in the cases, not the code.** Seven cases were
+written, named for what they claim rather than for the mechanism, and every byte bound is a
+comparison against the same work done straight against cuDF on the same input — the
+`partition_alone` pattern refcounted-scatter left — rather than a `rows * k` formula. The exact
+names, numbers and the red-before evidence are in `exit-copies-detail.md`.
 
 **Interfaces:**
 - Produces:
@@ -94,7 +106,7 @@ EvaluatedColumn evaluate_column(const fb::Expr* expr, cudf::table_view const& ta
 std::unique_ptr<cudf::column> build_column(const fb::Expr* expr, cudf::table_view const& table);
 ```
 
-- [ ] **Step 1: The cases, red.**
+- [x] **Step 1: The cases, red.**
 
 ```cpp
 /// A one-expression buffer: the Expr table finished as the root, so a test can hand an
@@ -165,9 +177,9 @@ TEST(ExitCopies, AFilterOnABareBooleanColumnBorrowsItsMask) {
 
   (`make_decimal_literal`'s argument order is the file's own, `:103`; read it before writing the
   literal. `int64_column`, `host_int64_column` and `allocated_by` are refcounted-scatter's.)
-- [ ] **Step 2: Device cycle:** the first and third do not compile (no `evaluate_column`); with
+- [x] **Step 2: Device cycle:** the first and third do not compile (no `evaluate_column`); with
   a stub returning `{build_column(...), {}}` the first and second are red.
-- [ ] **Step 3: The evaluator.** In `expr.cpp`, rename today's `build_column` (`:801`) to
+- [x] **Step 3: The evaluator.** In `expr.cpp`, rename today's `build_column` (`:801`) to
   `static std::unique_ptr<cudf::column> make_column(...)`, delete its `ColumnRef` arm
   (`:822-839`), and add after it:
 
@@ -190,7 +202,7 @@ std::unique_ptr<cudf::column> build_column(const fb::Expr* expr, cudf::table_vie
 
   The forward declaration at `:505` becomes `EvaluatedColumn evaluate_column(...)` beside
   `build_column`'s.
-- [ ] **Step 4: Convert the view-only callers.** The rule: a variable whose every later use is
+- [x] **Step 4: Convert the view-only callers.** The rule: a variable whose every later use is
   `->view()`, `->type()`, `->size()` or `->null_count()` becomes `auto x = evaluate_column(e, t);`
   with `x->view()` → `x.view()` and `x->type()` → `x.view().type()`; a variable that is returned,
   moved or reassigned keeps `build_column`. Applied:
@@ -226,16 +238,20 @@ std::unique_ptr<cudf::column> build_column(const fb::Expr* expr, cudf::table_vie
   - `filter.cpp:27`: `auto mask = evaluate_column(...)`, used as `mask.view()`; the AST branch
     keeps its owned column: hold both as `EvaluatedColumn mask = cudf_ast_can_evaluate(...) ?
     EvaluatedColumn{cudf::compute_column(...), {}} : evaluate_column(...);`.
-  - `sort.cpp:30-42`: `owned_keys` becomes `std::vector<EvaluatedColumn>`; the `ColumnRef`
-    special case there can go, since `evaluate_column` borrows it now.
-  - `aggregate.cpp:203,452`: `computed_args` becomes `std::vector<EvaluatedColumn>` (its
-    `reserve` stays — views into its elements must not move); `:354` `null_placeholders` likewise.
-  - `window.cpp:58-74`: `key_owned` → `std::vector<EvaluatedColumn>`; `arg_owned` stays a
-    `unique_ptr` for the decimal cast and the argument is `EvaluatedColumn arg = evaluate_column(...)`
+  - `window.cpp:58-74`: `key_owned` → `std::vector<EvaluatedColumn>`; the decimal cast moves to
+    an `arg_cast` `unique_ptr` and the argument is `EvaluatedColumn arg = evaluate_column(...)`
     with `arg_view = arg.view()`.
-- [ ] **Step 5: Device cycle:** the three green; the full gpu tier and `peacock_plan_tests`
+  - **`sort.cpp`, `aggregate.cpp` and `filter.cpp:27` were left alone, and the reading is why.**
+    Each already short-circuits `ColumnRef` before calling `build_column` — `sort.cpp:37-39`
+    pushes `tv.column(idx)` itself, and `aggregate.cpp`'s `get_values_col` and `arg_col` do the
+    same — so `build_column` there only ever sees a computed expression, which
+    `evaluate_column` owns anyway. `filter.cpp`'s mask is reached only when
+    `cudf_ast_can_evaluate` says no, and a bare `ColumnRef` is AST-able (`expr.cpp:440`
+    `default: return true`), so a borrowed mask is unreachable from there. Converting any of the
+    three would be a rename with no byte behind it.
+- [x] **Step 5: Device cycle:** the three green; the full gpu tier and `peacock_plan_tests`
   unchanged.
-- [ ] **Step 6: Commit.** `git commit -m "a bare ColumnRef is borrowed, not copied (#154)"`.
+- [x] **Step 6: Commit.** `git commit -m "a bare ColumnRef is borrowed, not copied (#154)"`.
 
 ### Task 2: The filter's projection shares its columns
 
@@ -246,7 +262,7 @@ std::unique_ptr<cudf::column> build_column(const fb::Expr* expr, cudf::table_vie
 **Interfaces:**
 - Consumes: `TableResult::owning`, `select` (refcounted-scatter Task 1).
 
-- [ ] **Step 1: The cases.**
+- [x] **Step 1: The cases.**
 
 ```cpp
 /// nation filtered on n_regionkey > 2, with `projection` (empty for none).
@@ -290,9 +306,9 @@ TEST(ExitCopies, AFiltersRepeatedOrdinalIsTwoColumnsOverOneOwner) {
 }
 ```
 
-- [ ] **Step 2: Device cycle:** the first red (the projection copies), the second green or red by
+- [x] **Step 2: Device cycle:** the first red (the projection copies), the second green or red by
   chance — it must be green after.
-- [ ] **Step 3: The fix.**
+- [x] **Step 3: The fix.**
 
 ```cpp
   auto filtered = cudf::apply_boolean_mask(input.view(), mask.view());
@@ -306,8 +322,8 @@ TEST(ExitCopies, AFiltersRepeatedOrdinalIsTwoColumnsOverOneOwner) {
   return result;
 ```
 
-- [ ] **Step 4: Device cycle:** both green; `PlanExecutor.FilterNation` unchanged.
-- [ ] **Step 5: Commit.** `git commit -m "a filter's projection selects, it does not copy (#154)"`.
+- [x] **Step 4: Device cycle:** both green; `PlanExecutor.FilterNation` unchanged.
+- [x] **Step 5: Commit.** `git commit -m "a filter's projection selects, it does not copy (#154)"`.
 
 ### Task 3: Project and window pass input columns through
 
@@ -315,7 +331,7 @@ TEST(ExitCopies, AFiltersRepeatedOrdinalIsTwoColumnsOverOneOwner) {
 - Modify: `cpp/src/operators/project.cpp:33-63`, `window.cpp:37-116`
 - Test: `cpp/tests/gpu/test_plan_executor.cpp`
 
-- [ ] **Step 1: The cases.**
+- [x] **Step 1: The cases.**
 
 ```cpp
 TEST(ExitCopies, AProjectOfColumnRefsAllocatesNothing) {
@@ -369,8 +385,8 @@ TEST(ExitCopies, AWindowPassesItsInputThroughUncopied) {
   (The `WindowExprNode` fields are `gpu_plan.fbs:541-565`; if `alias` is named differently there,
   use that name. nation's 25 rows are a small input: `scan.net` is its bytes, and the window
   result is 25 integers, so the bound holds by a wide margin after and fails before.)
-- [ ] **Step 2: Device cycle:** both red.
-- [ ] **Step 3: Project.** The `ColumnRef` arm shares the input's owner; computed columns are
+- [x] **Step 2: Device cycle:** both red.
+- [x] **Step 3: Project.** The `ColumnRef` arm shares the input's owner; computed columns are
   owned:
 
 ```cpp
@@ -403,13 +419,15 @@ TEST(ExitCopies, AWindowPassesItsInputThroughUncopied) {
 ```
 
   The empty-projection placeholder arm (`:20-31`) stays as it is (join-backend replaces it).
-- [ ] **Step 4: Window.** `TableResult out = input;` (shares every owner) replaces the copy loop
-  `:43-48`; each window column is appended as `out.owners.push_back(...)`,
-  `out.columns.push_back(owner->view())`, `out.column_names.push_back(...)`; `return out;`.
-  `tv` stays `input.view()` for the evaluation.
-- [ ] **Step 5: Device cycle:** both green; `PlanExecutor.ProjectRename`, the Sqrt cases and the
+- [x] **Step 4: Window.** `TableResult out = input;` (shares every owner) replaces the copy loop
+  `:43-48`, and each window column is appended with `out = out.with(std::move(col), name)` rather
+  than by hand: a window's output *is* the input handle plus a column, which is what `with` is,
+  and it carries the row-count check. `tv` stays `input.view()` for the evaluation.
+  Project keeps the hand assembly — it reorders and renames, so nothing it emits is `with`'s
+  shape — and pushes one of each vector per turn of the loop, so they cannot come out of step.
+- [x] **Step 5: Device cycle:** both green; `PlanExecutor.ProjectRename`, the Sqrt cases and the
   harness `exec_cases` unchanged.
-- [ ] **Step 6: Commit.** `git commit -m "project and window share their input's columns (#154)"`.
+- [x] **Step 6: Commit.** `git commit -m "project and window share their input's columns (#154)"`.
 
 ### Task 4: The aggregate releases groupby's keys
 
@@ -418,7 +436,7 @@ TEST(ExitCopies, AWindowPassesItsInputThroughUncopied) {
   `:678-681`, `:771`
 - Test: `cpp/tests/gpu/test_plan_executor.cpp`
 
-- [ ] **Step 1: The case.** A group-by of customer on `c_custkey` (every key distinct, so the
+- [x] **Step 1: The case.** A group-by of customer on `c_custkey` (every key distinct, so the
   output's key column is as large as the input's) with one count, against cuDF's own groupby of
   the same input as the baseline:
 
@@ -466,8 +484,8 @@ TEST(ExitCopies, AnAggregateHandsGroupbysKeysOverUncopied) {
   (`#include <cudf/groupby.hpp>`, `<cudf/aggregation.hpp>`, `<cudf/unary.hpp>` at the top of the
   file if absent. The cast mirrors the operator's count widening, so the baseline is groupby
   plus what the operator must add.)
-- [ ] **Step 2: Device cycle:** red, by about one key column.
-- [ ] **Step 3: The fix.** `:758-761`:
+- [x] **Step 2: Device cycle:** red, by about one key column.
+- [x] **Step 3: The fix.** `:758-761`:
 
 ```cpp
   // Groupby's key table is fresh and ours: hand its columns over rather than copy them.
@@ -491,24 +509,32 @@ TEST(ExitCopies, AnAggregateHandsGroupbysKeysOverUncopied) {
   struct, and a struct owns its children; these are the input's columns, so they are copied";
   `:771` — "the merged struct is read by up to three builds, one child each; releasing it for one
   would strand the others, and a per-group state column is small".
-- [ ] **Step 4: Device cycle:** green; `AggregateMerge.*`, `PlanExecutor.AggregateGroupBy` and
+- [x] **Step 4: Device cycle:** green; `AggregateMerge.*`, `PlanExecutor.AggregateGroupBy` and
   `AggregateCount` unchanged; the harness `aggregate_cases` unchanged.
-- [ ] **Step 5: Commit.** `git commit -m "the aggregate hands groupby's keys over (#154)"`.
+- [x] **Step 5: Commit.** `git commit -m "the aggregate hands groupby's keys over (#154)"`.
 
 ### Task 5: The tiers, the benchmark, the wiki
 
-- [ ] **Step 1: Device cycle, the full gpu tier and the corpus device cells on today.** Every
+- [x] **Step 1: Device cycle, the full gpu tier and the corpus device cells on today.** Every
   answer unchanged; tpcds q84 and q85 at tp1-single named in the record (Review focus 1).
-- [ ] **Step 2: The benchmark.** The sf40 q6 and q19 numbers before Task 1 and after Task 4
-  (`build-test-shadgpu.sh`'s benchmark run on shad-gpu), into the detail file; q19's lineitem
-  filter is where the `ColumnRef` copy cost most (#154's HBM reading, ~46 of 107 GB).
-- [ ] **Step 3: The wiki.** `tickets/corpus-coverage.md`'s #154 reworded to `join.cpp`'s ten
+- [x] **Step 2: The benchmark — DEFERRED, and not by choice.** sf40 lives only on shad-gpu,
+  which was down all run, and the human host override takes benchmark measurement out of every
+  task. So the one bar written to quantify `expr.cpp`'s arm did not run. What carries the claim
+  instead is the RMM statistics adaptor cases, which measure the same saving at gtest scale:
+  every one of the four byte bounds came out *exactly* equal to the cuDF work alone, so the
+  operators allocate nothing of their own. Figures in the detail file.
+- [x] **Step 3: The wiki.** `tickets/corpus-coverage.md`'s #154 reworded to `join.cpp`'s ten
   sites alone (join-session-cpp's), with this task's outcome per site; `build-test.md`:
-  `peacock_plan_tests` count (+8) and the row text.
-- [ ] **Step 4: Commit.** `git commit -m "#154 narrowed to join.cpp: the other exit copies are gone"`.
+  `peacock_plan_tests` 68 → 75, the C++ total 107 → 114 and the grand total 3023 → 3030, plus the
+  row text. `architecture.md`'s exit-path paragraph, the `CudfProject` row and the `ColumnRef`
+  ordinal row were all falsified by this change and are corrected, and its
+  "49 `.column(…)` calls" is 44 now.
+- [x] **Step 4: Commit.** `git commit -m "#154 narrowed to join.cpp: the other exit copies are gone"`.
 
 ### Task 6: The record
 
-- [ ] Detail file: each case red then green; the per-site table (11 sites: 6 gone — expr.cpp's
-  `ColumnRef`, filter, project, window, aggregate 413 and 759 — and 5 kept with their reasons);
-  the benchmark. `git commit -m "exit-copies: the record"`.
+- [x] Detail file: each case red then green; the per-site table (11 sites: 6 gone — `expr.cpp`'s
+  `ColumnRef` arm at 850, `filter.cpp` 41, `project.cpp` 44, `window.cpp` 46, `aggregate.cpp` 414
+  and 760 — and 5 kept with their reasons); the benchmark recorded as deferred with what replaced
+  it. The spec's line numbers were written against an older file: the real ones are in the detail
+  file's table, and `expr.cpp`'s arm is at 850, not 834.
