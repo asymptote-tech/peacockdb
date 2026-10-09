@@ -1000,3 +1000,48 @@ GPU Tests failed at rsync with `ssh: connect to host llm-gpu0h200.velkerr.ru por
 Connection timed out`, the same unreachable host as before the rebase. No pool was built, so
 it is not [#178](../tickets/testinfra.md#t178) and not this branch; chain K does not wait on
 that job.
+
+## The GPU half — reopened 2026-10-09
+
+The human reopened this task from `done` to `building`. The cpu lowering is closed and #62 is
+archived; what is left is the half the chain could not run while it had no GPU, filed as
+[#262](../tickets/corpus-coverage.md#t262): **no device has ever run a plan from this lowering.**
+The two-stage shape reaches the wire — an outer init running merge aggregators over state, a
+`__distinct_arg` key, a narrowed grouping id — and a device answer could differ from the cpu's
+with nothing to say so, because the cells are off.
+
+### Second rebase, onto master bc9b6e2f through ENS-guard-checks
+
+Fourteen commits replayed, every conflict bookkeeping:
+
+- `tasks.md`, once — this branch's own state progression, so the replayed side stands.
+- `build-test.md`'s grand-total line, four times. The replayed side is an **absolute** computed
+  off the old base, so taking it would have discarded the new base's own count; each was resolved
+  by applying the replayed commit's delta to the base instead (+26, +1, +1, and one more). Then
+  the result was checked the way the page says it should be — by summing the rows, not the
+  deltas: first table 1803, the second table's Rust rows 90, so Rust 1893, C++ 94, Python 381,
+  grand total **2368**, which is what the header reads.
+
+No code, golden or test conflicted. The branch is 14 commits above `ENS-guard-checks`, which is
+the task's own count, so the PR diff is still the task.
+
+### What the GPU run must do
+
+`tpch/distinct-functions`' five device cells, off on #262 alone, are the ones to try. Each cell
+that passes against the cpu golden is enabled; each that fails gets the ticket it fails on, and
+#262 narrows to what is left rather than closing.
+
+Two queries are **not** this run's business, and their cells stay off: tpcds q28 is a cross join
+behind [#152](../tickets/joins.md#t152), and `tpch/rollup-distinct` is behind
+[#65](../tickets/corpus-coverage.md#t65) at every mode and [#189](../tickets/corpus-coverage.md#t189)
+at tp4. Those are other tickets' to close, and #262 says so.
+
+### The host
+
+nebius-gpu, `dmitry@89.169.109.150`, an L40S with 46 GB — not shad-gpu, which is unreachable and
+is why every CI GPU job in this chain has failed. Chain K's board note in `tasks.md` carries the
+rules and overrides this spec's "No GPU" section and `build-test.md` where they disagree. The
+load-bearing ones: work in `~/peacockdb-K` and never `~/peacockdb-J`; rsync the tree uncommitted;
+`build-test-shadgpu.sh --build` and then run the staged binaries directly, never `--run`, which
+ssh-es to shad-gpu; cuDF 25.02; sf40 and the benchmarks are out. Probed at 15:20: card idle,
+37 GB free, sf1 data already in `~/peacockdb-K/testdata`, no source tree there yet.
