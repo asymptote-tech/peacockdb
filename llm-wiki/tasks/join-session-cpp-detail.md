@@ -369,10 +369,11 @@ session gives back its build side (and its hash table — 8.4 MB against a 4 MB 
 
 1. The duplicated `#include <cudf/reshape.hpp>` is gone.
 2. Three `chunk_bytes = 16` forms probed one row, and `chunks` caps the range count at the
-   probe's rows, so each ran identically to its unchunked sibling. All three now probe three
-   rows, with the extra rows chosen to leave the expected answers unchanged where that was
-   possible and recomputed by hand where it was not (the keyless decimal case now answers
-   three rows and an empty finish).
+   probe's rows, so each ran identically to its unchunked sibling. **One of the three was
+   given three rows** — the keyless decimal case, which now answers three rows and an empty
+   finish, recomputed by hand. The claim that all three were fixed was wrong: the forms at
+   `test_join_session.cpp:864` and `:1241` still probe one row, which the completeness pass
+   caught and the next round takes.
 3. `NullEqualsNullMatchesNullKeysForEveryOuterType` ran Full alone; it now loops the four and
    the name is accurate.
 4. `gpu_plan.fbs` now says what `projection`'s ordinals index, which differs by type, and that

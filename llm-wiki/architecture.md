@@ -427,6 +427,10 @@ a join, or a limit at the root, reaches this layer as two intervals.
 
 ## Joins
 
+Everything below is `join.cpp` and the recipe choreography, which still serve every plan.
+`operators/join_session.cpp` is a second implementation — all nine types, no hardcoded
+`EQUAL`, no finish join — that nothing reaches until join-backend.
+
 The build side is DataFusion's left input and one batch per lane (the planner inserts a
 `GpuCoalesceAllBatches`); the streamable side is its right input. Translation never swaps them
 (`translator/nodes.rs`): which table is left is DataFusion's choice. Its `JoinSelection` swaps
@@ -842,9 +846,11 @@ The mapping from a plan node to the seqs it addresses, and to the calls a driver
 | `GpuUnload` | none | `result_from_handle` per handle over the driver's row range; batches outside an interval are released without a call |
 
 Three facts about the C++ side are what make this drivable. `execute_node` is stateless per seq
-— the only state is the handle registry (and, under timing, a count of calls per seq that names
+— its state is the handle registry (and, under timing, a count of calls per seq that names
 a region and changes nothing), inputs are consumed per call, outputs get fresh handles — so
-calling one seq once per batch is legal. The collapse arm concatenates whatever k handles
+calling one seq once per batch is legal. A join session is the one thing addressed by seq that
+outlives a call, and it is reached by the four `peacock_join_*` symbols rather than by
+`execute_node`. The collapse arm concatenates whatever k handles
 it is passed, the merge arm merges any k>1 sorted handles, and the repartition arm takes exactly
 one handle and scatters it into the plan-declared N; none of them cross-checks handle counts
 against the plan tree. And stats
@@ -889,7 +895,7 @@ field with no consumer reads as a knob (#132).
 | [`CudfHashJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::inner_join` / `left_join` / `full_join(left_keys, right_keys, kJoinNulls)`; semi/anti take [`left_semi_join` / `left_anti_join`](../cpp/src/operators/join.cpp), or their `mixed_*` forms when a residual filter must be evaluated during the join |
 | [`CudfCrossJoin`](../flatbuffers/gpu_plan.fbs) | nothing — the node is its two inputs | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::cross_join(ltv, rtv)` |
 | [`CudfNestedLoopJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `filter` + `filter_columns`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::conditional_inner_join` / `conditional_left_join` over the predicate as an AST; a predicate the AST cannot take is `cudf::cross_join`, then [`apply_boolean_mask`](../cpp/src/operators/join.cpp) over the filter evaluated on the crossed table, for Inner alone ([#215](tickets/joins.md#t215)) |
-| [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; 0 is 1 GiB) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join` or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
+| [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; 0 is 1 GiB) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join`, `cross_join` where there is no condition either, or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
 | [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N — read as none at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
 | [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs) | nothing | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |
@@ -1127,11 +1133,14 @@ copies together.
 
 `cpp/src/`: `gpu_executor.cpp` (the C FFI), `node_session.cpp` (the post-order index, the
 handle registry, the multi-partition dispatch — scan-map emission, collapse, k-way merge,
-hash repartition, 1:1 map — and the timed regions, the NVTX domain and the harness range),
+hash repartition, 1:1 map — the join-session map and its four entry points, and the timed
+regions, the NVTX domain and the harness range),
 `expr.cpp` (expression and AST building),
 `table_result.cpp` (the handle's four constructors),
 `spark_hash_partition.cu` (the murmur3 kernel), and `operators/` (one `execute_*` per wire
-node kind plus `dispatch.cpp` with the `run_op` switch).
+node kind that `execute_node` runs, plus `dispatch.cpp` with the `run_op` switch, and the
+join session in `join_session`, `join_columns` and `join_residual`, which no `execute_*`
+reaches — `CudfJoin` is a leaf).
 
 `execute_one` enforces **consumed == provided**: a node handed inputs must consume all of
 them, or it ran against inputs the caller did not give it. That check is what makes the
@@ -1149,12 +1158,12 @@ Where the ordinals come from and where they land:
 | Reference | Written by | Read by |
 |---|---|---|
 | `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/wire/expr_writer.rs), off the ordinal `planner/translator/expr.rs` read from DataFusion's `Column::index()` | [`build_expr`](../cpp/src/expr.cpp) for the AST path, [`evaluate_column`](../cpp/src/expr.cpp) for the column path, which borrows the input's column rather than copying it |
-| `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join.cpp`](../cpp/src/operators/join.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
-| join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`join.cpp`](../cpp/src/operators/join.cpp) — ColumnRef only, anything else throws |
-| `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
+| `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join.cpp`](../cpp/src/operators/join.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
+| join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`join.cpp`](../cpp/src/operators/join.cpp), [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — ColumnRef only, anything else throws |
+| `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp), [`join_residual.cpp`](../cpp/src/operators/join_residual.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
 | sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/wire/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) |
 
-`cpp/src/` holds 22 `->index()` reads and 44 `.column(…)` calls, so this is the engine's most
+`cpp/src/` holds 27 `->index()` reads and 49 `.column(…)` calls, so this is the engine's most
 common operation and the one with the least ceremony around it.
 
 ### What guards it, and what does not
@@ -1197,8 +1206,8 @@ precisely so cuDF cannot infer something the CPU side did not.
 |---|---|---|---|
 | `parquet_reader_options` | [`scan.cpp`](../cpp/src/operators/scan.cpp) | `.columns(projected)`, `set_row_groups(map ∥ pruned)`, `set_num_rows(limit)` | read every column and every row group; the row-group list is also how a partition reads only its own slice |
 | `cudf::order`, `cudf::null_order` | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp) | per key from the flat buffers's `asc` / `nulls_first` — both sites map `nulls_first` to `BEFORE` regardless of direction, and cuDF flips a descending key after applying it, so a descending key's nulls land on the wrong end ([#202](tickets/corpus-coverage.md#t202)) | cuDF has no notion of the query's ORDER BY; the two sites must agree or a k-way merge would order differently from a sort |
-| `cudf::null_equality` | [`join.cpp`](../cpp/src/operators/join.cpp) ×9 | see the table below | `EQUAL` — NULL keys match, inventing rows SQL excludes |
-| `cudf::out_of_bounds_policy` | [`join.cpp`](../cpp/src/operators/join.cpp) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
+| `cudf::null_equality` | [`join.cpp`](../cpp/src/operators/join.cpp) ×9, [`join_session.cpp`](../cpp/src/operators/join_session.cpp) and [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) | see the table below | `EQUAL` — NULL keys match, inventing rows SQL excludes |
+| `cudf::out_of_bounds_policy` | [`join.cpp`](../cpp/src/operators/join.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
 | `cudf::null_policy` (groupby) | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [grouping sets](../cpp/src/operators/aggregate.cpp) | `INCLUDE` | `EXCLUDE` silently drops the NULL group — tpcds q15's NULL `ca_zip` row disappears |
 | `cudf::null_policy` (rolling count) | [`window.cpp`](../cpp/src/operators/window.cpp) | `EXCLUDE` for `COUNT(col)`, `INCLUDE` for `COUNT(*)` | one of the two is always wrong: `COUNT(*)` counts rows, `COUNT(col)` counts non-nulls |
 | decimal scale | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [`window.cpp`](../cpp/src/operators/window.cpp) | `data_type{id, -out_decimal_scale}` from the flat buffers | cuDF would re-derive a scale per operation and drift from DataFusion's |
