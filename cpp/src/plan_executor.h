@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -134,6 +135,16 @@ uint64_t varlen_content_bytes(const cudf::table_view& table);
 std::pair<cudf::size_type, cudf::size_type> clamp_row_range(uint64_t offset, uint64_t length,
                                                             cudf::size_type num_rows);
 
+/// The two refusals a join call recovers from: an unknown join id, and a probe or a finish
+/// after the finish. Its own type rather than `std::invalid_argument`, which cuDF throws from
+/// inside a probe — mismatched key types are a `cudf::data_type_error`, and that derives from
+/// `std::invalid_argument` — so sharing one would let a failure mid-work, with the lane's
+/// batch already consumed, read as a refusal that started nothing. Everything else ends the
+/// query, as `execute_node` does.
+struct JoinRefusal : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
 /// Node-by-node execution session: parses a plan once and drives ONE node at a
 /// time given already-resident child inputs, keeping intermediates resident in a
 /// handle registry. The only way a plan is executed.
@@ -159,9 +170,8 @@ class NodeSession {
   /// `out_stats[0..*out_count]` is filled PER PARTITION, so Rust can sum the
   /// ColAccum overhead per partition: Σ_p ColAccum(rows_p), NOT ColAccum(Σ rows).
   /// Input handles are CONSUMED.
-  void execute_node(uint64_t seq, const uint64_t* input_handles,
-                    const uint64_t* input_child_counts, size_t n_children,
-                    uint64_t* out_handles, size_t out_cap, size_t* out_count,
+  void execute_node(uint64_t seq, const uint64_t* input_handles, const uint64_t* input_child_counts,
+                    size_t n_children, uint64_t* out_handles, size_t out_cap, size_t* out_count,
                     NodeStats* out_stats);
 
   /// Execute the `CudfScan` at post-order `seq` reading exactly `row_groups` rather
@@ -175,6 +185,22 @@ class NodeSession {
   /// (`clamp_row_range` for the edges). The input handle is CONSUMED, as every
   /// operation on a resident table is.
   uint64_t slice_handle(uint64_t handle, uint64_t offset, uint64_t length);
+  /// Build the session for the `CudfJoin` at post-order `seq` over `build` (0 = no build
+  /// batch), CONSUMING it, and return the join id every later call names. A join lives
+  /// until `join_release` or the end of the plan, and any lane may probe it (#140).
+  uint64_t join_build(uint64_t seq, uint64_t build, NodeStats* out_stats);
+
+  /// One probe batch, CONSUMED: exactly one output handle, possibly of zero rows, or 0 for
+  /// the types that answer only at finish (LeftSemi, LeftAnti, LeftMark).
+  uint64_t join_probe(uint64_t join, uint64_t probe, NodeStats* out_stats);
+
+  /// Called once, after the last probe: one handle for the types that finish (Left, Full,
+  /// LeftSemi, LeftAnti, LeftMark), 0 for the rest. A probe after it is refused.
+  uint64_t join_finish(uint64_t join, NodeStats* out_stats);
+
+  /// Release a join session (idempotent, as handle release is).
+  void join_release(uint64_t join);
+
   /// Drain every region recorded since the last call, in execution order. Empty
   /// unless the mode was `NodeTiming::Events`.
   ///

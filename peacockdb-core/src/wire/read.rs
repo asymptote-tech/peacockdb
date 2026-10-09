@@ -81,6 +81,9 @@ pub(crate) fn children<'a>(node: &fb::PlanNode<'a>) -> Result<Vec<fb::PlanNode<'
             .node_as_cudf_nested_loop_join()
             .map(|n| pair(n.left(), n.right()))
             .unwrap_or_default(),
+        // A leaf, as the C++ twin has it: a session's two tables arrive through
+        // peacock_join_build and peacock_join_probe, so the node carries no child stubs.
+        fb::PlanNodeKind::CudfJoin => Vec::new(),
         fb::PlanNodeKind::CudfUnion => node
             .node_as_cudf_union()
             .and_then(|n| n.inputs())

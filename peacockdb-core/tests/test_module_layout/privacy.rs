@@ -385,7 +385,7 @@ pub(crate) fn private_modules(text: &str) -> Vec<String> {
 /// A component's implementation module is unreachable from outside the crate, proved by
 /// compiling against the built library rather than by reading the tree.
 ///
-/// `wire::generated` is the case worth the machinery: 7,336 lines of flatc output whose
+/// `wire::generated` is the case worth the machinery: 7,574 lines of flatc output whose
 /// privacy is the whole reason `wire/` is drawn where it is. A text check would assert that
 /// `wire/mod.rs` says `mod generated;` — this asserts what that means.
 ///
@@ -409,7 +409,7 @@ fn a_private_module_is_unreachable_from_outside_the_crate() {
     let probe = compile_against_the_library("layout_probe", err);
     assert!(
         !probe.status,
-        "`wire::generated` compiled from outside the crate. flatc's 7,336 lines are supposed \
+        "`wire::generated` compiled from outside the crate. flatc's 7,574 lines are supposed \
          to be private to one component; `wire/mod.rs` must declare `mod generated;`."
     );
     assert!(

@@ -1,4 +1,4 @@
-//! flatc's output, included verbatim: 7,336 lines, and the whole reason `wire/` is drawn
+//! flatc's output, included verbatim: 7,574 lines, and the whole reason `wire/` is drawn
 //! where it is.
 //!
 //! The `allow` is not cosmetic here, which it was while this module was `pub` in `lib.rs`:

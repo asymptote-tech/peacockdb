@@ -459,6 +459,30 @@ table CudfNestedLoopJoin {
   projection: [uint32];
 }
 
+/// A join answered through the session symbols (peacock_join_*), never execute_node: a leaf,
+/// since its inputs arrive by call. join-rewrite-design.md §1.1.
+table CudfJoin {
+  join_type: JoinType;                  // the nine; no RightMark (#241)
+  keys: [JoinKey];                      // ColumnRef pairs; empty = nested loop or cross
+  filter: Expr;                         // residual; refs index the filter's own schema
+  /// Filter schema ordinal -> (side, column). Empty when the filter names no column, which
+  /// is what a predicate-free non-Inner join carries: the literal `true`.
+  filter_columns: [JoinFilterColumn];
+  null_equals_null: bool = false;       // honoured by every type
+  build_schema: Schema;                 // types of an absent build side, and pad types
+  probe_schema: Schema;                 // pad types before any probe batch arrived
+  /// Absent = keep every column; present = keep these, never empty. The ordinals index what
+  /// the call emits, which differs by type: [build..., probe...] for Inner/Left/Right/Full,
+  /// the build alone for LeftSemi/LeftAnti, the build plus the trailing `mark` for LeftMark,
+  /// the probe alone for RightSemi/RightAnti.
+  projection: [uint32];
+  /// The pair/cross scratch a probe call may spend, 0 meaning 1 GiB. The executor bounds
+  /// `pairs x (8 + the residual's per-row bytes)` by it, the second term being the sum over
+  /// the filter's columns of their fixed width, 16 for a variable-width one — not 8 bytes a
+  /// pair, which is the index maps alone.
+  chunk_bytes: uint64 = 0;
+}
+
 /// Sort by one or more columns.
 table CudfSort {
   /// Sort specifications (first = primary key, etc.).
@@ -594,6 +618,7 @@ union PlanNodeKind {
   CudfUnion,
   CudfLimit,
   CudfWindow,
+  CudfJoin,
 }
 
 /// A single node in the physical plan tree.

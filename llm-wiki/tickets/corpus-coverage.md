@@ -703,8 +703,10 @@ each column into `all_cols` (~L337, ~L342), then copies the kept ones again if t
 `release()` moves instead; ordinal subset (211, 270, 376, 525), which `TableResult::select`
 shares; and a column of an **input** table kept in the output (259), which shares the input's
 owner. Traps: a view taken before the release dangles (`ftv` ~L372), and a repeated projection
-ordinal moved twice leaves a hole — a wrong answer, not a throw. `join-session-cpp` rewrites
-this file and takes them; land before [#155](joins.md#t155).
+ordinal moved twice leaves a hole — a wrong answer, not a throw. [`join-session-cpp`](../tasks/join-session-cpp.md)
+built the session beside this file, carrying none of these copies, and one allocation bound in
+`test_join_session.cpp` holds it to that. `join-backend` deletes `join.cpp` with the three old
+nodes and closes this; land before [#155](joins.md#t155).
 
 The other eleven sites are gone or justified, by [`exit-copies`](../tasks/exit-copies.md): six
 lost their copy — `expr.cpp`'s `ColumnRef` arm (now `evaluate_column`, a view of the input's own
