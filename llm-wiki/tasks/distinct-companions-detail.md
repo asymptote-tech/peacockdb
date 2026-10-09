@@ -1068,8 +1068,9 @@ That is [#225](../tickets/corpus-coverage.md#t225) and nothing else — the devi
 state's three columns under the alias. It is also the most informative line in the run, because
 the divergence enumerates *every* mismatching column, and it named three of the node's eleven.
 So the other eight held as declared, position 9 among them: the outer init's
-`avg(lineitem.l_extendedprice)$sum`, declared `Decimal128(35, 2)`. The widened decimal state the
-lowering introduces is device-correct.
+`avg(lineitem.l_extendedprice)$sum`, declared `Decimal128(35, 2)`. The widened state reached the
+device under the type id and scale the plan declares; its *precision* is not something a device
+holds — see below.
 
 The two tp1 modes reached the result instead, because at one lane the outer stage is a single
 `GpuAggregate` that inits *and* finalizes, so no state batch is ever emitted. #225 is therefore
@@ -1258,3 +1259,23 @@ on either side.
 The two nits: `262` is back on q28's and rollup_distinct's registry rows, which is what
 `grouping-id-impl.md`'s grep for rows naming it reads; and `assert_sorted_str_approx`'s
 "(q14/q39)" parenthetical is gone rather than re-listed, since the declarations are the list.
+
+### Two notes the round left open rather than closed
+
+**`build-test.md` gained a bullet nobody asked for.** `## Antipatterns` now carries the
+`rsync -a` mtime trap that cost this round a wrong conclusion about the device. By the letter of
+the growth rule that is growth, not correction: no sentence on the page was false before it. The
+coordinator added it anyway because the alternative home is this file, which is deleted at
+archive, and because the section's one prior entry is the same species of trap. **It is the
+human's to drop at merge** if they read that rule more strictly.
+
+**A schema-validation mask entry naming a mode the line does not run is unrefused.**
+`mask_names` checks an entry against the five modes, not against this line's own device modes,
+and a `none` line never reaches the decoder at all — so an exemption written for a cell that is
+off arms itself silently the day that cell is enabled. Declined for this task rather than
+overlooked: closing it means carrying the validation keyword on `CorpusDeclaration` and adding a
+cpu-side test that decodes every line at all five modes, which is harness machinery a second step
+beyond what reopening this task was for. Nothing is wrong today — distinct-functions runs all
+five modes, so its mask has no dead entry. **Whoever enables q28's or `rollup-distinct`'s device
+cells should read this paragraph first**, since those are the two lines a mask would next be
+written for.
