@@ -423,3 +423,29 @@ wait on that job, so the task is `done`.
 The two later commits on this branch are documentation only, so `paths-ignore` and the
 `changes` job both skip them and no run was started for them. The code-carrying run is the
 one above.
+
+### 2026-10-09 — second rebase, onto master bc9b6e2f
+
+The control file said `rebase`. master carried three commits over 31c56bea:
+
+- `2ad302bf` join-backend's spec and a report — `llm-wiki/**` only;
+- `f0a6ecbf` the cost gate fails only past `REGRESSION_FAIL_PCT` (10%) — `cost-report/src/main.rs`
+  and `pipeline.yml`, two new cases;
+- `bc9b6e2f` chain K's nebius-gpu note, the three specs' "No GPU" sections marked superseded,
+  and the board reset that reopens distinct-companions, limits and empty-sorts.
+
+So the rebase carried code, not documentation alone, and the task re-proves rather than keeping
+`done`. What it carried is narrow — the cost-report binary and the cost gate's flag — but
+`pipeline.yml` is a file both sides touched and `test_ci_coverage` reads it, which is the one
+way master's change can reach this branch's tests.
+
+One conflict, in `build-test.md`, and it is the test-count row this task already repaired once.
+master went 37 → 38 for two new cost-report cases, starting from the stale 37; this branch had
+corrected the same row to 36. The code is authoritative: `grep -c '#\[test\]'
+cost-report/src/main.rs` is 38, so master's value stands and this branch's correction was to the
+figure beneath it. The header follows the rows, not the deltas — re-summed both tables rather
+than adding: first table 1775, the second table's Rust rows 90, so Rust 1865, C++ 94, Python 381,
+grand total 2340.
+
+Nothing else conflicted. `guard-checks.md`, `pipeline.yml`'s GPU job and
+`build-test-shadgpu.sh` applied clean.
