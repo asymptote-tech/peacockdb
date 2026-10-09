@@ -574,12 +574,13 @@ dropped was on the same zero-column read, and could not have made it answer five
 **Corpus queries:** `tpch/nested-limits` at every device mode, off on this ticket, and the corpus's
 only scan declaring no column.
 
-**Fix proposed:** #63's, whose `row_count_table(rows)` / `is_row_count_only(t)` helpers it names
-this arm as sharing. Or, closer to the cause, `scan()` writes the file's own column names into
-`file_schema` and the declared ones into `projection`, so "no projection" and "no column" stop
-being one wire value — the honest fix, since the field is named `file_schema` and holds something
-else, but it needs the file's full column list, which `scan()`'s doc says a plan node does
-not carry.
+**Fix proposed:** `scan()` writes the file's own column names into `file_schema` and the declared
+ones into `projection`, so "no projection" and "no column" stop being one wire value. That is the
+honest fix — the field is named `file_schema` and holds something else — and it needs the file's
+full column list, which `scan()`'s doc says a plan node does not carry. #63's
+`row_count_table(rows)` / `is_row_count_only(t)` helpers give the representation but not the
+count: a zero-column read returns no rows and the node sends none, so the scan arm needs that
+column list either way.
 
 ## Repartitioning
 

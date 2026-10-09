@@ -197,8 +197,10 @@ rows-only → `cudf::repeat(left, r)`; else `cudf::cross_join`; one overflow che
 No wire or ABI change, no golden moves. Proof: gtests in `cpp/tests/gpu/test_plan_executor.cpp`
 for each arm, the report's two-subquery shape as a corpus query at every mode, and `tpcds/q9`
 enabled at tp1-single on shad-gpu. The second arm is [#285](corpus-coverage.md#t285), a scan
-projected to no columns, which shares the helper and lands with it; measured, it answers empty
-rather than refusing, because the zero-row batch never reaches `cudf::cross_join`.
+projected to no columns, which shares the helper and lands with it. Measured, it answers empty rather than
+refusing, because a `GpuLimit` swallows the zero-row batch first ([#214](corpus-coverage.md#t214))
+and nothing reaches `cudf::cross_join`; the refusal is still live for a shape with nothing
+between the scan and the join.
 
 <a id="t212"></a>
 ### #212 — a build side that emits no batch at all still refuses Right, Full and RightAnti

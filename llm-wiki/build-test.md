@@ -471,7 +471,7 @@ Thirty-six cells today: `tpch/q6`, `tpch/q1`, `tpch/shuffle-additive-avg`,
 [#95](tickets/corpus-coverage.md#t95),
 [#220](tickets/joins.md#t220) and the device's own tickets (#57, #63, #205). distinct-functions
 is the DISTINCT lowering's only device query; q28 and `tpch/rollup-distinct` wait on #152, #65
-and #189 ([#262](tickets/corpus-coverage.md#t262)). scan-limit is the only query whose cut is an
+and #189 ([#262](tickets/corpus-coverage.md#t262)). scan-limit is the only device cell whose cut is an
 unload's interval; `tpch/nested-limits`, the other one #186 touched, is off at every mode on
 [#285](tickets/corpus-coverage.md#t285) — its region scan declares no column. The
 thirty-seventh case is that a device run under a regeneration writes no golden

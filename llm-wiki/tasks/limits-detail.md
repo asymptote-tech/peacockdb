@@ -652,7 +652,8 @@ corpus query and the pin, cross-referenced to #63 both ways, and #63's closing s
 
 #### What the four converted cases proved about dropping `set_num_rows`
 
-All four ran on the card and passed:
+All five of the file's agreement cases ran on the card and passed — the four this task
+converted from `bug_` pins, and the one that was already an agreement case:
 `both_backends_read_the_same_batches_per_row_group`,
 `a_scan_of_one_row_group_reads_it_whole_on_both`,
 `a_limit_over_a_scan_of_one_row_group_keeps_its_first_rows_on_both`,

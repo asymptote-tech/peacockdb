@@ -210,9 +210,7 @@ fn every_unchecked_answer_is_held_somewhere() {
 /// A `golden_exact` where no committed section can serve fails on correct behaviour: the result
 /// is over the cap and carries a marker. A `live_cpu` where a section does serve spends a
 /// device-side cpu run on what a committed file says faster. One question, asked both ways, and
-/// the same one `corpus_gpu`'s device-side check asks — whether a section serves. Whether one
-/// mode can be the authority for five is a different claim, and the golden compare is what tests
-/// it: the device goes red at the mode that disagrees and names the author. Read off the
+/// the same one `corpus_gpu`'s device-side check asks — whether a section serves. Read off the
 /// declaration and the golden rather than a run, which is what catches the first `live_cpu` query
 /// BEFORE the rollout needing it. Derivable is why a CHECK can exist here, never why either value
 /// would be absent from the line. It also holds `ANSWER_HELD_ELSEWHERE` to the
@@ -230,10 +228,10 @@ fn each_declarations_two_oracles_suit_each_other() {
             continue;
         }
         let section = section_of(&result_golden(declared.dataset, declared.sf), &query);
-        // Read off what is committed, not off `cpu_oracle`: `data_fusion_subset` says
-        // DataFusion's pick and ours need not be the same rows, which is not our own five modes
-        // differing. `tpch/scan-limit` is both — undetermined against DataFusion, identical
-        // across the modes since #186 cut it on one lane over the covering prefix in order.
+        // Read off what is committed, not off `cpu_oracle`. A `golden_exact` on a
+        // `data_fusion_subset` line is the extra claim that our own five modes agree, which only
+        // the device golden compare tests. `tpch/scan-limit`'s do: #186 cut it on one lane over
+        // the covering prefix in order, so its five plans are identical. Measured 2026-10-09.
         let needs_live = section.starts_with(SKIPPED);
         let says_live = declared.gpu_oracle == "live_cpu";
         if needs_live && !says_live {
