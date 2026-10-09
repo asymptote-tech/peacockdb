@@ -11,7 +11,6 @@
 #include <cudf/concatenate.hpp>
 #include <cudf/copying.hpp>
 #include <cudf/merge.hpp>
-#include <cudf/scalar/scalar.hpp>
 #include <cudf/sorting.hpp>
 #include <cudf/strings/strings_column_view.hpp>
 #include <cudf/table/table.hpp>
@@ -227,21 +226,40 @@ bool harness_range_is_open() { return harness_range().has_value(); }
 
 bool nvtx_ranges() { return g_nvtx.load(std::memory_order_relaxed); }
 
+// `offsets[last] - offsets[first]`, both edges in one pair of async copies and one sync.
+// `cudf::get_element` would allocate a device scalar and launch a kernel per read, and this
+// runs for every string column of every node output of every batch.
+template <typename T>
+static int64_t offset_span(const cudf::column_view& offsets, cudf::size_type first,
+                           cudf::size_type last, rmm::cuda_stream_view stream) {
+  T edges[2] = {0, 0};
+  const T* data = offsets.data<T>();
+  cudaMemcpyAsync(&edges[0], data + first, sizeof(T), cudaMemcpyDeviceToHost, stream.value());
+  cudaMemcpyAsync(&edges[1], data + last, sizeof(T), cudaMemcpyDeviceToHost, stream.value());
+  if (auto err = cudaStreamSynchronize(stream.value()); err != cudaSuccess)
+    throw std::runtime_error(std::string("varlen_content_bytes: reading string offsets: ") +
+                             cudaGetErrorString(err));
+  return static_cast<int64_t>(edges[1]) - static_cast<int64_t>(edges[0]);
+}
+
 // The content bytes of a strings column's own rows. `chars_size` reads the unsliced
 // parent's last offset ("does not reflect a sliced parent column view",
 // strings_column_view.hpp), and a scatter partition is a slice of the scatter's table
-// (#145) — so read the slice's own two edges instead.
+// (#145) — so a sliced view reads its own two edges instead.
 static uint64_t string_content_bytes(const cudf::column_view& col) {
   if (col.size() == 0) return 0;
   cudf::strings_column_view sv(col);
+  auto stream = cudf::get_default_stream();
   auto offsets = sv.offsets();
-  auto at = [&](cudf::size_type i) -> int64_t {
-    auto s = cudf::get_element(offsets, i);
-    if (offsets.type().id() == cudf::type_id::INT64)
-      return static_cast<cudf::numeric_scalar<int64_t> const&>(*s).value();
-    return static_cast<cudf::numeric_scalar<int32_t> const&>(*s).value();
-  };
-  return static_cast<uint64_t>(at(sv.offset() + sv.size()) - at(sv.offset()));
+  // Every column but a scatter partition is the whole of its parent, and for those
+  // `chars_size` is already the answer in one read.
+  if (sv.offset() == 0 && sv.size() + 1 == offsets.size())
+    return static_cast<uint64_t>(sv.chars_size(stream));
+  const auto first = sv.offset();
+  const auto last = sv.offset() + sv.size();
+  return static_cast<uint64_t>(offsets.type().id() == cudf::type_id::INT64
+                                   ? offset_span<int64_t>(offsets, first, last, stream)
+                                   : offset_span<int32_t>(offsets, first, last, stream));
 }
 
 uint64_t varlen_content_bytes(const cudf::table_view& table) {
@@ -536,10 +554,9 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     impl_->registry.erase(it);
     std::vector<std::string> column_names = input.column_names;
     // The hash-scatter is shared by all N partitions and charged to p0, so
-    // Σ-over-partitions still equals the node total; p1..N-1 now time only their slice,
-    // which is host-side bookkeeping and reads as near zero. p0's region stays open
-    // across the scatter rather than closing and reopening, because N output partitions
-    // must cost exactly N timed regions.
+    // Σ-over-partitions still equals the node total; p1..N-1 now time only their slice.
+    // p0's region stays open across the scatter rather than closing and reopening,
+    // because N output partitions must cost exactly N timed regions.
     ScopedNodeTimer shared_timer(sink, seq, 0, call_index);
 
     // Hash keys: ColumnRef indices into the (partial-agg output) table. ColumnRef

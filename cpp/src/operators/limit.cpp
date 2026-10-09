@@ -29,6 +29,8 @@ TableResult execute_limit(const fb::CudfLimit* limit, NodeInputs* in) {
 
   std::vector<cudf::size_type> slice_indices{skip, end};
   auto sliced = cudf::slice(tv, slice_indices);
+  // An owning copy of the kept rows, not a view: a view would keep the whole input
+  // resident, which is the memory a limit exists to give back.
   auto result = std::make_unique<cudf::table>(sliced[0]);
   return TableResult::owning(std::move(result), std::move(input.column_names));
 }

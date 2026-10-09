@@ -2472,16 +2472,13 @@ static void report_scatter(const char* shape, int64_t rows, const Allocated& sca
             << " | call peak " << scatter.peak << " total " << scatter.total << "\n";
 }
 
-TEST(Scatter, HoldsTheInputOnlyUntilTheTableIsPartitioned) {
-  // The input arrives allocated (outside this scope); inside it the scatter allocates the
-  // partitioned table and frees the input. Copying every partition out, with input and
-  // partitioned table both still held, put the peak a whole input higher.
-  //
-  // The bound is `partition_alone` — the partitioned table and the scatter's temporaries,
-  // measured on this very input — and nothing on top. A hand formula would not do: cuDF's
-  // temporaries for one column type are not a multiple of another's.
-  flatbuffers::FlatBufferBuilder fbb;
-  auto buf = customer_fixed_scatter_plan(fbb, 4);
+/// Scatter `buf`'s plan into four lanes and hold the arm to the cost of partitioning
+/// alone: the partitions must add nothing to its peak and nothing to its requested total.
+/// Both bounds are measured on this very input, so no cuDF cost is baked into a constant —
+/// and a hand formula would not do, since cuDF's temporaries for one column type are not a
+/// multiple of another's.
+static void expect_the_partitions_add_nothing(const std::vector<uint8_t>& buf,
+                                              const char* shape) {
   peacock::NodeSession session(buf.data(), buf.size());
   std::vector<uint32_t> g{0};
   uint64_t in = 0;
@@ -2494,7 +2491,7 @@ TEST(Scatter, HoldsTheInputOnlyUntilTheTableIsPartitioned) {
   size_t produced = 0;
   auto scatter = allocated_by(
       [&] { session.execute_node(1, &in, counts, 1, out, 4, &produced, nullptr); });
-  report_scatter("fixed", rows, scan, probe, scatter);
+  report_scatter(shape, rows, scan, probe, scatter);
   const int64_t slack = int64_t{1} << 16;  // allocator rounding
   EXPECT_LE(scatter.peak, probe.peak + slack)
       << "the partitions add to the peak of partitioning alone";
@@ -2502,28 +2499,21 @@ TEST(Scatter, HoldsTheInputOnlyUntilTheTableIsPartitioned) {
       << "the partitions ask the allocator for bytes of their own";
 }
 
-TEST(Scatter, AStringColumnsGatherCostsMoreThanTheCopiesDid) {
-  // The same measurement over a string column, where cuDF's gather inside
-  // `cudf::partition` peaks above the table it produces — so the copies never set the
-  // peak and removing them cannot lower it. Recorded rather than asserted away:
-  // llm-wiki/tasks/refcounted-scatter-detail.md carries the figures.
+TEST(Scatter, HoldsTheInputOnlyUntilTheTableIsPartitioned) {
+  // Three fixed-width columns, the shape where the copies were what set the peak: the arm
+  // held the input, the partitioned table and a copy of every partition at once. Both
+  // bounds were red before the partitions became views.
   flatbuffers::FlatBufferBuilder fbb;
-  auto buf = customer_scatter_plan(fbb, 4);
-  peacock::NodeSession session(buf.data(), buf.size());
-  std::vector<uint32_t> g{0};
-  uint64_t in = 0;
-  auto scan = allocated_by([&] { in = session.execute_scan_rowgroups(0, g, nullptr); });
-  const int64_t rows = session.table_for(in).num_rows();
-  auto probe = partition_alone(session.table_for(in), 4);
-  uint64_t counts[1] = {1};
-  uint64_t out[4] = {};
-  size_t produced = 0;
-  auto scatter = allocated_by(
-      [&] { session.execute_node(1, &in, counts, 1, out, 4, &produced, nullptr); });
-  report_scatter("string", rows, scan, probe, scatter);
-  EXPECT_GT(probe.peak, scan.net * 2)
-      << "a string gather costing less than two inputs would make the copies the peak";
-  EXPECT_LE(scatter.peak, probe.peak + (int64_t{1} << 16));
+  expect_the_partitions_add_nothing(customer_fixed_scatter_plan(fbb, 4), "fixed");
+}
+
+TEST(Scatter, AStringScattersPartitionsAddNothingEither) {
+  // A string column, where only the total was red before: cuDF's gather inside
+  // `cudf::partition` peaks above the partitioned table plus the copies, so the copies
+  // never set the peak there. Printed rather than asserted — a cheaper gather in a newer
+  // cuDF is an improvement, not a defect; refcounted-scatter-detail.md has the figures.
+  flatbuffers::FlatBufferBuilder fbb;
+  expect_the_partitions_add_nothing(customer_scatter_plan(fbb, 4), "string");
 }
 
 TEST(Slice, OwnsItsRowsSoTheBatchCanGo) {

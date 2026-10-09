@@ -1003,9 +1003,10 @@ partitioned table and copy nothing. A column is freed when the last handle viewi
 a slice pins its parent column rather than the whole table. Four constructors build every one of
 them — `owning` from a fresh `cudf::table`, `slice`, `select` and `with`
 ([`table_result.cpp`](../cpp/src/table_result.cpp)) — and `owning` refuses a table of no columns
-and a name count that does not match. Consumers read `view()`; two sites copy on purpose and say
-why, the mid-plan limit's `slice_handle` and the sorted merge's fetch, because a view there would
-pin the whole batch, which is the memory those copies exist to give back. `NodeStats` carries only
+and a name count that does not match. Consumers read `view()`; four sites copy on purpose and say
+why — the session's `slice_handle` and sorted-merge fetch, and the limit and sort operators' own
+fetch slices — because a view there would pin the whole batch, which is the memory those copies
+exist to give back. `NodeStats` carries only
 what C++ alone can measure — rows and var-length content bytes, the latter read from a column's
 own first and last offsets so that a slice counts its own rows and not its parent's. The byte
 formula itself lives in Rust (`src/common.rs`) so the two engines cannot drift, and C++ prices

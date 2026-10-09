@@ -131,3 +131,70 @@ a fresh table; that is #154 and untouched.
 - `cpp/build` in this worktree is an empty root-owned directory and cmake dies at configure
   blaming itself; `/tmp/dkb-cppbuild` with `-DCMAKE_INSTALL_PREFIX=/tmp/dkb-cppinstall` is the
   local C++ build and survived another round.
+
+## Round 2 (2026-10-09) — review round 1 on PR #173: 0 blocking, 2 important, 4 nits
+
+### Important 1 — what `varlen_content_bytes` costs per string column
+
+The reviewer was right and the regression was real: round 1's `cudf::get_element` allocates a
+device scalar through RMM and launches `device_single_thread` per read, and it ran twice per
+string column on a path the driver takes for **every node output of every batch**
+(`gpu_backend/mod.rs` always passes a stats buffer). Measured on the card, 2,000 reps, two runs,
+`ns` per string column of customer row group 1 (27,120 rows):
+
+| path | ns/column | against the old |
+|---|--:|--:|
+| `chars_size` — the pre-task code, unsliced only | 7,201 / 7,375 | 1.00x |
+| round 1: `cudf::get_element` x2 | 30,851 / 31,665 | **4.3x** |
+| **now**, unsliced short-circuit — every column but a scatter partition | 7,682 / 7,736 | **1.05x** |
+| **now**, sliced: two async copies, one sync — scatter partitions only | 11,212 / 11,186 | **1.55x** |
+
+Both fixes compose and both are in. The short-circuit is
+`sv.offset() == 0 && sv.size() + 1 == offsets.size()`, which is every column that is not a
+scatter partition, so the common case is back to parity — the 5% is the branch plus the fact that
+the two "now" rows are timed through `varlen_content_bytes`'s own column loop while the other two
+call the strings path directly, which makes the parity figure conservative. The sliced path is two
+4-byte `cudaMemcpyAsync` and one `cudaStreamSynchronize`: one more copy than `chars_size`, one
+sync either way, no device allocation and no kernel — 2.8x cheaper than round 1.
+
+Correctness is unchanged and the two branches check each other: in
+`VarlenBytes.ASliceCountsOnlyItsOwnRows`, `all` reads the unsliced column (short-circuit) while
+`first` and `second` read slices (two-copy path), and `first + second == all` only holds if the
+two agree. The reviewer verified the formula against cuDF's `offsets_begin()` for slice-of-a-slice,
+single row, non-zero parent offset and the empty early return; none of those moved. Every memory
+figure in Measurement 1 above came out byte-identical after the change.
+
+### Important 2 — the copy list is four sites, not two
+
+`operators/limit.cpp` and `operators/sort.cpp` both slice into an owning table for the same
+reason `slice_handle` does, and carried no comment. One line at each now says why, in
+`slice_handle`'s wording. The four are: the session's `slice_handle`, the sorted merge's fetch,
+the limit operator's slice and the sort operator's fetch. `architecture.md` names all four — that
+edit is the coordinator's, left alone here.
+
+### Nit 6 — the finding kept without a cuDF constant
+
+`EXPECT_GT(probe.peak, scan.net * 2)` was a fact about cuDF's strings gather and would have gone
+red on a *cheaper* gather, which `verify-26.02` exists to run. Replaced by one helper,
+`expect_the_partitions_add_nothing`, asserting on both shapes that the arm's peak **and** its
+requested total are the peak and total of partitioning alone — measured on that very input, so no
+cuDF cost is baked into a constant. Both bounds discriminate: before the fix the total was red on
+both shapes (8,942,384 vs 5,454,880 fixed; 14,341,728 vs 10,623,968 string) and the peak was red
+on the fixed shape. The string case is `Scatter.AStringScattersPartitionsAddNothingEither`, and
+why its peak does not move is printed by `report_scatter` and recorded above rather than asserted.
+
+### Nits 3 and 4
+
+The repartition arm's in-body comment is back to 4 lines, and
+`Scatter.HoldsTheInputOnlyUntilTheTableIsPartitioned`'s to 3; the "measured, not estimated"
+rationale moved to the helper's doc comment, where the cap is 10.
+
+### Re-proved, exact tree
+
+`node_session.cpp` md5 `e87b2d43…` and `test_plan_executor.cpp` md5 `b61c3b4d…` identical local
+and remote. Build 0 warnings. `peacock_gpu_tests` 2/2, `peacock_plan_tests` **68/68**
+(`--gtest_list_tests` 68, so build-test.md's row is unchanged), `test_gpu_corpus` 79/0 including
+the six string-keyed tp4 cells run again on their own (q1 x3, shuffle-additive-avg x3),
+`test_node_timing` 1/0, `peacockdb_core_gpu_lib gpu_tests::` 580/0,
+`peacock_gpu_benchmarks --skip bench_` 8/0. No golden moved: the host's goldens hash
+`7a8b50b8…` after the corpus run, identical to the tree's.
