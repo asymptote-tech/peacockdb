@@ -527,6 +527,15 @@ comparator over it: every diverging column in the sink's spelling, a renamed one
 mismatch each a finding, precision and nullability never one; the schema-only IPC stream
 `peacock_handle_schema` answers, decoded with no device
 
+| Schema validation, declared | [test_support::schema_validation::tests](../peacockdb-core/src/test_support/schema_validation/tests.rs) | 6 |
+|---|---|--:|
+
+the last `corpus_query!` argument decoded against the mode being run: the hook on at every
+mode, off at every mode, and off at only the modes a `schema_validation_disabled(…)` mask
+names — plus the three refusals that keep a mask honest, since a misspelled keyword, a mask on
+the enabled form and a mask entry that is not one of the five would each read as a legal line
+and run a cell unvalidated
+
 | Forwarders and row ranges | [interleave_serves_lane_p_from_lane_p_of_every_child](../peacockdb-core/src/executor/forwarder/tests.rs) | 4 |
 |---|---|--:|
 
@@ -1728,3 +1737,10 @@ Wall-time runs are manual; the protocol: `PEACOCK_BENCHMARK=1`
   do sleep 15; done'` can never exit: the wrapper's own command line contains the pattern, so
   `pgrep -f` finds the waiter and the loop waits for itself. It ends only when the timeout
   fires. Where a pattern is unavoidable, exclude the waiter's own pid.
+- **A synced source older than the binary built from it.** `rsync -a` preserves mtimes, so
+  pushing the tree over a host-side edit can restore a *younger* file as an *older* one. Cargo
+  then sees nothing newer and skips the rebuild, and the run reports the previous build's
+  behaviour as the current one — a green that belongs to code the host no longer holds. Never
+  edit sources on a remote host; where one has been edited, `touch` the synced files before
+  building. Confirm which binary you are about to trust with `strings` on it when the change is
+  a literal the test reads.

@@ -15,7 +15,8 @@ use peacockdb_core::test_support::{
 };
 
 /// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, duckdb_oracle, cpu_oracle,
-/// gpu_oracle, schema_validation)` — one test and one registration per enabled cpu mode.
+/// gpu_oracle, schema_validation[(modes)])` — one test and one registration per enabled cpu
+/// mode.
 /// The modes read as a bitwise or and are matched as idents, which is what lets the expansion
 /// produce a case per mode rather than one that decides at run time whether it is one: a
 /// disabled mode has no test to name and no registration to explain. `all_modes` is the five
@@ -32,11 +33,11 @@ macro_rules! corpus_query {
         corpus_query!($dataset, $sf, $query, $($cpu)|+,
             tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
     };
-    ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident $(($($vmode:ident)|+))?) => {
         declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle);
         device_cell_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
     };
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident $(($($vmode:ident)|+))?) => {
         declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle);
         device_cell_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
         $(

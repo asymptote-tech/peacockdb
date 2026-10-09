@@ -2857,8 +2857,8 @@ static std::vector<uint8_t> customer_count_by_key_plan(flatbuffers::FlatBufferBu
       std::vector<flatbuffers::Offset<flatbuffers::String>>{fbb.CreateString("c_custkey")});
   auto args = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 0, "c_custkey")});
-  auto func = fb::CreateAggregateFuncNode(fbb, fbb.CreateString("count"), args,
-                                          /*distinct=*/false, fbb.CreateString("n"));
+  auto func =
+      fb::CreateAggregateFuncNode(fbb, fbb.CreateString("count"), args, fbb.CreateString("n"));
   auto funcs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::AggregateFuncNode>>{func});
   fb::CudfAggregateBuilder ab(fbb);
   ab.add_mode(fb::AggregateMode_Partial);
