@@ -987,3 +987,16 @@ No device run, no GPU cycle, no `--features gpu`, no shad-gpu, verda never attem
 was built and `ctest -L cpu` run; `peacock_plan_tests` was linked and **not** executed. Every
 command carried an explicit `timeout`. Nothing in git was mutated — head still `a1e36716`,
 working tree clean, stash untouched.
+
+### 2026-10-09 — done again on the rebased base
+
+CI run [37881237558](https://github.com/asymptote-tech/peacockdb/actions/runs/37881237558) on
+`a1e36716`, the rebased code head. Every job green — changes, both dataset-matrix legs,
+cpp-build-2502, cost-report and s3-datasets; deploy-pages skipped as a master-push job. The
+cost-report job going green is the one that matters most here: it is what re-reads q28's and
+the two new queries' cost sections.
+
+GPU Tests failed at rsync with `ssh: connect to host llm-gpu0h200.velkerr.ru port 22:
+Connection timed out`, the same unreachable host as before the rebase. No pool was built, so
+it is not [#178](../tickets/testinfra.md#t178) and not this branch; chain K does not wait on
+that job.
