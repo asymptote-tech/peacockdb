@@ -97,7 +97,7 @@ The murmur gate onto the production lane rule first; then float, boolean, timest
 keys on the device (decimals hashed as 16 bytes on both engines), and the rollup's grouping id
 out of the shuffle. #243's pins.
 
-### 4. [`refcounted-scatter.md`](refcounted-scatter.md) — closes [#145](../tickets/corpus-coverage.md#t145), [#197](../tickets/corpus-coverage.md#t197) — state: approved to build
+### 4. [`refcounted-scatter.md`](refcounted-scatter.md) — closes [#145](../tickets/corpus-coverage.md#t145), [#197](../tickets/corpus-coverage.md#t197) — state: building
 
 `TableResult` takes its final shape, one owner per column; a scatter's partitions share them. Peak
 3× → 2× during the partition, 1× after. Files the accounting ticket on landing.
