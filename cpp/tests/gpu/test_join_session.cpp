@@ -736,8 +736,11 @@ static JoinSpec residual(fb::JoinType t) {
           .probe_schema = {{"p_k", fb::DataType_Int32}, {"p_w", fb::DataType_Int64}}};
 }
 
-// probe p_k {1, 1, 2}, p_w {3, 9, 9}: key matches (1,3) (1,9) (2,9); the filter keeps
-// (1,9) (2,9), so probe row (1,3) is unmatched and Right/Full pad it (#153).
+// build (1,a,5) (2,b,5) (3,c,5) against probe (1,3) (1,9) (2,9) (3,1). Key matches b1-p1,
+// b1-p2, b2-p3, b3-p4; `p_w > b_lim` keeps b1-p2 and b2-p3 alone. So #153 has both of its
+// halves here: probe rows (1,3) and (3,1) are unmatched after the filter and Right/Full pad
+// them, and build row (3,c,5) — whose one key match the filter rejected — is unmatched after
+// it too, so Left/Full must pad that at the finish rather than count the key match.
 TEST(JoinSession, AnOuterResidualDecidesUnmatchedAfterTheFilter) {
   struct C {
     fb::JoinType t;
@@ -746,39 +749,48 @@ TEST(JoinSession, AnOuterResidualDecidesUnmatchedAfterTheFilter) {
   };
   for (auto const& c :
        std::vector<C>{{fb::JoinType_Inner, {"1|a|5|1|9", "2|b|5|2|9"}, {}},
-                      {fb::JoinType_Left, {"1|a|5|1|9", "2|b|5|2|9"}, {}},
-                      {fb::JoinType_Right, {"1|a|5|1|9", "2|b|5|2|9", "NULL|NULL|NULL|1|3"}, {}},
-                      {fb::JoinType_Full, {"1|a|5|1|9", "2|b|5|2|9", "NULL|NULL|NULL|1|3"}, {}}}) {
+                      {fb::JoinType_Left, {"1|a|5|1|9", "2|b|5|2|9"}, {"3|c|5|NULL|NULL"}},
+                      {fb::JoinType_Right,
+                       {"1|a|5|1|9", "2|b|5|2|9", "NULL|NULL|NULL|1|3", "NULL|NULL|NULL|3|1"},
+                       {}},
+                      {fb::JoinType_Full,
+                       {"1|a|5|1|9", "2|b|5|2|9", "NULL|NULL|NULL|1|3", "NULL|NULL|NULL|3|1"},
+                       {"3|c|5|NULL|NULL"}}}) {
     Session s(make_plan(residual(c.t)));
     uint64_t j = 0, out = 0;
-    ASSERT_EQ(peacock_join_build(
-                  s.exec(), 0,
-                  s.upload({i32("b_k", {1, 2}), utf8("b_v", {"a", "b"}), i32("b_lim", {5, 5})}), &j,
-                  nullptr),
+    ASSERT_EQ(peacock_join_build(s.exec(), 0,
+                                 s.upload({i32("b_k", {1, 2, 3}), utf8("b_v", {"a", "b", "c"}),
+                                           i32("b_lim", {5, 5, 5})}),
+                                 &j, nullptr),
               0)
         << s.error();
-    ASSERT_EQ(
-        peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {1, 1, 2}), i64("p_w", {3, 9, 9})}),
-                           &out, nullptr),
-        0)
+    ASSERT_EQ(peacock_join_probe(s.exec(), j,
+                                 s.upload({i32("p_k", {1, 1, 2, 3}), i64("p_w", {3, 9, 9, 1})}),
+                                 &out, nullptr),
+              0)
         << s.error();
     EXPECT_EQ(s.rows(out), sorted(c.probe)) << fb::EnumNameJoinType(c.t);
     ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
     if (c.t == fb::JoinType_Left || c.t == fb::JoinType_Full)
       EXPECT_EQ(s.rows(out), sorted(c.finish)) << fb::EnumNameJoinType(c.t);
+    else
+      EXPECT_EQ(out, 0u) << fb::EnumNameJoinType(c.t);
   }
 }
 
 TEST(JoinSession, ChunkingThePairsGivesTheSameRows) {
   auto spec = residual(fb::JoinType_Full);
   spec.chunk_bytes = 16;  // forces one chunk per probe row
+  // (3,c,9) has one key match, p4, and `9 > 9` rejects it — so the finish owes a padded row,
+  // and `matched` has to fold a rejection across chunks and not only a match.
   Session s(make_plan(spec));
   uint64_t j = 0, out = 0;
-  ASSERT_EQ(peacock_join_build(s.exec(), 0,
-                               s.upload({i32("b_k", {1, 1, 2}), utf8("b_v", {"a", "a2", "b"}),
-                                         i32("b_lim", {5, 5, 5})}),
-                               &j, nullptr),
-            0)
+  ASSERT_EQ(
+      peacock_join_build(s.exec(), 0,
+                         s.upload({i32("b_k", {1, 1, 2, 3}), utf8("b_v", {"a", "a2", "b", "c"}),
+                                   i32("b_lim", {5, 5, 5, 9})}),
+                         &j, nullptr),
+      0)
       << s.error();
   ASSERT_EQ(peacock_join_probe(s.exec(), j,
                                s.upload({i32("p_k", {1, 1, 2, 3}), i64("p_w", {3, 9, 9, 9})}), &out,
@@ -788,7 +800,8 @@ TEST(JoinSession, ChunkingThePairsGivesTheSameRows) {
   EXPECT_EQ(s.rows(out), sorted({"1|a|5|1|9", "1|a2|5|1|9", "2|b|5|2|9", "NULL|NULL|NULL|1|3",
                                  "NULL|NULL|NULL|3|9"}));
   ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
-  EXPECT_TRUE(s.rows(out).empty()) << "every build row matched under the filter";
+  EXPECT_EQ(s.rows(out), sorted({"3|c|9|NULL|NULL"}))
+      << "the build row whose only pair the filter rejected";
 }
 
 // A preserved-side condition that is NULL is no match (design §3.4, D3): a NULL b_flag
@@ -1471,28 +1484,33 @@ TEST(JoinSession, AnOuterResidualOfMatchingTypesIsStillApplied) {
   };
   for (auto const& c :
        std::vector<C>{{fb::JoinType_Inner, {"1|a|5|1|9", "2|b|5|2|9"}, {}},
-                      {fb::JoinType_Left, {"1|a|5|1|9", "2|b|5|2|9"}, {}},
-                      {fb::JoinType_Right, {"1|a|5|1|9", "2|b|5|2|9", "NULL|NULL|NULL|1|3"}, {}},
-                      {fb::JoinType_Full, {"1|a|5|1|9", "2|b|5|2|9", "NULL|NULL|NULL|1|3"}, {}}}) {
+                      {fb::JoinType_Left, {"1|a|5|1|9", "2|b|5|2|9"}, {"3|c|5|NULL|NULL"}},
+                      {fb::JoinType_Right,
+                       {"1|a|5|1|9", "2|b|5|2|9", "NULL|NULL|NULL|1|3", "NULL|NULL|NULL|3|1"},
+                       {}},
+                      {fb::JoinType_Full,
+                       {"1|a|5|1|9", "2|b|5|2|9", "NULL|NULL|NULL|1|3", "NULL|NULL|NULL|3|1"},
+                       {"3|c|5|NULL|NULL"}}}) {
     auto spec = residual(c.t);
     spec.build_schema[2].type = fb::DataType_Int64;  // b_lim beside p_w: AST-able as it stands
     Session s(make_plan(spec));
     uint64_t j = 0, out = 0;
-    ASSERT_EQ(peacock_join_build(
-                  s.exec(), 0,
-                  s.upload({i32("b_k", {1, 2}), utf8("b_v", {"a", "b"}), i64("b_lim", {5, 5})}), &j,
-                  nullptr),
+    ASSERT_EQ(peacock_join_build(s.exec(), 0,
+                                 s.upload({i32("b_k", {1, 2, 3}), utf8("b_v", {"a", "b", "c"}),
+                                           i64("b_lim", {5, 5, 5})}),
+                                 &j, nullptr),
               0)
         << s.error();
-    ASSERT_EQ(
-        peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {1, 1, 2}), i64("p_w", {3, 9, 9})}),
-                           &out, nullptr),
-        0)
+    ASSERT_EQ(peacock_join_probe(s.exec(), j,
+                                 s.upload({i32("p_k", {1, 1, 2, 3}), i64("p_w", {3, 9, 9, 1})}),
+                                 &out, nullptr),
+              0)
         << s.error();
     EXPECT_EQ(s.rows(out), sorted(c.probe)) << fb::EnumNameJoinType(c.t);
     ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
-    // Both build rows passed the filter against some probe row, so a finish that pads
-    // anything is a `matched` the dropped conjunct corrupted — which Inner cannot show.
+    // Build row (3,c,5) has one key match and the filter rejects it, so Left and Full owe it
+    // a padded row. A dropped conjunct marks it matched and that row vanishes — a missing
+    // row, which is the half of #153 Inner cannot show.
     if (c.t == fb::JoinType_Left || c.t == fb::JoinType_Full)
       EXPECT_EQ(s.rows(out), sorted(c.finish)) << fb::EnumNameJoinType(c.t);
     else

@@ -671,3 +671,68 @@ four overclaiming `build-test.md` clauses became literally true this round.
 whether or not the residual ever reached `matched`. Nothing in the file asserts #153's
 preserved-build half — a build row whose only key match **fails** the residual must still be padded
 at the finish. The semi five have it pinned, which is why Left and Full are the only gap.
+
+## Developer round 4, 2026-10-09 — #153's preserved-build half
+
+One gap, test data only; no session code changed. **Still 53 gtests and 213 hand-counted
+cases** — the three residual tests got discriminating data, not more cases — so
+`build-test.md`'s counts are unchanged.
+
+### The gap, confirmed
+
+All three residual tests used a build every row of which had a *surviving* pair, so
+`matched` came out all-true whether the residual reached it or not and Left's and Full's
+finish was `{}` either way. The comment claiming otherwise was false of its own data.
+
+`residual()`'s filter is `p_w > b_lim` and its output is `b_k|b_v|b_lim|p_k|p_w`. The data is
+now build `(1,a,5) (2,b,5) (3,c,5)` against probe `(1,3) (1,9) (2,9) (3,1)`, so the key
+matches are b1-p1, b1-p2, b2-p3, b3-p4 and the filter keeps b1-p2 and b2-p3 alone. **Build row
+(3,c,5) has exactly one key match and the filter rejects it**, which is the shape #153 is
+about on the preserved-build side. Derived from the column order rather than taken on trust:
+
+| type | probe | finish |
+|---|---|---|
+| Inner | `1\|a\|5\|1\|9`, `2\|b\|5\|2\|9` | handle 0 |
+| Left | the same two | `3\|c\|5\|NULL\|NULL` |
+| Right | the two, plus `NULL\|NULL\|NULL\|1\|3` and `NULL\|NULL\|NULL\|3\|1` | handle 0 |
+| Full | as Right | `3\|c\|5\|NULL\|NULL` |
+
+Both unmatched probe rows are unmatched *after* the filter: p1 and p4 are key matches the
+residual rejected, which is the other half of #153 and was only half-covered before (p4 used
+to have no key match at all).
+
+The AST-able twin, `AnOuterResidualOfMatchingTypesIsStillApplied`, takes the same data with
+`b_lim` Int64, and `ChunkingThePairsGivesTheSameRows` gained build row `(3,c,9)` whose one key
+match `9 > 9` rejects — so its finish is `3|c|9|NULL|NULL` instead of trivially empty, and
+`matched` now has to fold a *rejection* across chunks and not only a match.
+
+### Proved red
+
+The historical defect itself: `probe_pairs` passing an empty conjunct list to
+`keep_and_derive` instead of `s_->cross`. **6 of 53 cases fail**, and the finish assertions
+fail the right way — the padded row vanishes rather than appearing wrongly:
+
+    AnOuterResidualDecidesUnmatchedAfterTheFilter
+      finish, Left and Full:  actual {}  expected { "3|c|5|NULL|NULL" }
+      probe, Inner:  actual { "1|a|5|1|3", "1|a|5|1|9", "2|b|5|2|9", "3|c|5|3|1" }
+    ChunkingThePairsGivesTheSameRows
+      finish: actual {}  expected { "3|c|9|NULL|NULL" }
+
+Before this round that same break left every one of those finish assertions green. The three
+semi-family cases that also go red were already red under it.
+
+### What round 4 ran
+
+`cpp/install/bin/peacock_join_session_tests` on nebius-gpu, **53 passed**; the red proof above;
+the local build with 0 warnings and `clang-format` clean. The existing gpu tier was not re-run:
+this round changed no file outside `cpp/tests/gpu/test_join_session.cpp`.
+
+### The habit this round and the last two cost
+
+Three times now an edit was reported as landed without re-reading the tree: two of three
+`chunk_bytes` probes in round 2, `plan_executor.h`'s reflow in round 3 (where
+`git-clang-format --diff` reports clean either way, so the instrument could not see the
+claim), and two of the five patches in this round silently failed their own `assert` because
+clang-format had rewrapped the text between writing the patch and running it. The cheap habit
+is `git diff <base> -- <file>` read hunk by hunk after every patch run, never a formatter's
+verdict and never the exit code of the script that wrote it.
