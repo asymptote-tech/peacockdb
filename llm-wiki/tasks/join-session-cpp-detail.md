@@ -60,6 +60,11 @@ completeness pass need not re-derive it.
 ## Rounds
 
 - **Round 0, 2026-10-09** — board to `building`, developer dispatched against the 12-task plan.
+- **Developer green, 2026-10-09** — 47 gtests / 135 hand-counted cases on nebius-gpu's L40S at
+  cuDF 25.02, the existing gpu tier unchanged (2 + 77 + 95 + 1 + 580 + 8). Committed `46a2ab84`,
+  pushed, PR **#177** against `ENS-exit-copies`, 2 commits. Board to `reviewing`. The developer's
+  own breakdown of §5.6 onto case names, the two defects it found, and the three things it flagged
+  for a reviewer are above in this file.
 
 ## Developer round 1, 2026-10-09 — the device cycle that works
 
