@@ -28,7 +28,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#56 — q2: CASE-over-string-equality inside a partial-phase sum](#t56)
   - [#60 — `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
 - [Source](#source)
-  - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
   - [#282 — a scan with no surviving row groups is refused at planning](#t282)
 - [Repartitioning](#repartitioning)
   - [#206 — a float or boolean partition key is refused on the device](#t206)
@@ -45,7 +44,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#201 — the murmur gate proves a copy of the lane rule, not the rule](#t201)
   - [#174 — two clamps for one rule, and nothing compares them](#t174)
   - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
-  - [#234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
   - [#235 — no independent oracle checks the result goldens](#t235)
   - [#262 — two DISTINCT corpus queries have no device cell](#t262)
   - [#281 — limits' and empty-sorts' device cells have never run](#t281)
@@ -529,58 +527,6 @@ Registry: q78's row drops `60`. `round` over Float32 is #221.
 
 ## Source
 
-<a id="t186"></a>
-### #186 — a limit pushed into the scan: the cpu ignores it, the device refuses it
-
-`SELECT * FROM lineitem LIMIT 10` answers 6,001,215 rows on the cpu at `tp1-single` and
-`tp1-rowgroup`, a wrong answer. On the device every mode fails the first read: `CUDF failure …
-row_groups can't be set along with skip_rows and num_rows`.
-
-One plan shape, two halves of one design left unwritten. `architecture.md` says a limited scan
-plans one lane and one batch. `source()` (`planner/translator/nodes.rs`) gives it one lane but hands
-the mode's batching to `partition`, so the rowgroup modes map one batch per row group (49 for
-lineitem), and nothing validates it. On the cpu, `CpuSource` never reads `node.limit`, and its
-reader has no `with_limit`. At tp1 the limit sits in the scan alone; at tp4 the unload's interval
-hides it, though the loader still reads everything. On the device, `scan.cpp` sets
-`set_num_rows(limit)` and then the call's row groups, which cuDF refuses together, even for one
-row group. Pinned by the four `bug_` cases in `gpu_tests/source_cases.rs`: sixty-four rows for ten
-on the cpu, a refused read on the device. #188 filed the device half and is merged here.
-
-**Corpus queries:** `tpch/scan-limit`, cpu off at the two tp1 modes and device off at all five.
-`tpch/nested-limits`, device off at all five. Simplest: `select n_nationkey from nation limit 3;`
-(tpch), 25 rows on the cpu and a refused read on the device, at every mode.
-
-**Fix proposed:** F13 of `reports/bugfix-proposals/10-fixes-v1.md`: a limited scan is one lane
-and one batch over the row groups that cover the limit, and each reader bounds that one call.
-- Planner, `source()`: call `batching_for_source(t)` unconditionally, since it advances the
-  counter the estimator's second pass pairs by. With a limit, map one lane with `Batching::Off`
-  over the shortest prefix of the survivors whose rows reach the limit (all of them if none do);
-  without one, as today. `lanes_for` loses its limit arm. `GpuLoadParquet` keeps the full
-  survivor list, which the validator checks the mapping against.
-- Validator, `plan/source.rs`: a limited scan whose mapping is not one lane and one batch is
-  `PlanError::Invalid`, naming `source()`.
-- Cpu, `cpu_backend/source.rs`: `CpuSource` takes `node.limit`, and `read_next` adds
-  `with_limit`, which parquet 54 composes with `with_row_groups`.
-- Device, `scan.cpp`: drop `set_num_rows`; after the read, slice the table to `limit` rows with
-  `cudf::slice` when it holds more. Stats come from the returned view, so the batch prices
-  exactly. `0` still means no limit: `node_writer.rs` writes `limit.unwrap_or(0)`,
-  so `Some(0)` and `None` are one value on the wire. Harmless, since DataFusion's `EliminateLimit`
-  turns a literal `LIMIT 0` into an empty relation before any scan exists.
-- No recipe, driver, `GpuLimit` or unload change.
-
-Tests: a cpu source case, a validator case, a translator case over `customer` (`limit 3` maps
-`[[[0]]]`), a device executor case and a gtest capping one call. The end-to-end
-`a_limit_slices_at_most_two_batches_and_stops_the_scan` moves its claim onto a filtered variant,
-since both nested-limits scans become one batch. Ten tpch plan sections change (scan-limit and
-nested-limits at five modes) and ten execution sections; `mini.result.txt` is unchanged. The
-source line keeps `limit=10`, printed whenever the node carries one (`plan_text/node_text.rs`).
-Its mapping becomes `partition_groups=[[[0]]]`, one row group reaching ten rows, where today it
-is `[[[0,1,…,48]]]` at tp1-single and the tp4 modes and `[[[0],[1],…,[48]]]` at tp1-rowgroup.
-`batches=multiple` becomes `batches=single`, and the `--- memory ---` estimate falls to one row
-group, from 371 MB at tp1-single. The tp4 unload keeps its own `skip=0, fetch=10`. scan-limit's
-cpu tp1 cells turn on. Its device cells then meet the decimal export (#187); nested-limits' meet
-the zero-column scan and the cross join's batching (#220).
-
 <a id="t282"></a>
 ### #282 — a scan with no surviving row groups is refused at planning
 
@@ -847,32 +793,6 @@ return `PlanError::Invalid` naming the node and both counts, in the style of `de
 message. Test, in `plan/validate/tests.rs`: a hand-built sort declaring one column over a
 two-column source is refused, and the same sort declaring both columns passes.
 
-<a id="t234"></a>
-### #234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them
-
-For a mid-plan `GpuLimit`, the driver and the limit's executor each count the rows of the same
-stream against the same interval, for two decisions. Both counts are live, and both agree today.
-
-The driver adds each consumed batch's rows to `rows_seen` (`executor/driver/partitioned.rs`), and
-`settle_limit` reads it to mark the limit satisfied and stop pulling from below. `LimitStream`
-(`cpu_backend/accumulate.rs`, `gpu_backend/accumulate.rs`) keeps its own `seen` and applies
-`interval.range_of(seen, rows)` to decide whether to keep, slice or drop each batch. For an
-unload the driver makes that choice itself and hands the executor a `RowRange`; for a mid-plan
-limit the choice is made twice, in two places. If the counts ever drift — a batch counted on one
-side and not the other — the driver stops the scan before the limit has kept its rows, or keeps
-pulling after it is done: a LIMIT returning short, or reading more than it needs, with no test
-that would notice. Found by `reports/hacks-audit.md` §8.
-
-**Corpus queries:** `tpch/nested-limits`, the one mid-plan limit, where the counts agree.
-
-**Fix proposed:** one count. The driver already computes `range_of(rows_seen, arriving)` for an
-unload and passes the `RowRange` to the executor's call; do the same for a mid-plan limit, and
-make `LimitStream` stateless on both backends: release the batch where the range is `None`,
-forward it where the range covers it, slice it otherwise. `seen` goes. The driver's check that a
-range never needs the ABI's clamp then covers the limit too. Tests: the driver's limit tests assert
-the range each call was handed, and the backends' `LimitStream` tests take a range rather than
-a running count.
-
 <a id="t235"></a>
 ### #235 — no independent oracle checks the result goldens
 
@@ -990,6 +910,13 @@ have run on no device. A device answer could differ from the cpu's, and nothing 
 
 **Corpus queries:** `tpch/scan-limit` and `tpch/nested-limits` at every device mode, and
 `tpcds/q17` at `tp1-single`, each off on this ticket once chain K has merged.
+
+One place to look first, found by the review of limits and not by a run.
+`nested-limits`' region loader carries `projections=[]` and an empty declared schema, and
+`scan.cpp` reads an empty projection as "read every column", so the device table there has three
+columns against a declared schema of none. The new `GpuLimit` above it never slices that stream —
+its five rows sit wholly inside `0..+23`, so `slice_handle` is not called — but it is the first
+node in that path that has to read a row count from it.
 
 **Fix proposed:** on a GPU host, once one is free: run the device test tier and those cells;
 each cell passing is enabled, each failing gets the ticket it fails on. Then this ticket drops

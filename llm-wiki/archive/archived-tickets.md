@@ -28,6 +28,49 @@ one that goes nowhere.
 
 ## Done
 
+<a id="t186"></a>
+### #186 — a limit pushed into the scan: the cpu ignores it, the device refuses it
+
+`SELECT * FROM lineitem LIMIT 10` answered 6,001,215 rows on the cpu at `tp1-single` and
+`tp1-rowgroup`. On the device every mode failed its first read: `row_groups can't be set along
+with skip_rows and num_rows`.
+
+One design left half-written. `source()` copied DataFusion's pushed-down cut onto
+`GpuLoadParquet.limit` and left each reader to apply it. `CpuSource` never read it. `scan.cpp`
+called `set_num_rows` and then set the call's row groups, which cuDF refuses together. And a
+per-call limit is right only for a scan of one batch, which the rowgroup and sized modes do not
+map. #188 filed the device half and was merged here.
+
+**Closed by limits (chain K), and not the way the ticket proposed.** The fix the ticket argued
+for kept the limit in the scan and taught each reader to bound its own call; what landed takes
+the limit out of the scan altogether, which is the shape `architecture.md`'s limit lowering rule
+already described. Below the root the cut is a `GpuLimit` above the scan. At the root there is no
+node at all — `unload_input` hands the cut back and `translate` folds it into the unload's
+interval, so the validator's refusal of a limit whose only parent is the sink is never reached.
+A limited scan's survivors are trimmed to the shortest row-group prefix reaching `n`, because
+satisfying the limit stops the scan being scheduled but at tp1-single, tp4-single and tp4-sized
+lineitem is one batch of all 49 groups. `GpuLoadParquet.limit` is gone and `CudfScan.limit` is
+`(deprecated)` with no slot moved. The four `bug_` cases became agreement cases; they are built
+and not yet run, which is [#281](../tickets/corpus-coverage.md#t281).
+
+<a id="t234"></a>
+### #234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them
+
+The driver added each consumed batch's rows to `rows_seen` and `settle_limit` read it to stop
+pulling from below, while each backend's `LimitStream` kept its own `seen` and decided per batch
+whether to drop, forward or slice. Two counts of one stream against one interval, for two
+decisions. They agreed, and a drift would have been a LIMIT returning short or reading more than
+it needed, with no test to notice. Found by `reports/hacks-audit.md` §8.
+
+**Closed by limits (chain K), and again not as proposed.** The ticket argued for moving the whole
+decision to the driver and making `LimitStream` stateless. What landed moves it the other way:
+the executor keeps the only input count and every drop, forward and slice decision, and the
+driver counts the rows the limit *emits* — a number the lane outcome already carries. The
+driver's figure is then a consequence of the executor's decisions rather than a second
+computation of them. Two boundaries fell out and are pinned: `fetch 0` is satisfied before any
+read, where it used to pull one batch first, and a limit with no `fetch` is never satisfied.
+The unload's interval, which only the driver decides, still counts its input.
+
 <a id="t62"></a>
 ### #62 — a DISTINCT beside an avg or a count is refused at planning
 
@@ -607,14 +650,14 @@ No clean verification run is on record.
 num_rows`. The plan puts the interval in the scan, so the recipe carries both a row-group list and
 a row range, and the reader takes one or the other.
 
-The same plan shape as [#186](../tickets/corpus-coverage.md#t186) from the other side: where the interval sits in
+The same plan shape as [#186](#t186) from the other side: where the interval sits in
 the scan, the CPU ignores it and answers six million rows and the device refuses the read outright.
 Neither engine runs it and they fail differently, so a fix for either has to decide what that shape
 means — push the limit into the reader, or keep the interval on the unload at every mode as the
 three tp4 ones already do. Even one row group and a limit is refused, since every batch is a
 row-group read: pinned by the two `bug_…_refused_on_the_device` cases in `gpu_tests/source_cases.rs`.
 
-**Stale 2026-09-28.** Merged into [#186](../tickets/corpus-coverage.md#t186): the same plan shape,
+**Stale 2026-09-28.** Merged into [#186](#t186): the same plan shape,
 a limit pushed into the scan, seen from the device. One fix covers both engines.
 
 <a id="t180"></a>
